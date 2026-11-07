@@ -1,70 +1,77 @@
-# AD-EL POS · Etapa 1
+# AD-EL POS · Etapa 2
 
-Cimientos ejecutables de un POS para restaurantes. Monolito modular Go, PostgreSQL y una aplicación completa React/TypeScript dentro de Tauri 2. La entrega contiene diagnósticos reales y configuración de instalación; no contiene módulos de venta, cuentas ni datos comerciales simulados.
+Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Esta etapa implementa configuración del establecimiento, usuarios, roles, permisos individuales, sesiones, terminales, cajas físicas, preferencias y auditoría reales. No contiene ventas ni movimientos económicos.
 
 ## Inicio en este Mac
-
-Desde una terminal:
 
 ```bash
 cd "/Users/eliver/Documents/ADEL POS/ad-el-pos"
 ./scripts/dev.sh db-start
 ./scripts/dev.sh migrate
+./scripts/dev.sh prepare-setup
 ./scripts/dev.sh server-start
-./scripts/dev.sh desktop
+./scripts/dev.sh open-app
 ```
 
-`server-start` crea un proceso independiente y registra su PID. Cerrar Tauri no lo detiene. Para detenerlo explícitamente: `./scripts/dev.sh server-stop`. PostgreSQL se detiene por separado con `./scripts/dev.sh db-stop`. No se instaló un servicio al iniciar sesión.
+Para desarrollo con recarga: `./scripts/dev.sh desktop`. Para construir el `.app`: `./scripts/dev.sh build-macos`. La compilación está en `desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app`.
 
-Para la primera preparación de una copia nueva, consulta [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md): requisitos → `install` → `db-init` → `migrate` → `server-start` → `desktop`. Se necesita Internet para descargar herramientas/dependencias; una vez instaladas, la ejecución local no requiere Internet.
+En una instalación nueva aparece el asistente local. El nombre inicial del establecimiento es **ADEL POS** y la zona horaria se obtiene del sistema operativo; ambos son editables. Al guardar se crea **Caja 1**, sin abrir turnos ni registrar fondos, y se autoriza la terminal principal. Después accede con **admin / admin**. La advertencia de contraseña inicial recomienda cambiarla, pero permite continuar.
+
+El asistente no vuelve a inicializar una instalación configurada ni restablece contraseñas. Los usuarios y cambios se guardan en PostgreSQL. Cerrar Tauri conserva Go y PostgreSQL; ambos se detienen de forma explícita con `server-stop` y `db-stop`.
+
+## Credencial reservada de soporte
+
+La identidad `sa` está reservada y excluida de la administración ordinaria. Su contraseña la debe elegir el propietario en una terminal local:
+
+```bash
+./scripts/dev.sh provision-sa
+```
+
+El comando solicita y confirma el secreto sin eco, guarda solo Argon2id y audita la operación. No proporcionar contraseñas en argumentos, variables de entorno, chat o archivos versionados. Mientras el propietario no complete este paso, la identidad existe sin una contraseña utilizable. Un restablecimiento excepcional usa `./scripts/dev.sh reset-sa`, con confirmación local explícita y auditoría.
 
 ## Estructura
 
 ```text
 ad-el-pos/
 ├── backend/
-│   ├── cmd/ad-el-pos-server/    # Entrada CLI: serve, migrate, check-config, version
-│   ├── internal/
-│   │   ├── config/             # JSON estricto y validación
-│   │   ├── database/           # pgxpool, salud y migrador
-│   │   ├── httpapi/            # API técnica v1, CORS y errores
-│   │   ├── licensing/          # Único límite de licencias
-│   │   ├── product/            # Metadatos generados y embebidos
-│   │   └── events/             # Contrato reservado, transporte pendiente
-│   └── migrations/            # SQL versionado embebido en el binario
-├── desktop/
-│   ├── src/                   # React: componentes, hooks, servicios, contratos
-│   └── src-tauri/             # Ventana nativa y puente de diagnóstico limitado
-├── config/                    # Metadatos canónicos y ejemplos sin secretos
-├── scripts/                   # Desarrollo, DB, respaldo y procesos
-├── ops/launchd/               # Plantilla de servicio; no instalada
-├── assets/                    # Icono vectorial original
-├── tests/                     # Verificaciones operativas reproducibles
-├── docs/                      # Fuentes y evidencia de verificación
-├── .local/                    # PRIVADO/ignorado: clúster, secretos, PID y logs
-├── .tools/                    # Ignorado: toolchains locales de este Mac
-└── bin/                       # Ignorado: ad-el-pos-server
+│   ├── cmd/ad-el-pos-server/     # Servidor, migraciones y mantenimiento local
+│   ├── internal/administration/ # Identidad, permisos y recursos administrativos
+│   ├── internal/config/        # Parámetros técnicos del servidor
+│   ├── internal/database/      # Pool y migrador transaccional
+│   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
+│   ├── internal/localsetup/    # Certificados locales
+│   └── migrations/             # 0001 y 0002; inmutables después de aplicarse
+├── desktop/src/
+│   ├── components/             # Formularios, permisos y presentación reutilizables
+│   ├── hooks/                  # Sesión, recursos y conectividad
+│   ├── pages/                  # Pantallas administrativas reales
+│   └── services/               # Contratos tipados y puente API
+├── desktop/src-tauri/src/       # Rutas enumeradas, TLS y credenciales en Keychain
+├── config/                     # Identidad canónica y ejemplos sin secretos
+├── scripts/                    # Desarrollo, formato, procesos y PostgreSQL
+├── tests/                      # Pruebas operativas macOS
+├── ops/launchd/                # Plantilla; no instalada automáticamente
+└── docs/                       # Convenciones, dependencias y evidencia
 ```
 
-Las pruebas unitarias viven junto al código. Las de PostgreSQL usan una base temporal dedicada y nunca limpian `adel_pos`.
+`.local`, `.tools`, cachés, respaldos y artefactos están excluidos del repositorio. Node/Rust son herramientas de construcción; el `.app` funciona sin Vite. PostgreSQL y Go son procesos independientes.
 
-## Comandos de verificación
+## Verificación
 
 ```bash
+./scripts/dev.sh format-check
 ./scripts/dev.sh test
 ./scripts/dev.sh test-integration
-./scripts/dev.sh build-server
-./scripts/dev.sh build-macos
-curl --fail http://127.0.0.1:8181/api/v1/health/ready
 ```
 
-Versiones fijadas en `go.mod`/`go.sum`, `package-lock.json` y `Cargo.lock`. Revisa [docs/VERIFICATION.md](docs/VERIFICATION.md) para las comprobaciones realmente ejecutadas y [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) para versiones y fuentes oficiales.
+Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_pos_test_*`. No borran `adel_pos`. Consulta los resultados y límites reales en [docs/VERIFICATION.md](docs/VERIFICATION.md).
 
-## Documentación de continuidad
+## Documentación
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): responsabilidades, decisiones y límites.
-- [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md): ejecución, configuración y solución de problemas.
-- [API_CONTRACTS.md](API_CONTRACTS.md): API implementada y futuras extensiones.
-- [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): estado y siguiente tarea.
+- [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md): preparación, ejecución, terminales, TLS y recuperación local.
+- [ARCHITECTURE.md](ARCHITECTURE.md): responsabilidades y límites.
+- [API_CONTRACTS.md](API_CONTRACTS.md): rutas y permisos.
+- [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
+- [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): continuidad y decisiones pendientes.
 
-Esta es una compilación de desarrollo. El perfil `production` falla de forma explícita hasta integrar licenciamiento y controles comerciales. El nombre y el identificador `local.adel.pos.dev` son provisionales; no representan un dominio registrado.
+La distribución comercial sigue bloqueada hasta integrar licenciamiento. Firma/notarización Apple, servicio comercial persistente e instaladores Windows siguen pendientes. El bundle ID `local.adel.pos.dev` es provisional y no representa un dominio registrado.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,13 +11,16 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/licensing"
+	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/product"
 )
 
@@ -36,6 +40,7 @@ func run(logger *slog.Logger) error {
 	}
 	flags := flag.NewFlagSet(product.Read().ServerBinary, flag.ContinueOnError)
 	filename := flags.String("config", ".local/server.json", "archivo de configuración JSON")
+	lanIP := flags.String("lan-ip", "", "IP privada opcional para el certificado TLS local")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -46,8 +51,13 @@ func run(logger *slog.Logger) error {
 		fmt.Println(product.Read().Version)
 		return nil
 	}
-	if command != "serve" && command != "migrate" && command != "check-config" {
-		return errors.New("comando esperado: serve, migrate, check-config o version")
+	allowedCommands := map[string]bool{
+		"serve": true, "migrate": true, "check-config": true,
+		"prepare-setup": true, "provision-sa": true, "reset-sa": true, "tls-init": true,
+		"create-enrollment": true,
+	}
+	if !allowedCommands[command] {
+		return errors.New("comando no disponible; consulta DEVELOPMENT_MACOS.md")
 	}
 	cfg, err := config.Load(*filename)
 	if err != nil {
@@ -60,6 +70,12 @@ func run(logger *slog.Logger) error {
 	if err := licensing.CheckStartup(cfg.Environment, cfg.LicenseMode); err != nil {
 		return err
 	}
+	if command == "prepare-setup" {
+		return prepareSetup(*filename)
+	}
+	if command == "tls-init" {
+		return localsetup.CreateTLS(filepath.Join(filepath.Dir(*filename), "tls"), *lanIP)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	pool, err := database.Open(ctx, cfg.Database)
@@ -67,6 +83,16 @@ func run(logger *slog.Logger) error {
 		return errors.New("no se pudo crear el pool PostgreSQL")
 	}
 	defer pool.Close()
+	application := &administration.Service{
+		Pool:             pool,
+		ProvisioningFile: filepath.Join(filepath.Dir(*filename), "provisioning-token"),
+	}
+	if command == "provision-sa" || command == "reset-sa" {
+		return provisionSupport(ctx, application, command == "reset-sa")
+	}
+	if command == "create-enrollment" {
+		return createLocalEnrollment(ctx, application, *filename)
+	}
 	if command == "migrate" {
 		migrationCtx, done := context.WithTimeout(ctx, 30*time.Second)
 		defer done()
@@ -77,13 +103,31 @@ func run(logger *slog.Logger) error {
 		logger.Info("migrations_completed", "applied", count)
 		return nil
 	}
-	server := &http.Server{Addr: cfg.ListenAddress, Handler: httpapi.New(func(ctx context.Context) database.Health { return database.Probe(ctx, pool) }, cfg.AllowedOrigins, logger), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
+	probe := func(ctx context.Context) database.Health {
+		return database.Probe(ctx, pool)
+	}
+	server := &http.Server{
+		Addr:              cfg.ListenAddress,
+		Handler:           httpapi.New(probe, cfg.AllowedOrigins, logger, application),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    16 * 1024,
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
+	}
 	listener, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
 		return errors.New("no se pudo abrir el puerto HTTP; compruebe dirección y puerto")
 	}
 	stopped := make(chan error, 1)
-	go func() { stopped <- server.Serve(listener) }()
+	go func() {
+		if cfg.TLSCertificate != "" {
+			stopped <- server.ServeTLS(listener, cfg.TLSCertificate, cfg.TLSPrivateKey)
+			return
+		}
+		stopped <- server.Serve(listener)
+	}()
 	logger.Info("server_started", "product", product.Read().TechnicalID, "version", product.Read().Version, "environment", cfg.Environment, "mode", cfg.InstallationMode, "listen", cfg.ListenAddress)
 	select {
 	case err := <-stopped:

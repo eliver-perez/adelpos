@@ -14,7 +14,9 @@ import (
 )
 
 func handler(health database.Health) http.Handler {
-	return New(func(context.Context) database.Health { return health }, []string{"tauri://localhost"}, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	return New(func(context.Context) database.Health {
+		return health
+	}, []string{"tauri://localhost"}, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 }
 
 func TestTechnicalEndpoints(t *testing.T) {
@@ -77,7 +79,9 @@ func TestCORSAndMethodRestrictions(t *testing.T) {
 }
 
 func TestPanicDoesNotLeakInternals(t *testing.T) {
-	h := New(func(context.Context) database.Health { panic("postgresql://secret") }, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	h := New(func(context.Context) database.Health {
+		panic("postgresql://secret")
+	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/health/ready", nil))
 	if w.Code != 500 || strings.Contains(w.Body.String(), "secret") {

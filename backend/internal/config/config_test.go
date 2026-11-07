@@ -10,7 +10,22 @@ import (
 )
 
 func validConfig() Config {
-	return Config{Environment: "development", InstallationMode: "server-terminal", ListenAddress: "127.0.0.1:8181", AllowedOrigins: []string{"tauri://localhost"}, LicenseMode: "development", Database: Database{Host: "127.0.0.1", Port: 55432, Name: "adel_pos", User: "adel_app", Password: "test-only", SSLMode: "disable", MaxConnections: 8}}
+	return Config{
+		Environment:      "development",
+		InstallationMode: "server-terminal",
+		ListenAddress:    "127.0.0.1:8181",
+		AllowedOrigins:   []string{"tauri://localhost"},
+		LicenseMode:      "development",
+		Database: Database{
+			Host:           "127.0.0.1",
+			Port:           55432,
+			Name:           "adel_pos",
+			User:           "adel_app",
+			Password:       "test-only",
+			SSLMode:        "disable",
+			MaxConnections: 8,
+		},
+	}
 }
 
 func TestValidation(t *testing.T) {
@@ -18,17 +33,40 @@ func TestValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := map[string]func(*Config){
-		"missing password":              func(c *Config) { c.Database.Password = "" },
-		"remote database without TLS":   func(c *Config) { c.Database.Host = "192.168.1.50" },
-		"TLS downgrade":                 func(c *Config) { c.Database.SSLMode = "prefer" },
-		"wildcard CORS":                 func(c *Config) { c.AllowedOrigins = []string{"*"} },
-		"invalid CORS":                  func(c *Config) { c.AllowedOrigins = []string{"http://localhost/path"} },
-		"terminal cannot run server":    func(c *Config) { c.InstallationMode = "terminal-only" },
-		"implicit LAN":                  func(c *Config) { c.ListenAddress = "192.168.1.8:8181" },
-		"public binding":                func(c *Config) { c.ListenAddress = "0.0.0.0:8181"; c.AllowLAN = true },
-		"invalid port":                  func(c *Config) { c.ListenAddress = "127.0.0.1:0" },
-		"unbounded pool":                func(c *Config) { c.Database.MaxConnections = 0 },
-		"production development bypass": func(c *Config) { c.Environment = "production" },
+		"missing password": func(c *Config) {
+			c.Database.Password = ""
+		},
+		"remote database without TLS": func(c *Config) {
+			c.Database.Host = "192.168.1.50"
+		},
+		"TLS downgrade": func(c *Config) {
+			c.Database.SSLMode = "prefer"
+		},
+		"wildcard CORS": func(c *Config) {
+			c.AllowedOrigins = []string{"*"}
+		},
+		"invalid CORS": func(c *Config) {
+			c.AllowedOrigins = []string{"http://localhost/path"}
+		},
+		"terminal cannot run server": func(c *Config) {
+			c.InstallationMode = "terminal-only"
+		},
+		"implicit LAN": func(c *Config) {
+			c.ListenAddress = "192.168.1.8:8181"
+		},
+		"public binding": func(c *Config) {
+			c.ListenAddress = "0.0.0.0:8181"
+			c.AllowLAN = true
+		},
+		"invalid port": func(c *Config) {
+			c.ListenAddress = "127.0.0.1:0"
+		},
+		"unbounded pool": func(c *Config) {
+			c.Database.MaxConnections = 0
+		},
+		"production development bypass": func(c *Config) {
+			c.Environment = "production"
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -42,6 +80,8 @@ func TestValidation(t *testing.T) {
 	c := validConfig()
 	c.ListenAddress = "192.168.1.8:8181"
 	c.AllowLAN = true
+	c.TLSCertificate = "test-server.pem"
+	c.TLSPrivateKey = "test-server.key"
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}

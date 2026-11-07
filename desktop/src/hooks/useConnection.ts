@@ -11,25 +11,49 @@ export function useConnection() {
   const alive = useRef(false);
 
   const refresh = useCallback(async () => {
-    if (!config || busy.current) return;
+    if (!config || busy.current) {
+      return;
+    }
     busy.current = true;
     setRefreshing(true);
     try {
       const next = await getDiagnostics(config);
-      if (alive.current) setDiagnostics(next);
-    } finally { busy.current = false; if (alive.current) setRefreshing(false); }
+      if (alive.current) {
+        setDiagnostics(next);
+      }
+    } finally {
+      busy.current = false;
+      if (alive.current) {
+        setRefreshing(false);
+      }
+    }
   }, [config]);
 
   useEffect(() => {
     alive.current = true;
     let cancelled = false;
-    void connectionConfig().then(value => { if (!cancelled) setConfig(value); }).catch(() => { if (!cancelled) setConfigError(true); });
-    return () => { cancelled = true; alive.current = false; };
+    void connectionConfig()
+      .then((value) => {
+        if (!cancelled) {
+          setConfig(value);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setConfigError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+      alive.current = false;
+    };
   }, []);
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 5000);
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [refresh]);
 

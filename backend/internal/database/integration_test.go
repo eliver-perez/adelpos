@@ -4,6 +4,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -40,7 +41,12 @@ func TestPostgresMigrationLifecycle(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); n, err := Migrate(ctx, pool); counts <- n; errs <- err }()
+		go func() {
+			defer wg.Done()
+			n, err := Migrate(ctx, pool)
+			counts <- n
+			errs <- err
+		}()
 	}
 	wg.Wait()
 	close(counts)
@@ -54,7 +60,8 @@ func TestPostgresMigrationLifecycle(t *testing.T) {
 	for n := range counts {
 		total += n
 	}
-	if total != 1 {
+	expected, _ := ReadMigrations(migrations.Files)
+	if total != len(expected) {
 		t.Fatalf("concurrent apply count = %d", total)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
@@ -63,8 +70,11 @@ func TestPostgresMigrationLifecycle(t *testing.T) {
 	if h := Probe(ctx, pool); h.Postgres != "available" || h.Schema != "compatible" {
 		t.Fatalf("unexpected migrated state: %+v", h)
 	}
-	base, _ := migrations.Files.ReadFile("0001_technical_schema.sql")
-	broken := fstest.MapFS{"0001_technical_schema.sql": &fstest.MapFile{Data: base}, "0002_failure.sql": &fstest.MapFile{Data: []byte("CREATE TABLE app.rollback_probe (id integer); SELECT missing_function();")}}
+	broken := fstest.MapFS{}
+	for _, migration := range expected {
+		broken[migration.Name] = &fstest.MapFile{Data: []byte(migration.SQL)}
+	}
+	broken[fmt.Sprintf("%04d_failure.sql", len(expected)+1)] = &fstest.MapFile{Data: []byte("CREATE TABLE app.rollback_probe (id integer); SELECT missing_function();")}
 	if _, err := Apply(ctx, pool, broken); err == nil {
 		t.Fatal("broken migration succeeded")
 	}
@@ -84,9 +94,8 @@ func TestPostgresMigrationLifecycle(t *testing.T) {
 	if err := CheckSchema(ctx, pool); err == nil {
 		t.Fatal("tampered schema marked ready")
 	}
-	expected, _ := ReadMigrations(migrations.Files)
 	_, _ = pool.Exec(ctx, "UPDATE public.schema_migrations SET checksum=$1 WHERE version=1", expected[0].Checksum)
-	_, _ = pool.Exec(ctx, "INSERT INTO public.schema_migrations (version,name,checksum) VALUES (2,'0002_future.sql','future')")
+	_, _ = pool.Exec(ctx, "INSERT INTO public.schema_migrations (version,name,checksum) VALUES ($1,$2,'future')", len(expected)+1, fmt.Sprintf("%04d_future.sql", len(expected)+1))
 	if err := CheckSchema(ctx, pool); err == nil {
 		t.Fatal("newer schema accepted")
 	}

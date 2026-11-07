@@ -1,76 +1,70 @@
-# Arquitectura · Etapa 1
+# Arquitectura · Etapa 2
 
-## Componentes y límites
+## Responsabilidades
 
 ```mermaid
 flowchart LR
-    R[React / TypeScript] -->|IPC restringido| T[Tauri 2]
-    T -->|HTTP JSON /api/v1| G[Go independiente]
-    G -->|pgxpool / TCP local| P[(PostgreSQL)]
-    A[Android futuro] -. HTTP / eventos .-> G
-    K[KDS futuro] -. HTTP / eventos .-> G
-    L[Proveedor de licencias futuro] -. Adaptador central .-> G
+    R[React / TypeScript] -->|Operaciones enumeradas por IPC| T[Tauri / Rust]
+    T -->|HTTP JSON v1, TLS en LAN| G[Go independiente]
+    T --> K[Keychain del sistema]
+    G -->|pgxpool| P[(PostgreSQL)]
 ```
 
-Go es dueño de los datos y reglas. Tauri crea una ventana, lee configuración de conexión y realiza tres GET técnicos fijos mediante reqwest. No inicia Go, PostgreSQL ni comandos del sistema. React separa servicios, interpretación de respuestas, hook de consulta y presentación. No hay acceso SQL desde Rust/React ni credenciales DB en el bundle.
+Go es autoridad para configuración persistente, identidad, sesiones, permisos, terminales y auditoría. Rust conserva credenciales duraderas en el almacén seguro del sistema, valida el destino y ejecuta únicamente rutas API enumeradas. React presenta formularios, recoge credenciales transitorias de acceso y refleja las decisiones del servidor. Ningún código de escritorio accede a PostgreSQL.
 
-El puente HTTP nativo permite seleccionar un servidor en ejecución sin abrir `connect-src` a toda la red. La capability `main` autoriza solo `connection_config` y `server_snapshot`. No hay plugins de shell, filesystem o SQL. El contenido remoto no tiene capacidades; la ventana contiene assets locales. La CSP de producción mantiene `script-src 'self'`; el permiso de scripts inline de desarrollo sirve a React/Vite. Los estilos inline están permitidos; no se usa `unsafe-eval`.
+Tauri no inicia ni detiene Go o PostgreSQL. Los modos `server-terminal`, `terminal-only` y `server-only` conservan los límites de la etapa 1. Todas las funciones usan la misma aplicación de escritorio; su disponibilidad depende de permisos.
 
-La vista de navegador es solo una ayuda de desarrollo: usa fetch, CORS exacto y la configuración generada. La interfaz operativa es Tauri. Ninguna fuente, icono o biblioteca requiere CDN en ejecución.
+## Organización del backend
 
-## Tres instalaciones, una aplicación
+- `cmd/ad-el-pos-server`: composición, configuración, señales, CLI de migración/aprovisionamiento y ejecución HTTP/TLS.
+- `config`: JSON estricto y validación. Parámetros técnicos locales separados de datos del establecimiento.
+- `database`: pgxpool acotado, UTC y migraciones SQL embebidas.
+- `httpapi`: diagnósticos, CORS exacto, request IDs, límites y logs sin secretos.
+- `administration`: servicios con transacción por operación. Archivos por responsabilidad: autenticación, permisos, usuarios, roles, dispositivos, cajas, configuración, preferencias y auditoría.
+- `localsetup`: CA y certificado TLS locales; no modifica la confianza global del sistema.
+- `licensing`: único límite de integración comercial. Desarrollo permitido, producción bloqueada hasta integrar el proveedor.
+- `events`: sobre reservado; `/events` continúa respondiendo 501. La notificación de revocación usa consulta de sesión cada cinco segundos.
 
-| Modo | Procesos y configuración |
-| --- | --- |
-| `server-terminal` | PostgreSQL + Go independiente + escritorio. El escritorio nunca se responsabiliza de arrancar o detener los otros dos. |
-| `terminal-only` | El mismo escritorio; selecciona un Go existente por URL. No instala DB ni Go. El backend rechaza este modo. |
-| `server-only` | PostgreSQL + Go; no requiere Rust, Node, Tauri ni ventana en ejecución. |
+Las escrituras y sus eventos de auditoría se confirman en la misma transacción. Los fallos de autenticación y denegaciones relevantes se auditan deliberadamente aunque no se autorice la operación. Los errores públicos no incluyen SQL, hashes, DSN, secretos o detalles del driver.
 
-Estos modos están implementados por configuración, no por un instalador/asistente. No hay ediciones separadas para cajero/administrador: las futuras funciones dependerán de permisos validados en Go.
+## Identidad y autorización
 
-## Backend
+Las contraseñas se almacenan con Argon2id: 64 MiB, tres iteraciones, paralelismo uno y sal aleatoria de 16 bytes. La contraseña inicial admin/admin solo se crea durante la inicialización local. Una advertencia no bloqueante permanece hasta cambiarla. Reinicios y migraciones no vuelven a sembrar ni restablecer ese usuario.
 
-- `cmd/ad-el-pos-server`: composition root, CLI, señales y cierre ordenado. Dependencias de arriba hacia `internal`.
-- `config`: JSON estricto, validación, secreto opcional desde `ADEL_DB_PASSWORD`. No usa dependencias externas.
-- `database`: único adaptador PostgreSQL, pgxpool acotado, timeouts, conexiones con UTC. El proceso HTTP puede iniciar sin DB y reportar `503` hasta su recuperación.
-- `httpapi`: net/http estándar; GET técnicos, JSON uniforme, request IDs aleatorios, CORS de orígenes exactos, límites de cabeceras y tiempos. No hay router/framework adicional.
-- `licensing`: una verificación de arranque permite desarrollo local y rechaza producción sin proveedor. No hay protocolo de licencias inventado ni comprobaciones repartidas.
-- `events`: sobre JSON reservado. `/events` devuelve `501`: no existe WebSocket, bus, replay ni entrega garantizada todavía.
+`sa` es una identidad reservada, no un rol asignable del personal. Existe sin contraseña utilizable hasta el aprovisionamiento privado local del propietario. Los listados ordinarios excluyen su usuario y rol; los servicios de administración rechazan modificarlo incluso conociendo su UUID. Su acceso normal necesita dispositivo autorizado y una sesión válida. Su actividad aparece en auditoría, incluidos accesos privilegiados de consulta.
 
-Los futuros módulos se añaden cuando exista su primer caso de uso real: handler → servicio de aplicación → repositorio PostgreSQL. No crear capas o interfaces de repositorio sin una necesidad de sustitución/prueba concreta. Las transacciones se delimitan en el servicio de aplicación y se propagan a las operaciones del repositorio. No llamar handlers desde otros módulos.
+Hay siete roles ordinarios iniciales y roles personalizados. El registro central `administration.Permissions` contiene operaciones reales. Un permiso individual explícito allow/deny prevalece sobre el rol; inherit significa ausencia de excepción. Los permisos se resuelven desde PostgreSQL en cada petición, sin conservar autorizaciones en caché. React usa los permisos devueltos para navegación, y Go vuelve a verificarlos.
 
-Logs JSON a stdout; las respuestas de red no incluyen mensajes del driver, SQL, DSN, secretos ni rutas locales. El HTTP no registra cuerpos, query strings ni headers. Son logs de operación, todavía no auditoría de negocio ni sistema de rotación.
+Los tokens de dispositivo y sesión tienen 256 bits aleatorios; PostgreSQL guarda SHA-256, no los tokens. Cada sesión está ligada al dispositivo y al usuario. Un índice único parcial y un lock de usuario garantizan una sola sesión no revocada por usuario. Un acceso nuevo revoca la anterior; Go rechaza de inmediato sus operaciones y la interfaz informa el reemplazo en la siguiente consulta, como máximo tras el intervalo de cinco segundos si existe conectividad.
 
-## Esquema y migraciones
+Las sesiones expiran a las doce horas. Logout, desactivación, cambio de contraseña, revocación administrativa y revocación de terminal se validan en el servidor. Cinco fallos de acceso por usuario y terminal bloquean nuevos intentos durante quince minutos; las respuestas no distinguen cuentas inexistentes de contraseñas incorrectas.
 
-SQL embebido en el binario, migraciones `0001_descripcion.sql` consecutivas e inmutables después de aplicarse. El comando `migrate` toma un advisory lock transaccional y aplica todo el lote pendiente dentro de una transacción. Guarda número, nombre, SHA-256 y fecha UTC en `public.schema_migrations`; un fallo revierte el lote, incluido el registro. Dos migradores no aplican dos veces el mismo SQL.
+## Aprovisionamiento y confianza
 
-El esquema actual contiene únicamente el registro técnico y el namespace `app`. La disponibilidad comprueba conexión y coincidencia exacta del historial con el binario. Detecta versiones faltantes, nuevas, discontinuas y checksum alterado; no es una auditoría general de modificaciones manuales de todas las tablas. Nunca ejecutar DDL manual sobre esquemas administrados.
+El asistente requiere una autorización aleatoria generada en un archivo local 0600 y una conexión loopback. Una transacción serializada comprueba si ya existe el establecimiento; repetir el asistente no duplica ni restablece datos. La primera terminal recibe una credencial que Rust guarda directamente en Keychain.
 
-No hay migraciones automáticas al iniciar Go/Tauri, ni down automático. Para cambios futuros: respaldo → ensayo de restauración → migración explícita → comprobación de compatibilidad. `backup` produce un pg_dump custom y comprueba su catálogo; el ensayo de restauración sigue siendo un paso independiente. Cambios no transaccionales (p. ej. `CREATE INDEX CONCURRENTLY`) necesitan otro diseño revisado; no introducirlos en este migrador.
+Las terminales adicionales consumen códigos aleatorios de un solo uso, válidos diez minutos, emitidos por un usuario con `devices.manage`. Existe una recuperación local explícita por CLI para el propietario; queda auditada y tampoco autentica automáticamente un usuario. Nombre/UUID de terminal no sustituyen su secreto.
 
-Convenciones futuras:
+HTTP solo está permitido en loopback. Escucha LAN: IP privada específica, allow_lan explícito, certificado TLS y perfil de desarrollo. El cliente exige HTTPS en LAN y verifica CA y hostname. Los certificados de desarrollo no se instalan globalmente; la CA pública se distribuye por un canal local verificado. Nunca se comparte su clave privada ni la clave del servidor. No hay descubrimiento ni exposición pública a Internet.
 
-- UUID generados de forma inequívoca para entidades/operaciones; elegir versión final con el primer módulo. No usar nombres o índices visuales como identidad.
-- FK explícitas, índices en relaciones y `ON DELETE` deliberado; evitar cascadas implícitas para datos comerciales.
-- Transacciones para invariantes multi tabla; versionado optimista para edición concurrente. Un único servidor PostgreSQL es autoridad de cada instalación.
-- `timestamptz` para instantes, UTC en transporte/almacenamiento. Zona IANA del restaurante aparte para fechas de negocio y cierres; no derivarla del equipo cliente.
-- Dinero `numeric(precision,scale)` y aritmética decimal exacta. JSON decimal como cadena; nunca `float32/float64` ni `number` de JS para cálculos financieros. Precisiones, monedas y reglas de redondeo se fijarán con requisitos.
-- Auditoría futura en la misma transacción: actor, dispositivo, operación, instante y cambio. No confundir con logs HTTP.
-- Compatibilidad por API y esquema declarada. Etapa 1 exige esquema exacto; políticas de actualizaciones graduales se diseñarán antes de distribuir clientes móviles.
+Rust usa reqwest sin redirecciones ni proxy automático. La URL de conexión solo procede del archivo local, no de React. El puente admite una lista cerrada de operaciones, valida identificadores y restringe parámetros de consulta. La capability solo pertenece a la ventana local principal; CSP y acceso al sistema siguen restringidos.
 
-## Red, autenticación y operación
+La contraseña introducida y el código de enrolamiento existen transitoriamente en el formulario para enviarlos al servidor. No se guardan en React persistente, localStorage o logs. Los tokens duraderos no cruzan al WebView. El código de invitación se muestra temporalmente al administrador para transferir la autorización; no equivale a una sesión ni a una credencial permanente.
 
-Por defecto solo `127.0.0.1:8181`; DB exclusiva en `127.0.0.1:55432`. LAN requiere IP privada específica, `allow_lan=true` y `environment=development`; se rechazan `0.0.0.0`, direcciones públicas y producción LAN. Solo sirve para pruebas técnicas en red controlada. CORS no sustituye autenticación ni bloquea clientes nativos.
+## Datos y convenciones
 
-Antes de habilitar datos de negocio: enrolamiento de dispositivo, sesión de usuario, permisos en backend, TLS con confianza administrada, límites por dispositivo, revocación y firewall. No exponer este backend a Internet. SSL PostgreSQL `disable` solo se acepta en IP loopback de desarrollo; en otros casos se exige `verify-full`.
+La migración 0001 se conserva. La 0002 crea establecimiento, roles, permisos, usuarios, excepciones, cajas, terminales, invitaciones, sesiones, intentos de acceso, preferencias y auditoría. IDs UUID estables y claves foráneas explícitas. Los datos históricos no se eliminan al desactivar usuarios. No hay turnos, fondos, pagos ni movimientos económicos.
 
-El ejemplo launchd ejecuta Go en primer plano, con rutas absolutas, señales y reintento moderado. Un LaunchAgent vive durante la sesión de usuario; para un servicio comercial independiente del inicio de sesión se deberá diseñar un LaunchDaemon con usuario de servicio y permisos restringidos. No se instaló ninguno. PostgreSQL requiere su propia gestión del servicio; Go tolera que llegue después. No depender del orden de arranque de launchd ni del ciclo de vida de Tauri.
+La configuración del establecimiento persiste nombre, zona IANA, MXN, contacto y apariencia inicial. El asistente toma la zona del sistema operativo y permite cambiarla. Los instantes se almacenan como timestamptz y se transportan en UTC; la zona del establecimiento es una configuración de negocio independiente. El tema y pantalla inicial se guardan por usuario; el teclado por terminal. Las pantallas retiradas o no autorizadas vuelven a Estado del sistema.
 
-Los scripts actuales son para macOS. El código Go/Rust/React conserva compatibilidad de plataforma; servicio Windows, impresión, descubrimiento LAN, certificados, actualizaciones e instaladores siguen pendientes y no se probaron.
+Las futuras cantidades monetarias deben usar numeric/decimal y cadenas decimales en JSON; nunca float o aritmética financiera con number de JavaScript. Mantener transacciones por invariante y auditoría del actor/dispositivo/operación.
 
-## Identidad y renombrado
+El migrador conserva números, nombres y SHA-256; advisory lock y lote transaccional. Rechaza historial modificado, discontinuo, pendiente o más nuevo. No hay migración automática al abrir Tauri ni down automático. Respaldo y ensayo de restauración anteceden cambios sobre datos importantes; no incluir SQL no transaccional sin revisar el diseño.
 
-`config/product.json` es la fuente canónica de nombre, versión, ID técnico, API y esquema. `scripts/sync-metadata.mjs` actualiza metadatos embebidos Go, React, package/Cargo y Tauri. `--check` detecta divergencia; se ejecuta en pruebas. Cambiar `name` modifica el nombre visible. Para cambiar IDs técnicos también revisar rutas de comando, módulo Go, scripts, nombres de rol/DB y la plantilla launchd: una identidad persistente no debe renombrarse silenciosamente.
+## Operación y extensiones
 
-El bundle ID `local.adel.pos.dev` es válido y provisional. Sustituirlo por un identificador controlado antes de distribución y decidir la migración del directorio de configuración. El icono es provisional. Actualizar lockfiles después de cambiar la versión de paquetes y ejecutar todas las comprobaciones.
+La plantilla launchd sigue sin instalarse. LaunchAgent vive durante la sesión; un servicio comercial sin login requiere diseñar LaunchDaemon con usuario/permisos propios. Go tolera indisponibilidad PostgreSQL y gestiona SIGTERM. Windows Service, instaladores y pruebas Windows siguen pendientes.
+
+Persisten los puntos de extensión para Android offline y KDS: operación UUID, idempotencia transaccional, outbox, cursor de eventos y permisos por estación. No están implementados. Tampoco el proveedor comercial de licencias, sus firmas/caché ni límites comerciales de concurrencia.
+
+`config/product.json` sigue siendo canónico; `sync-metadata.mjs` genera metadatos respetando Prettier. Ver [CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md). Antes de distribuir: resolver bundle ID definitivo, firma/notarización, usuario DB runtime separado del migrador, backups/restauración y actualizaciones seguras.

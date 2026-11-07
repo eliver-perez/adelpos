@@ -32,6 +32,8 @@ type Config struct {
 	AllowedOrigins   []string `json:"allowed_origins"`
 	Database         Database `json:"database"`
 	LicenseMode      string   `json:"license_mode"`
+	TLSCertificate   string   `json:"tls_certificate,omitempty"`
+	TLSPrivateKey    string   `json:"tls_private_key,omitempty"`
 }
 
 func Load(filename string) (Config, error) {
@@ -77,6 +79,12 @@ func (c Config) Validate() error {
 	if !ip.IsLoopback() && !ip.IsPrivate() {
 		return errors.New("la escucha solo admite loopback o una IP privada específica")
 	}
+	if (c.TLSCertificate == "") != (c.TLSPrivateKey == "") {
+		return errors.New("TLS requiere certificado y clave privada juntos")
+	}
+	if !ip.IsLoopback() && c.TLSCertificate == "" {
+		return errors.New("la escucha LAN requiere un certificado TLS; HTTP solo se admite en loopback")
+	}
 	if c.Environment == "development" && c.LicenseMode != "development" {
 		return errors.New("desarrollo requiere license_mode development")
 	}
@@ -85,7 +93,12 @@ func (c Config) Validate() error {
 	}
 	for _, origin := range c.AllowedOrigins {
 		u, err := url.Parse(origin)
-		if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(origin, "*") || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "tauri") {
+		if err != nil {
+			return errors.New("allowed_origins contiene una dirección inválida")
+		}
+		allowedScheme := u.Scheme == "http" || u.Scheme == "https" || u.Scheme == "tauri"
+		hasExtraComponents := u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != ""
+		if u.Host == "" || hasExtraComponents || strings.Contains(origin, "*") || !allowedScheme {
 			return errors.New("allowed_origins debe contener orígenes exactos sin comodines")
 		}
 	}

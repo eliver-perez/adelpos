@@ -1,62 +1,78 @@
-# Contratos API
+# API v1 · Etapa 2
 
-Base implementada: `http://127.0.0.1:8181/api/v1`. Solo diagnósticos públicos de información no sensible; ninguna función administrativa remota. Las escrituras futuras requerirán identidad y autorización reales.
+HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
-## Rutas implementadas
+## Autenticación de transporte
 
-| Método | Ruta | Respuesta |
-| --- | --- | --- |
-| GET | `/api/v1/health/live` | `200 {"status":"alive"}`; no consulta DB. |
-| GET | `/api/v1/health/ready` | `200` si PostgreSQL y esquema están disponibles; `503` en caso contrario. |
-| GET | `/api/v1/version` | Identidad técnica, versión, API, esquema, capacidades no sensibles. |
-| GET | `/api/v1/events` | `501 EVENTS_NOT_AVAILABLE`; no realiza upgrade WebSocket. |
+El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer <sesión>`. Los tokens duraderos no se devuelven a React. Todos los endpoints protegidos comprueban dispositivo, sesión, usuario activo y permiso efectivo en PostgreSQL. Cambiar un identificador público no sustituye una credencial válida. Los ejemplos documentan nombres de cabeceras, nunca valores reales.
 
-Disponibilidad real:
+## Rutas
 
-```json
-{"status":"ready","checks":{"postgres":"available","schema":"compatible"}}
-```
+| Método     | Ruta                      | Requisito                                                                    |
+| ---------- | ------------------------- | ---------------------------------------------------------------------------- |
+| GET        | `/health/live`            | Público; proceso activo.                                                     |
+| GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                        |
+| GET        | `/version`                | Público; producto, versión, API y esquema 2.                                 |
+| GET        | `/events`                 | 501; transporte de eventos pendiente.                                        |
+| GET        | `/setup/status`           | Público; solo configured booleano.                                           |
+| POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                       |
+| POST       | `/devices/enroll`         | Código de autorización de un solo uso, no requiere sesión previa.            |
+| POST       | `/auth/login`             | Dispositivo autorizado; username y password.                                 |
+| POST       | `/auth/logout`            | Sesión; revoca la actual.                                                    |
+| GET        | `/auth/me`                | Sesión; identidad, permisos, preferencias y terminal.                        |
+| POST       | `/auth/password`          | Sesión; contraseña actual/nueva; rota la sesión.                             |
+| GET / POST | `/users`                  | users.read / users.manage.                                                   |
+| PATCH      | `/users/{id}`             | users.manage; no modifica sa.                                                |
+| GET / PUT  | `/users/{id}/permissions` | permissions.read / permissions.manage.                                       |
+| GET / PUT  | `/users/{id}/preferences` | users.manage; no modifica sa.                                                |
+| GET / POST | `/roles`                  | roles.read / roles.manage + permissions.manage.                              |
+| PATCH      | `/roles/{id}`             | roles.manage + permissions.manage; rol reservado rechazado.                  |
+| GET        | `/permissions`            | permissions.read; registro central.                                          |
+| GET / PUT  | `/settings`               | settings.read / settings.manage.                                             |
+| GET / POST | `/registers`              | registers.read / registers.manage.                                           |
+| PATCH      | `/registers/{id}`         | registers.manage; desactivar requiere desasociar terminales activas.         |
+| GET        | `/devices`                | devices.read.                                                                |
+| POST       | `/devices/invitations`    | devices.manage; código válido diez minutos.                                  |
+| PATCH      | `/devices/{id}`           | devices.manage; nombre, caja y teclado.                                      |
+| POST       | `/devices/{id}/revoke`    | devices.manage; revoca terminal y sesiones.                                  |
+| GET        | `/sessions`               | sessions.read; hasta 200 recientes, sin tokens.                              |
+| POST       | `/sessions/{id}/revoke`   | sessions.manage; una cuenta ordinaria no revoca directamente sesiones de sa. |
+| GET / PUT  | `/preferences`            | Sesión propia.                                                               |
+| PUT        | `/terminal/preferences`   | Sesión; solo teclado de la terminal actual.                                  |
+| GET        | `/audit`                  | audit.read; filtros y paginación.                                            |
 
-Sin DB: `status=not_ready`, `postgres=unavailable`, `schema=unknown`. DB conectada pero migraciones incompatibles: `postgres=available`, `schema=incompatible`, también `503`. Timeout del chequeo: 2 segundos. Tauri consulta cada 5 segundos, sin solapar consultas, y permite comprobación manual. Cada GET nativo tiene un timeout de 3 segundos y límite de respuesta de 32 KiB. La consulta de los tres endpoints no es una transacción: representa el estado observado durante ese intervalo.
+## Cuerpos principales
 
-Versión:
+Setup/settings: `name`, `timezone` IANA, `currency` MXN, `phone`, `email`, `address`, `theme` light/dark. Setup añade `terminal_name`. La zona propuesta procede del OS; Go valida y conserva la elección. Setup repetido con autorización local responde configured/already_configured y no vuelve a emitir credenciales ni modifica datos.
+
+Usuarios: `username`, `display_name`, `role_id`, `active`; POST añade password de 8 a 256 caracteres. PATCH no restablece contraseñas. Rol: `name`, `permissions` (claves del registro). Excepciones: `{ "overrides": { "users.read": "allow", "registers.read": "deny", "audit.read": "inherit" } }`. Heredar elimina la excepción; las demás claves enviadas se actualizan.
+
+Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled. Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Contraseña propia: `current_password`, `new_password`.
+
+Login devuelve session_token al cliente nativo. Setup/enrolamiento devuelven device_id y device_token al cliente nativo. Rust los guarda en Keychain y elimina campos secretos antes de responder al WebView. El UUID público de sesión no autentica peticiones. Caducidad de sesión: doce horas; nuevo acceso reemplaza la anterior. El evento lógico de reemplazo se informa con SESSION_REPLACED en la siguiente consulta, no mediante un WebSocket activo.
+
+## Auditoría y errores
+
+`GET /audit`: parámetros `actor` (usuario exacto), `action` exacta, `device_id`, `from`/`until` RFC3339, `page` (desde 1), `page_size` 1..100. Respuesta `items`, `total`, `page`, `page_size`. Cada evento incluye instante, actor, terminal, operación, entidad, resultado y estados antes/después cuando aplica. Contraseñas, hashes y tokens están excluidos. La identidad sa sigue siendo visible en este historial.
+
+Errores públicos:
 
 ```json
 {
-  "product": "ad-el-pos",
-  "server_version": "0.1.0",
-  "api_version": "v1",
-  "schema_version": 1,
-  "supported_api_versions": ["v1"],
-  "capabilities": ["technical-health"],
-  "events_available": false
+  "error": {
+    "code": "PERMISSION_DENIED",
+    "message": "No tienes permiso para esta operación.",
+    "request_id": "identificador-opaco"
+  }
 }
 ```
 
-El cliente valida identidad técnica, API y esquema; no basta que una URL devuelva HTTP 200. Un servidor inaccesible deja PostgreSQL en estado desconocido, nunca en un estado disponible almacenado de una consulta anterior.
+400: validación; 401: dispositivo/sesión/credenciales inválidos; 403: permiso o aprovisionamiento rechazado; 404: inexistente; 409: duplicado o caja en uso; 413: cuerpo mayor de 64 KiB; 429: límite de intentos; 503: indisponibilidad. Los diagnósticos conservan los códigos de la etapa 1. Códigos de sesión: SESSION_REQUIRED, SESSION_INVALID, SESSION_EXPIRED, SESSION_REVOKED, SESSION_REPLACED; terminal: DEVICE_REQUIRED y DEVICE_REVOKED. No exponer detalles PostgreSQL.
 
-## Convenciones actuales
+JSON UTF-8, Cache-Control no-store, X-Content-Type-Options nosniff y request ID generado por Go. CORS exacto conserva consultas técnicas GET; la operación autenticada de escritorio usa HTTP nativo, sin ampliar CORS ni CSP. Ninguna credencial se transporta por query string. Timeouts administrativos de diez segundos en Go y doce en el cliente; respuesta nativa limitada a 2 MiB.
 
-JSON UTF-8. `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `X-Request-ID` generado por el servidor. Los errores usan:
+## Versionado y proyectos futuros
 
-```json
-{"error":{"code":"NOT_FOUND","message":"Ruta no disponible.","request_id":"identificador-opaco"}}
-```
+API v1 admite campos adicionales compatibles; cambios incompatibles requieren nueva versión. El diagnóstico verifica identidad/API/esquema. El servidor es único dueño del esquema; ningún cliente migra PostgreSQL.
 
-Códigos: `NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `ORIGIN_NOT_ALLOWED` 403, `PREFLIGHT_REJECTED` 403, `EVENTS_NOT_AVAILABLE` 501, `INTERNAL_ERROR` 500. La disponibilidad negativa usa el documento `checks`, no un error genérico. Los métodos distintos de GET/OPTIONS se rechazan. OPTIONS permite GET desde un origen exacto y sin headers adicionales solicitados; ampliar CORS con autenticación futura de forma deliberada.
-
-El transporte Tauri realiza GET con rutas fijas desde Rust; no acepta una URL, método o SQL arbitrarios desde React. Un cliente nativo no necesita CORS. El modo navegador sí se somete a la lista de orígenes. No hay comodines ni cookies/sesiones en esta entrega.
-
-Versionado: cambios compatibles pueden añadir campos. Eliminaciones, cambios semánticos o tipos incompatibles requieren nueva versión de API. Los clientes deben ignorar campos nuevos y rechazar contratos esenciales ausentes/inválidos. `schema_version` sirve a diagnóstico; solo el servidor opera el esquema. El cliente no ejecuta migraciones.
-
-## Diseñado para la siguiente etapa; no implementado
-
-**Identidad y permisos.** Enrolamiento/revocación de dispositivos separado de sesión de usuario. Toda operación autoriza en Go el permiso correspondiente y el alcance del restaurante/terminal. Ocultar un botón no es autorización. El proveedor de licencias aporta derechos comerciales al límite de política central; no reemplaza permisos de usuario.
-
-**Android offline e idempotencia.** El cliente asignará `operation_id` UUID antes de guardar un pedido en su cola durable. El servidor deberá persistir en una misma transacción la clave única `(device_id, operation_id)`, hash canónico de la solicitud, pedido y resultado confirmado. Un reintento con el mismo contenido devuelve el mismo ID/resultado; con diferente contenido devuelve conflicto. Nunca confirmar recepción antes del commit. Ante respuesta perdida se reintenta la misma operación, sin crear otra. Definir retención de claves, recuperación, estado consultable y reglas de conflicto antes de implementar sincronización. Esto no promete entrega exactamente una vez por la red: evita duplicar el efecto persistido.
-
-**Eventos/KDS.** `events.Envelope` reserva `id`, `type`, `version`, `occurred_at`, `operation_id?` y `payload`. El futuro endpoint WebSocket requerirá autenticación del dispositivo/usuario, validación de Origin para navegadores, límites, heartbeat, backpressure y revocación. KDS recibirá eventos autorizados por estación y enviará cambios de estado por comandos idempotentes a Go. Evaluar outbox transaccional para publicar solo operaciones confirmadas, cursor de reanudación, deduplicación y resync de snapshot cuando el cursor expire. No se ha implementado ninguno de estos mecanismos.
-
-**Concurrencia.** Reservar revisiones de agregado para optimistic locking, responder conflicto al modificar una revisión obsoleta y mantener invariantes transaccionales. Un pool limita conexiones, pero no equivale a un control de terminales ni de sesiones. No aceptar el reloj cliente como autoridad para ordenar cambios.
-
-**Licencias.** Proyecto independiente. El adaptador central decidirá la política de arranque y derechos, con caché/verificación offline futura. Protocolo, firma, activación, periodos de gracia, licencias perpetuas/temporales y módulos están pendientes. No existe conexión al servicio comercial en desarrollo.
+Android offline necesitará una clave única (device_id, operation_id), hash de solicitud, resultado y pedido confirmados en la misma transacción; reintento idéntico devuelve el mismo resultado y contenido distinto da conflicto. KDS necesitará comandos autorizados por estación y eventos publicados tras commit. Outbox, cursor/replay, deduplicación, contratos de pedidos y transporte WebSocket continúan pendientes. El punto comercial de licencias sigue centralizado, sin protocolo definitivo.

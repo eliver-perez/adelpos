@@ -23,10 +23,12 @@ type ErrorBody struct {
 }
 type contextKey struct{}
 
-func New(probe Probe, origins []string, logger *slog.Logger) http.Handler {
+func New(probe Probe, origins []string, logger *slog.Logger, application ...http.Handler) http.Handler {
 	metadata := product.Read()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/health/live", func(w http.ResponseWriter, r *http.Request) { respond(w, 200, map[string]string{"status": "alive"}) })
+	mux.HandleFunc("/api/v1/health/live", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, 200, map[string]string{"status": "alive"})
+	})
 	mux.HandleFunc("/api/v1/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -41,12 +43,25 @@ func New(probe Probe, origins []string, logger *slog.Logger) http.Handler {
 		}{status, h})
 	})
 	mux.HandleFunc("/api/v1/version", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, 200, map[string]any{"product": metadata.TechnicalID, "server_version": metadata.Version, "api_version": metadata.APIVersion, "schema_version": metadata.SchemaVersion, "supported_api_versions": []string{metadata.APIVersion}, "capabilities": []string{"technical-health"}, "events_available": false})
+		respond(w, 200, map[string]any{
+			"product":                metadata.TechnicalID,
+			"server_version":         metadata.Version,
+			"api_version":            metadata.APIVersion,
+			"schema_version":         metadata.SchemaVersion,
+			"supported_api_versions": []string{metadata.APIVersion},
+			"capabilities":           []string{"technical-health", "identity-administration"},
+			"events_available":       false,
+		})
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 501, "EVENTS_NOT_AVAILABLE", "Los eventos en tiempo real aún no están habilitados.")
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, r, 404, "NOT_FOUND", "Ruta no disponible.") })
+	if len(application) > 0 {
+		mux.Handle("/api/v1/", application[0])
+	}
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fail(w, r, 404, "NOT_FOUND", "Ruta no disponible.")
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		var token [16]byte
@@ -83,7 +98,8 @@ func New(probe Probe, origins []string, logger *slog.Logger) http.Handler {
 			tracked.WriteHeader(204)
 			return
 		}
-		if r.Method != http.MethodGet {
+		technicalRoute := slices.Contains([]string{"/api/v1/health/live", "/api/v1/health/ready", "/api/v1/version", "/api/v1/events"}, r.URL.Path)
+		if r.Method != http.MethodGet && (technicalRoute || len(application) == 0) {
 			w.Header().Set("Allow", "GET, OPTIONS")
 			fail(tracked, r, 405, "METHOD_NOT_ALLOWED", "Método no permitido.")
 			return
