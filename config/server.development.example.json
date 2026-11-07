@@ -1,0 +1,18 @@
+{
+  "environment": "development",
+  "installation_mode": "server-terminal",
+  "listen_address": "127.0.0.1:8181",
+  "allow_lan": false,
+  "allowed_origins": ["http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "http://tauri.localhost"],
+  "database": {
+    "host": "127.0.0.1",
+    "port": 55432,
+    "name": "adel_pos",
+    "user": "adel_app",
+    "password": "",
+    "ssl_mode": "disable",
+    "ssl_root_cert": "",
+    "max_connections": 8
+  },
+  "license_mode": "development"
+}

@@ -1,0 +1,18 @@
+{
+  "environment": "production",
+  "installation_mode": "server-only",
+  "listen_address": "127.0.0.1:8181",
+  "allow_lan": false,
+  "allowed_origins": ["tauri://localhost", "http://tauri.localhost"],
+  "database": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "name": "adel_pos",
+    "user": "adel_app",
+    "password": "",
+    "ssl_mode": "verify-full",
+    "ssl_root_cert": "/absolute/path/to/postgres-ca.pem",
+    "max_connections": 16
+  },
+  "license_mode": "commercial"
+}

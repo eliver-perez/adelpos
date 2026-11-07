@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-diagnostics"
+description = "Leer la configuración de terminal y consultar tres rutas técnicas fijas."
+commands.allow = ["connection_config", "server_snapshot"]

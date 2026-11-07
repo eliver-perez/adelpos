@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>local.adel.pos.server</string>
+  <key>ProgramArguments</key><array>
+    <string>/ABSOLUTE/PATH/ad-el-pos/bin/ad-el-pos-server</string>
+    <string>serve</string><string>--config</string>
+    <string>/ABSOLUTE/PATH/ad-el-pos/.local/server.json</string>
+  </array>
+  <key>WorkingDirectory</key><string>/ABSOLUTE/PATH/ad-el-pos</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/ABSOLUTE/PATH/ad-el-pos/.local/service.log</string>
+  <key>StandardErrorPath</key><string>/ABSOLUTE/PATH/ad-el-pos/.local/service-error.log</string>
+</dict></plist>

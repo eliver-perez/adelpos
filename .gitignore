@@ -1,0 +1,14 @@
+.DS_Store
+.local/
+.tools/
+.cache/
+bin/
+backups/
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+*.log
+.env
+.env.*
+!*.example
