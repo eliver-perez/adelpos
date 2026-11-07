@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Notice } from './components/Forms';
+import { BrandLogo } from './components/BrandLogo';
+import { CatalogPage } from './pages/catalog/CatalogPage';
+import { PreviewPage } from './pages/catalog/PreviewPage';
 import { Icon } from './components/Icon';
 import { useSession } from './hooks/useSession';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
@@ -22,7 +25,10 @@ export function App() {
   const initializedUser = useRef<string | null>(null);
   const identity = session.identity;
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
-  const available = screens.filter((entry) => !entry.permission || can(entry.permission));
+  const available = screens.filter((entry) => {
+    const authorized = !entry.permission || can(entry.permission);
+    return authorized && (entry.id !== 'preview' || can('catalog.read'));
+  });
 
   useEffect(() => {
     if (!identity) {
@@ -50,11 +56,25 @@ export function App() {
       </main>
     );
   }
-  if (session.phase === 'loading' || session.phase === 'offline') {
+  if (
+    session.phase === 'loading' ||
+    session.phase === 'offline' ||
+    session.phase === 'secure-storage'
+  ) {
     return (
       <AccessFrame
-        title={session.phase === 'loading' ? 'Conectando' : 'Revisa la conexión'}
-        description="La aplicación consulta el servidor configurado y su estado real."
+        title={
+          session.phase === 'loading'
+            ? 'Conectando'
+            : session.phase === 'secure-storage'
+              ? 'Revisa el acceso seguro'
+              : 'Revisa la conexión'
+        }
+        description={
+          session.phase === 'secure-storage'
+            ? 'El sistema operativo debe autorizar la recuperación de tus credenciales locales. Revisa su diálogo de acceso al Llavero.'
+            : 'La aplicación consulta el servidor configurado y su estado real.'
+        }
       >
         <Notice>{session.connectionError}</Notice>
         <div className="button-row">
@@ -103,6 +123,10 @@ export function App() {
       return null;
     }
     switch (screen) {
+      case 'catalog':
+        return <CatalogPage can={can} />;
+      case 'preview':
+        return <PreviewPage can={can} />;
       case 'users':
         return <UsersPage can={can} onChanged={session.refresh} />;
       case 'roles':
@@ -130,11 +154,8 @@ export function App() {
     <div className="app-shell min-h-screen">
       <aside className="sidebar admin-sidebar">
         <div className="brand-heading">
-          <span className="brand-mark">
-            A<span>·</span>
-          </span>
-          <div>
-            <strong>{product.name}</strong>
+          <div className="brand-heading-content">
+            <BrandLogo />
             <p className="muted text-xs">Administración · v{product.version}</p>
           </div>
         </div>

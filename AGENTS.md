@@ -30,3 +30,12 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 - sa es reservado y no editable desde administración ordinaria. Su contraseña solo la define privadamente el propietario en Terminal local; no inventarla ni pedirla por chat.
 - Los secretos de sesión/dispositivo solo se conservan en el almacén seguro nativo. Auditar cambios transaccionalmente y no registrar contraseñas, hashes ni tokens.
 - Consultar dispositivos, sesiones y permisos vigentes en Go en cada operación protegida.
+
+## Reglas confirmadas en etapa 3
+
+- Catálogo y dinero se calculan exclusivamente en `internal/catalog` con decimal exacto. Dinero JSON como cadenas; no introducir cálculos financieros con number en React.
+- Conservar equivalencia por valor con piso en base, extras explícitos separados y tramos incrementales. Nunca imponer una opción original obligatoria si el mínimo es cero.
+- Combos referencian productos estables; no duplicar identidades ni consumo. Validar ciclos, disponibilidad y personalización de hijos.
+- Respetar revisión optimista y lock de catálogo; cada escritura y su auditoría pertenecen a la misma transacción. No eludir permisos de precios/estado/disponibilidad/imágenes mediante el editor completo.
+- 0003 aplicada es inmutable. La previsualización no registra ventas ni movimientos de inventario. Leer docs/CATALOG.md antes de ampliar reglas.
+- Preservar los PNG originales de assets/brand; BrandLogo elige por tema y conserva proporciones. No sustituir la marca ni confundirla con el logotipo futuro del restaurante.

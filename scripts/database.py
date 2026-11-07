@@ -140,7 +140,7 @@ SELECT format('CREATE DATABASE %I OWNER adel_app', :'database_name') WHERE NOT E
 def integration():
     ensure_owned()
     password = (LOCAL / "app-password").read_text().strip()
-    for package in ("./internal/database", "./internal/administration"):
+    for package in ("./internal/database", "./internal/administration", "./internal/catalog"):
         name = "adel_pos_test_" + secrets.token_hex(6)
         run([PG_BIN / "createdb", "--owner=adel_app", name], env=admin_env())
         try:

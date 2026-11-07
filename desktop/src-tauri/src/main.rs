@@ -6,6 +6,7 @@ mod vault;
 
 use connection::{load_config, ConnectionConfig};
 use serde::Serialize;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{Manager, State};
 use vault::Vault;
@@ -13,9 +14,22 @@ use vault::Vault;
 pub struct TerminalState {
     config: Result<ConnectionConfig, String>,
     client: Result<reqwest::Client, String>,
-    vault: Result<Vault, String>,
+    vault: Arc<OnceLock<Result<Vault, String>>>,
     provisioning_token: Option<String>,
     enrollment_code: Option<String>,
+}
+
+impl TerminalState {
+    fn vault(&self) -> Result<&Vault, String> {
+        self.vault
+            .get()
+            .ok_or_else(|| {
+                "Esperando autorización del almacén seguro del sistema. Revisa el diálogo de macOS."
+                    .to_string()
+            })?
+            .as_ref()
+            .map_err(Clone::clone)
+    }
 }
 
 #[derive(Serialize)]
@@ -98,10 +112,18 @@ fn main() {
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
             let client = config.as_ref().map_err(Clone::clone).and_then(client);
-            let vault = config
-                .as_ref()
-                .map_err(Clone::clone)
-                .and_then(|value| Vault::open(&value.server_url, &value.credential_namespace));
+            let vault = Arc::new(OnceLock::new());
+            let pending_vault = Arc::clone(&vault);
+            let vault_config = config.clone();
+            // macOS puede esperar consentimiento para una compilación nueva. La espera no debe
+            // bloquear el hilo de la ventana ni sustituir o borrar la credencial existente.
+            std::thread::spawn(move || {
+                let opened = vault_config
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|value| Vault::open(&value.server_url, &value.credential_namespace));
+                let _ = pending_vault.set(opened);
+            });
             let provisioning_token = std::env::var_os("ADEL_PROVISIONING_FILE")
                 .and_then(|filename| std::fs::read_to_string(filename).ok())
                 .map(|value| value.trim().to_string())
@@ -127,4 +149,33 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio");
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    #[test]
+    fn pending_secure_storage_does_not_supply_empty_credentials() {
+        let state = TerminalState {
+            config: Err("Prueba sin configuración".into()),
+            client: Err("Prueba sin HTTP".into()),
+            vault: Arc::new(OnceLock::new()),
+            provisioning_token: None,
+            enrollment_code: None,
+        };
+        assert!(state
+            .vault()
+            .err()
+            .unwrap()
+            .contains("Esperando autorización"));
+        assert!(state
+            .vault
+            .set(Err("Acceso denegado por el sistema".into()))
+            .is_ok());
+        assert_eq!(
+            state.vault().err().unwrap(),
+            "Acceso denegado por el sistema"
+        );
+    }
 }

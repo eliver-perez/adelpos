@@ -139,3 +139,11 @@ Antes de migraciones sobre información importante, respaldar y restaurar en una
 La plantilla launchd no está instalada. Un LaunchAgent depende de la sesión; para servicio comercial sin login se diseñará un LaunchDaemon con usuario y directorios propios. No iniciar simultáneamente launchd y server-start en el mismo puerto.
 
 Errores habituales: servidor desconectado → revisar status/log y URL; DB no disponible → db-start/puerto 55432; esquema incompatible → migrate con el binario correcto; credencial inválida → login o nueva autorización de terminal; fallo de Keychain → revisar acceso OS, sin borrar datos; fallo TLS → CA/SAN/fecha/IP correctos, sin desactivar validación. Un entorno aislado de agente puede necesitar permiso para puertos, memoria compartida y apertura de la aplicación.
+
+## Catálogo · etapa 3
+
+La versión 0.3.0 utiliza esquema 3. Para actualizar una instalación configurada: respaldo, restauración de ensayo en base temporal, `server-stop`, `migrate` y `server-start`; después compilar con `build-macos` y abrir con `open-app`. No ejecutar setup ni borrar .local. Se conservan establecimiento, usuarios, terminales y credenciales Keychain. Los logos originales deben existir en assets/brand.
+
+El `.app` abre inicialmente con altura 720 y mantiene desplazamiento y controles táctiles. Catálogo y Probar personalización aparecen según permisos. Las pruebas de integración incluyen `internal/catalog` en una tercera base temporal y eliminan solo las bases creadas por la prueba. Los productos de los ejemplos se crean únicamente en esas bases; no se siembran en la instalación real. Reglas operativas en [docs/CATALOG.md](docs/CATALOG.md).
+
+Una compilación de desarrollo nueva puede solicitar autorización del Llavero de macOS para leer la credencial existente. Autorizar únicamente en el diálogo del sistema; nunca compartir la contraseña por chat ni sustituir el perfil para evitarlo. La recuperación se ejecuta en segundo plano y la ventana muestra **Revisa el acceso seguro** mientras espera; conserva disponible Diagnóstico técnico. Después de autorizar, vuelve a comprobar automáticamente. Si se denegó el acceso, cerrar y reabrir la aplicación tras revisar la autorización del sistema. Esta política no guarda tokens en archivos ni cambia sa.

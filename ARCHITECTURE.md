@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 2
+# Arquitectura · Etapa 3
 
 ## Responsabilidades
 
@@ -21,6 +21,7 @@ Tauri no inicia ni detiene Go o PostgreSQL. Los modos `server-terminal`, `termin
 - `database`: pgxpool acotado, UTC y migraciones SQL embebidas.
 - `httpapi`: diagnósticos, CORS exacto, request IDs, límites y logs sin secretos.
 - `administration`: servicios con transacción por operación. Archivos por responsabilidad: autenticación, permisos, usuarios, roles, dispositivos, cajas, configuración, preferencias y auditoría.
+- `catalog`: documentos y relaciones del catálogo, revisión optimista, disponibilidad, imágenes y cálculo decimal puro. Recibe actor/auditoría desde administración; no importa administración ni depende del escritorio.
 - `localsetup`: CA y certificado TLS locales; no modifica la confianza global del sistema.
 - `licensing`: único límite de integración comercial. Desarrollo permitido, producción bloqueada hasta integrar el proveedor.
 - `events`: sobre reservado; `/events` continúa respondiendo 501. La notificación de revocación usa consulta de sesión cada cinco segundos.
@@ -68,3 +69,15 @@ La plantilla launchd sigue sin instalarse. LaunchAgent vive durante la sesión; 
 Persisten los puntos de extensión para Android offline y KDS: operación UUID, idempotencia transaccional, outbox, cursor de eventos y permisos por estación. No están implementados. Tampoco el proveedor comercial de licencias, sus firmas/caché ni límites comerciales de concurrencia.
 
 `config/product.json` sigue siendo canónico; `sync-metadata.mjs` genera metadatos respetando Prettier. Ver [CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md). Antes de distribuir: resolver bundle ID definitivo, firma/notarización, usuario DB runtime separado del migrador, backups/restauración y actualizaciones seguras.
+
+## Catálogo y cálculo comercial
+
+La 0003 añade productos con UUID estables, categorías, variantes opcionales, ingredientes/receta, complementos, porciones, grupos/opciones/originales incluidos, componentes y alternativas de combo, tramos, listas y promociones. Valores `numeric`, claves foráneas y desactivación lógica. Solo se siembra la lista predeterminada Restaurante; no hay productos ficticios. Los permisos nuevos se agregan al registro y al administrador sin restablecer usuarios ni modificar el mecanismo reservado sa.
+
+`administration` autentica cada petición y delega `catalog/*` pasando la misma transacción, permisos efectivos y callback de auditoría. El catálogo usa un advisory lock compartido para lecturas/cálculos y exclusivo para escrituras; así, un snapshot no mezcla revisiones ni permite validar simultáneamente ciclos incompatibles. Cada documento posee revisión; cambios de estado, disponibilidad y orden también la incrementan.
+
+`catalog.Calculate` es una función determinista del snapshot, solicitud, instante del servidor y zona del establecimiento. Un estado de cálculo acota la expansión recursiva. Se utiliza `shopspring/decimal` y se devuelven cadenas; React no calcula importes. El resultado incluye bases/origen, ingredientes, valores incluido/solicitado, diferencia/extras, árbol de componentes y promociones con motivos. Ver [CATALOG.md](docs/CATALOG.md) para reglas de redondeo, equivalencia, tramos y acumulación.
+
+Los logos originales se empaquetan con Vite y `BrandLogo` usa CSS por tema sin servicios externos. Las fotografías del catálogo se validan completamente en Go y guardan en PostgreSQL; llegan autenticadas por IPC como URI data. No se habilita acceso general al filesystem ni se amplía CSP. Solo las rutas de catálogo admiten cuerpos de hasta 2 MiB; el resto conserva 64 KiB.
+
+El componente `ProductCustomizer` admite componentes anidados y mantiene selecciones estructuradas y observaciones. `PreviewPage` permite varias líneas solo para comprobar promociones: no hay persistencia de pedidos, reserva, impuestos, comandas, pagos ni consumo de inventario. Una futura captura deberá solicitar nuevamente el cálculo y persistir su snapshot dentro de la transacción comercial correspondiente.

@@ -1,78 +1,84 @@
-# Verificación · Etapa 2
+# Verificación · Etapa 3
 
-Fecha: 7 de noviembre de 2026, America/Monterrey. macOS 26.5.2, Apple Silicon ARM64. La evidencia anterior se conserva en [VERIFICATION_STAGE1.md](VERIFICATION_STAGE1.md).
+Fecha: 7 de noviembre de 2026, America/Monterrey. macOS Apple Silicon. Versión 0.3.0, esquema 3. Evidencia previa: [etapa 1](VERIFICATION_STAGE1.md) y [etapa 2](VERIFICATION_STAGE2.md).
 
-## Pruebas reales de Go y PostgreSQL
+## Resultado ejecutado
 
-`./scripts/dev.sh test-integration` ejecutó las suites en bases temporales independientes `adel_pos_test_*`; ambas terminaron correctamente y sus bases se eliminaron. No se reinicializó adel_pos.
+- `./scripts/dev.sh test`: correcto. Incluye Prettier, gofmt, Rustfmt, metadatos coherentes, Go con detector de carreras y vet, pruebas frontend, TypeScript estricto, Vite y Rust con lockfile.
+- Frontend: **19 pruebas aprobadas** en cuatro archivos. Conserva las pruebas anteriores y añade administración del catálogo, permisos de consulta, selección estructurada, retiro/restauración de todos los complementos, conservación de otras selecciones, reinicio de un hijo de combo sin perder observaciones del padre, descarte de respuestas atrasadas y recuperación tras autorización pendiente del Llavero.
+- Rust: **7 aprobadas, 1 opt-in omitida**. Incluye rutas de catálogo cerradas, métodos correctos, bloqueo de identificadores/rutas arbitrarias, eliminación de tokens antes del WebView, conservación ante contraseña actual incorrecta y ausencia de credenciales vacías durante espera del almacén seguro. No se volvió a ejecutar el roundtrip opt-in real del Keychain en esta etapa; la ejecución de etapa 2 permanece documentada.
+- `./scripts/dev.sh test-integration`: correcto. Tres suites sobre bases temporales distintas `adel_pos_test_*`, eliminadas al terminar: migrador, administración y catálogo. No se utilizó adel_pos para sembrar escenarios de prueba.
+- `./scripts/dev.sh build-macos`: correcto. Bundle ARM64 `desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app`, versión 0.3.0, aproximadamente 9.31 MiB.
 
-- Inicialización local, repetición sin duplicados y creación de Caja 1 sin turnos/movimientos.
-- Acceso admin/admin, advertencia no bloqueante y autorización para continuar usando administración.
-- Cambio de contraseña, rechazo del secreto anterior y conservación al reconstruir la instancia del servicio sobre la misma base.
-- Aprovisionamiento sa con credencial aleatoria exclusivamente de prueba, rechazo de sobrescritura, acceso normal, exclusión de listados y rechazo de modificación ordinaria por UUID.
-- Usuarios: creación, edición y desactivación; roles personalizados: creación/edición.
-- Excepciones individuales heredadas, permitidas y denegadas; rechazo HTTP real de operaciones sin permiso. Cambiar permisos de rol se aplica a la siguiente solicitud.
-- Nuevo acceso revoca la sesión anterior e informa SESSION_REPLACED; vinculación de sesión/dispositivo, rechazo de identificador manipulado, caducidad y solicitudes anónimas.
-- Invitación de terminal: consumo único; revocación de dispositivo y rechazo de operaciones posteriores.
-- Persistencia de preferencias, fallback de pantalla inicial no autorizada y teclado por terminal.
-- Consulta autorizada de auditoría, historial conservado tras desactivar usuarios y ausencia de secretos en eventos.
-- Configuración general y zona horaria guardadas; cajas creadas/editadas; asociación de dispositivo; rechazo de desactivar una caja en uso; desasociación y desactivación posterior.
-- Autorización local de recuperación y revocación administrativa de sesión.
-- Acciones privilegiadas de soporte registradas; límite de intentos fallidos aplicado.
-- Migraciones concurrentes/repetidas, rollback de lote fallido y rechazo de checksum/historial alterado o esquema más nuevo.
+## Motor y aceptación de catálogo
 
-Se ejecutaron además compilación Go, `go test -race ./...` y `go vet ./...`, correctamente. Las pruebas TLS abren un servidor efímero local: una CA desconocida se rechaza, una CA autorizada se acepta y un hostname/SAN distinto se rechaza. Argon2id usa sales independientes y rechaza contraseña incorrecta o formato inválido.
+Las pruebas unitarias usan el motor Go real y reloj fijo; las de aceptación usan HTTP, autenticación y PostgreSQL reales. Las pruebas de interfaz sustituyen únicamente el transporte nativo; no se presentan como pruebas de persistencia.
 
-La migración real 0002 se aplicó a adel_pos después de generar un respaldo. Una repetición real informó `applied: 0`; la 0001 se mantuvo intacta. El respaldo se verificó con pg_restore --list; no se ensayó su restauración completa.
+Verificados:
 
-## Interfaz y puente nativo
+- Crear, editar, desactivar y reordenar categorías; revisión obsoleta rechazada sin sobrescribir; búsqueda, filtros y paginación.
+- Crear/editar productos, presentaciones, configuración reutilizable, duplicado con identidades nuevas, archivo y consulta de archivados.
+- Ingredientes removibles y adicionales con precio explícito; cero cargos implícitos; límites y rechazo de cantidades inválidas.
+- Retirar todos los complementos manteniendo $150; reemplazarlos completamente; arroz/ensalada → papas/ensalada = $155; doble papas = $165. Valores incluido/solicitado, diferencia y extras separados.
+- Redondeo comercial exacto: medio centavo a un centavo; rechazo de precisión monetaria excesiva; porcentajes por línea y totales exactos.
+- Grupos por cantidad con tramos; rechazo de fracciones o adicionales sin reglas explícitas.
+- Combo que reutiliza hamburguesa/papas: **$90 / $100 / $140** para 0/1/2 papas; sustitución permitida y rechazo de ciclo. Personalización del hijo cobrada una vez, sin sumar otra vez su base. Hijo inactivo impide el cálculo.
+- Listas alternativas y origen del precio, precio exacto por presentación, respaldo base y rechazo por precio faltante; cambio de lista predeterminada incrementa y audita la desplazada.
+- 2×1 con dos y tres unidades; compra/paga; porcentaje y precio especial; expiración, horarios, prioridad, incompatibilidad y combinación explícita sobre remanente; inclusión/exclusión de plataformas.
+- Zona IANA del establecimiento, fin exclusivo de horarios y cierre 24:00; categoría/producto inactivos, pausa temporal, archivo y excepción autorizada con motivo/auditoría.
+- PNG válido guardado y consultado; archivo inválido y PNG truncado rechazados. El código limita a 1 MiB y 2048 × 2048; no se probó cada posible archivo malformado.
+- Permisos efectivos vigentes, rechazos HTTP, auditoría transaccional y ocultación de dinero sin permiso incluso en los snapshots de auditoría. Pruebas unitarias adicionales impiden cambiar condiciones económicas, horario o estado de presentaciones sin sus permisos.
+- Toda la aceptación de etapa 2 volvió a pasar: setup idempotente, admin, sa exclusivamente temporal de prueba, roles/excepciones, sesiones, terminales, preferencias, cajas y auditoría. No se cambió el mecanismo reservado sa real.
 
-Las pruebas de componentes usan jsdom y sustituyen únicamente el transporte nativo. No son pruebas contra PostgreSQL ni una segunda máquina física. Se ejecutaron la navegación con advertencia inicial no bloqueante, selección inicial editable ADEL POS/zona OS, pérdida y recuperación visual de conexión y retorno al login por sesión reemplazada. Los seis tests de diagnóstico de etapa 1 se conservaron. TypeScript estricto y bundle Vite compilaron correctamente. Se probaron también los errores de contraseña actual y la revocación de terminal detectada desde el login.
+## Respaldo y actualización de la instalación
 
-El cierre final de pruebas frontend informó **12 tests aprobados**. Las pruebas Rust verifican destinos, modos, bloqueo de rutas/identificadores arbitrarios, eliminación de tokens antes de responder al WebView y conservación de sesión ante una contraseña actual incorrecta: **5 aprobadas y una prueba OS opt-in omitida del recorrido normal**. Se ejecutó explícitamente `cargo test real_system_vault_roundtrip -- --ignored`: guardó y recuperó una credencial temporal en el **Keychain real de macOS**, comprobó su persistencia y la eliminó. No leyó ni modificó perfiles existentes.
+Se creó `backups/adel_pos-20261107T220425Z-654dee.dump`, se verificó su catálogo y se **restauró completamente** en una base temporal exclusiva. Coincidieron los conteos de usuarios (2), terminales (1), establecimiento (1) y esquema (2). La base de ensayo se eliminó. No se restauró encima de adel_pos.
 
-El `.app` 0.2.0 ARM64 compiló y abrió; se observaron peticiones reales desde React → IPC → HTTP Go. La verificación operativa usa el mismo ejecutable que `dev.sh open-app`, con configuración local explícita.
+Después se detuvo Go, se aplicó 0003: `applied: 1`. Una repetición real informó `applied: 0`. 0001 y 0002 no se modificaron. Go reinició y readiness respondió 200: PostgreSQL disponible y esquema compatible.
 
-## Procesos y recuperación reales
+Una lectura posterior confirmó **ADEL POS**, **America/Monterrey**, **MXN**, dos usuarios, una terminal, cero categorías y cero productos ficticios. Existe una lista activa predeterminada y se añadieron los quince permisos de catálogo al administrador. No se borraron datos, credenciales ni configuración.
 
-`python3 tests/runtime_smoke.py` terminó correctamente tras corregir el control de estados de salida de procesos macOS:
+Evidencia privada, sin secretos impresos: `.local/stage3-restore-verification.json` y `.local/stage3-installation-verification.json`. Estos archivos y el respaldo no se versionan.
 
-- PostgreSQL detenido: live=200 y ready=503; PostgreSQL reiniciado: ready=200 con el mismo Go.
-- Tauri cerrado por salida normal de macOS: proceso nativo terminado, **Go PID 89097 conservado** y ready=200.
-- `.app` reabierto: consultas contra el mismo servidor.
-- Go detenido ordenadamente: Tauri permaneció abierto. Go reiniciado: el mismo escritorio retomó consultas.
-- Modo server-only: segundo Go temporal en 127.0.0.1:8182, disponibilidad real y SIGTERM correcto.
+## Ventana y procesos reales
 
-`python3 tests/runtime_smoke.py --terminal-only` también pasó: el mismo `.app` usó configuración externa sin iniciar Go adicional ni otra DB; el PID del servidor se conservó.
+El recorrido inicial `tests/runtime_smoke.py` verificó caída/recuperación de PostgreSQL conservando Go y modo server-only temporal. Se detuvo al esperar consultas del escritorio: la muestra de pila del proceso identificó una espera del Llavero de macOS (`SecKeychainFindGenericPassword`) para acceder a la credencial existente. Ese primer intento quedó incompleto; después de la autorización del propietario se repitió correctamente, como se detalla a continuación.
 
-El primer intento detectó un fallo del script al inspeccionar comm durante la salida: Go ya había terminado, pero se informaba erróneamente un PID ajeno. Se corrigió sin retirar la comprobación de propiedad anterior a SIGTERM; la repetición completa pasó. No se enviaron señales a procesos ajenos.
+Se corrigió el arranque: la recuperación del almacén seguro ocurre en segundo plano, mantiene viva la ventana y muestra **Revisa el acceso seguro** con acceso a diagnóstico. Nunca sustituye una espera/denegación por credenciales vacías ni guarda tokens en archivos. La recuperación de interfaz y el estado nativo pendiente tienen pruebas automatizadas aprobadas.
 
-## Comprobación final de la instalación real
+La compilación final se ejecutó además con un namespace temporal de diagnóstico, sin enrolar usuarios/dispositivos ni acceder al perfil real. Con esa instancia se verificó:
 
-La aplicación final quedó abierta y consultando Go, PID 89161, con readiness ready, PostgreSQL available y esquema compatible. Una consulta de solo lectura confirmó que el establecimiento real ya está configurado como **ADEL POS**, moneda **MXN**, zona **America/Monterrey**, que existe admin y que mantiene una sesión activa. No se imprimieron secretos. La identidad sa existe, pero su contraseña real sigue sin aprovisionarse; ese paso requiere la elección privada del propietario.
+- Consultas reales React → IPC → Go desde el `.app` 0.3.0.
+- SIGTERM del escritorio conserva Go y PostgreSQL; reabrir retoma consultas contra el mismo Go.
+- Detener Go conserva el escritorio; reiniciar Go permite a esa misma instancia recuperar consultas.
+- Modo terminal-only consulta al servidor existente, sin iniciar una segunda base o servidor.
 
-## Límites y pasos del propietario
+Resultado del perfil aislado en `.local/stage3-native-verification.json`. El perfil temporal y su proceso se retiraron.
 
-- En la base real, la primera configuración y la contraseña privada sa pertenecen al propietario. El asistente propone ADEL POS y la zona OS. No se inventó una contraseña sa ni se trasladaron datos de prueba a adel_pos.
-- La aceptación sa se verificó en la base temporal. La activación real requiere `./scripts/dev.sh provision-sa` con entrada local oculta del propietario; la identidad reservada sin credencial ya existe.
-- No se automatizó un recorrido por todos los controles de la ventana nativa ni inspección por captura de pantalla. La captura de ventana no estuvo disponible en esta sesión. Se distinguen las pruebas de componentes de la apertura/peticiones reales de Tauri.
-- No se probó una segunda máquina física LAN, Windows, Mac Intel, caída de energía, carga de muchas terminales ni restauración completa de backup.
-- El teclado flotante no está implementado; sí su preferencia persistente. No hay WebSocket activo: las notificaciones de sesión se consultan cada cinco segundos.
-- No hay firma/notarización comercial, instalador Windows, servicio automático instalado ni proveedor comercial de licencias.
+El propietario confirmó después la autorización del Llavero. Se comprobó en PostgreSQL que la aplicación normal retomó consultas autenticadas con la sesión existente, sin leer ni imprimir secretos. Se ejecutaron completos y correctamente ambos recorridos con ese perfil real:
 
-## Comandos reproducibles
+- `python3 tests/runtime_smoke.py`: caída/recuperación de PostgreSQL sin reiniciar Go, proceso server-only temporal, cierre normal del escritorio conservando Go, reapertura, detención de Go manteniendo Tauri y recuperación de consultas en la misma ventana.
+- `python3 tests/runtime_smoke.py --terminal-only`: el mismo `.app` consultó el servidor existente, cuyo PID se conservó; después se retiró el proceso de prueba y se reabrió la aplicación con su configuración normal.
+
+La comprobación final confirmó una sesión admin vigente y actividad autenticada de los últimos quince segundos, esquema 3 y readiness 200 con PostgreSQL disponible. Go quedó activo, PID 95050. La autorización del Llavero y estos recorridos ya no están pendientes.
+
+Evidencia privada: `.local/runtime-verification.json`, `.local/terminal-mode-verification.json` y `.local/stage3-real-profile-verification.json`. No contienen tokens ni contraseñas y no se versionan.
+
+## Límites reales
+
+- No se automatizó cada control de la ventana nativa ni se capturó su presentación a 1280 × 720. Sí se probaron componentes, TypeScript, bundle y transporte nativo real tanto con perfil aislado como con el perfil normal autenticado.
+- No se midieron carga de un catálogo grande, muchas terminales, segunda máquina LAN, caída de energía, Windows ni Mac Intel. Los límites explícitos de selectores, cálculo e imágenes están en [CATALOG.md](CATALOG.md).
+- Firma/notarización comercial, licencias, servicio instalado, teclado flotante y eventos WebSocket siguen pendientes de sus etapas. No existen pedidos, cobros ni movimientos físicos de inventario.
+
+## Repetir comprobaciones
 
 ```bash
-./scripts/dev.sh format-check
 ./scripts/dev.sh test
 ./scripts/dev.sh test-integration
 ./scripts/dev.sh build-macos
-# Sesión gráfica, solo servicios de desarrollo propios, sin trabajo real en curso:
-python3 tests/runtime_smoke.py
-python3 tests/runtime_smoke.py --terminal-only
-# Prueba opt-in del almacén seguro real:
-cd desktop/src-tauri
-cargo test real_system_vault_roundtrip -- --ignored
+./scripts/dev.sh db-start
+./scripts/dev.sh server-start
+./scripts/dev.sh open-app
 ```
 
-Para invocar Cargo directamente en este Mac, cargar previamente el entorno con `export PROJECT_ROOT="$PWD"; source scripts/env.sh` desde la raíz. Los scripts no requieren copiar secretos a argumentos o logs. La evidencia operativa queda en `.local/runtime-verification.json` y `.local/terminal-mode-verification.json`; no versionar el directorio privado.
+Sin trabajo real en curso, `python3 tests/runtime_smoke.py` y `python3 tests/runtime_smoke.py --terminal-only` permiten completar nuevamente los recorridos habituales. Son pruebas operativas opt-in que interrumpen únicamente los servicios propios de desarrollo.

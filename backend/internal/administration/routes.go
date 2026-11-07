@@ -2,6 +2,8 @@ package administration
 
 import (
 	"context"
+	"errors"
+	"local/ad-el-pos/server/internal/catalog"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +27,19 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	}
 	if route == "terminal/preferences" && request.Method == "PUT" {
 		return terminalPreferences(ctx, tx, request, principal)
+	}
+	if strings.HasPrefix(route, "catalog/") {
+		result, err := catalog.Handle(ctx, tx, catalog.Request{
+			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
+			Actor: catalog.Actor{Permissions: principal.Permissions},
+		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
+			return audit(ctx, tx, principal, action, entity, id, before, after, true)
+		})
+		var problem *catalog.Error
+		if errors.As(err, &problem) {
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+		}
+		return result, err
 	}
 	parts := strings.Split(route, "/")
 	if len(parts) > 1 && parts[1] != "invitations" && !identifierPattern.MatchString(parts[1]) {
@@ -51,7 +66,12 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	case "sessions":
 		return sessions(ctx, tx, request, principal, parts)
 	case "audit":
-		return auditLog(ctx, tx, request, principal)
+		result, err := auditLog(ctx, tx, request, principal)
+		actor := catalog.Actor{Permissions: principal.Permissions}
+		if !actor.Can("catalog.prices.read") {
+			return catalog.RedactPrices(result, actor), err
+		}
+		return result, err
 	}
 	return nil, &Fault{Status: 404, Code: "NOT_FOUND", Message: "Ruta no disponible."}
 }

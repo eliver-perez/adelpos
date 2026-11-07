@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Field, Form, Notice } from '../components/Forms';
 import { api } from '../services/api';
+import { BrandLogo } from '../components/BrandLogo';
 import product from '../generated/product.json';
 import { initialSettings, SettingsFields } from './SettingsPage';
 
@@ -17,10 +18,7 @@ export function AccessFrame({
     <main className="access-screen">
       <div className="access-card surface">
         <div className="mb-7 flex items-center gap-3">
-          <span className="brand-mark">
-            A<span>·</span>
-          </span>
-          <strong>{product.name}</strong>
+          <BrandLogo />
           <span className="muted text-xs">v{product.version}</span>
         </div>
         <h1>{title}</h1>

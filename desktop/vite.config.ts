@@ -9,6 +9,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 1420,
     strictPort: true,
+    fs: { allow: ['..'] },
     watch: { ignored: ['**/src-tauri/**'] },
   },
   build: { target: ['es2022', 'safari15.4', 'chrome105'] },

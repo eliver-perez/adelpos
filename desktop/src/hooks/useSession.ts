@@ -3,7 +3,8 @@ import { api, APIError, localAuthentication } from '../services/api';
 import type { LocalAuthentication } from '../services/api';
 import type { Identity } from '../services/models';
 
-type Phase = 'loading' | 'offline' | 'setup' | 'enroll' | 'login' | 'authenticated';
+type Phase =
+  'loading' | 'offline' | 'secure-storage' | 'setup' | 'enroll' | 'login' | 'authenticated';
 
 export function useSession() {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -45,7 +46,12 @@ export function useSession() {
         setPhase(credentials.enrolled ? 'login' : 'enroll');
       } else {
         setConnectionError(error instanceof Error ? error.message : 'No se pudo conectar.');
-        setPhase((current) => (current === 'authenticated' ? current : 'offline'));
+        const waitingForStorage =
+          error instanceof APIError && error.code === 'SECURE_STORAGE_UNAVAILABLE';
+        setPhase((current) => {
+          if (current === 'authenticated') return current;
+          return waitingForStorage ? 'secure-storage' : 'offline';
+        });
       }
     } finally {
       busy.current = false;

@@ -43,6 +43,26 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "preferences" => Some((Method::GET, "preferences")),
         "save_preferences" => Some((Method::PUT, "preferences")),
         "save_terminal_preferences" => Some((Method::PUT, "terminal/preferences")),
+        "catalog_categories" => Some((Method::GET, "catalog/categories")),
+        "catalog_create_categories" => Some((Method::POST, "catalog/categories")),
+        "catalog_products" => Some((Method::GET, "catalog/products")),
+        "catalog_create_products" => Some((Method::POST, "catalog/products")),
+        "catalog_ingredients" => Some((Method::GET, "catalog/ingredients")),
+        "catalog_create_ingredients" => Some((Method::POST, "catalog/ingredients")),
+        "catalog_complements" => Some((Method::GET, "catalog/complements")),
+        "catalog_create_complements" => Some((Method::POST, "catalog/complements")),
+        "catalog_portions" => Some((Method::GET, "catalog/portions")),
+        "catalog_create_portions" => Some((Method::POST, "catalog/portions")),
+        "catalog_groups" => Some((Method::GET, "catalog/groups")),
+        "catalog_create_groups" => Some((Method::POST, "catalog/groups")),
+        "catalog_price_lists" => Some((Method::GET, "catalog/price-lists")),
+        "catalog_create_price_lists" => Some((Method::POST, "catalog/price-lists")),
+        "catalog_promotions" => Some((Method::GET, "catalog/promotions")),
+        "catalog_create_promotions" => Some((Method::POST, "catalog/promotions")),
+        "catalog_lookups" => Some((Method::GET, "catalog/lookups")),
+        "catalog_preview" => Some((Method::POST, "catalog/preview")),
+        "catalog_upload_image" => Some((Method::POST, "catalog/images")),
+        "catalog_reorder_categories" => Some((Method::POST, "catalog/categories/reorder")),
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -50,6 +70,39 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
     }
     let identifier = resource_id(id)?;
     let (method, path) = match operation {
+        "catalog_get_categories" => (Method::GET, format!("catalog/categories/{identifier}")),
+        "catalog_save_categories" => (Method::PATCH, format!("catalog/categories/{identifier}")),
+        "catalog_get_products" => (Method::GET, format!("catalog/products/{identifier}")),
+        "catalog_save_products" => (Method::PATCH, format!("catalog/products/{identifier}")),
+        "catalog_get_ingredients" => (Method::GET, format!("catalog/ingredients/{identifier}")),
+        "catalog_save_ingredients" => (Method::PATCH, format!("catalog/ingredients/{identifier}")),
+        "catalog_get_complements" => (Method::GET, format!("catalog/complements/{identifier}")),
+        "catalog_save_complements" => (Method::PATCH, format!("catalog/complements/{identifier}")),
+        "catalog_get_portions" => (Method::GET, format!("catalog/portions/{identifier}")),
+        "catalog_save_portions" => (Method::PATCH, format!("catalog/portions/{identifier}")),
+        "catalog_get_groups" => (Method::GET, format!("catalog/groups/{identifier}")),
+        "catalog_save_groups" => (Method::PATCH, format!("catalog/groups/{identifier}")),
+        "catalog_get_price_lists" => (Method::GET, format!("catalog/price-lists/{identifier}")),
+        "catalog_save_price_lists" => (Method::PATCH, format!("catalog/price-lists/{identifier}")),
+        "catalog_get_promotions" => (Method::GET, format!("catalog/promotions/{identifier}")),
+        "catalog_save_promotions" => (Method::PATCH, format!("catalog/promotions/{identifier}")),
+        "catalog_image" => (Method::GET, format!("catalog/images/{identifier}")),
+        "catalog_configuration" => (
+            Method::GET,
+            format!("catalog/products/{identifier}/configuration"),
+        ),
+        "catalog_product_state" => (
+            Method::PATCH,
+            format!("catalog/products/{identifier}/state"),
+        ),
+        "catalog_product_availability" => (
+            Method::PATCH,
+            format!("catalog/products/{identifier}/availability"),
+        ),
+        "catalog_duplicate_product" => (
+            Method::POST,
+            format!("catalog/products/{identifier}/duplicate"),
+        ),
         "update_user" => (Method::PATCH, format!("users/{identifier}")),
         "user_permissions" => (Method::GET, format!("users/{identifier}/permissions")),
         "save_user_permissions" => (Method::PUT, format!("users/{identifier}/permissions")),
@@ -75,7 +128,7 @@ pub struct LocalState {
 
 #[tauri::command]
 pub fn authentication_state(state: State<'_, TerminalState>) -> Result<LocalState, String> {
-    let vault = state.vault.as_ref().map_err(Clone::clone)?;
+    let vault = state.vault()?;
     let credentials = vault.read()?;
     Ok(LocalState {
         enrolled: credentials.device_id.is_some() && credentials.device_token.is_some(),
@@ -94,7 +147,7 @@ pub async fn api_request(
     query: Option<BTreeMap<String, String>>,
 ) -> Result<HTTPResult, String> {
     let config = state.config.as_ref().map_err(Clone::clone)?;
-    let vault = state.vault.as_ref().map_err(Clone::clone)?;
+    let vault = state.vault()?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
     let mut credentials = vault.read()?;
     let (method, path) = route(&operation, resource_id.as_deref())?;
@@ -127,20 +180,30 @@ pub async fn api_request(
         body = Some(serde_json::json!({"name": name, "code": code}));
     }
     if let Some(query) = query {
-        if operation != "audit"
-            || query.keys().any(|key| {
-                ![
-                    "page",
-                    "page_size",
-                    "actor",
-                    "action",
-                    "device_id",
-                    "from",
-                    "until",
-                ]
-                .contains(&key.as_str())
-            })
-        {
+        let allowed: &[&str] = if operation == "audit" {
+            &[
+                "page",
+                "page_size",
+                "actor",
+                "action",
+                "device_id",
+                "from",
+                "until",
+            ]
+        } else if operation.starts_with("catalog_") {
+            &[
+                "page",
+                "page_size",
+                "search",
+                "active",
+                "category_id",
+                "kind",
+                "archived",
+            ]
+        } else {
+            &[]
+        };
+        if query.keys().any(|key| !allowed.contains(&key.as_str())) {
             return Err("Parámetros de consulta no autorizados.".into());
         }
         request = request.query(&query);
@@ -229,6 +292,22 @@ mod tests {
         assert!(route("update_user", Some("../../settings")).is_err());
         assert!(route("me", None).is_ok());
         assert!(route("update_user", Some("00000000-0000-0000-0000-000000000001")).is_ok());
+    }
+
+    #[test]
+    fn catalog_routes_are_fixed_and_preserve_methods() {
+        let identifier = "00000000-0000-0000-0000-000000000001";
+        let (method, path) = route("catalog_preview", None).unwrap();
+        assert_eq!(method, Method::POST);
+        assert_eq!(path, "catalog/preview");
+        let (method, path) = route("catalog_save_groups", Some(identifier)).unwrap();
+        assert_eq!(method, Method::PATCH);
+        assert_eq!(path, format!("catalog/groups/{identifier}"));
+        let (_, path) = route("catalog_configuration", Some(identifier)).unwrap();
+        assert_eq!(path, format!("catalog/products/{identifier}/configuration"));
+        assert!(route("catalog_save_groups", None).is_err());
+        assert!(route("catalog_delete_everything", Some(identifier)).is_err());
+        assert!(route("catalog_image", Some("../../../../private/secrets")).is_err());
     }
 
     #[test]

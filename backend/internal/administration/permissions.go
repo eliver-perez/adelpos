@@ -3,6 +3,8 @@ package administration
 import (
 	"context"
 
+	"local/ad-el-pos/server/internal/catalog"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,6 +30,12 @@ var Permissions = []Permission{
 	{"registers.read", "Consultar cajas físicas"},
 	{"registers.manage", "Crear y configurar cajas físicas"},
 	{"audit.read", "Consultar auditoría"},
+}
+
+func init() {
+	for _, permission := range catalog.Permissions {
+		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
+	}
 }
 
 func knownPermission(key string) bool {

@@ -1,6 +1,6 @@
-# AD-EL POS · Etapa 2
+# AD-EL POS · Etapa 3
 
-Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Esta etapa implementa configuración del establecimiento, usuarios, roles, permisos individuales, sesiones, terminales, cajas físicas, preferencias y auditoría reales. No contiene ventas ni movimientos económicos.
+Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. No contiene ventas ni movimientos de inventario.
 
 ## Inicio en este Mac
 
@@ -19,6 +19,14 @@ En una instalación nueva aparece el asistente local. El nombre inicial del esta
 
 El asistente no vuelve a inicializar una instalación configurada ni restablece contraseñas. Los usuarios y cambios se guardan en PostgreSQL. Cerrar Tauri conserva Go y PostgreSQL; ambos se detienen de forma explícita con `server-stop` y `db-stop`.
 
+## Catálogo y precios
+
+En **Catálogo** administra categorías, productos independientes, presentaciones opcionales, ingredientes, complementos, porciones, grupos reutilizables, combos, listas de precios y promociones. Incluye imágenes opcionales, horarios, archivo lógico, búsqueda, filtros y paginación. La edición rechaza revisiones obsoletas de otra terminal.
+
+En **Probar personalización** retira o sustituye todos los complementos, cambia cantidades, ingredientes, componentes y observaciones. Go valida y devuelve el desglose exacto; no se crea una venta. Las listas conservan la identidad del producto y las promociones explican su aplicación o exclusión. Los PNG originales locales cambian con el tema.
+
+Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración nueva es `0003_catalog_and_pricing.sql`; 0001 y 0002 se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
+
 ## Credencial reservada de soporte
 
 La identidad `sa` está reservada y excluida de la administración ordinaria. Su contraseña la debe elegir el propietario en una terminal local:
@@ -36,11 +44,12 @@ ad-el-pos/
 ├── backend/
 │   ├── cmd/ad-el-pos-server/     # Servidor, migraciones y mantenimiento local
 │   ├── internal/administration/ # Identidad, permisos y recursos administrativos
+│   ├── internal/catalog/       # Catálogo, disponibilidad y motor decimal único
 │   ├── internal/config/        # Parámetros técnicos del servidor
 │   ├── internal/database/      # Pool y migrador transaccional
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 y 0002; inmutables después de aplicarse
+│   └── migrations/             # 0001, 0002 y 0003; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad
@@ -71,6 +80,7 @@ Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_
 - [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md): preparación, ejecución, terminales, TLS y recuperación local.
 - [ARCHITECTURE.md](ARCHITECTURE.md): responsabilidades y límites.
 - [API_CONTRACTS.md](API_CONTRACTS.md): rutas y permisos.
+- [docs/CATALOG.md](docs/CATALOG.md): reglas comerciales, uso y límites del catálogo.
 - [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
 - [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): continuidad y decisiones pendientes.
 

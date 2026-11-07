@@ -18,7 +18,7 @@ Verificado durante la entrega del 7 de noviembre de 2026. Se consultó documenta
 | reqwest                | 0.12.28                  | HTTP nativo restringido para destinos configurables sin abrir CSP; TLS Rustls, sin proxy automático; [documentación](https://docs.rs/reqwest/0.12.28/reqwest/).                 |
 | Vitest                 | 5.1.0                    | Pruebas del contrato/servicio frontend; [guía](https://vitest.dev/guide/).                                                                                                      |
 
-Go estándar cubre HTTP, JSON, logs, configuración, señales y hashing. Solo pgx es dependencia directa del backend. No hay Redis, broker, Docker, ORM, servicio cloud ni framework Go adicional. Rust y paquetes npm son herramientas de compilación; no deben instalarse en cada terminal comercial. Python 3 y Bash se usan únicamente en scripts de desarrollo macOS.
+Go estándar cubre HTTP, JSON, logs, configuración, señales y hashing. Las dependencias directas del backend son pgx, decimal y x/crypto/x/term, detalladas por etapa a continuación. No hay Redis, broker, Docker, ORM, servicio cloud ni framework Go adicional. Rust y paquetes npm son herramientas de compilación; no deben instalarse en cada terminal comercial. Python 3 y Bash se usan únicamente en scripts de desarrollo macOS.
 
 Otras referencias: [pg_dump y respaldo](https://www.postgresql.org/docs/18/backup-dump.html), [bundle macOS Tauri](https://v2.tauri.app/distribute/macos-application-bundle/), [launchd de Apple](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
 
@@ -32,3 +32,11 @@ Otras referencias: [pg_dump y respaldo](https://www.postgresql.org/docs/18/backu
 - Rustfmt y Black 25.11.0 se utilizaron para expandir/formatear código Rust/Python existente. Black está en .tools/python y no es dependencia de ejecución; Rustfmt se incluye en la comprobación de formato.
 
 La política de sesiones se contrastó con [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html); TLS usa la [biblioteca estándar Go](https://pkg.go.dev/crypto/tls). Go/Rust siguen con lockfiles; no se incorporó ORM, servicio cloud, microservicio o broker.
+
+## Incorporaciones de la etapa 3
+
+- `github.com/shopspring/decimal` **1.6.0**, fijado en go.mod/go.sum: aritmética decimal exacta y redondeo explícito; [documentación primaria](https://pkg.go.dev/github.com/shopspring/decimal).
+- Persistencia monetaria [numeric de PostgreSQL](https://www.postgresql.org/docs/18/datatype-numeric.html); cadenas en JSON. No se añadió biblioteca financiera al frontend.
+- Validación de PNG/JPEG mediante [image de Go](https://pkg.go.dev/image) y decodificadores estándar. Los logos originales se integran como [assets locales de Vite](https://vite.dev/guide/assets).
+
+No se añadieron dependencias npm ni servicios externos para el catálogo. Se conservan los lockfiles y las versiones existentes.

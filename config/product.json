@@ -1,10 +1,10 @@
 {
   "name": "AD-EL POS",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "technical_id": "ad-el-pos",
   "server_binary": "ad-el-pos-server",
   "database_name": "adel_pos",
   "bundle_id": "local.adel.pos.dev",
   "api_version": "v1",
-  "schema_version": 2
+  "schema_version": 3
 }

@@ -49,7 +49,7 @@ func New(probe Probe, origins []string, logger *slog.Logger, application ...http
 			"api_version":            metadata.APIVersion,
 			"schema_version":         metadata.SchemaVersion,
 			"supported_api_versions": []string{metadata.APIVersion},
-			"capabilities":           []string{"technical-health", "identity-administration"},
+			"capabilities":           []string{"technical-health", "identity-administration", "catalog-administration", "exact-price-preview"},
 			"events_available":       false,
 		})
 	})

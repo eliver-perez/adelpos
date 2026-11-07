@@ -22,7 +22,11 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		writeFault(writer, request, &Fault{Status: 403, Code: "TLS_REQUIRED", Message: "Las conexiones de red requieren TLS verificado."})
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 64*1024))
+	limit := int64(64 * 1024)
+	if strings.HasPrefix(request.URL.Path, "/api/v1/catalog/") {
+		limit = 2 * 1024 * 1024
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, limit))
 	if err != nil {
 		writeFault(writer, request, &Fault{Status: 413, Code: "REQUEST_TOO_LARGE", Message: "La solicitud excede el tamaño permitido."})
 		return

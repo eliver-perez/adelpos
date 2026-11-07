@@ -123,6 +123,26 @@ afterEach(() => {
 });
 
 describe('acceso y recuperación de la interfaz', () => {
+  it('informa una autorización pendiente del Llavero y permite reintentar sin perder credenciales', async () => {
+    let pending = true;
+    const originalTransport = native.invoke.getMockImplementation();
+    native.invoke.mockImplementation((command: string, args?: { operation?: string }) => {
+      if (command === 'authentication_state' && pending) {
+        return Promise.reject(
+          'Esperando autorización del almacén seguro del sistema. Revisa el diálogo de macOS.',
+        );
+      }
+      return originalTransport?.(command, args);
+    });
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Revisa el acceso seguro' });
+    expect(screen.getByRole('button', { name: 'Diagnóstico técnico' })).toBeTruthy();
+    expect(native.invoke.mock.calls.some(([command]) => command === 'api_request')).toBe(false);
+    pending = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Volver a comprobar' }));
+    await screen.findByRole('heading', { name: 'Inicia sesión' });
+  });
+
   it('utiliza ADEL POS y la zona del sistema como valores iniciales configurables', async () => {
     configured = false;
     enrolled = false;

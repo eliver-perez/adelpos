@@ -5,6 +5,8 @@ import { api } from '../services/api';
 import type { Identity, Preferences } from '../services/models';
 
 export const screens = [
+  { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
+  { id: 'preview', label: 'Probar personalización', permission: 'catalog.prices.read' },
   { id: 'status', label: 'Estado del sistema', permission: '' },
   { id: 'users', label: 'Usuarios', permission: 'users.read' },
   { id: 'roles', label: 'Roles', permission: 'roles.read' },
