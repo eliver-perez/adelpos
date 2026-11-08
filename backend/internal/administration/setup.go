@@ -87,6 +87,13 @@ func (service *Service) setup(ctx context.Context, tx pgx.Tx, request Request) (
 	if err != nil {
 		return nil, err
 	}
+	// En una instalación nueva las migraciones corren antes de crear los roles: el administrador
+	// recibe aquí el límite de descuento total que la migración 0006 concede en instalaciones existentes.
+	_, err = tx.Exec(ctx, `INSERT INTO app.role_discount_limits(role_id,max_percent)
+        SELECT id,100 FROM app.roles WHERE code='administrator' ON CONFLICT DO NOTHING`)
+	if err != nil {
+		return nil, err
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO app.role_permissions(role_id,permission_key)
         SELECT r.id,p.key FROM app.roles r CROSS JOIN app.permissions p
         WHERE (r.code='supervisor' AND p.key IN ('users.read','devices.read','sessions.read','registers.read'))

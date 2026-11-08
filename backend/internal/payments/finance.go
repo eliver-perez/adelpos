@@ -216,7 +216,7 @@ type RefundRecord struct {
 
 func readRefunds(ctx context.Context, tx pgx.Tx, accountID string) ([]RefundRecord, error) {
 	rows, err := tx.Query(ctx, `SELECT r.id,r.payment_id,r.kind,r.method_name,r.is_cash,r.amount::text,r.tip::text,r.reason,r.reference,
-        actor.display_name,authorizer.display_name,r.created_at,
+        r.tax_breakdown,actor.display_name,authorizer.display_name,r.created_at,
         coalesce((SELECT array_agg(a.unit_id::text ORDER BY a.unit_id) FROM app.payment_refund_allocations a WHERE a.refund_id=r.id),'{}')
         FROM app.payment_refunds r JOIN app.users actor ON actor.id=r.actor_id
         LEFT JOIN app.users authorizer ON authorizer.id=r.authorized_by
@@ -229,7 +229,7 @@ func readRefunds(ctx context.Context, tx pgx.Tx, accountID string) ([]RefundReco
 	for rows.Next() {
 		var item RefundRecord
 		if err := rows.Scan(&item.ID, &item.PaymentID, &item.Kind, &item.MethodName, &item.IsCash, &item.Amount, &item.Tip, &item.Reason,
-			&item.Reference, &item.ActorName, &item.AuthorizedBy, &item.CreatedAt, &item.UnitIDs); err != nil {
+			&item.Reference, &item.Tax, &item.ActorName, &item.AuthorizedBy, &item.CreatedAt, &item.UnitIDs); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

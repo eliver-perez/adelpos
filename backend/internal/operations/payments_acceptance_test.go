@@ -586,4 +586,6 @@ func testPayments(t *testing.T, base *restaurantFixture) {
 			t.Fatal("Los movimientos no quedaron asociados al turno de su caja")
 		}
 	})
+
+	testPaymentAdjustments(t, fixture)
 }

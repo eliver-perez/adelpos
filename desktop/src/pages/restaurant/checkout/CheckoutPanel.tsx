@@ -1,65 +1,62 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Notice } from '../../../components/Forms';
+import { useFinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useLiveResource } from '../../../hooks/useLiveResource';
-import { usePaymentPreview } from '../../../hooks/usePaymentPreview';
-import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
-import { APIError } from '../../../services/api';
-import { formatMoney, paymentPendingKey, permissionName } from '../../../services/payments';
+import {
+  authorizationCodes,
+  isAuthorizationProblem,
+  repeatAuthorizationMessage,
+} from '../../../hooks/useSupervisorAuthorization';
+import type { Operation } from '../../../services/api';
+import { financialOutcome, formatMoney, permissionName } from '../../../services/payments';
 import type {
+  CorrectionResult,
   CurrentShift,
   Finance,
-  PaymentInput,
   PaymentMethod,
-  PaymentMode,
+  PaymentRecord,
   PaymentResult,
+  RefundResult,
 } from '../../../services/payments';
 import type { Bill } from '../../../services/restaurant';
 import { CheckoutAccount } from './CheckoutAccount';
-import type { CheckoutAccountAction } from './CheckoutAccount';
-import { PaymentCapture, RecordedPayment, UncertainPayment, statusTitle } from './PaymentCapture';
+import type { LineSelection } from './CheckoutAccount';
+import { CorrectionPanel } from './CorrectionPanel';
+import { PaymentCapture, RecordedPayment, statusTitle } from './PaymentCapture';
 import type { CheckoutStatus } from './PaymentCapture';
 import { CheckoutMethods } from './PaymentMethods';
+import { RefundPanel } from './RefundPanel';
 import { ShiftOpening } from './ShiftOpening';
-import {
-  buildPaymentInput,
-  calculationInput,
-  calculationMethod,
-  defaultTarget,
-  financeKey,
-  initialCapture,
-  newestFinance,
-  registerInput,
-  selectionList,
-} from './captureState';
-import type { CaptureState } from './captureState';
+import { UncertainOperation } from './UncertainOperation';
+import { newestFinance, selectableUnits } from './captureState';
+import { useCollectFlow } from './useCollectFlow';
+import { correctable, useCorrectionFlow } from './useCorrectionFlow';
+import { refundableUnits, useRefundFlow } from './useRefundFlow';
 
-// Códigos de Go que indican que la cuenta cambió y debe consultarse de nuevo.
-const refreshCodes = ['BALANCE_CHANGED', 'NOTHING_TO_COLLECT', 'ACCOUNT_NOT_OPEN'];
-const shiftCodes = ['SHIFT_REQUIRED', 'REGISTER_REQUIRED', 'SHIFT_NOT_SHARED'];
+export type CheckoutMode = 'collect' | 'refund';
 
-const cashQuickAmounts = [
-  { label: 'Exacto', value: '' },
-  { label: '$100', value: '100' },
-  { label: '$200', value: '200' },
-  { label: '$500', value: '500' },
-  { label: '$1000', value: '1000' },
-];
+// Errores que se muestran junto al formulario que los provocó, no en el aviso general.
+const contextualCodes = [...authorizationCodes, 'SHIFT_CLOSED', 'PAYMENT_NOT_CORRECTABLE'];
 
 // Pantalla de cobro integrada en la operación: cuenta y productos, métodos e historial, y
-// captura con teclado fijo. Go calcula toda cifra; la interfaz solo envía la captura.
+// captura con teclado fijo. Reúne cobros, devoluciones y correcciones de una cuenta; Go calcula
+// toda cifra y la interfaz solo envía la captura. Todas sus escrituras comparten la clave de
+// pendientes de la cuenta.
 export function CheckoutPanel({
   bill,
   active,
   can,
+  mode,
+  onModeChange,
   onClose,
-  onAccountAction,
 }: {
   bill: Bill;
   active: boolean;
   can: (permission: string) => boolean;
+  mode: CheckoutMode;
+  onModeChange: (mode: CheckoutMode) => void;
   onClose: () => void;
-  onAccountAction: (action: CheckoutAccountAction) => void;
 }) {
   const accountID = bill.account.id;
   const permissions = {
@@ -78,127 +75,80 @@ export function CheckoutPanel({
     interval: 15000,
   });
   const [recorded, setRecorded] = useState<Finance | null>(null);
-  const [capture, setCapture] = useState<CaptureState>(initialCapture);
-  const [lastResult, setLastResult] = useState<PaymentResult | null>(null);
-  const [conflict, setConflict] = useState(false);
-  const mutation = useRestaurantMutation((operation, result) => {
-    if (operation !== 'payments_pay') {
-      return;
-    }
-    const value = result as PaymentResult;
-    // Pagos mixtos = pagos sucesivos: tras cada registro la captura se reinicia por completo.
-    setLastResult(value);
-    setRecorded(value.finance);
-    setCapture(initialCapture());
-    setConflict(false);
-    window.dispatchEvent(new CustomEvent('adel-server-change'));
-  }, paymentPendingKey(accountID));
-
+  const [notice, setNotice] = useState('');
+  const [retryNotice, setRetryNotice] = useState('');
+  const mutation = useFinancialMutation(accountID, handleResult);
   const finance = newestFinance(polled.data, recorded, accountID);
   const activeMethods = (methods.data ?? []).filter((method) => method.active);
-  const method = activeMethods.find((entry) => entry.id === capture.methodID) ?? null;
-  const collectable = !!finance && finance.state === 'open' && !finance.settled;
   const shiftUsable = shift.data?.usable ?? false;
-  const pendingPayment = mutation.pending;
-  const locked = mutation.busy || !!pendingPayment;
-  const mode: PaymentMode = capture.mode === 'partial' && permissions.partial ? 'partial' : 'total';
-  const effectiveCapture = { ...capture, mode };
-
-  let previewInput: PaymentInput | null = null;
-  if (finance && permissions.collect && collectable) {
-    if (method) {
-      previewInput = buildPaymentInput(effectiveCapture, method, finance, permissions);
-    } else if (permissions.selection) {
-      // Antes de elegir método, Go calcula igualmente el total de la selección.
-      const selections = selectionList(capture.selections, finance);
-      const calculator = calculationMethod(activeMethods);
-      if (selections.length > 0 && calculator) {
-        previewInput = calculationInput(calculator, selections);
-      }
-    }
-  }
-  const preview = usePaymentPreview(accountID, previewInput, finance ? financeKey(finance) : '');
-  const plan = preview.plan;
-  const previewCode = preview.error?.code ?? '';
   const reloadFinance = polled.reload;
   const reloadShift = shift.reload;
+  const locked = mutation.busy || !!mutation.pending;
 
-  // Un cálculo hecho sobre otro saldo o un rechazo por cambio de la cuenta obliga a consultarla.
-  useEffect(() => {
-    if (plan && finance && plan.balance_before !== finance.balance) {
-      void reloadFinance();
+  const correction = useCorrectionFlow({
+    accountID,
+    finance,
+    methods: activeMethods,
+    mutation,
+    canCorrect: can('payments.corrections'),
+    reloadFinance,
+  });
+  const correcting = !!correction.original;
+  const collect = useCollectFlow({
+    accountID,
+    finance,
+    methods: activeMethods,
+    shiftUsable,
+    permissions,
+    mutation,
+    enabled: mode === 'collect' && !correcting,
+    reloadFinance,
+    reloadShift,
+  });
+  const refund = useRefundFlow({
+    accountID,
+    finance,
+    methods: activeMethods,
+    mutation,
+    enabled: mode === 'refund' && !correcting,
+    reloadFinance,
+    reloadShift,
+  });
+
+  // Toda escritura financiera devuelve el estado actualizado; cada flujo reinicia su captura.
+  function handleResult(operation: Operation, result: unknown) {
+    const outcome = financialOutcome(operation, result);
+    if (outcome.finance) {
+      setRecorded(outcome.finance);
     }
-  }, [plan, finance, reloadFinance]);
-
-  useEffect(() => {
-    if (refreshCodes.includes(previewCode)) {
-      void reloadFinance();
+    setRetryNotice('');
+    setNotice('');
+    if (operation === 'payments_pay') {
+      collect.onRecorded(result as PaymentResult);
+    } else if (operation === 'payments_refund') {
+      refund.onRecorded(result as RefundResult);
+    } else if (operation === 'payments_correct') {
+      correction.onRecorded(result as CorrectionResult);
+      setNotice(outcome.message);
+    } else {
+      setNotice(outcome.message);
     }
-  }, [previewCode, reloadFinance]);
+  }
 
-  function updateCapture(patch: Partial<CaptureState>) {
-    if (locked) {
+  // Un reintento se envía sin la contraseña del supervisor. Si la operación no llegó a
+  // confirmarse, Go la rechaza y la autorización debe repetirse con una captura nueva.
+  async function retryPending() {
+    const pending = mutation.pending;
+    const authorized = typeof pending?.body.authorization === 'object';
+    const problem = await mutation.retry();
+    if (!pending || !authorized || !isAuthorizationProblem(problem)) {
       return;
     }
-    setCapture((current) => ({ ...current, ...patch }));
-    setLastResult(null);
-    setConflict(false);
-    mutation.clearError();
-  }
-
-  function selectMethod(selected: PaymentMethod) {
-    updateCapture({
-      methodID: selected.id,
-      target: defaultTarget(mode, selected, permissions.tips),
-    });
-  }
-
-  function changeMode(next: PaymentMode) {
-    updateCapture({
-      mode: next,
-      amount: '',
-      target: defaultTarget(next, method, permissions.tips),
-    });
-  }
-
-  function changeSelection(versionID: string, quantity: number) {
-    updateCapture({ selections: { ...capture.selections, [versionID]: quantity } });
-  }
-
-  const canRegister =
-    permissions.collect &&
-    collectable &&
-    shiftUsable &&
-    !!method &&
-    !!plan &&
-    !preview.validating &&
-    !locked;
-
-  async function register() {
-    if (!finance || !method || !plan || !previewInput || !canRegister || mutation.isPending()) {
-      return;
-    }
-    setConflict(false);
-    setLastResult(null);
-    try {
-      await mutation.execute<PaymentResult>('payments_pay', {
-        id: accountID,
-        body: { ...registerInput(previewInput, plan, finance) },
-      });
-    } catch (problem) {
-      if (!(problem instanceof APIError)) {
-        return;
-      }
-      if (problem.code === 'BALANCE_CHANGED') {
-        // Conflicto de cobro: se consulta el saldo real y se conserva la captura para revisarla.
-        setConflict(true);
-      }
-      if (refreshCodes.includes(problem.code)) {
-        void reloadFinance();
-      }
-      if (shiftCodes.includes(problem.code)) {
-        void reloadShift();
-      }
+    setRetryNotice(repeatAuthorizationMessage);
+    if (pending.operation === 'payments_refund') {
+      refund.auth.requireRepeat();
+    } else if (pending.operation === 'payments_correct') {
+      correction.auth.requireRepeat();
     }
   }
 
@@ -221,85 +171,87 @@ export function CheckoutPanel({
     );
   }
 
-  const status = checkoutStatus();
-  const pendingMethod = activeMethods.find(
-    (entry) => entry.id === (pendingPayment?.body.method_id as string | undefined),
-  );
-  const pendingAmount = pendingPayment?.body.amount as string | undefined;
-  const pendingDescription = [
-    pendingAmount ? formatMoney(pendingAmount) : '',
-    pendingMethod ? `con ${pendingMethod.name}` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const status = checkoutStatus(finance);
 
-  function checkoutStatus(): CheckoutStatus {
-    if (!finance) {
-      return { state: 'loading', label: statusTitle('loading') };
+  function registeringLabel() {
+    const operation = mutation.pending?.operation;
+    if (operation === 'payments_refund') {
+      return 'Registrando devolución…';
     }
+    if (operation === 'payments_correct') {
+      return 'Registrando corrección…';
+    }
+    if (operation === 'payments_pay') {
+      return 'Registrando pago…';
+    }
+    return 'Registrando…';
+  }
+
+  function checkoutStatus(current: Finance): CheckoutStatus {
     if (mutation.uncertain) {
       return { state: 'uncertain', label: statusTitle('uncertain') };
     }
     if (mutation.busy) {
-      return { state: 'registering', label: 'Registrando pago…' };
+      return { state: 'registering', label: registeringLabel() };
     }
-    if (conflict) {
+    if (collect.conflict && mode === 'collect') {
       return { state: 'conflict', label: statusTitle('conflict') };
     }
-    if (mutation.error) {
+    if (mutation.error && !contextualCodes.includes(mutation.errorCode)) {
       return { state: 'error', label: statusTitle('error') };
     }
-    if (finance.settled) {
+    if (correcting) {
+      return { state: 'capturing', label: 'Capturando corrección' };
+    }
+    if (mode === 'refund') {
+      if (refund.preview.validating) {
+        return { state: 'validating', label: 'Validando…' };
+      }
+      if (refund.result) {
+        return { state: 'recorded', label: 'Devolución registrada' };
+      }
+      return { state: 'capturing', label: 'Capturando devolución' };
+    }
+    if (current.settled) {
       return { state: 'settled', label: statusTitle('settled') };
     }
-    if (!permissions.collect || finance.state !== 'open') {
+    if (!permissions.collect || current.state !== 'open') {
       return { state: 'readonly', label: statusTitle('readonly') };
     }
-    if (preview.validating) {
+    if (collect.preview.validating) {
       return { state: 'validating', label: 'Validando…' };
     }
-    if (lastResult) {
+    if (collect.lastResult) {
       return { state: 'recorded', label: statusTitle('recorded') };
     }
     return { state: 'capturing', label: statusTitle('capturing') };
   }
 
-  function banner() {
-    return (
-      <>
-        {mainBanner()}
-        {shift.error && (
-          <p className="checkout-inline-note" role="alert">
-            {shift.error}
-          </p>
-        )}
-      </>
-    );
-  }
-
-  function mainBanner() {
-    if (pendingPayment && mutation.uncertain) {
+  function mainBanner(current: Finance) {
+    const pending = mutation.pending;
+    if (pending && mutation.uncertain) {
       return (
-        <UncertainPayment
-          description={pendingDescription}
+        <UncertainOperation
+          request={pending}
+          methods={activeMethods}
           busy={mutation.busy}
-          onRetry={() => void mutation.retry()}
+          onRetry={() => void retryPending()}
           onConsult={() => void reloadFinance()}
         />
       );
     }
-    if (conflict && finance) {
+    if (collect.conflict && mode === 'collect') {
       return (
         <div className="checkout-conflict" role="alert">
           <strong>El saldo de la cuenta cambió en otra terminal.</strong>
           <p>
-            Saldo real: {formatMoney(finance.balance)}. Revisa la captura antes de registrar el
+            Saldo real: {formatMoney(current.balance)}. Revisa la captura antes de registrar el
             pago.
           </p>
         </div>
       );
     }
-    if (mutation.error) {
+    if (mutation.error && !contextualCodes.includes(mutation.errorCode)) {
       return (
         <p className="checkout-inline-note" role="alert">
           {mutation.error}
@@ -309,99 +261,236 @@ export function CheckoutPanel({
     return null;
   }
 
-  // Mensaje de validación de Go sobre la captura vigente (efectivo insuficiente, referencia…).
-  let hint = '';
-  if (preview.error && !refreshCodes.includes(previewCode)) {
-    hint = preview.error.message;
-  } else if (method && mode === 'partial' && !previewInput) {
-    hint = 'Captura el importe del abono.';
+  const banner: ReactNode = (
+    <>
+      {mainBanner(finance)}
+      {retryNotice && (
+        <p className="checkout-inline-note" role="alert">
+          {retryNotice}
+        </p>
+      )}
+      {notice && (
+        <p className="checkout-result" role="status">
+          {notice}
+        </p>
+      )}
+      {shift.error && (
+        <p className="checkout-inline-note" role="alert">
+          {shift.error}
+        </p>
+      )}
+    </>
+  );
+
+  const offerCorrection = can('payments.corrections') || permissions.collect;
+
+  function paymentActions(payment: PaymentRecord) {
+    const actions: ReactNode[] = [];
+    const choosingPayment = mode === 'refund' && refund.capture.mode === 'payment' && !correcting;
+    if (choosingPayment && !payment.corrected) {
+      const chosen = refund.capture.paymentID === payment.id;
+      actions.push(
+        <button
+          type="button"
+          key="refund"
+          className={`secondary-button ${chosen ? 'payment-history-chosen' : ''}`}
+          aria-pressed={chosen}
+          disabled={locked}
+          onClick={() => refund.choosePayment(payment.id)}
+        >
+          {chosen ? 'Pago elegido para devolver' : 'Devolver de este pago'}
+        </button>,
+      );
+    }
+    if (offerCorrection && correctable(payment) && !correcting && !locked) {
+      actions.push(
+        <button
+          type="button"
+          key="correct"
+          className="secondary-button"
+          onClick={() => {
+            setNotice('');
+            correction.start(payment);
+          }}
+        >
+          Corregir método
+        </button>,
+      );
+    }
+    return actions.length > 0 ? actions : null;
   }
 
-  const accountActions: { id: CheckoutAccountAction; label: string }[] = [];
-  const writable =
-    bill.account.state === 'open' && (bill.account.mode !== 'takeaway' || can('takeaway.manage'));
-  if (writable && can('accounts.split')) {
-    accountActions.push({ id: 'split', label: 'Dividir cuenta' });
-  }
-  if (writable && can('accounts.transfer_items')) {
-    accountActions.push({ id: 'transfer', label: 'Transferir productos' });
+  let selection: LineSelection | null = null;
+  if (
+    !correcting &&
+    mode === 'collect' &&
+    permissions.collect &&
+    permissions.selection &&
+    collect.collectable
+  ) {
+    selection = {
+      verb: 'Cobrar',
+      available: selectableUnits,
+      selections: collect.capture.selections,
+      onChange: collect.changeSelection,
+      onClear: () => collect.updateCapture({ selections: {} }),
+      locked,
+      totalLabel: 'Total de la selección',
+      total: collect.selectionTotal,
+      validating: collect.preview.validating,
+    };
+  } else if (!correcting && mode === 'refund' && refund.capture.mode === 'items') {
+    selection = {
+      verb: 'Devolver',
+      available: refundableUnits,
+      selections: refund.capture.selections,
+      onChange: refund.changeSelection,
+      onClear: () => refund.update({ selections: {} }),
+      locked,
+      totalLabel: 'Devolución de la selección',
+      total: refund.plan?.amount ?? null,
+      validating: refund.preview.validating,
+    };
   }
 
-  const selectionTotal = plan?.selection_total ?? null;
-  let quickAmounts: { label: string; value: string }[] = [];
-  if (capture.target === 'received') {
-    quickAmounts = cashQuickAmounts;
-  } else if (capture.target === 'amount' && mode === 'partial') {
-    const target = selectionTotal ?? (plan ? plan.target : finance.balance);
-    quickAmounts = [{ label: `Saldo ${formatMoney(target)}`, value: target }];
+  function methodsColumn() {
+    const common = {
+      payments: finance?.payments ?? [],
+      refunds: finance?.refunds ?? [],
+      timezone: bill.timezone,
+      error: methods.error,
+      actions: paymentActions,
+    };
+    if (correcting) {
+      return (
+        <CheckoutMethods
+          {...common}
+          title="Método correcto"
+          gridLabel="Métodos correctos disponibles"
+          methods={correction.replacements}
+          selectedID={correction.method?.id ?? ''}
+          onSelect={correction.chooseMethod}
+          disabled={locked}
+          emptyMethods="No hay otro método activo compatible con este pago."
+        />
+      );
+    }
+    if (mode === 'refund') {
+      return (
+        <CheckoutMethods
+          {...common}
+          title="Método de devolución"
+          gridLabel="Métodos de devolución disponibles"
+          methods={refund.outlets}
+          selectedID={refund.capture.methodID}
+          onSelect={(method) => refund.update({ methodID: method.id })}
+          disabled={locked}
+          emptyMethods="Ningún método activo admite devoluciones."
+        />
+      );
+    }
+    return (
+      <CheckoutMethods
+        {...common}
+        title="Método de pago"
+        gridLabel="Métodos de pago disponibles"
+        methods={activeMethods}
+        selectedID={collect.capture.methodID}
+        onSelect={collect.selectMethod}
+        disabled={!permissions.collect || !collect.collectable || !shiftUsable || locked}
+      />
+    );
+  }
+
+  function shiftColumn(current: CurrentShift) {
+    return (
+      <section className="checkout-area checkout-capture" aria-label="Turno de caja">
+        <div className="checkout-area-body">
+          {banner}
+          <ShiftOpening
+            current={current}
+            can={can}
+            active={active}
+            onChanged={() => void reloadShift()}
+          />
+        </div>
+      </section>
+    );
+  }
+
+  function operationColumn(current: Finance) {
+    if (correcting) {
+      return (
+        <CorrectionPanel
+          flow={correction}
+          status={status}
+          banner={banner}
+          canCorrect={can('payments.corrections')}
+          registering={mutation.busy}
+          onRefundInstead={() => {
+            correction.cancel();
+            onModeChange('refund');
+          }}
+        />
+      );
+    }
+    if (mode === 'refund') {
+      // Devolver exige un turno utilizable en la caja de esta terminal.
+      if (shift.data && !shiftUsable) {
+        return shiftColumn(shift.data);
+      }
+      return (
+        <RefundPanel
+          flow={refund}
+          finance={current}
+          status={status}
+          banner={banner}
+          keyboardActive={active}
+          canExecute={can('payments.refunds.execute')}
+          registering={mutation.busy}
+        />
+      );
+    }
+    if (permissions.collect && collect.collectable && shift.data && !shiftUsable) {
+      return shiftColumn(shift.data);
+    }
+    return (
+      <CheckoutCaptureOrSummary
+        finance={current}
+        status={status}
+        banner={banner}
+        lastResult={collect.lastResult}
+        collect={permissions.collect && collect.collectable}
+      >
+        <PaymentCapture
+          finance={current}
+          method={collect.method}
+          capture={collect.effectiveCapture}
+          onCapture={collect.updateCapture}
+          onModeChange={collect.changeMode}
+          plan={collect.plan}
+          hint={collect.hint}
+          canPartial={permissions.partial}
+          canTip={permissions.tips}
+          locked={locked}
+          status={status}
+          banner={banner}
+          lastResult={collect.lastResult}
+          canRegister={collect.canRegister}
+          registering={mutation.busy}
+          onRegister={() => void collect.register()}
+          keyboardActive={active}
+          quickAmounts={collect.quickAmounts}
+        />
+      </CheckoutCaptureOrSummary>
+    );
   }
 
   return (
     <div className="checkout-workspace" aria-label={`Cobro de la cuenta #${finance.folio}`}>
-      <CheckoutAccount
-        finance={finance}
-        bill={bill}
-        selections={capture.selections}
-        onSelectionChange={changeSelection}
-        onClearSelection={() => updateCapture({ selections: {} })}
-        selectionEnabled={permissions.collect && permissions.selection && collectable}
-        selectionLocked={locked}
-        selectionTotal={selectionTotal}
-        selectionValidating={preview.validating}
-        accountActions={locked ? [] : accountActions}
-        onAccountAction={onAccountAction}
-        onClose={onClose}
-      />
-      <CheckoutMethods
-        methods={activeMethods}
-        selectedID={capture.methodID}
-        onSelect={selectMethod}
-        disabled={!permissions.collect || !collectable || !shiftUsable || locked}
-        payments={finance.payments}
-        timezone={bill.timezone}
-        error={methods.error}
-      />
-      {permissions.collect && collectable && shift.data && !shiftUsable ? (
-        <section className="checkout-area checkout-capture" aria-label="Turno de caja">
-          <div className="checkout-area-body">
-            <ShiftOpening
-              current={shift.data}
-              can={can}
-              active={active}
-              onChanged={() => void reloadShift()}
-            />
-          </div>
-        </section>
-      ) : (
-        <CheckoutCaptureOrSummary
-          finance={finance}
-          status={status}
-          banner={banner()}
-          lastResult={lastResult}
-          collect={permissions.collect && collectable}
-        >
-          <PaymentCapture
-            finance={finance}
-            method={method}
-            capture={effectiveCapture}
-            onCapture={updateCapture}
-            onModeChange={changeMode}
-            plan={plan}
-            hint={hint}
-            canPartial={permissions.partial}
-            canTip={permissions.tips}
-            locked={locked}
-            status={status}
-            banner={banner()}
-            lastResult={lastResult}
-            canRegister={canRegister}
-            registering={mutation.busy}
-            onRegister={() => void register()}
-            keyboardActive={active}
-            quickAmounts={quickAmounts}
-          />
-        </CheckoutCaptureOrSummary>
-      )}
+      <CheckoutAccount finance={finance} bill={bill} selection={selection} onClose={onClose} />
+      {methodsColumn()}
+      {operationColumn(finance)}
     </div>
   );
 }
@@ -458,7 +547,7 @@ function CheckoutCaptureOrSummary({
 
 function summaryMessage(finance: Finance) {
   if (finance.settled && finance.state === 'closed') {
-    return 'La cuenta está liquidada y cerrada. Su historial de pagos permanece disponible.';
+    return 'La cuenta está liquidada y cerrada. Su historial de pagos permanece disponible; las devoluciones se registran en «Devoluciones».';
   }
   if (finance.settled && finance.mode === 'takeaway') {
     return 'El pedido está liquidado; la entrega se registra por separado.';

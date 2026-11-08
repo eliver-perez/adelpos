@@ -80,6 +80,7 @@ function finance(balance: string, serverTime = '2026-11-08T12:00:00Z'): Finance 
         version_id: versionID,
         item_id: 'item',
         name: 'Hamburguesa',
+        notes: '',
         quantity: 2,
         settled_quantity: 0,
         partial_quantity: 0,
@@ -115,6 +116,7 @@ function finance(balance: string, serverTime = '2026-11-08T12:00:00Z'): Finance 
     refunds: [],
     adjustments: [],
     delivery: null,
+    documents: [],
     server_time: serverTime,
   };
 }
@@ -262,8 +264,9 @@ function Checkout({ visible = true }: { visible?: boolean }) {
           bill={bill}
           active
           can={() => true}
+          mode="collect"
+          onModeChange={() => undefined}
           onClose={() => undefined}
-          onAccountAction={() => undefined}
         />
       )}
     </PendingOperationsProvider>

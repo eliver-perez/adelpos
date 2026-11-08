@@ -11,6 +11,7 @@ import type {
 } from '../../services/restaurant';
 import type { Lookups } from '../../services/catalog';
 import type { AccountAction } from './AccountActions';
+import { adjustmentsAvailable } from './adjustments/AccountAdjustments';
 import { usePendingEntry } from '../../hooks/pendingOperations';
 import {
   deliveryStateDescriptions,
@@ -19,8 +20,10 @@ import {
   paymentStateDescriptions,
 } from '../../services/payments';
 
+type BillAction = AccountAction | 'metadata' | 'history' | 'kitchen' | 'adjustments';
+
 const actions: {
-  id: AccountAction | 'metadata' | 'history' | 'kitchen';
+  id: BillAction;
   label: string;
   permission: string;
 }[] = [
@@ -31,6 +34,7 @@ const actions: {
   { id: 'split', label: 'Dividir cuenta', permission: 'accounts.split' },
   { id: 'transfer', label: 'Transferir productos', permission: 'accounts.transfer_items' },
   { id: 'merge', label: 'Combinar cuentas', permission: 'accounts.merge' },
+  { id: 'adjustments', label: 'Descuentos y cargos', permission: 'payments.read' },
   { id: 'assign', label: 'Cambiar responsable', permission: 'accounts.transfer' },
   { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage' },
 ];
@@ -75,7 +79,8 @@ function CheckoutButtons({
       <>
         {pending && (
           <p className="checkout-pending-hint" role="alert">
-            Hay un cobro sin resultado confirmado. Ábrelo para recuperarlo antes de cobrar otra vez.
+            Hay una operación financiera sin resultado confirmado. Abre el cobro para recuperarla
+            antes de registrar otra.
           </p>
         )}
         <button className="primary-button" disabled={disabled} onClick={onCheckout}>
@@ -123,7 +128,7 @@ export function BillPanel({
   editing: boolean;
   busy: boolean;
   can: (permission: string) => boolean;
-  onAction: (action: AccountAction | 'metadata' | 'history' | 'kitchen') => void;
+  onAction: (action: BillAction) => void;
   onCheckout: () => void;
   onDraftEdit: (item: DraftItem) => void;
   onDraftRemove: (item: DraftItem) => void;
@@ -154,7 +159,11 @@ export function BillPanel({
   const availableActions = actions.filter(
     (action) =>
       can(action.permission) &&
-      (action.id === 'history' || action.id === 'kitchen' || writable) &&
+      (action.id === 'history' ||
+        action.id === 'kitchen' ||
+        action.id === 'adjustments' ||
+        writable) &&
+      (action.id !== 'adjustments' || adjustmentsAvailable(account, can)) &&
       (action.id !== 'move' || account.mode === 'dine_in') &&
       (action.id !== 'void' || (account.confirmed_quantity === 0 && account.draft_quantity === 0)),
   );
@@ -186,8 +195,9 @@ export function BillPanel({
         aria-label="Acciones de cuenta"
         value=""
         onChange={(event) => {
-          if (event.target.value)
-            onAction(event.target.value as AccountAction | 'metadata' | 'history' | 'kitchen');
+          if (event.target.value) {
+            onAction(event.target.value as BillAction);
+          }
         }}
         disabled={busy || editing}
       >

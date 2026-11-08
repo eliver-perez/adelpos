@@ -26,6 +26,8 @@ export type WorkspacePanel =
   | 'cancel'
   | 'kitchen'
   | 'checkout'
+  | 'refund'
+  | 'adjustments'
   | AccountAction;
 
 export function useRestaurantWorkspace(

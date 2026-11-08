@@ -28,6 +28,7 @@ export function useRestaurantMutation(
     () => store.get(storeKey),
   );
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState('');
 
   async function send<T>(request: PendingRequest): Promise<T> {
     if (store.get(storeKey)?.running) {
@@ -35,6 +36,7 @@ export function useRestaurantMutation(
     }
     store.begin(storeKey, request);
     setError('');
+    setErrorCode('');
     try {
       const result = await api<T>(request.operation, { id: request.id, body: request.body });
       store.resolve(storeKey);
@@ -50,6 +52,7 @@ export function useRestaurantMutation(
         store.resolve(storeKey);
       }
       setError(problem instanceof Error ? problem.message : 'No se pudo completar la operación.');
+      setErrorCode(problem instanceof APIError ? problem.code : '');
       throw problem;
     }
   }
@@ -69,15 +72,19 @@ export function useRestaurantMutation(
     return send<T>(request);
   }
 
-  async function retry() {
+  // Reintenta con el mismo operation_id y cuerpo. Devuelve el error (o null si se confirmó) para
+  // que la pantalla distinga, por ejemplo, una autorización que debe repetirse.
+  async function retry(): Promise<unknown> {
     const pending = store.get(storeKey);
     if (!pending) {
-      return;
+      return null;
     }
     try {
       await send(pending.request);
-    } catch {
+      return null;
+    } catch (problem) {
       // El mismo identificador permanece disponible si vuelve a fallar la comunicación.
+      return problem;
     }
   }
 
@@ -86,10 +93,14 @@ export function useRestaurantMutation(
     retry,
     busy: entry?.running ?? false,
     error,
+    errorCode,
     uncertain: entry?.uncertain ?? false,
     pending: entry?.request ?? null,
     // Lectura sincrónica del almacén: evita un segundo envío por doble toque antes de renderizar.
     isPending: () => store.get(storeKey) !== undefined,
-    clearError: () => setError(''),
+    clearError: () => {
+      setError('');
+      setErrorCode('');
+    },
   };
 }

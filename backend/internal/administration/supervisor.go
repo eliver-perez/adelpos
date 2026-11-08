@@ -17,7 +17,9 @@ func supervisorAuthorizer(principal Principal) payments.Authorizer {
 	return func(ctx context.Context, tx pgx.Tx, username, password string) (*payments.Supervisor, error) {
 		username = strings.ToLower(strings.TrimSpace(username))
 		if username == "" || len(username) > 40 || password == "" || len(password) > 256 {
-			return nil, &Fault{Status: 400, Code: "AUTHORIZATION_REQUIRED", Message: "Indica el usuario y la contraseña del supervisor que autoriza."}
+			// Mismo código y estado que la autorización ausente en payments.approve: por ejemplo, un
+			// reintento incierto sin contraseña cuya operación original no llegó a confirmarse.
+			return nil, &Fault{Status: 403, Code: "AUTHORIZATION_REQUIRED", Message: "Indica el usuario y la contraseña del supervisor que autoriza."}
 		}
 		if username == principal.Username {
 			return nil, &Fault{Status: 403, Code: "SELF_AUTHORIZATION", Message: "No puedes autorizar tu propia operación; solicita la autorización de otro supervisor."}

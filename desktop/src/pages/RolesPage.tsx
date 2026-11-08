@@ -3,7 +3,41 @@ import { Field, Form, Notice, PageTitle } from '../components/Forms';
 import { PermissionChecklist } from '../components/PermissionEditor';
 import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
+import { acceptAmountText, toWireAmount } from '../services/amountInput';
 import type { Permission, Role } from '../services/models';
+
+// El límite es un porcentaje de 0 a 100 con hasta dos decimales; Go lo valida y además impide
+// conceder un límite mayor que el del propio usuario.
+function DiscountLimitField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field
+      label="Límite de descuento (%) · opcional"
+      hint="Descuentos por encima de este límite requieren autorización de un supervisor. Vacío: sin límite configurado (0 %)."
+    >
+      <input
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        maxLength={6}
+        value={value}
+        onChange={(event) => onChange(acceptAmountText(event.target.value, value))}
+      />
+    </Field>
+  );
+}
+
+function limitLabel(limit: string | null | undefined) {
+  if (limit === null || limit === undefined || limit === '') {
+    return 'Sin límite configurado (0 %)';
+  }
+  return `${limit} %`;
+}
 
 function RoleEditor({
   role,
@@ -18,6 +52,7 @@ function RoleEditor({
 }) {
   const [name, setName] = useState(role?.name ?? '');
   const [selected, setSelected] = useState(role?.permissions ?? []);
+  const [discountLimit, setDiscountLimit] = useState(role?.discount_limit ?? '');
   return (
     <section className="surface panel">
       <div className="section-heading">
@@ -31,7 +66,8 @@ function RoleEditor({
         onSave={async () => {
           await api(role ? 'update_role' : 'create_role', {
             id: role?.id,
-            body: { name, permissions: selected },
+            // La cadena vacía elimina el límite; enviar el valor vigente lo conserva.
+            body: { name, permissions: selected, discount_limit: toWireAmount(discountLimit) },
           });
           await onSaved();
         }}
@@ -44,6 +80,7 @@ function RoleEditor({
             onChange={(event) => setName(event.target.value)}
           />
         </Field>
+        <DiscountLimitField value={discountLimit} onChange={setDiscountLimit} />
         <PermissionChecklist registry={registry} selected={selected} onChange={setSelected} />
       </Form>
     </section>
@@ -92,6 +129,7 @@ export function RolesPage({
             <tr>
               <th>Rol</th>
               <th>Permisos concedidos</th>
+              <th>Límite de descuento</th>
               <th>Origen</th>
               <th>Acciones</th>
             </tr>
@@ -103,6 +141,7 @@ export function RolesPage({
                   <strong>{role.name}</strong>
                 </td>
                 <td>{role.permissions.length}</td>
+                <td>{limitLabel(role.discount_limit)}</td>
                 <td>{role.code ? 'Inicial' : 'Personalizado'}</td>
                 <td>
                   {editable && (

@@ -2,9 +2,11 @@ package administration
 
 import (
 	"context"
+	"regexp"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 )
 
 // Reglas de delegación administrativa.
@@ -108,14 +110,73 @@ func projectedPermissions(ctx context.Context, tx pgx.Tx, roleID string, overrid
 	return result, nil
 }
 
-// requireManageableUser impide administrar a un usuario cuyos permisos efectivos actuales
-// superan los del actor (por ejemplo, desactivar o degradar a un administrador).
+// requireManageableUser impide administrar a un usuario cuyos permisos efectivos actuales o cuyo
+// límite de descuento superan los del actor (por ejemplo, desactivar o degradar a un administrador).
 func requireManageableUser(ctx context.Context, tx pgx.Tx, principal Principal, userID string) error {
 	current, err := effectivePermissions(ctx, tx, userID, false)
 	if err != nil {
 		return err
 	}
-	return principal.requireWithin(current, "No puedes administrar a un usuario con permisos que tú no tienes.")
+	if err := principal.requireWithin(current, "No puedes administrar a un usuario con permisos que tú no tienes."); err != nil {
+		return err
+	}
+	roleID, err := userRoleID(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	return requireLimitWithin(ctx, tx, principal, roleID)
+}
+
+var discountLimitPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,2})(\.[0-9]{1,2})?$`)
+
+// parseDiscountLimit valida un límite de descuento por rol: porcentaje de 0 a 100 con dos decimales.
+func parseDiscountLimit(text string) (decimal.Decimal, error) {
+	if !discountLimitPattern.MatchString(text) {
+		return decimal.Zero, invalid("El límite de descuento debe ser un porcentaje de 0 a 100 con hasta dos decimales.")
+	}
+	value := decimal.RequireFromString(text)
+	if value.GreaterThan(decimal.NewFromInt(100)) {
+		return decimal.Zero, invalid("El límite de descuento no puede superar el 100 %.")
+	}
+	return value, nil
+}
+
+// actorDiscountLimit es el límite del actor según su rol; la identidad de soporte conserva el máximo.
+func actorDiscountLimit(ctx context.Context, tx pgx.Tx, principal Principal) (decimal.Decimal, error) {
+	if principal.Support {
+		return decimal.NewFromInt(100), nil
+	}
+	return roleDiscountLimit(ctx, tx, principal.RoleID)
+}
+
+func roleDiscountLimit(ctx context.Context, tx pgx.Tx, roleID string) (decimal.Decimal, error) {
+	var limit string
+	err := tx.QueryRow(ctx, "SELECT coalesce((SELECT max_percent FROM app.role_discount_limits WHERE role_id=$1),0)::numeric(5,2)::text", roleID).Scan(&limit)
+	if err != nil {
+		return decimal.Zero, err
+	}
+	return decimal.RequireFromString(limit), nil
+}
+
+// requireLimitWithin impide que un rol con un límite de descuento mayor que el del actor se
+// asigne, se edite o se conceda a otro usuario.
+func requireLimitWithin(ctx context.Context, tx pgx.Tx, principal Principal, roleID string) error {
+	limit, err := roleDiscountLimit(ctx, tx, roleID)
+	if err != nil {
+		return err
+	}
+	return requireLimitValue(ctx, tx, principal, limit)
+}
+
+func requireLimitValue(ctx context.Context, tx pgx.Tx, principal Principal, limit decimal.Decimal) error {
+	own, err := actorDiscountLimit(ctx, tx, principal)
+	if err != nil {
+		return err
+	}
+	if limit.GreaterThan(own) {
+		return delegationDenied("No puedes conceder un límite de descuento mayor que el tuyo.")
+	}
+	return nil
 }
 
 // fullAdministrators cuenta los usuarios ordinarios activos que conservan todos los permisos

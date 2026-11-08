@@ -25,6 +25,8 @@ export interface Role {
   code: string | null;
   name: string;
   permissions: string[];
+  // Porcentaje máximo de descuento sin autorización (cadena de Go); null equivale a 0 %.
+  discount_limit?: string | null;
 }
 
 export interface Permission {

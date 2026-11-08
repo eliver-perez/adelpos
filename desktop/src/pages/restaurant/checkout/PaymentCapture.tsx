@@ -91,36 +91,6 @@ export function RecordedPayment({ result }: { result: PaymentResult }) {
   );
 }
 
-export function UncertainPayment({
-  description,
-  busy,
-  onRetry,
-  onConsult,
-}: {
-  description: string;
-  busy: boolean;
-  onRetry: () => void;
-  onConsult: () => void;
-}) {
-  return (
-    <div className="checkout-uncertain" role="alert">
-      <strong>No se pudo confirmar el resultado del pago {description}.</strong>
-      <p>
-        No registres otro cobro en esta cuenta. Reintenta con el mismo identificador: si el pago ya
-        llegó al servidor se recupera sin duplicarse. También puedes consultar el resultado.
-      </p>
-      <div className="button-row">
-        <button type="button" className="primary-button" disabled={busy} onClick={onRetry}>
-          {busy ? 'Reintentando…' : 'Reintentar con el mismo identificador'}
-        </button>
-        <button type="button" className="secondary-button" onClick={onConsult}>
-          Consultar resultado
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function AmountSection({
   capture,
   method,
