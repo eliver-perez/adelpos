@@ -3,7 +3,7 @@ import type { Bill } from '../../../services/restaurant';
 import { adjustmentsAvailable } from '../adjustments/AccountAdjustments';
 import type { CheckoutMode } from './CheckoutPanel';
 
-export type CheckoutShortcut = 'adjustments' | 'split' | 'transfer';
+export type CheckoutShortcut = 'adjustments' | 'precheck' | 'split' | 'transfer';
 
 // Acciones contextuales de la pantalla de cobro, en la barra de la vista operativa: cambiar entre
 // cobro y devoluciones y abrir los mismos componentes de las acciones de la cuenta.
@@ -42,6 +42,11 @@ export function CheckoutToolbar({
             },
           ]}
         />
+      )}
+      {can('payments.read') && account.confirmed_quantity > 0 && (
+        <button type="button" className="secondary-button" onClick={() => onShortcut('precheck')}>
+          Precuenta
+        </button>
       )}
       {adjustmentsAvailable(account, can) && (
         <button

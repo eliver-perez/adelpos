@@ -49,7 +49,7 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 
 ## Continuidad de etapa 4
 
-- 0001–0005 ya están aplicadas y son inmutables. La siguiente ampliación del esquema requiere 0006. Leer docs/RESTAURANT_OPERATIONS.md, docs/KITCHEN_AND_PRINTING.md y docs/VERIFICATION.md.
+- 0001–0005 ya están aplicadas y son inmutables; la 0006 (etapa 6) también lo es una vez aplicada. La siguiente ampliación del esquema requiere 0007. Leer docs/RESTAURANT_OPERATIONS.md, docs/KITCHEN_AND_PRINTING.md y docs/VERIFICATION.md.
 - Toda escritura operativa conserva UUID, revisión, resultado idempotente, auditoría y eventos en la misma transacción. No regenerar UUID al reintentar una respuesta incierta.
 - Observaciones y reducciones de receta idéntica conservan importes de unidades históricas; otros cambios requieren cotización y aceptación explícitas. No recalcular automáticamente pedidos anteriores por cambios de catálogo o promociones.
 - Ventanilla pertenece a takeaway. Mantener preparación, pago y entrega independientes. No agregar una acción de entregar sin el futuro cobro real.
@@ -66,3 +66,16 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 - submitted significa aceptación CUPS/TCP, no salida física de papel. Reimprimir conserva presentación sin leyendas adicionales y bloquea otras copias sin resolver.
 - El planificador y los trabajadores pertenecen a Go independiente. SSE es el equivalente elegido a WebSocket: outbox, cursor/replay/reset, permisos por estación y Channel nativo sin tokens en React. Conservar HTTP idempotente para comandos/acuse KDS.
 - TestControlledCUPSPrinter nunca imprime en suites normales. El envío de hardware necesita destino explícito y ADEL_HARDWARE_SEND=1; no activar en CI ni dirigir a la impresora predeterminada por inferencia.
+
+## Reglas permanentes desde etapa 6
+
+- `catalog` es la única autoridad de precios; `payments` es la única autoridad financiera (saldos, pagos, asignaciones, cambio, descuentos manuales, cortesías, cargos, propinas, IVA, devoluciones, correcciones, turno mínimo, documentos comerciales y entregas). `payments` no importa `operations` ni `administration`; `operations` solo consulta sus guardas.
+- 0001–0006 son inmutables una vez aplicadas. La 0006 no se aplica a la instalación real sin autorización expresa del propietario, previo respaldo y ensayo de restauración.
+- Los registros financieros son inmutables: una corrección, cancelación o devolución es un registro compensatorio enlazado; nunca se edita ni borra un pago, ajuste o devolución.
+- Dinero con `numeric`/`shopspring/decimal` en Go y cadenas en JSON. React no suma, resta ni redondea dinero: muestra lo que devuelve Go y envía la cadena capturada. Los importes se capturan con `inputMode="decimal"` y validación estricta; nunca con `type="number"`.
+- El repartidor de centavos (`payments.allocate`) es determinista y conserva el total exacto. El IVA está incluido en los precios: la tasa del establecimiento es una lista cerrada (16, 8 o 0) elegida con botones, se copia a cada versión confirmada y no se recalcula al cambiar la configuración.
+- Una unidad con asignación neta de pago o con descuento manual vigente no se transfiere, divide, combina, cancela, edita ni anula. Una cuenta nunca queda con total menor que lo pagado.
+- Toda escritura de `payments/` toma el lock 7820148305 exclusivo, guarda su resultado en `restaurant_operations` y audita en la misma transacción. La huella de idempotencia excluye `authorization.password`; un reintento conserva el mismo `operation_id`.
+- La autorización de supervisor es puntual: valida usuario y contraseña con el límite de intentos del inicio de sesión, no crea sesión, rechaza la autoautorización y nunca se conserva en React (el almacén de operaciones pendientes descarta la contraseña).
+- Cobrar exige turno abierto en la caja de la terminal. El cierre, arqueo y conciliación de turno pertenecen a la etapa 7: no presentar `expected_cash` como arqueo.
+- Precuentas y tickets de pago son documentos comerciales: viven en la cola de impresión con `kind` `precheck`/`receipt`, no aparecen entre las comandas, no constituyen CFDI y un fallo de impresión nunca revierte un pago.

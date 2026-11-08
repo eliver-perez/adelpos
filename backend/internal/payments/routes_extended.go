@@ -3,10 +3,17 @@ package payments
 // extendedRoute agrega las acciones sobre una cuenta que no pertenecen al cobro básico. Las
 // previsualizaciones solo calculan y toman el lock compartido.
 func extendedRoute(method, action string) *route {
+	if method == "GET" && action == "precheck" {
+		return &route{"payments.read", true, (*service).precheck}
+	}
 	if method != "POST" {
 		return nil
 	}
 	switch action {
+	case "precheck/print":
+		return &route{"payments.tickets.print", false, (*service).printPrecheck}
+	case "documents/reprint":
+		return &route{"payments.tickets.reprint", false, (*service).reprintDocument}
 	case "deliver":
 		return &route{"takeaway.deliver", false, (*service).deliver}
 	case "discounts/preview":

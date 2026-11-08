@@ -2,7 +2,14 @@ import type { ReactNode } from 'react';
 import { AmountField, NumericKeypad, QuickAmounts } from '../../../components/NumericKeypad';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { Field } from '../../../components/Forms';
-import { formatMoney, isZeroMoney, permissionName } from '../../../services/payments';
+import {
+  formatMoney,
+  isZeroMoney,
+  permissionName,
+  printAttentionStates,
+  printingMessage,
+} from '../../../services/payments';
+import { DeliveryIcon, PrinterIcon, ToggleButton } from '../../../components/ToggleButton';
 import type {
   Finance,
   PaymentMethod,
@@ -65,8 +72,17 @@ function Figure({
 }
 
 // Resultado del último pago: el cambio sigue visible después de registrar para entregarlo.
-export function RecordedPayment({ result }: { result: PaymentResult }) {
+export function RecordedPayment({
+  result,
+  deliverRequested = false,
+}: {
+  result: PaymentResult;
+  deliverRequested?: boolean;
+}) {
   const payment = result.payment;
+  const printing = printingMessage(result.printing);
+  const printingAttention =
+    !!result.printing?.status && printAttentionStates.includes(result.printing.status);
   return (
     <div className="checkout-result" role="status">
       <strong>
@@ -83,11 +99,59 @@ export function RecordedPayment({ result }: { result: PaymentResult }) {
           : `Saldo pendiente ${formatMoney(result.finance.balance)}. Puedes registrar otro pago.`}
         {result.closed && ' La cuenta se cerró.'}
         {!result.closed &&
+          !result.delivered &&
           result.finance.settled &&
           result.finance.mode === 'takeaway' &&
           ' El pedido queda pendiente de entrega.'}
       </p>
+      {result.delivered && <p className="checkout-result-flag">Entrega realizada.</p>}
+      {deliverRequested && !result.delivered && (
+        <p className="checkout-result-warning">
+          El pedido no se marcó entregado porque queda saldo pendiente.
+        </p>
+      )}
+      {printing && (
+        <p className={printingAttention ? 'checkout-result-warning' : 'checkout-result-flag'}>
+          {printing}
+        </p>
+      )}
     </div>
+  );
+}
+
+// Interruptores del registro: imprimir ticket (con su permiso) y, en para llevar, entregar.
+function RegisterOptions({
+  showPrint,
+  print,
+  onPrint,
+  printerConfigured,
+  locked,
+}: {
+  showPrint: boolean;
+  print: boolean;
+  onPrint: (value: boolean) => void;
+  printerConfigured: boolean;
+  locked: boolean;
+}) {
+  if (!showPrint) {
+    return null;
+  }
+  return (
+    <>
+      <ToggleButton
+        label="Imprimir ticket"
+        pressed={print}
+        onChange={onPrint}
+        disabled={locked}
+        icon={<PrinterIcon />}
+        describedBy={!printerConfigured ? 'checkout-printer-missing' : undefined}
+      />
+      {!printerConfigured && print && (
+        <small id="checkout-printer-missing" className="checkout-printer-note">
+          Sin impresora de tickets configurada: el pago se registrará sin imprimir.
+        </small>
+      )}
+    </>
   );
 }
 
@@ -216,10 +280,10 @@ function PlanFigures({ plan, method }: { plan: PaymentPlan; method: PaymentMetho
   return (
     <dl className="checkout-figures" aria-live="polite">
       {method?.is_cash && <Figure label="Cambio" value={formatMoney(plan.change)} emphasis />}
-      <Figure label="Aplicado a la cuenta" value={formatMoney(plan.amount)} />
+      <Figure label="Aplicado" value={formatMoney(plan.amount)} />
       {!isZeroMoney(plan.tip) && <Figure label="Propina" value={formatMoney(plan.tip)} />}
       <Figure
-        label={plan.settles ? 'Saldo restante · liquida la cuenta' : 'Saldo restante'}
+        label={plan.settles ? 'Saldo restante (liquida)' : 'Saldo restante'}
         value={formatMoney(plan.balance_after)}
       />
     </dl>
@@ -246,6 +310,12 @@ export function PaymentCapture({
   onRegister,
   keyboardActive,
   quickAmounts,
+  showPrint,
+  printEnabled,
+  printerConfigured,
+  deliverAvailable,
+  deliverEnabled,
+  deliverRequested,
 }: {
   finance: Finance;
   method: PaymentMethod | null;
@@ -265,6 +335,12 @@ export function PaymentCapture({
   onRegister: () => void;
   keyboardActive: boolean;
   quickAmounts: { label: string; value: string }[];
+  showPrint: boolean;
+  printEnabled: boolean;
+  printerConfigured: boolean;
+  deliverAvailable: boolean;
+  deliverEnabled: boolean;
+  deliverRequested: boolean;
 }) {
   const editable = targetEditable(capture.target, capture, method, canTip);
   const keypadValue = capture[capture.target];
@@ -296,7 +372,19 @@ export function PaymentCapture({
       </header>
       <div className="checkout-area-body checkout-capture-fields">
         {banner}
-        {lastResult && <RecordedPayment result={lastResult} />}
+        {lastResult && <RecordedPayment result={lastResult} deliverRequested={deliverRequested} />}
+        {deliverAvailable && (
+          <div className="checkout-deliver-option">
+            <ToggleButton
+              label="Marcar como entregado"
+              pressed={deliverEnabled}
+              onChange={(deliver) => onCapture({ deliver })}
+              disabled={locked}
+              icon={<DeliveryIcon />}
+            />
+            <small className="muted">Solo se registra si este pago liquida el pedido.</small>
+          </div>
+        )}
         {!canPartial && (
           <p className="muted text-xs">
             Pago parcial requiere el permiso «{permissionName('payments.collect_partial')}».
@@ -336,14 +424,23 @@ export function PaymentCapture({
           captureKeyboard={keyboardActive && editable && !locked}
           disabled={!editable || locked}
         />
-        <button
-          type="button"
-          className="primary-button checkout-register"
-          disabled={!canRegister}
-          onClick={onRegister}
-        >
-          {registerLabel}
-        </button>
+        <div className="checkout-register-row">
+          <RegisterOptions
+            showPrint={showPrint}
+            print={printEnabled}
+            onPrint={(print) => onCapture({ print })}
+            printerConfigured={printerConfigured}
+            locked={locked}
+          />
+          <button
+            type="button"
+            className="primary-button checkout-register"
+            disabled={!canRegister}
+            onClick={onRegister}
+          >
+            {registerLabel}
+          </button>
+        </div>
       </footer>
     </section>
   );

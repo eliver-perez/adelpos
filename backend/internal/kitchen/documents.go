@@ -156,6 +156,12 @@ func clearInstructionPrices(instruction *Instructions) {
 }
 
 func (handler *service) enqueue(document Document, printer Printer, originalID *string) (*PrintJob, error) {
+	return handler.enqueueContent(document.ID, printer, originalID, RenderText(document, printer.PaperWidth))
+}
+
+// enqueueContent guarda un trabajo con su contenido ya renderizado. Comandas y documentos
+// comerciales comparten así la misma cola durable, el lease y la protección contra duplicados.
+func (handler *service) enqueueContent(ticketID string, printer Printer, originalID *string, content string) (*PrintJob, error) {
 	state := "pending"
 	message := ""
 	if !printer.Active || printer.Transport == "agent" {
@@ -168,8 +174,8 @@ func (handler *service) enqueue(document Document, printer Printer, originalID *
 		operationID = &handler.operationID
 	}
 	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_print_jobs(id,ticket_id,printer_id,operation_id,original_job_id,
-        printer_snapshot,content,state,last_error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, jobID, document.ID, printer.ID,
-		operationID, originalID, encoded(printer), RenderText(document, printer.PaperWidth), state, message)
+        printer_snapshot,content,state,last_error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, jobID, ticketID, printer.ID,
+		operationID, originalID, encoded(printer), content, state, message)
 	if err != nil {
 		return nil, err
 	}

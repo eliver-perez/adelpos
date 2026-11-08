@@ -1,4 +1,4 @@
-# Desarrollo macOS · Etapa 5
+# Desarrollo macOS · Etapa 6
 
 ## Entorno preparado
 
@@ -161,3 +161,9 @@ Go mantiene dos trabajadores de impresión y un planificador de liberaciones; ce
 La comprobación nativa opt-in `ADEL_WINDOW_VERIFICATION_FILE="$PWD/.local/stage5-window-verification.json" ./scripts/dev.sh open-app` consulta fullscreen inicial, sale a ventana y regresa mediante Tauri, guardando solo tamaños/resultados. Ejecutarla con una única ventana y sin trabajo real; en el arranque normal esa variable no existe y no cambia modos automáticamente.
 
 La prueba CUPS es opt-in: `ADEL_TEST_PACKAGE=./internal/operations ADEL_TEST_RUN=TestControlledCUPSPrinter ADEL_HARDWARE_QUEUE=NOMBRE ./scripts/dev.sh test-integration` genera un documento sin enviarlo. Solo `ADEL_HARDWARE_SEND=1` autoriza el envío real de una copia técnica. `ADEL_HARDWARE_PREVIEW` y `ADEL_HARDWARE_REPORT` seleccionan archivos privados de evidencia. Nunca activar esa opción en pruebas ordinarias o CI. Ver detalles y límites en [docs/KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md).
+
+## Cobros y pagos · etapa 6
+
+Versión 0.6.0/esquema 6. La migración `0006_payments_and_refunds.sql` **no se aplica a la instalación real sin autorización del propietario**. Procedimiento: `backup`, `python3 scripts/restore-check.py backups/NOMBRE.dump`, `server-stop`, `migrate`, `server-start`, `build-macos` y `open-app`. La migración asigna IVA 16 % a los productos ya confirmados, siembra cinco métodos de pago y concede los permisos nuevos al rol administrador con límite de descuento de 100 %; no crea turnos, pagos ni datos ficticios.
+
+Para cobrar, la terminal debe estar asociada a una caja (Cajas físicas / Terminales) y abrir turno desde la pantalla de cobro. La impresora de tickets se elige en Cobros → Políticas entre las impresoras de cocina registradas. Las pruebas de integración incluyen `internal/payments` y los recorridos de cobro de `internal/operations`; las bases temporales se eliminan al terminar.

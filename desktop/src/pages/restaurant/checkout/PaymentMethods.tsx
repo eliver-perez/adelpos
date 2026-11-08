@@ -181,9 +181,11 @@ export function CheckoutMethods({
   actions,
   emptyMethods,
   gridLabel,
+  documents,
 }: {
   title: string;
   gridLabel: string;
+  documents?: ReactNode;
   methods: PaymentMethod[];
   selectedID: string;
   onSelect: (method: PaymentMethod) => void;
@@ -213,6 +215,7 @@ export function CheckoutMethods({
         <h3 className="bill-section-title">Pagos registrados</h3>
         <PaymentHistory payments={payments} timezone={timezone} actions={actions} />
         <RefundHistory refunds={refunds} timezone={timezone} />
+        {documents}
       </div>
     </section>
   );

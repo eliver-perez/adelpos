@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
+import { ticketKindLabels } from '../../services/kitchen';
 import type { TicketDocument, TicketSummary } from '../../services/kitchen';
 import { serverDateTime } from '../../services/restaurant';
 
@@ -14,12 +15,7 @@ export function KitchenTickets({ timezone }: { timezone: string }) {
     id: selected || undefined,
     enabled: !!selected,
   });
-  const labels = {
-    normal: 'Comanda',
-    modification: 'MODIFICACIÓN',
-    cancellation: 'CANCELACIÓN',
-    test: 'Prueba autorizada',
-  };
+  const labels = ticketKindLabels;
   return (
     <div className="kitchen-editor-layout">
       <section className="panel form-stack">

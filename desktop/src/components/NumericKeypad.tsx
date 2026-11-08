@@ -189,11 +189,21 @@ export function AmountField({
   const hintID = `${identifier}-hint`;
   const container = useRef<HTMLDivElement>(null);
 
-  // El campo que recibe el teclado se mantiene visible aunque el área se desplace.
+  // El campo que recibe el teclado se mantiene visible aunque el área se desplace o cambie de
+  // tamaño (por ejemplo, cuando Go entrega el cambio y el pie del cobro crece).
   useEffect(() => {
-    if (active) {
-      container.current?.scrollIntoView?.({ block: 'nearest' });
+    const element = container.current;
+    if (!active || !element) {
+      return;
     }
+    element.scrollIntoView?.({ block: 'nearest' });
+    const area = element.closest('.checkout-area-body');
+    if (!area || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const observer = new ResizeObserver(() => element.scrollIntoView?.({ block: 'nearest' }));
+    observer.observe(area);
+    return () => observer.disconnect();
   }, [active]);
 
   return (

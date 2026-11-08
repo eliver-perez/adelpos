@@ -3,7 +3,7 @@ import { Accordion } from '../../components/Accordion';
 import { Field, Form, Notice } from '../../components/Forms';
 import { ReferenceField, TextField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { jobLabels } from '../../services/kitchen';
+import { jobLabels, ticketKindLabels } from '../../services/kitchen';
 import type { ExecuteKitchen, Printer, PrintJob, TicketDocument } from '../../services/kitchen';
 import { serverDateTime } from '../../services/restaurant';
 
@@ -266,7 +266,10 @@ function JobEditor({
         ))}
       </Accordion>
       {document.data && (
-        <Accordion title="Documento original" summary="La copia conserva esta presentación">
+        <Accordion
+          title={`Documento original · ${ticketKindLabels[document.data.kind] ?? 'Documento'}`}
+          summary="La copia conserva esta presentación"
+        >
           <pre className="kitchen-document">{document.data.preview}</pre>
         </Accordion>
       )}

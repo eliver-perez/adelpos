@@ -1,6 +1,6 @@
-# AD-EL POS · Etapa 5
+# AD-EL POS · Etapa 6
 
-Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible. No registra cobros ni movimientos físicos de inventario.
+Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible. No registra cierres de turno, arqueos ni movimientos físicos de inventario.
 
 ## Inicio en este Mac
 
@@ -25,9 +25,19 @@ En **Restaurante → Áreas y distribución** crea áreas y mesas y guarda su di
 
 Desde **Acciones de cuenta** divide cantidades enteras, transfiere productos, combina cuentas, cambia mesa/responsable o consulta historial. Las unidades conservan identidad, personalización y centavos; las transferencias no generan preparación adicional. Una revisión obsoleta conserva la captura para revisión. Una respuesta incierta se recupera con el mismo UUID para evitar duplicados.
 
-**Para llevar** utiliza listado a la izquierda y cuenta a la derecha, orden por antigüedad, búsqueda, avisos configurables y programación en la zona horaria del establecimiento. Ventanilla es un origen de esta misma modalidad. Confirmar crea una intención durable y resuelve la liberación real a cocina; la configuración incompleta deja advertencias y el pedido conservado. Preparación, pago y entrega permanecen separados; no se permite marcar entregado sin el futuro proceso de cobro.
+**Para llevar** utiliza listado a la izquierda y cuenta a la derecha, orden por antigüedad, búsqueda, avisos configurables y programación en la zona horaria del establecimiento. Ventanilla es un origen de esta misma modalidad. Confirmar crea una intención durable y resuelve la liberación real a cocina; la configuración incompleta deja advertencias y el pedido conservado. Preparación, pago y entrega permanecen separados: un pedido para llevar se marca entregado solo cuando está liquidado.
 
 Los acordeones comparten un componente accesible en pantallas anteriores y nuevas. El teclado virtual sigue la preferencia de cada terminal. Consulta [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md) para ciclo de vida, precios, concurrencia, límites y recorrido de uso. La integración actual está en [Cocina e impresión](docs/KITCHEN_AND_PRINTING.md).
+
+## Cobros, pagos y devoluciones
+
+Antes de cobrar, la terminal debe estar asociada a una caja con turno abierto; la apertura mínima se hace en la misma pantalla de cobro con un fondo explícito (puede ser $0). El cierre, arqueo y conciliación del turno pertenecen a la etapa 7.
+
+Desde una cuenta, **Cobrar** abre la pantalla de cobro sin salir de la operación: productos con su estado de pago, métodos como botones con icono, teclado numérico fijo y captura de efectivo recibido, cambio, propina y referencia. Go calcula cada importe; la interfaz solo muestra el resultado. Se admiten pagos totales, abonos parciales y pagos mixtos sucesivos, y el cobro de productos o cantidades seleccionados. Una cuenta de salón liquidada se cierra y libera la mesa; un pedido para llevar se cierra al entregarse.
+
+Descuentos por partida o generales, por porcentaje o importe, cortesías del 100 % y cargos extras generales se administran desde las acciones de la cuenta, con un acceso contextual desde el cobro. Cada rol tiene un límite de descuento configurable; superarlo, devolver sin permiso suficiente o corregir un pago requiere la autorización puntual de un supervisor, que no inicia sesión ni afecta la suya. Las devoluciones (totales, de un pago o por productos) y las correcciones de método son registros compensatorios; nunca se edita el pago original.
+
+El IVA está incluido en los precios. En **Cobros** se elige la tasa del establecimiento con botones (16 %, 8 % o 0 %), se administran métodos de pago y políticas, y se consultan los movimientos del turno actual. Cada producto confirmado conserva la tasa vigente al confirmarse. Las precuentas y tickets se imprimen en la impresora de tickets configurada; un fallo de impresión no revierte el pago y los documentos no son comprobantes fiscales (CFDI). Consulta [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md).
 
 ## Cocina e impresión
 
@@ -43,7 +53,7 @@ En **Catálogo** administra categorías, productos independientes, presentacione
 
 En **Probar personalización** retira o sustituye todos los complementos, cambia cantidades, ingredientes, componentes y observaciones. Go valida y devuelve el desglose exacto; no se crea una venta. Las listas conservan la identidad del producto y las promociones explican su aplicación o exclusión. Los PNG originales locales cambian con el tema.
 
-Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql` y la etapa 5 `0005_kitchen_and_printing.sql`. Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
+Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql` y la etapa 6 `0006_payments_and_refunds.sql`. Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
 
 ## Credencial reservada de soporte
 
@@ -68,9 +78,10 @@ ad-el-pos/
 │   ├── internal/kitchen/       # Preparación, documentos, transportes y trabajadores
 │   ├── internal/events/        # Outbox, cursor y replay autenticado
 │   ├── internal/operations/    # Mesas, cuentas, pedidos, unidades e historial
+│   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, turno mínimo y tickets
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 a 0005; inmutables después de aplicarse
+│   └── migrations/             # 0001 a 0006; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad
@@ -104,6 +115,7 @@ Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_
 - [API_CONTRACTS.md](API_CONTRACTS.md): rutas y permisos.
 - [docs/CATALOG.md](docs/CATALOG.md): reglas comerciales, uso y límites del catálogo.
 - [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md): flujo de pedidos, unidades y concurrencia.
+- [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md): cobros, IVA, descuentos, devoluciones, turno mínimo y tickets.
 - [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
 - [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): continuidad y decisiones pendientes.
 

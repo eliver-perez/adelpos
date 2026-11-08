@@ -14,16 +14,16 @@ Cerrar el editor con **Conservar y volver**, cambiar de cuenta o de vista intern
 
 ## Estados reales
 
-| Dimensión            | Estados implementados                               | Transición                                                                                                                       |
-| -------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Cuenta               | `open`, `merged`, `voided`                          | Abrir; combinar hacia otra cuenta; anular solo sin unidades activas ni borradores.                                               |
-| Captura              | Borrador persistido                                 | Guardar/reemplazar mediante revisión; confirmar vacía el lote pendiente.                                                         |
-| Unidades             | `active`, `cancelled`                               | Cancelación explícita; no se eliminan sus identidades.                                                                           |
-| Preparación derivada | `without_items`, `draft` y estados reales de cocina | Depende de unidades activas y borrador; la etapa 5 informa liberación/tareas reales, sin confundirlas con papel o recepción KDS. |
-| Pago                 | `not_recorded`                                      | No hay módulo de cobro en esta etapa.                                                                                            |
-| Entrega              | `not_delivered`                                     | No existe comando para entregar sin liquidación.                                                                                 |
+| Dimensión            | Estados implementados                               | Transición                                                                                                                                                                                                                                         |
+| -------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cuenta               | `open`, `closed`, `merged`, `voided`                | Abrir; cerrar al liquidarse (salón sin borrador) o al entregarse liquidada (para llevar); reabrir si una devolución deja saldo; combinar hacia otra cuenta sin pagos; anular solo sin unidades activas, sin borradores y con cobros netos en cero. |
+| Captura              | Borrador persistido                                 | Guardar/reemplazar mediante revisión; confirmar vacía el lote pendiente.                                                                                                                                                                           |
+| Unidades             | `active`, `cancelled`                               | Cancelación explícita; no se eliminan sus identidades.                                                                                                                                                                                             |
+| Preparación derivada | `without_items`, `draft` y estados reales de cocina | Depende de unidades activas y borrador; la etapa 5 informa liberación/tareas reales, sin confundirlas con papel o recepción KDS.                                                                                                                   |
+| Pago                 | `not_recorded`, `partial`, `paid`                   | Derivado en Go (`payments`) de pagos, devoluciones, descuentos y cargos reales; ver [PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md).                                                                                                            |
+| Entrega              | `not_delivered`, `delivered`                        | Solo pedidos para llevar liquidados, una vez por cuenta (`takeaway_deliveries`); independiente de la preparación.                                                                                                                                  |
 
-La mesa es libre si no tiene cuentas abiertas; ocupada si tiene una o más. Fuera de servicio impide nuevas asignaciones, pero permite consultar cuentas existentes. No se desactiva una mesa o área con cuentas abiertas. Desactivar conserva referencias históricas. Anular una cuenta vacía o combinarla retira su ocupación; la liquidación normal se integrará con cobros.
+La mesa es libre si no tiene cuentas abiertas; ocupada si tiene una o más. Fuera de servicio impide nuevas asignaciones, pero permite consultar cuentas existentes. No se desactiva una mesa o área con cuentas abiertas. Desactivar conserva referencias históricas. Anular una cuenta vacía, combinarla o cerrarla al liquidarse retira su ocupación.
 
 ## Precios históricos y cambios
 
@@ -86,3 +86,7 @@ El mapa usa un lienzo lógico de 1000×560 y desplazamiento interno. La captura 
 ```
 
 La primera instalación de navegadores de prueba requiere `cd desktop` y `PLAYWRIGHT_BROWSERS_PATH="$PWD/../.cache/playwright" npx playwright install chromium webkit`. Playwright es dependencia de desarrollo fijada. El ejecutor crea una base exclusiva por navegador, ejecuta Go real, sirve el frontend compilado y sustituye únicamente el transporte IPC en Node; los secretos nunca llegan al navegador. No agrega un acceso web alternativo al producto. La compilación y los procesos nativos se verifican por separado; ver [VERIFICATION.md](VERIFICATION.md).
+
+## Partidas con pago · etapa 6
+
+Una unidad con asignación neta de pago (liquidada o con abono) o con descuento manual vigente no se transfiere, divide, combina, cancela, edita ni anula (`UNIT_HAS_PAYMENT`, `UNIT_HAS_DISCOUNT`); primero se registra la devolución correspondiente. Transferir o cancelar una cantidad toma primero las unidades libres. Las unidades sin pago siguen las reglas anteriores siempre que la cuenta no quede con total menor que lo pagado (`ACCOUNT_BELOW_PAYMENTS`). Agregar productos a una cuenta con abonos aumenta su saldo. La guarda vive en `operations/payment_guards.go` y consulta a `payments` dentro de la misma transacción y lock.

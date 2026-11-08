@@ -35,6 +35,8 @@ export interface CollectPermissions {
   partial: boolean;
   selection: boolean;
   tips: boolean;
+  print: boolean;
+  deliver: boolean;
 }
 
 // Captura y registro de pagos (fase 6B) separados de la composición de la pantalla de cobro.
@@ -46,6 +48,8 @@ export function useCollectFlow({
   permissions,
   mutation,
   enabled,
+  printDefault,
+  initialDeliver,
   reloadFinance,
   reloadShift,
 }: {
@@ -56,17 +60,26 @@ export function useCollectFlow({
   permissions: CollectPermissions;
   mutation: FinancialMutation;
   enabled: boolean;
+  printDefault: boolean;
+  initialDeliver: boolean;
   reloadFinance: () => Promise<void>;
   reloadShift: () => Promise<void>;
 }) {
-  const [capture, setCapture] = useState<CaptureState>(initialCapture);
+  const [capture, setCapture] = useState<CaptureState>(() => initialCapture(initialDeliver));
   const [lastResult, setLastResult] = useState<PaymentResult | null>(null);
+  // Si se pidió la entrega con el último pago, para explicar cuando no se registró por saldo.
+  const [deliverRequested, setDeliverRequested] = useState(false);
   const [conflict, setConflict] = useState(false);
   const method = methods.find((entry) => entry.id === capture.methodID) ?? null;
   const collectable = !!finance && finance.state === 'open' && !finance.settled;
   const locked = mutation.busy || !!mutation.pending;
   const mode: PaymentMode = capture.mode === 'partial' && permissions.partial ? 'partial' : 'total';
   const effectiveCapture = { ...capture, mode };
+  // La impresión solo se ofrece con su permiso; sin decisión del cajero rige la preferencia.
+  const printEnabled = permissions.print && (capture.print ?? printDefault);
+  // La entrega solo aplica a pedidos para llevar aún no entregados.
+  const deliverAvailable = permissions.deliver && finance?.mode === 'takeaway' && !finance.delivery;
+  const deliverEnabled = deliverAvailable && capture.deliver;
 
   let previewInput: PaymentInput | null = null;
   if (enabled && finance && permissions.collect && collectable) {
@@ -127,10 +140,11 @@ export function useCollectFlow({
     updateCapture({ selections: { ...capture.selections, [versionID]: quantity } });
   }
 
-  // Pagos mixtos = pagos sucesivos: tras cada registro la captura se reinicia por completo.
+  // Pagos mixtos = pagos sucesivos: tras cada registro la captura se reinicia. La intención de
+  // entregar se conserva mientras el pedido siga sin entregarse.
   function onRecorded(result: PaymentResult) {
     setLastResult(result);
-    setCapture(initialCapture());
+    setCapture((current) => initialCapture(current.deliver && !result.delivered));
     setConflict(false);
   }
 
@@ -150,10 +164,16 @@ export function useCollectFlow({
     }
     setConflict(false);
     setLastResult(null);
+    setDeliverRequested(deliverEnabled);
     try {
       await mutation.execute<PaymentResult>('payments_pay', {
         id: accountID,
-        body: { ...registerInput(previewInput, plan, finance) },
+        body: {
+          ...registerInput(previewInput, plan, finance, {
+            print: printEnabled,
+            deliver: deliverEnabled,
+          }),
+        },
       });
     } catch (problem) {
       if (!(problem instanceof APIError)) {
@@ -206,6 +226,11 @@ export function useCollectFlow({
     conflict,
     lastResult,
     onRecorded,
+    printEnabled,
+    deliverAvailable,
+    deliverEnabled,
+    deliverRequested,
+    setDeliverRequested,
     hint,
     quickAmounts,
     selectionTotal,

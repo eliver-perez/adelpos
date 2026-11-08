@@ -28,6 +28,7 @@ export type WorkspacePanel =
   | 'checkout'
   | 'refund'
   | 'adjustments'
+  | 'precheck'
   | AccountAction;
 
 export function useRestaurantWorkspace(

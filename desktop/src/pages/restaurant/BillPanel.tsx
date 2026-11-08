@@ -12,6 +12,7 @@ import type {
 import type { Lookups } from '../../services/catalog';
 import type { AccountAction } from './AccountActions';
 import { adjustmentsAvailable } from './adjustments/AccountAdjustments';
+import { TakeawayDelivery } from './documents/TakeawayDelivery';
 import { usePendingEntry } from '../../hooks/pendingOperations';
 import {
   deliveryStateDescriptions,
@@ -20,7 +21,7 @@ import {
   paymentStateDescriptions,
 } from '../../services/payments';
 
-type BillAction = AccountAction | 'metadata' | 'history' | 'kitchen' | 'adjustments';
+type BillAction = AccountAction | 'metadata' | 'history' | 'kitchen' | 'adjustments' | 'precheck';
 
 const actions: {
   id: BillAction;
@@ -35,6 +36,7 @@ const actions: {
   { id: 'transfer', label: 'Transferir productos', permission: 'accounts.transfer_items' },
   { id: 'merge', label: 'Combinar cuentas', permission: 'accounts.merge' },
   { id: 'adjustments', label: 'Descuentos y cargos', permission: 'payments.read' },
+  { id: 'precheck', label: 'Precuenta', permission: 'payments.read' },
   { id: 'assign', label: 'Cambiar responsable', permission: 'accounts.transfer' },
   { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage' },
 ];
@@ -112,6 +114,7 @@ export function BillPanel({
   can,
   onAction,
   onCheckout,
+  onDeliverCheckout,
   onDraftEdit,
   onDraftRemove,
   onLineEdit,
@@ -130,6 +133,7 @@ export function BillPanel({
   can: (permission: string) => boolean;
   onAction: (action: BillAction) => void;
   onCheckout: () => void;
+  onDeliverCheckout: () => void;
   onDraftEdit: (item: DraftItem) => void;
   onDraftRemove: (item: DraftItem) => void;
   onLineEdit: (item: ConfirmedLine) => void;
@@ -162,8 +166,10 @@ export function BillPanel({
       (action.id === 'history' ||
         action.id === 'kitchen' ||
         action.id === 'adjustments' ||
+        action.id === 'precheck' ||
         writable) &&
       (action.id !== 'adjustments' || adjustmentsAvailable(account, can)) &&
+      (action.id !== 'precheck' || account.confirmed_quantity > 0) &&
       (action.id !== 'move' || account.mode === 'dine_in') &&
       (action.id !== 'void' || (account.confirmed_quantity === 0 && account.draft_quantity === 0)),
   );
@@ -237,6 +243,13 @@ export function BillPanel({
             <span>
               Entrega: {deliveryStateDescriptions[account.delivery_state] ?? account.delivery_state}
             </span>
+            <TakeawayDelivery
+              account={account}
+              timezone={bill.timezone}
+              can={can}
+              disabled={busy || editing}
+              onCollect={onDeliverCheckout}
+            />
             {account.customer_name && (
               <strong>
                 {account.customer_name} · {account.phone}

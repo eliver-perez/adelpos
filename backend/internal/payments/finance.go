@@ -44,6 +44,7 @@ type unitState struct {
 	ItemID    string
 	Ordinal   int
 	Name      string
+	Notes     string
 	Total     decimal.Decimal
 	TaxRate   int
 	Discount  decimal.Decimal
@@ -74,7 +75,7 @@ func (unit unitState) Status() string {
 const activeAdjustment = "NOT EXISTS(SELECT FROM app.account_adjustment_voids v WHERE v.adjustment_id=j.id)"
 
 func readUnits(ctx context.Context, tx pgx.Tx, accountID string) ([]unitState, error) {
-	rows, err := tx.Query(ctx, `SELECT u.id,u.version_id,u.item_id,u.ordinal,coalesce(v.quote_line->>'name',''),u.total::text,v.tax_rate,
+	rows, err := tx.Query(ctx, `SELECT u.id,u.version_id,u.item_id,u.ordinal,coalesce(v.quote_line->>'name',''),coalesce(v.request->'customization'->>'notes',''),u.total::text,v.tax_rate,
         coalesce((SELECT sum(a.amount) FROM app.account_adjustment_allocations a JOIN app.account_adjustments j ON j.id=a.adjustment_id
             WHERE a.unit_id=u.id AND j.kind='discount' AND `+activeAdjustment+`),0)::numeric(18,2)::text,
         (coalesce((SELECT sum(p.amount) FROM app.payment_allocations p WHERE p.unit_id=u.id),0)
@@ -89,7 +90,7 @@ func readUnits(ctx context.Context, tx pgx.Tx, accountID string) ([]unitState, e
 	for rows.Next() {
 		var unit unitState
 		var total, discount, paid string
-		if err := rows.Scan(&unit.ID, &unit.VersionID, &unit.ItemID, &unit.Ordinal, &unit.Name, &total, &unit.TaxRate,
+		if err := rows.Scan(&unit.ID, &unit.VersionID, &unit.ItemID, &unit.Ordinal, &unit.Name, &unit.Notes, &total, &unit.TaxRate,
 			&discount, &paid); err != nil {
 			return nil, err
 		}
@@ -254,6 +255,7 @@ type FinanceLine struct {
 	VersionID       string        `json:"version_id"`
 	ItemID          string        `json:"item_id"`
 	Name            string        `json:"name"`
+	Notes           string        `json:"notes"`
 	Quantity        int           `json:"quantity"`
 	SettledQuantity int           `json:"settled_quantity"`
 	PartialQuantity int           `json:"partial_quantity"`
@@ -270,34 +272,35 @@ type Delivery struct {
 
 // Finance es el estado financiero completo y autoritativo de una cuenta.
 type Finance struct {
-	AccountID        string          `json:"account_id"`
-	Folio            int64           `json:"folio"`
-	Name             string          `json:"name"`
-	Mode             string          `json:"mode"`
-	State            string          `json:"state"`
-	Revision         int             `json:"revision"`
-	TableName        *string         `json:"table_name"`
-	ItemsTotal       string          `json:"items_total"`
-	ItemDiscounts    string          `json:"item_discounts"`
-	AccountDiscounts string          `json:"account_discounts"`
-	Charges          string          `json:"charges"`
-	Total            string          `json:"total"`
-	Paid             string          `json:"paid"`
-	Refunded         string          `json:"refunded"`
-	Tips             string          `json:"tips"`
-	Balance          string          `json:"balance"`
-	PaymentState     string          `json:"payment_state"`
-	DeliveryState    string          `json:"delivery_state"`
-	Settled          bool            `json:"settled"`
-	Tax              []TaxLine       `json:"tax"`
-	TaxBase          string          `json:"tax_base"`
-	TaxTotal         string          `json:"tax_total"`
-	Lines            []FinanceLine   `json:"lines"`
-	Payments         []PaymentRecord `json:"payments"`
-	Refunds          []RefundRecord  `json:"refunds"`
-	Adjustments      []Adjustment    `json:"adjustments"`
-	Delivery         *Delivery       `json:"delivery"`
-	ServerTime       time.Time       `json:"server_time"`
+	AccountID        string           `json:"account_id"`
+	Folio            int64            `json:"folio"`
+	Name             string           `json:"name"`
+	Mode             string           `json:"mode"`
+	State            string           `json:"state"`
+	Revision         int              `json:"revision"`
+	TableName        *string          `json:"table_name"`
+	ItemsTotal       string           `json:"items_total"`
+	ItemDiscounts    string           `json:"item_discounts"`
+	AccountDiscounts string           `json:"account_discounts"`
+	Charges          string           `json:"charges"`
+	Total            string           `json:"total"`
+	Paid             string           `json:"paid"`
+	Refunded         string           `json:"refunded"`
+	Tips             string           `json:"tips"`
+	Balance          string           `json:"balance"`
+	PaymentState     string           `json:"payment_state"`
+	DeliveryState    string           `json:"delivery_state"`
+	Settled          bool             `json:"settled"`
+	Tax              []TaxLine        `json:"tax"`
+	TaxBase          string           `json:"tax_base"`
+	TaxTotal         string           `json:"tax_total"`
+	Lines            []FinanceLine    `json:"lines"`
+	Payments         []PaymentRecord  `json:"payments"`
+	Refunds          []RefundRecord   `json:"refunds"`
+	Adjustments      []Adjustment     `json:"adjustments"`
+	Delivery         *Delivery        `json:"delivery"`
+	Documents        []DocumentRecord `json:"documents"`
+	ServerTime       time.Time        `json:"server_time"`
 
 	units   []unitState
 	total   decimal.Decimal
@@ -418,7 +421,36 @@ func loadFinance(ctx context.Context, tx pgx.Tx, accountID string) (*Finance, er
 		finance.Delivery = &delivery
 		finance.DeliveryState = "delivered"
 	}
+	finance.Documents, err = readDocuments(ctx, tx, accountID)
+	if err != nil {
+		return nil, err
+	}
 	return finance, nil
+}
+
+// readDocuments lista precuentas y tickets con el estado de su último trabajo de impresión.
+func readDocuments(ctx context.Context, tx pgx.Tx, accountID string) ([]DocumentRecord, error) {
+	rows, err := tx.Query(ctx, `SELECT d.ticket_id,d.kind,d.payment_id,d.created_at,j.id,j.state,p.name,
+        (SELECT count(*) FROM app.kitchen_print_jobs c WHERE c.ticket_id=d.ticket_id)::integer
+        FROM app.payment_documents d
+        LEFT JOIN LATERAL (SELECT id,state,printer_id FROM app.kitchen_print_jobs WHERE ticket_id=d.ticket_id
+            ORDER BY created_at DESC LIMIT 1) j ON true
+        LEFT JOIN app.kitchen_printers p ON p.id=j.printer_id
+        WHERE d.account_id=$1 ORDER BY d.created_at,d.ticket_id`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []DocumentRecord{}
+	for rows.Next() {
+		var item DocumentRecord
+		if err := rows.Scan(&item.TicketID, &item.Kind, &item.PaymentID, &item.CreatedAt, &item.JobID, &item.JobState,
+			&item.PrinterName, &item.Copies); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
 }
 
 // paymentState distingue cuentas sin pago, con abonos y liquidadas. Una cuenta con productos y
@@ -441,7 +473,7 @@ func groupLines(units []unitState) []FinanceLine {
 		if !found {
 			position = len(lines)
 			positions[unit.VersionID] = position
-			lines = append(lines, FinanceLine{VersionID: unit.VersionID, ItemID: unit.ItemID, Name: unit.Name, Due: "0.00", Remaining: "0.00"})
+			lines = append(lines, FinanceLine{VersionID: unit.VersionID, ItemID: unit.ItemID, Name: unit.Name, Notes: unit.Notes, Due: "0.00", Remaining: "0.00"})
 		}
 		line := &lines[position]
 		line.Quantity++
