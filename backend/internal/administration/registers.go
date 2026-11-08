@@ -55,6 +55,14 @@ func registers(ctx context.Context, tx pgx.Tx, request Request, principal Princi
 			if inUse {
 				return nil, &Fault{Status: 409, Code: "REGISTER_IN_USE", Message: "Desasocia las terminales autorizadas antes de desactivar la caja."}
 			}
+			// Una caja con turno abierto conserva su identidad financiera hasta el cierre (etapa 7).
+			var shiftOpen bool
+			if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT FROM app.cash_shifts WHERE register_id=$1 AND state='open')", registerID).Scan(&shiftOpen); err != nil {
+				return nil, err
+			}
+			if shiftOpen {
+				return nil, &Fault{Status: 409, Code: "SHIFT_OPEN", Message: "La caja tiene un turno abierto. No puede desactivarse hasta cerrar ese turno."}
+			}
 		}
 		if _, err := tx.Exec(ctx, "UPDATE app.registers SET name=$1,description=$2,active=$3 WHERE id=$4", input.Name, input.Description, input.Active, registerID); err != nil {
 			return nil, err

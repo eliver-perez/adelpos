@@ -40,10 +40,18 @@ func (handler *service) selectedUnits(accountID string, selections []Selection) 
 		if err != nil {
 			return nil, err
 		}
+		available, err = handler.freeUnitsFirst(available)
+		if err != nil {
+			return nil, err
+		}
 		if selection.Quantity < 1 || selection.Quantity > len(available) {
 			return nil, invalid("La cantidad seleccionada excede las unidades de una partida en la cuenta de origen.")
 		}
 		units = append(units, available[:selection.Quantity]...)
+	}
+	// Las unidades con pago o descuento manual permanecen en su cuenta.
+	if err := handler.requireUnitsFree(units); err != nil {
+		return nil, err
 	}
 	return units, nil
 }
@@ -156,6 +164,10 @@ func (handler *service) transfer(id string, split bool) (any, error) {
 			return nil, err
 		}
 		identifiers = append(identifiers, unit.ID)
+	}
+	// La cuenta de origen no puede quedar con un total menor que sus pagos netos.
+	if err := handler.requireAccountCovered(source.ID); err != nil {
+		return nil, err
 	}
 	kind := "items.transferred"
 	if split {

@@ -1,4 +1,5 @@
-// Package operations conserva la operación del restaurante sin ejecutar cobros ni envíos a cocina.
+// Package operations conserva la operación del restaurante. Los cobros pertenecen a payments, que
+// aplica sus guardas financieras dentro de la misma transacción operativa.
 package operations
 
 import (
@@ -6,6 +7,7 @@ import (
 	"time"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/payments"
 )
 
 type Area struct {
@@ -62,35 +64,36 @@ type AccountInput struct {
 }
 
 type Account struct {
-	ID                string     `json:"id"`
-	Folio             int64      `json:"folio"`
-	Name              string     `json:"name"`
-	Mode              string     `json:"mode"`
-	State             string     `json:"state"`
-	TableID           *string    `json:"table_id"`
-	TableName         *string    `json:"table_name"`
-	PriceListID       string     `json:"price_list_id"`
-	CustomerName      string     `json:"customer_name"`
-	Phone             string     `json:"phone"`
-	Origin            string     `json:"origin"`
-	Notes             string     `json:"notes"`
-	ScheduledAt       *time.Time `json:"scheduled_at"`
-	ScheduledLocal    string     `json:"scheduled_local"`
-	ScheduleKind      *string    `json:"schedule_kind"`
-	AssignedUserID    string     `json:"assigned_user_id"`
-	AssignedName      string     `json:"assigned_name"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	Revision          int        `json:"revision"`
-	MergedIntoID      *string    `json:"merged_into_id"`
-	ElapsedSeconds    int64      `json:"elapsed_seconds"`
-	Urgency           string     `json:"urgency"`
-	PreparationState  string     `json:"preparation_state"`
-	PaymentState      string     `json:"payment_state"`
-	DeliveryState     string     `json:"delivery_state"`
-	ConfirmedQuantity int        `json:"confirmed_quantity"`
-	DraftQuantity     int        `json:"draft_quantity"`
-	Totals            Totals     `json:"totals"`
+	ID                string          `json:"id"`
+	Folio             int64           `json:"folio"`
+	Name              string          `json:"name"`
+	Mode              string          `json:"mode"`
+	State             string          `json:"state"`
+	TableID           *string         `json:"table_id"`
+	TableName         *string         `json:"table_name"`
+	PriceListID       string          `json:"price_list_id"`
+	CustomerName      string          `json:"customer_name"`
+	Phone             string          `json:"phone"`
+	Origin            string          `json:"origin"`
+	Notes             string          `json:"notes"`
+	ScheduledAt       *time.Time      `json:"scheduled_at"`
+	ScheduledLocal    string          `json:"scheduled_local"`
+	ScheduleKind      *string         `json:"schedule_kind"`
+	AssignedUserID    string          `json:"assigned_user_id"`
+	AssignedName      string          `json:"assigned_name"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+	Revision          int             `json:"revision"`
+	MergedIntoID      *string         `json:"merged_into_id"`
+	ElapsedSeconds    int64           `json:"elapsed_seconds"`
+	Urgency           string          `json:"urgency"`
+	PreparationState  string          `json:"preparation_state"`
+	PaymentState      string          `json:"payment_state"`
+	DeliveryState     string          `json:"delivery_state"`
+	Finance           *payments.Brief `json:"finance"`
+	ConfirmedQuantity int             `json:"confirmed_quantity"`
+	DraftQuantity     int             `json:"draft_quantity"`
+	Totals            Totals          `json:"totals"`
 }
 
 type Totals struct {

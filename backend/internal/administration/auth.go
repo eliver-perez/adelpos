@@ -49,12 +49,7 @@ func login(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	}
 	verified := VerifyPassword(input.Password, hash)
 	if !found || !active || !verified {
-		_, err := tx.Exec(ctx, `UPDATE app.login_attempts SET
-            failures=CASE WHEN window_start < now()-interval '15 minutes' THEN 1 ELSE failures+1 END,
-            locked_until=CASE WHEN failures>=4 AND window_start>=now()-interval '15 minutes' THEN now()+interval '15 minutes' ELSE NULL END,
-            window_start=CASE WHEN window_start<now()-interval '15 minutes' THEN now() ELSE window_start END
-            WHERE device_id=$1 AND username=$2`, request.DeviceID, input.Username)
-		if err != nil {
+		if err := recordFailedAttempt(ctx, tx, request.DeviceID, input.Username); err != nil {
 			return nil, err
 		}
 		return failedLogin(ctx, tx, request.DeviceID, input.Username, "INVALID_CREDENTIALS")
@@ -72,6 +67,17 @@ func login(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"session_token": token}, nil
+}
+
+// recordFailedAttempt aplica el límite de cinco fallos en quince minutos por usuario y terminal.
+// Lo comparten el inicio de sesión y las autorizaciones puntuales de supervisor.
+func recordFailedAttempt(ctx context.Context, tx pgx.Tx, deviceID, username string) error {
+	_, err := tx.Exec(ctx, `UPDATE app.login_attempts SET
+        failures=CASE WHEN window_start < now()-interval '15 minutes' THEN 1 ELSE failures+1 END,
+        locked_until=CASE WHEN failures>=4 AND window_start>=now()-interval '15 minutes' THEN now()+interval '15 minutes' ELSE NULL END,
+        window_start=CASE WHEN window_start<now()-interval '15 minutes' THEN now() ELSE window_start END
+        WHERE device_id=$1 AND username=$2`, deviceID, username)
+	return err
 }
 
 func failedLogin(ctx context.Context, tx pgx.Tx, deviceID, username, code string) (any, error) {
