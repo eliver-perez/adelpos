@@ -1,5 +1,7 @@
 package operations
 
+import "local/ad-el-pos/server/internal/payments"
+
 func (handler *service) merge(id string) (any, error) {
 	var input struct {
 		Mutation
@@ -45,6 +47,10 @@ func (handler *service) merge(id string) (any, error) {
 	}
 	if len(sourceDraft)+len(targetDraft) > 20 || source.DraftQuantity+target.DraftQuantity > 1000 {
 		return nil, invalid("Confirma o reduce los borradores antes de combinar: el lote resultante excede 20 partidas o 1000 unidades.")
+	}
+	// Cada pago permanece en la cuenta donde se registró: el origen no puede tener pagos ni ajustes.
+	if err := payments.RequireNoFinancialRecords(handler.ctx, handler.tx, source.ID); err != nil {
+		return nil, err
 	}
 	if err := handler.touch(source.ID, source.Revision); err != nil {
 		return nil, err

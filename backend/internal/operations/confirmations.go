@@ -2,6 +2,7 @@ package operations
 
 import (
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/payments"
 )
 
 func (handler *service) confirm(id string) (any, error) {
@@ -43,6 +44,11 @@ func (handler *service) confirm(id string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// La tasa de IVA vigente se copia a cada versión confirmada; un cambio posterior no la altera.
+	taxRate, err := payments.CurrentTaxRate(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, err
+	}
 	confirmed := []map[string]any{}
 	for index, item := range items {
 		itemID, versionID := newID(), newID()
@@ -51,7 +57,7 @@ func (handler *service) confirm(id string) (any, error) {
 			return nil, err
 		}
 		line := preview.Quote.Lines[index]
-		if err := handler.insertVersion(versionID, itemID, orderID, 1, item.LineRequest, line); err != nil {
+		if err := handler.insertVersion(versionID, itemID, orderID, 1, item.LineRequest, line, taxRate); err != nil {
 			return nil, err
 		}
 		units, err := handler.insertUnits(id, itemID, versionID, line, 1)
@@ -84,11 +90,13 @@ func (handler *service) insertOrder(accountID, kind string, quote *catalog.Quote
 	return id, err
 }
 
-func (handler *service) insertVersion(id, itemID, orderID string, version int, request catalog.LineRequest, quote catalog.QuoteLine) error {
+// insertVersion guarda una versión inmutable de la partida con la tasa de IVA que le corresponde:
+// la vigente al confirmarse, o la histórica cuando una edición conserva los importes anteriores.
+func (handler *service) insertVersion(id, itemID, orderID string, version int, request catalog.LineRequest, quote catalog.QuoteLine, taxRate int) error {
 	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.restaurant_item_versions
-        (id,item_id,order_id,version,request,quote_line,author_id,device_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, id, itemID, orderID, version, jsonValue(request), jsonValue(quote),
-		handler.request.Actor.UserID, handler.request.Actor.DeviceID)
+        (id,item_id,order_id,version,request,quote_line,author_id,device_id,tax_rate)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, itemID, orderID, version, jsonValue(request), jsonValue(quote),
+		handler.request.Actor.UserID, handler.request.Actor.DeviceID, taxRate)
 	return err
 }
 

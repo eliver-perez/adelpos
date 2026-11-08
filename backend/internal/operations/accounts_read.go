@@ -3,6 +3,7 @@ package operations
 import (
 	"fmt"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/payments"
 	"strconv"
 	"strings"
 	"time"
@@ -50,8 +51,14 @@ func (handler *service) decorateAccount(account *Account) error {
 	} else if account.ElapsedSeconds >= int64(settings.WarningMinutes*60) {
 		account.Urgency = "warning"
 	}
-	account.PaymentState = "not_recorded"
-	account.DeliveryState = "not_delivered"
+	// Pago y entrega se derivan de los registros financieros reales; la preparación sigue siendo independiente.
+	brief, err := payments.AccountBrief(handler.ctx, handler.tx, account.ID)
+	if err != nil {
+		return err
+	}
+	account.Finance = brief
+	account.PaymentState = brief.PaymentState
+	account.DeliveryState = brief.DeliveryState
 	account.PreparationState = "without_items"
 	if account.DraftQuantity > 0 {
 		account.PreparationState = "draft"
@@ -89,7 +96,7 @@ func (handler *service) listAccounts() (any, error) {
 	if state == "" {
 		state = "open"
 	}
-	if state != "open" && state != "merged" && state != "voided" && state != "all" {
+	if state != "open" && state != "closed" && state != "merged" && state != "voided" && state != "all" {
 		return nil, invalid("El estado de cuenta no es válido.")
 	}
 	if len(search) > 100 {

@@ -32,7 +32,15 @@ func (handler *service) cancel(id string) (any, error) {
 	if input.Quantity < 1 || input.Quantity > len(units) {
 		return nil, invalid("La cantidad por cancelar excede las unidades activas de esa partida en la cuenta.")
 	}
-	selected := units[len(units)-input.Quantity:]
+	// Solo se cancelan unidades sin pago ni descuento manual; las pagadas requieren devolución previa.
+	free, held, err := handler.splitFreeUnits(units)
+	if err != nil {
+		return nil, err
+	}
+	if input.Quantity > len(free) {
+		return nil, handler.requireUnitsFree(held)
+	}
+	selected := free[len(free)-input.Quantity:]
 	previous, err := readOne[versionRecord](handler.ctx, handler.tx,
 		"SELECT to_jsonb(v) FROM app.restaurant_item_versions v WHERE id=$1", input.VersionID)
 	if err != nil {
@@ -47,6 +55,9 @@ func (handler *service) cancel(id string) (any, error) {
 			return nil, err
 		}
 		identifiers = append(identifiers, unit.ID)
+	}
+	if err := handler.requireAccountCovered(id); err != nil {
+		return nil, err
 	}
 	if err := handler.event(id, nil, "item.cancelled", map[string]any{
 		"units":      selected,

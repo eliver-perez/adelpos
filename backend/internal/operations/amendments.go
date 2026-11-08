@@ -139,6 +139,10 @@ func (handler *service) calculateEdit(account *Account, input EditInput) (*editC
 	if err != nil {
 		return nil, err
 	}
+	// Una partida con unidades pagadas o con descuento manual no se edita sin revertir antes su pago.
+	if err := handler.requireUnitsFree(units); err != nil {
+		return nil, err
+	}
 	if input.Line.Quantity < len(units) {
 		if err := handler.request.Actor.Require("orders.cancel"); err != nil {
 			return nil, err
@@ -232,6 +236,9 @@ func (handler *service) edit(id string) (any, error) {
 	}
 	change, err := handler.persistEdit(account, input, calculation)
 	if err != nil {
+		return nil, err
+	}
+	if err := handler.requireAccountCovered(id); err != nil {
 		return nil, err
 	}
 	if err := handler.event(id, nil, "item.modified", map[string]any{

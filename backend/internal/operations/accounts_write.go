@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
+	"local/ad-el-pos/server/internal/payments"
 )
 
 func (handler *service) validateAccountInput(input *AccountInput, previous *Account) (*time.Time, error) {
@@ -233,6 +235,9 @@ func (handler *service) accountAction(id, action string) (any, error) {
 		}
 		if len(strings.TrimSpace(input.Reason)) < 5 || len(input.Reason) > 500 {
 			return nil, invalid("Indica un motivo de anulación de entre 5 y 500 caracteres.")
+		}
+		if err := payments.RequireNoNetFinance(handler.ctx, handler.tx, id); err != nil {
+			return nil, err
 		}
 	}
 	if err := handler.touch(id, input.Revision); err != nil {

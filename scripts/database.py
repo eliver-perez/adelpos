@@ -140,7 +140,7 @@ SELECT format('CREATE DATABASE %I OWNER adel_app', :'database_name') WHERE NOT E
 def integration():
     ensure_owned()
     password = (LOCAL / "app-password").read_text().strip()
-    packages = ("./internal/database", "./internal/administration", "./internal/catalog", "./internal/operations")
+    packages = ("./internal/database", "./internal/administration", "./internal/catalog", "./internal/operations", "./internal/payments")
     selected = os.environ.get("ADEL_TEST_PACKAGE")
     if selected and selected not in packages:
         raise SystemExit("El paquete de integración solicitado no está permitido.")

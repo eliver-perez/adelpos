@@ -6,6 +6,7 @@ import (
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
+	"local/ad-el-pos/server/internal/payments"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -59,6 +60,34 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		var catalogProblem *catalog.Error
 		if errors.As(err, &catalogProblem) {
 			return nil, &Fault{Status: catalogProblem.Status, Code: catalogProblem.Code, Message: catalogProblem.Message}
+		}
+		// Una operación comercial puede fallar por una guarda financiera o por la integración de cocina;
+		// ambas se traducen a su error público en lugar de un 503 genérico.
+		var paymentProblem *payments.Error
+		if errors.As(err, &paymentProblem) {
+			return nil, &Fault{Status: paymentProblem.Status, Code: paymentProblem.Code, Message: paymentProblem.Message}
+		}
+		var kitchenProblem *kitchen.Error
+		if errors.As(err, &kitchenProblem) {
+			return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message}
+		}
+		return result, err
+	}
+	if strings.HasPrefix(route, "payments/") {
+		result, err := payments.Handle(ctx, tx, payments.Request{
+			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
+			Actor:     payments.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+			Authorize: supervisorAuthorizer(principal),
+		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
+			return audit(ctx, tx, principal, action, entity, id, before, after, true)
+		})
+		var problem *payments.Error
+		if errors.As(err, &problem) {
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+		}
+		var kitchenProblem *kitchen.Error
+		if errors.As(err, &kitchenProblem) {
+			return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message}
 		}
 		return result, err
 	}
