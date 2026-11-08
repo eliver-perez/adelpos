@@ -1,11 +1,23 @@
 import type { ReactNode } from 'react';
+import { QuantityStepper } from '../../../components/QuantityStepper';
 import { formatMoney, isZeroMoney } from '../../../services/payments';
 import type { Finance, FinanceLine } from '../../../services/payments';
 import type { Bill, ConfirmedLine } from '../../../services/restaurant';
 import type { ProductBreakdown } from '../../../services/catalog';
-import { selectableUnits } from './captureState';
 
-export type CheckoutAccountAction = 'split' | 'transfer';
+// Selección de unidades por partida para la operación vigente (cobro o devolución). Las
+// cantidades son enteras; el importe de la selección siempre lo calcula Go.
+export interface LineSelection {
+  verb: string;
+  available: (line: FinanceLine) => number;
+  selections: Record<string, number>;
+  onChange: (versionID: string, quantity: number) => void;
+  onClear: () => void;
+  locked: boolean;
+  totalLabel: string;
+  total: string | null;
+  validating: boolean;
+}
 
 // Resume las personalizaciones relevantes de la partida confirmada sin recalcular importes.
 function customizationSummary(breakdown: ProductBreakdown): string[] {
@@ -55,65 +67,18 @@ function SummaryRow({
   );
 }
 
-function LineSelector({
-  line,
-  quantity,
-  onChange,
-  disabled,
-}: {
-  line: FinanceLine;
-  quantity: number;
-  onChange: (quantity: number) => void;
-  disabled: boolean;
-}) {
-  const available = selectableUnits(line);
-  if (available === 0) {
-    return null;
-  }
-  return (
-    <div className="checkout-line-selector" role="group" aria-label={`Cobrar ${line.name}`}>
-      <span className="muted text-xs">Cobrar</span>
-      <button
-        type="button"
-        className="secondary-button"
-        aria-label={`Quitar una unidad de ${line.name}`}
-        disabled={disabled || quantity === 0}
-        onClick={() => onChange(quantity - 1)}
-      >
-        −
-      </button>
-      <output aria-label={`Unidades seleccionadas de ${line.name}`}>{quantity}</output>
-      <button
-        type="button"
-        className="secondary-button"
-        aria-label={`Agregar una unidad de ${line.name}`}
-        disabled={disabled || quantity >= available}
-        onClick={() => onChange(quantity + 1)}
-      >
-        +
-      </button>
-      <span className="muted text-xs">de {available}</span>
-    </div>
-  );
-}
-
 function CheckoutLine({
   line,
   restaurantLine,
-  quantity,
-  selectable,
-  locked,
-  onChange,
+  selection,
 }: {
   line: FinanceLine;
   restaurantLine: ConfirmedLine | undefined;
-  quantity: number;
-  selectable: boolean;
-  locked: boolean;
-  onChange: (quantity: number) => void;
+  selection: LineSelection | null;
 }) {
   const details = restaurantLine ? customizationSummary(restaurantLine.quote_line) : [];
-  const notes = restaurantLine?.request.customization?.notes ?? '';
+  const notes = restaurantLine?.request.customization?.notes || line.notes || '';
+  const quantity = selection?.selections[line.version_id] ?? 0;
   const promotion = restaurantLine?.quote_line.discount ?? '0.00';
   return (
     <article
@@ -142,42 +107,34 @@ function CheckoutLine({
           <span className="status-pill">Pendiente {formatMoney(line.remaining)}</span>
         )}
       </div>
-      {selectable && (
-        <LineSelector line={line} quantity={quantity} onChange={onChange} disabled={locked} />
+      {selection && (
+        <QuantityStepper
+          verb={selection.verb}
+          name={line.name}
+          quantity={quantity}
+          max={selection.available(line)}
+          disabled={selection.locked}
+          onChange={(next) => selection.onChange(line.version_id, next)}
+        />
       )}
     </article>
   );
 }
 
-// Área de cuenta y productos: partidas confirmadas, totales de Go y selección por cobrar.
+// Área de cuenta y productos: partidas confirmadas, totales de Go y selección de la operación.
 export function CheckoutAccount({
   finance,
   bill,
-  selections,
-  onSelectionChange,
-  onClearSelection,
-  selectionEnabled,
-  selectionLocked,
-  selectionTotal,
-  selectionValidating,
-  accountActions,
-  onAccountAction,
+  selection,
   onClose,
 }: {
   finance: Finance;
   bill: Bill;
-  selections: Record<string, number>;
-  onSelectionChange: (versionID: string, quantity: number) => void;
-  onClearSelection: () => void;
-  selectionEnabled: boolean;
-  selectionLocked: boolean;
-  selectionTotal: string | null;
-  selectionValidating: boolean;
-  accountActions: { id: CheckoutAccountAction; label: string }[];
-  onAccountAction: (action: CheckoutAccountAction) => void;
+  selection: LineSelection | null;
   onClose: () => void;
 }) {
-  const hasSelection = Object.values(selections).some((quantity) => quantity > 0);
+  const hasSelection =
+    !!selection && Object.values(selection.selections).some((quantity) => quantity > 0);
   const restaurantLines = new Map(
     bill.lines.filter((line) => line.state === 'active').map((line) => [line.version_id, line]),
   );
@@ -210,25 +167,24 @@ export function CheckoutAccount({
             key={line.version_id}
             line={line}
             restaurantLine={restaurantLines.get(line.version_id)}
-            quantity={selections[line.version_id] ?? 0}
-            selectable={selectionEnabled}
-            locked={selectionLocked}
-            onChange={(quantity) => onSelectionChange(line.version_id, quantity)}
+            selection={selection}
           />
         ))}
       </div>
       <footer className="checkout-area-footer">
-        {hasSelection && (
+        {selection && hasSelection && (
           <div className="checkout-selection-total" aria-live="polite">
-            <span>Total de la selección</span>
+            <span>{selection.totalLabel}</span>
             <strong>
-              {selectionTotal && !selectionValidating ? formatMoney(selectionTotal) : 'Calculando…'}
+              {selection.total && !selection.validating
+                ? formatMoney(selection.total)
+                : 'Calculando…'}
             </strong>
             <button
               type="button"
               className="secondary-button"
-              disabled={selectionLocked}
-              onClick={onClearSelection}
+              disabled={selection.locked}
+              onClick={selection.onClear}
             >
               Limpiar selección
             </button>
@@ -252,12 +208,16 @@ export function CheckoutAccount({
             <SummaryRow label="Cargos" value={formatMoney(finance.charges)} />
           )}
           <SummaryRow label="Total" value={formatMoney(finance.total)} variant="total" />
-          <SummaryRow label="Abonos registrados" value={formatMoney(finance.paid)} />
+          {/* Go entrega lo pagado neto de devoluciones; lo devuelto se muestra solo como referencia. */}
+          <SummaryRow
+            label={isZeroMoney(finance.refunded) ? 'Abonos registrados' : 'Pagado neto'}
+            value={formatMoney(finance.paid)}
+          />
           {!isZeroMoney(finance.refunded) && (
-            <SummaryRow label="Devoluciones" value={formatMoney(finance.refunded)} />
+            <SummaryRow label="Devuelto" value={formatMoney(finance.refunded)} />
           )}
           {!isZeroMoney(finance.tips) && (
-            <SummaryRow label="Propinas (aparte)" value={formatMoney(finance.tips)} />
+            <SummaryRow label="Propinas (fuera de la venta)" value={formatMoney(finance.tips)} />
           )}
           {finance.tax.map((line) => (
             <SummaryRow
@@ -272,20 +232,6 @@ export function CheckoutAccount({
             variant="balance"
           />
         </dl>
-        {accountActions.length > 0 && (
-          <div className="button-row checkout-account-actions">
-            {accountActions.map((action) => (
-              <button
-                type="button"
-                key={action.id}
-                className="secondary-button"
-                onClick={() => onAccountAction(action.id)}
-              >
-                {action.label}
-              </button>
-            ))}
-          </div>
-        )}
       </footer>
     </section>
   );

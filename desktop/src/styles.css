@@ -1956,11 +1956,14 @@ summary {
   gap: 8px;
 }
 .checkout-capture-header {
+  flex-wrap: wrap;
   padding: 8px 10px;
 }
+/* El control no se comprime por debajo de sus botones: si no cabe junto al estado, este baja de
+   línea en lugar de encimarse sobre una opción táctil. */
 .checkout-capture-header .segmented-control {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: min-content;
   padding: 3px;
 }
 .checkout-capture-header .segmented-control button {
@@ -2287,4 +2290,152 @@ summary {
     grid-row: auto;
     min-height: 320px;
   }
+}
+
+/* Fase 6C: acciones del cobro, autorización de supervisor, devoluciones, correcciones y ajustes. */
+.checkout-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.checkout-toolbar .segmented-control {
+  flex: 0 1 280px;
+  padding: 3px;
+}
+.checkout-toolbar .segmented-control button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.checkout-toolbar .secondary-button {
+  min-height: 44px;
+}
+.supervisor-authorization {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning);
+  border-radius: 12px;
+  background: var(--subtle);
+  min-width: 0;
+}
+.supervisor-authorization legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+}
+.supervisor-authorization-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 8px;
+}
+.refund-summary {
+  display: grid;
+  gap: 6px;
+}
+.refund-parts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.refund-parts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.refund-parts strong {
+  font-variant-numeric: tabular-nums;
+}
+.refund-origin {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.payment-history-actions {
+  margin-top: 6px;
+}
+.payment-history-actions .secondary-button {
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.payment-history-chosen {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.payment-history-flag {
+  color: var(--warning);
+  font-weight: 600;
+}
+.payment-history-historic {
+  opacity: 0.75;
+}
+.payment-history-refund {
+  border-left-color: var(--warning);
+}
+.adjustments-panel .checkout-figures {
+  max-width: 520px;
+}
+.adjustment-form {
+  gap: 14px;
+}
+.courtesy-value {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--accent);
+}
+.adjustment-lines {
+  display: grid;
+  gap: 8px;
+}
+.adjustment-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+  font-size: 12px;
+}
+.adjustment-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.adjustment-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--subtle);
+}
+.adjustment-voided {
+  border-left-color: var(--muted);
+  opacity: 0.75;
+}
+.adjustment-voided .payment-history-heading strong:last-child {
+  text-decoration: line-through;
+}
+.adjustment-void {
+  margin-top: 8px;
+  gap: 10px;
 }

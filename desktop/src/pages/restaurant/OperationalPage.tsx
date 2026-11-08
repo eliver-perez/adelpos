@@ -16,6 +16,8 @@ import { OperationsAdmin } from './OperationsAdmin';
 import { OrderItemEditor } from './OrderItemEditor';
 import { ProductSelector } from './ProductSelector';
 import { CheckoutPanel } from './checkout/CheckoutPanel';
+import { CheckoutToolbar } from './checkout/CheckoutToolbar';
+import { AccountAdjustments } from './adjustments/AccountAdjustments';
 import { paymentStateBadges } from '../../services/payments';
 
 export function OperationalPage({
@@ -40,8 +42,8 @@ export function OperationalPage({
     bill.account.state === 'open' &&
     (bill.account.mode !== 'takeaway' || can('takeaway.manage'));
   const currentEditor = editor?.accountID === bill?.account.id ? editor : null;
-  // El cobro sustituye las áreas de captura y cuenta dentro de la misma vista operativa.
-  const checkoutOpen = view !== 'manage' && panel === 'checkout' && !!bill;
+  // El cobro (y sus devoluciones) sustituye las áreas de captura y cuenta dentro de la misma vista.
+  const checkoutOpen = view !== 'manage' && (panel === 'checkout' || panel === 'refund') && !!bill;
   const actionNames: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign', 'void'];
   const views: { id: RestaurantView; label: string; allowed: boolean }[] = [
     {
@@ -62,7 +64,7 @@ export function OperationalPage({
   ];
 
   function openAccountAction(
-    action: AccountAction | 'metadata' | 'history' | 'kitchen' | 'checkout',
+    action: AccountAction | 'metadata' | 'history' | 'kitchen' | 'checkout' | 'adjustments',
     origin: WorkspacePanel,
   ) {
     setActionReturn(origin);
@@ -124,6 +126,20 @@ export function OperationalPage({
           execute={workspace.execute}
           busy={blocked}
           onClose={() => workspace.setPanel('capture')}
+        />
+      );
+    }
+    if (panel === 'adjustments' && bill) {
+      return (
+        <AccountAdjustments
+          key={bill.account.id}
+          bill={bill}
+          active={active}
+          can={can}
+          onClose={() => {
+            workspace.setPanel(actionReturn);
+            setActionReturn('capture');
+          }}
         />
       );
     }
@@ -197,11 +213,20 @@ export function OperationalPage({
               </button>
             ))}
         </div>
-        <div className="button-row">
+        {checkoutOpen && bill && (
+          <CheckoutToolbar
+            bill={bill}
+            mode={panel === 'refund' ? 'refund' : 'collect'}
+            can={can}
+            onMode={(mode) => workspace.setPanel(mode === 'refund' ? 'refund' : 'checkout')}
+            onShortcut={(shortcut) => openAccountAction(shortcut, panel)}
+          />
+        )}
+        <div className={`button-row ${checkoutOpen ? 'operation-toolbar-secondary' : ''}`}>
           <button className="secondary-button" onClick={workspace.refresh}>
             Actualizar
           </button>
-          {can('accounts.open') && (
+          {can('accounts.open') && !checkoutOpen && (
             <button
               className="primary-button"
               disabled={
@@ -263,8 +288,9 @@ export function OperationalPage({
           bill={bill}
           active={active}
           can={can}
+          mode={panel === 'refund' ? 'refund' : 'collect'}
+          onModeChange={(mode) => workspace.setPanel(mode === 'refund' ? 'refund' : 'checkout')}
           onClose={() => workspace.setPanel('capture')}
-          onAccountAction={(action) => openAccountAction(action, 'checkout')}
         />
       )}
       {!checkoutOpen && view === 'manage' && (

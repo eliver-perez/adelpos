@@ -126,6 +126,8 @@ CREATE TABLE app.payment_refunds (
     tip numeric(18,2) NOT NULL DEFAULT 0 CHECK (tip >= 0),
     reason text NOT NULL CHECK (length(reason) BETWEEN 5 AND 500),
     reference text NOT NULL DEFAULT '' CHECK (length(reference) <= 120),
+    -- Desglose de IVA congelado con las tasas de la venta original al momento de devolver.
+    tax_breakdown jsonb NOT NULL DEFAULT '[]',
     actor_id uuid NOT NULL REFERENCES app.users(id),
     device_id uuid NOT NULL REFERENCES app.devices(id),
     authorized_by uuid REFERENCES app.users(id),

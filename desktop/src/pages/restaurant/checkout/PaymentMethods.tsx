@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 import { PaymentMethodIcon } from '../../../components/PaymentMethodIcon';
 import { formatMoney, isZeroMoney } from '../../../services/payments';
-import type { PaymentMethod, PaymentRecord } from '../../../services/payments';
+import type { PaymentMethod, PaymentRecord, RefundRecord } from '../../../services/payments';
 import { serverDateTime } from '../../../services/restaurant';
 
 // Métodos como botones rectangulares: icono a la izquierda, nombre y estado seleccionado por borde
@@ -10,17 +11,21 @@ export function PaymentMethodGrid({
   selectedID,
   onSelect,
   disabled,
+  label = 'Métodos de pago disponibles',
+  empty = 'No hay métodos de pago activos.',
 }: {
   methods: PaymentMethod[];
   selectedID: string;
   onSelect: (method: PaymentMethod) => void;
   disabled: boolean;
+  label?: string;
+  empty?: string;
 }) {
   if (methods.length === 0) {
-    return <p className="muted text-sm">No hay métodos de pago activos.</p>;
+    return <p className="muted text-sm">{empty}</p>;
   }
   return (
-    <div className="payment-method-grid" role="group" aria-label="Métodos de pago disponibles">
+    <div className="payment-method-grid" role="group" aria-label={label}>
       {methods.map((method) => (
         <button
           type="button"
@@ -38,9 +43,19 @@ export function PaymentMethodGrid({
   );
 }
 
-function PaymentHistoryItem({ payment, timezone }: { payment: PaymentRecord; timezone: string }) {
+function PaymentHistoryItem({
+  payment,
+  timezone,
+  original,
+  actions,
+}: {
+  payment: PaymentRecord;
+  timezone: string;
+  original: PaymentRecord | undefined;
+  actions: ReactNode;
+}) {
   return (
-    <li className="payment-history-item">
+    <li className={`payment-history-item ${payment.corrected ? 'payment-history-historic' : ''}`}>
       <div className="payment-history-heading">
         <strong>{payment.method_name}</strong>
         <strong>{formatMoney(payment.amount)}</strong>
@@ -57,14 +72,29 @@ function PaymentHistoryItem({ payment, timezone }: { payment: PaymentRecord; tim
             · Recibido {formatMoney(payment.received)} · Cambio {formatMoney(payment.change)}
           </>
         )}
-        {!isZeroMoney(payment.tip) && <> · Propina {formatMoney(payment.tip)}</>}
         {payment.reference && <> · Ref. {payment.reference}</>}
       </p>
-      {(!isZeroMoney(payment.refunded_amount) || payment.corrected) && (
-        <p className="payment-history-detail">
-          {payment.corrected ? 'Pago corregido' : 'Devuelto'} {formatMoney(payment.refunded_amount)}
+      {/* La propina se muestra siempre aparte de la venta; el cambio nunca se convierte en propina. */}
+      {!isZeroMoney(payment.tip) && (
+        <p className="payment-history-detail">Propina aparte {formatMoney(payment.tip)}</p>
+      )}
+      {payment.corrected && (
+        <p className="payment-history-detail payment-history-flag">
+          Corregido: se revirtió y se registró de nuevo con el método correcto
         </p>
       )}
+      {original && (
+        <p className="payment-history-detail payment-history-flag">
+          Corrige a un pago de {original.method_name}
+        </p>
+      )}
+      {!payment.corrected && !isZeroMoney(payment.refunded_amount) && (
+        <p className="payment-history-detail">
+          Devuelto {formatMoney(payment.refunded_amount)}
+          {!isZeroMoney(payment.refunded_tip) && ` · propina ${formatMoney(payment.refunded_tip)}`}
+        </p>
+      )}
+      {actions && <div className="button-row payment-history-actions">{actions}</div>}
     </li>
   );
 }
@@ -72,9 +102,11 @@ function PaymentHistoryItem({ payment, timezone }: { payment: PaymentRecord; tim
 export function PaymentHistory({
   payments,
   timezone,
+  actions,
 }: {
   payments: PaymentRecord[];
   timezone: string;
+  actions?: (payment: PaymentRecord) => ReactNode;
 }) {
   if (payments.length === 0) {
     return <p className="muted text-sm">Aún no hay pagos registrados en esta cuenta.</p>;
@@ -82,33 +114,91 @@ export function PaymentHistory({
   return (
     <ol className="payment-history" aria-label="Pagos registrados">
       {payments.map((payment) => (
-        <PaymentHistoryItem key={payment.id} payment={payment} timezone={timezone} />
+        <PaymentHistoryItem
+          key={payment.id}
+          payment={payment}
+          timezone={timezone}
+          original={payments.find((entry) => entry.id === payment.corrects_payment_id)}
+          actions={actions?.(payment) ?? null}
+        />
       ))}
     </ol>
   );
 }
 
+// Devoluciones y reversos de corrección: registros compensatorios que nunca editan el pago.
+export function RefundHistory({
+  refunds,
+  timezone,
+}: {
+  refunds: RefundRecord[];
+  timezone: string;
+}) {
+  if (refunds.length === 0) {
+    return null;
+  }
+  return (
+    <>
+      <h3 className="bill-section-title">Devoluciones y reversos</h3>
+      <ol className="payment-history" aria-label="Devoluciones registradas">
+        {refunds.map((refund) => (
+          <li className="payment-history-item payment-history-refund" key={refund.id}>
+            <div className="payment-history-heading">
+              <strong>
+                {refund.kind === 'correction' ? 'Reverso por corrección' : 'Devolución'} ·{' '}
+                {refund.method_name}
+              </strong>
+              <strong>−{formatMoney(refund.amount)}</strong>
+            </div>
+            <p className="muted text-xs">
+              {serverDateTime(refund.created_at, timezone)} · {refund.actor_name}
+              {refund.authorized_by_name && ` · autorizó ${refund.authorized_by_name}`}
+            </p>
+            <p className="payment-history-detail">
+              {refund.reason}
+              {refund.reference && ` · Ref. ${refund.reference}`}
+            </p>
+            {!isZeroMoney(refund.tip) && (
+              <p className="payment-history-detail">Propina devuelta {formatMoney(refund.tip)}</p>
+            )}
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
 export function CheckoutMethods({
+  title,
   methods,
   selectedID,
   onSelect,
   disabled,
   payments,
+  refunds,
   timezone,
   error,
+  actions,
+  emptyMethods,
+  gridLabel,
 }: {
+  title: string;
+  gridLabel: string;
   methods: PaymentMethod[];
   selectedID: string;
   onSelect: (method: PaymentMethod) => void;
   disabled: boolean;
   payments: PaymentRecord[];
+  refunds: RefundRecord[];
   timezone: string;
   error: string;
+  actions?: (payment: PaymentRecord) => ReactNode;
+  emptyMethods?: string;
 }) {
   return (
-    <section className="checkout-area checkout-methods" aria-label="Métodos de pago">
+    <section className="checkout-area checkout-methods" aria-label={title}>
       <header className="checkout-area-header">
-        <h3>Método de pago</h3>
+        <h3>{title}</h3>
       </header>
       <div className="checkout-area-body">
         {error && <p className="checkout-inline-note">{error}</p>}
@@ -117,9 +207,12 @@ export function CheckoutMethods({
           selectedID={selectedID}
           onSelect={onSelect}
           disabled={disabled}
+          label={gridLabel}
+          empty={emptyMethods}
         />
         <h3 className="bill-section-title">Pagos registrados</h3>
-        <PaymentHistory payments={payments} timezone={timezone} />
+        <PaymentHistory payments={payments} timezone={timezone} actions={actions} />
+        <RefundHistory refunds={refunds} timezone={timezone} />
       </div>
     </section>
   );

@@ -61,6 +61,9 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 	if err := principal.requireWithin(assigned, "No puedes asignar un rol con permisos que tú no tienes."); err != nil {
 		return nil, err
 	}
+	if err := requireLimitWithin(ctx, tx, principal, input.RoleID); err != nil {
+		return nil, err
+	}
 	var userID string
 	var previous json.RawMessage
 	action := "user.created"

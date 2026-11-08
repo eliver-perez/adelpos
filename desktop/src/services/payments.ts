@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { Operation } from './api';
 
 // Contratos del módulo financiero de Go (backend/internal/payments). El dinero viaja siempre como
 // cadena con dos decimales: la interfaz lo muestra tal como lo entrega Go y nunca lo calcula.
@@ -85,6 +86,7 @@ export interface FinanceLine {
   version_id: string;
   item_id: string;
   name: string;
+  notes: string;
   quantity: number;
   settled_quantity: number;
   partial_quantity: number;
@@ -159,6 +161,18 @@ export interface Delivery {
   device_name: string;
 }
 
+// Precuentas y tickets ligados a la cuenta (se usan a partir de la fase 6D).
+export interface DocumentRecord {
+  ticket_id: string;
+  kind: string;
+  payment_id: string | null;
+  created_at: string;
+  job_id: string | null;
+  job_state: string | null;
+  printer_name: string | null;
+  copies: number;
+}
+
 // Estado financiero completo y autoritativo de una cuenta (GET payments/accounts/{id}).
 export interface Finance {
   account_id: string;
@@ -188,6 +202,7 @@ export interface Finance {
   refunds: RefundRecord[];
   adjustments: Adjustment[];
   delivery: Delivery | null;
+  documents: DocumentRecord[];
   server_time: string;
 }
 
@@ -249,6 +264,113 @@ export interface PaymentResult {
   closed: boolean;
   delivered: boolean;
   printing: { requested: boolean } & Record<string, unknown>;
+}
+
+// Autorización puntual de un supervisor. La contraseña solo viaja en la solicitud que la usa.
+export interface AuthorizationInput {
+  username: string;
+  password: string;
+}
+
+export type DiscountScope = 'account' | 'items';
+export type DiscountMethod = 'percent' | 'amount';
+
+export interface DiscountInput {
+  scope: DiscountScope;
+  method: DiscountMethod;
+  value: string;
+  courtesy: boolean;
+  concept?: string;
+  reason?: string;
+  selections?: Selection[];
+  expected_balance?: string;
+  authorization?: AuthorizationInput;
+}
+
+export interface DiscountPlan {
+  scope: DiscountScope;
+  method: DiscountMethod;
+  value: string;
+  base: string;
+  amount: string;
+  percent: string;
+  courtesy: boolean;
+  actor_limit: string;
+  requires_authorization: boolean;
+  balance_after: string;
+  settles: boolean;
+  units: { unit_id: string; amount: string }[];
+}
+
+export interface ChargeInput {
+  concept: string;
+  amount: string;
+  reason?: string;
+  expected_balance: string;
+}
+
+export interface VoidAdjustmentInput {
+  adjustment_id: string;
+  reason: string;
+  authorization?: AuthorizationInput;
+}
+
+export interface AdjustmentResult {
+  adjustment_id: string;
+  finance: Finance;
+  closed: boolean;
+}
+
+export type RefundMode = 'total' | 'payment' | 'items';
+
+export interface RefundInput {
+  mode: RefundMode;
+  payment_id?: string;
+  amount?: string;
+  tip?: string;
+  selections?: Selection[];
+  method_id?: string;
+  reference?: string;
+  reason?: string;
+  authorization?: AuthorizationInput;
+}
+
+export interface RefundPart {
+  payment_id: string;
+  amount: string;
+  tip: string;
+  units: { unit_id: string; amount: string }[];
+  tax: TaxLine[];
+}
+
+export interface RefundPlan {
+  mode: RefundMode;
+  amount: string;
+  tip: string;
+  parts: RefundPart[];
+  requires_authorization: boolean;
+  balance_after: string;
+}
+
+export interface RefundResult {
+  refund_ids: string[];
+  plan: RefundPlan;
+  finance: Finance;
+  reopened: boolean;
+}
+
+export interface CorrectionInput {
+  payment_id: string;
+  method_id: string;
+  reference?: string;
+  reason: string;
+  authorization?: AuthorizationInput;
+}
+
+export interface CorrectionResult {
+  reversal_id: string;
+  payment_id: string;
+  finance: Finance;
 }
 
 export interface CashRegister {
@@ -340,6 +462,14 @@ export function previewPayment(accountID: string, input: PaymentInput) {
   return api<PaymentPlan>('payments_preview', { id: accountID, body: input });
 }
 
+export function previewDiscount(accountID: string, input: DiscountInput) {
+  return api<DiscountPlan>('payments_discount_preview', { id: accountID, body: input });
+}
+
+export function previewRefund(accountID: string, input: RefundInput) {
+  return api<RefundPlan>('payments_refund_preview', { id: accountID, body: input });
+}
+
 // Clave del almacén global de pendientes para los cobros de una cuenta.
 export function paymentPendingKey(accountID: string) {
   return `payments:${accountID}`;
@@ -394,7 +524,47 @@ export const movementKindLabels: Record<string, string> = {
   payment: 'Cobro',
   refund: 'Devolución',
   correction: 'Corrección',
+  correction_reversal: 'Reverso por corrección',
 };
+
+// Complemento «el resultado …» de cada escritura financiera, para describir una operación pendiente.
+export const financialOperationLabels: Partial<Record<Operation, string>> = {
+  payments_pay: 'del pago',
+  payments_discount: 'del descuento',
+  payments_charge: 'del cargo',
+  payments_void_adjustment: 'de la cancelación del ajuste',
+  payments_refund: 'de la devolución',
+  payments_correct: 'de la corrección del pago',
+  payments_open_shift: 'de la apertura del turno',
+};
+
+// Describe el resultado confirmado de cualquier escritura financiera; todas devuelven el estado
+// financiero actualizado, que la interfaz muestra sin recalcularlo.
+export function financialOutcome(operation: Operation, result: unknown) {
+  const value = result as { finance?: Finance; closed?: boolean; reopened?: boolean } | null;
+  const finance = value?.finance ?? null;
+  let message = 'Operación registrada.';
+  if (operation === 'payments_discount') {
+    message = 'Descuento registrado.';
+  } else if (operation === 'payments_charge') {
+    message = 'Cargo registrado.';
+  } else if (operation === 'payments_void_adjustment') {
+    message = 'Ajuste cancelado; el registro original se conserva en el historial.';
+  } else if (operation === 'payments_refund') {
+    message = 'Devolución registrada.';
+  } else if (operation === 'payments_correct') {
+    message = 'Pago corregido con un reverso y un pago nuevo.';
+  } else if (operation === 'payments_pay') {
+    message = 'Pago registrado.';
+  }
+  if (value?.closed) {
+    message += ' La cuenta quedó liquidada y se cerró.';
+  }
+  if (value?.reopened) {
+    message += ' La cuenta se reabrió porque quedó saldo pendiente.';
+  }
+  return { finance, message };
+}
 
 // Nombres legibles de los permisos financieros, con la misma descripción registrada en Go.
 export const paymentPermissionLabels: Record<string, string> = {
@@ -405,7 +575,18 @@ export const paymentPermissionLabels: Record<string, string> = {
   'payments.methods.manage': 'Administrar métodos de pago',
   'payments.settings.manage': 'Configurar políticas de cobro e impresión de tickets',
   'payments.tax.manage': 'Configurar la tasa de IVA del establecimiento',
+  'payments.discounts.apply': 'Aplicar descuentos manuales dentro del límite del rol',
+  'payments.discounts.authorize': 'Autorizar descuentos superiores al límite',
+  'payments.courtesy': 'Otorgar cortesías',
+  'payments.charges.create': 'Registrar cargos extras generales',
+  'payments.charges.manage': 'Modificar o cancelar cargos extras',
   'payments.tips.record': 'Registrar propinas',
+  'payments.corrections': 'Anular o corregir pagos',
+  'payments.refunds.execute': 'Ejecutar devoluciones',
+  'payments.refunds.authorize': 'Autorizar devoluciones',
+  'payments.tickets.print': 'Imprimir tickets y precuentas',
+  'payments.tickets.reprint': 'Reimprimir tickets',
+  'takeaway.deliver': 'Registrar entrega de pedidos para llevar',
   'cash.shifts.open': 'Abrir turno de caja',
   'cash.shifts.read': 'Consultar turnos y movimientos de caja',
   'kitchen.printers.manage': 'Administrar impresoras',
@@ -424,6 +605,30 @@ export function formatMoney(value: string | null | undefined) {
     return `−$${value.slice(1)}`;
   }
   return `$${value}`;
+}
+
+// Códigos de Go que indican que la cuenta cambió y debe consultarse de nuevo.
+export const refreshCodes = [
+  'BALANCE_CHANGED',
+  'NOTHING_TO_COLLECT',
+  'ACCOUNT_NOT_OPEN',
+  'ACCOUNT_BELOW_PAYMENTS',
+  'ADJUSTMENT_VOIDED',
+  'NOTHING_TO_REFUND',
+];
+
+// Códigos que exigen revisar o abrir el turno de la caja de la terminal.
+export const shiftCodes = ['SHIFT_REQUIRED', 'REGISTER_REQUIRED', 'SHIFT_NOT_SHARED'];
+
+// Longitud de un texto en caracteres (no en bytes), como la valida Go.
+export function textLength(text: string) {
+  return Array.from(text.trim()).length;
+}
+
+// Los motivos de descuentos, devoluciones, correcciones y cancelaciones miden de 5 a 500 caracteres.
+export function validReason(text: string) {
+  const length = textLength(text);
+  return length >= 5 && length <= 500;
 }
 
 // Reconoce un importe nulo por su forma textual ("0", "0.00"); no realiza aritmética.
