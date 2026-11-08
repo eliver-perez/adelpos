@@ -70,7 +70,7 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 ## Reglas permanentes desde etapa 6
 
 - `catalog` es la única autoridad de precios; `payments` es la única autoridad financiera (saldos, pagos, asignaciones, cambio, descuentos manuales, cortesías, cargos, propinas, IVA, devoluciones, correcciones, turno mínimo, documentos comerciales y entregas). `payments` no importa `operations` ni `administration`; `operations` solo consulta sus guardas.
-- 0001–0006 son inmutables una vez aplicadas. La 0006 no se aplica a la instalación real sin autorización expresa del propietario, previo respaldo y ensayo de restauración.
+- 0001–0006 están aplicadas en la instalación real y son inmutables. Toda migración futura sobre la instalación real requiere autorización expresa del propietario, previo respaldo y ensayo de restauración.
 - Los registros financieros son inmutables: una corrección, cancelación o devolución es un registro compensatorio enlazado; nunca se edita ni borra un pago, ajuste o devolución.
 - Dinero con `numeric`/`shopspring/decimal` en Go y cadenas en JSON. React no suma, resta ni redondea dinero: muestra lo que devuelve Go y envía la cadena capturada. Los importes se capturan con `inputMode="decimal"` y validación estricta; nunca con `type="number"`.
 - El repartidor de centavos (`payments.allocate`) es determinista y conserva el total exacto. El IVA está incluido en los precios: la tasa del establecimiento es una lista cerrada (16, 8 o 0) elegida con botones, se copia a cada versión confirmada y no se recalcula al cambiar la configuración.

@@ -2,7 +2,7 @@
 
 Ejecución del **8 de noviembre de 2026**, zona America/Monterrey. Versión **0.6.0**, API v1, esquema **6** en el código. Evidencia anterior: [etapa 5](VERIFICATION_STAGE5.md) (incluye las correcciones previas a esta etapa), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance por fases: [ETAPA_6_AVANCE.md](ETAPA_6_AVANCE.md).
 
-**La instalación real no se modificó.** La migración 0006 no se aplicó a `adel_pos` (sigue en esquema 5); el servidor real y `bin/ad-el-pos-server` continúan en 0.5.0; no se reiniciaron servicios, no se restauraron respaldos ni se leyeron secretos de `.local` o del Keychain.
+**Las pruebas no tocaron la instalación real.** Después de completarlas, y con autorización del propietario, la instalación real se migró a esquema 6 (ver «Migración de la instalación real»). No se leyeron secretos de `.local` ni del Keychain.
 
 ## Entorno aislado
 
@@ -12,17 +12,17 @@ Cada fase se verificó sobre la combinación exacta que se confirmó en su commi
 
 ## Resultados ejecutados (árbol completo de la etapa)
 
-| Comprobación        | Resultado                                                                                                                                                                                                                               |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Formato y metadatos | `scripts/dev.sh format` y `format-check` (Prettier, gofmt, `cargo fmt --check`) aprobados; `sync-metadata --check` aprobado.                                                                                                            |
-| Go                  | `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race ./...` aprobado en todos los paquetes con pruebas, incluido `internal/payments`.                                                                        |
-| PostgreSQL          | Integración de `database`, `administration`, `catalog`, `operations` y `payments` aprobada. La aceptación de cobros vive en `operations` (`payments_acceptance_test.go`, `payments_adjustments_test.go`, `payments_documents_test.go`). |
-| Frontend            | Vitest **72 pruebas en 16 archivos** aprobadas (31 en 9 archivos al inicio de la etapa); `tsc --noEmit` estricto y `npm run build` correctos.                                                                                           |
-| Rust                | `cargo test --locked --offline`: **11 aprobadas**, 1 ignorada deliberadamente (escritura real en Keychain, opt-in). Incluye la lista cerrada de operaciones `payments_*`.                                                               |
-| Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores, ahora con turno, cobros, precuenta, descuento, ticket, documentos y entrega para llevar (ver abajo).                                                        |
-| Bundle macOS        | `tauri build --bundles app` en la copia aislada (destino de compilación temporal, sin reemplazar el `.app` del proyecto): `AD-EL POS.app` ARM64 **0.6.0**, 9.43 MiB. No se abrió.                                                       |
-| Revisión visual     | Capturas con transporte simulado en Chromium a 1280×720, 1024×768 y 1920×1080, temas claro y oscuro: sin desplazamiento horizontal, objetivos ≥ 44 px y sin errores de consola. No sustituye WKWebView nativo ni pantalla táctil.       |
-| Instalación real    | **No ejecutado** por diseño: requiere autorización del propietario (respaldo, ensayo de restauración, `server-stop`, `migrate`, `server-start`).                                                                                        |
+| Comprobación        | Resultado                                                                                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato y metadatos | `scripts/dev.sh format` y `format-check` (Prettier, gofmt, `cargo fmt --check`) aprobados; `sync-metadata --check` aprobado.                                                                                                                        |
+| Go                  | `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race ./...` aprobado en todos los paquetes con pruebas, incluido `internal/payments`.                                                                                    |
+| PostgreSQL          | Integración de `database`, `administration`, `catalog`, `operations` y `payments` aprobada. La aceptación de cobros vive en `operations` (`payments_acceptance_test.go`, `payments_adjustments_test.go`, `payments_documents_test.go`).             |
+| Frontend            | Vitest **72 pruebas en 16 archivos** aprobadas (31 en 9 archivos al inicio de la etapa); `tsc --noEmit` estricto y `npm run build` correctos.                                                                                                       |
+| Rust                | `cargo test --locked --offline`: **11 aprobadas**, 1 ignorada deliberadamente (escritura real en Keychain, opt-in). Incluye la lista cerrada de operaciones `payments_*`.                                                                           |
+| Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores, ahora con turno, cobros, precuenta, descuento, ticket, documentos y entrega para llevar (ver abajo).                                                                    |
+| Bundle macOS        | `tauri build --bundles app` en la copia aislada (destino de compilación temporal, sin reemplazar el `.app` del proyecto): `AD-EL POS.app` ARM64 **0.6.0**, 9.43 MiB. No se abrió.                                                                   |
+| Revisión visual     | Capturas con transporte simulado en Chromium a 1280×720, 1024×768 y 1920×1080, temas claro y oscuro: sin desplazamiento horizontal, objetivos ≥ 44 px y sin errores de consola. No sustituye WKWebView nativo ni pantalla táctil.                   |
+| Instalación real    | Migrada con autorización: respaldo `adel_pos-20261108T191622Z-57c0f5.dump`, restauración verificada (63 tablas idénticas), `migrate` `applied:1` y repetición `applied:0`, readiness 200 con esquema compatible, `.app` 0.6.0 compilado e iniciado. |
 
 ## Aceptación funcional (§24 de la especificación)
 
@@ -55,12 +55,15 @@ Recorrido Playwright (Chromium y WebKit, 1280×720), sobre la operación existen
 
 ## No ejecutado o no verificado
 
-- Aplicar la 0006 a la instalación real, compilar e instalar 0.6.0 en ella y repetir `restore-check.py`: requiere autorización.
-- Ventana nativa Tauri con WKWebView, Keychain real, pantalla completa de 0.6.0 y `tests/runtime_smoke.py`: no se abrió la aplicación nativa ni se interrumpieron servicios.
+- Recorrido de cobro en la ventana nativa Tauri (WKWebView), Keychain real, pantalla completa de 0.6.0 y `tests/runtime_smoke.py`: la aplicación 0.6.0 se inició sobre la instalación migrada, pero no se recorrió ni se automatizó.
 - Impresión física de tickets o precuentas: ninguna prueba envió a una impresora real.
 - Autorización de supervisor y devoluciones en el navegador: cubiertas por Go y Vitest, no por Playwright (el recorrido usa al administrador, cuyo límite es 100 %).
 - Actualización en tiempo real del tablero tras cobros y entregas (60): los eventos `payments.recorded` y `takeaway.delivered` se escriben en la misma transacción y la interfaz recarga ante eventos y por sondeo, pero no hay una prueba automática que lo compruebe entre dos terminales.
 - Pantalla táctil física, LAN con otra máquina, muchas terminales, Mac Intel y Windows.
+
+## Migración de la instalación real
+
+Autorizada por el propietario y ejecutada el 8 de noviembre de 2026 con `scripts/dev.sh`: `backup` → `backups/adel_pos-20261108T191622Z-57c0f5.dump`; `restore-check.py` → 63 tablas con conteos idénticos en una base temporal (`.local/stage6-restore-verification.json`); `server-stop`; `migrate` → `applied:1` (repetición `applied:0`); `server-start` → readiness 200, PostgreSQL disponible y esquema compatible; consulta de solo lectura → migraciones 1–6, IVA 16 %, cinco métodos de pago, administrador con límite de 100 % y los 21 permisos nuevos, sin turnos, pagos ni cuentas ficticias, 78 tablas en `app`; `build-macos` → `.app` 0.6.0 de 9.43 MiB; `open-app` → aplicación iniciada y atendida por el servidor.
 
 ## Repetir las comprobaciones
 
@@ -72,4 +75,4 @@ Recorrido Playwright (Chromium y WebKit, 1280×720), sobre la operación existen
 ./scripts/dev.sh build-macos
 ```
 
-`test-integration` y `test-browser` crean y eliminan bases `adel_pos_test_*` en el clúster del proyecto (55432); para aislamiento total, seguir el procedimiento de `CLAUDE.md` §6. `build-macos` reemplaza el `.app` de `desktop/src-tauri/target/release/bundle/macos/`; no ejecutarlo mientras la instalación real deba seguir en 0.5.0.
+`test-integration` y `test-browser` crean y eliminan bases `adel_pos_test_*` en el clúster del proyecto (55432); para aislamiento total, seguir el procedimiento de `CLAUDE.md` §6. `build-macos` reemplaza el `.app` de `desktop/src-tauri/target/release/bundle/macos/`.
