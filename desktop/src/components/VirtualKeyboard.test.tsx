@@ -45,6 +45,27 @@ describe('teclado virtual de terminal', () => {
     expect(screen.queryByRole('group')).toBeNull();
   });
 
+  it('excluye de forma explícita los campos marcados y conserva los de referencia', () => {
+    render(
+      <>
+        <input aria-label="Importe" inputMode="decimal" data-virtual-keyboard="off" />
+        <div data-virtual-keyboard="off">
+          <input aria-label="Efectivo recibido" inputMode="decimal" />
+        </div>
+        <input aria-label="Referencia" />
+        <VirtualKeyboard mode="always" />
+      </>,
+    );
+    fireEvent.focusIn(screen.getByLabelText('Importe'));
+    expect(screen.queryByRole('group')).toBeNull();
+    fireEvent.focusIn(screen.getByLabelText('Efectivo recibido'));
+    expect(screen.queryByRole('group')).toBeNull();
+    fireEvent.focusIn(screen.getByLabelText('Referencia'));
+    expect(screen.getByRole('group', { name: 'Teclado virtual alfanumérico' })).toBeTruthy();
+    fireEvent.focusIn(screen.getByLabelText('Importe'));
+    expect(screen.queryByRole('group')).toBeNull();
+  });
+
   it('respeta la preferencia desactivada', () => {
     render(<Example mode="disabled" />);
     fireEvent.focusIn(screen.getByLabelText('Nombre'));

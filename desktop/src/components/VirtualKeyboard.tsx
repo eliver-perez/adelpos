@@ -3,7 +3,16 @@ import type { Device } from '../services/models';
 
 type EditableField = HTMLInputElement | HTMLTextAreaElement;
 
+// Un campo (o un contenedor) marcado con data-virtual-keyboard="off" queda excluido de forma
+// explícita; por ejemplo, los importes de cobro que se capturan con el teclado numérico fijo.
+export function excludedFromVirtualKeyboard(target: Element) {
+  return target.closest('[data-virtual-keyboard="off"]') !== null;
+}
+
 function eligibleField(target: EventTarget | null): target is EditableField {
+  if (target instanceof Element && excludedFromVirtualKeyboard(target)) {
+    return false;
+  }
   if (target instanceof HTMLTextAreaElement) return !target.disabled && !target.readOnly;
   return (
     target instanceof HTMLInputElement &&

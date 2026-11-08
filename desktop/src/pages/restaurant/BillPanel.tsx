@@ -2,9 +2,22 @@ import { preparationLabels } from '../../services/kitchen';
 import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
 import { ProductDetails } from '../../components/catalog/QuoteBreakdown';
-import type { Bill, ConfirmedLine, DraftItem, OrderQuote } from '../../services/restaurant';
+import type {
+  Account,
+  Bill,
+  ConfirmedLine,
+  DraftItem,
+  OrderQuote,
+} from '../../services/restaurant';
 import type { Lookups } from '../../services/catalog';
 import type { AccountAction } from './AccountActions';
+import { usePendingEntry } from '../../hooks/pendingOperations';
+import {
+  deliveryStateDescriptions,
+  formatMoney,
+  paymentPendingKey,
+  paymentStateDescriptions,
+} from '../../services/payments';
 
 const actions: {
   id: AccountAction | 'metadata' | 'history' | 'kitchen';
@@ -22,6 +35,67 @@ const actions: {
   { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage' },
 ];
 
+// Descripción del estado de pago con el saldo que calculó Go; no se suman importes en la interfaz.
+function paymentDescription(account: Account) {
+  const label = paymentStateDescriptions[account.payment_state] ?? account.payment_state;
+  if (account.payment_state === 'partial' && account.finance) {
+    return `${label} · saldo ${formatMoney(account.finance.balance)}`;
+  }
+  return label;
+}
+
+function closedDescription(account: Account) {
+  if (account.mode === 'takeaway') {
+    return 'Pedido liquidado y entregado; la cuenta está cerrada.';
+  }
+  return 'Cuenta liquidada y cerrada; la mesa quedó libre.';
+}
+
+// Botones de cobro: Cobrar exige registrar cobros y consultar la información financiera; la
+// consulta de pagos basta con el permiso de consulta.
+function CheckoutButtons({
+  account,
+  can,
+  disabled,
+  onCheckout,
+}: {
+  account: Account;
+  can: (permission: string) => boolean;
+  disabled: boolean;
+  onCheckout: () => void;
+}) {
+  const pending = usePendingEntry(paymentPendingKey(account.id));
+  if (!can('payments.read')) {
+    return null;
+  }
+  const collectable =
+    account.state === 'open' && account.confirmed_quantity > 0 && account.payment_state !== 'paid';
+  if (collectable && can('payments.collect')) {
+    return (
+      <>
+        {pending && (
+          <p className="checkout-pending-hint" role="alert">
+            Hay un cobro sin resultado confirmado. Ábrelo para recuperarlo antes de cobrar otra vez.
+          </p>
+        )}
+        <button className="primary-button" disabled={disabled} onClick={onCheckout}>
+          Cobrar {account.finance ? formatMoney(account.finance.balance) : ''}
+        </button>
+      </>
+    );
+  }
+  const consultable =
+    account.confirmed_quantity > 0 || account.payment_state !== 'not_recorded' || !!pending;
+  if (!consultable) {
+    return null;
+  }
+  return (
+    <button className="secondary-button" disabled={disabled} onClick={onCheckout}>
+      Consultar pagos y saldo
+    </button>
+  );
+}
+
 export function BillPanel({
   bill,
   error,
@@ -32,6 +106,7 @@ export function BillPanel({
   busy,
   can,
   onAction,
+  onCheckout,
   onDraftEdit,
   onDraftRemove,
   onLineEdit,
@@ -49,6 +124,7 @@ export function BillPanel({
   busy: boolean;
   can: (permission: string) => boolean;
   onAction: (action: AccountAction | 'metadata' | 'history' | 'kitchen') => void;
+  onCheckout: () => void;
   onDraftEdit: (item: DraftItem) => void;
   onDraftRemove: (item: DraftItem) => void;
   onLineEdit: (item: ConfirmedLine) => void;
@@ -102,6 +178,9 @@ export function BillPanel({
       <p className="account-preparation-status">
         Preparación: {preparationLabels[account.preparation_state] ?? account.preparation_state}
       </p>
+      {account.mode !== 'takeaway' && (
+        <p className="account-payment-status">Pago: {paymentDescription(account)}</p>
+      )}
       <select
         className="operation-account-actions"
         aria-label="Acciones de cuenta"
@@ -134,6 +213,7 @@ export function BillPanel({
             )}
           </Notice>
         )}
+        {account.state === 'closed' && <Notice>{closedDescription(account)}</Notice>}
         {account.state === 'voided' && (
           <Notice>Cuenta anulada sin productos activos. Su historial permanece disponible.</Notice>
         )}
@@ -143,8 +223,10 @@ export function BillPanel({
               Preparación:{' '}
               {preparationLabels[account.preparation_state] ?? account.preparation_state}
             </span>
-            <span>Pago: sin registro de cobro</span>
-            <span>Entrega: no entregado</span>
+            <span>Pago: {paymentDescription(account)}</span>
+            <span>
+              Entrega: {deliveryStateDescriptions[account.delivery_state] ?? account.delivery_state}
+            </span>
             {account.customer_name && (
               <strong>
                 {account.customer_name} · {account.phone}
@@ -253,6 +335,18 @@ export function BillPanel({
           <span>Confirmado</span>
           <strong>${account.totals.total}</strong>
         </div>
+        {account.finance && account.payment_state !== 'not_recorded' && (
+          <>
+            <div className="bill-total-row">
+              <span>Pagado</span>
+              <strong>{formatMoney(account.finance.paid)}</strong>
+            </div>
+            <div className="bill-total-row">
+              <span>Saldo pendiente</span>
+              <strong>{formatMoney(account.finance.balance)}</strong>
+            </div>
+          </>
+        )}
         {(bill.draft.length > 0 || editing) && (
           <>
             <div className="bill-total-row">
@@ -284,9 +378,15 @@ export function BillPanel({
             Confirmar pedido
           </button>
         )}
+        <CheckoutButtons
+          account={account}
+          can={can}
+          disabled={busy || editing}
+          onCheckout={onCheckout}
+        />
         <p className="muted text-xs">
           Confirmar registra el pedido y resuelve su liberación. Consulta Preparación para ver
-          destinos y recepción; los cobros se integrarán después.
+          destinos y recepción. Cobrar abre la pantalla de cobro de esta cuenta.
         </p>
       </footer>
     </aside>

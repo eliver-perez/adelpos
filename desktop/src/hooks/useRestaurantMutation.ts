@@ -1,42 +1,56 @@
-import { useRef, useState } from 'react';
+import { useContext, useState, useSyncExternalStore } from 'react';
 import { api, APIError } from '../services/api';
 import type { Operation } from '../services/api';
+import { PendingOperationStore, PendingOperationsContext } from './pendingOperations';
+import type { PendingRequest } from './pendingOperations';
 
-interface PendingOperation {
-  operation: Operation;
-  id?: string;
-  body: Record<string, unknown>;
-}
+const localKey = 'local';
 
-export function useRestaurantMutation(onResolved: (operation: Operation, result: unknown) => void) {
-  const [busy, setBusy] = useState(false);
+// Ejecuta escrituras idempotentes con operation_id. Ante un resultado incierto (sin conexión o
+// error ≥ 500) conserva la operación y su cuerpo exacto para reintentarla con el mismo UUID.
+//
+// Sin clave, el pendiente pertenece a la instancia del hook (comportamiento original). Con clave,
+// se guarda en el almacén global de la aplicación y sobrevive al desmontaje de la página.
+export function useRestaurantMutation(
+  onResolved: (operation: Operation, result: unknown) => void,
+  key?: string,
+) {
+  const shared = useContext(PendingOperationsContext);
+  const [local] = useState(() => new PendingOperationStore());
+  if (key !== undefined && !shared) {
+    throw new Error('Las operaciones con clave requieren PendingOperationsProvider.');
+  }
+  const store = key !== undefined && shared ? shared : local;
+  const storeKey = key ?? localKey;
+  const entry = useSyncExternalStore(
+    store.subscribe,
+    () => store.get(storeKey),
+    () => store.get(storeKey),
+  );
   const [error, setError] = useState('');
-  const [uncertain, setUncertain] = useState(false);
-  const pending = useRef<PendingOperation | null>(null);
-  const running = useRef(false);
 
-  async function send<T>(request: PendingOperation): Promise<T> {
-    if (running.current) throw new Error('Espera a que termine la operación actual.');
-    running.current = true;
-    setBusy(true);
+  async function send<T>(request: PendingRequest): Promise<T> {
+    if (store.get(storeKey)?.running) {
+      throw new Error('Espera a que termine la operación actual.');
+    }
+    store.begin(storeKey, request);
     setError('');
     try {
       const result = await api<T>(request.operation, { id: request.id, body: request.body });
-      pending.current = null;
-      setUncertain(false);
+      store.resolve(storeKey);
       onResolved(request.operation, result);
       return result;
     } catch (problem) {
       const unknownResult =
         problem instanceof APIError &&
         (problem.code === 'CONNECTION_ERROR' || problem.status >= 500);
-      if (!unknownResult) pending.current = null;
-      setUncertain(unknownResult);
+      if (unknownResult) {
+        store.markUncertain(storeKey);
+      } else {
+        store.resolve(storeKey);
+      }
       setError(problem instanceof Error ? problem.message : 'No se pudo completar la operación.');
       throw problem;
-    } finally {
-      running.current = false;
-      setBusy(false);
     }
   }
 
@@ -44,25 +58,38 @@ export function useRestaurantMutation(onResolved: (operation: Operation, result:
     operation: Operation,
     options: { id?: string; body?: Record<string, unknown> },
   ): Promise<T> {
-    if (pending.current)
+    if (store.get(storeKey)) {
       throw new Error('Primero recupera el resultado de la operación pendiente.');
-    const request: PendingOperation = {
+    }
+    const request: PendingRequest = {
       operation,
       id: options.id,
       body: { ...options.body, operation_id: crypto.randomUUID() },
     };
-    pending.current = request;
     return send<T>(request);
   }
 
   async function retry() {
-    if (!pending.current) return;
+    const pending = store.get(storeKey);
+    if (!pending) {
+      return;
+    }
     try {
-      await send(pending.current);
+      await send(pending.request);
     } catch {
       // El mismo identificador permanece disponible si vuelve a fallar la comunicación.
     }
   }
 
-  return { execute, retry, busy, error, uncertain, clearError: () => setError('') };
+  return {
+    execute,
+    retry,
+    busy: entry?.running ?? false,
+    error,
+    uncertain: entry?.uncertain ?? false,
+    pending: entry?.request ?? null,
+    // Lectura sincrónica del almacén: evita un segundo envío por doble toque antes de renderizar.
+    isPending: () => store.get(storeKey) !== undefined,
+    clearError: () => setError(''),
+  };
 }

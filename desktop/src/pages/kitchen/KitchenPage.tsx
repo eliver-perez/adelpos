@@ -23,11 +23,13 @@ export function KitchenPage({
 }) {
   const [view, setView] = useState('preparation');
   const [queueVersion, setQueueVersion] = useState(0);
+  // El pendiente de cocina vive en el almacén global (clave kitchen): cambiar de pantalla y volver
+  // conserva el mismo operation_id para recuperar el resultado.
   const mutation = useRestaurantMutation((operation) => {
     window.dispatchEvent(new CustomEvent('adel-server-change'));
     if (['kitchen_reprint', 'kitchen_retry_job', 'kitchen_resolve_job'].includes(operation))
       setQueueVersion((version) => version + 1);
-  });
+  }, 'kitchen');
   const execute: ExecuteKitchen = async (operation, options) => {
     try {
       return await mutation.execute(operation, options);

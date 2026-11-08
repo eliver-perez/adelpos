@@ -1,0 +1,122 @@
+import { Accordion } from '../../components/Accordion';
+import { Notice, PageTitle } from '../../components/Forms';
+import { useResource } from '../../hooks/useResource';
+import { useRestaurantMutation } from '../../hooks/useRestaurantMutation';
+import { APIError } from '../../services/api';
+import { permissionName } from '../../services/payments';
+import type { PaymentMethod, PaymentSettings } from '../../services/payments';
+import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
+import { MethodsAdmin } from './MethodsAdmin';
+import { PaymentPoliciesForm } from './PaymentPoliciesForm';
+import { ShiftOverview } from './ShiftOverview';
+import { TaxRateSection } from './TaxRateSection';
+
+export const paymentsConfigurationKey = 'payments:configuration';
+
+function changed() {
+  window.dispatchEvent(new CustomEvent('adel-server-change'));
+}
+
+// Administración de cobros: métodos de pago, IVA, políticas y turno actual con sus movimientos.
+export function PaymentsAdminPage({
+  can,
+  timezone,
+}: {
+  can: (permission: string) => boolean;
+  timezone: string;
+}) {
+  const readable = can('payments.read');
+  const settings = useResource<PaymentSettings>('payments_settings', { enabled: readable });
+  const methods = useResource<PaymentMethod[]>('payments_methods', { enabled: readable });
+  const mutation = useRestaurantMutation(changed, paymentsConfigurationKey);
+  const execute: ExecuteMutation = async (operation, options) => {
+    try {
+      return await mutation.execute(operation, options);
+    } catch (problem) {
+      // Una revisión obsoleta se resuelve consultando la versión vigente.
+      if (problem instanceof APIError && problem.status === 409) {
+        changed();
+      }
+      throw problem;
+    }
+  };
+  const busy = mutation.busy || mutation.uncertain;
+  const activeMethods = methods.data?.filter((method) => method.active).length ?? 0;
+
+  return (
+    <div className="payments-admin form-stack">
+      <PageTitle
+        title="Cobros"
+        description="Métodos de pago, IVA, políticas de cobro y turno de caja. Los importes y las validaciones se calculan en el servidor."
+      />
+      {!readable && (
+        <Notice>
+          Consultar la configuración de cobro requiere el permiso «{permissionName('payments.read')}
+          ».
+        </Notice>
+      )}
+      {mutation.uncertain && (
+        <div className="operation-recovery">
+          <p>
+            El resultado del último cambio no pudo confirmarse. Recupéralo con el mismo
+            identificador antes de realizar otro.
+          </p>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={mutation.busy}
+            onClick={() => void mutation.retry()}
+          >
+            Reintentar con el mismo identificador
+          </button>
+        </div>
+      )}
+      {readable && (
+        <>
+          <Accordion
+            title="Métodos de pago"
+            summary={
+              methods.data
+                ? `${activeMethods} activos de ${methods.data.length}`
+                : 'Consultando métodos…'
+            }
+            defaultOpen
+          >
+            <Notice>{methods.error}</Notice>
+            <MethodsAdmin methods={methods.data ?? []} can={can} execute={execute} busy={busy} />
+          </Accordion>
+          <Accordion
+            title="IVA"
+            summary={
+              settings.data
+                ? `Tasa vigente: ${settings.data.tax_rate} %`
+                : 'Consultando configuración…'
+            }
+          >
+            <Notice>{settings.error}</Notice>
+            {settings.data && (
+              <TaxRateSection settings={settings.data} can={can} execute={execute} busy={busy} />
+            )}
+          </Accordion>
+          <Accordion
+            title="Políticas de cobro"
+            summary="Turno compartido, impresión de ticket, impresora y devoluciones"
+          >
+            <Notice>{settings.error}</Notice>
+            {settings.data && (
+              <PaymentPoliciesForm
+                settings={settings.data}
+                can={can}
+                execute={execute}
+                busy={busy}
+              />
+            )}
+          </Accordion>
+        </>
+      )}
+      <Accordion title="Turno actual" summary="Caja de esta terminal, movimientos y totales">
+        <ShiftOverview can={can} timezone={timezone} />
+      </Accordion>
+    </div>
+  );
+}

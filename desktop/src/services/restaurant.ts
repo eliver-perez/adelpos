@@ -1,4 +1,5 @@
 import type { Customization, PreviewLine, ProductBreakdown, Quote } from './catalog';
+import type { DeliveryState, FinanceBrief, PaymentState } from './payments';
 
 export interface Area {
   id: string;
@@ -51,7 +52,7 @@ export interface Account {
   folio: number;
   name: string;
   mode: 'dine_in' | 'takeaway';
-  state: 'open' | 'merged' | 'voided';
+  state: 'open' | 'closed' | 'merged' | 'voided';
   table_id: string | null;
   table_name: string | null;
   price_list_id: string;
@@ -81,8 +82,11 @@ export interface Account {
     | 'ready'
     | 'change_pending'
     | 'cancelled';
-  payment_state: 'not_recorded';
-  delivery_state: 'not_delivered';
+  // Pago y entrega se derivan en Go de los registros financieros reales; son independientes de
+  // la preparación.
+  payment_state: PaymentState;
+  delivery_state: DeliveryState;
+  finance: FinanceBrief;
   confirmed_quantity: number;
   draft_quantity: number;
   totals: Totals;

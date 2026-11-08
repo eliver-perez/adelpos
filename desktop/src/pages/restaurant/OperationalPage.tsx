@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
 import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
-import type { RestaurantView } from '../../hooks/useRestaurantWorkspace';
+import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
 import { AccountForm } from './AccountForm';
@@ -14,6 +15,8 @@ import { CancelItem } from './CancelItem';
 import { OperationsAdmin } from './OperationsAdmin';
 import { OrderItemEditor } from './OrderItemEditor';
 import { ProductSelector } from './ProductSelector';
+import { CheckoutPanel } from './checkout/CheckoutPanel';
+import { paymentStateBadges } from '../../services/payments';
 
 export function OperationalPage({
   active,
@@ -28,6 +31,8 @@ export function OperationalPage({
 }) {
   const workspace = useRestaurantWorkspace(active, requestedView, can);
   const { view, panel, bill, overview, lookups, editor, mutation } = workspace;
+  // Panel al que vuelve una acción de cuenta: dividir o transferir desde el cobro regresa al cobro.
+  const [actionReturn, setActionReturn] = useState<WorkspacePanel>('capture');
   const blocked = mutation.busy || mutation.uncertain;
   const selectedTable = overview.data?.tables.find((table) => table.id === workspace.tableID);
   const editable =
@@ -35,6 +40,8 @@ export function OperationalPage({
     bill.account.state === 'open' &&
     (bill.account.mode !== 'takeaway' || can('takeaway.manage'));
   const currentEditor = editor?.accountID === bill?.account.id ? editor : null;
+  // El cobro sustituye las áreas de captura y cuenta dentro de la misma vista operativa.
+  const checkoutOpen = view !== 'manage' && panel === 'checkout' && !!bill;
   const actionNames: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign', 'void'];
   const views: { id: RestaurantView; label: string; allowed: boolean }[] = [
     {
@@ -53,6 +60,14 @@ export function OperationalPage({
         can('restaurant.settings.manage'),
     },
   ];
+
+  function openAccountAction(
+    action: AccountAction | 'metadata' | 'history' | 'kitchen' | 'checkout',
+    origin: WorkspacePanel,
+  ) {
+    setActionReturn(origin);
+    workspace.setPanel(action);
+  }
 
   function startAccount(takeaway = view === 'takeaway') {
     workspace.setNewMode(takeaway ? 'takeaway' : 'dine_in');
@@ -129,7 +144,10 @@ export function OperationalPage({
           overview={overview.data}
           execute={workspace.execute}
           busy={blocked}
-          onClose={() => workspace.setPanel('capture')}
+          onClose={() => {
+            workspace.setPanel(actionReturn);
+            setActionReturn('capture');
+          }}
         />
       );
     }
@@ -239,7 +257,17 @@ export function OperationalPage({
           </button>
         </div>
       )}
-      {view === 'manage' ? (
+      {checkoutOpen && bill && (
+        <CheckoutPanel
+          key={bill.account.id}
+          bill={bill}
+          active={active}
+          can={can}
+          onClose={() => workspace.setPanel('capture')}
+          onAccountAction={(action) => openAccountAction(action, 'checkout')}
+        />
+      )}
+      {!checkoutOpen && view === 'manage' && (
         <div className="operation-admin-scroll">
           <Notice>{overview.error}</Notice>
           {overview.data ? (
@@ -253,7 +281,8 @@ export function OperationalPage({
             <p className="muted">Consultando áreas y mesas…</p>
           )}
         </div>
-      ) : (
+      )}
+      {!checkoutOpen && view !== 'manage' && (
         <div
           className={`operation-workspace ${view === 'takeaway' ? 'operation-takeaway-board' : ''}`}
         >
@@ -288,7 +317,8 @@ export function OperationalPage({
                     <option value="">Selecciona una cuenta…</option>
                     {workspace.accounts.data?.items.map((account) => (
                       <option key={account.id} value={account.id}>
-                        #{account.folio} · {account.name} · ${account.totals.total}
+                        #{account.folio} · {account.name} · ${account.totals.total} ·{' '}
+                        {paymentStateBadges[account.payment_state] ?? account.payment_state}
                       </option>
                     ))}
                   </select>
@@ -344,7 +374,8 @@ export function OperationalPage({
             editing={!!currentEditor}
             busy={blocked}
             can={can}
-            onAction={workspace.setPanel}
+            onAction={(action) => openAccountAction(action, 'capture')}
+            onCheckout={() => openAccountAction('checkout', 'capture')}
             onDraftEdit={(item) => workspace.startEditor(item, 'draft')}
             onDraftRemove={(item) => void workspace.removeDraft(item)}
             onLineEdit={(line) => workspace.startEditor(line, 'confirmed')}

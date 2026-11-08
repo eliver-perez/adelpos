@@ -72,3 +72,33 @@ Cambios a tablas existentes: `restaurant_accounts.state` admite `closed` (+ `clo
 - La entrega solicitada en un pago que no liquida la cuenta no se registra (el pago sí); la respuesta lo indica con `delivered: false`.
 - La anulación de una cuenta exige que todo lo cobrado ya se haya devuelto (neto cero) y sin ajustes vigentes; combinar exige que el origen no tenga ningún pago registrado.
 - `package-lock.json` conserva la versión 0.4.0 que traía de etapas anteriores (no afecta `npm ci`).
+
+### 6B — Pantalla de cobro
+
+**Implementado**
+
+- Tipos y servicio `desktop/src/services/payments.ts` con los contratos de Go (dinero siempre como cadena; `formatMoney` solo antepone el símbolo). `Account` admite `closed`, `payment_state`/`delivery_state` reales y el resumen `finance`.
+- Almacén global de operaciones inciertas (M8): `hooks/pendingOperations.tsx` con `PendingOperationsProvider` en `App`. `useRestaurantMutation(onResolved, key?)` conserva operación, recurso, cuerpo exacto y `operation_id` bajo una clave (`payments:<cuenta>`, `payments:shift`, `payments:configuration`, `kitchen`); sin clave mantiene el comportamiento anterior. La copia guardada descarta `authorization.password`. Mientras exista un pendiente, la cuenta bloquea nuevos cobros y ofrece reintentar con el mismo identificador o consultar el resultado. `KitchenPage` migró al almacén sin otro cambio.
+- Teclado numérico fijo `components/NumericKeypad.tsx` (dígitos, `00`, punto, borrar, limpiar) que escribe sobre una cadena con validación estricta (`services/amountInput.ts`: un punto, dos decimales, diez enteros, sin signos). Admite teclado físico sin interceptar otros campos. Importes en texto con `inputMode="decimal"` (M2).
+- Exclusión del teclado flotante con `data-virtual-keyboard="off"` en el campo o un contenedor (M11).
+- Pantalla de cobro integrada en la operación (sin modal), `pages/restaurant/checkout/`: cuenta y productos con selección por cantidades y totales de Go con IVA; métodos como botones rectangulares con icono y texto (sin casillas) e historial de pagos; captura total/parcial con efectivo recibido, importes rápidos, propina, referencia, cambio destacado, importe aplicado y saldo restante. Toda cifra procede de `payments/accounts/{id}/preview` y el registro envía `expected_balance`. Estados: capturando, validando, registrando, registrado, saldo pendiente, liquidada, error recuperable, conflicto (`BALANCE_CHANGED`) e incierto. Botón «Cobrar $saldo» en la cuenta y consulta de pagos con `payments.read`.
+- Apertura de turno en la misma pantalla con fondo explícito (acepta $0) y motivo de Go cuando el turno no es utilizable; nunca se abre automáticamente.
+- Pantalla «Cobros» (`pages/payments/`): métodos, IVA con botones 16/8/0, políticas de cobro e impresora de tickets, y movimientos del turno actual con totales por método.
+- Tableros y listas con etiquetas de pago (Sin pago / Abono / Pagado) y de entrega independientes de la preparación, y filtro «Cerradas y liquidadas».
+- Puente nativo `api.rs`: lista cerrada con las 23 operaciones `payments_*` de la etapa (incluidas las que usan 6C y 6D) y prueba `payment_routes_are_closed_and_keep_write_methods`. Los identificadores anidados (ajuste, ticket) viajan en el cuerpo porque cada ruta Rust admite un solo identificador.
+
+**Pruebas ejecutadas** (copia aislada con la interfaz 6B y el backend del commit 6A; clúster temporal 55499)
+
+- Vitest: 12 archivos, 50 pruebas aprobadas (19 nuevas: teclado S7 con `+`, punto, doble punto y tercer decimal; almacén S6 que conserva identificador y cuerpo tras desmontar y reintenta con el mismo `operation_id` sin contraseña; cobro con métodos sin casillas, cambio desde la previsualización, total de selección, doble envío bloqueado, `BALANCE_CHANGED`, pago incierto tras remontar y apertura de turno con fondo explícito; exclusión del teclado flotante).
+- `tsc --noEmit`, `npm run build`, Prettier, gofmt, `cargo fmt --check`, `sync --check`, `go vet` (también con `integration`), `go test -race ./...` y `cargo test --locked --offline` (11 aprobadas, 1 ignorada de hardware): sin errores.
+- Playwright Chromium y WebKit con Go temporal en 8183: recorrido operativo existente aprobado en ambos motores (los textos de pago y entrega que verifica siguen vigentes).
+- Revisión visual con transporte simulado en Chromium a 1280×720, 1024×768 y 1920×1080, temas claro y oscuro: sin desplazamiento horizontal, objetivos ≥ 44 px, cambio siempre visible. No sustituye WKWebView nativo ni pantalla táctil real.
+
+**Decisiones**
+
+- El pago total envía también `amount` igual al importe calculado por Go, como segunda guarda junto a `expected_balance`.
+- El total de una selección se calcula antes de elegir método con un método solo de cálculo (efectivo preferido) que nunca se usa para registrar.
+- Los pendientes viven en memoria del proceso (sin `localStorage`); no se descartan manualmente: se resuelven al reintentar o con un rechazo definitivo de Go (4xx).
+- «Cobros» no se ofrece como pantalla de inicio: el backend de preferencias solo admite pantallas con un permiso único y esta depende de cualquiera de cuatro.
+- Los importes rápidos de efectivo ($100, $200, $500, $1000 y Exacto) son valores fijos; Go decide si alcanzan.
+- `print` y `deliver` en el pago, descuentos, cargos, devoluciones y entrega quedan para 6C y 6D.
