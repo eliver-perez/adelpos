@@ -53,6 +53,14 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 	if !roleAllowed {
 		return nil, denied()
 	}
+	// Delegación segura: el rol asignado nunca puede otorgar permisos que el actor no posee.
+	assigned, err := rolePermissionKeys(ctx, tx, input.RoleID)
+	if err != nil {
+		return nil, err
+	}
+	if err := principal.requireWithin(assigned, "No puedes asignar un rol con permisos que tú no tienes."); err != nil {
+		return nil, err
+	}
 	var userID string
 	var previous json.RawMessage
 	action := "user.created"
@@ -71,13 +79,36 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 	} else {
 		userID = parts[1]
 		// Serializa cambios administrativos para proteger al último administrador activo.
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(7820148303)"); err != nil {
+		if err := lockAdministration(ctx, tx); err != nil {
 			return nil, err
 		}
 		if err := editableUser(ctx, tx, userID); err != nil {
 			return nil, err
 		}
-		var err error
+		currentRole, err := userRoleID(ctx, tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		// Nadie modifica su propio rol; debe hacerlo otro usuario con permisos suficientes.
+		if userID == principal.UserID && currentRole != input.RoleID {
+			return nil, delegationDenied("No puedes modificar tu propio rol.")
+		}
+		if err := requireManageableUser(ctx, tx, principal, userID); err != nil {
+			return nil, err
+		}
+		// Las excepciones individuales del usuario se conservan con el nuevo rol; el resultado
+		// completo tampoco puede superar los permisos del actor.
+		overrides, err := userOverrides(ctx, tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		projected, err := projectedPermissions(ctx, tx, input.RoleID, overrides)
+		if err != nil {
+			return nil, err
+		}
+		if err := principal.requireWithin(projected, "El usuario resultante tendría permisos que tú no tienes."); err != nil {
+			return nil, err
+		}
 		previous, err = object(ctx, tx, "SELECT "+publicUserColumns+" FROM app.users u JOIN app.roles r ON r.id=u.role_id WHERE u.id=$1", userID)
 		if err != nil {
 			return nil, err
@@ -85,26 +116,19 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 		if input.Password != "" {
 			return nil, invalid("El cambio de contraseña se realiza desde el formulario personal de contraseña.")
 		}
-		// Evita perder al último administrador ordinario por una edición accidental.
-		var wouldRemoveLast bool
-		err = tx.QueryRow(ctx, `SELECT coalesce(selected_role.code='administrator',false)
-            AND (NOT $2::boolean OR $3::uuid<>u.role_id)
-            AND (SELECT count(*) FROM app.users a JOIN app.roles r ON r.id=a.role_id WHERE a.active AND r.code='administrator')<=1
-            FROM app.users u JOIN app.roles selected_role ON selected_role.id=u.role_id WHERE u.id=$1`, userID, input.Active, input.RoleID).Scan(&wouldRemoveLast)
-		if err != nil {
-			return nil, err
-		}
-		if wouldRemoveLast {
-			return nil, invalid("Debe permanecer al menos un administrador ordinario activo.")
-		}
-		_, err = tx.Exec(ctx, "UPDATE app.users SET username=$1,display_name=$2,role_id=$3,active=$4,updated_at=now() WHERE id=$5", input.Username, input.DisplayName, input.RoleID, input.Active, userID)
-		if err != nil {
-			return nil, err
-		}
-		if !input.Active {
-			if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='user_disabled' WHERE user_id=$1 AND revoked_at IS NULL", userID); err != nil {
-				return nil, err
+		// El último administrador se determina por permisos efectivos, no por el código del rol.
+		err = preserveAdministration(ctx, tx, func() error {
+			_, err := tx.Exec(ctx, "UPDATE app.users SET username=$1,display_name=$2,role_id=$3,active=$4,updated_at=now() WHERE id=$5", input.Username, input.DisplayName, input.RoleID, input.Active, userID)
+			if err != nil {
+				return err
 			}
+			if !input.Active {
+				_, err = tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='user_disabled' WHERE user_id=$1 AND revoked_at IS NULL", userID)
+			}
+			return err
+		})
+		if err != nil {
+			return nil, err
 		}
 		action = "user.updated"
 	}
@@ -147,23 +171,66 @@ func userPermissions(ctx context.Context, tx pgx.Tx, request Request, principal 
 		if err := decode(request.Body, &input); err != nil {
 			return nil, err
 		}
-		previous, err := list(ctx, tx, "SELECT permission_key,effect FROM app.user_permissions WHERE user_id=$1 ORDER BY permission_key", userID)
-		if err != nil {
-			return nil, err
-		}
 		for permission, effect := range input.Overrides {
 			if !knownPermission(permission) || (effect != "inherit" && effect != "allow" && effect != "deny") {
 				return nil, invalid("Los estados permitidos son inherit, allow y deny para permisos registrados.")
 			}
+		}
+		if err := lockAdministration(ctx, tx); err != nil {
+			return nil, err
+		}
+		// Nadie amplía ni reduce sus propias excepciones.
+		if userID == principal.UserID {
+			return nil, delegationDenied("No puedes modificar tus propias excepciones de permisos.")
+		}
+		if err := requireManageableUser(ctx, tx, principal, userID); err != nil {
+			return nil, err
+		}
+		// Se proyecta el resultado antes de escribir: tanto un allow como retirar un deny pueden
+		// otorgar permisos, y ninguno puede quedar fuera de los permisos del actor.
+		roleID, err := userRoleID(ctx, tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		resulting, err := userOverrides(ctx, tx, userID)
+		if err != nil {
+			return nil, err
+		}
+		for permission, effect := range input.Overrides {
 			if effect == "inherit" {
-				_, err = tx.Exec(ctx, "DELETE FROM app.user_permissions WHERE user_id=$1 AND permission_key=$2", userID, permission)
+				delete(resulting, permission)
 			} else {
-				_, err = tx.Exec(ctx, `INSERT INTO app.user_permissions(user_id,permission_key,effect) VALUES ($1,$2,$3)
-                    ON CONFLICT(user_id,permission_key) DO UPDATE SET effect=excluded.effect`, userID, permission, effect)
+				resulting[permission] = effect
 			}
-			if err != nil {
-				return nil, err
+		}
+		projected, err := projectedPermissions(ctx, tx, roleID, resulting)
+		if err != nil {
+			return nil, err
+		}
+		if err := principal.requireWithin(projected, "No puedes conceder permisos que tú no tienes."); err != nil {
+			return nil, err
+		}
+		previous, err := list(ctx, tx, "SELECT permission_key,effect FROM app.user_permissions WHERE user_id=$1 ORDER BY permission_key", userID)
+		if err != nil {
+			return nil, err
+		}
+		err = preserveAdministration(ctx, tx, func() error {
+			for permission, effect := range input.Overrides {
+				var err error
+				if effect == "inherit" {
+					_, err = tx.Exec(ctx, "DELETE FROM app.user_permissions WHERE user_id=$1 AND permission_key=$2", userID, permission)
+				} else {
+					_, err = tx.Exec(ctx, `INSERT INTO app.user_permissions(user_id,permission_key,effect) VALUES ($1,$2,$3)
+                        ON CONFLICT(user_id,permission_key) DO UPDATE SET effect=excluded.effect`, userID, permission, effect)
+				}
+				if err != nil {
+					return err
+				}
 			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
 		next, err := list(ctx, tx, "SELECT permission_key,effect FROM app.user_permissions WHERE user_id=$1 ORDER BY permission_key", userID)
 		if err != nil {

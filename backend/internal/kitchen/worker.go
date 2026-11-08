@@ -232,7 +232,21 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
         WHERE id=$4`, state, outcome.Message, encoded(outcome), owned.AttemptID); err != nil {
 		return true, err
 	}
+	confirmedFailures := false
 	if state == "error" && owned.Job.Attempts >= 3 && owned.Job.PrinterSnapshot.FallbackID != nil {
+		// El respaldo exige tres fallos confirmados consecutivos sin envío. Un intento incierto o
+		// en intervención entre ellos (por ejemplo, antes de un envío autorizado manualmente)
+		// interrumpe la cuenta: el total de intentos no basta.
+		var trailingErrors int
+		err := tx.QueryRow(storeContext, `SELECT count(*) FILTER (WHERE outcome='error') FROM (
+            SELECT outcome FROM app.kitchen_print_attempts WHERE job_id=$1 ORDER BY attempt DESC LIMIT 3) latest`,
+			owned.Job.ID).Scan(&trailingErrors)
+		if err != nil {
+			return true, err
+		}
+		confirmedFailures = trailingErrors == 3
+	}
+	if confirmedFailures {
 		fallback, err := one[Printer](storeContext, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", owned.Job.PrinterSnapshot.FallbackID)
 		if err != nil {
 			return true, err

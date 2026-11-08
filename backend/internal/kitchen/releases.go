@@ -240,6 +240,28 @@ func (handler *service) releaseAction(id, action string) (any, error) {
 	return saved, handler.history("release."+action, &id, release, saved)
 }
 
+// accountScheduleChanged compara la programación anterior y posterior de un evento
+// account.updated. Dos ausencias equivalen; dos instantes se comparan por igualdad temporal.
+func accountScheduleChanged(payload []byte) (bool, error) {
+	var change struct {
+		Before struct {
+			ScheduledAt *time.Time `json:"scheduled_at"`
+		} `json:"before"`
+		After struct {
+			ScheduledAt *time.Time `json:"scheduled_at"`
+		} `json:"after"`
+	}
+	if err := json.Unmarshal(payload, &change); err != nil {
+		return false, err
+	}
+	before := change.Before.ScheduledAt
+	after := change.After.ScheduledAt
+	if before == nil || after == nil {
+		return (before == nil) != (after == nil), nil
+	}
+	return !before.Equal(*after), nil
+}
+
 // Integrate consume el mismo evento dentro de la transacción comercial que lo produce.
 func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, payload []byte, actor Actor) error {
 	var found bool
@@ -279,7 +301,16 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 			return err
 		}
 	case "account.updated":
-		_, err := tx.Exec(ctx, `UPDATE app.kitchen_releases r SET scheduled_at=a.scheduled_at,
+		changed, err := accountScheduleChanged(payload)
+		if err != nil {
+			return err
+		}
+		// Solo una nueva programación capturada en la cuenta sustituye la de cocina. Editar
+		// teléfono, notas u otros datos no debe revertir una reprogramación hecha en cocina.
+		if !changed {
+			break
+		}
+		_, err = tx.Exec(ctx, `UPDATE app.kitchen_releases r SET scheduled_at=a.scheduled_at,
             due_at=a.scheduled_at-make_interval(mins=>r.lead_minutes),revision=r.revision+1,
             state=CASE WHEN a.scheduled_at IS NULL THEN 'pending' ELSE 'scheduled' END
             FROM app.restaurant_accounts a WHERE a.id=$1 AND r.account_id=a.id

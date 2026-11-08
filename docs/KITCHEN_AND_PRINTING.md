@@ -30,7 +30,7 @@ Las cuentas para llevar admiten hora local en la zona IANA configurable del esta
 
 La política se captura por liberación: automática o manual y minutos de anticipación. `due_at` resta la anticipación al instante programado, tanto si la referencia de la cuenta es preparación como entrega; usar anticipación cero si se desea liberar exactamente a esa hora. El trabajador Go revisa vencimientos cada segundo, incluso sin Tauri. Reiniciar no duplica liberaciones gracias a marcadores canónicos y locks transaccionales.
 
-La política automática está desactivada inicialmente; anticipación inicial 25 minutos. Cambiar la configuración general no reescribe pedidos programados existentes. Se puede actualizar una programación pendiente con revisión o liberar manualmente. Adelantar una liberación requiere también `kitchen.release_early`.
+La política automática está desactivada inicialmente; anticipación inicial 25 minutos. Cambiar la configuración general no reescribe pedidos programados existentes. Se puede actualizar una programación pendiente con revisión o liberar manualmente. Una reprogramación hecha en cocina se conserva aunque después se editen otros datos de la cuenta (teléfono, notas, responsable); solo una nueva programación capturada en la propia cuenta la sustituye. Adelantar una liberación requiere también `kitchen.release_early`.
 
 ## Documentos
 
@@ -55,7 +55,7 @@ El formato admite nombre del establecimiento, notas, precios, texto normal/grand
 
 **Agente de impresión**: contrato de destino futuro. Puede registrarse, pero los trabajos quedan en intervención con explicación. No se finge un envío ni se ejecuta un agente remoto.
 
-No hay redirección automática a la impresora predeterminada del sistema. Solo se utiliza un respaldo configurado explícitamente, sin ciclos, después de tres fallos confirmados previos al envío y una sola vez por trabajo. Un resultado incierto nunca activa ese respaldo.
+No hay redirección automática a la impresora predeterminada del sistema. Solo se utiliza un respaldo configurado explícitamente, sin ciclos, después de tres fallos confirmados consecutivos previos al envío y una sola vez por trabajo. Un resultado incierto nunca activa ese respaldo: si un intento incierto o en intervención aparece entre los tres últimos (por ejemplo, antes de un envío autorizado manualmente), la cuenta vuelve a empezar y se requieren tres errores confirmados seguidos.
 
 Referencias oficiales: [lp](https://www.cups.org/doc/man-lp.html), [lpstat](https://www.cups.org/doc/man-lpstat.html), [opciones CUPS](https://www.cups.org/doc/cupspm.html). La prueba en hardware y sus límites constan en [VERIFICATION.md](VERIFICATION.md).
 
