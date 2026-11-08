@@ -272,3 +272,45 @@ Lista priorizada y evidencias en [docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTI
 7. **Pruebas**: unitarias + aceptación con PostgreSQL (`//go:build integration`) para transacciones, concurrencia e idempotencia; actualizar `scripts/database.py` si hay paquete nuevo; Vitest para componentes; ampliar Playwright si cambia el recorrido operativo. Repetir las suites de etapas anteriores.
 8. **Documentación**: actualizar README, ARCHITECTURE, API_CONTRACTS, la guía del módulo y una nueva `docs/VERIFICATION.md` (archivando la anterior como `VERIFICATION_STAGE6.md`) **solo con lo realmente ejecutado**; no presentar pendientes como completos. Versionado en `config/product.json` + `sync`.
 9. **Alcance**: no modificar `sa`, admin/admin, marca ni etapas anteriores sin solicitud expresa; no adelantar funciones de etapas futuras; preguntar ante contradicciones.
+
+## 21. Sistema anterior (referencia funcional)
+
+El sistema anterior en C# / Windows Forms / SQL Server está en `../legacy-csharp/`
+(fuera de este repositorio). Lleva en uso en un restaurante real desde 2018.
+Es una versión antigua, no la última, y su código es irregular: sirve para
+entender **qué hacía y cómo lo usaban**, no **cómo programarlo**.
+
+Reglas:
+
+- **Solo lectura.** No modificar, compilar, ejecutar ni copiar archivos de esa carpeta a este repositorio.
+- **No copiar código ni patrones.** Usa `double` para dinero, SQL concatenado y lógica en formularios. Se reimplementa todo con la arquitectura y reglas de este proyecto.
+- **No conectarse a ninguna base SQL Server.** El esquema de referencia está en `PoS/database/Base de Datos.sql`.
+- **No leer ni copiar secretos** de `App.config` o cualquier archivo de configuración.
+- **Las decisiones del propietario prevalecen.** Si el sistema anterior hace algo distinto a lo decidido en este proyecto, gana lo decidido aquí. Señala la diferencia en lugar de imitarlo.
+
+Al iniciar cada etapa, antes de diseñar:
+
+1. Revisa cómo resolvía el sistema anterior las funciones de esa etapa.
+2. Reporta al propietario las funciones o reglas que tenía y no aparecen en el plan de la etapa.
+3. No las implementes sin su confirmación.
+
+Archivos de referencia por tema:
+
+| Tema | Archivos en `PoS/` |
+| --- | --- |
+| Captura de pedidos | `CapturaOrden.cs`, `Seleccionar_Producto.cs`, `ArticuloLista.cs` |
+| Mesas y punto de venta | `PuntoDeVenta.cs`, `AsignarMesa.cs`, `Pedidos.cs` |
+| Cobros | `PagarEfectivo.cs`, `PagarTarjeta.cs`, `PagoParcial.cs`, `PagoDivisa.cs`, `SeleccionaTipoPago.cs` |
+| Descuentos y cargos | `CapturaDescuento.cs`, `CapturaExtra.cs` |
+| División de cuentas | `DividirCuenta.cs` |
+| Caja y cortes | `IniciarCorte.cs`, `CorteParcial.cs`, `CerrarCorte.cs`, `Cortes.cs`, `Egresos.cs` |
+| Inventario y compras | `Inventario.cs`, `Entrada_Inventario.cs`, `AjusteInventario.cs`, `Control_Inventario.cs`, `Composicion.cs`, `Proveedores.cs` |
+| Reportes | `RegistroVentas.cs`, `RegistroEgresos.cs`, `RegistroCanceladas.cs`, `DetallesVenta.cs` |
+| Licencia y equipos | `Activacion.cs`, `License.cs`, `Registro_Equipo.cs` |
+
+Funciones del sistema anterior ya identificadas:
+
+- **Pago en dólares en efectivo**, con pesos y dólares en la misma operación y cambio mostrado en ambas monedas. Decidido como función opcional del establecimiento. Pendiente de implementar.
+- **Tope de caja** (`topes_caja`): aviso de exceso de efectivo. Candidato para la etapa 7.
+- **Pedido especial** (`ventas_especial`): quitar ingredientes de un producto desde la captura. Verificar cobertura en la etapa 3.
+- **Pantalla de captura** con categorías, productos como botones y personalización en el mismo panel. Base del rediseño táctil de la captura.
