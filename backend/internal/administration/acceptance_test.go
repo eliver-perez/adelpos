@@ -290,6 +290,15 @@ func TestStageTwoAcceptance(t *testing.T) {
 			t.Fatal("La actividad de soporte no quedó auditada")
 		}
 	})
+	testDelegationRules(t, &delegationEnvironment{
+		ctx:             ctx,
+		pool:            pool,
+		call:            call,
+		text:            text,
+		device:          terminal{id: primary.id, secret: primary.secret},
+		admin:           primary,
+		supportPassword: supportPassword,
+	})
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

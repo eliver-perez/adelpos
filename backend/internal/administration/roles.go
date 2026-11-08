@@ -44,6 +44,10 @@ func roles(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 			return nil, invalid("El rol contiene un permiso desconocido.")
 		}
 	}
+	// Delegación segura: un rol nunca puede otorgar permisos que el actor no posee.
+	if err := principal.requireWithin(input.Permissions, "No puedes conceder a un rol permisos que tú no tienes."); err != nil {
+		return nil, err
+	}
 	var roleID string
 	var previous json.RawMessage
 	action := "role.created"
@@ -51,8 +55,15 @@ func roles(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 		if err := tx.QueryRow(ctx, "INSERT INTO app.roles(name) VALUES ($1) RETURNING id", input.Name).Scan(&roleID); err != nil {
 			return nil, err
 		}
+		if err := insertRolePermissions(ctx, tx, roleID, input.Permissions); err != nil {
+			return nil, err
+		}
 	} else {
 		roleID = parts[1]
+		// Serializa cambios que pueden alterar quién administra el sistema.
+		if err := lockAdministration(ctx, tx); err != nil {
+			return nil, err
+		}
 		var reserved bool
 		if err := tx.QueryRow(ctx, "SELECT reserved FROM app.roles WHERE id=$1 FOR UPDATE", roleID).Scan(&reserved); err != nil {
 			return nil, err
@@ -60,27 +71,48 @@ func roles(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 		if reserved {
 			return nil, denied()
 		}
-		var err error
+		// Nadie modifica el rol que le otorga sus propios permisos.
+		if roleID == principal.RoleID {
+			return nil, delegationDenied("No puedes modificar tu propio rol.")
+		}
+		current, err := rolePermissionKeys(ctx, tx, roleID)
+		if err != nil {
+			return nil, err
+		}
+		if err := principal.requireWithin(current, "No puedes editar un rol con permisos que tú no tienes."); err != nil {
+			return nil, err
+		}
 		previous, err = object(ctx, tx, rolesQuery+" AND r.id=$1", roleID)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, "UPDATE app.roles SET name=$1 WHERE id=$2", input.Name, roleID); err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(ctx, "DELETE FROM app.role_permissions WHERE role_id=$1", roleID); err != nil {
+		// El último administrador se determina por permisos efectivos de todos los usuarios del rol.
+		err = preserveAdministration(ctx, tx, func() error {
+			if _, err := tx.Exec(ctx, "UPDATE app.roles SET name=$1 WHERE id=$2", input.Name, roleID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "DELETE FROM app.role_permissions WHERE role_id=$1", roleID); err != nil {
+				return err
+			}
+			return insertRolePermissions(ctx, tx, roleID, input.Permissions)
+		})
+		if err != nil {
 			return nil, err
 		}
 		action = "role.updated"
-	}
-	for _, key := range input.Permissions {
-		if _, err := tx.Exec(ctx, "INSERT INTO app.role_permissions(role_id,permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING", roleID, key); err != nil {
-			return nil, err
-		}
 	}
 	next, err := object(ctx, tx, rolesQuery+" AND r.id=$1", roleID)
 	if err != nil {
 		return nil, err
 	}
 	return next, audit(ctx, tx, principal, action, "role", &roleID, previous, next, true)
+}
+
+func insertRolePermissions(ctx context.Context, tx pgx.Tx, roleID string, keys []string) error {
+	for _, key := range keys {
+		if _, err := tx.Exec(ctx, "INSERT INTO app.role_permissions(role_id,permission_key) VALUES ($1,$2) ON CONFLICT DO NOTHING", roleID, key); err != nil {
+			return err
+		}
+	}
+	return nil
 }

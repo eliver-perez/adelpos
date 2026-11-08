@@ -135,12 +135,53 @@ func (service *Service) Execute(ctx context.Context, request Request) (any, erro
 	}
 	defer transaction.Rollback(context.Background())
 	result, operationError := service.dispatch(ctx, transaction, request)
-	var fault *Fault
-	shouldCommit := operationError == nil || (errors.As(operationError, &fault) && fault.Commit)
-	if shouldCommit {
+	if shouldCommit(operationError) {
 		if err := transaction.Commit(ctx); err != nil {
 			return nil, err
 		}
+	}
+	return result, operationError
+}
+
+// shouldCommit confirma solo operaciones correctas o fallos que deben conservar su rastro
+// (auditoría de denegaciones, intentos de acceso o sesiones expiradas).
+func shouldCommit(operationError error) bool {
+	var fault *Fault
+	return operationError == nil || (errors.As(operationError, &fault) && fault.Commit)
+}
+
+// runProtected ejecuta una operación autenticada dentro de un savepoint. Si la operación
+// termina en 403, se deshace todo lo que hubiera escrito, aunque la verificación de permiso
+// ocurriera después de una escritura, y solo se conserva la auditoría de la denegación.
+// Así la regla "toda autorización antes de la primera escritura" no depende de convención:
+// una autorización tardía nunca confirma cambios parciales.
+func runProtected(ctx context.Context, tx pgx.Tx, principal Principal, request Request, route string, operation func(pgx.Tx) (any, error)) (any, error) {
+	work, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, operationError := operation(work)
+	var fault *Fault
+	if errors.As(operationError, &fault) && fault.Status == 403 {
+		if err := work.Rollback(ctx); err != nil {
+			return nil, err
+		}
+		details := map[string]string{"method": request.Method, "operation": strings.Split(route, "/")[0]}
+		if err := audit(ctx, tx, principal, "access.denied", "authorization", nil, nil, details, false); err != nil {
+			return nil, err
+		}
+		fault.Commit = true
+		return nil, operationError
+	}
+	if operationError != nil && !shouldCommit(operationError) {
+		// La transacción completa se revertirá; se descarta también el savepoint.
+		if err := work.Rollback(ctx); err != nil {
+			return nil, err
+		}
+		return result, operationError
+	}
+	if err := work.Commit(ctx); err != nil {
+		return nil, err
 	}
 	return result, operationError
 }
@@ -168,16 +209,10 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if err != nil {
 		return nil, err
 	}
-	result, err := service.protected(ctx, tx, request, principal, route)
-	var fault *Fault
 	// Las denegaciones y acciones de soporte también forman parte del historial de seguridad.
-	if errors.As(err, &fault) && fault.Status == 403 {
-		auditError := audit(ctx, tx, principal, "access.denied", "authorization", nil, nil, map[string]string{"method": request.Method, "operation": strings.Split(route, "/")[0]}, false)
-		if auditError != nil {
-			return nil, auditError
-		}
-		fault.Commit = true
-	}
+	result, err := runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+		return service.protected(ctx, work, request, principal, route)
+	})
 	if err == nil && request.Method == "GET" && principal.Support {
 		err = audit(ctx, tx, principal, "support.read", strings.Split(route, "/")[0], nil, nil, nil, true)
 	}

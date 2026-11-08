@@ -10,38 +10,40 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 
 ## Rutas
 
-| Método     | Ruta                      | Requisito                                                                    |
-| ---------- | ------------------------- | ---------------------------------------------------------------------------- |
-| GET        | `/health/live`            | Público; proceso activo.                                                     |
-| GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                        |
-| GET        | `/version`                | Público; producto, versión, API y esquema 5.                                 |
-| GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                     |
-| GET        | `/setup/status`           | Público; solo configured booleano.                                           |
-| POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                       |
-| POST       | `/devices/enroll`         | Código de autorización de un solo uso, no requiere sesión previa.            |
-| POST       | `/auth/login`             | Dispositivo autorizado; username y password.                                 |
-| POST       | `/auth/logout`            | Sesión; revoca la actual.                                                    |
-| GET        | `/auth/me`                | Sesión; identidad, permisos, preferencias y terminal.                        |
-| POST       | `/auth/password`          | Sesión; contraseña actual/nueva; rota la sesión.                             |
-| GET / POST | `/users`                  | users.read / users.manage.                                                   |
-| PATCH      | `/users/{id}`             | users.manage; no modifica sa.                                                |
-| GET / PUT  | `/users/{id}/permissions` | permissions.read / permissions.manage.                                       |
-| GET / PUT  | `/users/{id}/preferences` | users.manage; no modifica sa.                                                |
-| GET / POST | `/roles`                  | roles.read / roles.manage + permissions.manage.                              |
-| PATCH      | `/roles/{id}`             | roles.manage + permissions.manage; rol reservado rechazado.                  |
-| GET        | `/permissions`            | permissions.read; registro central.                                          |
-| GET / PUT  | `/settings`               | settings.read / settings.manage.                                             |
-| GET / POST | `/registers`              | registers.read / registers.manage.                                           |
-| PATCH      | `/registers/{id}`         | registers.manage; desactivar requiere desasociar terminales activas.         |
-| GET        | `/devices`                | devices.read.                                                                |
-| POST       | `/devices/invitations`    | devices.manage; código válido diez minutos.                                  |
-| PATCH      | `/devices/{id}`           | devices.manage; nombre, caja y teclado.                                      |
-| POST       | `/devices/{id}/revoke`    | devices.manage; revoca terminal y sesiones.                                  |
-| GET        | `/sessions`               | sessions.read; hasta 200 recientes, sin tokens.                              |
-| POST       | `/sessions/{id}/revoke`   | sessions.manage; una cuenta ordinaria no revoca directamente sesiones de sa. |
-| GET / PUT  | `/preferences`            | Sesión propia.                                                               |
-| PUT        | `/terminal/preferences`   | Sesión; solo teclado de la terminal actual.                                  |
-| GET        | `/audit`                  | audit.read; filtros y paginación.                                            |
+| Método     | Ruta                      | Requisito                                                                                             |
+| ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| GET        | `/health/live`            | Público; proceso activo.                                                                              |
+| GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                                                 |
+| GET        | `/version`                | Público; producto, versión, API y esquema 5.                                                          |
+| GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                                              |
+| GET        | `/setup/status`           | Público; solo configured booleano.                                                                    |
+| POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                                                |
+| POST       | `/devices/enroll`         | Código de autorización de un solo uso, no requiere sesión previa.                                     |
+| POST       | `/auth/login`             | Dispositivo autorizado; username y password.                                                          |
+| POST       | `/auth/logout`            | Sesión; revoca la actual.                                                                             |
+| GET        | `/auth/me`                | Sesión; identidad, permisos, preferencias y terminal.                                                 |
+| POST       | `/auth/password`          | Sesión; contraseña actual/nueva; rota la sesión.                                                      |
+| GET / POST | `/users`                  | users.read / users.manage; el rol asignado no puede superar los permisos del actor.                   |
+| PATCH      | `/users/{id}`             | users.manage; no modifica sa, el propio rol ni usuarios con más permisos que el actor.                |
+| GET / PUT  | `/users/{id}/permissions` | permissions.read / permissions.manage; no las propias ni concesiones fuera de los permisos del actor. |
+| GET / PUT  | `/users/{id}/preferences` | users.manage; no modifica sa.                                                                         |
+| GET / POST | `/roles`                  | roles.read / roles.manage + permissions.manage; solo permisos que posee el actor.                     |
+| PATCH      | `/roles/{id}`             | roles.manage + permissions.manage; rol reservado, propio o con más permisos rechazado.                |
+| GET        | `/permissions`            | permissions.read; registro central.                                                                   |
+| GET / PUT  | `/settings`               | settings.read / settings.manage.                                                                      |
+| GET / POST | `/registers`              | registers.read / registers.manage.                                                                    |
+| PATCH      | `/registers/{id}`         | registers.manage; desactivar requiere desasociar terminales activas.                                  |
+| GET        | `/devices`                | devices.read.                                                                                         |
+| POST       | `/devices/invitations`    | devices.manage; código válido diez minutos.                                                           |
+| PATCH      | `/devices/{id}`           | devices.manage; nombre, caja y teclado.                                                               |
+| POST       | `/devices/{id}/revoke`    | devices.manage; revoca terminal y sesiones.                                                           |
+| GET        | `/sessions`               | sessions.read; hasta 200 recientes, sin tokens.                                                       |
+| POST       | `/sessions/{id}/revoke`   | sessions.manage; una cuenta ordinaria no revoca directamente sesiones de sa.                          |
+| GET / PUT  | `/preferences`            | Sesión propia.                                                                                        |
+| PUT        | `/terminal/preferences`   | Sesión; solo teclado de la terminal actual.                                                           |
+| GET        | `/audit`                  | audit.read; filtros y paginación.                                                                     |
+
+Delegación: un 403 `PERMISSION_DENIED` con mensaje específico rechaza crear, asignar o editar roles y excepciones cuyo resultado tenga permisos efectivos que el actor no posee, administrar a un usuario con más permisos, y modificar el propio rol o las propias excepciones. Retirar un `deny` (`inherit`) cuenta como concesión. Un cambio que dejaría al sistema sin un administrador completo (usuario ordinario activo con todos los permisos registrados) responde 400 `VALIDATION_ERROR` y no modifica datos.
 
 ## Cuerpos principales
 
@@ -69,7 +71,7 @@ Errores públicos:
 }
 ```
 
-400: validación; 401: dispositivo/sesión/credenciales inválidos; 403: permiso o aprovisionamiento rechazado; 404: inexistente; 409: duplicado o caja en uso; 413: cuerpo mayor del límite (64 KiB general; 2 MiB catálogo/restaurante); 429: límite de intentos; 503: indisponibilidad. Los diagnósticos conservan los códigos de la etapa 1. Códigos de sesión: SESSION_REQUIRED, SESSION_INVALID, SESSION_EXPIRED, SESSION_REVOKED, SESSION_REPLACED; terminal: DEVICE_REQUIRED y DEVICE_REVOKED. No exponer detalles PostgreSQL.
+400: validación; 401: dispositivo/sesión/credenciales inválidos; 403: permiso o aprovisionamiento rechazado (la operación completa se revierte y solo se audita la denegación); 404: inexistente; 409: duplicado o caja en uso; 413: cuerpo mayor del límite (64 KiB general; 2 MiB catálogo/restaurante); 429: límite de intentos; 503: indisponibilidad. Los diagnósticos conservan los códigos de la etapa 1. Códigos de sesión: SESSION_REQUIRED, SESSION_INVALID, SESSION_EXPIRED, SESSION_REVOKED, SESSION_REPLACED; terminal: DEVICE_REQUIRED y DEVICE_REVOKED. No exponer detalles PostgreSQL.
 
 JSON UTF-8, Cache-Control no-store, X-Content-Type-Options nosniff y request ID generado por Go. CORS exacto conserva consultas técnicas GET; la operación autenticada de escritorio usa HTTP nativo, sin ampliar CORS ni CSP. Ninguna credencial se transporta por query string. Timeouts administrativos de diez segundos en Go y doce en el cliente; respuesta nativa limitada a 2 MiB.
 

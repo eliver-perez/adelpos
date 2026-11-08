@@ -30,6 +30,7 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 - sa es reservado y no editable desde administración ordinaria. Su contraseña solo la define privadamente el propietario en Terminal local; no inventarla ni pedirla por chat.
 - Los secretos de sesión/dispositivo solo se conservan en el almacén seguro nativo. Auditar cambios transaccionalmente y no registrar contraseñas, hashes ni tokens.
 - Consultar dispositivos, sesiones y permisos vigentes en Go en cada operación protegida.
+- Delegación segura (corrección previa a etapa 6): nadie concede ni asigna permisos efectivos que no posee, administra a usuarios con más permisos ni modifica su propio rol o excepciones. Debe permanecer un administrador completo por permisos efectivos. Toda autorización ocurre antes de la primera escritura; además, un 403 revierte la operación mediante savepoint y solo confirma la auditoría de la denegación.
 
 ## Reglas confirmadas en etapa 3
 

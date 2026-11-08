@@ -136,4 +136,48 @@ func testKitchenQueueSafety(t *testing.T, fixture *restaurantFixture) {
 			"revision": copy.Revision, "decision": "cancel", "reason": "Finaliza ensayo sin transporte físico",
 		}, 200)
 	})
+	t.Run("envío autorizado tras incertidumbre exige tres fallos confirmados para el respaldo", func(t *testing.T) {
+		job := request()
+		adapter := &recordingTransport{state: "uncertain"}
+		worker := kitchen.Worker{Pool: fixture.pool, Transport: adapter}
+		allowRetry := func() {
+			t.Helper()
+			if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_print_jobs SET next_attempt_at=now() WHERE id=$1", job.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := worker.PrintNext(fixture.ctx); err != nil {
+			t.Fatal(err)
+		}
+		current := read(job.ID)
+		fixture.mutate(t, "POST", "kitchen/jobs/"+job.ID+"/resolve", map[string]any{
+			"revision": current.Revision, "decision": "send", "reason": "Revisado: no salió papel, se autoriza otro envío",
+		}, 200)
+		// Intentos 2 y 3 fallan sin envío; junto con el incierto suman tres intentos, pero no tres fallos confirmados.
+		adapter.state = "error"
+		for attempt := 0; attempt < 2; attempt++ {
+			if _, err := worker.PrintNext(fixture.ctx); err != nil {
+				t.Fatal(err)
+			}
+			allowRetry()
+		}
+		current = read(job.ID)
+		if current.PrinterID != primary.ID || current.State != "error" || current.Attempts != 3 {
+			t.Fatalf("Se activó el respaldo sin tres fallos confirmados: impresora %s, estado %s", current.PrinterID, current.State)
+		}
+		// Un reintento manual con un tercer error confirmado consecutivo sí habilita el respaldo explícito.
+		fixture.mutate(t, "POST", "kitchen/jobs/"+job.ID+"/retry", map[string]any{
+			"revision": current.Revision, "reason": "Reintento tras revisar la conexión",
+		}, 200)
+		if _, err := worker.PrintNext(fixture.ctx); err != nil {
+			t.Fatal(err)
+		}
+		redirected := read(job.ID)
+		if redirected.PrinterID != backup.ID || redirected.State != "pending" {
+			t.Fatal("Tres fallos confirmados consecutivos no activaron el respaldo configurado")
+		}
+		fixture.mutate(t, "POST", "kitchen/jobs/"+job.ID+"/resolve", map[string]any{
+			"revision": redirected.Revision, "decision": "cancel", "reason": "Finaliza ensayo sin transporte físico",
+		}, 200)
+	})
 }

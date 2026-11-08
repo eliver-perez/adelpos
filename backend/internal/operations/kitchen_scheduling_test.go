@@ -11,6 +11,28 @@ import (
 	"local/ad-el-pos/server/internal/operations"
 )
 
+// accountUpdate reproduce el documento editable de una cuenta tal como lo envía el escritorio.
+func accountUpdate(account operations.Account) map[string]any {
+	scheduleKind := ""
+	if account.ScheduleKind != nil {
+		scheduleKind = *account.ScheduleKind
+	}
+	return map[string]any{
+		"revision":         account.Revision,
+		"name":             account.Name,
+		"mode":             account.Mode,
+		"table_id":         account.TableID,
+		"price_list_id":    account.PriceListID,
+		"customer_name":    account.CustomerName,
+		"phone":            account.Phone,
+		"origin":           account.Origin,
+		"notes":            account.Notes,
+		"scheduled_local":  account.ScheduledLocal,
+		"schedule_kind":    scheduleKind,
+		"assigned_user_id": account.AssignedUserID,
+	}
+}
+
 func testKitchenSchedulingAndGrouping(t *testing.T, fixture *restaurantFixture, printer kitchen.Printer, first, second kitchen.Station, product catalog.Product) {
 	t.Run("combo enruta hijos sin duplicar unidades y productos nuevos generan comanda normal", func(t *testing.T) {
 		fixture.mutate(t, "POST", "kitchen/routes", kitchen.Route{
@@ -155,6 +177,42 @@ func testKitchenSchedulingAndGrouping(t *testing.T, fixture *restaurantFixture, 
 		fixture.mutate(t, "POST", "kitchen/releases/"+next.ID+"/release", map[string]any{"revision": next.Revision}, 200)
 		if fixture.refresh(t, manual.Account.ID).Account.PreparationState != "released" {
 			t.Fatal("La liberación manual autorizada no se ejecutó")
+		}
+	})
+	t.Run("reprogramación de cocina sobrevive a ediciones de la cuenta", func(t *testing.T) {
+		location, _ := time.LoadLocation("America/Monterrey")
+		original := time.Now().In(location).Add(3 * time.Hour).Truncate(time.Minute)
+		bill := decodeResponse[operations.Bill](t, fixture.mutate(t, "POST", "restaurant/accounts", map[string]any{
+			"name": "Reprogramado en cocina", "mode": "takeaway", "origin": "Teléfono",
+			"scheduled_local": original.Format("2006-01-02T15:04"), "schedule_kind": "preparation",
+		}, 200))
+		bill = fixture.capture(t, bill, []catalog.LineRequest{{ProductID: product.ID, Quantity: 1}})
+		release := kitchenReleases(t, fixture, bill)[0]
+		kitchenTime := original.Add(time.Hour)
+		fixture.mutate(t, "POST", "kitchen/releases/"+release.ID+"/schedule", map[string]any{
+			"revision": release.Revision, "scheduled_local": kitchenTime.Format("2006-01-02T15:04"),
+			"automatic": false, "lead_minutes": 10,
+		}, 200)
+
+		// Corregir el teléfono no debe revertir la hora elegida en cocina.
+		account := fixture.refresh(t, bill.Account.ID).Account
+		update := accountUpdate(account)
+		update["phone"] = "8180000000"
+		fixture.mutate(t, "PATCH", "restaurant/accounts/"+account.ID, update, 200)
+		current := kitchenReleases(t, fixture, bill)[0]
+		if current.ScheduledAt == nil || !current.ScheduledAt.Equal(kitchenTime) || current.Automatic || current.LeadMinutes != 10 {
+			t.Fatal("Una edición sin cambio de horario revirtió la reprogramación de cocina")
+		}
+
+		// Una nueva programación capturada en la cuenta sí sustituye la de cocina.
+		accountTime := original.Add(2 * time.Hour)
+		account = fixture.refresh(t, bill.Account.ID).Account
+		update = accountUpdate(account)
+		update["scheduled_local"] = accountTime.Format("2006-01-02T15:04")
+		fixture.mutate(t, "PATCH", "restaurant/accounts/"+account.ID, update, 200)
+		current = kitchenReleases(t, fixture, bill)[0]
+		if current.ScheduledAt == nil || !current.ScheduledAt.Equal(accountTime) || current.State != "scheduled" {
+			t.Fatal("La nueva programación de la cuenta no llegó a la liberación pendiente")
 		}
 	})
 	t.Run("cocina rutas inexistentes no aparentan liberación y sin preparación es explícito", func(t *testing.T) {
