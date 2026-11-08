@@ -1,3 +1,4 @@
+import { Accordion } from '../components/Accordion';
 import { useState } from 'react';
 import { dateTime, Field, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
@@ -93,8 +94,7 @@ export function AuditPage() {
                 </td>
                 <td>{event.success ? 'Correcto' : 'Rechazado'}</td>
                 <td>
-                  <details>
-                    <summary>Ver cambios</summary>
+                  <Accordion title="Ver cambios">
                     <dl className="audit-details">
                       <dt>Entidad</dt>
                       <dd>{event.entity_id ?? '—'}</dd>
@@ -109,7 +109,7 @@ export function AuditPage() {
                         <pre>{JSON.stringify(event.after_state, null, 2)}</pre>
                       </dd>
                     </dl>
-                  </details>
+                  </Accordion>
                 </td>
               </tr>
             ))}

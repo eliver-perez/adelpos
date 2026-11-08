@@ -2,10 +2,13 @@
 
 mod api;
 mod connection;
+mod realtime;
 mod vault;
+mod window_check;
 
 use connection::{load_config, ConnectionConfig};
 use serde::Serialize;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{Manager, State};
@@ -17,6 +20,7 @@ pub struct TerminalState {
     vault: Arc<OnceLock<Result<Vault, String>>>,
     provisioning_token: Option<String>,
     enrollment_code: Option<String>,
+    events_generation: Arc<AtomicU64>,
 }
 
 impl TerminalState {
@@ -48,6 +52,21 @@ struct Snapshot {
 #[tauri::command]
 fn connection_config(state: State<'_, TerminalState>) -> Result<ConnectionConfig, String> {
     state.config.clone()
+}
+
+#[tauri::command]
+fn window_fullscreen_state(window: tauri::WebviewWindow) -> Result<bool, String> {
+    window
+        .is_fullscreen()
+        .map_err(|_| "No se pudo consultar la ventana.".into())
+}
+
+#[tauri::command]
+fn window_set_fullscreen(window: tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+    // La API nativa conserva los Spaces y controles normales de macOS; no es modo quiosco.
+    window
+        .set_fullscreen(fullscreen)
+        .map_err(|_| "No se pudo cambiar la pantalla completa.".into())
 }
 
 async fn get(client: &reqwest::Client, base: &str, route: &str) -> Option<HTTPResult> {
@@ -138,11 +157,17 @@ fn main() {
                 vault,
                 provisioning_token,
                 enrollment_code,
+                events_generation: Arc::new(AtomicU64::new(0)),
             });
+            window_check::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             connection_config,
+            window_fullscreen_state,
+            window_set_fullscreen,
+            realtime::events_start,
+            realtime::events_stop,
             server_snapshot,
             api::authentication_state,
             api::api_request,
@@ -163,6 +188,7 @@ mod startup_tests {
             vault: Arc::new(OnceLock::new()),
             provisioning_token: None,
             enrollment_code: None,
+            events_generation: Arc::new(AtomicU64::new(0)),
         };
         assert!(state
             .vault()

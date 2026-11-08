@@ -1,84 +1,139 @@
-# Verificación · Etapa 3
+# Verificación · Etapa 5
 
-Fecha: 7 de noviembre de 2026, America/Monterrey. macOS Apple Silicon. Versión 0.3.0, esquema 3. Evidencia previa: [etapa 1](VERIFICATION_STAGE1.md) y [etapa 2](VERIFICATION_STAGE2.md).
+Ejecución del **8 de noviembre de 2026**, zona America/Monterrey. Proyecto existente, sin reinicialización. Versión **0.5.0**, API v1, esquema **5**. Evidencia anterior: [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md).
 
-## Resultado ejecutado
+## Resultados ejecutados
 
-- `./scripts/dev.sh test`: correcto. Incluye Prettier, gofmt, Rustfmt, metadatos coherentes, Go con detector de carreras y vet, pruebas frontend, TypeScript estricto, Vite y Rust con lockfile.
-- Frontend: **19 pruebas aprobadas** en cuatro archivos. Conserva las pruebas anteriores y añade administración del catálogo, permisos de consulta, selección estructurada, retiro/restauración de todos los complementos, conservación de otras selecciones, reinicio de un hijo de combo sin perder observaciones del padre, descarte de respuestas atrasadas y recuperación tras autorización pendiente del Llavero.
-- Rust: **7 aprobadas, 1 opt-in omitida**. Incluye rutas de catálogo cerradas, métodos correctos, bloqueo de identificadores/rutas arbitrarias, eliminación de tokens antes del WebView, conservación ante contraseña actual incorrecta y ausencia de credenciales vacías durante espera del almacén seguro. No se volvió a ejecutar el roundtrip opt-in real del Keychain en esta etapa; la ejecución de etapa 2 permanece documentada.
-- `./scripts/dev.sh test-integration`: correcto. Tres suites sobre bases temporales distintas `adel_pos_test_*`, eliminadas al terminar: migrador, administración y catálogo. No se utilizó adel_pos para sembrar escenarios de prueba.
-- `./scripts/dev.sh build-macos`: correcto. Bundle ARM64 `desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app`, versión 0.3.0, aproximadamente 9.31 MiB.
+| Comprobación          | Resultado                                                                                                                                                                                                                                 |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato y metadatos   | gofmt, Prettier, cargo fmt y sincronización aprobados. Revisión manual de instrucciones largas del módulo nuevo.                                                                                                                          |
+| `scripts/dev.sh test` | Go con race detector y vet; frontend **31 pruebas en 9 archivos**; TypeScript estricto y build Vite; Rust **10 aprobadas**, una prueba opt-in de escritura real de Keychain omitida deliberadamente.                                      |
+| PostgreSQL            | Las cuatro suites de database, administration, catalog y operations pasaron en bases aleatorias `adel_pos_test_*`, eliminadas al terminar. La aceptación operativa se amplió y se repitió después de revisar combos, traslados y formato. |
+| Navegadores           | Recorrido completo aprobado en Chromium y WebKit con Go/PostgreSQL reales; producción frontend y puente IPC de prueba exclusivo de Node.                                                                                                  |
+| Bundle macOS          | `.app` ARM64 0.5.0 compilado correctamente, 9.42 MiB.                                                                                                                                                                                     |
+| Fullscreen nativo     | Inicio verdadero, salida a ventana verdadera y regreso verdadero. Tauri reportó contenido de **3456×2168 píxeles físicos** al iniciar y al regresar.                                                                                      |
+| Instalación real      | Respaldo restaurado, migración 0005 `applied:1`, repetición `applied:0`, checksums 0001–0004 intactos y readiness 200.                                                                                                                    |
+| Procesos              | Recuperación ante caída de PostgreSQL/Go, cierre/reapertura Tauri, server-only y terminal-only aprobados.                                                                                                                                 |
+| Autenticación nativa  | Dispositivo y sesión existentes con actividad reciente, comprobada con booleanos de `last_seen_at`; no se leyeron ni mostraron tokens.                                                                                                    |
+| Hardware              | Una comanda técnica enviada a `Printer_POS_80`; CUPS aceptó `Printer_POS_80-219`. No se confirmó papel o corte físico.                                                                                                                    |
 
-## Motor y aceptación de catálogo
+Los logs y reportes privados están excluidos del repositorio. Principales: `.local/stage5-test-final.log`, `stage5-integration-final.log`, `stage5-operations-final.log`, `stage5-browser-final.log`, `stage5-build.log`, `stage5-window-verification.json`, `stage5-installation-verification.json`, `stage5-native-auth-verification.json`, `stage5-runtime.log`, `stage5-terminal.log` y `stage5-hardware.json`.
 
-Las pruebas unitarias usan el motor Go real y reloj fijo; las de aceptación usan HTTP, autenticación y PostgreSQL reales. Las pruebas de interfaz sustituyen únicamente el transporte nativo; no se presentan como pruebas de persistencia.
+## Aceptación funcional y matriz solicitada
 
-Verificados:
+La suite `TestRestaurantAcceptance` utiliza HTTP autenticado, permisos efectivos, transacciones y PostgreSQL reales. Los transportes controlados de las pruebas de cola no imprimen físicamente. El opt-in de hardware se ejecutó por separado una sola vez. La tabla identifica cobertura y distingue los límites físicos.
 
-- Crear, editar, desactivar y reordenar categorías; revisión obsoleta rechazada sin sobrescribir; búsqueda, filtros y paginación.
-- Crear/editar productos, presentaciones, configuración reutilizable, duplicado con identidades nuevas, archivo y consulta de archivados.
-- Ingredientes removibles y adicionales con precio explícito; cero cargos implícitos; límites y rechazo de cantidades inválidas.
-- Retirar todos los complementos manteniendo $150; reemplazarlos completamente; arroz/ensalada → papas/ensalada = $155; doble papas = $165. Valores incluido/solicitado, diferencia y extras separados.
-- Redondeo comercial exacto: medio centavo a un centavo; rechazo de precisión monetaria excesiva; porcentajes por línea y totales exactos.
-- Grupos por cantidad con tramos; rechazo de fracciones o adicionales sin reglas explícitas.
-- Combo que reutiliza hamburguesa/papas: **$90 / $100 / $140** para 0/1/2 papas; sustitución permitida y rechazo de ciclo. Personalización del hijo cobrada una vez, sin sumar otra vez su base. Hijo inactivo impide el cálculo.
-- Listas alternativas y origen del precio, precio exacto por presentación, respaldo base y rechazo por precio faltante; cambio de lista predeterminada incrementa y audita la desplazada.
-- 2×1 con dos y tres unidades; compra/paga; porcentaje y precio especial; expiración, horarios, prioridad, incompatibilidad y combinación explícita sobre remanente; inclusión/exclusión de plataformas.
-- Zona IANA del establecimiento, fin exclusivo de horarios y cierre 24:00; categoría/producto inactivos, pausa temporal, archivo y excepción autorizada con motivo/auditoría.
-- PNG válido guardado y consultado; archivo inválido y PNG truncado rechazados. El código limita a 1 MiB y 2048 × 2048; no se probó cada posible archivo malformado.
-- Permisos efectivos vigentes, rechazos HTTP, auditoría transaccional y ocultación de dinero sin permiso incluso en los snapshots de auditoría. Pruebas unitarias adicionales impiden cambiar condiciones económicas, horario o estado de presentaciones sin sus permisos.
-- Toda la aceptación de etapa 2 volvió a pasar: setup idempotente, admin, sa exclusivamente temporal de prueba, roles/excepciones, sesiones, terminales, preferencias, cajas y auditoría. No se cambió el mecanismo reservado sa real.
+| N.º | Escenario                     | Evidencia o límite                                                                                                                      |
+| --- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Crear/editar estaciones       | API de aceptación y formularios de ambos navegadores; revisión optimista.                                                               |
+| 2   | Desactivar estación           | Edición real; modificación comercial conserva aviso pendiente y rechaza avance de versión anterior.                                     |
+| 3   | Ruta por categoría            | Configuración API/UI y liberación de productos/componentes.                                                                             |
+| 4   | Excepción por producto        | Producto con dos estaciones prevalece sobre categoría con una; cambio posterior no reescribe pedido liberado.                           |
+| 5   | Varias estaciones             | Dos unidades comerciales producen cuatro tareas y solo dos marcadores canónicos.                                                        |
+| 6   | Destinos duplicados           | Se rechaza una ruta con la misma estación repetida.                                                                                     |
+| 7   | Ruta inválida                 | Pedido conservado/bloqueado, advertencias y exención Sin preparación explícita.                                                         |
+| 8   | Snapshot de ruta              | Edición de ruta actual no elimina el destino histórico de una modificación.                                                             |
+| 9   | Comanda de confirmado         | Documentos/cola persistidos en la misma integración transaccional.                                                                      |
+| 10  | Borrador sin comanda          | Conteos antes/después de guardar borrador sin nuevos trabajos.                                                                          |
+| 11  | Liberación única              | Repetir confirmación y liberar nuevamente no duplica documentos ni marcadores.                                                          |
+| 12  | Nuevos productos normales     | Agregar otro lote produce dos documentos `normal`, sin aviso de modificación para ese lote.                                             |
+| 13  | MODIFICACIÓN                  | Documentos por estaciones afectadas y pérdida del estado listo anterior.                                                                |
+| 14  | CANCELACIÓN                   | Avisos por estación, cantidad cancelada e identidades conservadas.                                                                      |
+| 15  | Copia sin REIMPRESIÓN         | Mismo contenido histórico, nuevo trabajo físico, sin otra liberación.                                                                   |
+| 16  | Sin ADICIÓN                   | Plantilla y documentos entregados al adaptador controlado excluyen esa etiqueta.                                                        |
+| 17  | Complementos/notas            | Documento conserva Guarniciones y notas con café/ñ; pruebas anteriores cubren variantes, porciones e ingredientes.                      |
+| 18  | Dividir sin imprimir          | Conteos de trabajos/liberaciones permanecen tras división de cuenta preparada.                                                          |
+| 19  | Mover mesa sin imprimir       | Traslado de cuenta preparada conserva conteo de trabajos. Transferencias/combinaciones previas conservan UUID y centavos.               |
+| 20  | Configurar impresoras         | API/UI, validación de destinos y prueba CUPS real independiente.                                                                        |
+| 21  | Impresora compartida          | Dos estaciones printer/both referencian una impresora.                                                                                  |
+| 22  | Tickets independientes        | Dos documentos/trabajos para estaciones de la misma impresora.                                                                          |
+| 23  | Ticket unificado              | Un documento con dos secciones y un trabajo físico.                                                                                     |
+| 24  | Corte por capacidad           | Validación y bytes ESC/POS de corte autorizado; no se certificó corte físico.                                                           |
+| 25  | Sin intercalación             | Dos trabajadores independientes: el segundo no envía mientras el primero conserva el lock por impresora.                                |
+| 26  | Fallos registrados            | Transporte controlado devuelve error y persiste intentos/resultados.                                                                    |
+| 27  | Pendientes tras reinicio      | Trabajador nuevo consume cola persistida; la cola no depende del proceso Tauri.                                                         |
+| 28  | Detectar incertidumbre        | Lease de procesamiento vencida se recupera como `uncertain`.                                                                            |
+| 29  | Sin reenvío ciego             | Ningún nuevo envío automático ni respaldo ante resultado desconocido.                                                                   |
+| 30  | Reintentos concurrentes       | UUID idempotente, locks y rechazo de copia adicional si otra de la familia está pendiente.                                              |
+| 31  | Redirección autorizada        | Respaldo explícito solo tras tres errores sin envío, sin cadena automática adicional.                                                   |
+| 32  | Avance manual                 | HTTP y acciones gráficas En preparación/Listo con revisión.                                                                             |
+| 33  | Avance por partida            | Cambia solo las tareas seleccionadas/autorizadas.                                                                                       |
+| 34  | Avance por pedido             | Configuración order rechaza actualización de partida y acepta lote completo.                                                            |
+| 35  | Consolidación                 | Una estación lista no oculta la otra; ambas listas completan la cuenta.                                                                 |
+| 36  | Pago/entrega separados        | Preparación lista conserva `not_recorded` / `not_delivered`.                                                                            |
+| 37  | Programado automático         | Vencimiento/anticipación persistidos y ejecución del trabajador Go.                                                                     |
+| 38  | Programado manual             | Liberación anticipada explícita con permiso correspondiente.                                                                            |
+| 39  | Reinicio sin doble liberación | Dos instancias sucesivas del planificador conservan un marcador por unidad.                                                             |
+| 40  | Tiempos/advertencias          | Configuración, valores y antigüedad entregados por Go y presentados en el tablero; no es certificación de tiempos bajo carga comercial. |
+| 41  | Conexión autenticada          | SSE HTTP real con sesión/dispositivo existentes en base temporal.                                                                       |
+| 42  | Rechazo anónimo               | SSE sin credenciales devuelve 401.                                                                                                      |
+| 43  | Otras terminales              | Cambio confirmado recibido en stream y filtrado por permisos/estación de otra terminal lógica.                                          |
+| 44  | Replay                        | Snapshot desde cursor previo recupera eventos; cursor consumido no repite el lote.                                                      |
+| 45  | Deduplicación                 | UUID únicos en lote y hook React que descarta repetidos y mensajes de identidad anterior.                                               |
+| 46  | Estado completo               | Más de 5000 secuencias producen reset; hook invalida y conserva sondeo de recuperación.                                                 |
+| 47  | Revocación conectada          | Stream de sesión revocada informa 401 y cierra.                                                                                         |
+| 48  | Inicio fullscreen             | Comprobación real Tauri con `is_fullscreen` y tamaño físico.                                                                            |
+| 49  | Salir/regresar                | APIs nativas reales y prueba del control visible React.                                                                                 |
+| 50  | Resoluciones                  | 1280×720, 1920×1080, 2560×1440, 1024×768 y 900×1200 en ambos motores.                                                                   |
+| 51  | Conservar formulario          | La cantidad en personalización permanece al redimensionar.                                                                              |
+| 52  | Temas                         | Capturas y recorrido claro/oscuro aprobados.                                                                                            |
+| 53  | Acordeones                    | Enter/Espacio, conservación de valores y componente compartido, además de pruebas unitarias.                                            |
+| 54  | Mouse/táctil                  | Interacción con mouse, teclado y teclado virtual; no se dispone de certificación en pantalla táctil física.                             |
+| 55  | Go race/vet                   | Aprobados.                                                                                                                              |
+| 56  | PostgreSQL                    | Cuatro paquetes en bases temporales; conservación de etapas anteriores.                                                                 |
+| 57  | Frontend                      | 31 pruebas aprobadas.                                                                                                                   |
+| 58  | TypeScript estricto           | `tsc --noEmit` aprobado.                                                                                                                |
+| 59  | Rust                          | 10 pruebas aprobadas; Keychain opt-in de escritura omitida, lectura existente sí verificada nativamente.                                |
+| 60  | macOS                         | Bundle ARM64 compilado y ejecutado.                                                                                                     |
+| 61  | Procesos independientes       | Pruebas nativas de cierre, desconexión y recuperación aprobadas.                                                                        |
+| 62  | Etapas anteriores             | Suites de migración, identidad, administración, catálogo y restaurante conservadas y aprobadas.                                         |
+| 63  | Migración sin pérdida         | Restauración completa de 46 tablas, checksums anteriores conservados y 63 tablas finales sin reducción de conteos anteriores.           |
 
-## Respaldo y actualización de la instalación
+Además se verificó el enrutamiento de papas elegidas dentro de un combo: dos combos mantienen dos unidades canónicas y sus componentes llegan con cantidad dos por unidad a la estación explícita. La recepción KDS conserva una sola fila ante repetición y no equivale a preparación o impresión. La cola rechaza copiar un resultado incierto o acumular otra copia sin resolver.
 
-Se creó `backups/adel_pos-20261107T220425Z-654dee.dump`, se verificó su catálogo y se **restauró completamente** en una base temporal exclusiva. Coincidieron los conteos de usuarios (2), terminales (1), establecimiento (1) y esquema (2). La base de ensayo se eliminó. No se restauró encima de adel_pos.
+## Interfaz y fullscreen
 
-Después se detuvo Go, se aplicó 0003: `applied: 1`. Una repetición real informó `applied: 0`. 0001 y 0002 no se modificaron. Go reinició y readiness respondió 200: PostgreSQL disponible y esquema compatible.
+El recorrido gráfico usa frontend compilado, backend real y PostgreSQL temporal por motor. Configura impresora de tipo agente claramente no disponible, dos estaciones, ruta por categoría y agrupación unificada. Captura/confirmación generan preparación y documentos reales; el destino sin agente permanece en intervención, y una resolución manual cancela solo el trabajo de impresión. No se imprime desde estas pruebas gráficas.
 
-Una lectura posterior confirmó **ADEL POS**, **America/Monterrey**, **MXN**, dos usuarios, una terminal, cero categorías y cero productos ficticios. Existe una lista activa predeterminada y se añadieron los quince permisos de catálogo al administrador. No se borraron datos, credenciales ni configuración.
+Se verificaron también áreas/mesas, distribución mediante teclado, borrador, confirmación, edición con motivo, historial, división y pedido programado de Ventanilla. Las capturas de monitores grandes muestran columnas fluidas sin los antiguos límites máximos; los formularios mantienen su selección. Temas, acordeones, teclado virtual y ausencia de errores JavaScript se comprobaron en ambos motores. Capturas revisadas en `.local/browser-artifacts/chromium/` y `webkit/`.
 
-Evidencia privada, sin secretos impresos: `.local/stage3-restore-verification.json` y `.local/stage3-installation-verification.json`. Estos archivos y el respaldo no se versionan.
+La prueba nativa opt-in consultó la ventana Tauri real: fullscreen inicial, modo ventana y regreso aprobados. La medida física reportada fue 3456×2168; no se confundió con el viewport simulado de Playwright. Conserva modo ventana normal y Spaces. No se certificaron todos los monitores, equipos táctiles o gestos de macOS.
 
-## Ventana y procesos reales
+## Respaldo y migración real
 
-El recorrido inicial `tests/runtime_smoke.py` verificó caída/recuperación de PostgreSQL conservando Go y modo server-only temporal. Se detuvo al esperar consultas del escritorio: la muestra de pila del proceso identificó una espera del Llavero de macOS (`SecKeychainFindGenericPassword`) para acceder a la credencial existente. Ese primer intento quedó incompleto; después de la autorización del propietario se repitió correctamente, como se detalla a continuación.
+Respaldo custom: `backups/adel_pos-20261108T150810Z-902294.dump`. Se restauró completamente con `pg_restore --exit-on-error` en una base temporal y se compararon las **46 tablas existentes**, con conteos iguales. Se eliminó esa base temporal. Evidencia en `.local/stage5-restore-verification.json`.
 
-Se corrigió el arranque: la recuperación del almacén seguro ocurre en segundo plano, mantiene viva la ventana y muestra **Revisa el acceso seguro** con acceso a diagnóstico. Nunca sustituye una espera/denegación por credenciales vacías ni guarda tokens en archivos. La recuperación de interfaz y el estado nativo pendiente tienen pruebas automatizadas aprobadas.
+Después se detuvo solo Go, se aplicó 0005 (`applied:1`), se repitió (`applied:0`) y se reinició el servidor. Las cinco migraciones quedan aplicadas; los nombres/checksums de las cuatro anteriores coinciden con la línea base. La 0005 añade **17 tablas y 20 permisos**, sin modificar usuarios o contraseñas ni crear estaciones/impresoras/productos de ejemplo. Se verificaron **63 tablas finales**, sin reducción de conteos anteriores.
 
-La compilación final se ejecutó además con un namespace temporal de diagnóstico, sin enrolar usuarios/dispositivos ni acceder al perfil real. Con esa instancia se verificó:
+La instalación conserva **ADEL POS**, **America/Monterrey**, **MXN**, dos usuarios y una terminal. Catálogo, áreas, mesas, cuentas y configuración de destinos reales siguen sin datos ficticios. Readiness devuelve 200, PostgreSQL disponible/esquema compatible, y `/version` devuelve 0.5.0/esquema 5/eventos disponibles. Reporte privado: `.local/stage5-installation-verification.json`.
 
-- Consultas reales React → IPC → Go desde el `.app` 0.3.0.
-- SIGTERM del escritorio conserva Go y PostgreSQL; reabrir retoma consultas contra el mismo Go.
-- Detener Go conserva el escritorio; reiniciar Go permite a esa misma instancia recuperar consultas.
-- Modo terminal-only consulta al servidor existente, sin iniciar una segunda base o servidor.
+## Aplicación nativa y recuperación
 
-Resultado del perfil aislado en `.local/stage3-native-verification.json`. El perfil temporal y su proceso se retiraron.
+Se abrió el bundle 0.5.0 usando el perfil de credenciales existente; actividad reciente de dispositivo y sesión se confirmó sin leer tokens. No se cambiaron sa, contraseñas ni la zona configurable.
 
-El propietario confirmó después la autorización del Llavero. Se comprobó en PostgreSQL que la aplicación normal retomó consultas autenticadas con la sesión existente, sin leer ni imprimir secretos. Se ejecutaron completos y correctamente ambos recorridos con ese perfil real:
+`python3 tests/runtime_smoke.py` aprobado: caída de PostgreSQL conserva Go y live=200/ready=503; recuperación vuelve a ready=200 sin reiniciar Go; proceso server-only temporal en 8182; cerrar/reabrir Tauri conserva Go; detener Go conserva la ventana y al reiniciar recupera consultas sin reiniciar Tauri. `--terminal-only` también aprobado. Se retiraron los procesos temporales y quedaron los servicios propios activos.
 
-- `python3 tests/runtime_smoke.py`: caída/recuperación de PostgreSQL sin reiniciar Go, proceso server-only temporal, cierre normal del escritorio conservando Go, reapertura, detención de Go manteniendo Tauri y recuperación de consultas en la misma ventana.
-- `python3 tests/runtime_smoke.py --terminal-only`: el mismo `.app` consultó el servidor existente, cuyo PID se conservó; después se retiró el proceso de prueba y se reabrió la aplicación con su configuración normal.
+Durante los primeros intentos, el propietario cerró manualmente las ventanas; confirmó esa intervención. Se repitieron las comprobaciones manteniéndolas abiertas y pasaron. No se atribuyó ese cierre voluntario a un fallo de conexión. Los reportes aprobados se archivaron como `.local/stage5-runtime-verification.json` y `stage5-terminal-mode-verification.json`.
 
-La comprobación final confirmó una sesión admin vigente y actividad autenticada de los últimos quince segundos, esquema 3 y readiness 200 con PostgreSQL disponible. Go quedó activo, PID 95050. La autorización del Llavero y estos recorridos ya no están pendientes.
+## Hardware y límites
 
-Evidencia privada: `.local/runtime-verification.json`, `.local/terminal-mode-verification.json` y `.local/stage3-real-profile-verification.json`. No contienen tokens ni contraseñas y no se versionan.
+Se descubrieron cuatro colas CUPS locales; se seleccionó expresamente la térmica USB **Printer_POS_80**, sin utilizar la impresora de oficina predeterminada. Primero se generó una vista previa privada sin enviar. Después se ejecutó un solo test opt-in, una copia de 80 mm sin corte, con el transporte CUPS real y cola/intento persistidos en base temporal.
 
-## Límites reales
+Resultado: `submitted`, referencia **Printer_POS_80-219**, mensaje **Aceptado por CUPS; no confirma salida física de papel**, `physical_confirmed:false`. Se solicitó la limpieza exclusivamente de ese trabajo de ensayo si aún seguía en el spooler. La base temporal se eliminó. No se afirmó salida de papel, legibilidad final, corte o compatibilidad física de otros modelos. No se repitió automáticamente el envío.
 
-- No se automatizó cada control de la ventana nativa ni se capturó su presentación a 1280 × 720. Sí se probaron componentes, TypeScript, bundle y transporte nativo real tanto con perfil aislado como con el perfil normal autenticado.
-- No se midieron carga de un catálogo grande, muchas terminales, segunda máquina LAN, caída de energía, Windows ni Mac Intel. Los límites explícitos de selectores, cálculo e imágenes están en [CATALOG.md](CATALOG.md).
-- Firma/notarización comercial, licencias, servicio instalado, teclado flotante y eventos WebSocket siguen pendientes de sus etapas. No existen pedidos, cobros ni movimientos físicos de inventario.
+ESC/POS TCP está implementado y sus bytes/acentos/corte autorizado se verificaron sin una segunda impresora de red física. El agente futuro informa indisponibilidad; no existe un agente funcional ni una aplicación KDS independiente. Las pruebas de cola usan adaptadores controlados para fallos, incertidumbre, serialización y respaldo.
 
-## Repetir comprobaciones
+Persisten los límites de licenciamiento comercial, firma/notarización, servicio instalado, carga elevada, muchas terminales/otra máquina LAN, Mac Intel, Windows, Android, resistencia a corte eléctrico, retención y respaldo periódico. No hay cobros, entrega habilitada, turnos ni inventario físico. El replay de 5000 secuencias es una ventana lógica; aún falta retención física. Una base y una impresora no comparten commit: se conserva incertidumbre en vez de prometer exactamente una copia física.
+
+## Repetir las comprobaciones
 
 ```bash
 ./scripts/dev.sh test
 ./scripts/dev.sh test-integration
+./scripts/dev.sh test-browser
 ./scripts/dev.sh build-macos
-./scripts/dev.sh db-start
-./scripts/dev.sh server-start
-./scripts/dev.sh open-app
+python3 tests/runtime_smoke.py
+python3 tests/runtime_smoke.py --terminal-only
 ```
 
-Sin trabajo real en curso, `python3 tests/runtime_smoke.py` y `python3 tests/runtime_smoke.py --terminal-only` permiten completar nuevamente los recorridos habituales. Son pruebas operativas opt-in que interrumpen únicamente los servicios propios de desarrollo.
+Ejecutar los dos ensayos de procesos secuencialmente, sin pruebas PostgreSQL ni trabajo real simultáneo. La impresión física es opt-in separada; las suites ordinarias nunca la ejecutan. Uso, contratos y políticas en [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md), [API_CONTRACTS.md](../API_CONTRACTS.md) y [DEVELOPMENT_MACOS.md](../DEVELOPMENT_MACOS.md).

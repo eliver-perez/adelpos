@@ -49,11 +49,15 @@ func New(probe Probe, origins []string, logger *slog.Logger, application ...http
 			"api_version":            metadata.APIVersion,
 			"schema_version":         metadata.SchemaVersion,
 			"supported_api_versions": []string{metadata.APIVersion},
-			"capabilities":           []string{"technical-health", "identity-administration", "catalog-administration", "exact-price-preview"},
-			"events_available":       false,
+			"capabilities":           []string{"technical-health", "identity-administration", "catalog-administration", "exact-price-preview", "restaurant-operations", "kitchen-preparation", "persistent-print-queue", "authenticated-sse-v1"},
+			"events_available":       len(application) > 0,
 		})
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		if len(application) > 0 {
+			application[0].ServeHTTP(w, r)
+			return
+		}
 		fail(w, r, 501, "EVENTS_NOT_AVAILABLE", "Los eventos en tiempo real aún no están habilitados.")
 	})
 	if len(application) > 0 {
@@ -111,6 +115,10 @@ func New(probe Probe, origins []string, logger *slog.Logger, application ...http
 type responseWriter struct {
 	http.ResponseWriter
 	status int
+}
+
+func (w *responseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func (w *responseWriter) WriteHeader(status int) {

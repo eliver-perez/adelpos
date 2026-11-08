@@ -13,6 +13,9 @@ type Preferences struct {
 }
 
 var screenPermissions = map[string]string{
+	"kitchen":     "kitchen.states.read",
+	"restaurant":  "accounts.read",
+	"takeaway":    "takeaway.read",
 	"status":      "",
 	"catalog":     "catalog.read",
 	"preview":     "catalog.prices.read",
@@ -27,7 +30,7 @@ var screenPermissions = map[string]string{
 }
 
 func allowedHome(screen string, permissions []string) string {
-	if screen == "preview" && !slices.Contains(permissions, "catalog.read") {
+	if (screen == "preview" && !slices.Contains(permissions, "catalog.read")) || (screen == "takeaway" && !slices.Contains(permissions, "accounts.read")) {
 		return "status"
 	}
 	permission, exists := screenPermissions[screen]

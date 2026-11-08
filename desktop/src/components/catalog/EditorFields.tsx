@@ -1,3 +1,4 @@
+import { Accordion } from '../Accordion';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { Field, Notice } from '../Forms';
@@ -230,8 +231,7 @@ export function ScheduleEditor({
 }) {
   const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
   return (
-    <details className="catalog-section">
-      <summary>Fechas, días y horarios</summary>
+    <Accordion title="Fechas, días y horarios">
       <p className="muted text-sm">
         Sin restricciones: disponible siempre. Se usa el reloj del servidor y la zona del
         establecimiento. Divide los horarios que cruzan medianoche en dos intervalos; usa 24:00 como
@@ -316,7 +316,7 @@ export function ScheduleEditor({
           </div>
         ))}
       </RepeatSection>
-    </details>
+    </Accordion>
   );
 }
 

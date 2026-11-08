@@ -1,4 +1,4 @@
-# Desarrollo macOS · Etapa 2
+# Desarrollo macOS · Etapa 5
 
 ## Entorno preparado
 
@@ -144,6 +144,20 @@ Errores habituales: servidor desconectado → revisar status/log y URL; DB no di
 
 La versión 0.3.0 utiliza esquema 3. Para actualizar una instalación configurada: respaldo, restauración de ensayo en base temporal, `server-stop`, `migrate` y `server-start`; después compilar con `build-macos` y abrir con `open-app`. No ejecutar setup ni borrar .local. Se conservan establecimiento, usuarios, terminales y credenciales Keychain. Los logos originales deben existir en assets/brand.
 
-El `.app` abre inicialmente con altura 720 y mantiene desplazamiento y controles táctiles. Catálogo y Probar personalización aparecen según permisos. Las pruebas de integración incluyen `internal/catalog` en una tercera base temporal y eliminan solo las bases creadas por la prueba. Los productos de los ejemplos se crean únicamente en esas bases; no se siembran en la instalación real. Reglas operativas en [docs/CATALOG.md](docs/CATALOG.md).
+Desde la etapa 5 el `.app` inicia en pantalla completa nativa, con salida/regreso visibles y tamaño adaptable; 1280×720 solo es un escenario de prueba. Catálogo y Probar personalización aparecen según permisos. Las pruebas de integración incluyen `internal/catalog` en una tercera base temporal y eliminan solo las bases creadas por la prueba. Los productos de los ejemplos se crean únicamente en esas bases; no se siembran en la instalación real. Reglas operativas en [docs/CATALOG.md](docs/CATALOG.md).
 
 Una compilación de desarrollo nueva puede solicitar autorización del Llavero de macOS para leer la credencial existente. Autorizar únicamente en el diálogo del sistema; nunca compartir la contraseña por chat ni sustituir el perfil para evitarlo. La recuperación se ejecuta en segundo plano y la ventana muestra **Revisa el acceso seguro** mientras espera; conserva disponible Diagnóstico técnico. Después de autorizar, vuelve a comprobar automáticamente. Si se denegó el acceso, cerrar y reabrir la aplicación tras revisar la autorización del sistema. Esta política no guarda tokens en archivos ni cambia sa.
+
+## Cocina, impresión y eventos · etapa 5
+
+Versión 0.5.0/esquema 5. Antes de actualizar: `backup`, `python3 scripts/restore-check.py backups/NOMBRE.dump`, `server-stop`, `migrate`, `server-start`, `build-macos` y `open-app`. El ensayo restaura todas las tablas en una base temporal y genera `.local/stage5-restore-verification.json`. No ejecutar setup ni eliminar credenciales para actualizar.
+
+Configurar impresoras/estaciones/rutas desde Cocina y preparación; no se siembran datos de negocio. CUPS consulta y envía en el host de Go; no en el equipo cliente de una terminal remota. `lpstat -a` lista colas y `lpoptions -p NOMBRE -l` opciones reales. No asumir que la impresora predeterminada es térmica. ESC/POS exige IP privada y puerto 9100–9109; agente remoto permanece pendiente. Aceptación CUPS/TCP no confirma papel. Revisar resultados inciertos en la cola antes de autorizar otra copia.
+
+Go mantiene dos trabajadores de impresión y un planificador de liberaciones; cerrar Tauri no los detiene. Los eventos usan SSE desde Rust con credenciales nativas, cursor y reconexión; no se requiere un servidor WebSocket separado ni acceso web alternativo. Los estados de preparación no cambian pago/entrega.
+
+`test-browser` ejecuta Chromium y WebKit con Go/PostgreSQL temporales y un puente de pruebas solo en Node. Incluye 1280×720, 1920×1080, 2560×1440, 1024×768 y 900×1200, conservación de cantidad, temas, teclado y preparación/cola reales. No equivale a hardware táctil o a toda la ventana nativa.
+
+La comprobación nativa opt-in `ADEL_WINDOW_VERIFICATION_FILE="$PWD/.local/stage5-window-verification.json" ./scripts/dev.sh open-app` consulta fullscreen inicial, sale a ventana y regresa mediante Tauri, guardando solo tamaños/resultados. Ejecutarla con una única ventana y sin trabajo real; en el arranque normal esa variable no existe y no cambia modos automáticamente.
+
+La prueba CUPS es opt-in: `ADEL_TEST_PACKAGE=./internal/operations ADEL_TEST_RUN=TestControlledCUPSPrinter ADEL_HARDWARE_QUEUE=NOMBRE ./scripts/dev.sh test-integration` genera un documento sin enviarlo. Solo `ADEL_HARDWARE_SEND=1` autoriza el envío real de una copia técnica. `ADEL_HARDWARE_PREVIEW` y `ADEL_HARDWARE_REPORT` seleccionan archivos privados de evidencia. Nunca activar esa opción en pruebas ordinarias o CI. Ver detalles y límites en [docs/KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md).

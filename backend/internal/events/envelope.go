@@ -1,4 +1,4 @@
-// Package events reserva el contrato de transporte; aún no existe un bus ni un WebSocket activo.
+// Package events conserva notificaciones transaccionales y el contrato versionado de replay.
 package events
 
 import (

@@ -41,7 +41,8 @@ type PreviewRequest struct {
 	OverrideReason       string        `json:"override_reason"`
 }
 
-// Snapshot solo vive durante el cálculo; no representa una venta ni reserva existencias.
+// Snapshot conserva la configuración exacta del cálculo; pedidos puede persistirlo al confirmar.
+// Por sí mismo no representa un cobro ni reserva o consume existencias.
 type Snapshot struct {
 	Products    map[string]Product
 	Categories  map[string]Category

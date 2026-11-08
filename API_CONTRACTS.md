@@ -1,4 +1,6 @@
-# API v1 · Etapa 3
+# API v1 · Etapa 5
+
+Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 
 HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
@@ -12,8 +14,8 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | ---------- | ------------------------- | ---------------------------------------------------------------------------- |
 | GET        | `/health/live`            | Público; proceso activo.                                                     |
 | GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                        |
-| GET        | `/version`                | Público; producto, versión, API y esquema 3.                                 |
-| GET        | `/events`                 | 501; transporte de eventos pendiente.                                        |
+| GET        | `/version`                | Público; producto, versión, API y esquema 5.                                 |
+| GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                     |
 | GET        | `/setup/status`           | Público; solo configured booleano.                                           |
 | POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                       |
 | POST       | `/devices/enroll`         | Código de autorización de un solo uso, no requiere sesión previa.            |
@@ -67,7 +69,7 @@ Errores públicos:
 }
 ```
 
-400: validación; 401: dispositivo/sesión/credenciales inválidos; 403: permiso o aprovisionamiento rechazado; 404: inexistente; 409: duplicado o caja en uso; 413: cuerpo mayor de 64 KiB; 429: límite de intentos; 503: indisponibilidad. Los diagnósticos conservan los códigos de la etapa 1. Códigos de sesión: SESSION_REQUIRED, SESSION_INVALID, SESSION_EXPIRED, SESSION_REVOKED, SESSION_REPLACED; terminal: DEVICE_REQUIRED y DEVICE_REVOKED. No exponer detalles PostgreSQL.
+400: validación; 401: dispositivo/sesión/credenciales inválidos; 403: permiso o aprovisionamiento rechazado; 404: inexistente; 409: duplicado o caja en uso; 413: cuerpo mayor del límite (64 KiB general; 2 MiB catálogo/restaurante); 429: límite de intentos; 503: indisponibilidad. Los diagnósticos conservan los códigos de la etapa 1. Códigos de sesión: SESSION_REQUIRED, SESSION_INVALID, SESSION_EXPIRED, SESSION_REVOKED, SESSION_REPLACED; terminal: DEVICE_REQUIRED y DEVICE_REVOKED. No exponer detalles PostgreSQL.
 
 JSON UTF-8, Cache-Control no-store, X-Content-Type-Options nosniff y request ID generado por Go. CORS exacto conserva consultas técnicas GET; la operación autenticada de escritorio usa HTTP nativo, sin ampliar CORS ni CSP. Ninguna credencial se transporta por query string. Timeouts administrativos de diez segundos en Go y doce en el cliente; respuesta nativa limitada a 2 MiB.
 
@@ -75,7 +77,7 @@ JSON UTF-8, Cache-Control no-store, X-Content-Type-Options nosniff y request ID 
 
 API v1 admite campos adicionales compatibles; cambios incompatibles requieren nueva versión. El diagnóstico verifica identidad/API/esquema. El servidor es único dueño del esquema; ningún cliente migra PostgreSQL.
 
-Android offline necesitará una clave única (device_id, operation_id), hash de solicitud, resultado y pedido confirmados en la misma transacción; reintento idéntico devuelve el mismo resultado y contenido distinto da conflicto. KDS necesitará comandos autorizados por estación y eventos publicados tras commit. Outbox, cursor/replay, deduplicación, contratos de pedidos y transporte WebSocket continúan pendientes. El punto comercial de licencias sigue centralizado, sin protocolo definitivo.
+La etapa 4 implementa contratos de pedidos e idempotencia durable con UUID, hash, resultado y evento en la misma transacción. La etapa 5 añade outbox, cursor/replay, SSE y contratos KDS autorizados de consulta/acuse/estado. Android, offline durable y la aplicación KDS independiente siguen pendientes. No se implementó WebSocket: SSE cubre la notificación unidireccional y los comandos usan HTTP idempotente. El punto comercial de licencias sigue centralizado, sin protocolo definitivo.
 
 ## Catálogo · esquema 3
 
@@ -143,3 +145,151 @@ Resultado: instante/zona, lista y revisión, `lines`, promociones, `subtotal`, `
 Errores del catálogo: `CATALOG_VALIDATION` 400, `PERMISSION_DENIED` 403, `REVISION_CONFLICT` 409, `PRODUCT_UNAVAILABLE` 409, además de los errores generales de etapa 2. No exponen SQL ni secretos. Escrituras, cambios de predeterminado y excepciones de disponibilidad se auditan transaccionalmente; una consulta normal de previsualización no crea movimientos comerciales.
 
 Reglas, ejemplos y límites operativos: [CATALOG.md](docs/CATALOG.md).
+
+## Restaurante · esquema 4
+
+Todas las rutas bajo `/api/v1/restaurant` requieren sesión y terminal vigentes. Toda ruta de cuenta exige `accounts.read`; los permisos de la tabla se agregan a este requisito. Para cuentas `takeaway`, consultar requiere `takeaway.read` y escribir requiere `takeaway.manage`. El listado filtra las modalidades que el usuario puede consultar. `overview` exige también `restaurant.areas.read`.
+
+| Método      | Ruta bajo `/restaurant`        | Permiso específico                                            |
+| ----------- | ------------------------------ | ------------------------------------------------------------- |
+| GET         | `/overview`                    | `restaurant.tables.read` y `restaurant.areas.read`            |
+| GET / POST  | `/areas`                       | `restaurant.areas.read` / `restaurant.areas.manage`           |
+| PATCH       | `/areas/{id}`                  | `restaurant.areas.manage`                                     |
+| GET / POST  | `/tables`                      | `restaurant.tables.read` / `restaurant.tables.manage`         |
+| PATCH       | `/tables/{id}`                 | `restaurant.tables.manage`                                    |
+| PUT         | `/layout`                      | `restaurant.tables.manage`                                    |
+| GET / PUT   | `/settings`                    | `accounts.read` / `restaurant.settings.manage`                |
+| GET         | `/staff`                       | `accounts.transfer`                                           |
+| GET / POST  | `/accounts`                    | `accounts.read` / `accounts.open`                             |
+| GET / PATCH | `/accounts/{id}`               | `accounts.read` / `accounts.manage`                           |
+| PUT         | `/accounts/{id}/draft`         | `orders.capture`                                              |
+| POST        | `/accounts/{id}/draft-preview` | `orders.capture`; solo calcula                                |
+| GET         | `/accounts/{id}/preview`       | `accounts.read`; calcula borrador guardado                    |
+| POST        | `/accounts/{id}/confirm`       | `orders.confirm`                                              |
+| POST        | `/accounts/{id}/edit-preview`  | `orders.edit`; solo calcula                                   |
+| POST        | `/accounts/{id}/edit`          | `orders.edit`; reducir unidades exige también `orders.cancel` |
+| POST        | `/accounts/{id}/cancel`        | `orders.cancel`                                               |
+| POST        | `/accounts/{id}/split`         | `accounts.split` y `accounts.open`                            |
+| POST        | `/accounts/{id}/transfer`      | `accounts.transfer_items`                                     |
+| POST        | `/accounts/{id}/merge`         | `accounts.merge`                                              |
+| POST        | `/accounts/{id}/move`          | `accounts.move`                                               |
+| POST        | `/accounts/{id}/assign`        | `accounts.transfer`                                           |
+| POST        | `/accounts/{id}/void`          | `accounts.manage`                                             |
+| GET         | `/accounts/{id}/history`       | `orders.history.read`                                         |
+
+Guardar/cotizar borrador, confirmar y editar exige además `catalog.read` y `catalog.prices.read`. Seleccionar otra lista requiere `orders.price_list.manage`. El PATCH de cuenta verifica también `accounts.move` o `accounts.transfer` si cambian esos campos. Un mesero autorizado no necesita otra credencial de supervisor para editar/cancelar.
+
+Las escrituras llevan `operation_id` UUID. Actualizar exige `revision`; transferir/combinar exige también `target_revision`. GET y POST de previsualización no llevan UUID ni persisten cambios. Repetir exactamente una escritura del mismo actor/terminal devuelve el resultado original. `REVISION_CONFLICT`, `QUOTE_CHANGED` e `IDEMPOTENCY_CONFLICT` responden 409 y conservan el estado previo. No hay DELETE. Cuerpos hasta 2 MiB y respuestas nativas hasta 2 MiB.
+
+### Documentos y consultas
+
+- Área: `name`, `description`, `sort_order`, `active`; PATCH conserva `id` y revisión del documento leído.
+- Mesa: `area_id`, `name`, `shape` (`rectangle`/`round`), `x`, `y`, `width`, `height`, `seats`, `active`, `out_of_service`. El lienzo lógico es 1000×560. `/layout` recibe `tables:[{id,revision,x,y,width,height,shape}]` y UUID del lote; todas las posiciones se validan antes de escribir.
+- Cuenta: `name`, `mode` (`dine_in`/`takeaway`, inmutable), `table_id` opcional, `price_list_id` opcional, `customer_name`, `phone`, `origin`, `notes`, `scheduled_local` (`YYYY-MM-DDTHH:mm`), `schedule_kind` (`preparation`/`delivery` o vacío), `assigned_user_id` opcional. Para llevar rechaza mesa. La zona proviene del establecimiento; el cliente no decide el offset.
+- Listado: `mode`, `table_id` (UUID o `unassigned`), `search`, `state` (`open` predeterminado, `merged`, `voided`, `all`), `page`, `page_size` hasta 100. Respuesta `{items,total,page,page_size,server_time,timezone,settings}` con orden ascendente de creación. `search` consulta folio, referencia, cliente y teléfono.
+- Cuenta completa: `{account,draft,lines,server_time,timezone}`. `lines` agrupa unidades por versión y estado e incluye `quantity`, solicitud, desglose histórico y totales exactos de las unidades que conserva esa cuenta. Los UUID de unidad se conservan en la base y eventos.
+- Historial: `page`, 100 eventos por página, orden descendente; incluye eventos donde la cuenta es origen o relacionada. Autor, terminal, instante, tipo, valores anterior/posterior y estado de integración son persistidos.
+- Configuración: `warning_minutes`, `overdue_minutes`, `revision`, `operation_id`; advertencia 1–240 minutos, atraso entre advertencia y 1440.
+
+### Captura y confirmación
+
+Guardar o cotizar una captura envía `revision` e `items`. Cada ítem lleva UUID estable de borrador, `product_id`, `variant_id` nullable, `quantity` entera y `customization` del catálogo. PUT de borrador añade el UUID de operación; POST `draft-preview` no lo requiere. Límite de lote: 20 partidas/1000 unidades totales.
+
+```json
+{
+  "operation_id": "00000000-0000-4000-8000-000000000001",
+  "revision": 1,
+  "items": [
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "product_id": "UUID real del catálogo",
+      "variant_id": null,
+      "quantity": 2,
+      "customization": { "ingredients": [], "groups": [], "components": [], "notes": "" }
+    }
+  ]
+}
+```
+
+La previsualización devuelve `{account_id,revision,fingerprint,quote,combined,pricing_policy}`. `quote` corresponde al lote; `combined` suma en Go el importe confirmado con el lote tentativo. Confirmar envía UUID, revisión y `expected_fingerprint` de GET `/preview`. Go vuelve a calcular y persiste solo si coincide. El resultado es la cuenta completa; el borrador se vacía y se crea una liberación durable y se informa el estado real de preparación.
+
+Editar envía `{operation_id,revision,version_id,line,reason,expected_fingerprint}`; `line` usa el contrato de catálogo. Primero POST `/edit-preview` con los mismos datos sin UUID/huella. Motivo de edición o cancelación: 5–500 caracteres. Cancelar envía `{operation_id,revision,version_id,quantity,reason}`. Se conservan versiones, unidades y centavos históricos conforme a [las reglas de modificación](docs/RESTAURANT_OPERATIONS.md).
+
+### Acciones entre cuentas
+
+Dividir recibe `{operation_id,revision,selections:[{version_id,quantity}],new_account:{name}}`. Transferir recibe esas selecciones y `target_account_id`, `target_revision`. Combinar recibe revisiones y cuenta destino sin selecciones. Las tres responden `{source,target}` con cuentas completas. Las cantidades son unidades comerciales enteras; no se recalculan ni se clonan sus importes. La cuenta nueva de división hereda contexto comercial y responsable.
+
+Mover recibe `{operation_id,revision,table_id}` con null para retirar mesa. Asignar recibe `{operation_id,revision,assigned_user_id}`. Anular cuenta vacía recibe `{operation_id,revision,reason}`. Las respuestas son cuentas completas y todas las acciones se auditan transaccionalmente.
+
+No existen rutas de cobro o entrega. `payment_state:not_recorded` y `delivery_state:not_delivered` siguen independientes de preparación. La etapa 5 integra liberaciones, documentos, impresión y eventos conforme a los contratos siguientes.
+
+## Cocina e impresión · etapa 5
+
+Prefijo `/api/v1/kitchen`. Todos los UUID se validan; las escrituras conservan `operation_id` y recuperan el resultado solo para el mismo actor, terminal, ruta y cuerpo. PATCH/PUT y acciones sobre entidades existentes usan revisión. Conflictos responden 409; no se regeneran UUID después de una respuesta incierta. No hay DELETE ni URL o comando arbitrario desde React.
+
+| Método     | Sufijo                                  | Permiso                                                                                 |
+| ---------- | --------------------------------------- | --------------------------------------------------------------------------------------- |
+| GET / POST | `/stations`                             | `kitchen.stations.read` / `kitchen.stations.manage`                                     |
+| PATCH      | `/stations/{id}`                        | `kitchen.stations.manage`; tiempos requieren también `kitchen.timing.manage`            |
+| GET        | `/outputs`                              | `kitchen.stations.manage`; destinos sin configuración técnica completa                  |
+| GET / PUT  | `/access`                               | `kitchen.stations.manage`                                                               |
+| GET / POST | `/printers`                             | `kitchen.printers.manage`                                                               |
+| PATCH      | `/printers/{id}`                        | `kitchen.printers.manage`                                                               |
+| GET        | `/discovery`                            | `kitchen.printers.manage`; consulta CUPS real del servidor                              |
+| GET        | `/targets`                              | `kitchen.routing.manage`; categorías/productos sin precios                              |
+| GET / POST | `/routes`                               | `kitchen.routing.manage`                                                                |
+| PATCH      | `/routes/{id}`                          | `kitchen.routing.manage`                                                                |
+| GET        | `/settings`                             | `kitchen.stations.read`, `kitchen.formats.manage` o `kitchen.timing.manage`             |
+| PUT        | `/settings`                             | `kitchen.formats.manage`; cambios de tiempos/seguimiento exigen `kitchen.timing.manage` |
+| PUT        | `/timing`                               | `kitchen.timing.manage`                                                                 |
+| GET        | `/board`, `/releases`, `/releases/{id}` | `kitchen.states.read` y alcance de estación                                             |
+| POST       | `/releases/{id}/release`                | `kitchen.release`; adelantada requiere `kitchen.release_early`                          |
+| POST       | `/releases/{id}/schedule`               | `kitchen.timing.manage`                                                                 |
+| POST       | `/changes/{id}/retry`                   | `kitchen.release`                                                                       |
+| POST       | `/states`                               | `kitchen.states.manage` y alcance por cada estación afectada                            |
+| GET        | `/tickets`, `/tickets/{id}`             | `kitchen.tickets.read` y alcance de estación                                            |
+| POST       | `/tickets/{id}/ack`                     | `kitchen.kds.ack` y alcance de estación                                                 |
+| GET        | `/jobs`, `/jobs/{id}`                   | `kitchen.queue.read` y `kitchen.stations.all`                                           |
+| POST       | `/jobs/{id}/retry`                      | `kitchen.queue.retry` y `kitchen.stations.all`                                          |
+| POST       | `/jobs/{id}/resolve`                    | `kitchen.queue.resolve` y `kitchen.stations.all`                                        |
+| POST       | `/reprint`                              | `kitchen.reprint` y `kitchen.stations.all`                                              |
+| POST       | `/test-print`                           | `kitchen.printers.test`                                                                 |
+| GET        | `/history`                              | `kitchen.history.read` y `kitchen.stations.all`                                         |
+
+El alcance global `kitchen.stations.all` se comprueba además del permiso funcional. Las consultas y acciones sobre liberaciones/cambios pendientes completos también lo exigen. Sin él, las tareas/documentos operativos y eventos se filtran por `kitchen_device_stations`; no basta conocer UUID. El listado de configuración de estaciones conserva su permiso específico. Cambiar un destino durante una resolución o reimpresión exige también `kitchen.printers.manage`. Los veinte permisos nuevos solo se asignan inicialmente al administrador.
+
+### Configuración
+
+- Estación: `{name,description,active,sort_order,reception,printer_id,target_minutes,warning_minutes,overdue_minutes,grouping,tracking}`. Recepción `printer|kds|both`; agrupación `inherit|independent|unified`; seguimiento `inherit|item|order`. PATCH lleva `id` y `revision`.
+- Impresora: `{name,transport,destination,port,paper_width,copies,supports_cut,cut,cutter_option,active,fallback_id}`. Transporte `cups|escpos_tcp|agent`; papel 58/80 mm, copias 1–3, puerto 9100–9109. CUPS utiliza nombre de cola; TCP una IP privada explícita; agente todavía no implementado. El respaldo es opcional y no puede formar ciclos. PATCH conserva identidad/revisión.
+- Ruta: exactamente uno de `category_id|product_id`, `mode:prepare|none`, `station_ids`. Preparación exige estaciones activas no repetidas; exención explícita usa lista vacía. PATCH conserva `id/revision`; producto prevalece sobre categoría.
+- Acceso: `{device_id,station_ids,expected_station_ids,operation_id}`. La lista esperada del último GET permite rechazar una edición concurrente. Solo dispositivos autorizados existentes.
+- Formato/política: `{grouping,tracking,automatic_release,lead_minutes,show_prices,show_notes,show_establishment,text_size,line_spacing,quantity_style,revision,operation_id}`. Agrupación `independent|unified`, seguimiento `item|order`, anticipación 0–1440, texto `normal|large`, separación 1–3, cantidad `prefix|multiplier`. PUT `/timing` recibe únicamente automatismo, anticipación, seguimiento, revisión y UUID.
+
+### Preparación y documentos
+
+`GET /board` acepta `station_id`, `account_id`, `state` y `page`; devuelve tareas con contexto actual de cuenta, antigüedad, tiempos, instrucciones y revisión, además de estaciones y, si tiene alcance global, liberaciones/cambios pendientes. Máximo 250 tareas por página. El estado de cuenta/partida lo calcula Go: `pending_release`, `scheduled`, `released`, `preparing`, `ready`, `change_pending`, `cancelled`; el estado vacío representa ausencia de productos confirmados.
+
+Liberar: `{operation_id,revision}`. Programar: `{operation_id,revision,scheduled_local,automatic,lead_minutes}`. La hora local `YYYY-MM-DDTHH:mm` se interpreta en la zona del establecimiento y se rechaza si no existe. Revisar cambio pendiente: `{operation_id,revision}` sobre UUID del evento conservado.
+
+Actualizar partidas: `{operation_id,state,tasks:[{id,revision}]}`. Actualizar pedido: `{operation_id,state,release_id,revision,station_id?}`; sin estación abarca las autorizadas del pedido y exige autorización para todas. Estado `preparing|ready`; una estación configurada por pedido rechaza avances por partida. No se avanza una versión obsoleta, cancelada ni se retrocede desde listo.
+
+`GET /tickets` acepta estación/cuenta/página; devuelve resúmenes con KDS pendiente. El detalle conserva UUID, tipo, contexto, ajustes, secciones e instrucciones históricas y `preview` generado por Go. Se ocultan precios salvo formato explícito y `catalog.prices.read`. `POST /tickets/{id}/ack` recibe `{operation_id,station_id}`; solo estaciones KDS/both y recepción única por documento/estación/dispositivo. No cambia preparación o impresión.
+
+### Cola y copias
+
+`GET /jobs` acepta `state` y `page` (100 registros). El detalle incluye trabajo, intentos y documento; no expone contenido crudo fuera de la presentación autorizada. Estados `pending|processing|submitted|error|uncertain|intervention|cancelled`. `submitted` es aceptación del transporte, sin confirmación física.
+
+Reintentar: `{operation_id,revision,reason,printer_id?}`; solo error confirmado o intervención. Resolver: mismos campos y `decision:cancel|accepted|send`; `send` tras incertidumbre es una autorización explícita que reconoce posible copia. No se interviene mientras `processing`. Motivo 5–500 caracteres.
+
+Reimprimir: `{operation_id,job_id,reason,printer_id?}`. El trabajo anterior debe estar finalizado/resuelto; otra copia pendiente o incierta devuelve `PRINT_COPY_PENDING` 409. Se usa documento y formato original sin leyenda adicional. Prueba técnica: `{operation_id,printer_id}`; crea solo documento de prueba/trabajo, sin pedido o liberación comercial.
+
+### SSE y recuperación
+
+`GET /api/v1/events?after=0&station_id=UUID` transmite `text/event-stream`. Sesión/dispositivo y `events.read` obligatorios; filtro por permiso de cada ámbito y estación. También admite `Last-Event-ID` si falta `after`. Parámetros desconocidos, cursor negativo y estación ajena se rechazan. No colocar tokens en query string.
+
+Cada frame `event: changes` incluye `id: cursor` y JSON `{cursor,reset,events}`. Un evento contiene `{sequence,id,version:1,kind,scope,station_id,aggregate_id,created_at}`. No contiene datos de precio/cliente. Lotes hasta 200; ventana lógica 5000; `reset:true` obliga a volver a consultar el estado completo. `GET /api/v1/events/snapshot` devuelve ese mismo lote con idéntica autenticación y permisos.
+
+Los tipos notifican cambios de restaurante/para llevar/configuración, liberación, preparación, recepción KDS y estados de impresión. Son invalidaciones: el consumidor consulta la API autoritativa y deduplica por UUID. Las sesiones/dispositivos/permisos se revalidan durante la conexión. Dos conexiones por dispositivo; la tercera responde `EVENT_CONNECTION_LIMIT` 429. Duración 30 segundos y reconexión nativa con cursor; un frame `interrupted` incluye código/status público y cierra el flujo.
+
+SSE se eligió como equivalente a WebSocket porque las acciones utilizan HTTP idempotente y las notificaciones son unidireccionales. Rust conserva tokens en Keychain y entrega frames a React con Channel. No existe WebSocket ni aplicación KDS independiente. La guía [KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md) detalla contratos KDS y límites de entrega física.

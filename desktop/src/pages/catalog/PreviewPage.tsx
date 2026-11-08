@@ -1,3 +1,4 @@
+import { Accordion } from '../../components/Accordion';
 import { useEffect, useState } from 'react';
 import { Notice, PageTitle } from '../../components/Forms';
 import {
@@ -150,8 +151,7 @@ export function PreviewPage({ can }: { can: (permission: string) => boolean }) {
                 Agregar otro producto a la prueba
               </button>
               {can('catalog.availability.override') && (
-                <details className="catalog-section">
-                  <summary>Excepción autorizada de disponibilidad</summary>
+                <Accordion title="Excepción autorizada de disponibilidad">
                   <Check
                     label="Ignorar pausa temporal y horarios (queda auditado)"
                     value={override}
@@ -165,7 +165,7 @@ export function PreviewPage({ can }: { can: (permission: string) => boolean }) {
                       required
                     />
                   )}
-                </details>
+                </Accordion>
               )}
             </>
           )}

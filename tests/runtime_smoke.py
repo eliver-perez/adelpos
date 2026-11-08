@@ -82,6 +82,13 @@ def requests():
 
 
 def wait_polling():
+    # WebKit puede suspender temporizadores de una ventana en segundo plano.
+    # La aceptación verifica la ventana activa, igual que una sesión de operación.
+    subprocess.run(
+        ["osascript", "-e", 'tell application id "local.adel.pos.dev" to activate'],
+        check=True,
+        timeout=10,
+    )
     before = requests()
     for _ in range(30):
         if requests() >= before + 1:

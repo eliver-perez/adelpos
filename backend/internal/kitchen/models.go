@@ -1,0 +1,165 @@
+// Package kitchen administra preparación y transportes de impresión sin registrar cobros ni inventario.
+package kitchen
+
+import (
+	"time"
+
+	"local/ad-el-pos/server/internal/catalog"
+)
+
+type Settings struct {
+	Grouping          string `json:"grouping"`
+	Tracking          string `json:"tracking"`
+	AutomaticRelease  bool   `json:"automatic_release"`
+	LeadMinutes       int    `json:"lead_minutes"`
+	ShowPrices        bool   `json:"show_prices"`
+	ShowNotes         bool   `json:"show_notes"`
+	ShowEstablishment bool   `json:"show_establishment"`
+	TextSize          string `json:"text_size"`
+	LineSpacing       int    `json:"line_spacing"`
+	QuantityStyle     string `json:"quantity_style"`
+	Revision          int    `json:"revision"`
+}
+
+type Printer struct {
+	ID           string  `json:"id"`
+	Name         string  `json:"name"`
+	Transport    string  `json:"transport"`
+	Destination  string  `json:"destination"`
+	Port         int     `json:"port"`
+	PaperWidth   int     `json:"paper_width"`
+	Copies       int     `json:"copies"`
+	SupportsCut  bool    `json:"supports_cut"`
+	Cut          bool    `json:"cut"`
+	CutterOption string  `json:"cutter_option"`
+	Active       bool    `json:"active"`
+	FallbackID   *string `json:"fallback_id"`
+	Revision     int     `json:"revision"`
+}
+
+type Station struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Description    string  `json:"description"`
+	Active         bool    `json:"active"`
+	SortOrder      int     `json:"sort_order"`
+	Reception      string  `json:"reception"`
+	PrinterID      *string `json:"printer_id"`
+	TargetMinutes  int     `json:"target_minutes"`
+	WarningMinutes int     `json:"warning_minutes"`
+	OverdueMinutes int     `json:"overdue_minutes"`
+	Grouping       string  `json:"grouping"`
+	Tracking       string  `json:"tracking"`
+	Revision       int     `json:"revision"`
+}
+
+type Route struct {
+	ID         string   `json:"id"`
+	ProductID  *string  `json:"product_id"`
+	CategoryID *string  `json:"category_id"`
+	Mode       string   `json:"mode"`
+	StationIDs []string `json:"station_ids"`
+	Revision   int      `json:"revision"`
+}
+
+type Release struct {
+	ID              string             `json:"id"`
+	SourceEventID   string             `json:"source_event_id"`
+	OrderID         string             `json:"order_id"`
+	AccountID       string             `json:"account_id"`
+	UnitIDs         []string           `json:"unit_ids"`
+	State           string             `json:"state"`
+	Automatic       bool               `json:"automatic"`
+	LeadMinutes     int                `json:"lead_minutes"`
+	ScheduledAt     *time.Time         `json:"scheduled_at"`
+	DueAt           *time.Time         `json:"due_at"`
+	Warnings        []string           `json:"warnings"`
+	RoutingSnapshot map[string]Route   `json:"routing_snapshot"`
+	StationSnapshot map[string]Station `json:"station_snapshot"`
+	ContextSnapshot TicketContext      `json:"context_snapshot"`
+	ReleasedAt      *time.Time         `json:"released_at"`
+	Revision        int                `json:"revision"`
+	CreatedAt       time.Time          `json:"created_at"`
+}
+
+type TicketContext struct {
+	Establishment string `json:"establishment"`
+	Timezone      string `json:"timezone"`
+	Folio         int64  `json:"folio"`
+	AccountName   string `json:"account_name"`
+	Table         string `json:"table"`
+	Area          string `json:"area"`
+	Mode          string `json:"mode"`
+	Customer      string `json:"customer"`
+	Origin        string `json:"origin"`
+	Employee      string `json:"employee"`
+	OrderID       string `json:"order_id"`
+}
+
+type Part struct {
+	Path        string                        `json:"path"`
+	ProductID   string                        `json:"product_id"`
+	Name        string                        `json:"name"`
+	Variant     string                        `json:"variant"`
+	Quantity    int                           `json:"quantity"`
+	Ingredients []catalog.IngredientBreakdown `json:"ingredients"`
+	Groups      []catalog.GroupBreakdown      `json:"groups"`
+	Notes       string                        `json:"notes"`
+}
+
+type Instructions struct {
+	ItemID    string        `json:"item_id"`
+	VersionID string        `json:"version_id"`
+	UnitIDs   []string      `json:"unit_ids"`
+	Name      string        `json:"name"`
+	Quantity  int           `json:"quantity"`
+	Parts     []Part        `json:"parts"`
+	Price     string        `json:"price,omitempty"`
+	Before    *Instructions `json:"before,omitempty"`
+	Reason    string        `json:"reason,omitempty"`
+	Notes     string        `json:"notes,omitempty"`
+}
+
+type Section struct {
+	Station Station        `json:"station"`
+	Items   []Instructions `json:"items"`
+}
+
+type Document struct {
+	Preview   string        `json:"preview,omitempty"`
+	ID        string        `json:"id"`
+	Kind      string        `json:"kind"`
+	CreatedAt time.Time     `json:"created_at"`
+	Context   TicketContext `json:"context"`
+	Settings  Settings      `json:"settings"`
+	Sections  []Section     `json:"sections"`
+}
+
+type Task struct {
+	ID           string       `json:"id"`
+	UnitID       string       `json:"unit_id"`
+	ReleaseID    string       `json:"release_id"`
+	StationID    string       `json:"station_id"`
+	VersionID    string       `json:"version_id"`
+	State        string       `json:"state"`
+	Instructions Instructions `json:"instructions"`
+	Revision     int          `json:"revision"`
+	ReleasedAt   time.Time    `json:"released_at"`
+	UpdatedAt    time.Time    `json:"updated_at"`
+}
+
+type PrintJob struct {
+	OriginalJobID      *string   `json:"original_job_id"`
+	TextSize           string    `json:"text_size,omitempty"`
+	ID                 string    `json:"id"`
+	TicketID           string    `json:"ticket_id"`
+	PrinterID          string    `json:"printer_id"`
+	PrinterSnapshot    Printer   `json:"printer_snapshot"`
+	Content            string    `json:"content,omitempty"`
+	State              string    `json:"state"`
+	Attempts           int       `json:"attempts"`
+	Revision           int       `json:"revision"`
+	LastError          string    `json:"last_error"`
+	TransportReference string    `json:"transport_reference"`
+	CreatedAt          time.Time `json:"created_at"`
+}

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,8 @@ import (
 type Service struct {
 	Pool             *pgxpool.Pool
 	ProvisioningFile string
+	streamMutex      sync.Mutex
+	streams          map[string]int
 }
 
 type Request struct {

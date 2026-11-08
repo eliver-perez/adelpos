@@ -67,6 +67,7 @@ export function Form({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const form = event.currentTarget;
     setError('');
     setSaved(false);
     setBusy(true);
@@ -75,6 +76,8 @@ export function Form({
       setSaved(true);
     } catch (error) {
       setError(error instanceof Error ? error.message : 'No se pudo guardar.');
+      // Si se cerró una sección durante la solicitud, el error debe quedar visible.
+      form.dispatchEvent(new CustomEvent('form-validation-error', { bubbles: true }));
     } finally {
       setBusy(false);
     }

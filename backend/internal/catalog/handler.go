@@ -311,6 +311,25 @@ func listPage(ctx context.Context, tx pgx.Tx, resource string, request Request) 
 		return nil, err
 	}
 	if resource == "products" {
+		var priceList *PriceList
+		if listID := request.Query.Get("price_list_id"); listID != "" {
+			if err := request.Actor.Require("catalog.prices.read"); err != nil {
+				return nil, err
+			}
+			if err := validateID(listID); err != nil {
+				return nil, err
+			}
+			document, err := readDocument(ctx, tx, "price-lists", listID)
+			if err != nil {
+				return nil, err
+			}
+			priceList = document.(*PriceList)
+		}
+		location, err := restaurantLocation(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		now := time.Now()
 		for index, item := range items {
 			value := item.(map[string]any)
 			id, _ := value["id"].(string)
@@ -323,20 +342,21 @@ func listPage(ctx context.Context, tx pgx.Tx, resource string, request Request) 
 			if err != nil {
 				return nil, err
 			}
-			location, err := restaurantLocation(ctx, tx)
-			if err != nil {
-				return nil, err
-			}
-			reason := productAvailabilityReason(
-
-				*product,
-				*categoryDoc.(*Category),
-				time.Now(),
-				location,
-				false,
-			)
+			reason := productAvailabilityReason(*product, *categoryDoc.(*Category), now, location, false)
 			value["available_now"] = reason == ""
 			value["availability_reason"] = reason
+			if priceList != nil {
+				price, origin, problem := effectivePrice(*product, nil, *priceList, now, location, false)
+				if !priceList.Active {
+					problem = unavailable("La lista de precios está inactiva.")
+				}
+				if problem == nil {
+					value["effective_price"], value["price_origin"] = money(price), origin
+				} else if fault, ok := problem.(*Error); ok {
+					value["pricing_error"] = fault.Message
+				}
+			}
+
 			items[index] = value
 		}
 	}

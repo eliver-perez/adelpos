@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-diagnostics"
 description = "Consultar diagnósticos y operaciones API enumeradas, con credenciales custodiadas por Rust."
-commands.allow = ["connection_config", "server_snapshot", "authentication_state", "api_request"]
+commands.allow = ["connection_config", "server_snapshot", "authentication_state", "api_request", "window_fullscreen_state", "window_set_fullscreen", "events_start", "events_stop"]

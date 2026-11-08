@@ -4,12 +4,29 @@ import (
 	"context"
 	"errors"
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/operations"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
 func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Request, principal Principal, route string) (any, error) {
+	if route == "events/snapshot" && request.Method == "GET" {
+		return service.eventSnapshot(ctx, tx, request, principal)
+	}
+	if strings.HasPrefix(route, "kitchen/") {
+		result, err := kitchen.Handle(ctx, tx, kitchen.Request{Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
+			Actor: kitchen.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions}},
+			func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
+				return audit(ctx, tx, principal, action, entity, id, before, after, true)
+			})
+		var problem *kitchen.Error
+		if errors.As(err, &problem) {
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+		}
+		return result, err
+	}
 	if request.Method == "GET" && route == "auth/me" {
 		return currentIdentity(ctx, tx, principal)
 	}
@@ -27,6 +44,23 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	}
 	if route == "terminal/preferences" && request.Method == "PUT" {
 		return terminalPreferences(ctx, tx, request, principal)
+	}
+	if strings.HasPrefix(route, "restaurant/") {
+		result, err := operations.Handle(ctx, tx, operations.Request{
+			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
+			Actor: operations.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
+			return audit(ctx, tx, principal, action, entity, id, before, after, true)
+		})
+		var problem *operations.Error
+		if errors.As(err, &problem) {
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+		}
+		var catalogProblem *catalog.Error
+		if errors.As(err, &catalogProblem) {
+			return nil, &Fault{Status: catalogProblem.Status, Code: catalogProblem.Code, Message: catalogProblem.Message}
+		}
+		return result, err
 	}
 	if strings.HasPrefix(route, "catalog/") {
 		result, err := catalog.Handle(ctx, tx, catalog.Request{

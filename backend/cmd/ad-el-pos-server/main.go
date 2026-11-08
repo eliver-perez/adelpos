@@ -19,6 +19,7 @@ import (
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/product"
@@ -120,6 +121,13 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return errors.New("no se pudo abrir el puerto HTTP; compruebe dirección y puerto")
 	}
+	workerContext, stopWorker := context.WithCancel(ctx)
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		(&kitchen.Worker{Pool: pool, Transport: kitchen.HostTransport{}, Logger: logger}).Run(workerContext)
+	}()
+	defer func() { stopWorker(); <-workerDone }()
 	stopped := make(chan error, 1)
 	go func() {
 		if cfg.TLSCertificate != "" {

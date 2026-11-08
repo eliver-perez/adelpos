@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import type { Operation } from '../services/api';
 
@@ -15,6 +15,7 @@ export function useResource<T>(
   const [loading, setLoading] = useState(true);
   const { id, enabled = true } = options;
   const queryKey = JSON.stringify(options.query ?? {});
+  const generation = useRef(0);
 
   const reload = useCallback(async () => {
     if (!enabled) {
@@ -23,22 +24,35 @@ export function useResource<T>(
     }
     setError('');
     setLoading(true);
+    const request = ++generation.current;
     try {
       const result = await api<T>(operation, {
         id,
         query: JSON.parse(queryKey) as Record<string, string>,
       });
-      setData(result);
+      if (request === generation.current) setData(result);
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo cargar la información.');
+      if (request === generation.current)
+        setError(error instanceof Error ? error.message : 'No se pudo cargar la información.');
     } finally {
-      setLoading(false);
+      if (request === generation.current) setLoading(false);
     }
   }, [operation, id, queryKey, enabled]);
 
   useEffect(() => {
     void reload();
-  }, [reload]);
+    let timer: number | undefined;
+    const invalidate = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void reload(), 75);
+    };
+    if (enabled) window.addEventListener('adel-server-change', invalidate);
+    return () => {
+      generation.current++;
+      window.clearTimeout(timer);
+      window.removeEventListener('adel-server-change', invalidate);
+    };
+  }, [reload, enabled]);
 
   return { data, error, loading, reload };
 }

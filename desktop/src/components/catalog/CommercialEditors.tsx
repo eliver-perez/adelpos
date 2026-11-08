@@ -1,3 +1,4 @@
+import { Accordion } from '../Accordion';
 import { Field } from '../Forms';
 import type { Lookups, OptionGroup, PriceList, Promotion } from '../../services/catalog';
 import {
@@ -233,10 +234,15 @@ function ScopeSelector({
   onChange: (value: string[]) => void;
 }) {
   return (
-    <details className="catalog-section" open={selected.length > 0}>
-      <summary>
-        {title} · {selected.length} seleccionados
-      </summary>
+    <Accordion
+      defaultOpen={selected.length > 0}
+      title={
+        <>
+          {' '}
+          {title} · {selected.length} seleccionados{' '}
+        </>
+      }
+    >
       <div className="scope-options">
         {options.map((option) => (
           <Check
@@ -251,7 +257,7 @@ function ScopeSelector({
           />
         ))}
       </div>
-    </details>
+    </Accordion>
   );
 }
 

@@ -86,6 +86,9 @@ case "${1:-help}" in
         (cd desktop && npm test && npm run build)
         (cd desktop/src-tauri && cargo test --locked)
         ;;
+    test-browser)
+        exec python3 scripts/browser-tests.py
+        ;;
     test-integration)
         exec python3 scripts/database.py test-integration
         ;;

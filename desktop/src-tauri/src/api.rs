@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use tauri::State;
 
-fn resource_id(id: Option<&str>) -> Result<&str, String> {
+pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
     let value = id.ok_or("Falta el identificador del registro.")?;
     if value.len() != 36
         || value
@@ -19,6 +19,29 @@ fn resource_id(id: Option<&str>) -> Result<&str, String> {
 
 fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> {
     let fixed = match operation {
+        "kitchen_outputs" => Some((Method::GET, "kitchen/outputs")),
+        "kitchen_stations" => Some((Method::GET, "kitchen/stations")),
+        "kitchen_create_station" => Some((Method::POST, "kitchen/stations")),
+        "kitchen_printers" => Some((Method::GET, "kitchen/printers")),
+        "kitchen_create_printer" => Some((Method::POST, "kitchen/printers")),
+        "kitchen_discovery" => Some((Method::GET, "kitchen/discovery")),
+        "kitchen_routes" => Some((Method::GET, "kitchen/routes")),
+        "kitchen_targets" => Some((Method::GET, "kitchen/targets")),
+        "kitchen_create_route" => Some((Method::POST, "kitchen/routes")),
+        "kitchen_settings" => Some((Method::GET, "kitchen/settings")),
+        "kitchen_save_settings" => Some((Method::PUT, "kitchen/settings")),
+        "kitchen_save_timing" => Some((Method::PUT, "kitchen/timing")),
+        "kitchen_access" => Some((Method::GET, "kitchen/access")),
+        "kitchen_save_access" => Some((Method::PUT, "kitchen/access")),
+        "kitchen_board" => Some((Method::GET, "kitchen/board")),
+        "kitchen_releases" => Some((Method::GET, "kitchen/releases")),
+        "kitchen_tickets" => Some((Method::GET, "kitchen/tickets")),
+        "kitchen_jobs" => Some((Method::GET, "kitchen/jobs")),
+        "kitchen_history" => Some((Method::GET, "kitchen/history")),
+        "kitchen_save_states" => Some((Method::POST, "kitchen/states")),
+        "kitchen_test_print" => Some((Method::POST, "kitchen/test-print")),
+        "kitchen_reprint" => Some((Method::POST, "kitchen/reprint")),
+
         "setup_status" => Some((Method::GET, "setup/status")),
         "setup" => Some((Method::POST, "setup")),
         "enroll" => Some((Method::POST, "devices/enroll")),
@@ -63,6 +86,17 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_preview" => Some((Method::POST, "catalog/preview")),
         "catalog_upload_image" => Some((Method::POST, "catalog/images")),
         "catalog_reorder_categories" => Some((Method::POST, "catalog/categories/reorder")),
+        "restaurant_overview" => Some((Method::GET, "restaurant/overview")),
+        "restaurant_areas" => Some((Method::GET, "restaurant/areas")),
+        "restaurant_create_area" => Some((Method::POST, "restaurant/areas")),
+        "restaurant_tables" => Some((Method::GET, "restaurant/tables")),
+        "restaurant_create_table" => Some((Method::POST, "restaurant/tables")),
+        "restaurant_save_layout" => Some((Method::PUT, "restaurant/layout")),
+        "restaurant_settings" => Some((Method::GET, "restaurant/settings")),
+        "restaurant_save_settings" => Some((Method::PUT, "restaurant/settings")),
+        "restaurant_staff" => Some((Method::GET, "restaurant/staff")),
+        "restaurant_accounts" => Some((Method::GET, "restaurant/accounts")),
+        "restaurant_open_account" => Some((Method::POST, "restaurant/accounts")),
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -70,6 +104,28 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
     }
     let identifier = resource_id(id)?;
     let (method, path) = match operation {
+        "kitchen_save_station" => (Method::PATCH, format!("kitchen/stations/{identifier}")),
+        "kitchen_save_printer" => (Method::PATCH, format!("kitchen/printers/{identifier}")),
+        "kitchen_save_route" => (Method::PATCH, format!("kitchen/routes/{identifier}")),
+        "kitchen_release" => (
+            Method::POST,
+            format!("kitchen/releases/{identifier}/release"),
+        ),
+        "kitchen_schedule" => (
+            Method::POST,
+            format!("kitchen/releases/{identifier}/schedule"),
+        ),
+        "kitchen_retry_change" => (Method::POST, format!("kitchen/changes/{identifier}/retry")),
+        "kitchen_ticket" => (Method::GET, format!("kitchen/tickets/{identifier}")),
+        "kitchen_ack_ticket" => (Method::POST, format!("kitchen/tickets/{identifier}/ack")),
+        "kitchen_job" => (Method::GET, format!("kitchen/jobs/{identifier}")),
+        "kitchen_retry_job" => (Method::POST, format!("kitchen/jobs/{identifier}/retry")),
+        "kitchen_resolve_job" => (Method::POST, format!("kitchen/jobs/{identifier}/resolve")),
+
+        "restaurant_draft_preview" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/draft-preview"),
+        ),
         "catalog_get_categories" => (Method::GET, format!("catalog/categories/{identifier}")),
         "catalog_save_categories" => (Method::PATCH, format!("catalog/categories/{identifier}")),
         "catalog_get_products" => (Method::GET, format!("catalog/products/{identifier}")),
@@ -102,6 +158,62 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_duplicate_product" => (
             Method::POST,
             format!("catalog/products/{identifier}/duplicate"),
+        ),
+        "restaurant_save_area" => (Method::PATCH, format!("restaurant/areas/{identifier}")),
+        "restaurant_save_table" => (Method::PATCH, format!("restaurant/tables/{identifier}")),
+        "restaurant_account" => (Method::GET, format!("restaurant/accounts/{identifier}")),
+        "restaurant_save_account" => (Method::PATCH, format!("restaurant/accounts/{identifier}")),
+        "restaurant_save_draft" => (
+            Method::PUT,
+            format!("restaurant/accounts/{identifier}/draft"),
+        ),
+        "restaurant_preview" => (
+            Method::GET,
+            format!("restaurant/accounts/{identifier}/preview"),
+        ),
+        "restaurant_history" => (
+            Method::GET,
+            format!("restaurant/accounts/{identifier}/history"),
+        ),
+        "restaurant_confirm" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/confirm"),
+        ),
+        "restaurant_edit_preview" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/edit-preview"),
+        ),
+        "restaurant_edit" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/edit"),
+        ),
+        "restaurant_cancel" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/cancel"),
+        ),
+        "restaurant_split" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/split"),
+        ),
+        "restaurant_transfer" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/transfer"),
+        ),
+        "restaurant_merge" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/merge"),
+        ),
+        "restaurant_move" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/move"),
+        ),
+        "restaurant_assign" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/assign"),
+        ),
+        "restaurant_void" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/void"),
         ),
         "update_user" => (Method::PATCH, format!("users/{identifier}")),
         "user_permissions" => (Method::GET, format!("users/{identifier}/permissions")),
@@ -190,6 +302,10 @@ pub async fn api_request(
                 "from",
                 "until",
             ]
+        } else if operation.starts_with("kitchen_") {
+            &["page", "station_id", "state", "account_id"]
+        } else if operation.starts_with("restaurant_") {
+            &["page", "page_size", "search", "mode", "table_id", "state"]
         } else if operation.starts_with("catalog_") {
             &[
                 "page",
@@ -199,6 +315,7 @@ pub async fn api_request(
                 "category_id",
                 "kind",
                 "archived",
+                "price_list_id",
             ]
         } else {
             &[]
@@ -287,6 +404,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn kitchen_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            (
+                "kitchen_save_station",
+                Method::PATCH,
+                format!("kitchen/stations/{identifier}"),
+            ),
+            (
+                "kitchen_retry_job",
+                Method::POST,
+                format!("kitchen/jobs/{identifier}/retry"),
+            ),
+            (
+                "kitchen_ack_ticket",
+                Method::POST,
+                format!("kitchen/tickets/{identifier}/ack"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+        }
+        assert!(route("kitchen_execute", Some(identifier)).is_err());
+        assert!(route("kitchen_job", Some("../../settings")).is_err());
+        assert_eq!(route("kitchen_save_settings", None).unwrap().0, Method::PUT);
+    }
+
+    #[test]
     fn rejects_arbitrary_routes_and_identifiers() {
         assert!(route("https://attacker.test", None).is_err());
         assert!(route("update_user", Some("../../settings")).is_err());
@@ -308,6 +452,28 @@ mod tests {
         assert!(route("catalog_save_groups", None).is_err());
         assert!(route("catalog_delete_everything", Some(identifier)).is_err());
         assert!(route("catalog_image", Some("../../../../private/secrets")).is_err());
+    }
+
+    #[test]
+    fn restaurant_routes_preserve_methods_and_reject_unimplemented_actions() {
+        let identifier = "00000000-0000-0000-0000-000000000001";
+        for (operation, method, suffix) in [
+            ("restaurant_save_draft", Method::PUT, "draft"),
+            ("restaurant_draft_preview", Method::POST, "draft-preview"),
+            ("restaurant_confirm", Method::POST, "confirm"),
+            ("restaurant_edit", Method::POST, "edit"),
+            ("restaurant_split", Method::POST, "split"),
+            ("restaurant_transfer", Method::POST, "transfer"),
+            ("restaurant_merge", Method::POST, "merge"),
+        ] {
+            let (actual_method, path) = route(operation, Some(identifier)).unwrap();
+            assert_eq!(actual_method, method);
+            assert_eq!(path, format!("restaurant/accounts/{identifier}/{suffix}"));
+            assert!(route(operation, None).is_err());
+        }
+        assert!(route("restaurant_deliver", Some(identifier)).is_err());
+        assert!(route("restaurant_pay", Some(identifier)).is_err());
+        assert!(route("restaurant_confirm", Some("../../settings")).is_err());
     }
 
     #[test]

@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { OperationalPage } from './pages/restaurant/OperationalPage';
+import { WindowControls } from './components/WindowControls';
+import { VirtualKeyboard } from './components/VirtualKeyboard';
 import { Notice } from './components/Forms';
 import { BrandLogo } from './components/BrandLogo';
 import { CatalogPage } from './pages/catalog/CatalogPage';
 import { PreviewPage } from './pages/catalog/PreviewPage';
 import { Icon } from './components/Icon';
 import { useSession } from './hooks/useSession';
+import { useRealtime } from './hooks/useRealtime';
+import { KitchenPage } from './pages/kitchen/KitchenPage';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
 import { AuditPage } from './pages/AuditPage';
 import { DevicesPage } from './pages/DevicesPage';
@@ -18,16 +23,34 @@ import { UsersPage } from './pages/UsersPage';
 import product from './generated/product.json';
 
 export function App() {
+  return (
+    <>
+      <WindowControls />
+      <ApplicationContent />
+    </>
+  );
+}
+
+function ApplicationContent() {
   const session = useSession();
   const [screen, setScreen] = useState('status');
   const [technical, setTechnical] = useState(false);
   const [actionError, setActionError] = useState('');
   const initializedUser = useRef<string | null>(null);
   const identity = session.identity;
+  const realtimeStatus = useRealtime(
+    identity?.user.id ?? '',
+    !!identity?.user.permissions.includes('events.read'),
+  );
+  const operationMode = screen === 'restaurant' || screen === 'takeaway';
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const available = screens.filter((entry) => {
     const authorized = !entry.permission || can(entry.permission);
-    return authorized && (entry.id !== 'preview' || can('catalog.read'));
+    return (
+      authorized &&
+      (entry.id !== 'preview' || can('catalog.read')) &&
+      (entry.id !== 'takeaway' || can('accounts.read'))
+    );
   });
 
   useEffect(() => {
@@ -123,6 +146,11 @@ export function App() {
       return null;
     }
     switch (screen) {
+      case 'restaurant':
+      case 'takeaway':
+        return null;
+      case 'kitchen':
+        return <KitchenPage can={can} timezone={identity.establishment.timezone} />;
       case 'catalog':
         return <CatalogPage can={can} />;
       case 'preview':
@@ -151,7 +179,7 @@ export function App() {
   }
 
   return (
-    <div className="app-shell min-h-screen">
+    <div className={`app-shell min-h-screen ${operationMode ? 'operation-mode' : ''}`}>
       <aside className="sidebar admin-sidebar">
         <div className="brand-heading">
           <div className="brand-heading-content">
@@ -195,6 +223,9 @@ export function App() {
             <span className="text-xs">
               {session.connectionError ? 'Sin conexión' : 'Sesión verificada'}
             </span>
+            <span className="realtime-status text-xs">
+              {!session.connectionError && realtimeStatus}
+            </span>
           </div>
         </header>
         <div className="mobile-navigation">
@@ -232,8 +263,23 @@ export function App() {
             </div>
           )}
           {content()}
+          {can('accounts.read') && (
+            <div
+              className="operation-root-host"
+              style={{ display: operationMode ? 'block' : 'none' }}
+            >
+              <OperationalPage
+                timezone={identity.establishment.timezone}
+                key={identity.user.id}
+                active={operationMode}
+                requestedView={screen === 'takeaway' ? 'takeaway' : 'tables'}
+                can={can}
+              />
+            </div>
+          )}
         </main>
       </div>
+      <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { Accordion } from '../Accordion';
 import { Field, Notice } from '../Forms';
 import { useResource } from '../../hooks/useResource';
 import type {
@@ -212,8 +213,7 @@ export function ProductCustomizer({
               />
             </div>
             {selection.quantity > 0 && (
-              <details>
-                <summary>Personalizar este componente</summary>
+              <Accordion title="Personalizar este componente">
                 <ProductCustomizer
                   productID={selection.product_id}
                   variantID={selection.variant_id}
@@ -230,7 +230,7 @@ export function ProductCustomizer({
                   lookups={lookups}
                   depth={depth + 1}
                 />
-              </details>
+              </Accordion>
             )}
           </section>
         );

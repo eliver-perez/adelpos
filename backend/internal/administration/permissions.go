@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/operations"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -33,6 +35,12 @@ var Permissions = []Permission{
 }
 
 func init() {
+	for _, permission := range kitchen.Permissions {
+		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
+	}
+	for _, permission := range operations.Permissions {
+		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
+	}
 	for _, permission := range catalog.Permissions {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}

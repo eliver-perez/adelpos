@@ -5,6 +5,9 @@ import { api } from '../services/api';
 import type { Identity, Preferences } from '../services/models';
 
 export const screens = [
+  { id: 'kitchen', label: 'Cocina y preparación', permission: 'kitchen.states.read' },
+  { id: 'restaurant', label: 'Restaurante', permission: 'accounts.read' },
+  { id: 'takeaway', label: 'Para llevar', permission: 'takeaway.read' },
   { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
   { id: 'preview', label: 'Probar personalización', permission: 'catalog.prices.read' },
   { id: 'status', label: 'Estado del sistema', permission: '' },

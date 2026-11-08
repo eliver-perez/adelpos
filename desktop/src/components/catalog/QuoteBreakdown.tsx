@@ -1,6 +1,7 @@
+import { Accordion } from '../Accordion';
 import type { ProductBreakdown, Quote } from '../../services/catalog';
 
-function ProductDetails({ value }: { value: ProductBreakdown }) {
+export function ProductDetails({ value }: { value: ProductBreakdown }) {
   return (
     <div className="quote-product-details">
       <p className="muted text-xs">
@@ -19,8 +20,7 @@ function ProductDetails({ value }: { value: ProductBreakdown }) {
         <dd>${value.unit_price}</dd>
       </dl>
       {value.groups.map((group) => (
-        <details key={group.group_id} open className="quote-group">
-          <summary>{group.name}</summary>
+        <Accordion key={group.group_id} defaultOpen title={group.name}>
           <dl className="price-breakdown">
             <dt>Valor original incluido</dt>
             <dd>${group.original_value}</dd>
@@ -38,7 +38,7 @@ function ProductDetails({ value }: { value: ProductBreakdown }) {
                 {option.name}: {option.included} incluido → {option.requested} solicitado
               </p>
             ))}
-        </details>
+        </Accordion>
       ))}
       {value.ingredients.map((ingredient) => (
         <p className="muted text-xs" key={ingredient.ingredient_id}>
@@ -47,12 +47,13 @@ function ProductDetails({ value }: { value: ProductBreakdown }) {
         </p>
       ))}
       {value.components.map((component) => (
-        <details key={component.slot_id}>
-          <summary>
-            {component.name} × {component.quantity} · +${component.charge}
-          </summary>
+        <Accordion
+          key={component.slot_id}
+          title={`${component.name} × ${component.quantity}`}
+          summary={`Cargo del componente: $${component.charge}`}
+        >
           {component.product && <ProductDetails value={component.product} />}
-        </details>
+        </Accordion>
       ))}
       {value.notes && <p className="muted text-sm">Preparación: {value.notes}</p>}
     </div>

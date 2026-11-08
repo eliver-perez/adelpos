@@ -39,3 +39,29 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 - Respetar revisión optimista y lock de catálogo; cada escritura y su auditoría pertenecen a la misma transacción. No eludir permisos de precios/estado/disponibilidad/imágenes mediante el editor completo.
 - 0003 aplicada es inmutable. La previsualización no registra ventas ni movimientos de inventario. Leer docs/CATALOG.md antes de ampliar reglas.
 - Preservar los PNG originales de assets/brand; BrandLogo elige por tema y conserva proporciones. No sustituir la marca ni confundirla con el logotipo futuro del restaurante.
+
+## Regla visual permanente desde etapa 4
+
+- Utilizar components/Accordion para secciones colapsables. Encabezado completo con título, resumen opcional y chevron; tarjeta discreta, temas claro/oscuro y transición con movimiento reducido.
+- Mantener controles montados al cerrar, conservar valores/errores y revelar automáticamente errores de formulario. Preservar relaciones aria y navegación por teclado. No reintroducir details/summary sin este patrón ni convertir indiscriminadamente todas las pantallas en acordeones.
+- Pedidos confirmados conservan snapshots y unidades estables. Transferir o dividir no recalcula precios ni genera preparación. No afirmar envío a cocina, pago o entrega hasta contar con sus módulos reales.
+
+## Continuidad de etapa 4
+
+- 0001–0005 ya están aplicadas y son inmutables. La siguiente ampliación del esquema requiere 0006. Leer docs/RESTAURANT_OPERATIONS.md, docs/KITCHEN_AND_PRINTING.md y docs/VERIFICATION.md.
+- Toda escritura operativa conserva UUID, revisión, resultado idempotente, auditoría y eventos en la misma transacción. No regenerar UUID al reintentar una respuesta incierta.
+- Observaciones y reducciones de receta idéntica conservan importes de unidades históricas; otros cambios requieren cotización y aceptación explícitas. No recalcular automáticamente pedidos anteriores por cambios de catálogo o promociones.
+- Ventanilla pertenece a takeaway. Mantener preparación, pago y entrega independientes. No agregar una acción de entregar sin el futuro cobro real.
+- El borrador persistido y el editor local son estados distintos. No descartar selecciones ante sondeo o conflicto. No prometer recuperación offline después de cerrar el proceso.
+- Las pruebas visuales usan solo bases adel_pos_test_* y transporte IPC de prueba exclusivo de Node. No introducir un acceso web alternativo en producción ni pasar tokens al WebView.
+
+## Regla permanente desde etapa 5
+
+- Iniciar en pantalla completa nativa mediante Tauri, con salida/regreso visibles y modo ventana normal. No imponer quiosco ni bloquear controles o Spaces de macOS.
+- 1280×720 es un escenario de prueba; no un ancho/alto fijo del producto. Usar todo el monitor con distribuciones fluidas y paneles prácticos; conservar formularios y selecciones al redimensionar.
+- La liberación canónica es una por UUID de unidad comercial en kitchen_unit_releases; estaciones/copias no crean consumo adicional. No registrar inventario físico todavía.
+- Conservar rutas/documentos históricos. Modificaciones bloqueadas permanecen en kitchen_pending_changes; no aparentar preparación lista ni avanzar una versión obsoleta.
+- La cola confirma intento/lease antes del transporte y serializa por impresora. Un resultado desconocido exige resolución explícita; nunca reenviarlo automáticamente ni activar respaldo por incertidumbre.
+- submitted significa aceptación CUPS/TCP, no salida física de papel. Reimprimir conserva presentación sin leyendas adicionales y bloquea otras copias sin resolver.
+- El planificador y los trabajadores pertenecen a Go independiente. SSE es el equivalente elegido a WebSocket: outbox, cursor/replay/reset, permisos por estación y Channel nativo sin tokens en React. Conservar HTTP idempotente para comandos/acuse KDS.
+- TestControlledCUPSPrinter nunca imprime en suites normales. El envío de hardware necesita destino explícito y ADEL_HARDWARE_SEND=1; no activar en CI ni dirigir a la impresora predeterminada por inferencia.

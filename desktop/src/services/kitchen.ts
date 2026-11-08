@@ -1,0 +1,213 @@
+import type { Operation } from './api';
+
+export interface Printer {
+  id: string;
+  name: string;
+  transport: 'cups' | 'escpos_tcp' | 'agent';
+  destination: string;
+  port: number;
+  paper_width: number;
+  copies: number;
+  supports_cut: boolean;
+  cut: boolean;
+  cutter_option: string;
+  active: boolean;
+  fallback_id: string | null;
+  revision: number;
+}
+
+export interface Station {
+  id: string;
+  name: string;
+  description: string;
+  active: boolean;
+  sort_order: number;
+  reception: 'printer' | 'kds' | 'both';
+  printer_id: string | null;
+  target_minutes: number;
+  warning_minutes: number;
+  overdue_minutes: number;
+  grouping: 'inherit' | 'independent' | 'unified';
+  tracking: 'inherit' | 'item' | 'order';
+  revision: number;
+}
+
+export interface KitchenSettings {
+  grouping: 'independent' | 'unified';
+  tracking: 'item' | 'order';
+  automatic_release: boolean;
+  lead_minutes: number;
+  show_prices: boolean;
+  show_notes: boolean;
+  show_establishment: boolean;
+  text_size: 'normal' | 'large';
+  line_spacing: number;
+  quantity_style: 'prefix' | 'multiplier';
+  revision: number;
+}
+
+export interface KitchenRoute {
+  id: string;
+  product_id: string | null;
+  category_id: string | null;
+  mode: 'prepare' | 'none';
+  station_ids: string[];
+  revision: number;
+}
+
+export interface Release {
+  id: string;
+  account_id: string;
+  order_id: string;
+  folio?: number;
+  account_name?: string;
+  state: 'pending' | 'scheduled' | 'blocked' | 'released' | 'cancelled';
+  scheduled_at: string | null;
+  due_at: string | null;
+  automatic: boolean;
+  lead_minutes: number;
+  warnings: string[];
+  revision: number;
+  created_at: string;
+}
+
+export interface PreparationPart {
+  path: string;
+  name: string;
+  variant: string;
+  quantity: number;
+  notes: string;
+}
+
+export interface Instructions {
+  item_id: string;
+  version_id: string;
+  name: string;
+  quantity: number;
+  notes?: string;
+  parts: PreparationPart[];
+  reason?: string;
+}
+
+export interface Task {
+  id: string;
+  unit_id: string;
+  release_id: string;
+  station_id: string;
+  state: 'released' | 'preparing' | 'ready' | 'cancelled';
+  instructions: Instructions;
+  revision: number;
+  released_at: string;
+  folio: number;
+  account_name: string;
+  table_name: string | null;
+  station_name: string;
+  warning_minutes: number;
+  overdue_minutes: number;
+  target_minutes: number;
+  elapsed_seconds: number;
+  release_revision: number;
+  tracking: 'item' | 'order';
+}
+
+export interface Board {
+  tasks: Task[];
+  releases: Release[];
+  pending_changes: {
+    event_id: string;
+    kind: string;
+    warnings: string[];
+    revision: number;
+    created_at: string;
+  }[];
+  stations: Station[];
+  server_time: string;
+  timezone: string;
+  page: number;
+}
+
+export interface PrintJob {
+  id: string;
+  ticket_id: string;
+  printer_id: string;
+  printer_name: string;
+  printer_snapshot: Printer;
+  original_job_id: string | null;
+  state:
+    'pending' | 'processing' | 'submitted' | 'error' | 'uncertain' | 'cancelled' | 'intervention';
+  attempts: number;
+  last_error: string;
+  transport_reference: string;
+  revision: number;
+  created_at: string;
+}
+
+export interface TicketSummary {
+  id: string;
+  kind: 'normal' | 'modification' | 'cancellation' | 'test';
+  created_at: string;
+  release_id: string;
+  folio: number;
+  pending_kds: boolean;
+}
+
+export interface TicketDocument {
+  id: string;
+  kind: TicketSummary['kind'];
+  created_at: string;
+  context: { folio: number; account_name: string; timezone: string };
+  sections: { station: Station; items: Instructions[] }[];
+  preview: string;
+}
+
+export interface DeviceScope {
+  device_id: string;
+  device_name: string;
+  station_ids: string[];
+}
+
+export type ExecuteKitchen = <T>(
+  operation: Operation,
+  options: { id?: string; body?: Record<string, unknown> },
+) => Promise<T>;
+
+export const preparationLabels: Record<string, string> = {
+  without_items: 'Sin productos confirmados',
+  draft: 'Borrador por confirmar',
+  confirmed_pending_dispatch: 'Pendiente de liberación',
+  pending_release: 'Pendiente de liberación · revisar cocina',
+  change_pending: 'Cambio de cocina pendiente de revisión',
+  scheduled: 'Programado para preparación',
+  released: 'Liberado a preparación',
+  preparing: 'En preparación',
+  ready: 'Listo',
+  cancelled: 'Cancelado',
+};
+
+export const jobLabels: Record<PrintJob['state'], string> = {
+  pending: 'Pendiente',
+  processing: 'En proceso',
+  submitted: 'Aceptado por el transporte',
+  error: 'Error confirmado antes del envío',
+  uncertain: 'Resultado incierto · requiere revisión',
+  cancelled: 'Cancelado administrativamente',
+  intervention: 'Requiere intervención',
+};
+
+export function zonedInput(value: string | null, timezone: string) {
+  if (!value) return '';
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(new Date(value))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+}
