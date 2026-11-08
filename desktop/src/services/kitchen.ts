@@ -144,7 +144,7 @@ export interface PrintJob {
 
 export interface TicketSummary {
   id: string;
-  kind: 'normal' | 'modification' | 'cancellation' | 'test';
+  kind: 'normal' | 'modification' | 'cancellation' | 'test' | 'receipt' | 'precheck';
   created_at: string;
   release_id: string;
   folio: number;
@@ -182,6 +182,16 @@ export const preparationLabels: Record<string, string> = {
   preparing: 'En preparación',
   ready: 'Listo',
   cancelled: 'Cancelado',
+};
+
+// Tipo de documento en comandas y cola de impresión, incluidos los documentos comerciales.
+export const ticketKindLabels: Record<TicketSummary['kind'], string> = {
+  normal: 'Comanda',
+  modification: 'MODIFICACIÓN',
+  cancellation: 'CANCELACIÓN',
+  test: 'Prueba autorizada',
+  receipt: 'Ticket de pago',
+  precheck: 'Precuenta',
 };
 
 export const jobLabels: Record<PrintJob['state'], string> = {

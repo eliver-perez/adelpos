@@ -24,9 +24,13 @@ export interface CaptureState {
   // Cantidad seleccionada por versión de partida (unidades enteras, no dinero).
   selections: Record<string, number>;
   target: AmountTarget;
+  // Imprimir ticket: null sigue la preferencia del establecimiento hasta que el cajero la cambie.
+  print: boolean | null;
+  // Marcar como entregado al registrar (solo pedidos para llevar).
+  deliver: boolean;
 }
 
-export function initialCapture(): CaptureState {
+export function initialCapture(deliver = false): CaptureState {
   return {
     methodID: '',
     mode: 'total',
@@ -36,6 +40,8 @@ export function initialCapture(): CaptureState {
     reference: '',
     selections: {},
     target: 'amount',
+    print: null,
+    deliver,
   };
 }
 
@@ -126,16 +132,20 @@ export function calculationInput(method: PaymentMethod, selections: Selection[])
 }
 
 // Cuerpo del registro: el importe total que se mostró (calculado por Go) y el saldo mostrado como
-// saldo esperado. Si cualquiera cambió en otra terminal, Go responde BALANCE_CHANGED.
+// saldo esperado. Si cualquiera cambió en otra terminal, Go responde BALANCE_CHANGED. Impresión y
+// entrega se envían siempre explícitas para no depender de la preferencia del servidor.
 export function registerInput(
   input: PaymentInput,
   plan: PaymentPlan,
   finance: Finance,
+  options: { print: boolean; deliver: boolean },
 ): PaymentInput {
   return {
     ...input,
     amount: input.mode === 'total' ? plan.amount : input.amount,
     expected_balance: finance.balance,
+    print: options.print,
+    deliver: options.deliver,
   };
 }
 

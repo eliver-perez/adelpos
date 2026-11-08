@@ -1681,9 +1681,9 @@ summary {
   min-height: 0;
   display: grid;
   grid-template-columns:
-    minmax(0, 1.15fr)
-    minmax(0, 0.9fr)
-    minmax(300px, 0.95fr);
+    minmax(0, 1.05fr)
+    minmax(0, 0.85fr)
+    minmax(320px, 1fr);
   gap: 12px;
 }
 .checkout-loading {
@@ -1868,6 +1868,19 @@ summary {
 }
 .checkout-capture-footer .checkout-figures {
   background: var(--panel);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 14px;
+  align-items: center;
+}
+/* En el pie, el cambio ocupa dos filas a la izquierda y el resto se apila a la derecha. */
+.checkout-capture-footer .checkout-figure-emphasis {
+  grid-row: span 2;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+}
+.checkout-capture-footer .checkout-figure-emphasis dd {
+  text-align: left;
 }
 .checkout-figure-emphasis {
   align-items: baseline;
@@ -2438,4 +2451,129 @@ summary {
 .adjustment-void {
   margin-top: 8px;
   gap: 10px;
+}
+
+/* Fase 6D: impresión, entrega, precuenta y documentos. */
+.toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+/* Activado: fondo y borde de acento, sin casilla ni marca de verificación. */
+.toggle-button-on {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 7px 11px;
+}
+.toggle-button:disabled {
+  cursor: not-allowed;
+}
+.checkout-register-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+}
+/* El interruptor y el botón principal comparten línea; el texto del botón puede ocupar dos. */
+.checkout-register-row .toggle-button {
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding-inline: 10px;
+}
+.checkout-register-row .toggle-button-on {
+  padding-inline: 9px;
+}
+.checkout-register-row .checkout-register {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  line-height: 1.3;
+}
+.checkout-printer-note {
+  order: 3;
+  flex-basis: 100%;
+  font-size: 10px;
+  color: var(--warning);
+}
+.checkout-deliver-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.checkout-deliver-option small {
+  font-size: 10px;
+}
+.checkout-result-flag {
+  font-weight: 600;
+  color: var(--accent);
+}
+.checkout-result-warning {
+  font-weight: 600;
+  color: var(--warning);
+}
+.document-list {
+  display: grid;
+  gap: 6px;
+}
+.document-state {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: right;
+}
+.document-attention {
+  border-left-color: var(--warning);
+}
+.document-attention .document-state {
+  color: var(--warning);
+}
+.takeaway-delivery {
+  display: grid;
+  gap: 6px;
+  padding-top: 4px;
+}
+.takeaway-delivery > .secondary-button {
+  justify-self: start;
+}
+.takeaway-delivery-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+.takeaway-delivered {
+  font-weight: 650;
+  color: var(--accent);
+}
+.precheck-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  gap: 14px;
+  align-items: start;
+}
+.commercial-document {
+  margin: 0;
+  max-height: 60dvh;
+  font-size: 11px;
+  line-height: 1.5;
+}
+@media (max-width: 1180px) {
+  .precheck-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

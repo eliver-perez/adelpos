@@ -18,6 +18,7 @@ import { ProductSelector } from './ProductSelector';
 import { CheckoutPanel } from './checkout/CheckoutPanel';
 import { CheckoutToolbar } from './checkout/CheckoutToolbar';
 import { AccountAdjustments } from './adjustments/AccountAdjustments';
+import { PrecheckPanel } from './documents/PrecheckPanel';
 import { paymentStateBadges } from '../../services/payments';
 
 export function OperationalPage({
@@ -35,6 +36,8 @@ export function OperationalPage({
   const { view, panel, bill, overview, lookups, editor, mutation } = workspace;
   // Panel al que vuelve una acción de cuenta: dividir o transferir desde el cobro regresa al cobro.
   const [actionReturn, setActionReturn] = useState<WorkspacePanel>('capture');
+  // El cobro abierto desde «Marcar como entregado» inicia con la entrega activada.
+  const [checkoutDeliver, setCheckoutDeliver] = useState(false);
   const blocked = mutation.busy || mutation.uncertain;
   const selectedTable = overview.data?.tables.find((table) => table.id === workspace.tableID);
   const editable =
@@ -64,7 +67,8 @@ export function OperationalPage({
   ];
 
   function openAccountAction(
-    action: AccountAction | 'metadata' | 'history' | 'kitchen' | 'checkout' | 'adjustments',
+    action:
+      AccountAction | 'metadata' | 'history' | 'kitchen' | 'checkout' | 'adjustments' | 'precheck',
     origin: WorkspacePanel,
   ) {
     setActionReturn(origin);
@@ -132,6 +136,20 @@ export function OperationalPage({
     if (panel === 'adjustments' && bill) {
       return (
         <AccountAdjustments
+          key={bill.account.id}
+          bill={bill}
+          active={active}
+          can={can}
+          onClose={() => {
+            workspace.setPanel(actionReturn);
+            setActionReturn('capture');
+          }}
+        />
+      );
+    }
+    if (panel === 'precheck' && bill) {
+      return (
+        <PrecheckPanel
           key={bill.account.id}
           bill={bill}
           active={active}
@@ -291,6 +309,7 @@ export function OperationalPage({
           mode={panel === 'refund' ? 'refund' : 'collect'}
           onModeChange={(mode) => workspace.setPanel(mode === 'refund' ? 'refund' : 'checkout')}
           onClose={() => workspace.setPanel('capture')}
+          initialDeliver={checkoutDeliver}
         />
       )}
       {!checkoutOpen && view === 'manage' && (
@@ -401,7 +420,14 @@ export function OperationalPage({
             busy={blocked}
             can={can}
             onAction={(action) => openAccountAction(action, 'capture')}
-            onCheckout={() => openAccountAction('checkout', 'capture')}
+            onCheckout={() => {
+              setCheckoutDeliver(false);
+              openAccountAction('checkout', 'capture');
+            }}
+            onDeliverCheckout={() => {
+              setCheckoutDeliver(true);
+              openAccountAction('checkout', 'capture');
+            }}
             onDraftEdit={(item) => workspace.startEditor(item, 'draft')}
             onDraftRemove={(item) => void workspace.removeDraft(item)}
             onLineEdit={(line) => workspace.startEditor(line, 'confirmed')}

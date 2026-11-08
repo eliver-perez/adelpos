@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { configureKitchen, checkPreparation } from './kitchen-flow';
+import {
+  checkDineInPayment,
+  checkTakeawayDelivery,
+  configureReceiptPrinter,
+} from './payments-flow';
 
 test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, testInfo) => {
   const errors: string[] = [];
@@ -11,6 +16,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await configureKitchen(page);
+  await configureReceiptPrinter(page);
   await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
   await page.getByRole('button', { name: 'Áreas y distribución', exact: true }).click();
   await page.getByRole('button', { name: 'Crear área', exact: true }).click();
@@ -80,6 +86,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByLabel(/Filete de prueba · 2 disponibles/).fill('1');
   await page.getByRole('button', { name: 'Dividir cuenta', exact: true }).click();
   await expect(page.getByRole('complementary', { name: 'Cuenta actual' })).toContainText('$150.00');
+  await checkDineInPayment(page);
   await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
   await page.getByRole('button', { name: 'Nuevo para llevar', exact: true }).click();
   await page.getByLabel('Nombre del cliente (opcional)').fill('Cliente temporal');
@@ -99,6 +106,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(bill).toContainText('Pago: sin registro de cobro');
   await expect(bill).toContainText('Entrega: no entregado');
   await expect(page.getByRole('button', { name: /Marcar.*entregado|Cobrar/ })).toHaveCount(0);
+  await checkTakeawayDelivery(page);
 
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {

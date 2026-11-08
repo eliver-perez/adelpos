@@ -2,7 +2,7 @@
 
 Guía de trabajo para Claude en este repositorio. Resume decisiones vigentes y remite a la documentación existente en lugar de copiarla. **`AGENTS.md` sigue siendo obligatorio** y prevalece en convenciones; si este archivo y otro documento se contradicen, señalarlo al propietario en lugar de resolverlo por cuenta propia.
 
-Última revisión: 8 de noviembre de 2026, tras el diagnóstico independiente de las etapas 1–5 ([docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTICO_ETAPAS_1_5.md)) y la corrección de H1, M1, H2, M3, M4 y B1 (sin migraciones nuevas). Versión 0.5.0, API v1, esquema PostgreSQL 5.
+Última revisión: 8 de noviembre de 2026, al terminar la etapa 6 (cobros, pagos y devoluciones; avance por fases en [docs/ETAPA_6_AVANCE.md](docs/ETAPA_6_AVANCE.md)), después del diagnóstico de las etapas 1–5 ([docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTICO_ETAPAS_1_5.md)). Versión 0.6.0, API v1, esquema PostgreSQL 6 en el código. **La instalación real sigue en esquema 5 hasta que el propietario autorice aplicar la 0006.**
 
 ---
 
@@ -32,7 +32,7 @@ React/TS (WebView) ──IPC: operaciones enumeradas──▶ Rust/Tauri ──H
                                                      └─ Keychain (tokens duraderos)
 ```
 
-- **Go es la autoridad** de negocio, permisos, sesiones, dinero, cocina y eventos. Toda operación SQL vive en `backend/`. Ningún código de escritorio accede a PostgreSQL.
+- **Go es la autoridad** de negocio, permisos, sesiones, dinero (precios en `catalog`, finanzas en `payments`), cocina y eventos. Toda operación SQL vive en `backend/`. Ningún código de escritorio accede a PostgreSQL.
 - **Tauri no inicia ni detiene Go ni PostgreSQL.** Go funciona sin ventana (trabajadores de impresión y planificador incluidos).
 - **Rust** custodia credenciales en Keychain, valida el destino (solo desde archivo local, nunca desde React) y expone una **lista cerrada** de operaciones API (`desktop/src-tauri/src/api.rs`). Los tokens nunca llegan al WebView.
 - **React** presenta y recoge datos; no calcula dinero (los importes llegan como cadenas decimales calculadas en Go).
@@ -43,20 +43,20 @@ React/TS (WebView) ──IPC: operaciones enumeradas──▶ Rust/Tauri ──H
 
 `administration` autentica cada petición (dispositivo + sesión + permisos leídos de PostgreSQL), abre **una transacción por operación** y delega por prefijo (`backend/internal/administration/routes.go`):
 
-- `catalog/*` → `catalog.Handle` · `restaurant/*` → `operations.Handle` · `kitchen/*` → `kitchen.Handle` · `events` / `events/snapshot` → SSE en `administration/events.go`.
+- `catalog/*` → `catalog.Handle` · `restaurant/*` → `operations.Handle` · `kitchen/*` → `kitchen.Handle` · `payments/*` → `payments.Handle` (con autorizador de supervisor, `administration/supervisor.go`) · `events` / `events/snapshot` → SSE en `administration/events.go`.
 - Cada módulo recibe la misma `pgx.Tx`, un `Actor` con permisos efectivos y un callback de auditoría que escribe en la misma transacción.
 
 Locks consultivos en uso (no reutilizar números para otro fin; respetar el orden de adquisición):
 
-| Clave      | Uso                                                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 7820148301 | Migrador                                                                                                                                            |
-| 7820148302 | Asistente inicial y aprovisionamiento de `sa`                                                                                                       |
-| 7820148303 | Usuarios/sesiones (`administration/users.go`)                                                                                                       |
-| 7820148304 | Catálogo: compartido en lecturas/cálculos, exclusivo en escrituras                                                                                  |
-| 7820148305 | Operación del restaurante **y cocina** (incluye el planificador): compartido en lecturas, exclusivo en escrituras; se toma **antes** que 7820148304 |
-| 7820148306 | Publicación ordenada del outbox `realtime_events`                                                                                                   |
-| 7820148307 | Semilla de `hashtextextended` para el lock de sesión por impresora                                                                                  |
+| Clave      | Uso                                                                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7820148301 | Migrador                                                                                                                                                                   |
+| 7820148302 | Asistente inicial y aprovisionamiento de `sa`                                                                                                                              |
+| 7820148303 | Usuarios/sesiones (`administration/users.go`)                                                                                                                              |
+| 7820148304 | Catálogo: compartido en lecturas/cálculos, exclusivo en escrituras                                                                                                         |
+| 7820148305 | Operación del restaurante, **cocina y cobros** (incluye el planificador y `payments/*`): compartido en lecturas, exclusivo en escrituras; se toma **antes** que 7820148304 |
+| 7820148306 | Publicación ordenada del outbox `realtime_events`                                                                                                                          |
+| 7820148307 | Semilla de `hashtextextended` para el lock de sesión por impresora                                                                                                         |
 
 ## 4. Estructura real del repositorio
 
@@ -72,10 +72,11 @@ ad-el-pos/
 │   ├── internal/catalog/          # catálogo, disponibilidad, imágenes y motor decimal único (Calculate, QuoteForOrder)
 │   ├── internal/operations/       # áreas, mesas, cuentas, borradores, lotes, versiones, unidades, división/transferencia/combinación
 │   ├── internal/kitchen/          # estaciones, rutas, liberaciones, tareas, documentos, cola y transportes de impresión, Worker
+│   ├── internal/payments/         # saldos, pagos, ajustes, IVA, devoluciones, correcciones, turno mínimo, documentos comerciales, entregas
 │   ├── internal/events/           # outbox, secuencia, replay
 │   ├── internal/httpapi/          # diagnósticos, CORS, request ID, errores
 │   ├── internal/config/  database/  localsetup/  licensing/  product/
-│   └── migrations/                # 0001–0005 embebidas; INMUTABLES
+│   └── migrations/                # 0001–0006 embebidas; INMUTABLES
 ├── desktop/
 │   ├── src/                       # App.tsx, components/, hooks/, pages/, services/, styles.css, generated/
 │   ├── src-tauri/                 # main.rs, api.rs, vault.rs, connection.rs, realtime.rs, window_check.rs, tauri.conf.json, capabilities/, permissions/
@@ -85,7 +86,7 @@ ad-el-pos/
 ├── tests/runtime_smoke.py         # prueba operativa opt-in (interrumpe servicios)
 ├── ops/launchd/                   # plantilla .plist NO instalada
 ├── assets/brand/                  # PNG originales de marca (no modificar)
-└── docs/                          # CATALOG, RESTAURANT_OPERATIONS, KITCHEN_AND_PRINTING, VERIFICATION*, CODING_CONVENTIONS, DEPENDENCIES, DIAGNOSTICO_ETAPAS_1_5
+└── docs/                          # CATALOG, RESTAURANT_OPERATIONS, KITCHEN_AND_PRINTING, PAYMENTS_AND_REFUNDS, ETAPA_6_AVANCE, VERIFICATION*, CODING_CONVENTIONS, DEPENDENCIES, DIAGNOSTICO_ETAPAS_1_5, etapas/
 ```
 
 Excluidos de git (no versionar ni borrar): `.local/` (clúster, secretos, logs, evidencias), `.tools/`, `.cache/`, `bin/`, `backups/`, `desktop/node_modules/`, `desktop/dist/`, `desktop/src-tauri/target/`, `desktop/src-tauri/gen/`.
@@ -182,32 +183,35 @@ Obligatorias y detalladas en [AGENTS.md](AGENTS.md) y [docs/CODING_CONVENTIONS.m
 
 Clasificación del diagnóstico del 8/11/2026 (evidencia completa en [docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTICO_ETAPAS_1_5.md)):
 
-| Etapa | Alcance                                  | Estado reportado | Estado verificado (8/11/2026)                                                                                                                                                                              |
-| ----- | ---------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1     | Arquitectura y cimientos                 | Terminada        | Implementada con verificaciones pendientes (código y pruebas aprobadas; ciclo nativo de procesos/modos no re-ejecutado).                                                                                   |
-| 2     | Administración y seguridad               | Terminada        | Implementada con verificaciones pendientes (aceptación PostgreSQL aprobada; Keychain real y ventana nativa no re-ejecutados; H1 y M1 corregidos con pruebas negativas).                                    |
-| 3     | Catálogo y precios                       | Terminada        | Comprobada (motor y aceptación PostgreSQL aprobados; defecto de límite M5).                                                                                                                                |
-| 4     | Operación del restaurante                | Terminada        | Comprobada (aceptación PostgreSQL y Playwright Chromium/WebKit aprobadas; sin pantalla táctil física; defecto M2 y menores de interfaz).                                                                   |
-| 5     | Cocina, comandas e impresión             | Terminada        | Implementada con verificaciones pendientes (cola/SSE/preparación aprobadas con transportes controlados; papel físico nunca confirmado; fullscreen nativo no re-ejecutado; M3 y M4 corregidos; M8 abierto). |
-| 6     | Cobros, pagos y devoluciones             | Pendiente        | No iniciada. Siguiente tarea.                                                                                                                                                                              |
-| 7     | Administración de caja y cortes          | Pendiente        | —                                                                                                                                                                                                          |
-| 8     | Inventarios y compras                    | Pendiente        | —                                                                                                                                                                                                          |
-| 9     | Reportes, indicadores y documentos       | Pendiente        | —                                                                                                                                                                                                          |
-| 10    | Licenciamiento, respaldos y distribución | Pendiente        | —                                                                                                                                                                                                          |
+| Etapa | Alcance                                  | Estado reportado | Estado verificado (8/11/2026)                                                                                                                                                                                                                                                                                                |
+| ----- | ---------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | Arquitectura y cimientos                 | Terminada        | Implementada con verificaciones pendientes (código y pruebas aprobadas; ciclo nativo de procesos/modos no re-ejecutado).                                                                                                                                                                                                     |
+| 2     | Administración y seguridad               | Terminada        | Implementada con verificaciones pendientes (aceptación PostgreSQL aprobada; Keychain real y ventana nativa no re-ejecutados; H1 y M1 corregidos con pruebas negativas).                                                                                                                                                      |
+| 3     | Catálogo y precios                       | Terminada        | Comprobada (motor y aceptación PostgreSQL aprobados; defecto de límite M5).                                                                                                                                                                                                                                                  |
+| 4     | Operación del restaurante                | Terminada        | Comprobada (aceptación PostgreSQL y Playwright Chromium/WebKit aprobadas; sin pantalla táctil física; defecto M2 y menores de interfaz).                                                                                                                                                                                     |
+| 5     | Cocina, comandas e impresión             | Terminada        | Implementada con verificaciones pendientes (cola/SSE/preparación aprobadas con transportes controlados; papel físico nunca confirmado; fullscreen nativo no re-ejecutado; M3 y M4 corregidos; M8 resuelto en etapa 6).                                                                                                       |
+| 6     | Cobros, pagos y devoluciones             | Implementada     | Implementada con verificaciones pendientes (fases 6A–6D en commits locales de `etapa-6`; aceptación PostgreSQL, Vitest, Rust y Playwright Chromium/WebKit aprobados en entorno aislado; 0006 **no aplicada** a la instalación real; ventana nativa, Keychain, pantalla táctil e impresión física de tickets no verificadas). |
+| 7     | Administración de caja y cortes          | Pendiente        | —                                                                                                                                                                                                                                                                                                                            |
+| 8     | Inventarios y compras                    | Pendiente        | —                                                                                                                                                                                                                                                                                                                            |
+| 9     | Reportes, indicadores y documentos       | Pendiente        | —                                                                                                                                                                                                                                                                                                                            |
+| 10    | Licenciamiento, respaldos y distribución | Pendiente        | —                                                                                                                                                                                                                                                                                                                            |
 
-Alcance funcional de cada etapa: el propietario lo entregó en el prompt de diagnóstico y está resumido en el documento de diagnóstico. Respetar las fronteras: no implementar de forma incidental funciones de etapas posteriores (inventario, turnos completos, impuestos, Android, KDS, licencias).
+Alcance funcional de cada etapa: el propietario lo entregó en el prompt de diagnóstico y está resumido en el documento de diagnóstico. Respetar las fronteras: no implementar de forma incidental funciones de etapas posteriores (cierre de turno y arqueo, inventario, facturación electrónica, Android, KDS, licencias).
 
 ## 15. Decisiones funcionales vigentes
 
-- **Dinero**: `numeric` en PostgreSQL (`numeric(18,2)` en unidades), `shopspring/decimal` en Go, cadenas en JSON; redondeo comercial mitad alejándose de cero; residuos de centavos asignados a los primeros ordinales. `catalog.Calculate` y `QuoteForOrder` son la única autoridad de precios. Moneda única MXN (CHECK en `app.establishment`). No hay impuestos todavía.
+- **Dinero**: `numeric` en PostgreSQL (`numeric(18,2)` en unidades), `shopspring/decimal` en Go, cadenas en JSON; redondeo comercial mitad alejándose de cero; residuos de centavos asignados a los primeros ordinales. `catalog.Calculate` y `QuoteForOrder` son la única autoridad de precios. Moneda única MXN (CHECK en `app.establishment`). `payments` es la única autoridad financiera; el repartidor de centavos `payments.allocate` (residuo mayor, desempate por posición) conserva el total exacto.
+- **IVA (decisión del propietario)**: incluido en los precios. Tasa del establecimiento de lista cerrada 16/8/0 (`CHECK` en SQL, validación en Go, botones en la interfaz; nunca captura libre), copiada a cada versión confirmada (`restaurant_item_versions.tax_rate`) y nunca recalculada al cambiar la configuración. Desglose por tasa: base = total/(1+tasa) redondeada, IVA = total − base. Los descuentos generales y las devoluciones se reparten entre tasas en proporción; las devoluciones congelan su desglose; los cargos llevan la tasa vigente; las propinas no llevan IVA. Precuentas y tickets no son CFDI.
 - **Equivalencia por valor** con piso en el precio base, extras explícitos separados, tramos incrementales; mínimo de grupo predeterminado cero (se puede retirar todo). Ver [docs/CATALOG.md](docs/CATALOG.md).
 - **Pedidos**: borrador persistido ≠ editor local. Confirmar es explícito, compara huella (`expected_fingerprint`) y guarda snapshot comercial por lote. Cada unidad comercial tiene UUID, ordinal y centavos propios (`app.restaurant_item_units`). Dividir/transferir/combinar mueve las mismas unidades sin recalcular ni generar preparación. Ver [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 - **Escrituras operativas**: `operation_id` UUID + `revision`; resultado idempotente en `app.restaurant_operations`, auditoría, `restaurant_events` y `realtime_events` en la misma transacción. Nunca regenerar el UUID tras una respuesta incierta.
-- **Estados independientes**: preparación, pago (`payment_state`, hoy fijo `not_recorded`) y entrega (`delivery_state`, hoy fijo `not_delivered`) no se mezclan; preparación lista no habilita entrega. Ventanilla es un origen de `takeaway`.
+- **Estados independientes**: preparación, pago (`payment_state`: `not_recorded`, `partial`, `paid`) y entrega (`delivery_state`: `not_delivered`, `delivered`) no se mezclan; los dos últimos los deriva `payments` de registros reales. Pagado no implica entregado; solo se entrega un pedido para llevar liquidado. Ventanilla es un origen de `takeaway`. La cuenta admite `closed`: salón al liquidarse sin borrador, para llevar al entregarse liquidada; una devolución que deja saldo la reabre.
+- **Partidas con pago (decisión del propietario)**: una unidad con asignación neta de pago o descuento manual vigente no se transfiere, divide, combina, cancela, edita ni anula; ninguna operación deja la cuenta con total menor que lo pagado; combinar exige origen sin pagos; anular exige cobros netos en cero. Guardas en `payments/guards.go`, usadas por `operations/payment_guards.go`.
+- **Cobros**: registros financieros inmutables con compensaciones enlazadas (devoluciones, cancelaciones de ajustes, reversos de corrección). Pagos mixtos = pagos sucesivos; efectivo con `recibido ≥ importe + propina`; el excedente nunca se vuelve propina. Turno mínimo: uno abierto por caja, requerido para cobrar o devolver; `shared_shifts` falso por omisión. Una corrección directa solo procede con el turno original abierto. La autorización de supervisor es puntual (sin sesión, con límite de intentos, sin autoautorización) y queda ligada al `operation_id`; la huella idempotente excluye su contraseña. Límite de descuento por rol en `role_discount_limits`.
 - **Cocina**: una liberación canónica por unidad (`kitchen_unit_releases`), base del consumo teórico futuro. Cola de impresión: intento/lease confirmados antes de imprimir, serialización por impresora, `uncertain` exige resolución humana y nunca se reenvía solo; `submitted` = aceptación CUPS/TCP, **no** papel físico. Ver [docs/KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md).
 - **Tiempo real**: SSE (no WebSocket) para invalidaciones; comandos por HTTP idempotente; Rust entrega frames por `Channel`; el sondeo sigue como recuperación.
-- **Cajas**: el asistente crea **Caja 1** sin turnos ni fondos; las terminales pueden asociarse a una caja (`devices.register_id`).
-- **Futuras (ya decididas por el propietario)**: pagos mixtos por operaciones sucesivas; propinas separadas de ventas; una apertura activa por caja física; las diferencias de caja no bloquean el cierre ni se exige liquidar cuentas para cerrar turno; existencias teóricas negativas no bloquean ventas.
+- **Cajas**: el asistente crea **Caja 1** sin turnos ni fondos; las terminales pueden asociarse a una caja (`devices.register_id`). Una caja con turno abierto no se desactiva y su terminal no cambia de caja hasta el cierre (etapa 7).
+- **Futuras (ya decididas por el propietario)**: las diferencias de caja no bloquean el cierre ni se exige liquidar cuentas para cerrar turno (etapa 7); existencias teóricas negativas no bloquean ventas.
 
 ## 16. Separación de proyectos
 
@@ -229,23 +233,26 @@ No desarrollar los proyectos 2–4 aquí. La futura herramienta de migración SQ
 
 1. [AGENTS.md](AGENTS.md) (obligatorio) y [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md).
 2. [ARCHITECTURE.md](ARCHITECTURE.md), [API_CONTRACTS.md](API_CONTRACTS.md), [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md).
-3. Según el área: [docs/CATALOG.md](docs/CATALOG.md), [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md), [docs/KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md).
+3. Según el área: [docs/CATALOG.md](docs/CATALOG.md), [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md), [docs/KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md), [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md).
 4. [docs/VERIFICATION.md](docs/VERIFICATION.md) (qué está probado y qué no) y [docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTICO_ETAPAS_1_5.md) (riesgos abiertos).
-5. Código de referencia para nuevos módulos: `backend/internal/administration/routes.go` (delegación de rutas), `backend/internal/administration/delegation.go` (reglas de delegación de permisos), `backend/internal/operations/handler.go` (locks, idempotencia), `backend/internal/operations/context.go` (permisos del módulo), `backend/internal/events/store.go` (outbox), `desktop/src-tauri/src/api.rs` (lista cerrada), `desktop/src/hooks/useRestaurantMutation.ts` (reintento con mismo UUID).
+5. Código de referencia para nuevos módulos: `backend/internal/administration/routes.go` (delegación de rutas), `backend/internal/administration/delegation.go` (reglas de delegación de permisos), `backend/internal/operations/handler.go` (locks, idempotencia), `backend/internal/operations/context.go` (permisos del módulo), `backend/internal/events/store.go` (outbox), `desktop/src-tauri/src/api.rs` (lista cerrada), `desktop/src/hooks/useRestaurantMutation.ts` y `desktop/src/hooks/pendingOperations.tsx` (reintento con mismo UUID y almacén global de pendientes), `backend/internal/payments/handler.go` (rutas, permisos e idempotencia financiera).
 
 ## 19. Riesgos y limitaciones conocidos
 
-Lista priorizada y evidencias en [docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTICO_ETAPAS_1_5.md) (IDs H/M/B). **Corregidos**: H1, M1, H2, M3, M4 y B1 (§11 del diagnóstico). Los demás siguen abiertos; corregirlos solo cuando el propietario lo solicite. Resumen para no olvidar al desarrollar:
+Lista priorizada y evidencias en [docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTICO_ETAPAS_1_5.md) (IDs H/M/B). **Corregidos**: H1, M1, H2, M3, M4 y B1 antes de la etapa 6 (§11 del diagnóstico); H3, M8 y B9 durante la etapa 6, M2 y M11 en la captura de cobros y B14 en la autorización de supervisor (§12 del diagnóstico). Los demás siguen abiertos; corregirlos solo cuando el propietario lo solicite. Resumen para no olvidar al desarrollar:
 
 - **H1 y M1 · corregidos**: la delegación vive en `administration/delegation.go`. Nadie concede, asigna o edita permisos efectivos que no posee, administra a usuarios con más permisos ni modifica su propio rol o excepciones; debe permanecer un administrador completo (todos los permisos registrados, por permisos efectivos). Todo permiso nuevo de etapas futuras amplía ese conjunto: concederlo al rol `administrator` en la misma migración, o los administradores dejarán de contar como completos.
 - **H2 · corregido**: `runProtected` ejecuta cada operación autenticada en un savepoint y un 403 revierte todo lo escrito (solo se confirma la auditoría `access.denied`). La regla sigue siendo autorizar **antes de la primera escritura**; el savepoint es una red de seguridad, no un sustituto.
-- **H3 · Las unidades no conocen pagos**: transferir, combinar, cancelar, editar y anular deberán validar importes cobrados en la etapa 6.
-- **M2 · Teclado virtual**: `+` y `.` vacían campos `type="number"`; para importes usar texto con `inputMode="decimal"`. El espacio reservado solo existe en modo operación y varios objetivos táctiles miden menos de 44 px.
-- **M8 · Operaciones inciertas por página**: el UUID pendiente de cocina se pierde al navegar; los cobros necesitan un almacén de pendientes a nivel de aplicación.
+- **H3 · resuelto**: las guardas de partidas con pago (§15) viven en `payments/guards.go`; toda operación nueva que mueva, cancele o recotice unidades debe llamarlas en la misma transacción.
+- **M2 y M11 · resueltos en cobros**: importes en texto con `inputMode="decimal"` y `services/amountInput.ts`; teclado numérico fijo en el cobro y exclusión del teclado flotante con `data-virtual-keyboard="off"`. Siguen abiertos fuera de cobros: la cantidad del producto (`type="number"`), el espacio reservado solo en modo operación y objetivos táctiles menores de 44 px en pantallas anteriores.
+- **M8 · resuelto**: `hooks/pendingOperations.tsx` conserva operación, cuerpo y `operation_id` a nivel de aplicación (cobros con clave `payments:<cuenta>`, cocina con `kitchen`) y descarta la contraseña de autorización. No sobrevive al cierre del proceso.
 - **Cocina · M3 y M4 corregidos**: editar datos de la cuenta ya no revierte la reprogramación de cocina (solo un cambio de `scheduled_at` la sustituye); el respaldo exige tres errores confirmados consecutivos.
 - **Catálogo**: el límite de 200 productos por cotización cuenta todos los productos ligados a complementos (M5).
 - **Contrato**: restaurante devuelve `ACCOUNT_CONFLICT`, aunque la documentación dice `REVISION_CONFLICT` (B2).
-- **Escrituras serializadas globalmente**: restaurante, cocina y planificador comparten el lock exclusivo 7820148305. Correcto para consistencia; no medido bajo carga. Cobros añadirán más presión sobre ese lock.
+- **Escrituras serializadas globalmente**: restaurante, cocina, planificador y cobros comparten el lock exclusivo 7820148305. Correcto para consistencia; no medido bajo carga.
+- **Instalación real en esquema 5**: la 0006 solo se ha aplicado en bases desechables. Aplicarla requiere autorización del propietario, `backup` y `restore-check.py`; hasta entonces el servidor real y `bin/ad-el-pos-server` siguen en 0.5.0 y no exponen `payments/*`; un servidor 0.6.0 sobre el esquema 5 reportaría `schema: incompatible` en su diagnóstico y las rutas nuevas fallarían.
+- **Cobros sin cierre de turno**: `expected_cash` no es un arqueo; un turno abierto permanece abierto hasta la etapa 7 y bloquea desactivar su caja o cambiar la caja de su terminal.
+- **Autorización reintentada**: un reintento incierto de una operación autorizada viaja sin contraseña; si el original no se confirmó, Go responde `403 AUTHORIZATION_REQUIRED` y el supervisor debe autorizar de nuevo.
 - **SSE por sondeo de BD**: cada conexión consulta PostgreSQL cada ~750 ms (flujos de 30 s, medidos); límite de 2 conexiones por dispositivo mantenido en memoria del proceso.
 - **Apagado (reproducido)**: con un flujo SSE abierto, `Shutdown` agota sus 5 s y el proceso termina con código 1 (relevante para futuros servicios del sistema).
 - **Sin retención** de auditoría, `realtime_events`, `restaurant_operations`, sesiones ni intentos; los snapshots por lote crecen sin límite.
@@ -256,12 +263,12 @@ Lista priorizada y evidencias en [docs/DIAGNOSTICO_ETAPAS_1_5.md](docs/DIAGNOSTI
 
 ## 20. Criterios para agregar funcionalidad sin romper lo anterior
 
-1. **Esquema**: nunca editar 0001–0005. La siguiente migración es `0006_…sql`, transaccional, sin datos ficticios. Las restricciones CHECK sin nombre de 0004/0005 (p. ej. estados de `restaurant_accounts`) se modifican con `ALTER TABLE … DROP/ADD CONSTRAINT` en una migración nueva. Antes de aplicarla a la instalación real: `backup` + `restore-check.py` y autorización del propietario.
+1. **Esquema**: nunca editar 0001–0006. La siguiente migración es `0007_…sql`, transaccional, sin datos ficticios. Las restricciones CHECK sin nombre (p. ej. estados de `restaurant_accounts`, reemplazado en la 0006) se modifican con `ALTER TABLE … DROP/ADD CONSTRAINT` en una migración nueva. Antes de aplicarla a la instalación real: `backup` + `restore-check.py` y autorización del propietario.
 2. **Permisos**: añadir la clave al `Permissions` del módulo (se agrega al registro central en `administration/permissions.go`) **y** en la migración (`INSERT INTO app.permissions` + concesión al rol `administrator`), porque las instalaciones existentes no vuelven a ejecutar el asistente. No asignar por inferencia a otros roles.
-3. **Rutas**: delegar desde `administration/routes.go` con la misma transacción, `Actor` y callback de auditoría; **comprobar todos los permisos antes de cualquier escritura** (un 403 revierte la operación mediante savepoint, pero no debe usarse como control de flujo); validar UUID, `revision` y `operation_id`; registrar el resultado idempotente en la misma transacción; publicar en `realtime_events` dentro de la transacción; respetar el orden de locks (§3); traducir los errores del módulo a `Fault` en `routes.go` (hoy un `kitchen.Error` dentro de una operación comercial sale como 503).
+3. **Rutas**: delegar desde `administration/routes.go` con la misma transacción, `Actor` y callback de auditoría; **comprobar todos los permisos antes de cualquier escritura** (un 403 revierte la operación mediante savepoint, pero no debe usarse como control de flujo); validar UUID, `revision` y `operation_id`; registrar el resultado idempotente en la misma transacción; publicar en `realtime_events` dentro de la transacción; respetar el orden de locks (§3); traducir los errores del módulo a `Fault` en `routes.go` (como ya se hace con `payments.Error` y `kitchen.Error`).
 4. **Dinero**: solo `decimal` en Go y cadenas en JSON; reutilizar el motor de `catalog` y los importes históricos de `restaurant_item_units`; nunca aritmética monetaria con `number` en TypeScript.
 5. **Puente nativo**: cada operación nueva se agrega a la lista cerrada de `api.rs` (con prueba Rust), respetando el formato que lee el driver e2e; nunca rutas arbitrarias ni tokens en React.
 6. **Frontend**: tipos en `desktop/src/services/*.ts`; reutilizar `Accordion`, `VirtualKeyboard`, `Forms`, `DecimalField`, `useResource`/`useLiveResource`, `useRestaurantMutation`; conservar selección local ante sondeo/conflicto; las operaciones inciertas que deban sobrevivir a la navegación no pueden vivir en el estado de una página que se desmonta; importes en campos de texto `inputMode="decimal"`, nunca `type="number"`; objetivos táctiles ≥ 44 px; temas claro/oscuro con tokens existentes; layout fluido.
 7. **Pruebas**: unitarias + aceptación con PostgreSQL (`//go:build integration`) para transacciones, concurrencia e idempotencia; actualizar `scripts/database.py` si hay paquete nuevo; Vitest para componentes; ampliar Playwright si cambia el recorrido operativo. Repetir las suites de etapas anteriores.
-8. **Documentación**: actualizar README, ARCHITECTURE, API_CONTRACTS, la guía del módulo y una nueva `docs/VERIFICATION.md` (archivando la anterior como `VERIFICATION_STAGE5.md`) **solo con lo realmente ejecutado**; no presentar pendientes como completos. Versionado en `config/product.json` + `sync`.
+8. **Documentación**: actualizar README, ARCHITECTURE, API_CONTRACTS, la guía del módulo y una nueva `docs/VERIFICATION.md` (archivando la anterior como `VERIFICATION_STAGE6.md`) **solo con lo realmente ejecutado**; no presentar pendientes como completos. Versionado en `config/product.json` + `sync`.
 9. **Alcance**: no modificar `sa`, admin/admin, marca ni etapas anteriores sin solicitud expresa; no adelantar funciones de etapas futuras; preguntar ante contradicciones.

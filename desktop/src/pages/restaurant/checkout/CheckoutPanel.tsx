@@ -17,6 +17,7 @@ import type {
   PaymentMethod,
   PaymentRecord,
   PaymentResult,
+  PaymentSettings,
   RefundResult,
 } from '../../../services/payments';
 import type { Bill } from '../../../services/restaurant';
@@ -29,6 +30,7 @@ import { CheckoutMethods } from './PaymentMethods';
 import { RefundPanel } from './RefundPanel';
 import { ShiftOpening } from './ShiftOpening';
 import { UncertainOperation } from './UncertainOperation';
+import { DocumentList } from '../documents/DocumentList';
 import { newestFinance, selectableUnits } from './captureState';
 import { useCollectFlow } from './useCollectFlow';
 import { correctable, useCorrectionFlow } from './useCorrectionFlow';
@@ -50,6 +52,7 @@ export function CheckoutPanel({
   mode,
   onModeChange,
   onClose,
+  initialDeliver = false,
 }: {
   bill: Bill;
   active: boolean;
@@ -57,6 +60,7 @@ export function CheckoutPanel({
   mode: CheckoutMode;
   onModeChange: (mode: CheckoutMode) => void;
   onClose: () => void;
+  initialDeliver?: boolean;
 }) {
   const accountID = bill.account.id;
   const permissions = {
@@ -64,6 +68,8 @@ export function CheckoutPanel({
     partial: can('payments.collect_partial'),
     selection: can('payments.collect_selection'),
     tips: can('payments.tips.record'),
+    print: can('payments.tickets.print'),
+    deliver: can('takeaway.deliver'),
   };
   const polled = useLiveResource<Finance>('payments_account', { id: accountID, enabled: active });
   const methods = useLiveResource<PaymentMethod[]>('payments_methods', {
@@ -73,6 +79,11 @@ export function CheckoutPanel({
   const shift = useLiveResource<CurrentShift>('payments_current_shift', {
     enabled: active,
     interval: 15000,
+  });
+  // La preferencia de impresión y la impresora de tickets vienen de la configuración de cobros.
+  const settings = useLiveResource<PaymentSettings>('payments_settings', {
+    enabled: active,
+    interval: 60000,
   });
   const [recorded, setRecorded] = useState<Finance | null>(null);
   const [notice, setNotice] = useState('');
@@ -102,6 +113,8 @@ export function CheckoutPanel({
     permissions,
     mutation,
     enabled: mode === 'collect' && !correcting,
+    printDefault: settings.data?.print_receipt_default ?? false,
+    initialDeliver,
     reloadFinance,
     reloadShift,
   });
@@ -140,6 +153,9 @@ export function CheckoutPanel({
   async function retryPending() {
     const pending = mutation.pending;
     const authorized = typeof pending?.body.authorization === 'object';
+    if (pending?.operation === 'payments_pay') {
+      collect.setDeliverRequested(pending.body.deliver === true);
+    }
     const problem = await mutation.retry();
     if (!pending || !authorized || !isAuthorizationProblem(problem)) {
       return;
@@ -222,7 +238,7 @@ export function CheckoutPanel({
       return { state: 'validating', label: 'Validando…' };
     }
     if (collect.lastResult) {
-      return { state: 'recorded', label: statusTitle('recorded') };
+      return { state: 'recorded', label: recordedLabel(collect.lastResult) };
     }
     return { state: 'capturing', label: statusTitle('capturing') };
   }
@@ -360,6 +376,15 @@ export function CheckoutPanel({
       timezone: bill.timezone,
       error: methods.error,
       actions: paymentActions,
+      documents: (
+        <DocumentList
+          accountID={accountID}
+          documents={finance?.documents ?? []}
+          timezone={bill.timezone}
+          can={can}
+          methods={activeMethods}
+        />
+      ),
     };
     if (correcting) {
       return (
@@ -404,7 +429,7 @@ export function CheckoutPanel({
 
   function shiftColumn(current: CurrentShift) {
     return (
-      <section className="checkout-area checkout-capture" aria-label="Turno de caja">
+      <section className="checkout-area checkout-capture" aria-label="Apertura de turno">
         <div className="checkout-area-body">
           {banner}
           <ShiftOpening
@@ -460,6 +485,7 @@ export function CheckoutPanel({
         status={status}
         banner={banner}
         lastResult={collect.lastResult}
+        deliverRequested={collect.deliverRequested}
         collect={permissions.collect && collect.collectable}
       >
         <PaymentCapture
@@ -481,6 +507,12 @@ export function CheckoutPanel({
           onRegister={() => void collect.register()}
           keyboardActive={active}
           quickAmounts={collect.quickAmounts}
+          showPrint={permissions.print}
+          printEnabled={collect.printEnabled}
+          printerConfigured={!!settings.data?.receipt_printer_id}
+          deliverAvailable={collect.deliverAvailable}
+          deliverEnabled={collect.deliverEnabled}
+          deliverRequested={collect.deliverRequested}
         />
       </CheckoutCaptureOrSummary>
     );
@@ -501,6 +533,7 @@ function CheckoutCaptureOrSummary({
   status,
   banner,
   lastResult,
+  deliverRequested,
   collect,
   children,
 }: {
@@ -508,6 +541,7 @@ function CheckoutCaptureOrSummary({
   status: CheckoutStatus;
   banner: ReactNode;
   lastResult: PaymentResult | null;
+  deliverRequested: boolean;
   collect: boolean;
   children: ReactNode;
 }) {
@@ -524,7 +558,7 @@ function CheckoutCaptureOrSummary({
       </header>
       <div className="checkout-area-body checkout-capture-fields">
         {banner}
-        {lastResult && <RecordedPayment result={lastResult} />}
+        {lastResult && <RecordedPayment result={lastResult} deliverRequested={deliverRequested} />}
         <dl className="checkout-figures">
           <div className="checkout-figure checkout-figure-emphasis">
             <dt>Saldo pendiente</dt>
@@ -543,6 +577,18 @@ function CheckoutCaptureOrSummary({
       </div>
     </section>
   );
+}
+
+// Estado visible tras un pago: la entrega realizada y la impresión pendiente se distinguen.
+function recordedLabel(result: PaymentResult) {
+  if (result.delivered) {
+    return 'Entrega realizada';
+  }
+  const status = result.printing?.status;
+  if (status === 'pending' || status === 'processing') {
+    return 'Impresión pendiente';
+  }
+  return statusTitle('recorded');
 }
 
 function summaryMessage(finance: Finance) {

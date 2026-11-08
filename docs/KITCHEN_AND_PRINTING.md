@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.5.0, esquema 5. Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen cobros, inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado.
+Versión 0.6.0, esquema 6. Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
@@ -123,4 +123,8 @@ La configuración usa las APIs oficiales de [Tauri](https://v2.tauri.app/referen
 
 Antes de aplicar a una instalación existente: respaldo custom, restauración completa en base temporal con comparación de todas las tablas, detener Go, migrar, verificar reaplicación sin cambios y reiniciar. No ejecutar setup de nuevo ni borrar `.local` o Keychain. La evidencia de instalación se registra por etapa.
 
-Quedan fuera: agente remoto, KDS independiente, Android, offline durable, cobros, inventario físico, impuestos, diseñador arbitrario, servicio comercial de licencias e instaladores Windows. No se ha certificado cada modelo de impresora, corte físico, detección de papel, muchas terminales o resistencia a pérdida eléctrica. Deben medirse volumen, retención de eventos/auditoría y tamaño de snapshots antes de uso comercial; el replay acotado no elimina físicamente filas del outbox.
+Quedan fuera: agente remoto, KDS independiente, Android, offline durable, inventario físico, facturación electrónica, diseñador arbitrario, servicio comercial de licencias e instaladores Windows. No se ha certificado cada modelo de impresora, corte físico, detección de papel, muchas terminales o resistencia a pérdida eléctrica. Deben medirse volumen, retención de eventos/auditoría y tamaño de snapshots antes de uso comercial; el replay acotado no elimina físicamente filas del outbox.
+
+## Documentos comerciales · etapa 6
+
+Precuentas y tickets de pago se generan en `payments/documents.go` y se encolan con `kitchen.EnqueueCommercial` en la impresora de tickets elegida en las políticas de cobro. Usan `kitchen_tickets.kind` `precheck` o `receipt` y la misma cola, lease, serialización por impresora y resolución de incertidumbre que las comandas, pero no crean liberaciones ni tareas y no aparecen en el listado de comandas (`GET /kitchen/tickets`); sí pueden consultarse por identificador. La reimpresión (`payments/accounts/{id}/documents/reprint`) conserva el contenido exacto; exige que el trabajo original esté enviado o cancelado (un trabajo con error o incierto se resuelve primero en la cola) y responde `PRINT_COPY_PENDING` mientras otra copia siga sin resolver. Un fallo de impresión nunca revierte el pago y el estado del trabajo aparece en los documentos de la cuenta.

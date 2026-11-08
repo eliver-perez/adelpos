@@ -588,4 +588,5 @@ func testPayments(t *testing.T, base *restaurantFixture) {
 	})
 
 	testPaymentAdjustments(t, fixture)
+	testPaymentDocuments(t, fixture)
 }

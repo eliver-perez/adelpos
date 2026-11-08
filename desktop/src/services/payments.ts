@@ -258,12 +258,77 @@ export interface PaymentPlan {
   units: SelectedUnit[];
 }
 
+export type PrintJobState =
+  'pending' | 'processing' | 'submitted' | 'error' | 'uncertain' | 'intervention' | 'cancelled';
+
+// Resultado de la impresión solicitada con un pago o una precuenta. Un fallo de impresión nunca
+// revierte el pago: el trabajo queda en la cola durable de Cocina.
+export interface PrintingResult {
+  requested: boolean;
+  status?: PrintJobState | 'not_configured';
+  job_id?: string;
+  ticket_id?: string;
+  message?: string;
+}
+
 export interface PaymentResult {
   payment: PaymentRecord | null;
   finance: Finance;
   closed: boolean;
   delivered: boolean;
-  printing: { requested: boolean } & Record<string, unknown>;
+  printing: PrintingResult;
+}
+
+export interface DeliveryResult {
+  finance: Finance;
+  closed: boolean;
+  delivered: boolean;
+}
+
+export interface ReprintResult {
+  status: PrintJobState;
+  job_id: string;
+  ticket_id: string;
+}
+
+export interface CommercialDocumentLine {
+  quantity: number;
+  name: string;
+  notes: string;
+  amount: string;
+}
+
+export interface CommercialDocumentPayment {
+  method: string;
+  amount: string;
+  tip: string;
+  reference: string;
+  received: string | null;
+  change: string;
+}
+
+// Precuenta o ticket comercial. No es un CFDI; content es el texto ya formateado para imprimir.
+export interface CommercialDocument {
+  kind: 'precheck' | 'receipt';
+  establishment: string;
+  folio: number;
+  account_name: string;
+  context: string;
+  issued_at: string;
+  local_time: string;
+  cashier: string;
+  lines: CommercialDocumentLine[];
+  adjustments: { concept: string; amount: string }[];
+  tax: TaxLine[];
+  tax_base: string;
+  tax_total: string;
+  total: string;
+  payments: CommercialDocumentPayment[];
+  paid: string;
+  tips: string;
+  balance: string;
+  payment: CommercialDocumentPayment | null;
+  content: string;
 }
 
 // Autorización puntual de un supervisor. La contraseña solo viaja en la solicitud que la usa.
@@ -475,6 +540,66 @@ export function paymentPendingKey(accountID: string) {
   return `payments:${accountID}`;
 }
 
+// Las impresiones de precuentas y copias usan su propia clave: una impresión incierta no bloquea
+// los cobros de la cuenta.
+export function documentsPendingKey(accountID: string) {
+  return `documents:${accountID}`;
+}
+
+export const documentKindLabels: Record<string, string> = {
+  receipt: 'Ticket de pago',
+  precheck: 'Precuenta',
+};
+
+// Estados del trabajo de impresión explicados al cajero; submitted significa aceptado por la
+// impresora o CUPS, no confirmación física del papel.
+export const printStatusLabels: Record<string, string> = {
+  pending: 'Impresión pendiente',
+  processing: 'Impresión en curso',
+  submitted: 'Ticket enviado',
+  error: 'Error de impresión',
+  uncertain: 'Resultado de impresión incierto',
+  intervention: 'La impresión requiere intervención',
+  cancelled: 'Impresión cancelada',
+  not_configured: 'Sin impresora configurada',
+};
+
+// Estados que se resuelven en Cocina → Cola de impresión.
+export const printAttentionStates = ['error', 'uncertain', 'intervention'];
+
+// Estado del último trabajo de un documento (ticket o precuenta) en la lista de documentos.
+export const documentJobLabels: Record<string, string> = {
+  pending: 'Pendiente de imprimir',
+  processing: 'Imprimiendo',
+  submitted: 'Enviado a la impresora',
+  error: 'Error de impresión',
+  uncertain: 'Resultado incierto',
+  intervention: 'Requiere intervención',
+  cancelled: 'Cancelado',
+};
+
+// Explica el resultado de una impresión solicitada. Nunca se presenta como fallo del pago: el
+// trabajo queda en la cola durable y se resuelve en Cocina.
+export function printingMessage(printing: PrintingResult | null | undefined, subject = 'pago') {
+  if (!printing || !printing.requested || !printing.status) {
+    return '';
+  }
+  const status = printing.status;
+  if (status === 'not_configured') {
+    return `Sin impresora configurada: el ${subject} quedó registrado.`;
+  }
+  if (status === 'pending' || status === 'processing') {
+    return 'Impresión pendiente: el documento está en la cola de impresión.';
+  }
+  if (status === 'submitted') {
+    return 'Ticket enviado a la impresora.';
+  }
+  if (status === 'cancelled') {
+    return `Impresión cancelada; el ${subject} quedó registrado.`;
+  }
+  return `${printStatusLabels[status] ?? 'Impresión no confirmada'}: el ${subject} quedó registrado. Revísalo en Cocina → Cola de impresión.`;
+}
+
 export const paymentStateBadges: Record<PaymentState, string> = {
   not_recorded: 'Sin pago',
   partial: 'Abono',
@@ -535,6 +660,9 @@ export const financialOperationLabels: Partial<Record<Operation, string>> = {
   payments_void_adjustment: 'de la cancelación del ajuste',
   payments_refund: 'de la devolución',
   payments_correct: 'de la corrección del pago',
+  payments_deliver: 'de la entrega del pedido',
+  payments_print_precheck: 'de la impresión de la precuenta',
+  payments_reprint: 'de la copia del documento',
   payments_open_shift: 'de la apertura del turno',
 };
 
@@ -556,6 +684,8 @@ export function financialOutcome(operation: Operation, result: unknown) {
     message = 'Pago corregido con un reverso y un pago nuevo.';
   } else if (operation === 'payments_pay') {
     message = 'Pago registrado.';
+  } else if (operation === 'payments_deliver') {
+    message = 'Entrega realizada.';
   }
   if (value?.closed) {
     message += ' La cuenta quedó liquidada y se cerró.';

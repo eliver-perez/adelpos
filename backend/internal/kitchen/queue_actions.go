@@ -140,8 +140,18 @@ func (handler *service) reprint() (any, error) {
 		}
 		printer = *current
 	}
-	// Una copia usa la presentación original: no añade una leyenda REIMPRESIÓN.
-	job, err := handler.enqueue(*document, printer, &rootID)
+	var kind string
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", original.TicketID).Scan(&kind); err != nil {
+		return nil, err
+	}
+	// Una copia usa la presentación original: no añade una leyenda REIMPRESIÓN. Un documento
+	// comercial conserva su contenido ya renderizado en lugar de interpretarse como comanda.
+	var job *PrintJob
+	if isCommercialKind(kind) {
+		job, err = handler.enqueueContent(original.TicketID, printer, &rootID, original.Content)
+	} else {
+		job, err = handler.enqueue(*document, printer, &rootID)
+	}
 	if err != nil {
 		return nil, err
 	}

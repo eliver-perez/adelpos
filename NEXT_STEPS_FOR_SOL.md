@@ -1,24 +1,24 @@
-# Continuidad para Sol · Estado de la etapa 5
+# Continuidad para Sol · Estado de la etapa 6
 
 ## Estado actual
 
-Versión 0.5.0 y esquema 5. Etapas 1–3 conservadas: Go independiente, PostgreSQL exclusivo, Tauri, almacén seguro, configuración, usuarios/permisos/sesiones/terminales y catálogo decimal. La etapa 4 conserva áreas, mesas, cuentas, borradores, versiones y transferencias; la etapa 5 añade estaciones, rutas, liberaciones, preparación, documentos, cola/transportes de impresión y SSE autenticado. Tauri inicia fullscreen nativo y utiliza un diseño fluido.
+Versión 0.6.0 y esquema 6. Etapas 1–3 conservadas: Go independiente, PostgreSQL exclusivo, Tauri, almacén seguro, configuración, usuarios/permisos/sesiones/terminales y catálogo decimal. La etapa 4 conserva áreas, mesas, cuentas, borradores, versiones y transferencias; la etapa 5 añade estaciones, rutas, liberaciones, preparación, documentos, cola/transportes de impresión y SSE autenticado. La etapa 6 añade el módulo `payments`: cobros totales, parciales, mixtos y por selección, efectivo y cambio, descuentos y cortesías con límite por rol, cargos generales, propinas, IVA incluido (16/8/0), devoluciones, correcciones, autorización puntual de supervisor, turno mínimo, precuentas, tickets y entrega de pedidos para llevar. Tauri inicia fullscreen nativo y utiliza un diseño fluido.
 
-Leer primero AGENTS.md, README.md, ARCHITECTURE.md, API_CONTRACTS.md, docs/CATALOG.md, docs/RESTAURANT_OPERATIONS.md, docs/KITCHEN_AND_PRINTING.md y docs/VERIFICATION.md. La verificación anterior está archivada por etapa. No reiniciar ni reconstruir el proyecto.
+Leer primero AGENTS.md, README.md, ARCHITECTURE.md, API_CONTRACTS.md, docs/CATALOG.md, docs/RESTAURANT_OPERATIONS.md, docs/KITCHEN_AND_PRINTING.md, docs/PAYMENTS_AND_REFUNDS.md y docs/VERIFICATION.md. La verificación anterior está archivada por etapa. No reiniciar ni reconstruir el proyecto.
 
 ## Reglas permanentes
 
 - Fuentes legibles, nombres descriptivos y comentarios de negocio en español. gofmt y Prettier obligatorios; revisar también lo que no expandan. Los artefactos generados se mantienen separados de los fuentes.
-- Migraciones 0001–0005 inmutables una vez aplicadas. La próxima ampliación requiere 0006. Respaldo y ensayo real de restauración antes de modificar datos existentes; nunca borrar .local para resolver un problema.
+- Migraciones 0001–0006 inmutables una vez aplicadas. La próxima ampliación requiere 0007. Respaldo y ensayo real de restauración antes de modificar datos existentes; nunca borrar .local para resolver un problema.
 - `config/product.json` es canónico. Ejecutar sync y mantener lockfiles. No actualizar dependencias por inferencia de una nueva etapa.
 - admin/admin es la política inicial autorizada; no restablecer ni imponer cambio. sa permanece reservado al propietario mediante CLI local y no aparece en la administración normal.
 - Tokens duraderos solo en el almacén seguro nativo; no imprimirlos, versionarlos ni transportarlos al WebView. El OnceLock de Keychain es asíncrono: un consentimiento pendiente no significa credenciales vacías.
 - Toda operación protegida valida sesión, dispositivo y permisos vigentes en Go. Mantener loopback, CSP/capabilities limitadas y HTTPS/CA verificadas para LAN.
-- Todo dinero usa numeric/decimal en Go y cadenas JSON. `catalog.Calculate` y `QuoteForOrder` son la única autoridad comercial. Mantener equivalencia por valor con piso base, extras explícitos y tramos incrementales.
+- Todo dinero usa numeric/decimal en Go y cadenas JSON. `catalog.Calculate` y `QuoteForOrder` son la única autoridad de precios y `payments` la única autoridad financiera; React no calcula importes. Mantener equivalencia por valor con piso base, extras explícitos y tramos incrementales.
 - Confirmar guarda snapshot comercial. Editar observaciones o reducir receta idéntica conserva centavos; otros cambios requieren previsualización explícita. Transferir/dividir mueve los mismos UUID de unidad y no genera preparación ni consumo.
 - Cada escritura operativa lleva UUID/revisión y guarda resultado, eventos y auditoría en la misma transacción. Conservar el UUID/cuerpo de una respuesta incierta y consultar estado actual después del reintento.
 - Usar `Accordion` para secciones colapsables; conservar valores montados, aria, foco, revelación de errores y movimiento reducido. No reintroducir details/summary ni convertir cada bloque en acordeón.
-- Mantener selección local ante actualización y conflicto. El borrador persiste; el editor local y el reintento incierto todavía no sobreviven al cierre del proceso.
+- Mantener selección local ante actualización y conflicto. El borrador persiste. Las operaciones inciertas viven en el almacén global de la aplicación (`hooks/pendingOperations.tsx`) y sobreviven a la navegación, pero no al cierre del proceso.
 
 ## Continuidad de cocina
 
@@ -30,9 +30,15 @@ El planificador pertenece a Go; no trasladarlo a temporizadores de React. La pol
 
 La instalación real no recibe estaciones, productos ni impresoras ficticias. La prueba física fue una sola comanda técnica a Printer_POS_80, aceptada por CUPS como 219; no se certificó salida de papel o corte. `TestControlledCUPSPrinter` es opt-in y las suites ordinarias no imprimen. No reutilizar esa cola real en pruebas automáticas sin intención explícita de hardware.
 
+## Continuidad de cobros
+
+No cambiar 0006 después de aplicarla. Los registros financieros son inmutables: pagos, ajustes y devoluciones se corrigen con registros compensatorios enlazados. Una unidad con pago o descuento manual vigente no se transfiere, divide, combina, cancela, edita ni anula; ninguna operación deja la cuenta con total menor que lo pagado. Toda escritura de `payments/` usa el lock 7820148305, `restaurant_operations` y auditoría en la misma transacción; la huella excluye la contraseña de autorización.
+
+`cash_movements` ya registra cobros, devoluciones y reversos por turno, con efectivo recibido y cambio, y `GET payments/shifts/{id}/movements` informa totales por método y `expected_cash`. Una caja con turno abierto no se desactiva y su terminal no cambia de caja hasta el cierre. Una corrección directa solo procede mientras el turno original está abierto.
+
 ## Próxima etapa
 
-Esperar alcance del usuario para cobros y entrega. Pago sigue `not_recorded` y entrega `not_delivered`; preparación lista no habilita una entrega ficticia. Ventanilla continúa como origen de takeaway. No añadir inventario, turnos, propinas, impuestos, Android, agente remoto o aplicación KDS de forma incidental.
+Etapa 7 (caja y cortes): cierre de turno, arqueo, diferencias que no bloquean el cierre, retiros y regularizaciones posteriores al cierre, a partir de `cash_shifts` y `cash_movements`. No exigir liquidar cuentas para cerrar turno. No añadir inventario, Android, agente remoto, aplicación KDS ni facturación electrónica de forma incidental.
 
 ## Verificar antes de ampliar
 
@@ -52,7 +58,7 @@ La aceptación PostgreSQL crea/elimina bases aleatorias adel_pos_test_*. La visu
 
 ## Límites a resolver con alcance explícito
 
-Hay SSE, preparación e impresión CUPS/ESC-POS. No existen WebSocket, offline durable, agente remoto, aplicación KDS, inventario físico, cobros, impuestos, turnos ni licenciamiento comercial. El servidor production sigue bloqueado por licencias. Firma/notarización, servicio instalado y Windows/Android permanecen pendientes.
+Hay SSE, preparación e impresión CUPS/ESC-POS. No existen WebSocket, offline durable, agente remoto, aplicación KDS, inventario físico, cierre de turno ni arqueo, facturación electrónica (CFDI) ni licenciamiento comercial. El servidor production sigue bloqueado por licencias. Firma/notarización, servicio instalado y Windows/Android permanecen pendientes.
 
 Medir carga antes de uso comercial: locks operativos serializan escrituras, snapshots completos por lote consumen espacio y cuentas/historiales grandes pueden exceder el límite IPC de 2 MiB. El lote de captura se limita a 20 partidas/1000 unidades y el catálogo a 5000 referencias. Implementar paginación de detalle y búsqueda remota antes de superar los límites. No se ha medido LAN con otra máquina, muchas terminales ni resistencia a caída de energía.
 

@@ -178,6 +178,13 @@ func (handler *service) authorizeResource(parts []string) error {
 }
 
 func (handler *service) filteredDocument(id string) (*Document, error) {
+	var kind string
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", id).Scan(&kind); err != nil {
+		return nil, err
+	}
+	if isCommercialKind(kind) {
+		return handler.commercialDocument(id, kind)
+	}
 	document, err := one[Document](handler.ctx, handler.tx, "SELECT document FROM app.kitchen_tickets WHERE id=$1", id)
 	if err != nil {
 		return nil, err
@@ -201,6 +208,27 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 	return document, nil
 }
 
+// commercialDocument muestra en la cola un ticket o precuenta con su contenido impreso. Contiene
+// importes, por lo que exige el alcance global de la cola y permiso de precios o pagos.
+func (handler *service) commercialDocument(id, kind string) (*Document, error) {
+	if err := handler.request.Actor.Require("kitchen.stations.all"); err != nil {
+		return nil, err
+	}
+	if !handler.request.Actor.Can("catalog.prices.read") && !handler.request.Actor.Can("payments.read") {
+		return nil, &Error{Status: 403, Code: "PERMISSION_DENIED", Message: "No tienes permiso para consultar documentos con importes."}
+	}
+	var document Document
+	err := handler.tx.QueryRow(handler.ctx, `SELECT t.created_at,coalesce((SELECT j.content FROM app.kitchen_print_jobs j
+        WHERE j.ticket_id=t.id ORDER BY j.created_at DESC LIMIT 1),'') FROM app.kitchen_tickets t WHERE t.id=$1`, id).Scan(&document.CreatedAt, &document.Preview)
+	if err != nil {
+		return nil, err
+	}
+	document.ID = id
+	document.Kind = kind
+	document.Sections = []Section{}
+	return &document, nil
+}
+
 func (handler *service) readTickets(parts []string) (any, error) {
 	if len(parts) == 2 {
 		return handler.filteredDocument(parts[1])
@@ -221,7 +249,7 @@ func (handler *service) readTickets(parts []string) (any, error) {
             WHERE section->'station'->>'reception' IN ('kds','both')
             AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations a WHERE a.device_id=$3 AND a.station_id=(section->'station'->>'id')::uuid))
             AND NOT EXISTS(SELECT FROM app.kitchen_kds_receipts k WHERE k.ticket_id=t.id AND k.station_id=(section->'station'->>'id')::uuid)))
-        FROM app.kitchen_tickets t WHERE ($1='' OR NULLIF($1,'')::uuid=ANY(station_ids))
+        FROM app.kitchen_tickets t WHERE t.kind NOT IN ('receipt','precheck') AND ($1='' OR NULLIF($1,'')::uuid=ANY(station_ids))
         AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations d WHERE d.device_id=$3 AND d.station_id=ANY(t.station_ids)))
         ORDER BY created_at DESC,id DESC LIMIT 100 OFFSET $4`, station, handler.request.Actor.Can("kitchen.stations.all"), handler.request.Actor.DeviceID, (page-1)*100)
 	return rows, err
