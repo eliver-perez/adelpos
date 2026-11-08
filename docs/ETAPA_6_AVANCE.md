@@ -143,7 +143,7 @@ Cambios a tablas existentes: `restaurant_accounts.state` admite `closed` (+ `clo
 - Vitest: 16 archivos, 72 pruebas aprobadas (10 nuevas: interruptor de impresión sin casilla con `aria-pressed` y `print` explícito, `not_configured` sin error de pago, entrega ausente en salón y presente en para llevar, pago parcial con entrega no registrada, entrega directa, entrega con saldo que abre el cobro, `ALREADY_DELIVERED`, sin botón de cobro o entrega en un pedido vacío, precuenta solo de consulta, `PRINTER_NOT_CONFIGURED` y `PRINT_COPY_PENDING`).
 - Playwright Chromium y WebKit con Go temporal en 8183: recorrido completo aprobado en ambos motores, con impresora de tickets configurada en Cobros, apertura de turno con fondo mediante el teclado fijo, abono en efectivo con cambio, ticket encolado sin afectar el pago, precuenta con IVA y saldo, descuento general, pago con tarjeta que liquida y cierra la cuenta, documentos de la cuenta y entrega de un pedido para llevar desde «Marcar como entregado».
 - Árbol completo: formato, `sync --check`, `go vet` (también `integration`), `go test -race ./...`, integración PostgreSQL de los cinco paquetes, `tsc`, `npm run build` y `cargo test --locked --offline` (11 aprobadas, 1 ignorada) aprobados. `tauri build --bundles app` en la copia aislada produjo `AD-EL POS.app` ARM64 0.6.0 (9.43 MiB) sin reemplazar el `.app` del proyecto.
-- No ejecutado: aplicación nativa, Keychain real, impresión física, migración de la instalación real (requiere autorización) y prueba automática de actualización del tablero entre dos terminales.
+- No ejecutado en esta fase: recorrido en la aplicación nativa, Keychain real, impresión física y prueba automática de actualización del tablero entre dos terminales. La migración de la instalación real se hizo después, con autorización (sección siguiente).
 
 **Decisiones**
 
@@ -152,3 +152,15 @@ Cambios a tablas existentes: `restaurant_accounts.state` admite `closed` (+ `clo
 - A 1280×720 y 1024×768, en el cobro para llevar, el interruptor de entrega queda bajo el área visible y requiere desplazamiento interno; el total, el cambio y el botón de registro permanecen visibles. A 1920×1080 cabe completo.
 - La región exterior de apertura de turno se nombra «Apertura de turno» para no duplicar el nombre accesible «Turno de caja» del formulario (detectado por Playwright).
 - Las copias de un documento con trabajo en error, incierto o en intervención se resuelven primero en Cocina → Cola de impresión, como las comandas.
+
+## Migración de la instalación real (autorizada por el propietario)
+
+8 de noviembre de 2026, después del commit de 6D:
+
+1. `./scripts/dev.sh backup`: `backups/adel_pos-20261108T191622Z-57c0f5.dump` (permisos 0600, catálogo legible).
+2. `python3 scripts/restore-check.py backups/adel_pos-20261108T191622Z-57c0f5.dump`: restauración en base temporal con 63 tablas y conteos idénticos (`.local/stage6-restore-verification.json`).
+3. `./scripts/dev.sh server-stop`: servidor 0.5.0 detenido de forma ordenada.
+4. `./scripts/dev.sh migrate`: `applied:1`; repetición `applied:0`. El migrador verifica las sumas de 0001–0005.
+5. `./scripts/dev.sh server-start`: servidor 0.6.0 con readiness 200 y esquema compatible.
+6. Comprobación de solo lectura: migraciones 1–6, IVA 16 %, cinco métodos de pago, límite de descuento del administrador 100 %, 21 permisos nuevos concedidos al administrador, sin turnos, pagos ni cuentas ficticias; 78 tablas en `app`.
+7. `./scripts/dev.sh build-macos`: `AD-EL POS.app` 0.6.0 (9.43 MiB) y `./scripts/dev.sh open-app`: aplicación iniciada y atendida por el servidor 0.6.0. No se recorrió el cobro en la ventana nativa.
