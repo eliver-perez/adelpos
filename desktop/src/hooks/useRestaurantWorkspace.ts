@@ -18,7 +18,15 @@ import type { AccountAction } from '../pages/restaurant/AccountActions';
 
 export type RestaurantView = 'tables' | 'takeaway' | 'accounts' | 'manage';
 export type WorkspacePanel =
-  'capture' | 'new' | 'metadata' | 'history' | 'editor' | 'cancel' | 'kitchen' | AccountAction;
+  | 'capture'
+  | 'new'
+  | 'metadata'
+  | 'history'
+  | 'editor'
+  | 'cancel'
+  | 'kitchen'
+  | 'checkout'
+  | AccountAction;
 
 export function useRestaurantWorkspace(
   active: boolean,

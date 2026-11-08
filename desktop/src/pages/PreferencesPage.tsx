@@ -4,7 +4,17 @@ import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
 import type { Identity, Preferences } from '../services/models';
 
-export const screens = [
+export interface ScreenEntry {
+  id: string;
+  label: string;
+  permission: string;
+  // Basta con uno de estos permisos para ver la pantalla.
+  anyPermission?: string[];
+  // Falso cuando el servidor todavía no admite la pantalla como inicio.
+  home?: boolean;
+}
+
+export const screens: ScreenEntry[] = [
   { id: 'kitchen', label: 'Cocina y preparación', permission: 'kitchen.states.read' },
   { id: 'restaurant', label: 'Restaurante', permission: 'accounts.read' },
   { id: 'takeaway', label: 'Para llevar', permission: 'takeaway.read' },
@@ -15,11 +25,34 @@ export const screens = [
   { id: 'roles', label: 'Roles', permission: 'roles.read' },
   { id: 'devices', label: 'Terminales', permission: 'devices.read' },
   { id: 'registers', label: 'Cajas físicas', permission: 'registers.read' },
+  {
+    id: 'payments',
+    label: 'Cobros',
+    permission: '',
+    anyPermission: [
+      'payments.methods.manage',
+      'payments.settings.manage',
+      'payments.tax.manage',
+      'cash.shifts.read',
+    ],
+    home: false,
+  },
   { id: 'sessions', label: 'Sesiones', permission: 'sessions.read' },
   { id: 'settings', label: 'Configuración', permission: 'settings.read' },
   { id: 'audit', label: 'Auditoría', permission: 'audit.read' },
   { id: 'preferences', label: 'Mis preferencias', permission: '' },
 ];
+
+// Una pantalla se autoriza con su permiso propio y, si declara alternativas, con alguna de ellas.
+export function screenAuthorized(entry: ScreenEntry, permissions: string[]) {
+  if (entry.permission && !permissions.includes(entry.permission)) {
+    return false;
+  }
+  if (entry.anyPermission && !entry.anyPermission.some((key) => permissions.includes(key))) {
+    return false;
+  }
+  return true;
+}
 
 export function UserPreferencesForm({
   value,
@@ -35,7 +68,7 @@ export function UserPreferencesForm({
   const [theme, setTheme] = useState(value.theme);
   const [home, setHome] = useState(value.home_screen);
   const available = screens.filter(
-    (screen) => !permissions || !screen.permission || permissions.includes(screen.permission),
+    (screen) => screen.home !== false && (!permissions || screenAuthorized(screen, permissions)),
   );
   return (
     <Form

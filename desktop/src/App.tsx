@@ -13,7 +13,9 @@ import { KitchenPage } from './pages/kitchen/KitchenPage';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
 import { AuditPage } from './pages/AuditPage';
 import { DevicesPage } from './pages/DevicesPage';
-import { PasswordPage, PreferencesPage, screens } from './pages/PreferencesPage';
+import { PasswordPage, PreferencesPage, screenAuthorized, screens } from './pages/PreferencesPage';
+import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
+import { PendingOperationsProvider } from './hooks/pendingOperations';
 import { RegistersPage } from './pages/RegistersPage';
 import { RolesPage } from './pages/RolesPage';
 import { SessionsPage } from './pages/SessionsPage';
@@ -23,11 +25,13 @@ import { UsersPage } from './pages/UsersPage';
 import product from './generated/product.json';
 
 export function App() {
+  // El almacén de operaciones inciertas vive por encima de todas las pantallas: navegar no pierde
+  // el operation_id de un cobro o una operación de cocina sin resultado confirmado.
   return (
-    <>
+    <PendingOperationsProvider>
       <WindowControls />
       <ApplicationContent />
-    </>
+    </PendingOperationsProvider>
   );
 }
 
@@ -45,7 +49,7 @@ function ApplicationContent() {
   const operationMode = screen === 'restaurant' || screen === 'takeaway';
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const available = screens.filter((entry) => {
-    const authorized = !entry.permission || can(entry.permission);
+    const authorized = screenAuthorized(entry, identity?.user.permissions ?? []);
     return (
       authorized &&
       (entry.id !== 'preview' || can('catalog.read')) &&
@@ -64,7 +68,7 @@ function ApplicationContent() {
       initializedUser.current = identity.user.id;
     }
     const current = screens.find((entry) => entry.id === screen);
-    if (current?.permission && !identity.user.permissions.includes(current.permission)) {
+    if (current && !screenAuthorized(current, identity.user.permissions)) {
       setScreen('status');
     }
   }, [identity, screen]);
@@ -163,6 +167,8 @@ function ApplicationContent() {
         return <DevicesPage can={can} />;
       case 'registers':
         return <RegistersPage can={can} />;
+      case 'payments':
+        return <PaymentsAdminPage can={can} timezone={identity.establishment.timezone} />;
       case 'sessions':
         return <SessionsPage can={can} />;
       case 'settings':

@@ -1,7 +1,40 @@
 import { preparationLabels } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
 import { elapsedTime, serverDateTime } from '../../services/restaurant';
-import type { AccountPage } from '../../services/restaurant';
+import type { Account, AccountPage } from '../../services/restaurant';
+import { deliveryStateBadges, formatMoney, paymentStateBadges } from '../../services/payments';
+
+function accountStateText(account: Account) {
+  if (account.state === 'open') {
+    return `${account.confirmed_quantity} unidades confirmadas`;
+  }
+  if (account.state === 'closed') {
+    return 'Cuenta cerrada · liquidada';
+  }
+  if (account.state === 'merged') {
+    return 'Cuenta combinada';
+  }
+  return 'Cuenta anulada';
+}
+
+// Pago y entrega se muestran separados de la preparación, con los estados que calcula Go.
+function FinanceBadges({ account, takeaway }: { account: Account; takeaway: boolean }) {
+  return (
+    <div className="account-finance-badges">
+      <span className={`finance-badge finance-badge-${account.payment_state}`}>
+        Pago: {paymentStateBadges[account.payment_state] ?? account.payment_state}
+      </span>
+      {account.payment_state === 'partial' && account.finance && (
+        <span className="finance-badge">Saldo {formatMoney(account.finance.balance)}</span>
+      )}
+      {takeaway && (
+        <span className={`finance-badge finance-badge-${account.delivery_state}`}>
+          Entrega: {deliveryStateBadges[account.delivery_state] ?? account.delivery_state}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function AccountList({
   value,
@@ -51,6 +84,7 @@ export function AccountList({
             }}
           >
             <option value="open">Abiertas</option>
+            <option value="closed">Cerradas y liquidadas</option>
             <option value="all">Todas con historial</option>
             <option value="merged">Combinadas</option>
             <option value="voided">Anuladas sin productos activos</option>
@@ -87,16 +121,14 @@ export function AccountList({
               <span>{serverDateTime(account.created_at, value.timezone)}</span>
               <strong>{elapsedTime(account.elapsed_seconds)}</strong>
             </div>
-            <p>{preparationLabels[account.preparation_state] ?? account.preparation_state}</p>
+            <p>
+              Preparación:{' '}
+              {preparationLabels[account.preparation_state] ?? account.preparation_state}
+            </p>
+            <FinanceBadges account={account} takeaway={takeaway} />
             <div className="account-list-card-detail">
               <span>{takeaway ? account.origin : (account.table_name ?? 'Sin mesa')}</span>
-              <span>
-                {account.state === 'open'
-                  ? `${account.confirmed_quantity} unidades confirmadas`
-                  : account.state === 'merged'
-                    ? 'Cuenta combinada'
-                    : 'Cuenta anulada'}
-              </span>
+              <span>{accountStateText(account)}</span>
             </div>
             {account.scheduled_at && (
               <p>

@@ -86,6 +86,13 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_preview" => Some((Method::POST, "catalog/preview")),
         "catalog_upload_image" => Some((Method::POST, "catalog/images")),
         "catalog_reorder_categories" => Some((Method::POST, "catalog/categories/reorder")),
+        "payments_settings" => Some((Method::GET, "payments/settings")),
+        "payments_save_settings" => Some((Method::PUT, "payments/settings")),
+        "payments_save_tax" => Some((Method::PUT, "payments/tax")),
+        "payments_methods" => Some((Method::GET, "payments/methods")),
+        "payments_create_method" => Some((Method::POST, "payments/methods")),
+        "payments_current_shift" => Some((Method::GET, "payments/shifts/current")),
+        "payments_open_shift" => Some((Method::POST, "payments/shifts")),
         "restaurant_overview" => Some((Method::GET, "restaurant/overview")),
         "restaurant_areas" => Some((Method::GET, "restaurant/areas")),
         "restaurant_create_area" => Some((Method::POST, "restaurant/areas")),
@@ -214,6 +221,64 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "restaurant_void" => (
             Method::POST,
             format!("restaurant/accounts/{identifier}/void"),
+        ),
+        "payments_save_method" => (Method::PATCH, format!("payments/methods/{identifier}")),
+        "payments_shift_movements" => (
+            Method::GET,
+            format!("payments/shifts/{identifier}/movements"),
+        ),
+        "payments_account" => (Method::GET, format!("payments/accounts/{identifier}")),
+        "payments_preview" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/preview"),
+        ),
+        "payments_pay" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/payments"),
+        ),
+        "payments_deliver" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/deliver"),
+        ),
+        "payments_discount_preview" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/discounts/preview"),
+        ),
+        "payments_discount" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/discounts"),
+        ),
+        "payments_charge" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/charges"),
+        ),
+        "payments_void_adjustment" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/adjustments/void"),
+        ),
+        "payments_refund_preview" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/refunds/preview"),
+        ),
+        "payments_refund" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/refunds"),
+        ),
+        "payments_correct" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/corrections"),
+        ),
+        "payments_precheck" => (
+            Method::GET,
+            format!("payments/accounts/{identifier}/precheck"),
+        ),
+        "payments_print_precheck" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/precheck/print"),
+        ),
+        "payments_reprint" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/documents/reprint"),
         ),
         "update_user" => (Method::PATCH, format!("users/{identifier}")),
         "user_permissions" => (Method::GET, format!("users/{identifier}/permissions")),
@@ -402,6 +467,33 @@ fn invalidates_credentials(status: u16, result: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn payment_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("payments_pay", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("payments/accounts/{identifier}/payments")
+            )
+        );
+        assert_eq!(
+            route("payments_account", Some(identifier)).unwrap(),
+            (Method::GET, format!("payments/accounts/{identifier}"))
+        );
+        assert_eq!(
+            route("payments_save_tax", None).unwrap(),
+            (Method::PUT, "payments/tax".to_string())
+        );
+        assert_eq!(
+            route("payments_refund", Some(identifier)).unwrap().0,
+            Method::POST
+        );
+        assert!(route("payments_pay", Some("../../users")).is_err());
+        assert!(route("payments_pay", None).is_err());
+        assert!(route("payments_delete", Some(identifier)).is_err());
+    }
 
     #[test]
     fn kitchen_routes_are_closed_and_keep_write_methods() {
