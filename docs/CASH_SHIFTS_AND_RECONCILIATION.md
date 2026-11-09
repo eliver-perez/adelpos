@@ -1,6 +1,6 @@
 # Administración de caja, arqueos y cortes · Etapa 7
 
-Estado: **etapa 7 completa (fases 0 y A–D), versión 0.7.0, esquema 8**: migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. **La 0008 no se ha aplicado a la instalación real**: requiere la autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
+Estado: **etapa 7 completa (fases 0 y A–D), versión 0.7.0, esquema 8**: migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. La 0008 se aplicó a la instalación real el 9 de noviembre de 2026 con autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
 
 ## Autoridad y estructura
 
@@ -190,5 +190,4 @@ Sobre el árbol 0.7.0 en el entorno aislado: estáticas, `go vet` y `go test -ra
 - Los usuarios sin `events.read` se actualizan por sondeo; no se probaron dos terminales nativas simultáneas.
 - Un usuario con permiso de autorizar salidas, pero sin `cash.expected.read`, podría inferir por tanteo si un importe excede el disponible (cada rechazo no revela cifras ni queda auditado).
 - Las filas individuales de movimientos y operaciones se muestran a quien tiene su permiso de consulta aunque no tenga `cash.expected.read`; los totales que equivalen al esperado se omiten.
-- La 0008 no se ha aplicado a la instalación real: hasta que el propietario lo autorice, el servidor real (0.6.2, esquema 7) conserva el turno mínimo sin arqueo ni cierre.
 - Sin verificar en la ventana nativa WKWebView, con pantalla táctil física ni con dos terminales nativas simultáneas.
