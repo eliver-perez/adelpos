@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PendingOperationsProvider } from '../../hooks/pendingOperations';
 import { CashOperationForm } from './CashOperationForm';
@@ -93,8 +93,11 @@ describe('operaciones de efectivo', () => {
     type('200');
     expect(screen.getByText(/Autorización propia/)).toBeTruthy();
     expect(screen.queryByLabelText('Contraseña del supervisor')).toBeNull();
-    submit(/^Registrar retiro \$200$/);
-    await screen.findByText('Retiro registrado: $200.00 · Resguardo');
+    submit(/^Registrar retiro \$200\.00$/);
+    // La confirmación llega como aviso y el resultado sigue en el panel (fase A de la 7.1).
+    const confirmation = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(confirmation.textContent).toContain('Retiro registrado: $200.00 · Resguardo');
+    expect(screen.getAllByText('Retiro registrado: $200.00 · Resguardo')).toHaveLength(2);
     expect(screen.getByText('Autorizado con el permiso propio de Administrador')).toBeTruthy();
     const call = sent('payments_shift_withdrawal')[0]!;
     expect(call.resourceId).toBe(shiftID);
@@ -143,9 +146,12 @@ describe('operaciones de efectivo', () => {
     renderForm('withdrawal');
     fireEvent.click(screen.getByRole('button', { name: 'Resguardo' }));
     type('900');
-    submit(/^Registrar retiro \$900$/);
-    const alert = await screen.findByText(message);
+    submit(/^Registrar retiro \$900\.00$/);
+    // El rechazo es un aviso de error persistente con el texto de Go, sin cifras ni código.
+    const alert = await screen.findByRole('alert', { name: 'Error' });
+    expect(alert.textContent).toContain(message);
     expect(alert.textContent).not.toMatch(/\$|[0-9]/);
+    expect(alert.textContent).not.toContain('CASH_INSUFFICIENT');
     fireEvent.click(screen.getByRole('button', { name: 'Solicitar salida excepcional' }));
     expect(screen.getByText(message)).toBeTruthy();
     const register = screen.getByRole('button', { name: /^Registrar retiro/ }) as HTMLButtonElement;
@@ -155,6 +161,8 @@ describe('operaciones de efectivo', () => {
     });
     fireEvent.click(register);
     await screen.findByText(/Salida excepcional/);
+    // Al registrarse la salida, el aviso del rechazo anterior se retira.
+    await waitFor(() => expect(screen.queryByText(message)).toBeNull());
     const second = sent('payments_shift_withdrawal')[1]!.body;
     expect(second).toMatchObject({
       amount: '900',
@@ -176,9 +184,14 @@ describe('operaciones de efectivo', () => {
     renderForm('income');
     fireEvent.click(screen.getByRole('button', { name: 'Aportación adicional al fondo' }));
     type('100');
-    submit(/^Registrar ingreso \$100$/);
-    await screen.findByText('No se pudo confirmar el resultado del ingreso de efectivo por $100.');
+    submit(/^Registrar ingreso \$100\.00$/);
+    await screen.findByText(
+      'No se pudo confirmar el resultado del ingreso de efectivo por $100.00.',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    // El rechazo del reintento es un aviso de error persistente que conserva el texto completo.
+    const alert = await screen.findByRole('alert', { name: 'Error' });
+    expect(alert.textContent).toContain('El reintento no se registró.');
     const notice = await screen.findByText(/no se registró ni se duplicó/);
     expect(notice.textContent).toContain('El turno de Caja 1 ya está cerrado.');
     expect(notice.textContent).toContain('regístrala como una operación nueva en un turno abierto');

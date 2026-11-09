@@ -3,6 +3,7 @@ import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useSupervisorAuthorization } from '../../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../../services/api';
 import { isZeroMoney, validReason } from '../../../services/payments';
+import { notifyActionError } from './actionErrors';
 import type {
   CorrectionInput,
   CorrectionResult,
@@ -124,15 +125,16 @@ export function useCorrectionFlow({
       if (auth.handleError(problem)) {
         return;
       }
-      if (!(problem instanceof APIError)) {
-        return;
-      }
-      if (problem.code === 'SHIFT_CLOSED') {
+      // Estos dos rechazos se explican en el propio panel de corrección, con la alternativa que
+      // corresponde (regularización o devolución); los demás se avisan como mensaje.
+      if (problem instanceof APIError && problem.code === 'SHIFT_CLOSED') {
         setNotice(closedShiftMessage);
-      } else if (problem.code === 'PAYMENT_NOT_CORRECTABLE') {
+      } else if (problem instanceof APIError && problem.code === 'PAYMENT_NOT_CORRECTABLE') {
         setNotice(`${problem.message} Registra una devolución en su lugar.`);
         setSuggestRefund(true);
         void reloadFinance();
+      } else {
+        notifyActionError(problem, 'No se pudo registrar la corrección.');
       }
     }
   }

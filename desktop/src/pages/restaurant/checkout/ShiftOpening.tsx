@@ -1,11 +1,12 @@
 import { useId } from 'react';
 import { Notice } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { AmountField, NumericKeypad } from '../../../components/NumericKeypad';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { permissionName } from '../../../services/payments';
 import type { CurrentShift } from '../../../services/payments';
 import { CountTotals, DenominationCount } from '../../cash/DenominationCount';
-import { confirmationCode, RateConfirmation } from './ShiftRateCapture';
+import { RateConfirmation } from './ShiftRateCapture';
 import { useShiftOpening } from './useShiftOpening';
 import type { OpeningMode, ShiftOpeningState } from './useShiftOpening';
 
@@ -133,7 +134,7 @@ function OpeningForm({ state, active }: { state: ShiftOpeningState; active: bool
         disabled={!state.ready || state.mutation.busy || !!state.mutation.pending}
         onClick={() => void state.open()}
       >
-        {state.openLabel()}
+        <IconLabel icon="register">{state.openLabel()}</IconLabel>
       </button>
     </>
   );
@@ -161,11 +162,6 @@ export function ShiftOpening({
     <section className="checkout-shift" aria-label="Turno de caja">
       <h3>{register ? `Turno de ${register.name}` : 'Caja no asignada'}</h3>
       <p className="checkout-inline-note">{current.reason}</p>
-      {mutation.error && mutation.errorCode !== confirmationCode && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
       {mutation.uncertain && (
         <div className="operation-recovery">
           <p>
@@ -176,9 +172,9 @@ export function ShiftOpening({
             type="button"
             className="primary-button"
             disabled={mutation.busy}
-            onClick={() => void mutation.retry()}
+            onClick={() => void state.retry()}
           >
-            Reintentar con el mismo identificador
+            <IconLabel icon="refresh">Reintentar con el mismo identificador</IconLabel>
           </button>
           <button type="button" className="secondary-button" onClick={onChanged}>
             Consultar turno

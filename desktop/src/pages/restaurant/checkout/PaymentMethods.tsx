@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { PaymentMethodIcon } from '../../../components/PaymentMethodIcon';
+import { formatDeduction } from '../../../services/money';
 import { formatDollars, formatMoney, isZeroMoney } from '../../../services/payments';
 import type { PaymentMethod, PaymentRecord, RefundRecord } from '../../../services/payments';
 import { serverDateTime } from '../../../services/restaurant';
@@ -158,7 +159,7 @@ export function RefundHistory({
                 {refund.kind === 'correction' ? 'Reverso por corrección' : 'Devolución'} ·{' '}
                 {refund.method_name}
               </strong>
-              <strong>−{formatMoney(refund.amount)}</strong>
+              <strong>{formatDeduction(refund.amount)}</strong>
             </div>
             <p className="muted text-xs">
               {serverDateTime(refund.created_at, timezone)} · {refund.actor_name}

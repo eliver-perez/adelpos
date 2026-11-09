@@ -338,7 +338,7 @@ function renderDelivery(account: Account, onCollect = vi.fn()) {
 }
 
 describe('entrega de pedidos para llevar', () => {
-  it('entrega directamente un pedido liquidado tras una confirmación en línea', async () => {
+  it('entrega directamente un pedido liquidado tras confirmarlo en el diálogo estándar', async () => {
     writeHandler = () => ({
       status: 200,
       body: { finance: finance(), closed: true, delivered: true },
@@ -346,11 +346,23 @@ describe('entrega de pedidos para llevar', () => {
     renderDelivery(takeawayAccount());
     fireEvent.click(screen.getByRole('button', { name: 'Marcar como entregado' }));
     expect(requests('payments_deliver')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar entrega' }));
-    await screen.findByText('Entrega realizada.');
+    const dialog = screen.getByRole('alertdialog', { name: 'Confirmar entrega' });
+    expect(dialog.textContent).toContain('¿El cliente recibió el pedido #90?');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar entrega' }));
+    const notice = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(notice.textContent).toContain('Pedido #90 entregado.');
     expect(lastBody<{ operation_id: string }>('payments_deliver').operation_id).toMatch(
       /^[0-9a-f-]{36}$/,
     );
+  });
+
+  it('cancelar el diálogo de entrega no registra nada', async () => {
+    renderDelivery(takeawayAccount());
+    fireEvent.click(screen.getByRole('button', { name: 'Marcar como entregado' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Confirmar entrega' });
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(requests('payments_deliver')).toHaveLength(0);
   });
 
   it('con saldo pendiente abre el cobro en lugar de entregar', () => {
@@ -367,8 +379,10 @@ describe('entrega de pedidos para llevar', () => {
     });
     renderDelivery(takeawayAccount());
     fireEvent.click(screen.getByRole('button', { name: 'Marcar como entregado' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmar entrega' }));
-    await screen.findByText('El pedido ya estaba entregado.');
+    const dialog = screen.getByRole('alertdialog', { name: 'Confirmar entrega' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Confirmar entrega' }));
+    const notice = await screen.findByRole('status', { name: 'Información' });
+    expect(notice.textContent).toContain('El pedido ya estaba entregado.');
   });
 
   it('no ofrece entregar un pedido sin productos confirmados', () => {

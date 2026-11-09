@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Field } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { AmountField, NumericKeypad } from '../../../components/NumericKeypad';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
@@ -53,6 +54,8 @@ function RefundSummary({ plan, finance }: { plan: RefundPlan; finance: Finance }
   );
 }
 
+// Resultado de la devolución: permanece en pantalla porque indica el importe que se entrega al
+// cliente; además se avisa con un mensaje de confirmación.
 function RefundRecorded({ result }: { result: RefundResult }) {
   return (
     <div className="checkout-result" role="status">
@@ -225,9 +228,10 @@ export function RefundPanel({
           disabled={!flow.canRegister}
           onClick={() => void flow.register()}
         >
-          {registerLabel}
+          <IconLabel icon="refund">{registerLabel}</IconLabel>
         </button>
       </footer>
+      {flow.dialog}
     </section>
   );
 }

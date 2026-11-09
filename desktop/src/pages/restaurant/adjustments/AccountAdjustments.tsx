@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { Notice } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { useFinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import {
-  authorizationCodes,
   isAuthorizationProblem,
   repeatAuthorizationMessage,
 } from '../../../hooks/useSupervisorAuthorization';
+import { notifyError, notifySuccess } from '../../../services/notify';
 import { financialOutcome, formatMoney, permissionName } from '../../../services/payments';
 import type { Finance } from '../../../services/payments';
 import type { Account, Bill } from '../../../services/restaurant';
 import { newestFinance } from '../checkout/captureState';
 import { UncertainOperation } from '../checkout/UncertainOperation';
+import { notifyActionError } from '../checkout/actionErrors';
 import { AdjustmentList } from './AdjustmentList';
 import { ChargeForm } from './ChargeForm';
 import { DiscountForm } from './DiscountForm';
@@ -61,8 +63,6 @@ export function AccountAdjustments({
   const accountID = bill.account.id;
   const polled = useLiveResource<Finance>('payments_account', { id: accountID, enabled: active });
   const [recorded, setRecorded] = useState<Finance | null>(null);
-  const [notice, setNotice] = useState('');
-  const [retryNotice, setRetryNotice] = useState('');
   const [generation, setGeneration] = useState(0);
   const kinds = adjustmentKinds(can);
   const [kind, setKind] = useState<AdjustmentKind>(kinds[0]?.value ?? 'discount');
@@ -71,8 +71,7 @@ export function AccountAdjustments({
     if (outcome.finance) {
       setRecorded(outcome.finance);
     }
-    setNotice(outcome.message);
-    setRetryNotice('');
+    notifySuccess(outcome.message);
     // Tras registrar, el formulario vuelve a su estado inicial.
     setGeneration((value) => value + 1);
   });
@@ -82,9 +81,15 @@ export function AccountAdjustments({
   async function retryPending() {
     const authorized = typeof pending?.body.authorization === 'object';
     const problem = await mutation.retry();
-    if (authorized && isAuthorizationProblem(problem)) {
-      setRetryNotice(repeatAuthorizationMessage);
+    if (!problem) {
+      return;
     }
+    // Un reintento autorizado que no llegó a registrarse pide repetir la autorización.
+    if (authorized && isAuthorizationProblem(problem)) {
+      notifyError(repeatAuthorizationMessage);
+      return;
+    }
+    notifyActionError(problem, 'No se pudo registrar el ajuste pendiente.');
   }
 
   return (
@@ -92,7 +97,7 @@ export function AccountAdjustments({
       <div className="section-heading">
         <h2>Descuentos y cargos · #{bill.account.folio}</h2>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <Notice>{polled.error}</Notice>
@@ -105,11 +110,6 @@ export function AccountAdjustments({
           onConsult={() => void polled.reload()}
         />
       )}
-      {retryNotice && <Notice>{retryNotice}</Notice>}
-      {mutation.error &&
-        !mutation.uncertain &&
-        !authorizationCodes.includes(mutation.errorCode) && <Notice>{mutation.error}</Notice>}
-      {notice && <Notice success>{notice}</Notice>}
       {!finance && !polled.error && <p className="muted">Consultando el estado financiero…</p>}
       {finance && (
         <>

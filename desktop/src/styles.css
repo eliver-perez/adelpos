@@ -104,6 +104,15 @@
   --accent-soft: #eaf5f1;
   --banner: #edf4f4;
   --warning: #c08636;
+  /* Etapa 7.1: tonos de avisos y de acciones destructivas. */
+  --warning-soft: #fbf3e6;
+  --danger: #b4473c;
+  --danger-soft: #fbeceb;
+  --danger-contrast: #fff;
+  --info: #2f6db3;
+  --info-soft: #eaf1fa;
+  --toast-shadow: 0 12px 32px rgb(15 23 32 / 18%);
+  --toast-offset-top: 92px;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -122,6 +131,13 @@
   --accent-soft: #203b36;
   --banner: #203130;
   --warning: #e6b15f;
+  --warning-soft: #3a2f1c;
+  --danger: #f08c80;
+  --danger-soft: #3a2422;
+  --danger-contrast: #1a0f0e;
+  --info: #8bb8ec;
+  --info-soft: #1d2b3d;
+  --toast-shadow: 0 12px 32px rgb(0 0 0 / 45%);
 }
 body {
   margin: 0;
@@ -379,9 +395,6 @@ fieldset:disabled {
   margin-bottom: 18px;
   overflow-wrap: anywhere;
 }
-.notice-success {
-  border-color: var(--accent);
-}
 .secondary-button,
 .danger-button {
   min-height: 44px;
@@ -394,7 +407,7 @@ fieldset:disabled {
   font-weight: 550;
 }
 .danger-button {
-  color: #bf5b50;
+  color: var(--danger);
 }
 .button-row {
   display: flex;
@@ -681,6 +694,15 @@ summary {
   border-top: 1px solid var(--border);
   font-size: 12px;
   color: var(--muted);
+}
+/* Promoción aplicada en la vista previa del catálogo: borde de acento (antes reutilizaba el estilo
+   de aviso de éxito, retirado en la etapa 7.1). */
+.quote-promotion-applied {
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--text);
 }
 @media (max-width: 1150px) {
   .preview-layout {
@@ -2398,16 +2420,6 @@ summary {
 .takeaway-delivery > .secondary-button {
   justify-self: start;
 }
-.takeaway-delivery-confirm {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: var(--accent-soft);
-  color: var(--text);
-  font-size: 12px;
-}
 .takeaway-delivered {
   font-weight: 650;
   color: var(--accent);
@@ -2816,6 +2828,8 @@ summary {
   border-style: dashed;
 }
 .capture-topbar-refresh {
+  display: inline-grid;
+  place-items: center;
   min-width: 48px;
   min-height: 48px;
   padding: 0;
@@ -3010,6 +3024,8 @@ summary {
   border-radius: 8px;
 }
 .capture-product-customize {
+  display: inline-grid;
+  place-items: center;
   position: absolute;
   top: 10px;
   right: 6px;
@@ -3921,7 +3937,6 @@ summary {
 }
 .cash-warning,
 .cash-limit-warning,
-.cash-retry-rejected,
 .cash-exceptional {
   display: grid;
   gap: 8px;
@@ -4004,4 +4019,163 @@ summary {
 /* La apertura reutilizada en Caja aprovecha el ancho sin estirar el teclado numérico. */
 .cash-panel .checkout-shift .numeric-keypad {
   width: min(100%, 520px);
+}
+
+/* Etapa 7.1 · Sistema único de mensajes (Sonner sin estilos propios). La pila queda arriba al
+   centro, debajo de la cabecera, para no tapar las acciones principales de cobro y captura. */
+:root:has(.app-shell.operation-mode) {
+  --toast-offset-top: 64px;
+}
+.app-toast-frame {
+  width: var(--width);
+}
+/* Avisos anteriores de la pila apilada: solo asoma su borde detrás del más reciente (la pila no se
+   despliega con el puntero; ver AppToaster). */
+.app-toast-frame[data-expanded='false'][data-front='false'] {
+  overflow: hidden;
+  border-radius: 14px;
+}
+.app-toast-frame[data-expanded='false'][data-front='false'] > .app-toast {
+  height: 100%;
+}
+.app-toast-frame[data-expanded='false'][data-front='false'] > .app-toast > * {
+  opacity: 0;
+}
+.app-toast {
+  --toast-accent: var(--accent);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 6px 6px 16px;
+  border: 1px solid var(--border);
+  border-left: 6px solid var(--toast-accent);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--toast-shadow);
+  font-size: 16px;
+  line-height: 1.45;
+}
+.app-toast-info {
+  --toast-accent: var(--info);
+}
+.app-toast-warning {
+  --toast-accent: var(--warning);
+  background: var(--warning-soft);
+}
+.app-toast-error {
+  --toast-accent: var(--danger);
+  background: var(--danger-soft);
+}
+.app-toast-icon {
+  flex: 0 0 auto;
+  margin-top: 11px;
+  color: var(--toast-accent);
+}
+.app-toast-content {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+}
+.app-toast-message {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.app-toast-description {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.app-toast-action {
+  flex: 0 0 auto;
+  align-self: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--toast-accent);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--toast-accent);
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.app-toast-close {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+.app-toast-close:hover,
+.app-toast-action:hover {
+  background: color-mix(in srgb, var(--toast-accent) 12%, transparent);
+}
+
+/* Etapa 7.1 · Diálogo de confirmación estándar: botones de 56 px y acción destructiva diferenciada. */
+.dialog-panel {
+  width: min(520px, 100%);
+  gap: 16px;
+  padding: 28px;
+}
+.dialog-panel-danger {
+  border-top: 4px solid var(--danger);
+}
+.dialog-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.dialog-heading-icon {
+  flex: 0 0 auto;
+  color: var(--danger);
+}
+.dialog-panel h2 {
+  font-size: 20px;
+}
+.dialog-message {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 1.55;
+}
+.dialog-actions .dialog-button {
+  min-height: 56px;
+  min-width: 140px;
+  padding: 12px 20px;
+  font-size: 15px;
+}
+.danger-solid-button {
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--danger);
+  color: var(--danger-contrast);
+  font-weight: 650;
+}
+
+/* Etapa 7.1 · Icono a la izquierda del texto en los botones de acción (18 px, trazo 1.6). */
+.icon-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.icon-label > .app-icon {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+.icon-label-text {
+  min-width: 0;
 }

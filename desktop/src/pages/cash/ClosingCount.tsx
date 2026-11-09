@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { AmountField, NumericKeypad } from '../../components/NumericKeypad';
 import type { Denomination } from '../../services/cash';
 import type { Shift } from '../../services/payments';
@@ -128,11 +129,6 @@ function DraftStatus({
           )}
         </div>
       )}
-      {mutation.error && !late && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
     </>
   );
 }
@@ -210,7 +206,7 @@ export function ClosingCount({
       <header className="cash-panel-header">
         <h3>Arqueo de cierre · {shift.register_name}</h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver a la caja
+          <IconLabel icon="back">Volver a la caja</IconLabel>
         </button>
       </header>
       <p className="muted text-sm">
@@ -284,7 +280,7 @@ export function ClosingCount({
               disabled={!ready}
               onClick={onConfirm}
             >
-              Confirmar cierre del turno
+              <IconLabel icon="count">Confirmar cierre del turno</IconLabel>
             </button>
           )}
         </div>

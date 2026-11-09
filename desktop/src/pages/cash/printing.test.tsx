@@ -231,7 +231,9 @@ describe('impresión y reimpresión según permisos', () => {
     expect(screen.queryByRole('button', { name: 'Imprimir' })).toBeNull();
     expect(screen.getByText(/Enviado a la impresora/)).toBeTruthy();
     fireEvent.click(reprint);
-    await screen.findByText('Documento enviado a la cola de impresión.');
+    // El resultado de reimprimir es un aviso de confirmación, fuera del panel.
+    const reprinted = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(reprinted.textContent).toContain('Documento enviado a la cola de impresión.');
     expect(sent('payments_reprint_cash_document')[0]?.resourceId).toBe('documento-1');
     cleanup();
 
@@ -308,9 +310,30 @@ describe('mensajes de envío', () => {
       target: { value: 'Cambio para el fondo' },
     });
     fireEvent.click(send);
-    await screen.findByText('Comando de apertura enviado.');
+    const confirmation = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(confirmation.textContent).toContain('Comando de apertura enviado.');
     expect(sent('payments_open_drawer')[0]?.body.reason).toBe('Cambio para el fondo');
     expect(document.body.textContent).not.toMatch(/cajón abierto|se abrió/i);
+  });
+
+  it('un comando del cajón con resultado incierto queda como aviso persistente', async () => {
+    const shift = shiftOf();
+    serve({
+      ...caja(shift, detailOf(shift), true),
+      payments_open_drawer: () => ({
+        status: 200,
+        body: { requested: true, status: 'uncertain', job_id: 'cajon', event_id: 'evento' },
+      }),
+    });
+    render(<Page />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Abrir cajón' }));
+    fireEvent.change(screen.getByLabelText(/Motivo de la apertura del cajón/), {
+      target: { value: 'Cambio para el fondo' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar comando de apertura' }));
+    const warning = await screen.findByRole('status', { name: 'Atención' });
+    expect(warning.textContent).toContain('No se reintenta automáticamente');
+    expect(warning.textContent).not.toMatch(/cajón abierto|se abrió/i);
   });
 
   it('sin el permiso no ofrece abrir el cajón', async () => {

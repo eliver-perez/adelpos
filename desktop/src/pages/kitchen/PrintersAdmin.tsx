@@ -9,6 +9,7 @@ import {
 } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { ExecuteKitchen, Printer } from '../../services/kitchen';
+import { notifySuccess } from '../../services/notify';
 
 const emptyPrinter = (): Printer => ({
   id: '',
@@ -129,6 +130,7 @@ export function PrintersAdmin({
           <Form
             disabled={busy || stale}
             label="Guardar impresora"
+            successMessage="Impresora guardada."
             onSave={async () =>
               setValue(
                 await execute<Printer>(
@@ -260,9 +262,12 @@ export function PrintersAdmin({
               className="secondary-button"
               disabled={busy}
               onClick={() =>
-                void execute('kitchen_test_print', { body: { printer_id: value.id } }).catch(
-                  () => undefined,
-                )
+                void execute('kitchen_test_print', { body: { printer_id: value.id } })
+                  .then(() =>
+                    // «Enviada a la cola», nunca «impresa»: Go no confirma el papel.
+                    notifySuccess(`Impresión de prueba enviada a la cola de ${value.name}.`),
+                  )
+                  .catch(() => undefined)
               }
             >
               Enviar una impresión de prueba a {value.name}

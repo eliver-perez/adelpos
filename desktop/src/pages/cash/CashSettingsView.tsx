@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
-import { Field, Form, Notice } from '../../components/Forms';
+import { Field, Form } from '../../components/Forms';
 import { PositionField } from '../../components/PositionField';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { ToggleButton } from '../../components/ToggleButton';
 import { useRestaurantMutation } from '../../hooks/useRestaurantMutation';
 import { acceptAmountText, toWireAmount } from '../../services/amountInput';
 import { currencyLabels, denominationLabel } from '../../services/cash';
+import { notifyError, notifySuccess } from '../../services/notify';
 import type { CashCatalog, CashCurrency, Denomination, ExpenseCategory } from '../../services/cash';
 import { orderSiblings, positionPayload } from '../../services/positions';
 import { APIError } from '../../services/api';
@@ -34,6 +35,7 @@ function NewDenomination({ execute }: { execute: Execute }) {
   return (
     <Form
       label="Agregar denominación"
+      successMessage="Denominación agregada."
       onSave={async () => {
         await execute('payments_create_denomination', {
           body: { currency, kind, value: toWireAmount(value), active: true },
@@ -91,24 +93,25 @@ function DenominationsAdmin({
   execute: Execute;
   busy: boolean;
 }) {
-  const [error, setError] = useState('');
   const currencies: CashCurrency[] = ['MXN', 'USD'];
 
   async function toggle(denomination: Denomination, active: boolean) {
-    setError('');
+    const label = denominationLabel(denomination);
     try {
       await execute('payments_save_denomination', {
         id: denomination.id,
         body: { revision: denomination.revision, active },
       });
+      notifySuccess(
+        active ? `Denominación activada: ${label}.` : `Denominación desactivada: ${label}.`,
+      );
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'No se pudo guardar.');
+      notifyError(problem, 'No se pudo guardar la denominación.');
     }
   }
 
   return (
     <div className="form-stack">
-      <Notice>{error}</Notice>
       {currencies.map((currency) => (
         <div key={currency} className="field">
           <span>{currencyLabels[currency]}</span>
@@ -163,6 +166,7 @@ function CategoryEditor({
   return (
     <Form
       label={category ? 'Guardar categoría' : 'Crear categoría'}
+      successMessage={category ? 'Categoría de gasto guardada.' : 'Categoría de gasto creada.'}
       onSave={async () => {
         const body: Record<string, unknown> = { name, active };
         const position = positionPayload(categories, category?.id ?? '', after);
@@ -254,6 +258,17 @@ export function CashSettingsView({ catalog }: { catalog: CashCatalog | null }) {
   if (!catalog) {
     return <p className="muted">Consultando la configuración de caja…</p>;
   }
+  // Reintento del cambio incierto: su resultado definitivo se avisa como el de cualquier acción.
+  async function retry() {
+    const problem = await mutation.retry();
+    if (!problem) {
+      notifySuccess('Cambio de configuración confirmado en el servidor.');
+      return;
+    }
+    if (!mutation.isPending()) {
+      notifyError(problem, 'No se pudo confirmar el cambio.');
+    }
+  }
   const execute: Execute = async (operation, options) => {
     try {
       return await mutation.execute(operation, options);
@@ -274,7 +289,7 @@ export function CashSettingsView({ catalog }: { catalog: CashCatalog | null }) {
             type="button"
             className="primary-button"
             disabled={mutation.busy}
-            onClick={() => void mutation.retry()}
+            onClick={() => void retry()}
           >
             Reintentar con el mismo identificador
           </button>

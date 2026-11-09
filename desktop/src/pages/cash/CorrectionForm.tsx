@@ -1,14 +1,13 @@
 import { useId, useState } from 'react';
-import {
-  authorizationCodes,
-  useSupervisorAuthorization,
-} from '../../hooks/useSupervisorAuthorization';
+import { IconLabel } from '../../components/Icon';
+import { useSupervisorAuthorization } from '../../hooks/useSupervisorAuthorization';
 import type { CashCorrectionResult, CashOperation } from '../../services/cash';
+import { notifySuccess } from '../../services/notify';
 import { validReason } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { OutflowAuthorization } from './OutflowAuthorization';
 import { PendingCashOperation } from './PendingCashOperation';
-import { RecordedOperation } from './RecordedOperation';
+import { RecordedOperation, recordedOperationTitle } from './RecordedOperation';
 import { useCashMutation } from './useCashMutation';
 
 // Corrección (mismo turno abierto) o regularización (turno cerrado de la misma caja) de una
@@ -54,8 +53,12 @@ export function CorrectionForm({
       setResult(saved);
       setReason('');
       auth.reset();
+      notifySuccess(recordedOperationTitle(saved.correction));
     } catch (problem) {
-      auth.handleError(problem);
+      // Un problema de autorización se explica en su formulario; los demás, con un aviso.
+      if (!auth.handleError(problem)) {
+        mutation.reportFailure(problem, 'No se pudo registrar la corrección.');
+      }
     }
   }
 
@@ -71,7 +74,7 @@ export function CorrectionForm({
       <div className="form-stack">
         <RecordedOperation operation={result.correction} />
         <button type="button" className="secondary-button" onClick={onDone}>
-          Volver a los movimientos
+          <IconLabel icon="back">Volver a los movimientos</IconLabel>
         </button>
       </div>
     );
@@ -111,11 +114,6 @@ export function CorrectionForm({
         permission="cash.corrections.authorize"
       />
       <PendingCashOperation mutation={mutation} />
-      {mutation.error && !authorizationCodes.includes(mutation.errorCode) && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
       <div className="button-row">
         <button
           type="button"
@@ -123,7 +121,7 @@ export function CorrectionForm({
           disabled={!ready}
           onClick={() => void register()}
         >
-          {submitLabel()}
+          <IconLabel icon="edit">{submitLabel()}</IconLabel>
         </button>
         <button type="button" className="secondary-button" onClick={onDone}>
           Cancelar

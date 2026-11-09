@@ -1,19 +1,63 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
+import { Icon } from './Icon';
 
-// Confirmaciones dentro de la aplicación. El WebView nativo de Tauri en macOS no muestra
-// window.confirm, window.alert ni window.prompt: devuelve un valor vacío sin mostrar nada, y la
-// pantalla parece no responder. Toda confirmación debe usar este componente.
+// Diálogo de confirmación estándar (etapa 7.1, a partir del diálogo de la etapa 6.1 para «Volver al
+// listado»). El WebView nativo de Tauri en macOS no muestra window.confirm, window.alert ni
+// window.prompt: devuelve un valor vacío sin mostrar nada, y la pantalla parece no responder. Toda
+// confirmación debe usar este componente.
+//
+// - tone 'danger' diferencia la acción destructiva o irreversible (cancelar productos, devolver,
+//   descartar cambios) con color propio e icono de advertencia;
+// - el foco queda atrapado dentro del diálogo mientras está abierto y vuelve al control anterior
+//   al cerrarse;
+// - Escape equivale a cancelar; el foco inicial va a la opción que no descarta nada;
+// - botones de 56 px o más para pantalla táctil.
+
+export type ConfirmTone = 'default' | 'danger';
 
 export interface ConfirmRequest {
   title: string;
-  message: string;
+  message: ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
+  tone?: ConfirmTone;
 }
 
 interface PendingConfirmation extends ConfirmRequest {
   resolve: (confirmed: boolean) => void;
+}
+
+const focusableSelector = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+// Mantiene el foco dentro del panel: Tab en el último control vuelve al primero y Mayús+Tab en el
+// primero va al último.
+function trapFocus(event: KeyboardEvent<HTMLDivElement>, panel: HTMLDivElement) {
+  const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector));
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (!first || !last) {
+    event.preventDefault();
+    return;
+  }
+  const active = document.activeElement;
+  const outside = !panel.contains(active);
+  if (event.shiftKey && (active === first || outside)) {
+    event.preventDefault();
+    last.focus();
+    return;
+  }
+  if (!event.shiftKey && (active === last || outside)) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 export function ConfirmDialog({
@@ -21,6 +65,7 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   cancelLabel = 'Cancelar',
+  tone = 'default',
   onConfirm,
   onCancel,
 }: ConfirmRequest & {
@@ -29,35 +74,66 @@ export function ConfirmDialog({
 }) {
   const titleID = useId();
   const messageID = useId();
+  const panel = useRef<HTMLDivElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    // El foco inicial va a la opción que no descarta nada.
+    // El foco inicial va a la opción que no descarta nada; al cerrar vuelve a donde estaba.
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelButton.current?.focus();
+    return () => {
+      if (previous && previous.isConnected) {
+        previous.focus();
+      }
+    };
   }, []);
 
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+      return;
+    }
+    if (event.key === 'Tab' && panel.current) {
+      trapFocus(event, panel.current);
+    }
+  }
+
+  const danger = tone === 'danger';
   return (
     <div className="dialog-backdrop">
       <div
-        className="dialog-panel"
+        ref={panel}
+        className={`dialog-panel ${danger ? 'dialog-panel-danger' : ''}`}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleID}
         aria-describedby={messageID}
-        onKeyDown={(event) => {
-          if (event.key === 'Escape') {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
+        onKeyDown={handleKeyDown}
       >
-        <h2 id={titleID}>{title}</h2>
-        <p id={messageID}>{message}</p>
+        <div className="dialog-heading">
+          {danger && <Icon name="alert" size={26} className="dialog-heading-icon" />}
+          <h2 id={titleID}>{title}</h2>
+        </div>
+        <div id={messageID} className="dialog-message">
+          {message}
+        </div>
         <div className="dialog-actions">
-          <button ref={cancelButton} type="button" className="secondary-button" onClick={onCancel}>
+          <button
+            ref={cancelButton}
+            type="button"
+            className="secondary-button dialog-button"
+            onClick={onCancel}
+          >
             {cancelLabel}
           </button>
-          <button type="button" className="primary-button" onClick={onConfirm}>
+          <button
+            type="button"
+            className={`${danger ? 'danger-solid-button' : 'primary-button'} dialog-button`}
+            data-tone={tone}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </button>
         </div>
@@ -90,6 +166,7 @@ export function useConfirmDialog(): {
       message={pending.message}
       confirmLabel={pending.confirmLabel}
       cancelLabel={pending.cancelLabel}
+      tone={pending.tone}
       onConfirm={() => finish(true)}
       onCancel={() => finish(false)}
     />

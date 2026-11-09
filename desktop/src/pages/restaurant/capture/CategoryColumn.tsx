@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { Category, Lookups } from '../../../services/catalog';
+import { countLabel } from '../../../services/plural';
 
 export interface CaptureCategory {
   category: Category;
@@ -65,9 +66,7 @@ export function CategoryColumn({
           <span className="capture-category-mark" aria-hidden="true" />
           <span className="capture-category-text">
             <strong>{category.name}</strong>
-            <span className="muted">
-              {products} {products === 1 ? 'producto' : 'productos'}
-            </span>
+            <span className="muted">{countLabel(products, 'producto', 'productos')}</span>
           </span>
         </button>
       ))}

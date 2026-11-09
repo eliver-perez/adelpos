@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Field } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
 import { formatMoney, isZeroMoney, permissionName } from '../../../services/payments';
 import type { CheckoutStatus } from './PaymentCapture';
@@ -97,7 +98,7 @@ export function CorrectionPanel({
             <p>{flow.notice}</p>
             {flow.suggestRefund && (
               <button type="button" className="secondary-button" onClick={onRefundInstead}>
-                Ir a devoluciones
+                <IconLabel icon="refund">Ir a devoluciones</IconLabel>
               </button>
             )}
           </div>
@@ -111,7 +112,7 @@ export function CorrectionPanel({
             disabled={registering}
             onClick={flow.cancel}
           >
-            Cancelar corrección
+            <IconLabel icon="back">Cancelar corrección</IconLabel>
           </button>
         </div>
         <button
@@ -120,7 +121,7 @@ export function CorrectionPanel({
           disabled={!flow.canRegister}
           onClick={() => void flow.register()}
         >
-          {registerLabel}
+          <IconLabel icon="edit">{registerLabel}</IconLabel>
         </button>
       </footer>
     </section>

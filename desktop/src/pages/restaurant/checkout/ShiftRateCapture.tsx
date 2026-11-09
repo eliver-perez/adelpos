@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { AmountField, NumericKeypad } from '../../../components/NumericKeypad';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
+import { IconLabel } from '../../../components/Icon';
 import { APIError } from '../../../services/api';
 import { toWireAmount } from '../../../services/amountInput';
+import { notifySuccess } from '../../../services/notify';
 import { formatMoney } from '../../../services/payments';
 import type { Shift } from '../../../services/payments';
 import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
+import { notifyActionError } from './actionErrors';
 
 // Clave compartida de las escrituras del turno desde el cobro y desde Caja: una apertura o un
 // tipo de cambio incierto se recupera en cualquiera de las dos pantallas.
@@ -52,6 +55,7 @@ export function ShiftRateCapture({
   const [rate, setRate] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const mutation = useRestaurantMutation(() => {
+    notifySuccess(`Tipo de cambio del turno de ${shift.register_name} registrado.`);
     setRate('');
     onChanged();
     window.dispatchEvent(new CustomEvent('adel-server-change'));
@@ -73,9 +77,17 @@ export function ShiftRateCapture({
         setConfirmation(problem.message);
         return;
       }
+      notifyActionError(problem, 'No se pudo registrar el tipo de cambio.');
       if (problem instanceof APIError && problem.status === 409) {
         onChanged();
       }
+    }
+  }
+
+  async function retry() {
+    const problem = await mutation.retry();
+    if (problem) {
+      notifyActionError(problem, 'No se pudo registrar el tipo de cambio.');
     }
   }
 
@@ -84,7 +96,7 @@ export function ShiftRateCapture({
       <header className="checkout-area-header">
         <h3>Tipo de cambio de {shift.register_name}</h3>
         <button type="button" className="secondary-button" onClick={onCancel}>
-          Volver al cobro
+          <IconLabel icon="back">Volver al cobro</IconLabel>
         </button>
       </header>
       <div className="checkout-area-body checkout-capture-fields">
@@ -92,11 +104,6 @@ export function ShiftRateCapture({
           El turno no tiene tipo de cambio y no acepta dólares. Captúralo una sola vez: queda fijo
           hasta el cierre del turno.
         </p>
-        {mutation.error && mutation.errorCode !== confirmationCode && (
-          <p className="checkout-inline-note" role="alert">
-            {mutation.error}
-          </p>
-        )}
         {mutation.uncertain && (
           <div className="operation-recovery">
             <p>No se pudo confirmar el tipo de cambio. Reintenta con el mismo identificador.</p>
@@ -104,9 +111,9 @@ export function ShiftRateCapture({
               type="button"
               className="primary-button"
               disabled={mutation.busy}
-              onClick={() => void mutation.retry()}
+              onClick={() => void retry()}
             >
-              Reintentar con el mismo identificador
+              <IconLabel icon="refresh">Reintentar con el mismo identificador</IconLabel>
             </button>
           </div>
         )}
@@ -134,7 +141,9 @@ export function ShiftRateCapture({
           disabled={wire === '' || mutation.busy || !!mutation.pending}
           onClick={() => void save()}
         >
-          {wire === '' ? 'Captura el tipo de cambio' : `Fijar el dólar a ${formatMoney(wire)}`}
+          <IconLabel icon="check">
+            {wire === '' ? 'Captura el tipo de cambio' : `Fijar el dólar a ${formatMoney(wire)}`}
+          </IconLabel>
         </button>
       </footer>
       {confirmation && (

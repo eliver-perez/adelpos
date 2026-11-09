@@ -5,6 +5,7 @@ import {
   printAttentionStatuses,
 } from '../../services/cash';
 import type { CashLimitWarning, DrawerOutcome, PrintOutcome } from '../../services/cash';
+import { notifySuccess, notifyWarning } from '../../services/notify';
 
 // Aviso del tope de caja (fase C). Solo se muestra si Go lo entregó: la función está activa, quien
 // consulta puede ver el efectivo esperado y el turno no está en arqueo. La interfaz nunca compara
@@ -59,4 +60,37 @@ export function DrawerNotice({ outcome }: { outcome?: DrawerOutcome | null }) {
       {message}
     </p>
   );
+}
+
+// Estados en los que el documento o el comando se entregó a la cola o a la impresora. Ninguno
+// confirma papel impreso ni cajón abierto.
+const sentStatuses = ['pending', 'processing', 'submitted'];
+
+// Resultado de una impresión de caja pedida como acción propia (imprimir o reimprimir un documento,
+// imprimir un corte): se avisa con el sistema único de mensajes, con el mismo texto que el
+// resultado en pantalla. Si no se envió, el aviso permanece porque exige revisar la impresión.
+export function notifyPrintOutcome(outcome: PrintOutcome | null | undefined, subject: string) {
+  const message = cashPrintMessage(outcome, subject);
+  if (!message) {
+    return;
+  }
+  if (!sentStatuses.includes(outcome?.status ?? '')) {
+    notifyWarning(message, { persistent: true });
+    return;
+  }
+  notifySuccess(message);
+}
+
+// Resultado del comando del cajón: «Comando de apertura enviado» (nunca «cajón abierto»). Un
+// resultado incierto o fallido queda como aviso persistente: no se reintenta solo.
+export function notifyDrawerOutcome(outcome: DrawerOutcome | null | undefined) {
+  const message = drawerMessage(outcome);
+  if (!message) {
+    return;
+  }
+  if (!sentStatuses.includes(outcome?.status ?? '')) {
+    notifyWarning(message, { persistent: true });
+    return;
+  }
+  notifySuccess(message);
 }

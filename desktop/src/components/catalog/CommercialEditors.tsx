@@ -1,5 +1,6 @@
 import { Accordion } from '../Accordion';
 import { Field } from '../Forms';
+import { countLabel } from '../../services/plural';
 import type { Lookups, OptionGroup, PriceList, Promotion } from '../../services/catalog';
 import {
   Check,
@@ -241,7 +242,7 @@ function ScopeSelector({
       title={
         <>
           {' '}
-          {title} · {selected.length} seleccionados{' '}
+          {title} · {countLabel(selected.length, 'seleccionado', 'seleccionados')}{' '}
         </>
       }
     >

@@ -1,5 +1,5 @@
-import type { ComponentProps } from 'react';
 import { Icon } from './Icon';
+import type { IconName } from './Icon';
 
 export function StatusCard({
   icon,
@@ -8,7 +8,7 @@ export function StatusCard({
   description,
   state,
 }: {
-  icon: ComponentProps<typeof Icon>['name'];
+  icon: IconName;
   label: string;
   value: string;
   description: string;

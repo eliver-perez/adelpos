@@ -41,6 +41,7 @@ function SettingsEditor({
       <Form
         disabled={busy || initial.revision !== value.revision}
         label="Guardar configuración de cocina"
+        successMessage="Configuración de cocina guardada."
         onSave={async () => {
           const formats = can('kitchen.formats.manage');
           const body = formats

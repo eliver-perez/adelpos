@@ -4,9 +4,12 @@ import { useResource } from '../../hooks/useResource';
 import { useRestaurantMutation } from '../../hooks/useRestaurantMutation';
 import { APIError } from '../../services/api';
 import { featureEnabled } from '../../services/features';
+import { formatMoney } from '../../services/money';
+import { notifyError, notifySuccess } from '../../services/notify';
 import type { EstablishmentFeature } from '../../services/features';
 import { permissionName } from '../../services/payments';
 import type { PaymentMethod, PaymentSettings } from '../../services/payments';
+import { countLabel } from '../../services/plural';
 import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
 import { MethodsAdmin } from './MethodsAdmin';
 import { PaymentPoliciesForm } from './PaymentPoliciesForm';
@@ -47,6 +50,18 @@ export function PaymentsAdminPage({
     }
   };
   const busy = mutation.busy || mutation.uncertain;
+
+  // Reintento del cambio incierto: su resultado definitivo se avisa como el de cualquier acción.
+  async function retry() {
+    const problem = await mutation.retry();
+    if (!problem) {
+      notifySuccess('Cambio de configuración confirmado en el servidor.');
+      return;
+    }
+    if (!mutation.isPending()) {
+      notifyError(problem, 'No se pudo confirmar el cambio.');
+    }
+  }
   const activeMethods = methods.data?.filter((method) => method.active).length ?? 0;
 
   return (
@@ -71,7 +86,7 @@ export function PaymentsAdminPage({
             type="button"
             className="primary-button"
             disabled={mutation.busy}
-            onClick={() => void mutation.retry()}
+            onClick={() => void retry()}
           >
             Reintentar con el mismo identificador
           </button>
@@ -83,7 +98,7 @@ export function PaymentsAdminPage({
             title="Métodos de pago"
             summary={
               methods.data
-                ? `${activeMethods} activos de ${methods.data.length}`
+                ? `${countLabel(activeMethods, 'activo', 'activos')} de ${methods.data.length}`
                 : 'Consultando métodos…'
             }
             defaultOpen
@@ -109,7 +124,7 @@ export function PaymentsAdminPage({
               title="Pago en dólares"
               summary={
                 settings.data
-                  ? `Tipo de cambio de ${settings.data.usd_rate_min} a ${settings.data.usd_rate_max} · confirmación si difiere más de ${settings.data.usd_rate_alert_percent} %`
+                  ? `Tipo de cambio de ${formatMoney(settings.data.usd_rate_min)} a ${formatMoney(settings.data.usd_rate_max)} · confirmación si difiere más de ${settings.data.usd_rate_alert_percent} %`
                   : 'Consultando configuración…'
               }
             >

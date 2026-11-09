@@ -1,7 +1,8 @@
 import { useId, useState } from 'react';
+import { IconLabel } from '../../components/Icon';
 import type { DrawerOutcome } from '../../services/cash';
 import { validReason } from '../../services/payments';
-import { DrawerNotice } from './CashNotices';
+import { notifyDrawerOutcome } from './CashNotices';
 import { PendingCashOperation } from './PendingCashOperation';
 import { useCashMutation } from './useCashMutation';
 
@@ -12,7 +13,7 @@ export function drawerPendingKey(registerID: string) {
 }
 
 // Apertura manual del cajón de la caja de esta terminal (cash.drawer.open). Exige un motivo, es
-// idempotente y Go la audita. La pantalla solo informa que el comando se envió: nunca afirma que el
+// idempotente y Go la audita. El aviso solo informa que el comando se envió: nunca afirma que el
 // cajón se abrió físicamente.
 export function DrawerControl({
   registerID,
@@ -24,8 +25,12 @@ export function DrawerControl({
   const reasonID = useId();
   const [capturing, setCapturing] = useState(false);
   const [reason, setReason] = useState('');
-  const [outcome, setOutcome] = useState<DrawerOutcome | null>(null);
-  const mutation = useCashMutation(registerID, undefined, drawerPendingKey(registerID));
+  // El resultado se avisa al confirmarse, también cuando llega por el reintento de un incierto.
+  const mutation = useCashMutation(
+    registerID,
+    (_, result) => notifyDrawerOutcome(result as DrawerOutcome),
+    drawerPendingKey(registerID),
+  );
   const ready = validReason(reason) && !mutation.locked;
 
   async function send() {
@@ -33,14 +38,13 @@ export function DrawerControl({
       return;
     }
     try {
-      const result = await mutation.execute<DrawerOutcome>('payments_open_drawer', {
+      await mutation.execute<DrawerOutcome>('payments_open_drawer', {
         body: { reason: reason.trim() },
       });
-      setOutcome(result);
       setReason('');
       setCapturing(false);
-    } catch {
-      // El mensaje de Go queda visible junto al formulario.
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo enviar el comando de apertura del cajón.');
     }
   }
 
@@ -53,11 +57,12 @@ export function DrawerControl({
           aria-expanded={capturing}
           onClick={() => {
             setCapturing(!capturing);
-            setOutcome(null);
             mutation.clearError();
           }}
         >
-          {capturing ? 'Cancelar apertura del cajón' : 'Abrir cajón'}
+          <IconLabel icon={capturing ? 'close' : 'drawer'}>
+            {capturing ? 'Cancelar apertura del cajón' : 'Abrir cajón'}
+          </IconLabel>
         </button>
       </div>
       {capturing && (
@@ -82,17 +87,13 @@ export function DrawerControl({
             disabled={!ready}
             onClick={() => void send()}
           >
-            {mutation.busy ? 'Enviando comando…' : 'Enviar comando de apertura'}
+            <IconLabel icon="drawer">
+              {mutation.busy ? 'Enviando comando…' : 'Enviar comando de apertura'}
+            </IconLabel>
           </button>
         </div>
       )}
       <PendingCashOperation mutation={mutation} />
-      {mutation.error && !mutation.uncertain && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
-      <DrawerNotice outcome={outcome} />
     </section>
   );
 }

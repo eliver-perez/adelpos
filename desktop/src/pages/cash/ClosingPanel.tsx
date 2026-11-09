@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { IconLabel } from '../../components/Icon';
 import { APIError } from '../../services/api';
 import type { CashCatalog, PrintOutcome } from '../../services/cash';
-import { formatDollars, formatMoney } from '../../services/payments';
+import { formatDollars, formatMoney } from '../../services/money';
+import { notifyError, notifySuccess } from '../../services/notify';
 import type { Shift } from '../../services/payments';
 import { ClosingCount } from './ClosingCount';
 import { capturableDenominations } from './countCapture';
@@ -29,8 +31,9 @@ function StartClosing({
     }
     try {
       await mutation.execute('payments_shift_start_closing', { id: shift.id, body: {} });
-    } catch {
-      // El mensaje de Go queda visible junto al botón.
+      notifySuccess(`Arqueo de cierre iniciado: ${shift.register_name} quedó pausada.`);
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo iniciar el arqueo de cierre.');
     }
   }
 
@@ -39,7 +42,7 @@ function StartClosing({
       <header className="cash-panel-header">
         <h3>Arqueo y cierre de {shift.register_name}</h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver a la caja
+          <IconLabel icon="back">Volver a la caja</IconLabel>
         </button>
       </header>
       <p className="muted text-sm">
@@ -48,11 +51,6 @@ function StartClosing({
         devoluciones, ingresos, retiros, gastos ni correcciones. Las cuentas abiertas siguen
         abiertas y pueden cobrarse en otra caja con turno abierto.
       </p>
-      {mutation.error && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
       <div className="button-row">
         <button
           type="button"
@@ -60,7 +58,9 @@ function StartClosing({
           disabled={mutation.locked}
           onClick={() => setAsking(true)}
         >
-          {mutation.busy ? 'Iniciando arqueo…' : 'Iniciar arqueo de cierre'}
+          <IconLabel icon="count">
+            {mutation.busy ? 'Iniciando arqueo…' : 'Iniciar arqueo de cierre'}
+          </IconLabel>
         </button>
       </div>
       {asking && (
@@ -139,14 +139,22 @@ function ClosingInProgress({
         'payments_shift_confirm_closing',
         { id: shift.id, body },
       );
+      // El aviso confirma el cierre sin cifras: lo declarado, el esperado y las diferencias se
+      // consultan en el resultado según los permisos de quien cerró.
+      notifySuccess(`Turno de ${shift.register_name} cerrado.`);
       onClosed(shift.id, result.printing);
     } catch (problem) {
       if (problem instanceof APIError && problem.code === 'CLOSING_MOVEMENTS_CHANGED') {
+        // El panel de movimientos posteriores explica qué hacer y permanece en el arqueo.
         setLate(true);
+        return;
       }
       if (problem instanceof APIError && problem.code === 'COUNT_CHANGED') {
         void draft.closing.reload();
+        notifyError(problem);
+        return;
       }
+      mutation.reportFailure(problem, 'No se pudo cerrar el turno.');
     }
   }
 
@@ -161,8 +169,9 @@ function ClosingInProgress({
         body: late ? { reason: 'Movimientos posteriores al inicio del arqueo' } : {},
       });
       setLate(false);
-    } catch {
-      // El mensaje de Go queda visible en el arqueo.
+      notifySuccess(`Arqueo cancelado: ${shift.register_name} acepta de nuevo operaciones.`);
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo cancelar el arqueo.');
     }
   }
 
@@ -198,6 +207,7 @@ function ClosingInProgress({
           message={`Se cerrará el turno de ${shift.register_name} con ${declaredText(plan?.counted_mxn, plan?.counted_usd, dollars)} declarados. Después del cierre no se pueden agregar movimientos al turno.`}
           confirmLabel="Cerrar el turno"
           cancelLabel="Seguir contando"
+          tone="danger"
           onConfirm={() => void confirm()}
           onCancel={() => setDialog(null)}
         />
@@ -208,6 +218,7 @@ function ClosingInProgress({
           message={`El turno de ${shift.register_name} vuelve a «Abierto» y la caja acepta de nuevo operaciones. Lo contado no se conserva: el siguiente arqueo empieza desde cero.`}
           confirmLabel="Cancelar el arqueo"
           cancelLabel="Seguir contando"
+          tone="danger"
           onConfirm={() => void cancel()}
           onCancel={() => setDialog(null)}
         />

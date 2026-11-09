@@ -50,8 +50,8 @@ export function CatalogEditor({
   lookups: Lookups;
   can: (permission: string) => boolean;
   onSave: () => Promise<void>;
-  // Alta continua: guarda y abre un documento nuevo del mismo recurso.
-  onSaveAndNew?: () => Promise<void>;
+  // Alta continua: guarda y abre un documento nuevo del mismo recurso. Devuelve el texto del aviso.
+  onSaveAndNew?: () => Promise<string | void>;
   // Etiqueta con la concordancia del recurso («otra categoría», «otro producto»).
   saveAndNewLabel?: string;
   editable: boolean;

@@ -76,6 +76,7 @@ export function RoutingAdmin({ execute, busy }: { execute: ExecuteKitchen; busy:
           <Form
             disabled={busy}
             label="Guardar ruta"
+            successMessage="Ruta de preparación guardada."
             onSave={async () =>
               setSelected(
                 await execute<KitchenRoute>(

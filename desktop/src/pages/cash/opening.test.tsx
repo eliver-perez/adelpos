@@ -82,7 +82,7 @@ describe('apertura ampliada del turno', () => {
   it('abre por total con fondo de $0 sin pedir desglose', async () => {
     render(<Opening />);
     fireEvent.click(within(keypad()).getByRole('button', { name: '0' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Abrir turno con fondo de $0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir turno con fondo de $0.00' }));
     await waitFor(() => expect(calls('payments_open_shift')).toHaveLength(1));
     const body = calls('payments_open_shift')[0]!.body;
     expect(body.opening_float).toBe('0');

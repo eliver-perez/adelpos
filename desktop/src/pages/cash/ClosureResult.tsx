@@ -4,7 +4,10 @@ import { Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { denominationLabel } from '../../services/cash';
 import type { ClosureView, PrintOutcome } from '../../services/cash';
-import { formatDollars, formatMoney, permissionName, textLength } from '../../services/payments';
+import { formatDollars, formatMoney } from '../../services/money';
+import { notifySuccess } from '../../services/notify';
+import { permissionName, textLength } from '../../services/payments';
+import { countLabel } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
 import { CashDocumentActions } from './CashDocumentActions';
 import { PrintNotice } from './CashNotices';
@@ -64,7 +67,10 @@ function ClosureComments({
 }) {
   const identifier = useId();
   const [comment, setComment] = useState('');
-  const mutation = useCashMutation(view.shift.id, () => setComment(''));
+  const mutation = useCashMutation(view.shift.id, () => {
+    setComment('');
+    notifySuccess('Comentario agregado al cierre.');
+  });
   const reviewer = can('cash.closures.review');
   if (!view.comments && !reviewer) {
     return null;
@@ -73,7 +79,7 @@ function ClosureComments({
   return (
     <Accordion
       title="Comentarios del supervisor"
-      summary={`${view.comments?.length ?? 0} registrados`}
+      summary={countLabel(view.comments?.length ?? 0, 'registrado', 'registrados')}
     >
       {(view.comments ?? []).map((item) => (
         <p key={item.id} className="text-sm">
@@ -97,11 +103,6 @@ function ClosureComments({
               El comentario queda auditado y no cambia la diferencia.
             </small>
           </div>
-          {mutation.error && (
-            <p className="checkout-inline-note" role="alert">
-              {mutation.error}
-            </p>
-          )}
           <button
             type="button"
             className="secondary-button"
@@ -112,7 +113,9 @@ function ClosureComments({
                   id: view.shift.id,
                   body: { comment: comment.trim() },
                 })
-                .catch(() => undefined)
+                .catch((problem: unknown) =>
+                  mutation.reportFailure(problem, 'No se pudo agregar el comentario.'),
+                )
             }
           >
             Agregar comentario
@@ -169,7 +172,7 @@ export function ClosureResult({
       {view.regularizations.length > 0 && (
         <Accordion
           title="Regularizaciones enlazadas"
-          summary={`${view.regularizations.length} registradas en turnos posteriores`}
+          summary={`${countLabel(view.regularizations.length, 'registrada', 'registradas')} en turnos posteriores`}
         >
           <p className="muted text-xs">
             Corrigen movimientos de este turno sin cambiar su diferencia registrada.

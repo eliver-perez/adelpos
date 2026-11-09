@@ -9,6 +9,8 @@ import (
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/moneytext"
+	"local/ad-el-pos/server/internal/plural"
 )
 
 // Documentos de caja (etapa 7, §20): comprobantes de ingreso, retiro y gasto, corte parcial y corte
@@ -112,20 +114,15 @@ func displayDate(value string) string {
 	return parsed.Format("02/01/2006")
 }
 
-// currencyText expresa un importe guardado por Go en su moneda, con dos decimales y el signo antes
-// del símbolo.
+// currencyText expresa un importe guardado por Go en su moneda con el formato único de
+// moneytext: miles, dos decimales y el signo antes del símbolo («-$1,234.56», «US$20.00»).
 func currencyText(currency, amount string) string {
-	symbol := "$"
-	if currency == currencyUSD {
-		symbol = "US$"
-	}
-	if value, err := decimal.NewFromString(amount); err == nil {
-		amount = money(value)
-	}
-	if strings.HasPrefix(amount, "-") {
-		return "-" + symbol + strings.TrimPrefix(amount, "-")
-	}
-	return symbol + amount
+	return moneytext.Format(currency, amount)
+}
+
+// rateText expresa el tipo de cambio de un turno: pesos por dólar («$18.50/US$»).
+func rateText(rate string) string {
+	return pesosText(rate) + "/US$"
 }
 
 // zeroAmount indica si un importe guardado es cero (o no es un importe).
@@ -283,7 +280,7 @@ func renderReport(document *documentLines, header *documentHeader, source cashDo
 		document.pair("Fondo inicial en dólares", dollarsText(*control.FloatUSD))
 	}
 	if control.USDRate != nil {
-		document.pair("Tipo de cambio del turno", pesosText(*control.USDRate)+"/US$")
+		document.pair("Tipo de cambio del turno", rateText(*control.USDRate))
 	}
 	document.divider()
 	document.text("VENTAS Y PAGOS POR MÉTODO")
@@ -318,7 +315,15 @@ func renderReport(document *documentLines, header *documentHeader, source cashDo
 		}
 	}
 	if totals.Regularizations > 0 {
-		document.text("Regularizaciones de turnos cerrados: " + strconv.Itoa(totals.Regularizations) + " (no cambian este turno).")
+		// La frase concuerda con el número: «1 regularización de un turno cerrado; no cambia este
+		// turno.» y «2 regularizaciones de turnos cerrados; no cambian este turno.».
+		regularizations := plural.Count(
+			totals.Regularizations,
+			"regularización de un turno cerrado",
+			"regularizaciones de turnos cerrados",
+		)
+		verb := plural.Word(totals.Regularizations, "no cambia", "no cambian")
+		document.text(regularizations + "; " + verb + " este turno.")
 	}
 	renderDeclared(document, report, shiftHandlesDollars(shift))
 	renderSensitive(document, report, includeExpected)
@@ -398,7 +403,7 @@ func renderVoucher(document *documentLines, header *documentHeader, source cashD
 	document.text("Concepto: " + operation.Concept)
 	document.pair("Importe", currencyText(operation.Currency, operation.Amount))
 	if operation.Currency == currencyUSD && operation.USDRate != nil {
-		document.pair("Tipo de cambio", pesosText(*operation.USDRate)+"/US$")
+		document.pair("Tipo de cambio", rateText(*operation.USDRate))
 		document.pair("Equivale a", pesosText(operation.EquivalentMXN))
 	}
 	if operation.Reference != "" {

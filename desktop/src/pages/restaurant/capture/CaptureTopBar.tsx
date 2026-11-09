@@ -1,3 +1,4 @@
+import { Icon, IconLabel } from '../../../components/Icon';
 import type { Account, RestaurantTable } from '../../../services/restaurant';
 import {
   accountCustomName,
@@ -98,7 +99,7 @@ export function CaptureTopBar({
   return (
     <header className="capture-topbar">
       <button type="button" className="secondary-button capture-topbar-back" onClick={onBack}>
-        <span aria-hidden="true">‹</span> {backLabel}
+        <IconLabel icon="back">{backLabel}</IconLabel>
       </button>
       <div className="capture-topbar-title">
         <h1>
@@ -157,7 +158,7 @@ export function CaptureTopBar({
               disabled={disabled}
               onClick={onNewAccount}
             >
-              + Nueva cuenta
+              <IconLabel icon="plus">Nueva cuenta</IconLabel>
             </button>
           )}
         </div>
@@ -168,7 +169,7 @@ export function CaptureTopBar({
         aria-label="Actualizar"
         onClick={onRefresh}
       >
-        ↻
+        <Icon name="refresh" size={20} />
       </button>
     </header>
   );

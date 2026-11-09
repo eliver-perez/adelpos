@@ -5,6 +5,7 @@ import { ToggleButton } from '../components/ToggleButton';
 import { useResource } from '../hooks/useResource';
 import { api, APIError } from '../services/api';
 import { saveFeature } from '../services/features';
+import { notifyError, notifySuccess } from '../services/notify';
 import type { EstablishmentFeature } from '../services/features';
 import type { Settings } from '../services/models';
 import { filterTimezones, timezoneLabel, timezoneOptions } from '../services/timezones';
@@ -168,6 +169,7 @@ function SettingsEditor({
     <div className="surface panel">
       <Form
         disabled={!editable}
+        successMessage="Configuración del establecimiento guardada."
         onSave={async () => {
           await api('save_settings', { body: value });
           await onSaved();
@@ -185,32 +187,28 @@ export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
   const resource = useResource<EstablishmentFeature[]>('settings_features');
   const editable = can('settings.features.manage');
   const [saving, setSaving] = useState('');
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
 
   async function change(feature: EstablishmentFeature, enabled: boolean) {
     if (saving !== '') {
       return;
     }
     setSaving(feature.code);
-    setMessage('');
-    setError('');
     try {
       const saved = await saveFeature({
         code: feature.code,
         enabled,
         revision: feature.revision,
       });
-      setMessage(`${saved.name}: ${saved.enabled ? 'activada' : 'desactivada'}.`);
+      notifySuccess(`${saved.name}: ${saved.enabled ? 'activada' : 'desactivada'}.`);
       // Las pantallas abiertas (cobro, turno, cobros) vuelven a consultar el estado.
       window.dispatchEvent(new CustomEvent('adel-server-change'));
     } catch (problem) {
       if (problem instanceof APIError && problem.code === 'REVISION_CONFLICT') {
-        setError(
+        notifyError(
           'La función cambió en otra terminal. Se cargó su estado actual; revísalo antes de cambiarla.',
         );
       } else {
-        setError(problem instanceof Error ? problem.message : 'No se pudo guardar la función.');
+        notifyError(problem, 'No se pudo guardar la función.');
       }
     } finally {
       setSaving('');
@@ -258,8 +256,6 @@ export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
           establecimiento».
         </p>
       )}
-      <Notice>{error}</Notice>
-      {message && <Notice success>{message}</Notice>}
     </section>
   );
 }

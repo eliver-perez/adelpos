@@ -26,7 +26,10 @@ describe('Accordion compartido', () => {
     expect(screen.getByRole('button', { name: 'Datos' }).getAttribute('aria-expanded')).toBe(
       'true',
     );
-    expect(screen.getByRole('status').textContent).toContain('La revisión cambió');
+    // El error del servidor es un aviso persistente del sistema único de mensajes.
+    expect((await screen.findByRole('alert', { name: 'Error' })).textContent).toContain(
+      'La revisión cambió',
+    );
   });
 
   it('conserva los campos montados y sus valores al cerrar y abrir', () => {
@@ -48,7 +51,9 @@ describe('Accordion compartido', () => {
     expect(field.closest('[inert]')).not.toBeNull();
     fireEvent.click(button);
     expect((field as HTMLInputElement).value).toBe('conservado');
-    expect(screen.getByRole('region').id).toBe(button.getAttribute('aria-controls'));
+    expect(screen.getByRole('region', { name: 'Programación' }).id).toBe(
+      button.getAttribute('aria-controls'),
+    );
   });
 
   it('revela y enfoca una validación nativa dentro de una sección cerrada', () => {

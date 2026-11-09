@@ -46,6 +46,7 @@ export function SetupPage({
       {available ? (
         <Form
           label="Configurar establecimiento"
+          successMessage="Establecimiento configurado."
           onSave={async () => {
             await api('setup', { body: { ...settings, terminal_name: terminalName } });
             await refresh();
@@ -88,6 +89,7 @@ export function LoginPage({ message, refresh }: { message: string; refresh: () =
       <Notice>{message}</Notice>
       <Form
         label="Entrar"
+        successMessage="Sesión iniciada."
         onSave={async () => {
           try {
             await api('login', { body: { username, password } });
@@ -141,6 +143,7 @@ export function EnrollmentPage({
       <Notice>{message}</Notice>
       <Form
         label="Autorizar terminal"
+        successMessage="Terminal autorizada."
         onSave={async () => {
           try {
             await api('enroll', { body: { name, code: code.trim() } });
@@ -175,6 +178,7 @@ export function EnrollmentPage({
         <section className="mt-6">
           <Form
             label="Usar autorización local"
+            successMessage="Terminal autorizada."
             onSave={async () => {
               await api('enroll_local', { body: { name } });
               await refresh();

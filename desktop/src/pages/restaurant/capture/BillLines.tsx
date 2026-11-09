@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { Accordion } from '../../../components/Accordion';
 import { ProductDetails } from '../../../components/catalog/QuoteBreakdown';
 import type { Lookups, ProductBreakdown } from '../../../services/catalog';
+import { IconLabel } from '../../../components/Icon';
 import { preparationLabels } from '../../../services/kitchen';
+import { formatMoney } from '../../../services/money';
 import type { ConfirmedLine, DraftItem } from '../../../services/restaurant';
 import { describeBreakdown, describeSelection } from './captureRules';
 
@@ -43,7 +45,7 @@ export function ConfirmedLines({
               <strong className="capture-line-name">
                 {line.quantity} × {line.quote_line.name}
               </strong>
-              <strong className="capture-line-total">${line.totals.total}</strong>
+              <strong className="capture-line-total">{formatMoney(line.totals.total)}</strong>
             </div>
             <div className="capture-line-meta">
               <span className={`capture-tag ${cancelled ? 'capture-tag-cancelled' : ''}`}>
@@ -61,7 +63,7 @@ export function ConfirmedLines({
                     disabled={disabled}
                     onClick={() => onEdit(line)}
                   >
-                    Modificar
+                    <IconLabel icon="edit">Modificar</IconLabel>
                   </button>
                 )}
                 {can('orders.cancel') && (
@@ -71,14 +73,14 @@ export function ConfirmedLines({
                     disabled={disabled}
                     onClick={() => onCancel(line)}
                   >
-                    Cancelar unidades
+                    <IconLabel icon="trash">Cancelar unidades</IconLabel>
                   </button>
                 )}
               </div>
             )}
             <Accordion
               title="Desglose"
-              summary={`Versión ${line.version} · Descuento $${line.totals.discount}`}
+              summary={`Versión ${line.version} · Descuento ${formatMoney(line.totals.discount)}`}
             >
               <ProductDetails value={line.quote_line} />
             </Accordion>
@@ -140,7 +142,7 @@ export function DraftLines({
             <div className="capture-line-heading">
               <strong className="capture-line-name">{name}</strong>
               <strong className="capture-line-total" aria-busy={!quote}>
-                {quote ? `$${quote.total}` : '…'}
+                {quote ? formatMoney(quote.total) : '…'}
               </strong>
             </div>
             {detail.length > 0 && <p className="capture-line-detail">{detail.join(' · ')}</p>}

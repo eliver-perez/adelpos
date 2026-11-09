@@ -1,0 +1,24 @@
+{
+  "description": "Tabla única de casos de concordancia de contadores. La usan las pruebas de Go (internal/plural) y de Vitest (desktop/src/services/plural.test.ts).",
+  "count": [
+    { "count": 0, "singular": "cuenta", "plural": "cuentas", "text": "0 cuentas" },
+    { "count": 1, "singular": "cuenta", "plural": "cuentas", "text": "1 cuenta" },
+    { "count": 2, "singular": "cuenta", "plural": "cuentas", "text": "2 cuentas" },
+    {
+      "count": 1,
+      "singular": "operación de efectivo",
+      "plural": "operaciones de efectivo",
+      "text": "1 operación de efectivo"
+    },
+    {
+      "count": 3,
+      "singular": "operación de efectivo",
+      "plural": "operaciones de efectivo",
+      "text": "3 operaciones de efectivo"
+    },
+    { "count": 1, "singular": "producto", "plural": "productos", "text": "1 producto" },
+    { "count": 12, "singular": "producto", "plural": "productos", "text": "12 productos" },
+    { "count": 1, "singular": "mesa", "plural": "mesas", "text": "1 mesa" },
+    { "count": 1000, "singular": "mesa", "plural": "mesas", "text": "1000 mesas" }
+  ]
+}

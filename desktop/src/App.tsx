@@ -3,6 +3,7 @@ import { OperationalPage } from './pages/restaurant/OperationalPage';
 import { WindowControls } from './components/WindowControls';
 import { VirtualKeyboard } from './components/VirtualKeyboard';
 import { Notice } from './components/Forms';
+import { AppToaster } from './components/AppToaster';
 import { BrandLogo } from './components/BrandLogo';
 import { CatalogPage } from './pages/catalog/CatalogPage';
 import { Icon } from './components/Icon';
@@ -29,6 +30,9 @@ import { SettingsPage } from './pages/SettingsPage';
 import { StatusPage } from './pages/StatusPage';
 import { UsersPage } from './pages/UsersPage';
 import product from './generated/product.json';
+import { dismissNotice, notifyError, notifyWarning } from './services/notify';
+
+const connectionNoticeID = 'connection';
 
 export function App() {
   // El almacén de operaciones inciertas vive por encima de todas las pantallas: navegar no pierde
@@ -37,6 +41,7 @@ export function App() {
     <PendingOperationsProvider>
       <WindowControls />
       <ApplicationContent />
+      <AppToaster />
     </PendingOperationsProvider>
   );
 }
@@ -45,7 +50,6 @@ function ApplicationContent() {
   const session = useSession();
   const [screen, setScreen] = useState('status');
   const [technical, setTechnical] = useState(false);
-  const [actionError, setActionError] = useState('');
   const initializedUser = useRef<string | null>(null);
   const identity = session.identity;
   const realtimeStatus = useRealtime(
@@ -58,6 +62,24 @@ function ApplicationContent() {
     const authorized = screenAuthorized(entry, identity?.user.permissions ?? []);
     return authorized && (entry.id !== 'takeaway' || can('accounts.read'));
   });
+
+  // La pérdida de conexión con una sesión abierta se avisa con un mensaje persistente que se
+  // retira solo cuando el servidor vuelve a responder (la cabecera también indica «Sin conexión»).
+  const authenticated = session.phase === 'authenticated';
+  const connectionError = session.connectionError;
+  useEffect(() => {
+    if (!authenticated || !connectionError) {
+      dismissNotice(connectionNoticeID);
+      return;
+    }
+    notifyWarning(
+      `${connectionError} Se reintentará automáticamente; los cambios deben confirmarse por el servidor.`,
+      {
+        id: connectionNoticeID,
+        persistent: true,
+      },
+    );
+  }, [authenticated, connectionError]);
 
   useEffect(() => {
     if (!identity) {
@@ -139,11 +161,10 @@ function ApplicationContent() {
   }
 
   async function logout() {
-    setActionError('');
     try {
       await session.logout();
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'No se pudo cerrar la sesión.');
+      notifyError(error, 'No se pudo cerrar la sesión.');
     }
   }
 
@@ -260,11 +281,6 @@ function ApplicationContent() {
           </button>
         </div>
         <main className="admin-main">
-          <Notice>
-            {session.connectionError &&
-              `${session.connectionError} Se reintentará automáticamente; los cambios deben confirmarse por el servidor.`}
-          </Notice>
-          <Notice>{actionError}</Notice>
           {identity.user.initial_password && (
             <div className="password-warning" role="status">
               <div>

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { CatalogImage } from '../../../components/catalog/EditorFields';
 import { Notice } from '../../../components/Forms';
+import { Icon } from '../../../components/Icon';
 import { ToggleButton } from '../../../components/ToggleButton';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import type { Lookups } from '../../../services/catalog';
+import { formatMoney } from '../../../services/money';
 import type { Account } from '../../../services/restaurant';
 import { categoryStyle } from './CategoryColumn';
 import { productSelectable, requiresChoices } from './captureRules';
@@ -14,14 +16,14 @@ const pageSize = 100;
 // Precio mostrado en el botón: siempre el que calculó Go para la lista de la cuenta.
 function priceLabel(product: CaptureProduct) {
   if (product.effective_price) {
-    return `$${product.effective_price}`;
+    return formatMoney(product.effective_price);
   }
   if (product.pricing_error) {
     return product.variants.some((variant) => variant.active)
       ? 'Elegir presentación'
       : 'Sin precio';
   }
-  return `$${product.base_price}`;
+  return formatMoney(product.base_price);
 }
 
 export function ProductGrid({
@@ -134,7 +136,7 @@ export function ProductGrid({
                   aria-label={`Personalizar ${product.name}`}
                   onClick={() => onCustomize(product)}
                 >
-                  <span aria-hidden="true">✎</span>
+                  <Icon name="edit" size={20} />
                 </button>
               )}
             </div>

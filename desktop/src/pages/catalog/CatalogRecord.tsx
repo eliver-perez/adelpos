@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CatalogImage } from '../../components/catalog/EditorFields';
 import { Field } from '../../components/Forms';
 import { api } from '../../services/api';
+import { formatMoney } from '../../services/money';
 import type { CatalogDocument, Category, Product, Resource } from '../../services/catalog';
 
 export function CatalogRecord({
@@ -23,7 +24,8 @@ export function CatalogRecord({
   onOpen: (id: string) => void;
   onViewProducts: () => void;
   onMoveUp?: () => void;
-  runAction: (action: () => Promise<unknown>) => Promise<void>;
+  // Ejecuta la acción, confirma el resultado con un aviso y devuelve si Go la aceptó.
+  runAction: (action: () => Promise<unknown>, success?: string) => Promise<boolean>;
 }) {
   const product =
     resource === 'products' ? (record as Product & { availability_reason?: string }) : null;
@@ -43,7 +45,7 @@ export function CatalogRecord({
         </span>
         {product?.archived && <span className="status-pill status-muted">Archivado</span>}
         {product && can('catalog.prices.read') && (
-          <strong className="catalog-price">${product.base_price}</strong>
+          <strong className="catalog-price">{formatMoney(product.base_price)}</strong>
         )}
         {product?.availability_reason && (
           <p className="muted text-xs">{product.availability_reason}</p>
@@ -71,15 +73,17 @@ export function CatalogRecord({
           <button
             className="secondary-button"
             onClick={() =>
-              void runAction(() =>
-                api('catalog_product_state', {
-                  id: product.id,
-                  body: {
-                    revision: product.revision,
-                    active: product.active,
-                    archived: !product.archived,
-                  },
-                }),
+              void runAction(
+                () =>
+                  api('catalog_product_state', {
+                    id: product.id,
+                    body: {
+                      revision: product.revision,
+                      active: product.active,
+                      archived: !product.archived,
+                    },
+                  }),
+                product.archived ? `«${product.name}» restaurado.` : `«${product.name}» archivado.`,
               )
             }
           >
@@ -90,15 +94,17 @@ export function CatalogRecord({
           <button
             className="secondary-button"
             onClick={() =>
-              void runAction(() =>
-                api('catalog_product_state', {
-                  id: product.id,
-                  body: {
-                    revision: product.revision,
-                    active: !product.active,
-                    archived: product.archived,
-                  },
-                }),
+              void runAction(
+                () =>
+                  api('catalog_product_state', {
+                    id: product.id,
+                    body: {
+                      revision: product.revision,
+                      active: !product.active,
+                      archived: product.archived,
+                    },
+                  }),
+                product.active ? `«${product.name}» desactivado.` : `«${product.name}» activado.`,
               )
             }
           >
@@ -109,15 +115,19 @@ export function CatalogRecord({
           <button
             className="secondary-button"
             onClick={() =>
-              void runAction(() =>
-                api('catalog_product_availability', {
-                  id: product.id,
-                  body: {
-                    revision: product.revision,
-                    temporary_unavailable: !product.temporary_unavailable,
-                    availability: product.availability,
-                  },
-                }),
+              void runAction(
+                () =>
+                  api('catalog_product_availability', {
+                    id: product.id,
+                    body: {
+                      revision: product.revision,
+                      temporary_unavailable: !product.temporary_unavailable,
+                      availability: product.availability,
+                    },
+                  }),
+                product.temporary_unavailable
+                  ? `«${product.name}» vuelve a estar disponible.`
+                  : `«${product.name}» quedó pausado.`,
               )
             }
           >
@@ -140,13 +150,18 @@ export function CatalogRecord({
           product={product}
           onCancel={() => setDuplicating(false)}
           onDuplicate={async (name, code) => {
-            await runAction(() =>
-              api('catalog_duplicate_product', {
-                id: product.id,
-                body: { name, code, revision: product.revision },
-              }),
+            const duplicated = await runAction(
+              () =>
+                api('catalog_duplicate_product', {
+                  id: product.id,
+                  body: { name, code, revision: product.revision },
+                }),
+              `Copia «${name}» creada.`,
             );
-            setDuplicating(false);
+            // Si Go rechaza la copia, el formulario sigue abierto con lo capturado.
+            if (duplicated) {
+              setDuplicating(false);
+            }
           }}
         />
       )}

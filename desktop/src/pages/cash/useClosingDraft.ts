@@ -155,8 +155,11 @@ export function useClosingDraft({
     } catch (problem) {
       setFailedKey(key);
       if (problem instanceof APIError && problem.code === 'COUNT_CHANGED') {
+        // El conflicto se explica en el panel del arqueo, que permanece hasta guardar.
         setConflict(true);
         void closing.reload();
+      } else {
+        mutation.reportFailure(problem, 'No se pudo guardar el borrador del arqueo.');
       }
       return null;
     }

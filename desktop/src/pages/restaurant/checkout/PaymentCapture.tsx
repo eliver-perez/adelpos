@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { AmountField, NumericKeypad, QuickAmounts } from '../../../components/NumericKeypad';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { Field } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import {
   changeCurrencyLabels,
   formatDollars,
@@ -82,7 +83,8 @@ function Figure({
   );
 }
 
-// Resultado del último pago: el cambio sigue visible después de registrar para entregarlo.
+// Resultado del último pago: el cambio sigue visible después de registrar para entregarlo. Es estado
+// en pantalla (no un aviso que se cierra solo); la confirmación se avisa además como mensaje.
 export function RecordedPayment({
   result,
   deliverRequested = false,
@@ -563,7 +565,7 @@ export function PaymentCapture({
             disabled={!canRegister}
             onClick={onRegister}
           >
-            {registerLabel}
+            <IconLabel icon="check">{registerLabel}</IconLabel>
           </button>
         </div>
       </footer>

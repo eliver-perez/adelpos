@@ -1,5 +1,12 @@
 import { Accordion } from '../Accordion';
 import type { ProductBreakdown, Quote } from '../../services/catalog';
+import { formatDeduction, formatMoney, formatSignedMoney } from '../../services/money';
+
+// Cargo que se suma al precio base: «+$10.00» (o «$0.00» sin cargo), con el formato único de
+// importes. El importe lo calcula Go; aquí solo se presenta.
+function addition(value: string) {
+  return formatSignedMoney(value);
+}
 
 export function ProductDetails({ value }: { value: ProductBreakdown }) {
   return (
@@ -9,27 +16,27 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
       </p>
       <dl className="price-breakdown">
         <dt>Base</dt>
-        <dd>${value.base_price}</dd>
+        <dd>{formatMoney(value.base_price)}</dd>
         <dt>Ingredientes</dt>
-        <dd>+ ${value.ingredient_extras}</dd>
+        <dd>{addition(value.ingredient_extras)}</dd>
         <dt>Complementos</dt>
-        <dd>+ ${value.group_extras}</dd>
+        <dd>{addition(value.group_extras)}</dd>
         <dt>Componentes</dt>
-        <dd>+ ${value.component_extras}</dd>
+        <dd>{addition(value.component_extras)}</dd>
         <dt>Precio por unidad</dt>
-        <dd>${value.unit_price}</dd>
+        <dd>{formatMoney(value.unit_price)}</dd>
       </dl>
       {value.groups.map((group) => (
         <Accordion key={group.group_id} defaultOpen title={group.name}>
           <dl className="price-breakdown">
             <dt>Valor original incluido</dt>
-            <dd>${group.original_value}</dd>
+            <dd>{formatMoney(group.original_value)}</dd>
             <dt>Valor solicitado</dt>
-            <dd>${group.requested_value}</dd>
+            <dd>{formatMoney(group.requested_value)}</dd>
             <dt>{group.mode === 'value' ? 'Diferencia positiva' : 'Cargo por tramos'}</dt>
-            <dd>${group.difference}</dd>
+            <dd>{formatMoney(group.difference)}</dd>
             <dt>Extras explícitos separados</dt>
-            <dd>${group.extras}</dd>
+            <dd>{formatMoney(group.extras)}</dd>
           </dl>
           {group.options
             .filter((option) => option.requested !== '0' || option.included !== '0')
@@ -42,15 +49,15 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
       ))}
       {value.ingredients.map((ingredient) => (
         <p className="muted text-xs" key={ingredient.ingredient_id}>
-          {ingredient.name}: {ingredient.included} incluido → {ingredient.requested} solicitado · +$
-          {ingredient.extra}
+          {ingredient.name}: {ingredient.included} incluido → {ingredient.requested} solicitado ·{' '}
+          {addition(ingredient.extra)}
         </p>
       ))}
       {value.components.map((component) => (
         <Accordion
           key={component.slot_id}
           title={`${component.name} × ${component.quantity}`}
-          summary={`Cargo del componente: $${component.charge}`}
+          summary={`Cargo del componente: ${formatMoney(component.charge)}`}
         >
           {component.product && <ProductDetails value={component.product} />}
         </Accordion>
@@ -65,18 +72,18 @@ export function QuoteBreakdown({ value }: { value: Quote }) {
     <div className="form-stack">
       <div>
         <p className="eyebrow">Cálculo confirmado por Go</p>
-        <h2 className="quote-total">${value.total}</h2>
+        <h2 className="quote-total">{formatMoney(value.total)}</h2>
         <p className="muted text-xs">
           {value.price_list_name} · {value.timezone}
         </p>
       </div>
       <dl className="price-breakdown">
         <dt>Subtotal</dt>
-        <dd>${value.subtotal}</dd>
+        <dd>{formatMoney(value.subtotal)}</dd>
         <dt>Promociones automáticas</dt>
-        <dd>− ${value.discount}</dd>
+        <dd>{formatDeduction(value.discount)}</dd>
         <dt>Total de previsualización</dt>
-        <dd>${value.total}</dd>
+        <dd>{formatMoney(value.total)}</dd>
       </dl>
       {value.lines.map((line, index) => (
         <section className="catalog-section" key={index}>
@@ -85,17 +92,20 @@ export function QuoteBreakdown({ value }: { value: Quote }) {
           </h3>
           <ProductDetails value={line} />
           <p className="text-sm">
-            Subtotal ${line.subtotal} · Descuento ${line.discount} · Total ${line.total}
+            Subtotal {formatMoney(line.subtotal)} · Descuento {formatDeduction(line.discount)} ·
+            Total {formatMoney(line.total)}
           </p>
         </section>
       ))}
       {value.promotions.map((promotion) => (
         <div
-          className={promotion.applied ? 'notice notice-success' : 'quote-promotion'}
+          className={
+            promotion.applied ? 'quote-promotion quote-promotion-applied' : 'quote-promotion'
+          }
           key={promotion.id}
         >
           <strong>
-            {promotion.name} · −${promotion.discount}
+            {promotion.name} · {formatDeduction(promotion.discount)}
           </strong>
           <p className="text-xs">{promotion.reason}</p>
         </div>

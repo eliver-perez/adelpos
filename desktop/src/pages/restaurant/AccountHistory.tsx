@@ -1,6 +1,7 @@
 import { Accordion } from '../../components/Accordion';
 import { HistoryDetails } from '../../components/restaurant/HistoryDetails';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { eventLabels, serverDateTime } from '../../services/restaurant';
 import type { Bill, HistoryPage } from '../../services/restaurant';
@@ -17,7 +18,7 @@ export function AccountHistory({ bill, onClose }: { bill: Bill; onClose: () => v
       <div className="section-heading">
         <h2>Historial · #{bill.account.folio}</h2>
         <button className="secondary-button" onClick={onClose}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <Notice>{history.error}</Notice>

@@ -414,7 +414,7 @@ func (handler *service) applyDollars(plan *PaymentPlan, shift *Shift, preview bo
 	settlement := settleCashWithUSD(charged, pesos, plan.dollars.receivedUSD, rate, plan.dollars.changeCurrency)
 	if !settlement.covered && !preview {
 		return invalid("El efectivo recibido no cubre el importe y la propina: faltan " + formatPesos(settlement.missing) +
-			" (US$" + money(usdToCover(settlement.missing, rate)) + ").")
+			" (" + formatDollars(usdToCover(settlement.missing, rate)) + ").")
 	}
 	usd.ReceivedMXN = money(settlement.receivedMXN)
 	usd.ReceivedUSD = money(settlement.receivedUSD)

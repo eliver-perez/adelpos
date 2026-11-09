@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Form, Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { IntegerField, ReferenceField, TextField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
+import { formatMoney } from '../../services/money';
+import { pluralWord } from '../../services/plural';
 import { accountCustomName, accountLabel } from '../../services/restaurant';
 import type { AccountPage, Bill, Overview } from '../../services/restaurant';
 import type { ExecuteMutation } from './OperationsAdmin';
@@ -14,6 +17,16 @@ const titles = {
   move: 'Cambiar mesa',
   assign: 'Cambiar responsable',
   void: 'Anular cuenta vacía',
+};
+
+// Confirmación que muestra el aviso de éxito al terminar cada acción.
+const successMessages = {
+  split: 'Cuenta dividida',
+  transfer: 'Productos transferidos',
+  merge: 'Cuentas combinadas',
+  move: 'Mesa de la cuenta cambiada',
+  assign: 'Responsable de la cuenta cambiado',
+  void: 'Cuenta anulada',
 };
 
 export function AccountActions({
@@ -66,7 +79,7 @@ export function AccountActions({
           {titles[action]} · #{bill.account.folio}
         </h2>
         <button className="secondary-button" onClick={onClose}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <Notice>{candidates.error || staff.error}</Notice>
@@ -83,6 +96,7 @@ export function AccountActions({
       <Form
         disabled={busy || stale}
         label={titles[action]}
+        successMessage={successMessages[action]}
         onSave={async () => {
           const body: Record<string, unknown> = { revision };
           if (action === 'split' || action === 'transfer') {
@@ -112,7 +126,7 @@ export function AccountActions({
             {activeLines.map((line) => (
               <IntegerField
                 key={line.version_id}
-                label={`${line.quote_line.name} · ${line.quantity} disponibles · $${line.totals.total}`}
+                label={`${line.quote_line.name} · ${line.quantity} ${pluralWord(line.quantity, 'disponible', 'disponibles')} · ${formatMoney(line.totals.total)}`}
                 value={quantities[line.version_id] ?? 0}
                 max={line.quantity}
                 onChange={(quantity) =>
@@ -142,7 +156,7 @@ export function AccountActions({
               value={targetID}
               options={targets.map((account) => ({
                 id: account.id,
-                name: `${accountLabel(account)} · ${account.table_name ?? 'sin mesa'} · $${account.totals.total}`,
+                name: `${accountLabel(account)} · ${account.table_name ?? 'sin mesa'} · ${formatMoney(account.totals.total)}`,
               }))}
               onChange={setTargetID}
             />

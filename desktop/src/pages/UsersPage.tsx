@@ -22,6 +22,7 @@ function UserEditor({
   return (
     <Form
       label={user ? 'Guardar usuario' : 'Crear usuario'}
+      successMessage={user ? 'Usuario guardado.' : 'Usuario creado.'}
       onSave={async () => {
         const body = {
           username,
@@ -118,6 +119,7 @@ function UserPermissionEditor({
         <Form
           disabled={!editable}
           label="Guardar excepciones"
+          successMessage="Excepciones de permisos guardadas."
           onSave={async () => {
             await api('save_user_permissions', { id: user.id, body: { overrides: changes } });
             await resource.reload();

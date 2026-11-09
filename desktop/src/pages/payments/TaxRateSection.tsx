@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Notice } from '../../components/Forms';
 import { SegmentedControl } from '../../components/SegmentedControl';
+import { notifyError, notifySuccess } from '../../services/notify';
 import { permissionName, taxRateLabels } from '../../services/payments';
 import type { PaymentSettings, TaxRate } from '../../services/payments';
 import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
@@ -21,21 +21,17 @@ export function TaxRateSection({
 }) {
   const [selected, setSelected] = useState<TaxRate>(settings.tax_rate);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
   const editable = can('payments.tax.manage');
 
   async function save() {
     setSaving(true);
-    setError('');
-    setMessage('');
     try {
       await execute('payments_save_tax', {
         body: { revision: settings.revision, tax_rate: selected },
       });
-      setMessage(`Tasa de IVA guardada: ${selected} %.`);
+      notifySuccess(`Tasa de IVA guardada: ${selected} %.`);
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'No se pudo guardar la tasa.');
+      notifyError(problem, 'No se pudo guardar la tasa.');
     } finally {
       setSaving(false);
     }
@@ -77,8 +73,6 @@ export function TaxRateSection({
           Cambiar la tasa requiere el permiso «{permissionName('payments.tax.manage')}».
         </p>
       )}
-      <Notice>{error}</Notice>
-      {message && <Notice success>{message}</Notice>}
     </div>
   );
 }

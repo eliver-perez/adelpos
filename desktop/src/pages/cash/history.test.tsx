@@ -99,7 +99,7 @@ describe('historial de turnos', () => {
     expect(visibleRow.textContent).toContain('$380.00');
     expect(visibleRow.textContent).toContain('−$70.00 · Faltante');
     const hiddenRow = screen.getByText('07/11/2026').closest('tr')!;
-    expect(hiddenRow.textContent).toContain('$1200.00');
+    expect(hiddenRow.textContent).toContain('$1,200.00');
     expect(hiddenRow.textContent).not.toMatch(/Faltante|Sobrante|Sin diferencia/);
     fireEvent.click(
       within(hiddenRow).getByRole('button', { name: 'Detalle del turno de Caja 1 del 07/11/2026' }),

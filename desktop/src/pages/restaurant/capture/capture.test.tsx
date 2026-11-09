@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PendingOperationsProvider } from '../../../hooks/pendingOperations';
+import { emptyCustomization } from '../../../services/restaurant';
 import type { DraftItem } from '../../../services/restaurant';
 import { OperationalPage } from '../OperationalPage';
 
@@ -176,6 +177,7 @@ let accounts: Record<string, ServerAccount>;
 let replays: Map<string, unknown>;
 let saves: { id: string; body: { revision: number; items: DraftItem[] } }[];
 let confirms: { id: string; body: Record<string, unknown> }[];
+let cancels: { id: string; body: Record<string, unknown> }[];
 let holdSaves: boolean;
 let heldSaves: (() => void)[];
 let quoteChanged: boolean;
@@ -440,6 +442,11 @@ function respond(
       state!.revision += 1;
       return bill(state!);
     }
+    case 'restaurant_cancel': {
+      cancels.push({ id: id!, body: body! });
+      state!.revision += 1;
+      return bill(state!);
+    }
     case 'restaurant_history':
       return { items: [], page: 1, total: 0 };
     case 'catalog_lookups':
@@ -497,6 +504,7 @@ beforeEach(() => {
   saves = [];
   replays = new Map();
   confirms = [];
+  cancels = [];
   holdSaves = false;
   heldSaves = [];
   quoteChanged = false;
@@ -579,7 +587,7 @@ describe('captura táctil de pedidos', () => {
     await openFirstAccount();
     const group = screen.getByRole('group', { name: 'Cuentas de la mesa' });
     expect(pressed(within(group).getByRole('button', { name: 'Cuenta #1' }))).toBe('true');
-    expect(within(group).getByRole('button', { name: '+ Nueva cuenta' })).toBeTruthy();
+    expect(within(group).getByRole('button', { name: 'Nueva cuenta' })).toBeTruthy();
     expect(screen.queryByRole('combobox', { name: 'Cuenta de la mesa' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Acciones de cuenta' })).toBeNull();
     expect(screen.getByText(/Mesero: Laura · Mesa para 4 · Abierta/)).toBeTruthy();
@@ -709,6 +717,9 @@ describe('captura táctil de pedidos', () => {
     await waitFor(() => expect(send().textContent).toBe('Enviar a cocina · 0'));
     expect(disabled(send())).toBe(true);
     expect(within(bill).getByText('Enviado a cocina').nextSibling?.textContent).toBe('$281.10');
+    // El envío confirmado se avisa con el número de productos en concordancia.
+    const notice = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(notice.textContent).toContain('Pedido enviado a cocina · 2 productos');
   });
 
   it('ante QUOTE_CHANGED avisa y conserva los productos nuevos para revisarlos', async () => {
@@ -717,7 +728,10 @@ describe('captura táctil de pedidos', () => {
     fireEvent.click(productButton('Filete de prueba'));
     quoteChanged = true;
     fireEvent.click(within(bill).getByRole('button', { name: 'Enviar a cocina · 1' }));
-    await screen.findByText(/El cálculo cambió antes de enviar/);
+    // El rechazo es un aviso persistente; ningún aviso de éxito afirma el envío.
+    const alert = await screen.findByRole('alert', { name: 'Error' });
+    expect(alert.textContent).toContain('El cálculo cambió antes de enviar');
+    expect(screen.queryByText(/Pedido enviado a cocina/)).toBeNull();
     expect(within(bill).getByRole('article', { name: '1 × Filete de prueba' })).toBeTruthy();
     expect(accounts[ids.first]!.draft).toHaveLength(1);
   });
@@ -776,6 +790,90 @@ describe('captura táctil de pedidos', () => {
     expect(
       pressed(await within(resumed).findByRole('button', { name: 'Aros de cebolla +$10.00' })),
     ).toBe('true');
+  });
+
+  it('descartar la selección conservada pide confirmación de peligro', async () => {
+    await openFirstAccount();
+    const burger = await waitFor(() => {
+      const button = productButton('Hamburguesa de prueba');
+      expect(disabled(button)).toBe(false);
+      return button;
+    });
+    fireEvent.click(burger);
+    const panel = screen.getByRole('region', { name: 'Personalizar Hamburguesa de prueba' });
+    fireEvent.click(await within(panel).findByRole('button', { name: 'Aros de cebolla +$10.00' }));
+    const group = screen.getByRole('group', { name: 'Cuentas de la mesa' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #2' }));
+    await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Descartar selección' }));
+    let dialog = await screen.findByRole('alertdialog', {
+      name: '¿Descartar la selección sin guardar?',
+    });
+    expect(dialog.className).toContain('dialog-panel-danger');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Conservarla' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(screen.getByText('Selección sin guardar conservada.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Descartar selección' }));
+    dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Descartar selección' }));
+    await waitFor(() => expect(screen.queryByText('Selección sin guardar conservada.')).toBeNull());
+  });
+
+  it('cancelar unidades pide confirmación de peligro antes de escribir', async () => {
+    const item: DraftItem = {
+      id: 'draft-enviado',
+      product_id: ids.steak,
+      variant_id: null,
+      quantity: 2,
+      customization: emptyCustomization(),
+    };
+    accounts[ids.first]!.lines = [
+      {
+        preparation_state: 'released',
+        version_id: 'version-0',
+        item_id: 'item-0',
+        original_order_id: 'order',
+        version: 1,
+        state: 'active',
+        quantity: 2,
+        request: item,
+        quote_line: quoteLine(item),
+        totals: { subtotal: lineTotal(item), discount: '0.00', total: lineTotal(item) },
+        created_at: '2026-11-08T19:00:00Z',
+      },
+    ];
+    accounts[ids.first]!.confirmedTotal = '281.10';
+    const bill = await openFirstAccount();
+    const line = await within(bill).findByRole('article', { name: '2 × Filete de prueba' });
+    fireEvent.click(within(line).getByRole('button', { name: 'Cancelar unidades' }));
+    await screen.findByRole('heading', { name: 'Cancelar unidades · Filete de prueba' });
+    fireEvent.change(screen.getByLabelText('Motivo de cancelación'), {
+      target: { value: 'El cliente cambió de opinión' },
+    });
+    const submit = screen.getByRole('button', { name: 'Confirmar cancelación de unidades' });
+    fireEvent.click(submit);
+    let dialog = await screen.findByRole('alertdialog', {
+      name: '¿Cancelar 2 unidades de Filete de prueba?',
+    });
+    expect(dialog.className).toContain('dialog-panel-danger');
+    // «Conservar unidades» no envía nada a Go.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Conservar unidades' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(cancels).toHaveLength(0);
+    fireEvent.click(submit);
+    dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar unidades' }));
+    await waitFor(() => expect(cancels).toHaveLength(1));
+    expect(cancels[0]!.body).toEqual(
+      expect.objectContaining({
+        revision: 4,
+        version_id: 'version-0',
+        quantity: 2,
+        reason: 'El cliente cambió de opinión',
+      }),
+    );
+    const notice = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(notice.textContent).toContain('Cancelación registrada: 2 unidades de Filete de prueba');
   });
 
   it('las acciones secundarias son botones y «Más…» reúne las demás', async () => {

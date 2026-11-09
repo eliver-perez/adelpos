@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import { notice } from './notices';
 
 // Recorridos de cobro de la etapa 6 contra Go y PostgreSQL reales. Todas las cifras que se
 // verifican provienen de Go; la interfaz solo las muestra. Desde la etapa 6.1 (fase C) el
@@ -23,7 +24,8 @@ export async function enableUSDCash(page: Page) {
   await expect(features).toContainText('tipo de cambio');
   await expect(features.locator('input[type="checkbox"]')).toHaveCount(0);
   await toggle.click();
-  await expect(features.getByText('Pago en dólares en efectivo: activada.')).toBeVisible();
+  // La confirmación es un aviso del sistema único de mensajes, fuera de la sección.
+  await expect(notice(page, 'Pago en dólares en efectivo: activada.')).toBeVisible();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 }
 
@@ -66,7 +68,10 @@ export async function checkDineInPayment(page: Page) {
   await expect(shift.getByLabel('Tipo de cambio del dólar', { exact: true })).toHaveValue('18.50');
   await expect(shift.getByLabel('Fondo inicial', { exact: true })).toHaveValue('500');
   await shift
-    .getByRole('button', { name: 'Abrir turno con fondo de $500 y dólar a $18.50', exact: true })
+    .getByRole('button', {
+      name: 'Abrir turno con fondo de $500.00 y dólar a $18.50',
+      exact: true,
+    })
     .click();
   await expect(page.locator('[aria-label="Pago en dólares"]')).toContainText('$18.50 por dólar');
 
@@ -118,7 +123,8 @@ export async function checkDineInPayment(page: Page) {
   const precheck = page.getByRole('region', { name: 'Precuenta' });
   await precheck.getByRole('button', { name: 'Imprimir precuenta', exact: true }).click();
   // El destino de aceptación no tiene hardware: el trabajo queda en la cola con su estado real.
-  await expect(precheck.getByRole('status')).toContainText(/Precuenta.*(cola|Cola) de impresión/);
+  // El envío se confirma con un aviso del sistema único de mensajes.
+  await expect(notice(page, /Precuenta.*(cola|Cola) de impresión/)).toBeVisible();
   await precheck.getByRole('button', { name: 'Volver', exact: true }).click();
 
   // Descuento general del 10 % dentro del límite del administrador: sin autorización adicional.
@@ -128,7 +134,7 @@ export async function checkDineInPayment(page: Page) {
   await adjustments.getByLabel(/^Motivo/).fill('Cliente frecuente');
   await expect(adjustments.getByText('Autorización de supervisor')).toHaveCount(0);
   await adjustments.getByRole('button', { name: /^Aplicar descuento \$15\.00/ }).click();
-  await expect(adjustments.getByText('Descuento registrado.')).toBeVisible();
+  await expect(notice(page, 'Descuento registrado: −$15.00.')).toBeVisible();
   await adjustments.getByRole('button', { name: 'Volver', exact: true }).click();
 
   // Pago mixto sucesivo: el saldo restante de $35 con tarjeta liquida y cierra la cuenta.

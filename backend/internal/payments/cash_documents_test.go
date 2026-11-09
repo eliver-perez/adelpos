@@ -106,6 +106,10 @@ func TestDocumentFormatting(t *testing.T) {
 		currencyText(currencyMXN, "0") != "$0.00" || !zeroAmount("0") || zeroAmount("0.50") {
 		t.Fatal("Formato de importes incorrecto")
 	}
+	// Etapa 7.1: comprobantes y cortes usan el separador de miles del formato único.
+	if currencyText(currencyMXN, "-1500.00") != "-$1,500.00" || currencyText(currencyUSD, "12345.6") != "US$12,345.60" {
+		t.Fatal("Los documentos de caja no separan los miles")
+	}
 	if displayDate("2026-11-09") != "09/11/2026" || displayDate("sin fecha") != "sin fecha" {
 		t.Fatal("Formato de fecha comercial incorrecto")
 	}

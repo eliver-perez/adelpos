@@ -2,11 +2,13 @@ import { preparationLabels } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
 import { accountLabel, elapsedTime, serverDateTime } from '../../services/restaurant';
 import type { Account, AccountPage } from '../../services/restaurant';
-import { deliveryStateBadges, formatMoney, paymentStateBadges } from '../../services/payments';
+import { formatMoney } from '../../services/money';
+import { deliveryStateBadges, paymentStateBadges } from '../../services/payments';
+import { countLabel } from '../../services/plural';
 
 function accountStateText(account: Account) {
   if (account.state === 'open') {
-    return `${account.confirmed_quantity} unidades confirmadas`;
+    return countLabel(account.confirmed_quantity, 'unidad confirmada', 'unidades confirmadas');
   }
   if (account.state === 'closed') {
     return 'Cuenta cerrada · liquidada';
@@ -113,7 +115,7 @@ export function AccountList({
           >
             <div className="account-list-card-heading">
               <strong>{accountLabel(account)}</strong>
-              <strong>Confirmado: ${account.totals.total}</strong>
+              <strong>Confirmado: {formatMoney(account.totals.total)}</strong>
             </div>
             <div className="account-list-card-detail">
               <span>{serverDateTime(account.created_at, value.timezone)}</span>
@@ -151,7 +153,7 @@ export function AccountList({
           Anterior
         </button>
         <span className="muted text-xs">
-          {value?.total ?? 0} cuentas · Página {page}
+          {countLabel(value?.total ?? 0, 'cuenta', 'cuentas')} · Página {page}
         </span>
         <button
           className="secondary-button"

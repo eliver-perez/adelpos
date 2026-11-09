@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { Field, Form, Notice } from '../../components/Forms';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
+import { Field, Form } from '../../components/Forms';
+import { notifyError, notifySuccess } from '../../services/notify';
+import { uncertainError } from './capture/draftSync';
 import { Accordion } from '../../components/Accordion';
 import {
   Check,
@@ -90,8 +93,9 @@ export function OperationsAdmin({
   const [table, setTable] = useState<RestaurantTable | null>(null);
   const [areaID, setAreaID] = useState(overview.areas[0]?.id ?? '');
   const [positions, setPositions] = useState<Record<string, RestaurantTable>>({});
-  const [error, setError] = useState('');
   const [settings, setSettings] = useState<RestaurantSettings>(overview.settings);
+  const { confirm, dialog } = useConfirmDialog();
+  const pendingPositions = Object.keys(positions).length;
   const tables = overview.tables.map((entry) => positions[entry.id] ?? entry);
   const selectedArea = overview.areas.some((entry) => entry.id === areaID)
     ? areaID
@@ -111,10 +115,52 @@ export function OperationsAdmin({
     return saved;
   }
 
+  async function saveLayout() {
+    try {
+      await execute('restaurant_save_layout', {
+        body: {
+          tables: Object.values(positions).map(({ id, revision, x, y, width, height, shape }) => ({
+            id,
+            revision,
+            x,
+            y,
+            width,
+            height,
+            shape,
+          })),
+        },
+      });
+      setPositions({});
+      notifySuccess('Distribución de mesas guardada');
+    } catch (problem) {
+      // Un resultado incierto queda en «Recuperar resultado» de la página.
+      if (!uncertainError(problem)) {
+        notifyError(problem, 'No se pudo guardar la distribución.');
+      }
+    }
+  }
+
+  // Descartar las posiciones movidas en esta terminal pierde el trabajo sin guardar: se confirma.
+  async function discardPositions() {
+    if (pendingPositions === 0) {
+      return;
+    }
+    const discard = await confirm({
+      title: '¿Descartar las posiciones sin guardar?',
+      message: 'Las mesas vuelven a la distribución guardada en el servidor.',
+      confirmLabel: 'Descartar posiciones',
+      cancelLabel: 'Conservarlas',
+      tone: 'danger',
+    });
+    if (discard) {
+      setPositions({});
+    }
+  }
+
   return (
     <div className="operations-admin form-stack">
+      {dialog}
       <h2>Áreas, mesas y distribución</h2>
-      <Notice>{error}</Notice>
       <div className="button-row">
         {can('restaurant.areas.manage') && (
           <button className="secondary-button" onClick={() => setArea(newArea())}>
@@ -154,6 +200,7 @@ export function OperationsAdmin({
           <Form
             disabled={busy}
             label="Guardar área"
+            successMessage="Área guardada"
             onSave={async () => {
               const body: Record<string, unknown> = { ...area };
               delete body.position;
@@ -202,6 +249,7 @@ export function OperationsAdmin({
           <Form
             disabled={busy}
             label="Guardar mesa"
+            successMessage="Mesa guardada"
             onSave={async () => {
               setTable(await saveTable(table));
             }}
@@ -306,43 +354,15 @@ export function OperationsAdmin({
         <div className="button-row">
           <button
             className="primary-button"
-            disabled={busy || Object.keys(positions).length === 0}
-            onClick={() => {
-              setError('');
-              void execute('restaurant_save_layout', {
-                body: {
-                  tables: Object.values(positions).map(
-                    ({ id, revision, x, y, width, height, shape }) => ({
-                      id,
-                      revision,
-                      x,
-                      y,
-                      width,
-                      height,
-                      shape,
-                    }),
-                  ),
-                },
-              })
-                .then(() => setPositions({}))
-                .catch((problem: unknown) =>
-                  setError(
-                    problem instanceof Error
-                      ? problem.message
-                      : 'No se pudo guardar la distribución.',
-                  ),
-                );
-            }}
+            disabled={busy || pendingPositions === 0}
+            onClick={() => void saveLayout()}
           >
             Guardar distribución
           </button>
           <button
             className="secondary-button"
-            disabled={busy}
-            onClick={() => {
-              setPositions({});
-              setError('');
-            }}
+            disabled={busy || pendingPositions === 0}
+            onClick={() => void discardPositions()}
           >
             Descartar posiciones locales
           </button>
@@ -355,6 +375,7 @@ export function OperationsAdmin({
         >
           <Form
             disabled={busy}
+            successMessage="Advertencias del tablero guardadas"
             onSave={async () => {
               const saved = await execute<RestaurantSettings>('restaurant_save_settings', {
                 body: { ...settings },

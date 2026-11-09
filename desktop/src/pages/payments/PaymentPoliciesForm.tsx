@@ -90,6 +90,7 @@ export function PaymentPoliciesForm({
       )}
       <Form
         label="Guardar políticas"
+        successMessage="Políticas de cobro guardadas."
         disabled={!editable || busy || stale}
         onSave={async () => {
           const threshold = toWireAmount(value.threshold);

@@ -1,5 +1,6 @@
 import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { Board, Release } from '../../services/kitchen';
 import { preparationLabels } from '../../services/kitchen';
@@ -26,7 +27,7 @@ export function AccountKitchen({
       <div className="section-heading">
         <h2>Preparación · #{bill.account.folio}</h2>
         <button className="secondary-button" onClick={onClose}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <p>{preparationLabels[bill.account.preparation_state]}</p>

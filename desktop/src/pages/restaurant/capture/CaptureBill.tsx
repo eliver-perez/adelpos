@@ -3,9 +3,10 @@ import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
 import type { Lookups } from '../../../services/catalog';
 import { preparationLabels } from '../../../services/kitchen';
+import { IconLabel } from '../../../components/Icon';
+import { formatMoney } from '../../../services/money';
 import {
   deliveryStateDescriptions,
-  formatMoney,
   paymentPendingKey,
   paymentStateDescriptions,
 } from '../../../services/payments';
@@ -188,7 +189,7 @@ export function CaptureBill({
             className="secondary-button capture-open-button"
             onClick={onCapture}
           >
-            Capturar productos en esta cuenta
+            <IconLabel icon="edit">Capturar productos en esta cuenta</IconLabel>
           </button>
         )}
         {account.state === 'merged' && (
@@ -250,6 +251,7 @@ export function CaptureBill({
                       'Se quitarán de esta terminal los productos nuevos que aún no se guardaron en la cuenta.',
                     confirmLabel: 'Descartar productos',
                     cancelLabel: 'Conservarlos',
+                    tone: 'danger',
                   }).then((confirmed) => {
                     if (confirmed) onDiscard();
                   })

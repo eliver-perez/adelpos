@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Notice } from '../Forms';
 import { api } from '../../services/api';
+import { notifyError, notifySuccess } from '../../services/notify';
 import { CatalogImage } from './EditorFields';
 
 // Imagen opcional de categorías y productos.
@@ -15,13 +15,13 @@ export function ImageEditor({
   id: string | null;
   onChange: (id: string | null) => void;
 }) {
-  const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // Cargar una imagen es una acción: su resultado se confirma con un aviso. La imagen queda
+  // asignada al registro en edición y se conserva al guardarlo.
   function upload(file: File) {
-    setError('');
     if (file.size > 1024 * 1024) {
-      setError('La imagen excede 1 MiB.');
+      notifyError('La imagen excede 1 MiB.');
       return;
     }
     setBusy(true);
@@ -31,14 +31,15 @@ export function ImageEditor({
       void api<{ id: string }>('catalog_upload_image', {
         body: { content_base64: content },
       })
-        .then((result) => onChange(result.id))
-        .catch((problem: unknown) =>
-          setError(problem instanceof Error ? problem.message : 'No se pudo cargar.'),
-        )
+        .then((result) => {
+          onChange(result.id);
+          notifySuccess('Imagen cargada. Guarda el registro para conservarla.');
+        })
+        .catch((problem: unknown) => notifyError(problem, 'No se pudo cargar la imagen.'))
         .finally(() => setBusy(false));
     };
     reader.onerror = () => {
-      setError('No se pudo leer la imagen.');
+      notifyError('No se pudo leer la imagen.');
       setBusy(false);
     };
     reader.readAsDataURL(file);
@@ -92,7 +93,6 @@ export function ImageEditor({
           </div>
         </div>
       </div>
-      <Notice>{error}</Notice>
     </section>
   );
 }

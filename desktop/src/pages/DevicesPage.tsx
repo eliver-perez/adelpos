@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { dateTime, Field, Form, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
+import { notifyError, notifySuccess } from '../services/notify';
 import type { Device, Register } from '../services/models';
 
 function DeviceEditor({
@@ -20,6 +22,7 @@ function DeviceEditor({
     <section className="surface panel">
       <h2 className="mb-5">Editar {device.name}</h2>
       <Form
+        successMessage="Terminal actualizada."
         onSave={async () => {
           await api('update_device', {
             id: device.id,
@@ -70,29 +73,38 @@ export function DevicesPage({ can }: { can: (key: string) => boolean }) {
   const registers = useResource<Register[]>('registers', { enabled: can('registers.read') });
   const [editing, setEditing] = useState<Device | null>(null);
   const [invite, setInvite] = useState<{ code: string; expires_at: string } | null>(null);
-  const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirmDialog();
   async function invitation() {
     setBusy(true);
-    setError('');
     try {
       setInvite(await api('invite_device', { body: {} }));
+      notifySuccess('Código de autorización creado.');
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo crear la autorización.');
+      notifyError(error, 'No se pudo crear la autorización.');
     } finally {
       setBusy(false);
     }
   }
-  async function revoke(id: string) {
+  // Revocar es irreversible: se confirma con el diálogo estándar en su variante de peligro.
+  async function revoke(device: Device) {
+    const confirmed = await confirm({
+      title: `Revocar ${device.name}`,
+      message: 'La terminal perderá acceso inmediatamente, incluidas sus sesiones.',
+      confirmLabel: 'Confirmar revocación',
+      cancelLabel: 'Cancelar',
+      tone: 'danger',
+    });
+    if (!confirmed) {
+      return;
+    }
     setBusy(true);
-    setError('');
     try {
-      await api('revoke_device', { id, body: {} });
-      setConfirm(null);
+      await api('revoke_device', { id: device.id, body: {} });
+      notifySuccess(`Terminal ${device.name} revocada.`);
       await devices.reload();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo revocar.');
+      notifyError(error, 'No se pudo revocar la terminal.');
     } finally {
       setBusy(false);
     }
@@ -109,7 +121,7 @@ export function DevicesPage({ can }: { can: (key: string) => boolean }) {
           </button>
         )}
       </PageTitle>
-      <Notice>{devices.error || registers.error || error}</Notice>
+      <Notice>{devices.error || registers.error}</Notice>
       {invite && (
         <section className="surface panel">
           <h2>Código de un solo uso</h2>
@@ -135,17 +147,6 @@ export function DevicesPage({ can }: { can: (key: string) => boolean }) {
             Cerrar editor
           </button>
         </>
-      )}
-      {confirm && (
-        <Notice>
-          La terminal perderá acceso inmediatamente, incluidas sus sesiones.{' '}
-          <button className="danger-button" disabled={busy} onClick={() => void revoke(confirm)}>
-            Confirmar revocación
-          </button>{' '}
-          <button className="secondary-button" onClick={() => setConfirm(null)}>
-            Cancelar
-          </button>
-        </Notice>
       )}
       <div className="surface table-container">
         <table>
@@ -177,7 +178,7 @@ export function DevicesPage({ can }: { can: (key: string) => boolean }) {
                       <button
                         className="danger-button"
                         disabled={busy}
-                        onClick={() => setConfirm(device.id)}
+                        onClick={() => void revoke(device)}
                       >
                         Revocar
                       </button>
@@ -189,6 +190,7 @@ export function DevicesPage({ can }: { can: (key: string) => boolean }) {
           </tbody>
         </table>
       </div>
+      {dialog}
     </>
   );
 }

@@ -1,19 +1,28 @@
-import { useState } from 'react';
+import { createElement, Fragment, useState } from 'react';
+import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useRefundPreview } from '../../../hooks/usePaymentPreview';
 import { useSupervisorAuthorization } from '../../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../../services/api';
 import { toWireAmount } from '../../../services/amountInput';
-import { isZeroMoney, refreshCodes, shiftCodes, validReason } from '../../../services/payments';
+import {
+  formatMoney,
+  isZeroMoney,
+  refreshCodes,
+  shiftCodes,
+  validReason,
+} from '../../../services/payments';
 import type {
   Finance,
   FinanceLine,
   PaymentMethod,
   RefundInput,
   RefundMode,
+  RefundPlan,
   RefundResult,
   Selection,
 } from '../../../services/payments';
+import { notifyActionError } from './actionErrors';
 import { financeKey } from './captureState';
 
 export type RefundTarget = 'amount' | 'tip';
@@ -81,6 +90,23 @@ export function refundPreviewInput(capture: RefundCapture, finance: Finance): Re
   return { mode: 'items', selections };
 }
 
+// Resumen de la devolución para el diálogo de confirmación: importes y reparto tal como los
+// calculó Go en la vista previa, sin aritmética en la interfaz.
+function refundConfirmation(plan: RefundPlan, method: PaymentMethod, reason: string) {
+  const tip = isZeroMoney(plan.tip) ? '' : ` y propina ${formatMoney(plan.tip)}`;
+  return createElement(
+    Fragment,
+    null,
+    createElement('p', null, `Se devolverán ${formatMoney(plan.amount)}${tip} por ${method.name}.`),
+    createElement('p', null, `Motivo: ${reason}`),
+    createElement(
+      'p',
+      null,
+      `El saldo de la cuenta quedará en ${formatMoney(plan.balance_after)}. La devolución es un registro compensatorio: no se puede deshacer.`,
+    ),
+  );
+}
+
 // Devoluciones totales, de un pago o por productos, con el método real de salida del dinero.
 export function useRefundFlow({
   accountID,
@@ -104,6 +130,7 @@ export function useRefundFlow({
 }) {
   const [capture, setCapture] = useState<RefundCapture>(() => initialRefundCapture());
   const [result, setResult] = useState<RefundResult | null>(null);
+  const { confirm, dialog } = useConfirmDialog();
   const input = enabled && finance ? refundPreviewInput(capture, finance) : null;
   const preview = useRefundPreview(accountID, input, finance ? financeKey(finance) : '');
   const plan = preview.plan;
@@ -150,7 +177,18 @@ export function useRefundFlow({
   }
 
   async function register() {
-    if (!canRegister || !input || !method || mutation.isPending()) {
+    if (!canRegister || !input || !method || !plan || mutation.isPending()) {
+      return;
+    }
+    // Una devolución no se deshace: se confirma con el resumen de Go antes de enviarla.
+    const confirmed = await confirm({
+      title: `¿Registrar la devolución de ${formatMoney(plan.amount)}?`,
+      message: refundConfirmation(plan, method, capture.reason.trim()),
+      confirmLabel: `Devolver ${formatMoney(plan.amount)}`,
+      cancelLabel: 'Revisar la devolución',
+      tone: 'danger',
+    });
+    if (!confirmed || mutation.isPending()) {
       return;
     }
     // La contraseña se retira del formulario antes de enviar, sea cual sea el resultado.
@@ -174,6 +212,7 @@ export function useRefundFlow({
       if (auth.handleError(problem)) {
         return;
       }
+      notifyActionError(problem, 'No se pudo registrar la devolución.');
       if (!(problem instanceof APIError)) {
         return;
       }
@@ -216,6 +255,8 @@ export function useRefundFlow({
     result,
     onRecorded,
     hint,
+    // Diálogo de confirmación de la devolución; lo dibuja el panel.
+    dialog,
   };
 }
 

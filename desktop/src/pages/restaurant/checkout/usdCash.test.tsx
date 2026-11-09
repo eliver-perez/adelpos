@@ -394,7 +394,7 @@ describe('pago en dólares en el cobro', () => {
       '16',
     );
     fireEvent.click(
-      screen.getByRole('button', { name: 'Abrir turno con fondo de $500 y dólar a $16' }),
+      screen.getByRole('button', { name: 'Abrir turno con fondo de $500.00 y dólar a $16.00' }),
     );
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog.textContent).toContain('difiere 13.51 %');
@@ -420,7 +420,7 @@ describe('pago en dólares en el cobro', () => {
     expect(await screen.findByLabelText('Fondo inicial')).toBeTruthy();
     expect(screen.queryByLabelText('Tipo de cambio del dólar')).toBeNull();
     press('0');
-    fireEvent.click(screen.getByRole('button', { name: 'Abrir turno con fondo de $0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir turno con fondo de $0.00' }));
     await waitFor(() => expect(requests('payments_open_shift')).toHaveLength(1));
     expect(requests('payments_open_shift')[0]?.body).not.toHaveProperty('usd_rate');
   });

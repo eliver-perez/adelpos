@@ -1,6 +1,7 @@
 import { api } from './api';
 import type { Operation } from './api';
 import type { AuthorizationInput, Shift } from './payments';
+import { formatDenomination } from './money';
 
 // Contratos de la administración de caja de Go (backend/internal/payments/cash_*.go, etapa 7).
 // El dinero viaja como cadena con dos decimales y lo calcula Go: la interfaz nunca suma billetes,
@@ -615,18 +616,16 @@ export function retryRejectedMessage(code: string, serverMessage: string) {
   return `${serverMessage} La operación pendiente no se registró ni se duplicó; ya no se reintentará. Si sigue haciendo falta, regístrala como una operación nueva en un turno abierto.`;
 }
 
-// Etiquetas de un billete o una moneda del catálogo, con el valor tal como lo entrega Go.
+// Etiquetas de un billete o una moneda del catálogo, con el valor que entrega Go en el formato
+// único de denominaciones: sin decimales si es entero («Billetes de $1,000») y con dos si no
+// («Monedas de $0.50»).
 export function denominationLabel(denomination: {
   currency: CashCurrency;
   kind: string;
   value: string;
 }) {
-  const symbol = denomination.currency === 'USD' ? 'US$' : '$';
-  const value = denomination.value.endsWith('.00')
-    ? denomination.value.slice(0, -3)
-    : denomination.value;
   const kind = denomination.kind === 'bill' ? 'Billetes' : 'Monedas';
-  return `${kind} de ${symbol}${value}`;
+  return `${kind} de ${formatDenomination(denomination.value, denomination.currency)}`;
 }
 
 export const currencyLabels: Record<CashCurrency, string> = {

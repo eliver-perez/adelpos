@@ -52,6 +52,7 @@ function CashLimitForm({ settings, execute }: { settings: CashLimitSettings; exe
   return (
     <Form
       label="Guardar tope de caja"
+      successMessage="Tope de caja guardado."
       onSave={async () => {
         const body: Record<string, unknown> = {
           revision: settings.revision,
@@ -153,6 +154,7 @@ function DrawerEditor({
   return (
     <Form
       label={`Guardar cajón de ${drawer.register_name}`}
+      successMessage={`Cajón de ${drawer.register_name} guardado.`}
       onSave={async () => {
         await execute('payments_save_cash_drawer', {
           id: drawer.register_id,

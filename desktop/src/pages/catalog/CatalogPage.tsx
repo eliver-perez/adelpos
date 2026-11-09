@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Field, Notice, PageTitle } from '../../components/Forms';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
+import { notifyError, notifySuccess } from '../../services/notify';
+import { countLabel } from '../../services/plural';
 import { CatalogRecord } from './CatalogRecord';
 import { useResource } from '../../hooks/useResource';
 import { api } from '../../services/api';
@@ -32,14 +34,12 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
   const [page, setPage] = useState(1);
   const [draft, setDraft] = useState<CatalogDocument | null>(null);
   const [savedDraft, setSavedDraft] = useState('');
-  const [error, setError] = useState('');
   // «Vista previa» (antes «Probar personalización» en el menú principal) vive dentro del catálogo.
   const [view, setView] = useState<'records' | 'preview'>('records');
   // Cada «Guardar y crear otra» abre un editor nuevo: su estado interno (por ejemplo, si el código
   // ya se editó a mano) no pasa al registro siguiente.
   const [editorSession, setEditorSession] = useState(0);
   const [focusName, setFocusName] = useState(false);
-  const [notice, setNotice] = useState('');
   const { confirm, dialog } = useConfirmDialog();
   const resource = tab === 'combos' ? 'products' : tab;
   const lookup = useResource<Lookups>('catalog_lookups');
@@ -68,13 +68,13 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
         message: 'Este registro tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
         confirmLabel: 'Descartar cambios',
         cancelLabel: 'Seguir editando',
+        tone: 'danger',
       });
       if (!discard) {
         return false;
       }
     }
     setDraft(null);
-    setNotice('');
     setFocusName(false);
     return true;
   }
@@ -93,26 +93,31 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
 
   async function openEditor(id: string) {
     if (!(await closeEditor())) return;
-    setError('');
     setFocusName(false);
     try {
       const record = await api<CatalogDocument>(catalogOperation(resource, 'get_'), { id });
       setDraft(record);
       setSavedDraft(JSON.stringify(record));
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'No se pudo abrir el registro.');
+      notifyError(problem, 'No se pudo abrir el registro.');
     }
   }
 
-  async function runAction(action: () => Promise<unknown>) {
-    setError('');
+  // Acciones rápidas de un registro del listado (estado, disponibilidad, duplicar, orden). El
+  // resultado se confirma con un aviso y el listado se recarga; devuelve si Go la aceptó.
+  async function runAction(action: () => Promise<unknown>, success?: string) {
     try {
       await action();
-      await list.reload();
-      await lookup.reload();
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'No se pudo completar.');
+      notifyError(problem, 'No se pudo completar la acción.');
+      return false;
     }
+    if (success) {
+      notifySuccess(success);
+    }
+    await list.reload();
+    await lookup.reload();
+    return true;
   }
 
   async function moveCategoryUp(index: number) {
@@ -132,7 +137,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
           })),
         },
       });
-    });
+    }, 'Orden de las categorías actualizado.');
   }
 
   return (
@@ -191,8 +196,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
           </button>
         )}
       </div>
-      <Notice>{error || lookup.error || list.error}</Notice>
-      {notice && <Notice success>{notice}</Notice>}
+      <Notice>{lookup.error || list.error}</Notice>
       {view === 'preview' && previewAllowed ? (
         <PreviewPage can={can} embedded />
       ) : draft && lookup.data ? (
@@ -225,7 +229,6 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             focusName={focusName}
             onSave={async () => {
               const saved = await saveDraft(draft);
-              setNotice('');
               setFocusName(false);
               setDraft(saved);
               setSavedDraft(JSON.stringify(saved));
@@ -249,9 +252,10 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
                     setSavedDraft(JSON.stringify(next));
                     setEditorSession((current) => current + 1);
                     setFocusName(true);
-                    setNotice(`«${saved.name}» quedó guardado. Captura el siguiente registro.`);
                     await list.reload();
                     await lookup.reload();
+                    // El formulario muestra este texto como aviso de confirmación.
+                    return `«${saved.name}» quedó guardado. Captura el siguiente registro.`;
                   }
                 : undefined
             }
@@ -376,7 +380,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             </div>
             <div className="catalog-pagination">
               <span className="muted text-sm">
-                {list.data?.total ?? 0} registros · Página {page}
+                {countLabel(list.data?.total ?? 0, 'registro', 'registros')} · Página {page}
               </span>
               <div className="button-row">
                 <button

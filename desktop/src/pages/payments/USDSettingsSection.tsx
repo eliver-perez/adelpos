@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Field, Notice } from '../../components/Forms';
+import { Field } from '../../components/Forms';
 import { acceptAmountText, toWireAmount } from '../../services/amountInput';
-import { formatMoney, permissionName } from '../../services/payments';
+import { formatMoney } from '../../services/money';
+import { notifyError, notifySuccess } from '../../services/notify';
+import { permissionName } from '../../services/payments';
 import type { PaymentSettings, USDSettingsInput } from '../../services/payments';
 import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
 
@@ -23,14 +25,10 @@ export function USDSettingsSection({
   const [maximum, setMaximum] = useState(settings.usd_rate_max);
   const [alert, setAlert] = useState(settings.usd_rate_alert_percent);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
   const editable = can('payments.settings.manage');
 
   async function save() {
     setSaving(true);
-    setMessage('');
-    setError('');
     try {
       const body: USDSettingsInput = {
         revision: settings.revision,
@@ -41,11 +39,11 @@ export function USDSettingsSection({
       const saved = await execute<PaymentSettings>('payments_save_usd_settings', {
         body: { ...body },
       });
-      setMessage(
+      notifySuccess(
         `Rango guardado: de ${formatMoney(saved.usd_rate_min)} a ${formatMoney(saved.usd_rate_max)} por dólar; confirmación si difiere más de ${saved.usd_rate_alert_percent} %.`,
       );
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'No se pudo guardar el rango.');
+      notifyError(problem, 'No se pudo guardar el rango.');
     } finally {
       setSaving(false);
     }
@@ -109,8 +107,6 @@ export function USDSettingsSection({
           Cambiar el rango requiere el permiso «{permissionName('payments.settings.manage')}».
         </p>
       )}
-      <Notice>{error}</Notice>
-      {message && <Notice success>{message}</Notice>}
     </div>
   );
 }

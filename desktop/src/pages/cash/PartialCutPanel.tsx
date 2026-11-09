@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { CashReport, CashReportSummary, CreatedCashReport } from '../../services/cash';
+import { notifySuccess } from '../../services/notify';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
 import { CashDocumentActions } from './CashDocumentActions';
-import { PrintNotice } from './CashNotices';
+import { notifyPrintOutcome } from './CashNotices';
 import { CashReportView, reportTitle } from './CashReportView';
 import { PrintToggle } from './PrintToggle';
 import type { CashMutation } from './useCashMutation';
@@ -94,7 +96,6 @@ export function PartialCutPanel({
 }) {
   const [selectedID, setSelectedID] = useState('');
   const [print, setPrint] = useState(false);
-  const [created, setCreated] = useState<CreatedCashReport | null>(null);
   const canCreate = can('cash.partial_cuts.create') && shift.state === 'open';
   const partials = reports.filter((report) => report.kind === 'partial');
 
@@ -107,10 +108,13 @@ export function PartialCutPanel({
         id: shift.id,
         body: print ? { print: true } : {},
       });
-      setCreated(report);
       setSelectedID(report.id);
-    } catch {
-      // El mensaje de Go queda visible en el aviso de la operación.
+      // El aviso confirma el corte sin cifras: el informe se consulta abajo, con el esperado solo
+      // si Go lo entrega a quien tiene permiso.
+      notifySuccess(`${reportTitle(report)} generado.`);
+      notifyPrintOutcome(report.printing, 'el corte');
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo generar el corte parcial.');
     }
   }
 
@@ -119,7 +123,7 @@ export function PartialCutPanel({
       <header className="cash-panel-header">
         <h3>Corte parcial</h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver a la caja
+          <IconLabel icon="back">Volver a la caja</IconLabel>
         </button>
       </header>
       <p className="cash-terminology">
@@ -144,23 +148,17 @@ export function PartialCutPanel({
             disabled={mutation.locked}
             onClick={() => void create()}
           >
-            {mutation.busy ? 'Generando corte…' : 'Generar corte parcial'}
+            <IconLabel icon="report">
+              {mutation.busy ? 'Generando corte…' : 'Generar corte parcial'}
+            </IconLabel>
           </button>
         )}
         {can('cash.withdrawals.record') && shift.state === 'open' && (
           <button type="button" className="secondary-button" onClick={onWithdraw}>
-            Retirar efectivo
+            <IconLabel icon="withdrawal">Retirar efectivo</IconLabel>
           </button>
         )}
       </div>
-      {mutation.error && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
-      {created && created.id === selectedID && (
-        <PrintNotice outcome={created.printing} subject="el corte" />
-      )}
       <ReportList
         reports={partials}
         selectedID={selectedID}

@@ -4,6 +4,7 @@ import { Notice, PageTitle } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { useRestaurantMutation } from '../../hooks/useRestaurantMutation';
 import { APIError } from '../../services/api';
+import { notifyError, notifySuccess } from '../../services/notify';
 import { jobLabels, preparationLabels, type ExecuteKitchen } from '../../services/kitchen';
 import { serverDateTime } from '../../services/restaurant';
 import { KitchenSettingsForm } from './KitchenSettingsForm';
@@ -30,15 +31,32 @@ export function KitchenPage({
     if (['kitchen_reprint', 'kitchen_retry_job', 'kitchen_resolve_job'].includes(operation))
       setQueueVersion((version) => version + 1);
   }, 'kitchen');
+  // Toda escritura de cocina pasa por aquí: un rechazo de Go se muestra como aviso persistente
+  // (sistema único de mensajes); un resultado incierto no, porque queda en el panel de
+  // recuperación con el mismo operation_id. Cada pantalla confirma su propio éxito.
   const execute: ExecuteKitchen = async (operation, options) => {
     try {
       return await mutation.execute(operation, options);
     } catch (problem) {
       if (problem instanceof APIError && problem.status === 409)
         window.dispatchEvent(new CustomEvent('adel-server-change'));
+      if (!uncertainResult(problem)) {
+        notifyError(problem, 'No se pudo completar la operación de cocina.');
+      }
       throw problem;
     }
   };
+
+  async function recover() {
+    const problem = await mutation.retry();
+    if (!problem) {
+      notifySuccess('Operación de cocina recuperada.');
+      return;
+    }
+    if (!uncertainResult(problem)) {
+      notifyError(problem, 'No se pudo recuperar la operación de cocina.');
+    }
+  }
   const busy = mutation.busy || mutation.uncertain;
   const tabs = [
     { id: 'preparation', label: 'Preparación', allowed: can('kitchen.states.read') },
@@ -81,14 +99,13 @@ export function KitchenPage({
           </button>
         ))}
       </div>
-      <Notice>{mutation.error}</Notice>
       {mutation.uncertain && (
         <div className="operation-recovery">
           <p>El resultado no pudo confirmarse. Recupera la misma operación antes de continuar.</p>
           <button
             className="primary-button"
             disabled={mutation.busy}
-            onClick={() => void mutation.retry()}
+            onClick={() => void recover()}
           >
             Recuperar operación de cocina
           </button>
@@ -111,6 +128,14 @@ export function KitchenPage({
       {selected === 'settings' && <KitchenSettingsForm can={can} execute={execute} busy={busy} />}
       {selected === 'history' && <KitchenHistory timezone={timezone} />}
     </div>
+  );
+}
+
+// Sin conexión o error ≥ 500: Go pudo haber registrado la operación; se recupera con el mismo
+// identificador en lugar de mostrarla como rechazada.
+function uncertainResult(problem: unknown) {
+  return (
+    problem instanceof APIError && (problem.code === 'CONNECTION_ERROR' || problem.status >= 500)
   );
 }
 

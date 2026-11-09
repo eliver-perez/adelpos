@@ -1,13 +1,12 @@
 import { useId, useState } from 'react';
+import { IconLabel } from '../../components/Icon';
 import { AmountField, NumericKeypad } from '../../components/NumericKeypad';
 import { SegmentedControl } from '../../components/SegmentedControl';
-import {
-  authorizationCodes,
-  useSupervisorAuthorization,
-} from '../../hooks/useSupervisorAuthorization';
+import { useSupervisorAuthorization } from '../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../services/api';
 import { toWireAmount } from '../../services/amountInput';
 import type { CashCatalog, CashCurrency, RecordedCashOperation } from '../../services/cash';
+import { dismissNotice, notifyError, notifySuccess } from '../../services/notify';
 import { permissionName, validReason } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { currencyAmount } from './DenominationCount';
@@ -15,7 +14,7 @@ import { cashEntries, entryBody, initialEntry, outflowPermissions } from './oper
 import type { CashEntryCapture, CashEntryKind } from './operationForm';
 import { OutflowAuthorization } from './OutflowAuthorization';
 import { PrintToggle } from './PrintToggle';
-import { RecordedOperation } from './RecordedOperation';
+import { RecordedOperation, recordedOperationTitle } from './RecordedOperation';
 import type { CashMutation } from './useCashMutation';
 
 // Opciones del tipo de ingreso, del motivo del retiro o de la categoría del gasto.
@@ -30,6 +29,9 @@ function entryChoices(kind: CashEntryKind, catalog: CashCatalog) {
     .filter((category) => category.active)
     .map((category) => ({ id: category.id, label: category.name }));
 }
+
+// Aviso del rechazo por efectivo insuficiente: se retira en cuanto cambia la captura.
+const insufficientNoticeID = 'cash-insufficient';
 
 const choiceLabels: Record<CashEntryKind, string> = {
   income: 'Tipo de ingreso',
@@ -236,6 +238,7 @@ export function CashOperationForm({
     if (!exceptionalOnly) {
       setInsufficient(false);
       mutation.clearError();
+      dismissNotice(insufficientNoticeID);
     }
   }
 
@@ -261,13 +264,20 @@ export function CashOperationForm({
       setCapture(initialEntry());
       setInsufficient(false);
       auth.reset();
+      dismissNotice(insufficientNoticeID);
+      notifySuccess(recordedOperationTitle(operation));
     } catch (problem) {
+      // Un problema de autorización se explica en el formulario de autorización.
       if (auth.handleError(problem)) {
         return;
       }
       if (problem instanceof APIError && problem.code === 'CASH_INSUFFICIENT') {
+        // El texto de Go no lleva cifras; la salida excepcional queda a la vista.
         setInsufficient(true);
+        notifyError(problem, undefined, { id: insufficientNoticeID });
+        return;
       }
+      mutation.reportFailure(problem);
     }
   }
 
@@ -278,7 +288,7 @@ export function CashOperationForm({
       <header className="cash-panel-header">
         <h3>{definition.title}</h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver a la caja
+          <IconLabel icon="back">Volver a la caja</IconLabel>
         </button>
       </header>
       {result && <RecordedOperation operation={result} />}
@@ -333,11 +343,6 @@ export function CashOperationForm({
               disabled={mutation.locked}
             />
           )}
-          {mutation.error && !authorizationCodes.includes(mutation.errorCode) && (
-            <p className="checkout-inline-note" role="alert">
-              {mutation.error}
-            </p>
-          )}
           {definition.outflow && (insufficient || capture.exceptional) && (
             <InsufficientCash capture={capture} update={update} locked={mutation.locked} />
           )}
@@ -356,7 +361,7 @@ export function CashOperationForm({
             disabled={!ready}
             onClick={() => void register()}
           >
-            {mutation.busy ? 'Registrando…' : label}
+            <IconLabel icon="check">{mutation.busy ? 'Registrando…' : label}</IconLabel>
           </button>
         </div>
       </div>

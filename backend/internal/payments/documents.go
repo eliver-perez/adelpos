@@ -174,50 +174,51 @@ func renderDocument(document *CommercialDocument, width int) string {
 	add(fit("Atendió: "+document.Cashier, width)...)
 	add(divider)
 	for _, line := range document.Lines {
-		add(row(decimal.NewFromInt(int64(line.Quantity)).String()+" x "+line.Name, "$"+line.Amount, width)...)
+		add(row(decimal.NewFromInt(int64(line.Quantity)).String()+" x "+line.Name, pesosText(line.Amount), width)...)
 		if strings.TrimSpace(line.Notes) != "" {
 			add(fit("   Nota: "+line.Notes, width)...)
 		}
 	}
+	// Los importes usan el formato único de moneytext; un descuento se imprime «-$50.00».
 	for _, adjustment := range document.Adjustments {
-		add(row(adjustment.Concept, "$"+adjustment.Amount, width)...)
+		add(row(adjustment.Concept, pesosText(adjustment.Amount), width)...)
 	}
 	add(divider)
 	for _, tax := range document.Tax {
-		add(row("Subtotal sin IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", "$"+tax.Base, width)...)
-		add(row("IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", "$"+tax.Tax, width)...)
+		add(row("Subtotal sin IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", pesosText(tax.Base), width)...)
+		add(row("IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", pesosText(tax.Tax), width)...)
 	}
-	add(row("TOTAL", "$"+document.Total, width)...)
+	add(row("TOTAL", pesosText(document.Total), width)...)
 	if document.Payment != nil {
 		add(divider)
 		add("ESTE PAGO")
-		add(row(document.Payment.Method, "$"+document.Payment.Amount, width)...)
+		add(row(document.Payment.Method, pesosText(document.Payment.Amount), width)...)
 		if document.Payment.Reference != "" {
 			add(fit("   Ref. "+document.Payment.Reference, width)...)
 		}
 		if document.Payment.ReceivedUSD != nil {
 			add(cashWithDollars(*document.Payment, width)...)
 		} else if document.Payment.Received != nil {
-			add(row("   Efectivo recibido", "$"+*document.Payment.Received, width)...)
-			add(row("   Cambio", "$"+document.Payment.Change, width)...)
+			add(row("   Efectivo recibido", pesosText(*document.Payment.Received), width)...)
+			add(row("   Cambio", pesosText(document.Payment.Change), width)...)
 		}
 		if document.Payment.Tip != "0.00" {
-			add(row("   Propina (no es venta)", "$"+document.Payment.Tip, width)...)
+			add(row("   Propina (no es venta)", pesosText(document.Payment.Tip), width)...)
 		}
 	}
 	if len(document.Payments) > 0 {
 		add(divider)
 		add("PAGOS REGISTRADOS")
 		for _, payment := range document.Payments {
-			add(row(payment.Method, "$"+payment.Amount, width)...)
+			add(row(payment.Method, pesosText(payment.Amount), width)...)
 		}
-		add(row("Pagado", "$"+document.Paid, width)...)
+		add(row("Pagado", pesosText(document.Paid), width)...)
 		if document.Tips != "0.00" {
-			add(row("Propinas", "$"+document.Tips, width)...)
+			add(row("Propinas", pesosText(document.Tips), width)...)
 		}
 	}
 	if document.Balance != "0.00" {
-		add(row("SALDO PENDIENTE", "$"+document.Balance, width)...)
+		add(row("SALDO PENDIENTE", pesosText(document.Balance), width)...)
 	}
 	add(divider)
 	add(fit("Documento comercial. No es un comprobante fiscal (CFDI).", width)...)
@@ -228,17 +229,17 @@ func renderDocument(document *CommercialDocument, width int) string {
 // del turno, el total en pesos y el cambio con la moneda en que se entregó.
 func cashWithDollars(payment DocumentPayment, width int) []string {
 	lines := []string{}
-	lines = append(lines, row("   Pesos recibidos", "$"+*payment.ReceivedMXN, width)...)
-	lines = append(lines, row("   Dólares recibidos", "US$"+*payment.ReceivedUSD, width)...)
-	lines = append(lines, row("   Tipo de cambio", "$"+*payment.USDRate+"/US$", width)...)
+	lines = append(lines, row("   Pesos recibidos", pesosText(*payment.ReceivedMXN), width)...)
+	lines = append(lines, row("   Dólares recibidos", dollarsText(*payment.ReceivedUSD), width)...)
+	lines = append(lines, row("   Tipo de cambio", rateText(*payment.USDRate), width)...)
 	if payment.Received != nil {
-		lines = append(lines, row("   Total recibido", "$"+*payment.Received, width)...)
+		lines = append(lines, row("   Total recibido", pesosText(*payment.Received), width)...)
 	}
 	if payment.ChangeCurrency != nil && *payment.ChangeCurrency == currencyUSD && payment.ChangeUSD != nil {
-		lines = append(lines, row("   Cambio en dólares", "US$"+*payment.ChangeUSD, width)...)
-		lines = append(lines, row("   Equivale a", "$"+payment.Change, width)...)
+		lines = append(lines, row("   Cambio en dólares", dollarsText(*payment.ChangeUSD), width)...)
+		lines = append(lines, row("   Equivale a", pesosText(payment.Change), width)...)
 	} else {
-		lines = append(lines, row("   Cambio en pesos", "$"+payment.Change, width)...)
+		lines = append(lines, row("   Cambio en pesos", pesosText(payment.Change), width)...)
 	}
 	return lines
 }

@@ -390,7 +390,7 @@ func matchOpeningCount(tally countTally, plan *openingPlan) error {
 		return &Error{
 			Status:  400,
 			Code:    "COUNT_TOTAL_MISMATCH",
-			Message: "El desglose en dólares suma US$" + money(tally.usd) + " y el fondo en dólares declarado es US$" + money(floatUSD) + ". Revisa el conteo.",
+			Message: "El desglose en dólares suma " + formatDollars(tally.usd) + " y el fondo en dólares declarado es " + formatDollars(floatUSD) + ". Revisa el conteo.",
 		}
 	}
 	return nil
@@ -457,10 +457,6 @@ func (handler *service) validateShiftRate(text string, confirmed bool, currentSh
 		}
 	}
 	return rate, nil
-}
-
-func formatPesos(value decimal.Decimal) string {
-	return "$" + money(value)
 }
 
 // setShiftRate captura una sola vez el tipo de cambio de un turno abierto que no lo tiene, por

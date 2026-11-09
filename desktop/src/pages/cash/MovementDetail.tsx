@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { IconLabel } from '../../components/Icon';
 import type { CashOperation } from '../../services/cash';
 import { formatDollars, formatMoney } from '../../services/payments';
 import type { Shift } from '../../services/payments';
@@ -149,7 +150,7 @@ export function MovementDetail({
           {row.typeLabel} · {serverDateTime(row.at, timezone)}
         </h4>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Cerrar detalle
+          <IconLabel icon="close">Cerrar detalle</IconLabel>
         </button>
       </header>
       {operation ? (
@@ -166,9 +167,11 @@ export function MovementDetail({
       )}
       {operation && target && !correcting && (
         <button type="button" className="secondary-button" onClick={() => setCorrecting(true)}>
-          {operation.shift_id === target.id
-            ? 'Corregir este movimiento'
-            : 'Regularizar en el turno vigente'}
+          <IconLabel icon="edit">
+            {operation.shift_id === target.id
+              ? 'Corregir este movimiento'
+              : 'Regularizar en el turno vigente'}
+          </IconLabel>
         </button>
       )}
       {operation && target && correcting && (

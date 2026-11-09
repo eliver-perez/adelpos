@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Accordion } from '../../../components/Accordion';
 import { Notice } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { QuantityStepper } from '../../../components/QuantityStepper';
 import { TextField } from '../../../components/catalog/EditorFields';
 import { QuoteBreakdown } from '../../../components/catalog/QuoteBreakdown';
 import { originalCustomization } from '../../../components/catalog/customizationRules';
 import { api } from '../../../services/api';
 import type { Lookups } from '../../../services/catalog';
+import { formatMoney } from '../../../services/money';
+import { notifyError, notifySuccess } from '../../../services/notify';
 import type { Bill, DraftItem, EditorState, OrderQuote } from '../../../services/restaurant';
 import type { ExecuteMutation } from '../OperationsAdmin';
+import { uncertainError } from './draftSync';
 import { KitchenNotes } from './KitchenNotes';
 import { TouchCustomizer } from './TouchCustomizer';
 
@@ -27,7 +31,9 @@ export function tentativeItems(editor: EditorState, localDraft: DraftItem[]): Dr
 
 // Personalización en el panel central de la captura. La cotización tentativa la calcula Go
 // (`restaurant_draft_preview` sobre el borrador local vigente o `restaurant_edit_preview` para una
-// partida confirmada); el total del botón principal es el de esa cotización.
+// partida confirmada); el total del botón principal es el de esa cotización. Un error al cotizar
+// queda en el panel (impide confirmar); el resultado de confirmar una modificación se avisa con el
+// sistema único de mensajes.
 export function CustomizationPanel({
   editor,
   onChange,
@@ -115,7 +121,7 @@ export function CustomizationPanel({
         (line) => line.version_id === editor.confirmedVersionID && line.state === 'active',
       )
     ) {
-      setError(
+      notifyError(
         'La versión confirmada cambió o fue transferida. Abre su versión actual desde la cuenta.',
       );
       return;
@@ -125,7 +131,6 @@ export function CustomizationPanel({
 
   async function confirmEdit() {
     if (!preview || !ready) return;
-    setError('');
     try {
       await execute('restaurant_edit', {
         id: editor.accountID,
@@ -134,8 +139,12 @@ export function CustomizationPanel({
           expected_fingerprint: preview.fingerprint,
         },
       });
+      notifySuccess(`Modificación confirmada: ${productName}`);
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : 'No se pudo modificar.');
+      // Un resultado incierto queda en «Recuperar resultado» de la página.
+      if (!uncertainError(problem)) {
+        notifyError(problem, 'No se pudo modificar.');
+      }
     }
   }
 
@@ -150,7 +159,7 @@ export function CustomizationPanel({
     <section className="capture-customization" aria-label={`Personalizar ${productName}`}>
       <header className="capture-customization-header">
         <button type="button" className="secondary-button capture-back" onClick={onBack}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
         <div>
           <h2>{title}</h2>
@@ -210,7 +219,7 @@ export function CustomizationPanel({
           {preview?.quote && (
             <Accordion
               title="Desglose calculado por el servidor"
-              summary={`Cuenta resultante: $${preview.combined.total}`}
+              summary={`Cuenta resultante: ${formatMoney(preview.combined.total)}`}
             >
               <p className="muted text-sm">{preview.pricing_policy}</p>
               <QuoteBreakdown value={preview.quote} />
@@ -252,12 +261,14 @@ export function CustomizationPanel({
           disabled={busy || !ready || (confirmed && editor.reason.trim().length < 5)}
           onClick={() => (confirmed ? void confirmEdit() : onSave())}
         >
-          {confirmed
-            ? 'Confirmar modificación'
-            : editor.kind === 'draft'
-              ? 'Guardar cambios'
-              : 'Agregar a la cuenta'}
-          {quoteLine && !calculating ? ` · $${quoteLine.total}` : ''}
+          <IconLabel icon={confirmed || editor.kind === 'draft' ? 'check' : 'plus'}>
+            {confirmed
+              ? 'Confirmar modificación'
+              : editor.kind === 'draft'
+                ? 'Guardar cambios'
+                : 'Agregar a la cuenta'}
+            {quoteLine && !calculating ? ` · ${formatMoney(quoteLine.total)}` : ''}
+          </IconLabel>
         </button>
         <p className="muted text-xs capture-add-status" role="status">
           {calculating ? 'Calculando en el servidor…' : ''}
