@@ -25,7 +25,32 @@ export interface RestaurantTable {
   out_of_service: boolean;
   revision: number;
   account_count: number;
-  state: 'free' | 'occupied' | 'out_of_service';
+  // Estado calculado por Go (etapa 7.1); con varias cuentas, el más avanzado.
+  state: TableState;
+  // Apertura de la cuenta abierta más antigua y segundos transcurridos según el servidor.
+  occupied_since: string | null;
+  occupied_seconds: number;
+  // Suma de los saldos de las cuentas abiertas, calculada por Go.
+  balance: string;
+}
+
+export type TableState =
+  'free' | 'occupied' | 'awaiting_payment' | 'partial_payment' | 'out_of_service';
+
+// Nombre de cada estado de mesa: el mismo texto en el mapa, su leyenda y el panel de la mesa.
+export const tableStateLabels: Record<TableState, string> = {
+  free: 'Libre',
+  occupied: 'Ocupada',
+  awaiting_payment: 'Esperando pago',
+  partial_payment: 'Pago parcial',
+  out_of_service: 'Fuera de servicio',
+};
+
+// Cuenta abierta que otra terminal creó en la mesa (detalle del rechazo TABLE_HAS_ACCOUNT).
+export interface TableAccountRef {
+  id: string;
+  folio: number;
+  name: string;
 }
 
 export interface RestaurantSettings {
@@ -90,6 +115,8 @@ export interface Account {
   confirmed_quantity: number;
   draft_quantity: number;
   totals: Totals;
+  // Go la marca liberable cuando está abierta y vacía en sentido estricto (etapa 7.1).
+  releasable: boolean;
 }
 
 export interface AccountInput {
@@ -217,6 +244,80 @@ export function normalizeSelection(line: PreviewLine): PreviewLine {
   };
 }
 
+// Cuenta pendiente (etapa 7.1): la captura de una mesa sin cuenta trabaja con un identificador
+// local; la cuenta se crea en Go con el primer producto guardado. Este prefijo nunca coincide con
+// un UUID, por lo que el puente nativo rechazaría cualquier consulta que lo usara por error.
+export const pendingAccountPrefix = 'pendiente:';
+
+export function isPendingAccount(account: Pick<Account, 'id'> | null | undefined): boolean {
+  return !!account && account.id.startsWith(pendingAccountPrefix);
+}
+
+// Cuenta mostrada mientras la mesa aún no tiene cuenta: abierta, sin productos ni importes. Usa la
+// lista de precios predeterminada (la misma que Go asignará al crearla) para los precios del
+// catálogo.
+export function pendingAccountBill({
+  localID,
+  table,
+  priceListID,
+  createdAt,
+  timezone,
+}: {
+  localID: string;
+  table: Pick<RestaurantTable, 'id' | 'name'>;
+  priceListID: string;
+  createdAt: string;
+  timezone: string;
+}): Bill {
+  const zero: Totals = { subtotal: '0.00', discount: '0.00', total: '0.00' };
+  return {
+    account: {
+      id: localID,
+      folio: 0,
+      name: table.name,
+      mode: 'dine_in',
+      state: 'open',
+      table_id: table.id,
+      table_name: table.name,
+      price_list_id: priceListID,
+      customer_name: '',
+      phone: '',
+      origin: '',
+      notes: '',
+      scheduled_at: null,
+      scheduled_local: '',
+      schedule_kind: null,
+      assigned_user_id: '',
+      assigned_name: '',
+      created_at: createdAt,
+      updated_at: createdAt,
+      revision: 0,
+      merged_into_id: null,
+      elapsed_seconds: 0,
+      urgency: 'normal',
+      preparation_state: 'without_items',
+      payment_state: 'not_recorded',
+      delivery_state: 'not_delivered',
+      finance: {
+        total: '0.00',
+        paid: '0.00',
+        balance: '0.00',
+        tips: '0.00',
+        payment_state: 'not_recorded',
+        delivery_state: 'not_delivered',
+      },
+      confirmed_quantity: 0,
+      draft_quantity: 0,
+      totals: zero,
+      releasable: false,
+    },
+    draft: [],
+    lines: [],
+    server_time: createdAt,
+    timezone,
+  };
+}
+
 export function serverDateTime(value: string, timezone: string) {
   return new Intl.DateTimeFormat('es-MX', {
     dateStyle: 'short',
@@ -257,6 +358,9 @@ export function takeawayCustomerName(
 // Identificación corta de una cuenta: «Cuenta #folio» o «Pedido #folio», con el nombre capturado
 // si lo tiene.
 export function accountLabel(account: Account): string {
+  if (isPendingAccount(account)) {
+    return 'Cuenta nueva';
+  }
   if (account.mode === 'takeaway') {
     const customer = takeawayCustomerName(account);
     return customer ? `Pedido #${account.folio} · ${customer}` : `Pedido #${account.folio}`;
@@ -278,6 +382,7 @@ export const eventLabels: Record<string, string> = {
   'account.move': 'Cambio de mesa',
   'account.assign': 'Cambio de responsable',
   'account.void': 'Cuenta vacía anulada',
+  'account.released': 'Cuenta vacía liberada',
   'account.split': 'División de cuenta',
   'account.merged': 'Combinación de cuentas',
   'items.transferred': 'Transferencia de unidades',

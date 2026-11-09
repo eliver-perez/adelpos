@@ -4,7 +4,7 @@ import type { Operation } from '../services/api';
 import type { PreviewLine } from '../services/catalog';
 import { notifySuccess } from '../services/notify';
 import { countLabel } from '../services/plural';
-import { emptyCustomization } from '../services/restaurant';
+import { emptyCustomization, isPendingAccount } from '../services/restaurant';
 import type { Bill, DraftItem, EditorState, OrderQuote } from '../services/restaurant';
 import type { CaptureProduct } from '../pages/restaurant/capture/captureRules';
 import {
@@ -121,10 +121,13 @@ export function useCaptureDraft({
   // operation_id y liberación a cocina).
   async function sendToKitchen() {
     if (!bill || sending) return;
-    const accountID = bill.account.id;
     setSending(true);
     try {
-      const synced = await engine.settle(accountID);
+      const synced = await engine.settle(bill.account.id);
+      // Una cuenta pendiente (etapa 7.1) se crea al sincronizar: se continúa con su identificador
+      // real. Si no hubo productos que crear, no hay nada que enviar.
+      const accountID = synced?.accountID ?? bill.account.id;
+      if (engine.isPending(accountID) || isPendingAccount({ id: accountID })) return;
       const items = synced ? synced.items : bill.draft;
       const expectedRevision = synced ? synced.baseRevision : bill.account.revision;
       if (items.length === 0) return;

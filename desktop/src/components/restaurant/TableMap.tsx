@@ -1,7 +1,10 @@
-import type { CSSProperties, PointerEvent } from 'react';
+import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { useRef } from 'react';
+import { formatMoney } from '../../services/money';
 import { countLabel } from '../../services/plural';
-import type { Area, RestaurantTable } from '../../services/restaurant';
+import { elapsedTime, tableStateLabels } from '../../services/restaurant';
+import type { Area, RestaurantTable, TableState } from '../../services/restaurant';
+import { Icon } from '../Icon';
 
 interface TableMapProps {
   areas: Area[];
@@ -14,7 +17,59 @@ interface TableMapProps {
   onPosition?: (id: string, x: number, y: number) => void;
 }
 
-const stateLabels = { free: 'Libre', occupied: 'Ocupada', out_of_service: 'Fuera de servicio' };
+// Indicador de cada estado (etapa 7.1): además del color, un texto o icono que lo distingue.
+// El tiempo y el saldo los calcula Go; aquí solo se presentan.
+function stateIndicator(table: RestaurantTable): { content: ReactNode; text: string } {
+  switch (table.state) {
+    case 'occupied': {
+      const time = elapsedTime(table.occupied_seconds);
+      return {
+        content: (
+          <>
+            <Icon name="clock" size={12} />
+            {time}
+          </>
+        ),
+        text: time,
+      };
+    }
+    case 'awaiting_payment':
+      return {
+        content: (
+          <>
+            <Icon name="receipt" size={12} />
+            Precuenta
+          </>
+        ),
+        text: 'precuenta impresa',
+      };
+    case 'partial_payment': {
+      const balance = `Saldo ${formatMoney(table.balance)}`;
+      return { content: balance, text: balance.toLowerCase() };
+    }
+    case 'out_of_service':
+      return {
+        content: (
+          <>
+            <Icon name="lock" size={12} />
+            Fuera de servicio
+          </>
+        ),
+        text: '',
+      };
+    default:
+      return { content: 'Libre', text: '' };
+  }
+}
+
+// Leyenda del mapa con los cinco estados, cada uno con su muestra de color y su indicador.
+const legend: { state: TableState; icon?: 'clock' | 'receipt' | 'lock'; hint?: string }[] = [
+  { state: 'free' },
+  { state: 'occupied', icon: 'clock', hint: 'tiempo' },
+  { state: 'awaiting_payment', icon: 'receipt', hint: 'precuenta' },
+  { state: 'partial_payment', hint: 'saldo' },
+  { state: 'out_of_service', icon: 'lock' },
+];
 
 export function TableMap({
   areas,
@@ -85,6 +140,15 @@ export function TableMap({
             </p>
           )}
           {visible.map((table) => {
+            const indicator = stateIndicator(table);
+            const accessible = [
+              table.name,
+              tableStateLabels[table.state],
+              countLabel(table.account_count, 'cuenta', 'cuentas'),
+            ];
+            if (indicator.text) {
+              accessible.push(indicator.text);
+            }
             const style: CSSProperties = {
               left: `min(${table.x / 10}%, calc(100% - 44px))`,
               top: `min(${table.y / 5.6}%, calc(100% - 44px))`,
@@ -97,7 +161,7 @@ export function TableMap({
                 type="button"
                 style={style}
                 className={`restaurant-table table-${table.state} table-${table.shape} ${selectedTableID === table.id ? 'selected-table' : ''}`}
-                aria-label={`${table.name}, ${stateLabels[table.state]}, ${countLabel(table.account_count, 'cuenta', 'cuentas')}`}
+                aria-label={accessible.join(', ')}
                 aria-pressed={selectedTableID === table.id}
                 onClick={() => onSelect(table)}
                 onPointerDown={(event) => {
@@ -140,29 +204,28 @@ export function TableMap({
                 }}
               >
                 <strong>{table.name}</strong>
-                <span>
-                  {table.account_count
-                    ? countLabel(table.account_count, 'cuenta', 'cuentas')
-                    : stateLabels[table.state]}
-                </span>
+                <span className="table-indicator">{indicator.content}</span>
+                {table.account_count > 1 && (
+                  <span className="table-account-count">
+                    {countLabel(table.account_count, 'cuenta', 'cuentas')}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
       </div>
       <div className="map-legend muted">
-        <span>
-          <i className="legend-dot legend-free" />
-          Libre
-        </span>
-        <span>
-          <i className="legend-dot legend-occupied" />
-          Ocupada
-        </span>
-        <span>
-          <i className="legend-dot legend-unavailable" />
-          Fuera de servicio
-        </span>
+        <ul className="map-legend-states" aria-label="Estados de las mesas">
+          {legend.map((entry) => (
+            <li key={entry.state} className="map-legend-state">
+              <i className={`legend-swatch legend-${entry.state}`} aria-hidden="true" />
+              {entry.icon && <Icon name={entry.icon} size={12} />}
+              {tableStateLabels[entry.state]}
+              {entry.hint && <span className="map-legend-hint">· {entry.hint}</span>}
+            </li>
+          ))}
+        </ul>
         {designer && <span>Arrastra o usa flechas; Shift mueve de uno en uno.</span>}
       </div>
     </div>

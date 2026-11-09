@@ -104,19 +104,28 @@ func (handler *service) saveDraft(id string) (any, error) {
 	if _, err := handler.tx.Exec(handler.ctx, "DELETE FROM app.restaurant_draft_items WHERE account_id=$1", id); err != nil {
 		return nil, err
 	}
-	for index, item := range input.Items {
-		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.restaurant_draft_items
-            (id,account_id,product_id,variant_id,quantity,customization,position,author_id,device_id)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, item.ID, id, item.ProductID, item.VariantID, item.Quantity,
-			jsonValue(item.Customization), index, handler.request.Actor.UserID, handler.request.Actor.DeviceID)
-		if err != nil {
-			return nil, err
-		}
+	if err := handler.insertDraftItems(id, input.Items); err != nil {
+		return nil, err
 	}
 	if err := handler.event(id, nil, "draft.saved", before, input.Items); err != nil {
 		return nil, err
 	}
 	return handler.readBill(id)
+}
+
+// insertDraftItems guarda las partidas del borrador en su orden. La comparten guardar el borrador y
+// abrir una cuenta con su primer producto (etapa 7.1).
+func (handler *service) insertDraftItems(accountID string, items []DraftItem) error {
+	for index, item := range items {
+		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.restaurant_draft_items
+            (id,account_id,product_id,variant_id,quantity,customization,position,author_id,device_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, item.ID, accountID, item.ProductID, item.VariantID, item.Quantity,
+			jsonValue(item.Customization), index, handler.request.Actor.UserID, handler.request.Actor.DeviceID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func draftRequests(items []DraftItem) []catalog.LineRequest {

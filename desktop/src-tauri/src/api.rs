@@ -184,6 +184,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         ),
         "restaurant_save_area" => (Method::PATCH, format!("restaurant/areas/{identifier}")),
         "restaurant_save_table" => (Method::PATCH, format!("restaurant/tables/{identifier}")),
+        // Etapa 7.1: fuera de servicio o habilitar una mesa desde la operación.
+        "restaurant_table_service" => (
+            Method::POST,
+            format!("restaurant/tables/{identifier}/service"),
+        ),
         "restaurant_account" => (Method::GET, format!("restaurant/accounts/{identifier}")),
         "restaurant_save_account" => (Method::PATCH, format!("restaurant/accounts/{identifier}")),
         "restaurant_save_draft" => (
@@ -237,6 +242,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "restaurant_void" => (
             Method::POST,
             format!("restaurant/accounts/{identifier}/void"),
+        ),
+        // Etapa 7.1: «Liberar mesa» anula sin motivo una cuenta vacía.
+        "restaurant_release_account" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/release"),
         ),
         "payments_save_method" => (Method::PATCH, format!("payments/methods/{identifier}")),
         "payments_shift_movements" => (
@@ -893,6 +903,16 @@ mod tests {
             assert_eq!(path, format!("restaurant/accounts/{identifier}/{suffix}"));
             assert!(route(operation, None).is_err());
         }
+        let (method, path) = route("restaurant_release_account", Some(identifier)).unwrap();
+        assert_eq!(method, Method::POST);
+        assert_eq!(path, format!("restaurant/accounts/{identifier}/release"));
+        assert!(route("restaurant_release_account", None).is_err());
+        assert!(route("restaurant_release_account", Some("../../settings")).is_err());
+        let (method, path) = route("restaurant_table_service", Some(identifier)).unwrap();
+        assert_eq!(method, Method::POST);
+        assert_eq!(path, format!("restaurant/tables/{identifier}/service"));
+        assert!(route("restaurant_table_service", None).is_err());
+        assert!(route("restaurant_table_service", Some("../../settings")).is_err());
         assert!(route("restaurant_deliver", Some(identifier)).is_err());
         assert!(route("restaurant_pay", Some(identifier)).is_err());
         assert!(route("restaurant_confirm", Some("../../settings")).is_err());

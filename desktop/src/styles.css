@@ -113,6 +113,24 @@
   --info-soft: #eaf1fa;
   --toast-shadow: 0 12px 32px rgb(15 23 32 / 18%);
   --toast-offset-top: 92px;
+  /* Etapa 7.1: estados de mesa. Propuesta inicial ajustable por el propietario; además del tono,
+     la luminosidad baja de libre a pago parcial y fuera de servicio lleva rayas y borde punteado. */
+  --table-free-bg: #fff;
+  --table-free-border: #c5ced9;
+  --table-free-text: #202b3e;
+  --table-occupied-bg: #d3ece2;
+  --table-occupied-border: #1b7568;
+  --table-occupied-text: #0f4d43;
+  --table-awaiting-bg: #f3c76f;
+  --table-awaiting-border: #a86a12;
+  --table-awaiting-text: #4a2f05;
+  --table-partial-bg: #8fb9e9;
+  --table-partial-border: #245a99;
+  --table-partial-text: #0f2c4f;
+  --table-out-bg: #e4e7eb;
+  --table-out-stripe: #cfd5dc;
+  --table-out-border: #98a3b0;
+  --table-out-text: #4f5b69;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -138,6 +156,22 @@
   --info: #8bb8ec;
   --info-soft: #1d2b3d;
   --toast-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  --table-free-bg: #19232e;
+  --table-free-border: #3d4a5a;
+  --table-free-text: #e4ebf2;
+  --table-occupied-bg: #1e4d42;
+  --table-occupied-border: #79ceba;
+  --table-occupied-text: #dff5ee;
+  --table-awaiting-bg: #7d5c12;
+  --table-awaiting-border: #e6b15f;
+  --table-awaiting-text: #fff0cc;
+  --table-partial-bg: #4475b0;
+  --table-partial-border: #8bb8ec;
+  --table-partial-text: #fff;
+  --table-out-bg: #1d252f;
+  --table-out-stripe: #27313d;
+  --table-out-border: #56637a;
+  --table-out-text: #9baabd;
 }
 body {
   margin: 0;
@@ -1112,14 +1146,62 @@ summary {
 .restaurant-table.table-round {
   border-radius: 50%;
 }
+/* Etapa 7.1: cinco estados calculados por Go, con tokens por tema y un indicador de texto o icono
+   en cada mesa (tiempo, «Precuenta», «Saldo $X», candado). */
+.restaurant-table.table-free {
+  background: var(--table-free-bg);
+  border-color: var(--table-free-border);
+  color: var(--table-free-text);
+}
 .restaurant-table.table-occupied {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--table-occupied-bg);
+  border: 2px solid var(--table-occupied-border);
+  color: var(--table-occupied-text);
+}
+.restaurant-table.table-awaiting_payment {
+  background: var(--table-awaiting-bg);
+  border: 2px solid var(--table-awaiting-border);
+  color: var(--table-awaiting-text);
+}
+.restaurant-table.table-partial_payment {
+  background: var(--table-partial-bg);
+  border: 2px solid var(--table-partial-border);
+  color: var(--table-partial-text);
 }
 .restaurant-table.table-out_of_service {
-  background: var(--subtle);
-  border-style: dashed;
-  color: var(--muted);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--table-out-bg) 0 6px,
+    var(--table-out-stripe) 6px 12px
+  );
+  border: 1px dashed var(--table-out-border);
+  color: var(--table-out-text);
+}
+.restaurant-table .table-indicator {
+  /* En mesas pequeñas (o redondas) el icono pasa arriba del texto en lugar de recortarlo. */
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 1px 3px;
+  max-width: 100%;
+  color: inherit;
+  font-size: 9.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  text-align: center;
+}
+.restaurant-table .table-indicator svg {
+  flex: 0 0 auto;
+}
+.restaurant-table .table-account-count {
+  color: inherit;
+  opacity: 0.85;
+}
+.restaurant-table.table-free .table-indicator,
+.restaurant-table.table-out_of_service .table-indicator {
+  font-weight: 500;
 }
 .restaurant-table.selected-table {
   outline: 2px solid var(--accent);
@@ -1149,21 +1231,57 @@ summary {
   align-items: center;
   gap: 5px;
 }
-.legend-dot {
-  width: 8px;
-  height: 8px;
+/* Leyenda con los cinco estados de mesa: muestra, icono y texto. */
+.map-legend-states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+.map-legend-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+}
+.map-legend .map-legend-hint {
+  display: inline;
+  color: var(--muted);
+}
+.legend-swatch {
+  width: 18px;
+  height: 14px;
   display: inline-block;
-  border: 1px solid var(--border);
-  border-radius: 50%;
+  flex: 0 0 auto;
+  border-radius: 4px;
 }
 .legend-free {
-  background: var(--panel);
+  background: var(--table-free-bg);
+  border: 1px solid var(--table-free-border);
 }
 .legend-occupied {
-  background: var(--accent);
+  background: var(--table-occupied-bg);
+  border: 2px solid var(--table-occupied-border);
 }
-.legend-unavailable {
-  background: var(--muted);
+.legend-awaiting_payment {
+  background: var(--table-awaiting-bg);
+  border: 2px solid var(--table-awaiting-border);
+}
+.legend-partial_payment {
+  background: var(--table-partial-bg);
+  border: 2px solid var(--table-partial-border);
+}
+.legend-out_of_service {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--table-out-bg) 0 3px,
+    var(--table-out-stripe) 3px 6px
+  );
+  border: 1px dashed var(--table-out-border);
 }
 .account-list-filters {
   display: flex;
@@ -3575,6 +3693,9 @@ summary {
 }
 .table-panel-state {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 4px 10px;
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -3583,14 +3704,32 @@ summary {
   font-size: 12px;
   font-weight: 700;
 }
+/* Etapa 7.1: el estado del panel usa los mismos tokens que el mapa. */
 .table-panel-state-free {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-color: var(--table-free-border);
+  background: var(--table-free-bg);
+  color: var(--table-free-text);
 }
 .table-panel-state-occupied {
-  border-color: var(--warning);
-  color: var(--warning);
+  border-color: var(--table-occupied-border);
+  background: var(--table-occupied-bg);
+  color: var(--table-occupied-text);
+}
+.table-panel-state-awaiting_payment {
+  border-color: var(--table-awaiting-border);
+  background: var(--table-awaiting-bg);
+  color: var(--table-awaiting-text);
+}
+.table-panel-state-partial_payment {
+  border-color: var(--table-partial-border);
+  background: var(--table-partial-bg);
+  color: var(--table-partial-text);
+}
+.table-panel-state-out_of_service {
+  border-style: dashed;
+  border-color: var(--table-out-border);
+  background: var(--table-out-bg);
+  color: var(--table-out-text);
 }
 .table-panel-accounts {
   display: flex;
@@ -3623,12 +3762,6 @@ summary {
   display: grid;
   align-content: start;
   gap: 12px;
-}
-.table-panel-primary {
-  width: 100%;
-  min-height: 64px;
-  font-size: 16px;
-  font-weight: 700;
 }
 .table-panel-account {
   font-size: 16px;
@@ -4152,6 +4285,14 @@ summary {
   min-width: 140px;
   padding: 12px 20px;
   font-size: 15px;
+}
+/* Etapa 7.1: diálogo de opciones («Esta mesa ya tiene una cuenta»), una opción por fila. */
+.dialog-choices {
+  display: grid;
+  justify-content: stretch;
+}
+.dialog-panel:not(.dialog-panel-danger) .dialog-heading-icon {
+  color: var(--info);
 }
 .danger-solid-button {
   border: 1px solid var(--danger);

@@ -55,7 +55,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		})
 		var problem *operations.Error
 		if errors.As(err, &problem) {
-			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message, Details: problem.Details}
 		}
 		var catalogProblem *catalog.Error
 		if errors.As(err, &catalogProblem) {

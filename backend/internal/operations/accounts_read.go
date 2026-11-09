@@ -74,7 +74,9 @@ func (handler *service) decorateAccount(account *Account) error {
 	if account.ScheduledAt != nil {
 		account.ScheduledLocal = account.ScheduledAt.In(location).Format("2006-01-02T15:04")
 	}
-	return nil
+	// Etapa 7.1: Go decide si la cuenta se puede liberar sin motivo («Liberar mesa»).
+	account.Releasable, err = handler.releasable(account)
+	return err
 }
 
 func (handler *service) listAccounts() (any, error) {
@@ -270,6 +272,8 @@ func (handler *service) accounts(parts []string) (any, error) {
 		return handler.merge(id)
 	case "move", "assign", "void":
 		return handler.accountAction(id, parts[2])
+	case "release":
+		return handler.releaseAccount(id)
 	case "history":
 		return handler.history(id)
 	}

@@ -39,6 +39,8 @@ type Fault struct {
 	Code    string
 	Message string
 	Commit  bool
+	// Details son datos públicos opcionales del rechazo; se publican en error.details.
+	Details any
 }
 
 func (fault *Fault) Error() string {

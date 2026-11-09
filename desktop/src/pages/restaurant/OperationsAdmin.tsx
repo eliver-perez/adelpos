@@ -76,6 +76,9 @@ const newTable = (areaID: string): RestaurantTable => ({
   revision: 0,
   account_count: 0,
   state: 'free',
+  occupied_since: null,
+  occupied_seconds: 0,
+  balance: '0.00',
 });
 
 export function OperationsAdmin({

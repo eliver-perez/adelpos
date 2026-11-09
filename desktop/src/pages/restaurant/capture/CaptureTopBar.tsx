@@ -3,6 +3,7 @@ import type { Account, RestaurantTable } from '../../../services/restaurant';
 import {
   accountCustomName,
   accountLabel,
+  isPendingAccount,
   serverDateTime,
   takeawayCustomerName,
 } from '../../../services/restaurant';
@@ -21,6 +22,10 @@ function captureTitle(account: Account | null) {
   }
   if (account.mode === 'takeaway') {
     return `Para llevar · Pedido #${account.folio}`;
+  }
+  // Etapa 7.1: la mesa aún no tiene cuenta; Go la crea con el primer producto.
+  if (isPendingAccount(account)) {
+    return `${account.table_name ?? 'Mesa'} · Cuenta nueva`;
   }
   if (account.table_name) {
     return `${account.table_name} · Cuenta #${account.folio}`;
@@ -43,6 +48,11 @@ function captureDetails(account: Account, table: RestaurantTable | null, timezon
       details.push('Sin hora programada');
     }
     if (account.origin) details.push(account.origin);
+    return details;
+  }
+  if (isPendingAccount(account)) {
+    if (table) details.push(`Mesa para ${table.seats}`);
+    details.push('La cuenta se abre al guardar el primer producto');
     return details;
   }
   details.push(`Mesero: ${account.assigned_name}`);
@@ -96,6 +106,11 @@ export function CaptureTopBar({
   const unnamedSent =
     !!account && takeaway && account.confirmed_quantity > 0 && !takeawayCustomerName(account);
   const detailsLabel = takeaway ? 'Datos del pedido' : 'Datos de la cuenta';
+  // En una cuenta pendiente se muestran las cuentas abiertas de la mesa para volver a ellas; «Nueva
+  // cuenta» no se repite: ya se está capturando una.
+  const pending = isPendingAccount(account);
+  const showAccounts = tableAccounts.length > 1 || (pending && tableAccounts.length > 0);
+  const offerNewAccount = canOpenAccount && !pending;
   return (
     <header className="capture-topbar">
       <button type="button" className="secondary-button capture-topbar-back" onClick={onBack}>
@@ -134,9 +149,9 @@ export function CaptureTopBar({
           {detailsLabel}
         </button>
       )}
-      {!takeaway && (tableAccounts.length > 1 || canOpenAccount) && (
+      {!takeaway && (showAccounts || offerNewAccount) && (
         <div className="capture-topbar-accounts" role="group" aria-label="Cuentas de la mesa">
-          {tableAccounts.length > 1 &&
+          {showAccounts &&
             tableAccounts.map((entry) => (
               <button
                 type="button"
@@ -151,7 +166,7 @@ export function CaptureTopBar({
                 {accountLabel(entry)}
               </button>
             ))}
-          {canOpenAccount && (
+          {offerNewAccount && (
             <button
               type="button"
               className="secondary-button capture-new-account"

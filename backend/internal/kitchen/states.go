@@ -133,6 +133,16 @@ func (handler *service) saveStates() (any, error) {
 	return result, handler.history("states.changed", nil, tasks, result)
 }
 
+// HasAccountRecords indica si la cocina conserva registros de la cuenta: liberaciones (en cualquier
+// estado, también canceladas o bloqueadas) o cambios pendientes que la configuración no pudo enrutar.
+// Una cuenta con alguno de ellos no está vacía (etapa 7.1, «Liberar mesa»).
+func HasAccountRecords(ctx context.Context, tx pgx.Tx, accountID string) (bool, error) {
+	var found bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.kitchen_releases WHERE account_id=$1)
+        OR EXISTS(SELECT FROM app.kitchen_pending_changes WHERE account_id=$1)`, accountID).Scan(&found)
+	return found, err
+}
+
 // AccountPreparation utiliza la pertenencia actual de las mismas unidades, incluso tras dividir.
 func AccountPreparation(ctx context.Context, tx pgx.Tx, accountID string) (string, error) {
 	return VersionPreparation(ctx, tx, accountID, "")

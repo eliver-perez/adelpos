@@ -34,7 +34,15 @@ type Table struct {
 	OutOfService bool   `json:"out_of_service"`
 	Revision     int    `json:"revision"`
 	AccountCount int    `json:"account_count"`
-	State        string `json:"state"`
+	// State lo calcula Go (etapa 7.1): free, occupied, awaiting_payment, partial_payment u
+	// out_of_service. Con varias cuentas abiertas gana el más avanzado.
+	State string `json:"state"`
+	// OccupiedSince es la apertura de la cuenta abierta más antigua y OccupiedSeconds el tiempo
+	// transcurrido según el servidor; ambos vacíos o en cero si la mesa no tiene cuentas.
+	OccupiedSince   *time.Time `json:"occupied_since"`
+	OccupiedSeconds int64      `json:"occupied_seconds"`
+	// Balance es la suma de los saldos de las cuentas abiertas, calculada por payments.
+	Balance string `json:"balance"`
 }
 
 type Settings struct {
@@ -61,6 +69,24 @@ type AccountInput struct {
 	ScheduledLocal string  `json:"scheduled_local"`
 	ScheduleKind   string  `json:"schedule_kind"`
 	AssignedUserID *string `json:"assigned_user_id"`
+}
+
+// OpenAccountInput es el cuerpo de POST restaurant/accounts. Desde la etapa 7.1 la cuenta de una mesa
+// se crea con su primer producto: Items es el borrador inicial (mismo formato y límites que PUT
+// …/draft) y SeenAccountIDs, las cuentas abiertas que la terminal ya veía en la mesa. Sin
+// seen_account_ids no se comprueba la mesa (comportamiento anterior).
+type OpenAccountInput struct {
+	AccountInput
+	Items          []DraftItem `json:"items"`
+	SeenAccountIDs *[]string   `json:"seen_account_ids"`
+}
+
+// TableAccountRef identifica una cuenta abierta que otra terminal creó en la mesa
+// (detalle del rechazo TABLE_HAS_ACCOUNT).
+type TableAccountRef struct {
+	ID    string `json:"id"`
+	Folio int64  `json:"folio"`
+	Name  string `json:"name"`
 }
 
 type Account struct {
@@ -94,6 +120,9 @@ type Account struct {
 	ConfirmedQuantity int             `json:"confirmed_quantity"`
 	DraftQuantity     int             `json:"draft_quantity"`
 	Totals            Totals          `json:"totals"`
+	// Releasable: la cuenta está abierta y vacía en sentido estricto, por lo que «Liberar mesa»
+	// procede sin motivo (etapa 7.1). Lo calcula Go en cada lectura.
+	Releasable bool `json:"releasable"`
 }
 
 type Totals struct {

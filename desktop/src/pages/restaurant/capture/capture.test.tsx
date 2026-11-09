@@ -17,6 +17,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => t
 const ids = {
   area: '00000000-0000-4000-8000-0000000000a1',
   table: '00000000-0000-4000-8000-0000000000b1',
+  // Etapa 7.1: mesa libre para la captura sin cuenta.
+  freeTable: '00000000-0000-4000-8000-0000000000b2',
   first: '00000000-0000-4000-8000-0000000000c1',
   second: '00000000-0000-4000-8000-0000000000c2',
   dishes: '00000000-0000-4000-8000-0000000000d1',
@@ -171,6 +173,8 @@ interface ServerAccount {
   draft: DraftItem[];
   lines: unknown[];
   confirmedTotal: string;
+  // Mesa de la cuenta; sin indicarla, Mesa 1.
+  table?: string;
 }
 
 let accounts: Record<string, ServerAccount>;
@@ -183,6 +187,10 @@ let heldSaves: (() => void)[];
 let quoteChanged: boolean;
 let failNextSave: boolean;
 let saveRequests: Record<string, unknown>[];
+// Etapa 7.1: aperturas con el primer producto y la cuenta que «otra terminal» abre en la mesa.
+let opens: Record<string, unknown>[];
+let otherTerminal: ServerAccount | null;
+let catalogPreviews: Record<string, unknown>[];
 
 function account(state: ServerAccount) {
   return {
@@ -191,8 +199,8 @@ function account(state: ServerAccount) {
     name: 'Cuenta',
     mode: 'dine_in',
     state: 'open',
-    table_id: ids.table,
-    table_name: 'Mesa 1',
+    table_id: state.table ?? ids.table,
+    table_name: state.table === ids.freeTable ? 'Mesa 2' : 'Mesa 1',
     price_list_id: ids.list,
     customer_name: '',
     phone: '',
@@ -223,7 +231,79 @@ function account(state: ServerAccount) {
     confirmed_quantity: state.lines.length,
     draft_quantity: state.draft.reduce((total, item) => total + item.quantity, 0),
     totals: { subtotal: state.confirmedTotal, discount: '0.00', total: state.confirmedTotal },
+    releasable: false,
   };
+}
+
+function tableAccounts(table: string) {
+  return Object.values(accounts).filter((entry) => (entry.table ?? ids.table) === table);
+}
+
+function mapTable(id: string, name: string, x: number) {
+  const count = tableAccounts(id).length;
+  return {
+    id,
+    area_id: ids.area,
+    name,
+    shape: 'rectangle',
+    x,
+    y: 20,
+    width: 120,
+    height: 100,
+    seats: 4,
+    active: true,
+    out_of_service: false,
+    revision: 1,
+    account_count: count,
+    state: count ? 'occupied' : 'free',
+    occupied_since: count ? '2026-11-08T18:30:00Z' : null,
+    occupied_seconds: count ? 60 : 0,
+    balance: '0.00',
+  };
+}
+
+// Apertura con el primer producto como en Go: idempotente por operation_id y con TABLE_HAS_ACCOUNT
+// si la mesa tiene una cuenta abierta que la terminal no veía (sin crear nada).
+function openWithItems(body: Record<string, unknown>) {
+  const replay = replays.get(String(body.operation_id));
+  if (replay) {
+    return replay;
+  }
+  opens.push(body);
+  const table = String(body.table_id);
+  if (otherTerminal && !accounts[otherTerminal.id]) {
+    accounts[otherTerminal.id] = otherTerminal;
+  }
+  const seen = (body.seen_account_ids as string[] | undefined) ?? [];
+  const unseen = tableAccounts(table).filter((entry) => !seen.includes(entry.id));
+  if (body.seen_account_ids && unseen.length > 0) {
+    return {
+      status: 409,
+      body: {
+        error: {
+          code: 'TABLE_HAS_ACCOUNT',
+          message: 'Esta mesa ya tiene una cuenta abierta en otra terminal.',
+          details: {
+            accounts: unseen.map((entry) => ({ id: entry.id, folio: entry.folio, name: 'Mesa 2' })),
+          },
+        },
+      },
+    };
+  }
+  const folio = Math.max(...Object.values(accounts).map((entry) => entry.folio)) + 1;
+  const id = `00000000-0000-4000-8000-0000000009${String(folio).padStart(2, '0')}`;
+  accounts[id] = {
+    id,
+    folio,
+    revision: 1,
+    draft: (body.items as DraftItem[]) ?? [],
+    lines: [],
+    confirmedTotal: '0.00',
+    table,
+  };
+  const result = bill(accounts[id]!);
+  replays.set(String(body.operation_id), result);
+  return result;
 }
 
 function bill(state: ServerAccount) {
@@ -345,39 +425,43 @@ function respond(
             table_count: 1,
           },
         ],
-        tables: [
-          {
-            id: ids.table,
-            area_id: ids.area,
-            name: 'Mesa 1',
-            shape: 'rectangle',
-            x: 20,
-            y: 20,
-            width: 120,
-            height: 100,
-            seats: 4,
-            active: true,
-            out_of_service: false,
-            revision: 1,
-            account_count: 2,
-            state: 'occupied',
-          },
-        ],
+        tables: [mapTable(ids.table, 'Mesa 1', 20), mapTable(ids.freeTable, 'Mesa 2', 300)],
         settings: { warning_minutes: 15, overdue_minutes: 30, revision: 1 },
         timezone: 'America/Monterrey',
       };
-    case 'restaurant_accounts':
+    case 'restaurant_accounts': {
+      const items = (query?.table_id ? tableAccounts(query.table_id) : Object.values(accounts)).map(
+        (entry) => account(entry),
+      );
       return {
-        items: Object.values(accounts).map((entry) => account(entry)),
-        total: Object.keys(accounts).length,
+        items,
+        total: items.length,
         page: 1,
         page_size: 50,
         server_time: '2026-11-08T19:00:00Z',
         timezone: 'America/Monterrey',
         settings: { warning_minutes: 15, overdue_minutes: 30, revision: 1 },
       };
+    }
     case 'restaurant_account':
       return bill(state!);
+    case 'restaurant_open_account':
+      return openWithItems(body!);
+    case 'catalog_preview': {
+      // Cotización del catálogo para una cuenta pendiente: los mismos importes «de Go».
+      catalogPreviews.push(body!);
+      const lines = ((body!.lines as DraftItem[]) ?? []).map((line, index) => ({
+        ...line,
+        id: `linea-${index}`,
+      }));
+      return {
+        ...quote(
+          { id: '', folio: 0, revision: 0, draft: [], lines: [], confirmedTotal: '0.00' },
+          lines,
+          0,
+        ).quote,
+      };
+    }
     case 'restaurant_preview':
       return quote(state!, state!.draft, state!.revision);
     case 'restaurant_draft_preview': {
@@ -510,6 +594,9 @@ beforeEach(() => {
   quoteChanged = false;
   failNextSave = false;
   saveRequests = [];
+  opens = [];
+  otherTerminal = null;
+  catalogPreviews = [];
   native.invoke.mockImplementation(
     async (
       command: string,
@@ -897,5 +984,159 @@ describe('captura táctil de pedidos', () => {
     fireEvent.click(within(menu).getByRole('button', { name: 'Historial de cambios' }));
     await screen.findByRole('heading', { name: 'Historial · #1' });
     expect(within(bill).queryByRole('group', { name: 'Más acciones de la cuenta' })).toBeNull();
+  });
+});
+
+// Etapa 7.1 (fase B): la captura de una mesa libre trabaja con una cuenta pendiente; Go la crea
+// con el primer producto guardado y avisa si otra terminal abrió una cuenta en la mesa.
+async function openFreeTable() {
+  renderCapture();
+  fireEvent.click(await screen.findByRole('button', { name: /^Mesa 2, Libre/ }));
+  const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
+  fireEvent.click(await within(panel).findByRole('button', { name: 'Capturar' }));
+  await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta nueva' });
+  await waitFor(() => expect(disabled(productButton('Filete de prueba'))).toBe(false));
+  return screen.getByRole('complementary', { name: 'Cuenta actual' });
+}
+
+describe('captura de una mesa sin cuenta (etapa 7.1)', () => {
+  it('el primer guardado crea la cuenta con sus productos y los siguientes guardan el borrador', async () => {
+    const bill = await openFreeTable();
+    expect(within(bill).getByRole('heading', { name: 'Cuenta nueva' })).toBeTruthy();
+    expect(opens).toHaveLength(0);
+    fireEvent.click(productButton('Filete de prueba'));
+    fireEvent.click(productButton('Filete de prueba'));
+    expect(within(bill).getByRole('article', { name: '2 × Filete de prueba' })).toBeTruthy();
+    // Una sola apertura con antirrebote, con la mesa, las cuentas vistas y el borrador completo.
+    await waitFor(() => expect(opens).toHaveLength(1), { timeout: 2500 });
+    expect(opens[0]).toEqual(
+      expect.objectContaining({
+        mode: 'dine_in',
+        table_id: ids.freeTable,
+        seen_account_ids: [],
+        items: [expect.objectContaining({ product_id: ids.steak, quantity: 2 })],
+      }),
+    );
+    expect(typeof opens[0]!.operation_id).toBe('string');
+    expect(saves).toHaveLength(0);
+    // La captura continúa en la cuenta creada, sin perder los productos nuevos.
+    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta #3' });
+    expect(within(bill).getByRole('article', { name: '2 × Filete de prueba' })).toBeTruthy();
+    fireEvent.click(productButton('Filete de prueba'));
+    await waitFor(() => expect(saves).toHaveLength(1), { timeout: 2500 });
+    const created = Object.values(accounts).find((entry) => entry.table === ids.freeTable)!;
+    expect(saves[0]!.id).toBe(created.id);
+    expect(saves[0]!.body.revision).toBe(1);
+    expect(saves[0]!.body.items[0]?.quantity).toBe(3);
+    expect(opens).toHaveLength(1);
+  });
+
+  it('salir sin productos no llama al servidor y la mesa sigue libre', async () => {
+    await openFreeTable();
+    fireEvent.click(screen.getByRole('button', { name: /Mesas/ }));
+    const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
+    expect(within(panel).getByText('Libre')).toBeTruthy();
+    expect(within(panel).getByText('Sin cuenta abierta')).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    expect(opens).toHaveLength(0);
+    expect(saves).toHaveLength(0);
+  });
+
+  it('personalizar en la cuenta pendiente cotiza con el catálogo y la lista predeterminada', async () => {
+    const bill = await openFreeTable();
+    fireEvent.click(productButton('Hamburguesa de prueba'));
+    const options = await screen.findByRole('region', {
+      name: 'Personalizar Hamburguesa de prueba',
+    });
+    const add = await within(options).findByRole('button', { name: /^Agregar a la cuenta/ });
+    await waitFor(() => expect(add.textContent).toContain('$121.25'));
+    expect(catalogPreviews.at(-1)).toEqual(
+      expect.objectContaining({
+        lines: [expect.objectContaining({ product_id: ids.burger, quantity: 1 })],
+      }),
+    );
+    fireEvent.click(add);
+    expect(within(bill).getByRole('article', { name: '1 × Hamburguesa de prueba' })).toBeTruthy();
+    await waitFor(() => expect(opens).toHaveLength(1), { timeout: 2500 });
+  });
+
+  it('«Esta mesa ya tiene una cuenta»: agregar los productos a esa cuenta conserva su borrador', async () => {
+    const theirs: DraftItem = {
+      id: 'borrador-ajeno',
+      product_id: ids.steak,
+      variant_id: null,
+      quantity: 1,
+      customization: emptyCustomization(),
+    };
+    otherTerminal = {
+      id: '00000000-0000-4000-8000-000000000955',
+      folio: 5,
+      revision: 2,
+      draft: [theirs],
+      lines: [],
+      confirmedTotal: '0.00',
+      table: ids.freeTable,
+    };
+    await openFreeTable();
+    fireEvent.click(productButton('Hamburguesa de prueba'));
+    const options = await screen.findByRole('region', {
+      name: 'Personalizar Hamburguesa de prueba',
+    });
+    const add = await within(options).findByRole('button', { name: /^Agregar a la cuenta/ });
+    await waitFor(() => expect(disabled(add)).toBe(false));
+    fireEvent.click(add);
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'Esta mesa ya tiene una cuenta',
+    });
+    expect(dialog.textContent).toContain('Cuenta #5');
+    // Go no creó nada: la cuenta pendiente conserva sus productos.
+    expect(Object.values(accounts).filter((entry) => entry.table === ids.freeTable)).toHaveLength(
+      1,
+    );
+    expect(within(dialog).getByRole('button', { name: 'Abrir una cuenta nueva' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Agregar a la Cuenta #5' }));
+    await waitFor(() => expect(saves).toHaveLength(1), { timeout: 2500 });
+    expect(saves[0]!.id).toBe(otherTerminal.id);
+    expect(saves[0]!.body.revision).toBe(2);
+    expect(saves[0]!.body.items.map((item) => item.product_id)).toEqual([ids.steak, ids.burger]);
+    expect(saves[0]!.body.items[0]!.id).toBe('borrador-ajeno');
+    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta #5' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(opens).toHaveLength(1);
+  });
+
+  it('«Esta mesa ya tiene una cuenta»: abrir una cuenta nueva reenvía sabiendo de la otra', async () => {
+    otherTerminal = {
+      id: '00000000-0000-4000-8000-000000000955',
+      folio: 5,
+      revision: 2,
+      draft: [],
+      lines: [],
+      confirmedTotal: '0.00',
+      table: ids.freeTable,
+    };
+    await openFreeTable();
+    fireEvent.click(productButton('Filete de prueba'));
+    const dialog = await screen.findByRole(
+      'alertdialog',
+      { name: 'Esta mesa ya tiene una cuenta' },
+      { timeout: 2500 },
+    );
+    // Escape no decide por el operador.
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.getByRole('alertdialog', { name: 'Esta mesa ya tiene una cuenta' })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abrir una cuenta nueva' }));
+    await waitFor(() => expect(opens).toHaveLength(2));
+    expect(opens[1]).toEqual(
+      expect.objectContaining({
+        seen_account_ids: [otherTerminal.id],
+        items: [expect.objectContaining({ product_id: ids.steak, quantity: 1 })],
+      }),
+    );
+    expect(opens[1]!.operation_id).not.toBe(opens[0]!.operation_id);
+    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta #6' });
+    expect(Object.values(accounts).filter((entry) => entry.table === ids.freeTable)).toHaveLength(
+      2,
+    );
   });
 });

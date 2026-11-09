@@ -84,9 +84,15 @@ func publicFault(err error) *Fault {
 func writeFault(writer http.ResponseWriter, request *http.Request, fault *Fault) {
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.WriteHeader(fault.Status)
-	_ = json.NewEncoder(writer).Encode(map[string]any{"error": map[string]string{
+	body := map[string]any{
 		"code":       fault.Code,
 		"message":    fault.Message,
 		"request_id": writer.Header().Get("X-Request-ID"),
-	}})
+	}
+	// Los detalles solo existen en rechazos que la terminal resuelve con datos públicos (etapa 7.1:
+	// TABLE_HAS_ACCOUNT con las cuentas que otra terminal abrió en la mesa).
+	if fault.Details != nil {
+		body["details"] = fault.Details
+	}
+	_ = json.NewEncoder(writer).Encode(map[string]any{"error": body})
 }

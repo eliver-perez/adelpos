@@ -23,6 +23,28 @@ export function useDraftSync(delay = 700) {
         {
           save: (accountID, body) =>
             latest.current.execute<Bill>('restaurant_save_draft', { id: accountID, body }),
+          // Etapa 7.1: la cuenta de la mesa se crea con su primer producto, con la misma apertura
+          // sin formulario (Go asigna la lista predeterminada, el responsable y la referencia
+          // neutra) y la misma clave de pendientes: un resultado incierto se recupera con el mismo
+          // operation_id.
+          create: (body) =>
+            latest.current.execute<Bill>('restaurant_open_account', {
+              body: {
+                name: '',
+                mode: 'dine_in',
+                table_id: body.table_id,
+                price_list_id: null,
+                customer_name: '',
+                phone: '',
+                origin: '',
+                notes: '',
+                scheduled_local: '',
+                schedule_kind: '',
+                assigned_user_id: null,
+                seen_account_ids: body.seen_account_ids,
+                items: body.items,
+              },
+            }),
           retry: async () => {
             lastResult.current = null;
             const problem = await latest.current.retry();

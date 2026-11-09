@@ -10,6 +10,7 @@ import {
   paymentPendingKey,
   paymentStateDescriptions,
 } from '../../../services/payments';
+import { isPendingAccount } from '../../../services/restaurant';
 import type {
   Account,
   Bill,
@@ -170,13 +171,21 @@ export function CaptureBill({
     <aside className="capture-bill" aria-label="Cuenta actual">
       {dialog}
       <header className="capture-bill-header">
-        <div>
-          <h2>Cuenta #{account.folio}</h2>
-          <p className="muted text-xs">
-            Preparación: {preparationLabels[account.preparation_state] ?? account.preparation_state}
-            {account.mode !== 'takeaway' && ` · Pago: ${paymentDescription(account)}`}
-          </p>
-        </div>
+        {isPendingAccount(account) ? (
+          <div>
+            <h2>Cuenta nueva</h2>
+            <p className="muted text-xs">Se abre al guardar el primer producto.</p>
+          </div>
+        ) : (
+          <div>
+            <h2>Cuenta #{account.folio}</h2>
+            <p className="muted text-xs">
+              Preparación:{' '}
+              {preparationLabels[account.preparation_state] ?? account.preparation_state}
+              {account.mode !== 'takeaway' && ` · Pago: ${paymentDescription(account)}`}
+            </p>
+          </div>
+        )}
         <p className="muted text-xs capture-sync-status" role="status">
           {status}
         </p>

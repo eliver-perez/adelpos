@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { notice } from './notices';
 import { checkCashShift } from './cash-flow';
 import { configureKitchen, checkPreparation } from './kitchen-flow';
 import {
@@ -151,33 +153,46 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     .toBe(30);
   await page.getByRole('button', { name: 'Mesas', exact: true }).click();
   const tableID = (await driver.request('GET', 'restaurant/overview')).body.tables[0].id as string;
-  // Etapa 6.2 §1.1–1.2: tocar la mesa abre el panel lateral (sin ventana emergente) y una mesa
-  // libre ofrece «Abrir cuenta y capturar», que abre la cuenta sin formulario.
+  // Etapa 6.2 §1.1–1.2: tocar la mesa abre el panel lateral (sin ventana emergente).
   await expect(page.getByRole('button', { name: 'Abrir cuenta en mesa', exact: true })).toHaveCount(
     0,
   );
+  // Etapa 7.1 §2.4: la leyenda del mapa muestra los cinco estados.
+  const legend = page.getByRole('list', { name: 'Estados de las mesas' });
+  for (const state of ['Libre', 'Ocupada', 'Esperando pago', 'Pago parcial', 'Fuera de servicio']) {
+    await expect(legend).toContainText(state);
+  }
   await page.getByRole('button', { name: /Mesa 1, Libre/ }).click();
   const tablePanel = page.getByRole('complementary', { name: 'Panel de Mesa 1' });
+  // Etapa 7.1 §2.3: la mesa libre tiene la misma estructura que una ocupada, con totales en cero,
+  // «Capturar» en su lugar y las acciones que no aplican desactivadas.
   await expect(tablePanel.locator('.table-panel-state')).toHaveText('Libre');
   await expect(tablePanel).toContainText('Mesa para 4');
+  await expect(tablePanel.locator('.table-panel-totals')).toContainText('$0.00');
+  for (const label of ['Cobrar', 'Precuenta', 'Dividir']) {
+    await expect(tablePanel.getByRole('button', { name: label, exact: true })).toBeDisabled();
+  }
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  const openButton = tablePanel.getByRole('button', {
-    name: 'Abrir cuenta y capturar',
-    exact: true,
-  });
-  await panelThemes(page, testInfo, 'table-panel-free', 'Abrir cuenta y capturar');
+  const captureButton = tablePanel.getByRole('button', { name: 'Capturar', exact: true });
+  await panelThemes(page, testInfo, 'table-panel-free', 'Capturar');
+  // Etapa 7.1 §2.1: mesa libre → capturar → salir sin productos → la mesa sigue libre.
+  await captureButton.click();
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta nueva' })).toBeVisible();
+  await page.locator('.capture-topbar').getByRole('button', { name: /Mesas/ }).click();
+  await expect(tablePanel.locator('.table-panel-state')).toHaveText('Libre');
+  await expect(page.getByRole('button', { name: /Mesa 1, Libre/ })).toBeVisible();
+  expect(await openTableAccounts(driver, tableID)).toHaveLength(0);
   // Doble toque: dos clics en el mismo instante, antes de que React vuelva a dibujar.
-  await openButton.evaluate((element) => {
+  await captureButton.evaluate((element) => {
     (element as HTMLButtonElement).click();
     (element as HTMLButtonElement).click();
   });
   // Etapa 6.1 §4: captura táctil. Categoría → producto directo → producto con opciones → enviar
   // a cocina → cobrar. Todas las cifras que se comprueban las calcula Go.
-  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #1' })).toBeVisible();
-  // Sin formulario: Go asignó la referencia neutra (el nombre de la mesa) y una sola cuenta.
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta nueva' })).toBeVisible();
+  expect(await openTableAccounts(driver, tableID)).toHaveLength(0);
+  // Sin formulario: Go asignará la referencia neutra (el nombre de la mesa).
   await expect(page.getByLabel('Nombre o referencia de cuenta')).toHaveCount(0);
-  await expect.poll(async () => (await openTableAccounts(driver, tableID)).length).toBe(1);
-  expect((await openTableAccounts(driver, tableID))[0]!.name).toBe('Mesa 1');
   await expect(page.locator('.capture-topbar')).toContainText('Mesa para 4');
   await expect(page.getByRole('combobox', { name: 'Cuenta de la mesa' })).toHaveCount(0);
   await expect(page.getByRole('combobox', { name: 'Acciones de cuenta' })).toHaveCount(0);
@@ -198,6 +213,11 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await steak.click();
   await steak.click();
   const steakLine = bill.getByRole('article', { name: '2 × Filete de prueba' });
+  await expect(steakLine).toContainText('Nuevo');
+  // Etapa 7.1: el primer guardado crea la cuenta con sus productos, una sola vez.
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #1' })).toBeVisible();
+  await expect.poll(async () => (await openTableAccounts(driver, tableID)).length).toBe(1);
+  expect((await openTableAccounts(driver, tableID))[0]!.name).toBe('Mesa 1');
   await expect(steakLine).toContainText('Nuevo');
   // Producto con elección obligatoria: la personalización se abre en el panel central.
   const burger = page.getByRole('button', { name: /^Hamburguesa de prueba/ });
@@ -364,24 +384,36 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     await expect(tablePanel.getByRole('button', { name: label, exact: true })).toBeVisible();
   }
   await panelThemes(page, testInfo, 'table-panel', 'Capturar');
-  // «Nueva cuenta» (icono +) abre otra cuenta en la mesa ocupada y entra a capturar.
+  // «Nueva cuenta» (icono +) entra a capturar en la mesa ocupada; sin productos no se crea.
   await tablePanel.getByRole('button', { name: 'Nueva cuenta', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #3' })).toBeVisible();
-  await expect.poll(async () => (await openTableAccounts(driver, tableID)).length).toBe(3);
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta nueva' })).toBeVisible();
   await page.locator('.capture-topbar').getByRole('button', { name: /Mesas/ }).click();
-  await expect(
-    panelAccounts.getByRole('button', { name: 'Cuenta #3', exact: true }),
-  ).toHaveAttribute('aria-pressed', 'true');
-  // La cuenta vacía se anula desde «Más…» del panel con su flujo existente.
-  await tablePanel.getByRole('button', { name: 'Más…', exact: true }).click();
-  await tablePanel
-    .getByRole('group', { name: 'Más acciones de la cuenta' })
-    .getByRole('button', { name: 'Anular cuenta vacía', exact: true })
-    .click();
-  await page.getByLabel('Motivo de anulación de cuenta vacía').fill('Abierta para la prueba');
-  await page.getByRole('button', { name: 'Anular cuenta vacía', exact: true }).last().click();
+  await expect(tablePanel).toBeVisible();
+  expect(await openTableAccounts(driver, tableID)).toHaveLength(2);
+  // Etapa 7.1 §2.2: una cuenta vacía (de las que dejaba la versión anterior; aquí se crea con la
+  // API de prueba) se libera sin motivo con «Liberar mesa» y queda auditada en Go.
+  await driver.request('POST', 'restaurant/accounts', {
+    operation_id: randomUUID(),
+    mode: 'dine_in',
+    table_id: tableID,
+  });
+  const emptyAccount = panelAccounts.getByRole('button', { name: 'Cuenta #3', exact: true });
+  await expect(emptyAccount).toBeVisible({ timeout: 10000 });
+  await emptyAccount.click();
+  await expect(tablePanel.getByRole('heading', { name: 'Cuenta #3', exact: true })).toBeVisible();
+  // Una cuenta con productos no ofrece «Liberar mesa»; la vacía sí.
+  await tablePanel.getByRole('button', { name: 'Liberar mesa', exact: true }).click();
+  const releaseDialog = page.getByRole('alertdialog', { name: '¿Liberar Mesa 1?' });
+  await expect(releaseDialog).toContainText('Cuenta #3');
+  await releaseDialog.getByRole('button', { name: 'Liberar mesa', exact: true }).click();
+  await expect(notice(page, 'Cuenta #3 liberada.')).toBeVisible();
   await expect.poll(async () => (await openTableAccounts(driver, tableID)).length).toBe(2);
   await expect(page.getByRole('region', { name: 'Mapa del restaurante' })).toBeVisible();
+  await panelAccounts.getByRole('button', { name: 'Cuenta #1', exact: true }).click();
+  await expect(tablePanel.getByRole('heading', { name: 'Cuenta #1', exact: true })).toBeVisible();
+  await expect(tablePanel.getByRole('button', { name: 'Liberar mesa', exact: true })).toHaveCount(
+    0,
+  );
   // Capturar y cobrar desde el panel lateral.
   await panelAccounts.getByRole('button', { name: 'Cuenta #2', exact: true }).click();
   await expect(tablePanel.getByRole('heading', { name: 'Cuenta #2', exact: true })).toBeVisible();
@@ -392,6 +424,24 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await checkCashShift(page, testInfo);
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
   await checkDineInPayment(page);
+  // Etapa 7.1 §2.4: precuenta impresa → la mesa queda «Esperando pago» (Go calcula el estado y
+  // el evento de la precuenta llega al mapa).
+  await page
+    .getByRole('group', { name: 'Vistas operativas' })
+    .getByRole('button', { name: 'Mesas', exact: true })
+    .click();
+  await page.getByRole('button', { name: /^Mesa 1, Ocupada/ }).click();
+  await expect(tablePanel.getByRole('heading', { name: 'Cuenta #1', exact: true })).toBeVisible();
+  await tablePanel.getByRole('button', { name: 'Precuenta', exact: true }).click();
+  const precheckPanel = page.getByRole('region', { name: 'Precuenta' });
+  await precheckPanel.getByRole('button', { name: 'Imprimir precuenta', exact: true }).click();
+  await expect(notice(page, /Precuenta.*(cola|Cola) de impresión/)).toBeVisible();
+  await precheckPanel.getByRole('button', { name: 'Volver', exact: true }).click();
+  const awaitingTable = page.getByRole('button', { name: /^Mesa 1, Esperando pago/ });
+  await expect(awaitingTable).toBeVisible({ timeout: 10000 });
+  await expect(awaitingTable).toContainText('Precuenta');
+  await expect(tablePanel.locator('.table-panel-state')).toHaveText('Esperando pago');
+  await panelThemes(page, testInfo, 'table-awaiting-payment', 'Capturar');
   await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
   // Etapa 6.2 §2: «Nuevo pedido» entra directo a la captura, sin formulario previo.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
