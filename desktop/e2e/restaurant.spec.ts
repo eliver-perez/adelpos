@@ -5,6 +5,7 @@ import {
   checkDineInPayment,
   checkTakeawayDelivery,
   configureReceiptPrinter,
+  enableUSDCash,
 } from './payments-flow';
 
 test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, testInfo) => {
@@ -17,6 +18,8 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await configureKitchen(page);
   await configureReceiptPrinter(page);
+  // Etapa 6.1 §3.3: el pago en dólares se activa antes de abrir el turno.
+  await enableUSDCash(page);
   await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
   await page.getByRole('button', { name: 'Áreas y distribución', exact: true }).click();
   await page.getByRole('button', { name: 'Crear área', exact: true }).click();

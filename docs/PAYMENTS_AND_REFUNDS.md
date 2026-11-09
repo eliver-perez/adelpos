@@ -1,6 +1,6 @@
 # Cobros, pagos, descuentos y devoluciones · Etapa 6
 
-Versión 0.6.0, esquema 6. Este documento describe únicamente lo implementado y probado. La administración completa de caja y cortes pertenece a la etapa 7.
+Versión 0.6.0, esquema 6, con las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable. Este documento describe únicamente lo implementado y probado. La administración completa de caja y cortes pertenece a la etapa 7.
 
 ## Autoridad y estructura
 
@@ -26,6 +26,8 @@ Versión 0.6.0, esquema 6. Este documento describe únicamente lo implementado y
 | `takeaway_deliveries`                                  | Una entrega por cuenta para llevar (clave primaria por cuenta).                                                                                                                |
 | `payment_documents`                                    | Precuentas y tickets ligados a `kitchen_tickets` y su trabajo en la cola de impresión.                                                                                         |
 
+Migración 0007 (etapa 6.1), sin modificar 0001–0006: `establishment_features` (funciones activables; `usd_cash` sembrada desactivada), `catalog_products.tax_rate` (NULL hereda la tasa general), `payment_settings.usd_rate_min/usd_rate_max/usd_rate_alert_percent` (10, 40 y 10 iniciales), `cash_shifts.usd_rate/usd_rate_set_by/usd_rate_set_at` (los tres juntos), `payments.received_mxn/received_usd/usd_rate/change_currency/change_usd` (con la igualdad `received = received_mxn + round(received_usd × usd_rate, 2)` y `change_usd = round(change_given / usd_rate, 2)` cuando el cambio sale en dólares, comprobadas por CHECK) y `cash_movements.mxn_in/mxn_out/usd_in/usd_out/usd_rate`. Todas las restricciones nuevas tienen nombre explícito. Permisos nuevos solo para el administrador: `settings.features.manage` y `payments.usd_rate.manage`.
+
 Cambios a tablas existentes, sin modificar 0001–0005: `restaurant_accounts.state` admite `closed` (+ `closed_at`); `restaurant_item_versions.tax_rate` (16 para versiones existentes; obligatoria en nuevas); `kitchen_tickets.kind` admite `receipt` y `precheck`. 21 permisos nuevos concedidos solo al administrador.
 
 ## Saldo y estados
@@ -40,6 +42,7 @@ Cambios a tablas existentes, sin modificar 0001–0005: `restaurant_accounts.sta
 
 - Cada cobro y devolución exige que la terminal tenga caja física asignada y un turno abierto en esa caja. Nunca se abre un turno automáticamente.
 - `POST payments/shifts` abre el turno de la caja de la terminal con fondo inicial obligatorio (se permite `0`). Un segundo turno abierto en la misma caja se rechaza (servicio e índice único).
+- Con el pago en dólares activo, la apertura acepta además el tipo de cambio del turno (`usd_rate`, permiso `payments.usd_rate.manage`). Ver «Pago en dólares».
 - `shared_shifts = false` (inicial): solo quien abrió el turno cobra en él. Con `true`, varios usuarios cobran en el mismo turno; cada movimiento conserva su usuario.
 - Una caja con turno abierto no se desactiva y su terminal no cambia de caja hasta el cierre del turno, que pertenece a la etapa 7.
 
@@ -84,10 +87,35 @@ Cambios a tablas existentes, sin modificar 0001–0005: `restaurant_accounts.sta
 ## IVA
 
 - Los precios ya incluyen IVA; el impuesto se desglosa, nunca se suma. Tasas permitidas: **16 %**, **8 %** y **0 %**, elegidas desde una lista cerrada (`PUT payments/tax` con `"16"`, `"8"` o `"0"`; cualquier otro valor se rechaza en Go y en PostgreSQL). Cambiarla requiere `payments.tax.manage` y se audita con valor anterior y nuevo.
-- Cada versión confirmada copia la tasa vigente; una edición que conserva importes conserva su tasa histórica. Cambiar la tasa solo afecta lo que se confirme después.
+- **Tasa por producto (etapa 6.1)**: cada producto o combo puede tener tasa propia (16, 8 o 0) o heredar la general. Al confirmar, cada versión copia su **tasa efectiva**: la del producto raíz de la línea (en un combo, la del combo para todo su importe, aunque sus componentes tengan otra) o, si hereda, la general vigente. Una edición con nueva cotización (más cantidad o cambio de receta) toma la tasa efectiva vigente; una edición que conserva importes (observaciones o reducción) conserva su tasa histórica. Cambiar la tasa del producto o la general solo afecta lo que se confirme después.
+- Una cuenta con tasas mezcladas se desglosa con una línea de base e IVA por cada tasa presente, en la precuenta, el ticket y las devoluciones; en cada grupo base + IVA = total exacto. Probado con una cuenta 16/8/0 que incluye un combo al 8 % con un componente exento.
 - **Nivel de cálculo**: por cuenta, agrupando por tasa. Para cada tasa, base = total ÷ (1 + tasa) redondeada a centavos e IVA = total − base, de modo que base + IVA es exactamente el total. Calcularlo sobre la suma por tasa evita acumular redondeos unidad por unidad.
 - Los descuentos manuales reducen el bruto de su tasa; un descuento general se reparte entre tasas en proporción. Los cargos llevan la tasa vigente al registrarse. Las propinas no llevan IVA.
 - Las devoluciones guardan su desglose (`tax_breakdown`) con las tasas de la venta original al momento de devolver.
+
+## Pago en dólares (función `usd_cash`, etapa 6.1)
+
+Función activable del establecimiento, **desactivada por defecto** (Configuración → Funciones del establecimiento, permiso `settings.features.manage`). Con ella desactivada no aparece nada en dólares y Go rechaza con `409 FEATURE_DISABLED` cualquier dato en dólares (`received_usd`, `change_currency: "USD"`, tipo de cambio en la apertura, captura posterior del tipo de cambio o configuración del rango), aunque se llame a la API directamente. Desactivarla no borra ni altera los pagos registrados en dólares.
+
+**Tipo de cambio por turno.** Se captura al abrir el turno (`usd_rate` en `POST payments/shifts`) o, si el turno no lo tiene (por ejemplo, la función se activó con el turno abierto), una sola vez con `POST payments/shifts/{id}/usd-rate`; queda fijo hasta el cierre. Requiere `payments.usd_rate.manage`. Go valida formato (positivo, hasta dos decimales), el rango configurable (`usd_rate_min`–`usd_rate_max`, 10 a 40 inicial; fuera de él `400 USD_RATE_OUT_OF_RANGE`) y la diferencia contra el último tipo capturado en otro turno de cualquier caja: si supera `usd_rate_alert_percent` (10 % inicial) responde `409 USD_RATE_CONFIRMATION_REQUIRED` hasta recibir `confirm_rate_difference: true`. Así se evita, por ejemplo, 1.95 en lugar de 19.50. Un turno sin tipo de cambio no acepta dólares (`409 USD_RATE_REQUIRED`) pero sigue cobrando en pesos. La captura queda auditada (`cash.shift_usd_rate_set`, o en la apertura del turno). El rango y el porcentaje se ajustan en Cobros → Pago en dólares (`PUT payments/settings/usd`, permiso `payments.settings.manage`).
+
+**Cobro.** Solo en efectivo (otro método con dólares responde 400). En una misma operación se capturan pesos recibidos y dólares recibidos. Go calcula:
+
+- Dólares recibidos en pesos = dólares × tipo de cambio, redondeado a centavos.
+- Total recibido en pesos (`received`) = pesos recibidos + dólares convertidos; debe cubrir importe + propina.
+- Cambio en pesos (`change_given`) = total recibido − importe − propina, y su equivalente en dólares = cambio ÷ tipo de cambio redondeado a centavos.
+- «Cambio entregado en: Pesos / Dólares» (pesos por omisión) registra la moneda real del cambio; un cambio de cero se registra en pesos.
+- La vista previa devuelve el saldo y el importe de este pago en dólares, lo recibido y el cambio en ambas monedas; si el efectivo no alcanza, informa el faltante en pesos y la menor cantidad de dólares que lo cubre (`covered:false`), y el registro se rechaza.
+
+**Redondeo.** Comercial a centavos, mitad alejándose de cero, en cada conversión (`Decimal.Round(2)` y `Decimal.DivRound(…, 2)` en Go; `round(numeric, 2)` en los CHECK de PostgreSQL). Solo el faltante en dólares se redondea hacia arriba al centavo, porque es el mínimo que cubre lo que falta y no se registra. Ejemplo: tipo $18.50, saldo $290.00 (equivale a US$15.68); $100 + US$20 ($370.00) = $470.00 recibidos; cambio $180.00 o US$9.73.
+
+**Registro.** Cada pago guarda pesos recibidos, dólares recibidos, tipo de cambio aplicado, importe aplicado en pesos, cambio en pesos, moneda del cambio y, si salió en dólares, el cambio en dólares. Un efectivo sin dólares se registra como en la etapa 6 (columnas por moneda en NULL). Cada movimiento de efectivo nuevo guarda pesos y dólares físicos que entraron y salieron (`mxn_in`, `mxn_out`, `usd_in`, `usd_out`, `usd_rate`); los movimientos anteriores a la 0007 conservan NULL y su efecto físico es su neto en pesos. `GET payments/shifts/{id}/movements` agrega `by_currency` con entradas, salidas, pesos físicos esperados (fondo inicial incluido) y dólares físicos esperados, para que el corte de la etapa 7 cuente cada moneda por separado. No es un arqueo.
+
+**Devoluciones solo en pesos.** Una devolución, aunque revierta un pago recibido en dólares, sale en pesos (movimiento `mxn_out`). Registrar devoluciones en dólares físicos complicaría el modelo sin un caso aprobado; queda documentado como límite.
+
+**Correcciones.** El reverso de corrección invierte lo que el pago original movió por moneda (los dólares recibidos salen y el cambio entregado entra), de modo que el cajón queda como antes del pago erróneo. Si el método correcto también es efectivo y el original tenía dólares, el pago nuevo conserva lo recibido y entregado en cada moneda.
+
+**Ticket.** El ticket del pago muestra pesos recibidos, dólares recibidos, tipo de cambio («$18.50/US$»), total recibido y el cambio con su moneda («Cambio en dólares US$1.22 · Equivale a $22.50»).
 
 ## Devoluciones
 
@@ -120,21 +148,23 @@ Cambios a tablas existentes, sin modificar 0001–0005: `restaurant_accounts.sta
 ## Interfaz
 
 - **Cobro**: desde la cuenta, «Cobrar $saldo» abre la pantalla de cobro dentro de la operación (sin modal): cuenta y productos con su estado de pago y selección por cantidades; métodos como botones rectangulares con icono y texto (sin casillas) e historial; captura con teclado numérico fijo, importes rápidos, efectivo recibido, propina, referencia y el cambio destacado junto al botón de registro. Toda cifra procede de la previsualización de Go. Con `payments.read` sin permiso de cobro se ofrece «Consultar pagos y saldo».
-- **Turno**: si la caja de la terminal no tiene turno utilizable, la misma pantalla muestra el motivo de Go y, con `cash.shifts.open`, la apertura con fondo explícito.
+- **Turno**: si la caja de la terminal no tiene turno utilizable, la misma pantalla muestra el motivo de Go y, con `cash.shifts.open`, la apertura con fondo explícito. Con el pago en dólares activo y `payments.usd_rate.manage`, la apertura agrega «Tipo de cambio del dólar»; el teclado fijo edita el campo activo y una diferencia grande se confirma en un diálogo propio (sin `window.confirm`). Si el turno abierto no tiene tipo de cambio, el cobro lo indica y, con el permiso, ofrece «Capturar tipo de cambio».
+- **Dólares** (solo con la función activa): el cobro muestra el tipo de cambio del turno y el saldo con su equivalente en dólares; en efectivo agrega «Pesos recibidos», «Dólares recibidos» (el teclado fijo escribe en el campo activo; billetes US$5–US$100) y «Cambio entregado en: Pesos / Dólares». El cambio se destaca en la moneda en que se entrega y muestra su equivalente en la otra. Todas las cifras proceden de la vista previa de Go.
 - **Descuentos y cargos**: un único componente, accesible desde las acciones de la cuenta y desde la barra del cobro, con descuento, cortesía y cargo, previsualización y lista de ajustes con cancelación.
 - **Devoluciones y correcciones**: dentro del cobro (también con la cuenta cerrada o liquidada). La devolución elige modo, pago de origen y método de salida; la corrección se inicia con «Corregir método» en el historial. Para métodos electrónicos, la interfaz aclara que AD-EL POS no procesa reembolsos bancarios.
 - **Autorización**: formulario en línea con usuario y contraseña del supervisor, mostrado cuando la previsualización la exige o Go responde `AUTHORIZATION_REQUIRED`. La contraseña se borra en cada envío y nunca entra al almacén de pendientes.
 - **Impresión y entrega**: el botón «Imprimir ticket» funciona como interruptor resaltado (sin casilla) con el valor predeterminado del establecimiento; en pedidos para llevar, «Marcar como entregado» (inicialmente desactivado) registra la entrega si el pago liquida. Desde la cuenta para llevar, «Marcar como entregado» entrega directamente si está liquidada o abre el cobro con la entrega activada si queda saldo.
 - **Precuenta y documentos**: «Precuenta» muestra la vista previa del documento y permite imprimirla; «Documentos de la cuenta» lista tickets y precuentas con el estado de su último trabajo y la reimpresión.
 - **Operaciones inciertas**: todas las escrituras financieras de una cuenta comparten la clave `payments:<cuenta>` del almacén global de pendientes (la impresión de precuentas y reimpresiones usa `documents:<cuenta>`). Mientras exista una operación incierta, la cuenta bloquea nuevas escrituras financieras y ofrece reintentar con el mismo `operation_id` o consultar el resultado.
-- **Cobros (administración)**: métodos de pago, IVA con botones 16/8/0, políticas (turno compartido, impresión predeterminada, impresora de tickets, umbral de devoluciones) y movimientos del turno actual.
+- **Cobros (administración)**: métodos de pago, IVA con botones 16/8/0, políticas (turno compartido, impresión predeterminada, impresora de tickets, umbral de devoluciones), «Pago en dólares» (rango y porcentaje de alerta, solo con la función activa) y movimientos del turno actual con su tipo de cambio y, si movió dólares, el efectivo físico por moneda.
 
 ## Contratos para la etapa 7
 
 - `cash_shifts` ya distingue `open`/`closed` y conserva fondo inicial, quién abrió, terminal y hora; el cierre, cortes, arqueos y conteos se agregarán sin modificar pagos.
-- `cash_movements` contiene cada efecto en caja (cobro, devolución, reverso de corrección) firmado, por método, con efectivo recibido y cambio. `GET payments/shifts/{id}/movements` ya calcula totales por método y efectivo esperado = fondo inicial + efectivo neto.
+- `cash_movements` contiene cada efecto en caja (cobro, devolución, reverso de corrección) firmado, por método, con efectivo recibido y cambio y, desde la 0007, entradas y salidas físicas por moneda. `GET payments/shifts/{id}/movements` ya calcula totales por método, efectivo esperado = fondo inicial + efectivo neto y `by_currency` (pesos y dólares físicos esperados).
+- Con dólares, el registro usa el tipo de cambio vigente del turno abierto; al existir cierres (etapa 7) convendrá que el cobro envíe el tipo de cambio que mostró la vista previa para detectar un turno distinto.
 - Cerrar un turno no exigirá liquidar cuentas pendientes; los pagos quedan siempre ligados a su turno y caja.
 
 ## Pruebas
 
-Aceptación PostgreSQL en `backend/internal/operations/payments_acceptance_test.go`, `payments_adjustments_test.go` y `payments_documents_test.go`, encadenadas a `TestRestaurantAcceptance`; unitarias en `backend/internal/payments/money_test.go`. La evidencia ejecutada está en [VERIFICATION.md](VERIFICATION.md).
+Aceptación PostgreSQL en `backend/internal/operations/payments_acceptance_test.go`, `payments_adjustments_test.go`, `payments_documents_test.go`, `payments_tax_test.go` (IVA por producto, etapa 6.1) y `payments_usd_test.go` (funciones activables y dólares, etapa 6.1), encadenadas a `TestRestaurantAcceptance`; actualización de una instalación en esquema 6 en `backend/internal/database/existing_install_test.go`; unitarias en `backend/internal/payments/money_test.go` y `currency_test.go`. La evidencia ejecutada está en [VERIFICATION.md](VERIFICATION.md).

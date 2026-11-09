@@ -48,8 +48,19 @@ export interface PaymentSettings {
   receipt_printer_id: string | null;
   receipt_printer_name: string | null;
   refund_authorization_threshold: string | null;
+  // Rango del tipo de cambio (MXN por USD) y porcentaje de diferencia que exige confirmación.
+  usd_rate_min: string;
+  usd_rate_max: string;
+  usd_rate_alert_percent: string;
   revision: number;
   updated_at: string;
+}
+
+export interface USDSettingsInput {
+  revision: number;
+  usd_rate_min: string;
+  usd_rate_max: string;
+  usd_rate_alert_percent: string;
 }
 
 export interface SettingsInput {
@@ -107,6 +118,13 @@ export interface PaymentRecord {
   tip: string;
   received: string | null;
   change: string;
+  // Efectivo con dólares: pesos y dólares recibidos, tipo de cambio y moneda del cambio. Go los
+  // envía siempre (null en pagos solo en pesos).
+  received_mxn?: string | null;
+  received_usd?: string | null;
+  usd_rate?: string | null;
+  change_currency?: ChangeCurrency | null;
+  change_usd?: string | null;
   reference: string;
   corrects_payment_id: string | null;
   refunded_amount: string;
@@ -223,13 +241,18 @@ export interface Selection {
   quantity: number;
 }
 
+export type ChangeCurrency = 'MXN' | 'USD';
+
 // Captura de un pago. La previsualización y el registro usan el mismo contrato; el registro agrega
-// operation_id y expected_balance.
+// operation_id y expected_balance. Los campos en dólares solo se envían con la función usd_cash
+// activa; con dólares, received son los pesos recibidos.
 export interface PaymentInput {
   method_id: string;
   mode: PaymentMode;
   amount: string;
   received: string;
+  received_usd?: string;
+  change_currency?: ChangeCurrency;
   tip: string;
   reference: string;
   selections: Selection[];
@@ -258,6 +281,26 @@ export interface PaymentPlan {
   settles: boolean;
   selection_total: string | null;
   units: SelectedUnit[];
+  // Solo con la función usd_cash activa, método de efectivo y turno con tipo de cambio.
+  usd?: USDPlan;
+}
+
+// Cifras en pesos y dólares de un cobro en efectivo, calculadas por Go con el tipo de cambio del
+// turno. La interfaz nunca convierte ni redondea.
+export interface USDPlan {
+  rate: string;
+  balance_usd: string;
+  charged_usd: string;
+  received_mxn: string;
+  received_usd: string;
+  received_usd_mxn: string;
+  received_total: string;
+  change_mxn: string;
+  change_usd: string;
+  change_currency: ChangeCurrency;
+  covered: boolean;
+  missing_mxn: string;
+  missing_usd: string;
 }
 
 export type PrintJobState =
@@ -307,6 +350,11 @@ export interface CommercialDocumentPayment {
   reference: string;
   received: string | null;
   change: string;
+  received_mxn?: string | null;
+  received_usd?: string | null;
+  usd_rate?: string | null;
+  change_currency?: ChangeCurrency | null;
+  change_usd?: string | null;
 }
 
 // Precuenta o ticket comercial. No es un CFDI; content es el texto ya formateado para imprimir.
@@ -459,6 +507,10 @@ export interface Shift {
   closed_at: string | null;
   revision: number;
   shared_allowed: boolean;
+  // Tipo de cambio fijo del turno; null mientras no se captura.
+  usd_rate?: string | null;
+  usd_rate_set_by_name?: string | null;
+  usd_rate_set_at?: string | null;
 }
 
 export interface CurrentShift {
@@ -467,6 +519,9 @@ export interface CurrentShift {
   shared_shifts: boolean;
   usable: boolean;
   reason: string;
+  // Estado de la función usd_cash y si el turno abierto aún no tiene tipo de cambio.
+  usd_cash?: boolean;
+  usd_rate_required?: boolean;
 }
 
 export interface ShiftMovement {
@@ -479,6 +534,12 @@ export interface ShiftMovement {
   net_amount: string;
   cash_received: string;
   change_given: string;
+  // Efecto físico por moneda; null en movimientos anteriores a la 0007 o no efectivo.
+  mxn_in?: string | null;
+  mxn_out?: string | null;
+  usd_in?: string | null;
+  usd_out?: string | null;
+  usd_rate?: string | null;
   account_id: string;
   folio: number;
   payment_id: string | null;
@@ -501,6 +562,15 @@ export interface ShiftMovements {
   by_method: MethodTotal[];
   cash_net: string;
   expected_cash: string;
+  // Efectivo físico por moneda (no es arqueo: el cierre pertenece a la etapa 7).
+  by_currency?: {
+    mxn_in: string;
+    mxn_out: string;
+    usd_in: string;
+    usd_out: string;
+    expected_mxn: string;
+    expected_usd: string;
+  };
 }
 
 // Consultas finas sobre el puente nativo. Las escrituras pasan por el almacén de operaciones
@@ -666,6 +736,7 @@ export const financialOperationLabels: Partial<Record<Operation, string>> = {
   payments_print_precheck: 'de la impresión de la precuenta',
   payments_reprint: 'de la copia del documento',
   payments_open_shift: 'de la apertura del turno',
+  payments_shift_usd_rate: 'de la captura del tipo de cambio',
 };
 
 // Describe el resultado confirmado de cualquier escritura financiera; todas devuelven el estado
@@ -721,6 +792,7 @@ export const paymentPermissionLabels: Record<string, string> = {
   'takeaway.deliver': 'Registrar entrega de pedidos para llevar',
   'cash.shifts.open': 'Abrir turno de caja',
   'cash.shifts.read': 'Consultar turnos y movimientos de caja',
+  'payments.usd_rate.manage': 'Capturar el tipo de cambio del dólar del turno',
   'kitchen.printers.manage': 'Administrar impresoras',
 };
 
@@ -750,7 +822,26 @@ export const refreshCodes = [
 ];
 
 // Códigos que exigen revisar o abrir el turno de la caja de la terminal.
-export const shiftCodes = ['SHIFT_REQUIRED', 'REGISTER_REQUIRED', 'SHIFT_NOT_SHARED'];
+export const shiftCodes = [
+  'SHIFT_REQUIRED',
+  'REGISTER_REQUIRED',
+  'SHIFT_NOT_SHARED',
+  'USD_RATE_REQUIRED',
+  'FEATURE_DISABLED',
+];
+
+// Antepone el símbolo de dólares a una cifra que ya calculó Go, sin convertirla.
+export function formatDollars(value: string | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+  return `US$${value}`;
+}
+
+export const changeCurrencyLabels: Record<ChangeCurrency, string> = {
+  MXN: 'Pesos',
+  USD: 'Dólares',
+};
 
 // Longitud de un texto en caracteres (no en bytes), como la valida Go.
 export function textLength(text: string) {

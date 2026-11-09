@@ -31,6 +31,9 @@ func validateProduct(ctx context.Context, tx pgx.Tx, product *Product, previous 
 	if _, err := parseMoney(product.BasePrice); err != nil {
 		return err
 	}
+	if err := validateProductTaxRate(product.TaxRate); err != nil {
+		return err
+	}
 	if err := validateSchedule(product.Availability); err != nil {
 		return err
 	}

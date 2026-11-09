@@ -25,7 +25,7 @@ type Permission struct {
 }
 
 // Permissions enumera las operaciones financieras reales. Cada clave también se inserta en la
-// migración 0006 y se concede inicialmente solo al rol administrador.
+// migración que la introdujo (0006 o 0007) y se concede inicialmente solo al rol administrador.
 var Permissions = []Permission{
 	{"payments.read", "Consultar información financiera y pagos de cuentas"},
 	{"payments.collect", "Registrar cobros"},
@@ -47,6 +47,7 @@ var Permissions = []Permission{
 	{"payments.tickets.reprint", "Reimprimir tickets"},
 	{"cash.shifts.open", "Abrir turno de caja"},
 	{"cash.shifts.read", "Consultar turnos y movimientos de caja"},
+	{"payments.usd_rate.manage", "Capturar el tipo de cambio del dólar del turno"},
 	{"takeaway.deliver", "Registrar entrega de pedidos para llevar"},
 }
 

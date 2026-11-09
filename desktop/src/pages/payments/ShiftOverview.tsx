@@ -1,6 +1,12 @@
 import { Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { formatMoney, movementKindLabels, permissionName } from '../../services/payments';
+import {
+  formatDollars,
+  formatMoney,
+  isZeroMoney,
+  movementKindLabels,
+  permissionName,
+} from '../../services/payments';
 import type { CurrentShift, Shift, ShiftMovements } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
 
@@ -16,6 +22,11 @@ function ShiftMovementsTable({ shift, timezone }: { shift: Shift; timezone: stri
     return <p className="muted">Consultando movimientos del turno…</p>;
   }
   const data = movements.data;
+  const currency = data.by_currency;
+  // Los totales por moneda solo se muestran cuando el turno movió dólares o tiene tipo de cambio.
+  const dollars =
+    !!currency &&
+    (!!shift.usd_rate || !isZeroMoney(currency.usd_in) || !isZeroMoney(currency.usd_out));
   return (
     <div className="form-stack">
       <div className="shift-summary">
@@ -28,6 +39,24 @@ function ShiftMovementsTable({ shift, timezone }: { shift: Shift; timezone: stri
           <strong>{formatMoney(data.expected_cash)}</strong>
         </div>
       </div>
+      {dollars && currency && (
+        <div className="shift-summary" aria-label="Efectivo físico por moneda">
+          <div>
+            Pesos físicos esperados
+            <strong>{formatMoney(currency.expected_mxn)}</strong>
+          </div>
+          <div>
+            Dólares físicos esperados
+            <strong>{formatDollars(currency.expected_usd)}</strong>
+          </div>
+          <div>
+            Dólares recibidos / entregados
+            <strong>
+              {formatDollars(currency.usd_in)} / {formatDollars(currency.usd_out)}
+            </strong>
+          </div>
+        </div>
+      )}
       <h3 className="bill-section-title">Totales por método</h3>
       <div className="table-container">
         <table>
@@ -149,6 +178,14 @@ export function ShiftOverview({
             Uso del turno
             <strong>{current.data.shared_shifts ? 'Compartido' : 'Solo quien lo abrió'}</strong>
           </div>
+          {(current.data.usd_cash || shift.usd_rate) && (
+            <div>
+              Tipo de cambio del dólar
+              <strong>
+                {shift.usd_rate ? `${formatMoney(shift.usd_rate)} por dólar` : 'Sin capturar'}
+              </strong>
+            </div>
+          )}
         </div>
       )}
       {shift && current.data.reason && <Notice>{current.data.reason}</Notice>}

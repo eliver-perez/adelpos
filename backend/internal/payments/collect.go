@@ -1,11 +1,13 @@
 package payments
 
 import (
+	"errors"
 	"sort"
 	"strings"
 
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/features"
 )
 
 type Selection struct {
@@ -14,11 +16,17 @@ type Selection struct {
 }
 
 type PaymentInput struct {
-	OperationID     string      `json:"operation_id"`
-	MethodID        string      `json:"method_id"`
-	Mode            string      `json:"mode"`
-	Amount          string      `json:"amount"`
-	Received        string      `json:"received"`
+	OperationID string `json:"operation_id"`
+	MethodID    string `json:"method_id"`
+	Mode        string `json:"mode"`
+	Amount      string `json:"amount"`
+	// Received son los pesos recibidos en efectivo. Sin dólares, vacío significa importe exacto;
+	// con dólares, vacío significa cero pesos.
+	Received string `json:"received"`
+	// ReceivedUSD son los dólares recibidos y ChangeCurrency la moneda en que sale el cambio
+	// (MXN predeterminado). Solo se admiten con la función usd_cash activa y método de efectivo.
+	ReceivedUSD     string      `json:"received_usd"`
+	ChangeCurrency  string      `json:"change_currency"`
 	Tip             string      `json:"tip"`
 	Reference       string      `json:"reference"`
 	Selections      []Selection `json:"selections"`
@@ -48,6 +56,8 @@ type PaymentPlan struct {
 	Settles        bool           `json:"settles"`
 	SelectionTotal *string        `json:"selection_total"`
 	Units          []SelectedUnit `json:"units"`
+	// USD solo aparece con la función usd_cash activa, método de efectivo y turno con tipo de cambio.
+	USD *USDPlan `json:"usd,omitempty"`
 
 	method   *Method
 	amount   decimal.Decimal
@@ -57,6 +67,36 @@ type PaymentPlan struct {
 	shares   []decimal.Decimal
 	selected []unitState
 	kind     string
+	// dollars conserva la captura en dólares validada; settlement, su liquidación con el tipo de
+	// cambio del turno cuando intervienen dólares.
+	dollars       *dollarCapture
+	settlement    *cashSettlement
+	rate          *decimal.Decimal
+	inputReceived string
+}
+
+// USDPlan expresa en pesos y en dólares el cobro en efectivo. Todas las cifras las calcula Go con
+// el tipo de cambio fijo del turno; la interfaz solo las muestra.
+type USDPlan struct {
+	Rate           string `json:"rate"`
+	BalanceUSD     string `json:"balance_usd"`
+	ChargedUSD     string `json:"charged_usd"`
+	ReceivedMXN    string `json:"received_mxn"`
+	ReceivedUSD    string `json:"received_usd"`
+	ReceivedUSDMXN string `json:"received_usd_mxn"`
+	ReceivedTotal  string `json:"received_total"`
+	ChangeMXN      string `json:"change_mxn"`
+	ChangeUSD      string `json:"change_usd"`
+	ChangeCurrency string `json:"change_currency"`
+	Covered        bool   `json:"covered"`
+	MissingMXN     string `json:"missing_mxn"`
+	MissingUSD     string `json:"missing_usd"`
+}
+
+// dollarCapture es la parte en dólares de una captura de efectivo.
+type dollarCapture struct {
+	receivedUSD    decimal.Decimal
+	changeCurrency string
 }
 
 // selectUnits elige, por cada partida, unidades con importe pendiente: primero las que ya tienen
@@ -170,7 +210,21 @@ func (handler *service) planPayment(finance *Finance, input PaymentInput) (*Paym
 	}
 	plan.amount, plan.tip = amount, tip
 	charged := amount.Add(tip)
-	if method.IsCash {
+	dollars, err := handler.parseDollars(input, method)
+	if err != nil {
+		return nil, err
+	}
+	plan.dollars = dollars
+	plan.inputReceived = strings.TrimSpace(input.Received)
+	if method.IsCash && dollars != nil {
+		// Con dólares, lo recibido y el cambio se liquidan con el tipo de cambio del turno
+		// (applyDollars); aquí solo se valida la forma de los pesos recibidos.
+		if strings.TrimSpace(input.Received) != "" {
+			if _, err := parseAmount(input.Received, "pesos recibidos"); err != nil {
+				return nil, err
+			}
+		}
+	} else if method.IsCash {
 		received := charged
 		if strings.TrimSpace(input.Received) != "" {
 			received, err = parseAmount(input.Received, "efectivo recibido")
@@ -251,7 +305,133 @@ func (handler *service) previewPayment(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handler.planPayment(finance, input)
+	plan, err := handler.planPayment(finance, input)
+	if err != nil {
+		return nil, err
+	}
+	if err := handler.previewDollars(plan); err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+// previewDollars agrega a la vista previa de un cobro en efectivo sus cifras en dólares cuando la
+// función está activa y el turno tiene tipo de cambio. Sin dólares capturados, un turno no
+// utilizable no impide la vista previa en pesos; con dólares, su error se informa.
+func (handler *service) previewDollars(plan *PaymentPlan) error {
+	if !plan.method.IsCash {
+		return nil
+	}
+	if plan.dollars == nil {
+		enabled, err := features.Enabled(handler.ctx, handler.tx, features.USDCash)
+		if err != nil || !enabled {
+			return err
+		}
+	}
+	shift, err := handler.usableShift()
+	if err != nil {
+		var problem *Error
+		if plan.dollars == nil && errors.As(err, &problem) {
+			return nil
+		}
+		return err
+	}
+	return handler.applyDollars(plan, shift, true)
+}
+
+// parseDollars valida la parte en dólares de la captura. Cualquier dato en dólares con la función
+// desactivada se rechaza (409 FEATURE_DISABLED) aunque se llame a la API directamente; solo el
+// efectivo admite dólares.
+func (handler *service) parseDollars(input PaymentInput, method *Method) (*dollarCapture, error) {
+	currency := strings.TrimSpace(input.ChangeCurrency)
+	if currency != "" && currency != currencyMXN && currency != currencyUSD {
+		return nil, invalid("La moneda del cambio debe ser pesos (MXN) o dólares (USD).")
+	}
+	receivedText := strings.TrimSpace(input.ReceivedUSD)
+	if receivedText == "" && currency != currencyUSD {
+		return nil, nil
+	}
+	if err := handler.requireUSDCash(); err != nil {
+		return nil, err
+	}
+	if !method.IsCash {
+		return nil, invalid("Solo el efectivo admite dólares. " + method.Name + " se registra en pesos.")
+	}
+	received := zero
+	if receivedText != "" {
+		value, err := parseAmount(receivedText, "dólares recibidos")
+		if err != nil {
+			return nil, err
+		}
+		received = value
+	}
+	if currency == "" {
+		currency = currencyMXN
+	}
+	return &dollarCapture{receivedUSD: received, changeCurrency: currency}, nil
+}
+
+// applyDollars liquida el efectivo con el tipo de cambio fijo del turno. Con dólares capturados,
+// un turno sin tipo de cambio no los acepta (409 USD_RATE_REQUIRED) y un efectivo insuficiente se
+// rechaza al registrar; en la vista previa (preview) se informa lo que falta en ambas monedas.
+func (handler *service) applyDollars(plan *PaymentPlan, shift *Shift, preview bool) error {
+	if shift.USDRate == nil {
+		if plan.dollars != nil {
+			return conflict("USD_RATE_REQUIRED", "El turno no tiene tipo de cambio: no acepta dólares hasta que alguien con permiso lo capture.")
+		}
+		return nil
+	}
+	rate := decimal.RequireFromString(*shift.USDRate)
+	charged := plan.amount.Add(plan.tip)
+	usd := &USDPlan{
+		Rate:       money(rate),
+		BalanceUSD: money(mxnToUSD(decimal.RequireFromString(plan.BalanceBefore), rate)),
+		ChargedUSD: money(mxnToUSD(charged, rate)),
+		MissingMXN: "0.00",
+		MissingUSD: "0.00",
+	}
+	if plan.dollars == nil {
+		// Solo pesos: las cifras en dólares son informativas y el pago se registra como en la etapa 6.
+		usd.ReceivedMXN = money(*plan.received)
+		usd.ReceivedUSD = "0.00"
+		usd.ReceivedUSDMXN = "0.00"
+		usd.ReceivedTotal = money(*plan.received)
+		usd.ChangeMXN = money(plan.change)
+		usd.ChangeUSD = money(mxnToUSD(plan.change, rate))
+		usd.ChangeCurrency = currencyMXN
+		usd.Covered = true
+		plan.USD = usd
+		return nil
+	}
+	pesos := zero
+	if strings.TrimSpace(plan.inputReceived) != "" {
+		pesos = decimal.RequireFromString(plan.inputReceived)
+	}
+	settlement := settleCashWithUSD(charged, pesos, plan.dollars.receivedUSD, rate, plan.dollars.changeCurrency)
+	if !settlement.covered && !preview {
+		return invalid("El efectivo recibido no cubre el importe y la propina: faltan " + formatPesos(settlement.missing) +
+			" (US$" + money(usdToCover(settlement.missing, rate)) + ").")
+	}
+	usd.ReceivedMXN = money(settlement.receivedMXN)
+	usd.ReceivedUSD = money(settlement.receivedUSD)
+	usd.ReceivedUSDMXN = money(settlement.receivedUSDMXN)
+	usd.ReceivedTotal = money(settlement.receivedTotal)
+	usd.ChangeMXN = money(settlement.change)
+	usd.ChangeUSD = money(settlement.changeUSD)
+	usd.ChangeCurrency = settlement.changeCurrency
+	usd.Covered = settlement.covered
+	usd.MissingMXN = money(settlement.missing)
+	usd.MissingUSD = money(usdToCover(settlement.missing, rate))
+	received := settlement.receivedTotal
+	plan.received = &received
+	formatted := money(received)
+	plan.Received = &formatted
+	plan.change = settlement.change
+	plan.Change = money(settlement.change)
+	plan.settlement = &settlement
+	plan.rate = &rate
+	plan.USD = usd
+	return nil
 }
 
 func (handler *service) readAccountFinance(parts []string) (any, error) {
@@ -306,19 +486,33 @@ func (handler *service) registerPayment(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A partir de aquí se escribe: toda autorización ya se verificó.
+	if plan.dollars != nil {
+		if err := handler.applyDollars(plan, shift, false); err != nil {
+			return nil, err
+		}
+	}
+	// A partir de aquí se escribe: toda autorización y validación ya se verificó.
 	paymentID := newID()
 	var received *string
 	if plan.received != nil {
 		formatted := money(*plan.received)
 		received = &formatted
 	}
+	currency := paymentCurrency{}
+	var physical *cashPhysical
+	if plan.settlement != nil && plan.settlement.usesDollars() {
+		currency = currencyColumns(*plan.settlement, *plan.rate)
+		effect := plan.settlement.physical(*plan.rate)
+		physical = &effect
+	}
 	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.payments(id,account_id,shift_id,register_id,method_id,method_name,is_cash,
-        kind,amount,tip,received,change_given,reference,actor_id,device_id,operation_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12,$13,$14,$15,$16)`,
+        kind,amount,tip,received,change_given,reference,actor_id,device_id,operation_id,
+        received_mxn,received_usd,usd_rate,change_currency,change_usd)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12,$13,$14,$15,$16,$17::numeric,$18::numeric,$19::numeric,$20,$21::numeric)`,
 		paymentID, accountID, shift.ID, shift.RegisterID, plan.method.ID, plan.method.Name, plan.method.IsCash, plan.kind,
 		plan.Amount, plan.Tip, received, plan.Change, strings.TrimSpace(input.Reference),
-		handler.request.Actor.UserID, handler.request.Actor.DeviceID, handler.operationID)
+		handler.request.Actor.UserID, handler.request.Actor.DeviceID, handler.operationID,
+		currency.receivedMXN, currency.receivedUSD, currency.rate, currency.changeCurrency, currency.changeUSD)
 	if err != nil {
 		return nil, err
 	}
@@ -333,11 +527,39 @@ func (handler *service) registerPayment(parts []string) (any, error) {
 	}
 	if err := handler.insertMovement(shift, movementInput{
 		Kind: "payment", Method: plan.method, Sale: plan.amount, Tip: plan.tip, Received: plan.received, Change: plan.change,
-		AccountID: accountID, PaymentID: &paymentID,
+		AccountID: accountID, PaymentID: &paymentID, Physical: physical,
 	}); err != nil {
 		return nil, err
 	}
 	return handler.completeCollection(accountID, paymentID, input)
+}
+
+// paymentCurrency son las columnas por moneda de un pago; todas nil en un pago solo en pesos.
+type paymentCurrency struct {
+	receivedMXN    *string
+	receivedUSD    *string
+	rate           *string
+	changeCurrency *string
+	changeUSD      *string
+}
+
+func optionalMoney(value decimal.Decimal) *string {
+	formatted := money(value)
+	return &formatted
+}
+
+func currencyColumns(settlement cashSettlement, rate decimal.Decimal) paymentCurrency {
+	currency := settlement.changeCurrency
+	columns := paymentCurrency{
+		receivedMXN:    optionalMoney(settlement.receivedMXN),
+		receivedUSD:    optionalMoney(settlement.receivedUSD),
+		rate:           optionalMoney(rate),
+		changeCurrency: &currency,
+	}
+	if currency == currencyUSD {
+		columns.changeUSD = optionalMoney(settlement.changeUSD)
+	}
+	return columns
 }
 
 // completeCollection cierra la cuenta liquidada cuando corresponde, registra la entrega
@@ -441,21 +663,52 @@ type movementInput struct {
 	AccountID string
 	PaymentID *string
 	RefundID  *string
+	// Physical es el efecto por moneda cuando intervienen dólares o se invierte otro movimiento;
+	// si es nil, un movimiento de efectivo se registra solo en pesos.
+	Physical *cashPhysical
+}
+
+// pesosOnly deduce el efecto físico de un efectivo solo en pesos: entra lo recibido y sale el
+// cambio; sin importe recibido, el neto positivo entra y el negativo (devoluciones) sale.
+func pesosOnly(input movementInput, net decimal.Decimal) cashPhysical {
+	if input.Received != nil {
+		return cashPhysical{mxnIn: *input.Received, mxnOut: input.Change}
+	}
+	if net.Sign() >= 0 {
+		return cashPhysical{mxnIn: net}
+	}
+	return cashPhysical{mxnOut: net.Neg()}
 }
 
 // insertMovement registra el efecto del cobro o devolución en el turno. El efectivo recibido y el
 // cambio se guardan para el arqueo, pero el neto (venta + propina) es lo único que suma en caja.
+// Los movimientos de efectivo registran además lo que entra y sale por moneda (pesos y dólares
+// físicos) para que el corte de la etapa 7 cuente cada moneda por separado.
 func (handler *service) insertMovement(shift *Shift, input movementInput) error {
 	received := zero
 	if input.Received != nil {
 		received = *input.Received
 	}
 	net := input.Sale.Add(input.Tip)
+	var mxnIn, mxnOut, usdIn, usdOut, rate *string
+	if input.Method.IsCash {
+		physical := pesosOnly(input, net)
+		if input.Physical != nil {
+			physical = *input.Physical
+		}
+		mxnIn, mxnOut = optionalMoney(physical.mxnIn), optionalMoney(physical.mxnOut)
+		usdIn, usdOut = optionalMoney(physical.usdIn), optionalMoney(physical.usdOut)
+		if physical.rate != nil {
+			rate = optionalMoney(*physical.rate)
+		}
+	}
 	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.cash_movements(id,shift_id,register_id,kind,method_id,method_name,is_cash,
-        sale_amount,tip_amount,net_amount,cash_received,change_given,account_id,payment_id,refund_id,actor_id,device_id,operation_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        sale_amount,tip_amount,net_amount,cash_received,change_given,account_id,payment_id,refund_id,actor_id,device_id,operation_id,
+        mxn_in,mxn_out,usd_in,usd_out,usd_rate)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::numeric,$20::numeric,$21::numeric,$22::numeric,$23::numeric)`,
 		newID(), shift.ID, shift.RegisterID, input.Kind, input.Method.ID, input.Method.Name, input.Method.IsCash,
 		money(input.Sale), money(input.Tip), money(net), money(received), money(input.Change), input.AccountID,
-		input.PaymentID, input.RefundID, handler.request.Actor.UserID, handler.request.Actor.DeviceID, handler.operationID)
+		input.PaymentID, input.RefundID, handler.request.Actor.UserID, handler.request.Actor.DeviceID, handler.operationID,
+		mxnIn, mxnOut, usdIn, usdOut, rate)
 	return err
 }

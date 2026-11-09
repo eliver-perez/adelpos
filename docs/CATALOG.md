@@ -70,6 +70,15 @@ Promociones iniciales: 2×1, porcentaje, compra/paga por cantidad y precio espec
 
 El resultado muestra cada promoción aplicada o descartada, motivo e importe descontado. Cambiar la lista, cantidad o personalización invalida visualmente el resultado anterior hasta recibir el cálculo nuevo. Una respuesta atrasada no reemplaza una selección reciente.
 
+## Tasa de IVA por producto · etapa 6.1
+
+Cada producto y cada combo tienen una **tasa de IVA** elegida con botones en su editor: «Tasa general del establecimiento» (predeterminada), **16 %**, **8 %** o **0 %**. No hay captura libre. Go valida la lista cerrada y PostgreSQL la impone (`catalog_products.tax_rate`, `NULL` = hereda la tasa general configurada en Cobros; restricción `catalog_products_tax_rate_check`).
+
+- Los precios ya incluyen IVA: la tasa solo decide cómo se desglosa el importe. El motor de precios no cambia.
+- Cambiar la tasa de un producto exige `catalog.prices.manage` (como el precio) y queda auditado con el guardado del producto (`catalog.products.updated`, estado anterior y nuevo). Sin ese permiso los botones se muestran desactivados y Go rechaza el cambio con 403; los demás cambios del producto siguen permitidos.
+- Duplicar conserva la tasa. Cambiar la tasa incrementa la revisión del producto, por lo que un borrador abierto recibe `QUOTE_CHANGED` al confirmarse y pide revisar el desglose.
+- La tasa solo afecta lo que se confirme después: cada versión de partida guarda su tasa efectiva al confirmarse (ver [PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md)). Un combo aplica su propia tasa a todo su importe, aunque sus componentes tengan otra.
+
 ## Disponibilidad, imágenes y concurrencia
 
 Fechas inclusivas, días domingo 0 a sábado 6 e intervalos `[inicio, fin)` en hora del establecimiento. Vacío significa sin restricciones. `24:00` se admite como fin; para cruzar medianoche crear intervalos separados. No se acepta un reloj enviado por el cliente.

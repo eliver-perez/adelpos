@@ -1,7 +1,5 @@
 package operations
 
-import "local/ad-el-pos/server/internal/payments"
-
 func (handler *service) persistEdit(account *Account, input EditInput, calculation *editCalculation) (any, error) {
 	previous := calculation.Previous
 	orderID := previous.OrderID
@@ -20,14 +18,17 @@ func (handler *service) persistEdit(account *Account, input EditInput, calculati
 		return nil, err
 	}
 	line := calculation.Result.Quote.Lines[0]
-	// Cambiar la tasa solo afecta lo que se confirma después: una edición que conserva importes
-	// conserva también la tasa histórica de la versión anterior.
-	taxRate, err := payments.CurrentTaxRate(handler.ctx, handler.tx)
-	if err != nil {
-		return nil, err
-	}
+	// Cambiar la tasa (del producto o la general) solo afecta lo que se confirma después: una
+	// edición con nueva cotización toma la tasa efectiva vigente del producto raíz, y una edición
+	// que conserva importes conserva también la tasa histórica de la versión anterior.
+	var taxRate int
 	if calculation.Preserve {
 		if err := handler.tx.QueryRow(handler.ctx, "SELECT tax_rate FROM app.restaurant_item_versions WHERE id=$1", previous.ID).Scan(&taxRate); err != nil {
+			return nil, err
+		}
+	} else {
+		taxRate, err = handler.effectiveTaxRate(input.Line.ProductID)
+		if err != nil {
 			return nil, err
 		}
 	}

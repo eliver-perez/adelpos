@@ -28,7 +28,7 @@ import { PaymentCapture, RecordedPayment, statusTitle } from './PaymentCapture';
 import type { CheckoutStatus } from './PaymentCapture';
 import { CheckoutMethods } from './PaymentMethods';
 import { RefundPanel } from './RefundPanel';
-import { ShiftOpening } from './ShiftOpening';
+import { ShiftOpening, ShiftRateCapture } from './ShiftOpening';
 import { UncertainOperation } from './UncertainOperation';
 import { DocumentList } from '../documents/DocumentList';
 import { newestFinance, selectableUnits } from './captureState';
@@ -86,12 +86,21 @@ export function CheckoutPanel({
     interval: 60000,
   });
   const [recorded, setRecorded] = useState<Finance | null>(null);
+  // Captura única del tipo de cambio del turno abierto (pago en dólares activo).
+  const [rateCapture, setRateCapture] = useState(false);
   const [notice, setNotice] = useState('');
   const [retryNotice, setRetryNotice] = useState('');
   const mutation = useFinancialMutation(accountID, handleResult);
   const finance = newestFinance(polled.data, recorded, accountID);
   const activeMethods = (methods.data ?? []).filter((method) => method.active);
   const shiftUsable = shift.data?.usable ?? false;
+  // Con la función de pago en dólares desactivada, el cobro queda exactamente como en la etapa 6.
+  const dollarState = {
+    enabled: !!shift.data?.usd_cash,
+    rate: shift.data?.shift?.usd_rate ?? null,
+  };
+  const rateMissing =
+    dollarState.enabled && shiftUsable && !!shift.data?.shift && !dollarState.rate;
   const reloadFinance = polled.reload;
   const reloadShift = shift.reload;
   const locked = mutation.busy || !!mutation.pending;
@@ -117,6 +126,7 @@ export function CheckoutPanel({
     initialDeliver,
     reloadFinance,
     reloadShift,
+    dollarState,
   });
   const refund = useRefundFlow({
     accountID,
@@ -443,7 +453,43 @@ export function CheckoutPanel({
     );
   }
 
+  // Aviso del turno sin tipo de cambio: no acepta dólares hasta que alguien con permiso lo capture.
+  const dollarNotice = rateMissing ? (
+    <div className="checkout-usd" role="status">
+      <p className="checkout-usd-equivalent">
+        Este turno no tiene tipo de cambio del dólar: por ahora solo acepta pesos.
+      </p>
+      {can('payments.usd_rate.manage') ? (
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={locked}
+          onClick={() => setRateCapture(true)}
+        >
+          Capturar tipo de cambio
+        </button>
+      ) : (
+        <p className="muted text-xs">
+          Lo captura alguien con el permiso «{permissionName('payments.usd_rate.manage')}».
+        </p>
+      )}
+    </div>
+  ) : null;
+
   function operationColumn(current: Finance) {
+    if (rateCapture && rateMissing && shift.data?.shift && !correcting && mode === 'collect') {
+      return (
+        <ShiftRateCapture
+          shift={shift.data.shift}
+          active={active}
+          onChanged={() => {
+            setRateCapture(false);
+            void reloadShift();
+          }}
+          onCancel={() => setRateCapture(false)}
+        />
+      );
+    }
     if (correcting) {
       return (
         <CorrectionPanel
@@ -513,6 +559,9 @@ export function CheckoutPanel({
           deliverAvailable={collect.deliverAvailable}
           deliverEnabled={collect.deliverEnabled}
           deliverRequested={collect.deliverRequested}
+          dollars={collect.dollars}
+          dollarRate={collect.dollarRate}
+          dollarNotice={dollarNotice}
         />
       </CheckoutCaptureOrSummary>
     );

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { PaymentMethodIcon } from '../../../components/PaymentMethodIcon';
-import { formatMoney, isZeroMoney } from '../../../services/payments';
+import { formatDollars, formatMoney, isZeroMoney } from '../../../services/payments';
 import type { PaymentMethod, PaymentRecord, RefundRecord } from '../../../services/payments';
 import { serverDateTime } from '../../../services/restaurant';
 
@@ -74,6 +74,16 @@ function PaymentHistoryItem({
         )}
         {payment.reference && <> · Ref. {payment.reference}</>}
       </p>
+      {/* Un efectivo con dólares conserva lo recibido en cada moneda y el tipo de cambio aplicado. */}
+      {payment.is_cash && payment.received_usd && (
+        <p className="payment-history-detail">
+          {formatMoney(payment.received_mxn)} y {formatDollars(payment.received_usd)} a{' '}
+          {formatMoney(payment.usd_rate)} por dólar
+          {payment.change_currency === 'USD' && payment.change_usd
+            ? ` · cambio entregado en dólares ${formatDollars(payment.change_usd)}`
+            : ''}
+        </p>
+      )}
       {/* La propina se muestra siempre aparte de la venta; el cambio nunca se convierte en propina. */}
       {!isZeroMoney(payment.tip) && (
         <p className="payment-history-detail">Propina aparte {formatMoney(payment.tip)}</p>

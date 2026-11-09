@@ -1,8 +1,11 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TextareaHTMLAttributes } from 'react';
 import { Field, Form, Notice, PageTitle } from '../components/Forms';
+import { ToggleButton } from '../components/ToggleButton';
 import { useResource } from '../hooks/useResource';
-import { api } from '../services/api';
+import { api, APIError } from '../services/api';
+import { saveFeature } from '../services/features';
+import type { EstablishmentFeature } from '../services/features';
 import type { Settings } from '../services/models';
 import { filterTimezones, timezoneLabel, timezoneOptions } from '../services/timezones';
 
@@ -176,6 +179,91 @@ function SettingsEditor({
   );
 }
 
+// Funciones activables: un interruptor por función con su explicación. Go guarda el estado y lo
+// hace cumplir aunque se llame a la API directamente; desactivar nunca borra registros.
+export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
+  const resource = useResource<EstablishmentFeature[]>('settings_features');
+  const editable = can('settings.features.manage');
+  const [saving, setSaving] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function change(feature: EstablishmentFeature, enabled: boolean) {
+    if (saving !== '') {
+      return;
+    }
+    setSaving(feature.code);
+    setMessage('');
+    setError('');
+    try {
+      const saved = await saveFeature({
+        code: feature.code,
+        enabled,
+        revision: feature.revision,
+      });
+      setMessage(`${saved.name}: ${saved.enabled ? 'activada' : 'desactivada'}.`);
+      // Las pantallas abiertas (cobro, turno, cobros) vuelven a consultar el estado.
+      window.dispatchEvent(new CustomEvent('adel-server-change'));
+    } catch (problem) {
+      if (problem instanceof APIError && problem.code === 'REVISION_CONFLICT') {
+        setError(
+          'La función cambió en otra terminal. Se cargó su estado actual; revísalo antes de cambiarla.',
+        );
+      } else {
+        setError(problem instanceof Error ? problem.message : 'No se pudo guardar la función.');
+      }
+    } finally {
+      setSaving('');
+      await resource.reload();
+    }
+  }
+
+  return (
+    <section className="surface panel form-stack" aria-labelledby="features-title">
+      <div>
+        <h2 id="features-title">Funciones del establecimiento</h2>
+        <p className="muted text-sm">
+          Activa solo lo que usa este restaurante. Una función desactivada no aparece en la
+          operación y el servidor rechaza sus datos; desactivarla nunca borra ni altera los
+          registros que ya generó.
+        </p>
+      </div>
+      <Notice>{resource.error}</Notice>
+      <ul className="feature-list">
+        {(resource.data ?? []).map((feature) => (
+          <li key={feature.code} className="feature-row">
+            {/* El interruptor lleva el nombre de la función; su estado se anuncia con aria-pressed. */}
+            <ToggleButton
+              label={feature.name}
+              pressed={feature.enabled}
+              onChange={(enabled) => void change(feature, enabled)}
+              disabled={!editable || saving !== '' || resource.loading}
+              describedBy={`feature-${feature.code}-description`}
+            />
+            <div className="feature-text">
+              <p id={`feature-${feature.code}-description`} className="muted text-sm">
+                {feature.description}
+              </p>
+              <small className={feature.enabled ? 'feature-state-on' : 'muted'}>
+                {feature.enabled ? 'Activada' : 'Desactivada'}
+                {feature.updated_by_name ? ` · último cambio: ${feature.updated_by_name}` : ''}
+              </small>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {!editable && (
+        <p className="muted text-sm">
+          Cambiar las funciones requiere el permiso «Activar o desactivar funciones del
+          establecimiento».
+        </p>
+      )}
+      <Notice>{error}</Notice>
+      {message && <Notice success>{message}</Notice>}
+    </section>
+  );
+}
+
 export function SettingsPage({
   can,
   onSaved,
@@ -198,6 +286,7 @@ export function SettingsPage({
           onSaved={onSaved}
         />
       )}
+      <FeaturesSection can={can} />
     </>
   );
 }

@@ -1,10 +1,71 @@
-import type { Lookups, Product } from '../../services/catalog';
+import type { Lookups, Product, ProductTaxRate } from '../../services/catalog';
 import { productSiblings } from '../../services/catalogPositions';
 import { PositionField } from '../PositionField';
+import { SegmentedControl } from '../SegmentedControl';
 import { Check, DecimalField, ReferenceField, ScheduleEditor, TextField } from './EditorFields';
 import { ImageEditor } from './ImageEditor';
 import { VariantEditor, IngredientRulesEditor, ProductGroupsEditor } from './ProductDetailsEditors';
 import { ComboEditor } from './ComboEditor';
+
+type TaxChoice = 'general' | '16' | '8' | '0';
+
+const taxChoices: { value: TaxChoice; label: string }[] = [
+  { value: 'general', label: 'Tasa general del establecimiento' },
+  { value: '16', label: '16 %' },
+  { value: '8', label: '8 %' },
+  { value: '0', label: '0 %' },
+];
+
+function taxChoice(rate: ProductTaxRate | null | undefined): TaxChoice {
+  if (rate === 16 || rate === 8 || rate === 0) {
+    return String(rate) as TaxChoice;
+  }
+  return 'general';
+}
+
+function choiceRate(choice: TaxChoice): ProductTaxRate | null {
+  if (choice === '16') {
+    return 16;
+  }
+  if (choice === '8') {
+    return 8;
+  }
+  if (choice === '0') {
+    return 0;
+  }
+  return null;
+}
+
+// Tasa de IVA del producto (y del combo, que la aplica a todo su importe): botones de una lista
+// cerrada, sin captura libre. Cambiarla exige el permiso de precios, como el precio, y Go la
+// audita con el guardado. Solo afecta a lo que se confirme después.
+export function ProductTaxField({
+  value,
+  onChange,
+  editable,
+}: {
+  value: ProductTaxRate | null | undefined;
+  onChange: (rate: ProductTaxRate | null) => void;
+  editable: boolean;
+}) {
+  return (
+    <div className="field product-tax-field">
+      <span>Tasa de IVA</span>
+      <SegmentedControl<TaxChoice>
+        label="Tasa de IVA del producto"
+        value={taxChoice(value)}
+        onChange={(choice) => onChange(choiceRate(choice))}
+        disabled={!editable}
+        options={taxChoices}
+      />
+      <small className="muted">
+        {editable
+          ? 'Los precios incluyen IVA. La tasa general es la configurada en Cobros; cambiar la tasa solo afecta a los pedidos que se confirmen después.'
+          : 'Cambiar la tasa requiere el permiso «Modificar precios y valores comerciales».'}
+      </small>
+    </div>
+  );
+}
 
 export function ProductEditor({
   value,
@@ -50,6 +111,11 @@ export function ProductEditor({
           label="Precio base anunciado"
           value={value.base_price}
           onChange={(base_price) => onChange({ ...value, base_price })}
+        />
+        <ProductTaxField
+          value={value.tax_rate}
+          onChange={(tax_rate) => onChange({ ...value, tax_rate })}
+          editable={can('catalog.prices.manage')}
         />
         <PositionField
           label="Posición en su categoría"

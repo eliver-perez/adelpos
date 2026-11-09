@@ -130,11 +130,14 @@ type ComboSlot struct {
 
 type Product struct {
 	Metadata
-	CategoryID           string              `json:"category_id"`
-	Code                 string              `json:"code"`
-	Barcode              *string             `json:"barcode"`
-	Kind                 string              `json:"kind"`
-	BasePrice            string              `json:"base_price"`
+	CategoryID string  `json:"category_id"`
+	Code       string  `json:"code"`
+	Barcode    *string `json:"barcode"`
+	Kind       string  `json:"kind"`
+	BasePrice  string  `json:"base_price"`
+	// TaxRate es la tasa de IVA propia (0, 8 o 16); nil hereda la tasa general del establecimiento.
+	// En un combo aplica a todo su importe.
+	TaxRate              *int                `json:"tax_rate"`
 	ImageID              *string             `json:"image_id"`
 	SortOrder            int                 `json:"sort_order"`
 	Archived             bool                `json:"archived"`

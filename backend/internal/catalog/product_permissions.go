@@ -13,7 +13,9 @@ func validateProductPermissions(product, previous *Product, actor Actor) error {
 	availabilityChanged := hasSchedule(product.Availability) || product.TemporaryUnavailable
 	imageChanged := product.ImageID != nil
 	if previous != nil {
+		// La tasa de IVA propia es un atributo comercial: cambiarla exige el mismo permiso que el precio.
 		pricesChanged = previous.BasePrice != product.BasePrice ||
+			!reflect.DeepEqual(previous.TaxRate, product.TaxRate) ||
 			!reflect.DeepEqual(previous.Variants, product.Variants) ||
 			!reflect.DeepEqual(previous.Ingredients, product.Ingredients) ||
 			!reflect.DeepEqual(previous.Groups, product.Groups) ||

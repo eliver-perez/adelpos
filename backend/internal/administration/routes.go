@@ -104,6 +104,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		}
 		return result, err
 	}
+	// Las funciones del establecimiento se identifican por código, no por UUID.
+	if route == "settings/features" {
+		return establishmentFeatures(ctx, tx, request, principal)
+	}
 	parts := strings.Split(route, "/")
 	if len(parts) > 1 && parts[1] != "invitations" && !identifierPattern.MatchString(parts[1]) {
 		return nil, invalid("El identificador no es válido.")

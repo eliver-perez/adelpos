@@ -128,12 +128,17 @@ export interface ComboSlot {
   options: ComboOption[];
 }
 
+// Tasa de IVA propia de un producto o combo: lista cerrada validada en Go y PostgreSQL. null (o
+// ausente) hereda la tasa general vigente del establecimiento.
+export type ProductTaxRate = 16 | 8 | 0;
+
 export interface Product extends Metadata {
   category_id: string;
   code: string;
   barcode: string | null;
   kind: string;
   base_price: string;
+  tax_rate?: ProductTaxRate | null;
   image_id: string | null;
   sort_order: number;
   archived: boolean;
