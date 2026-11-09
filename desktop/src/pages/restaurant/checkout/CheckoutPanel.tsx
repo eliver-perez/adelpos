@@ -31,6 +31,8 @@ import type { CheckoutStatus } from './PaymentCapture';
 import { CheckoutMethods } from './PaymentMethods';
 import { RefundPanel } from './RefundPanel';
 import { ShiftOpening } from './ShiftOpening';
+import { CashLimitNotice } from '../../cash/CashNotices';
+import { useCashEvents } from '../../../hooks/useCashEvents';
 import { ShiftRateCapture } from './ShiftRateCapture';
 import { UncertainOperation } from './UncertainOperation';
 import { DocumentList } from '../documents/DocumentList';
@@ -112,6 +114,10 @@ export function CheckoutPanel({
     dollarState.enabled && shiftUsable && !!shift.data?.shift && !dollarState.rate;
   const reloadFinance = polled.reload;
   const reloadShift = shift.reload;
+  // Un evento de caja (apertura, arqueo, cierre o movimiento desde otra terminal) vuelve a consultar
+  // de inmediato el turno: el cobro refleja la pausa o el cierre sin esperar el sondeo. Go sigue
+  // rechazando cualquier cobro sobre un turno pausado o cerrado.
+  useCashEvents(() => void reloadShift(), active);
   const locked = mutation.busy || !!mutation.pending;
 
   const correction = useCorrectionFlow({
@@ -324,6 +330,7 @@ export function CheckoutPanel({
           {shift.error}
         </p>
       )}
+      {shiftUsable && <CashLimitNotice warning={shift.data?.cash_limit_warning} />}
     </>
   );
 

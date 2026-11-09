@@ -153,6 +153,15 @@ func (handler *service) currentShift(_ []string) (any, error) {
 		return result, nil
 	}
 	result["usd_rate_required"] = usdCash && shift.USDRate == nil
+	// Aviso del tope de caja (función cash_limit): solo para quien ve el esperado del turno. Nunca
+	// impide cobrar.
+	warning, err := handler.cashLimitWarning(shift)
+	if err != nil {
+		return nil, err
+	}
+	if warning != nil {
+		result["cash_limit_warning"] = warning
+	}
 	if !settings.SharedShifts && shift.OpenedBy != handler.request.Actor.UserID {
 		result["reason"] = "El turno abierto pertenece a " + shift.OpenedByName + " y la configuración no permite compartirlo."
 		return result, nil

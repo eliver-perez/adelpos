@@ -58,6 +58,9 @@ func (HostTransport) Submit(ctx context.Context, job PrintJob) Outcome {
 	if err := validatePrinter(&job.PrinterSnapshot); err != nil {
 		return Outcome{State: "intervention", Message: "El destino guardado requiere revisión."}
 	}
+	if job.DrawerPulse != nil {
+		return submitDrawerPulse(ctx, job)
+	}
 	switch job.PrinterSnapshot.Transport {
 	case "cups":
 		return submitCUPS(ctx, job)
@@ -179,4 +182,37 @@ func submitESCPos(ctx context.Context, job PrintJob) Outcome {
 		}
 	}
 	return Outcome{State: "submitted", Accepted: true, Message: "Bytes entregados a la conexión de red; no confirma impresión física."}
+}
+
+// DrawerPulseBytes es el comando ESC/POS de apertura del cajón: ESC p m t1 t2, con m el pin del
+// conector (0 = pin 2, 1 = pin 5), t1 = 25 (50 ms de pulso) y t2 = 250 (500 ms de pausa). No se
+// envía ESC @: reiniciar la impresora podría descartar lo que aún tenga en su búfer.
+func DrawerPulseBytes(pin int) []byte {
+	if pin != 1 {
+		pin = 0
+	}
+	return []byte{0x1b, 0x70, byte(pin), 0x19, 0xfa}
+}
+
+// submitDrawerPulse entrega el pulso del cajón por una conexión ESC/POS directa. Otros transportes
+// alterarían los bytes (CUPS los filtra como texto) o no existen aún (agente): el trabajo queda en
+// intervención sin enviar nada. La aceptación TCP no confirma que el cajón se abrió físicamente.
+func submitDrawerPulse(ctx context.Context, job PrintJob) Outcome {
+	printer := job.PrinterSnapshot
+	if !CompatibleDrawerTransport(printer.Transport) {
+		return Outcome{State: "intervention", Message: "El transporte de la impresora no entrega el pulso ESC/POS del cajón sin alterar; no se envió el comando."}
+	}
+	dialer := net.Dialer{Timeout: 4 * time.Second}
+	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(printer.Destination, strconv.Itoa(printer.Port)))
+	if err != nil {
+		return Outcome{State: "error", Message: "No se abrió la conexión con la impresora del cajón; no se envió el comando de apertura."}
+	}
+	defer connection.Close()
+	_ = connection.SetWriteDeadline(time.Now().Add(8 * time.Second))
+	data := DrawerPulseBytes(job.DrawerPulse.Pin)
+	written, err := connection.Write(data)
+	if err != nil || written != len(data) {
+		return Outcome{State: "uncertain", Message: "La conexión se interrumpió al enviar el comando de apertura; revisa el cajón antes de volver a abrirlo."}
+	}
+	return Outcome{State: "submitted", Accepted: true, Message: "Comando de apertura entregado a la conexión de red; no confirma que el cajón se abrió."}
 }

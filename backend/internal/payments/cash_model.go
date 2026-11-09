@@ -28,6 +28,9 @@ const (
 	permissionHistoryRead          = "cash.history.read"
 	permissionExpectedRead         = "cash.expected.read"
 	permissionClosuresReview       = "cash.closures.review"
+	permissionReportsPrint         = "cash.reports.print"
+	permissionReportsReprint       = "cash.reports.reprint"
+	permissionDrawerOpen           = "cash.drawer.open"
 	permissionCashSettings         = "cash.settings.manage"
 )
 

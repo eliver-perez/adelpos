@@ -19,6 +19,8 @@ func cashRoute(method string, parts []string) *route {
 		return &route{permissionShiftsRead, true, (*service).readShiftDetail}
 	case length == 2 && parts[0] == "cash-reports" && method == "GET":
 		return &route{permissionShiftsRead, true, (*service).readReport}
+	case length == 3 && (parts[0] == "cash-reports" || parts[0] == "cash-operations" || parts[0] == "cash-documents"):
+		return cashDocumentRoute(method, parts[0], parts[2])
 	case length >= 2 && parts[0] == "cash":
 		return cashSettingsRoute(method, parts)
 	case length >= 3 && parts[0] == "shifts":
@@ -44,6 +46,15 @@ func cashSettingsRoute(method string, parts []string) *route {
 			return &route{permissionCashSettings, false, (*service).createDenomination}
 		case resource == "expense-categories" && method == "POST":
 			return &route{permissionCashSettings, false, (*service).createExpenseCategory}
+		// Fase C: tope de caja, cajón de dinero por caja y apertura manual del cajón de la terminal.
+		case resource == "limit" && method == "GET":
+			return &route{permissionCashSettings, true, (*service).readCashLimitSettings}
+		case resource == "limit" && method == "PUT":
+			return &route{permissionCashSettings, false, (*service).saveCashLimitSettings}
+		case resource == "drawers" && method == "GET":
+			return &route{permissionCashSettings, true, (*service).listDrawerSettings}
+		case resource == "open-drawer" && method == "POST":
+			return &route{permissionDrawerOpen, false, (*service).openDrawerManually}
 		}
 		return nil
 	}
@@ -54,6 +65,28 @@ func cashSettingsRoute(method string, parts []string) *route {
 		case "expense-categories":
 			return &route{permissionCashSettings, false, (*service).updateExpenseCategory}
 		}
+	}
+	if len(parts) == 3 && method == "PUT" && resource == "drawers" {
+		return &route{permissionCashSettings, false, (*service).saveDrawerSettings}
+	}
+	return nil
+}
+
+// cashDocumentRoute atiende la vista previa, la impresión y la reimpresión de documentos de caja
+// (fase C): payments/cash-reports/{corte}/preview|print, payments/cash-operations/{operación}/
+// preview|print y payments/cash-documents/{documento}/reprint. La vista previa no escribe.
+func cashDocumentRoute(method, resource, action string) *route {
+	switch {
+	case resource == "cash-reports" && action == "preview" && method == "GET":
+		return &route{permissionShiftsRead, true, (*service).previewReportDocument}
+	case resource == "cash-reports" && action == "print" && method == "POST":
+		return &route{permissionReportsPrint, false, (*service).printReportDocument}
+	case resource == "cash-operations" && action == "preview" && method == "GET":
+		return &route{permissionMovementsRead, true, (*service).previewOperationDocument}
+	case resource == "cash-operations" && action == "print" && method == "POST":
+		return &route{permissionReportsPrint, false, (*service).printOperationDocument}
+	case resource == "cash-documents" && action == "reprint" && method == "POST":
+		return &route{permissionReportsReprint, false, (*service).reprintCashDocument}
 	}
 	return nil
 }
@@ -70,6 +103,8 @@ func shiftActionRoute(method, action string) *route {
 			return &route{permissionShiftsRead, true, (*service).readClosure}
 		case "summary":
 			return &route{permissionShiftsRead, true, (*service).shiftSummary}
+		case "documents":
+			return &route{permissionShiftsRead, true, (*service).shiftDocuments}
 		}
 		return nil
 	}
@@ -105,7 +140,7 @@ func shiftActionRoute(method, action string) *route {
 // cashIdentifier devuelve el identificador de la ruta que debe validarse como UUID, si existe.
 func cashIdentifier(parts []string) (string, bool) {
 	switch {
-	case len(parts) > 1 && parts[0] == "cash-reports":
+	case len(parts) > 1 && (parts[0] == "cash-reports" || parts[0] == "cash-operations" || parts[0] == "cash-documents"):
 		return parts[1], true
 	case len(parts) > 2 && parts[0] == "cash":
 		return parts[2], true

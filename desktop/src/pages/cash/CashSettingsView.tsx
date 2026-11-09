@@ -11,6 +11,7 @@ import type { CashCatalog, CashCurrency, Denomination, ExpenseCategory } from '.
 import { orderSiblings, positionPayload } from '../../services/positions';
 import { APIError } from '../../services/api';
 import type { Operation } from '../../services/api';
+import { CashLimitAdmin, DrawerAdmin } from './CashHardwareSettings';
 
 // Escrituras de configuración de caja con su propia clave de pendientes.
 const settingsPendingKey = 'cash:settings';
@@ -246,8 +247,8 @@ function CategoriesAdmin({
   );
 }
 
-// Configuración de caja (cash.settings.manage): denominaciones y categorías de gasto. El tope de
-// caja y el cajón de dinero pertenecen a la fase C.
+// Configuración de caja (cash.settings.manage): denominaciones, categorías de gasto, tope de caja
+// (función activable) y cajón de dinero por caja.
 export function CashSettingsView({ catalog }: { catalog: CashCatalog | null }) {
   const mutation = useRestaurantMutation(changed, settingsPendingKey);
   if (!catalog) {
@@ -292,6 +293,15 @@ export function CashSettingsView({ catalog }: { catalog: CashCatalog | null }) {
       </Accordion>
       <Accordion title="Categorías de gasto" summary="Nombre, estado y orden de las categorías">
         <CategoriesAdmin categories={catalog.expense_categories} execute={execute} />
+      </Accordion>
+      <Accordion title="Tope de caja" summary="Aviso de efectivo excedido; nunca bloquea cobros">
+        <CashLimitAdmin execute={execute} />
+      </Accordion>
+      <Accordion
+        title="Cajón de dinero"
+        summary="Impresora ESC/POS, conector y activación por caja"
+      >
+        <DrawerAdmin execute={execute} />
       </Accordion>
     </div>
   );

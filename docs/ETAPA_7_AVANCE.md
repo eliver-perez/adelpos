@@ -158,3 +158,81 @@ Implementada sobre el backend de la fase A. Detalle funcional en [CASH_SHIFTS_AN
 | Playwright                                                    | `1 passed` en Chromium y en WebKit: recorrido existente más `e2e/cash-flow.ts` (apertura por denominaciones, ingreso y retiro autoautorizado, corte parcial, arqueo que bloquea el cobro, conteo, cierre con faltante e historial).            |
 
 Las capturas de Playwright (claro y oscuro, 1280 × 720 y 1920 × 1080) se revisaron; mostraron el orden de texto de las denominaciones (decisión 4) y una puntuación doble tras las horas, ambos corregidos antes de la verificación final. Las suites se repitieron de forma independiente sobre la copia sincronizada con el mismo resultado (Vitest 161 aprobadas, integración sin fallos, Playwright `1 passed` en Chromium y WebKit). Commit local en `etapa-7`.
+
+## Fase C · Impresión de documentos de caja, cajón de dinero, tope de caja y eventos SSE
+
+Implementada sobre las fases A y B. Detalle funcional en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md) («Impresión de documentos de caja», «Cajón de dinero», «Tope de caja» y «Tiempo real»), contratos en [API_CONTRACTS.md](../API_CONTRACTS.md) y transporte en [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md). **Sin hardware**: la impresión y el pulso del cajón se verificaron con el adaptador controlado de la cola; ninguna prueba envió nada a CUPS, a una impresora ni a una conexión TCP. La 0008 no se aplicó a la instalación real.
+
+### Cambios a la 0008 (no aplicada en la instalación real)
+
+- `kitchen_tickets_kind_check` admite además `cash_drawer` (el comando de apertura del cajón viaja por la cola durable, pero no es un documento).
+- `cash_documents`: `includes_expected` (si el contenido impreso incluye el esperado o las diferencias), `operation_id` (único, diferible, hacia `restaurant_operations`), CHECK `cash_documents_expected_check` (un comprobante nunca incluye el esperado) e índices únicos parciales `cash_documents_one_per_report_idx` y `cash_documents_one_per_operation_idx` (un documento por corte o por operación; las copias son reimpresiones del mismo ticket).
+- `cash_drawer_events`: motivo `refund` además de `payment`, `operation` y `manual`; `notes` (≤ 500, `cash_drawer_events_notes_length_check`) con `cash_drawer_events_manual_check` (la apertura manual exige motivo de 5 o más caracteres); `job_id` obligatorio y únicos `operation_id` y `job_id` (una operación emite como máximo un comando y cada comando tiene su trabajo).
+- Solo comentarios en el tope de caja y en `cash_drawer_settings` (sin cambios de columnas). Sigue transaccional, con nombres explícitos e `IS NOT NULL` en las ramas opcionales; `TestStage7UpgradeOfExistingInstallation` (actualización desde esquema 7) agrega `checkPrintingConstraints` y el tipo `cash_drawer`.
+
+### Backend
+
+- `payments/cash_documents.go`: plantilla de texto de comprobantes (ingreso, retiro, gasto) y cortes (parcial y definitivo) con el contenido de §20; vista previa de solo lectura; impresión al crear (bandera `print`, parte de la huella) o después; reimpresión; lista de documentos del turno. Impresora: la de tickets de Cobros (mismo criterio que los documentos comerciales de la etapa 6).
+- `payments/cash_drawer.go`: configuración por caja, apertura automática (cobros y devoluciones en efectivo; ingresos, retiros y gastos) y manual (`cash.drawer.open`, motivo, idempotente y auditada).
+- `payments/cash_limit.go` y `features.CashLimit`: tope global por caja (`payment_settings.cash_limit_mxn/usd`), aviso solo con el esperado visible.
+- `kitchen`: tipos `cash_report`, `cash_voucher` y `cash_drawer`; `EnqueueDrawerPulse`, `CompatibleDrawerTransport` y `DrawerPulseBytes` (`ESC p m 25 250`, sin `ESC @`); el trabajador entrega el pulso solo por ESC/POS TCP, nunca reintenta un comando del cajón ni lo pasa a una impresora de respaldo y avisa `cash.print.updated` en el ámbito de caja; la cola no reimprime ni reenvía documentos o comandos de caja (solo cancelar o reconocer) y muestra un corte con esperado solo con `cash.expected.read` y fuera del arqueo; el listado de comandas excluye los tipos de caja.
+- Respuestas ampliadas (compatibles): ingreso, retiro y gasto agregan `printing` y `drawer`; el corte parcial y el cierre, `printing`; el cobro y la devolución, `drawer`. Un fallo al encolar documento o comando se revierte a un punto de guardado y la operación o el cierre se confirman con `status: "failed"`.
+- Eventos `cash` nuevos (sin importes): `cash.movement.recorded` (cobros, devoluciones y correcciones de pago), `cash.document.printed`, `cash.document.reprinted`, `cash.drawer.command_queued`, `cash.print.updated`; `cash.settings.changed` también al configurar cajón y tope y al activar o desactivar `cash_limit` o `usd_cash`.
+
+### Rutas nuevas (lista cerrada de `api.rs`, prueba Rust `cash_printing_drawer_and_limit_routes_are_closed`)
+
+| Operación del puente              | Ruta                                        | Permiso                                       |
+| --------------------------------- | ------------------------------------------- | --------------------------------------------- |
+| `payments_cash_report_preview`    | `GET payments/cash-reports/{id}/preview`    | `cash.shifts.read` y acceso al turno          |
+| `payments_print_cash_report`      | `POST payments/cash-reports/{id}/print`     | `cash.reports.print`                          |
+| `payments_cash_operation_preview` | `GET payments/cash-operations/{id}/preview` | `cash.movements.read` y acceso al turno       |
+| `payments_print_cash_operation`   | `POST payments/cash-operations/{id}/print`  | `cash.reports.print`                          |
+| `payments_reprint_cash_document`  | `POST payments/cash-documents/{id}/reprint` | `cash.reports.reprint` (+ esperado si aplica) |
+| `payments_shift_documents`        | `GET payments/shifts/{id}/documents`        | `cash.shifts.read` y acceso al turno          |
+| `payments_cash_drawers`           | `GET payments/cash/drawers`                 | `cash.settings.manage`                        |
+| `payments_save_cash_drawer`       | `PUT payments/cash/drawers/{caja}`          | `cash.settings.manage`                        |
+| `payments_open_drawer`            | `POST payments/cash/open-drawer`            | `cash.drawer.open`                            |
+| `payments_cash_limit`             | `GET payments/cash/limit`                   | `cash.settings.manage`                        |
+| `payments_save_cash_limit`        | `PUT payments/cash/limit`                   | `cash.settings.manage`                        |
+
+### Interfaz
+
+- **Imprimir** (`PrintToggle`, solo con `cash.reports.print`, apagado por omisión) en ingreso, retiro, gasto, corte parcial y confirmación del cierre. **Vista previa, Imprimir y Reimprimir** (`CashDocumentActions`) en cada corte (Operación, Historial y resultado del cierre) y en el detalle de ingresos, retiros y gastos; «Reimprimir» solo con `cash.reports.reprint` y, si el documento incluye el esperado, con `cash.expected.read`. Los mensajes dicen «Documento enviado a la cola de impresión» o «enviado a la impresora», nunca que el papel salió.
+- **Cajón**: «Abrir cajón» con motivo en la caja de la terminal (solo con el cajón activado y `cash.drawer.open`); avisos «Comando de apertura enviado» tras cobros, devoluciones y operaciones, nunca «cajón abierto».
+- **Tope**: aviso «Tope de caja superado» en la vista operativa, el resumen de Reportes y el cobro, solo si Go lo entrega y nunca durante el arqueo; configuración en Caja → Configuración junto al cajón (`CashHardwareSettings`). La función aparece en Configuración → Funciones.
+- **Tiempo real**: `useRealtime` publica además `adel-cash-change` con los tipos y turnos de los eventos de caja; `useCashEvents` vuelve a consultar de inmediato Caja (`useCashWorkspace`) y el turno del cobro (`CheckoutPanel`). El sondeo sigue como recuperación.
+
+### Decisiones menores y desviaciones
+
+1. **Impresora**: la de tickets de Cobros para todos los documentos de caja; no se agregó impresora por caja porque no hizo falta (el cajón sí tiene la suya).
+2. **Impresión opcional**: sin bandera `print` no se imprime; no hay preferencia del establecimiento para documentos de caja (más conservador que el ticket de pago).
+3. **Un documento por corte u operación**: la segunda impresión responde 409 `CASH_DOCUMENT_EXISTS` y se usa «Reimprimir», que copia el contenido exacto con las reglas de la etapa 6 (original enviado o cancelado; `PRINT_COPY_PENDING`). Si el primer documento se generó sin el esperado, la copia tampoco lo trae; el esperado se consulta en pantalla.
+4. **Esperado en documentos**: se decide al generar el documento (permiso de quien lo genera y turno fuera del arqueo) y queda en `includes_expected`; reimprimirlo exige `cash.expected.read` y que el turno no esté en arqueo (409 `SHIFT_CLOSING`).
+5. **Correcciones y regularizaciones** no tienen comprobante propio (409 `CASH_DOCUMENT_UNSUPPORTED`); §20 solo pide ingreso, retiro y gasto.
+6. **Cajón**: un trabajo por comando con copias forzadas a 1; un error confirmado tampoco se reintenta solo (un cajón que se abre más tarde sin nadie presente es un riesgo físico) y nunca pasa a la impresora de respaldo; desde la cola solo se cancela o se reconoce. La apertura manual solo desde una terminal de la caja y se admite sin turno activo (por ejemplo, para preparar el fondo). Una corrección del método de pago no abre el cajón; una devolución lo abre una vez aunque abarque varios pagos. Con la impresora del cajón desactivada o incompatible no se encola nada (`status: "unavailable"`) y la operación sigue.
+7. **Tope**: «supera» es estrictamente mayor; la configuración comparte la revisión de `payment_settings` (un cambio simultáneo en Cobros responde `REVISION_CONFLICT`); guardar exige la función activa (409 `FEATURE_DISABLED`) y el tope en dólares exige `usd_cash` (sin ella, el tope en dólares guardado se conserva).
+8. **Defecto de las fases A y B corregido**: las sumas vacías de los totales del corte y del resumen se devolvían como `"0"`; ahora siempre con dos decimales (`numeric(18,2)`), y la plantilla normaliza cualquier importe.
+9. **Pendientes separados**: la impresión usa la clave `cash-documents:<turno>` y el cajón `cash-drawer:<caja>`, para que una impresión incierta no bloquee las operaciones de efectivo del turno.
+10. **Revisión de la coordinación**: la consulta de la impresora de tickets y la de la configuración del cajón se movieron dentro del punto de guardado de `printAfterRecording` y `openDrawerAfter`. Fuera de él, un error de PostgreSQL en esa lectura habría abortado la transacción completa y, con ella, la operación o el cierre que la solicitó.
+
+### Limitaciones de la fase C
+
+- Sin hardware: pulso del cajón (pin, tiempos 50/500 ms), impresoras ESC/POS con cajón, papel y corte no verificados físicamente; solo adaptador controlado y prueba unitaria de los bytes. Una impresora por CUPS no puede abrir el cajón (no entrega los bytes sin alterar) hasta que exista el agente o una cola sin filtrado.
+- La vista previa y la impresión usan texto plano de 42 o 30 columnas; el diseñador de documentos sigue reservado a la etapa 9.
+- Los usuarios sin `events.read` se actualizan por sondeo; `cash.print.updated` identifica el trabajo, no el turno.
+- Tiempo real verificado con el API de eventos (integración), Vitest y el puente de pruebas; no con dos terminales nativas simultáneas.
+- `config/product.json` sigue en 0.6.2 y esquema 7 hasta la fase D.
+
+### Verificación (entorno aislado: copia del repositorio, clúster temporal 55499, Go temporal 8183)
+
+| Suite                                                         | Resultado                                                                                                                                                                                                                                |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prettier, gofmt, cargo fmt, `sync-metadata --check`, `go vet` | Aprobados (`go vet` también con `-tags=integration`).                                                                                                                                                                                    |
+| `go test -race ./...` (unitarias)                             | `ok` en todos los paquetes con pruebas, incluidos `payments` (contenido de cortes y comprobantes), `kitchen` (bytes del pulso y transporte incompatible) y `features` (`cash_limit` registrada).                                         |
+| Integración PostgreSQL (`-race -tags=integration`)            | `ok` en `database` (actualización desde esquema 7 con los CHECK de la fase C), `administration`, `catalog`, `operations` (`TestRestaurantAcceptance` con C31–C47 de impresión, cajón, tope y eventos) y `payments`.                      |
+| Vitest                                                        | 30 archivos, 175 pruebas aprobadas (nuevas: `pages/cash/printing.test.tsx`, tres casos en `checkout/checkout.test.tsx` y uno en `hooks/useRealtime.test.tsx`).                                                                           |
+| `tsc --noEmit`, `npm run build`                               | Aprobados.                                                                                                                                                                                                                               |
+| `cargo test --locked --offline`                               | 14 aprobadas, 1 ignorada (nueva: `cash_printing_drawer_and_limit_routes_are_closed`).                                                                                                                                                    |
+| Playwright                                                    | `1 passed` en Chromium y en WebKit: recorrido existente más vista previa del corte parcial y del corte definitivo y tope activado (aviso visible) y desactivado (sin aviso) en `e2e/cash-flow.ts`; capturas en claro y oscuro revisadas. |
+
+La prueba física opt-in (`TestControlledCUPSPrinter`) se omitió como siempre: ninguna suite envió trabajos a CUPS, a una impresora ni a una conexión TCP. Las capturas mostraron importes `$0` en sumas vacías de los totales (defecto de las fases A y B, decisión 8), corregido antes de la verificación final. Verificación independiente de la coordinación de la etapa sobre la copia sincronizada con el ajuste de la decisión 10: estáticas aprobadas; `go test -race` `ok` en los doce paquetes con pruebas; integración `ok` en `database`, `administration`, `catalog`, `operations` (106 s), `payments` y `kitchen`; Vitest 175/175 en 30 archivos; `tsc` y `build` correctos; Rust 14 aprobadas y 1 ignorada; Playwright `1 passed` en Chromium y en WebKit.

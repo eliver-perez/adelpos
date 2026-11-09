@@ -149,17 +149,21 @@ type Task struct {
 }
 
 type PrintJob struct {
-	OriginalJobID      *string   `json:"original_job_id"`
-	TextSize           string    `json:"text_size,omitempty"`
-	ID                 string    `json:"id"`
-	TicketID           string    `json:"ticket_id"`
-	PrinterID          string    `json:"printer_id"`
-	PrinterSnapshot    Printer   `json:"printer_snapshot"`
-	Content            string    `json:"content,omitempty"`
-	State              string    `json:"state"`
-	Attempts           int       `json:"attempts"`
-	Revision           int       `json:"revision"`
-	LastError          string    `json:"last_error"`
-	TransportReference string    `json:"transport_reference"`
-	CreatedAt          time.Time `json:"created_at"`
+	OriginalJobID *string `json:"original_job_id"`
+	TextSize      string  `json:"text_size,omitempty"`
+	// TicketKind y DrawerPulse los completa el trabajador al reclamar el trabajo: el tipo de ticket
+	// decide reintentos, respaldo y eventos; el pulso solo existe en los comandos del cajón.
+	TicketKind         string       `json:"ticket_kind,omitempty"`
+	DrawerPulse        *DrawerPulse `json:"drawer_pulse,omitempty"`
+	ID                 string       `json:"id"`
+	TicketID           string       `json:"ticket_id"`
+	PrinterID          string       `json:"printer_id"`
+	PrinterSnapshot    Printer      `json:"printer_snapshot"`
+	Content            string       `json:"content,omitempty"`
+	State              string       `json:"state"`
+	Attempts           int          `json:"attempts"`
+	Revision           int          `json:"revision"`
+	LastError          string       `json:"last_error"`
+	TransportReference string       `json:"transport_reference"`
+	CreatedAt          time.Time    `json:"created_at"`
 }

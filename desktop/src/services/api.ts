@@ -164,6 +164,18 @@ export type Operation =
   // Consultas de solo lectura de la interfaz de caja (etapa 7, fase B).
   | 'payments_cash_count_preview'
   | 'payments_shift_summary'
+  // Impresión de documentos de caja, cajón de dinero y tope de caja (etapa 7, fase C).
+  | 'payments_cash_limit'
+  | 'payments_save_cash_limit'
+  | 'payments_cash_drawers'
+  | 'payments_save_cash_drawer'
+  | 'payments_open_drawer'
+  | 'payments_cash_report_preview'
+  | 'payments_print_cash_report'
+  | 'payments_cash_operation_preview'
+  | 'payments_print_cash_operation'
+  | 'payments_reprint_cash_document'
+  | 'payments_shift_documents'
   | 'restaurant_overview'
   | 'restaurant_areas'
   | 'restaurant_create_area'

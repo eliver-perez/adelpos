@@ -8,13 +8,32 @@ import (
 	"local/ad-el-pos/server/internal/events"
 )
 
-// Documentos comerciales (precuentas y tickets de pago) creados por el módulo de pagos. Se
-// imprimen por la misma cola durable de la etapa 5; su contenido llega ya renderizado y nunca
-// se reinterpreta como comanda.
+// Documentos comerciales (precuentas y tickets de pago) y documentos de caja (comprobantes y
+// cortes, etapa 7) creados por el módulo de pagos. Se imprimen por la misma cola durable de la
+// etapa 5; su contenido llega ya renderizado y nunca se reinterpreta como comanda. El comando de
+// apertura del cajón (cash_drawer) también viaja por la cola, pero no es un documento: su único
+// contenido binario lo genera el controlador ESC/POS.
 
+// Tipos de ticket de caja (etapa 7).
+const (
+	KindCashReport  = "cash_report"
+	KindCashVoucher = "cash_voucher"
+	KindCashDrawer  = "cash_drawer"
+)
+
+// isCommercialKind indica un documento ya renderizado que se imprime y reimprime tal cual.
 func isCommercialKind(kind string) bool {
-	return kind == "receipt" || kind == "precheck"
+	return kind == "receipt" || kind == "precheck" || kind == KindCashReport || kind == KindCashVoucher
 }
+
+// isCashKind indica un ticket que pertenece a la administración de caja: sus copias y su
+// contenido se gobiernan desde Caja, con los permisos de caja, y no desde la cola de cocina.
+func isCashKind(kind string) bool {
+	return kind == KindCashReport || kind == KindCashVoucher || kind == KindCashDrawer
+}
+
+// renderedKinds es la lista SQL de los tipos que no son comandas: no aparecen en su listado.
+const renderedKinds = "'receipt','precheck','cash_report','cash_voucher','cash_drawer'"
 
 type CommercialPrint struct {
 	Kind        string
@@ -66,7 +85,7 @@ func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, ac
 		return nil, err
 	}
 	if !isCommercialKind(kind) {
-		return nil, invalid("El documento no es un ticket ni una precuenta.")
+		return nil, invalid("El documento no es un ticket, una precuenta ni un documento de caja.")
 	}
 	original, err := one[PrintJob](ctx, tx, `SELECT to_jsonb(j) FROM app.kitchen_print_jobs j
         WHERE ticket_id=$1 AND original_job_id IS NULL ORDER BY created_at LIMIT 1`, ticketID)
@@ -90,4 +109,68 @@ func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, ac
 		return nil, err
 	}
 	return job, handler.history("print.reprinted", &job.ID, nil, job)
+}
+
+// DrawerPulse es la orden de apertura del cajón: el pin del conector (0 = pin 2, 1 = pin 5). El
+// controlador la traduce a ESC p; nunca se imprime texto ni se corta papel.
+type DrawerPulse struct {
+	Pin int `json:"pin"`
+}
+
+// DrawerCommand es un comando de apertura del cajón encolado por el módulo de pagos.
+type DrawerCommand struct {
+	PrinterID    string
+	Pin          int
+	RegisterName string
+	Reason       string
+	OperationID  string
+	ActorID      string
+	DeviceID     string
+}
+
+// CompatibleDrawerTransport indica si un transporte entrega los bytes ESC/POS del pulso sin
+// alterar. CUPS filtra el contenido como texto y el agente de impresión aún no existe: solo la
+// conexión ESC/POS directa por red es compatible. No se asume que todo dispositivo admite el pulso.
+func CompatibleDrawerTransport(transport string) bool {
+	return transport == "escpos_tcp"
+}
+
+// EnqueueDrawerPulse guarda el comando de apertura del cajón y su trabajo en la transacción de la
+// operación. Se rechaza si la impresora no existe, está inactiva o su transporte no es compatible:
+// así nunca se encola un comando que no podría llegar al cajón.
+func EnqueueDrawerPulse(ctx context.Context, tx pgx.Tx, command DrawerCommand) (*PrintJob, string, error) {
+	printer, err := one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", command.PrinterID)
+	if err != nil {
+		return nil, "", err
+	}
+	if !printer.Active {
+		return nil, "", &Error{Status: 409, Code: "DRAWER_UNAVAILABLE", Message: "La impresora del cajón está desactivada; no se envió el comando de apertura."}
+	}
+	if !CompatibleDrawerTransport(printer.Transport) {
+		return nil, "", &Error{Status: 409, Code: "DRAWER_PROTOCOL_UNSUPPORTED", Message: "La impresora del cajón no usa ESC/POS por red; no se envió el comando de apertura."}
+	}
+	if command.Pin != 0 && command.Pin != 1 {
+		return nil, "", invalid("El pin del cajón debe ser 0 (conector 2) o 1 (conector 5).")
+	}
+	// Un comando ocupa una sola copia aunque la impresora imprima varias de cada documento.
+	printer.Copies = 1
+	ticketID := events.NewID()
+	document := map[string]any{
+		"kind":          KindCashDrawer,
+		"register_name": command.RegisterName,
+		"reason":        command.Reason,
+		"drawer_pulse":  DrawerPulse{Pin: command.Pin},
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO app.kitchen_tickets(id,kind,station_ids,document) VALUES ($1,$2,'{}',$3)",
+		ticketID, KindCashDrawer, encoded(document)); err != nil {
+		return nil, "", err
+	}
+	handler := service{ctx: ctx, tx: tx, operationID: command.OperationID, request: Request{Actor: Actor{UserID: command.ActorID, DeviceID: command.DeviceID}}}
+	// El contenido solo describe el comando en la cola; el transporte nunca lo imprime.
+	content := cleanText("Comando de apertura del cajón de " + command.RegisterName)
+	job, err := handler.enqueueContent(ticketID, *printer, nil, content)
+	if err != nil {
+		return nil, "", err
+	}
+	return job, ticketID, handler.history("print.drawer_requested", &job.ID, nil, job)
 }

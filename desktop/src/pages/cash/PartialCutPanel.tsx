@@ -1,14 +1,28 @@
 import { useState } from 'react';
 import { Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import type { CashReport, CashReportSummary } from '../../services/cash';
+import type { CashReport, CashReportSummary, CreatedCashReport } from '../../services/cash';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
+import { CashDocumentActions } from './CashDocumentActions';
+import { PrintNotice } from './CashNotices';
 import { CashReportView, reportTitle } from './CashReportView';
+import { PrintToggle } from './PrintToggle';
 import type { CashMutation } from './useCashMutation';
 
-// Consulta un corte con las reglas de Go: el esperado solo llega con su permiso.
-export function ReportLoader({ reportID, timezone }: { reportID: string; timezone: string }) {
+// Consulta un corte con las reglas de Go (el esperado solo llega con su permiso) y ofrece su vista
+// previa, impresión y reimpresión según permisos.
+export function ReportLoader({
+  reportID,
+  shiftID,
+  can,
+  timezone,
+}: {
+  reportID: string;
+  shiftID: string;
+  can: (permission: string) => boolean;
+  timezone: string;
+}) {
   const report = useLiveResource<CashReport>('payments_cash_report', {
     id: reportID,
     interval: 60000,
@@ -19,7 +33,12 @@ export function ReportLoader({ reportID, timezone }: { reportID: string; timezon
   if (!report.data) {
     return <p className="muted">Consultando el corte…</p>;
   }
-  return <CashReportView report={report.data} timezone={timezone} />;
+  return (
+    <div className="form-stack">
+      <CashReportView report={report.data} timezone={timezone} />
+      <CashDocumentActions source={{ kind: 'report', id: reportID }} shiftID={shiftID} can={can} />
+    </div>
+  );
 }
 
 // Lista de cortes del turno; cada uno se abre para consultarlo.
@@ -74,6 +93,8 @@ export function PartialCutPanel({
   onClose: () => void;
 }) {
   const [selectedID, setSelectedID] = useState('');
+  const [print, setPrint] = useState(false);
+  const [created, setCreated] = useState<CreatedCashReport | null>(null);
   const canCreate = can('cash.partial_cuts.create') && shift.state === 'open';
   const partials = reports.filter((report) => report.kind === 'partial');
 
@@ -82,10 +103,11 @@ export function PartialCutPanel({
       return;
     }
     try {
-      const report = await mutation.execute<CashReport>('payments_shift_partial_cut', {
+      const report = await mutation.execute<CreatedCashReport>('payments_shift_partial_cut', {
         id: shift.id,
-        body: {},
+        body: print ? { print: true } : {},
       });
+      setCreated(report);
       setSelectedID(report.id);
     } catch {
       // El mensaje de Go queda visible en el aviso de la operación.
@@ -105,6 +127,15 @@ export function PartialCutPanel({
         dinero, no cierra el turno y no pausa la caja. Para sacar dinero de la caja registra un{' '}
         <strong>retiro de efectivo</strong>.
       </p>
+      {canCreate && (
+        <PrintToggle
+          label="Imprimir el corte"
+          pressed={print}
+          onChange={setPrint}
+          can={can}
+          disabled={mutation.locked}
+        />
+      )}
       <div className="button-row">
         {canCreate && (
           <button
@@ -127,13 +158,24 @@ export function PartialCutPanel({
           {mutation.error}
         </p>
       )}
+      {created && created.id === selectedID && (
+        <PrintNotice outcome={created.printing} subject="el corte" />
+      )}
       <ReportList
         reports={partials}
         selectedID={selectedID}
         timezone={timezone}
         onSelect={setSelectedID}
       />
-      {selectedID && <ReportLoader key={selectedID} reportID={selectedID} timezone={timezone} />}
+      {selectedID && (
+        <ReportLoader
+          key={selectedID}
+          reportID={selectedID}
+          shiftID={shift.id}
+          can={can}
+          timezone={timezone}
+        />
+      )}
     </section>
   );
 }

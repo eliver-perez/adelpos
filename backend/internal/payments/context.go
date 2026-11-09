@@ -65,9 +65,9 @@ var Permissions = []Permission{
 	{permissionHistoryRead, "Consultar turnos y cortes históricos"},
 	{permissionExpectedRead, "Consultar importes esperados y diferencias"},
 	{permissionClosuresReview, "Comentar cierres de caja"},
-	{"cash.reports.print", "Imprimir cortes y comprobantes de caja"},
-	{"cash.reports.reprint", "Reimprimir cortes y comprobantes de caja"},
-	{"cash.drawer.open", "Abrir el cajón de dinero manualmente"},
+	{permissionReportsPrint, "Imprimir cortes y comprobantes de caja"},
+	{permissionReportsReprint, "Reimprimir cortes y comprobantes de caja"},
+	{permissionDrawerOpen, "Abrir el cajón de dinero manualmente"},
 	{permissionCashSettings, "Administrar denominaciones, categorías de gasto, tope de caja y cajón"},
 }
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useCashEvents } from '../../hooks/useCashEvents';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { CashCatalog, RegisterShift, ShiftDetail } from '../../services/cash';
 import type { CurrentShift } from '../../services/payments';
@@ -6,7 +7,9 @@ import type { CurrentShift } from '../../services/payments';
 // Datos compartidos por las vistas de Caja: cajas visibles con su turno activo (la de la terminal
 // y, con cash.shifts.read_all, las demás), el turno de la terminal, el catálogo de caja y el
 // detalle del turno de la caja seleccionada. Todo se consulta con sondeo y se invalida con los
-// eventos de la aplicación (useLiveResource).
+// eventos de la aplicación (useLiveResource); un evento del ámbito de caja (fase C) vuelve a
+// consultar de inmediato, de modo que una apertura, un arqueo o un cierre desde otra terminal se
+// reflejan sin esperar el sondeo.
 export function useCashWorkspace(can: (permission: string) => boolean) {
   const registers = useLiveResource<RegisterShift[]>('payments_cash_registers', {
     interval: 15000,
@@ -28,6 +31,11 @@ export function useCashWorkspace(can: (permission: string) => boolean) {
     id: shift?.id,
     enabled: !!shift,
     interval: 10000,
+  });
+  useCashEvents(() => {
+    void registers.reload();
+    void current.reload();
+    void detail.reload();
   });
 
   return {

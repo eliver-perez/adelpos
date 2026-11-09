@@ -47,6 +47,8 @@ export interface RegisterShift {
   register: { id: string; name: string; active: boolean };
   shift: Shift | null;
   own: boolean;
+  // Fase C: la caja tiene un cajón de dinero activado (sin datos de su impresora).
+  drawer_enabled?: boolean;
 }
 
 // Conteo por denominaciones: cantidades físicas capturadas; Go calcula importes y totales.
@@ -178,6 +180,15 @@ export interface ShiftDetail {
   summary: { payments: number; refunds: number; cash_operations: number; partial_cuts: number };
   expected_visible: boolean;
   expected?: CashExpectation;
+  // Aviso del tope de caja: solo llega con el esperado visible y la función activa (fase C).
+  cash_limit_warning?: CashLimitWarning;
+}
+
+// Aviso de Go cuando el efectivo esperado supera el tope de caja. Nunca bloquea cobros y solo
+// llega a quien puede consultar el esperado, fuera del arqueo de cierre.
+export interface CashLimitWarning {
+  currencies: CashCurrency[];
+  message: string;
 }
 
 export interface MethodReportTotals {
@@ -345,6 +356,101 @@ export interface ShiftSummary {
   expected?: CashExpectation;
   physical?: PhysicalCash;
   closure?: ClosureSummary;
+  cash_limit_warning?: CashLimitWarning;
+}
+
+// Estado de una impresión solicitada (fase C). status es el estado del trabajo en la cola o
+// not_configured (sin impresora de tickets) o failed (no se pudo encolar). Nunca significa que el
+// papel salió: la aceptación de CUPS o TCP solo confirma el envío.
+export interface PrintOutcome {
+  requested: boolean;
+  status?: string;
+  document_id?: string;
+  ticket_id?: string;
+  job_id?: string;
+  includes_expected: boolean;
+  message?: string;
+}
+
+// Estado de un comando de apertura del cajón. status es el del trabajo en la cola o disabled,
+// unavailable o failed. Nunca significa que el cajón se abrió físicamente.
+export interface DrawerOutcome {
+  requested: boolean;
+  status?: string;
+  job_id?: string;
+  event_id?: string;
+  message?: string;
+}
+
+// Ingreso, retiro o gasto registrado con el estado de su comprobante y del cajón.
+export type RecordedCashOperation = CashOperation & {
+  printing?: PrintOutcome;
+  drawer?: DrawerOutcome;
+};
+
+// Corte parcial creado: sin bloque sensible y con el estado de su impresión si se pidió.
+export type CreatedCashReport = CashReport & { printing?: PrintOutcome };
+
+export type CashDocumentKind = 'partial_cut' | 'final_cut' | 'income' | 'withdrawal' | 'expense';
+
+export interface CashDocumentRecord {
+  id: string;
+  kind: CashDocumentKind;
+  shift_id: string;
+  report_id: string | null;
+  cash_operation_id: string | null;
+  ticket_id: string;
+  includes_expected: boolean;
+  created_by_name: string;
+  created_at: string;
+  job_id: string | null;
+  job_state: string | null;
+  printer_name: string | null;
+  copies: number;
+}
+
+// Vista previa renderizada por Go con la misma plantilla y los mismos permisos que la impresión.
+export interface CashDocumentPreview {
+  kind: CashDocumentKind;
+  title: string;
+  content: string;
+  includes_expected: boolean;
+  paper_width: number;
+  document: CashDocumentRecord | null;
+}
+
+// Origen de un documento de caja: un corte o una operación de efectivo.
+export interface CashDocumentSource {
+  kind: 'report' | 'operation';
+  id: string;
+}
+
+export interface DrawerSettings {
+  register_id: string;
+  register_name: string;
+  register_active: boolean;
+  printer_id: string | null;
+  printer_name: string | null;
+  pulse_pin: number;
+  enabled: boolean;
+  revision: number;
+  updated_at: string | null;
+}
+
+export interface DrawerPrinter {
+  id: string;
+  name: string;
+  transport: string;
+  active: boolean;
+  compatible: boolean;
+}
+
+export interface CashLimitSettings {
+  enabled: boolean;
+  usd_cash: boolean;
+  cash_limit_mxn: string | null;
+  cash_limit_usd: string | null;
+  revision: number;
 }
 
 export function previewCount(input: CountPreviewInput) {
@@ -398,6 +504,13 @@ export function readShiftSummary(shiftID: string) {
   return api<ShiftSummary>('payments_shift_summary', { id: shiftID });
 }
 
+// Vista previa de solo lectura de un documento de caja (fase C).
+export function previewCashDocument(source: CashDocumentSource) {
+  const operation: Operation =
+    source.kind === 'report' ? 'payments_cash_report_preview' : 'payments_cash_operation_preview';
+  return api<CashDocumentPreview>(operation, { id: source.id });
+}
+
 // Clave del almacén global de pendientes para las escrituras de un turno.
 export function cashPendingKey(shiftID: string) {
   return `cash:${shiftID}`;
@@ -415,7 +528,81 @@ export const cashOperationLabels: Partial<Record<Operation, string>> = {
   payments_shift_cancel_closing: 'de la cancelación del arqueo',
   payments_shift_confirm_closing: 'del cierre del turno',
   payments_shift_comment_closure: 'del comentario del cierre',
+  payments_print_cash_report: 'de la impresión del corte',
+  payments_print_cash_operation: 'de la impresión del comprobante',
+  payments_reprint_cash_document: 'de la reimpresión del documento',
+  payments_open_drawer: 'del comando de apertura del cajón',
 };
+
+export const cashDocumentKindLabels: Record<CashDocumentKind, string> = {
+  partial_cut: 'Corte parcial',
+  final_cut: 'Corte definitivo',
+  income: 'Comprobante de ingreso',
+  withdrawal: 'Comprobante de retiro',
+  expense: 'Comprobante de gasto',
+};
+
+// Estado del último trabajo de un documento de caja en la cola de impresión. «Enviado» significa
+// que CUPS o la impresora aceptaron el trabajo, no que el papel salió.
+export const cashJobLabels: Record<string, string> = {
+  pending: 'En la cola de impresión',
+  processing: 'Enviándose a la impresora',
+  submitted: 'Enviado a la impresora',
+  error: 'Error de impresión',
+  uncertain: 'Resultado incierto',
+  intervention: 'Requiere intervención',
+  cancelled: 'Cancelado',
+};
+
+// Explica el resultado de una impresión de caja. Nunca afirma que el papel salió ni presenta un
+// fallo de impresión como fallo de la operación: el trabajo queda en la cola durable.
+export function cashPrintMessage(outcome: PrintOutcome | null | undefined, subject: string) {
+  if (!outcome || !outcome.requested || !outcome.status) {
+    return '';
+  }
+  switch (outcome.status) {
+    case 'not_configured':
+      return `Sin impresora de tickets configurada: ${subject} quedó registrado sin imprimir.`;
+    case 'failed':
+      return `No se pudo enviar el documento a la cola: ${subject} quedó registrado. Imprímelo después desde Caja.`;
+    case 'pending':
+    case 'processing':
+      return 'Documento enviado a la cola de impresión.';
+    case 'submitted':
+      return 'Documento enviado a la impresora.';
+    case 'cancelled':
+      return `Impresión cancelada; ${subject} quedó registrado.`;
+  }
+  return `${cashJobLabels[outcome.status] ?? 'Impresión no confirmada'}: ${subject} quedó registrado. Revisa el trabajo en la cola de impresión.`;
+}
+
+export const printAttentionStatuses = [
+  'error',
+  'uncertain',
+  'intervention',
+  'failed',
+  'unavailable',
+];
+
+// Explica el resultado de un comando del cajón. Solo informa que el comando se envió: nunca que el
+// cajón se abrió físicamente.
+export function drawerMessage(outcome: DrawerOutcome | null | undefined) {
+  if (!outcome || !outcome.requested || !outcome.status) {
+    return '';
+  }
+  switch (outcome.status) {
+    case 'pending':
+    case 'processing':
+    case 'submitted':
+      return 'Comando de apertura enviado.';
+    case 'uncertain':
+      return 'Resultado incierto del comando de apertura: revisa el cajón. No se reintenta automáticamente.';
+    case 'unavailable':
+    case 'failed':
+      return outcome.message || 'No se pudo enviar el comando de apertura del cajón.';
+  }
+  return 'El comando de apertura no se envió: revísalo en la cola de impresión.';
+}
 
 // Rechazos de un reintento sobre un turno pausado, cerrado o sustituido. El servidor es la fuente
 // de verdad: la operación no se registró ni se duplicó, y el pendiente se descarta.

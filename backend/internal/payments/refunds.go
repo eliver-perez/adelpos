@@ -414,6 +414,15 @@ func (handler *service) refund(parts []string) (any, error) {
 	if err := handler.recordApproval(approved, accountID, plan.total); err != nil {
 		return nil, err
 	}
+	// Una devolución en efectivo saca dinero del cajón: con el cajón activado se abre una vez por
+	// devolución, aunque abarque varios pagos. Un fallo del comando no revierte la devolución.
+	drawer := DrawerOutcome{Requested: false}
+	if method.IsCash {
+		drawer = handler.openDrawerAfter(shift, drawerRefund)
+	}
+	if err := handler.cashMovementEvent(shift); err != nil {
+		return nil, err
+	}
 	reopened, err := handler.reopenIfPending(accountID)
 	if err != nil {
 		return nil, err
@@ -430,7 +439,7 @@ func (handler *service) refund(parts []string) (any, error) {
 	}); err != nil {
 		return nil, err
 	}
-	return map[string]any{"refund_ids": refundIDs, "plan": plan, "finance": saved, "reopened": reopened}, nil
+	return map[string]any{"refund_ids": refundIDs, "plan": plan, "finance": saved, "reopened": reopened, "drawer": drawer}, nil
 }
 
 // correct corrige el método de un pago capturado por error mediante un reverso compensatorio y un
@@ -608,6 +617,10 @@ func (handler *service) correct(parts []string) (any, error) {
 		return nil, err
 	}
 	if err := handler.recordApproval(approved, accountID, amount.Add(tip)); err != nil {
+		return nil, err
+	}
+	// La corrección del método no mueve dinero físico nuevo: no abre el cajón, pero sí avisa a Caja.
+	if err := handler.cashMovementEvent(shift); err != nil {
 		return nil, err
 	}
 	saved, err := loadFinance(handler.ctx, handler.tx, accountID)

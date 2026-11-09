@@ -24,6 +24,9 @@ func TestKnownFeaturesAreWellFormed(t *testing.T) {
 	if !seen[USDCash] {
 		t.Fatal("El pago en dólares no está registrado")
 	}
+	if !seen[CashLimit] {
+		t.Fatal("El tope de caja no está registrado")
+	}
 	if _, found := Lookup("licencias"); found {
 		t.Fatal("Se aceptó una función desconocida")
 	}

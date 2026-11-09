@@ -198,14 +198,15 @@ func (handler *service) readShiftTotals(shift *Shift) (shiftTotals, error) {
 }
 
 // readMethodTotals suma por método los cobros, propinas, devoluciones y reversos de corrección.
-// Las ventas incluyen pagos y reversos (que restan); las devoluciones se informan aparte.
+// Las ventas incluyen pagos y reversos (que restan); las devoluciones se informan aparte. Las
+// sumas vacías se expresan con dos decimales («0.00»), como todo importe del contrato.
 func (handler *service) readMethodTotals(shift *Shift, totals *shiftTotals) error {
 	rows, err := handler.tx.Query(handler.ctx, `SELECT method_name,is_cash,
         count(*) FILTER (WHERE kind='payment'),count(*) FILTER (WHERE kind='refund'),count(*) FILTER (WHERE kind='correction_reversal'),
-        coalesce(sum(sale_amount) FILTER (WHERE kind<>'refund'),0)::text,
-        coalesce(sum(tip_amount) FILTER (WHERE kind<>'refund'),0)::text,
-        coalesce(-sum(net_amount) FILTER (WHERE kind='refund'),0)::text,
-        coalesce(sum(net_amount),0)::text
+        coalesce(sum(sale_amount) FILTER (WHERE kind<>'refund'),0)::numeric(18,2)::text,
+        coalesce(sum(tip_amount) FILTER (WHERE kind<>'refund'),0)::numeric(18,2)::text,
+        coalesce(-sum(net_amount) FILTER (WHERE kind='refund'),0)::numeric(18,2)::text,
+        coalesce(sum(net_amount),0)::numeric(18,2)::text
         FROM app.cash_movements WHERE shift_id=$1 GROUP BY method_name,is_cash ORDER BY min(created_at),method_name`, shift.ID)
 	if err != nil {
 		return err
@@ -237,8 +238,8 @@ func (handler *service) readMethodTotals(shift *Shift, totals *shiftTotals) erro
 func (handler *service) readAdjustmentTotals(shift *Shift, totals *shiftTotals) error {
 	var discounts, courtesies string
 	err := handler.tx.QueryRow(handler.ctx, `SELECT
-        coalesce(sum(a.amount) FILTER (WHERE NOT a.courtesy),0)::text,count(*) FILTER (WHERE NOT a.courtesy),
-        coalesce(sum(a.amount) FILTER (WHERE a.courtesy),0)::text,count(*) FILTER (WHERE a.courtesy)
+        coalesce(sum(a.amount) FILTER (WHERE NOT a.courtesy),0)::numeric(18,2)::text,count(*) FILTER (WHERE NOT a.courtesy),
+        coalesce(sum(a.amount) FILTER (WHERE a.courtesy),0)::numeric(18,2)::text,count(*) FILTER (WHERE a.courtesy)
         FROM app.account_adjustments a JOIN app.devices d ON d.id=a.device_id
         WHERE a.kind='discount' AND d.register_id=$1 AND a.created_at>=$2
         AND NOT EXISTS(SELECT FROM app.account_adjustment_voids v WHERE v.adjustment_id=a.id)`,
@@ -254,11 +255,11 @@ func (handler *service) readAdjustmentTotals(shift *Shift, totals *shiftTotals) 
 // aparecen; los dólares, solo si el turno los manejó.
 func (handler *service) readOperationTotals(shift *Shift, totals *shiftTotals) error {
 	rows, err := handler.tx.Query(handler.ctx, `SELECT currency,
-        coalesce(sum(amount) FILTER (WHERE kind='income'),0)::text,
-        coalesce(sum(amount) FILTER (WHERE kind='withdrawal'),0)::text,
-        coalesce(sum(amount) FILTER (WHERE kind='expense'),0)::text,
-        coalesce(sum(amount) FILTER (WHERE kind='correction' AND direction='in'),0)::text,
-        coalesce(sum(amount) FILTER (WHERE kind='correction' AND direction='out'),0)::text,
+        coalesce(sum(amount) FILTER (WHERE kind='income'),0)::numeric(18,2)::text,
+        coalesce(sum(amount) FILTER (WHERE kind='withdrawal'),0)::numeric(18,2)::text,
+        coalesce(sum(amount) FILTER (WHERE kind='expense'),0)::numeric(18,2)::text,
+        coalesce(sum(amount) FILTER (WHERE kind='correction' AND direction='in'),0)::numeric(18,2)::text,
+        coalesce(sum(amount) FILTER (WHERE kind='correction' AND direction='out'),0)::numeric(18,2)::text,
         count(*)
         FROM app.cash_operations WHERE shift_id=$1 AND NOT regularization GROUP BY currency`, shift.ID)
 	if err != nil {
@@ -368,12 +369,24 @@ func (handler *service) recordReport(shift *Shift, kind string, extras *reportEx
 	return id, err
 }
 
-// createPartialCut registra un corte parcial informativo del turno activo.
+// CreatedReport es la respuesta de un corte parcial: el corte sin bloque sensible y, si se pidió,
+// el estado de su impresión (que nunca revierte el corte).
+type CreatedReport struct {
+	*CashReport
+	Printing *PrintOutcome `json:"printing,omitempty"`
+}
+
+// createPartialCut registra un corte parcial informativo del turno activo y, si se pide, lo imprime.
 func (handler *service) createPartialCut(parts []string) (any, error) {
 	var input struct {
 		OperationID string `json:"operation_id"`
+		Print       *bool  `json:"print"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
+		return nil, err
+	}
+	printDocument, err := handler.printRequested(input.Print)
+	if err != nil {
 		return nil, err
 	}
 	shift, err := handler.readShift("s.id=$1", parts[1])
@@ -398,11 +411,18 @@ func (handler *service) createPartialCut(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	result := &CreatedReport{CashReport: report}
+	if printDocument {
+		// El documento se renderiza con el snapshot completo y los permisos de quien lo genera; la
+		// respuesta, guardada para reintentos, nunca incluye el bloque sensible.
+		printing := handler.printAfterRecording(cashDocumentSource{kind: documentPartialCut, shift: shift, report: report}, "el corte")
+		result.Printing = &printing
+	}
 	report.hideSensitive()
 	if err := events.Append(handler.ctx, handler.tx, "cash.report.created", cashScope, &shift.ID, nil); err != nil {
 		return nil, err
 	}
-	return report, handler.audit(handler.ctx, handler.tx, "cash.partial_cut_created", "cash_shift", &shift.ID, nil, map[string]any{
+	return result, handler.audit(handler.ctx, handler.tx, "cash.partial_cut_created", "cash_shift", &shift.ID, nil, map[string]any{
 		"report_id": id, "sequence": report.Sequence, "covered_from": report.CoveredFrom, "covered_to": report.CoveredTo,
 	})
 }

@@ -2,6 +2,7 @@ package kitchen
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -52,5 +53,31 @@ func TestESCPosEncodingAndTrustedCut(t *testing.T) {
 	}
 	if !queuePattern.MatchString("_192_168_1_80") {
 		t.Fatal("Se rechazó una cola local válida de CUPS")
+	}
+}
+
+// El pulso del cajón es exactamente ESC p m t1 t2: sin reinicio (ESC @), sin texto ni corte, y
+// solo el transporte ESC/POS directo lo entrega sin alterar.
+func TestDrawerPulseBytesAndCompatibleTransport(t *testing.T) {
+	if !bytes.Equal(DrawerPulseBytes(0), []byte{0x1b, 0x70, 0x00, 0x19, 0xfa}) {
+		t.Fatalf("Pulso del pin 2 incorrecto: % x", DrawerPulseBytes(0))
+	}
+	if !bytes.Equal(DrawerPulseBytes(1), []byte{0x1b, 0x70, 0x01, 0x19, 0xfa}) {
+		t.Fatalf("Pulso del pin 5 incorrecto: % x", DrawerPulseBytes(1))
+	}
+	// Un pin fuera de la lista cerrada nunca produce otro comando.
+	if !bytes.Equal(DrawerPulseBytes(7), DrawerPulseBytes(0)) {
+		t.Fatal("Un pin desconocido generó un comando distinto del pin 2")
+	}
+	if !CompatibleDrawerTransport("escpos_tcp") || CompatibleDrawerTransport("cups") || CompatibleDrawerTransport("agent") {
+		t.Fatal("La compatibilidad del cajón no se limita a ESC/POS por red")
+	}
+	// Con un transporte incompatible el comando queda en intervención sin abrir conexiones.
+	outcome := HostTransport{}.Submit(context.Background(), PrintJob{
+		DrawerPulse:     &DrawerPulse{Pin: 0},
+		PrinterSnapshot: Printer{Name: "Tickets", Transport: "cups", Destination: "ADEL_TEST_ONLY", PaperWidth: 80, Copies: 1, Port: 9100},
+	})
+	if outcome.State != "intervention" || outcome.Accepted || !strings.Contains(outcome.Message, "pulso") {
+		t.Fatalf("Un pulso por CUPS no quedó en intervención: %+v", outcome)
 	}
 }

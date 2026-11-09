@@ -113,6 +113,8 @@ type ShiftSummaryView struct {
 	Expected        *CashExpectation   `json:"expected,omitempty"`
 	Physical        *PhysicalCash      `json:"physical,omitempty"`
 	Closure         *ClosureSummary    `json:"closure,omitempty"`
+	// CashLimitWarning es el aviso del tope de caja; solo con el esperado visible (fase C).
+	CashLimitWarning *CashLimitWarning `json:"cash_limit_warning,omitempty"`
 }
 
 // shiftSummary atiende GET payments/shifts/{id}/summary con las reglas de consulta del turno.
@@ -167,6 +169,9 @@ func (handler *service) shiftSummary(parts []string) (any, error) {
 	view.ExpectedVisible = true
 	view.Expected = &public
 	if view.Physical, err = handler.physicalCash(shift.ID); err != nil {
+		return nil, err
+	}
+	if view.CashLimitWarning, err = handler.cashLimitWarning(shift); err != nil {
 		return nil, err
 	}
 	return view, nil

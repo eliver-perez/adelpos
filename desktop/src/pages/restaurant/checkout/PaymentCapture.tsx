@@ -12,6 +12,7 @@ import {
   printingMessage,
 } from '../../../services/payments';
 import { DeliveryIcon, PrinterIcon, ToggleButton } from '../../../components/ToggleButton';
+import { DrawerNotice } from '../../cash/CashNotices';
 import type {
   ChangeCurrency,
   Finance,
@@ -131,6 +132,7 @@ export function RecordedPayment({
           {printing}
         </p>
       )}
+      <DrawerNotice outcome={result.drawer} />
     </div>
   );
 }

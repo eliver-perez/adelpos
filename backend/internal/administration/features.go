@@ -54,5 +54,12 @@ func establishmentFeatures(ctx context.Context, tx pgx.Tx, request Request, prin
 	if err := events.Append(ctx, tx, "settings.features.changed", "configuration", nil, nil); err != nil {
 		return nil, err
 	}
+	// El tope de caja y el pago en dólares cambian lo que muestran Caja y el cobro: se avisa también
+	// en el ámbito de caja, que reciben los cajeros sin acceso a la configuración de cocina.
+	if code == features.CashLimit || code == features.USDCash {
+		if err := events.Append(ctx, tx, "cash.settings.changed", "cash", nil, nil); err != nil {
+			return nil, err
+		}
+	}
 	return saved, audit(ctx, tx, principal, "settings.feature_changed", "establishment_feature", nil, previous, saved, true)
 }

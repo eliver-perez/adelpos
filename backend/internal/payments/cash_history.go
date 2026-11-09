@@ -19,6 +19,8 @@ type ShiftDetail struct {
 	Summary         ShiftSummary        `json:"summary"`
 	ExpectedVisible bool                `json:"expected_visible"`
 	Expected        *CashExpectation    `json:"expected,omitempty"`
+	// CashLimitWarning es el aviso del tope de caja; solo con el esperado visible (fase C).
+	CashLimitWarning *CashLimitWarning `json:"cash_limit_warning,omitempty"`
 }
 
 // ShiftSummary cuenta los registros del turno sin importes.
@@ -59,6 +61,9 @@ func (handler *service) readShiftDetail(parts []string) (any, error) {
 		detail.ExpectedVisible = true
 		detail.Expected = &public
 	}
+	if detail.CashLimitWarning, err = handler.cashLimitWarning(shift); err != nil {
+		return nil, err
+	}
 	return detail, nil
 }
 
@@ -67,6 +72,8 @@ type RegisterShift struct {
 	Register Register `json:"register"`
 	Shift    *Shift   `json:"shift"`
 	Own      bool     `json:"own"`
+	// DrawerEnabled indica si la caja tiene un cajón de dinero activado (fase C).
+	DrawerEnabled bool `json:"drawer_enabled"`
 }
 
 // listCashRegisters devuelve la caja de la terminal y, con cash.shifts.read_all, las demás. Una
@@ -105,7 +112,13 @@ func (handler *service) listCashRegisters(_ []string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, RegisterShift{Register: register, Shift: shift, Own: own != nil && own.ID == register.ID})
+		drawer, err := handler.drawerEnabled(register.ID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, RegisterShift{
+			Register: register, Shift: shift, Own: own != nil && own.ID == register.ID, DrawerEnabled: drawer,
+		})
 	}
 	return result, nil
 }

@@ -7,13 +7,14 @@ import {
 } from '../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../services/api';
 import { toWireAmount } from '../../services/amountInput';
-import type { CashCatalog, CashCurrency, CashOperation } from '../../services/cash';
+import type { CashCatalog, CashCurrency, RecordedCashOperation } from '../../services/cash';
 import { permissionName, validReason } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { currencyAmount } from './DenominationCount';
 import { cashEntries, entryBody, initialEntry, outflowPermissions } from './operationForm';
 import type { CashEntryCapture, CashEntryKind } from './operationForm';
 import { OutflowAuthorization } from './OutflowAuthorization';
+import { PrintToggle } from './PrintToggle';
 import { RecordedOperation } from './RecordedOperation';
 import type { CashMutation } from './useCashMutation';
 
@@ -202,7 +203,9 @@ export function CashOperationForm({
 }) {
   const definition = cashEntries[kind];
   const [capture, setCapture] = useState<CashEntryCapture>(initialEntry);
-  const [result, setResult] = useState<CashOperation | null>(null);
+  const [result, setResult] = useState<RecordedCashOperation | null>(null);
+  // Imprimir el comprobante es opcional y se elige por operación (cash.reports.print).
+  const [print, setPrint] = useState(false);
   const [insufficient, setInsufficient] = useState(false);
   const selfAuthorized =
     definition.outflow && outflowPermissions(capture.exceptional).every((key) => can(key));
@@ -246,8 +249,11 @@ export function CashOperationForm({
     if (authorization) {
       body.authorization = authorization;
     }
+    if (print && can('cash.reports.print')) {
+      body.print = true;
+    }
     try {
-      const operation = await mutation.execute<CashOperation>(definition.operation, {
+      const operation = await mutation.execute<RecordedCashOperation>(definition.operation, {
         id: shift.id,
         body,
       });
@@ -311,6 +317,13 @@ export function CashOperationForm({
             capture={capture}
             update={update}
             placeholder={chosen?.label ?? ''}
+          />
+          <PrintToggle
+            label="Imprimir comprobante"
+            pressed={print}
+            onChange={setPrint}
+            can={can}
+            disabled={mutation.locked}
           />
           {definition.outflow && (
             <OutflowAuthorization

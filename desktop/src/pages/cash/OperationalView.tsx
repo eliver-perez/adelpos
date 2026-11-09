@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
 import { denominationLabel } from '../../services/cash';
-import type { ShiftDetail } from '../../services/cash';
+import type { PrintOutcome, ShiftDetail } from '../../services/cash';
 import { permissionName } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { ShiftOpening } from '../restaurant/checkout/ShiftOpening';
 import { CashActions } from './CashActions';
 import type { CashAction } from './CashActions';
+import { CashLimitNotice } from './CashNotices';
 import { CashOperationForm } from './CashOperationForm';
 import { ClosingPanel } from './ClosingPanel';
 import { ClosureResult } from './ClosureResult';
 import { currencyAmount } from './DenominationCount';
+import { DrawerControl } from './DrawerControl';
 import { ExpectedFigures } from './ExpectedBlock';
 import { PartialCutPanel } from './PartialCutPanel';
 import { PendingCashOperation } from './PendingCashOperation';
@@ -80,7 +82,7 @@ function ShiftWorkspace({
   userID: string;
   timezone: string;
   onNavigate: (section: CashSection) => void;
-  onClosed: (shiftID: string) => void;
+  onClosed: (shiftID: string, printing?: PrintOutcome) => void;
 }) {
   const [chosen, setChosen] = useState<CashAction | null>(null);
   const mutation = useCashMutation(shift.id);
@@ -158,6 +160,7 @@ function ShiftWorkspace({
     <div className="form-stack">
       <ClosingNotice shift={shift} timezone={timezone} />
       <ShiftStatusCard shift={shift} timezone={timezone} />
+      {shift.state === 'open' && <CashLimitNotice warning={detail?.cash_limit_warning} />}
       <ExpectedNow shift={shift} detail={detail} />
       {detail && shift.state === 'open' && <ShiftRecords detail={detail} />}
       <PendingCashOperation mutation={mutation} />
@@ -169,9 +172,25 @@ function ShiftWorkspace({
         onSelect={(next) => choose(next)}
         onCorrections={() => onNavigate('movements')}
       />
+      <ManualDrawer workspace={workspace} can={can} />
       {panel()}
     </div>
   );
+}
+
+// Apertura manual del cajón: solo en la caja de esta terminal, con el cajón activado y el permiso.
+function ManualDrawer({
+  workspace,
+  can,
+}: {
+  workspace: CashWorkspace;
+  can: (permission: string) => boolean;
+}) {
+  const selected = workspace.selected;
+  if (!selected?.own || !selected.drawer_enabled || !can('cash.drawer.open')) {
+    return null;
+  }
+  return <DrawerControl registerID={selected.register.id} registerName={selected.register.name} />;
 }
 
 // Vista operativa de Caja (§19): caja seleccionada, turno, aviso de «Cierre en curso», acciones
@@ -189,18 +208,23 @@ export function OperationalView({
   timezone: string;
   onNavigate: (section: CashSection) => void;
 }) {
-  const [closedShiftID, setClosedShiftID] = useState('');
+  const [closed, setClosed] = useState<{ shiftID: string; printing?: PrintOutcome } | null>(null);
   const { selected, shift, current } = workspace;
-  if (closedShiftID) {
+  if (closed) {
     return (
       <div className="form-stack">
-        <ClosureResult shiftID={closedShiftID} can={can} timezone={timezone} />
+        <ClosureResult
+          shiftID={closed.shiftID}
+          can={can}
+          timezone={timezone}
+          printing={closed.printing}
+        />
         <div className="button-row">
           <button
             type="button"
             className="primary-button"
             onClick={() => {
-              setClosedShiftID('');
+              setClosed(null);
               workspace.reload();
             }}
           >
@@ -233,6 +257,7 @@ export function OperationalView({
         {!selected.own && (
           <p className="muted text-xs">El turno se abre desde una terminal de esa caja.</p>
         )}
+        <ManualDrawer workspace={workspace} can={can} />
       </div>
     );
   }
@@ -245,7 +270,7 @@ export function OperationalView({
       userID={userID}
       timezone={timezone}
       onNavigate={onNavigate}
-      onClosed={setClosedShiftID}
+      onClosed={(shiftID, printing) => setClosed({ shiftID, printing })}
     />
   );
 }

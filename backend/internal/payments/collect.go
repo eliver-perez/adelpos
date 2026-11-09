@@ -535,7 +535,27 @@ func (handler *service) registerPayment(parts []string) (any, error) {
 	}); err != nil {
 		return nil, err
 	}
-	return handler.completeCollection(accountID, paymentID, input)
+	// El cajón se abre solo con efectivo físico; un pago electrónico nunca lo abre (§18).
+	drawer := DrawerOutcome{Requested: false}
+	if plan.method.IsCash {
+		drawer = handler.openDrawerAfter(shift, drawerPayment)
+	}
+	if err := handler.cashMovementEvent(shift); err != nil {
+		return nil, err
+	}
+	result, err := handler.completeCollection(accountID, paymentID, input)
+	if err != nil {
+		return nil, err
+	}
+	result["drawer"] = drawer
+	return result, nil
+}
+
+// cashMovementEvent avisa en el ámbito de caja que el turno registró un cobro, una devolución o
+// una corrección de pago, para que Caja y el cobro de otras terminales se actualicen sin esperar
+// el sondeo. Solo lleva el identificador del turno, nunca importes.
+func (handler *service) cashMovementEvent(shift *Shift) error {
+	return events.Append(handler.ctx, handler.tx, "cash.movement.recorded", cashScope, &shift.ID, nil)
 }
 
 // paymentCurrency son las columnas por moneda de un pago; todas nil en un pago solo en pesos.
@@ -568,7 +588,7 @@ func currencyColumns(settlement cashSettlement, rate decimal.Decimal) paymentCur
 
 // completeCollection cierra la cuenta liquidada cuando corresponde, registra la entrega
 // solicitada, encola el ticket y devuelve el resultado con el estado financiero actualizado.
-func (handler *service) completeCollection(accountID, paymentID string, input PaymentInput) (any, error) {
+func (handler *service) completeCollection(accountID, paymentID string, input PaymentInput) (map[string]any, error) {
 	finance, err := loadFinance(handler.ctx, handler.tx, accountID)
 	if err != nil {
 		return nil, err

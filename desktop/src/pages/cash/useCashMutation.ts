@@ -8,16 +8,20 @@ import { cashPendingKey, retryRejectedMessage } from '../../services/cash';
 // de pendientes: una operación incierta sobrevive a la navegación, se reintenta con el mismo
 // operation_id y nunca guarda la contraseña de la autorización. Un resultado confirmado invalida
 // las consultas de la aplicación (el mismo evento que usa el canal en tiempo real).
+//
+// pendingKey permite separar escrituras que no deben bloquear las operaciones de efectivo del
+// turno, como la impresión de documentos o el comando del cajón (fase C).
 export function useCashMutation(
   shiftID: string,
   onResult?: (operation: Operation, result: unknown) => void,
+  pendingKey: string = cashPendingKey(shiftID),
 ) {
   const [retryNotice, setRetryNotice] = useState('');
   const mutation = useRestaurantMutation((operation, result) => {
     setRetryNotice('');
     window.dispatchEvent(new CustomEvent('adel-server-change'));
     onResult?.(operation, result);
-  }, cashPendingKey(shiftID));
+  }, pendingKey);
 
   // Reintenta con el mismo identificador. Si Go rechaza el reintento porque el turno ya está en
   // arqueo, cerrado o sustituido, la operación no se registró ni se duplicó: el almacén ya la

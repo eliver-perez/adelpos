@@ -128,11 +128,16 @@ func (worker *Worker) claim(ctx context.Context) (*ownedJob, error) {
 		return nil, err
 	}
 	defer tx.Rollback(context.Background())
-	candidates, err := many[PrintJob](ctx, tx, `SELECT to_jsonb(j)||jsonb_build_object('text_size',
-		(SELECT t.document->'settings'->>'text_size' FROM app.kitchen_tickets t WHERE t.id=j.ticket_id))
-		FROM app.kitchen_print_jobs j
-        WHERE (state='pending' OR (state='error' AND attempts<3 AND next_attempt_at<=now())
-        OR (state='processing' AND lease_until<now())) ORDER BY created_at,id LIMIT 20 FOR UPDATE SKIP LOCKED`)
+	// Un comando del cajón con error confirmado no se reintenta solo: un cajón que se abre minutos
+	// después, sin nadie que lo atienda, es un riesgo físico. Se resuelve desde la cola o se vuelve
+	// a abrir manualmente desde Caja, con su permiso y motivo.
+	candidates, err := many[PrintJob](ctx, tx, `SELECT to_jsonb(j)||jsonb_build_object(
+		'text_size',t.document->'settings'->>'text_size',
+		'ticket_kind',t.kind,
+		'drawer_pulse',CASE WHEN t.kind='cash_drawer' THEN t.document->'drawer_pulse' END)
+		FROM app.kitchen_print_jobs j JOIN app.kitchen_tickets t ON t.id=j.ticket_id
+        WHERE (j.state='pending' OR (j.state='error' AND j.attempts<3 AND j.next_attempt_at<=now() AND t.kind<>'cash_drawer')
+        OR (j.state='processing' AND j.lease_until<now())) ORDER BY j.created_at,j.id LIMIT 20 FOR UPDATE OF j SKIP LOCKED`)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +238,9 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	confirmedFailures := false
-	if state == "error" && owned.Job.Attempts >= 3 && owned.Job.PrinterSnapshot.FallbackID != nil {
+	// El comando del cajón nunca pasa a una impresora de respaldo: el cajón está conectado a una
+	// impresora concreta y otra no lo abriría.
+	if state == "error" && owned.Job.Attempts >= 3 && owned.Job.PrinterSnapshot.FallbackID != nil && owned.Job.DrawerPulse == nil {
 		// El respaldo exige tres fallos confirmados consecutivos sin envío. Un intento incierto o
 		// en intervención entre ellos (por ejemplo, antes de un envío autorizado manualmente)
 		// interrumpe la cuenta: el total de intentos no basta.
@@ -269,6 +276,13 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 	}
 	if err := events.Append(storeContext, tx, "printing."+state, "printing", &owned.Job.ID, nil); err != nil {
 		return true, err
+	}
+	// Los documentos y comandos de caja avisan también en el ámbito de caja, que reciben los
+	// cajeros sin acceso a la cola de cocina: así la pantalla de Caja refleja el estado del envío.
+	if isCashKind(owned.Job.TicketKind) {
+		if err := events.Append(storeContext, tx, "cash.print.updated", "cash", &owned.Job.ID, nil); err != nil {
+			return true, err
+		}
 	}
 	return true, tx.Commit(storeContext)
 }

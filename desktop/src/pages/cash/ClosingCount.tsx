@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Notice } from '../../components/Forms';
 import { AmountField, NumericKeypad } from '../../components/NumericKeypad';
 import type { Denomination } from '../../services/cash';
@@ -152,6 +153,7 @@ export function ClosingCount({
   onConfirm,
   onCancel,
   onClose,
+  printControl,
 }: {
   shift: Shift;
   draft: ClosingDraft;
@@ -165,6 +167,8 @@ export function ClosingCount({
   onConfirm: () => void;
   onCancel: () => void;
   onClose: () => void;
+  // Interruptor opcional para imprimir el corte definitivo al confirmar (fase C).
+  printControl?: ReactNode;
 }) {
   const [target, setTarget] = useState<CountTarget>(`count:${denominations[0]?.id ?? ''}`);
   const countID = target.startsWith('count:') ? target.slice('count:'.length) : '';
@@ -272,6 +276,7 @@ export function ClosingCount({
               </button>
             )}
           </div>
+          {canConfirm && printControl}
           {canConfirm && (
             <button
               type="button"

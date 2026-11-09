@@ -239,4 +239,5 @@ func testCashShifts(t *testing.T, base *paymentsFixture) {
 	testCashUSD(t, fixture)
 	testCashHistory(t, fixture)
 	testCashViews(t, fixture)
+	testCashPrinting(t, fixture)
 }

@@ -1,9 +1,10 @@
 import { expect } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 
-// Recorrido de caja de la etapa 7 (fase B) contra Go y PostgreSQL reales: apertura por
-// denominaciones, ingreso y retiro autoautorizado, corte parcial, arqueo ciego que pausa el cobro
-// y cierre con faltante. Todas las cifras que se verifican las calcula Go; la interfaz solo las
+// Recorrido de caja de la etapa 7 (fases B y C) contra Go y PostgreSQL reales: apertura por
+// denominaciones, ingreso y retiro autoautorizado, corte parcial con su vista previa, tope de caja
+// activado y desactivado, arqueo ciego que pausa el cobro, cierre con faltante y vista previa del
+// corte definitivo. Nada se imprime: el destino de la aceptación no tiene hardware. Todas las cifras que se verifican las calcula Go; la interfaz solo las
 // muestra. El administrador tiene todos los permisos, por lo que su propio permiso autoriza el
 // retiro y ve el esperado y las diferencias después del cierre.
 
@@ -115,6 +116,59 @@ async function partialCut(page: Page) {
   await expect(report).toContainText('$200.00');
 }
 
+// 3b. Vista previa del corte (fase C): Go la renderiza con la plantilla de impresión y, para el
+// administrador, con el efectivo esperado. Solo consulta: no imprime ni registra documentos.
+async function previewPartialCut(page: Page, testInfo: TestInfo) {
+  const cut = page.getByRole('region', { name: 'Corte parcial', exact: true });
+  await cut.getByRole('button', { name: 'Vista previa', exact: true }).click();
+  const preview = cut.getByLabel('Vista previa de CORTE PARCIAL #1', { exact: true });
+  await expect(preview).toContainText('CORTE PARCIAL #1');
+  await expect(preview).toContainText('Caja: Caja 1');
+  await expect(preview).toContainText('VENTAS Y PAGOS POR MÉTODO');
+  await expect(preview).toContainText('EFECTIVO ESPERADO');
+  await expect(preview).toContainText('$400.00');
+  await expect(preview).toContainText('No es un comprobante fiscal');
+  await expect(cut.getByRole('button', { name: 'Imprimir el corte', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await cashThemes(page, testInfo, 'cash-cut-preview');
+  await cut.getByRole('button', { name: 'Ocultar vista previa', exact: true }).click();
+}
+
+// 3c. Tope de caja (fase C): se activa la función, se fija un tope de $300.00 y el administrador
+// (que consulta el esperado de $400.00) ve el aviso que calcula Go. Al desactivar la función el
+// aviso desaparece: desactivada no tiene efecto.
+async function cashLimitWarning(page: Page, testInfo: TestInfo) {
+  const features = page.getByRole('region', { name: 'Funciones del establecimiento' });
+  const toggle = features.getByRole('button', { name: 'Tope de efectivo en caja', exact: true });
+  await page.getByRole('button', { name: 'Configuración', exact: true }).click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(features.getByText('Tope de efectivo en caja: activada.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  const sections = page.getByRole('tablist', { name: 'Secciones de caja' });
+  await sections.getByRole('tab', { name: 'Configuración', exact: true }).click();
+  await page.getByRole('button', { name: /^Tope de caja/ }).click();
+  const limit = page.getByLabel(/^Tope en pesos/);
+  await limit.fill('300');
+  await page.getByRole('button', { name: 'Guardar tope de caja', exact: true }).click();
+  await expect(limit).toHaveValue('300.00');
+  await sections.getByRole('tab', { name: 'Operación', exact: true }).click();
+  const warning = page.getByRole('status', { name: 'Tope de caja superado', exact: true });
+  await expect(warning).toContainText('considera un retiro');
+  await expect(warning).toContainText('no impide cobrar');
+  await cashThemes(page, testInfo, 'cash-limit');
+
+  await page.getByRole('button', { name: 'Configuración', exact: true }).click();
+  await toggle.click();
+  await expect(features.getByText('Tope de efectivo en caja: desactivada.')).toBeVisible();
+  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  await expect(page.getByLabel('Turno de Caja 1', { exact: true })).toContainText('Abierto');
+  await expect(warning).toHaveCount(0);
+}
+
 // 4. Arqueo: se confirma la pausa y el cobro de la cuenta queda bloqueado con el mensaje de Go.
 async function startClosingAndCheckCheckout(page: Page) {
   await cashActions(page).getByRole('button', { name: 'Arqueo y cierre', exact: true }).click();
@@ -186,6 +240,14 @@ async function countAndClose(page: Page, testInfo: TestInfo) {
   const differences = result.getByLabel('Diferencias del arqueo', { exact: true });
   await expect(differences).toContainText('Diferencia en pesos · Faltante');
   await expect(differences).toContainText('−$100.00');
+  // Vista previa del corte definitivo (fase C) con lo declarado, el esperado y la diferencia.
+  await result.getByRole('button', { name: /^Corte definitivo/ }).click();
+  await result.getByRole('button', { name: 'Vista previa', exact: true }).click();
+  const preview = result.getByLabel('Vista previa de CORTE DEFINITIVO', { exact: true });
+  await expect(preview).toContainText('EFECTIVO DECLARADO');
+  await expect(preview).toContainText('$300.00');
+  await expect(preview).toContainText('DIFERENCIAS (CONTADO - ESPERADO)');
+  await expect(preview).toContainText('-$100.00');
   await cashThemes(page, testInfo, 'cash-closure');
   await page.getByRole('button', { name: 'Volver a la caja', exact: true }).click();
   await expect(page.getByText('No hay un turno abierto en Caja 1.', { exact: true })).toBeVisible();
@@ -226,6 +288,8 @@ export async function checkCashShift(page: Page, testInfo: TestInfo) {
   await openByDenominations(page, testInfo);
   await incomeAndWithdrawal(page);
   await partialCut(page);
+  await previewPartialCut(page, testInfo);
+  await cashLimitWarning(page, testInfo);
   await startClosingAndCheckCheckout(page);
   await countAndClose(page, testInfo);
   await reviewClosedShift(page);

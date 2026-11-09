@@ -182,6 +182,9 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", id).Scan(&kind); err != nil {
 		return nil, err
 	}
+	if isCashKind(kind) {
+		return handler.cashDocument(id, kind)
+	}
 	if isCommercialKind(kind) {
 		return handler.commercialDocument(id, kind)
 	}
@@ -229,6 +232,31 @@ func (handler *service) commercialDocument(id, kind string) (*Document, error) {
 	return &document, nil
 }
 
+// cashDocument muestra en la cola un documento o comando de caja. Los comprobantes y cortes
+// contienen importes: exigen consultar turnos de caja. Un corte que incluye el efectivo esperado
+// solo se muestra con el permiso de consultarlo y nunca mientras su turno está en arqueo de
+// cierre, cuando la captura es ciega para todos. El comando del cajón no contiene importes.
+func (handler *service) cashDocument(id, kind string) (*Document, error) {
+	if err := handler.request.Actor.Require("kitchen.stations.all"); err != nil {
+		return nil, err
+	}
+	var includesExpected bool
+	var shiftState *string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT coalesce((t.document->>'includes_expected')::boolean,false),
+        (SELECT s.state FROM app.cash_shifts s WHERE s.id::text=t.document->>'shift_id')
+        FROM app.kitchen_tickets t WHERE t.id=$1`, id).Scan(&includesExpected, &shiftState)
+	if err != nil {
+		return nil, err
+	}
+	if kind != KindCashDrawer && !handler.request.Actor.Can("cash.shifts.read") {
+		return nil, &Error{Status: 403, Code: "PERMISSION_DENIED", Message: "No tienes permiso para consultar documentos de caja."}
+	}
+	if includesExpected && (!handler.request.Actor.Can("cash.expected.read") || (shiftState != nil && *shiftState == "closing")) {
+		return nil, &Error{Status: 403, Code: "PERMISSION_DENIED", Message: "El documento contiene el efectivo esperado; no puede consultarse sin su permiso ni durante el arqueo de cierre."}
+	}
+	return handler.commercialDocument(id, kind)
+}
+
 func (handler *service) readTickets(parts []string) (any, error) {
 	if len(parts) == 2 {
 		return handler.filteredDocument(parts[1])
@@ -249,7 +277,7 @@ func (handler *service) readTickets(parts []string) (any, error) {
             WHERE section->'station'->>'reception' IN ('kds','both')
             AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations a WHERE a.device_id=$3 AND a.station_id=(section->'station'->>'id')::uuid))
             AND NOT EXISTS(SELECT FROM app.kitchen_kds_receipts k WHERE k.ticket_id=t.id AND k.station_id=(section->'station'->>'id')::uuid)))
-        FROM app.kitchen_tickets t WHERE t.kind NOT IN ('receipt','precheck') AND ($1='' OR NULLIF($1,'')::uuid=ANY(station_ids))
+        FROM app.kitchen_tickets t WHERE t.kind NOT IN (`+renderedKinds+`) AND ($1='' OR NULLIF($1,'')::uuid=ANY(station_ids))
         AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations d WHERE d.device_id=$3 AND d.station_id=ANY(t.station_ids)))
         ORDER BY created_at DESC,id DESC LIMIT 100 OFFSET $4`, station, handler.request.Actor.Can("kitchen.stations.all"), handler.request.Actor.DeviceID, (page-1)*100)
 	return rows, err
