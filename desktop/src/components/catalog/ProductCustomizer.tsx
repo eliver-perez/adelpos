@@ -7,14 +7,21 @@ import type {
   Customization,
   Lookups,
 } from '../../services/catalog';
+import {
+  componentSelection,
+  groupLimits,
+  groupSelection,
+  ingredientQuantity,
+  originalCustomization,
+  withComponent,
+  withGroupOption,
+  withIngredient,
+  withoutGroupOptions,
+} from './customizationRules';
 import { CatalogImage, DecimalField, IntegerField, ReferenceField } from './EditorFields';
 
-export const originalCustomization = (): Customization => ({
-  ingredients: [],
-  groups: [],
-  components: [],
-  notes: '',
-});
+// Se conserva la exportación original para los editores existentes.
+export { originalCustomization };
 
 export function ProductCustomizer({
   productID,
@@ -46,13 +53,7 @@ export function ProductCustomizer({
   const product = data.product;
   if (depth > 8) return <Notice>El combo supera el límite de profundidad.</Notice>;
   function changeComponent(selection: ComponentSelection) {
-    onChange({
-      ...value,
-      components: [
-        ...value.components.filter((entry) => entry.slot_id !== selection.slot_id),
-        selection,
-      ],
-    });
+    onChange(withComponent(value, selection));
   }
   return (
     <div className="product-customizer form-stack">
@@ -84,20 +85,9 @@ export function ProductCustomizer({
               quantity
               key={ingredient.ingredient_id}
               label={`${ingredient.name} · incluido ${ingredient.included_quantity} · adicional $${ingredient.extra_price}`}
-              value={
-                value.ingredients.find((entry) => entry.ingredient_id === ingredient.ingredient_id)
-                  ?.quantity ?? ingredient.included_quantity
-              }
+              value={ingredientQuantity(value, ingredient)}
               onChange={(quantity) =>
-                onChange({
-                  ...value,
-                  ingredients: [
-                    ...value.ingredients.filter(
-                      (entry) => entry.ingredient_id !== ingredient.ingredient_id,
-                    ),
-                    { ingredient_id: ingredient.ingredient_id, quantity },
-                  ],
-                })
+                onChange(withIngredient(value, ingredient.ingredient_id, quantity))
               }
             />
           ))}
@@ -106,9 +96,8 @@ export function ProductCustomizer({
       {product.groups.map((binding) => {
         const group = data.groups.find((entry) => entry.id === binding.group_id);
         if (!group) return null;
-        const selection =
-          value.groups.find((entry) => entry.group_id === binding.group_id)?.options ??
-          binding.included;
+        const selection = groupSelection(value, binding);
+        const limits = groupLimits(binding, group);
         return (
           <section className="catalog-section" key={binding.group_id}>
             <h3>{group.name}</h3>
@@ -116,8 +105,7 @@ export function ProductCustomizer({
               {group.pricing_mode === 'value'
                 ? 'Equivalencia por valor: se cobra solamente la diferencia positiva.'
                 : 'Unidades adicionales con tramos explícitos.'}{' '}
-              Mínimo: {binding.min_quantity ?? group.min_quantity}. Máximo:{' '}
-              {binding.max_quantity ?? group.max_quantity ?? 'sin límite'}.
+              Mínimo: {limits.minimum}. Máximo: {limits.maximum ?? 'sin límite'}.
             </p>
             {group.options.map((option) => (
               <div className="customization-option" key={option.id}>
@@ -138,19 +126,7 @@ export function ProductCustomizer({
                   label="Porciones solicitadas"
                   value={selection.find((entry) => entry.option_id === option.id)?.quantity ?? '0'}
                   onChange={(quantity) =>
-                    onChange({
-                      ...value,
-                      groups: [
-                        ...value.groups.filter((entry) => entry.group_id !== binding.group_id),
-                        {
-                          group_id: binding.group_id,
-                          options: [
-                            ...selection.filter((entry) => entry.option_id !== option.id),
-                            { option_id: option.id, quantity },
-                          ],
-                        },
-                      ],
-                    })
+                    onChange(withGroupOption(value, binding, option.id, quantity))
                   }
                 />
               </div>
@@ -158,15 +134,7 @@ export function ProductCustomizer({
             <button
               type="button"
               className="secondary-button"
-              onClick={() =>
-                onChange({
-                  ...value,
-                  groups: [
-                    ...value.groups.filter((entry) => entry.group_id !== binding.group_id),
-                    { group_id: binding.group_id, options: [] },
-                  ],
-                })
-              }
+              onClick={() => onChange(withoutGroupOptions(value, binding.group_id))}
             >
               Retirar todos los complementos de este grupo
             </button>
@@ -174,13 +142,7 @@ export function ProductCustomizer({
         );
       })}
       {product.slots.map((slot) => {
-        const selection = value.components.find((entry) => entry.slot_id === slot.id) ?? {
-          slot_id: slot.id,
-          product_id: slot.default_product_id,
-          variant_id: null,
-          quantity: slot.default_quantity,
-          customization: originalCustomization(),
-        };
+        const selection = componentSelection(value, slot);
         const options = lookups.products.filter((product) =>
           slot.options.some((option) => option.product_id === product.id),
         );

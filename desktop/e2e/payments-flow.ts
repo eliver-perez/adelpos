@@ -48,7 +48,7 @@ export async function configureReceiptPrinter(page: Page) {
 // precuenta, descuento general, pago con tarjeta que liquida y ticket en la cola.
 export async function checkDineInPayment(page: Page) {
   const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
-  await bill.getByRole('button', { name: 'Cobrar $150.00', exact: true }).click();
+  await bill.getByRole('button', { name: 'Cobrar · $150.00', exact: true }).click();
 
   const shift = page.getByRole('region', { name: 'Turno de caja' });
   await expect(shift).toBeVisible();
@@ -146,18 +146,19 @@ export async function checkDineInPayment(page: Page) {
   );
 }
 
-// Pedido para llevar con saldo: «Marcar como entregado» abre el cobro real con la entrega
+// Pedido para llevar con saldo, capturado en la misma pantalla táctil: un toque agrega el filete
+// y «Enviar a cocina» lo confirma. «Marcar como entregado» abre el cobro real con la entrega
 // activada y el pago que liquida registra también la entrega.
 export async function checkTakeawayDelivery(page: Page) {
   const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
-  await page
-    .getByRole('button', { name: 'Capturar productos en esta cuenta', exact: true })
-    .click();
-  await page.getByRole('button', { name: /Filete de prueba/ }).click();
-  await page.getByRole('button', { name: 'Guardar en borrador', exact: true }).click();
-  const confirm = page.getByRole('button', { name: 'Confirmar pedido', exact: true });
-  await expect(confirm).toBeEnabled();
-  await confirm.click();
+  await page.getByRole('button', { name: /^Filete de prueba/ }).click();
+  await expect(bill.getByRole('article', { name: '1 × Filete de prueba' })).toContainText('Nuevo');
+  const send = bill.getByRole('button', { name: 'Enviar a cocina · 1', exact: true });
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect(bill.getByRole('article', { name: '1 × Filete de prueba' })).toContainText(
+    'En cocina',
+  );
   await expect(bill).toContainText('$150.00');
   await expect(bill).toContainText('Entrega: no entregado');
   await bill.getByRole('button', { name: 'Marcar como entregado', exact: true }).click();

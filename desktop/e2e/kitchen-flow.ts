@@ -54,26 +54,37 @@ export async function configureKitchen(page: Page) {
   await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
 }
 
+// Lote enviado desde la captura táctil: 2 filetes y 1 hamburguesa con aros de cebolla, cada uno
+// en las dos estaciones de la ruta de Platillos.
 export async function checkPreparation(page: Page) {
   await page.getByRole('button', { name: 'Cocina y preparación', exact: true }).click();
   await page.getByRole('button', { name: 'Preparación', exact: true }).click();
-  await expect(
-    page.locator('.kitchen-preparation-card').filter({ hasText: 'Filete de prueba' }),
-  ).toHaveCount(2);
-  await page.getByRole('button', { name: 'En preparación', exact: true }).first().click();
-  await page.getByRole('button', { name: 'Marcar producto listo', exact: true }).first().click();
-  await expect(
-    page.locator('.kitchen-preparation-card').filter({ hasText: 'Filete de prueba' }),
-  ).toHaveCount(1);
-  await page.getByRole('button', { name: 'Marcar producto listo', exact: true }).click();
-  await expect(
-    page.locator('.kitchen-preparation-card').filter({ hasText: 'Filete de prueba' }),
-  ).toHaveCount(0);
+  const steaks = page.locator('.kitchen-preparation-card').filter({ hasText: 'Filete de prueba' });
+  await expect(steaks).toHaveCount(2);
+  await expect(steaks.first()).toContainText('2 × Filete de prueba');
+  await steaks.first().getByRole('button', { name: 'En preparación', exact: true }).click();
+  await steaks.first().getByRole('button', { name: 'Marcar producto listo', exact: true }).click();
+  await expect(steaks).toHaveCount(1);
+  await steaks.getByRole('button', { name: 'Marcar producto listo', exact: true }).click();
+  await expect(steaks).toHaveCount(0);
+  const burgers = page
+    .locator('.kitchen-preparation-card')
+    .filter({ hasText: 'Hamburguesa de prueba' });
+  await expect(burgers).toHaveCount(2);
+  for (const remaining of [1, 0]) {
+    await burgers
+      .first()
+      .getByRole('button', { name: 'Marcar producto listo', exact: true })
+      .click();
+    await expect(burgers).toHaveCount(remaining);
+  }
   await page.getByRole('button', { name: 'Comandas', exact: true }).click();
   await expect(page.getByText('Recepción KDS pendiente', { exact: true })).toBeVisible();
   await page.locator('.kitchen-list-button').first().click();
   await expect(page.locator('.kitchen-document')).toContainText('COCINA CALIENTE');
   await expect(page.locator('.kitchen-document')).toContainText('FREIDORAS');
+  // La elección de la personalización llega a la comanda.
+  await expect(page.locator('.kitchen-document')).toContainText('Aros de cebolla');
   await page.getByRole('button', { name: 'Cola de impresión', exact: true }).click();
   await expect(page.locator('.kitchen-job')).toHaveCount(1);
   await expect(page.locator('.kitchen-job')).toContainText('Requiere intervención');
@@ -84,5 +95,7 @@ export async function checkPreparation(page: Page) {
   await page.getByRole('button', { name: 'Registrar decisión', exact: true }).click();
   await expect(page.locator('.kitchen-job')).toContainText('Cancelado administrativamente');
   await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
-  await expect(page.locator('.account-preparation-status')).toContainText('Listo');
+  await expect(page.getByRole('complementary', { name: 'Cuenta actual' })).toContainText(
+    'Preparación: Listo',
+  );
 }

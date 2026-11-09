@@ -815,6 +815,48 @@ func TestStageThreeAcceptance(t *testing.T) {
 			t.Fatalf("El cambio de tasa no quedó auditado con el guardado: %d %v", audited, err)
 		}
 	})
+	run("captura táctil: categorías disponibles y búsqueda por nombre o código", func(t *testing.T) {
+		// Etapa 6.1 fase D: los lookups indican qué categorías están disponibles ahora (activas y
+		// dentro de su horario, con el reloj de Go) y el listado de productos busca también por
+		// código interno.
+		future := catalog.Category{
+			Metadata:     catalog.Metadata{Name: "Temporada futura", Active: true},
+			Availability: catalog.Schedule{StartsOn: "2999-01-01", Days: []int{}, Windows: []catalog.TimeWindow{}},
+		}
+		_ = json.Unmarshal(call("POST", "catalog/categories", future, 200), &future)
+		paused := catalog.Category{Metadata: catalog.Metadata{Name: "Categoría inactiva", Active: false}}
+		_ = json.Unmarshal(call("POST", "catalog/categories", paused, 200), &paused)
+		var lookups struct {
+			Categories []map[string]any `json:"categories"`
+		}
+		_ = json.Unmarshal(call("GET", "catalog/lookups", nil, 200), &lookups)
+		availability := map[string]any{}
+		for _, entry := range lookups.Categories {
+			id, _ := entry["id"].(string)
+			availability[id] = entry["available_now"]
+		}
+		if availability[category.ID] != true {
+			t.Fatalf("una categoría sin restricciones no aparece disponible: %v", availability[category.ID])
+		}
+		if availability[future.ID] != false || availability[paused.ID] != false {
+			t.Fatalf("una categoría fuera de horario o inactiva aparece disponible: %v %v", availability[future.ID], availability[paused.ID])
+		}
+		coded := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Machacado norteño", Active: true},
+			CategoryID: category.ID, Code: "MACH-77", Kind: "product", BasePrice: "95",
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", coded, 200), &coded)
+		for _, search := range []string{"mach-77", "Machacado"} {
+			var page struct {
+				Items []catalog.Product `json:"items"`
+				Total int               `json:"total"`
+			}
+			_ = json.Unmarshal(call("GET", "catalog/products?search="+search, nil, 200), &page)
+			if page.Total != 1 || page.Items[0].ID != coded.ID {
+				t.Fatalf("la búsqueda %q no encontró el producto por nombre o código: %+v", search, page)
+			}
+		}
+	})
 	run("permisos vigentes precios protegidos y auditoría", func(t *testing.T) {
 		var userID string
 		if err := pool.QueryRow(ctx, "SELECT id FROM app.users WHERE username='admin'").Scan(&userID); err != nil {

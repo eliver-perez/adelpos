@@ -48,7 +48,13 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[resource] = RedactPrices(records, actor)
+		redacted := RedactPrices(records, actor)
+		if resource == "categories" {
+			if err := markCategoryAvailability(ctx, tx, records, redacted); err != nil {
+				return nil, err
+			}
+		}
+		result[resource] = redacted
 	}
 	// La categoría y el orden de cada producto permiten a la interfaz mostrar las posiciones dentro
 	// de su categoría sin otra consulta. El orden por nombre se conserva para los selectores.
@@ -105,6 +111,31 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 	result["products"] = products
 	result["palette"] = Palette
 	return result, nil
+}
+
+// markCategoryAvailability agrega available_now a cada categoría de los lookups: activa y dentro
+// de su horario en este momento, con el reloj de Go y la zona del establecimiento. La captura
+// táctil solo muestra las categorías disponibles sin repetir en la interfaz la evaluación de
+// horarios; Go sigue rechazando al calcular cualquier producto no disponible.
+func markCategoryAvailability(ctx context.Context, tx pgx.Tx, records []any, redacted any) error {
+	entries, ok := redacted.([]any)
+	if !ok || len(entries) != len(records) {
+		return nil
+	}
+	location, err := restaurantLocation(ctx, tx)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for index, record := range records {
+		category, isCategory := record.(*Category)
+		entry, isMap := entries[index].(map[string]any)
+		if !isCategory || !isMap {
+			continue
+		}
+		entry["available_now"] = category.Active && scheduleAvailable(category.Availability, now, location)
+	}
+	return nil
 }
 
 func configuration(ctx context.Context, tx pgx.Tx, id string, actor Actor) (any, error) {

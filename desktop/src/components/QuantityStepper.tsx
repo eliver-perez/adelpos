@@ -1,4 +1,6 @@
 // Selector táctil de unidades enteras de una partida (no de dinero): menos, cantidad y más.
+// `minimum` (cero por omisión) y `showMax` permiten usarlo también como cantidad del producto en
+// la captura, donde no se muestra el máximo; `large` agranda los botones (captura táctil).
 export function QuantityStepper({
   verb,
   name,
@@ -6,6 +8,9 @@ export function QuantityStepper({
   max,
   onChange,
   disabled = false,
+  minimum = 0,
+  showMax = true,
+  large = false,
 }: {
   verb: string;
   name: string;
@@ -13,18 +18,25 @@ export function QuantityStepper({
   max: number;
   onChange: (quantity: number) => void;
   disabled?: boolean;
+  minimum?: number;
+  showMax?: boolean;
+  large?: boolean;
 }) {
   if (max === 0) {
     return null;
   }
   return (
-    <div className="checkout-line-selector" role="group" aria-label={`${verb} ${name}`}>
+    <div
+      className={`checkout-line-selector ${large ? 'quantity-stepper-large' : ''}`}
+      role="group"
+      aria-label={`${verb} ${name}`}
+    >
       <span className="muted text-xs">{verb}</span>
       <button
         type="button"
         className="secondary-button"
         aria-label={`Quitar una unidad de ${name}`}
-        disabled={disabled || quantity === 0}
+        disabled={disabled || quantity <= minimum}
         onClick={() => onChange(quantity - 1)}
       >
         −
@@ -39,7 +51,7 @@ export function QuantityStepper({
       >
         +
       </button>
-      <span className="muted text-xs">de {max}</span>
+      {showMax && <span className="muted text-xs">de {max}</span>}
     </div>
   );
 }
