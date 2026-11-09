@@ -79,17 +79,17 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 			return nil, invalid("La caja seleccionada está inactiva.")
 		}
 	}
-	// Mientras la caja actual de la terminal tenga un turno abierto, sus cobros pertenecen a ese
-	// turno: no se reasigna la terminal a otra caja hasta cerrarlo.
+	// Mientras la caja actual de la terminal tenga un turno activo (abierto o en arqueo de cierre),
+	// sus cobros pertenecen a ese turno: no se reasigna la terminal a otra caja hasta cerrarlo.
 	var registerChanged, shiftOpen bool
 	err = tx.QueryRow(ctx, `SELECT d.register_id IS DISTINCT FROM $2::uuid,
-        EXISTS(SELECT FROM app.cash_shifts s WHERE s.register_id=d.register_id AND s.state='open')
+        EXISTS(SELECT FROM app.cash_shifts s WHERE s.register_id=d.register_id AND s.state IN ('open','closing'))
         FROM app.devices d WHERE d.id=$1`, deviceID, input.RegisterID).Scan(&registerChanged, &shiftOpen)
 	if err != nil {
 		return nil, err
 	}
 	if registerChanged && shiftOpen {
-		return nil, &Fault{Status: 409, Code: "SHIFT_OPEN", Message: "La caja actual de esta terminal tiene un turno abierto. No se puede cambiar de caja hasta cerrarlo."}
+		return nil, &Fault{Status: 409, Code: "SHIFT_OPEN", Message: "La caja actual de esta terminal tiene un turno abierto o en arqueo de cierre. No se puede cambiar de caja hasta cerrarlo."}
 	}
 	if _, err := tx.Exec(ctx, "UPDATE app.devices SET name=$1,register_id=$2,keyboard_mode=$3 WHERE id=$4", input.Name, input.RegisterID, input.KeyboardMode, deviceID); err != nil {
 		return nil, err

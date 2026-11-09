@@ -18,6 +18,9 @@ type route struct {
 }
 
 func resolve(method string, parts []string) *route {
+	if selected := cashRoute(method, parts); selected != nil {
+		return selected
+	}
 	length := len(parts)
 	switch {
 	case length == 1 && parts[0] == "settings" && method == "GET":
@@ -62,7 +65,8 @@ func resolve(method string, parts []string) *route {
 
 // Handle atiende las rutas financieras dentro de la transacción autenticada de administración.
 // Toda escritura toma primero el lock operativo 7820148305, el mismo de transferencias y
-// combinaciones, porque comparte el agregado de la cuenta; las lecturas lo toman compartido.
+// combinaciones, porque comparte el agregado de la cuenta; las lecturas lo toman compartido. Las
+// rutas de caja (etapa 7) usan el mismo lock: un cobro y el cierre de su turno nunca se intercalan.
 func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, error) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(request.Route, "payments/"), "/"), "/")
 	selected := resolve(request.Method, parts)
@@ -74,6 +78,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	}
 	if len(parts) > 1 && (parts[0] == "accounts" || parts[0] == "methods" || (parts[0] == "shifts" && parts[1] != "current")) {
 		if err := validateID(parts[1]); err != nil {
+			return nil, err
+		}
+	}
+	if identifier, found := cashIdentifier(parts); found {
+		if err := validateID(identifier); err != nil {
 			return nil, err
 		}
 	}

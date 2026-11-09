@@ -164,6 +164,7 @@ Función activable del establecimiento, **desactivada por defecto** (Configuraci
 - `cash_movements` contiene cada efecto en caja (cobro, devolución, reverso de corrección) firmado, por método, con efectivo recibido y cambio y, desde la 0007, entradas y salidas físicas por moneda. `GET payments/shifts/{id}/movements` ya calcula totales por método, efectivo esperado = fondo inicial + efectivo neto y `by_currency` (pesos y dólares físicos esperados).
 - Con dólares, el registro usa el tipo de cambio vigente del turno abierto; al existir cierres (etapa 7) convendrá que el cobro envíe el tipo de cambio que mostró la vista previa para detectar un turno distinto.
 - Cerrar un turno no exigirá liquidar cuentas pendientes; los pagos quedan siempre ligados a su turno y caja.
+- **Etapa 7 (fase A, migración 0008)**: el turno admite el estado «Cierre en curso» (`closing`), durante el cual cobros, devoluciones y correcciones responden 409 `SHIFT_CLOSING`; el efectivo esperado y `by_currency` de `GET payments/shifts/{id}/movements` solo se entregan con `cash.expected.read` y nunca durante el arqueo; el cobro y la devolución aceptan `shift_id` opcional. Ingresos, retiros, gastos, cortes, arqueos y cierre: [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md).
 
 ## Pruebas
 

@@ -1,9 +1,12 @@
 package payments
 
 import (
+	"errors"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/features"
@@ -16,39 +19,84 @@ type Register struct {
 }
 
 type Shift struct {
-	ID            string     `json:"id"`
-	RegisterID    string     `json:"register_id"`
-	RegisterName  string     `json:"register_name"`
-	State         string     `json:"state"`
-	OpeningFloat  string     `json:"opening_float"`
-	OpenedBy      string     `json:"opened_by"`
-	OpenedByName  string     `json:"opened_by_name"`
-	OpenedDevice  string     `json:"opened_device_name"`
-	OpenedAt      time.Time  `json:"opened_at"`
-	ClosedAt      *time.Time `json:"closed_at"`
-	Revision      int        `json:"revision"`
-	SharedAllowed bool       `json:"shared_allowed"`
+	ID              string  `json:"id"`
+	RegisterID      string  `json:"register_id"`
+	RegisterName    string  `json:"register_name"`
+	State           string  `json:"state"`
+	OpeningFloat    string  `json:"opening_float"`
+	OpeningFloatUSD *string `json:"opening_float_usd"`
+	OpeningNotes    string  `json:"opening_notes"`
+	// Fecha comercial: fecha de apertura en la zona horaria del establecimiento.
+	BusinessDate string    `json:"business_date"`
+	OpenedBy     string    `json:"opened_by"`
+	OpenedByName string    `json:"opened_by_name"`
+	OpenedDevice string    `json:"opened_device_name"`
+	OpenedAt     time.Time `json:"opened_at"`
+	// Arqueo de cierre en curso (o el que cerró el turno): quién lo inició, cuándo y desde dónde.
+	ClosingStartedBy     *string    `json:"closing_started_by"`
+	ClosingStartedByName *string    `json:"closing_started_by_name"`
+	ClosingStartedAt     *time.Time `json:"closing_started_at"`
+	ClosingDeviceName    *string    `json:"closing_device_name"`
+	ClosedAt             *time.Time `json:"closed_at"`
+	ClosedBy             *string    `json:"closed_by"`
+	ClosedByName         *string    `json:"closed_by_name"`
+	ClosedDeviceName     *string    `json:"closed_device_name"`
+	Revision             int        `json:"revision"`
+	SharedAllowed        bool       `json:"shared_allowed"`
 	// Tipo de cambio fijo del turno (MXN por USD); nil mientras no se captura.
 	USDRate          *string    `json:"usd_rate"`
 	USDRateSetByName *string    `json:"usd_rate_set_by_name"`
 	USDRateSetAt     *time.Time `json:"usd_rate_set_at"`
+
+	// Conteos de registros al iniciar el arqueo; la confirmación los compara.
+	closingMovements  *int
+	closingOperations *int
 }
 
-const shiftQuery = `SELECT s.id,s.register_id,r.name,s.state,s.opening_float::text,s.opened_by,u.display_name,d.name,
-    s.opened_at,s.closed_at,s.revision,s.usd_rate::text,setter.display_name,s.usd_rate_set_at
+// businessDateExpression calcula la fecha comercial de un turno: la guardada al abrir o, en
+// turnos anteriores a la etapa 7, la fecha de apertura en la zona horaria vigente.
+const businessDateExpression = `coalesce(s.business_date,(s.opened_at AT TIME ZONE coalesce(e.timezone,'UTC'))::date)`
+
+const shiftQuery = `SELECT s.id,s.register_id,r.name,s.state,s.opening_float::text,s.opening_float_usd::text,s.opening_notes,
+    ` + businessDateExpression + `::text,s.opened_by,u.display_name,d.name,s.opened_at,
+    s.closing_started_by,starter.display_name,s.closing_started_at,closing_device.name,
+    s.closed_at,s.closed_by,closer.display_name,closed_device.name,
+    s.revision,s.usd_rate::text,setter.display_name,s.usd_rate_set_at,s.closing_movement_count,s.closing_operation_count
     FROM app.cash_shifts s JOIN app.registers r ON r.id=s.register_id
     JOIN app.users u ON u.id=s.opened_by JOIN app.devices d ON d.id=s.opened_device_id
-    LEFT JOIN app.users setter ON setter.id=s.usd_rate_set_by`
+    LEFT JOIN app.users setter ON setter.id=s.usd_rate_set_by
+    LEFT JOIN app.users starter ON starter.id=s.closing_started_by
+    LEFT JOIN app.devices closing_device ON closing_device.id=s.closing_device_id
+    LEFT JOIN app.users closer ON closer.id=s.closed_by
+    LEFT JOIN app.devices closed_device ON closed_device.id=s.closed_device_id
+    LEFT JOIN app.establishment e ON true`
+
+// scanShift lee una fila de shiftQuery.
+func scanShift(row pgx.Row) (*Shift, error) {
+	var shift Shift
+	err := row.Scan(&shift.ID, &shift.RegisterID, &shift.RegisterName, &shift.State, &shift.OpeningFloat, &shift.OpeningFloatUSD,
+		&shift.OpeningNotes, &shift.BusinessDate, &shift.OpenedBy, &shift.OpenedByName, &shift.OpenedDevice, &shift.OpenedAt,
+		&shift.ClosingStartedBy, &shift.ClosingStartedByName, &shift.ClosingStartedAt, &shift.ClosingDeviceName,
+		&shift.ClosedAt, &shift.ClosedBy, &shift.ClosedByName, &shift.ClosedDeviceName,
+		&shift.Revision, &shift.USDRate, &shift.USDRateSetByName, &shift.USDRateSetAt,
+		&shift.closingMovements, &shift.closingOperations)
+	if err != nil {
+		return nil, err
+	}
+	return &shift, nil
+}
 
 func (handler *service) readShift(where string, argument any) (*Shift, error) {
-	var shift Shift
-	err := handler.tx.QueryRow(handler.ctx, shiftQuery+" WHERE "+where, argument).Scan(&shift.ID, &shift.RegisterID, &shift.RegisterName,
-		&shift.State, &shift.OpeningFloat, &shift.OpenedBy, &shift.OpenedByName, &shift.OpenedDevice, &shift.OpenedAt, &shift.ClosedAt, &shift.Revision,
-		&shift.USDRate, &shift.USDRateSetByName, &shift.USDRateSetAt)
+	shift, err := scanShift(handler.tx.QueryRow(handler.ctx, shiftQuery+" WHERE "+where, argument))
 	if isNoRows(err) {
 		return nil, nil
 	}
-	return &shift, err
+	return shift, err
+}
+
+// activeShift devuelve el turno activo de una caja: abierto o en arqueo de cierre.
+func (handler *service) activeShift(registerID string) (*Shift, error) {
+	return handler.readShift("s.register_id=$1 AND s.state IN ('open','closing')", registerID)
 }
 
 // deviceRegister obtiene la caja física asociada a la terminal actual.
@@ -89,7 +137,7 @@ func (handler *service) currentShift(_ []string) (any, error) {
 		result["reason"] = "Esta terminal no tiene una caja física asignada. Asígnala desde Terminales."
 		return result, nil
 	}
-	shift, err := handler.readShift("s.register_id=$1 AND s.state='open'", register.ID)
+	shift, err := handler.activeShift(register.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +147,11 @@ func (handler *service) currentShift(_ []string) (any, error) {
 	}
 	shift.SharedAllowed = settings.SharedShifts
 	result["shift"] = shift
+	// Un turno en arqueo de cierre está pausado: no acepta cobros, devoluciones ni movimientos.
+	if shift.State == shiftClosing {
+		result["reason"] = closingMessage(shift)
+		return result, nil
+	}
 	result["usd_rate_required"] = usdCash && shift.USDRate == nil
 	if !settings.SharedShifts && shift.OpenedBy != handler.request.Actor.UserID {
 		result["reason"] = "El turno abierto pertenece a " + shift.OpenedByName + " y la configuración no permite compartirlo."
@@ -109,7 +162,8 @@ func (handler *service) currentShift(_ []string) (any, error) {
 }
 
 // usableShift exige caja asociada y turno abierto antes de registrar cualquier cobro o devolución.
-// Nunca se abre un turno automáticamente con un fondo inventado.
+// Nunca se abre un turno automáticamente con un fondo inventado. Un turno en arqueo de cierre
+// responde 409 SHIFT_CLOSING.
 func (handler *service) usableShift() (*Shift, error) {
 	register, err := handler.deviceRegister()
 	if err != nil {
@@ -118,41 +172,171 @@ func (handler *service) usableShift() (*Shift, error) {
 	if register == nil {
 		return nil, conflict("REGISTER_REQUIRED", "Esta terminal no tiene una caja física asignada. Asígnala desde Terminales antes de cobrar.")
 	}
-	shift, err := handler.readShift("s.register_id=$1 AND s.state='open'", register.ID)
+	shift, err := handler.activeShift(register.ID)
 	if err != nil {
 		return nil, err
 	}
 	if shift == nil {
 		return nil, conflict("SHIFT_REQUIRED", "No hay un turno abierto en "+register.Name+". Abre el turno con su fondo inicial antes de cobrar.")
 	}
-	settings, err := handler.settings()
-	if err != nil {
+	if err := shiftStateError(shift); err != nil {
 		return nil, err
 	}
-	if !settings.SharedShifts && shift.OpenedBy != handler.request.Actor.UserID {
-		return nil, conflict("SHIFT_NOT_SHARED", "El turno abierto pertenece a "+shift.OpenedByName+" y la configuración del establecimiento no permite compartirlo.")
+	if err := handler.requireSharedShift(shift); err != nil {
+		return nil, err
 	}
 	return shift, nil
 }
 
-func (handler *service) openShift(_ []string) (any, error) {
-	var input struct {
-		OperationID           string `json:"operation_id"`
-		OpeningFloat          string `json:"opening_float"`
-		USDRate               string `json:"usd_rate"`
-		ConfirmRateDifference bool   `json:"confirm_rate_difference"`
+// requireSharedShift respeta la política de turno compartido: si está desactivada, solo quien
+// abrió el turno registra cobros y movimientos en él.
+func (handler *service) requireSharedShift(shift *Shift) error {
+	settings, err := handler.settings()
+	if err != nil {
+		return err
 	}
+	if !settings.SharedShifts && shift.OpenedBy != handler.request.Actor.UserID {
+		return conflict("SHIFT_NOT_SHARED", "El turno abierto pertenece a "+shift.OpenedByName+" y la configuración del establecimiento no permite compartirlo.")
+	}
+	return nil
+}
+
+// usableShiftFor valida además el turno que la terminal mostraba al preparar la operación
+// (shift_id opcional del cuerpo, parte de la huella idempotente). Así, el reintento de una
+// operación incierta sobre un turno pausado o cerrado se rechaza con un error claro en lugar de
+// registrarse en otro turno; si sigue haciendo falta, se registra como operación nueva.
+func (handler *service) usableShiftFor(expectedID string) (*Shift, error) {
+	expectedID = strings.TrimSpace(expectedID)
+	if expectedID != "" {
+		if err := validateID(expectedID); err != nil {
+			return nil, err
+		}
+		expected, err := handler.readShift("s.id=$1", expectedID)
+		if err != nil {
+			return nil, err
+		}
+		if expected == nil {
+			return nil, notFound("El turno indicado no existe.")
+		}
+		if err := shiftStateError(expected); err != nil {
+			return nil, err
+		}
+	}
+	shift, err := handler.usableShift()
+	if err != nil {
+		return nil, err
+	}
+	if expectedID != "" && shift.ID != expectedID {
+		return nil, conflict("SHIFT_CHANGED", "El turno de la caja cambió desde que se preparó la operación. Actualiza la pantalla y revisa el turno vigente.")
+	}
+	return shift, nil
+}
+
+// OpeningInput es la apertura ampliada del turno. El fondo en pesos es obligatorio (puede ser
+// $0); el fondo en dólares y el tipo de cambio solo se aceptan con la función usd_cash activa. El
+// desglose por denominaciones es opcional: si viene, su total por moneda debe coincidir con el
+// fondo declarado.
+type OpeningInput struct {
+	OperationID           string      `json:"operation_id"`
+	OpeningFloat          string      `json:"opening_float"`
+	OpeningFloatUSD       string      `json:"opening_float_usd"`
+	OpeningNotes          string      `json:"opening_notes"`
+	USDRate               string      `json:"usd_rate"`
+	ConfirmRateDifference bool        `json:"confirm_rate_difference"`
+	Count                 *CountInput `json:"count"`
+}
+
+// openingPlan es la apertura validada por completo antes de escribir.
+type openingPlan struct {
+	float    decimal.Decimal
+	floatUSD *decimal.Decimal
+	notes    string
+	rate     *string
+	count    *countTally
+}
+
+func (handler *service) openShift(_ []string) (any, error) {
+	var input OpeningInput
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
+	plan, err := handler.planOpening(input)
+	if err != nil {
+		return nil, err
+	}
+	register, err := handler.deviceRegister()
+	if err != nil {
+		return nil, err
+	}
+	if register == nil {
+		return nil, conflict("REGISTER_REQUIRED", "Esta terminal no tiene una caja física asignada. Asígnala desde Terminales.")
+	}
+	if !register.Active {
+		return nil, conflict("REGISTER_INACTIVE", "La caja "+register.Name+" está desactivada.")
+	}
+	// El lock operativo serializa las aperturas; el índice único parcial impide duplicados aunque
+	// falle esa serialización. Un turno en arqueo de cierre sigue activo: no se abre otro.
+	existing, err := handler.activeShift(register.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, shiftAlreadyOpen(register.Name, existing)
+	}
+	id := newID()
+	if err := handler.insertShift(id, register, plan); err != nil {
+		return nil, err
+	}
+	if plan.count != nil {
+		if _, err := handler.insertCount(id, "opening", "final", *plan.count, ""); err != nil {
+			return nil, err
+		}
+	}
+	shift, err := handler.readShift("s.id=$1", id)
+	if err != nil {
+		return nil, err
+	}
+	if err := events.Append(handler.ctx, handler.tx, "cash.shift.opened", cashScope, &id, nil); err != nil {
+		return nil, err
+	}
+	return shift, handler.audit(handler.ctx, handler.tx, "cash.shift_opened", "cash_shift", &id, nil, map[string]any{
+		"shift": shift, "counted_by_denominations": plan.count != nil,
+	})
+}
+
+// shiftAlreadyOpen explica por qué una caja no admite otra apertura.
+func shiftAlreadyOpen(registerName string, existing *Shift) error {
+	if existing.State == shiftClosing {
+		return conflict("SHIFT_ALREADY_OPEN", "La caja "+registerName+" está en arqueo de cierre. Confirma o cancela el arqueo antes de abrir otro turno.")
+	}
+	return conflict("SHIFT_ALREADY_OPEN", "La caja "+registerName+" ya tiene un turno abierto por "+existing.OpenedByName+".")
+}
+
+// planOpening valida la apertura completa (fondos, observaciones, tipo de cambio y desglose)
+// antes de cualquier escritura.
+func (handler *service) planOpening(input OpeningInput) (*openingPlan, error) {
 	// El fondo inicial es obligatorio, aunque puede ser $0.
 	opening, err := parseAmount(input.OpeningFloat, "fondo inicial")
 	if err != nil {
 		return nil, err
 	}
+	plan := &openingPlan{float: opening, notes: strings.TrimSpace(input.OpeningNotes)}
+	if textLength(plan.notes) > 2000 {
+		return nil, invalid("Las observaciones de la apertura admiten hasta 2000 caracteres.")
+	}
+	// El fondo en dólares es un dato en dólares: con la función desactivada se rechaza.
+	if strings.TrimSpace(input.OpeningFloatUSD) != "" {
+		if err := handler.requireUSDCash(); err != nil {
+			return nil, err
+		}
+		floatUSD, err := parseAmount(strings.TrimSpace(input.OpeningFloatUSD), "fondo inicial en dólares")
+		if err != nil {
+			return nil, err
+		}
+		plan.floatUSD = &floatUSD
+	}
 	// El tipo de cambio es opcional al abrir; si viene, exige la función activa y su permiso, y se
 	// valida por completo antes de escribir.
-	var usdRate *string
 	if strings.TrimSpace(input.USDRate) != "" || input.ConfirmRateDifference {
 		if err := handler.requireUSDCash(); err != nil {
 			return nil, err
@@ -165,43 +349,64 @@ func (handler *service) openShift(_ []string) (any, error) {
 			return nil, err
 		}
 		formatted := money(rate)
-		usdRate = &formatted
+		plan.rate = &formatted
 	}
-	register, err := handler.deviceRegister()
-	if err != nil {
-		return nil, err
+	if input.Count != nil {
+		tally, err := handler.evaluateCount(*input.Count, plan.floatUSD != nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := matchOpeningCount(tally, plan); err != nil {
+			return nil, err
+		}
+		plan.count = &tally
 	}
-	if register == nil {
-		return nil, conflict("REGISTER_REQUIRED", "Esta terminal no tiene una caja física asignada. Asígnala desde Terminales.")
+	return plan, nil
+}
+
+// matchOpeningCount exige que el desglose sume exactamente el fondo declarado en cada moneda.
+func matchOpeningCount(tally countTally, plan *openingPlan) error {
+	floatUSD := zero
+	if plan.floatUSD != nil {
+		floatUSD = *plan.floatUSD
 	}
-	if !register.Active {
-		return nil, conflict("REGISTER_INACTIVE", "La caja "+register.Name+" está desactivada.")
+	if !tally.mxn.Equal(plan.float) {
+		return &Error{
+			Status:  400,
+			Code:    "COUNT_TOTAL_MISMATCH",
+			Message: "El desglose suma " + formatPesos(tally.mxn) + " y el fondo inicial declarado es " + formatPesos(plan.float) + ". Revisa el conteo.",
+		}
 	}
-	// El lock operativo serializa las aperturas; el índice único parcial impide duplicados aunque falle esa serialización.
-	existing, err := handler.readShift("s.register_id=$1 AND s.state='open'", register.ID)
-	if err != nil {
-		return nil, err
+	if !tally.usd.Equal(floatUSD) {
+		return &Error{
+			Status:  400,
+			Code:    "COUNT_TOTAL_MISMATCH",
+			Message: "El desglose en dólares suma US$" + money(tally.usd) + " y el fondo en dólares declarado es US$" + money(floatUSD) + ". Revisa el conteo.",
+		}
 	}
-	if existing != nil {
-		return nil, conflict("SHIFT_ALREADY_OPEN", "La caja "+register.Name+" ya tiene un turno abierto por "+existing.OpenedByName+".")
+	return nil
+}
+
+// insertShift registra el turno con su fecha comercial, calculada con la misma hora de apertura
+// en la zona horaria del establecimiento.
+func (handler *service) insertShift(id string, register *Register, plan *openingPlan) error {
+	var floatUSD *string
+	if plan.floatUSD != nil {
+		floatUSD = optionalMoney(*plan.floatUSD)
 	}
-	id := newID()
-	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.cash_shifts(id,register_id,opening_float,opened_by,opened_device_id,operation_id,
-        usd_rate,usd_rate_set_by,usd_rate_set_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7::numeric,CASE WHEN $7::numeric IS NULL THEN NULL ELSE $4::uuid END,
-        CASE WHEN $7::numeric IS NULL THEN NULL ELSE now() END)`,
-		id, register.ID, money(opening), handler.request.Actor.UserID, handler.request.Actor.DeviceID, handler.operationID, usdRate)
-	if err != nil {
-		return nil, err
+	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.cash_shifts(id,register_id,opening_float,opening_float_usd,opening_notes,
+        business_date,opened_by,opened_device_id,operation_id,usd_rate,usd_rate_set_by,usd_rate_set_at)
+        VALUES ($1,$2,$3,$4::numeric,$5,(now() AT TIME ZONE coalesce((SELECT timezone FROM app.establishment),'UTC'))::date,
+        $6,$7,$8,$9::numeric,CASE WHEN $9::numeric IS NULL THEN NULL ELSE $6::uuid END,
+        CASE WHEN $9::numeric IS NULL THEN NULL ELSE now() END)`,
+		id, register.ID, money(plan.float), floatUSD, plan.notes, handler.request.Actor.UserID, handler.request.Actor.DeviceID,
+		handler.operationID, plan.rate)
+	// Dos aperturas que eludieran el lock chocarían con el índice único de turno activo.
+	var problem *pgconn.PgError
+	if errors.As(err, &problem) && problem.Code == "23505" && problem.ConstraintName == "cash_shifts_one_active_idx" {
+		return conflict("SHIFT_ALREADY_OPEN", "La caja "+register.Name+" ya tiene un turno activo.")
 	}
-	shift, err := handler.readShift("s.id=$1", id)
-	if err != nil {
-		return nil, err
-	}
-	if err := events.Append(handler.ctx, handler.tx, "cash.shift.opened", "configuration", &id, nil); err != nil {
-		return nil, err
-	}
-	return shift, handler.audit(handler.ctx, handler.tx, "cash.shift_opened", "cash_shift", &id, nil, shift)
+	return err
 }
 
 // validateShiftRate valida un tipo de cambio: formato, rango configurado y, si difiere más del
@@ -270,8 +475,9 @@ func (handler *service) setShiftRate(parts []string) (any, error) {
 	if shift == nil {
 		return nil, notFound("El turno no existe.")
 	}
-	if shift.State != "open" {
-		return nil, conflict("SHIFT_CLOSED", "El turno ya está cerrado; su tipo de cambio no puede capturarse.")
+	// En arqueo de cierre o cerrado, el tipo de cambio ya no puede capturarse.
+	if err := shiftStateError(shift); err != nil {
+		return nil, err
 	}
 	if shift.USDRate != nil {
 		return nil, conflict("USD_RATE_ALREADY_SET", "El turno ya tiene tipo de cambio ("+formatPesos(decimal.RequireFromString(*shift.USDRate))+
@@ -294,7 +500,7 @@ func (handler *service) setShiftRate(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := events.Append(handler.ctx, handler.tx, "cash.shift.usd_rate_set", "configuration", &shift.ID, nil); err != nil {
+	if err := events.Append(handler.ctx, handler.tx, "cash.shift.usd_rate_set", cashScope, &shift.ID, nil); err != nil {
 		return nil, err
 	}
 	return saved, handler.audit(handler.ctx, handler.tx, "cash.shift_usd_rate_set", "cash_shift", &shift.ID,
@@ -333,14 +539,13 @@ type MethodTotal struct {
 	Net        string `json:"net"`
 }
 
-// shiftMovements expone los movimientos persistidos del turno, base de los cortes de la etapa 7.
+// shiftMovements expone los movimientos de cobro persistidos del turno con sus totales por
+// método. El efectivo esperado y los totales físicos por moneda (de los que se deduce) solo se
+// incluyen con cash.expected.read y nunca durante el arqueo de cierre.
 func (handler *service) shiftMovements(parts []string) (any, error) {
-	shift, err := handler.readShift("s.id=$1", parts[1])
+	shift, err := handler.readableShift(parts[1])
 	if err != nil {
 		return nil, err
-	}
-	if shift == nil {
-		return nil, notFound("El turno no existe.")
 	}
 	rows, err := handler.tx.Query(handler.ctx, `SELECT m.id,m.kind,m.method_name,m.is_cash,m.sale_amount::text,m.tip_amount::text,
         m.net_amount::text,m.cash_received::text,m.change_given::text,m.mxn_in::text,m.mxn_out::text,m.usd_in::text,m.usd_out::text,
@@ -387,13 +592,25 @@ func (handler *service) shiftMovements(parts []string) (any, error) {
 	for _, name := range order {
 		byMethod = append(byMethod, *totals[name])
 	}
-	// Efectivo esperado = fondo inicial + efectivo neto cobrado: el cambio nunca suma dos veces.
-	expectedCash := decimal.RequireFromString(shift.OpeningFloat).Add(cashNet)
-	return map[string]any{
-		"shift": shift, "movements": movements, "by_method": byMethod,
-		"cash_net": money(cashNet), "expected_cash": money(expectedCash),
-		"by_currency": currency.summary(decimal.RequireFromString(shift.OpeningFloat)),
-	}, nil
+	result := map[string]any{
+		"shift": shift, "movements": movements, "by_method": byMethod, "cash_net": money(cashNet),
+		"expected_visible": false,
+	}
+	if !handler.expectedVisible(shift) {
+		return result, nil
+	}
+	// El esperado es el mismo que usan cortes y cierre: fondos, cobros en efectivo por moneda y
+	// operaciones de efectivo del turno. expected_cash conserva el nombre de la etapa 6 y expresa
+	// los pesos físicos esperados.
+	expected, err := handler.expectedCash(shift)
+	if err != nil {
+		return nil, err
+	}
+	result["expected_visible"] = true
+	result["expected"] = expected.public()
+	result["expected_cash"] = money(expected.mxn)
+	result["by_currency"] = currency.summary(expected)
+	return result, nil
 }
 
 // currencyTotals acumula el efectivo físico del turno por moneda para el corte de la etapa 7.
@@ -417,15 +634,15 @@ func (totals *currencyTotals) add(item Movement) {
 	totals.usdOut = totals.usdOut.Add(decimal.RequireFromString(*item.USDOut))
 }
 
-// summary expresa lo físico por moneda. El efectivo esperado en pesos incluye el fondo inicial;
-// los dólares se cuentan aparte, sin convertir. No es un arqueo: el cierre pertenece a la etapa 7.
-func (totals *currencyTotals) summary(opening decimal.Decimal) map[string]string {
+// summary expresa lo físico de los cobros por moneda y el efectivo esperado del turno en cada
+// moneda (fondos y operaciones de efectivo incluidos), sin convertir dólares a pesos.
+func (totals *currencyTotals) summary(expected cashExpectation) map[string]string {
 	return map[string]string{
 		"mxn_in":       money(totals.mxnIn),
 		"mxn_out":      money(totals.mxnOut),
 		"usd_in":       money(totals.usdIn),
 		"usd_out":      money(totals.usdOut),
-		"expected_mxn": money(opening.Add(totals.mxnIn).Sub(totals.mxnOut)),
-		"expected_usd": money(totals.usdIn.Sub(totals.usdOut)),
+		"expected_mxn": money(expected.mxn),
+		"expected_usd": money(expected.usd),
 	}
 }

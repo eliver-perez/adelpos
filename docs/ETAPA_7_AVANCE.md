@@ -49,3 +49,56 @@ Revisión de solo lectura de `IniciarCorte.cs`, `CorteParcial.cs`, `CerrarCorte.
 - **Cajón**: se abría tras **cualquier** cobro, incluso con tarjeta (ESC/POS por el puerto 9100), y había un botón manual sin autorización ni registro.
 
 Funciones o reglas del sistema anterior que no están en este plan (no se implementan sin confirmación): filtrar reportes de ventas por corte y por empleado; acreditar la venta al corte de quien la cobra (aquí el pago pertenece al turno de la caja donde se registra, que es equivalente cuando cada cajero usa su caja); bloquear la captura de pedidos sin turno abierto (aquí solo se exige turno para cobrar); el reporte «Egresos» de compras a proveedores (etapa 8). Diferencias deliberadas del plan: cierre ciego, autorización de retiros, cajón solo con efectivo, esperado sin tarjetas y separado por moneda.
+
+## Fase A · Migración, modelo y backend de caja
+
+Implementada sobre el diseño aprobado. Detalle funcional en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md) y contratos en [API_CONTRACTS.md](../API_CONTRACTS.md) («Caja, arqueos y cortes · esquema 8»). Sin pantallas nuevas (fase B), sin impresión, cajón ni tope (fase C, solo esquema). La 0008 no se aplicó a la instalación real.
+
+### Esquema (0008_cash_shifts_and_reconciliation.sql)
+
+- `cash_shifts`: `cash_shifts_state_check` sustituido por `open`/`closing`/`closed`; columnas `opening_float_usd`, `opening_notes`, `business_date`, `closing_started_by/at`, `closing_device_id`, `closing_movement_count`, `closing_operation_count`, `closed_device_id`; CHECK de campos del arqueo y de turno abierto; `cash_shifts_closed_fields_check` `NOT VALID`; `cash_shifts_one_open_idx` sustituido por `cash_shifts_one_active_idx` (`open` y `closing`) e índice de historial.
+- Tablas nuevas: `cash_denominations` (18 sembradas), `cash_counts` + `cash_count_lines`, `cash_expense_categories` (4 sembradas), `cash_operations`, `cash_shift_reports`, `cash_shift_closures`, `cash_closure_comments`, `cash_drawer_settings`, `cash_drawer_events`, `cash_documents`.
+- `payment_settings.cash_limit_mxn/usd`, función `cash_limit` sembrada desactivada, `kitchen_tickets_kind_check` con `cash_report`/`cash_voucher`, `realtime_events_scope_check` con `cash`.
+- 19 permisos nuevos solo para el administrador (Go y migración; una prueba unitaria compara ambos).
+- Nombres heredados verificados en una base temporal migrada antes de escribir los `DROP`. Repetible y probada sobre una base en esquema 7 con un turno abierto.
+
+### Backend
+
+- `backend/internal/payments/cash_*.go` (modelo, acceso, esperado, conteos, operaciones, correcciones, cortes, arqueo y cierre, historial, catálogo y rutas) y ajustes en `shifts.go` (apertura ampliada, turno activo, `usableShiftFor`), `collect.go`/`refunds.go` (`shift_id` opcional, `SHIFT_CLOSING`), `handler.go` (rutas y validación de identificadores) y `context.go` (permisos).
+- `administration/registers.go` y `devices.go` tratan `closing` como turno activo; `events/store.go` filtra el ámbito `cash` por `cash.shifts.read` o `payments.read`; `ordering` agrega el alcance `CashExpenseCategories`.
+- Puente nativo: 22 operaciones nuevas en la lista cerrada de `api.rs` (formato que lee `native-driver.ts`, verificado), parámetros de consulta permitidos solo para el historial, prueba Rust `cash_routes_are_closed_and_keep_write_methods`. Tipos y consultas en `desktop/src/services/cash.ts`; `services/api.ts` y `services/payments.ts` actualizados.
+- Interfaz existente: `ShiftOverview.tsx` muestra el esperado solo si Go lo entrega y la pausa del arqueo (quién y cuándo); el cobro trata `SHIFT_CLOSING` como código de turno (vuelve a consultar el turno) y `ShiftOpening` muestra el motivo de Go sin ofrecer otra apertura.
+
+### Decisiones menores y desviaciones del diseño
+
+1. **Regularizaciones fuera del esperado del turno vigente.** El diseño sumaba todas las operaciones al esperado; una regularización corrige el registro de un turno cerrado sin mover dinero en el vigente, y contarla permitiría ocultar una diferencia del turno vigente (lo prohíbe §16). Se excluye del esperado y de los totales del corte (se informa su cantidad) y la consulta del cierre original la lista enlazada.
+2. **Detección de registros posteriores al arqueo por cantidad y por fecha.** Se agregaron `closing_movement_count` y `closing_operation_count` a `cash_shifts` (no estaban en el diseño): la confirmación compara los conteos guardados al iniciar y, además, busca registros con fecha posterior. `closing_started_at` usa `clock_timestamp()` tomado tras el lock exclusivo para evitar falsos positivos.
+3. **Respuestas de escritura sin esperado.** Crear un corte o confirmar el cierre nunca devuelve esperado ni diferencias (la respuesta se guarda para reintentos); se consultan después con el permiso vigente. La auditoría tampoco los registra (el comentario del supervisor se audita sin copiar su texto).
+4. **Visibilidad por permiso y estado.** Esperado, `by_currency` y el bloque `sensitive` solo con `cash.expected.read` y nunca durante `closing`. Turno de otra caja: `cash.shifts.read_all`; turno cerrado: `cash.history.read` salvo quien lo cerró. Las filas individuales de movimientos y operaciones siguen visibles con su permiso de consulta.
+5. **`expected_cash` de `GET shifts/{id}/movements`** ahora expresa los pesos físicos esperados (incluye operaciones de efectivo); `by_currency.expected_*` usa la misma función. Con solo cobros en pesos el valor es el mismo que antes.
+6. **Rutas** bajo `/payments/shifts/{id}/…`, `/payments/cash/…` y `/payments/cash-reports/{id}` con un solo identificador. Ingresos, retiros y gastos tienen ruta propia para comprobar su permiso antes de leer el cuerpo.
+7. **Eventos de turno** (`cash.shift.opened`, `cash.shift.usd_rate_set`) pasan del ámbito `configuration` al nuevo `cash`; lo reciben también los usuarios con `payments.read` para que una terminal de cobro sepa pronto que su caja entró en arqueo.
+8. **Monedas de dólar no sembradas**; se agregan con `cash.settings.manage`. Las denominaciones no tienen orden manual (se ordenan por moneda, tipo y valor); las categorías usan el orden por posiciones.
+9. **Arqueo desde otra terminal**: iniciar, contar, cancelar y confirmar se permiten desde la caja del turno o, con `cash.shifts.read_all`, desde otra terminal; la política de turno compartido solo aplica a cobros y operaciones de efectivo.
+10. **Corrección de un ingreso** no se valida contra el disponible (corrige un registro, no es una salida física nueva).
+11. **Prueba existente adaptada**: `payments_adjustments_test.go` cerraba un turno con SQL directo; ahora también fija `closed_by` y `closed_device_id`, que la 0008 exige. La devolución verifica el turno antes que la autorización del supervisor, para no consumir un intento con la caja pausada.
+
+### Limitaciones de la fase A
+
+- Sin pantallas de caja ni envío de `shift_id` desde el cobro (fase B). Sin impresión, cajón ni tope (fase C); `cash_limit` no está registrada en `internal/features`.
+- Un usuario con permiso de autorizar salidas sin `cash.expected.read` puede inferir por tanteo si un importe excede el disponible; los rechazos no revelan cifras ni se auditan.
+- `config/product.json` sigue en `schema_version: 7` y 0.6.2 hasta el versionado de la fase D.
+
+### Verificación (entorno aislado: copia del repositorio, clúster temporal 55499, Go temporal 8183)
+
+| Suite                                                         | Resultado                                                                                                                                                                                    |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prettier, gofmt, cargo fmt, `sync-metadata --check`, `go vet` | Aprobados (`go vet` también con `-tags=integration`).                                                                                                                                        |
+| `go test -race ./...` (unitarias)                             | `ok` en todos los paquetes con pruebas, incluidos `payments` (esperado, diferencias, conteos, permisos de la 0008) y `ordering`.                                                             |
+| Integración PostgreSQL (`-race -tags=integration`)            | `ok` en `database` (incluye `TestStage7UpgradeOfExistingInstallation`), `administration`, `catalog`, `operations` (`TestRestaurantAcceptance` con los subtests de caja C1–C25) y `payments`. |
+| Vitest                                                        | 25 archivos, 144 pruebas aprobadas (incluye `pages/payments/shiftOverview.test.tsx`).                                                                                                        |
+| `tsc --noEmit`, `npm run build`                               | Aprobados.                                                                                                                                                                                   |
+| `cargo test --locked --offline`                               | 13 aprobadas, 1 ignorada (incluye `cash_routes_are_closed_and_keep_write_methods`).                                                                                                          |
+| Playwright                                                    | Recorrido existente aprobado en Chromium y WebKit.                                                                                                                                           |
+
+Las suites se repitieron de forma independiente sobre la copia sincronizada con el mismo resultado (sin fallos; Playwright `1 passed` en Chromium y WebKit). Commit local en `etapa-7`.

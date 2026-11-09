@@ -165,3 +165,202 @@ func checkCurrencyConstraints(ctx context.Context, t *testing.T, pool *pgxpool.P
 		t.Fatal(err)
 	}
 }
+
+// Simula una instalación existente en esquema 7 con un turno abierto y aplica la 0008: el turno
+// conserva sus datos (las columnas nuevas quedan en NULL), los permisos de caja se conceden solo
+// al administrador, las semillas son solo configuración (denominaciones, categorías de gasto y la
+// función cash_limit desactivada) y las restricciones nuevas rechazan datos incoherentes. Deja la
+// base vacía al terminar.
+func TestStage7UpgradeOfExistingInstallation(t *testing.T) {
+	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
+	u, err := url.Parse(dsn)
+	if err != nil || !strings.HasPrefix(u.Path, "/adel_pos_test_") {
+		t.Fatal("integration requires an isolated adel_pos_test_ database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal("pool creation failed")
+	}
+	defer pool.Close()
+	reset := func() {
+		if _, err := pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.schema_migrations"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset()
+	defer reset()
+	expected, err := ReadMigrations(migrations.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageSeven := fstest.MapFS{}
+	for _, migration := range expected {
+		if migration.Version <= 7 {
+			stageSeven[migration.Name] = &fstest.MapFile{Data: []byte(migration.SQL)}
+		}
+	}
+	if n, err := Apply(ctx, pool, stageSeven); err != nil || n != 7 {
+		t.Fatalf("no se preparó el esquema 7: %d %v", n, err)
+	}
+	// Datos de una instalación real en esquema 7: roles, una caja, un usuario, una terminal y un
+	// turno abierto con tipo de cambio.
+	if _, err := pool.Exec(ctx, `INSERT INTO app.roles(code,name) VALUES ('administrator','Administrador'),('cashier','Cajero');
+        INSERT INTO app.registers(name) VALUES ('Caja 1');
+        INSERT INTO app.users(username,display_name,role_id) SELECT 'cajera','Cajera',id FROM app.roles WHERE code='cashier';
+        INSERT INTO app.devices(name,secret_hash,register_id) SELECT 'Terminal 1','hash-de-prueba',id FROM app.registers;
+        INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
+        SELECT '00000000-0000-4000-8000-000000000071',u.id,d.id,'POST payments/shifts','huella','{}' FROM app.users u,app.devices d
+        WHERE u.username='cajera';
+        INSERT INTO app.cash_shifts(id,register_id,opening_float,opened_by,opened_device_id,operation_id,usd_rate,usd_rate_set_by,usd_rate_set_at)
+        SELECT '00000000-0000-4000-8000-000000000072',d.register_id,350,u.id,d.id,'00000000-0000-4000-8000-000000000071',18.25,u.id,now()
+        FROM app.users u,app.devices d WHERE u.username='cajera'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-7 {
+		t.Fatalf("la 0008 no se aplicó sobre el esquema 7: %d %v", n, err)
+	}
+	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
+		t.Fatal("la 0008 no es repetible")
+	}
+	var state, float, rate string
+	var floatUSD, businessDate, closingStarted *string
+	if err := pool.QueryRow(ctx, `SELECT state,opening_float::text,usd_rate::text,opening_float_usd::text,business_date::text,
+        closing_started_at::text FROM app.cash_shifts WHERE id='00000000-0000-4000-8000-000000000072'`).Scan(
+		&state, &float, &rate, &floatUSD, &businessDate, &closingStarted); err != nil {
+		t.Fatal(err)
+	}
+	if state != "open" || float != "350.00" || rate != "18.25" || floatUSD != nil || businessDate != nil || closingStarted != nil {
+		t.Fatalf("el turno existente cambió al migrar: %s %s %s %v %v %v", state, float, rate, floatUSD, businessDate, closingStarted)
+	}
+	var granted, others, denominations, categories int
+	var cashLimit bool
+	var limitMXN *string
+	if err := pool.QueryRow(ctx, `SELECT
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
+            WHERE r.code='administrator' AND p.permission_key LIKE 'cash.%' AND p.permission_key NOT IN ('cash.shifts.open','cash.shifts.read')),
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
+            WHERE r.code<>'administrator' AND p.permission_key LIKE 'cash.%'),
+        (SELECT count(*) FROM app.cash_denominations WHERE active),
+        (SELECT count(*) FROM app.cash_expense_categories WHERE active),
+        (SELECT enabled FROM app.establishment_features WHERE code='cash_limit'),
+        (SELECT cash_limit_mxn::text FROM app.payment_settings)`).Scan(&granted, &others, &denominations, &categories, &cashLimit, &limitMXN); err != nil {
+		t.Fatal(err)
+	}
+	if granted != 19 || others != 0 || denominations != 18 || categories != 4 || cashLimit || limitMXN != nil {
+		t.Fatalf("permisos o semillas inesperados: %d %d %d %d %v %v", granted, others, denominations, categories, cashLimit, limitMXN)
+	}
+	var oldIndex, newIndex bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('app.cash_shifts_one_open_idx') IS NOT NULL,
+        to_regclass('app.cash_shifts_one_active_idx') IS NOT NULL`).Scan(&oldIndex, &newIndex); err != nil || oldIndex || !newIndex {
+		t.Fatalf("el índice de turno activo no sustituyó al de turno abierto: %v %v %v", oldIndex, newIndex, err)
+	}
+	for _, statement := range []string{
+		// Cerrar sin responsable ni terminal, o entrar en arqueo sin quién, cuándo y dónde.
+		"UPDATE app.cash_shifts SET state='closed',closed_at=now()",
+		"UPDATE app.cash_shifts SET state='closing'",
+		"UPDATE app.cash_shifts SET state='suspended'",
+		"UPDATE app.cash_shifts SET opening_float_usd=-1",
+		"INSERT INTO app.cash_denominations(currency,value,kind) VALUES ('MXN',500,'bill')",
+		"INSERT INTO app.cash_denominations(currency,value,kind) VALUES ('EUR',5,'bill')",
+		"UPDATE app.payment_settings SET cash_limit_mxn=0",
+	} {
+		if _, err := pool.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó %q", statement)
+		}
+	}
+	for _, statement := range []string{
+		"INSERT INTO app.realtime_events(id,kind,scope) VALUES (gen_random_uuid(),'cash.shift.opened','cash')",
+		"INSERT INTO app.kitchen_tickets(id,kind,station_ids,document) VALUES (gen_random_uuid(),'cash_report','{}','{}')",
+	} {
+		if _, err := pool.Exec(ctx, statement); err != nil {
+			t.Fatalf("PostgreSQL rechazó %q: %v", statement, err)
+		}
+	}
+	checkCashConstraints(ctx, t, pool)
+}
+
+// checkCashConstraints prueba las expresiones CHECK de las operaciones de efectivo y de los
+// cierres con tablas temporales que copian solo esas restricciones (sin llaves foráneas).
+func checkCashConstraints(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Release()
+	if _, err := connection.Exec(ctx, `CREATE TEMP TABLE operations_check (LIKE app.cash_operations INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE closures_check (LIKE app.cash_shift_closures INCLUDING CONSTRAINTS INCLUDING DEFAULTS)`); err != nil {
+		t.Fatal(err)
+	}
+	actor := "'00000000-0000-4000-8000-0000000000a1'"
+	other := "'00000000-0000-4000-8000-0000000000a2'"
+	operation := `INSERT INTO operations_check(id,shift_id,register_id,kind,currency,amount,direction,concept,subtype,category_id,reason,
+        corrects_operation_id,regularization,exceptional,usd_rate,actor_id,device_id,authorized_by,authorization_mode,operation_id)
+        VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),%s,` + actor + `,gen_random_uuid(),%s,gen_random_uuid())`
+	accepted := []struct{ values, authorization string }{
+		{"'income','MXN',10,'in','Ingreso','other',NULL,'',NULL,false,false,NULL", "NULL,NULL"},
+		{"'withdrawal','USD',10,'out','Retiro','safekeeping',NULL,'',NULL,false,false,18.50", other + ",'supervisor'"},
+		{"'expense','MXN',10,'out','Gasto',NULL,gen_random_uuid(),'',NULL,false,false,NULL", actor + ",'self'"},
+		{"'correction','MXN',10,'in','Corrección',NULL,NULL,'Motivo válido',gen_random_uuid(),true,false,NULL", actor + ",'self'"},
+		{"'withdrawal','MXN',10,'out','Retiro','other',NULL,'Motivo excepcional',NULL,false,true,NULL", other + ",'supervisor'"},
+	}
+	rejected := []struct{ values, authorization string }{
+		// Retiro sin autorización, autoautorización con otra persona o supervisor que es el actor.
+		{"'withdrawal','MXN',10,'out','Retiro','other',NULL,'',NULL,false,false,NULL", "NULL,NULL"},
+		{"'withdrawal','MXN',10,'out','Retiro','other',NULL,'',NULL,false,false,NULL", other + ",'self'"},
+		{"'withdrawal','MXN',10,'out','Retiro','other',NULL,'',NULL,false,false,NULL", actor + ",'supervisor'"},
+		// Ingreso que sale, gasto sin categoría, dólares sin tipo de cambio y pesos con tipo de cambio.
+		{"'income','MXN',10,'out','Ingreso','other',NULL,'',NULL,false,false,NULL", "NULL,NULL"},
+		{"'expense','MXN',10,'out','Gasto',NULL,NULL,'',NULL,false,false,NULL", actor + ",'self'"},
+		{"'income','USD',10,'in','Ingreso','other',NULL,'',NULL,false,false,NULL", "NULL,NULL"},
+		{"'income','MXN',10,'in','Ingreso','other',NULL,'',NULL,false,false,18.50", "NULL,NULL"},
+		// Corrección sin motivo o sin original, regularización que no es corrección, excepcional sin motivo.
+		{"'correction','MXN',10,'in','Corrección',NULL,NULL,'',gen_random_uuid(),false,false,NULL", actor + ",'self'"},
+		{"'correction','MXN',10,'in','Corrección',NULL,NULL,'Motivo válido',NULL,false,false,NULL", actor + ",'self'"},
+		{"'income','MXN',10,'in','Ingreso','other',NULL,'',NULL,true,false,NULL", "NULL,NULL"},
+		{"'withdrawal','MXN',10,'out','Retiro','other',NULL,'',NULL,false,true,NULL", other + ",'supervisor'"},
+		{"'income','MXN',0,'in','Ingreso','other',NULL,'',NULL,false,false,NULL", "NULL,NULL"},
+	}
+	build := func(values, authorization string) string {
+		return strings.Replace(strings.Replace(operation, "%s", values, 1), "%s", authorization, 1)
+	}
+	for _, item := range accepted {
+		if _, err := connection.Exec(ctx, build(item.values, item.authorization)); err != nil {
+			t.Fatalf("PostgreSQL rechazó una operación válida (%s): %v", item.values, err)
+		}
+	}
+	for _, item := range rejected {
+		if _, err := connection.Exec(ctx, build(item.values, item.authorization)); err == nil {
+			t.Fatalf("PostgreSQL aceptó una operación incoherente: %s / %s", item.values, item.authorization)
+		}
+	}
+	closure := `INSERT INTO closures_check(shift_id,count_id,final_report_id,expected_mxn,expected_usd,counted_mxn,counted_usd,
+        difference_mxn,difference_usd,usd_rate,difference_equivalent_mxn,result_mxn,result_usd,closed_by,device_id,operation_id)
+        VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),%s,gen_random_uuid(),gen_random_uuid(),gen_random_uuid())`
+	validClosures := []string{
+		"5000,0,4850,0,-150,0,NULL,NULL,'short','even'",
+		"1015,57.30,1035.50,47.30,20.50,-10,18.50,-164.50,'over','short'",
+	}
+	invalidClosures := []string{
+		// Diferencia que no es contado − esperado, resultado incoherente y equivalencia sin tipo de cambio.
+		"5000,0,4850,0,0,0,NULL,NULL,'even','even'",
+		"5000,0,4850,0,-150,0,NULL,NULL,'over','even'",
+		"1015,57.30,1035.50,47.30,20.50,-10,NULL,-164.50,'over','short'",
+		"1015,57.30,1035.50,47.30,20.50,-10,18.50,20.50,'over','short'",
+	}
+	for _, values := range validClosures {
+		if _, err := connection.Exec(ctx, strings.Replace(closure, "%s", values, 1)); err != nil {
+			t.Fatalf("PostgreSQL rechazó un cierre válido (%s): %v", values, err)
+		}
+	}
+	for _, values := range invalidClosures {
+		if _, err := connection.Exec(ctx, strings.Replace(closure, "%s", values, 1)); err == nil {
+			t.Fatalf("PostgreSQL aceptó un cierre incoherente: %s", values)
+		}
+	}
+	if _, err := connection.Exec(ctx, "DROP TABLE operations_check, closures_check"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -33,6 +33,10 @@ type PaymentInput struct {
 	ExpectedBalance string      `json:"expected_balance"`
 	Print           *bool       `json:"print"`
 	Deliver         bool        `json:"deliver"`
+	// ShiftID es el turno que mostraba la terminal al preparar el cobro (opcional). Forma parte de
+	// la huella: un reintento incierto sobre un turno pausado o cerrado se rechaza con un error
+	// claro en lugar de registrarse en otro turno.
+	ShiftID string `json:"shift_id"`
 }
 
 type SelectedUnit struct {
@@ -482,7 +486,7 @@ func (handler *service) registerPayment(parts []string) (any, error) {
 	if err := handler.requirePrintPermission(input.Print); err != nil {
 		return nil, err
 	}
-	shift, err := handler.usableShift()
+	shift, err := handler.usableShiftFor(input.ShiftID)
 	if err != nil {
 		return nil, err
 	}

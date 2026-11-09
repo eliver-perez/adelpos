@@ -23,6 +23,9 @@ function ShiftMovementsTable({ shift, timezone }: { shift: Shift; timezone: stri
   }
   const data = movements.data;
   const currency = data.by_currency;
+  // Go solo entrega el efectivo esperado con el permiso correspondiente y nunca durante el arqueo
+  // de cierre: la interfaz no lo calcula ni lo deduce.
+  const expectedShown = data.expected_cash !== undefined;
   // Los totales por moneda solo se muestran cuando el turno movió dólares o tiene tipo de cambio.
   const dollars =
     !!currency &&
@@ -34,11 +37,20 @@ function ShiftMovementsTable({ shift, timezone }: { shift: Shift; timezone: stri
           Efectivo neto cobrado
           <strong>{formatMoney(data.cash_net)}</strong>
         </div>
-        <div>
-          Efectivo esperado (fondo + neto)
-          <strong>{formatMoney(data.expected_cash)}</strong>
-        </div>
+        {expectedShown && (
+          <div>
+            Pesos esperados en caja
+            <strong>{formatMoney(data.expected_cash)}</strong>
+          </div>
+        )}
       </div>
+      {!expectedShown && (
+        <p className="muted text-sm">
+          {shift.state === 'closing'
+            ? 'Arqueo de cierre en curso: el efectivo esperado no se muestra durante el conteo.'
+            : `El efectivo esperado se muestra con el permiso «${permissionName('cash.expected.read')}».`}
+        </p>
+      )}
       {dollars && currency && (
         <div className="shift-summary" aria-label="Efectivo físico por moneda">
           <div>
@@ -184,6 +196,26 @@ export function ShiftOverview({
               <strong>
                 {shift.usd_rate ? `${formatMoney(shift.usd_rate)} por dólar` : 'Sin capturar'}
               </strong>
+            </div>
+          )}
+        </div>
+      )}
+      {shift && shift.state === 'closing' && (
+        <div className="shift-summary" aria-label="Arqueo de cierre en curso">
+          <div>
+            Estado
+            <strong>Cierre en curso</strong>
+          </div>
+          {shift.closing_started_by_name && (
+            <div>
+              Arqueo iniciado por
+              <strong>{shift.closing_started_by_name}</strong>
+            </div>
+          )}
+          {shift.closing_started_at && (
+            <div>
+              Inicio del arqueo
+              <strong>{serverDateTime(shift.closing_started_at, timezone)}</strong>
             </div>
           )}
         </div>
