@@ -12,6 +12,8 @@ import {
   quantityShape,
 } from '../../services/numericInput';
 import { OptionalDateField } from './DateField';
+import { ToggleButton } from '../ToggleButton';
+import { dayShortNames, scheduleSummary, weekOrder } from '../../services/scheduleSummary';
 
 export function TextField({
   label,
@@ -20,6 +22,7 @@ export function TextField({
   required = false,
   type = 'text',
   hint,
+  autoFocus = false,
 }: {
   label: string;
   value: string;
@@ -27,6 +30,7 @@ export function TextField({
   required?: boolean;
   type?: string;
   hint?: string;
+  autoFocus?: boolean;
 }) {
   return (
     <Field label={label} hint={hint}>
@@ -35,6 +39,7 @@ export function TextField({
         value={value}
         required={required}
         maxLength={2000}
+        autoFocus={autoFocus}
         onChange={(event) => onChange(event.target.value)}
       />
     </Field>
@@ -286,14 +291,25 @@ export function ScheduleEditor({
   value: Schedule;
   onChange: (value: Schedule) => void;
 }) {
-  const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const days = value.days ?? [];
   return (
-    <Accordion title="Fechas, días y horarios">
-      <p className="muted text-sm">
-        Sin restricciones: disponible siempre. Se usa el reloj del servidor y la zona del
-        establecimiento. Divide los horarios que cruzan medianoche en dos intervalos; usa 24:00 como
-        fin del día.
-      </p>
+    <Accordion title="Restricciones de horario" summary={scheduleSummary(value)}>
+      <ul className="schedule-help muted text-sm">
+        <li>
+          Sin restricciones, el registro está disponible siempre. Se usa el reloj del servidor con
+          la zona horaria del establecimiento.
+        </li>
+        <li>Si no eliges días, aplica todos los días de la semana.</li>
+        <li>
+          La hora final no se incluye: con 12:00 a 15:00 deja de estar disponible justo a las 15:00.
+          Para llegar hasta la medianoche usa 24:00 como hora final.
+        </li>
+        <li>
+          Si el horario cruza la medianoche, captúralo como dos horarios. Ejemplo: de 20:00 a 02:00
+          se captura como 20:00 a 24:00 y 00:00 a 02:00. Si además eliges días, el horario de 00:00
+          a 02:00 cuenta para el día siguiente.
+        </li>
+      </ul>
       <div className="form-grid">
         <OptionalDateField
           label="Desde la fecha"
@@ -306,25 +322,29 @@ export function ScheduleEditor({
           onChange={(ends_on) => onChange({ ...value, ends_on })}
         />
       </div>
-      <div className="button-row">
-        {days.map((name, day) => (
-          <Check
-            key={day}
-            label={name}
-            value={value.days?.includes(day) ?? false}
-            onChange={(selected) =>
-              onChange({
-                ...value,
-                days: selected
-                  ? [...(value.days ?? []), day]
-                  : (value.days ?? []).filter((entry) => entry !== day),
-              })
-            }
-          />
-        ))}
+      <div className="field">
+        <span>Días de la semana</span>
+        <div className="schedule-days" role="group" aria-label="Días de la semana">
+          {weekOrder.map((day) => (
+            <ToggleButton
+              key={day}
+              label={dayShortNames[day] ?? ''}
+              pressed={days.includes(day)}
+              onChange={(selected) =>
+                onChange({
+                  ...value,
+                  days: selected
+                    ? [...days, day].sort((first, second) => first - second)
+                    : days.filter((entry) => entry !== day),
+                })
+              }
+            />
+          ))}
+        </div>
       </div>
       <RepeatSection
-        title="Intervalos (fin exclusivo)"
+        title="Horarios del día"
+        hint="La hora final no se incluye."
         onAdd={() =>
           onChange({
             ...value,
@@ -348,7 +368,7 @@ export function ScheduleEditor({
               }
             />
             <TextField
-              label="Hora final (HH:mm; 24:00 cierra el día)"
+              label="Hora final, no incluida (HH:mm; 24:00 = medianoche)"
               type="text"
               value={window.end}
               onChange={(end) =>
@@ -361,7 +381,7 @@ export function ScheduleEditor({
               }
             />
             <RemoveButton
-              label="Quitar intervalo"
+              label="Quitar horario"
               onClick={() =>
                 onChange({
                   ...value,

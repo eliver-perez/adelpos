@@ -72,7 +72,9 @@
 }
 .accordion-clip {
   min-height: 0;
-  overflow: hidden;
+  /* clip recorta igual que hidden pero no crea un contenedor de desplazamiento: la barra de
+     acciones fija de un formulario dentro del acordeón se pega al área que realmente se desplaza. */
+  overflow: clip;
 }
 .accordion-content {
   display: grid;
@@ -2691,4 +2693,122 @@ summary {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--subtle);
+}
+
+/* Etapa 6.1 · fase B: alta continua, posiciones, paleta, horarios y configuración. */
+.form-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 -4px;
+  padding: 10px 4px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.color-field {
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.color-field-current {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.color-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 550;
+  text-align: left;
+}
+.color-swatch {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+}
+.color-swatch-empty {
+  background:
+    linear-gradient(135deg, transparent 45%, var(--muted) 45%, var(--muted) 55%, transparent 55%),
+    var(--subtle);
+}
+.color-palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.color-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.color-option[aria-pressed='true'] {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 7px 9px;
+}
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.schedule-days .toggle-button {
+  min-width: 56px;
+}
+.schedule-help {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+.timezone-field {
+  display: grid;
+  gap: 8px;
+}
+.read-only-value {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  background: var(--subtle);
+  font-size: 14px;
+  font-weight: 550;
+}
+/* La altura la ajusta AutoGrowTextarea hasta este máximo; después aparece desplazamiento interno. */
+.auto-grow {
+  min-height: 88px;
+  max-height: 220px;
+  overflow-y: auto;
+  resize: none;
 }

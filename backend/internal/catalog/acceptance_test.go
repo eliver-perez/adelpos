@@ -21,6 +21,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/ordering"
 )
 
 func TestStageThreeAcceptance(t *testing.T) {
@@ -133,7 +134,7 @@ func TestStageThreeAcceptance(t *testing.T) {
 	)
 	sessionToken = login.SessionToken
 
-	category := catalog.Category{Metadata: catalog.Metadata{Name: "Platillos", Active: true}, Color: "#14665c"}
+	category := catalog.Category{Metadata: catalog.Metadata{Name: "Platillos", Active: true}, Color: "#1f9a78"}
 	run("categorías edición concurrencia y filtros", func(t *testing.T) {
 		_ = json.Unmarshal(call("POST", "catalog/categories", category, 200), &category)
 		stale := category
@@ -536,6 +537,225 @@ func TestStageThreeAcceptance(t *testing.T) {
 		}
 		original.Default = true
 		call("PATCH", "catalog/price-lists/"+original.ID, original, 200)
+	})
+	run("paleta de colores con conservación del color heredado", func(t *testing.T) {
+		// Etapa 6.1 §2.3: Go acepta sin color o un color de la paleta; un color capturado antes de
+		// la paleta se conserva al editar, pero no se puede capturar uno nuevo fuera de ella.
+		var lookups struct {
+			Palette  []catalog.PaletteColor `json:"palette"`
+			Products []map[string]any       `json:"products"`
+		}
+		_ = json.Unmarshal(call("GET", "catalog/lookups", nil, 200), &lookups)
+		if len(lookups.Palette) != 16 || lookups.Palette[0].Hex != catalog.Palette[0].Hex {
+			t.Fatalf("los lookups no exponen la paleta: %+v", lookups.Palette)
+		}
+		for _, entry := range lookups.Products {
+			if _, ok := entry["category_id"].(string); !ok {
+				t.Fatalf("un producto de los lookups no expone su categoría: %+v", entry)
+			}
+			if _, ok := entry["sort_order"].(float64); !ok {
+				t.Fatalf("un producto de los lookups no expone su orden: %+v", entry)
+			}
+		}
+		outside := catalog.Category{Metadata: catalog.Metadata{Name: "Color libre", Active: true}, Color: "#14665c"}
+		if problem := string(call("POST", "catalog/categories", outside, 400)); !strings.Contains(problem, "paleta") {
+			t.Fatalf("el rechazo del color no se explicó: %s", problem)
+		}
+		legacy := catalog.Category{Metadata: catalog.Metadata{Name: "Color heredado", Active: true}, Color: "#d64545"}
+		_ = json.Unmarshal(call("POST", "catalog/categories", legacy, 200), &legacy)
+		if _, err := pool.Exec(ctx, "UPDATE app.catalog_categories SET color='#14665c' WHERE id=$1", legacy.ID); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.Unmarshal(call("GET", "catalog/categories/"+legacy.ID, nil, 200), &legacy)
+		legacy.Description = "Conserva su color anterior"
+		_ = json.Unmarshal(call("PATCH", "catalog/categories/"+legacy.ID, legacy, 200), &legacy)
+		if legacy.Color != "#14665c" {
+			t.Fatalf("no se conservó el color heredado: %q", legacy.Color)
+		}
+		changed := legacy
+		changed.Color = "#123456"
+		call("PATCH", "catalog/categories/"+legacy.ID, changed, 400)
+		changed.Color = "#3591D4"
+		_ = json.Unmarshal(call("PATCH", "catalog/categories/"+legacy.ID, changed, 200), &legacy)
+		if legacy.Color != "#3591d4" {
+			t.Fatalf("el color de la paleta no quedó en forma canónica: %q", legacy.Color)
+		}
+		legacy.Color = ""
+		_ = json.Unmarshal(call("PATCH", "catalog/categories/"+legacy.ID, legacy, 200), &legacy)
+		if legacy.Color != "" {
+			t.Fatal("no se pudo quitar el color")
+		}
+	})
+	run("orden visual por posiciones dentro de cada lista", func(t *testing.T) {
+		// Etapa 6.1 §2.2: el usuario elige «al inicio» o «después de» y Go renumera en múltiplos de
+		// 10 dentro de la misma transacción, incrementando la revisión de los hermanos movidos.
+		at := func(after string) *ordering.Position {
+			return &ordering.Position{After: &after}
+		}
+		readCategory := func(id string) catalog.Category {
+			var value catalog.Category
+			_ = json.Unmarshal(call("GET", "catalog/categories/"+id, nil, 200), &value)
+			return value
+		}
+		readProduct := func(id string) catalog.Product {
+			var value catalog.Product
+			_ = json.Unmarshal(call("GET", "catalog/products/"+id, nil, 200), &value)
+			return value
+		}
+		var categories struct {
+			Items []catalog.Category `json:"items"`
+		}
+		_ = json.Unmarshal(call("GET", "catalog/categories?page_size=100", nil, 200), &categories)
+		previous := map[string]catalog.Category{}
+		for _, item := range categories.Items {
+			previous[item.ID] = item
+		}
+		breakfast := catalog.Category{Metadata: catalog.Metadata{Name: "Desayunos", Active: true}, Position: at("")}
+		_ = json.Unmarshal(call("POST", "catalog/categories", breakfast, 200), &breakfast)
+		if breakfast.SortOrder != 10 || breakfast.Revision != 1 {
+			t.Fatalf("la categoría al inicio no recibió el primer lugar: %+v", breakfast)
+		}
+		_ = json.Unmarshal(call("GET", "catalog/categories?page_size=100", nil, 200), &categories)
+		if categories.Items[0].ID != breakfast.ID {
+			t.Fatalf("el listado no respeta la nueva posición: %+v", categories.Items)
+		}
+		for index, item := range categories.Items {
+			if item.SortOrder != (index+1)*10 {
+				t.Fatalf("la renumeración no usa múltiplos de 10: %+v", categories.Items)
+			}
+			if old, exists := previous[item.ID]; exists && old.SortOrder != item.SortOrder && item.Revision != old.Revision+1 {
+				t.Fatalf("un hermano movido no incrementó su revisión: antes %+v después %+v", old, item)
+			}
+		}
+		drinks := catalog.Category{Metadata: catalog.Metadata{Name: "Bebidas", Active: true}, Position: at(breakfast.ID)}
+		_ = json.Unmarshal(call("POST", "catalog/categories", drinks, 200), &drinks)
+		if drinks.SortOrder != 20 {
+			t.Fatalf("«después de Desayunos» no quedó en segundo lugar: %+v", drinks)
+		}
+		// Guardar sin moverse no renumera ni cambia la revisión de los hermanos.
+		platillos := readCategory(category.ID)
+		drinks.Position = at(breakfast.ID)
+		drinks.Description = "Frías y calientes"
+		_ = json.Unmarshal(call("PATCH", "catalog/categories/"+drinks.ID, drinks, 200), &drinks)
+		if readCategory(category.ID).Revision != platillos.Revision || drinks.SortOrder != 20 {
+			t.Fatal("guardar en la misma posición alteró a los hermanos")
+		}
+		drinks.Position = at(drinks.ID)
+		problem := string(call("PATCH", "catalog/categories/"+drinks.ID, drinks, 400))
+		if !strings.Contains(problem, "sí mismo") {
+			t.Fatalf("colocarse después de sí mismo no se explicó: %s", problem)
+		}
+		drinks.Position = at("00000000-0000-4000-8000-000000000061")
+		call("PATCH", "catalog/categories/"+drinks.ID, drinks, 400)
+		drinks.Position = &ordering.Position{}
+		call("PATCH", "catalog/categories/"+drinks.ID, drinks, 400)
+		drinks.Position = nil
+
+		coffee := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Café americano", Active: true},
+			CategoryID: drinks.ID,
+			Code:       "CAFE-61",
+			Kind:       "product",
+			BasePrice:  "30",
+			Position:   at(""),
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", coffee, 200), &coffee)
+		juice := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Jugo de naranja", Active: true},
+			CategoryID: drinks.ID,
+			Code:       "JUGO-61",
+			Kind:       "product",
+			BasePrice:  "35",
+			Position:   at(coffee.ID),
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", juice, 200), &juice)
+		if coffee.SortOrder != 10 || juice.SortOrder != 20 {
+			t.Fatalf("los productos no se numeraron dentro de su categoría: %d %d", coffee.SortOrder, juice.SortOrder)
+		}
+		// Los combos comparten la lista de su categoría.
+		combo := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Desayuno con bebida", Active: true},
+			CategoryID: drinks.ID,
+			Code:       "COMBO-DESAYUNO-61",
+			Kind:       "combo",
+			BasePrice:  "60",
+			Position:   at(""),
+			Slots: []catalog.ComboSlot{
+				{
+					Name:             "Bebida",
+					MinQuantity:      1,
+					MaxQuantity:      1,
+					IncludedQuantity: 1,
+					DefaultQuantity:  1,
+					DefaultProductID: coffee.ID,
+				},
+			},
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", combo, 200), &combo)
+		coffeeAfter := readProduct(coffee.ID)
+		juiceAfter := readProduct(juice.ID)
+		if combo.SortOrder != 10 || coffeeAfter.SortOrder != 20 || juiceAfter.SortOrder != 30 {
+			t.Fatalf(
+
+				"el combo no se ordenó con los productos: %d %d %d",
+				combo.SortOrder,
+				coffeeAfter.SortOrder,
+				juiceAfter.SortOrder,
+			)
+		}
+		if coffeeAfter.Revision != coffee.Revision+1 || juiceAfter.Revision != juice.Revision+1 {
+			t.Fatal("los productos renumerados no incrementaron su revisión")
+		}
+		if readProduct(product.ID).SortOrder != product.SortOrder {
+			t.Fatal("la renumeración alcanzó a productos de otra categoría")
+		}
+		var listed struct {
+			Items []catalog.Product `json:"items"`
+		}
+		_ = json.Unmarshal(call("GET", "catalog/products?archived=all&category_id="+drinks.ID, nil, 200), &listed)
+		if len(listed.Items) != 3 || listed.Items[0].ID != combo.ID || listed.Items[2].ID != juice.ID {
+			t.Fatalf("el listado no respeta el orden de la categoría: %+v", listed.Items)
+		}
+		// Un hermano de otra categoría se rechaza y no deja cambios parciales.
+		juiceAfter.Position = at(product.ID)
+		problem = string(call("PATCH", "catalog/products/"+juice.ID, juiceAfter, 400))
+		if !strings.Contains(problem, "misma lista") {
+			t.Fatalf("el hermano de otra categoría no se explicó: %s", problem)
+		}
+		if readProduct(juice.ID).Revision != juiceAfter.Revision {
+			t.Fatal("el rechazo dejó cambios parciales")
+		}
+		// Al cambiar de categoría con posición, el producto se coloca entre sus nuevos hermanos.
+		molletes := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Molletes", Active: true},
+			CategoryID: breakfast.ID,
+			Code:       "MOLLETES-61",
+			Kind:       "product",
+			BasePrice:  "70",
+			Position:   at(""),
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", molletes, 200), &molletes)
+		juiceAfter.CategoryID = breakfast.ID
+		juiceAfter.Position = at("")
+		var moved catalog.Product
+		_ = json.Unmarshal(call("PATCH", "catalog/products/"+juice.ID, juiceAfter, 200), &moved)
+		if moved.CategoryID != breakfast.ID || moved.SortOrder != 10 || moved.Revision != juiceAfter.Revision+1 {
+			t.Fatalf("el cambio de categoría con posición no fue el esperado: %+v", moved)
+		}
+		if shifted := readProduct(molletes.ID); shifted.SortOrder != 20 || shifted.Revision != molletes.Revision+1 {
+			t.Fatalf("el hermano de la nueva categoría no se renumeró: %+v", shifted)
+		}
+		if remaining := readProduct(coffee.ID); remaining.SortOrder != 20 || remaining.Revision != coffeeAfter.Revision {
+			t.Fatal("la categoría anterior no debía renumerarse al retirar el producto")
+		}
+		var reorders int
+		if err := pool.QueryRow(
+			ctx,
+			`SELECT count(*) FROM app.audit_events
+            WHERE action IN ('catalog.categories.reordered','catalog.products.reordered')`,
+		).Scan(&reorders); err != nil || reorders < 3 {
+			t.Fatalf("la renumeración no quedó auditada: %d %v", reorders, err)
+		}
 	})
 	run("permisos vigentes precios protegidos y auditoría", func(t *testing.T) {
 		var userID string

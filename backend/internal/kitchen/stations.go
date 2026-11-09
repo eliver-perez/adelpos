@@ -1,16 +1,21 @@
 package kitchen
 
 import (
+	"errors"
 	"slices"
 	"strings"
 
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/ordering"
 )
 
 func (handler *service) saveStation(parts []string) (any, error) {
 	var input struct {
 		OperationID string `json:"operation_id"`
 		Station
+		// Position elige el orden visual («al inicio» o «después de» otra estación); sin ella se
+		// conserva el sort_order recibido.
+		Position *ordering.Position `json:"position"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
@@ -67,11 +72,18 @@ func (handler *service) saveStation(parts []string) (any, error) {
 			return nil, invalid("Una estación nueva no reutiliza identidad ni revisión.")
 		}
 		station.ID = events.NewID()
-		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_stations(id,name,description,active,sort_order,reception,printer_id,
+		after, err := stationPosition(input.Position, &station, nil)
+		if err != nil {
+			return nil, err
+		}
+		_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_stations(id,name,description,active,sort_order,reception,printer_id,
             target_minutes,warning_minutes,overdue_minutes,grouping,tracking) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			station.ID, station.Name, station.Description, station.Active, station.SortOrder, station.Reception, station.PrinterID,
 			station.TargetMinutes, station.WarningMinutes, station.OverdueMinutes, station.Grouping, station.Tracking)
 		if err != nil {
+			return nil, err
+		}
+		if err := handler.placeStation(input.Position, station.ID, after, before == nil); err != nil {
 			return nil, err
 		}
 	} else {
@@ -88,6 +100,10 @@ func (handler *service) saveStation(parts []string) (any, error) {
 				return nil, err
 			}
 		}
+		after, err := stationPosition(input.Position, &station, before)
+		if err != nil {
+			return nil, err
+		}
 		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_stations SET name=$1,description=$2,active=$3,sort_order=$4,
             reception=$5,printer_id=$6,target_minutes=$7,warning_minutes=$8,overdue_minutes=$9,grouping=$10,tracking=$11,
             revision=revision+1,updated_at=now() WHERE id=$12`, station.Name, station.Description, station.Active, station.SortOrder,
@@ -96,12 +112,57 @@ func (handler *service) saveStation(parts []string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := handler.placeStation(input.Position, station.ID, after, before == nil); err != nil {
+			return nil, err
+		}
 	}
 	saved, err := one[Station](handler.ctx, handler.tx, "SELECT to_jsonb(s) FROM app.kitchen_stations s WHERE id=$1", station.ID)
 	if err != nil {
 		return nil, err
 	}
 	return saved, handler.history("station.saved", &station.ID, before, saved)
+}
+
+// stationPosition valida la posición antes de escribir. Con posición, el número enviado no se
+// usa: la estación conserva el suyo (o uno provisional si es nueva) y placeStation lo recalcula.
+func stationPosition(position *ordering.Position, station *Station, before *Station) (string, error) {
+	if position == nil {
+		return "", nil
+	}
+	after, err := ordering.Validate(position, station.ID)
+	if err != nil {
+		return "", invalid(err.Error())
+	}
+	station.SortOrder = 0
+	if before != nil {
+		station.SortOrder = before.SortOrder
+	}
+	return after, nil
+}
+
+// placeStation renumera las estaciones en la misma transacción y deja la renumeración de las
+// demás estaciones en el historial auditado de cocina.
+func (handler *service) placeStation(position *ordering.Position, id, after string, joining bool) error {
+	if position == nil {
+		return nil
+	}
+	result, err := ordering.Place(handler.ctx, handler.tx, ordering.KitchenStations, "", id, after, joining)
+	var problem *ordering.Error
+	if errors.As(err, &problem) {
+		return invalid(problem.Message)
+	}
+	if err != nil {
+		return err
+	}
+	if len(result.Changes) == 0 {
+		return nil
+	}
+	return handler.history("station.reordered", &id, nil, map[string]any{
+		"placed_id":  id,
+		"after":      after,
+		"sort_order": result.SortOrder,
+		"changes":    result.Changes,
+	})
 }
 
 func (handler *service) saveAccess() (any, error) {

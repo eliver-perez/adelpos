@@ -18,7 +18,6 @@ var screenPermissions = map[string]string{
 	"takeaway":    "takeaway.read",
 	"status":      "",
 	"catalog":     "catalog.read",
-	"preview":     "catalog.prices.read",
 	"users":       "users.read",
 	"roles":       "roles.read",
 	"devices":     "devices.read",
@@ -29,8 +28,16 @@ var screenPermissions = map[string]string{
 	"preferences": "",
 }
 
+// legacyPreviewScreen era la pantalla «Probar personalización» del menú principal. Desde la
+// etapa 6.1 la vista previa vive dentro de Catálogo, por lo que una preferencia guardada con ese
+// valor (no se migra en la base) se interpreta como Catálogo al leerla o guardarla.
+const legacyPreviewScreen = "preview"
+
 func allowedHome(screen string, permissions []string) string {
-	if (screen == "preview" && !slices.Contains(permissions, "catalog.read")) || (screen == "takeaway" && !slices.Contains(permissions, "accounts.read")) {
+	if screen == legacyPreviewScreen {
+		screen = "catalog"
+	}
+	if screen == "takeaway" && !slices.Contains(permissions, "accounts.read") {
 		return "status"
 	}
 	permission, exists := screenPermissions[screen]

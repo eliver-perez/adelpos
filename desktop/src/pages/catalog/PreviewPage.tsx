@@ -23,7 +23,15 @@ const emptyLine = (): PreviewLine => ({
   customization: originalCustomization(),
 });
 
-export function PreviewPage({ can }: { can: (permission: string) => boolean }) {
+// Vista previa de personalización y precios. Desde la etapa 6.1 se abre como pestaña dentro de
+// Catálogo (embedded), no como pantalla del menú principal.
+export function PreviewPage({
+  can,
+  embedded = false,
+}: {
+  can: (permission: string) => boolean;
+  embedded?: boolean;
+}) {
   const lookup = useResource<Lookups>('catalog_lookups');
   const [lines, setLines] = useState<PreviewLine[]>([emptyLine()]);
   const [priceList, setPriceList] = useState('');
@@ -83,10 +91,17 @@ export function PreviewPage({ can }: { can: (permission: string) => boolean }) {
 
   return (
     <>
-      <PageTitle
-        title="Probar personalización"
-        description="Comprueba productos reales y promociones con el motor del servidor, sin crear pedidos ni ventas."
-      />
+      {embedded ? (
+        <p className="muted text-sm mb-5">
+          Comprueba productos reales y promociones con el motor del servidor, sin crear pedidos ni
+          ventas.
+        </p>
+      ) : (
+        <PageTitle
+          title="Vista previa"
+          description="Comprueba productos reales y promociones con el motor del servidor, sin crear pedidos ni ventas."
+        />
+      )}
       <Notice>{lookup.error}</Notice>
       <div className="preview-layout">
         <section className="panel form-stack">

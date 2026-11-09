@@ -139,6 +139,10 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		}
 		metadata.ID = newID()
 	}
+	position, err := preparePlacement(document, previous)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateDocument(
 
 		ctx,
@@ -170,6 +174,9 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		document,
 		previous == nil,
 	); err != nil {
+		return nil, err
+	}
+	if err := applyPlacement(ctx, tx, position, audit); err != nil {
 		return nil, err
 	}
 	saved, err := readDocument(ctx, tx, resource, metadata.ID)
@@ -283,8 +290,14 @@ func listPage(ctx context.Context, tx pgx.Tx, resource string, request Request) 
 		return nil, err
 	}
 	order := " ORDER BY " + alias + ".name," + alias + ".id"
-	if resource == "products" || resource == "categories" {
-		order = " ORDER BY " + alias + ".sort_order," + alias + ".name," + alias + ".id"
+	if resource == "categories" {
+		order = " ORDER BY c.sort_order,c.name,c.id"
+	}
+	if resource == "products" {
+		// El orden visual de un producto es relativo a su categoría: el listado sigue el orden de
+		// las categorías y, dentro de cada una, el de sus productos.
+		order = ` ORDER BY (SELECT c.sort_order FROM app.catalog_categories c WHERE c.id=p.category_id),
+            (SELECT c.name FROM app.catalog_categories c WHERE c.id=p.category_id),p.category_id,p.sort_order,p.name,p.id`
 	}
 	query := documentQueries[resource] + where + order + fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(arguments)+1, len(arguments)+2)
 	arguments = append(arguments, size, (page-1)*size)

@@ -3,6 +3,8 @@ import { Field, Form, Notice } from '../../components/Forms';
 import { PaymentMethodIcon } from '../../components/PaymentMethodIcon';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { Check } from '../../components/catalog/EditorFields';
+import { PositionField } from '../../components/PositionField';
+import { positionPayload } from '../../services/positions';
 import {
   methodIconLabels,
   methodIcons,
@@ -39,26 +41,9 @@ function initialInput(method: PaymentMethod | null, nextOrder: number): MethodIn
   };
 }
 
-// El orden es un entero (no dinero): se captura como texto para no depender de type="number".
-function OrderField({ value, onChange }: { value: number; onChange: (value: number) => void }) {
-  return (
-    <Field label="Orden" hint="De 0 a 10000; los métodos se muestran de menor a mayor.">
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={5}
-        value={String(value)}
-        onChange={(event) => {
-          const digits = event.target.value.replace(/[^0-9]/g, '');
-          onChange(digits === '' ? 0 : Number.parseInt(digits, 10));
-        }}
-      />
-    </Field>
-  );
-}
-
 function MethodEditor({
   method,
+  methods,
   nextOrder,
   editable,
   execute,
@@ -66,6 +51,8 @@ function MethodEditor({
   onClose,
 }: {
   method: PaymentMethod | null;
+  // Métodos en su orden actual: son las posiciones que se ofrecen.
+  methods: PaymentMethod[];
   nextOrder: number;
   editable: boolean;
   execute: ExecuteMutation;
@@ -111,7 +98,12 @@ function MethodEditor({
         label={method ? 'Guardar método' : 'Crear método'}
         disabled={!editable || busy}
         onSave={async () => {
-          const body = { ...value };
+          const body: Record<string, unknown> = { ...value };
+          delete body.position;
+          const position = positionPayload(methods, method?.id ?? '', value.position?.after);
+          if (position) {
+            body.position = position;
+          }
           if (method) {
             const saved = await execute<PaymentMethod>('payments_save_method', {
               id: method.id,
@@ -134,7 +126,14 @@ function MethodEditor({
               onChange={(event) => change({ name: event.target.value })}
             />
           </Field>
-          <OrderField value={value.sort_order} onChange={(sort_order) => change({ sort_order })} />
+          <PositionField
+            label="Posición del método"
+            siblings={methods}
+            recordID={method?.id ?? ''}
+            value={value.position?.after}
+            onChange={(after) => change({ position: { after } })}
+            hint="Los métodos se muestran en este orden en la pantalla de cobro."
+          />
         </div>
         <div className="field">
           <span>Icono</span>
@@ -247,6 +246,7 @@ export function MethodsAdmin({
         <MethodEditor
           key={editing ?? 'new'}
           method={selected}
+          methods={methods}
           nextOrder={nextOrder + 10}
           editable={editable}
           execute={execute}
@@ -263,13 +263,13 @@ export function MethodsAdmin({
               <th>Referencia</th>
               <th>Propina</th>
               <th>Devolución</th>
-              <th>Orden</th>
+              <th>Posición</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {methods.map((method) => (
+            {methods.map((method, index) => (
               <tr key={method.id}>
                 <td>
                   <span className="flex items-center gap-2">
@@ -281,7 +281,7 @@ export function MethodsAdmin({
                 <td>{referenceModeLabels[method.reference_mode]}</td>
                 <td>{method.allows_tip ? 'Permitida' : 'No'}</td>
                 <td>{method.allows_refund ? 'Permitida' : 'No'}</td>
-                <td>{method.sort_order}</td>
+                <td>{index + 1}</td>
                 <td>{method.active ? 'Activo' : 'Inactivo'}</td>
                 <td>
                   {editable && (

@@ -20,11 +20,23 @@ export interface Schedule {
   windows: TimeWindow[];
 }
 
+// Posición elegida para el orden visual: «» al inicio o el identificador del hermano anterior.
+// Solo se envía al crear o guardar; Go recalcula sort_order y no la devuelve en las lecturas.
+export interface Position {
+  after: string;
+}
+
+export interface PaletteColor {
+  hex: string;
+  name: string;
+}
+
 export interface Category extends Metadata {
   sort_order: number;
   color: string;
   image_id: string | null;
   availability: Schedule;
+  position?: Position;
 }
 
 export interface Ingredient extends Metadata {
@@ -131,6 +143,7 @@ export interface Product extends Metadata {
   ingredients: ProductIngredient[];
   groups: ProductGroup[];
   slots: ComboSlot[];
+  position?: Position;
 }
 
 export interface PriceEntry {
@@ -177,6 +190,9 @@ export interface ProductReference extends Metadata {
   code: string;
   kind: string;
   archived: boolean;
+  // Categoría y orden dentro de ella: permiten mostrar las posiciones sin otra consulta.
+  category_id: string;
+  sort_order: number;
   variants: Pick<Variant, 'id' | 'name' | 'active'>[];
 }
 export interface Lookups {
@@ -187,6 +203,8 @@ export interface Lookups {
   groups: OptionGroup[];
   'price-lists': PriceList[];
   products: ProductReference[];
+  // Paleta cerrada de colores de categoría definida en Go.
+  palette: PaletteColor[];
 }
 export interface CatalogPage {
   items: CatalogDocument[];

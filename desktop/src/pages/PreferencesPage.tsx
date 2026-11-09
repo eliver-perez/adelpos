@@ -19,7 +19,6 @@ export const screens: ScreenEntry[] = [
   { id: 'restaurant', label: 'Restaurante', permission: 'accounts.read' },
   { id: 'takeaway', label: 'Para llevar', permission: 'takeaway.read' },
   { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
-  { id: 'preview', label: 'Probar personalización', permission: 'catalog.prices.read' },
   { id: 'status', label: 'Estado del sistema', permission: '' },
   { id: 'users', label: 'Usuarios', permission: 'users.read' },
   { id: 'roles', label: 'Roles', permission: 'roles.read' },
@@ -42,6 +41,13 @@ export const screens: ScreenEntry[] = [
   { id: 'audit', label: 'Auditoría', permission: 'audit.read' },
   { id: 'preferences', label: 'Mis preferencias', permission: '' },
 ];
+
+// «Probar personalización» (preview) salió del menú principal en la etapa 6.1 y ahora es la
+// pestaña «Vista previa» de Catálogo. Una pantalla de inicio guardada con ese valor abre Catálogo
+// (Go aplica la misma equivalencia al leer y guardar preferencias).
+export function homeScreen(saved: string): string {
+  return saved === 'preview' ? 'catalog' : saved;
+}
 
 // Una pantalla se autoriza con su permiso propio y, si declara alternativas, con alguna de ellas.
 export function screenAuthorized(entry: ScreenEntry, permissions: string[]) {
@@ -66,7 +72,7 @@ export function UserPreferencesForm({
   onSaved: () => Promise<void>;
 }) {
   const [theme, setTheme] = useState(value.theme);
-  const [home, setHome] = useState(value.home_screen);
+  const [home, setHome] = useState(homeScreen(value.home_screen));
   const available = screens.filter(
     (screen) => screen.home !== false && (!permissions || screenAuthorized(screen, permissions)),
   );

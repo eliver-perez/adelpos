@@ -34,8 +34,8 @@ func (input *EstablishmentInput) validate() error {
 	if len(input.Name) < 1 || len(input.Name) > 100 || input.Currency != "MXN" {
 		return invalid("Indica un nombre de hasta 100 caracteres y moneda MXN.")
 	}
-	if _, err := time.LoadLocation(input.Timezone); err != nil {
-		return invalid("La zona horaria debe ser un identificador IANA válido.")
+	if !validTimezone(input.Timezone) {
+		return invalid("Elige una zona horaria de la lista (identificador IANA válido).")
 	}
 	if input.Theme != "light" && input.Theme != "dark" {
 		return invalid("El tema debe ser light o dark.")
@@ -44,6 +44,18 @@ func (input *EstablishmentInput) validate() error {
 		return invalid("Los datos de contacto exceden la longitud permitida.")
 	}
 	return nil
+}
+
+// validTimezone exige un identificador IANA que exista en la base de zonas embebida
+// (time/tzdata). time.LoadLocation también acepta "" (UTC) y "Local" (la zona del proceso), que
+// no identifican la zona del establecimiento, por lo que se rechazan explícitamente, igual que
+// un nombre con espacios alrededor.
+func validTimezone(name string) bool {
+	if name == "" || name == "Local" || strings.TrimSpace(name) != name {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
 }
 
 func (service *Service) setup(ctx context.Context, tx pgx.Tx, request Request) (any, error) {

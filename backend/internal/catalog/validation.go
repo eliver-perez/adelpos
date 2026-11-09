@@ -108,15 +108,16 @@ func validateDocument(ctx context.Context, tx pgx.Tx, document any, previous any
 	}
 	switch value := document.(type) {
 	case *Category:
-		if value.Color != "" && !colorPattern.MatchString(value.Color) {
-			return invalid("El color debe ser hexadecimal #RRGGBB.")
+		old, _ := previous.(*Category)
+		if err := validateCategoryColor(value, old); err != nil {
+			return err
 		}
 		if err := optionalReference(ctx, tx, "images", value.ImageID); err != nil {
 			return err
 		}
 		var oldSchedule Schedule
 		var oldImage *string
-		if old, ok := previous.(*Category); ok {
+		if old != nil {
 			oldSchedule = old.Availability
 			oldImage = old.ImageID
 		}

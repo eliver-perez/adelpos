@@ -47,11 +47,11 @@ Delegación: un 403 `PERMISSION_DENIED` con mensaje específico rechaza crear, a
 
 ## Cuerpos principales
 
-Setup/settings: `name`, `timezone` IANA, `currency` MXN, `phone`, `email`, `address`, `theme` light/dark. Setup añade `terminal_name`. La zona propuesta procede del OS; Go valida y conserva la elección. Setup repetido con autorización local responde configured/already_configured y no vuelve a emitir credenciales ni modifica datos.
+Setup/settings: `name`, `timezone` IANA (Go exige una zona existente con `time.LoadLocation` y rechaza `""` y `Local`), `currency` MXN, `phone`, `email`, `address`, `theme` light/dark. Setup añade `terminal_name`. La zona propuesta procede del OS; Go valida y conserva la elección. Setup repetido con autorización local responde configured/already_configured y no vuelve a emitir credenciales ni modifica datos.
 
 Usuarios: `username`, `display_name`, `role_id`, `active`; POST añade password de 8 a 256 caracteres. PATCH no restablece contraseñas. Rol: `name`, `permissions` (claves del registro). Excepciones: `{ "overrides": { "users.read": "allow", "registers.read": "deny", "audit.read": "inherit" } }`. Heredar elimina la excepción; las demás claves enviadas se actualizan.
 
-Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled. Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Contraseña propia: `current_password`, `new_password`.
+Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled. Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Desde la etapa 6.1 `preview` ya no es una pantalla: un valor guardado o enviado como `preview` se interpreta como `catalog` (la vista previa vive en Catálogo). Contraseña propia: `current_password`, `new_password`.
 
 Login devuelve session_token al cliente nativo. Setup/enrolamiento devuelven device_id y device_token al cliente nativo. Rust los guarda en Keychain y elimina campos secretos antes de responder al WebView. El UUID público de sesión no autentica peticiones. Caducidad de sesión: doce horas; nuevo acceso reemplaza la anterior. El evento lógico de reemplazo se informa con SESSION_REPLACED en la siguiente consulta, no mediante un WebSocket activo.
 
@@ -109,6 +109,10 @@ Recursos de listado: categories, products, ingredients, complements, portions, g
 Los POST de documentos nuevos envían `id:""`, `revision:0`, nombre, descripción, activo y campos específicos. PATCH envía el documento completo de GET y su revisión vigente. Los campos derivados exclusivos del listado no forman parte del cuerpo de edición. Una revisión antigua responde 409 `REVISION_CONFLICT` y no modifica datos. No hay DELETE; `active=false` o `archived=true` conservan identidad y referencias. Cambiar imagen, estado u horarios desde un documento también comprueba sus permisos propios; no permite eludir rutas específicas.
 
 Estado: `{revision,active,archived}`. Disponibilidad: `{revision,temporary_unavailable,availability}`. Duplicar: `{revision,name,code}`. Reordenar: `{items:[{id,revision,sort_order}]}`; todo el lote revierte ante conflicto. Imágenes: POST `{content_base64}` PNG/JPEG, máximo 1 MiB y 2048 × 2048; GET devuelve `{id,data_uri,width,height}`. No se aceptan rutas locales ni formatos activos.
+
+Orden visual por posición (etapa 6.1): los POST/PATCH de categorías y productos aceptan el campo opcional de entrada `position:{after:""|UUID}`; `""` coloca el registro al inicio y un UUID inmediatamente después de ese hermano (categorías: todas; productos y combos: los de la misma categoría con la que se guarda el producto). Con `position`, el `sort_order` del cuerpo se ignora y Go renumera la lista en múltiplos de 10 dentro de la misma transacción (hermanos bloqueados con `FOR UPDATE`, revisión incrementada solo en los hermanos cuyo número cambió, auditoría `catalog.categories.reordered`/`catalog.products.reordered`); un registro que se agrega al final recibe el mayor número + 10 sin tocar a los demás y guardar sin mover no renumera. Sin `position` se conserva el comportamiento anterior. `after` ausente, inexistente, de otra lista (otra categoría) o igual al propio registro responde 400. `position` no se devuelve en las lecturas. El listado de productos se ordena por el orden de su categoría y después por el del producto.
+
+Color de categoría (etapa 6.1): `""` o un `hex` de la paleta cerrada de Go (16 colores, se normaliza a minúsculas). Al editar se acepta también el color ya guardado aunque no esté en la paleta (colores anteriores a la paleta); cualquier otro valor responde 400. `GET /lookups` añade `palette:[{hex,name}]` y, en cada producto, `category_id` y `sort_order`.
 
 Horarios: `{starts_on?:"AAAA-MM-DD",ends_on?:"AAAA-MM-DD",days:[0..6],windows:[{start:"HH:mm",end:"HH:mm"}]}`. Arrays vacíos: sin restricción. Fin exclusivo; `24:00` solo como final. La zona proviene del establecimiento y el instante de Go, nunca del cliente.
 
@@ -185,7 +189,7 @@ Las escrituras llevan `operation_id` UUID. Actualizar exige `revision`; transfer
 
 ### Documentos y consultas
 
-- Área: `name`, `description`, `sort_order`, `active`; PATCH conserva `id` y revisión del documento leído.
+- Área: `name`, `description`, `sort_order`, `active` y, desde la etapa 6.1, `position:{after}` opcional con la misma regla del catálogo (auditoría `restaurant.areas.reordered`); PATCH conserva `id` y revisión del documento leído.
 - Mesa: `area_id`, `name`, `shape` (`rectangle`/`round`), `x`, `y`, `width`, `height`, `seats`, `active`, `out_of_service`. El lienzo lógico es 1000×560. `/layout` recibe `tables:[{id,revision,x,y,width,height,shape}]` y UUID del lote; todas las posiciones se validan antes de escribir.
 - Cuenta: `name`, `mode` (`dine_in`/`takeaway`, inmutable), `table_id` opcional, `price_list_id` opcional, `customer_name`, `phone`, `origin`, `notes`, `scheduled_local` (`YYYY-MM-DDTHH:mm`), `schedule_kind` (`preparation`/`delivery` o vacío), `assigned_user_id` opcional. Para llevar rechaza mesa. La zona proviene del establecimiento; el cliente no decide el offset.
 - Listado: `mode`, `table_id` (UUID o `unassigned`), `search`, `state` (`open` predeterminado, `merged`, `voided`, `all`), `page`, `page_size` hasta 100. Respuesta `{items,total,page,page_size,server_time,timezone,settings}` con orden ascendente de creación. `search` consulta folio, referencia, cliente y teléfono.
@@ -262,7 +266,7 @@ El alcance global `kitchen.stations.all` se comprueba además del permiso funcio
 
 ### Configuración
 
-- Estación: `{name,description,active,sort_order,reception,printer_id,target_minutes,warning_minutes,overdue_minutes,grouping,tracking}`. Recepción `printer|kds|both`; agrupación `inherit|independent|unified`; seguimiento `inherit|item|order`. PATCH lleva `id` y `revision`.
+- Estación: `{name,description,active,sort_order,reception,printer_id,target_minutes,warning_minutes,overdue_minutes,grouping,tracking}` y `position:{after}` opcional (etapa 6.1, misma regla del catálogo; historial `station.reordered`). Recepción `printer|kds|both`; agrupación `inherit|independent|unified`; seguimiento `inherit|item|order`. PATCH lleva `id` y `revision`.
 - Impresora: `{name,transport,destination,port,paper_width,copies,supports_cut,cut,cutter_option,active,fallback_id}`. Transporte `cups|escpos_tcp|agent`; papel 58/80 mm, copias 1–3, puerto 9100–9109. CUPS utiliza nombre de cola; TCP una IP privada explícita; agente todavía no implementado. El respaldo es opcional y no puede formar ciclos. PATCH conserva identidad/revisión.
 - Ruta: exactamente uno de `category_id|product_id`, `mode:prepare|none`, `station_ids`. Preparación exige estaciones activas no repetidas; exención explícita usa lista vacía. PATCH conserva `id/revision`; producto prevalece sobre categoría.
 - Acceso: `{device_id,station_ids,expected_station_ids,operation_id}`. La lista esperada del último GET permite rechazar una edición concurrente. Solo dispositivos autorizados existentes.
@@ -326,6 +330,7 @@ Prefijo `/api/v1/payments`. Todas las rutas requieren sesión y terminal vigente
 
 ### Cuerpos principales
 
+- Método de pago: `{operation_id, revision, name, icon, active, sort_order, is_cash, reference_mode, allows_tip, allows_refund}` y, desde la etapa 6.1, `position:{after}` opcional con la misma regla del catálogo (auditoría `payments.methods_reordered`).
 - Pago: `{operation_id, method_id, mode: "total"|"partial", amount?, received?, tip?, reference?, selections?: [{version_id, quantity}], expected_balance, print?, deliver?}`. Respuesta `{payment, finance, closed, delivered, printing}`.
 - Descuento: `{operation_id, scope: "account"|"items", method: "percent"|"amount", value, courtesy, concept?, reason, selections?, expected_balance, authorization?: {username, password}}`. Cargo: `{operation_id, concept, amount, reason?, expected_balance}`. Cancelación: `{operation_id, adjustment_id, reason, authorization?}`.
 - Devolución: `{operation_id, mode: "total"|"payment"|"items", payment_id?, amount?, tip?, selections?, method_id, reference?, reason, authorization?}`. Corrección: `{operation_id, payment_id, method_id, reference?, reason, authorization?}`.

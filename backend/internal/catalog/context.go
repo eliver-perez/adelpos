@@ -92,7 +92,6 @@ type Request struct {
 type Audit func(context.Context, pgx.Tx, string, string, *string, any, any) error
 
 var idPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-var colorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
 func newID() string {
 	var value [16]byte

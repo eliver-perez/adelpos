@@ -50,7 +50,9 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 		}
 		result[resource] = RedactPrices(records, actor)
 	}
-	rows, err := tx.Query(ctx, `SELECT id,name,code,kind,active,archived,
+	// La categoría y el orden de cada producto permiten a la interfaz mostrar las posiciones dentro
+	// de su categoría sin otra consulta. El orden por nombre se conserva para los selectores.
+	rows, err := tx.Query(ctx, `SELECT id,name,code,kind,active,archived,category_id::text,sort_order,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id',v.id,'name',v.name,'active',v.active) ORDER BY v.name)
         FROM app.catalog_variants v WHERE v.product_id=p.id),'[]')
         FROM app.catalog_products p ORDER BY name,id LIMIT 5001`)
@@ -59,8 +61,9 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 	}
 	products := []any{}
 	for rows.Next() {
-		var id, name, code, kind string
+		var id, name, code, kind, categoryID string
 		var active, archived bool
+		var sortOrder int
 		var variants any
 		if err := rows.Scan(
 
@@ -70,6 +73,8 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 			&kind,
 			&active,
 			&archived,
+			&categoryID,
+			&sortOrder,
 			&variants,
 		); err != nil {
 			rows.Close()
@@ -78,13 +83,15 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 		products = append(
 			products,
 			map[string]any{
-				"id":       id,
-				"name":     name,
-				"code":     code,
-				"kind":     kind,
-				"active":   active,
-				"archived": archived,
-				"variants": variants,
+				"id":          id,
+				"name":        name,
+				"code":        code,
+				"kind":        kind,
+				"active":      active,
+				"archived":    archived,
+				"category_id": categoryID,
+				"sort_order":  sortOrder,
+				"variants":    variants,
 			},
 		)
 	}
@@ -96,6 +103,7 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 		return nil, invalid("El selector admite hasta 5000 productos; reduce el catálogo activo antes de usar este editor.")
 	}
 	result["products"] = products
+	result["palette"] = Palette
 	return result, nil
 }
 

@@ -36,6 +36,8 @@ export interface MethodInput {
   reference_mode: ReferenceMode;
   allows_tip: boolean;
   allows_refund: boolean;
+  // Posición elegida para el orden visual; Go recalcula sort_order al guardar.
+  position?: { after: string };
 }
 
 export interface PaymentSettings {

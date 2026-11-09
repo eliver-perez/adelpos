@@ -11,7 +11,17 @@ import type {
   Product,
 } from '../../services/catalog';
 import { CatalogEditor } from './CatalogEditor';
+import { PreviewPage } from './PreviewPage';
 import { catalogOperation, catalogTabs, newCatalogDocument } from './catalogState';
+import { catalogRequestBody } from '../../services/catalogPositions';
+
+// Recursos que suelen capturarse muchos seguidos y ofrecen «Guardar y crear otra».
+const continuousTabs: (typeof catalogTabs)[number]['id'][] = [
+  'categories',
+  'products',
+  'ingredients',
+  'complements',
+];
 
 export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
   const [tab, setTab] = useState<(typeof catalogTabs)[number]['id']>('products');
@@ -23,6 +33,13 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
   const [draft, setDraft] = useState<CatalogDocument | null>(null);
   const [savedDraft, setSavedDraft] = useState('');
   const [error, setError] = useState('');
+  // «Vista previa» (antes «Probar personalización» en el menú principal) vive dentro del catálogo.
+  const [view, setView] = useState<'records' | 'preview'>('records');
+  // Cada «Guardar y crear otra» abre un editor nuevo: su estado interno (por ejemplo, si el código
+  // ya se editó a mano) no pasa al registro siguiente.
+  const [editorSession, setEditorSession] = useState(0);
+  const [focusName, setFocusName] = useState(false);
+  const [notice, setNotice] = useState('');
   const { confirm, dialog } = useConfirmDialog();
   const resource = tab === 'combos' ? 'products' : tab;
   const lookup = useResource<Lookups>('catalog_lookups');
@@ -38,6 +55,8 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
     can(catalogTabs.find((item) => item.id === tab)?.permission ?? '') &&
     (tab !== 'combos' || can('catalog.products.manage')) &&
     (!commercial || (can('catalog.prices.read') && can('catalog.prices.manage')));
+  // La vista previa calcula precios: exige administrar productos y consultar precios.
+  const previewAllowed = can('catalog.products.manage') && can('catalog.prices.read');
 
   // Cierra el editor actual. Con cambios sin guardar pregunta dentro de la aplicación: el WebView
   // nativo no muestra window.confirm y lo resolvía como «no», por lo que «Volver al listado»
@@ -55,12 +74,27 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
       }
     }
     setDraft(null);
+    setNotice('');
+    setFocusName(false);
     return true;
+  }
+
+  // Guarda el borrador con la posición elegida (Go recalcula el orden visual) y recarga el
+  // listado y los lookups para que el siguiente registro vea el estado actualizado.
+  async function saveDraft(current: CatalogDocument) {
+    if (!lookup.data) {
+      throw new Error('Espera a que se carguen las referencias del catálogo.');
+    }
+    return api<CatalogDocument>(catalogOperation(resource, current.id ? 'save_' : 'create_'), {
+      id: current.id || undefined,
+      body: catalogRequestBody(resource, current, lookup.data),
+    });
   }
 
   async function openEditor(id: string) {
     if (!(await closeEditor())) return;
     setError('');
+    setFocusName(false);
     try {
       const record = await api<CatalogDocument>(catalogOperation(resource, 'get_'), { id });
       setDraft(record);
@@ -107,7 +141,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
         title="Catálogo comercial"
         description="Productos, preparación y reglas de precio persistidos en el servidor."
       >
-        {editable && !draft && (
+        {editable && !draft && view === 'records' && (
           <button
             className="primary-button"
             disabled={!lookup.data}
@@ -118,6 +152,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
               const record = newCatalogDocument(resource, tab === 'combos', category);
               setDraft(record);
               setSavedDraft(JSON.stringify(record));
+              setFocusName(true);
             }}
           >
             Crear {tab === 'combos' ? 'combo' : 'registro'}
@@ -129,10 +164,11 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
           <button
             key={item.id}
             role="tab"
-            aria-selected={tab === item.id}
-            className={tab === item.id ? 'tab-active' : ''}
+            aria-selected={view === 'records' && tab === item.id}
+            className={view === 'records' && tab === item.id ? 'tab-active' : ''}
             onClick={async () => {
               if (!(await closeEditor())) return;
+              setView('records');
               setTab(item.id);
               setPage(1);
               setSearch('');
@@ -141,9 +177,25 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             {item.label}
           </button>
         ))}
+        {previewAllowed && (
+          <button
+            role="tab"
+            aria-selected={view === 'preview'}
+            className={view === 'preview' ? 'tab-active' : ''}
+            onClick={async () => {
+              if (!(await closeEditor())) return;
+              setView('preview');
+            }}
+          >
+            Vista previa
+          </button>
+        )}
       </div>
       <Notice>{error || lookup.error || list.error}</Notice>
-      {draft && lookup.data ? (
+      {notice && <Notice success>{notice}</Notice>}
+      {view === 'preview' && previewAllowed ? (
+        <PreviewPage can={can} embedded />
+      ) : draft && lookup.data ? (
         <section className="panel catalog-editor">
           <div className="section-heading">
             <div>
@@ -163,23 +215,46 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             </Notice>
           )}
           <CatalogEditor
-            key={`${resource}-${draft.id}`}
+            key={`${resource}-${draft.id}-${editorSession}`}
             resource={resource}
             value={draft}
             onChange={setDraft}
             lookups={lookup.data}
             can={can}
             editable={editable}
+            focusName={focusName}
             onSave={async () => {
-              const saved = await api<CatalogDocument>(
-                catalogOperation(resource, draft.id ? 'save_' : 'create_'),
-                { id: draft.id || undefined, body: draft },
-              );
+              const saved = await saveDraft(draft);
+              setNotice('');
+              setFocusName(false);
               setDraft(saved);
               setSavedDraft(JSON.stringify(saved));
               await list.reload();
               await lookup.reload();
             }}
+            saveAndNewLabel={
+              resource === 'categories' ? 'Guardar y crear otra' : 'Guardar y crear otro'
+            }
+            onSaveAndNew={
+              continuousTabs.includes(tab)
+                ? async () => {
+                    const saved = await saveDraft(draft);
+                    // En productos se conserva la categoría elegida para el siguiente registro.
+                    const next = newCatalogDocument(
+                      resource,
+                      false,
+                      resource === 'products' ? (saved as Product).category_id : category,
+                    );
+                    setDraft(next);
+                    setSavedDraft(JSON.stringify(next));
+                    setEditorSession((current) => current + 1);
+                    setFocusName(true);
+                    setNotice(`«${saved.name}» quedó guardado. Captura el siguiente registro.`);
+                    await list.reload();
+                    await lookup.reload();
+                  }
+                : undefined
+            }
           />
         </section>
       ) : (
