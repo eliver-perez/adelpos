@@ -116,10 +116,17 @@ export function CaptureScreen({
           table.active &&
           !table.out_of_service
         }
+        canEditDetails={
+          !!bill &&
+          bill.account.state === 'open' &&
+          (bill.account.mode !== 'takeaway' || can('takeaway.manage')) &&
+          can('accounts.manage')
+        }
         disabled={blocked}
         onBack={workspace.leaveCapture}
         onChooseAccount={workspace.chooseAccount}
         onNewAccount={onNewAccount}
+        onDetails={() => onAction('metadata')}
         onRefresh={workspace.refresh}
       />
       <div className="capture-body">

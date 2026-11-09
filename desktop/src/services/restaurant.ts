@@ -231,6 +231,47 @@ export function elapsedTime(seconds: number) {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
+// Referencias neutras (etapa 6.2): Go asigna a una cuenta abierta o editada sin nombre el nombre
+// de su mesa («Cuenta» sin mesa) o «Pedido para llevar». También se tratan como neutras las que
+// proponía el formulario anterior («Cuenta», «Para llevar»). Una cuenta con referencia neutra se
+// considera «sin nombre»: la interfaz la identifica por su folio y no muestra la referencia como
+// nombre capturado.
+const neutralAccountNames = ['Cuenta', 'Pedido para llevar', 'Para llevar'];
+
+export function accountCustomName(account: Pick<Account, 'name' | 'table_name'>): string {
+  const name = account.name.trim();
+  if (!name || neutralAccountNames.includes(name) || name === account.table_name) {
+    return '';
+  }
+  return name;
+}
+
+// Nombre con que se identifica a quien recoge un pedido para llevar: el cliente o, en pedidos
+// anteriores, el nombre capturado de la cuenta. Vacío si el pedido no tiene nombre.
+export function takeawayCustomerName(
+  account: Pick<Account, 'name' | 'table_name' | 'customer_name'>,
+): string {
+  return account.customer_name.trim() || accountCustomName(account);
+}
+
+// Identificación corta de una cuenta: «Cuenta #folio» o «Pedido #folio», con el nombre capturado
+// si lo tiene.
+export function accountLabel(account: Account): string {
+  if (account.mode === 'takeaway') {
+    const customer = takeawayCustomerName(account);
+    return customer ? `Pedido #${account.folio} · ${customer}` : `Pedido #${account.folio}`;
+  }
+  const custom = accountCustomName(account);
+  return custom ? `Cuenta #${account.folio} · ${custom}` : `Cuenta #${account.folio}`;
+}
+
+// Orígenes sugeridos de un pedido para llevar (todos son la modalidad takeaway). Un origen
+// distinto capturado antes se conserva como «Otro origen».
+export const takeawayOrigins = ['Para llevar', 'Mostrador', 'Teléfono', 'Ventanilla'];
+
+// Origen con que se abre un pedido nuevo desde «Nuevo pedido».
+export const defaultTakeawayOrigin = 'Para llevar';
+
 export const eventLabels: Record<string, string> = {
   'account.opened': 'Cuenta abierta',
   'account.updated': 'Datos actualizados',

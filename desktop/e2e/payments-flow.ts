@@ -146,10 +146,9 @@ export async function checkDineInPayment(page: Page) {
   );
 }
 
-// Pedido para llevar con saldo, capturado en la misma pantalla táctil: un toque agrega el filete
-// y «Enviar a cocina» lo confirma. «Marcar como entregado» abre el cobro real con la entrega
-// activada y el pago que liquida registra también la entrega.
-export async function checkTakeawayDelivery(page: Page) {
+// Pedido para llevar capturado en la misma pantalla táctil: un toque agrega el filete y «Enviar a
+// cocina» lo confirma (etapa 6.2: aunque el pedido no tenga nombre del cliente).
+export async function sendTakeawayToKitchen(page: Page) {
   const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
   await page.getByRole('button', { name: /^Filete de prueba/ }).click();
   await expect(bill.getByRole('article', { name: '1 × Filete de prueba' })).toContainText('Nuevo');
@@ -160,6 +159,13 @@ export async function checkTakeawayDelivery(page: Page) {
     'En cocina',
   );
   await expect(bill).toContainText('$150.00');
+  await expect(bill).toContainText('Entrega: no entregado');
+}
+
+// Pedido para llevar con saldo, ya enviado a cocina. «Marcar como entregado» abre el cobro real
+// con la entrega activada y el pago que liquida registra también la entrega.
+export async function checkTakeawayDelivery(page: Page) {
+  const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
   await expect(bill).toContainText('Entrega: no entregado');
   await bill.getByRole('button', { name: 'Marcar como entregado', exact: true }).click();
   const deliver = page

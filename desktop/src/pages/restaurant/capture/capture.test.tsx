@@ -554,7 +554,10 @@ function renderCapture() {
 
 async function openFirstAccount() {
   renderCapture();
+  // Etapa 6.2: tocar la mesa abre su panel lateral; «Capturar» entra a la cuenta elegida.
   fireEvent.click(await screen.findByRole('button', { name: /^Mesa 1, Ocupada/ }));
+  const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 1' });
+  fireEvent.click(await within(panel).findByRole('button', { name: 'Capturar' }));
   await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #1' });
   return screen.getByRole('complementary', { name: 'Cuenta actual' });
 }
@@ -579,7 +582,7 @@ describe('captura táctil de pedidos', () => {
     expect(within(group).getByRole('button', { name: '+ Nueva cuenta' })).toBeTruthy();
     expect(screen.queryByRole('combobox', { name: 'Cuenta de la mesa' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Acciones de cuenta' })).toBeNull();
-    expect(screen.getByText(/Mesero: Laura · 4 lugares · Abierta/)).toBeTruthy();
+    expect(screen.getByText(/Mesero: Laura · Mesa para 4 · Abierta/)).toBeTruthy();
     fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #2' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #2' });
     // Categorías: solo las disponibles según Go, con su número de productos.

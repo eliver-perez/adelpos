@@ -214,6 +214,7 @@ func TestRestaurantAcceptance(t *testing.T) {
 	testKitchenAcceptance(t, fixture)
 	testPayments(t, fixture)
 	testOrderPositions(t, fixture)
+	testQuickOpen(t, fixture)
 }
 
 func mustJSON(value any) []byte {
