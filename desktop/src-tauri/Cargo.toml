@@ -1,6 +1,6 @@
 [package]
 name = "ad-el-pos-desktop"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2021"
 rust-version = "1.99"
 description = "Terminal de escritorio para el servidor local"

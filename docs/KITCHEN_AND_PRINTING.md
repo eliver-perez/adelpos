@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.6.1, esquema 7. Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
+Versión 0.6.2, esquema 7. Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
