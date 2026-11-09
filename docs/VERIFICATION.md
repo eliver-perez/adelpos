@@ -2,7 +2,7 @@
 
 Ejecución del **9 de noviembre de 2026**, zona America/Monterrey. Versión **0.6.2**, API v1, esquema **7** (sin migraciones nuevas). Evidencia anterior: [etapa 6.1](VERIFICATION_STAGE6_1.md), [etapa 6](VERIFICATION_STAGE6.md), [etapa 5](VERIFICATION_STAGE5.md), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance: [ETAPA_6_2_AVANCE.md](ETAPA_6_2_AVANCE.md).
 
-**La instalación real no se modificó.** Sigue con el servidor y la aplicación 0.6.1 sobre el esquema 7; la 0.6.2 no requiere migración, pero instalarla implica recompilar y reiniciar servicios, lo que no se hizo. No se leyeron secretos de `.local` ni del Keychain.
+**Las pruebas no tocaron la instalación real.** Después, con autorización del propietario, se instaló la 0.6.2 (ver «Instalación en la instalación real»). No se leyeron secretos de `.local` ni del Keychain.
 
 ## Entorno aislado
 
@@ -19,16 +19,19 @@ Copia del repositorio en el directorio temporal de la sesión (sin `.git`, `.loc
 | Rust                | `cargo test --locked --offline`: 12 aprobadas, 1 ignorada deliberadamente (Keychain real, opt-in).                                                                                                                                                                                                                              |
 | Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores (ver abajo).                                                                                                                                                                                                                                         |
 | Revisión visual     | Capturas del panel lateral (mesa libre y ocupada) a 1280 × 720 y 1920 × 1080, tema claro y oscuro, en Chromium y WebKit: sin desplazamiento horizontal y con las acciones principales visibles.                                                                                                                                 |
-| Instalación real    | Sin cambios.                                                                                                                                                                                                                                                                                                                    |
+| Instalación real    | Servidor y `.app` 0.6.2 instalados después de las pruebas, con autorización (sin migraciones).                                                                                                                                                                                                                                  |
 
 Recorrido Playwright (además de las comprobaciones de etapas 4 a 6.1): mesa libre → panel lateral → «Abrir cuenta y capturar» con dos clics simultáneos → una sola cuenta en el servidor → productos → «Enviar a cocina»; mesa ocupada → panel lateral → «Capturar» y «Cobrar»; «+ Nueva cuenta» en mesa ocupada; para llevar → «Nuevo pedido» entra directo a la captura → «Datos del pedido» → envío a cocina sin nombre con el aviso «Pedido sin nombre».
 
 ## No ejecutado o no verificado
 
-- Instalación de 0.6.2 en la instalación real (recompilar servidor y `.app`, reiniciar): pendiente de que el propietario lo indique.
 - Ventana nativa Tauri, pantalla táctil física, Keychain real e impresión física.
 - Actualización en tiempo real del panel lateral entre dos terminales (usa SSE y sondeo existentes; sin prueba automática con dos terminales).
 - Número de comensales: no implementado (requiere migración; ver el avance).
+
+## Instalación en la instalación real
+
+9 de noviembre de 2026, con autorización del propietario y la aplicación cerrada: `server-stop` (0.6.1 detenido de forma ordenada); `migrate` → `applied:0` (sin migraciones pendientes, esquema 7); `server-start` → 0.6.2, readiness 200, PostgreSQL disponible y esquema compatible; `build-macos` → `.app` 0.6.2 de 9.45 MiB; `open-app` → aplicación iniciada y atendida por el servidor (respuestas 200). No se recorrió el flujo en la ventana nativa.
 
 ## Repetir las comprobaciones
 
