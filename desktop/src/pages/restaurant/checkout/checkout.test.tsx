@@ -509,3 +509,67 @@ describe('pantalla de cobro', () => {
     expect(sent.body.operation_id).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
+
+describe('caja en el cobro (etapa 7, fase C)', () => {
+  it('muestra el aviso del tope solo cuando Go lo entrega y sin bloquear el cobro', async () => {
+    render(<Checkout />);
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    expect(screen.queryByRole('status', { name: 'Tope de caja superado' })).toBeNull();
+    cleanup();
+    shiftState = {
+      ...usableShift,
+      cash_limit_warning: {
+        currencies: ['MXN'],
+        message: 'El efectivo esperado supera el tope de caja; considera un retiro.',
+      },
+    };
+    render(<Checkout />);
+    const notice = await screen.findByRole('status', { name: 'Tope de caja superado' });
+    expect(notice.textContent).toContain('considera un retiro');
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+  });
+
+  it('un evento de caja refleja de inmediato la pausa iniciada en otra terminal', async () => {
+    render(<Checkout />);
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    const before = requests('payments_current_shift').length;
+    shiftState = {
+      ...usableShift,
+      shift: { ...usableShift.shift!, state: 'closing' },
+      usable: false,
+      reason: 'La caja Caja 1 está en arqueo de cierre (lo inició Supervisora Ana).',
+    };
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('adel-cash-change', {
+          detail: { kinds: ['cash.shift.closing_started'], aggregates: ['shift'] },
+        }),
+      );
+    });
+    await waitFor(() => expect(requests('payments_current_shift').length).toBeGreaterThan(before));
+    expect(await screen.findByText(/está en arqueo de cierre/)).toBeTruthy();
+  });
+
+  it('informa el comando del cajón sin afirmar que se abrió', async () => {
+    payHandler = async () => ({
+      status: 200,
+      body: {
+        payment: null,
+        finance: { ...finance('0.00', '2026-11-08T12:10:00Z'), settled: true },
+        closed: true,
+        delivered: false,
+        printing: { requested: false },
+        drawer: { requested: true, status: 'pending', job_id: 'cajon' },
+      },
+    });
+    render(<Checkout />);
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    fireEvent.click(registerButton());
+    expect(await screen.findByText('Comando de apertura enviado.')).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/cajón abierto|se abrió/i);
+  });
+});

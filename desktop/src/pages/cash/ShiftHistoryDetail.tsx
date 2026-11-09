@@ -34,7 +34,15 @@ function ShiftTotalsSection({ shiftID }: { shiftID: string }) {
 }
 
 // Cortes parciales y corte definitivo del turno.
-function ShiftReports({ shiftID, timezone }: { shiftID: string; timezone: string }) {
+function ShiftReports({
+  shiftID,
+  can,
+  timezone,
+}: {
+  shiftID: string;
+  can: (permission: string) => boolean;
+  timezone: string;
+}) {
   const [selectedID, setSelectedID] = useState('');
   const detail = useLiveResource<ShiftDetail>('payments_shift', { id: shiftID, interval: 60000 });
   if (detail.error) {
@@ -48,7 +56,15 @@ function ShiftReports({ shiftID, timezone }: { shiftID: string; timezone: string
         timezone={timezone}
         onSelect={setSelectedID}
       />
-      {selectedID && <ReportLoader key={selectedID} reportID={selectedID} timezone={timezone} />}
+      {selectedID && (
+        <ReportLoader
+          key={selectedID}
+          reportID={selectedID}
+          shiftID={shiftID}
+          can={can}
+          timezone={timezone}
+        />
+      )}
     </div>
   );
 }
@@ -90,7 +106,7 @@ export function ShiftHistoryDetail({
         <ShiftTotalsSection shiftID={shift.id} />
       </Accordion>
       <Accordion title="Cortes" summary="Cortes parciales y corte definitivo">
-        <ShiftReports shiftID={shift.id} timezone={timezone} />
+        <ShiftReports shiftID={shift.id} can={can} timezone={timezone} />
       </Accordion>
       <Accordion title="Movimientos" summary="Cobros, devoluciones y operaciones de efectivo">
         <MovementsTimeline shiftID={shift.id} ownShift={ownShift} can={can} timezone={timezone} />

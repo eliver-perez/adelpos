@@ -8,6 +8,7 @@ import type { ShiftHistory, ShiftSummary } from '../../services/cash';
 import { formatDollars, formatMoney, isZeroMoney, permissionName } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
+import { CashLimitNotice } from './CashNotices';
 import { ExpectedFigures } from './ExpectedBlock';
 import { businessDate } from './movementRows';
 import { PhysicalFigures, TotalsTables } from './TotalsTables';
@@ -59,6 +60,7 @@ function CurrentSummary({ shift, timezone }: { shift: Shift; timezone: string })
           ]}
         />
       )}
+      {data.shift.state === 'open' && <CashLimitNotice warning={data.cash_limit_warning} />}
       <TotalsTables totals={totals} />
       {data.physical && <PhysicalFigures physical={data.physical} />}
       {data.expected_visible && data.expected && <ExpectedFigures expected={data.expected} />}

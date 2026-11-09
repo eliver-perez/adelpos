@@ -311,8 +311,9 @@ CREATE TABLE app.cash_closure_comments (
 );
 CREATE INDEX cash_closure_comments_shift_idx ON app.cash_closure_comments(shift_id, created_at);
 
--- 8. Tope de caja (función activable cash_limit, desactivada) y cajón de dinero. El tope nunca
--- bloquea cobros; NULL significa sin tope. Los usa la fase C de la etapa 7.
+-- 8. Tope de caja (función activable cash_limit, desactivada) y cajón de dinero. El tope es global
+-- y se compara con el efectivo esperado de cada caja por separado (como topes_caja del sistema
+-- anterior); solo produce un aviso y nunca bloquea cobros. NULL significa sin tope.
 ALTER TABLE app.payment_settings
     ADD COLUMN cash_limit_mxn numeric(18,2),
     ADD COLUMN cash_limit_usd numeric(18,2),
@@ -322,7 +323,9 @@ ALTER TABLE app.payment_settings
     );
 INSERT INTO app.establishment_features(code, enabled) VALUES ('cash_limit', false) ON CONFLICT DO NOTHING;
 
--- Configuración del cajón por caja física: se abre con un pulso de la impresora asociada.
+-- Configuración del cajón por caja física: se abre con un pulso ESC/POS (ESC p) de la impresora
+-- asociada. Solo sirven transportes que entregan esos bytes sin alterar (ESC/POS por red); Go lo
+-- valida al guardar y al emitir cada comando, porque el transporte de la impresora puede cambiar.
 CREATE TABLE app.cash_drawer_settings (
     register_id uuid PRIMARY KEY REFERENCES app.registers(id),
     printer_id uuid REFERENCES app.kitchen_printers(id),
@@ -333,28 +336,44 @@ CREATE TABLE app.cash_drawer_settings (
     CONSTRAINT cash_drawer_settings_printer_check CHECK (NOT enabled OR printer_id IS NOT NULL)
 );
 
--- Cada comando de apertura emitido; no afirma que el cajón se abrió físicamente.
+-- Cada comando de apertura emitido, ligado a su trabajo en la cola durable; no afirma que el cajón
+-- se abrió físicamente. Motivo: cobro o devolución con efectivo físico, operación de efectivo
+-- (ingreso, retiro o gasto) o apertura manual, que exige una explicación. Una operación emite como
+-- máximo un comando: el reintento idempotente nunca vuelve a abrir el cajón.
 CREATE TABLE app.cash_drawer_events (
     id uuid PRIMARY KEY,
     register_id uuid NOT NULL REFERENCES app.registers(id),
     shift_id uuid REFERENCES app.cash_shifts(id),
-    reason text NOT NULL CONSTRAINT cash_drawer_events_reason_check CHECK (reason IN ('payment', 'manual', 'operation')),
+    reason text NOT NULL CONSTRAINT cash_drawer_events_reason_check
+        CHECK (reason IN ('payment', 'refund', 'operation', 'manual')),
+    notes text NOT NULL DEFAULT '' CONSTRAINT cash_drawer_events_notes_length_check CHECK (length(notes) <= 500),
     actor_id uuid NOT NULL REFERENCES app.users(id),
     device_id uuid NOT NULL REFERENCES app.devices(id),
-    job_id uuid REFERENCES app.kitchen_print_jobs(id),
+    job_id uuid NOT NULL REFERENCES app.kitchen_print_jobs(id),
     operation_id uuid NOT NULL REFERENCES app.restaurant_operations(id) DEFERRABLE INITIALLY DEFERRED,
-    created_at timestamptz NOT NULL DEFAULT now()
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT cash_drawer_events_operation_id_key UNIQUE (operation_id),
+    CONSTRAINT cash_drawer_events_job_key UNIQUE (job_id),
+    CONSTRAINT cash_drawer_events_manual_check CHECK (reason <> 'manual' OR length(notes) >= 5)
 );
 CREATE INDEX cash_drawer_events_register_idx ON app.cash_drawer_events(register_id, created_at);
 
--- 9. Documentos de caja (comprobantes y cortes) en la cola durable de impresión de la etapa 5.
--- El CHECK del tipo de ticket se recreó con nombre explícito en la 0006.
+-- 9. Documentos de caja (comprobantes y cortes) y comandos del cajón en la cola durable de
+-- impresión de la etapa 5. El CHECK del tipo de ticket se recreó con nombre explícito en la 0006.
+-- cash_drawer es el pulso de apertura del cajón: no imprime papel y su transporte lo genera solo
+-- el controlador ESC/POS.
 ALTER TABLE app.kitchen_tickets DROP CONSTRAINT kitchen_tickets_kind_check;
 ALTER TABLE app.kitchen_tickets
     ADD CONSTRAINT kitchen_tickets_kind_check CHECK (
-        kind IN ('normal', 'modification', 'cancellation', 'test', 'receipt', 'precheck', 'cash_report', 'cash_voucher')
+        kind IN (
+            'normal', 'modification', 'cancellation', 'test', 'receipt', 'precheck', 'cash_report', 'cash_voucher', 'cash_drawer'
+        )
     );
 
+-- Un documento por corte o por operación: las copias posteriores son reimpresiones del mismo
+-- ticket (otro trabajo en la cola), nunca documentos nuevos. includes_expected indica si el
+-- contenido impreso incluye el efectivo esperado o las diferencias: solo se genera así para quien
+-- tiene el permiso de consultarlos y nunca para un turno en arqueo; reimprimirlo exige ese permiso.
 CREATE TABLE app.cash_documents (
     id uuid PRIMARY KEY,
     ticket_id uuid NOT NULL REFERENCES app.kitchen_tickets(id),
@@ -363,17 +382,25 @@ CREATE TABLE app.cash_documents (
     cash_operation_id uuid REFERENCES app.cash_operations(id),
     kind text NOT NULL CONSTRAINT cash_documents_kind_check
         CHECK (kind IN ('partial_cut', 'final_cut', 'income', 'withdrawal', 'expense')),
+    includes_expected boolean NOT NULL DEFAULT false,
     created_by uuid NOT NULL REFERENCES app.users(id),
     device_id uuid NOT NULL REFERENCES app.devices(id),
+    operation_id uuid NOT NULL REFERENCES app.restaurant_operations(id) DEFERRABLE INITIALLY DEFERRED,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT cash_documents_ticket_key UNIQUE (ticket_id),
+    CONSTRAINT cash_documents_operation_id_key UNIQUE (operation_id),
     -- Exactamente una referencia según el tipo: un corte o una operación de efectivo.
     CONSTRAINT cash_documents_reference_check CHECK (
         (kind IN ('partial_cut', 'final_cut') AND report_id IS NOT NULL AND cash_operation_id IS NULL)
         OR (kind IN ('income', 'withdrawal', 'expense') AND cash_operation_id IS NOT NULL AND report_id IS NULL)
-    )
+    ),
+    -- Los comprobantes de ingreso, retiro y gasto nunca contienen el efectivo esperado.
+    CONSTRAINT cash_documents_expected_check CHECK (NOT includes_expected OR kind IN ('partial_cut', 'final_cut'))
 );
 CREATE INDEX cash_documents_shift_idx ON app.cash_documents(shift_id, created_at);
+CREATE UNIQUE INDEX cash_documents_one_per_report_idx ON app.cash_documents(report_id) WHERE report_id IS NOT NULL;
+CREATE UNIQUE INDEX cash_documents_one_per_operation_idx ON app.cash_documents(cash_operation_id)
+    WHERE cash_operation_id IS NOT NULL;
 
 -- 10. Eventos en tiempo real con ámbito propio de caja. El CHECK sin nombre de la 0005 se llama
 -- realtime_events_scope_check (verificado en una base temporal migrada).

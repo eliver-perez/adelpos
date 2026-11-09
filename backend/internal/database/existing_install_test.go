@@ -273,6 +273,7 @@ func TestStage7UpgradeOfExistingInstallation(t *testing.T) {
 	for _, statement := range []string{
 		"INSERT INTO app.realtime_events(id,kind,scope) VALUES (gen_random_uuid(),'cash.shift.opened','cash')",
 		"INSERT INTO app.kitchen_tickets(id,kind,station_ids,document) VALUES (gen_random_uuid(),'cash_report','{}','{}')",
+		"INSERT INTO app.kitchen_tickets(id,kind,station_ids,document) VALUES (gen_random_uuid(),'cash_drawer','{}','{}')",
 	} {
 		if _, err := pool.Exec(ctx, statement); err != nil {
 			t.Fatalf("PostgreSQL rechazó %q: %v", statement, err)
@@ -361,6 +362,48 @@ func checkCashConstraints(ctx context.Context, t *testing.T, pool *pgxpool.Pool)
 		}
 	}
 	if _, err := connection.Exec(ctx, "DROP TABLE operations_check, closures_check"); err != nil {
+		t.Fatal(err)
+	}
+	checkPrintingConstraints(ctx, t, connection)
+}
+
+// checkPrintingConstraints prueba los CHECK de los documentos de caja y de los comandos del cajón
+// (fase C) con tablas temporales que copian solo esas restricciones.
+func checkPrintingConstraints(ctx context.Context, t *testing.T, connection *pgxpool.Conn) {
+	t.Helper()
+	if _, err := connection.Exec(ctx, `CREATE TEMP TABLE documents_check (LIKE app.cash_documents INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE drawer_check (LIKE app.cash_drawer_events INCLUDING CONSTRAINTS INCLUDING DEFAULTS)`); err != nil {
+		t.Fatal(err)
+	}
+	document := `INSERT INTO documents_check(id,ticket_id,shift_id,report_id,cash_operation_id,kind,includes_expected,created_by,device_id,operation_id)
+        VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),%s,gen_random_uuid(),gen_random_uuid(),gen_random_uuid())`
+	drawer := `INSERT INTO drawer_check(id,register_id,reason,notes,actor_id,device_id,job_id,operation_id)
+        VALUES (gen_random_uuid(),gen_random_uuid(),%s,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid())`
+	accepted := []string{
+		strings.Replace(document, "%s", "gen_random_uuid(),NULL,'partial_cut',true", 1),
+		strings.Replace(document, "%s", "NULL,gen_random_uuid(),'withdrawal',false", 1),
+		strings.Replace(drawer, "%s", "'refund',''", 1),
+		strings.Replace(drawer, "%s", "'manual','Cambio para el fondo'", 1),
+	}
+	rejected := []string{
+		// Un comprobante nunca contiene el esperado; un corte exige su referencia.
+		strings.Replace(document, "%s", "NULL,gen_random_uuid(),'income',true", 1),
+		strings.Replace(document, "%s", "NULL,gen_random_uuid(),'final_cut',false", 1),
+		// Motivo desconocido y apertura manual sin explicación.
+		strings.Replace(drawer, "%s", "'unknown',''", 1),
+		strings.Replace(drawer, "%s", "'manual','No'", 1),
+	}
+	for _, statement := range accepted {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("PostgreSQL rechazó un registro válido (%s): %v", statement, err)
+		}
+	}
+	for _, statement := range rejected {
+		if _, err := connection.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó un registro incoherente: %s", statement)
+		}
+	}
+	if _, err := connection.Exec(ctx, "DROP TABLE documents_check, drawer_check"); err != nil {
 		t.Fatal(err)
 	}
 }

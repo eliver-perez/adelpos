@@ -36,6 +36,17 @@ type CashOperationInput struct {
 	Exceptional   bool                `json:"exceptional"`
 	Reason        string              `json:"reason"`
 	Authorization *AuthorizationInput `json:"authorization"`
+	// Print solicita imprimir el comprobante al registrar (fase C); forma parte de la huella y
+	// exige cash.reports.print. Sin él no se imprime: la impresión física es opcional.
+	Print *bool `json:"print"`
+}
+
+// RecordedCashOperation es la respuesta de un ingreso, retiro o gasto: la operación con el estado
+// de la impresión de su comprobante y del comando del cajón. Ninguno revierte la operación.
+type RecordedCashOperation struct {
+	*CashOperation
+	Printing *PrintOutcome  `json:"printing,omitempty"`
+	Drawer   *DrawerOutcome `json:"drawer,omitempty"`
 }
 
 // operationDraft es una operación validada antes de escribir.
@@ -231,6 +242,10 @@ func (handler *service) recordCashOperation(shiftID, kind string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	printDocument, err := handler.printRequested(input.Print)
+	if err != nil {
+		return nil, err
+	}
 	shift, err := handler.operableShift(shiftID)
 	if err != nil {
 		return nil, err
@@ -259,10 +274,18 @@ func (handler *service) recordCashOperation(shiftID, kind string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	result := &RecordedCashOperation{CashOperation: operation}
+	if printDocument {
+		printing := handler.printAfterRecording(cashDocumentSource{kind: kind, shift: shift, operation: operation}, "la operación")
+		result.Printing = &printing
+	}
+	// Ingresos, retiros y gastos mueven efectivo físico: con el cajón activado se abre (§18).
+	drawer := handler.openDrawerAfter(shift, drawerOperation)
+	result.Drawer = &drawer
 	if err := events.Append(handler.ctx, handler.tx, "cash.operation.recorded", cashScope, &shift.ID, nil); err != nil {
 		return nil, err
 	}
-	return operation, handler.audit(handler.ctx, handler.tx, "cash.operation_recorded", "cash_operation", &id, nil, operation)
+	return result, handler.audit(handler.ctx, handler.tx, "cash.operation_recorded", "cash_operation", &id, nil, operation)
 }
 
 // checkAvailable compara una salida con el efectivo esperado de su moneda. Sin solicitud

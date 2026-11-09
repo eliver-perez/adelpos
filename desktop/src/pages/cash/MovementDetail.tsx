@@ -3,6 +3,7 @@ import type { CashOperation } from '../../services/cash';
 import { formatDollars, formatMoney } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
+import { CashDocumentActions } from './CashDocumentActions';
 import { CorrectionForm } from './CorrectionForm';
 import { currencyAmount } from './DenominationCount';
 import type { MovementRow } from './movementRows';
@@ -155,6 +156,13 @@ export function MovementDetail({
         <OperationFacts operation={operation} operations={operations} timezone={timezone} />
       ) : (
         <MovementFacts row={row} />
+      )}
+      {operation && operation.kind !== 'correction' && (
+        <CashDocumentActions
+          source={{ kind: 'operation', id: operation.id }}
+          shiftID={operation.shift_id}
+          can={can}
+        />
       )}
       {operation && target && !correcting && (
         <button type="button" className="secondary-button" onClick={() => setCorrecting(true)}>

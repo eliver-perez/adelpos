@@ -1,5 +1,6 @@
 import { cashOperationKindLabels } from '../../services/cash';
-import type { CashOperation } from '../../services/cash';
+import type { CashOperation, RecordedCashOperation } from '../../services/cash';
+import { DrawerNotice, PrintNotice } from './CashNotices';
 import { currencyAmount } from './DenominationCount';
 
 // Describe quién autorizó una operación de efectivo sin mostrar identificadores internos.
@@ -13,8 +14,9 @@ export function authorizationText(operation: CashOperation) {
   return 'Sin autorización adicional';
 }
 
-// Resultado confirmado de un ingreso, retiro, gasto o corrección, con lo que devolvió Go.
-export function RecordedOperation({ operation }: { operation: CashOperation }) {
+// Resultado confirmado de un ingreso, retiro, gasto o corrección, con lo que devolvió Go: también
+// el estado del comprobante y del comando del cajón, que nunca revierten la operación.
+export function RecordedOperation({ operation }: { operation: RecordedCashOperation }) {
   const kind = operation.regularization
     ? 'Regularización'
     : cashOperationKindLabels[operation.kind];
@@ -30,6 +32,8 @@ export function RecordedOperation({ operation }: { operation: CashOperation }) {
         {authorizationText(operation)}
         {operation.exceptional ? ' · Salida excepcional' : ''}
       </p>
+      <PrintNotice outcome={operation.printing} subject="la operación" />
+      <DrawerNotice outcome={operation.drawer} />
     </div>
   );
 }

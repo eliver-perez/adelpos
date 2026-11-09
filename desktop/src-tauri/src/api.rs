@@ -104,6 +104,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_create_category" => Some((Method::POST, "payments/cash/expense-categories")),
         // Vista previa del conteo por denominaciones (fase B): solo calcula, no escribe.
         "payments_cash_count_preview" => Some((Method::POST, "payments/cash/count-preview")),
+        // Fase C: tope de caja, cajones por caja y apertura manual del cajón de la terminal.
+        "payments_cash_limit" => Some((Method::GET, "payments/cash/limit")),
+        "payments_save_cash_limit" => Some((Method::PUT, "payments/cash/limit")),
+        "payments_cash_drawers" => Some((Method::GET, "payments/cash/drawers")),
+        "payments_open_drawer" => Some((Method::POST, "payments/cash/open-drawer")),
         "restaurant_overview" => Some((Method::GET, "restaurant/overview")),
         "restaurant_areas" => Some((Method::GET, "restaurant/areas")),
         "restaurant_create_area" => Some((Method::POST, "restaurant/areas")),
@@ -291,6 +296,32 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             format!("payments/shifts/{identifier}/closure/comments"),
         ),
         "payments_cash_report" => (Method::GET, format!("payments/cash-reports/{identifier}")),
+        // Fase C: vista previa, impresión y reimpresión de documentos de caja y cajón por caja.
+        "payments_cash_report_preview" => (
+            Method::GET,
+            format!("payments/cash-reports/{identifier}/preview"),
+        ),
+        "payments_print_cash_report" => (
+            Method::POST,
+            format!("payments/cash-reports/{identifier}/print"),
+        ),
+        "payments_cash_operation_preview" => (
+            Method::GET,
+            format!("payments/cash-operations/{identifier}/preview"),
+        ),
+        "payments_print_cash_operation" => (
+            Method::POST,
+            format!("payments/cash-operations/{identifier}/print"),
+        ),
+        "payments_reprint_cash_document" => (
+            Method::POST,
+            format!("payments/cash-documents/{identifier}/reprint"),
+        ),
+        "payments_shift_documents" => (
+            Method::GET,
+            format!("payments/shifts/{identifier}/documents"),
+        ),
+        "payments_save_cash_drawer" => (Method::PUT, format!("payments/cash/drawers/{identifier}")),
         "payments_save_denomination" => (
             Method::PATCH,
             format!("payments/cash/denominations/{identifier}"),
@@ -723,6 +754,75 @@ mod tests {
         }
         assert!(route("payments_shift_delete", Some(identifier)).is_err());
         assert!(route("payments_shift_reopen", Some(identifier)).is_err());
+    }
+
+    #[test]
+    fn cash_printing_drawer_and_limit_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            (
+                "payments_cash_report_preview",
+                Method::GET,
+                format!("payments/cash-reports/{identifier}/preview"),
+            ),
+            (
+                "payments_print_cash_report",
+                Method::POST,
+                format!("payments/cash-reports/{identifier}/print"),
+            ),
+            (
+                "payments_cash_operation_preview",
+                Method::GET,
+                format!("payments/cash-operations/{identifier}/preview"),
+            ),
+            (
+                "payments_print_cash_operation",
+                Method::POST,
+                format!("payments/cash-operations/{identifier}/print"),
+            ),
+            (
+                "payments_reprint_cash_document",
+                Method::POST,
+                format!("payments/cash-documents/{identifier}/reprint"),
+            ),
+            (
+                "payments_shift_documents",
+                Method::GET,
+                format!("payments/shifts/{identifier}/documents"),
+            ),
+            (
+                "payments_save_cash_drawer",
+                Method::PUT,
+                format!("payments/cash/drawers/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        for (operation, method, path) in [
+            ("payments_cash_limit", Method::GET, "payments/cash/limit"),
+            (
+                "payments_save_cash_limit",
+                Method::PUT,
+                "payments/cash/limit",
+            ),
+            (
+                "payments_cash_drawers",
+                Method::GET,
+                "payments/cash/drawers",
+            ),
+            (
+                "payments_open_drawer",
+                Method::POST,
+                "payments/cash/open-drawer",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        // Ninguna operación permite abrir el cajón de otra caja ni reimprimir por ruta libre.
+        assert!(route("payments_open_drawer_register", Some(identifier)).is_err());
+        assert!(route("payments_cash_document_delete", Some(identifier)).is_err());
     }
 
     #[test]

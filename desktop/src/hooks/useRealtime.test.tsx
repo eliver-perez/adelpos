@@ -51,3 +51,61 @@ it('deduplica avisos, recupera estado completo y descarta mensajes de una identi
   unmount();
   window.removeEventListener('adel-server-change', changed);
 });
+
+it('publica los eventos de caja con su tipo y turno para refrescar Caja y el cobro', async () => {
+  const cash = vi.fn();
+  const listener = (event: Event) => cash((event as CustomEvent).detail);
+  window.addEventListener('adel-cash-change', listener);
+  const { unmount } = renderHook(() => useRealtime('usuario-caja', true));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('events_start', expect.any(Object)));
+  const options = vi.mocked(invoke).mock.calls[0]?.[1] as {
+    channel: { onmessage: (message: unknown) => void };
+  };
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        { id: 'cocina-1', sequence: 1, kind: 'kitchen.changed', scope: 'kitchen', version: 1 },
+      ],
+      cursor: 1,
+    }),
+  );
+  expect(cash).not.toHaveBeenCalled();
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        {
+          id: 'caja-1',
+          sequence: 2,
+          kind: 'cash.shift.closing_started',
+          scope: 'cash',
+          version: 1,
+          aggregate_id: 'turno-1',
+        },
+      ],
+      cursor: 2,
+    }),
+  );
+  expect(cash).toHaveBeenCalledWith({
+    kinds: ['cash.shift.closing_started'],
+    aggregates: ['turno-1'],
+  });
+  // Un evento repetido no vuelve a publicarse.
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        {
+          id: 'caja-1',
+          sequence: 2,
+          kind: 'cash.shift.closing_started',
+          scope: 'cash',
+          version: 1,
+          aggregate_id: 'turno-1',
+        },
+      ],
+      cursor: 2,
+    }),
+  );
+  expect(cash).toHaveBeenCalledTimes(1);
+  unmount();
+  window.removeEventListener('adel-cash-change', listener);
+});

@@ -3,9 +3,11 @@ import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { denominationLabel } from '../../services/cash';
-import type { ClosureView } from '../../services/cash';
+import type { ClosureView, PrintOutcome } from '../../services/cash';
 import { formatDollars, formatMoney, permissionName, textLength } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
+import { CashDocumentActions } from './CashDocumentActions';
+import { PrintNotice } from './CashNotices';
 import { currencyAmount } from './DenominationCount';
 import { DifferenceFigures, ExpectedFigures } from './ExpectedBlock';
 import { authorizationText } from './RecordedOperation';
@@ -128,10 +130,13 @@ export function ClosureResult({
   shiftID,
   can,
   timezone,
+  printing,
 }: {
   shiftID: string;
   can: (permission: string) => boolean;
   timezone: string;
+  // Estado de la impresión del corte definitivo solicitada al cerrar (fase C).
+  printing?: PrintOutcome;
 }) {
   const closure = useLiveResource<ClosureView>('payments_shift_closure', {
     id: shiftID,
@@ -151,6 +156,7 @@ export function ClosureResult({
         El turno de {view.shift.register_name} quedó cerrado (
         {serverDateTime(view.closed_at, timezone)}) y ya no admite movimientos.
       </p>
+      <PrintNotice outcome={printing} subject="el cierre" />
       <DeclaredCount view={view} />
       {visible && view.expected && <ExpectedFigures expected={view.expected} />}
       {visible && view.differences && <DifferenceFigures differences={view.differences} />}
@@ -179,6 +185,13 @@ export function ClosureResult({
           </ul>
         </Accordion>
       )}
+      <Accordion title="Corte definitivo" summary="Vista previa, impresión y reimpresión">
+        <CashDocumentActions
+          source={{ kind: 'report', id: view.final_report_id }}
+          shiftID={view.shift.id}
+          can={can}
+        />
+      </Accordion>
       <ClosureComments view={view} can={can} timezone={timezone} />
     </section>
   );

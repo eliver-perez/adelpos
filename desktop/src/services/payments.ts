@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { CashLimitWarning, DrawerOutcome } from './cash';
 import type { Operation } from './api';
 
 // Contratos del módulo financiero de Go (backend/internal/payments). El dinero viaja siempre como
@@ -324,6 +325,8 @@ export interface PaymentResult {
   closed: boolean;
   delivered: boolean;
   printing: PrintingResult;
+  // Comando de apertura del cajón (etapa 7): solo con efectivo físico y el cajón activado.
+  drawer?: DrawerOutcome;
 }
 
 export interface DeliveryResult {
@@ -476,6 +479,7 @@ export interface RefundResult {
   plan: RefundPlan;
   finance: Finance;
   reopened: boolean;
+  drawer?: DrawerOutcome;
 }
 
 export interface CorrectionInput {
@@ -539,6 +543,8 @@ export interface CurrentShift {
   // Estado de la función usd_cash y si el turno abierto aún no tiene tipo de cambio.
   usd_cash?: boolean;
   usd_rate_required?: boolean;
+  // Aviso del tope de caja (etapa 7): solo para quien ve el esperado; nunca bloquea el cobro.
+  cash_limit_warning?: CashLimitWarning;
 }
 
 export interface ShiftMovement {

@@ -34,6 +34,15 @@ func (handler *service) jobAction(id, action string) (any, error) {
 	if len(strings.TrimSpace(input.Reason)) < 5 || len(input.Reason) > 500 {
 		return nil, invalid("Indica un motivo de entre 5 y 500 caracteres.")
 	}
+	var ticketKind string
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", job.TicketID).Scan(&ticketKind); err != nil {
+		return nil, err
+	}
+	// Un comando del cajón solo se cancela o se reconoce desde la cola: reenviarlo abriría el
+	// cajón sin el permiso ni el motivo que exige la apertura manual en Caja.
+	if ticketKind == KindCashDrawer && (action == "retry" || input.Decision == "send") {
+		return nil, invalid("Un comando de apertura del cajón no se reenvía desde la cola. Si hace falta abrirlo, usa «Abrir cajón» en Caja, con su permiso y motivo.")
+	}
 	if action == "retry" {
 		if job.State != "error" && job.State != "intervention" {
 			return nil, invalid("Un resultado incierto requiere resolución explícita; no se reintenta como error confirmado.")
@@ -110,6 +119,15 @@ func (handler *service) reprint() (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	var kind string
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", original.TicketID).Scan(&kind); err != nil {
+		return nil, err
+	}
+	// Las copias de documentos de caja exigen los permisos de caja (reimprimir y, si incluyen el
+	// efectivo esperado, consultarlo); el cajón nunca se vuelve a abrir con una copia.
+	if isCashKind(kind) {
+		return nil, invalid("Los documentos y comandos de caja se reimprimen o repiten desde Caja, con sus permisos.")
+	}
 	if original.State != "submitted" && original.State != "cancelled" {
 		return nil, invalid("Resuelve primero el trabajo pendiente o incierto para no generar copias descontroladas.")
 	}
@@ -139,10 +157,6 @@ func (handler *service) reprint() (any, error) {
 			return nil, err
 		}
 		printer = *current
-	}
-	var kind string
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", original.TicketID).Scan(&kind); err != nil {
-		return nil, err
 	}
 	// Una copia usa la presentación original: no añade una leyenda REIMPRESIÓN. Un documento
 	// comercial conserva su contenido ya renderizado en lugar de interpretarse como comanda.

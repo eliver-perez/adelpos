@@ -25,6 +25,10 @@ import (
 // USDCash habilita recibir dólares en efectivo con tipo de cambio fijo por turno.
 const USDCash = "usd_cash"
 
+// CashLimit habilita el tope de caja (etapa 7): un aviso, nunca un bloqueo, cuando el efectivo
+// esperado de una caja supera el importe configurado.
+const CashLimit = "cash_limit"
+
 // Definition describe una función conocida por el sistema.
 type Definition struct {
 	Code        string
@@ -40,6 +44,13 @@ var Known = []Definition{
 		Description: "Permite recibir dólares estadounidenses en efectivo, solos o junto con pesos, con un tipo de cambio " +
 			"fijo que se captura al abrir cada turno. El cambio se muestra en pesos y en dólares. Las tarjetas, " +
 			"transferencias y devoluciones siguen en pesos.",
+	},
+	{
+		Code: CashLimit,
+		Name: "Tope de efectivo en caja",
+		Description: "Avisa a quienes pueden consultar el efectivo esperado cuando el de una caja supera el tope configurado, " +
+			"para sugerir un retiro. Nunca bloquea cobros. Los importes del tope (en pesos y, con el pago en dólares, en " +
+			"dólares) se configuran en Caja → Configuración con el permiso de administrar la caja.",
 	},
 }
 

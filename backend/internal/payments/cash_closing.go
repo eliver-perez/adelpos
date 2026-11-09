@@ -243,8 +243,15 @@ func (handler *service) confirmClosing(parts []string) (any, error) {
 	var input struct {
 		OperationID   string `json:"operation_id"`
 		CountRevision int    `json:"count_revision"`
+		// Print solicita imprimir el corte definitivo al cerrar; un fallo de impresión nunca
+		// revierte ni bloquea el cierre.
+		Print *bool `json:"print"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
+		return nil, err
+	}
+	printDocument, err := handler.printRequested(input.Print)
+	if err != nil {
 		return nil, err
 	}
 	shift, err := handler.closingShift(parts[1])
@@ -297,6 +304,17 @@ func (handler *service) confirmClosing(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	printing := &PrintOutcome{Requested: false}
+	if printDocument {
+		// El turno ya está cerrado: el esperado y las diferencias se imprimen solo si quien cierra
+		// tiene cash.expected.read. La respuesta solo informa el estado del trabajo.
+		report, err := handler.readReportRecord(reportID)
+		if err != nil {
+			return nil, err
+		}
+		outcome := handler.printAfterRecording(cashDocumentSource{kind: documentFinalCut, shift: closed, report: report}, "el cierre")
+		printing = &outcome
+	}
 	if err := events.Append(handler.ctx, handler.tx, "cash.shift.closed", cashScope, &shift.ID, nil); err != nil {
 		return nil, err
 	}
@@ -308,7 +326,7 @@ func (handler *service) confirmClosing(parts []string) (any, error) {
 		}); err != nil {
 		return nil, err
 	}
-	return map[string]any{"shift": closed, "count": final, "final_report_id": reportID, "closed": true}, nil
+	return map[string]any{"shift": closed, "count": final, "final_report_id": reportID, "closed": true, "printing": printing}, nil
 }
 
 // requireNoLateRecords comprueba que no haya movimientos ni operaciones posteriores al inicio del

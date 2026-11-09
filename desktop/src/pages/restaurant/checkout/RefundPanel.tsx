@@ -5,6 +5,7 @@ import { SegmentedControl } from '../../../components/SegmentedControl';
 import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
 import { formatMoney, isZeroMoney, permissionName } from '../../../services/payments';
 import type { Finance, RefundMode, RefundPlan, RefundResult } from '../../../services/payments';
+import { DrawerNotice } from '../../cash/CashNotices';
 import type { CheckoutStatus } from './PaymentCapture';
 import type { RefundFlow } from './useRefundFlow';
 
@@ -61,6 +62,7 @@ function RefundRecorded({ result }: { result: RefundResult }) {
         Saldo de la cuenta {formatMoney(result.finance.balance)}.
         {result.reopened && ' La cuenta se reabrió porque quedó saldo pendiente.'}
       </p>
+      <DrawerNotice outcome={result.drawer} />
     </div>
   );
 }

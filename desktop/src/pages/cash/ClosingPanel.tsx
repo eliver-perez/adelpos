@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { APIError } from '../../services/api';
-import type { CashCatalog } from '../../services/cash';
+import type { CashCatalog, PrintOutcome } from '../../services/cash';
 import { formatDollars, formatMoney } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { ClosingCount } from './ClosingCount';
 import { capturableDenominations } from './countCapture';
+import { PrintToggle } from './PrintToggle';
 import { useClosingDraft } from './useClosingDraft';
 import type { CashMutation } from './useCashMutation';
 
@@ -104,7 +105,7 @@ function ClosingInProgress({
   usdCash: boolean;
   mutation: CashMutation;
   timezone: string;
-  onClosed: (shiftID: string) => void;
+  onClosed: (shiftID: string, printing?: PrintOutcome) => void;
   onClose: () => void;
 }) {
   // Un turno que manejó dólares los cuenta aunque la función se haya desactivado después.
@@ -113,6 +114,8 @@ function ClosingInProgress({
   const draft = useClosingDraft({ shift, denominations, mutation });
   const [dialog, setDialog] = useState<'confirm' | 'cancel' | null>(null);
   const [late, setLate] = useState(false);
+  // Imprimir el corte definitivo al cerrar es opcional; un fallo de impresión no impide el cierre.
+  const [print, setPrint] = useState(false);
   const ownClosing = shift.closing_started_by === userID;
   const canCancel = can('cash.counts.perform') && (ownClosing || can('cash.closing.cancel_any'));
 
@@ -127,12 +130,16 @@ function ClosingInProgress({
     if (revision === null || mutation.isPending()) {
       return;
     }
+    const body: Record<string, unknown> = { count_revision: revision };
+    if (print && can('cash.reports.print')) {
+      body.print = true;
+    }
     try {
-      await mutation.execute('payments_shift_confirm_closing', {
-        id: shift.id,
-        body: { count_revision: revision },
-      });
-      onClosed(shift.id);
+      const result = await mutation.execute<{ printing?: PrintOutcome }>(
+        'payments_shift_confirm_closing',
+        { id: shift.id, body },
+      );
+      onClosed(shift.id, result.printing);
     } catch (problem) {
       if (problem instanceof APIError && problem.code === 'CLOSING_MOVEMENTS_CHANGED') {
         setLate(true);
@@ -175,6 +182,15 @@ function ClosingInProgress({
         onConfirm={() => setDialog('confirm')}
         onCancel={() => setDialog('cancel')}
         onClose={onClose}
+        printControl={
+          <PrintToggle
+            label="Imprimir el corte definitivo"
+            pressed={print}
+            onChange={setPrint}
+            can={can}
+            disabled={mutation.locked}
+          />
+        }
       />
       {dialog === 'confirm' && (
         <ConfirmDialog
@@ -220,7 +236,7 @@ export function ClosingPanel({
   usdCash: boolean;
   mutation: CashMutation;
   timezone: string;
-  onClosed: (shiftID: string) => void;
+  onClosed: (shiftID: string, printing?: PrintOutcome) => void;
   onClose: () => void;
 }) {
   if (shift.state === 'open') {
