@@ -90,6 +90,7 @@ export function useRefundFlow({
   enabled,
   reloadFinance,
   reloadShift,
+  shiftID = null,
 }: {
   accountID: string;
   finance: Finance | null;
@@ -98,6 +99,8 @@ export function useRefundFlow({
   enabled: boolean;
   reloadFinance: () => Promise<void>;
   reloadShift: () => Promise<void>;
+  // Turno que muestra la terminal; forma parte de la huella de la devolución (etapa 7).
+  shiftID?: string | null;
 }) {
   const [capture, setCapture] = useState<RefundCapture>(() => initialRefundCapture());
   const [result, setResult] = useState<RefundResult | null>(null);
@@ -160,6 +163,9 @@ export function useRefundFlow({
     };
     if (authorization) {
       body.authorization = authorization;
+    }
+    if (shiftID) {
+      body.shift_id = shiftID;
     }
     setResult(null);
     try {

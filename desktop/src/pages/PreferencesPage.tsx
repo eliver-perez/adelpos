@@ -18,6 +18,8 @@ export const screens: ScreenEntry[] = [
   { id: 'kitchen', label: 'Cocina y preparación', permission: 'kitchen.states.read' },
   { id: 'restaurant', label: 'Restaurante', permission: 'accounts.read' },
   { id: 'takeaway', label: 'Para llevar', permission: 'takeaway.read' },
+  // Etapa 7: administración de caja (turno, movimientos, arqueo, historial y reportes).
+  { id: 'cash', label: 'Caja', permission: 'cash.shifts.read' },
   { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
   { id: 'status', label: 'Estado del sistema', permission: '' },
   { id: 'users', label: 'Usuarios', permission: 'users.read' },

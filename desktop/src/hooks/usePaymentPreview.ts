@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { APIError } from '../services/api';
+import { previewCount } from '../services/cash';
+import type { CountPreview, CountPreviewInput } from '../services/cash';
 import { previewDiscount, previewPayment, previewRefund } from '../services/payments';
 import type {
   DiscountInput,
@@ -114,4 +116,16 @@ export function useDiscountPreview(
 
 export function useRefundPreview(accountID: string, input: RefundInput | null, financeKey: string) {
   return useFinancePreview<RefundInput, RefundPlan>(previewRefund, accountID, input, financeKey);
+}
+
+// Totales de un conteo por denominaciones (arqueo o desglose del fondo) calculados por Go, con el
+// mismo antirrebote y el mismo descarte de respuestas viejas. scope distingue el turno del arqueo
+// de la apertura; la interfaz nunca suma billetes.
+export function useCountPreview(scope: string, input: CountPreviewInput | null) {
+  return useFinancePreview<CountPreviewInput, CountPreview>(
+    (_scope, body) => previewCount(body),
+    scope,
+    input,
+    '',
+  );
 }

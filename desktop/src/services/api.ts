@@ -161,6 +161,9 @@ export type Operation =
   | 'payments_cash_report'
   | 'payments_save_denomination'
   | 'payments_save_category'
+  // Consultas de solo lectura de la interfaz de caja (etapa 7, fase B).
+  | 'payments_cash_count_preview'
+  | 'payments_shift_summary'
   | 'restaurant_overview'
   | 'restaurant_areas'
   | 'restaurant_create_area'

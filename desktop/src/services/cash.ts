@@ -305,6 +305,52 @@ export interface ShiftHistoryFilter {
   page?: string;
 }
 
+// Vista previa de un conteo por denominaciones (POST payments/cash/count-preview). Go valida y
+// totaliza con la misma función del arqueo y de la apertura; nunca incluye el efectivo esperado.
+export interface CountPreviewInput extends CountInput {
+  // Turno del arqueo; se omite para el desglose del fondo de una apertura.
+  shift_id?: string;
+}
+
+export interface CountPreview {
+  lines: CountLine[];
+  extra_mxn: string;
+  extra_usd: string;
+  extra_note: string;
+  counted_mxn: string;
+  counted_usd: string;
+}
+
+// Efectivo recibido y entregado en cobros y devoluciones por moneda. Solo llega con el permiso de
+// consultar importes esperados y fuera del arqueo.
+export interface PhysicalCash {
+  mxn_in: string;
+  mxn_out: string;
+  usd_in: string;
+  usd_out: string;
+}
+
+// Resumen en vivo del turno (GET payments/shifts/{id}/summary): los totales de un corte sin
+// registrarlo. Durante el arqueo (blind) no trae totales, esperado ni efectivo físico.
+export interface ShiftSummary {
+  shift: Shift;
+  generated_at: string;
+  blind: boolean;
+  control: CashReport['snapshot']['control'];
+  partial_cuts: number;
+  last_cut: CashReportSummary | null;
+  accumulated?: ShiftTotals;
+  since_last_cut?: ShiftTotals;
+  expected_visible: boolean;
+  expected?: CashExpectation;
+  physical?: PhysicalCash;
+  closure?: ClosureSummary;
+}
+
+export function previewCount(input: CountPreviewInput) {
+  return api<CountPreview>('payments_cash_count_preview', { body: input });
+}
+
 // Consultas sobre el puente nativo. Las escrituras pasan por el almacén de operaciones pendientes
 // (useRestaurantMutation con cashPendingKey) para conservar su operation_id ante una respuesta
 // incierta; la contraseña de autorización nunca se guarda.
@@ -348,6 +394,10 @@ export function readShiftHistory(filter: ShiftHistoryFilter = {}) {
   return api<ShiftHistory>('payments_shifts', { query });
 }
 
+export function readShiftSummary(shiftID: string) {
+  return api<ShiftSummary>('payments_shift_summary', { id: shiftID });
+}
+
 // Clave del almacén global de pendientes para las escrituras de un turno.
 export function cashPendingKey(shiftID: string) {
   return `cash:${shiftID}`;
@@ -365,6 +415,36 @@ export const cashOperationLabels: Partial<Record<Operation, string>> = {
   payments_shift_cancel_closing: 'de la cancelación del arqueo',
   payments_shift_confirm_closing: 'del cierre del turno',
   payments_shift_comment_closure: 'del comentario del cierre',
+};
+
+// Rechazos de un reintento sobre un turno pausado, cerrado o sustituido. El servidor es la fuente
+// de verdad: la operación no se registró ni se duplicó, y el pendiente se descarta.
+export const shiftEndedCodes = ['SHIFT_CLOSING', 'SHIFT_CLOSED', 'SHIFT_CHANGED'];
+
+export function retryRejectedMessage(code: string, serverMessage: string) {
+  if (!shiftEndedCodes.includes(code)) {
+    return '';
+  }
+  return `${serverMessage} La operación pendiente no se registró ni se duplicó; ya no se reintentará. Si sigue haciendo falta, regístrala como una operación nueva en un turno abierto.`;
+}
+
+// Etiquetas de un billete o una moneda del catálogo, con el valor tal como lo entrega Go.
+export function denominationLabel(denomination: {
+  currency: CashCurrency;
+  kind: string;
+  value: string;
+}) {
+  const symbol = denomination.currency === 'USD' ? 'US$' : '$';
+  const value = denomination.value.endsWith('.00')
+    ? denomination.value.slice(0, -3)
+    : denomination.value;
+  const kind = denomination.kind === 'bill' ? 'Billetes' : 'Monedas';
+  return `${kind} de ${symbol}${value}`;
+}
+
+export const currencyLabels: Record<CashCurrency, string> = {
+  MXN: 'Pesos',
+  USD: 'Dólares',
 };
 
 export const cashOperationKindLabels: Record<CashOperationKind, string> = {

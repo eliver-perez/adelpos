@@ -8,7 +8,9 @@ import {
   isAuthorizationProblem,
   repeatAuthorizationMessage,
 } from '../../../hooks/useSupervisorAuthorization';
+import { APIError } from '../../../services/api';
 import type { Operation } from '../../../services/api';
+import { retryRejectedMessage, shiftEndedCodes } from '../../../services/cash';
 import { financialOutcome, formatMoney, permissionName } from '../../../services/payments';
 import type {
   CorrectionResult,
@@ -28,7 +30,8 @@ import { PaymentCapture, RecordedPayment, statusTitle } from './PaymentCapture';
 import type { CheckoutStatus } from './PaymentCapture';
 import { CheckoutMethods } from './PaymentMethods';
 import { RefundPanel } from './RefundPanel';
-import { ShiftOpening, ShiftRateCapture } from './ShiftOpening';
+import { ShiftOpening } from './ShiftOpening';
+import { ShiftRateCapture } from './ShiftRateCapture';
 import { UncertainOperation } from './UncertainOperation';
 import { DocumentList } from '../documents/DocumentList';
 import { newestFinance, selectableUnits } from './captureState';
@@ -38,8 +41,14 @@ import { refundableUnits, useRefundFlow } from './useRefundFlow';
 
 export type CheckoutMode = 'collect' | 'refund';
 
-// Errores que se muestran junto al formulario que los provocó, no en el aviso general.
-const contextualCodes = [...authorizationCodes, 'SHIFT_CLOSED', 'PAYMENT_NOT_CORRECTABLE'];
+// Errores que se muestran junto al formulario que los provocó, no en el aviso general. Durante
+// una corrección, SHIFT_CLOSED se refiere al turno del pago original y lo explica su panel; en un
+// cobro o una devolución se muestra en el aviso general.
+const contextualCodes = [...authorizationCodes, 'PAYMENT_NOT_CORRECTABLE'];
+
+function isContextual(code: string, correcting: boolean) {
+  return contextualCodes.includes(code) || (correcting && code === 'SHIFT_CLOSED');
+}
 
 // Pantalla de cobro integrada en la operación: cuenta y productos, métodos e historial, y
 // captura con teclado fijo. Reúne cobros, devoluciones y correcciones de una cuenta; Go calcula
@@ -127,6 +136,7 @@ export function CheckoutPanel({
     reloadFinance,
     reloadShift,
     dollarState,
+    shiftID: shift.data?.shift?.id ?? null,
   });
   const refund = useRefundFlow({
     accountID,
@@ -136,6 +146,7 @@ export function CheckoutPanel({
     enabled: mode === 'refund' && !correcting,
     reloadFinance,
     reloadShift,
+    shiftID: shift.data?.shift?.id ?? null,
   });
 
   // Toda escritura financiera devuelve el estado actualizado; cada flujo reinicia su captura.
@@ -167,6 +178,14 @@ export function CheckoutPanel({
       collect.setDeliverRequested(pending.body.deliver === true);
     }
     const problem = await mutation.retry();
+    // Un reintento sobre un turno en arqueo, cerrado o sustituido se rechaza sin registrarse: el
+    // pendiente ya se descartó y se explica cómo continuar (etapa 7, operaciones inciertas).
+    if (problem instanceof APIError && shiftEndedCodes.includes(problem.code)) {
+      setRetryNotice(retryRejectedMessage(problem.code, problem.message));
+      mutation.clearError();
+      void reloadShift();
+      return;
+    }
     if (!pending || !authorized || !isAuthorizationProblem(problem)) {
       return;
     }
@@ -223,7 +242,7 @@ export function CheckoutPanel({
     if (collect.conflict && mode === 'collect') {
       return { state: 'conflict', label: statusTitle('conflict') };
     }
-    if (mutation.error && !contextualCodes.includes(mutation.errorCode)) {
+    if (mutation.error && !isContextual(mutation.errorCode, correcting)) {
       return { state: 'error', label: statusTitle('error') };
     }
     if (correcting) {
@@ -277,7 +296,7 @@ export function CheckoutPanel({
         </div>
       );
     }
-    if (mutation.error && !contextualCodes.includes(mutation.errorCode)) {
+    if (mutation.error && !isContextual(mutation.errorCode, correcting)) {
       return (
         <p className="checkout-inline-note" role="alert">
           {mutation.error}

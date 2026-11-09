@@ -22,6 +22,7 @@ var screenPermissions = map[string]string{
 	"roles":       "roles.read",
 	"devices":     "devices.read",
 	"registers":   "registers.read",
+	"cash":        "cash.shifts.read",
 	"sessions":    "sessions.read",
 	"settings":    "settings.read",
 	"audit":       "audit.read",

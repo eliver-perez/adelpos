@@ -102,6 +102,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_cash_registers" => Some((Method::GET, "payments/cash/registers")),
         "payments_create_denomination" => Some((Method::POST, "payments/cash/denominations")),
         "payments_create_category" => Some((Method::POST, "payments/cash/expense-categories")),
+        // Vista previa del conteo por denominaciones (fase B): solo calcula, no escribe.
+        "payments_cash_count_preview" => Some((Method::POST, "payments/cash/count-preview")),
         "restaurant_overview" => Some((Method::GET, "restaurant/overview")),
         "restaurant_areas" => Some((Method::GET, "restaurant/areas")),
         "restaurant_create_area" => Some((Method::POST, "restaurant/areas")),
@@ -282,6 +284,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             format!("payments/shifts/{identifier}/closing/confirm"),
         ),
         "payments_shift_closure" => (Method::GET, format!("payments/shifts/{identifier}/closure")),
+        // Resumen en vivo del turno (fase B): los totales de un corte sin registrarlo.
+        "payments_shift_summary" => (Method::GET, format!("payments/shifts/{identifier}/summary")),
         "payments_shift_comment_closure" => (
             Method::POST,
             format!("payments/shifts/{identifier}/closure/comments"),
@@ -668,6 +672,11 @@ mod tests {
                 format!("payments/cash-reports/{identifier}"),
             ),
             (
+                "payments_shift_summary",
+                Method::GET,
+                format!("payments/shifts/{identifier}/summary"),
+            ),
+            (
                 "payments_save_denomination",
                 Method::PATCH,
                 format!("payments/cash/denominations/{identifier}"),
@@ -703,6 +712,11 @@ mod tests {
                 "payments_create_category",
                 Method::POST,
                 "payments/cash/expense-categories",
+            ),
+            (
+                "payments_cash_count_preview",
+                Method::POST,
+                "payments/cash/count-preview",
             ),
         ] {
             assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
