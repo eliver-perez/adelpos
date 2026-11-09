@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import type { useRestaurantWorkspace } from '../../../hooks/useRestaurantWorkspace';
+import { isPendingAccount } from '../../../services/restaurant';
 import type { ConfirmedLine } from '../../../services/restaurant';
 import { CaptureBill } from './CaptureBill';
 import type { BillAction } from './CaptureBill';
@@ -119,6 +120,7 @@ export function CaptureScreen({
         }
         canEditDetails={
           !!bill &&
+          !isPendingAccount(bill.account) &&
           bill.account.state === 'open' &&
           (bill.account.mode !== 'takeaway' || can('takeaway.manage')) &&
           can('accounts.manage')

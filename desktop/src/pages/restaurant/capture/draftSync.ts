@@ -1,5 +1,5 @@
 import { APIError } from '../../../services/api';
-import type { Bill, DraftItem } from '../../../services/restaurant';
+import type { Bill, DraftItem, TableAccountRef } from '../../../services/restaurant';
 import { applyOperations } from './draftOperations';
 import type { DraftOperation } from './draftOperations';
 
@@ -15,10 +15,17 @@ import type { DraftOperation } from './draftOperations';
 //   hasta recuperar la misma operación (mismo operation_id) con `recover`.
 // - Si otra terminal cambió la cuenta, el conflicto es explícito: se conservan los toques y el
 //   operador decide si aplicarlos sobre la cuenta actual o descartarlos.
+// - Etapa 7.1: una mesa sin cuenta se captura con una «cuenta pendiente» (identificador local). El
+//   primer guardado crea la cuenta con su borrador en una sola operación idempotente; después la
+//   entrada pasa al identificador real y los guardados siguientes usan PUT …/draft. Si otra
+//   terminal abrió una cuenta en la mesa (TABLE_HAS_ACCOUNT), no se crea nada: los toques se
+//   conservan hasta que el operador elige agregarlos a esa cuenta o abrir una nueva.
 
 export interface DraftSyncTransport {
   // Guarda el borrador completo con un operation_id nuevo.
   save(accountID: string, body: { revision: number; items: DraftItem[] }): Promise<Bill>;
+  // Crea la cuenta de la mesa con su primer producto (etapa 7.1) con un operation_id nuevo.
+  create(body: { table_id: string; seen_account_ids: string[]; items: DraftItem[] }): Promise<Bill>;
   // Reintenta la última operación incierta con el mismo operation_id y cuerpo.
   retry(): Promise<Bill>;
 }
@@ -38,9 +45,27 @@ export interface DraftView {
   error: string;
 }
 
+// Mesa y cuentas que la terminal conocía al empezar a capturar sin cuenta.
+export interface PendingCreation {
+  tableID: string;
+  seenAccountIDs: string[];
+}
+
+// Cuenta pendiente detenida porque otra terminal abrió una cuenta en la mesa.
+export interface TableAccountConflict {
+  localID: string;
+  tableID: string;
+  accounts: TableAccountRef[];
+}
+
+interface Creation extends PendingCreation {
+  // Cuentas que Go informó con TABLE_HAS_ACCOUNT; mientras existan no se envía nada.
+  accounts: TableAccountRef[] | null;
+}
+
 export class DraftSyncError extends Error {
   constructor(
-    public reason: 'conflict' | 'uncertain' | 'error',
+    public reason: 'conflict' | 'uncertain' | 'table' | 'error',
     message: string,
   ) {
     super(message);
@@ -62,6 +87,14 @@ interface Entry {
   timer: ReturnType<typeof setTimeout> | null;
   // Última cuenta vista desde el servidor: base para conservar o descartar en un conflicto.
   latest: Bill | null;
+}
+
+function tableAccountsOf(problem: unknown): TableAccountRef[] | null {
+  if (!(problem instanceof APIError) || problem.code !== 'TABLE_HAS_ACCOUNT') {
+    return null;
+  }
+  const details = problem.details as { accounts?: TableAccountRef[] } | undefined;
+  return details?.accounts?.length ? details.accounts : null;
 }
 
 function conflictError(problem: unknown) {
@@ -89,6 +122,11 @@ export class DraftSyncEngine {
   private inFlight: { accountID: string; promise: Promise<void> } | null = null;
   private uncertainAccount: string | null = null;
   private held = new Set<string>();
+  // Cuentas pendientes (identificador local → mesa y cuentas vistas) y a qué cuenta real pasó
+  // cada una al crearse o al agregarse a otra.
+  private creations = new Map<string, Creation>();
+  private renamed = new Map<string, string>();
+  private createdListeners = new Set<(localID: string, bill: Bill) => void>();
 
   constructor(
     private transport: DraftSyncTransport,
@@ -103,6 +141,125 @@ export class DraftSyncEngine {
   };
 
   getVersion = () => this.version;
+
+  // Avisa cuando una cuenta pendiente pasa a una cuenta real (creada o existente).
+  onAccountCreated = (listener: (localID: string, bill: Bill) => void) => {
+    this.createdListeners.add(listener);
+    return () => {
+      this.createdListeners.delete(listener);
+    };
+  };
+
+  // Identificador vigente de una cuenta: el real si la cuenta pendiente ya se creó.
+  resolve(accountID: string): string {
+    let current = accountID;
+    while (this.renamed.has(current)) {
+      current = this.renamed.get(current)!;
+    }
+    return current;
+  }
+
+  isPending(accountID: string): boolean {
+    return this.creations.has(accountID);
+  }
+
+  // Registra una cuenta pendiente de la mesa. Las pendientes anteriores que no recibieron ningún
+  // toque se olvidan: no hay nada que crear.
+  preparePending(localID: string, creation: PendingCreation) {
+    for (const id of this.creations.keys()) {
+      if (id !== localID && !this.entries.has(id)) {
+        this.creations.delete(id);
+      }
+    }
+    this.creations.set(localID, { ...creation, accounts: null });
+  }
+
+  // Olvida una cuenta pendiente sin toques ni envíos: salir sin productos no deja registro.
+  // Devuelve false si todavía hay algo que crear o resolver.
+  discardPendingIfIdle(localID: string): boolean {
+    const creation = this.creations.get(localID);
+    if (!creation) {
+      return false;
+    }
+    const entry = this.entries.get(localID);
+    const idle =
+      !creation.accounts &&
+      (!entry ||
+        (entry.operations.length === 0 && !this.sendingAccount(localID) && entry.timer === null));
+    if (!idle) {
+      return false;
+    }
+    this.creations.delete(localID);
+    this.entries.delete(localID);
+    this.emit();
+    return true;
+  }
+
+  // Primera cuenta pendiente detenida por TABLE_HAS_ACCOUNT.
+  tableConflict(): TableAccountConflict | null {
+    for (const [localID, creation] of this.creations) {
+      if (creation.accounts) {
+        return { localID, tableID: creation.tableID, accounts: creation.accounts };
+      }
+    }
+    return null;
+  }
+
+  // «Abrir una cuenta nueva»: se reenvía la creación sabiendo de las cuentas informadas (con un
+  // operation_id nuevo: el rechazo no confirmó nada).
+  openNewAccount(localID: string) {
+    const creation = this.creations.get(localID);
+    const entry = this.entries.get(localID);
+    if (!creation?.accounts || !entry) {
+      return;
+    }
+    creation.seenAccountIDs = [
+      ...creation.seenAccountIDs,
+      ...creation.accounts.map((account) => account.id),
+    ];
+    creation.accounts = null;
+    entry.error = '';
+    this.emit();
+    this.trySend(entry);
+  }
+
+  // «Agregar a esa cuenta»: los toques de la cuenta pendiente se aplican sobre el borrador de la
+  // cuenta existente, que conserva el suyo, y se guardan con su revisión.
+  addToAccount(localID: string, target: Bill) {
+    const creation = this.creations.get(localID);
+    const entry = this.entries.get(localID);
+    if (!creation || !entry || this.sendingAccount(localID)) {
+      return;
+    }
+    this.clearTimer(entry);
+    this.creations.delete(localID);
+    this.entries.delete(localID);
+    this.renamed.set(localID, target.account.id);
+    let destination = this.entries.get(target.account.id);
+    if (destination) {
+      destination.operations.push(...entry.operations);
+      this.observe(target);
+    } else {
+      destination = entry;
+      destination.accountID = target.account.id;
+      destination.base = target.draft;
+      destination.baseRevision = target.account.revision;
+      destination.latest = target;
+      destination.conflict = false;
+      destination.error = '';
+      destination.sentCount = 0;
+      this.entries.set(target.account.id, destination);
+    }
+    this.notifyCreated(localID, target);
+    this.emit();
+    this.trySend(destination);
+  }
+
+  private notifyCreated(localID: string, bill: Bill) {
+    for (const listener of this.createdListeners) {
+      listener(localID, bill);
+    }
+  }
 
   private emit() {
     this.version++;
@@ -131,10 +288,11 @@ export class DraftSyncEngine {
   // Cuenta más reciente que conoce el motor (respuesta de un guardado propio o la última
   // observada): evita mostrar por un instante una revisión anterior mientras llega el sondeo.
   latestBill(accountID: string): Bill | null {
-    return this.entries.get(accountID)?.latest ?? null;
+    return this.entries.get(this.resolve(accountID))?.latest ?? null;
   }
 
-  view(accountID: string): DraftView | null {
+  view(requested: string): DraftView | null {
+    const accountID = this.resolve(requested);
     const entry = this.entries.get(accountID);
     if (!entry) {
       return null;
@@ -163,9 +321,12 @@ export class DraftSyncEngine {
   }
 
   private ensure(bill: Bill): Entry {
-    const existing = this.entries.get(bill.account.id);
+    // Un toque sobre la cuenta pendiente que acaba de crearse se suma a la entrada real.
+    const existing = this.entries.get(this.resolve(bill.account.id));
     if (existing) {
-      this.observe(bill);
+      if (existing.accountID === bill.account.id) {
+        this.observe(bill);
+      }
       return existing;
     }
     const entry: Entry = {
@@ -233,7 +394,7 @@ export class DraftSyncEngine {
 
   // Envía de inmediato lo pendiente de la cuenta (al cambiar de cuenta o de vista).
   flushNow(accountID: string) {
-    const entry = this.entries.get(accountID);
+    const entry = this.entries.get(this.resolve(accountID));
     if (!entry) {
       return;
     }
@@ -242,7 +403,7 @@ export class DraftSyncEngine {
   }
 
   private trySend(entry: Entry) {
-    if (entry.operations.length === 0 || entry.conflict) {
+    if (entry.operations.length === 0 || entry.conflict || this.blockedCreation(entry)) {
       return;
     }
     if (this.inFlight || this.uncertainAccount || this.held.has(entry.accountID)) {
@@ -253,20 +414,67 @@ export class DraftSyncEngine {
     this.send(entry);
   }
 
+  // La cuenta pendiente espera la decisión del operador ante TABLE_HAS_ACCOUNT.
+  private blockedCreation(entry: Entry) {
+    return !!this.creations.get(entry.accountID)?.accounts;
+  }
+
   private send(entry: Entry) {
     const items = applyOperations(entry.base, entry.operations);
+    const creation = this.creations.get(entry.accountID);
+    if (creation && items.length === 0) {
+      // Los toques se anularon entre sí (agregar y quitar): no hay cuenta que crear.
+      entry.operations = [];
+      entry.sentCount = 0;
+      entry.due = false;
+      entry.error = '';
+      this.emit();
+      return;
+    }
     entry.sentCount = entry.operations.length;
     entry.due = false;
     entry.error = '';
-    const promise = this.transport
-      .save(entry.accountID, { revision: entry.baseRevision, items })
+    const request = creation
+      ? this.transport.create({
+          table_id: creation.tableID,
+          seen_account_ids: [...creation.seenAccountIDs],
+          items,
+        })
+      : this.transport.save(entry.accountID, { revision: entry.baseRevision, items });
+    const promise = request
       .then(
-        (bill) => this.acknowledge(entry, bill),
+        (bill) => {
+          if (creation) {
+            this.created(entry, bill);
+          } else {
+            this.acknowledge(entry, bill);
+          }
+        },
         (problem: unknown) => this.reject(entry, problem),
       )
       .finally(() => this.next());
     this.inFlight = { accountID: entry.accountID, promise };
     this.emit();
+  }
+
+  // La cuenta pendiente ya existe en Go: la entrada pasa a su identificador real y los toques
+  // siguientes se guardan con PUT …/draft.
+  private created(entry: Entry, bill: Bill) {
+    const localID = entry.accountID;
+    const accountID = bill.account.id;
+    this.creations.delete(localID);
+    this.entries.delete(localID);
+    this.renamed.set(localID, accountID);
+    entry.accountID = accountID;
+    this.entries.set(accountID, entry);
+    if (this.inFlight?.accountID === localID) {
+      this.inFlight.accountID = accountID;
+    }
+    if (this.uncertainAccount === localID) {
+      this.uncertainAccount = accountID;
+    }
+    this.acknowledge(entry, bill);
+    this.notifyCreated(localID, bill);
   }
 
   private acknowledge(entry: Entry, bill: Bill) {
@@ -290,6 +498,14 @@ export class DraftSyncEngine {
       return;
     }
     entry.sentCount = 0;
+    const creation = this.creations.get(entry.accountID);
+    const accounts = creation ? tableAccountsOf(problem) : null;
+    if (creation && accounts) {
+      // Otra terminal abrió una cuenta en la mesa: Go no creó nada y el operador decide.
+      creation.accounts = accounts;
+      entry.error = '';
+      return;
+    }
     if (conflictError(problem)) {
       entry.conflict = true;
       entry.error = '';
@@ -306,11 +522,14 @@ export class DraftSyncEngine {
           entry.due &&
           entry.operations.length > 0 &&
           !entry.conflict &&
+          !this.blockedCreation(entry) &&
           entry.timer === null &&
           !this.held.has(entry.accountID)
         ) {
           this.send(entry);
-          return;
+          if (this.inFlight) {
+            return;
+          }
         }
       }
     }
@@ -329,7 +548,11 @@ export class DraftSyncEngine {
       .then(
         (bill) => {
           this.uncertainAccount = null;
-          this.acknowledge(entry, bill);
+          if (this.creations.has(entry.accountID)) {
+            this.created(entry, bill);
+          } else {
+            this.acknowledge(entry, bill);
+          }
         },
         (problem: unknown) => {
           if (uncertainError(problem)) {
@@ -347,8 +570,8 @@ export class DraftSyncEngine {
   }
 
   // Resuelve un conflicto aplicando los toques pendientes sobre la cuenta actual.
-  keepMine(accountID: string) {
-    const entry = this.entries.get(accountID);
+  keepMine(requested: string) {
+    const entry = this.entries.get(this.resolve(requested));
     if (!entry?.latest || !entry.conflict) {
       return;
     }
@@ -361,7 +584,8 @@ export class DraftSyncEngine {
   }
 
   // Descarta los toques pendientes y adopta la cuenta actual del servidor.
-  discard(accountID: string) {
+  discard(requested: string) {
+    const accountID = this.resolve(requested);
     const entry = this.entries.get(accountID);
     if (!entry || this.sendingAccount(accountID)) {
       return;
@@ -404,13 +628,21 @@ export class DraftSyncEngine {
 
   // Envía lo pendiente y espera a que la cuenta quede sincronizada. Falla de forma explícita si
   // hay un conflicto, una operación incierta o un rechazo que el operador debe revisar.
-  async settle(accountID: string): Promise<DraftView | null> {
+  async settle(requested: string): Promise<DraftView | null> {
     // Un rechazo previo se reintenta una sola vez; si el envío hecho aquí falla, se informa.
     let attempted = false;
     for (;;) {
+      // Una cuenta pendiente puede crearse mientras se espera: se sigue a su identificador real.
+      const accountID = this.resolve(requested);
       const entry = this.entries.get(accountID);
       if (!entry) {
         return null;
+      }
+      if (this.blockedCreation(entry)) {
+        throw new DraftSyncError(
+          'table',
+          'Esta mesa ya tiene una cuenta. Elige si agregas tus productos a esa cuenta o abres una nueva.',
+        );
       }
       if (entry.conflict) {
         throw new DraftSyncError(

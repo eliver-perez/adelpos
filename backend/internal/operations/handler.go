@@ -91,13 +91,21 @@ func (handler *service) authorizeRoute(parts []string) error {
 	if len(parts) == 1 {
 		if handler.request.Method == "POST" {
 			var input struct {
-				Mode string `json:"mode"`
+				Mode  string            `json:"mode"`
+				Items []json.RawMessage `json:"items"`
 			}
 			if err := json.Unmarshal(handler.request.Body, &input); err != nil {
 				return invalid("La cuenta requiere un cuerpo JSON válido.")
 			}
 			if input.Mode == "takeaway" {
-				return handler.request.Actor.Require("takeaway.manage")
+				if err := handler.request.Actor.Require("takeaway.manage"); err != nil {
+					return err
+				}
+			}
+			// Etapa 7.1: abrir la cuenta con su primer producto guarda además el borrador, así que exige
+			// los mismos permisos que PUT …/draft antes de cualquier escritura.
+			if len(input.Items) > 0 {
+				return handler.request.Actor.Require("orders.capture", "catalog.read", "catalog.prices.read")
 			}
 		}
 		return nil
@@ -166,6 +174,10 @@ func routePermission(method string, parts []string) string {
 			}
 		}
 	}
+	// Etapa 7.1: poner fuera de servicio o habilitar una mesa desde la operación.
+	if resource == "tables" && len(parts) == 3 && parts[2] == "service" && method == "POST" {
+		return "restaurant.tables.manage"
+	}
 	if len(parts) == 2 && method == "PATCH" {
 		return map[string]string{
 			"areas":    "restaurant.areas.manage",
@@ -190,7 +202,7 @@ func routePermission(method string, parts []string) string {
 				"confirm":       "orders.confirm", "edit-preview": "orders.edit", "edit": "orders.edit",
 				"cancel": "orders.cancel", "split": "accounts.split", "transfer": "accounts.transfer_items",
 				"merge": "accounts.merge", "move": "accounts.move", "assign": "accounts.transfer",
-				"void": "accounts.manage",
+				"void": "accounts.manage", "release": "accounts.open",
 			}[action]
 		}
 	}

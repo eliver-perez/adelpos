@@ -72,7 +72,8 @@ func newFixture(t *testing.T) *restaurantFixture {
 	if err != nil || !strings.HasPrefix(parsed.Path, "/adel_pos_test_") {
 		t.Fatal("Se requiere una base temporal exclusiva")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	// La aceptación encadenada (etapas 4 a 7.1) supera los dos minutos con -race en este equipo.
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	t.Cleanup(cancel)
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {

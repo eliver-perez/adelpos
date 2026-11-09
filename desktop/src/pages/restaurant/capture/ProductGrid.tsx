@@ -67,7 +67,8 @@ export function ProductGrid({
   } else {
     query.category_id = categoryID;
   }
-  if (account) query.price_list_id = account.price_list_id;
+  // Una cuenta pendiente sin lista conocida consulta los precios de la lista predeterminada.
+  if (account?.price_list_id) query.price_list_id = account.price_list_id;
   const products = useLiveResource<{ items: CaptureProduct[]; total: number }>('catalog_products', {
     query,
     enabled: enabled && active && !!account && (searching || !!categoryID),

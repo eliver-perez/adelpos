@@ -121,7 +121,12 @@ func (handler *service) validateAssignee(id string) error {
 }
 
 func (handler *service) insertAccount(input AccountInput, scheduled *time.Time) (*Account, error) {
-	id := newID()
+	return handler.insertAccountWithID(newID(), input, scheduled)
+}
+
+// insertAccountWithID registra la cuenta con un identificador ya generado: la apertura con borrador
+// inicial (etapa 7.1) valida sus partidas contra ese identificador antes de escribir.
+func (handler *service) insertAccountWithID(id string, input AccountInput, scheduled *time.Time) (*Account, error) {
 	var scheduleKind *string
 	if scheduled != nil {
 		scheduleKind = &input.ScheduleKind
@@ -141,8 +146,13 @@ func (handler *service) insertAccount(input AccountInput, scheduled *time.Time) 
 	return account, handler.event(id, nil, "account.opened", nil, account)
 }
 
+// openAccount abre una cuenta sin formulario (etapa 6.2). Desde la etapa 7.1 la cuenta de una mesa se
+// crea en la misma operación idempotente que guarda su primer producto: con items, la cuenta y su
+// borrador se registran juntos; con seen_account_ids, se rechaza (TABLE_HAS_ACCOUNT, sin escribir
+// nada) si la mesa tiene una cuenta abierta que la terminal no veía, para no abrir una segunda
+// cuenta en silencio cuando otra terminal ya la abrió.
 func (handler *service) openAccount() (any, error) {
-	var input AccountInput
+	var input OpenAccountInput
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
@@ -150,18 +160,67 @@ func (handler *service) openAccount() (any, error) {
 		return nil, invalid("Una cuenta nueva empieza sin revisión previa.")
 	}
 	// Etapa 6.2: el nombre es opcional al abrir; sin nombre, Go asigna la referencia neutra.
-	if err := handler.fillAccountName(&input); err != nil {
+	if err := handler.fillAccountName(&input.AccountInput); err != nil {
 		return nil, err
 	}
-	scheduled, err := handler.validateAccountInput(&input, nil)
+	scheduled, err := handler.validateAccountInput(&input.AccountInput, nil)
 	if err != nil {
 		return nil, err
 	}
-	account, err := handler.insertAccount(input, scheduled)
-	if err != nil {
+	if input.SeenAccountIDs != nil {
+		if err := handler.requireNoUnseenAccounts(input.TableID, *input.SeenAccountIDs); err != nil {
+			return nil, err
+		}
+	}
+	id := newID()
+	if err := handler.validateDraftItems(id, input.Items); err != nil {
 		return nil, err
 	}
-	return handler.readBill(account.ID)
+	if _, err := handler.insertAccountWithID(id, input.AccountInput, scheduled); err != nil {
+		return nil, err
+	}
+	if len(input.Items) > 0 {
+		if err := handler.insertDraftItems(id, input.Items); err != nil {
+			return nil, err
+		}
+		if err := handler.event(id, nil, "draft.saved", []DraftItem{}, input.Items); err != nil {
+			return nil, err
+		}
+	}
+	return handler.readBill(id)
+}
+
+// requireNoUnseenAccounts compara las cuentas abiertas de la mesa con las que la terminal conocía.
+// Una cuenta nueva de otra terminal se informa en el detalle del rechazo para que el operador elija
+// entre agregar sus productos a esa cuenta o abrir otra a sabiendas.
+func (handler *service) requireNoUnseenAccounts(tableID *string, seen []string) error {
+	if len(seen) > 100 {
+		return invalid("Se admiten hasta 100 cuentas vistas en la mesa.")
+	}
+	for _, id := range seen {
+		if err := validateID(id); err != nil {
+			return err
+		}
+	}
+	if tableID == nil {
+		return nil
+	}
+	unseen, err := readList[TableAccountRef](handler.ctx, handler.tx, `SELECT jsonb_build_object(
+        'id',a.id,'folio',a.folio,'name',a.name) FROM app.restaurant_accounts a
+        WHERE a.table_id=$1 AND a.state='open' AND NOT (a.id::text = ANY($2::text[]))
+        ORDER BY a.created_at,a.id`, *tableID, seen)
+	if err != nil {
+		return err
+	}
+	if len(unseen) == 0 {
+		return nil
+	}
+	return &Error{
+		Status:  409,
+		Code:    "TABLE_HAS_ACCOUNT",
+		Message: "Esta mesa ya tiene una cuenta abierta en otra terminal. Elige si agregas los productos a esa cuenta o abres una cuenta nueva.",
+		Details: map[string]any{"accounts": unseen},
+	}
 }
 
 func (handler *service) updateAccount(id string) (any, error) {

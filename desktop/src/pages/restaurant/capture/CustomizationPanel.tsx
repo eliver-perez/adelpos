@@ -7,9 +7,10 @@ import { TextField } from '../../../components/catalog/EditorFields';
 import { QuoteBreakdown } from '../../../components/catalog/QuoteBreakdown';
 import { originalCustomization } from '../../../components/catalog/customizationRules';
 import { api } from '../../../services/api';
-import type { Lookups } from '../../../services/catalog';
+import type { Lookups, Quote } from '../../../services/catalog';
 import { formatMoney } from '../../../services/money';
 import { notifyError, notifySuccess } from '../../../services/notify';
+import { isPendingAccount } from '../../../services/restaurant';
 import type { Bill, DraftItem, EditorState, OrderQuote } from '../../../services/restaurant';
 import type { ExecuteMutation } from '../OperationsAdmin';
 import { uncertainError } from './draftSync';
@@ -27,6 +28,36 @@ export function tentativeItems(editor: EditorState, localDraft: DraftItem[]): Dr
     return [...localDraft, { ...editor.line, id }];
   }
   return [...localDraft, { ...editor.line, id: editor.localID }];
+}
+
+// Cotización tentativa de una cuenta pendiente (etapa 7.1): la cuenta aún no existe en Go, así
+// que se cotiza con el motor del catálogo y la lista predeterminada (la que Go asignará al
+// crearla). Es la misma autoridad de precios; la interfaz no calcula importes.
+async function pendingPreview(
+  accountID: string,
+  priceListID: string,
+  items: DraftItem[],
+  revision: number,
+): Promise<OrderQuote> {
+  const quote = await api<Quote>('catalog_preview', {
+    body: {
+      price_list_id: priceListID || null,
+      lines: items.map((item) => ({
+        product_id: item.product_id,
+        variant_id: item.variant_id ?? null,
+        quantity: item.quantity,
+        customization: item.customization,
+      })),
+    },
+  });
+  return {
+    account_id: accountID,
+    revision,
+    fingerprint: '',
+    quote,
+    combined: { subtotal: quote.subtotal, discount: quote.discount, total: quote.total },
+    pricing_policy: '',
+  };
 }
 
 // Personalización en el panel central de la captura. La cotización tentativa la calcula Go
@@ -63,6 +94,8 @@ export function CustomizationPanel({
   const [error, setError] = useState('');
   const [calculating, setCalculating] = useState(false);
   const confirmed = editor.kind === 'confirmed';
+  const pending = isPendingAccount(bill.account);
+  const priceListID = bill.account.price_list_id;
   const stale = confirmed && editor.revision !== bill.account.revision;
   const items = confirmed ? [] : tentativeItems(editor, localDraft);
   const position = items.findIndex((item) => item.id === (editor.draftID ?? editor.localID));
@@ -90,10 +123,14 @@ export function CustomizationPanel({
     setCalculating(true);
     // Breve espera para no cotizar cada toque intermedio; una respuesta atrasada se descarta.
     const timer = window.setTimeout(() => {
-      void api<OrderQuote>(confirmed ? 'restaurant_edit_preview' : 'restaurant_draft_preview', {
-        id: editor.accountID,
-        body: JSON.parse(requestKey),
-      })
+      const request = JSON.parse(requestKey) as { revision: number; items: DraftItem[] };
+      const calculation = pending
+        ? pendingPreview(editor.accountID, priceListID, request.items, request.revision)
+        : api<OrderQuote>(confirmed ? 'restaurant_edit_preview' : 'restaurant_draft_preview', {
+            id: editor.accountID,
+            body: request,
+          });
+      void calculation
         .then((result) => {
           if (current) setPreview(result);
         })
@@ -110,7 +147,7 @@ export function CustomizationPanel({
       current = false;
       window.clearTimeout(timer);
     };
-  }, [requestKey, stale, confirmed, editor.accountID]);
+  }, [requestKey, stale, confirmed, editor.accountID, pending, priceListID]);
 
   const quoteLine = preview?.quote?.lines[confirmed ? 0 : position] ?? null;
   const ready = !!preview && !!quoteLine && !calculating && !stale && !error;

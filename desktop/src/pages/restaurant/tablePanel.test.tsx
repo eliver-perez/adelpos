@@ -46,9 +46,15 @@ interface ServerAccount {
   total: string;
   paid: string;
   balance: string;
+  // Etapa 7.1: Go marca liberable una cuenta abierta y vacía en sentido estricto.
+  releasable: boolean;
 }
 
 let accounts: Record<string, ServerAccount>;
+// Etapa 7.1: liberaciones, cambios de servicio y mesas fuera de servicio del servidor simulado.
+let releases: { id: string; body: Record<string, unknown> }[];
+let services: { id: string; body: Record<string, unknown> }[];
+let outOfService: Set<string>;
 let opens: Record<string, unknown>[];
 let openRequests: number;
 let saves: { id: string; body: Record<string, unknown> }[];
@@ -74,6 +80,7 @@ function serverAccount(values: Partial<ServerAccount> & { id: string; folio: num
     total: '0.00',
     paid: '0.00',
     balance: '0.00',
+    releasable: false,
     ...values,
   };
 }
@@ -117,6 +124,7 @@ function account(state: ServerAccount) {
     confirmed_quantity: state.lines.length,
     draft_quantity: state.draft.length,
     totals: { subtotal: state.total, discount: '0.00', total: state.total },
+    releasable: state.releasable,
   };
 }
 
@@ -191,10 +199,13 @@ function overview() {
       height: 100,
       seats: index === 0 ? 4 : 6,
       active: true,
-      out_of_service: false,
-      revision: 1,
+      out_of_service: outOfService.has(id),
+      revision: outOfService.has(id) ? 2 : 1,
       account_count: count,
-      state: count > 0 ? 'occupied' : 'free',
+      state: outOfService.has(id) ? 'out_of_service' : count > 0 ? 'occupied' : 'free',
+      occupied_since: count > 0 ? '2026-11-08T18:30:00Z' : null,
+      occupied_seconds: count > 0 ? 3900 : 0,
+      balance: '0.00',
     };
   });
   return {
@@ -272,6 +283,22 @@ function respond(
         return { status: 409, body: { error: openFailure } };
       }
       return openAccount(body!);
+    case 'restaurant_release_account': {
+      releases.push({ id: id!, body: body! });
+      const released = { ...bill(accounts[id!]!) };
+      released.account = { ...released.account, state: 'voided', releasable: false };
+      delete accounts[id!];
+      return released;
+    }
+    case 'restaurant_table_service': {
+      services.push({ id: id!, body: body! });
+      if (body!.out_of_service) {
+        outOfService.add(id!);
+      } else {
+        outOfService.delete(id!);
+      }
+      return overview().tables.find((table) => table.id === id);
+    }
     case 'restaurant_save_account': {
       saves.push({ id: id!, body: body! });
       const state = accounts[id!]!;
@@ -363,6 +390,9 @@ beforeEach(() => {
   holdOpens = false;
   heldOpens = [];
   openFailure = null;
+  releases = [];
+  services = [];
+  outOfService = new Set();
   native.invoke.mockImplementation(
     async (
       command: string,
@@ -420,37 +450,43 @@ async function tablePanel(name: RegExp, title: string) {
 }
 
 describe('panel lateral de la mesa', () => {
-  it('mesa libre: «Abrir cuenta y capturar» abre sin formulario y entra directo a la captura', async () => {
+  it('mesa libre: misma estructura que una ocupada y «Capturar» entra sin crear la cuenta', async () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
     expect(within(panel).getByRole('heading', { name: 'Mesa 2' })).toBeTruthy();
     expect(within(panel).getByText('Libre')).toBeTruthy();
     expect(within(panel).getByText('Mesa para 6')).toBeTruthy();
+    // Área de cuenta vacía, totales en cero y las acciones que no aplican desactivadas.
+    expect(within(panel).getByRole('heading', { name: 'Sin cuenta abierta' })).toBeTruthy();
+    expect(within(panel).getByText('Total').nextSibling?.textContent).toBe('$0.00');
+    expect(within(panel).getByText('Pagado').nextSibling?.textContent).toBe('$0.00');
+    expect(within(panel).getByText('Saldo').nextSibling?.textContent).toBe('$0.00');
+    const capture = within(panel).getByRole('button', { name: 'Capturar' });
+    expect((capture as HTMLButtonElement).disabled).toBe(false);
+    for (const label of ['Cobrar', 'Precuenta', 'Dividir']) {
+      expect(
+        (within(panel).getByRole('button', { name: label }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    }
+    // «Capturar» está en el mismo lugar que en una mesa ocupada (primera acción principal).
+    expect(capture.closest('.capture-primary-actions')?.firstElementChild).toBe(capture);
     // El mapa sigue visible y sin controles de edición.
     const map = screen.getByRole('region', { name: 'Mapa del restaurante' });
     expect(within(map).queryByText(/Arrastra o usa flechas/)).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Abrir cuenta y capturar' }));
-    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta #3' });
-    expect(opens).toHaveLength(1);
-    // Sin nombre, lista ni observaciones: Go asigna la lista predeterminada y la referencia neutra.
-    expect(opens[0]).toEqual(
-      expect.objectContaining({
-        name: '',
-        mode: 'dine_in',
-        table_id: ids.free,
-        price_list_id: null,
-        notes: '',
-        assigned_user_id: null,
-      }),
-    );
-    expect(typeof opens[0]!.operation_id).toBe('string');
+    fireEvent.click(capture);
+    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta nueva' });
+    // Sin productos todavía no hay cuenta: nada se envía a Go.
+    expect(openRequests).toBe(0);
+    expect(screen.getByText(/La cuenta se abre al guardar el primer producto/)).toBeTruthy();
     expect(screen.queryByLabelText(/Nombre o referencia de cuenta/)).toBeNull();
-    // La referencia neutra («Mesa 2») no se muestra como nombre capturado.
-    expect(screen.getByText(/Mesero: Laura · Mesa para 6 · Abierta/).textContent).not.toMatch(
-      /Mesa 2$/,
-    );
+    expect(screen.queryByRole('button', { name: 'Datos de la cuenta' })).toBeNull();
     expect(screen.getByRole('complementary', { name: 'Cuenta actual' })).toBeTruthy();
+    // Salir sin productos: la mesa sigue libre y no queda registro.
+    fireEvent.click(screen.getByRole('button', { name: /Mesas/ }));
+    const again = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
+    expect(within(again).getByText('Libre')).toBeTruthy();
+    expect(openRequests).toBe(0);
   });
 
   it('mesa ocupada con varias cuentas: botones, productos, totales de Go y acciones', async () => {
@@ -477,6 +513,9 @@ describe('panel lateral de la mesa', () => {
     expect(within(panel).getByRole('button', { name: 'Precuenta' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Dividir' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Nueva cuenta' })).toBeTruthy();
+    // Una cuenta con productos no se libera ni se pone la mesa fuera de servicio.
+    expect(within(panel).queryByRole('button', { name: 'Liberar mesa' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Poner fuera de servicio' })).toBeNull();
     fireEvent.click(within(panel).getByRole('button', { name: 'Más…' }));
     const menu = within(panel).getByRole('group', { name: 'Más acciones de la cuenta' });
     for (const label of [
@@ -512,67 +551,65 @@ describe('panel lateral de la mesa', () => {
     renderPage();
     await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
     const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
-    expect(within(panel).getByRole('button', { name: 'Abrir cuenta y capturar' })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
     expect(screen.queryByRole('complementary', { name: 'Panel de Mesa 1' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Mapa del restaurante' })).toBeTruthy();
   });
 
-  it('«Nueva cuenta» abre otra cuenta en la mesa ocupada y entra a capturar', async () => {
+  it('«Nueva cuenta» entra a capturar en la mesa ocupada sin crear la cuenta', async () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
     await within(panel).findByRole('button', { name: 'Capturar' });
     fireEvent.click(within(panel).getByRole('button', { name: 'Nueva cuenta' }));
-    await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #3' });
-    expect(opens).toEqual([expect.objectContaining({ name: '', table_id: ids.occupied })]);
-    // Desde la captura, «Nueva cuenta» abre otra en la misma mesa sin formulario.
+    await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta nueva' });
+    expect(openRequests).toBe(0);
+    // Las cuentas abiertas de la mesa siguen a un toque; «Nueva cuenta» no se repite.
     const group = screen.getByRole('group', { name: 'Cuentas de la mesa' });
-    await waitFor(() =>
-      expect(pressed(within(group).getByRole('button', { name: 'Cuenta #3' }))).toBe('true'),
+    expect(within(group).queryByRole('button', { name: 'Nueva cuenta' })).toBeNull();
+    fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #1' }));
+    await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #1' });
+    expect(openRequests).toBe(0);
+    // Desde la captura de una cuenta existente, «Nueva cuenta» vuelve a una cuenta pendiente.
+    fireEvent.click(
+      within(screen.getByRole('group', { name: 'Cuentas de la mesa' })).getByRole('button', {
+        name: 'Nueva cuenta',
+      }),
     );
-    fireEvent.click(within(group).getByRole('button', { name: 'Nueva cuenta' }));
-    await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #4' });
-    expect(opens).toHaveLength(2);
-    expect(opens[1]).toEqual(expect.objectContaining({ table_id: ids.occupied }));
+    await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta nueva' });
+    expect(openRequests).toBe(0);
   });
 
-  it('un doble toque no abre una segunda cuenta ni genera otro operation_id', async () => {
+  it('un doble toque en «Capturar» no abre cuentas', async () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
-    holdOpens = true;
-    const open = within(panel).getByRole('button', { name: 'Abrir cuenta y capturar' });
-    fireEvent.click(open);
-    fireEvent.click(open);
+    const capture = within(panel).getByRole('button', { name: 'Capturar' });
+    fireEvent.click(capture);
+    fireEvent.click(capture);
+    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta nueva' });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    fireEvent.click(open);
-    expect(openRequests).toBe(1);
-    holdOpens = false;
-    heldOpens.forEach((resolve) => resolve());
-    await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta #3' });
-    expect(openRequests).toBe(1);
-    expect(opens).toHaveLength(1);
-    expect(Object.values(accounts).filter((entry) => entry.tableID === ids.free)).toHaveLength(1);
-    expect(screen.queryByText(/Primero recupera|Espera a que termine/)).toBeNull();
+    expect(openRequests).toBe(0);
+    expect(Object.values(accounts).filter((entry) => entry.tableID === ids.free)).toHaveLength(0);
   });
 
   it('un rechazo de Go al abrir se avisa en español, sin código interno, y no se cierra solo', async () => {
-    renderPage();
-    const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
+    // Para llevar sigue abriendo al instante (etapa 6.2): su rechazo es un aviso persistente.
+    renderPage('takeaway');
     openFailure = {
-      code: 'TABLE_OUT_OF_SERVICE',
-      message: 'La mesa está fuera de servicio y no admite cuentas nuevas.',
+      code: 'TAKEAWAY_DISABLED',
+      message: 'No se pudo abrir el pedido: revisa los datos del establecimiento.',
     };
-    fireEvent.click(within(panel).getByRole('button', { name: 'Abrir cuenta y capturar' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
     const alert = await screen.findByRole('alert', { name: 'Error' });
     expect(alert.textContent).toContain(
-      'La mesa está fuera de servicio y no admite cuentas nuevas.',
+      'No se pudo abrir el pedido: revisa los datos del establecimiento.',
     );
-    expect(alert.textContent).not.toContain('TABLE_OUT_OF_SERVICE');
+    expect(alert.textContent).not.toContain('TAKEAWAY_DISABLED');
     // No queda un banner superior duplicado ni un panel de recuperación: el rechazo fue definitivo.
     expect(document.querySelector('.operational-page > .notice')).toBeNull();
     expect(document.querySelector('.operation-recovery')).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Mesa 2 · Cuenta #3' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /Pedido #/ })).toBeNull();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 4500));
     });
@@ -580,46 +617,216 @@ describe('panel lateral de la mesa', () => {
   }, 10000);
 });
 
-describe('contadores del mapa', () => {
-  it('concuerda «1 cuenta» y «2 cuentas» en el texto y en el nombre accesible', () => {
-    const area = {
-      id: ids.area,
-      name: 'Salón',
-      description: '',
-      sort_order: 10,
-      active: true,
-      revision: 1,
-      table_count: 2,
-    };
-    const table = {
-      area_id: ids.area,
-      shape: 'rectangle' as const,
-      x: 20,
-      y: 20,
-      width: 120,
-      height: 100,
-      seats: 4,
-      active: true,
-      out_of_service: false,
-      revision: 1,
-      state: 'occupied' as const,
-    };
+describe('liberar mesa y fuera de servicio (etapa 7.1)', () => {
+  it('«Liberar mesa» solo aparece si Go marcó la cuenta liberable y pide confirmación', async () => {
+    accounts[ids.second]!.releasable = true;
+    renderPage();
+    const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
+    const group = within(panel).getByRole('group', { name: 'Cuentas abiertas de la mesa' });
+    await waitFor(() =>
+      expect(pressed(within(group).getByRole('button', { name: 'Cuenta #1' }))).toBe('true'),
+    );
+    expect(within(panel).queryByRole('button', { name: 'Liberar mesa' })).toBeNull();
+    fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #2 · Familia Ruiz' }));
+    const release = await within(panel).findByRole('button', { name: 'Liberar mesa' });
+    // La anulación con motivo no se ofrece para una cuenta que se libera sin motivo.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Más…' }));
+    const menu = within(panel).getByRole('group', { name: 'Más acciones de la cuenta' });
+    expect(within(menu).queryByRole('button', { name: 'Anular cuenta vacía' })).toBeNull();
+    fireEvent.click(release);
+    const dialog = await screen.findByRole('alertdialog', { name: '¿Liberar Mesa 1?' });
+    expect(dialog.textContent).toContain('Cuenta #2');
+    // La mesa conserva otra cuenta abierta: no se anuncia como libre.
+    expect(dialog.textContent).toContain('las demás cuentas de la mesa no cambian');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Conservar la cuenta' }));
+    expect(releases).toHaveLength(0);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Liberar mesa' }));
+    fireEvent.click(
+      within(await screen.findByRole('alertdialog', { name: '¿Liberar Mesa 1?' })).getByRole(
+        'button',
+        { name: 'Liberar mesa' },
+      ),
+    );
+    await waitFor(() => expect(releases).toHaveLength(1));
+    expect(releases[0]!.id).toBe(ids.second);
+    expect(releases[0]!.body).toEqual(expect.objectContaining({ revision: 7 }));
+    expect(typeof releases[0]!.body.operation_id).toBe('string');
+    expect(
+      (await screen.findByRole('status', { name: 'Operación completada' })).textContent,
+    ).toContain('Cuenta #2 · Familia Ruiz liberada.');
+  });
+
+  it('una cuenta liberable sin permiso de abrir cuentas no muestra «Liberar mesa»', async () => {
+    accounts[ids.second]!.releasable = true;
+    renderPage('tables', (permission) => permission !== 'accounts.open');
+    const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
+    const group = within(panel).getByRole('group', { name: 'Cuentas abiertas de la mesa' });
+    await waitFor(() =>
+      expect(pressed(within(group).getByRole('button', { name: 'Cuenta #1' }))).toBe('true'),
+    );
+    fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #2 · Familia Ruiz' }));
+    await within(panel).findByRole('heading', { name: 'Cuenta #2 · Familia Ruiz' });
+    expect(within(panel).queryByRole('button', { name: 'Liberar mesa' })).toBeNull();
+  });
+
+  it('«Poner fuera de servicio» en una mesa libre y «Habilitar» después, con su permiso', async () => {
+    renderPage();
+    const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Poner fuera de servicio' }));
+    await waitFor(() => expect(services).toHaveLength(1));
+    expect(services[0]).toEqual({
+      id: ids.free,
+      body: expect.objectContaining({ revision: 1, out_of_service: true }),
+    });
+    expect(
+      (await screen.findByRole('status', { name: 'Operación completada' })).textContent,
+    ).toContain('Mesa 2 quedó fuera de servicio.');
+    const disabledPanel = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
+    await within(disabledPanel).findByText(
+      'La mesa está fuera de servicio y no admite cuentas nuevas.',
+    );
+    expect(within(disabledPanel).getByText('Fuera de servicio')).toBeTruthy();
+    expect(
+      (within(disabledPanel).getByRole('button', { name: 'Capturar' }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(within(disabledPanel).getByRole('button', { name: 'Habilitar' }));
+    await waitFor(() => expect(services).toHaveLength(2));
+    expect(services[1]!.body).toEqual(
+      expect.objectContaining({ revision: 2, out_of_service: false }),
+    );
+  });
+
+  it('sin administrar mesas no se ofrece el cambio de servicio', async () => {
+    renderPage('tables', (permission) => permission !== 'restaurant.tables.manage');
+    const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
+    expect(within(panel).queryByRole('button', { name: 'Poner fuera de servicio' })).toBeNull();
+    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
+  });
+});
+
+describe('mapa de mesas y leyenda (etapa 7.1)', () => {
+  const area = {
+    id: ids.area,
+    name: 'Salón',
+    description: '',
+    sort_order: 10,
+    active: true,
+    revision: 1,
+    table_count: 5,
+  };
+  const base = {
+    area_id: ids.area,
+    shape: 'rectangle' as const,
+    y: 20,
+    width: 120,
+    height: 100,
+    seats: 4,
+    active: true,
+    out_of_service: false,
+    revision: 1,
+    account_count: 1,
+    occupied_since: '2026-11-08T18:30:00Z',
+    occupied_seconds: 2700,
+    balance: '163.40',
+  };
+
+  function renderMap() {
     render(
       <TableMap
         areas={[area]}
         tables={[
-          { ...table, id: ids.occupied, name: 'Mesa 1', account_count: 1 },
-          { ...table, id: ids.free, name: 'Mesa 2', x: 300, account_count: 2 },
+          {
+            ...base,
+            id: 'libre',
+            name: 'Mesa 1',
+            x: 20,
+            state: 'free',
+            account_count: 0,
+            occupied_since: null,
+            occupied_seconds: 0,
+            balance: '0.00',
+          },
+          { ...base, id: 'ocupada', name: 'Mesa 2', x: 160, state: 'occupied', balance: '263.40' },
+          { ...base, id: 'precuenta', name: 'Mesa 3', x: 300, state: 'awaiting_payment' },
+          {
+            ...base,
+            id: 'parcial',
+            name: 'Mesa 4',
+            x: 440,
+            state: 'partial_payment',
+            account_count: 2,
+          },
+          {
+            ...base,
+            id: 'servicio',
+            name: 'Mesa 5',
+            x: 580,
+            state: 'out_of_service',
+            out_of_service: true,
+            account_count: 0,
+            occupied_since: null,
+            occupied_seconds: 0,
+            balance: '0.00',
+          },
         ]}
         areaID={ids.area}
         onAreaChange={() => undefined}
         onSelect={() => undefined}
       />,
     );
-    const single = screen.getByRole('button', { name: 'Mesa 1, Ocupada, 1 cuenta' });
-    expect(within(single).getByText('1 cuenta')).toBeTruthy();
-    const double = screen.getByRole('button', { name: 'Mesa 2, Ocupada, 2 cuentas' });
-    expect(within(double).getByText('2 cuentas')).toBeTruthy();
+  }
+
+  it('cada estado se distingue por texto o icono, no solo por color', () => {
+    renderMap();
+    const free = screen.getByRole('button', { name: 'Mesa 1, Libre, 0 cuentas' });
+    expect(free.className).toContain('table-free');
+    expect(within(free).getByText('Libre')).toBeTruthy();
+    // Ocupada: tiempo calculado por Go («45 min»).
+    const occupied = screen.getByRole('button', { name: 'Mesa 2, Ocupada, 1 cuenta, 45 min' });
+    expect(occupied.className).toContain('table-occupied');
+    expect(within(occupied).getByText('45 min')).toBeTruthy();
+    expect(occupied.querySelector('svg')).not.toBeNull();
+    // Esperando pago: icono de recibo y «Precuenta».
+    const awaiting = screen.getByRole('button', {
+      name: 'Mesa 3, Esperando pago, 1 cuenta, precuenta impresa',
+    });
+    expect(awaiting.className).toContain('table-awaiting_payment');
+    expect(within(awaiting).getByText('Precuenta')).toBeTruthy();
+    expect(awaiting.querySelector('svg')).not.toBeNull();
+    // Pago parcial: el saldo de Go y, con varias cuentas, cuántas son.
+    const partial = screen.getByRole('button', {
+      name: 'Mesa 4, Pago parcial, 2 cuentas, saldo $163.40',
+    });
+    expect(partial.className).toContain('table-partial_payment');
+    expect(within(partial).getByText('Saldo $163.40')).toBeTruthy();
+    expect(within(partial).getByText('2 cuentas')).toBeTruthy();
+    // Fuera de servicio: candado.
+    const blocked = screen.getByRole('button', { name: 'Mesa 5, Fuera de servicio, 0 cuentas' });
+    expect(blocked.className).toContain('table-out_of_service');
+    expect(blocked.querySelector('svg')).not.toBeNull();
+  });
+
+  it('la leyenda muestra los cinco estados', () => {
+    renderMap();
+    const legend = screen.getByRole('list', { name: 'Estados de las mesas' });
+    const items = within(legend).getAllByRole('listitem');
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Libre',
+      'Ocupada· tiempo',
+      'Esperando pago· precuenta',
+      'Pago parcial· saldo',
+      'Fuera de servicio',
+    ]);
+    for (const state of [
+      'free',
+      'occupied',
+      'awaiting_payment',
+      'partial_payment',
+      'out_of_service',
+    ]) {
+      expect(legend.querySelector(`.legend-${state}`)).not.toBeNull();
+    }
   });
 });
 

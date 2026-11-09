@@ -17,6 +17,9 @@ type Error struct {
 	Status  int
 	Code    string
 	Message string
+	// Details acompaña al error con datos públicos que la terminal necesita para decidir (por
+	// ejemplo, las cuentas que otra terminal abrió en la mesa). Nunca lleva secretos.
+	Details any
 }
 
 func (problem *Error) Error() string {

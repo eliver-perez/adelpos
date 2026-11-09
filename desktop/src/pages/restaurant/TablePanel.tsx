@@ -1,14 +1,36 @@
 import { Notice } from '../../components/Forms';
-import { IconLabel } from '../../components/Icon';
+import { Icon, IconLabel } from '../../components/Icon';
 import type { Lookups } from '../../services/catalog';
 import { formatMoney } from '../../services/money';
-import { accountLabel, elapsedTime } from '../../services/restaurant';
-import type { Account, Bill, DraftItem, RestaurantTable } from '../../services/restaurant';
+import { accountLabel, elapsedTime, tableStateLabels } from '../../services/restaurant';
+import type {
+  Account,
+  Bill,
+  DraftItem,
+  RestaurantTable,
+  TableState,
+} from '../../services/restaurant';
 import type { BillAction } from './capture/BillFooter';
 import { CheckoutButton, accountMoreActions } from './capture/BillFooter';
 import { MoreActions } from './capture/MoreActions';
 
-const stateLabels = { free: 'Libre', occupied: 'Ocupada', out_of_service: 'Fuera de servicio' };
+// Icono que acompaña al texto del estado en el encabezado del panel (no solo color).
+const stateIcons: Partial<Record<TableState, 'clock' | 'receipt' | 'cash' | 'lock'>> = {
+  occupied: 'clock',
+  awaiting_payment: 'receipt',
+  partial_payment: 'cash',
+  out_of_service: 'lock',
+};
+
+function StateChip({ state }: { state: TableState }) {
+  const icon = stateIcons[state];
+  return (
+    <span className={`table-panel-state table-panel-state-${state}`}>
+      {icon && <Icon name={icon} size={14} />}
+      {tableStateLabels[state]}
+    </span>
+  );
+}
 
 // Productos de la cuenta en el panel: enviados con «En cocina» y su importe de Go; nuevos (aún sin
 // enviar) con «Nuevo», sin importe (la cotización vive en la captura).
@@ -84,9 +106,34 @@ function PanelTotals({ account }: { account: Account }) {
   );
 }
 
+// Totales de una mesa sin cuenta: la misma fila que en una mesa ocupada, en cero.
+function EmptyTotals() {
+  return (
+    <dl className="table-panel-totals" aria-label="Totales de la cuenta · precios con IVA incluido">
+      <div>
+        <dt>Total</dt>
+        <dd>{formatMoney('0.00')}</dd>
+      </div>
+      <div>
+        <dt>Pagado</dt>
+        <dd>{formatMoney('0.00')}</dd>
+      </div>
+      <div className="table-panel-balance">
+        <dt>Saldo</dt>
+        <dd>{formatMoney('0.00')}</dd>
+      </div>
+    </dl>
+  );
+}
+
 // Panel lateral de la mesa seleccionada en el mapa (etapa 6.2): nombre, estado y tiempo abierta;
-// cuentas abiertas como botones; productos, totales y acciones de la cuenta elegida. Mesa libre:
-// «Abrir cuenta y capturar» abre la cuenta sin formulario y entra directo a la captura.
+// cuentas abiertas como botones; productos, totales y acciones de la cuenta elegida.
+//
+// Etapa 7.1: la mesa libre tiene la misma estructura (encabezado con su estado, área de cuenta
+// vacía, totales en $0.00 y «Capturar» en el mismo lugar; Cobrar, Precuenta y Dividir quedan
+// desactivados). «Capturar» y «Nueva cuenta» entran a la captura sin crear la cuenta: Go la crea
+// con el primer producto. «Liberar mesa» solo aparece si Go marcó la cuenta como liberable, y
+// «Poner fuera de servicio» / «Habilitar» requieren administrar mesas.
 export function TablePanel({
   table,
   accounts,
@@ -101,6 +148,8 @@ export function TablePanel({
   onOpenAccount,
   onAction,
   onCheckout,
+  onRelease,
+  onService,
 }: {
   table: RestaurantTable;
   // Cuentas abiertas de la mesa; null mientras se consultan.
@@ -116,12 +165,17 @@ export function TablePanel({
   onOpenAccount: () => void;
   onAction: (action: BillAction) => void;
   onCheckout: () => void;
+  onRelease: (account: Account) => void;
+  onService: (outOfService: boolean) => void;
 }) {
   const open = accounts ?? [];
   const occupied = open.length > 0;
-  const state = occupied ? 'occupied' : table.state;
+  // El estado lo calcula Go; si el mapa aún no refleja una cuenta recién abierta, se muestra ocupada.
+  const state: TableState = occupied && table.state === 'free' ? 'occupied' : table.state;
   const oldest = open.reduce((seconds, account) => Math.max(seconds, account.elapsed_seconds), 0);
-  const canOpen = can('accounts.open') && table.active && !table.out_of_service;
+  const inService = table.active && !table.out_of_service;
+  const canOpen = can('accounts.open') && inService;
+  const canManage = can('restaurant.tables.manage') && table.active;
   // Solo se muestra la cuenta elegida si sigue abierta en esta mesa.
   const current = bill && open.some((account) => account.id === bill.account.id) ? bill : null;
   const account = current?.account ?? null;
@@ -130,6 +184,31 @@ export function TablePanel({
     account.state === 'open' &&
     (account.mode !== 'takeaway' || can('takeaway.manage'));
   const activeLines = current?.lines.filter((line) => line.state === 'active').length ?? 0;
+  // «Liberar mesa»: lo decide Go (releasable) y no debe haber productos nuevos sin guardar.
+  const releasable =
+    !!account && account.releasable && can('accounts.open') && localDraft.length === 0;
+  // Habilitar procede siempre; poner fuera de servicio solo en una mesa sin cuentas abiertas.
+  const serviceButton = canManage ? (
+    table.out_of_service ? (
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={blocked}
+        onClick={() => onService(false)}
+      >
+        <IconLabel icon="unlock">Habilitar</IconLabel>
+      </button>
+    ) : !occupied && accounts !== null ? (
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={blocked}
+        onClick={() => onService(true)}
+      >
+        <IconLabel icon="lock">Poner fuera de servicio</IconLabel>
+      </button>
+    ) : null
+  ) : null;
   // El estado se muestra en la etiqueta del encabezado; aquí, capacidad y tiempo abierta.
   const details = [`Mesa para ${table.seats}`];
   if (occupied) {
@@ -143,28 +222,59 @@ export function TablePanel({
           <h2>{table.name}</h2>
           <p className="muted">{details.join(' · ')}</p>
         </div>
-        <span className={`table-panel-state table-panel-state-${state}`}>{stateLabels[state]}</span>
+        <StateChip state={state} />
       </header>
       {accounts === null ? (
         <p className="muted table-panel-body">Consultando cuentas de la mesa…</p>
       ) : !occupied ? (
-        <div className="table-panel-body table-panel-free">
-          {table.out_of_service || !table.active ? (
-            <Notice>La mesa está fuera de servicio y no admite cuentas nuevas.</Notice>
-          ) : (
-            <p className="muted">Mesa libre. Abre una cuenta y captura sin llenar formularios.</p>
-          )}
-          {canOpen && (
-            <button
-              type="button"
-              className="primary-button table-panel-primary"
-              disabled={blocked}
-              onClick={onOpenAccount}
+        <>
+          <div className="table-panel-body table-panel-free">
+            {!inService && (
+              <Notice>La mesa está fuera de servicio y no admite cuentas nuevas.</Notice>
+            )}
+            <h3 className="table-panel-account">Sin cuenta abierta</h3>
+            <p className="muted table-panel-empty-lines">
+              {inService
+                ? 'La cuenta se abre al guardar el primer producto; si sales sin capturar, la mesa sigue libre.'
+                : 'Habilita la mesa para capturar en ella.'}
+            </p>
+          </div>
+          <footer className="table-panel-footer">
+            <EmptyTotals />
+            <div className="capture-primary-actions">
+              <button
+                type="button"
+                className="primary-button capture-send"
+                disabled={blocked || !canOpen}
+                onClick={onOpenAccount}
+              >
+                <IconLabel icon="edit">Capturar</IconLabel>
+              </button>
+              {can('payments.read') && can('payments.collect') && (
+                <button type="button" className="primary-button capture-checkout" disabled>
+                  <IconLabel icon="cash">Cobrar</IconLabel>
+                </button>
+              )}
+            </div>
+            <div
+              className="capture-secondary-actions"
+              role="group"
+              aria-label="Acciones de la cuenta"
             >
-              <IconLabel icon="plus">Abrir cuenta y capturar</IconLabel>
-            </button>
-          )}
-        </div>
+              {can('payments.read') && (
+                <button type="button" className="secondary-button" disabled>
+                  <IconLabel icon="receipt">Precuenta</IconLabel>
+                </button>
+              )}
+              {can('accounts.split') && (
+                <button type="button" className="secondary-button" disabled>
+                  <IconLabel icon="split">Dividir</IconLabel>
+                </button>
+              )}
+              {serviceButton}
+            </div>
+          </footer>
+        </>
       ) : (
         <>
           {(open.length > 1 || !current || canOpen) && (
@@ -258,6 +368,17 @@ export function TablePanel({
                     <IconLabel icon="split">Dividir</IconLabel>
                   </button>
                 )}
+                {releasable && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={blocked}
+                    onClick={() => onRelease(account)}
+                  >
+                    <IconLabel icon="unlock">Liberar mesa</IconLabel>
+                  </button>
+                )}
+                {serviceButton}
                 <MoreActions
                   actions={accountMoreActions(account, can, localDraft.length)}
                   disabled={blocked}

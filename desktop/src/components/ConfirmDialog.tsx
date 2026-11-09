@@ -142,6 +142,89 @@ export function ConfirmDialog({
   );
 }
 
+export interface DialogChoice {
+  label: string;
+  onSelect: () => void;
+}
+
+// Diálogo con varias opciones equivalentes y sin «Cancelar» (etapa 7.1, «Esta mesa ya tiene una
+// cuenta»): ninguna descarta nada y el operador debe elegir una. Mismo aspecto, foco atrapado y
+// botones de 56 px que ConfirmDialog; Escape no elige por el operador. La primera opción recibe
+// el foco y se destaca como principal.
+export function ChoiceDialog({
+  title,
+  message,
+  choices,
+  busy = false,
+}: {
+  title: string;
+  message: ReactNode;
+  choices: DialogChoice[];
+  busy?: boolean;
+}) {
+  const titleID = useId();
+  const messageID = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  const firstChoice = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    firstChoice.current?.focus();
+    return () => {
+      if (previous && previous.isConnected) {
+        previous.focus();
+      }
+    };
+  }, []);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key === 'Tab' && panel.current) {
+      trapFocus(event, panel.current);
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop">
+      <div
+        ref={panel}
+        className="dialog-panel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby={titleID}
+        aria-describedby={messageID}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="dialog-heading">
+          <Icon name="info" size={26} className="dialog-heading-icon" />
+          <h2 id={titleID}>{title}</h2>
+        </div>
+        <div id={messageID} className="dialog-message">
+          {message}
+        </div>
+        <div className="dialog-actions dialog-choices">
+          {choices.map((choice, index) => (
+            <button
+              key={choice.label}
+              ref={index === 0 ? firstChoice : undefined}
+              type="button"
+              className={`${index === 0 ? 'primary-button' : 'secondary-button'} dialog-button`}
+              disabled={busy}
+              onClick={choice.onSelect}
+            >
+              {choice.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Devuelve una función confirm() basada en promesas y el diálogo que la página debe renderizar.
 export function useConfirmDialog(): {
   confirm: (request: ConfirmRequest) => Promise<boolean>;

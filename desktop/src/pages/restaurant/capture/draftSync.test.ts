@@ -34,20 +34,54 @@ interface Deferred {
   reject: (problem: unknown) => void;
 }
 
+interface Creation {
+  body: { table_id: string; seen_account_ids: string[]; items: DraftItem[] };
+  resolve: (value: Bill) => void;
+  reject: (problem: unknown) => void;
+}
+
 function controlledTransport() {
   const calls: Deferred[] = [];
   const retries: Deferred[] = [];
+  const creations: Creation[] = [];
+  const saveTargets: string[] = [];
   const transport: DraftSyncTransport = {
-    save: (_accountID, body) =>
+    save: (accountID, body) =>
       new Promise<Bill>((resolve, reject) => {
+        saveTargets.push(accountID);
         calls.push({ body, resolve, reject });
+      }),
+    create: (body) =>
+      new Promise<Bill>((resolve, reject) => {
+        creations.push({ body, resolve, reject });
       }),
     retry: () =>
       new Promise<Bill>((resolve, reject) => {
-        retries.push({ body: calls.at(-1)!.body, resolve, reject });
+        retries.push({ body: calls.at(-1)?.body ?? { revision: 0, items: [] }, resolve, reject });
       }),
   };
-  return { transport, calls, retries };
+  return { transport, calls, retries, creations, saveTargets };
+}
+
+// Cuenta pendiente de una mesa sin cuenta (etapa 7.1) y la cuenta que Go crea con su borrador.
+function pendingBill(localID = 'pendiente:mesa') {
+  return {
+    account: { id: localID, revision: 0, state: 'open', table_id: 'mesa' },
+    draft: [],
+    lines: [],
+    server_time: '2026-11-08T12:00:00Z',
+    timezone: 'America/Monterrey',
+  } as unknown as Bill;
+}
+
+function createdBill(id: string, items: DraftItem[], revision = 1) {
+  return {
+    account: { id, revision, state: 'open', table_id: 'mesa' },
+    draft: items,
+    lines: [],
+    server_time: '2026-11-08T12:00:00Z',
+    timezone: 'America/Monterrey',
+  } as unknown as Bill;
 }
 
 // Respuesta de Go a un guardado: el borrador enviado con la revisión siguiente.
@@ -212,5 +246,121 @@ describe('sincronización del borrador de la captura', () => {
     expect(calls[1]!.body.items).toEqual([
       expect.objectContaining({ product_id: 'filete', quantity: 1 }),
     ]);
+  });
+});
+
+describe('cuenta creada con el primer producto (etapa 7.1)', () => {
+  it('el primer guardado crea la cuenta con su borrador y los siguientes usan PUT …/draft', async () => {
+    const { transport, calls, creations, saveTargets } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const created: string[] = [];
+    engine.onAccountCreated((localID, result) => created.push(`${localID}>${result.account.id}`));
+    engine.preparePending('pendiente:mesa', { tableID: 'mesa', seenAccountIDs: ['vista'] });
+    const pending = pendingBill();
+    engine.stage(pending, addLineOperation([], filete, newID));
+    engine.stage(pending, addLineOperation(engine.view('pendiente:mesa')!.items, filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    // Una sola creación, con antirrebote, la mesa, las cuentas vistas y el borrador completo.
+    expect(creations).toHaveLength(1);
+    expect(calls).toHaveLength(0);
+    expect(creations[0]!.body).toEqual({
+      table_id: 'mesa',
+      seen_account_ids: ['vista'],
+      items: [expect.objectContaining({ product_id: 'filete', quantity: 2 })],
+    });
+    // Un toque durante la creación se acumula sobre la cuenta pendiente.
+    engine.stage(pending, addLineOperation(engine.view('pendiente:mesa')!.items, filete, newID));
+    creations[0]!.resolve(createdBill('cuenta-real', creations[0]!.body.items));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created).toEqual(['pendiente:mesa>cuenta-real']);
+    expect(engine.resolve('pendiente:mesa')).toBe('cuenta-real');
+    expect(engine.isPending('pendiente:mesa')).toBe(false);
+    // El toque acumulado viaja con PUT …/draft a la cuenta real y su revisión (con su antirrebote).
+    await vi.advanceTimersByTimeAsync(700);
+    expect(calls).toHaveLength(1);
+    expect(saveTargets).toEqual(['cuenta-real']);
+    expect(calls[0]!.body.revision).toBe(1);
+    expect(calls[0]!.body.items[0]?.quantity).toBe(3);
+    expect(engine.view('pendiente:mesa')?.accountID).toBe('cuenta-real');
+  });
+
+  it('salir sin productos no crea nada; toques que se anulan tampoco', async () => {
+    const { transport, calls, creations } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    engine.preparePending('pendiente:mesa', { tableID: 'mesa', seenAccountIDs: [] });
+    expect(engine.discardPendingIfIdle('pendiente:mesa')).toBe(true);
+    engine.preparePending('pendiente:otra', { tableID: 'mesa', seenAccountIDs: [] });
+    const pending = pendingBill('pendiente:otra');
+    engine.stage(pending, addLineOperation([], filete, newID));
+    const line = engine.view('pendiente:otra')!.items[0]!;
+    engine.stage(pending, quantityOperation(line, -1, newID));
+    engine.flushNow('pendiente:otra');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(creations).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+    expect(engine.discardPendingIfIdle('pendiente:otra')).toBe(true);
+    expect(engine.view('pendiente:otra')).toBeNull();
+  });
+
+  it('TABLE_HAS_ACCOUNT detiene la creación y conserva los toques hasta decidir', async () => {
+    const { transport, calls, creations, saveTargets } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    engine.preparePending('pendiente:mesa', { tableID: 'mesa', seenAccountIDs: [] });
+    engine.stage(pendingBill(), addLineOperation([], filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    const other = { id: 'cuenta-ajena', folio: 12, name: 'Mesa 3' };
+    creations[0]!.reject(
+      new APIError('TABLE_HAS_ACCOUNT', 'Esta mesa ya tiene una cuenta.', 409, {
+        accounts: [other],
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.tableConflict()).toEqual({
+      localID: 'pendiente:mesa',
+      tableID: 'mesa',
+      accounts: [other],
+    });
+    expect(engine.view('pendiente:mesa')?.items).toHaveLength(1);
+    expect(engine.discardPendingIfIdle('pendiente:mesa')).toBe(false);
+    await expect(engine.settle('pendiente:mesa')).rejects.toThrow('ya tiene una cuenta');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(creations).toHaveLength(1);
+    // «Abrir una cuenta nueva»: se reenvía sabiendo de la cuenta informada.
+    engine.openNewAccount('pendiente:mesa');
+    expect(engine.tableConflict()).toBeNull();
+    expect(creations).toHaveLength(2);
+    expect(creations[1]!.body.seen_account_ids).toEqual(['cuenta-ajena']);
+    creations[1]!.reject(
+      new APIError('TABLE_HAS_ACCOUNT', 'Esta mesa ya tiene una cuenta.', 409, {
+        accounts: [{ id: 'cuenta-tercera', folio: 13, name: 'Mesa 3' }],
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    // «Agregar a esa cuenta»: los toques se aplican sobre su borrador vigente y su revisión.
+    const theirs: DraftItem = { ...filete, product_id: 'agua', id: newID() };
+    engine.addToAccount('pendiente:mesa', createdBill('cuenta-tercera', [theirs], 6));
+    expect(engine.resolve('pendiente:mesa')).toBe('cuenta-tercera');
+    expect(saveTargets).toEqual(['cuenta-tercera']);
+    expect(calls[0]!.body.revision).toBe(6);
+    expect(calls[0]!.body.items.map((item) => item.product_id)).toEqual(['agua', 'filete']);
+  });
+
+  it('una creación incierta se recupera con la misma operación y pasa a la cuenta real', async () => {
+    const { transport, creations, retries } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    engine.preparePending('pendiente:mesa', { tableID: 'mesa', seenAccountIDs: [] });
+    engine.stage(pendingBill(), addLineOperation([], filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    creations[0]!.reject(new APIError('CONNECTION_ERROR', 'Sin conexión'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.uncertainAccountID).toBe('pendiente:mesa');
+    expect(engine.discardPendingIfIdle('pendiente:mesa')).toBe(false);
+    const recovery = engine.recover();
+    expect(retries).toHaveLength(1);
+    retries[0]!.resolve(createdBill('cuenta-real', creations[0]!.body.items));
+    await recovery;
+    expect(engine.uncertain).toBe(false);
+    expect(engine.resolve('pendiente:mesa')).toBe('cuenta-real');
+    expect(engine.view('cuenta-real')?.pending).toBe(false);
   });
 });

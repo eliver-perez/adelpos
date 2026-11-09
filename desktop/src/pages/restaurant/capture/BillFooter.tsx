@@ -2,6 +2,7 @@ import { IconLabel } from '../../../components/Icon';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
 import { formatMoney } from '../../../services/money';
 import { paymentPendingKey } from '../../../services/payments';
+import { isPendingAccount } from '../../../services/restaurant';
 import type { Account, DraftItem, OrderQuote } from '../../../services/restaurant';
 import type { AccountAction } from '../AccountActions';
 import { adjustmentsAvailable } from '../adjustments/AccountAdjustments';
@@ -51,6 +52,10 @@ export function accountMoreActions(
   can: (permission: string) => boolean,
   localDraftItems: number,
 ): MoreAction<BillAction>[] {
+  // Una cuenta pendiente (etapa 7.1) aún no existe en Go: no tiene acciones propias.
+  if (isPendingAccount(account)) {
+    return [];
+  }
   const writable =
     account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
   return moreActions.filter(
@@ -61,7 +66,10 @@ export function accountMoreActions(
       (action.id !== 'void' ||
         (account.confirmed_quantity === 0 &&
           account.draft_quantity === 0 &&
-          localDraftItems === 0)),
+          localDraftItems === 0 &&
+          // Una cuenta de mesa vacía en sentido estricto se libera sin motivo con «Liberar mesa»
+          // desde el panel de la mesa.
+          !(account.releasable && !!account.table_id && can('accounts.open')))),
   );
 }
 
@@ -172,7 +180,7 @@ export function BillFooter({
   const secondary = {
     split: writable && can('accounts.split'),
     splitReady: activeLines > 0,
-    adjustments: adjustmentsAvailable(account, can),
+    adjustments: !isPendingAccount(account) && adjustmentsAvailable(account, can),
     precheck: can('payments.read'),
     precheckReady: account.confirmed_quantity > 0,
   };

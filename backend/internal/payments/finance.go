@@ -511,31 +511,21 @@ type Brief struct {
 	DeliveryState string `json:"delivery_state"`
 }
 
-// AccountBrief resume con una sola consulta el total, lo pagado y la entrega de una cuenta.
+// AccountBrief resume con una sola consulta el total, lo pagado y la entrega de una cuenta. Usa la
+// misma fórmula que los estados de mesa (AccountStandingSQL).
 func AccountBrief(ctx context.Context, tx pgx.Tx, accountID string) (*Brief, error) {
 	var units int
-	var itemsText, discountsText, chargesText, paidText, tipsText string
+	var totalText, paidText, tipsText string
 	var delivered bool
-	err := tx.QueryRow(ctx, `SELECT
-        (SELECT count(*) FROM app.restaurant_item_units WHERE account_id=$1 AND state='active'),
-        coalesce((SELECT sum(total) FROM app.restaurant_item_units WHERE account_id=$1 AND state='active'),0)::numeric(18,2)::text,
-        coalesce((SELECT sum(j.amount) FROM app.account_adjustments j WHERE j.account_id=$1 AND j.kind='discount' AND `+activeAdjustment+`),0)::numeric(18,2)::text,
-        coalesce((SELECT sum(j.amount) FROM app.account_adjustments j WHERE j.account_id=$1 AND j.kind='charge' AND `+activeAdjustment+`),0)::numeric(18,2)::text,
-        (coalesce((SELECT sum(amount) FROM app.payments WHERE account_id=$1),0)
-            - coalesce((SELECT sum(amount) FROM app.payment_refunds WHERE account_id=$1),0))::numeric(18,2)::text,
-        (coalesce((SELECT sum(tip) FROM app.payments WHERE account_id=$1),0)
-            - coalesce((SELECT sum(tip) FROM app.payment_refunds WHERE account_id=$1),0))::numeric(18,2)::text,
-        EXISTS(SELECT FROM app.takeaway_deliveries WHERE account_id=$1)`, accountID).Scan(
-		&units, &itemsText, &discountsText, &chargesText, &paidText, &tipsText, &delivered)
+	err := tx.QueryRow(ctx, `SELECT f.units,f.total::text,f.paid::text,f.tips::text,
+        EXISTS(SELECT FROM app.takeaway_deliveries WHERE account_id=$1)
+        FROM (`+AccountStandingSQL("$1")+`) f`, accountID).Scan(&units, &totalText, &paidText, &tipsText, &delivered)
 	if err != nil {
 		return nil, err
 	}
-	items := decimal.RequireFromString(itemsText)
-	discounts := decimal.RequireFromString(discountsText)
-	charges := decimal.RequireFromString(chargesText)
+	total := decimal.RequireFromString(totalText)
 	paid := decimal.RequireFromString(paidText)
 	tips := decimal.RequireFromString(tipsText)
-	total := items.Sub(discounts).Add(charges)
 	brief := &Brief{
 		Total: money(total), Paid: money(paid), Balance: money(total.Sub(paid)), Tips: money(tips),
 		PaymentState: paymentState(units > 0, total, paid), DeliveryState: "not_delivered",

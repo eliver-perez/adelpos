@@ -1,12 +1,54 @@
 package operations
 
-import "strings"
+import (
+	"strings"
 
-const tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
-    'account_count',(SELECT count(*) FROM app.restaurant_accounts a WHERE a.table_id=t.id AND a.state='open'),
+	"local/ad-el-pos/server/internal/payments"
+)
+
+// tableQuery entrega cada mesa con su ocupación calculada por Go en una sola consulta para todo el
+// mapa (etapa 7.1, sin consultas por mesa ni por cuenta desde la aplicación):
+//
+//   - out_of_service: mesa desactivada o fuera de servicio;
+//   - free: sin cuentas abiertas;
+//   - awaiting_payment: alguna cuenta tiene una precuenta impresa posterior a su último cambio de
+//     contenido (revisión de la cuenta, ajustes o sus cancelaciones) y le queda saldo; los pagos
+//     posteriores a la precuenta no la invalidan;
+//   - partial_payment: alguna cuenta tiene pagado neto mayor que cero y saldo pendiente;
+//   - occupied: cualquier otra cuenta abierta, también la que aún no tiene productos.
+//
+// Con varias cuentas gana el estado más avanzado (esperando pago > pago parcial > ocupada). El total,
+// lo pagado y el saldo salen de la fórmula única de payments (AccountStandingSQL).
+var tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
+    'account_count',occupancy.account_count,
+    'occupied_since',occupancy.occupied_since,
+    'occupied_seconds',occupancy.occupied_seconds,
+    'balance',occupancy.balance::text,
     'state',CASE WHEN NOT t.active OR t.out_of_service THEN 'out_of_service'
-        WHEN EXISTS(SELECT FROM app.restaurant_accounts a WHERE a.table_id=t.id AND a.state='open') THEN 'occupied'
-        ELSE 'free' END) FROM app.restaurant_tables t`
+        WHEN occupancy.account_count=0 THEN 'free'
+        WHEN occupancy.awaiting_payment THEN 'awaiting_payment'
+        WHEN occupancy.partial_payment THEN 'partial_payment'
+        ELSE 'occupied' END)
+    FROM app.restaurant_tables t
+    CROSS JOIN LATERAL (SELECT count(*)::integer AS account_count,
+        min(a.created_at) AS occupied_since,
+        greatest(0,coalesce(floor(extract(epoch FROM now()-min(a.created_at))),0))::bigint AS occupied_seconds,
+        coalesce(sum(f.balance),0)::numeric(18,2) AS balance,
+        coalesce(bool_or(f.balance>0 AND f.precheck_at IS NOT NULL
+            AND f.precheck_at>greatest(a.updated_at,f.adjusted_at)),false) AS awaiting_payment,
+        coalesce(bool_or(f.paid>0 AND f.balance>0),false) AS partial_payment
+        FROM app.restaurant_accounts a
+        CROSS JOIN LATERAL (` + payments.AccountStandingSQL("a.id") + `) f
+        WHERE a.table_id=t.id AND a.state='open') occupancy`
+
+// tableHasOpenAccounts rechaza poner fuera de servicio una mesa con cuentas abiertas (etapa 7.1).
+func tableHasOpenAccounts() error {
+	return &Error{
+		Status:  409,
+		Code:    "TABLE_HAS_OPEN_ACCOUNTS",
+		Message: "La mesa tiene cuentas abiertas. Cóbralas, muévelas o libéralas antes de ponerla fuera de servicio.",
+	}
+}
 
 func validateGeometry(table Table) error {
 	validPosition := table.X >= 0 && table.Y >= 0 && table.X+table.Width <= 1000 && table.Y+table.Height <= 560
@@ -38,6 +80,9 @@ func (handler *service) validateTableTarget(id *string) error {
 }
 
 func (handler *service) tables(parts []string) (any, error) {
+	if len(parts) == 3 && parts[2] == "service" {
+		return handler.tableService(parts[1])
+	}
 	if handler.request.Method == "GET" {
 		return readList[Table](handler.ctx, handler.tx, tableQuery+" ORDER BY t.area_id,t.name,t.id")
 	}
@@ -88,6 +133,11 @@ func (handler *service) tables(parts []string) (any, error) {
 		before = old
 		if !table.Active && old.AccountCount > 0 {
 			return nil, invalid("Mueve o resuelve las cuentas abiertas antes de desactivar la mesa.")
+		}
+		// Etapa 7.1: tampoco se pone fuera de servicio una mesa con cuentas abiertas. Una mesa que ya
+		// estaba fuera de servicio con cuentas (registros anteriores) puede seguir editándose.
+		if table.OutOfService && !old.OutOfService && old.AccountCount > 0 {
+			return nil, tableHasOpenAccounts()
 		}
 		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.restaurant_tables SET area_id=$1,name=$2,shape=$3,x=$4,y=$5,
             width=$6,height=$7,seats=$8,active=$9,out_of_service=$10,revision=revision+1,updated_at=now()

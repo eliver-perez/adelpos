@@ -189,6 +189,7 @@ export type Operation =
   | 'restaurant_open_account'
   | 'restaurant_save_area'
   | 'restaurant_save_table'
+  | 'restaurant_table_service'
   | 'restaurant_account'
   | 'restaurant_save_account'
   | 'restaurant_save_draft'
@@ -203,13 +204,17 @@ export type Operation =
   | 'restaurant_merge'
   | 'restaurant_move'
   | 'restaurant_assign'
-  | 'restaurant_void';
+  | 'restaurant_void'
+  | 'restaurant_release_account';
 
 export class APIError extends Error {
   constructor(
     public code: string,
     message: string,
     public status = 0,
+    // Datos públicos opcionales del rechazo (error.details de Go), por ejemplo las cuentas que otra
+    // terminal abrió en la mesa (TABLE_HAS_ACCOUNT, etapa 7.1).
+    public details: unknown = undefined,
   ) {
     super(message);
     this.name = 'APIError';
@@ -264,11 +269,14 @@ export async function api<T>(
     throw new APIError('CONNECTION_ERROR', message);
   }
   if (response.status >= 400) {
-    const body = response.body as { error?: { code?: string; message?: string } };
+    const body = response.body as {
+      error?: { code?: string; message?: string; details?: unknown };
+    };
     const error = new APIError(
       body.error?.code ?? 'API_ERROR',
       body.error?.message ?? 'No se pudo completar la operación.',
       response.status,
+      body.error?.details,
     );
     const invalidatesSession =
       error.code.startsWith('SESSION_') || error.code.startsWith('DEVICE_');

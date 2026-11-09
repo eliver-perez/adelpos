@@ -55,6 +55,9 @@ function table(id: string, area_id: string, name: string): RestaurantTable {
     revision: 1,
     account_count: 0,
     state: 'free',
+    occupied_since: null,
+    occupied_seconds: 0,
+    balance: '0.00',
   };
 }
 

@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { useConfirmDialog } from '../../components/ConfirmDialog';
+import { ChoiceDialog, useConfirmDialog } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { notifyError, notifySuccess } from '../../services/notify';
+import { accountLabel } from '../../services/restaurant';
+import type { Account, RestaurantTable } from '../../services/restaurant';
 import { uncertainError } from './capture/draftSync';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
@@ -82,10 +84,62 @@ export function OperationalPage({
     setActionReturn('capture');
   }
 
-  // Abrir una cuenta no muestra formulario (etapa 6.2): Mesas abre en la mesa elegida, Para llevar
-  // abre un pedido y Cuentas una cuenta sin mesa; las tres entran directo a la captura.
+  // Abrir una cuenta no muestra formulario (etapa 6.2). En Mesas (etapa 7.1) se entra a la
+  // captura sin crear la cuenta: Go la crea con el primer producto guardado. Para llevar y
+  // Cuentas («Cuenta sin mesa») siguen abriendo la cuenta al instante.
   function openAccount(mode: 'dine_in' | 'takeaway', table: string | null) {
+    if (mode === 'dine_in' && table) {
+      workspace.startPendingCapture(table);
+      return;
+    }
     void workspace.quickOpen(mode, table);
+  }
+
+  // «Liberar mesa» (etapa 7.1): una cuenta vacía se anula sin motivo después de confirmarlo.
+  async function releaseAccount(table: RestaurantTable, account: Account) {
+    // Con otras cuentas abiertas la mesa sigue ocupada: solo se libera esta cuenta.
+    const others =
+      workspace.accounts.data?.items.filter(
+        (entry) => entry.state === 'open' && entry.table_id === table.id && entry.id !== account.id,
+      ).length ?? 0;
+    const release = await confirm({
+      title: `¿Liberar ${table.name}?`,
+      message:
+        others > 0
+          ? `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se anulará; las demás cuentas de la mesa no cambian.`
+          : `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se anulará y la mesa quedará libre.`,
+      confirmLabel: 'Liberar mesa',
+      cancelLabel: 'Conservar la cuenta',
+    });
+    if (!release) {
+      return;
+    }
+    try {
+      await workspace.execute('restaurant_release_account', {
+        id: account.id,
+        body: { revision: account.revision },
+      });
+      notifySuccess(
+        others > 0 ? `${accountLabel(account)} liberada.` : `${table.name} quedó libre.`,
+      );
+    } catch (problem) {
+      workspace.reportError(problem, 'No se pudo liberar la mesa.');
+    }
+  }
+
+  // Fuera de servicio desde la operación (etapa 7.1); Go rechaza una mesa con cuentas abiertas.
+  async function changeTableService(table: RestaurantTable, outOfService: boolean) {
+    try {
+      await workspace.execute('restaurant_table_service', {
+        id: table.id,
+        body: { revision: table.revision, out_of_service: outOfService },
+      });
+      notifySuccess(
+        outOfService ? `${table.name} quedó fuera de servicio.` : `${table.name} quedó habilitada.`,
+      );
+    } catch (problem) {
+      workspace.reportError(problem, 'No se pudo cambiar el servicio de la mesa.');
+    }
   }
 
   function openCheckout(deliver: boolean) {
@@ -266,9 +320,38 @@ export function OperationalPage({
 
   // Estados persistentes del flujo (etapa 7.1): siguen en pantalla mientras duran. Los resultados
   // de las acciones se informan con avisos (services/notify).
+  const conflict = workspace.tableConflict;
+  const conflictTable = conflict
+    ? overview.data?.tables.find((table) => table.id === conflict.tableID)
+    : undefined;
   const banners = (
     <>
       {dialog}
+      {conflict && (
+        <ChoiceDialog
+          title="Esta mesa ya tiene una cuenta"
+          message={
+            <p>
+              Otra terminal abrió{' '}
+              {conflict.accounts.map((entry) => `la Cuenta #${entry.folio}`).join(' y ')}
+              {conflictTable ? ` en ${conflictTable.name}` : ''} mientras capturabas. Tus productos
+              se conservan en esta terminal: agrégalos a esa cuenta o abre una cuenta nueva en la
+              mesa.
+            </p>
+          }
+          busy={workspace.resolvingConflict}
+          choices={[
+            ...conflict.accounts.map((entry) => ({
+              label: `Agregar a la Cuenta #${entry.folio}`,
+              onSelect: () => void workspace.addPendingToAccount(conflict.localID, entry.id),
+            })),
+            {
+              label: 'Abrir una cuenta nueva',
+              onSelect: () => workspace.openPendingAnyway(conflict.localID),
+            },
+          ]}
+        />
+      )}
       {mutation.uncertain && (
         <div className="operation-recovery">
           <p>
@@ -439,6 +522,8 @@ export function OperationalPage({
               onOpenAccount={() => openAccount('dine_in', selectedTable.id)}
               onAction={(action) => openAccountAction(action, 'capture')}
               onCheckout={() => openCheckout(false)}
+              onRelease={(account) => void releaseAccount(selectedTable, account)}
+              onService={(outOfService) => void changeTableService(selectedTable, outOfService)}
             />
           )}
         </div>
