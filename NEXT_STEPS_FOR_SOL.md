@@ -2,14 +2,14 @@
 
 ## Estado actual
 
-Versión 0.6.0 y esquema 6. Etapas 1–3 conservadas: Go independiente, PostgreSQL exclusivo, Tauri, almacén seguro, configuración, usuarios/permisos/sesiones/terminales y catálogo decimal. La etapa 4 conserva áreas, mesas, cuentas, borradores, versiones y transferencias; la etapa 5 añade estaciones, rutas, liberaciones, preparación, documentos, cola/transportes de impresión y SSE autenticado. La etapa 6 añade el módulo `payments`: cobros totales, parciales, mixtos y por selección, efectivo y cambio, descuentos y cortesías con límite por rol, cargos generales, propinas, IVA incluido (16/8/0), devoluciones, correcciones, autorización puntual de supervisor, turno mínimo, precuentas, tickets y entrega de pedidos para llevar. Tauri inicia fullscreen nativo y utiliza un diseño fluido.
+Versión 0.6.1 y esquema 7. Etapas 1–3 conservadas: Go independiente, PostgreSQL exclusivo, Tauri, almacén seguro, configuración, usuarios/permisos/sesiones/terminales y catálogo decimal. La etapa 4 conserva áreas, mesas, cuentas, borradores, versiones y transferencias; la etapa 5 añade estaciones, rutas, liberaciones, preparación, documentos, cola/transportes de impresión y SSE autenticado. La etapa 6 añade el módulo `payments`: cobros totales, parciales, mixtos y por selección, efectivo y cambio, descuentos y cortesías con límite por rol, cargos generales, propinas, IVA incluido (16/8/0), devoluciones, correcciones, autorización puntual de supervisor, turno mínimo, precuentas, tickets y entrega de pedidos para llevar. Tauri inicia fullscreen nativo y utiliza un diseño fluido.
 
 Leer primero AGENTS.md, README.md, ARCHITECTURE.md, API_CONTRACTS.md, docs/CATALOG.md, docs/RESTAURANT_OPERATIONS.md, docs/KITCHEN_AND_PRINTING.md, docs/PAYMENTS_AND_REFUNDS.md y docs/VERIFICATION.md. La verificación anterior está archivada por etapa. No reiniciar ni reconstruir el proyecto.
 
 ## Reglas permanentes
 
 - Fuentes legibles, nombres descriptivos y comentarios de negocio en español. gofmt y Prettier obligatorios; revisar también lo que no expandan. Los artefactos generados se mantienen separados de los fuentes.
-- Migraciones 0001–0006 inmutables una vez aplicadas. La próxima ampliación requiere 0007. Respaldo y ensayo real de restauración antes de modificar datos existentes; nunca borrar .local para resolver un problema.
+- Migraciones 0001–0007 inmutables una vez aplicadas (0001–0006 ya están en la instalación real; la 0007 espera autorización). La próxima ampliación requiere 0008. Respaldo y ensayo real de restauración antes de modificar datos existentes; nunca borrar .local para resolver un problema.
 - `config/product.json` es canónico. Ejecutar sync y mantener lockfiles. No actualizar dependencias por inferencia de una nueva etapa.
 - admin/admin es la política inicial autorizada; no restablecer ni imponer cambio. sa permanece reservado al propietario mediante CLI local y no aparece en la administración normal.
 - Tokens duraderos solo en el almacén seguro nativo; no imprimirlos, versionarlos ni transportarlos al WebView. El OnceLock de Keychain es asíncrono: un consentimiento pendiente no significa credenciales vacías.

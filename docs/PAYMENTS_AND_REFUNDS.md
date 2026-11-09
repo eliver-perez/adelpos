@@ -1,6 +1,6 @@
 # Cobros, pagos, descuentos y devoluciones · Etapa 6
 
-Versión 0.6.0, esquema 6, con las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable. Este documento describe únicamente lo implementado y probado. La administración completa de caja y cortes pertenece a la etapa 7.
+Versión 0.6.1, esquema 7: etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable. Este documento describe únicamente lo implementado y probado. La administración completa de caja y cortes pertenece a la etapa 7.
 
 ## Autoridad y estructura
 

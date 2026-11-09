@@ -81,7 +81,7 @@ ad-el-pos/
 │   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, turno mínimo y tickets
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 a 0006; inmutables después de aplicarse
+│   └── migrations/             # 0001 a 0007; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad

@@ -307,7 +307,7 @@ Los tipos notifican cambios de restaurante/para llevar/configuración, liberaci�
 
 SSE se eligió como equivalente a WebSocket porque las acciones utilizan HTTP idempotente y las notificaciones son unidireccionales. Rust conserva tokens en Keychain y entrega frames a React con Channel. No existe WebSocket ni aplicación KDS independiente. La guía [KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md) detalla contratos KDS y límites de entrega física.
 
-## Cobros, pagos y devoluciones · esquema 6
+## Cobros, pagos y devoluciones · esquemas 6 y 7
 
 Prefijo `/api/v1/payments`. Todas las rutas requieren sesión y terminal vigentes; las rutas de cuenta exigen además `accounts.read` y, para pedidos para llevar, `takeaway.read`. Las escrituras llevan `operation_id` UUID y son idempotentes por actor, terminal, ruta y cuerpo; la huella excluye `authorization.password`. El dinero viaja como cadena decimal con hasta dos decimales. Las previsualizaciones (`preview`) solo calculan. Reglas completas en [PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md).
 

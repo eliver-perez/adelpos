@@ -79,3 +79,13 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 - La autorización de supervisor es puntual: valida usuario y contraseña con el límite de intentos del inicio de sesión, no crea sesión, rechaza la autoautorización y nunca se conserva en React (el almacén de operaciones pendientes descarta la contraseña).
 - Cobrar exige turno abierto en la caja de la terminal. El cierre, arqueo y conciliación de turno pertenecen a la etapa 7: no presentar `expected_cash` como arqueo.
 - Precuentas y tickets de pago son documentos comerciales: viven en la cola de impresión con `kind` `precheck`/`receipt`, no aparecen entre las comandas, no constituyen CFDI y un fallo de impresión nunca revierte un pago.
+
+## Reglas permanentes desde etapa 6.1
+
+- La 0007 es inmutable en cuanto se aplique; la siguiente ampliación requiere 0008. Un CHECK que evalúa a NULL se acepta en PostgreSQL: las restricciones con columnas opcionales deben exigir `IS NOT NULL` explícito en la rama que valida datos.
+- Nunca usar `window.confirm`, `window.alert` ni `window.prompt`: el WebView nativo de macOS no los muestra. Usar `components/ConfirmDialog.tsx` o formularios dentro de la pantalla.
+- Campos numéricos con `services/numericInput.ts` (importes 2 decimales, cantidades 3, enteros solo dígitos) o el teclado de cobro; nunca `type="number"`. Fechas opcionales con `OptionalDateField` (el control nativo de WebKit muestra la fecha de hoy con el valor vacío).
+- Orden visual por posiciones (`position: {after}`) con `internal/ordering`; no volver a capturar números de orden. Colores de categoría solo de la paleta de Go.
+- Funciones activables: registrar la función en `internal/features`, hacerla cumplir en Go aunque la interfaz la oculte y no borrar ni alterar registros al desactivarla. El pago en dólares (`usd_cash`) está desactivado por defecto; con él desactivado el cobro es idéntico al de la etapa 6.
+- IVA por producto: NULL hereda la tasa general; cada versión confirmada guarda la tasa efectiva. Dólares: solo efectivo, tipo de cambio fijo por turno, conversiones redondeadas a centavos en Go y devoluciones solo en pesos.
+- Captura táctil: un solo flujo de pedidos (borrador persistido + confirmación con huella). El borrador se sincroniza con antirrebote y una sola petición en vuelo; no crear una petición por toque ni un segundo flujo.

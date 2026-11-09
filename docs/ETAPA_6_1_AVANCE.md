@@ -151,3 +151,23 @@ Verificación en la copia aislada (clúster temporal 55499, Go temporal 8183), t
 Ajuste en la revisión antes del commit: «Cobrar», «Dividir» y «Precuenta» se ocultaban mientras la cuenta solo tenía productos nuevos, lo que movía la distribución al enviar a cocina. Ahora permanecen en su lugar mientras el usuario tenga el permiso y se desactivan hasta que haya productos enviados (como «Enviar a cocina» sin productos nuevos). El recorrido de Playwright comprueba «Cobrar» desactivado en un pedido para llevar vacío.
 
 Verificación independiente antes del commit (copia aislada): formato, metadatos y `go vet` aprobados; `go test -race` aprobado; Vitest 132 pruebas en 23 archivos; `tsc`, build y `cargo test` correctos; integración PostgreSQL de `database`, `administration`, `catalog`, `operations` y `payments` aprobada; Playwright aprobado en Chromium y WebKit.
+
+## Fase E · Regresiones, documentación y entrega
+
+- Versión **0.6.1** y esquema **7** en `config/product.json`, sincronizados con `./scripts/dev.sh sync` (metadatos de Go, Tauri, `package.json`, `Cargo.toml`) y en la entrada raíz de `Cargo.lock`. El `package-lock.json` raíz sigue con la versión 0.4.0 heredada (limitación conocida, sin efecto funcional).
+- Regresión final sobre el árbol completo (copia aislada): formato y metadatos, `go vet`, `go test -race` en todos los paquetes, integración PostgreSQL de los cinco paquetes, Vitest 132 pruebas en 23 archivos, `tsc`, build, `cargo test` (12 aprobadas, 1 ignorada), Playwright Chromium y WebKit, y `tauri build --bundles app` en un destino temporal (`AD-EL POS.app` 0.6.1, 9.45 MiB, sin reemplazar el `.app` 0.6.0 del proyecto). Detalle en [VERIFICATION.md](VERIFICATION.md); la evidencia de la etapa 6 quedó en [VERIFICATION_STAGE6.md](VERIFICATION_STAGE6.md).
+- Documentación actualizada: `CLAUDE.md`, `AGENTS.md` (reglas permanentes desde la etapa 6.1), `README.md`, `ARCHITECTURE.md`, `API_CONTRACTS.md`, `NEXT_STEPS_FOR_SOL.md`, `DEVELOPMENT_MACOS.md`, `docs/CATALOG.md`, `docs/RESTAURANT_OPERATIONS.md`, `docs/KITCHEN_AND_PRINTING.md` y `docs/PAYMENTS_AND_REFUNDS.md`.
+
+### Procedimiento para aplicar la 0007 a la instalación real (en espera de autorización)
+
+La instalación real sigue en 0.6.0 con esquema 6. No ejecutar `build-macos` ni reiniciar el servidor con 0.6.1 antes de migrar: reportaría `schema: incompatible` y las rutas nuevas fallarían.
+
+1. Cerrar la aplicación y confirmar que no hay cobros en curso. Una cuenta abierta o un turno abierto no impiden migrar; la 0007 solo agrega tablas, columnas y restricciones.
+2. `./scripts/dev.sh backup` y `python3 scripts/restore-check.py backups/<respaldo>.dump` (conteos idénticos en una base temporal).
+3. `./scripts/dev.sh server-stop`.
+4. `./scripts/dev.sh migrate`: esperado `applied:1`; repetirlo debe dar `applied:0`.
+5. `./scripts/dev.sh server-start`: readiness 200, PostgreSQL disponible y esquema compatible; versión 0.6.1.
+6. Comprobación de solo lectura: migraciones 1–7, `usd_cash` desactivada, productos con `tax_rate` NULL (heredan la general), rango del dólar 10–40 con alerta de 10 %, los dos permisos nuevos solo en el rol administrador, ningún pago ni movimiento alterado.
+7. `./scripts/dev.sh build-macos` y `./scripts/dev.sh open-app`.
+
+Si algo falla antes del paso 5, el respaldo del paso 2 permite volver al estado anterior; restaurarlo también requiere autorización.
