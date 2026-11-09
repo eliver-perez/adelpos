@@ -32,6 +32,12 @@ type DocumentPayment struct {
 	Reference string  `json:"reference"`
 	Received  *string `json:"received"`
 	Change    string  `json:"change"`
+	// Efectivo con dólares: pesos y dólares recibidos, tipo de cambio y moneda del cambio.
+	ReceivedMXN    *string `json:"received_mxn"`
+	ReceivedUSD    *string `json:"received_usd"`
+	USDRate        *string `json:"usd_rate"`
+	ChangeCurrency *string `json:"change_currency"`
+	ChangeUSD      *string `json:"change_usd"`
 }
 
 // CommercialDocument es la información de una precuenta o ticket. No es un CFDI.
@@ -104,7 +110,8 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 	for _, record := range finance.Payments {
 		item := DocumentPayment{
 			Method: record.MethodName, Amount: record.Amount, Tip: record.Tip, Reference: record.Reference,
-			Received: record.Received, Change: record.Change,
+			Received: record.Received, Change: record.Change, ReceivedMXN: record.ReceivedMXN, ReceivedUSD: record.ReceivedUSD,
+			USDRate: record.USDRate, ChangeCurrency: record.ChangeCurrency, ChangeUSD: record.ChangeUSD,
 		}
 		document.Payments = append(document.Payments, item)
 		if payment != nil && record.ID == payment.ID {
@@ -188,7 +195,9 @@ func renderDocument(document *CommercialDocument, width int) string {
 		if document.Payment.Reference != "" {
 			add(fit("   Ref. "+document.Payment.Reference, width)...)
 		}
-		if document.Payment.Received != nil {
+		if document.Payment.ReceivedUSD != nil {
+			add(cashWithDollars(*document.Payment, width)...)
+		} else if document.Payment.Received != nil {
 			add(row("   Efectivo recibido", "$"+*document.Payment.Received, width)...)
 			add(row("   Cambio", "$"+document.Payment.Change, width)...)
 		}
@@ -213,6 +222,25 @@ func renderDocument(document *CommercialDocument, width int) string {
 	add(divider)
 	add(fit("Documento comercial. No es un comprobante fiscal (CFDI).", width)...)
 	return strings.Join(lines, "\n")
+}
+
+// cashWithDollars detalla un efectivo con dólares: lo recibido en cada moneda, el tipo de cambio
+// del turno, el total en pesos y el cambio con la moneda en que se entregó.
+func cashWithDollars(payment DocumentPayment, width int) []string {
+	lines := []string{}
+	lines = append(lines, row("   Pesos recibidos", "$"+*payment.ReceivedMXN, width)...)
+	lines = append(lines, row("   Dólares recibidos", "US$"+*payment.ReceivedUSD, width)...)
+	lines = append(lines, row("   Tipo de cambio", "$"+*payment.USDRate+"/US$", width)...)
+	if payment.Received != nil {
+		lines = append(lines, row("   Total recibido", "$"+*payment.Received, width)...)
+	}
+	if payment.ChangeCurrency != nil && *payment.ChangeCurrency == currencyUSD && payment.ChangeUSD != nil {
+		lines = append(lines, row("   Cambio en dólares", "US$"+*payment.ChangeUSD, width)...)
+		lines = append(lines, row("   Equivale a", "$"+payment.Change, width)...)
+	} else {
+		lines = append(lines, row("   Cambio en pesos", "$"+payment.Change, width)...)
+	}
+	return lines
 }
 
 func paperWidth(columns int) int {

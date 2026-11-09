@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { usePaymentPreview } from '../../../hooks/usePaymentPreview';
 import { APIError } from '../../../services/api';
-import { formatMoney, refreshCodes, shiftCodes } from '../../../services/payments';
+import { formatDollars, formatMoney, refreshCodes, shiftCodes } from '../../../services/payments';
 import type {
   Finance,
   PaymentInput,
@@ -30,6 +30,21 @@ const cashQuickAmounts = [
   { label: '$1000', value: '1000' },
 ];
 
+// Billetes de dólar frecuentes para los dólares recibidos (cadenas fijas, sin conversión).
+const dollarQuickAmounts = [
+  { label: 'US$5', value: '5' },
+  { label: 'US$10', value: '10' },
+  { label: 'US$20', value: '20' },
+  { label: 'US$50', value: '50' },
+  { label: 'US$100', value: '100' },
+];
+
+// Estado del pago en dólares para el cobro: función activa y tipo de cambio del turno.
+export interface DollarState {
+  enabled: boolean;
+  rate: string | null;
+}
+
 export interface CollectPermissions {
   collect: boolean;
   partial: boolean;
@@ -52,6 +67,7 @@ export function useCollectFlow({
   initialDeliver,
   reloadFinance,
   reloadShift,
+  dollarState = { enabled: false, rate: null },
 }: {
   accountID: string;
   finance: Finance | null;
@@ -64,6 +80,7 @@ export function useCollectFlow({
   initialDeliver: boolean;
   reloadFinance: () => Promise<void>;
   reloadShift: () => Promise<void>;
+  dollarState?: DollarState;
 }) {
   const [capture, setCapture] = useState<CaptureState>(() => initialCapture(initialDeliver));
   const [lastResult, setLastResult] = useState<PaymentResult | null>(null);
@@ -80,11 +97,16 @@ export function useCollectFlow({
   // La entrega solo aplica a pedidos para llevar aún no entregados.
   const deliverAvailable = permissions.deliver && finance?.mode === 'takeaway' && !finance.delivery;
   const deliverEnabled = deliverAvailable && capture.deliver;
+  // Los dólares solo se capturan en efectivo, con la función activa y el turno con tipo de cambio.
+  const dollars = dollarState.enabled && !!dollarState.rate && !!method?.is_cash;
+  const dollarCapture: CaptureState = dollars
+    ? effectiveCapture
+    : { ...effectiveCapture, receivedUSD: '', changeCurrency: 'MXN' };
 
   let previewInput: PaymentInput | null = null;
   if (enabled && finance && permissions.collect && collectable) {
     if (method) {
-      previewInput = buildPaymentInput(effectiveCapture, method, finance, permissions);
+      previewInput = buildPaymentInput(dollarCapture, method, finance, permissions, dollars);
     } else if (permissions.selection) {
       // Antes de elegir método, Go calcula igualmente el total de la selección.
       const selections = selectionList(capture.selections, finance);
@@ -148,6 +170,9 @@ export function useCollectFlow({
     setConflict(false);
   }
 
+  // Con dólares, Go entrega la vista previa aunque el efectivo no alcance para mostrar lo que
+  // falta en ambas monedas; en ese caso todavía no se puede registrar.
+  const dollarsMissing = !!plan?.usd && !plan.usd.covered;
   const canRegister =
     enabled &&
     permissions.collect &&
@@ -155,6 +180,7 @@ export function useCollectFlow({
     shiftUsable &&
     !!method &&
     !!plan &&
+    !dollarsMissing &&
     !preview.validating &&
     !locked;
 
@@ -198,12 +224,20 @@ export function useCollectFlow({
     hint = preview.error.message;
   } else if (method && mode === 'partial' && !previewInput) {
     hint = 'Captura el importe del abono.';
+  } else if (plan?.usd && dollarsMissing) {
+    hint = `El efectivo recibido no alcanza: faltan ${formatMoney(plan.usd.missing_mxn)} o ${formatDollars(plan.usd.missing_usd)}.`;
   }
 
   const selectionTotal = plan?.selection_total ?? null;
   let quickAmounts: { label: string; value: string }[] = [];
   if (capture.target === 'received') {
-    quickAmounts = cashQuickAmounts;
+    // Con dólares capturados, un campo de pesos vacío significa cero pesos, no importe exacto.
+    quickAmounts =
+      dollars && capture.receivedUSD !== ''
+        ? [{ label: 'Sin pesos', value: '' }, ...cashQuickAmounts.slice(1)]
+        : cashQuickAmounts;
+  } else if (capture.target === 'received_usd' && dollars) {
+    quickAmounts = dollarQuickAmounts;
   } else if (capture.target === 'amount' && mode === 'partial' && finance) {
     const target = selectionTotal ?? (plan ? plan.target : finance.balance);
     quickAmounts = [{ label: `Saldo ${formatMoney(target)}`, value: target }];
@@ -212,6 +246,9 @@ export function useCollectFlow({
   return {
     capture,
     effectiveCapture,
+    dollars,
+    // El tipo de cambio del turno se muestra con la función activa aunque aún no se elija método.
+    dollarRate: dollarState.enabled ? dollarState.rate : null,
     method,
     mode,
     collectable,

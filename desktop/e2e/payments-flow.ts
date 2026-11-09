@@ -2,12 +2,29 @@ import { expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
 // Recorridos de cobro de la etapa 6 contra Go y PostgreSQL reales. Todas las cifras que se
-// verifican provienen de Go; la interfaz solo las muestra.
+// verifican provienen de Go; la interfaz solo las muestra. Desde la etapa 6.1 (fase C) el
+// recorrido activa el pago en dólares, captura el tipo de cambio al abrir el turno y registra un
+// cobro en efectivo con pesos y dólares.
 
 async function typeOnKeypad(keypad: Locator, digits: string) {
   for (const digit of digits) {
-    await keypad.getByRole('button', { name: digit, exact: true }).click();
+    const name = digit === '.' ? 'Punto decimal' : digit;
+    await keypad.getByRole('button', { name, exact: true }).click();
   }
+}
+
+// Activa el pago en dólares en Configuración → Funciones del establecimiento antes de abrir el
+// turno. El interruptor es un botón con aria-pressed, sin casillas.
+export async function enableUSDCash(page: Page) {
+  await page.getByRole('button', { name: 'Configuración', exact: true }).click();
+  const features = page.getByRole('region', { name: 'Funciones del establecimiento' });
+  const toggle = features.getByRole('button', { name: 'Pago en dólares en efectivo', exact: true });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(features).toContainText('tipo de cambio');
+  await expect(features.locator('input[type="checkbox"]')).toHaveCount(0);
+  await toggle.click();
+  await expect(features.getByText('Pago en dólares en efectivo: activada.')).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 }
 
 function checkoutStatus(page: Page) {
@@ -40,7 +57,18 @@ export async function checkDineInPayment(page: Page) {
     '500',
   );
   await expect(shift.getByLabel('Fondo inicial', { exact: true })).toHaveValue('500');
-  await shift.getByRole('button', { name: 'Abrir turno con fondo de $500', exact: true }).click();
+  // Con el pago en dólares activo, el tipo de cambio fijo del turno se captura al abrirlo.
+  await shift.getByLabel('Tipo de cambio del dólar', { exact: true }).click();
+  await typeOnKeypad(
+    shift.getByRole('group', { name: 'Teclado numérico del tipo de cambio' }),
+    '18.50',
+  );
+  await expect(shift.getByLabel('Tipo de cambio del dólar', { exact: true })).toHaveValue('18.50');
+  await expect(shift.getByLabel('Fondo inicial', { exact: true })).toHaveValue('500');
+  await shift
+    .getByRole('button', { name: 'Abrir turno con fondo de $500 y dólar a $18.50', exact: true })
+    .click();
+  await expect(page.locator('[aria-label="Pago en dólares"]')).toContainText('$18.50 por dólar');
 
   // Abono de $100 en efectivo con $200 recibidos: Go calcula $100 de cambio.
   await page
@@ -58,12 +86,14 @@ export async function checkDineInPayment(page: Page) {
   await page.getByLabel('Importe del abono', { exact: true }).click();
   await typeOnKeypad(keypad, '100');
   await expect(page.getByLabel('Importe del abono', { exact: true })).toHaveValue('100');
-  await page.getByLabel('Efectivo recibido', { exact: true }).click();
+  await page.getByLabel('Pesos recibidos', { exact: true }).click();
   await page
     .getByRole('group', { name: 'Importes rápidos' })
     .getByRole('button', { name: '$200', exact: true })
     .click();
+  // El cambio se informa en ambas monedas y se destaca la moneda en que se entrega (pesos).
   await expect(page.locator('.checkout-figure-emphasis')).toContainText('$100.00');
+  await expect(page.locator('.checkout-figure-emphasis')).toContainText('En dólares: US$5.41');
   const print = page.getByRole('button', { name: 'Imprimir ticket', exact: true });
   await expect(print).toHaveAttribute('aria-pressed', 'true');
   const register = page.locator('.checkout-register');
@@ -139,14 +169,37 @@ export async function checkTakeawayDelivery(page: Page) {
     .getByRole('group', { name: 'Métodos de pago disponibles' })
     .getByRole('button', { name: 'Efectivo', exact: true })
     .click();
-  await page
-    .getByRole('group', { name: 'Importes rápidos' })
-    .getByRole('button', { name: 'Exacto', exact: true })
-    .click();
+  // Cobro en efectivo con pesos y dólares a $18.50: $100 + US$5 ($92.50) = $192.50 recibidos.
+  const dollars = page.locator('[aria-label="Pago en dólares"]');
+  await expect(dollars).toContainText('$18.50 por dólar');
+  await expect(dollars).toContainText('equivale a US$8.11');
+  const keypad = page.getByRole('group', { name: 'Teclado numérico de cobro' });
+  await page.getByLabel('Pesos recibidos', { exact: true }).click();
+  await typeOnKeypad(keypad, '100');
+  await page.getByLabel('Dólares recibidos', { exact: true }).click();
+  await typeOnKeypad(keypad, '5');
+  await expect(page.getByLabel('Pesos recibidos', { exact: true })).toHaveValue('100');
+  await expect(page.getByLabel('Dólares recibidos', { exact: true })).toHaveValue('5');
+  await expect(dollars).toContainText('total $192.50');
+  const change = page.locator('.checkout-figures .checkout-figure-emphasis');
+  await expect(change).toContainText('Cambio en pesos');
+  await expect(change).toContainText('$42.50');
+  await expect(change).toContainText('En dólares: US$2.30');
+  const changeIn = page.getByRole('group', { name: 'Cambio entregado en' });
+  await expect(changeIn.getByRole('button', { name: 'Pesos', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await changeIn.getByRole('button', { name: 'Dólares', exact: true }).click();
+  await expect(change).toContainText('Cambio en dólares');
+  await expect(change).toContainText('US$2.30');
+  await expect(change).toContainText('En pesos: $42.50');
   const register = page.locator('.checkout-register');
   await expect(register).toHaveText(/Registrar \$150\.00 · Efectivo/);
   await register.click();
   await expect(page.getByText('Pago registrado: $150.00 con Efectivo')).toBeVisible();
+  await expect(page.getByText('Entrega cambio US$2.30 (equivale a $42.50)')).toBeVisible();
+  await expect(page.getByText(/Recibido \$100\.00 y US\$5\.00/)).toBeVisible();
   await expect(page.getByText('Entrega realizada.').first()).toBeVisible();
   await page.getByRole('button', { name: 'Volver a la cuenta', exact: true }).first().click();
 }

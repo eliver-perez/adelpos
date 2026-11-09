@@ -57,6 +57,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "permissions" => Some((Method::GET, "permissions")),
         "settings" => Some((Method::GET, "settings")),
         "save_settings" => Some((Method::PUT, "settings")),
+        "settings_features" => Some((Method::GET, "settings/features")),
+        "save_settings_feature" => Some((Method::PUT, "settings/features")),
         "registers" => Some((Method::GET, "registers")),
         "create_register" => Some((Method::POST, "registers")),
         "devices" => Some((Method::GET, "devices")),
@@ -93,6 +95,7 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_create_method" => Some((Method::POST, "payments/methods")),
         "payments_current_shift" => Some((Method::GET, "payments/shifts/current")),
         "payments_open_shift" => Some((Method::POST, "payments/shifts")),
+        "payments_save_usd_settings" => Some((Method::PUT, "payments/settings/usd")),
         "restaurant_overview" => Some((Method::GET, "restaurant/overview")),
         "restaurant_areas" => Some((Method::GET, "restaurant/areas")),
         "restaurant_create_area" => Some((Method::POST, "restaurant/areas")),
@@ -226,6 +229,10 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_shift_movements" => (
             Method::GET,
             format!("payments/shifts/{identifier}/movements"),
+        ),
+        "payments_shift_usd_rate" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/usd-rate"),
         ),
         "payments_account" => (Method::GET, format!("payments/accounts/{identifier}")),
         "payments_preview" => (
@@ -493,6 +500,33 @@ mod tests {
         assert!(route("payments_pay", Some("../../users")).is_err());
         assert!(route("payments_pay", None).is_err());
         assert!(route("payments_delete", Some(identifier)).is_err());
+    }
+
+    #[test]
+    fn feature_and_usd_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("settings_features", None).unwrap(),
+            (Method::GET, "settings/features".to_string())
+        );
+        assert_eq!(
+            route("save_settings_feature", None).unwrap(),
+            (Method::PUT, "settings/features".to_string())
+        );
+        assert_eq!(
+            route("payments_save_usd_settings", None).unwrap(),
+            (Method::PUT, "payments/settings/usd".to_string())
+        );
+        assert_eq!(
+            route("payments_shift_usd_rate", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("payments/shifts/{identifier}/usd-rate")
+            )
+        );
+        assert!(route("payments_shift_usd_rate", Some("../../settings")).is_err());
+        assert!(route("payments_shift_usd_rate", None).is_err());
+        assert!(route("save_settings_feature_usd_cash", None).is_err());
     }
 
     #[test]

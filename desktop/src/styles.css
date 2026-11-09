@@ -2812,3 +2812,90 @@ summary {
   overflow-y: auto;
   resize: none;
 }
+
+/* Funciones del establecimiento: un interruptor por función con su explicación. */
+.feature-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.feature-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.feature-row .toggle-button {
+  justify-content: flex-start;
+  min-height: 52px;
+  font-size: 14px;
+  text-align: left;
+}
+.feature-text p {
+  margin: 0 0 6px;
+}
+.feature-state-on {
+  color: var(--accent);
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .feature-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Pago en dólares en el cobro y en la apertura de turno. */
+.checkout-usd {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.checkout-usd-rate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 13px;
+}
+.checkout-usd-rate strong {
+  font-size: 15px;
+}
+.checkout-usd-equivalent {
+  color: var(--muted);
+  font-size: 13px;
+}
+.checkout-usd-missing {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* La tasa de IVA del producto ocupa toda la fila: cuatro botones de una lista cerrada. */
+.product-tax-field {
+  grid-column: 1 / -1;
+}
+.product-tax-field .segmented-control {
+  flex-wrap: wrap;
+}
+.product-tax-field .segmented-control button {
+  flex: 1 1 120px;
+}
+
+/* Segunda línea de una cifra del cobro: el cambio en la otra moneda. */
+.checkout-figure-detail {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}

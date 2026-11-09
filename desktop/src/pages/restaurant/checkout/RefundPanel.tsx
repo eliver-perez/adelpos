@@ -160,6 +160,10 @@ export function RefundPanel({
           {method &&
             !method.is_cash &&
             ' Registra solo una devolución ya confirmada fuera del sistema; AD-EL POS no procesa reembolsos bancarios.'}
+          {method &&
+            method.is_cash &&
+            finance.payments.some((payment) => !!payment.received_usd) &&
+            ' Las devoluciones se entregan en pesos, aunque el pago se haya recibido en dólares.'}
         </p>
         {method && method.reference_mode !== 'none' && (
           <Field

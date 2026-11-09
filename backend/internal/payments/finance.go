@@ -148,15 +148,21 @@ func readAdjustments(ctx context.Context, tx pgx.Tx, accountID string) ([]Adjust
 }
 
 type PaymentRecord struct {
-	ID                string    `json:"id"`
-	Kind              string    `json:"kind"`
-	MethodID          string    `json:"method_id"`
-	MethodName        string    `json:"method_name"`
-	IsCash            bool      `json:"is_cash"`
-	Amount            string    `json:"amount"`
-	Tip               string    `json:"tip"`
-	Received          *string   `json:"received"`
-	Change            string    `json:"change"`
+	ID         string  `json:"id"`
+	Kind       string  `json:"kind"`
+	MethodID   string  `json:"method_id"`
+	MethodName string  `json:"method_name"`
+	IsCash     bool    `json:"is_cash"`
+	Amount     string  `json:"amount"`
+	Tip        string  `json:"tip"`
+	Received   *string `json:"received"`
+	Change     string  `json:"change"`
+	// Columnas por moneda de un efectivo con dólares; nil en pagos solo en pesos.
+	ReceivedMXN       *string   `json:"received_mxn"`
+	ReceivedUSD       *string   `json:"received_usd"`
+	USDRate           *string   `json:"usd_rate"`
+	ChangeCurrency    *string   `json:"change_currency"`
+	ChangeUSD         *string   `json:"change_usd"`
 	Reference         string    `json:"reference"`
 	CorrectsPaymentID *string   `json:"corrects_payment_id"`
 	RefundedAmount    string    `json:"refunded_amount"`
@@ -172,7 +178,8 @@ type PaymentRecord struct {
 
 func readPayments(ctx context.Context, tx pgx.Tx, accountID string) ([]PaymentRecord, error) {
 	rows, err := tx.Query(ctx, `SELECT p.id,p.kind,p.method_id,p.method_name,p.is_cash,p.amount::text,p.tip::text,p.received::text,
-        p.change_given::text,p.reference,p.corrects_payment_id,
+        p.change_given::text,p.received_mxn::text,p.received_usd::text,p.usd_rate::text,p.change_currency,p.change_usd::text,
+        p.reference,p.corrects_payment_id,
         coalesce((SELECT sum(r.amount) FROM app.payment_refunds r WHERE r.payment_id=p.id),0)::numeric(18,2)::text,
         coalesce((SELECT sum(r.tip) FROM app.payment_refunds r WHERE r.payment_id=p.id),0)::numeric(18,2)::text,
         EXISTS(SELECT FROM app.payment_refunds r WHERE r.payment_id=p.id AND r.kind='correction'),
@@ -189,7 +196,8 @@ func readPayments(ctx context.Context, tx pgx.Tx, accountID string) ([]PaymentRe
 	for rows.Next() {
 		var item PaymentRecord
 		if err := rows.Scan(&item.ID, &item.Kind, &item.MethodID, &item.MethodName, &item.IsCash, &item.Amount, &item.Tip, &item.Received,
-			&item.Change, &item.Reference, &item.CorrectsPaymentID, &item.RefundedAmount, &item.RefundedTip, &item.Corrected,
+			&item.Change, &item.ReceivedMXN, &item.ReceivedUSD, &item.USDRate, &item.ChangeCurrency, &item.ChangeUSD,
+			&item.Reference, &item.CorrectsPaymentID, &item.RefundedAmount, &item.RefundedTip, &item.Corrected,
 			&item.ShiftID, &item.RegisterName, &item.ActorName, &item.DeviceName, &item.CreatedAt, &item.UnitIDs); err != nil {
 			return nil, err
 		}
@@ -536,4 +544,32 @@ func AccountBrief(ctx context.Context, tx pgx.Tx, accountID string) (*Brief, err
 		brief.DeliveryState = "delivered"
 	}
 	return brief, nil
+}
+
+// physicalEffect devuelve lo que un pago en efectivo movió por moneda en el cajón. nil si el pago
+// no fue en efectivo. Un pago solo en pesos movió lo recibido y su cambio.
+func (payment PaymentRecord) physicalEffect() *cashPhysical {
+	if !payment.IsCash {
+		return nil
+	}
+	if payment.ReceivedUSD == nil {
+		charged := decimal.RequireFromString(payment.Amount).Add(decimal.RequireFromString(payment.Tip))
+		received := charged
+		if payment.Received != nil {
+			received = decimal.RequireFromString(*payment.Received)
+		}
+		return &cashPhysical{mxnIn: received, mxnOut: decimal.RequireFromString(payment.Change)}
+	}
+	rate := decimal.RequireFromString(*payment.USDRate)
+	effect := &cashPhysical{
+		mxnIn: decimal.RequireFromString(*payment.ReceivedMXN),
+		usdIn: decimal.RequireFromString(*payment.ReceivedUSD),
+		rate:  &rate,
+	}
+	if payment.ChangeCurrency != nil && *payment.ChangeCurrency == currencyUSD {
+		effect.usdOut = decimal.RequireFromString(*payment.ChangeUSD)
+	} else {
+		effect.mxnOut = decimal.RequireFromString(payment.Change)
+	}
+	return effect
 }

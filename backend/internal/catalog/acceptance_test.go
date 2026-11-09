@@ -757,6 +757,64 @@ func TestStageThreeAcceptance(t *testing.T) {
 			t.Fatalf("la renumeración no quedó auditada: %d %v", reorders, err)
 		}
 	})
+	run("tasa de IVA propia de lista cerrada, protegida y auditada", func(t *testing.T) {
+		eight := 8
+		taxed := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Agua fronteriza", Active: true},
+			CategoryID: category.ID, Code: "AGUA-8", Kind: "product", BasePrice: "20", TaxRate: &eight,
+		}
+		var saved catalog.Product
+		_ = json.Unmarshal(call("POST", "catalog/products", taxed, 200), &saved)
+		if saved.TaxRate == nil || *saved.TaxRate != 8 {
+			t.Fatalf("La tasa propia no se guardó: %+v", saved.TaxRate)
+		}
+		for _, rate := range []int{15, -8, 1, 160} {
+			invalidRate := rate
+			candidate := taxed
+			candidate.Code = "AGUA-INVALIDA"
+			candidate.TaxRate = &invalidRate
+			call("POST", "catalog/products", candidate, 400)
+		}
+		if _, err := pool.Exec(ctx, "UPDATE app.catalog_products SET tax_rate=15 WHERE id=$1", saved.ID); err == nil {
+			t.Fatal("PostgreSQL aceptó una tasa fuera de la lista cerrada")
+		}
+		// Un duplicado conserva la tasa propia del original.
+		var copied catalog.Product
+		_ = json.Unmarshal(call("POST", "catalog/products/"+saved.ID+"/duplicate", map[string]any{
+			"name": "Agua fronteriza copia", "code": "AGUA-8-C", "revision": saved.Revision,
+		}, 200), &copied)
+		if copied.TaxRate == nil || *copied.TaxRate != 8 {
+			t.Fatal("El duplicado perdió la tasa propia")
+		}
+		// Cambiar la tasa exige el permiso de precios, como el precio; otros cambios no.
+		var userID string
+		if err := pool.QueryRow(ctx, "SELECT id FROM app.users WHERE username='admin'").Scan(&userID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO app.user_permissions(user_id,permission_key,effect) VALUES ($1,'catalog.prices.manage','deny')", userID); err != nil {
+			t.Fatal(err)
+		}
+		inherit := saved
+		inherit.TaxRate = nil
+		call("PATCH", "catalog/products/"+saved.ID, inherit, 403)
+		described := saved
+		described.Description = "Sin cambio de tasa"
+		_ = json.Unmarshal(call("PATCH", "catalog/products/"+saved.ID, described, 200), &saved)
+		if _, err := pool.Exec(ctx, "DELETE FROM app.user_permissions WHERE user_id=$1 AND permission_key='catalog.prices.manage'", userID); err != nil {
+			t.Fatal(err)
+		}
+		inherit = saved
+		inherit.TaxRate = nil
+		_ = json.Unmarshal(call("PATCH", "catalog/products/"+saved.ID, inherit, 200), &saved)
+		if saved.TaxRate != nil {
+			t.Fatal("El producto no volvió a heredar la tasa general")
+		}
+		var audited int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM app.audit_events WHERE action='catalog.products.updated'
+            AND entity_id=$1 AND before_state->>'tax_rate'='8' AND after_state->'tax_rate'='null'::jsonb`, saved.ID).Scan(&audited); err != nil || audited != 1 {
+			t.Fatalf("El cambio de tasa no quedó auditado con el guardado: %d %v", audited, err)
+		}
+	})
 	run("permisos vigentes precios protegidos y auditoría", func(t *testing.T) {
 		var userID string
 		if err := pool.QueryRow(ctx, "SELECT id FROM app.users WHERE username='admin'").Scan(&userID); err != nil {

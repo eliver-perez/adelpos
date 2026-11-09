@@ -3,6 +3,8 @@ import { Notice, PageTitle } from '../../components/Forms';
 import { useResource } from '../../hooks/useResource';
 import { useRestaurantMutation } from '../../hooks/useRestaurantMutation';
 import { APIError } from '../../services/api';
+import { featureEnabled } from '../../services/features';
+import type { EstablishmentFeature } from '../../services/features';
 import { permissionName } from '../../services/payments';
 import type { PaymentMethod, PaymentSettings } from '../../services/payments';
 import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
@@ -10,6 +12,7 @@ import { MethodsAdmin } from './MethodsAdmin';
 import { PaymentPoliciesForm } from './PaymentPoliciesForm';
 import { ShiftOverview } from './ShiftOverview';
 import { TaxRateSection } from './TaxRateSection';
+import { USDSettingsSection } from './USDSettingsSection';
 
 export const paymentsConfigurationKey = 'payments:configuration';
 
@@ -28,6 +31,9 @@ export function PaymentsAdminPage({
   const readable = can('payments.read');
   const settings = useResource<PaymentSettings>('payments_settings', { enabled: readable });
   const methods = useResource<PaymentMethod[]>('payments_methods', { enabled: readable });
+  // El rango del tipo de cambio solo aparece con el pago en dólares activo.
+  const features = useResource<EstablishmentFeature[]>('settings_features');
+  const dollars = featureEnabled(features.data, 'usd_cash');
   const mutation = useRestaurantMutation(changed, paymentsConfigurationKey);
   const execute: ExecuteMutation = async (operation, options) => {
     try {
@@ -98,6 +104,27 @@ export function PaymentsAdminPage({
               <TaxRateSection settings={settings.data} can={can} execute={execute} busy={busy} />
             )}
           </Accordion>
+          {dollars && (
+            <Accordion
+              title="Pago en dólares"
+              summary={
+                settings.data
+                  ? `Tipo de cambio de ${settings.data.usd_rate_min} a ${settings.data.usd_rate_max} · confirmación si difiere más de ${settings.data.usd_rate_alert_percent} %`
+                  : 'Consultando configuración…'
+              }
+            >
+              <Notice>{settings.error}</Notice>
+              {settings.data && (
+                <USDSettingsSection
+                  key={settings.data.revision}
+                  settings={settings.data}
+                  can={can}
+                  execute={execute}
+                  busy={busy}
+                />
+              )}
+            </Accordion>
+          )}
           <Accordion
             title="Políticas de cobro"
             summary="Turno compartido, impresión de ticket, impresora y devoluciones"

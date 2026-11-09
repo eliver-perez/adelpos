@@ -1,6 +1,7 @@
 import { toWireAmount } from '../../../services/amountInput';
 import { isZeroMoney } from '../../../services/payments';
 import type {
+  ChangeCurrency,
   Finance,
   FinanceLine,
   PaymentInput,
@@ -10,8 +11,9 @@ import type {
   Selection,
 } from '../../../services/payments';
 
-// Campo de importe al que escribe el teclado numérico fijo.
-export type AmountTarget = 'amount' | 'received' | 'tip';
+// Campo de importe al que escribe el teclado numérico fijo. received_usd solo existe con la
+// función de pago en dólares activa y un turno con tipo de cambio.
+export type AmountTarget = 'amount' | 'received' | 'received_usd' | 'tip';
 
 // Captura local del cajero. Son cadenas tal como se teclean: Go valida y calcula cada importe.
 export interface CaptureState {
@@ -19,6 +21,9 @@ export interface CaptureState {
   mode: PaymentMode;
   amount: string;
   received: string;
+  // Dólares recibidos y moneda en que se entrega el cambio (pesos por omisión).
+  receivedUSD: string;
+  changeCurrency: ChangeCurrency;
   tip: string;
   reference: string;
   // Cantidad seleccionada por versión de partida (unidades enteras, no dinero).
@@ -36,6 +41,8 @@ export function initialCapture(deliver = false): CaptureState {
     mode: 'total',
     amount: '',
     received: '',
+    receivedUSD: '',
+    changeCurrency: 'MXN',
     tip: '',
     reference: '',
     selections: {},
@@ -71,12 +78,14 @@ export function tipAllowed(method: PaymentMethod | null, canRecordTips: boolean)
 }
 
 // Captura completa para previsualizar con el método elegido. Un abono sin importe todavía no se
-// valida: el cajero aún lo está capturando.
+// valida: el cajero aún lo está capturando. Los campos en dólares solo se agregan con dollars
+// (función activa, efectivo y turno con tipo de cambio): sin ellos el cuerpo es el de la etapa 6.
 export function buildPaymentInput(
   capture: CaptureState,
   method: PaymentMethod,
   finance: Finance,
   permissions: { tips: boolean; selection: boolean },
+  dollars = false,
 ): PaymentInput | null {
   const amount = toWireAmount(capture.amount);
   if (capture.mode === 'partial' && amount === '') {
@@ -98,7 +107,7 @@ export function buildPaymentInput(
   if (permissions.selection) {
     selections = selectionList(capture.selections, finance);
   }
-  return {
+  const input: PaymentInput = {
     method_id: method.id,
     mode: capture.mode,
     amount: capture.mode === 'partial' ? amount : '',
@@ -107,6 +116,16 @@ export function buildPaymentInput(
     reference,
     selections,
   };
+  if (dollars && method.is_cash) {
+    const receivedUSD = toWireAmount(capture.receivedUSD);
+    if (receivedUSD !== '') {
+      input.received_usd = receivedUSD;
+    }
+    if (capture.changeCurrency === 'USD') {
+      input.change_currency = 'USD';
+    }
+  }
+  return input;
 }
 
 // Método usado solo para que Go calcule el total de una selección antes de que el cajero elija
@@ -203,10 +222,27 @@ export function targetPatch(target: AmountTarget, value: string): Partial<Captur
   if (target === 'received') {
     return { received: value };
   }
+  if (target === 'received_usd') {
+    return { receivedUSD: value };
+  }
   if (target === 'tip') {
     return { tip: value };
   }
   return { amount: value };
+}
+
+// Valor de la captura que muestra y edita el teclado según el campo activo.
+export function targetValue(capture: CaptureState, target: AmountTarget) {
+  if (target === 'received') {
+    return capture.received;
+  }
+  if (target === 'received_usd') {
+    return capture.receivedUSD;
+  }
+  if (target === 'tip') {
+    return capture.tip;
+  }
+  return capture.amount;
 }
 
 // Solo es editable el campo que corresponde a la captura vigente.
@@ -215,12 +251,16 @@ export function targetEditable(
   capture: CaptureState,
   method: PaymentMethod | null,
   canRecordTips: boolean,
+  dollars = false,
 ) {
   if (target === 'amount') {
     return capture.mode === 'partial';
   }
   if (target === 'received') {
     return !!method?.is_cash;
+  }
+  if (target === 'received_usd') {
+    return dollars && !!method?.is_cash;
   }
   return tipAllowed(method, canRecordTips);
 }

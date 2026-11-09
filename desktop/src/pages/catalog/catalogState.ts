@@ -84,6 +84,7 @@ export function newCatalogDocument(
         barcode: null,
         kind: combo ? 'combo' : 'product',
         base_price: '0.00',
+        tax_rate: null,
         image_id: null,
         sort_order: 0,
         archived: false,

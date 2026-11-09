@@ -173,6 +173,7 @@ export function AmountField({
   hint,
   disabled = false,
   emphasis = false,
+  currency = '$',
 }: {
   label: string;
   value: string;
@@ -183,6 +184,8 @@ export function AmountField({
   hint?: ReactNode;
   disabled?: boolean;
   emphasis?: boolean;
+  // Símbolo mostrado junto al importe: «$» para pesos (predeterminado) o «US$» para dólares.
+  currency?: string;
 }) {
   const identifier = useId();
   const inputID = `${identifier}-amount`;
@@ -216,7 +219,7 @@ export function AmountField({
       </label>
       <span className="amount-field-control">
         <span className="amount-field-currency" aria-hidden="true">
-          $
+          {currency}
         </span>
         <input
           id={inputID}

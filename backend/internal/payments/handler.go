@@ -24,6 +24,8 @@ func resolve(method string, parts []string) *route {
 		return &route{"payments.read", true, (*service).readSettings}
 	case length == 1 && parts[0] == "settings" && method == "PUT":
 		return &route{"payments.settings.manage", false, (*service).saveSettings}
+	case length == 2 && parts[0] == "settings" && parts[1] == "usd" && method == "PUT":
+		return &route{"payments.settings.manage", false, (*service).saveUSDSettings}
 	case length == 1 && parts[0] == "tax" && method == "PUT":
 		return &route{"payments.tax.manage", false, (*service).saveTaxRate}
 	case length == 1 && parts[0] == "methods" && method == "GET":
@@ -38,6 +40,8 @@ func resolve(method string, parts []string) *route {
 		return &route{"cash.shifts.open", false, (*service).openShift}
 	case length == 3 && parts[0] == "shifts" && parts[2] == "movements" && method == "GET":
 		return &route{"cash.shifts.read", true, (*service).shiftMovements}
+	case length == 3 && parts[0] == "shifts" && parts[2] == "usd-rate" && method == "POST":
+		return &route{"payments.usd_rate.manage", false, (*service).setShiftRate}
 	}
 	if length < 2 || parts[0] != "accounts" {
 		return nil

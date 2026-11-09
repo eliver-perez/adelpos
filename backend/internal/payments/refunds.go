@@ -536,25 +536,53 @@ func (handler *service) correct(parts []string) (any, error) {
 			return nil, err
 		}
 	}
+	// El reverso invierte lo que el pago original movió físicamente por moneda (pesos y dólares
+	// recibidos, cambio entregado), de modo que el cajón queda como antes del pago erróneo.
+	var reversal *cashPhysical
+	if effect := original.physicalEffect(); effect != nil {
+		inverted := effect.reversed()
+		reversal = &inverted
+	}
 	if err := handler.insertMovement(shift, movementInput{
 		Kind: "correction_reversal", Method: previousMethod, Sale: amount.Neg(), Tip: tip.Neg(), AccountID: accountID, RefundID: &reversalID,
+		Physical: reversal,
 	}); err != nil {
 		return nil, err
 	}
 	paymentID := newID()
 	var received *string
 	var receivedValue *decimal.Decimal
+	change := zero
+	currency := paymentCurrency{}
+	var replacementPhysical *cashPhysical
 	if replacement.IsCash {
 		charged := amount.Add(tip)
 		formatted := money(charged)
 		received = &formatted
 		receivedValue = &charged
+		// Entre dos métodos de efectivo, un pago con dólares conserva lo que físicamente se recibió
+		// y entregó: el dinero sigue en el cajón aunque cambie el método. Un efectivo solo en pesos
+		// conserva el comportamiento de la etapa 6 (recibido igual al importe, sin cambio).
+		if original.IsCash && original.ReceivedUSD != nil {
+			received = original.Received
+			value := decimal.RequireFromString(*original.Received)
+			receivedValue = &value
+			change = decimal.RequireFromString(original.Change)
+			currency = paymentCurrency{
+				receivedMXN: original.ReceivedMXN, receivedUSD: original.ReceivedUSD, rate: original.USDRate,
+				changeCurrency: original.ChangeCurrency, changeUSD: original.ChangeUSD,
+			}
+			replacementPhysical = original.physicalEffect()
+		}
 	}
 	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.payments(id,account_id,shift_id,register_id,method_id,method_name,is_cash,
-        kind,amount,tip,received,change_given,reference,corrects_payment_id,actor_id,device_id,operation_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,0,$12,$13,$14,$15,$16)`,
+        kind,amount,tip,received,change_given,reference,corrects_payment_id,actor_id,device_id,operation_id,
+        received_mxn,received_usd,usd_rate,change_currency,change_usd)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12,$13,$14,$15,$16,$17,$18::numeric,$19::numeric,$20::numeric,$21,$22::numeric)`,
 		paymentID, accountID, shift.ID, shift.RegisterID, replacement.ID, replacement.Name, replacement.IsCash, original.Kind,
-		original.Amount, original.Tip, received, reference, original.ID, handler.request.Actor.UserID, handler.request.Actor.DeviceID, handler.operationID)
+		original.Amount, original.Tip, received, money(change), reference, original.ID, handler.request.Actor.UserID,
+		handler.request.Actor.DeviceID, handler.operationID,
+		currency.receivedMXN, currency.receivedUSD, currency.rate, currency.changeCurrency, currency.changeUSD)
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +593,8 @@ func (handler *service) correct(parts []string) (any, error) {
 		}
 	}
 	if err := handler.insertMovement(shift, movementInput{
-		Kind: "payment", Method: replacement, Sale: amount, Tip: tip, Received: receivedValue, AccountID: accountID, PaymentID: &paymentID,
+		Kind: "payment", Method: replacement, Sale: amount, Tip: tip, Received: receivedValue, Change: change, AccountID: accountID,
+		PaymentID: &paymentID, Physical: replacementPhysical,
 	}); err != nil {
 		return nil, err
 	}

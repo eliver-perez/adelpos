@@ -30,6 +30,7 @@ var Permissions = []Permission{
 	{"sessions.manage", "Revocar sesiones"},
 	{"settings.read", "Consultar configuración general"},
 	{"settings.manage", "Modificar configuración general"},
+	{"settings.features.manage", "Activar o desactivar funciones del establecimiento"},
 	{"registers.read", "Consultar cajas físicas"},
 	{"registers.manage", "Crear y configurar cajas físicas"},
 	{"audit.read", "Consultar auditoría"},
