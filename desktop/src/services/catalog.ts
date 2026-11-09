@@ -37,6 +37,8 @@ export interface Category extends Metadata {
   image_id: string | null;
   availability: Schedule;
   position?: Position;
+  // Solo en los lookups: activa y dentro de su horario ahora, según el reloj de Go.
+  available_now?: boolean;
 }
 
 export interface Ingredient extends Metadata {

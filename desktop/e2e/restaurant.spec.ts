@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { configureKitchen, checkPreparation } from './kitchen-flow';
 import {
@@ -7,6 +8,34 @@ import {
   configureReceiptPrinter,
   enableUSDCash,
 } from './payments-flow';
+
+// Revisión visual de la captura: 1280 × 720, 1920 × 1080 y 1024 × 768 en tema claro y oscuro.
+async function captureThemes(page: Page, testInfo: TestInfo, name: string) {
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 1920, height: 1080 },
+    { width: 1024, height: 768 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((value) => {
+        document.documentElement.dataset.theme = value;
+      }, theme);
+      // Deja terminar el cambio de tamaño y las transiciones de color antes de la captura.
+      await page.waitForTimeout(300);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath(`${name}-${theme}-${size.width}x${size.height}.png`),
+      });
+    }
+  }
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'light';
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
 
 test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, testInfo) => {
   const errors: string[] = [];
@@ -75,8 +104,46 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByRole('button', { name: /Mesa 1, Libre/ }).click();
   await page.getByRole('button', { name: 'Abrir cuenta en mesa', exact: true }).click();
   await page.getByRole('button', { name: 'Abrir cuenta y capturar', exact: true }).click();
-  await page.getByRole('button', { name: /Filete de prueba/ }).click();
-  await page.getByLabel('Cantidad del producto').fill('2');
+  // Etapa 6.1 §4: captura táctil. Categoría → producto directo → producto con opciones → enviar
+  // a cocina → cobrar. Todas las cifras que se comprueban las calcula Go.
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #1' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Cuenta de la mesa' })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Acciones de cuenta' })).toHaveCount(0);
+  const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
+  const dishes = page
+    .getByRole('navigation', { name: 'Categorías' })
+    .getByRole('button', { name: /Platillos/ });
+  await dishes.click();
+  await expect(dishes).toHaveAttribute('aria-pressed', 'true');
+  await expect(dishes).toContainText('2 productos');
+  const categoryBox = await dishes.boundingBox();
+  expect(categoryBox!.height).toBeGreaterThanOrEqual(64);
+  const steak = page.getByRole('button', { name: /^Filete de prueba/ });
+  await expect(steak).toContainText('$150.00');
+  const steakBox = await steak.boundingBox();
+  expect(steakBox!.height).toBeGreaterThanOrEqual(108);
+  // Un toque agrega; el segundo suma a la misma partida nueva.
+  await steak.click();
+  await steak.click();
+  const steakLine = bill.getByRole('article', { name: '2 × Filete de prueba' });
+  await expect(steakLine).toContainText('Nuevo');
+  // Producto con elección obligatoria: la personalización se abre en el panel central.
+  const burger = page.getByRole('button', { name: /^Hamburguesa de prueba/ });
+  await expect(burger).toContainText('Opciones');
+  await burger.click();
+  const options = page.getByRole('region', { name: 'Personalizar Hamburguesa de prueba' });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(
+    options.getByRole('button', { name: 'Papas a la francesa', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  const rings = options.getByRole('button', { name: 'Aros de cebolla +$10.00', exact: true });
+  const ringsBox = await rings.boundingBox();
+  expect(ringsBox!.height).toBeGreaterThanOrEqual(56);
+  await rings.click();
+  await expect(rings).toHaveAttribute('aria-pressed', 'true');
+  const add = options.getByRole('button', { name: /^Agregar a la cuenta/ });
+  await expect(add).toHaveText('Agregar a la cuenta · $130.00');
+  // Revisión visual de la personalización y sin desplazamiento horizontal en otros tamaños.
   for (const size of [
     { width: 1920, height: 1080 },
     { width: 2560, height: 1440 },
@@ -85,46 +152,101 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     { width: 1280, height: 720 },
   ]) {
     await page.setViewportSize(size);
-    await expect(page.getByLabel('Cantidad del producto')).toHaveValue('2');
+    await expect(rings).toHaveAttribute('aria-pressed', 'true');
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    await page.screenshot({
-      path: testInfo.outputPath(`capture-${size.width}x${size.height}.png`),
-    });
+    const addBox = await add.boundingBox();
+    expect(addBox!.y + addBox!.height).toBeLessThanOrEqual(size.height);
   }
+  await expect(bill.locator('.capture-sync-status')).toHaveText('Guardado');
+  await expect(add).toHaveText('Agregar a la cuenta · $130.00');
+  await captureThemes(page, testInfo, 'capture-options');
+  await add.click();
+  const burgerLine = bill.getByRole('article', { name: '1 × Hamburguesa de prueba' });
+  await expect(burgerLine).toContainText('Aros de cebolla');
+  await expect(page.getByRole('region', { name: 'Productos' })).toBeVisible();
+  // El borrador se guarda con antirrebote y los importes llegan de Go.
+  await expect(steakLine).toContainText('$300.00');
+  await expect(burgerLine).toContainText('$130.00');
+  await expect(bill.locator('.capture-grand-total')).toContainText('$430.00');
+  await expect(bill).toContainText('Precios con IVA incluido');
+  for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 2560, height: 1440 },
+    { width: 1024, height: 768 },
+    { width: 900, height: 1200 },
+    { width: 1280, height: 720 },
+  ]) {
+    await page.setViewportSize(size);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    const sendBox = await bill
+      .getByRole('button', { name: 'Enviar a cocina · 3', exact: true })
+      .boundingBox();
+    expect(sendBox!.y + sendBox!.height).toBeLessThanOrEqual(size.height);
+  }
+  await expect(bill.locator('.capture-sync-status')).toHaveText('Guardado');
+  await captureThemes(page, testInfo, 'capture');
+  const send = bill.getByRole('button', { name: 'Enviar a cocina · 3', exact: true });
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect(bill.locator('.capture-line-confirmed')).toHaveCount(2);
+  await expect(steakLine).toContainText('En cocina');
   await expect(
-    page.getByRole('button', { name: 'Guardar en borrador', exact: true }),
-  ).toBeEnabled();
-  await page.getByRole('button', { name: 'Guardar en borrador', exact: true }).click();
-  const confirm = page.getByRole('button', { name: 'Confirmar pedido', exact: true });
-  await expect(confirm).toBeEnabled();
-  const bounds = await confirm.boundingBox();
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(720);
-  await confirm.click();
-  await expect(
-    page.locator('.bill-line:not(.bill-line-draft):not(.bill-line-cancelled)'),
-  ).toHaveCount(1);
-  await expect(page.getByRole('complementary', { name: 'Cuenta actual' })).toContainText('$300.00');
+    bill.getByRole('button', { name: 'Enviar a cocina · 0', exact: true }),
+  ).toBeDisabled();
+  await expect(bill.locator('.capture-grand-total')).toContainText('$430.00');
   await checkPreparation(page);
-  await page.getByRole('button', { name: 'Modificar', exact: true }).click();
+  await steakLine.getByRole('button', { name: 'Modificar', exact: true }).click();
+  const edit = page.getByRole('region', { name: 'Personalizar Filete de prueba' });
+  await edit.getByRole('button', { name: 'Escribir otra', exact: true }).click();
+  await edit.getByLabel('Nueva indicación para cocina').fill('Empacar por separado');
+  await edit.getByRole('button', { name: 'Agregar indicación', exact: true }).click();
+  await edit.getByLabel('Motivo de modificación').fill('Indicaciones del cliente');
+  await edit.getByRole('button', { name: /^Confirmar modificación/ }).click();
+  await expect(steakLine).toContainText('Empacar por separado');
+  // Cancelación de una partida enviada con su flujo y permiso existentes.
+  await burgerLine.getByRole('button', { name: 'Cancelar unidades', exact: true }).click();
+  await page.getByLabel('Motivo de cancelación').fill('El cliente cambió de opinión');
   await page
-    .getByLabel('Observaciones para preparación (sin cargo automático)')
-    .fill('Empacar por separado');
-  await page.getByLabel('Motivo de modificación').fill('Indicaciones del cliente');
-  await page.getByRole('button', { name: 'Confirmar modificación', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: 'Cuenta actual' })).toContainText(
-    'Empacar por separado',
-  );
-  await page.getByLabel('Acciones de cuenta').selectOption('history');
+    .getByRole('button', { name: 'Confirmar cancelación de unidades', exact: true })
+    .click();
+  await expect(burgerLine).toContainText('Cancelado');
+  await expect(bill.locator('.capture-grand-total')).toContainText('$300.00');
+  // «Más…» reúne las acciones menos frecuentes; ya no hay lista desplegable de acciones.
+  await bill.getByRole('button', { name: 'Más…', exact: true }).click();
+  await bill
+    .getByRole('group', { name: 'Más acciones de la cuenta' })
+    .getByRole('button', { name: 'Historial de cambios', exact: true })
+    .click();
+  await expect(page.getByRole('button', { name: /Producto cancelado/ })).toBeVisible();
   await page.getByRole('button', { name: /Producto modificado/ }).click();
   await expect(page.getByRole('heading', { name: 'Antes', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Después', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Volver', exact: true }).click();
-  await page.getByLabel('Acciones de cuenta').selectOption('split');
+  await bill.getByRole('button', { name: 'Dividir', exact: true }).click();
   await page.getByLabel(/Filete de prueba · 2 disponibles/).fill('1');
   await page.getByRole('button', { name: 'Dividir cuenta', exact: true }).click();
-  await expect(page.getByRole('complementary', { name: 'Cuenta actual' })).toContainText('$150.00');
+  await expect(bill.locator('.capture-grand-total')).toContainText('$150.00');
+  // Las cuentas de la mesa quedan como botones en la barra superior: la división muestra la
+  // cuenta resultante y la original sigue a un toque.
+  const tableAccounts = page.getByRole('group', { name: 'Cuentas de la mesa' });
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
+  await expect(
+    tableAccounts.getByRole('button', { name: 'Cuenta #2 · Cuenta · separada', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    tableAccounts.getByRole('button', { name: '+ Nueva cuenta', exact: true }),
+  ).toBeVisible();
+  await tableAccounts.getByRole('button', { name: 'Cuenta #1', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #1' })).toBeVisible();
+  await expect(bill.locator('.capture-grand-total')).toContainText('$150.00');
+  await tableAccounts
+    .getByRole('button', { name: 'Cuenta #2 · Cuenta · separada', exact: true })
+    .click();
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
   await checkDineInPayment(page);
   await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
   await page.getByRole('button', { name: 'Nuevo para llevar', exact: true }).click();
@@ -140,23 +262,36 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.keyboard.press('Space');
   await expect(page.getByLabel('Fecha y hora · America/Monterrey')).toHaveValue('2026-12-15T19:30');
   await page.getByRole('button', { name: 'Abrir cuenta y capturar', exact: true }).click();
-  const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
+  // La cuenta actual es ahora el pedido para llevar recién abierto.
   await expect(bill).toContainText('Cliente temporal');
   await expect(bill).toContainText('Pago: sin registro de cobro');
   await expect(bill).toContainText('Entrega: no entregado');
-  await expect(page.getByRole('button', { name: /Marcar.*entregado|Cobrar/ })).toHaveCount(0);
+  // Sin productos enviados no se entrega ni se cobra: «Cobrar» conserva su lugar desactivado.
+  await expect(page.getByRole('button', { name: /Marcar.*entregado/ })).toHaveCount(0);
+  await expect(bill.getByRole('button', { name: 'Cobrar', exact: true })).toBeDisabled();
   await checkTakeawayDelivery(page);
 
+  // La misma pantalla de captura sirve para llevar, con los datos del pedido arriba; la cuenta
+  // refleja la entrega y el cobro registrados.
+  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
+  await expect(bill).toContainText('Entrega: entregado');
+  await expect(page.locator('.capture-topbar')).toContainText('Cliente temporal');
+  await expect(page.locator('.capture-topbar')).toContainText('Entrega programada');
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {
       document.documentElement.dataset.theme = value;
     }, theme);
+    await page.waitForTimeout(300);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`takeaway-${theme}-1280x720.png`) });
   }
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'light';
+  });
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.locator('.capture-topbar').getByRole('button', { name: 'Para llevar' }).click();
   await page.getByRole('button', { name: 'Nuevo para llevar', exact: true }).click();
   await driver.request('PUT', 'terminal/preferences', { keyboard_mode: 'always' });
   // La preferencia se refresca por el mismo sondeo de sesión de la aplicación nativa.

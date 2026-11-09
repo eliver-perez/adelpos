@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Accordion } from '../../components/Accordion';
+import type { ReactNode } from 'react';
 import { Notice } from '../../components/Forms';
 import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
@@ -10,16 +10,16 @@ import { AccountForm } from './AccountForm';
 import { AccountHistory } from './AccountHistory';
 import { AccountKitchen } from './AccountKitchen';
 import { AccountList } from './AccountList';
-import { BillPanel } from './BillPanel';
 import { CancelItem } from './CancelItem';
 import { OperationsAdmin } from './OperationsAdmin';
-import { OrderItemEditor } from './OrderItemEditor';
-import { ProductSelector } from './ProductSelector';
 import { CheckoutPanel } from './checkout/CheckoutPanel';
 import { CheckoutToolbar } from './checkout/CheckoutToolbar';
 import { AccountAdjustments } from './adjustments/AccountAdjustments';
 import { PrecheckPanel } from './documents/PrecheckPanel';
-import { paymentStateBadges } from '../../services/payments';
+import type { BillAction } from './capture/CaptureBill';
+import { CaptureScreen, WorkspaceBill, captureLinesLocked } from './capture/CaptureScreen';
+
+const accountActions: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign', 'void'];
 
 export function OperationalPage({
   active,
@@ -38,16 +38,16 @@ export function OperationalPage({
   const [actionReturn, setActionReturn] = useState<WorkspacePanel>('capture');
   // El cobro abierto desde «Marcar como entregado» inicia con la entrega activada.
   const [checkoutDeliver, setCheckoutDeliver] = useState(false);
-  const blocked = mutation.busy || mutation.uncertain;
+  const draftUncertain = workspace.draft.uncertain;
+  const blocked = mutation.busy || mutation.uncertain || draftUncertain;
   const selectedTable = overview.data?.tables.find((table) => table.id === workspace.tableID);
-  const editable =
-    !!bill &&
-    bill.account.state === 'open' &&
-    (bill.account.mode !== 'takeaway' || can('takeaway.manage'));
-  const currentEditor = editor?.accountID === bill?.account.id ? editor : null;
-  // El cobro (y sus devoluciones) sustituye las áreas de captura y cuenta dentro de la misma vista.
+  // El cobro (y sus devoluciones) sustituye la captura y la cuenta dentro de la misma vista.
   const checkoutOpen = view !== 'manage' && (panel === 'checkout' || panel === 'refund') && !!bill;
-  const actionNames: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign', 'void'];
+  const editorVisible =
+    workspace.captureMode &&
+    panel === 'editor' &&
+    !!editor &&
+    editor.accountID === bill?.account.id;
   const views: { id: RestaurantView; label: string; allowed: boolean }[] = [
     {
       id: 'tables',
@@ -66,13 +66,14 @@ export function OperationalPage({
     },
   ];
 
-  function openAccountAction(
-    action:
-      AccountAction | 'metadata' | 'history' | 'kitchen' | 'checkout' | 'adjustments' | 'precheck',
-    origin: WorkspacePanel,
-  ) {
+  function openAccountAction(action: BillAction | 'checkout', origin: WorkspacePanel) {
     setActionReturn(origin);
-    workspace.setPanel(action);
+    void workspace.openPanel(action);
+  }
+
+  function closeAction() {
+    workspace.setPanel(actionReturn);
+    setActionReturn('capture');
   }
 
   function startAccount(takeaway = view === 'takeaway') {
@@ -80,24 +81,21 @@ export function OperationalPage({
     workspace.setPanel('new');
   }
 
-  function leftPanel() {
-    if (panel === 'kitchen' && bill) {
-      return (
-        <AccountKitchen
-          bill={bill}
-          allStations={can('kitchen.stations.all')}
-          onClose={() => workspace.setPanel('capture')}
-        />
-      );
-    }
-    if (panel === 'new' || (panel === 'metadata' && bill)) {
+  function openCheckout(deliver: boolean) {
+    setCheckoutDeliver(deliver);
+    openAccountAction('checkout', 'capture');
+  }
+
+  // Paneles de la cuenta (formularios y consultas). En la captura ocupan las columnas de
+  // categorías y productos; en los listados, la columna izquierda.
+  function accountPanel(): ReactNode {
+    if (panel === 'new') {
       return (
         <AccountForm
           timezone={timezone}
-          key={panel === 'new' ? `new-${workspace.newMode}` : bill?.account.id}
+          key={`new-${workspace.newMode}`}
           mode={workspace.newMode}
           tableID={view === 'tables' ? workspace.tableID || null : null}
-          current={panel === 'metadata' ? bill?.account : undefined}
           overview={overview.data}
           lookups={lookups.data}
           can={can}
@@ -107,21 +105,36 @@ export function OperationalPage({
         />
       );
     }
-    if (panel === 'editor' && currentEditor && bill && lookups.data) {
+    if (!bill) {
+      return null;
+    }
+    if (panel === 'kitchen') {
       return (
-        <OrderItemEditor
-          value={currentEditor}
-          onChange={workspace.setEditor}
+        <AccountKitchen
           bill={bill}
-          lookups={lookups.data}
-          execute={workspace.execute}
-          busy={blocked || !!workspace.resource.error}
+          allStations={can('kitchen.stations.all')}
           onClose={() => workspace.setPanel('capture')}
-          onPreview={workspace.receivePreview}
         />
       );
     }
-    if (panel === 'cancel' && bill && workspace.cancelLine) {
+    if (panel === 'metadata') {
+      return (
+        <AccountForm
+          timezone={timezone}
+          key={bill.account.id}
+          mode={workspace.newMode}
+          tableID={null}
+          current={bill.account}
+          overview={overview.data}
+          lookups={lookups.data}
+          can={can}
+          execute={workspace.execute}
+          busy={blocked}
+          onClose={() => workspace.setPanel('capture')}
+        />
+      );
+    }
+    if (panel === 'cancel' && workspace.cancelLine) {
       return (
         <CancelItem
           key={workspace.cancelLine.version_id}
@@ -133,35 +146,29 @@ export function OperationalPage({
         />
       );
     }
-    if (panel === 'adjustments' && bill) {
+    if (panel === 'adjustments') {
       return (
         <AccountAdjustments
           key={bill.account.id}
           bill={bill}
           active={active}
           can={can}
-          onClose={() => {
-            workspace.setPanel(actionReturn);
-            setActionReturn('capture');
-          }}
+          onClose={closeAction}
         />
       );
     }
-    if (panel === 'precheck' && bill) {
+    if (panel === 'precheck') {
       return (
         <PrecheckPanel
           key={bill.account.id}
           bill={bill}
           active={active}
           can={can}
-          onClose={() => {
-            workspace.setPanel(actionReturn);
-            setActionReturn('capture');
-          }}
+          onClose={closeAction}
         />
       );
     }
-    if (panel === 'history' && bill)
+    if (panel === 'history') {
       return (
         <AccountHistory
           key={bill.account.id}
@@ -169,7 +176,8 @@ export function OperationalPage({
           onClose={() => workspace.setPanel('capture')}
         />
       );
-    if (bill && actionNames.includes(panel as AccountAction)) {
+    }
+    if (accountActions.includes(panel as AccountAction)) {
       return (
         <AccountActions
           key={`${panel}-${bill.account.id}`}
@@ -178,93 +186,68 @@ export function OperationalPage({
           overview={overview.data}
           execute={workspace.execute}
           busy={blocked}
-          onClose={() => {
-            workspace.setPanel(actionReturn);
-            setActionReturn('capture');
-          }}
+          onClose={closeAction}
         />
       );
     }
-    if (view === 'takeaway' || view === 'accounts') {
-      return (
-        <AccountList
-          value={workspace.accounts.data}
-          selectedID={workspace.selectedID}
-          onSelect={workspace.chooseAccount}
-          search={workspace.search}
-          onSearch={workspace.setSearch}
-          state={workspace.state}
-          onStateChange={workspace.setState}
-          page={workspace.page}
-          onPageChange={workspace.setPage}
-          error={workspace.accounts.error}
-          takeaway={view === 'takeaway'}
-        />
-      );
-    }
-    return (
-      <ProductSelector
-        account={bill?.account ?? null}
-        lookups={lookups.data}
-        enabled={can('orders.capture') && can('catalog.read') && can('catalog.prices.read')}
-        active={active}
-        onSelect={(product) => workspace.startEditor(product, 'new')}
-      />
-    );
+    return null;
   }
 
-  return (
-    <div className="operational-page">
-      <div className="operation-toolbar">
-        <div className="operation-view-tabs" role="group" aria-label="Vistas operativas">
-          {views
-            .filter((entry) => entry.allowed)
-            .map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                aria-pressed={view === entry.id}
-                className={view === entry.id ? 'selected-operation-view' : ''}
-                onClick={() => workspace.switchView(entry.id)}
-              >
-                {entry.label}
-              </button>
-            ))}
-        </div>
-        {checkoutOpen && bill && (
-          <CheckoutToolbar
-            bill={bill}
-            mode={panel === 'refund' ? 'refund' : 'collect'}
-            can={can}
-            onMode={(mode) => workspace.setPanel(mode === 'refund' ? 'refund' : 'checkout')}
-            onShortcut={(shortcut) => openAccountAction(shortcut, panel)}
-          />
-        )}
-        <div className={`button-row ${checkoutOpen ? 'operation-toolbar-secondary' : ''}`}>
-          <button className="secondary-button" onClick={workspace.refresh}>
-            Actualizar
-          </button>
-          {can('accounts.open') && !checkoutOpen && (
+  const toolbar = (
+    <div className="operation-toolbar">
+      <div className="operation-view-tabs" role="group" aria-label="Vistas operativas">
+        {views
+          .filter((entry) => entry.allowed)
+          .map((entry) => (
             <button
-              className="primary-button"
-              disabled={
-                blocked ||
-                (view === 'tables' &&
-                  !!selectedTable &&
-                  (!selectedTable.active || selectedTable.out_of_service)) ||
-                (view === 'takeaway' && !can('takeaway.manage'))
-              }
-              onClick={() => startAccount()}
+              key={entry.id}
+              type="button"
+              aria-pressed={view === entry.id}
+              className={view === entry.id ? 'selected-operation-view' : ''}
+              onClick={() => workspace.switchView(entry.id)}
             >
-              {view === 'takeaway'
-                ? 'Nuevo para llevar'
-                : view === 'tables'
-                  ? 'Abrir cuenta en mesa'
-                  : 'Cuenta sin mesa'}
+              {entry.label}
             </button>
-          )}
-        </div>
+          ))}
       </div>
+      {checkoutOpen && bill && (
+        <CheckoutToolbar
+          bill={bill}
+          mode={panel === 'refund' ? 'refund' : 'collect'}
+          can={can}
+          onMode={(mode) => workspace.setPanel(mode === 'refund' ? 'refund' : 'checkout')}
+          onShortcut={(shortcut) => openAccountAction(shortcut, panel)}
+        />
+      )}
+      <div className={`button-row ${checkoutOpen ? 'operation-toolbar-secondary' : ''}`}>
+        <button className="secondary-button" onClick={workspace.refresh}>
+          Actualizar
+        </button>
+        {can('accounts.open') && !checkoutOpen && view !== 'manage' && (
+          <button
+            className="primary-button"
+            disabled={
+              blocked ||
+              (view === 'tables' &&
+                !!selectedTable &&
+                (!selectedTable.active || selectedTable.out_of_service)) ||
+              (view === 'takeaway' && !can('takeaway.manage'))
+            }
+            onClick={() => startAccount()}
+          >
+            {view === 'takeaway'
+              ? 'Nuevo para llevar'
+              : view === 'tables'
+                ? 'Abrir cuenta en mesa'
+                : 'Cuenta sin mesa'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  const banners = (
+    <>
       <Notice>{workspace.actionError || mutation.error}</Notice>
       {mutation.uncertain && (
         <div className="operation-recovery">
@@ -281,7 +264,22 @@ export function OperationalPage({
           </button>
         </div>
       )}
-      {editor && (
+      {draftUncertain && (
+        <div className="operation-recovery">
+          <p>
+            No se pudo confirmar el guardado de los productos nuevos. Recupera la misma operación
+            antes de continuar; tus toques se conservan en esta terminal.
+          </p>
+          <button
+            className="primary-button"
+            disabled={workspace.draft.busy}
+            onClick={() => void workspace.recoverDraft()}
+          >
+            Recuperar resultado del borrador
+          </button>
+        </div>
+      )}
+      {editor && !editorVisible && (
         <div className="pending-selection">
           <span>Selección sin guardar conservada.</span>
           <button className="secondary-button" onClick={workspace.resumeEditor}>
@@ -290,17 +288,20 @@ export function OperationalPage({
           <button
             className="secondary-button"
             disabled={mutation.busy}
-            onClick={() => {
-              workspace.setEditor(null);
-              workspace.receivePreview(null);
-              workspace.setPanel('capture');
-            }}
+            onClick={workspace.discardEditor}
           >
             Descartar selección
           </button>
         </div>
       )}
-      {checkoutOpen && bill && (
+    </>
+  );
+
+  if (checkoutOpen && bill) {
+    return (
+      <div className="operational-page">
+        {toolbar}
+        {banners}
         <CheckoutPanel
           key={bill.account.id}
           bill={bill}
@@ -311,8 +312,15 @@ export function OperationalPage({
           onClose={() => workspace.setPanel('capture')}
           initialDeliver={checkoutDeliver}
         />
-      )}
-      {!checkoutOpen && view === 'manage' && (
+      </div>
+    );
+  }
+
+  if (view === 'manage') {
+    return (
+      <div className="operational-page">
+        {toolbar}
+        {banners}
         <div className="operation-admin-scroll">
           <Notice>{overview.error}</Notice>
           {overview.data ? (
@@ -326,121 +334,103 @@ export function OperationalPage({
             <p className="muted">Consultando áreas y mesas…</p>
           )}
         </div>
-      )}
-      {!checkoutOpen && view !== 'manage' && (
-        <div
-          className={`operation-workspace ${view === 'takeaway' ? 'operation-takeaway-board' : ''}`}
-        >
-          <div className="operation-left">
-            {view === 'tables' && overview.data && (
-              <Accordion
-                key={`map-${!!bill}`}
-                title={selectedTable ? `Mesas · ${selectedTable.name}` : 'Mapa del restaurante'}
-                summary="Selecciona una mesa; sus cuentas permanecen en esta pantalla"
-                defaultOpen={!bill}
-              >
-                <TableMap
-                  areas={overview.data.areas}
-                  tables={overview.data.tables}
-                  areaID={workspace.areaID}
-                  selectedTableID={workspace.tableID}
-                  onAreaChange={workspace.setAreaID}
-                  onSelect={(table) => workspace.chooseTable(table.id)}
-                />
-              </Accordion>
-            )}
-            <Notice>{overview.error}</Notice>
-            {view === 'tables' && (
-              <div className="table-account-switcher">
-                <label>
-                  <span>Cuentas de {selectedTable?.name ?? 'la mesa seleccionada'}</span>
-                  <select
-                    aria-label="Cuenta de la mesa"
-                    value={workspace.selectedID}
-                    onChange={(event) => workspace.chooseAccount(event.target.value)}
-                  >
-                    <option value="">Selecciona una cuenta…</option>
-                    {workspace.accounts.data?.items.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        #{account.folio} · {account.name} · ${account.totals.total} ·{' '}
-                        {paymentStateBadges[account.payment_state] ?? account.payment_state}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            )}
-            {(view === 'takeaway' || view === 'accounts') &&
-              bill &&
-              panel === 'capture' &&
-              editable &&
-              can('orders.capture') && (
-                <button
-                  className="secondary-button capture-products-button"
-                  onClick={() => workspace.setPanel('editor' as const)}
-                >
-                  Capturar productos en esta cuenta
-                </button>
-              )}
-            <div className="operation-left-content">
-              {panel === 'editor' &&
-                (view === 'takeaway' || view === 'accounts') &&
-                !currentEditor && (
-                  <button
-                    className="secondary-button"
-                    onClick={() => workspace.setPanel('capture')}
-                  >
-                    Volver al listado de cuentas
-                  </button>
-                )}
-              {panel === 'editor' &&
-              !currentEditor &&
-              (view === 'takeaway' || view === 'accounts') ? (
-                <ProductSelector
-                  account={bill?.account ?? null}
-                  lookups={lookups.data}
-                  enabled={
-                    can('orders.capture') && can('catalog.read') && can('catalog.prices.read')
-                  }
-                  active={active}
-                  onSelect={(product) => workspace.startEditor(product, 'new')}
-                />
-              ) : (
-                leftPanel()
-              )}
-            </div>
-          </div>
-          <BillPanel
-            bill={bill}
-            error={workspace.resource.error || workspace.savedQuote.error}
-            loading={workspace.resource.loading}
-            lookups={lookups.data}
-            quote={currentEditor ? workspace.tentativeQuote : workspace.savedQuote.data}
-            editing={!!currentEditor}
-            busy={blocked}
-            can={can}
-            onAction={(action) => openAccountAction(action, 'capture')}
-            onCheckout={() => {
-              setCheckoutDeliver(false);
-              openAccountAction('checkout', 'capture');
-            }}
-            onDeliverCheckout={() => {
-              setCheckoutDeliver(true);
-              openAccountAction('checkout', 'capture');
-            }}
-            onDraftEdit={(item) => workspace.startEditor(item, 'draft')}
-            onDraftRemove={(item) => void workspace.removeDraft(item)}
-            onLineEdit={(line) => workspace.startEditor(line, 'confirmed')}
-            onLineCancel={(line) => {
-              workspace.setCancelLine(line);
-              workspace.setPanel('cancel');
-            }}
-            onConfirm={() => void workspace.confirm()}
-            onRefresh={workspace.refresh}
-            onMergedTarget={workspace.chooseAccount}
-          />
+      </div>
+    );
+  }
+
+  if (workspace.captureMode) {
+    const content = panel === 'capture' || panel === 'editor' ? null : accountPanel();
+    return (
+      <div className="operational-page">
+        {banners}
+        <CaptureScreen
+          workspace={workspace}
+          can={can}
+          active={active}
+          timezone={timezone}
+          blocked={blocked}
+          panelContent={content}
+          onAction={(action) => openAccountAction(action, 'capture')}
+          onCheckout={() => openCheckout(false)}
+          onDeliverCheckout={() => openCheckout(true)}
+          onNewAccount={() => startAccount(false)}
+        />
+      </div>
+    );
+  }
+
+  if (view === 'tables') {
+    return (
+      <div className="operational-page">
+        {toolbar}
+        {banners}
+        <div className="operation-map-screen">
+          <Notice>{overview.error}</Notice>
+          {panel === 'new' ? (
+            <div className="operation-map-form">{accountPanel()}</div>
+          ) : overview.data ? (
+            <section className="operation-map-card" aria-label="Mapa del restaurante">
+              <p className="muted text-sm">
+                {selectedTable?.state === 'free'
+                  ? `${selectedTable.name} está libre. Abre una cuenta para capturar.`
+                  : 'Toca una mesa para abrir su cuenta y capturar productos.'}
+              </p>
+              <TableMap
+                areas={overview.data.areas}
+                tables={overview.data.tables}
+                areaID={workspace.areaID}
+                selectedTableID={workspace.tableID}
+                onAreaChange={workspace.setAreaID}
+                onSelect={(table) => workspace.chooseTable(table.id)}
+              />
+            </section>
+          ) : (
+            <p className="muted">Consultando áreas y mesas…</p>
+          )}
         </div>
-      )}
+      </div>
+    );
+  }
+
+  // Para llevar y Cuentas: listado a la izquierda y la cuenta seleccionada a la derecha.
+  const listPanel = accountPanel();
+  return (
+    <div className="operational-page">
+      {toolbar}
+      {banners}
+      <div
+        className={`operation-workspace ${view === 'takeaway' ? 'operation-takeaway-board' : ''}`}
+      >
+        <div className="operation-left">
+          <div className="operation-left-content">
+            {listPanel ?? (
+              <AccountList
+                value={workspace.accounts.data}
+                selectedID={workspace.selectedID}
+                onSelect={workspace.chooseAccount}
+                search={workspace.search}
+                onSearch={workspace.setSearch}
+                state={workspace.state}
+                onStateChange={workspace.setState}
+                page={workspace.page}
+                onPageChange={workspace.setPage}
+                error={workspace.accounts.error}
+                takeaway={view === 'takeaway'}
+              />
+            )}
+          </div>
+        </div>
+        <WorkspaceBill
+          workspace={workspace}
+          can={can}
+          blocked={blocked}
+          linesLocked={captureLinesLocked(workspace)}
+          onAction={(action) => openAccountAction(action, 'capture')}
+          onCheckout={() => openCheckout(false)}
+          onDeliverCheckout={() => openCheckout(true)}
+          onCapture={workspace.enterCapture}
+        />
+      </div>
     </div>
   );
 }

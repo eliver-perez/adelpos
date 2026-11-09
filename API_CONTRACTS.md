@@ -119,6 +119,8 @@ Orden visual por posición (etapa 6.1): los POST/PATCH de categorías y producto
 
 Color de categoría (etapa 6.1): `""` o un `hex` de la paleta cerrada de Go (16 colores, se normaliza a minúsculas). Al editar se acepta también el color ya guardado aunque no esté en la paleta (colores anteriores a la paleta); cualquier otro valor responde 400. `GET /lookups` añade `palette:[{hex,name}]` y, en cada producto, `category_id` y `sort_order`.
 
+Captura táctil (etapa 6.1, fase D; sin rutas nuevas): en el listado de productos, `search` busca por nombre **o código interno** (`ILIKE` en ambos; los demás recursos siguen buscando solo por nombre). `GET /lookups` añade en cada categoría `available_now` (booleano de solo lectura: activa y dentro de su horario en este momento, con el reloj de Go y la zona del establecimiento); la captura solo muestra las categorías disponibles y Go sigue rechazando al cotizar cualquier producto no disponible. `available_now` no forma parte del cuerpo de edición de la categoría.
+
 Horarios: `{starts_on?:"AAAA-MM-DD",ends_on?:"AAAA-MM-DD",days:[0..6],windows:[{start:"HH:mm",end:"HH:mm"}]}`. Arrays vacíos: sin restricción. Fin exclusivo; `24:00` solo como final. La zona proviene del establecimiento y el instante de Go, nunca del cliente.
 
 Ejemplo de previsualización (sustituir los UUID por registros reales):
@@ -204,7 +206,7 @@ Las escrituras llevan `operation_id` UUID. Actualizar exige `revision`; transfer
 
 ### Captura y confirmación
 
-Guardar o cotizar una captura envía `revision` e `items`. Cada ítem lleva UUID estable de borrador, `product_id`, `variant_id` nullable, `quantity` entera y `customization` del catálogo. PUT de borrador añade el UUID de operación; POST `draft-preview` no lo requiere. Límite de lote: 20 partidas/1000 unidades totales.
+Guardar o cotizar una captura envía `revision` e `items`. Cada ítem lleva UUID estable de borrador, `product_id`, `variant_id` nullable, `quantity` entera y `customization` del catálogo. PUT de borrador añade el UUID de operación; POST `draft-preview` no lo requiere. Límite de lote: 20 partidas/1000 unidades totales. La captura táctil de la etapa 6.1 usa estos mismos contratos: guarda el borrador completo con antirrebote y una sola petición en vuelo, y «Enviar a cocina» llama a `restaurant_confirm` con la huella de `GET /accounts/{id}/preview` (ver [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md)).
 
 ```json
 {

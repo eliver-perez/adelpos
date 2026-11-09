@@ -259,7 +259,12 @@ func listPage(ctx context.Context, tx pgx.Tx, resource string, request Request) 
 		if len(search) > 100 {
 			return nil, invalid("La búsqueda admite hasta 100 caracteres.")
 		}
-		add(alias+".name ILIKE $%d", "%"+search+"%")
+		if resource == "products" {
+			// La captura táctil busca un producto por su nombre o por su código interno.
+			add("(p.name ILIKE $%[1]d OR p.code ILIKE $%[1]d)", "%"+search+"%")
+		} else {
+			add(alias+".name ILIKE $%d", "%"+search+"%")
+		}
 	}
 	if active := request.Query.Get("active"); active != "" {
 		if active != "true" && active != "false" {

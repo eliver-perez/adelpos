@@ -175,17 +175,24 @@ export interface HistoryPage {
   total: number;
 }
 
+// Personalización en curso en el panel central de la captura. Para una partida nueva o del
+// borrador, la cotización tentativa se calcula sobre el borrador local vigente; para modificar una
+// partida confirmada se conserva la revisión en la que se abrió, como exige `restaurant_edit`.
 export interface EditorState {
   accountID: string;
   mode: Account['mode'];
   tableID: string | null;
+  kind: 'new' | 'draft' | 'confirmed';
   revision: number;
-  baseDraft: DraftItem[];
   localID: string;
   draftID: string | null;
   confirmedVersionID: string | null;
   line: PreviewLine;
+  // Selección al abrir: «Volver» solo pide confirmación si hubo cambios.
+  initialLine: PreviewLine;
   reason: string;
+  // El listado de captura informó que el producto base no tiene precio en la lista de la cuenta.
+  basePriceUnavailable: boolean;
 }
 
 export function emptyCustomization(): Customization {

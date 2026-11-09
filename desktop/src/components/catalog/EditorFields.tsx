@@ -396,7 +396,15 @@ export function ScheduleEditor({
   );
 }
 
-export function CatalogImage({ id }: { id: string | null }) {
+// `decorative` omite el texto alternativo cuando la imagen acompaña a un nombre ya visible (por
+// ejemplo, dentro del botón de un producto en la captura).
+export function CatalogImage({
+  id,
+  decorative = false,
+}: {
+  id: string | null;
+  decorative?: boolean;
+}) {
   const [source, setSource] = useState('');
   useEffect(() => {
     let current = true;
@@ -412,6 +420,15 @@ export function CatalogImage({ id }: { id: string | null }) {
       current = false;
     };
   }, [id]);
+  if (decorative) {
+    return source ? (
+      <img src={source} alt="" className="catalog-image" />
+    ) : (
+      <span className="catalog-image catalog-placeholder" aria-hidden="true">
+        ◇
+      </span>
+    );
+  }
   return source ? (
     <img src={source} alt="Fotografía del catálogo" className="catalog-image" />
   ) : (
