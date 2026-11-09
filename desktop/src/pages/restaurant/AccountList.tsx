@@ -1,6 +1,6 @@
 import { preparationLabels } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
-import { elapsedTime, serverDateTime } from '../../services/restaurant';
+import { accountLabel, elapsedTime, serverDateTime } from '../../services/restaurant';
 import type { Account, AccountPage } from '../../services/restaurant';
 import { deliveryStateBadges, formatMoney, paymentStateBadges } from '../../services/payments';
 
@@ -112,9 +112,7 @@ export function AccountList({
             onClick={() => onSelect(account.id)}
           >
             <div className="account-list-card-heading">
-              <strong>
-                #{account.folio} · {account.customer_name || account.name}
-              </strong>
+              <strong>{accountLabel(account)}</strong>
               <strong>Confirmado: ${account.totals.total}</strong>
             </div>
             <div className="account-list-card-detail">

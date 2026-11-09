@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Form, Notice } from '../../components/Forms';
 import { IntegerField, ReferenceField, TextField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
+import { accountCustomName, accountLabel } from '../../services/restaurant';
 import type { AccountPage, Bill, Overview } from '../../services/restaurant';
 import type { ExecuteMutation } from './OperationsAdmin';
 
@@ -34,7 +35,11 @@ export function AccountActions({
   const [targetID, setTargetID] = useState('');
   const [tableID, setTableID] = useState(bill.account.table_id ?? '');
   const [staffID, setStaffID] = useState(bill.account.assigned_user_id);
-  const [name, setName] = useState(`${bill.account.name} · separada`);
+  // Una cuenta sin nombre capturado (referencia neutra) propone un nombre a partir de su folio.
+  const [name, setName] = useState(() => {
+    const custom = accountCustomName(bill.account);
+    return custom ? `${custom} · separada` : `Separada de la cuenta #${bill.account.folio}`;
+  });
   const [reason, setReason] = useState('');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
@@ -137,7 +142,7 @@ export function AccountActions({
               value={targetID}
               options={targets.map((account) => ({
                 id: account.id,
-                name: `#${account.folio} · ${account.name} · ${account.table_name ?? 'sin mesa'} · $${account.totals.total}`,
+                name: `${accountLabel(account)} · ${account.table_name ?? 'sin mesa'} · $${account.totals.total}`,
               }))}
               onChange={setTargetID}
             />

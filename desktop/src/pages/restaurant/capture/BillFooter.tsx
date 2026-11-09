@@ -22,9 +22,30 @@ const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
   { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage' },
 ];
 
+// Acciones del menú «Más…» que aplican a la cuenta con los permisos del usuario. Las comparten la
+// cuenta de la captura y el panel lateral de la mesa.
+export function accountMoreActions(
+  account: Account,
+  can: (permission: string) => boolean,
+  localDraftItems: number,
+): MoreAction<BillAction>[] {
+  const writable =
+    account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
+  return moreActions.filter(
+    (action) =>
+      can(action.permission) &&
+      (action.id === 'history' || action.id === 'kitchen' || writable) &&
+      (action.id !== 'move' || account.mode === 'dine_in') &&
+      (action.id !== 'void' ||
+        (account.confirmed_quantity === 0 &&
+          account.draft_quantity === 0 &&
+          localDraftItems === 0)),
+  );
+}
+
 // Botón de cobro: Cobrar exige registrar cobros y consultar la información financiera; muestra el
 // saldo que calculó Go. Sin permiso de cobro basta la consulta.
-function CheckoutButton({
+export function CheckoutButton({
   account,
   can,
   disabled,
@@ -131,16 +152,7 @@ export function BillFooter({
     precheck: can('payments.read'),
     precheckReady: account.confirmed_quantity > 0,
   };
-  const more = moreActions.filter(
-    (action) =>
-      can(action.permission) &&
-      (action.id === 'history' || action.id === 'kitchen' || writable) &&
-      (action.id !== 'move' || account.mode === 'dine_in') &&
-      (action.id !== 'void' ||
-        (account.confirmed_quantity === 0 &&
-          account.draft_quantity === 0 &&
-          localDraft.length === 0)),
-  );
+  const more = accountMoreActions(account, can, localDraft.length);
   return (
     <footer className="capture-bill-footer" aria-live="polite">
       <dl className="capture-totals">

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { APIError } from '../services/api';
 import type { Operation } from '../services/api';
 import type { Lookups } from '../services/catalog';
-import { emptyCustomization, normalizeSelection } from '../services/restaurant';
+import {
+  defaultTakeawayOrigin,
+  emptyCustomization,
+  normalizeSelection,
+} from '../services/restaurant';
 import type {
   AccountPage,
   Bill,
@@ -22,7 +26,6 @@ import type { CaptureProduct } from '../pages/restaurant/capture/captureRules';
 export type RestaurantView = 'tables' | 'takeaway' | 'accounts' | 'manage';
 export type WorkspacePanel =
   | 'capture'
-  | 'new'
   | 'metadata'
   | 'history'
   | 'editor'
@@ -56,8 +59,9 @@ export function useRestaurantWorkspace(
     accounts: '',
     manage: '',
   });
-  // En Para llevar y Cuentas, la captura táctil se abre expresamente desde el listado; se recuerda
-  // por vista para que llegar desde el menú principal muestre el listado de esa vista.
+  // La captura táctil se abre expresamente: en Mesas desde el panel lateral de la mesa («Capturar»
+  // o al abrir una cuenta) y en Para llevar y Cuentas desde el listado. Se recuerda por vista para
+  // que llegar desde el menú principal muestre el mapa o el listado de esa vista.
   const [captureViews, setCaptureViews] = useState<Record<RestaurantView, boolean>>({
     tables: false,
     takeaway: false,
@@ -69,7 +73,6 @@ export function useRestaurantWorkspace(
   const [page, setPage] = useState(1);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [cancelLine, setCancelLine] = useState<ConfirmedLine | null>(null);
-  const [newMode, setNewMode] = useState<'dine_in' | 'takeaway'>('dine_in');
   const [actionError, setActionError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const canMap = can('restaurant.areas.read') && can('restaurant.tables.read');
@@ -111,8 +114,7 @@ export function useRestaurantWorkspace(
       can('catalog.read') &&
       can('catalog.prices.read'),
   });
-  const captureMode =
-    view !== 'manage' && !!selectedID && (view === 'tables' || captureViews[view]);
+  const captureMode = view !== 'manage' && !!selectedID && captureViews[view];
 
   function setCaptureOpen(target: RestaurantView, open: boolean) {
     setCaptureViews((current) => ({ ...current, [target]: open }));
@@ -261,14 +263,11 @@ export function useRestaurantWorkspace(
     setActionError('');
   }
 
-  // «Mesas» vuelve al mapa; en Para llevar y Cuentas, al listado.
+  // «Mesas» vuelve al mapa con el panel lateral de la misma mesa; en Para llevar y Cuentas, al
+  // listado.
   function leaveCapture() {
     flushCurrent();
     setActionError('');
-    if (view === 'tables') {
-      chooseTable('');
-      return;
-    }
     setCaptureOpen(view, false);
     setPanel('capture');
   }
@@ -277,6 +276,37 @@ export function useRestaurantWorkspace(
     setCaptureOpen(view, true);
     setPanel('capture');
     setActionError('');
+  }
+
+  // Apertura rápida (etapa 6.2): abre la cuenta sin formulario con la apertura idempotente
+  // existente y, al confirmarse, entra directo a la captura (ver onResolved). Go asigna la lista
+  // predeterminada, el responsable y la referencia neutra del nombre. Un doble toque no abre otra
+  // cuenta: mientras la apertura está en vuelo (o incierta) el segundo toque se ignora sin generar
+  // otro operation_id.
+  async function quickOpen(mode: 'dine_in' | 'takeaway', table: string | null) {
+    if (mutation.isPending()) {
+      return;
+    }
+    flushCurrent();
+    setActionError('');
+    const body: Record<string, unknown> = {
+      name: '',
+      mode,
+      table_id: mode === 'takeaway' ? null : table,
+      price_list_id: null,
+      customer_name: '',
+      phone: '',
+      origin: mode === 'takeaway' ? defaultTakeawayOrigin : '',
+      notes: '',
+      scheduled_local: '',
+      schedule_kind: '',
+      assigned_user_id: null,
+    };
+    try {
+      await execute<Bill>('restaurant_open_account', { body });
+    } catch {
+      // El error (o el resultado incierto con «Recuperar resultado») lo muestra la página.
+    }
   }
 
   // Abre un panel de la cuenta. Las acciones que escriben parten de la cuenta sincronizada: se
@@ -397,6 +427,7 @@ export function useRestaurantWorkspace(
     captureMode,
     enterCapture,
     leaveCapture,
+    quickOpen,
     search,
     setSearch,
     state,
@@ -418,8 +449,6 @@ export function useRestaurantWorkspace(
     resumeEditor,
     cancelLine,
     setCancelLine,
-    newMode,
-    setNewMode,
     actionError,
     setActionError,
     refresh: () => setRefresh((current) => current + 1),

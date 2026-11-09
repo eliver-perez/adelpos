@@ -6,12 +6,13 @@ import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
-import { AccountForm } from './AccountForm';
+import { AccountDetails } from './AccountDetails';
 import { AccountHistory } from './AccountHistory';
 import { AccountKitchen } from './AccountKitchen';
 import { AccountList } from './AccountList';
 import { CancelItem } from './CancelItem';
 import { OperationsAdmin } from './OperationsAdmin';
+import { TablePanel } from './TablePanel';
 import { CheckoutPanel } from './checkout/CheckoutPanel';
 import { CheckoutToolbar } from './checkout/CheckoutToolbar';
 import { AccountAdjustments } from './adjustments/AccountAdjustments';
@@ -76,9 +77,10 @@ export function OperationalPage({
     setActionReturn('capture');
   }
 
-  function startAccount(takeaway = view === 'takeaway') {
-    workspace.setNewMode(takeaway ? 'takeaway' : 'dine_in');
-    workspace.setPanel('new');
+  // Abrir una cuenta no muestra formulario (etapa 6.2): Mesas abre en la mesa elegida, Para llevar
+  // abre un pedido y Cuentas una cuenta sin mesa; las tres entran directo a la captura.
+  function openAccount(mode: 'dine_in' | 'takeaway', table: string | null) {
+    void workspace.quickOpen(mode, table);
   }
 
   function openCheckout(deliver: boolean) {
@@ -89,22 +91,6 @@ export function OperationalPage({
   // Paneles de la cuenta (formularios y consultas). En la captura ocupan las columnas de
   // categorías y productos; en los listados, la columna izquierda.
   function accountPanel(): ReactNode {
-    if (panel === 'new') {
-      return (
-        <AccountForm
-          timezone={timezone}
-          key={`new-${workspace.newMode}`}
-          mode={workspace.newMode}
-          tableID={view === 'tables' ? workspace.tableID || null : null}
-          overview={overview.data}
-          lookups={lookups.data}
-          can={can}
-          execute={workspace.execute}
-          busy={blocked}
-          onClose={() => workspace.setPanel('capture')}
-        />
-      );
-    }
     if (!bill) {
       return null;
     }
@@ -119,18 +105,15 @@ export function OperationalPage({
     }
     if (panel === 'metadata') {
       return (
-        <AccountForm
-          timezone={timezone}
+        <AccountDetails
           key={bill.account.id}
-          mode={workspace.newMode}
-          tableID={null}
-          current={bill.account}
-          overview={overview.data}
+          account={bill.account}
+          timezone={bill.timezone || timezone}
           lookups={lookups.data}
           can={can}
           execute={workspace.execute}
           busy={blocked}
-          onClose={() => workspace.setPanel('capture')}
+          onClose={closeAction}
         />
       );
     }
@@ -223,23 +206,14 @@ export function OperationalPage({
         <button className="secondary-button" onClick={workspace.refresh}>
           Actualizar
         </button>
-        {can('accounts.open') && !checkoutOpen && view !== 'manage' && (
+        {/* En Mesas, la cuenta se abre desde el panel lateral de la mesa. */}
+        {can('accounts.open') && !checkoutOpen && (view === 'takeaway' || view === 'accounts') && (
           <button
             className="primary-button"
-            disabled={
-              blocked ||
-              (view === 'tables' &&
-                !!selectedTable &&
-                (!selectedTable.active || selectedTable.out_of_service)) ||
-              (view === 'takeaway' && !can('takeaway.manage'))
-            }
-            onClick={() => startAccount()}
+            disabled={blocked || (view === 'takeaway' && !can('takeaway.manage'))}
+            onClick={() => openAccount(view === 'takeaway' ? 'takeaway' : 'dine_in', null)}
           >
-            {view === 'takeaway'
-              ? 'Nuevo para llevar'
-              : view === 'tables'
-                ? 'Abrir cuenta en mesa'
-                : 'Cuenta sin mesa'}
+            {view === 'takeaway' ? 'Nuevo pedido' : 'Cuenta sin mesa'}
           </button>
         )}
       </div>
@@ -353,28 +327,42 @@ export function OperationalPage({
           onAction={(action) => openAccountAction(action, 'capture')}
           onCheckout={() => openCheckout(false)}
           onDeliverCheckout={() => openCheckout(true)}
-          onNewAccount={() => startAccount(false)}
+          onNewAccount={() =>
+            openAccount('dine_in', bill?.account.table_id ?? (workspace.tableID || null))
+          }
         />
       </div>
     );
   }
 
   if (view === 'tables') {
+    // Mapa operativo (sin controles de edición) a la izquierda y panel lateral de la mesa a la
+    // derecha. Una acción de la cuenta (dividir, precuenta, historial…) ocupa el lugar del mapa
+    // y al cerrarse vuelve a él; el panel permanece.
+    const tablePanelAction = panel === 'capture' || panel === 'editor' ? null : accountPanel();
+    const tableAccounts =
+      selectedTable && workspace.accounts.data
+        ? workspace.accounts.data.items.filter(
+            (entry) => entry.state === 'open' && entry.table_id === selectedTable.id,
+          )
+        : null;
     return (
       <div className="operational-page">
         {toolbar}
         {banners}
-        <div className="operation-map-screen">
-          <Notice>{overview.error}</Notice>
-          {panel === 'new' ? (
-            <div className="operation-map-form">{accountPanel()}</div>
+        <div className={`operation-map-screen ${selectedTable ? 'operation-map-split' : ''}`}>
+          {tablePanelAction ? (
+            <section className="operation-map-card operation-map-action">
+              {tablePanelAction}
+            </section>
           ) : overview.data ? (
             <section className="operation-map-card" aria-label="Mapa del restaurante">
-              <p className="muted text-sm">
-                {selectedTable?.state === 'free'
-                  ? `${selectedTable.name} está libre. Abre una cuenta para capturar.`
-                  : 'Toca una mesa para abrir su cuenta y capturar productos.'}
-              </p>
+              <Notice>{overview.error}</Notice>
+              {!selectedTable && (
+                <p className="muted text-sm">
+                  Toca una mesa para ver sus cuentas, abrir una nueva o capturar productos.
+                </p>
+              )}
               <TableMap
                 areas={overview.data.areas}
                 tables={overview.data.tables}
@@ -385,7 +373,27 @@ export function OperationalPage({
               />
             </section>
           ) : (
-            <p className="muted">Consultando áreas y mesas…</p>
+            <section className="operation-map-card">
+              <Notice>{overview.error}</Notice>
+              <p className="muted">Consultando áreas y mesas…</p>
+            </section>
+          )}
+          {selectedTable && (
+            <TablePanel
+              table={selectedTable}
+              accounts={tableAccounts}
+              bill={bill}
+              billError={workspace.resource.error}
+              localDraft={workspace.localDraft}
+              lookups={lookups.data}
+              can={can}
+              blocked={blocked}
+              onChooseAccount={workspace.chooseAccount}
+              onCapture={workspace.enterCapture}
+              onOpenAccount={() => openAccount('dine_in', selectedTable.id)}
+              onAction={(action) => openAccountAction(action, 'capture')}
+              onCheckout={() => openCheckout(false)}
+            />
           )}
         </div>
       </div>

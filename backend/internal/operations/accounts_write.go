@@ -149,6 +149,10 @@ func (handler *service) openAccount() (any, error) {
 	if input.Revision != 0 {
 		return nil, invalid("Una cuenta nueva empieza sin revisión previa.")
 	}
+	// Etapa 6.2: el nombre es opcional al abrir; sin nombre, Go asigna la referencia neutra.
+	if err := handler.fillAccountName(&input); err != nil {
+		return nil, err
+	}
 	scheduled, err := handler.validateAccountInput(&input, nil)
 	if err != nil {
 		return nil, err
@@ -170,6 +174,18 @@ func (handler *service) updateAccount(id string) (any, error) {
 		return nil, err
 	}
 	if err := ensureOpen(account, input.Revision); err != nil {
+		return nil, err
+	}
+	// Una cuenta identificada por su referencia neutra que cambia de mesa toma la de la mesa
+	// nueva; vaciar el nombre restaura la referencia neutra en lugar de fallar.
+	if strings.TrimSpace(input.Name) == account.Name {
+		moved, err := handler.movedAccountName(account, input.TableID)
+		if err != nil {
+			return nil, err
+		}
+		input.Name = moved
+	}
+	if err := handler.fillAccountName(&input); err != nil {
 		return nil, err
 	}
 	scheduled, err := handler.validateAccountInput(&input, account)
@@ -240,12 +256,20 @@ func (handler *service) accountAction(id, action string) (any, error) {
 			return nil, err
 		}
 	}
+	// Cambiar de mesa conserva un nombre capturado; la referencia neutra sigue a la mesa nueva.
+	name := account.Name
+	if action == "move" {
+		name, err = handler.movedAccountName(account, input.TableID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if err := handler.touch(id, input.Revision); err != nil {
 		return nil, err
 	}
 	switch action {
 	case "move":
-		_, err = handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET table_id=$1 WHERE id=$2", input.TableID, id)
+		_, err = handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET table_id=$1,name=$2 WHERE id=$3", input.TableID, name, id)
 	case "assign":
 		_, err = handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET assigned_user_id=$1 WHERE id=$2", input.AssignedUserID, id)
 	case "void":
