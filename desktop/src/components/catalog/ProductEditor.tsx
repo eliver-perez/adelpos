@@ -2,12 +2,12 @@ import type { Lookups, Product } from '../../services/catalog';
 import {
   Check,
   DecimalField,
-  ImageEditor,
   IntegerField,
   ReferenceField,
   ScheduleEditor,
   TextField,
 } from './EditorFields';
+import { ImageEditor } from './ImageEditor';
 import { VariantEditor, IngredientRulesEditor, ProductGroupsEditor } from './ProductDetailsEditors';
 import { ComboEditor } from './ComboEditor';
 

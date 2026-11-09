@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { CatalogImage } from '../../components/catalog/EditorFields';
+import { Field } from '../../components/Forms';
 import { api } from '../../services/api';
 import type { CatalogDocument, Category, Product, Resource } from '../../services/catalog';
 
@@ -25,6 +27,7 @@ export function CatalogRecord({
 }) {
   const product =
     resource === 'products' ? (record as Product & { availability_reason?: string }) : null;
+  const [duplicating, setDuplicating] = useState(false);
   return (
     <article className="catalog-record" key={record.id}>
       {(resource === 'products' || resource === 'categories') && (
@@ -123,24 +126,80 @@ export function CatalogRecord({
         )}
         {product && editable && (
           <button
+            type="button"
             className="secondary-button"
-            onClick={() => {
-              const name = window.prompt('Nombre del nuevo producto', `${product.name} (copia)`);
-              if (!name) return;
-              const code = window.prompt('Código interno único para la copia');
-              if (!code) return;
-              void runAction(() =>
-                api('catalog_duplicate_product', {
-                  id: product.id,
-                  body: { name, code, revision: product.revision },
-                }),
-              );
-            }}
+            aria-expanded={duplicating}
+            onClick={() => setDuplicating(!duplicating)}
           >
             Duplicar
           </button>
         )}
       </div>
+      {product && duplicating && (
+        <DuplicateProductForm
+          product={product}
+          onCancel={() => setDuplicating(false)}
+          onDuplicate={async (name, code) => {
+            await runAction(() =>
+              api('catalog_duplicate_product', {
+                id: product.id,
+                body: { name, code, revision: product.revision },
+              }),
+            );
+            setDuplicating(false);
+          }}
+        />
+      )}
     </article>
+  );
+}
+
+// Datos de la copia capturados dentro de la tarjeta. Sustituye a window.prompt, que el WebView
+// nativo no muestra (el botón «Duplicar» no hacía nada).
+function DuplicateProductForm({
+  product,
+  onCancel,
+  onDuplicate,
+}: {
+  product: Product;
+  onCancel: () => void;
+  onDuplicate: (name: string, code: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(`${product.name} (copia)`);
+  const [code, setCode] = useState('');
+  return (
+    <form
+      className="duplicate-form"
+      aria-label={`Duplicar ${product.name}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onDuplicate(name.trim(), code.trim());
+      }}
+    >
+      <Field label="Nombre de la copia">
+        <input
+          value={name}
+          required
+          maxLength={100}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </Field>
+      <Field label="Código interno de la copia">
+        <input
+          value={code}
+          required
+          maxLength={60}
+          onChange={(event) => setCode(event.target.value)}
+        />
+      </Field>
+      <div className="button-row">
+        <button type="submit" className="primary-button">
+          Crear copia
+        </button>
+        <button type="button" className="secondary-button" onClick={onCancel}>
+          Cancelar
+        </button>
+      </div>
+    </form>
   );
 }

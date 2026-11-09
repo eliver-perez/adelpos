@@ -119,6 +119,7 @@ export function VariantEditor({ value, onChange, can }: ProductDetailsProps) {
             />
           )}
           <RemoveButton
+            label="Quitar presentación"
             onClick={() =>
               onChange({
                 ...value,
@@ -208,6 +209,7 @@ export function IngredientRulesEditor({ value, onChange, lookups }: ProductDetai
                 onChange={(addable) => update({ addable })}
               />
               <RemoveButton
+                label="Quitar ingrediente"
                 onClick={() =>
                   onChange({
                     ...value,
@@ -290,6 +292,7 @@ export function ProductGroupsEditor({ value, onChange, lookups }: ProductDetails
               />
             ))}
             <RemoveButton
+              label="Quitar grupo"
               onClick={() =>
                 onChange({
                   ...value,

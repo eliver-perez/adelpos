@@ -120,6 +120,7 @@ export function GroupEditor({
                 <TierEditor value={option.tiers} onChange={(tiers) => update({ tiers })} />
               )}
               <RemoveButton
+                label="Quitar opción"
                 onClick={() =>
                   onChange({
                     ...value,
@@ -207,6 +208,7 @@ export function PriceListEditor({
                 />
               </div>
               <RemoveButton
+                label="Quitar precio"
                 onClick={() =>
                   onChange({
                     ...value,

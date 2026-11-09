@@ -377,6 +377,66 @@ func TestStageThreeAcceptance(t *testing.T) {
 		)
 		checkTotal("145.00")
 	})
+	run("combo con producto original implícito y sin autorreferencia", func(t *testing.T) {
+		// Etapa 6.1 §1.4: «Productos permitidos y sustituciones» es opcional; el original siempre está
+		// permitido. §1.5: un combo no puede contenerse a sí mismo y el original debe elegirse.
+		drink := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Refresco", Active: true},
+			CategoryID: category.ID,
+			Code:       "REFRESCO-61",
+			Kind:       "product",
+			BasePrice:  "25",
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", drink, 200), &drink)
+		combo := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Combo sin alternativas", Active: true},
+			CategoryID: category.ID,
+			Code:       "COMBO-61",
+			Kind:       "combo",
+			BasePrice:  "120",
+			Slots: []catalog.ComboSlot{
+				{
+					Name:             "Bebida",
+					MinQuantity:      1,
+					MaxQuantity:      1,
+					IncludedQuantity: 1,
+					DefaultQuantity:  1,
+					DefaultProductID: drink.ID,
+				},
+			},
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", combo, 200), &combo)
+		if len(combo.Slots) != 1 || len(combo.Slots[0].Options) != 1 {
+			t.Fatalf("el original no quedó como alternativa implícita: %+v", combo.Slots)
+		}
+		original := combo.Slots[0].Options[0]
+		if original.ProductID != drink.ID || original.SubstitutionPrice != "0.00" || len(original.Tiers) != 0 {
+			t.Fatalf("alternativa implícita inesperada: %+v", original)
+		}
+		request = catalog.PreviewRequest{Lines: []catalog.LineRequest{{ProductID: combo.ID, Quantity: 1}}}
+		checkTotal("120.00")
+		var saved catalog.Product
+		_ = json.Unmarshal(call("GET", "catalog/products/"+combo.ID, nil, 200), &saved)
+		if len(saved.Slots) != 1 || len(saved.Slots[0].Options) != 1 {
+			t.Fatalf("la consulta no conserva el original: %+v", saved.Slots)
+		}
+		selfReference := saved
+		selfReference.Slots = []catalog.ComboSlot{saved.Slots[0]}
+		selfReference.Slots[0].DefaultProductID = saved.ID
+		selfReference.Slots[0].Options = nil
+		problem := string(call("PATCH", "catalog/products/"+saved.ID, selfReference, 400))
+		if !strings.Contains(problem, "sí mismo") {
+			t.Fatalf("la autorreferencia del original no se explicó: %s", problem)
+		}
+		missing := saved
+		missing.Slots = []catalog.ComboSlot{saved.Slots[0]}
+		missing.Slots[0].DefaultProductID = ""
+		missing.Slots[0].Options = nil
+		problem = string(call("PATCH", "catalog/products/"+saved.ID, missing, 400))
+		if !strings.Contains(problem, "producto original") {
+			t.Fatalf("la falta de original no se explicó: %s", problem)
+		}
+	})
 	run("listas promociones vigencia y exclusiones", func(t *testing.T) {
 		request = catalog.PreviewRequest{Lines: []catalog.LineRequest{{ProductID: product.ID, Quantity: 2}}}
 		promotion := catalog.Promotion{

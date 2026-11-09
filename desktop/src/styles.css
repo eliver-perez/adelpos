@@ -1068,8 +1068,13 @@ summary {
   background: var(--subtle);
 }
 .table-canvas {
-  height: 440px;
+  /* Escala uniforme: el lienzo conserva la proporción del espacio lógico de 1000 × 560, de modo
+     que el mismo ancho y alto lógicos producen la misma medida en pantalla (mesa redonda =
+     círculo, cuadrada = cuadrado) con cualquier tamaño de ventana. */
+  aspect-ratio: 1000 / 560;
   width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
   position: relative;
   overflow: hidden;
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
@@ -2576,4 +2581,114 @@ summary {
   .precheck-layout {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Etapa 6.1 · componentes compartidos de formularios */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(15 23 32 / 45%);
+}
+.dialog-panel {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 22%);
+}
+.dialog-panel h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.dialog-panel p {
+  margin: 0;
+  color: var(--muted);
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.dialog-actions button {
+  min-height: 44px;
+}
+.repeat-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.remove-button {
+  min-height: 44px;
+  justify-self: start;
+}
+.repeat-card > .remove-button {
+  justify-self: start;
+}
+.inline-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.inline-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.image-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.image-editor-body {
+  display: grid;
+  gap: 6px;
+}
+.image-editor-status {
+  margin: 0;
+}
+.file-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+.file-button:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.file-button.is-disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.duplicate-form {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
 }

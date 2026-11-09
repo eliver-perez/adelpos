@@ -2,12 +2,12 @@ import { Field, Form } from '../../components/Forms';
 import {
   Check,
   DecimalField,
-  ImageEditor,
   IntegerField,
   ReferenceField,
   ScheduleEditor,
   TextField,
 } from '../../components/catalog/EditorFields';
+import { ImageEditor } from '../../components/catalog/ImageEditor';
 import { ProductEditor } from '../../components/catalog/ProductEditor';
 import {
   GroupEditor,
