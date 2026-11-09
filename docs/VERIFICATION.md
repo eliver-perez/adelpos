@@ -2,7 +2,7 @@
 
 Ejecución del **8 de noviembre de 2026**, zona America/Monterrey. Versión **0.6.1**, API v1, esquema **7** en el código. Evidencia anterior: [etapa 6](VERIFICATION_STAGE6.md), [etapa 5](VERIFICATION_STAGE5.md), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance por fases: [ETAPA_6_1_AVANCE.md](ETAPA_6_1_AVANCE.md).
 
-**La instalación real no se modificó.** Sigue en 0.6.0 con esquema 6; la migración 0007 espera la autorización del propietario. La única interacción con ella fue una consulta de solo lectura (transacción de solo lectura) para verificar §1.8 de la especificación: ninguna categoría, producto, presentación ni promoción tenía fechas de disponibilidad guardadas. No se leyeron secretos de `.local` ni del Keychain.
+**Las pruebas no tocaron la instalación real.** Después de completarlas, y con autorización del propietario, la instalación real se migró a esquema 7 (ver «Migración de la instalación real»). Antes, la única interacción con ella fue una consulta de solo lectura (transacción de solo lectura) para verificar §1.8 de la especificación: ninguna categoría, producto, presentación ni promoción tenía fechas de disponibilidad guardadas. No se leyeron secretos de `.local` ni del Keychain.
 
 ## Entorno aislado
 
@@ -10,17 +10,17 @@ Copia del repositorio en el directorio temporal de la sesión (sin `.git`, `.loc
 
 ## Resultados ejecutados (árbol completo de la etapa)
 
-| Comprobación        | Resultado                                                                                                                                                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Formato y metadatos | `scripts/dev.sh format` y `format-check` (Prettier, gofmt, `cargo fmt --check`) aprobados; `sync-metadata --check` aprobado con 0.6.1 / esquema 7.                                                                                                     |
-| Go                  | `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race ./...` aprobado en todos los paquetes con pruebas, incluidos los nuevos `internal/ordering` e `internal/features`.                                                     |
-| PostgreSQL          | Integración de `database`, `administration`, `catalog`, `operations` y `payments` aprobada. Incluye la actualización de una instalación en esquema 6 a la 0007 (permisos solo al administrador, repetible) y los CHECK de dólares sin huecos por NULL. |
-| Frontend            | Vitest **132 pruebas en 23 archivos** aprobadas (72 en 16 archivos al inicio de la etapa); `tsc --noEmit` estricto y `npm run build` correctos.                                                                                                        |
-| Rust                | `cargo test --locked --offline`: **12 aprobadas**, 1 ignorada deliberadamente (escritura real en Keychain, opt-in). Incluye las rutas nuevas de la lista cerrada (`settings/features`, tipo de cambio y rango del dólar).                              |
-| Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores con la nueva captura táctil y el cobro en dólares (ver abajo).                                                                                                              |
-| Bundle macOS        | `tauri build --bundles app` en la copia aislada (destino de compilación temporal, sin reemplazar el `.app` 0.6.0 del proyecto): `AD-EL POS.app` ARM64 **0.6.1**, 9.45 MiB. No se abrió.                                                                |
-| Revisión visual     | Capturas de la captura táctil en Chromium y WebKit a 1280 × 720, 1920 × 1080 y 1024 × 768, temas claro y oscuro, incluida la personalización en el panel central y un pedido para llevar. No sustituye WKWebView nativo ni pantalla táctil.            |
-| Instalación real    | Sin cambios: 0.6.0 / esquema 6. Solo la consulta de solo lectura descrita arriba.                                                                                                                                                                      |
+| Comprobación        | Resultado                                                                                                                                                                                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato y metadatos | `scripts/dev.sh format` y `format-check` (Prettier, gofmt, `cargo fmt --check`) aprobados; `sync-metadata --check` aprobado con 0.6.1 / esquema 7.                                                                                                                                                        |
+| Go                  | `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race ./...` aprobado en todos los paquetes con pruebas, incluidos los nuevos `internal/ordering` e `internal/features`.                                                                                                        |
+| PostgreSQL          | Integración de `database`, `administration`, `catalog`, `operations` y `payments` aprobada. Incluye la actualización de una instalación en esquema 6 a la 0007 (permisos solo al administrador, repetible) y los CHECK de dólares sin huecos por NULL.                                                    |
+| Frontend            | Vitest **132 pruebas en 23 archivos** aprobadas (72 en 16 archivos al inicio de la etapa); `tsc --noEmit` estricto y `npm run build` correctos.                                                                                                                                                           |
+| Rust                | `cargo test --locked --offline`: **12 aprobadas**, 1 ignorada deliberadamente (escritura real en Keychain, opt-in). Incluye las rutas nuevas de la lista cerrada (`settings/features`, tipo de cambio y rango del dólar).                                                                                 |
+| Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores con la nueva captura táctil y el cobro en dólares (ver abajo).                                                                                                                                                                 |
+| Bundle macOS        | `tauri build --bundles app` en la copia aislada (destino de compilación temporal, sin reemplazar el `.app` 0.6.0 del proyecto): `AD-EL POS.app` ARM64 **0.6.1**, 9.45 MiB. No se abrió.                                                                                                                   |
+| Revisión visual     | Capturas de la captura táctil en Chromium y WebKit a 1280 × 720, 1920 × 1080 y 1024 × 768, temas claro y oscuro, incluida la personalización en el panel central y un pedido para llevar. No sustituye WKWebView nativo ni pantalla táctil.                                                               |
+| Instalación real    | Migrada con autorización: respaldo `backups/adel_pos-20261109T035824Z-b8a22a.dump` con restauración verificada (78 tablas idénticas, `.local/stage7-restore-verification.json`), `migrate` `applied:1` y repetición `applied:0`, readiness 200 con esquema compatible; servidor y `.app` 0.6.1 iniciados. |
 
 ## Aceptación por fase (§5 de la especificación)
 
@@ -38,13 +38,16 @@ Recorrido Playwright (Chromium y WebKit, 1280 × 720 y otros tamaños), sobre la
 
 ## No ejecutado o no verificado
 
-- Migración 0007 sobre la instalación real, compilación e inicio de 0.6.1 sobre ella y `restore-check.py`: requieren autorización.
-- Ventana nativa Tauri (WKWebView), pantalla completa, Keychain real y `tests/runtime_smoke.py`.
+- Recorrido de captura y cobro en la ventana nativa Tauri (WKWebView), pantalla completa, Keychain real y `tests/runtime_smoke.py`: la aplicación 0.6.1 se inició sobre la instalación migrada y el servidor respondió 200 a sus peticiones, pero no se recorrió ni se automatizó.
 - Pantalla táctil física: los tamaños de los objetivos se comprobaron en navegador, no con toque real.
 - Impresión física de tickets con dólares o precuentas.
 - Autorización de supervisor y devoluciones en el navegador (cubiertas por Go y Vitest).
 - Actualización en tiempo real entre dos terminales durante la captura (cubierta por la lógica de conflicto y sondeo, sin prueba automática con dos terminales).
 - Rendimiento con un catálogo grande o muchas terminales; LAN con otra máquina; Mac Intel y Windows.
+
+## Migración de la instalación real
+
+Autorizada por el propietario y ejecutada el 8 de noviembre de 2026 con `scripts/dev.sh`, con la aplicación cerrada: `backup` → `backups/adel_pos-20261109T035824Z-b8a22a.dump` (0600); `restore-check.py` → 78 tablas con conteos idénticos en una base temporal (`.local/stage7-restore-verification.json`); `server-stop` (servidor 0.6.0 detenido de forma ordenada); `migrate` → `applied:1` (repetición `applied:0`); `server-start` → 0.6.1, readiness 200, PostgreSQL disponible y esquema compatible; consulta de solo lectura → migraciones 1–7, `usd_cash` desactivada, 0 de 6 productos con tasa propia (heredan la general de 16 %), rango del dólar 10.00–40.00 con alerta de 10 %, los dos permisos nuevos solo en el rol administrador, sin turnos, pagos ni movimientos (la cuenta abierta existente se conserva), 79 tablas en `app`; `build-macos` → `.app` 0.6.1 de 9.45 MiB; `open-app` → aplicación iniciada y atendida por el servidor (respuestas 200).
 
 ## Repetir las comprobaciones
 
@@ -56,4 +59,4 @@ Recorrido Playwright (Chromium y WebKit, 1280 × 720 y otros tamaños), sobre la
 ./scripts/dev.sh build-macos
 ```
 
-`test-integration` y `test-browser` crean y eliminan bases `adel_pos_test_*` en el clúster del proyecto (55432); para aislamiento total, seguir el procedimiento de `CLAUDE.md` §6. `build-macos` reemplaza el `.app` de `desktop/src-tauri/target/release/bundle/macos/`: **no ejecutarlo mientras la instalación real deba seguir en 0.6.0** (antes de aplicar la 0007).
+`test-integration` y `test-browser` crean y eliminan bases `adel_pos_test_*` en el clúster del proyecto (55432); para aislamiento total, seguir el procedimiento de `CLAUDE.md` §6. `build-macos` reemplaza el `.app` de `desktop/src-tauri/target/release/bundle/macos/`: Toda migración futura sobre la instalación real requiere autorización previa.

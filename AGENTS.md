@@ -82,7 +82,7 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 
 ## Reglas permanentes desde etapa 6.1
 
-- La 0007 es inmutable en cuanto se aplique; la siguiente ampliación requiere 0008. Un CHECK que evalúa a NULL se acepta en PostgreSQL: las restricciones con columnas opcionales deben exigir `IS NOT NULL` explícito en la rama que valida datos.
+- 0001–0007 están aplicadas en la instalación real y son inmutables; la siguiente ampliación requiere 0008 y, sobre la instalación real, autorización expresa previa con respaldo y ensayo de restauración. Un CHECK que evalúa a NULL se acepta en PostgreSQL: las restricciones con columnas opcionales deben exigir `IS NOT NULL` explícito en la rama que valida datos.
 - Nunca usar `window.confirm`, `window.alert` ni `window.prompt`: el WebView nativo de macOS no los muestra. Usar `components/ConfirmDialog.tsx` o formularios dentro de la pantalla.
 - Campos numéricos con `services/numericInput.ts` (importes 2 decimales, cantidades 3, enteros solo dígitos) o el teclado de cobro; nunca `type="number"`. Fechas opcionales con `OptionalDateField` (el control nativo de WebKit muestra la fecha de hoy con el valor vacío).
 - Orden visual por posiciones (`position: {after}`) con `internal/ordering`; no volver a capturar números de orden. Colores de categoría solo de la paleta de Go.
