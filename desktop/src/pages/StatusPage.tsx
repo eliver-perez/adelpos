@@ -1,4 +1,4 @@
-import { Notice, PageTitle } from '../components/Forms';
+import { PageTitle } from '../components/Forms';
 import { StatusCard } from '../components/StatusCard';
 import { useConnection } from '../hooks/useConnection';
 import product from '../generated/product.json';
@@ -24,11 +24,18 @@ export function StatusPage() {
           {refreshing ? 'Comprobando…' : 'Comprobar conexión'}
         </button>
       </PageTitle>
-      <Notice success={Boolean(connected && databaseReady && diagnostics?.compatible)}>
+      {/* Estado vigente del sistema (diagnóstico), no el resultado de una acción: se queda en
+          pantalla y se resalta cuando Go y PostgreSQL están listos. */}
+      <div
+        className={`notice connection-banner ${
+          connected && databaseReady && diagnostics?.compatible ? 'is-ready' : ''
+        }`}
+        role="status"
+      >
         {configError
           ? 'No se pudo leer la configuración de conexión.'
           : (diagnostics?.message ?? 'Comprobando la conexión…')}
-      </Notice>
+      </div>
       <div className="my-6 grid gap-4 sm:grid-cols-3">
         <StatusCard
           icon="server"

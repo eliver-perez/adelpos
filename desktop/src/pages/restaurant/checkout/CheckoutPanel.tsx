@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Notice } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { useFinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import {
@@ -11,6 +12,7 @@ import {
 import { APIError } from '../../../services/api';
 import type { Operation } from '../../../services/api';
 import { retryRejectedMessage, shiftEndedCodes } from '../../../services/cash';
+import { notifyError, notifySuccess } from '../../../services/notify';
 import { financialOutcome, formatMoney, permissionName } from '../../../services/payments';
 import type {
   CorrectionResult,
@@ -40,12 +42,13 @@ import { newestFinance, selectableUnits } from './captureState';
 import { useCollectFlow } from './useCollectFlow';
 import { correctable, useCorrectionFlow } from './useCorrectionFlow';
 import { refundableUnits, useRefundFlow } from './useRefundFlow';
+import { notifyActionError } from './actionErrors';
 
 export type CheckoutMode = 'collect' | 'refund';
 
-// Errores que se muestran junto al formulario que los provocó, no en el aviso general. Durante
-// una corrección, SHIFT_CLOSED se refiere al turno del pago original y lo explica su panel; en un
-// cobro o una devolución se muestra en el aviso general.
+// Errores que se muestran junto al formulario que los provocó, no como aviso. Durante una
+// corrección, SHIFT_CLOSED se refiere al turno del pago original y lo explica su panel; en un
+// cobro o una devolución se muestra como aviso (sistema único de mensajes, etapa 7.1).
 const contextualCodes = [...authorizationCodes, 'PAYMENT_NOT_CORRECTABLE'];
 
 function isContextual(code: string, correcting: boolean) {
@@ -99,8 +102,6 @@ export function CheckoutPanel({
   const [recorded, setRecorded] = useState<Finance | null>(null);
   // Captura única del tipo de cambio del turno abierto (pago en dólares activo).
   const [rateCapture, setRateCapture] = useState(false);
-  const [notice, setNotice] = useState('');
-  const [retryNotice, setRetryNotice] = useState('');
   const mutation = useFinancialMutation(accountID, handleResult);
   const finance = newestFinance(polled.data, recorded, accountID);
   const activeMethods = (methods.data ?? []).filter((method) => method.active);
@@ -155,24 +156,22 @@ export function CheckoutPanel({
     shiftID: shift.data?.shift?.id ?? null,
   });
 
-  // Toda escritura financiera devuelve el estado actualizado; cada flujo reinicia su captura.
+  // Toda escritura financiera devuelve el estado actualizado; cada flujo reinicia su captura. La
+  // confirmación se avisa siempre; el cobro y la devolución conservan además su resultado en
+  // pantalla (el cambio o el efectivo por entregar no deben desaparecer solos).
   function handleResult(operation: Operation, result: unknown) {
     const outcome = financialOutcome(operation, result);
     if (outcome.finance) {
       setRecorded(outcome.finance);
     }
-    setRetryNotice('');
-    setNotice('');
     if (operation === 'payments_pay') {
       collect.onRecorded(result as PaymentResult);
     } else if (operation === 'payments_refund') {
       refund.onRecorded(result as RefundResult);
     } else if (operation === 'payments_correct') {
       correction.onRecorded(result as CorrectionResult);
-      setNotice(outcome.message);
-    } else {
-      setNotice(outcome.message);
     }
+    notifySuccess(outcome.message);
   }
 
   // Un reintento se envía sin la contraseña del supervisor. Si la operación no llegó a
@@ -184,18 +183,22 @@ export function CheckoutPanel({
       collect.setDeliverRequested(pending.body.deliver === true);
     }
     const problem = await mutation.retry();
+    if (!problem) {
+      return;
+    }
     // Un reintento sobre un turno en arqueo, cerrado o sustituido se rechaza sin registrarse: el
     // pendiente ya se descartó y se explica cómo continuar (etapa 7, operaciones inciertas).
     if (problem instanceof APIError && shiftEndedCodes.includes(problem.code)) {
-      setRetryNotice(retryRejectedMessage(problem.code, problem.message));
+      notifyError(retryRejectedMessage(problem.code, problem.message));
       mutation.clearError();
       void reloadShift();
       return;
     }
     if (!pending || !authorized || !isAuthorizationProblem(problem)) {
+      notifyActionError(problem, 'No se pudo registrar la operación pendiente.');
       return;
     }
-    setRetryNotice(repeatAuthorizationMessage);
+    notifyError(repeatAuthorizationMessage);
     if (pending.operation === 'payments_refund') {
       refund.auth.requireRepeat();
     } else if (pending.operation === 'payments_correct') {
@@ -210,7 +213,7 @@ export function CheckoutPanel({
           <header className="checkout-area-header">
             <h2>Cobro · Cuenta #{bill.account.folio}</h2>
             <button type="button" className="secondary-button" onClick={onClose}>
-              Volver a la cuenta
+              <IconLabel icon="back">Volver a la cuenta</IconLabel>
             </button>
           </header>
           <div className="checkout-area-body">
@@ -302,29 +305,14 @@ export function CheckoutPanel({
         </div>
       );
     }
-    if (mutation.error && !isContextual(mutation.errorCode, correcting)) {
-      return (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      );
-    }
     return null;
   }
 
+  // Estado en pantalla del cobro: la operación incierta, el conflicto de saldo, el error al
+  // consultar el turno y el tope de caja. Los rechazos de una acción se avisan como mensaje.
   const banner: ReactNode = (
     <>
       {mainBanner(finance)}
-      {retryNotice && (
-        <p className="checkout-inline-note" role="alert">
-          {retryNotice}
-        </p>
-      )}
-      {notice && (
-        <p className="checkout-result" role="status">
-          {notice}
-        </p>
-      )}
       {shift.error && (
         <p className="checkout-inline-note" role="alert">
           {shift.error}
@@ -350,7 +338,9 @@ export function CheckoutPanel({
           disabled={locked}
           onClick={() => refund.choosePayment(payment.id)}
         >
-          {chosen ? 'Pago elegido para devolver' : 'Devolver de este pago'}
+          <IconLabel icon="refund">
+            {chosen ? 'Pago elegido para devolver' : 'Devolver de este pago'}
+          </IconLabel>
         </button>,
       );
     }
@@ -360,12 +350,9 @@ export function CheckoutPanel({
           type="button"
           key="correct"
           className="secondary-button"
-          onClick={() => {
-            setNotice('');
-            correction.start(payment);
-          }}
+          onClick={() => correction.start(payment)}
         >
-          Corregir método
+          <IconLabel icon="edit">Corregir método</IconLabel>
         </button>,
       );
     }
@@ -492,7 +479,7 @@ export function CheckoutPanel({
           disabled={locked}
           onClick={() => setRateCapture(true)}
         >
-          Capturar tipo de cambio
+          <IconLabel icon="edit">Capturar tipo de cambio</IconLabel>
         </button>
       ) : (
         <p className="muted text-xs">

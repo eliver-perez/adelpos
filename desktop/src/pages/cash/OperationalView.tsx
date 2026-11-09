@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { denominationLabel } from '../../services/cash';
 import type { PrintOutcome, ShiftDetail } from '../../services/cash';
 import { permissionName } from '../../services/payments';
 import type { Shift } from '../../services/payments';
+import { countLabel } from '../../services/plural';
 import { ShiftOpening } from '../restaurant/checkout/ShiftOpening';
 import { CashActions } from './CashActions';
 import type { CashAction } from './CashActions';
@@ -30,8 +32,10 @@ function ShiftRecords({ detail }: { detail: ShiftDetail }) {
   return (
     <>
       <p className="muted text-sm">
-        Registros del turno: {summary.payments} cobros · {summary.refunds} devoluciones ·{' '}
-        {summary.cash_operations} operaciones de efectivo · {summary.partial_cuts} cortes parciales.
+        Registros del turno: {countLabel(summary.payments, 'cobro', 'cobros')} ·{' '}
+        {countLabel(summary.refunds, 'devolución', 'devoluciones')} ·{' '}
+        {countLabel(summary.cash_operations, 'operación de efectivo', 'operaciones de efectivo')} ·{' '}
+        {countLabel(summary.partial_cuts, 'corte parcial', 'cortes parciales')}.
       </p>
       {opening && (
         <Accordion title="Fondo inicial por denominaciones" summary="Desglose capturado al abrir">
@@ -228,7 +232,7 @@ export function OperationalView({
               workspace.reload();
             }}
           >
-            Volver a la caja
+            <IconLabel icon="back">Volver a la caja</IconLabel>
           </button>
         </div>
       </div>

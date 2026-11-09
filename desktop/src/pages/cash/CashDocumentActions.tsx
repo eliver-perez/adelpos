@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { APIError } from '../../services/api';
 import { cashDocumentKindLabels, cashJobLabels, previewCashDocument } from '../../services/cash';
@@ -9,7 +10,8 @@ import type {
   PrintOutcome,
 } from '../../services/cash';
 import { permissionName } from '../../services/payments';
-import { PrintNotice } from './CashNotices';
+import { countLabel } from '../../services/plural';
+import { notifyPrintOutcome } from './CashNotices';
 import { PendingCashOperation } from './PendingCashOperation';
 import { useCashMutation } from './useCashMutation';
 
@@ -52,7 +54,7 @@ export function documentOptions(
 // Estado visible del documento: tipo, último trabajo y copias, sin identificadores internos.
 function documentSummary(document: CashDocumentRecord) {
   const state = document.job_state ? (cashJobLabels[document.job_state] ?? document.job_state) : '';
-  const copies = document.copies === 1 ? '1 envío' : `${document.copies} envíos`;
+  const copies = countLabel(document.copies, 'envío', 'envíos');
   const parts = [cashDocumentKindLabels[document.kind], state, copies];
   if (document.printer_name) {
     parts.push(document.printer_name);
@@ -81,8 +83,12 @@ export function CashDocumentActions({
   const [preview, setPreview] = useState<CashDocumentPreview | null>(null);
   const [previewError, setPreviewError] = useState('');
   const [loadingPreview, setLoadingPreview] = useState(false);
-  const [outcome, setOutcome] = useState<PrintOutcome | null>(null);
-  const mutation = useCashMutation(shiftID, undefined, cashDocumentPendingKey(shiftID));
+  // El resultado de imprimir o reimprimir se avisa al confirmarse, también tras un reintento.
+  const mutation = useCashMutation(
+    shiftID,
+    (_, result) => notifyPrintOutcome(result as PrintOutcome, 'el documento'),
+    cashDocumentPendingKey(shiftID),
+  );
   const document = documentFor(documents.data?.documents ?? [], source);
   const options = documentOptions(can, document);
 
@@ -111,10 +117,10 @@ export function CashDocumentActions({
     const operation =
       source.kind === 'report' ? 'payments_print_cash_report' : 'payments_print_cash_operation';
     try {
-      setOutcome(await mutation.execute<PrintOutcome>(operation, { id: source.id, body: {} }));
+      await mutation.execute<PrintOutcome>(operation, { id: source.id, body: {} });
       void documents.reload();
-    } catch {
-      // El mensaje de Go queda visible junto a las acciones.
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo enviar el documento a imprimir.');
     }
   }
 
@@ -123,15 +129,13 @@ export function CashDocumentActions({
       return;
     }
     try {
-      setOutcome(
-        await mutation.execute<PrintOutcome>('payments_reprint_cash_document', {
-          id: document.id,
-          body: {},
-        }),
-      );
+      await mutation.execute<PrintOutcome>('payments_reprint_cash_document', {
+        id: document.id,
+        body: {},
+      });
       void documents.reload();
-    } catch {
-      // El mensaje de Go queda visible junto a las acciones.
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo enviar el documento a reimprimir.');
     }
   }
 
@@ -155,7 +159,7 @@ export function CashDocumentActions({
             disabled={mutation.locked}
             onClick={() => void print()}
           >
-            Imprimir
+            <IconLabel icon="printer">Imprimir</IconLabel>
           </button>
         )}
         {options.reprint && (
@@ -165,7 +169,7 @@ export function CashDocumentActions({
             disabled={mutation.locked}
             onClick={() => void reprint()}
           >
-            Reimprimir
+            <IconLabel icon="printer">Reimprimir</IconLabel>
           </button>
         )}
       </div>
@@ -176,17 +180,11 @@ export function CashDocumentActions({
         </p>
       )}
       <PendingCashOperation mutation={mutation} />
-      {mutation.error && !mutation.uncertain && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
       {previewError && (
         <p className="checkout-inline-note" role="alert">
           {previewError}
         </p>
       )}
-      <PrintNotice outcome={outcome} subject="el documento" />
       {preview && (
         <figure className="cash-document-preview">
           <figcaption className="muted text-xs">

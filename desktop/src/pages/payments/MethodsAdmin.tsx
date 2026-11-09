@@ -96,6 +96,7 @@ function MethodEditor({
       )}
       <Form
         label={method ? 'Guardar método' : 'Crear método'}
+        successMessage={method ? 'Método de pago guardado.' : 'Método de pago creado.'}
         disabled={!editable || busy}
         onSave={async () => {
           const body: Record<string, unknown> = { ...value };

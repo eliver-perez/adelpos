@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { APIError } from '../services/api';
 import type { Operation } from '../services/api';
 import type { Lookups } from '../services/catalog';
+import { notifyError, notifyWarning } from '../services/notify';
 import {
   defaultTakeawayOrigin,
   emptyCustomization,
@@ -22,6 +23,7 @@ import { useLiveResource } from './useLiveResource';
 import { useRestaurantMutation } from './useRestaurantMutation';
 import type { AccountAction } from '../pages/restaurant/AccountActions';
 import type { CaptureProduct } from '../pages/restaurant/capture/captureRules';
+import { DraftSyncError, uncertainError } from '../pages/restaurant/capture/draftSync';
 
 export type RestaurantView = 'tables' | 'takeaway' | 'accounts' | 'manage';
 export type WorkspacePanel =
@@ -36,6 +38,9 @@ export type WorkspacePanel =
   | 'adjustments'
   | 'precheck'
   | AccountAction;
+
+const uncertainResultMessage =
+  'La conexión no permitió conocer el resultado. Usa «Recuperar resultado» antes de realizar otra operación.';
 
 // Paneles de solo consulta: no requieren sincronizar el borrador antes de abrirse.
 const readOnlyPanels: WorkspacePanel[] = ['capture', 'history', 'kitchen', 'editor'];
@@ -73,7 +78,6 @@ export function useRestaurantWorkspace(
   const [page, setPage] = useState(1);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [cancelLine, setCancelLine] = useState<ConfirmedLine | null>(null);
-  const [actionError, setActionError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const canMap = can('restaurant.areas.read') && can('restaurant.tables.read');
   const selectedID = selections[view];
@@ -217,8 +221,30 @@ export function useRestaurantWorkspace(
     } catch (problem) {
       if (problem instanceof APIError && problem.status === 409)
         setRefresh((current) => current + 1);
+      // Un resultado incierto conserva su código (la operación queda pendiente de recuperar),
+      // pero su texto remite al panel «Recuperar resultado»: los formularios lo muestran como
+      // aviso y no debe parecer un rechazo.
+      if (problem instanceof APIError && uncertainError(problem)) {
+        throw new APIError(problem.code, uncertainResultMessage, problem.status);
+      }
       throw problem;
     }
+  }
+
+  // Rechazo de una acción del espacio de trabajo (sistema único de mensajes, etapa 7.1):
+  // - una escritura con resultado incierto queda en su panel «Recuperar resultado», sin otro aviso;
+  // - un borrador en conflicto o incierto ya tiene su panel en la pantalla: el aviso solo explica
+  //   por qué no se continuó y se cierra solo;
+  // - los demás errores permanecen hasta que se cierran.
+  function reportError(problem: unknown, fallback: string) {
+    if (uncertainError(problem) && mutation.isPending()) {
+      return;
+    }
+    if (problem instanceof DraftSyncError && problem.reason !== 'error') {
+      notifyWarning(problem.message);
+      return;
+    }
+    notifyError(problem, fallback);
   }
 
   const capture = useCaptureDraft({
@@ -227,7 +253,7 @@ export function useRestaurantWorkspace(
     can,
     savedQuote,
     execute,
-    onError: setActionError,
+    onError: reportError,
     onConflict: () => setRefresh((current) => current + 1),
   });
 
@@ -240,7 +266,6 @@ export function useRestaurantWorkspace(
     flushCurrent();
     setSelections((current) => ({ ...current, [view]: id }));
     setPanel('capture');
-    setActionError('');
   }
 
   function chooseTable(id: string) {
@@ -260,14 +285,12 @@ export function useRestaurantWorkspace(
     setSearch('');
     setPage(1);
     setState('open');
-    setActionError('');
   }
 
   // «Mesas» vuelve al mapa con el panel lateral de la misma mesa; en Para llevar y Cuentas, al
   // listado.
   function leaveCapture() {
     flushCurrent();
-    setActionError('');
     setCaptureOpen(view, false);
     setPanel('capture');
   }
@@ -275,7 +298,6 @@ export function useRestaurantWorkspace(
   function enterCapture() {
     setCaptureOpen(view, true);
     setPanel('capture');
-    setActionError('');
   }
 
   // Apertura rápida (etapa 6.2): abre la cuenta sin formulario con la apertura idempotente
@@ -288,7 +310,6 @@ export function useRestaurantWorkspace(
       return;
     }
     flushCurrent();
-    setActionError('');
     const body: Record<string, unknown> = {
       name: '',
       mode,
@@ -304,8 +325,9 @@ export function useRestaurantWorkspace(
     };
     try {
       await execute<Bill>('restaurant_open_account', { body });
-    } catch {
-      // El error (o el resultado incierto con «Recuperar resultado») lo muestra la página.
+    } catch (problem) {
+      // Un resultado incierto queda en «Recuperar resultado»; los demás errores se avisan.
+      reportError(problem, 'No se pudo abrir la cuenta.');
     }
   }
 
@@ -316,11 +338,10 @@ export function useRestaurantWorkspace(
       try {
         await draft.engine.settle(bill.account.id);
       } catch (problem) {
-        setActionError(problem instanceof Error ? problem.message : 'No se pudo guardar.');
+        reportError(problem, 'No se pudo guardar.');
         return;
       }
     }
-    setActionError('');
     setPanel(next);
   }
 
@@ -331,7 +352,9 @@ export function useRestaurantWorkspace(
   ) {
     if (!bill || bill.account.state !== 'open') return;
     if (editor) {
-      setActionError(
+      // La selección conservada sigue visible con «Retomar» y «Descartar»; el aviso explica por
+      // qué no se abrió otro producto.
+      notifyWarning(
         'Conservas una selección sin guardar. Retómala o descártala antes de editar otro producto.',
       );
       return;
@@ -367,7 +390,6 @@ export function useRestaurantWorkspace(
     // La personalización vive en el panel central de la captura, también desde un listado.
     setCaptureOpen(view, true);
     setPanel('editor');
-    setActionError('');
   }
 
   // Modificar una partida confirmada parte de la cuenta sincronizada (revisión vigente).
@@ -377,7 +399,7 @@ export function useRestaurantWorkspace(
       const synced = await draft.engine.settle(bill.account.id);
       startEditor(line, 'confirmed', synced?.baseRevision ?? bill.account.revision);
     } catch (problem) {
-      setActionError(problem instanceof Error ? problem.message : 'No se pudo guardar.');
+      reportError(problem, 'No se pudo guardar.');
     }
   }
 
@@ -449,8 +471,6 @@ export function useRestaurantWorkspace(
     resumeEditor,
     cancelLine,
     setCancelLine,
-    actionError,
-    setActionError,
     refresh: () => setRefresh((current) => current + 1),
     mutation,
     execute,

@@ -5,6 +5,8 @@ import { Check, IntegerField, TextField } from '../../components/catalog/EditorF
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { preparationLabels, zonedInput } from '../../services/kitchen';
 import type { Board, ExecuteKitchen, Release, Task } from '../../services/kitchen';
+import { notifySuccess } from '../../services/notify';
+import { countLabel } from '../../services/plural';
 import { elapsedTime, serverDateTime } from '../../services/restaurant';
 
 export function PreparationBoard({
@@ -46,11 +48,16 @@ export function PreparationBoard({
     setChanging(true);
     try {
       await execute('kitchen_save_states', { body });
+      notifySuccess(
+        next === 'ready'
+          ? `${first.instructions.name} · listo en ${first.station_name}`
+          : `${first.instructions.name} · en preparación`,
+      );
       // Conservar el bloqueo hasta recibir las revisiones nuevas evita que un segundo
       // toque rápido envíe el siguiente avance con la revisión anterior.
       await resource.reload();
     } catch {
-      // El controlador común conserva el error y permite recuperar un resultado incierto.
+      // El controlador común muestra el rechazo o conserva el resultado incierto para recuperarlo.
     } finally {
       setChanging(false);
     }
@@ -96,7 +103,11 @@ export function PreparationBoard({
       {board && (board.releases.length > 0 || board.pending_changes.length > 0) && (
         <Accordion
           title="Pendientes de liberación y avisos"
-          summary={`${board.releases.length} pedidos · ${board.pending_changes.length} cambios por revisar`}
+          summary={`${countLabel(board.releases.length, 'pedido', 'pedidos')} · ${countLabel(
+            board.pending_changes.length,
+            'cambio por revisar',
+            'cambios por revisar',
+          )}`}
           defaultOpen
         >
           <div className="kitchen-board-grid">
@@ -140,7 +151,11 @@ export function PreparationBoard({
                           void execute('kitchen_release', {
                             id: release.id,
                             body: { revision: release.revision },
-                          }).catch(() => undefined)
+                          })
+                            .then(() =>
+                              notifySuccess(`Pedido #${release.folio} liberado a preparación`),
+                            )
+                            .catch(() => undefined)
                         }
                       >
                         {early ? 'Liberar anticipadamente' : 'Liberar a preparación'}
@@ -172,7 +187,9 @@ export function PreparationBoard({
                       void execute('kitchen_retry_change', {
                         id: change.event_id,
                         body: { revision: change.revision },
-                      }).catch(() => undefined)
+                      })
+                        .then(() => notifySuccess('Destinos revisados y aviso generado'))
+                        .catch(() => undefined)
                     }
                   >
                     Revisar destinos y generar aviso
@@ -226,7 +243,11 @@ export function PreparationBoard({
               )}
               <Accordion
                 title="Instrucciones y variantes"
-                summary={`${task.instructions.parts.length} componentes de preparación`}
+                summary={countLabel(
+                  task.instructions.parts.length,
+                  'componente de preparación',
+                  'componentes de preparación',
+                )}
               >
                 {task.instructions.parts.map((part) => (
                   <div key={part.path}>
@@ -328,6 +349,7 @@ function ScheduleEditor({
       <Form
         disabled={busy || current?.revision !== release.revision}
         label="Guardar programación"
+        successMessage={`Programación del pedido #${release.folio} guardada.`}
         onSave={async () => {
           await execute('kitchen_schedule', {
             id: release.id,

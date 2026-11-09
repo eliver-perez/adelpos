@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { IconLabel } from '../../../components/Icon';
 import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
+import { notifySuccess } from '../../../services/notify';
 import {
   documentJobLabels,
   documentKindLabels,
@@ -7,11 +8,13 @@ import {
   printAttentionStates,
 } from '../../../services/payments';
 import type { DocumentRecord, PaymentMethod, ReprintResult } from '../../../services/payments';
+import { countLabel, pluralWord } from '../../../services/plural';
 import { serverDateTime } from '../../../services/restaurant';
 import { UncertainOperation } from '../checkout/UncertainOperation';
+import { notifyActionError } from '../checkout/actionErrors';
 
 function copiesLabel(copies: number) {
-  return copies === 1 ? '1 copia solicitada' : `${copies} copias solicitadas`;
+  return `${countLabel(copies, 'copia', 'copias')} ${pluralWord(copies, 'solicitada', 'solicitadas')}`;
 }
 
 // Tickets y precuentas de la cuenta con el estado de su último trabajo de impresión. Reimprimir
@@ -30,10 +33,9 @@ export function DocumentList({
   can: (permission: string) => boolean;
   methods?: PaymentMethod[];
 }) {
-  const [message, setMessage] = useState('');
   const mutation = useRestaurantMutation((_operation, value) => {
     const result = value as ReprintResult;
-    setMessage(
+    notifySuccess(
       `Copia solicitada: ${documentJobLabels[result.status] ?? 'en la cola de impresión'}.`,
     );
     window.dispatchEvent(new CustomEvent('adel-server-change'));
@@ -45,14 +47,21 @@ export function DocumentList({
     if (mutation.isPending()) {
       return;
     }
-    setMessage('');
     try {
       await mutation.execute('payments_reprint', {
         id: accountID,
         body: { ticket_id: ticketID },
       });
-    } catch {
-      // Go explica el motivo (copia pendiente o trabajo sin resolver); se muestra abajo.
+    } catch (problem) {
+      // Go explica el motivo (copia pendiente o trabajo sin resolver).
+      notifyActionError(problem, 'No se pudo solicitar la copia.');
+    }
+  }
+
+  async function retry() {
+    const problem = await mutation.retry();
+    if (problem) {
+      notifyActionError(problem, 'No se pudo solicitar la copia.');
     }
   }
 
@@ -67,19 +76,9 @@ export function DocumentList({
           request={mutation.pending}
           methods={methods}
           busy={mutation.busy}
-          onRetry={() => void mutation.retry()}
+          onRetry={() => void retry()}
           onConsult={() => window.dispatchEvent(new CustomEvent('adel-server-change'))}
         />
-      )}
-      {mutation.error && !mutation.uncertain && (
-        <p className="checkout-inline-note" role="alert">
-          {mutation.error}
-        </p>
-      )}
-      {message && (
-        <p className="checkout-result" role="status">
-          {message}
-        </p>
       )}
       <ol className="payment-history">
         {documents.map((document) => {
@@ -114,7 +113,9 @@ export function DocumentList({
                     disabled={locked}
                     onClick={() => void reprint(document.ticket_id)}
                   >
-                    Reimprimir {documentKindLabels[document.kind]?.toLowerCase() ?? 'documento'}
+                    <IconLabel icon="printer">
+                      Reimprimir {documentKindLabels[document.kind]?.toLowerCase() ?? 'documento'}
+                    </IconLabel>
                   </button>
                 </div>
               )}

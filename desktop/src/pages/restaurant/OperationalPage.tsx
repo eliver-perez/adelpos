@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
+import { notifyError, notifySuccess } from '../../services/notify';
+import { uncertainError } from './capture/draftSync';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
 import { AccountDetails } from './AccountDetails';
@@ -39,6 +43,7 @@ export function OperationalPage({
   const [actionReturn, setActionReturn] = useState<WorkspacePanel>('capture');
   // El cobro abierto desde «Marcar como entregado» inicia con la entrega activada.
   const [checkoutDeliver, setCheckoutDeliver] = useState(false);
+  const { confirm, dialog } = useConfirmDialog();
   const draftUncertain = workspace.draft.uncertain;
   const blocked = mutation.busy || mutation.uncertain || draftUncertain;
   const selectedTable = overview.data?.tables.find((table) => table.id === workspace.tableID);
@@ -86,6 +91,43 @@ export function OperationalPage({
   function openCheckout(deliver: boolean) {
     setCheckoutDeliver(deliver);
     openAccountAction('checkout', 'capture');
+  }
+
+  // «Recuperar resultado» repite la misma operación con su operation_id. Si Go la confirma se
+  // avisa; si la rechaza, el error permanece; si sigue sin respuesta, el panel continúa.
+  async function recoverOperation() {
+    const problem = await mutation.retry();
+    if (!problem) {
+      notifySuccess('Resultado recuperado: el servidor confirmó la operación.');
+      return;
+    }
+    if (!uncertainError(problem)) {
+      notifyError(problem, 'No se pudo recuperar el resultado de la operación.');
+    }
+  }
+
+  // Descartar la selección conservada pierde las opciones elegidas: se confirma antes.
+  async function discardPendingSelection() {
+    const discard = await confirm({
+      title: '¿Descartar la selección sin guardar?',
+      message: 'Las opciones elegidas para ese producto no se agregarán a la cuenta.',
+      confirmLabel: 'Descartar selección',
+      cancelLabel: 'Conservarla',
+      tone: 'danger',
+    });
+    if (discard) {
+      workspace.discardEditor();
+    }
+  }
+
+  // Recupera el guardado incierto del borrador. Un rechazo queda indicado en la cuenta.
+  async function recoverDraft() {
+    const accountID = workspace.draft.uncertainAccountID;
+    await workspace.recoverDraft();
+    const stored = accountID ? workspace.draft.view(accountID) : null;
+    if (accountID && !workspace.draft.uncertain && !stored?.error) {
+      notifySuccess('Productos nuevos guardados en la cuenta.');
+    }
   }
 
   // Paneles de la cuenta (formularios y consultas). En la captura ocupan las columnas de
@@ -204,7 +246,7 @@ export function OperationalPage({
       )}
       <div className={`button-row ${checkoutOpen ? 'operation-toolbar-secondary' : ''}`}>
         <button className="secondary-button" onClick={workspace.refresh}>
-          Actualizar
+          <IconLabel icon="refresh">Actualizar</IconLabel>
         </button>
         {/* En Mesas, la cuenta se abre desde el panel lateral de la mesa. */}
         {can('accounts.open') && !checkoutOpen && (view === 'takeaway' || view === 'accounts') && (
@@ -213,16 +255,20 @@ export function OperationalPage({
             disabled={blocked || (view === 'takeaway' && !can('takeaway.manage'))}
             onClick={() => openAccount(view === 'takeaway' ? 'takeaway' : 'dine_in', null)}
           >
-            {view === 'takeaway' ? 'Nuevo pedido' : 'Cuenta sin mesa'}
+            <IconLabel icon="plus">
+              {view === 'takeaway' ? 'Nuevo pedido' : 'Cuenta sin mesa'}
+            </IconLabel>
           </button>
         )}
       </div>
     </div>
   );
 
+  // Estados persistentes del flujo (etapa 7.1): siguen en pantalla mientras duran. Los resultados
+  // de las acciones se informan con avisos (services/notify).
   const banners = (
     <>
-      <Notice>{workspace.actionError || mutation.error}</Notice>
+      {dialog}
       {mutation.uncertain && (
         <div className="operation-recovery">
           <p>
@@ -232,9 +278,9 @@ export function OperationalPage({
           <button
             className="primary-button"
             disabled={mutation.busy}
-            onClick={() => void mutation.retry()}
+            onClick={() => void recoverOperation()}
           >
-            Recuperar resultado
+            <IconLabel icon="refresh">Recuperar resultado</IconLabel>
           </button>
         </div>
       )}
@@ -247,9 +293,9 @@ export function OperationalPage({
           <button
             className="primary-button"
             disabled={workspace.draft.busy}
-            onClick={() => void workspace.recoverDraft()}
+            onClick={() => void recoverDraft()}
           >
-            Recuperar resultado del borrador
+            <IconLabel icon="refresh">Recuperar resultado del borrador</IconLabel>
           </button>
         </div>
       )}
@@ -262,7 +308,7 @@ export function OperationalPage({
           <button
             className="secondary-button"
             disabled={mutation.busy}
-            onClick={workspace.discardEditor}
+            onClick={() => void discardPendingSelection()}
           >
             Descartar selección
           </button>

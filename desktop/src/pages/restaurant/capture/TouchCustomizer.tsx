@@ -1,5 +1,6 @@
 import { Accordion } from '../../../components/Accordion';
 import { Notice } from '../../../components/Forms';
+import { formatSignedMoney } from '../../../services/money';
 import { CatalogImage } from '../../../components/catalog/EditorFields';
 import {
   componentProductIDs,
@@ -154,7 +155,9 @@ function ComboComponentBlock({
         </span>
       </header>
       {breakdown && positiveAmount(breakdown.charge) && (
-        <p className="capture-block-charge">Cargo del componente +${breakdown.charge}</p>
+        <p className="capture-block-charge">
+          Cargo del componente {formatSignedMoney(breakdown.charge)}
+        </p>
       )}
       <div className="capture-choices">
         {products.map((productID) => {
@@ -178,7 +181,9 @@ function ComboComponentBlock({
             >
               <span>{name}</span>{' '}
               {option && positiveAmount(option.substitution_price) && (
-                <span className="capture-choice-extra">+${option.substitution_price}</span>
+                <span className="capture-choice-extra">
+                  {formatSignedMoney(option.substitution_price)}
+                </span>
               )}
             </button>
           );

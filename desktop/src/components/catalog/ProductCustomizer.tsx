@@ -1,5 +1,7 @@
 import { Accordion } from '../Accordion';
 import { Field, Notice } from '../Forms';
+import { formatMoney } from '../../services/money';
+import { countLabel, pluralWord } from '../../services/plural';
 import { useResource } from '../../hooks/useResource';
 import type {
   ComponentSelection,
@@ -84,7 +86,7 @@ export function ProductCustomizer({
             <DecimalField
               quantity
               key={ingredient.ingredient_id}
-              label={`${ingredient.name} · incluido ${ingredient.included_quantity} · adicional $${ingredient.extra_price}`}
+              label={`${ingredient.name} · incluido ${ingredient.included_quantity} · adicional ${formatMoney(ingredient.extra_price)}`}
               value={ingredientQuantity(value, ingredient)}
               onChange={(quantity) =>
                 onChange(withIngredient(value, ingredient.ingredient_id, quantity))
@@ -117,7 +119,8 @@ export function ProductCustomizer({
                     Incluido:{' '}
                     {binding.included.find((entry) => entry.option_id === option.id)?.quantity ??
                       '0'}{' '}
-                    · Valor: ${option.reference_value} · Extra explícito: ${option.extra_price}
+                    · Valor: {formatMoney(option.reference_value)} · Extra explícito:{' '}
+                    {formatMoney(option.extra_price)}
                     {!option.active ? ' · inactivo' : ''}
                   </p>
                 </div>
@@ -150,7 +153,8 @@ export function ProductCustomizer({
           <section className="catalog-section" key={slot.id}>
             <h3>{slot.name}</h3>
             <p className="muted text-sm">
-              Incluidas en el precio del combo: {slot.included_quantity} unidades.
+              {pluralWord(slot.included_quantity, 'Incluida', 'Incluidas')} en el precio del combo:{' '}
+              {countLabel(slot.included_quantity, 'unidad', 'unidades')}.
             </p>
             <div className="form-grid">
               <ReferenceField

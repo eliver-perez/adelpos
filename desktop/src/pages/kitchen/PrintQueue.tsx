@@ -7,6 +7,13 @@ import { jobLabels, ticketKindLabels } from '../../services/kitchen';
 import type { ExecuteKitchen, Printer, PrintJob, TicketDocument } from '../../services/kitchen';
 import { serverDateTime } from '../../services/restaurant';
 
+// Confirmación de cada decisión sobre la cola: «enviado a la cola», nunca «impreso».
+const queueActionMessages: Record<'resolve' | 'retry' | 'reprint', string> = {
+  reprint: 'Copia adicional autorizada y enviada a la cola de impresión.',
+  retry: 'Reintento autorizado: el trabajo vuelve a la cola de impresión.',
+  resolve: 'Decisión sobre el trabajo de impresión registrada.',
+};
+
 export function PrintQueue({
   can,
   execute,
@@ -214,6 +221,7 @@ function JobEditor({
                 ? 'Autorizar reintento'
                 : 'Registrar decisión'
           }
+          successMessage={queueActionMessages[action]}
           onSave={async () => {
             const body = { revision: job.revision, reason, printer_id: printerID || null };
             if (action === 'reprint')

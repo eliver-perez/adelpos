@@ -324,6 +324,7 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
         position: { after: 'desayunos' },
       }),
     );
+    // El formulario confirma el alta continua con un aviso del sistema único de mensajes.
     await screen.findByText('«Comidas» quedó guardado. Captura el siguiente registro.');
     const next = screen.getByLabelText('Nombre') as HTMLInputElement;
     expect(next.value).toBe('');

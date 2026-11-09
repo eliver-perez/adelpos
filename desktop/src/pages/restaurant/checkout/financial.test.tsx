@@ -291,6 +291,15 @@ describe('devoluciones y correcciones en la pantalla de cobro', () => {
     await waitFor(() => expect(registerButton().disabled).toBe(false));
     expect(registerButton().textContent).toBe('Registrar devolución $135.00 · Transferencia');
     fireEvent.click(registerButton());
+    // La devolución no se envía hasta confirmarla en el diálogo estándar de peligro.
+    const dialog = await screen.findByRole('alertdialog', {
+      name: '¿Registrar la devolución de $135.00?',
+    });
+    expect(dialog.className).toContain('dialog-panel-danger');
+    expect(dialog.textContent).toContain('Se devolverán $135.00 por Transferencia.');
+    expect(dialog.textContent).toContain('Motivo: Producto equivocado');
+    expect(requests('payments_refund')).toHaveLength(0);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Devolver $135.00' }));
     await waitFor(() => expect(requests('payments_refund')).toHaveLength(1));
     expect(lastBody('payments_refund')).toMatchObject({
       mode: 'items',
@@ -299,7 +308,23 @@ describe('devoluciones y correcciones en la pantalla de cobro', () => {
       reference: 'SPEI-123',
       reason: 'Producto equivocado',
     });
+    // El resultado permanece en pantalla y la confirmación se avisa además como mensaje.
     await screen.findByText('Devolución registrada: $135.00');
+    const notice = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(notice.textContent).toContain('Devolución de $135.00 registrada.');
+  });
+
+  it('revisar la devolución en el diálogo no envía nada', async () => {
+    render(<Checkout />);
+    await chooseOutlet('Efectivo');
+    fireEvent.change(input('Motivo de la devolución'), { target: { value: 'Pedido cancelado' } });
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    fireEvent.click(registerButton());
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Revisar la devolución' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(requests('payments_refund')).toHaveLength(0);
+    expect((input('Motivo de la devolución') as HTMLInputElement).value).toBe('Pedido cancelado');
   });
 
   it('muestra NOTHING_TO_REFUND cuando ya no hay importe devolvible', async () => {
@@ -358,7 +383,11 @@ describe('devoluciones y correcciones en la pantalla de cobro', () => {
     fireEvent.change(input('Motivo de la devolución'), { target: { value: 'Pedido cancelado' } });
     await waitFor(() => expect(registerButton().disabled).toBe(false));
     fireEvent.click(registerButton());
+    const dialog = await screen.findByRole('alertdialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Devolver / }));
     await screen.findByText(/No se pudo confirmar el resultado de la devolución/);
+    // Un resultado incierto se queda en su panel de recuperación: no se avisa como error.
+    expect(screen.queryByRole('alert', { name: 'Error' })).toBeNull();
     const first = lastBody<{ operation_id: string }>('payments_refund');
 
     // Al cambiar al cobro de la misma cuenta, el pendiente bloquea un pago nuevo.

@@ -1,6 +1,7 @@
 import { api } from './api';
 import type { CashLimitWarning, DrawerOutcome } from './cash';
 import type { Operation } from './api';
+import { formatDeduction, formatMoney as formatAmount } from './money';
 
 // Contratos del módulo financiero de Go (backend/internal/payments). El dinero viaja siempre como
 // cadena con dos decimales: la interfaz lo muestra tal como lo entrega Go y nunca lo calcula.
@@ -771,27 +772,56 @@ export const financialOperationLabels: Partial<Record<Operation, string>> = {
   payments_shift_usd_rate: 'de la captura del tipo de cambio',
 };
 
+// Mensaje de un descuento, una cortesía o un cargo recién registrado, con el importe que calculó
+// Go (se busca el ajuste por su id en el estado financiero devuelto).
+function adjustmentMessage(operation: Operation, adjustmentID: string, finance: Finance | null) {
+  const adjustment = finance?.adjustments.find((entry) => entry.id === adjustmentID);
+  if (operation === 'payments_charge') {
+    return adjustment
+      ? `Cargo registrado: ${formatAmount(adjustment.amount)}.`
+      : 'Cargo registrado.';
+  }
+  const label = adjustment?.courtesy ? 'Cortesía registrada' : 'Descuento registrado';
+  return adjustment ? `${label}: ${formatDeduction(adjustment.amount)}.` : `${label}.`;
+}
+
+// Mensaje de confirmación de una escritura financiera ya registrada (sistema único de mensajes,
+// etapa 7.1). Solo usa importes que entregó Go; nunca incluye el efectivo esperado.
+function outcomeMessage(operation: Operation, result: unknown, finance: Finance | null) {
+  if (operation === 'payments_discount' || operation === 'payments_charge') {
+    const value = result as Partial<AdjustmentResult> | null;
+    return adjustmentMessage(operation, value?.adjustment_id ?? '', finance);
+  }
+  if (operation === 'payments_void_adjustment') {
+    return 'Ajuste cancelado; el registro original se conserva en el historial.';
+  }
+  if (operation === 'payments_refund') {
+    const plan = (result as Partial<RefundResult> | null)?.plan;
+    return plan
+      ? `Devolución de ${formatAmount(plan.amount)} registrada.`
+      : 'Devolución registrada.';
+  }
+  if (operation === 'payments_correct') {
+    return 'Pago corregido con un reverso y un pago nuevo.';
+  }
+  if (operation === 'payments_pay') {
+    const payment = (result as Partial<PaymentResult> | null)?.payment;
+    return payment
+      ? `Cobro de ${formatAmount(payment.amount)} con ${payment.method_name} registrado.`
+      : 'Cobro registrado.';
+  }
+  if (operation === 'payments_deliver') {
+    return 'Entrega realizada.';
+  }
+  return 'Operación registrada.';
+}
+
 // Describe el resultado confirmado de cualquier escritura financiera; todas devuelven el estado
 // financiero actualizado, que la interfaz muestra sin recalcularlo.
 export function financialOutcome(operation: Operation, result: unknown) {
   const value = result as { finance?: Finance; closed?: boolean; reopened?: boolean } | null;
   const finance = value?.finance ?? null;
-  let message = 'Operación registrada.';
-  if (operation === 'payments_discount') {
-    message = 'Descuento registrado.';
-  } else if (operation === 'payments_charge') {
-    message = 'Cargo registrado.';
-  } else if (operation === 'payments_void_adjustment') {
-    message = 'Ajuste cancelado; el registro original se conserva en el historial.';
-  } else if (operation === 'payments_refund') {
-    message = 'Devolución registrada.';
-  } else if (operation === 'payments_correct') {
-    message = 'Pago corregido con un reverso y un pago nuevo.';
-  } else if (operation === 'payments_pay') {
-    message = 'Pago registrado.';
-  } else if (operation === 'payments_deliver') {
-    message = 'Entrega realizada.';
-  }
+  let message = outcomeMessage(operation, result, finance);
   if (value?.closed) {
     message += ' La cuenta quedó liquidada y se cerró.';
   }
@@ -851,16 +881,9 @@ export function permissionName(key: string) {
   return paymentPermissionLabels[key] ?? key;
 }
 
-// Antepone el símbolo de moneda sin convertir ni recalcular el importe que entregó Go.
-export function formatMoney(value: string | null | undefined) {
-  if (value === null || value === undefined || value === '') {
-    return '—';
-  }
-  if (value.startsWith('-')) {
-    return `−$${value.slice(1)}`;
-  }
-  return `$${value}`;
-}
+// El formato de importes vive en services/money.ts (una sola implementación, etapa 7.1); se
+// reexporta aquí para las pantallas de cobro que ya lo importaban de este módulo.
+export { formatDollars, formatMoney } from './money';
 
 // Códigos de Go que indican que la cuenta cambió y debe consultarse de nuevo.
 export const refreshCodes = [
@@ -885,14 +908,6 @@ export const shiftCodes = [
   'USD_RATE_REQUIRED',
   'FEATURE_DISABLED',
 ];
-
-// Antepone el símbolo de dólares a una cifra que ya calculó Go, sin convertirla.
-export function formatDollars(value: string | null | undefined) {
-  if (value === null || value === undefined || value === '') {
-    return '—';
-  }
-  return `US$${value}`;
-}
 
 export const changeCurrencyLabels: Record<ChangeCurrency, string> = {
   MXN: 'Pesos',

@@ -1,6 +1,7 @@
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import type { Lookups } from '../../services/catalog';
-import { formatMoney } from '../../services/payments';
+import { formatMoney } from '../../services/money';
 import { accountLabel, elapsedTime } from '../../services/restaurant';
 import type { Account, Bill, DraftItem, RestaurantTable } from '../../services/restaurant';
 import type { BillAction } from './capture/BillFooter';
@@ -32,7 +33,7 @@ function PanelLines({
             {line.quantity} × {line.quote_line.name}
           </span>
           <span className="capture-tag">En cocina</span>
-          <strong className="table-panel-line-total">${line.totals.total}</strong>
+          <strong className="table-panel-line-total">{formatMoney(line.totals.total)}</strong>
         </li>
       ))}
       {localDraft.map((item) => {
@@ -76,7 +77,7 @@ function PanelTotals({ account }: { account: Account }) {
       ) : (
         <div className="table-panel-balance">
           <dt>Enviado a cocina</dt>
-          <dd>${account.totals.total}</dd>
+          <dd>{formatMoney(account.totals.total)}</dd>
         </div>
       )}
     </dl>
@@ -160,7 +161,7 @@ export function TablePanel({
               disabled={blocked}
               onClick={onOpenAccount}
             >
-              Abrir cuenta y capturar
+              <IconLabel icon="plus">Abrir cuenta y capturar</IconLabel>
             </button>
           )}
         </div>
@@ -193,7 +194,7 @@ export function TablePanel({
                   disabled={blocked}
                   onClick={onOpenAccount}
                 >
-                  + Nueva cuenta
+                  <IconLabel icon="plus">Nueva cuenta</IconLabel>
                 </button>
               )}
             </div>
@@ -223,7 +224,7 @@ export function TablePanel({
                   disabled={blocked}
                   onClick={onCapture}
                 >
-                  Capturar
+                  <IconLabel icon="edit">Capturar</IconLabel>
                 </button>
                 <CheckoutButton
                   account={account}
@@ -244,7 +245,7 @@ export function TablePanel({
                     disabled={blocked || account.confirmed_quantity === 0}
                     onClick={() => onAction('precheck')}
                   >
-                    Precuenta
+                    <IconLabel icon="receipt">Precuenta</IconLabel>
                   </button>
                 )}
                 {writable && can('accounts.split') && (
@@ -254,7 +255,7 @@ export function TablePanel({
                     disabled={blocked || activeLines === 0}
                     onClick={() => onAction('split')}
                   >
-                    Dividir
+                    <IconLabel icon="split">Dividir</IconLabel>
                   </button>
                 )}
                 <MoreActions

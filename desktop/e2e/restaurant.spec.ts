@@ -285,6 +285,12 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page
     .getByRole('button', { name: 'Confirmar cancelación de unidades', exact: true })
     .click();
+  // Etapa 7.1: la cancelación pide confirmación en el diálogo estándar con tono de peligro.
+  const cancelDialog = page.getByRole('alertdialog', {
+    name: /^¿Cancelar .*Hamburguesa de prueba\?$/,
+  });
+  await expect(cancelDialog).toHaveClass(/dialog-panel-danger/);
+  await cancelDialog.getByRole('button', { name: 'Cancelar unidades', exact: true }).click();
   await expect(burgerLine).toContainText('Cancelado');
   await expect(bill.locator('.capture-grand-total')).toContainText('$300.00');
   // «Más…» reúne las acciones menos frecuentes; ya no hay lista desplegable de acciones.
@@ -313,7 +319,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     }),
   ).toHaveAttribute('aria-pressed', 'true');
   await expect(
-    tableAccounts.getByRole('button', { name: '+ Nueva cuenta', exact: true }),
+    tableAccounts.getByRole('button', { name: 'Nueva cuenta', exact: true }),
   ).toBeVisible();
   await tableAccounts.getByRole('button', { name: 'Cuenta #1', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #1' })).toBeVisible();
@@ -358,8 +364,8 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     await expect(tablePanel.getByRole('button', { name: label, exact: true })).toBeVisible();
   }
   await panelThemes(page, testInfo, 'table-panel', 'Capturar');
-  // «+ Nueva cuenta» abre otra cuenta en la mesa ocupada y entra a capturar.
-  await tablePanel.getByRole('button', { name: '+ Nueva cuenta', exact: true }).click();
+  // «Nueva cuenta» (icono +) abre otra cuenta en la mesa ocupada y entra a capturar.
+  await tablePanel.getByRole('button', { name: 'Nueva cuenta', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #3' })).toBeVisible();
   await expect.poll(async () => (await openTableAccounts(driver, tableID)).length).toBe(3);
   await page.locator('.capture-topbar').getByRole('button', { name: /Mesas/ }).click();

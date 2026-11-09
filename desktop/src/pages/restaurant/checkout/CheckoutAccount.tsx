@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react';
+import { IconLabel } from '../../../components/Icon';
 import { QuantityStepper } from '../../../components/QuantityStepper';
+import { formatDeduction } from '../../../services/money';
 import { formatMoney, isZeroMoney } from '../../../services/payments';
+import { countLabel } from '../../../services/plural';
 import type { Finance, FinanceLine } from '../../../services/payments';
 import type { Bill, ConfirmedLine } from '../../../services/restaurant';
 import type { ProductBreakdown } from '../../../services/catalog';
@@ -95,10 +98,12 @@ function CheckoutLine({
       {notes && <p className="checkout-line-details">Preparación: {notes}</p>}
       <div className="checkout-line-status">
         {!isZeroMoney(promotion) && (
-          <span className="status-pill">Promoción −{formatMoney(promotion)}</span>
+          <span className="status-pill">Promoción {formatDeduction(promotion)}</span>
         )}
         {line.settled_quantity > 0 && (
-          <span className="status-pill status-good">{line.settled_quantity} pagadas</span>
+          <span className="status-pill status-good">
+            {countLabel(line.settled_quantity, 'pagada', 'pagadas')}
+          </span>
         )}
         {line.partial_quantity > 0 && (
           <span className="status-pill">{line.partial_quantity} con abono</span>
@@ -150,7 +155,7 @@ export function CheckoutAccount({
           <h2>{bill.account.customer_name || finance.name}</h2>
         </div>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver a la cuenta
+          <IconLabel icon="back">Volver a la cuenta</IconLabel>
         </button>
       </header>
       <div className="checkout-area-body">
@@ -195,13 +200,13 @@ export function CheckoutAccount({
           {!isZeroMoney(finance.item_discounts) && (
             <SummaryRow
               label="Descuentos por partida"
-              value={`−${formatMoney(finance.item_discounts)}`}
+              value={formatDeduction(finance.item_discounts)}
             />
           )}
           {!isZeroMoney(finance.account_discounts) && (
             <SummaryRow
               label="Descuentos generales"
-              value={`−${formatMoney(finance.account_discounts)}`}
+              value={formatDeduction(finance.account_discounts)}
             />
           )}
           {!isZeroMoney(finance.charges) && (

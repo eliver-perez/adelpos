@@ -1,3 +1,4 @@
+import { IconLabel } from '../../../components/Icon';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import type { Bill } from '../../../services/restaurant';
 import { adjustmentsAvailable } from '../adjustments/AccountAdjustments';
@@ -45,7 +46,7 @@ export function CheckoutToolbar({
       )}
       {can('payments.read') && account.confirmed_quantity > 0 && (
         <button type="button" className="secondary-button" onClick={() => onShortcut('precheck')}>
-          Precuenta
+          <IconLabel icon="receipt">Precuenta</IconLabel>
         </button>
       )}
       {adjustmentsAvailable(account, can) && (
@@ -54,17 +55,17 @@ export function CheckoutToolbar({
           className="secondary-button"
           onClick={() => onShortcut('adjustments')}
         >
-          Descuentos y cargos
+          <IconLabel icon="discount">Descuentos y cargos</IconLabel>
         </button>
       )}
       {writable && can('accounts.split') && (
         <button type="button" className="secondary-button" onClick={() => onShortcut('split')}>
-          Dividir cuenta
+          <IconLabel icon="split">Dividir cuenta</IconLabel>
         </button>
       )}
       {writable && can('accounts.transfer_items') && (
         <button type="button" className="secondary-button" onClick={() => onShortcut('transfer')}>
-          Transferir productos
+          <IconLabel icon="transfer">Transferir productos</IconLabel>
         </button>
       )}
     </div>

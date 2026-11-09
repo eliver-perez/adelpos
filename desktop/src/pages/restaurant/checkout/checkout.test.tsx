@@ -308,6 +308,17 @@ describe('pantalla de cobro', () => {
     expect(registerButton().textContent).toBe('Registrar $270.00 · Efectivo');
   });
 
+  it('los billetes rápidos usan el formato único de importes con miles', async () => {
+    render(<Checkout />);
+    await chooseCash();
+    const quick = screen.getByRole('button', { name: '$1,000' });
+    expect(screen.getByRole('button', { name: '$100' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '$1000' })).toBeNull();
+    fireEvent.click(quick);
+    // El botón muestra «$1,000» pero envía la cadena sin formato.
+    expect((screen.getByLabelText('Efectivo recibido') as HTMLInputElement).value).toBe('1000');
+  });
+
   it('muestra el cambio que calcula la previsualización de Go', async () => {
     render(<Checkout />);
     await chooseCash();
@@ -389,6 +400,11 @@ describe('pantalla de cobro', () => {
       });
     });
     await screen.findByText('Pago registrado: $270.00 con Efectivo');
+    // El resultado con el cambio sigue en pantalla y además se confirma con un aviso.
+    const notice = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(notice.textContent).toContain(
+      'Cobro de $270.00 con Efectivo registrado. La cuenta quedó liquidada y se cerró.',
+    );
     expect(requests('payments_pay')).toHaveLength(1);
   });
 
@@ -424,7 +440,8 @@ describe('pantalla de cobro', () => {
       },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
-    const notice = await screen.findByText(/no se registró ni se duplicó/);
+    const notice = await screen.findByRole('alert', { name: 'Error' });
+    expect(notice.textContent).toContain('no se registró ni se duplicó');
     expect(notice.textContent).toContain('La caja Caja 1 está en arqueo de cierre');
     expect(
       screen.queryByRole('button', { name: 'Reintentar con el mismo identificador' }),
@@ -451,6 +468,30 @@ describe('pantalla de cobro', () => {
     await screen.findByText('Conflicto de cobro', { selector: '.checkout-status' });
     await screen.findByText(/Saldo real: \$120\.00/);
     expect(screen.getByText('El saldo de la cuenta cambió en otra terminal.')).toBeTruthy();
+  });
+
+  it('un rechazo de Go se avisa como error persistente, sin el código interno', async () => {
+    payHandler = async () => ({
+      status: 409,
+      body: {
+        error: {
+          code: 'METHOD_INACTIVE',
+          message: 'El método de pago ya no está activo.',
+        },
+      },
+    });
+    render(<Checkout />);
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    fireEvent.click(registerButton());
+    const notice = await screen.findByRole('alert', { name: 'Error' });
+    expect(notice.textContent).toContain('El método de pago ya no está activo.');
+    expect(notice.textContent).not.toContain('METHOD_INACTIVE');
+    // Ya no hay un aviso dentro del área de captura: el estado indica el error recuperable.
+    expect(
+      document.querySelector('.checkout-capture .checkout-inline-note[role="alert"]'),
+    ).toBeNull();
+    await screen.findByText('Error recuperable', { selector: '.checkout-status' });
   });
 
   it('bloquea nuevos cobros con un pago incierto y lo reintenta con el mismo identificador', async () => {
@@ -502,7 +543,7 @@ describe('pantalla de cobro', () => {
     expect(open.disabled).toBe(true);
     expect(requests('payments_open_shift')).toHaveLength(0);
     fireEvent.click(screen.getByRole('button', { name: '0' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Abrir turno con fondo de $0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir turno con fondo de $0.00' }));
     await waitFor(() => expect(requests('payments_open_shift')).toHaveLength(1));
     const sent = requests('payments_open_shift')[0]?.[1] as { body: Record<string, unknown> };
     expect(sent.body.opening_float).toBe('0');

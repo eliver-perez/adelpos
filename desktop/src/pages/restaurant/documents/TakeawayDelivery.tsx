@@ -1,15 +1,19 @@
-import { useState } from 'react';
+import { useConfirmDialog } from '../../../components/ConfirmDialog';
+import { IconLabel } from '../../../components/Icon';
 import { useFinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import { APIError } from '../../../services/api';
+import { notifyInfo, notifySuccess } from '../../../services/notify';
 import type { Finance } from '../../../services/payments';
 import type { Account } from '../../../services/restaurant';
 import { serverDateTime } from '../../../services/restaurant';
 import { UncertainOperation } from '../checkout/UncertainOperation';
+import { notifyActionError } from '../checkout/actionErrors';
 
 // Entrega de un pedido para llevar desde la cuenta o el tablero. Preparación, pago y entrega son
-// independientes: un pedido liquidado se entrega directamente; con saldo, se abre el cobro con la
-// entrega activada para registrar ambos en la misma operación.
+// independientes: un pedido liquidado se entrega directamente, tras confirmarlo en el diálogo
+// estándar; con saldo, se abre el cobro con la entrega activada para registrar ambos en la misma
+// operación.
 export function TakeawayDelivery({
   account,
   timezone,
@@ -23,8 +27,7 @@ export function TakeawayDelivery({
   disabled: boolean;
   onCollect: () => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const [notice, setNotice] = useState('');
+  const { confirm, dialog } = useConfirmDialog();
   const delivered = account.delivery_state === 'delivered';
   // Datos de la entrega (hora, usuario y terminal) desde el estado financiero de Go.
   const finance = useLiveResource<Finance>('payments_account', {
@@ -33,8 +36,7 @@ export function TakeawayDelivery({
     interval: 30000,
   });
   const mutation = useFinancialMutation(account.id, () => {
-    setConfirming(false);
-    setNotice('Entrega realizada.');
+    notifySuccess(`Pedido #${account.folio} entregado.`);
   });
   const locked = mutation.busy || !!mutation.pending;
 
@@ -57,26 +59,46 @@ export function TakeawayDelivery({
   }
   const settled = account.payment_state === 'paid';
 
+  // Rechazos de la entrega: con saldo pendiente se abre el cobro; si ya estaba entregado se
+  // informa y se actualiza la vista; los demás se avisan como error.
+  function handleFailure(problem: unknown) {
+    if (problem instanceof APIError && problem.code === 'BALANCE_PENDING') {
+      // Otra terminal dejó saldo: la entrega se registra junto con el cobro.
+      onCollect();
+      return;
+    }
+    if (problem instanceof APIError && problem.code === 'ALREADY_DELIVERED') {
+      notifyInfo('El pedido ya estaba entregado.');
+      window.dispatchEvent(new CustomEvent('adel-server-change'));
+      return;
+    }
+    notifyActionError(problem, 'No se pudo registrar la entrega.');
+  }
+
   async function deliver() {
     if (mutation.isPending()) {
       return;
     }
-    setNotice('');
+    const confirmed = await confirm({
+      title: 'Confirmar entrega',
+      message: `¿El cliente recibió el pedido #${account.folio}?`,
+      confirmLabel: 'Confirmar entrega',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed || mutation.isPending()) {
+      return;
+    }
     try {
       await mutation.execute('payments_deliver', { id: account.id, body: {} });
     } catch (problem) {
-      if (!(problem instanceof APIError)) {
-        return;
-      }
-      if (problem.code === 'BALANCE_PENDING') {
-        // Otra terminal dejó saldo: la entrega se registra junto con el cobro.
-        setConfirming(false);
-        onCollect();
-      } else if (problem.code === 'ALREADY_DELIVERED') {
-        setConfirming(false);
-        setNotice('El pedido ya estaba entregado.');
-        window.dispatchEvent(new CustomEvent('adel-server-change'));
-      }
+      handleFailure(problem);
+    }
+  }
+
+  async function retry() {
+    const problem = await mutation.retry();
+    if (problem) {
+      handleFailure(problem);
     }
   }
 
@@ -87,67 +109,32 @@ export function TakeawayDelivery({
           request={mutation.pending}
           methods={[]}
           busy={mutation.busy}
-          onRetry={() => void mutation.retry()}
+          onRetry={() => void retry()}
           onConsult={() => window.dispatchEvent(new CustomEvent('adel-server-change'))}
         />
       )}
-      {mutation.error &&
-        !mutation.uncertain &&
-        mutation.errorCode !== 'ALREADY_DELIVERED' &&
-        mutation.errorCode !== 'BALANCE_PENDING' && (
-          <p className="checkout-inline-note" role="alert">
-            {mutation.error}
-          </p>
-        )}
-      {notice && (
-        <p className="checkout-result" role="status">
-          {notice}
-        </p>
-      )}
-      {!confirming && (
-        <button
-          type="button"
-          className="secondary-button"
-          disabled={disabled || locked}
-          onClick={() => {
-            if (settled) {
-              setConfirming(true);
-            } else {
-              onCollect();
-            }
-          }}
-        >
-          Marcar como entregado
-        </button>
-      )}
-      {!confirming && !settled && (
+      <button
+        type="button"
+        className="secondary-button"
+        disabled={disabled || locked}
+        onClick={() => {
+          if (settled) {
+            void deliver();
+          } else {
+            onCollect();
+          }
+        }}
+      >
+        <IconLabel icon="delivery">
+          {mutation.busy ? 'Registrando entrega…' : 'Marcar como entregado'}
+        </IconLabel>
+      </button>
+      {!settled && (
         <small className="muted">
           Tiene saldo pendiente: se abrirá el cobro con la entrega activada.
         </small>
       )}
-      {confirming && (
-        <div className="takeaway-delivery-confirm" role="group" aria-label="Confirmar entrega">
-          <span>¿El cliente recibió el pedido #{account.folio}?</span>
-          <div className="button-row">
-            <button
-              type="button"
-              className="primary-button"
-              disabled={locked}
-              onClick={() => void deliver()}
-            >
-              {mutation.busy ? 'Registrando entrega…' : 'Confirmar entrega'}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={mutation.busy}
-              onClick={() => setConfirming(false)}
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
+      {dialog}
     </div>
   );
 }

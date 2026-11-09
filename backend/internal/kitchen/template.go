@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/shopspring/decimal"
+	"local/ad-el-pos/server/internal/moneytext"
 )
 
 func cleanText(value string) string {
@@ -102,7 +103,7 @@ func RenderText(document Document, paperWidth int) string {
 				add("NOTA: " + item.Notes)
 			}
 			if document.Settings.ShowPrices && item.Price != "" {
-				add("Importe: $" + item.Price)
+				add("Importe: " + moneytext.Format(moneytext.CurrencyMXN, item.Price))
 			}
 			if item.Reason != "" {
 				add("Motivo: " + item.Reason)

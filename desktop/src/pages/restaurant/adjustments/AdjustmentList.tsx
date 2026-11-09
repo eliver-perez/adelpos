@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Field } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
 import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useSupervisorAuthorization } from '../../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../../services/api';
-import { formatMoney, refreshCodes, validReason } from '../../../services/payments';
+import { formatDeduction, formatSignedMoney } from '../../../services/money';
+import { refreshCodes, validReason } from '../../../services/payments';
 import type { Adjustment, VoidAdjustmentInput } from '../../../services/payments';
 import { serverDateTime } from '../../../services/restaurant';
+import { notifyActionError } from '../checkout/actionErrors';
 
 function adjustmentTitle(adjustment: Adjustment) {
   if (adjustment.kind === 'charge') {
@@ -18,11 +21,12 @@ function adjustmentTitle(adjustment: Adjustment) {
   return adjustment.scope === 'items' ? 'Descuento por productos' : 'Descuento general';
 }
 
+// Los cargos suman y los descuentos y cortesías restan; Go entrega el importe siempre positivo.
 function adjustmentValue(adjustment: Adjustment) {
   if (adjustment.kind === 'charge') {
-    return `+${formatMoney(adjustment.amount)}`;
+    return formatSignedMoney(adjustment.amount);
   }
-  return `−${formatMoney(adjustment.amount)}`;
+  return formatDeduction(adjustment.amount);
 }
 
 // Permiso con el que el propio usuario cancela el ajuste sin autorización de supervisor.
@@ -65,6 +69,7 @@ function VoidAdjustmentForm({
       if (auth.handleError(problem)) {
         return;
       }
+      notifyActionError(problem, 'No se pudo cancelar el ajuste.');
       if (problem instanceof APIError && refreshCodes.includes(problem.code)) {
         void reloadFinance();
       }
@@ -174,7 +179,7 @@ export function AdjustmentList({
                 disabled={locked}
                 onClick={() => setVoiding(adjustment.id)}
               >
-                Cancelar ajuste
+                <IconLabel icon="ban">Cancelar ajuste</IconLabel>
               </button>
             </div>
           )}

@@ -1,5 +1,7 @@
+import { IconLabel } from '../../../components/Icon';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
-import { formatMoney, paymentPendingKey } from '../../../services/payments';
+import { formatMoney } from '../../../services/money';
+import { paymentPendingKey } from '../../../services/payments';
 import type { Account, DraftItem, OrderQuote } from '../../../services/restaurant';
 import type { AccountAction } from '../AccountActions';
 import { adjustmentsAvailable } from '../adjustments/AccountAdjustments';
@@ -12,14 +14,34 @@ export type BillAction =
 
 // Acciones menos frecuentes del menú «Más…» (antes «Acciones de cuenta…»), con su permiso.
 const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
-  { id: 'metadata', label: 'Datos de cuenta', permission: 'accounts.manage' },
-  { id: 'history', label: 'Historial de cambios', permission: 'orders.history.read' },
-  { id: 'kitchen', label: 'Preparación y comandas', permission: 'kitchen.states.read' },
-  { id: 'move', label: 'Cambiar mesa', permission: 'accounts.move' },
-  { id: 'transfer', label: 'Transferir productos', permission: 'accounts.transfer_items' },
-  { id: 'merge', label: 'Combinar cuentas', permission: 'accounts.merge' },
-  { id: 'assign', label: 'Cambiar responsable', permission: 'accounts.transfer' },
-  { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage' },
+  { id: 'metadata', label: 'Datos de cuenta', permission: 'accounts.manage', icon: 'edit' },
+  {
+    id: 'history',
+    label: 'Historial de cambios',
+    permission: 'orders.history.read',
+    icon: 'clock',
+  },
+  {
+    id: 'kitchen',
+    label: 'Preparación y comandas',
+    permission: 'kitchen.states.read',
+    icon: 'send',
+  },
+  { id: 'move', label: 'Cambiar mesa', permission: 'accounts.move', icon: 'move' },
+  {
+    id: 'transfer',
+    label: 'Transferir productos',
+    permission: 'accounts.transfer_items',
+    icon: 'transfer',
+  },
+  { id: 'merge', label: 'Combinar cuentas', permission: 'accounts.merge', icon: 'merge' },
+  {
+    id: 'assign',
+    label: 'Cambiar responsable',
+    permission: 'accounts.transfer',
+    icon: 'edit',
+  },
+  { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage', icon: 'ban' },
 ];
 
 // Acciones del menú «Más…» que aplican a la cuenta con los permisos del usuario. Las comparten la
@@ -70,7 +92,9 @@ export function CheckoutButton({
         disabled={disabled}
         onClick={onCheckout}
       >
-        Cobrar{account.finance ? ` · ${formatMoney(account.finance.balance)}` : ''}
+        <IconLabel icon="cash">
+          Cobrar{account.finance ? ` · ${formatMoney(account.finance.balance)}` : ''}
+        </IconLabel>
       </button>
     );
   }
@@ -82,7 +106,7 @@ export function CheckoutButton({
     if (account.state === 'open' && can('payments.collect')) {
       return (
         <button type="button" className="primary-button capture-checkout" disabled>
-          Cobrar
+          <IconLabel icon="cash">Cobrar</IconLabel>
         </button>
       );
     }
@@ -95,7 +119,7 @@ export function CheckoutButton({
       disabled={disabled}
       onClick={onCheckout}
     >
-      Consultar pagos
+      <IconLabel icon="cash">Consultar pagos</IconLabel>
     </button>
   );
 }
@@ -158,12 +182,12 @@ export function BillFooter({
       <dl className="capture-totals">
         <div>
           <dt>Enviado a cocina</dt>
-          <dd>${account.totals.total}</dd>
+          <dd>{formatMoney(account.totals.total)}</dd>
         </div>
         {localDraft.length > 0 && (
           <div>
             <dt>Nuevo sin enviar</dt>
-            <dd>{clean && quote?.quote ? `$${quote.quote.total}` : 'Calculando…'}</dd>
+            <dd>{clean && quote?.quote ? formatMoney(quote.quote.total) : 'Calculando…'}</dd>
           </div>
         )}
         {adjusted && localDraft.length > 0 && (
@@ -192,7 +216,7 @@ export function BillFooter({
             disabled={blocked || !secondary.splitReady}
             onClick={() => onAction('split')}
           >
-            Dividir
+            <IconLabel icon="split">Dividir</IconLabel>
           </button>
         )}
         {secondary.adjustments && (
@@ -202,7 +226,7 @@ export function BillFooter({
             disabled={blocked}
             onClick={() => onAction('adjustments')}
           >
-            Descuento
+            <IconLabel icon="discount">Descuento</IconLabel>
           </button>
         )}
         {secondary.precheck && (
@@ -212,7 +236,7 @@ export function BillFooter({
             disabled={blocked || !secondary.precheckReady}
             onClick={() => onAction('precheck')}
           >
-            Precuenta
+            <IconLabel icon="receipt">Precuenta</IconLabel>
           </button>
         )}
         <MoreActions actions={more} disabled={blocked} onAction={onAction} />
@@ -231,7 +255,9 @@ export function BillFooter({
             disabled={newUnits === 0 || blocked || sending || conflict || linesLocked}
             onClick={onSend}
           >
-            {sending ? 'Enviando…' : `Enviar a cocina · ${newUnits}`}
+            <IconLabel icon="send">
+              {sending ? 'Enviando…' : `Enviar a cocina · ${newUnits}`}
+            </IconLabel>
           </button>
         )}
         <CheckoutButton

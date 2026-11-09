@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
+import { expectNoticeClosesUnderPointer, expectNoticeLayout, notice } from './notices';
 
 // Recorrido de caja de la etapa 7 (fases B y C) contra Go y PostgreSQL reales: apertura por
 // denominaciones, ingreso y retiro autoautorizado, corte parcial con su vista previa, tope de caja
@@ -79,10 +80,13 @@ async function incomeAndWithdrawal(page: Page) {
   const income = page.getByRole('region', { name: 'Ingreso de efectivo', exact: true });
   await income.getByRole('button', { name: 'Aportación adicional al fondo', exact: true }).click();
   await typeOnKeypad(income.getByRole('group', { name: 'Teclado numérico del importe' }), '100');
-  await income.getByRole('button', { name: 'Registrar ingreso $100', exact: true }).click();
+  await income.getByRole('button', { name: 'Registrar ingreso $100.00', exact: true }).click();
   await expect(
     income.getByText('Ingreso registrado: $100.00 · Aportación adicional al fondo'),
   ).toBeVisible();
+  // Además del resultado en el panel, el aviso confirma la operación arriba al centro, debajo
+  // de la cabecera, y se cierra con un toque.
+  await expectNoticeLayout(page, 'Ingreso registrado: $100.00 · Aportación adicional al fondo');
 
   await cashActions(page).getByRole('button', { name: 'Retiro de efectivo', exact: true }).click();
   const withdrawal = page.getByRole('region', { name: 'Retiro de efectivo', exact: true });
@@ -94,8 +98,9 @@ async function incomeAndWithdrawal(page: Page) {
   // §0-B: con su propio permiso no se pide una segunda contraseña.
   await expect(withdrawal.getByText(/Autorización propia/)).toBeVisible();
   await expect(withdrawal.getByLabel('Contraseña del supervisor')).toHaveCount(0);
-  await withdrawal.getByRole('button', { name: 'Registrar retiro $200', exact: true }).click();
+  await withdrawal.getByRole('button', { name: 'Registrar retiro $200.00', exact: true }).click();
   await expect(withdrawal.getByText('Retiro registrado: $200.00 · Resguardo')).toBeVisible();
+  await expectNoticeClosesUnderPointer(page, 'Retiro registrado: $200.00 · Resguardo');
   await expect(
     withdrawal.getByText('Autorizado con el permiso propio de Administrador'),
   ).toBeVisible();
@@ -145,7 +150,7 @@ async function cashLimitWarning(page: Page, testInfo: TestInfo) {
   await page.getByRole('button', { name: 'Configuración', exact: true }).click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
-  await expect(features.getByText('Tope de efectivo en caja: activada.')).toBeVisible();
+  await expect(notice(page, 'Tope de efectivo en caja: activada.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Caja', exact: true }).click();
   const sections = page.getByRole('tablist', { name: 'Secciones de caja' });
@@ -163,7 +168,7 @@ async function cashLimitWarning(page: Page, testInfo: TestInfo) {
 
   await page.getByRole('button', { name: 'Configuración', exact: true }).click();
   await toggle.click();
-  await expect(features.getByText('Tope de efectivo en caja: desactivada.')).toBeVisible();
+  await expect(notice(page, 'Tope de efectivo en caja: desactivada.')).toBeVisible();
   await page.getByRole('button', { name: 'Caja', exact: true }).click();
   await expect(page.getByLabel('Turno de Caja 1', { exact: true })).toContainText('Abierto');
   await expect(warning).toHaveCount(0);

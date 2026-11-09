@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Field, Form, Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { ReferenceField, TextField } from '../../components/catalog/EditorFields';
 import type { Lookups } from '../../services/catalog';
@@ -60,7 +61,7 @@ export function AccountDetails({
       <div className="section-heading">
         <h2>{title}</h2>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <Notice>
@@ -79,6 +80,7 @@ export function AccountDetails({
       <Form
         disabled={busy || stale}
         label={takeaway ? 'Guardar datos del pedido' : 'Guardar datos de la cuenta'}
+        successMessage={takeaway ? 'Datos del pedido guardados' : 'Datos de la cuenta guardados'}
         onSave={async () => {
           await execute<Bill>('restaurant_save_account', {
             id: account.id,

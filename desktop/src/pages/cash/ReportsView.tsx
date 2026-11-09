@@ -5,7 +5,9 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { cashDifferenceLabels } from '../../services/cash';
 import type { ShiftHistory, ShiftSummary } from '../../services/cash';
-import { formatDollars, formatMoney, isZeroMoney, permissionName } from '../../services/payments';
+import { formatDollars, formatMoney } from '../../services/money';
+import { isZeroMoney, permissionName } from '../../services/payments';
+import { countLabel } from '../../services/plural';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
 import { CashLimitNotice } from './CashNotices';
@@ -46,7 +48,7 @@ function CurrentSummary({ shift, timezone }: { shift: Shift; timezone: string })
         {data.control.opening_float_usd
           ? ` + ${formatDollars(data.control.opening_float_usd)}`
           : ''}{' '}
-        · {data.partial_cuts} cortes parciales
+        · {countLabel(data.partial_cuts, 'corte parcial', 'cortes parciales')}
         {data.last_cut ? ` (último: ${serverDateTime(data.last_cut.created_at, timezone)})` : ''}.
       </p>
       {data.last_cut && (

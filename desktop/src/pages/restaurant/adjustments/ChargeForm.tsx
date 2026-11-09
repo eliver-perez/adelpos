@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { Field } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { APIError } from '../../../services/api';
 import { acceptAmountText, isZeroAmountText, toWireAmount } from '../../../services/amountInput';
 import { formatMoney, refreshCodes, textLength } from '../../../services/payments';
 import type { ChargeInput, Finance } from '../../../services/payments';
+import { notifyActionError } from '../checkout/actionErrors';
 
 // Cargo extra general de la cuenta (por ejemplo, servicio a domicilio). Es distinto de los extras
 // de un producto, nunca es negativo y lleva la tasa de IVA vigente al registrarse.
@@ -49,10 +51,13 @@ export function ChargeForm({
     try {
       await mutation.execute('payments_charge', { id: accountID, body: { ...body } });
     } catch (problem) {
+      // La cuenta cambió: el conflicto se explica junto al formulario y se conserva la captura.
       if (problem instanceof APIError && refreshCodes.includes(problem.code)) {
         setConflict(problem.message);
         void reloadFinance();
+        return;
       }
+      notifyActionError(problem, 'No se pudo registrar el cargo.');
     }
   }
 
@@ -106,7 +111,11 @@ export function ChargeForm({
           disabled={!canSubmit}
           onClick={() => void submit()}
         >
-          {wireAmount !== '' ? `Registrar cargo de ${formatMoney(wireAmount)}` : 'Registrar cargo'}
+          <IconLabel icon="charge">
+            {wireAmount !== ''
+              ? `Registrar cargo de ${formatMoney(wireAmount)}`
+              : 'Registrar cargo'}
+          </IconLabel>
         </button>
       </div>
     </div>

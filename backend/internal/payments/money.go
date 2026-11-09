@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/shopspring/decimal"
+	"local/ad-el-pos/server/internal/moneytext"
 )
 
 var (
@@ -37,8 +38,20 @@ func parseOptionalAmount(text, field string) (decimal.Decimal, error) {
 	return parseAmount(text, field)
 }
 
+// money es la cadena decimal de un importe para JSON y para la base de datos: dos decimales, sin
+// símbolo ni separadores. Los textos para personas usan formatPesos o formatDollars.
 func money(value decimal.Decimal) string {
 	return value.StringFixed(2)
+}
+
+// formatPesos y formatDollars expresan un importe calculado por Go en los mensajes con el formato
+// único de moneytext («$1,234.50», «US$2.70»).
+func formatPesos(value decimal.Decimal) string {
+	return moneytext.FormatDecimal(currencyMXN, value)
+}
+
+func formatDollars(value decimal.Decimal) string {
+	return moneytext.FormatDecimal(currencyUSD, value)
 }
 
 func cents(value decimal.Decimal) *big.Int {

@@ -109,6 +109,7 @@ export function StationsAdmin({
           <Form
             disabled={busy || stale || !can('kitchen.stations.manage')}
             label="Guardar estación"
+            successMessage="Estación guardada."
             onSave={async () => {
               const body: Record<string, unknown> = { ...selected };
               delete body.position;
@@ -287,6 +288,7 @@ function DeviceStations({
         <Form
           disabled={busy}
           label="Guardar estaciones de terminal"
+          successMessage="Estaciones de la terminal guardadas."
           onSave={async () => {
             await execute('kitchen_save_access', {
               body: {

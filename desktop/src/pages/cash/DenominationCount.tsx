@@ -1,13 +1,13 @@
 import { useId } from 'react';
 import { denominationLabel, currencyLabels } from '../../services/cash';
 import type { CashCurrency, CountLine, CountPreview, Denomination } from '../../services/cash';
-import { formatDollars, formatMoney } from '../../services/payments';
+import { formatDollars, formatMoney } from '../../services/money';
 import { acceptQuantity } from './countCapture';
 import type { CountQuantities } from './countCapture';
 
-// Importe de una cifra que entregó Go, con el símbolo de su moneda.
+// Importe de una cifra que entregó Go, con el símbolo de su moneda (formato único de money.ts).
 export function currencyAmount(currency: CashCurrency, value: string | null | undefined) {
-  return currency === 'USD' ? formatDollars(value) : formatMoney(value);
+  return formatMoney(value, currency);
 }
 
 // Campo táctil de una denominación: la cantidad contada (texto con dígitos) y el importe que Go

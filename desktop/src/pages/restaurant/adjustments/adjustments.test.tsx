@@ -352,22 +352,64 @@ describe('descuentos, cortesías, cargos y cancelaciones', () => {
   });
 
   it('exige el concepto del cargo y envía el saldo esperado', async () => {
+    const charged = {
+      ...finance.adjustments[1]!,
+      id: 'cargo-nuevo',
+      value: '1250.00',
+      amount: '1250.00',
+    };
+    writeHandler = async () => ({
+      status: 200,
+      body: {
+        adjustment_id: 'cargo-nuevo',
+        finance: { ...finance, adjustments: [...finance.adjustments, charged] },
+        closed: false,
+      },
+    });
     renderAdjustments();
     fireEvent.click(await screen.findByRole('button', { name: 'Cargo extra' }));
-    fireEvent.change(input('Importe del cargo ($)'), { target: { value: '50' } });
+    fireEvent.change(input('Importe del cargo ($)'), { target: { value: '1250' } });
     expect(submitButton(/Registrar cargo/).disabled).toBe(true);
     fireEvent.change(input('Concepto del cargo'), {
       target: { value: 'Servicio a domicilio' },
     });
-    expect(submitButton(/Registrar cargo de \$50/).disabled).toBe(false);
+    expect(submitButton(/Registrar cargo de \$1,250\.00/).disabled).toBe(false);
     fireEvent.click(submitButton(/Registrar cargo/));
     await waitFor(() => expect(requests('payments_charge')).toHaveLength(1));
     expect(lastBody('payments_charge')).toMatchObject({
       concept: 'Servicio a domicilio',
-      amount: '50',
+      amount: '1250',
       expected_balance: '270.00',
     });
-    await screen.findByText('Cargo registrado.');
+    // La confirmación es un aviso con el importe que calculó Go, con miles.
+    const notice = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(notice.textContent).toContain('Cargo registrado: $1,250.00.');
+  });
+
+  it('muestra cargos con signo «+» y descuentos con «−» antes del símbolo', async () => {
+    renderAdjustments();
+    const list = await screen.findByRole('list', { name: 'Ajustes de la cuenta' });
+    expect(within(list).getByText('\u2212$27.00')).toBeTruthy();
+    expect(within(list).getByText('+$40.00')).toBeTruthy();
+  });
+
+  it('un rechazo del descuento se avisa como error y no queda como banner', async () => {
+    writeHandler = async () => ({
+      status: 409,
+      body: {
+        error: {
+          code: 'DISCOUNT_LIMIT_EXCEEDED',
+          message: 'El descuento supera el límite permitido.',
+        },
+      },
+    });
+    await captureDiscount();
+    await waitFor(() => expect(submitButton(/Aplicar descuento \$/).disabled).toBe(false));
+    fireEvent.click(submitButton(/Aplicar descuento/));
+    const notice = await screen.findByRole('alert', { name: 'Error' });
+    expect(notice.textContent).toContain('El descuento supera el límite permitido.');
+    expect(notice.textContent).not.toContain('DISCOUNT_LIMIT_EXCEEDED');
+    expect(document.querySelector('.adjustments-panel .notice')).toBeNull();
   });
 
   it('cancela un ajuste con motivo y conserva los cancelados como históricos', async () => {

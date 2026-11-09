@@ -204,7 +204,7 @@ func (handler *service) planRefund(finance *Finance, input RefundInput) (*Refund
 		}
 		// La parte asignada a productos se devuelve seleccionando esos productos.
 		if amount.GreaterThan(ledger.general) {
-			return nil, invalid("El importe excede lo devolvible de ese pago (" + money(ledger.general) + "). Lo asignado a productos se devuelve seleccionándolos.")
+			return nil, invalid("El importe excede lo devolvible de ese pago (" + formatPesos(ledger.general) + "). Lo asignado a productos se devuelve seleccionándolos.")
 		}
 		if tip.GreaterThan(ledger.tip) {
 			return nil, invalid("La propina devuelta excede la propina neta de ese pago.")

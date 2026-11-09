@@ -5,11 +5,13 @@ import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
 import { APIError } from '../../../services/api';
 import { toWireAmount } from '../../../services/amountInput';
 import type { CashCatalog, CountPreviewInput } from '../../../services/cash';
+import { notifySuccess } from '../../../services/notify';
 import { formatDollars, formatMoney, isZeroMoney } from '../../../services/payments';
 import type { CurrentShift } from '../../../services/payments';
 import { acceptQuantity, capturableDenominations, countLines } from '../../cash/countCapture';
 import type { CountQuantities } from '../../cash/countCapture';
 import { confirmationCode, shiftPendingKey } from './ShiftRateCapture';
+import { notifyActionError } from './actionErrors';
 
 export type OpeningMode = 'total' | 'denominations';
 
@@ -37,7 +39,10 @@ export function useShiftOpening({
   const [quantities, setQuantities] = useState<CountQuantities>({});
   const [target, setTarget] = useState<OpeningTarget>('opening');
   const [confirmation, setConfirmation] = useState('');
+  const register = current.register;
   const mutation = useRestaurantMutation(() => {
+    // El fondo es lo que declaró quien abre (no el esperado): el aviso solo confirma la apertura.
+    notifySuccess(register ? `Turno de ${register.name} abierto.` : 'Turno abierto.');
     setOpening('');
     setOpeningUSD('');
     setRate('');
@@ -47,7 +52,6 @@ export function useShiftOpening({
     onChanged();
     window.dispatchEvent(new CustomEvent('adel-server-change'));
   }, shiftPendingKey);
-  const register = current.register;
   const openable = !!register && !current.shift && can('cash.shifts.open');
   // Sin la función activa, la apertura no muestra dólares (queda como en la etapa 6).
   const dollars = !!current.usd_cash;
@@ -123,10 +127,20 @@ export function useShiftOpening({
         setConfirmation(problem.message);
         return;
       }
+      notifyActionError(problem, 'No se pudo abrir el turno.');
       // Un turno abierto por otra terminal mientras se capturaba el fondo se refleja al consultar.
       if (problem instanceof APIError && problem.status === 409) {
         onChanged();
       }
+    }
+  }
+
+  // Reintento de una apertura incierta con el mismo identificador: un rechazo definitivo se avisa;
+  // si vuelve a fallar la comunicación, el panel de recuperación sigue en pantalla.
+  async function retry() {
+    const problem = await mutation.retry();
+    if (problem) {
+      notifyActionError(problem, 'No se pudo abrir el turno.');
     }
   }
 
@@ -199,6 +213,7 @@ export function useShiftOpening({
     ready,
     openLabel,
     open,
+    retry,
     confirmation,
     setConfirmation,
     keypad,

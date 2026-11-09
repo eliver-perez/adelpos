@@ -241,9 +241,15 @@ describe('arqueo y cierre ciego', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar cierre del turno' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog.textContent).toContain('$500.00 declarados');
+    // Cerrar el turno es irreversible: el diálogo estándar usa la variante de peligro.
+    expect(dialog.className).toContain('dialog-panel-danger');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cerrar el turno' }));
     await waitFor(() => expect(sent('payments_shift_confirm_closing')).toHaveLength(1));
     expect(sent('payments_shift_confirm_closing')[0]!.body).toMatchObject({ count_revision: 4 });
+    // El aviso confirma el cierre sin ninguna cifra; el resultado sigue en pantalla.
+    const confirmation = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(confirmation.textContent).toContain('Turno de Caja 1 cerrado.');
+    expect(confirmation.textContent).not.toMatch(/\$|500|987|12\.34/);
     await screen.findByText(/quedó cerrado/);
     expect(screen.getByText(/se consultan con el permiso/)).toBeTruthy();
   });

@@ -1,3 +1,4 @@
+import { IconLabel } from '../../../components/Icon';
 import { financialOperationLabels, formatMoney } from '../../../services/payments';
 import type { PaymentMethod } from '../../../services/payments';
 import type { PendingRequest } from '../../../hooks/pendingOperations';
@@ -50,7 +51,9 @@ export function UncertainOperation({
       )}
       <div className="button-row">
         <button type="button" className="primary-button" disabled={busy} onClick={onRetry}>
-          {busy ? 'Reintentando…' : 'Reintentar con el mismo identificador'}
+          <IconLabel icon="refresh">
+            {busy ? 'Reintentando…' : 'Reintentar con el mismo identificador'}
+          </IconLabel>
         </button>
         <button type="button" className="secondary-button" onClick={onConsult}>
           Consultar resultado

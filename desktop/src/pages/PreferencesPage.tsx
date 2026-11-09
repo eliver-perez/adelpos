@@ -80,6 +80,7 @@ export function UserPreferencesForm({
   );
   return (
     <Form
+      successMessage="Preferencias guardadas."
       onSave={async () => {
         await api(userID ? 'save_user_preferences' : 'save_preferences', {
           id: userID,
@@ -163,6 +164,7 @@ export function PreferencesPage({
       <section className="surface panel">
         <h2 className="mb-5">Teclado de {identity.terminal.name}</h2>
         <Form
+          successMessage="Preferencia de teclado de la terminal guardada."
           onSave={async () => {
             await api('save_terminal_preferences', { body: { keyboard_mode: keyboard } });
             await refresh();
@@ -201,6 +203,7 @@ export function PasswordPage({ refresh }: { refresh: () => Promise<void> }) {
       <section className="surface panel">
         <Form
           label="Cambiar contraseña"
+          successMessage="Contraseña cambiada."
           onSave={async () => {
             if (next !== confirmation) {
               throw new Error('La confirmación no coincide.');

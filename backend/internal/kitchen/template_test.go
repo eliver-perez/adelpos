@@ -35,6 +35,19 @@ func TestThermalDocumentPreservesPreparationAndExcludesCommands(t *testing.T) {
 	}
 }
 
+// Con la opción de mostrar importes, la comanda usa el formato único de importes (etapa 7.1).
+func TestThermalDocumentShowsPriceWithThousands(t *testing.T) {
+	document := Document{ID: "document-price", Kind: "normal", CreatedAt: time.Date(2026, 11, 7, 19, 0, 0, 0, time.UTC),
+		Settings: Settings{ShowPrices: true, QuantityStyle: "prefix"},
+		Context:  TicketContext{Timezone: "America/Monterrey", Folio: 7, Table: "Mesa 2"},
+		Sections: []Section{{Station: Station{Name: "Barra"}, Items: []Instructions{{Name: "Botella", Quantity: 1,
+			Price: "1250.00", Parts: []Part{}, ItemID: "partida-precio"}}}}}
+	text := RenderText(document, 80)
+	if !strings.Contains(text, "Importe: $1,250.00") || strings.Contains(text, "$1250.00") {
+		t.Fatalf("La comanda no usa el formato de importes con miles:\n%s", text)
+	}
+}
+
 func TestESCPosEncodingAndTrustedCut(t *testing.T) {
 	plain := ESCPosBytes("Café ñ á\n", Printer{})
 	if bytes.Contains(plain, []byte{0x1d, 0x56}) {

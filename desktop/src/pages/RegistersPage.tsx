@@ -26,6 +26,7 @@ function RegisterEditor({
       </div>
       <Form
         label="Guardar caja"
+        successMessage={register ? 'Caja física guardada.' : 'Caja física creada.'}
         onSave={async () => {
           await api(register ? 'update_register' : 'create_register', {
             id: register?.id,

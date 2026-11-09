@@ -2,20 +2,20 @@ import { useState } from 'react';
 import { dateTime, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
+import { notifyError, notifySuccess } from '../services/notify';
 import type { Session } from '../services/models';
 
 export function SessionsPage({ can }: { can: (key: string) => boolean }) {
   const resource = useResource<Session[]>('sessions');
-  const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  async function revoke(id: string) {
+  async function revoke(session: Session) {
     setBusy(true);
-    setError('');
     try {
-      await api('revoke_session', { id, body: {} });
+      await api('revoke_session', { id: session.id, body: {} });
+      notifySuccess(`Sesión de ${session.username} revocada.`);
       await resource.reload();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'No se pudo revocar.');
+      notifyError(error, 'No se pudo revocar la sesión.');
     } finally {
       setBusy(false);
     }
@@ -30,7 +30,7 @@ export function SessionsPage({ can }: { can: (key: string) => boolean }) {
           Actualizar
         </button>
       </PageTitle>
-      <Notice>{resource.error || error}</Notice>
+      <Notice>{resource.error}</Notice>
       <div className="surface table-container">
         <table>
           <thead>
@@ -60,7 +60,7 @@ export function SessionsPage({ can }: { can: (key: string) => boolean }) {
                       <button
                         className="danger-button"
                         disabled={busy}
-                        onClick={() => void revoke(session.id)}
+                        onClick={() => void revoke(session)}
                       >
                         Revocar sesión
                       </button>

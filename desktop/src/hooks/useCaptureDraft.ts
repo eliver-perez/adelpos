@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { api, APIError } from '../services/api';
 import type { Operation } from '../services/api';
 import type { PreviewLine } from '../services/catalog';
+import { notifySuccess } from '../services/notify';
+import { countLabel } from '../services/plural';
 import { emptyCustomization } from '../services/restaurant';
 import type { Bill, DraftItem, EditorState, OrderQuote } from '../services/restaurant';
 import type { CaptureProduct } from '../pages/restaurant/capture/captureRules';
@@ -29,6 +31,8 @@ type Execute = <T>(
 
 // Borrador local de la captura táctil para la cuenta mostrada: los toques se aplican primero en
 // la terminal (motor de sincronización) y «Enviar a cocina» confirma con las reglas existentes.
+// Los rechazos se informan con onError (avisos del sistema único de mensajes) y el envío
+// confirmado, con un aviso de éxito.
 export function useCaptureDraft({
   bill,
   engine,
@@ -43,7 +47,8 @@ export function useCaptureDraft({
   can: (permission: string) => boolean;
   savedQuote: { data: OrderQuote | null; reload: () => Promise<void> };
   execute: Execute;
-  onError: (message: string) => void;
+  // Informa el rechazo de una acción: un texto propio o el error capturado.
+  onError: (problem: unknown, fallback: string) => void;
   onConflict: () => void;
 }) {
   const [sending, setSending] = useState(false);
@@ -78,10 +83,10 @@ export function useCaptureDraft({
     if (next.length > maximumDraftLines || draftUnits(next) > maximumDraftUnits) {
       onError(
         `Envía a cocina este lote antes de agregar más productos (hasta ${maximumDraftLines} partidas y ${maximumDraftUnits} unidades por envío).`,
+        'No se pudo agregar el producto.',
       );
       return false;
     }
-    onError('');
     engine.stage(bill, operation);
     return true;
   }
@@ -117,7 +122,6 @@ export function useCaptureDraft({
   async function sendToKitchen() {
     if (!bill || sending) return;
     const accountID = bill.account.id;
-    onError('');
     setSending(true);
     try {
       const synced = await engine.settle(accountID);
@@ -128,6 +132,7 @@ export function useCaptureDraft({
       if (quote.revision !== expectedRevision) {
         onError(
           'La cuenta cambió en otra terminal. Revisa los productos nuevos y vuelve a enviar.',
+          'No se pudo enviar a cocina.',
         );
         onConflict();
         return;
@@ -142,6 +147,7 @@ export function useCaptureDraft({
         // Lo que vio el operador ya no coincide con el cálculo vigente: primero se revisa.
         onError(
           'El cálculo de Go cambió desde que se mostró. Revisa los importes y vuelve a enviar.',
+          'No se pudo enviar a cocina.',
         );
         void savedQuote.reload();
         return;
@@ -157,14 +163,18 @@ export function useCaptureDraft({
       } finally {
         engine.release(accountID, confirmed);
       }
+      notifySuccess(
+        `Pedido enviado a cocina · ${countLabel(draftUnits(items), 'producto', 'productos')}`,
+      );
     } catch (problem) {
       if (problem instanceof APIError && problem.code === 'QUOTE_CHANGED') {
         onError(
           'El cálculo cambió antes de enviar. Los productos nuevos se conservan: revisa los importes y vuelve a enviar.',
+          'No se pudo enviar a cocina.',
         );
         void savedQuote.reload();
       } else {
-        onError(problem instanceof Error ? problem.message : 'No se pudo enviar a cocina.');
+        onError(problem, 'No se pudo enviar a cocina.');
       }
     } finally {
       setSending(false);

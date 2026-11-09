@@ -1,6 +1,7 @@
 import { currencyLabels } from '../../services/cash';
 import type { PhysicalCash, ShiftTotals } from '../../services/cash';
-import { formatDollars, formatMoney } from '../../services/payments';
+import { formatDollars, formatMoney } from '../../services/money';
+import { countLabel } from '../../services/plural';
 import { currencyAmount } from './DenominationCount';
 
 // Totales informativos de un turno, tal como los calculó Go para un corte o para el resumen en
@@ -32,8 +33,9 @@ function CountFigures({ totals }: { totals: ShiftTotals }) {
       <div>
         Registros
         <strong>
-          {totals.payments} cobros · {totals.refunds} devoluciones · {totals.cash_operations}{' '}
-          operaciones de efectivo
+          {countLabel(totals.payments, 'cobro', 'cobros')} ·{' '}
+          {countLabel(totals.refunds, 'devolución', 'devoluciones')} ·{' '}
+          {countLabel(totals.cash_operations, 'operación de efectivo', 'operaciones de efectivo')}
         </strong>
       </div>
       {totals.regularizations > 0 && (

@@ -1,5 +1,6 @@
 import type { CSSProperties, PointerEvent } from 'react';
 import { useRef } from 'react';
+import { countLabel } from '../../services/plural';
 import type { Area, RestaurantTable } from '../../services/restaurant';
 
 interface TableMapProps {
@@ -96,7 +97,7 @@ export function TableMap({
                 type="button"
                 style={style}
                 className={`restaurant-table table-${table.state} table-${table.shape} ${selectedTableID === table.id ? 'selected-table' : ''}`}
-                aria-label={`${table.name}, ${stateLabels[table.state]}, ${table.account_count} cuentas`}
+                aria-label={`${table.name}, ${stateLabels[table.state]}, ${countLabel(table.account_count, 'cuenta', 'cuentas')}`}
                 aria-pressed={selectedTableID === table.id}
                 onClick={() => onSelect(table)}
                 onPointerDown={(event) => {
@@ -141,7 +142,7 @@ export function TableMap({
                 <strong>{table.name}</strong>
                 <span>
                   {table.account_count
-                    ? `${table.account_count} cuentas`
+                    ? countLabel(table.account_count, 'cuenta', 'cuentas')
                     : stateLabels[table.state]}
                 </span>
               </button>

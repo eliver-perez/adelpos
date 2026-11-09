@@ -63,6 +63,7 @@ function RoleEditor({
       </div>
       <Form
         label="Guardar rol"
+        successMessage="Rol guardado."
         onSave={async () => {
           await api(role ? 'update_role' : 'create_role', {
             id: role?.id,

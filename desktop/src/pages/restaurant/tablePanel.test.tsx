@@ -2,6 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TableMap } from '../../components/restaurant/TableMap';
 import { PendingOperationsProvider } from '../../hooks/pendingOperations';
 import { OperationalPage } from './OperationalPage';
 
@@ -54,6 +55,8 @@ let saves: { id: string; body: Record<string, unknown> }[];
 let replays: Map<string, unknown>;
 let holdOpens: boolean;
 let heldOpens: (() => void)[];
+// Rechazo de Go para la próxima apertura (código interno y mensaje en español).
+let openFailure: { code: string; message: string } | null;
 
 function serverAccount(values: Partial<ServerAccount> & { id: string; folio: number }) {
   return {
@@ -265,6 +268,9 @@ function respond(
     case 'restaurant_account':
       return bill(accounts[id!]!);
     case 'restaurant_open_account':
+      if (openFailure) {
+        return { status: 409, body: { error: openFailure } };
+      }
       return openAccount(body!);
     case 'restaurant_save_account': {
       saves.push({ id: id!, body: body! });
@@ -356,6 +362,7 @@ beforeEach(() => {
   replays = new Map();
   holdOpens = false;
   heldOpens = [];
+  openFailure = null;
   native.invoke.mockImplementation(
     async (
       command: string,
@@ -469,7 +476,7 @@ describe('panel lateral de la mesa', () => {
     expect(within(panel).getByRole('button', { name: 'Cobrar · $163.40' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Precuenta' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Dividir' })).toBeTruthy();
-    expect(within(panel).getByRole('button', { name: '+ Nueva cuenta' })).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: 'Nueva cuenta' })).toBeTruthy();
     fireEvent.click(within(panel).getByRole('button', { name: 'Más…' }));
     const menu = within(panel).getByRole('group', { name: 'Más acciones de la cuenta' });
     for (const label of [
@@ -510,19 +517,19 @@ describe('panel lateral de la mesa', () => {
     expect(screen.getByRole('region', { name: 'Mapa del restaurante' })).toBeTruthy();
   });
 
-  it('«+ Nueva cuenta» abre otra cuenta en la mesa ocupada y entra a capturar', async () => {
+  it('«Nueva cuenta» abre otra cuenta en la mesa ocupada y entra a capturar', async () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
     await within(panel).findByRole('button', { name: 'Capturar' });
-    fireEvent.click(within(panel).getByRole('button', { name: '+ Nueva cuenta' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Nueva cuenta' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #3' });
     expect(opens).toEqual([expect.objectContaining({ name: '', table_id: ids.occupied })]);
-    // Desde la captura, «+ Nueva cuenta» abre otra en la misma mesa sin formulario.
+    // Desde la captura, «Nueva cuenta» abre otra en la misma mesa sin formulario.
     const group = screen.getByRole('group', { name: 'Cuentas de la mesa' });
     await waitFor(() =>
       expect(pressed(within(group).getByRole('button', { name: 'Cuenta #3' }))).toBe('true'),
     );
-    fireEvent.click(within(group).getByRole('button', { name: '+ Nueva cuenta' }));
+    fireEvent.click(within(group).getByRole('button', { name: 'Nueva cuenta' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #4' });
     expect(opens).toHaveLength(2);
     expect(opens[1]).toEqual(expect.objectContaining({ table_id: ids.occupied }));
@@ -547,6 +554,72 @@ describe('panel lateral de la mesa', () => {
     expect(opens).toHaveLength(1);
     expect(Object.values(accounts).filter((entry) => entry.tableID === ids.free)).toHaveLength(1);
     expect(screen.queryByText(/Primero recupera|Espera a que termine/)).toBeNull();
+  });
+
+  it('un rechazo de Go al abrir se avisa en español, sin código interno, y no se cierra solo', async () => {
+    renderPage();
+    const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
+    openFailure = {
+      code: 'TABLE_OUT_OF_SERVICE',
+      message: 'La mesa está fuera de servicio y no admite cuentas nuevas.',
+    };
+    fireEvent.click(within(panel).getByRole('button', { name: 'Abrir cuenta y capturar' }));
+    const alert = await screen.findByRole('alert', { name: 'Error' });
+    expect(alert.textContent).toContain(
+      'La mesa está fuera de servicio y no admite cuentas nuevas.',
+    );
+    expect(alert.textContent).not.toContain('TABLE_OUT_OF_SERVICE');
+    // No queda un banner superior duplicado ni un panel de recuperación: el rechazo fue definitivo.
+    expect(document.querySelector('.operational-page > .notice')).toBeNull();
+    expect(document.querySelector('.operation-recovery')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Mesa 2 · Cuenta #3' })).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 4500));
+    });
+    expect(screen.queryByRole('alert', { name: 'Error' })).not.toBeNull();
+  }, 10000);
+});
+
+describe('contadores del mapa', () => {
+  it('concuerda «1 cuenta» y «2 cuentas» en el texto y en el nombre accesible', () => {
+    const area = {
+      id: ids.area,
+      name: 'Salón',
+      description: '',
+      sort_order: 10,
+      active: true,
+      revision: 1,
+      table_count: 2,
+    };
+    const table = {
+      area_id: ids.area,
+      shape: 'rectangle' as const,
+      x: 20,
+      y: 20,
+      width: 120,
+      height: 100,
+      seats: 4,
+      active: true,
+      out_of_service: false,
+      revision: 1,
+      state: 'occupied' as const,
+    };
+    render(
+      <TableMap
+        areas={[area]}
+        tables={[
+          { ...table, id: ids.occupied, name: 'Mesa 1', account_count: 1 },
+          { ...table, id: ids.free, name: 'Mesa 2', x: 300, account_count: 2 },
+        ]}
+        areaID={ids.area}
+        onAreaChange={() => undefined}
+        onSelect={() => undefined}
+      />,
+    );
+    const single = screen.getByRole('button', { name: 'Mesa 1, Ocupada, 1 cuenta' });
+    expect(within(single).getByText('1 cuenta')).toBeTruthy();
+    const double = screen.getByRole('button', { name: 'Mesa 2, Ocupada, 2 cuentas' });
+    expect(within(double).getByText('2 cuentas')).toBeTruthy();
   });
 });
 
@@ -593,6 +666,10 @@ describe('datos de la cuenta durante la captura', () => {
       }),
     );
     expect(typeof saves[0]!.body.operation_id).toBe('string');
+    // La confirmación es un aviso del sistema único de mensajes.
+    expect(
+      (await screen.findByRole('status', { name: 'Operación completada' })).textContent,
+    ).toContain('Datos de la cuenta guardados');
     // Go restauró la referencia neutra: la interfaz la trata como «sin nombre».
     await screen.findByRole('region', { name: 'Productos' });
     await waitFor(() => expect(accounts[ids.second]!.name).toBe('Mesa 1'));

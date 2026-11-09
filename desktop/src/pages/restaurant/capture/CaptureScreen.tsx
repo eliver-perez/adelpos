@@ -83,6 +83,7 @@ export function CaptureScreen({
         message: 'Las opciones elegidas para este producto no se agregarán a la cuenta.',
         confirmLabel: 'Descartar selección',
         cancelLabel: 'Seguir eligiendo',
+        tone: 'danger',
       });
       if (!discard) {
         return false;

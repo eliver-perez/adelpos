@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { ShiftDetail, ShiftSummary } from '../../services/cash';
 import type { Shift } from '../../services/payments';
@@ -92,7 +93,7 @@ export function ShiftHistoryDetail({
           {shift.register_name} · turno del {businessDate(shift.business_date)}
         </h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver al historial
+          <IconLabel icon="back">Volver al historial</IconLabel>
         </button>
       </header>
       <ShiftStatusCard shift={shift} timezone={timezone} />

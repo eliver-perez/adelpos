@@ -1,3 +1,5 @@
+import { IconLabel } from '../../components/Icon';
+import type { IconName } from '../../components/Icon';
 import { permissionName } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 
@@ -6,24 +8,45 @@ export type CashAction = 'income' | 'withdrawal' | 'expense' | 'partial' | 'clos
 interface ActionDefinition {
   action: CashAction;
   label: string;
+  icon: IconName;
   permission: string;
   // Las operaciones de efectivo se registran desde una terminal de la caja del turno.
   ownRegister: boolean;
 }
 
 const definitions: ActionDefinition[] = [
-  { action: 'income', label: 'Ingreso', permission: 'cash.income.record', ownRegister: true },
+  {
+    action: 'income',
+    label: 'Ingreso',
+    icon: 'income',
+    permission: 'cash.income.record',
+    ownRegister: true,
+  },
   {
     action: 'withdrawal',
     label: 'Retiro de efectivo',
+    icon: 'withdrawal',
     permission: 'cash.withdrawals.record',
     ownRegister: true,
   },
-  { action: 'expense', label: 'Gasto', permission: 'cash.expenses.record', ownRegister: true },
-  { action: 'partial', label: 'Corte parcial', permission: 'cash.shifts.read', ownRegister: false },
+  {
+    action: 'expense',
+    label: 'Gasto',
+    icon: 'expense',
+    permission: 'cash.expenses.record',
+    ownRegister: true,
+  },
+  {
+    action: 'partial',
+    label: 'Corte parcial',
+    icon: 'report',
+    permission: 'cash.shifts.read',
+    ownRegister: false,
+  },
   {
     action: 'closing',
     label: 'Arqueo y cierre',
+    icon: 'count',
     permission: 'cash.counts.perform',
     ownRegister: false,
   },
@@ -80,14 +103,16 @@ export function CashActions({
             aria-pressed={selected === definition.action}
             onClick={() => onSelect(definition.action)}
           >
-            {definition.action === 'closing' && shift.state === 'closing'
-              ? 'Continuar arqueo'
-              : definition.label}
+            <IconLabel icon={definition.icon}>
+              {definition.action === 'closing' && shift.state === 'closing'
+                ? 'Continuar arqueo'
+                : definition.label}
+            </IconLabel>
           </button>
         ))}
         {correctable && (
           <button type="button" onClick={onCorrections}>
-            Corrección o regularización
+            <IconLabel icon="edit">Corrección o regularización</IconLabel>
           </button>
         )}
       </div>

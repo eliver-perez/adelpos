@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { IconLabel } from '../../../components/Icon';
+import type { IconName } from '../../../components/Icon';
 
 export interface MoreAction<T extends string> {
   id: T;
   label: string;
+  // Icono opcional a la izquierda del texto del botón.
+  icon?: IconName;
 }
 
 // Menú «Más…» de la cuenta: reúne las acciones menos frecuentes como botones grandes (sustituye
@@ -50,7 +54,7 @@ export function MoreActions<T extends string>({
         disabled={disabled}
         onClick={() => setOpen(!open)}
       >
-        Más…
+        <IconLabel icon="more">Más…</IconLabel>
       </button>
       {open && (
         <div className="capture-more-menu" role="group" aria-label="Más acciones de la cuenta">
@@ -64,7 +68,11 @@ export function MoreActions<T extends string>({
                 onAction(action.id);
               }}
             >
-              {action.label}
+              {action.icon ? (
+                <IconLabel icon={action.icon}>{action.label}</IconLabel>
+              ) : (
+                action.label
+              )}
             </button>
           ))}
         </div>

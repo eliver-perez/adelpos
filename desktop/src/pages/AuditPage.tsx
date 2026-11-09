@@ -2,6 +2,7 @@ import { Accordion } from '../components/Accordion';
 import { useState } from 'react';
 import { dateTime, Field, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
+import { countLabel } from '../services/plural';
 import type { AuditPage as AuditPageData } from '../services/models';
 
 export function AuditPage() {
@@ -118,7 +119,7 @@ export function AuditPage() {
       </div>
       <div className="pagination">
         <span className="muted text-sm">
-          {resource.data?.total ?? 0} eventos · Página {query.page}
+          {countLabel(resource.data?.total ?? 0, 'evento', 'eventos')} · Página {query.page}
         </span>
         <div className="button-row">
           <button

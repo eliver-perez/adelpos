@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Field } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { QuantityStepper } from '../../../components/QuantityStepper';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
@@ -8,6 +9,7 @@ import { useDiscountPreview } from '../../../hooks/usePaymentPreview';
 import { useSupervisorAuthorization } from '../../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../../services/api';
 import { acceptAmountText, toWireAmount } from '../../../services/amountInput';
+import { formatDeduction } from '../../../services/money';
 import {
   formatMoney,
   isZeroMoney,
@@ -25,6 +27,7 @@ import type {
   Selection,
 } from '../../../services/payments';
 import { financeKey } from '../checkout/captureState';
+import { notifyActionError } from '../checkout/actionErrors';
 
 // Solo se descuentan unidades sin pago asignado y sin otro descuento manual vigente.
 export function discountableUnits(line: FinanceLine) {
@@ -52,7 +55,7 @@ function DiscountPreview({ plan, courtesy }: { plan: DiscountPlan; courtesy: boo
         </div>
         <div className="checkout-figure checkout-figure-emphasis">
           <dt>{courtesy ? 'Cortesía' : 'Descuento'}</dt>
-          <dd>−{formatMoney(plan.amount)}</dd>
+          <dd>{formatDeduction(plan.amount)}</dd>
         </div>
         <div className="checkout-figure">
           <dt>Porcentaje efectivo</dt>
@@ -69,7 +72,8 @@ function DiscountPreview({ plan, courtesy }: { plan: DiscountPlan; courtesy: boo
       </dl>
       {plan.settles && (
         <p className="muted text-xs">
-          La cuenta quedará liquidada sin registrar un pago de $0 y se cerrará si no tiene borrador.
+          La cuenta quedará liquidada sin registrar un pago de {formatMoney('0')} y se cerrará si no
+          tiene borrador.
         </p>
       )}
       {plan.requires_authorization && (
@@ -156,10 +160,16 @@ export function DiscountForm({
         return;
       }
       if (problem instanceof APIError && refreshCodes.includes(problem.code)) {
-        // La cuenta cambió: se consulta de nuevo y se conserva la captura para revisarla.
+        // La cuenta cambió: se consulta de nuevo y se conserva la captura para revisarla; el
+        // conflicto se explica junto al formulario.
         setConflict(problem.message);
         void reloadFinance();
+        return;
       }
+      notifyActionError(
+        problem,
+        courtesy ? 'No se pudo registrar la cortesía.' : 'No se pudo registrar el descuento.',
+      );
     }
   }
 
@@ -295,7 +305,9 @@ export function DiscountForm({
           disabled={!canSubmit}
           onClick={() => void submit()}
         >
-          {plan ? `${label} ${formatMoney(plan.amount)}` : label}
+          <IconLabel icon="discount">
+            {plan ? `${label} ${formatMoney(plan.amount)}` : label}
+          </IconLabel>
         </button>
       </div>
     </div>

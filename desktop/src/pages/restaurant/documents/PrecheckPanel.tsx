@@ -1,8 +1,9 @@
-import { useState } from 'react';
 import { Notice } from '../../../components/Forms';
+import { IconLabel } from '../../../components/Icon';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
 import { APIError } from '../../../services/api';
+import { notifyError, notifySuccess, notifyWarning } from '../../../services/notify';
 import {
   documentJobLabels,
   documentsPendingKey,
@@ -14,17 +15,30 @@ import {
 import type { CommercialDocument, PrintingResult } from '../../../services/payments';
 import type { Bill } from '../../../services/restaurant';
 import { UncertainOperation } from '../checkout/UncertainOperation';
+import { notifyActionError } from '../checkout/actionErrors';
 
 const missingPrinter =
   'No hay impresora de tickets configurada. Configúrala en Cobros → Políticas de cobro.';
 
-function printResultMessage(result: PrintingResult) {
+// Resultado de la impresión como aviso: «enviada», nunca «impresa». Un trabajo que exige atención
+// (sin impresora disponible, incierto…) se avisa como advertencia que dura más.
+function notifyPrintResult(result: PrintingResult) {
   const status = result.status ?? '';
   const label = documentJobLabels[status] ?? 'Solicitud registrada';
   if (printAttentionStates.includes(status)) {
-    return `Precuenta: ${label}. Se resuelve en Cocina → Cola de impresión.`;
+    notifyWarning(`Precuenta: ${label}. Se resuelve en Cocina → Cola de impresión.`);
+    return;
   }
-  return `Precuenta enviada a la cola de impresión: ${label}.`;
+  notifySuccess(`Precuenta enviada a la cola de impresión: ${label}.`);
+}
+
+// Sin impresora de tickets se explica dónde configurarla; los demás rechazos son los de Go.
+function notifyPrintFailure(problem: unknown) {
+  if (problem instanceof APIError && problem.code === 'PRINTER_NOT_CONFIGURED') {
+    notifyError(missingPrinter);
+    return;
+  }
+  notifyActionError(problem, 'No se pudo enviar la precuenta a imprimir.');
 }
 
 // Precuenta integrada en la operación: vista previa del documento que entrega Go (texto de 42
@@ -46,10 +60,8 @@ export function PrecheckPanel({
     enabled: active,
     interval: 30000,
   });
-  const [result, setResult] = useState<PrintingResult | null>(null);
-  const [notice, setNotice] = useState('');
   const mutation = useRestaurantMutation((_operation, value) => {
-    setResult(value as PrintingResult);
+    notifyPrintResult(value as PrintingResult);
     window.dispatchEvent(new CustomEvent('adel-server-change'));
   }, documentsPendingKey(accountID));
   const locked = mutation.busy || !!mutation.pending;
@@ -59,14 +71,17 @@ export function PrecheckPanel({
     if (mutation.isPending()) {
       return;
     }
-    setResult(null);
-    setNotice('');
     try {
       await mutation.execute('payments_print_precheck', { id: accountID, body: {} });
     } catch (problem) {
-      if (problem instanceof APIError && problem.code === 'PRINTER_NOT_CONFIGURED') {
-        setNotice(missingPrinter);
-      }
+      notifyPrintFailure(problem);
+    }
+  }
+
+  async function retry() {
+    const problem = await mutation.retry();
+    if (problem) {
+      notifyPrintFailure(problem);
     }
   }
 
@@ -75,7 +90,7 @@ export function PrecheckPanel({
       <div className="section-heading">
         <h2>Precuenta · #{bill.account.folio}</h2>
         <button type="button" className="secondary-button" onClick={onClose}>
-          Volver
+          <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <p className="muted text-sm">
@@ -88,15 +103,10 @@ export function PrecheckPanel({
           request={mutation.pending}
           methods={[]}
           busy={mutation.busy}
-          onRetry={() => void mutation.retry()}
+          onRetry={() => void retry()}
           onConsult={() => window.dispatchEvent(new CustomEvent('adel-server-change'))}
         />
       )}
-      {notice && <Notice>{notice}</Notice>}
-      {mutation.error && !mutation.uncertain && mutation.errorCode !== 'PRINTER_NOT_CONFIGURED' && (
-        <Notice>{mutation.error}</Notice>
-      )}
-      {result && <Notice success>{printResultMessage(result)}</Notice>}
       {!data && !document.error && <p className="muted">Preparando la precuenta…</p>}
       {data && (
         <div className="precheck-layout">
@@ -144,7 +154,9 @@ export function PrecheckPanel({
             disabled={locked || !data}
             onClick={() => void print()}
           >
-            {mutation.busy ? 'Enviando precuenta…' : 'Imprimir precuenta'}
+            <IconLabel icon="printer">
+              {mutation.busy ? 'Enviando precuenta…' : 'Imprimir precuenta'}
+            </IconLabel>
           </button>
         </div>
       ) : (

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { usePaymentPreview } from '../../../hooks/usePaymentPreview';
 import { APIError } from '../../../services/api';
+import { formatDenomination } from '../../../services/money';
 import { formatDollars, formatMoney, refreshCodes, shiftCodes } from '../../../services/payments';
 import type {
   Finance,
@@ -21,23 +22,22 @@ import {
   selectionList,
 } from './captureState';
 import type { CaptureState } from './captureState';
+import { notifyActionError } from './actionErrors';
 
+// Billetes frecuentes para el efectivo recibido (cadenas fijas, sin conversión). La etiqueta usa
+// el formato único de importes: «$1,000», «US$20».
 const cashQuickAmounts = [
   { label: 'Exacto', value: '' },
-  { label: '$100', value: '100' },
-  { label: '$200', value: '200' },
-  { label: '$500', value: '500' },
-  { label: '$1000', value: '1000' },
+  ...['100', '200', '500', '1000'].map((value) => ({
+    label: formatDenomination(value),
+    value,
+  })),
 ];
 
-// Billetes de dólar frecuentes para los dólares recibidos (cadenas fijas, sin conversión).
-const dollarQuickAmounts = [
-  { label: 'US$5', value: '5' },
-  { label: 'US$10', value: '10' },
-  { label: 'US$20', value: '20' },
-  { label: 'US$50', value: '50' },
-  { label: 'US$100', value: '100' },
-];
+const dollarQuickAmounts = ['5', '10', '20', '50', '100'].map((value) => ({
+  label: formatDenomination(value, 'USD'),
+  value,
+}));
 
 // Estado del pago en dólares para el cobro: función activa y tipo de cambio del turno.
 export interface DollarState {
@@ -208,11 +208,15 @@ export function useCollectFlow({
       await mutation.execute<PaymentResult>('payments_pay', { id: accountID, body });
     } catch (problem) {
       if (!(problem instanceof APIError)) {
+        notifyActionError(problem, 'No se pudo registrar el pago.');
         return;
       }
       if (problem.code === 'BALANCE_CHANGED') {
-        // Conflicto de cobro: se consulta el saldo real y se conserva la captura para revisarla.
+        // Conflicto de cobro: se consulta el saldo real y se conserva la captura para revisarla. El
+        // conflicto se explica en su panel, junto a la captura.
         setConflict(true);
+      } else {
+        notifyActionError(problem, 'No se pudo registrar el pago.');
       }
       if (refreshCodes.includes(problem.code)) {
         void reloadFinance();

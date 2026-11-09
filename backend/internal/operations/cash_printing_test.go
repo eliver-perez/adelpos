@@ -9,6 +9,7 @@ import (
 
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/moneytext"
 	"local/ad-el-pos/server/internal/payments"
 )
 
@@ -241,6 +242,8 @@ func testCashDocuments(t *testing.T, fixture *printingFixture) {
 
 	t.Run("C33_corte_parcial_impreso_con_y_sin_permiso_de_esperado", func(t *testing.T) {
 		expected := fixture.expected(t, shiftID)
+		// El esperado se busca con el mismo formato impreso (miles y dos decimales).
+		expectedText := moneytext.Format(moneytext.CurrencyMXN, expected.MXN)
 		hidden := fixture.shiftCall(t, fixture.cashier, "POST", shiftID, "partial-cuts", map[string]any{"print": true}, 200)
 		blind(t, hidden, "El corte parcial impreso sin permiso")
 		cut := decodeResponse[payments.CreatedReport](t, hidden)
@@ -249,12 +252,12 @@ func testCashDocuments(t *testing.T, fixture *printingFixture) {
 		}
 		content := fixture.jobContent(t, cut.Printing.JobID)
 		for _, fragment := range []string{"CORTE PARCIAL #1", "VENTAS Y PAGOS POR MÉTODO", "INGRESOS, RETIROS Y GASTOS", "Retiros", "$200.00",
-			"Gastos", "$30.00", "Fondo inicial", "$1000.00", "Esperado y diferencias: no incluidos."} {
+			"Gastos", "$30.00", "Fondo inicial", "$1,000.00", "Esperado y diferencias: no incluidos."} {
 			if !strings.Contains(content, fragment) {
 				t.Fatalf("El corte parcial sin permiso no muestra %q:\n%s", fragment, content)
 			}
 		}
-		if strings.Contains(content, "EFECTIVO ESPERADO") || strings.Contains(content, "$"+expected.MXN) {
+		if strings.Contains(content, "EFECTIVO ESPERADO") || strings.Contains(content, expectedText) {
 			t.Fatalf("El corte parcial sin permiso imprimió el esperado (%s):\n%s", expected.MXN, content)
 		}
 		visible := fixture.shiftCall(t, fixture.supervisor, "POST", shiftID, "partial-cuts", map[string]any{"print": true}, 200)
@@ -264,7 +267,7 @@ func testCashDocuments(t *testing.T, fixture *printingFixture) {
 			t.Fatalf("El corte con permiso no incluyó el esperado: %+v", withExpected.Printing)
 		}
 		content = fixture.jobContent(t, withExpected.Printing.JobID)
-		if !strings.Contains(content, "CORTE PARCIAL #2") || !strings.Contains(content, "EFECTIVO ESPERADO") || !strings.Contains(content, "$"+expected.MXN) {
+		if !strings.Contains(content, "CORTE PARCIAL #2") || !strings.Contains(content, "EFECTIVO ESPERADO") || !strings.Contains(content, expectedText) {
 			t.Fatalf("El corte con permiso no muestra el esperado %s:\n%s", expected.MXN, content)
 		}
 		// La vista previa respeta los mismos permisos sin escribir.
@@ -274,7 +277,7 @@ func testCashDocuments(t *testing.T, fixture *printingFixture) {
 		previewVisible := decodeResponse[payments.CashDocumentPreview](t, fixture.call(t, fixture.supervisor, "GET",
 			"payments/cash-reports/"+withExpected.ID+"/preview", nil, 200))
 		if previewHidden.IncludesExpected || strings.Contains(previewHidden.Content, "EFECTIVO ESPERADO") ||
-			!previewVisible.IncludesExpected || !strings.Contains(previewVisible.Content, "$"+expected.MXN) ||
+			!previewVisible.IncludesExpected || !strings.Contains(previewVisible.Content, expectedText) ||
 			previewVisible.Document == nil || previewVisible.Document.ID != withExpected.Printing.DocumentID {
 			t.Fatal("La vista previa del corte no respetó los permisos de consulta del esperado")
 		}
@@ -807,7 +810,7 @@ func testFinalCutPrinting(t *testing.T, fixture *printingFixture) {
 		closures := fixture.countRows(t, "SELECT count(*) FROM app.cash_shift_closures")
 		printed := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.supervisor, "POST", route, map[string]any{"operation_id": randomID()}, 200))
 		content := fixture.jobContent(t, printed.JobID)
-		for _, fragment := range []string{"CORTE DEFINITIVO", "Cierre", "Cerró: Prueba cajero_impresion", "EFECTIVO DECLARADO", "$1000.00",
+		for _, fragment := range []string{"CORTE DEFINITIVO", "Cierre", "Cerró: Prueba cajero_impresion", "EFECTIVO DECLARADO", "$1,000.00",
 			"EFECTIVO ESPERADO", "DIFERENCIAS (CONTADO - ESPERADO)", "Observaciones", "Cierre de la caja de impresión"} {
 			if !strings.Contains(strings.ToLower(content), strings.ToLower(fragment)) {
 				t.Fatalf("El corte definitivo con permiso no muestra %q:\n%s", fragment, content)

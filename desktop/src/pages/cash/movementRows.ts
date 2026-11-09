@@ -89,8 +89,7 @@ function movementRow(movement: ShiftMovement): MovementRow {
 }
 
 function operationRow(operation: CashOperation): MovementRow {
-  const amount =
-    operation.currency === 'USD' ? formatDollars(operation.amount) : formatMoney(operation.amount);
+  const amount = formatMoney(operation.amount, operation.currency);
   return {
     key: `operation-${operation.id}`,
     at: operation.created_at,

@@ -81,7 +81,9 @@ describe('funciones del establecimiento', () => {
       enabled: true,
       revision: 1,
     });
-    expect(await within(section).findByText('Pago en dólares en efectivo: activada.')).toBeTruthy();
+    // La confirmación es un aviso del sistema único de mensajes, fuera de la sección.
+    const saved = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(saved.textContent).toContain('Pago en dólares en efectivo: activada.');
     await waitFor(() =>
       expect(
         within(section)
@@ -105,7 +107,10 @@ describe('funciones del establecimiento', () => {
     };
     render(<FeaturesSection can={() => true} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Pago en dólares en efectivo' }));
-    expect(await screen.findByText(/cambió en otra terminal/)).toBeTruthy();
+    // El conflicto es un error que permanece hasta que se cierra, sin el código interno.
+    const conflict = await screen.findByRole('alert', { name: 'Error' });
+    expect(conflict.textContent).toMatch(/cambió en otra terminal/);
+    expect(conflict.textContent).not.toContain('REVISION_CONFLICT');
     expect(requests('settings_features').length).toBeGreaterThanOrEqual(3);
   });
 });

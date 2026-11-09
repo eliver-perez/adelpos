@@ -16,6 +16,7 @@ import type {
   ProductBreakdown,
   ProductGroup,
 } from '../../../services/catalog';
+import { formatSignedMoney } from '../../../services/money';
 import { positiveAmount } from './captureRules';
 import { displayQuantity, fromThousandths, toThousandths, unit } from './quantities';
 
@@ -24,7 +25,7 @@ import { displayQuantity, fromThousandths, toThousandths, unit } from './quantit
 // valida y cotiza.
 
 function extraLabel(amount: string | undefined) {
-  return positiveAmount(amount) ? `+$${amount}` : '';
+  return positiveAmount(amount) ? formatSignedMoney(amount) : '';
 }
 
 export function VariantBlock({
@@ -143,9 +144,9 @@ export function GroupBlock({
       {charge && (positiveAmount(charge.difference) || positiveAmount(charge.extras)) && (
         <p className="capture-block-charge">
           {positiveAmount(charge.difference) &&
-            `Diferencia por equivalencia +$${charge.difference}`}
+            `Diferencia por equivalencia ${formatSignedMoney(charge.difference)}`}
           {positiveAmount(charge.difference) && positiveAmount(charge.extras) && ' · '}
-          {positiveAmount(charge.extras) && `Extras +$${charge.extras}`}
+          {positiveAmount(charge.extras) && `Extras ${formatSignedMoney(charge.extras)}`}
         </p>
       )}
       <div className="capture-choices">

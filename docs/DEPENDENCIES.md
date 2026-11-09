@@ -40,3 +40,9 @@ La política de sesiones se contrastó con [OWASP](https://cheatsheetseries.owas
 - Validación de PNG/JPEG mediante [image de Go](https://pkg.go.dev/image) y decodificadores estándar. Los logos originales se integran como [assets locales de Vite](https://vite.dev/guide/assets).
 
 No se añadieron dependencias npm ni servicios externos para el catálogo. Se conservan los lockfiles y las versiones existentes.
+
+## Incorporaciones de la etapa 7.1
+
+- `sonner` **2.0.8** (licencia MIT), dependencia de ejecución del escritorio fijada de forma exacta en `desktop/package.json` y `desktop/package-lock.json` (integridad SHA-512 del registro npm). Motivo: el sistema único de mensajes de la etapa 7.1 (avisos de éxito que se cierran solos, errores persistentes y acción opcional); la especificación pide Sonner adaptado a los tokens visuales. No tiene dependencias propias; sus dependencias de pares son `react` y `react-dom` ^18 o ^19 (`@types/react` opcional), satisfechas por React 19.3.1. Se usa en modo sin estilos propios: cada aviso es un componente de la aplicación (`components/AppToast.tsx`) con los tokens de `styles.css` en tema claro y oscuro. Sonner inserta en tiempo de ejecución su hoja de estilos de posicionamiento y animación (sin recursos de red). [Repositorio oficial](https://github.com/emilkowalski/sonner) y [documentación](https://sonner.emilkowal.ski/).
+- Sin librería de iconos: los iconos de los botones amplían el conjunto propio `components/Icon.tsx` (SVG de 24 × 24 con trazo 1.6).
+- Backend: sin dependencias nuevas. Los paquetes `internal/moneytext` (formato de importes impresos) e `internal/plural` (concordancia de contadores) usan solo la biblioteca estándar y `shopspring/decimal`, ya fijado.

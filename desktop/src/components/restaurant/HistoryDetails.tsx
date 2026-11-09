@@ -1,5 +1,6 @@
 import { ProductDetails } from '../catalog/QuoteBreakdown';
 import type { ProductBreakdown } from '../../services/catalog';
+import { formatMoney } from '../../services/money';
 import type { HistoryEvent } from '../../services/restaurant';
 
 type RecordValue = Record<string, unknown>;
@@ -45,7 +46,7 @@ export function HistoryDetails({ event }: { event: HistoryEvent }) {
       {typeof account.notes === 'string' && account.notes && <p>Observaciones: {account.notes}</p>}
       {units !== null && <p>Unidades conservadas en la operación: {units}</p>}
       {typeof after.quantity === 'number' && <p>Unidades afectadas: {after.quantity}</p>}
-      {typeof totals.total === 'string' && <p>Importe histórico: ${totals.total}</p>}
+      {typeof totals.total === 'string' && <p>Importe histórico: {formatMoney(totals.total)}</p>}
       {event.kind === 'item.modified' && (
         <>
           <h4>Antes</h4>
