@@ -158,7 +158,7 @@ Verificación independiente antes del commit (copia aislada): formato, metadatos
 - Regresión final sobre el árbol completo (copia aislada): formato y metadatos, `go vet`, `go test -race` en todos los paquetes, integración PostgreSQL de los cinco paquetes, Vitest 132 pruebas en 23 archivos, `tsc`, build, `cargo test` (12 aprobadas, 1 ignorada), Playwright Chromium y WebKit, y `tauri build --bundles app` en un destino temporal (`AD-EL POS.app` 0.6.1, 9.45 MiB, sin reemplazar el `.app` 0.6.0 del proyecto). Detalle en [VERIFICATION.md](VERIFICATION.md); la evidencia de la etapa 6 quedó en [VERIFICATION_STAGE6.md](VERIFICATION_STAGE6.md).
 - Documentación actualizada: `CLAUDE.md`, `AGENTS.md` (reglas permanentes desde la etapa 6.1), `README.md`, `ARCHITECTURE.md`, `API_CONTRACTS.md`, `NEXT_STEPS_FOR_SOL.md`, `DEVELOPMENT_MACOS.md`, `docs/CATALOG.md`, `docs/RESTAURANT_OPERATIONS.md`, `docs/KITCHEN_AND_PRINTING.md` y `docs/PAYMENTS_AND_REFUNDS.md`.
 
-### Procedimiento para aplicar la 0007 a la instalación real (en espera de autorización)
+### Procedimiento para aplicar la 0007 a la instalación real (autorizado y ejecutado)
 
 La instalación real sigue en 0.6.0 con esquema 6. No ejecutar `build-macos` ni reiniciar el servidor con 0.6.1 antes de migrar: reportaría `schema: incompatible` y las rutas nuevas fallarían.
 
@@ -171,3 +171,15 @@ La instalación real sigue en 0.6.0 con esquema 6. No ejecutar `build-macos` ni 
 7. `./scripts/dev.sh build-macos` y `./scripts/dev.sh open-app`.
 
 Si algo falla antes del paso 5, el respaldo del paso 2 permite volver al estado anterior; restaurarlo también requiere autorización.
+
+### Migración de la instalación real (autorizada por el propietario)
+
+8 de noviembre de 2026, después del commit de la fase E y con la aplicación cerrada:
+
+1. `./scripts/dev.sh backup`: `backups/adel_pos-20261109T035824Z-b8a22a.dump` (permisos 0600, catálogo legible).
+2. `python3 scripts/restore-check.py backups/adel_pos-20261109T035824Z-b8a22a.dump`: 78 tablas con conteos idénticos en una base temporal (`.local/stage7-restore-verification.json`).
+3. `./scripts/dev.sh server-stop`: servidor 0.6.0 detenido de forma ordenada.
+4. `./scripts/dev.sh migrate`: `applied:1`; repetición `applied:0`.
+5. `./scripts/dev.sh server-start`: servidor 0.6.1 con readiness 200 y esquema compatible.
+6. Comprobación de solo lectura: migraciones 1–7, `usd_cash` desactivada, ningún producto con tasa propia (los 6 heredan la general de 16 %), rango del dólar 10.00–40.00 con alerta de 10 %, permisos nuevos solo en el rol administrador, sin turnos, pagos ni movimientos; la cuenta abierta existente se conserva; 79 tablas en `app`.
+7. `./scripts/dev.sh build-macos`: `AD-EL POS.app` 0.6.1 (9.45 MiB) y `./scripts/dev.sh open-app`: aplicación iniciada y atendida por el servidor 0.6.1 (respuestas 200). No se recorrió la captura ni el cobro en la ventana nativa.
