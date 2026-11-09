@@ -1,69 +1,50 @@
-# Verificación · Etapa 6
+# Verificación · Etapa 6.1
 
-Ejecución del **8 de noviembre de 2026**, zona America/Monterrey. Versión **0.6.0**, API v1, esquema **6** en el código. Evidencia anterior: [etapa 5](VERIFICATION_STAGE5.md) (incluye las correcciones previas a esta etapa), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance por fases: [ETAPA_6_AVANCE.md](ETAPA_6_AVANCE.md).
+Ejecución del **8 de noviembre de 2026**, zona America/Monterrey. Versión **0.6.1**, API v1, esquema **7** en el código. Evidencia anterior: [etapa 6](VERIFICATION_STAGE6.md), [etapa 5](VERIFICATION_STAGE5.md), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance por fases: [ETAPA_6_1_AVANCE.md](ETAPA_6_1_AVANCE.md).
 
-**Las pruebas no tocaron la instalación real.** Después de completarlas, y con autorización del propietario, la instalación real se migró a esquema 6 (ver «Migración de la instalación real»). No se leyeron secretos de `.local` ni del Keychain.
+**La instalación real no se modificó.** Sigue en 0.6.0 con esquema 6; la migración 0007 espera la autorización del propietario. La única interacción con ella fue una consulta de solo lectura (transacción de solo lectura) para verificar §1.8 de la especificación: ninguna categoría, producto, presentación ni promoción tenía fechas de disponibilidad guardadas. No se leyeron secretos de `.local` ni del Keychain.
 
 ## Entorno aislado
 
-Todas las pruebas se ejecutaron en una copia del repositorio en el directorio temporal de la sesión (sin `.git`, `.local`, `.tools`, cachés ni artefactos), con un clúster PostgreSQL 18 temporal en el puerto 55499 (solo loopback), cachés de Go, Cargo y npm en el directorio temporal y `GOPROXY=off`. Las bases `adel_pos_test_*` se crearon y eliminaron por cada suite. Playwright usó un Go temporal en 8183 contra ese clúster. Es el procedimiento descrito en `CLAUDE.md` §6; equivale a `scripts/dev.sh test`, `test-integration` y `test-browser`, pero sin usar el clúster del proyecto (55432).
-
-Cada fase se verificó sobre la combinación exacta que se confirmó en su commit local: 6A (backend), 6B (interfaz 6B con backend 6A), 6C (interfaz 6C con backend 6A + 6C, sin documentos de 6D) y 6D (árbol completo).
+Copia del repositorio en el directorio temporal de la sesión (sin `.git`, `.local`, `.tools`, cachés ni artefactos), clúster PostgreSQL 18 temporal en el puerto 55499 (solo loopback), bases `adel_pos_test_*` creadas y eliminadas por suite, Go temporal en 8183 para Playwright y cachés de Go, Cargo y npm en el directorio temporal con `GOPROXY=off`. Es el procedimiento de `CLAUDE.md` §6. Cada fase (A–D) se verificó antes de su commit local; la tabla siguiente es la regresión final sobre el árbol completo con la versión 0.6.1.
 
 ## Resultados ejecutados (árbol completo de la etapa)
 
-| Comprobación        | Resultado                                                                                                                                                                                                                                           |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Formato y metadatos | `scripts/dev.sh format` y `format-check` (Prettier, gofmt, `cargo fmt --check`) aprobados; `sync-metadata --check` aprobado.                                                                                                                        |
-| Go                  | `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race ./...` aprobado en todos los paquetes con pruebas, incluido `internal/payments`.                                                                                    |
-| PostgreSQL          | Integración de `database`, `administration`, `catalog`, `operations` y `payments` aprobada. La aceptación de cobros vive en `operations` (`payments_acceptance_test.go`, `payments_adjustments_test.go`, `payments_documents_test.go`).             |
-| Frontend            | Vitest **72 pruebas en 16 archivos** aprobadas (31 en 9 archivos al inicio de la etapa); `tsc --noEmit` estricto y `npm run build` correctos.                                                                                                       |
-| Rust                | `cargo test --locked --offline`: **11 aprobadas**, 1 ignorada deliberadamente (escritura real en Keychain, opt-in). Incluye la lista cerrada de operaciones `payments_*`.                                                                           |
-| Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores, ahora con turno, cobros, precuenta, descuento, ticket, documentos y entrega para llevar (ver abajo).                                                                    |
-| Bundle macOS        | `tauri build --bundles app` en la copia aislada (destino de compilación temporal, sin reemplazar el `.app` del proyecto): `AD-EL POS.app` ARM64 **0.6.0**, 9.43 MiB. No se abrió.                                                                   |
-| Revisión visual     | Capturas con transporte simulado en Chromium a 1280×720, 1024×768 y 1920×1080, temas claro y oscuro: sin desplazamiento horizontal, objetivos ≥ 44 px y sin errores de consola. No sustituye WKWebView nativo ni pantalla táctil.                   |
-| Instalación real    | Migrada con autorización: respaldo `adel_pos-20261108T191622Z-57c0f5.dump`, restauración verificada (63 tablas idénticas), `migrate` `applied:1` y repetición `applied:0`, readiness 200 con esquema compatible, `.app` 0.6.0 compilado e iniciado. |
+| Comprobación        | Resultado                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Formato y metadatos | `scripts/dev.sh format` y `format-check` (Prettier, gofmt, `cargo fmt --check`) aprobados; `sync-metadata --check` aprobado con 0.6.1 / esquema 7.                                                                                                     |
+| Go                  | `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race ./...` aprobado en todos los paquetes con pruebas, incluidos los nuevos `internal/ordering` e `internal/features`.                                                     |
+| PostgreSQL          | Integración de `database`, `administration`, `catalog`, `operations` y `payments` aprobada. Incluye la actualización de una instalación en esquema 6 a la 0007 (permisos solo al administrador, repetible) y los CHECK de dólares sin huecos por NULL. |
+| Frontend            | Vitest **132 pruebas en 23 archivos** aprobadas (72 en 16 archivos al inicio de la etapa); `tsc --noEmit` estricto y `npm run build` correctos.                                                                                                        |
+| Rust                | `cargo test --locked --offline`: **12 aprobadas**, 1 ignorada deliberadamente (escritura real en Keychain, opt-in). Incluye las rutas nuevas de la lista cerrada (`settings/features`, tipo de cambio y rango del dólar).                              |
+| Navegadores         | Playwright Chromium y WebKit: recorrido completo aprobado en ambos motores con la nueva captura táctil y el cobro en dólares (ver abajo).                                                                                                              |
+| Bundle macOS        | `tauri build --bundles app` en la copia aislada (destino de compilación temporal, sin reemplazar el `.app` 0.6.0 del proyecto): `AD-EL POS.app` ARM64 **0.6.1**, 9.45 MiB. No se abrió.                                                                |
+| Revisión visual     | Capturas de la captura táctil en Chromium y WebKit a 1280 × 720, 1920 × 1080 y 1024 × 768, temas claro y oscuro, incluida la personalización en el panel central y un pedido para llevar. No sustituye WKWebView nativo ni pantalla táctil.            |
+| Instalación real    | Sin cambios: 0.6.0 / esquema 6. Solo la consulta de solo lectura descrita arriba.                                                                                                                                                                      |
 
-## Aceptación funcional (§24 de la especificación)
+## Aceptación por fase (§5 de la especificación)
 
-Pruebas PostgreSQL con Go real, transacciones, locks e idempotencia reales:
+- **Errores (§1)**: una prueba por error que falla con el código anterior (comprobado sobre una instantánea de `HEAD`): `pages/catalog/catalogFixes.test.tsx` (volver al listado sin `window.confirm`, campos numéricos, combos sin «Productos permitidos», selectores sin preselección, botones de quitar, imagen en español, fechas vacías), aceptación de catálogo en Go (original implícito, autorreferencia y original faltante) y la medición de la mesa redonda de 100 × 100 en Playwright a tres tamaños de ventana (con el CSS anterior la diferencia era de 87 px).
+- **Formularios (§2)**: unitarias de `ordering`, paleta (`catalog/palette_test.go`), zona horaria y pantalla de inicio heredada (`administration/security_test.go`); aceptación de posiciones de categorías, productos por categoría, áreas, estaciones y métodos de pago (hermano ajeno rechazado sin cambios parciales, renumeración con revisión y auditoría) y de la paleta con color heredado; Vitest de selector de posición, color, horarios, alta continua de mesas y catálogo, código sugerido, vista previa y configuración.
+- **Funciones, IVA y dólares (§3)**: funciones activables con la API rechazando dólares con la función desactivada; IVA por producto (herencia, tasa efectiva por unidad, cuentas mixtas 16/8/0 con base + IVA exacto por tasa en precuenta, ticket y devolución); dólares (conversión, pesos y dólares en la misma operación, cambio en ambas monedas, movimientos por moneda, tipo de cambio fuera de rango y confirmación por diferencia, idempotencia con el mismo `operation_id` y concurrencia entre dos cobros); Vitest de la sección de funciones, el selector de IVA, la apertura de turno con tipo de cambio y la captura en dólares.
+- **Captura táctil (§4)**: Vitest de la sincronización del borrador (antirrebote, una sola petición en vuelo, sin perder toques, conflicto e incertidumbre), un toque que agrega y suma, personalización en el panel central, «Enviar a cocina» con huella y desactivado sin productos nuevos, cuentas como botones, «Más…» y totales de Go.
 
-- **Cobros (1–10)**: total en efectivo con cambio y cierre; tarjeta con referencia opcional y obligatoria; parcial y mixto sucesivo con cambio de un abono; importes inválidos (`-1`, `1.234`, `abc`, `0`, `1..2`, `1e2`) y sobrepagos rechazados.
-- **Productos y cuentas (11–20)**: cobro de una partida, de una unidad y parcial de una selección; integridad de combos; división y combinación con pagos; transferencias de cantidades pendientes; productos nuevos tras un abono; repartidor de centavos exacto (también en pruebas unitarias de `payments`).
-- **Descuentos y extras (21–30)**: por producto y general con base e IVA reducidos; 100 % y cortesía sin pago ficticio; límite por rol; autorización puntual, sesión del supervisor intacta; cargos generales independientes de complementos; auditoría de cambios.
-- **Propinas y devoluciones (31–42)**: propinas en efectivo y electrónicas separadas de la venta; devolución total con otro método, parcial de un pago, por productos y sin duplicados; con permiso directo, por umbral y con supervisor; corrección de método en turno abierto conservando los movimientos originales.
-- **Caja (43–50)**: apertura mínima con fondo $0, rechazo sin turno, un turno por caja, movimientos ligados a caja, turno y usuario; concurrencia entre cajeros; saldo conservado al reiniciar Go.
-- **Tickets y entrega (51–59)**: precuenta sin registrar venta; ticket con interruptor; pago válido aunque falle la impresora o no haya impresora; reimpresión idéntica sin duplicar cobros; entrega solo de pedidos liquidados, pagado pero pendiente de entrega y entrega directa.
-- **Integridad y seguridad (61–70)**: mismo identificador recupera el resultado, otro contenido responde conflicto, doble envío; cobro simultáneo desde dos terminales; sesión sin permisos y revocada; un 403 no deja escrituras (S2, 70). La auditoría financiera (67) se comprueba en cargos, cancelaciones, cambio de IVA y autorizaciones (sin contraseñas); los cálculos decimales exactos (68), en las pruebas unitarias de importes, repartidor e IVA; la conservación de precios confirmados (69), en A4 y en las ediciones que conservan importes.
-- **IVA (A1–A7)**: tasas 16/8/0 desde la configuración; rechazo en Go y PostgreSQL de `15`, `0.16`, `16.0`, `-8`, `abc`, `08`, `+8` y vacío; base + IVA = total; cambio de tasa sin alterar cuentas anteriores, auditado y protegido por permiso; descuentos, cortesías, cargos y propinas en el desglose; devolución con la tasa original.
-- **Partidas con pago (P1–P6)** y **seguridad heredada (S1–S5)**: bloqueos sobre unidades liquidadas y parciales; transferencia de unidades libres; total nunca menor que lo pagado; combinación con origen sin pagos; unidad liberada tras devolución; delegación del límite de descuento; límite de intentos; autoautorización rechazada; autorización incompleta tratada como requerida. Las pruebas negativas de H1 y M1 se conservan de las correcciones previas.
+Recorrido Playwright (Chromium y WebKit, 1280 × 720 y otros tamaños), sobre la operación de etapas 4 a 6:
 
-Pruebas de interfaz (Vitest con jsdom):
-
-- **S6**: un pago incierto conserva identificador y cuerpo al desmontar y volver, y el reintento usa el mismo `operation_id` sin contraseña.
-- **S7**: teclado de cobro con `+`, punto, doble punto y tercer decimal sin vaciar ni corromper el importe.
-- Métodos sin casillas, cambio desde la previsualización, doble envío bloqueado, `BALANCE_CHANGED`, autorización de supervisor, ajustes, devoluciones, correcciones, impresión, precuenta, documentos y entrega.
-
-Recorrido Playwright (Chromium y WebKit, 1280×720), sobre la operación existente de etapas 4 y 5:
-
-1. Impresora de tickets configurada en Cobros → Políticas con el destino controlado de aceptación (sin hardware).
-2. Cuenta de salón de $150: apertura de turno con fondo de $500 mediante el teclado fijo; abono de $100 en efectivo con $200 recibidos y $100 de cambio calculados por Go; ticket encolado (requiere intervención por el destino sin hardware) sin afectar el pago.
-3. Precuenta con IVA 16 % ($129.31 + $20.69), pagos registrados, saldo de $50 y leyenda CFDI; impresión encolada.
-4. Descuento general de 10 % ($15) dentro del límite del administrador, sin autorización adicional.
-5. Pago de los $35 restantes con tarjeta de débito: cuenta liquidada y cerrada; documentos de la cuenta con ticket y precuenta; sin desplazamiento horizontal.
-6. Pedido para llevar: «Marcar como entregado» con saldo abre el cobro con la entrega activada; pago exacto en efectivo y entrega registrada.
+1. Configuración: función «Pago en dólares» activada; impresora de tickets con destino controlado; área con posición y mesa redonda de 100 × 100 dibujada como círculo; barra de acciones visible mientras el formulario continúa.
+2. Captura: categoría → producto directo (un toque, suma de cantidad) → producto con opciones personalizado en el panel central (cambio de guarnición con cargo) → «Enviar a cocina» → preparación en cocina, modificación, cancelación, división de cuenta e historial.
+3. Cobro: apertura de turno con fondo y tipo de cambio, abono en efectivo con cambio en ambas monedas, ticket, precuenta con IVA, descuento, pago con tarjeta y documentos.
+4. Para llevar en la misma pantalla de captura: «Cobrar» desactivado sin productos enviados; cobro con $100 + US$5 y cambio entregado en dólares (US$2.30, equivalente a $42.50); entrega registrada.
 
 ## No ejecutado o no verificado
 
-- Recorrido de cobro en la ventana nativa Tauri (WKWebView), Keychain real, pantalla completa de 0.6.0 y `tests/runtime_smoke.py`: la aplicación 0.6.0 se inició sobre la instalación migrada, pero no se recorrió ni se automatizó.
-- Impresión física de tickets o precuentas: ninguna prueba envió a una impresora real.
-- Autorización de supervisor y devoluciones en el navegador: cubiertas por Go y Vitest, no por Playwright (el recorrido usa al administrador, cuyo límite es 100 %).
-- Actualización en tiempo real del tablero tras cobros y entregas (60): los eventos `payments.recorded` y `takeaway.delivered` se escriben en la misma transacción y la interfaz recarga ante eventos y por sondeo, pero no hay una prueba automática que lo compruebe entre dos terminales.
-- Pantalla táctil física, LAN con otra máquina, muchas terminales, Mac Intel y Windows.
-
-## Migración de la instalación real
-
-Autorizada por el propietario y ejecutada el 8 de noviembre de 2026 con `scripts/dev.sh`: `backup` → `backups/adel_pos-20261108T191622Z-57c0f5.dump`; `restore-check.py` → 63 tablas con conteos idénticos en una base temporal (`.local/stage6-restore-verification.json`); `server-stop`; `migrate` → `applied:1` (repetición `applied:0`); `server-start` → readiness 200, PostgreSQL disponible y esquema compatible; consulta de solo lectura → migraciones 1–6, IVA 16 %, cinco métodos de pago, administrador con límite de 100 % y los 21 permisos nuevos, sin turnos, pagos ni cuentas ficticias, 78 tablas en `app`; `build-macos` → `.app` 0.6.0 de 9.43 MiB; `open-app` → aplicación iniciada y atendida por el servidor.
+- Migración 0007 sobre la instalación real, compilación e inicio de 0.6.1 sobre ella y `restore-check.py`: requieren autorización.
+- Ventana nativa Tauri (WKWebView), pantalla completa, Keychain real y `tests/runtime_smoke.py`.
+- Pantalla táctil física: los tamaños de los objetivos se comprobaron en navegador, no con toque real.
+- Impresión física de tickets con dólares o precuentas.
+- Autorización de supervisor y devoluciones en el navegador (cubiertas por Go y Vitest).
+- Actualización en tiempo real entre dos terminales durante la captura (cubierta por la lógica de conflicto y sondeo, sin prueba automática con dos terminales).
+- Rendimiento con un catálogo grande o muchas terminales; LAN con otra máquina; Mac Intel y Windows.
 
 ## Repetir las comprobaciones
 
@@ -75,4 +56,4 @@ Autorizada por el propietario y ejecutada el 8 de noviembre de 2026 con `scripts
 ./scripts/dev.sh build-macos
 ```
 
-`test-integration` y `test-browser` crean y eliminan bases `adel_pos_test_*` en el clúster del proyecto (55432); para aislamiento total, seguir el procedimiento de `CLAUDE.md` §6. `build-macos` reemplaza el `.app` de `desktop/src-tauri/target/release/bundle/macos/`.
+`test-integration` y `test-browser` crean y eliminan bases `adel_pos_test_*` en el clúster del proyecto (55432); para aislamiento total, seguir el procedimiento de `CLAUDE.md` §6. `build-macos` reemplaza el `.app` de `desktop/src-tauri/target/release/bundle/macos/`: **no ejecutarlo mientras la instalación real deba seguir en 0.6.0** (antes de aplicar la 0007).
