@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/ordering"
 )
 
 type Method struct {
@@ -69,6 +70,9 @@ type methodInput struct {
 	ReferenceMode string `json:"reference_mode"`
 	AllowsTip     bool   `json:"allows_tip"`
 	AllowsRefund  bool   `json:"allows_refund"`
+	// Position elige el orden visual («al inicio» o «después de» otro método); sin ella se
+	// conserva el sort_order recibido.
+	Position *ordering.Position `json:"position"`
 }
 
 func (input *methodInput) validate() error {
@@ -92,6 +96,47 @@ func (input *methodInput) validate() error {
 	return nil
 }
 
+// preparePosition valida la posición antes de escribir. Con posición, el número enviado no se
+// usa: el método conserva el suyo (o uno provisional si es nuevo) y placeMethod lo recalcula.
+func (input *methodInput) preparePosition(id string, previous *Method) (string, error) {
+	if input.Position == nil {
+		return "", nil
+	}
+	after, err := ordering.Validate(input.Position, id)
+	if err != nil {
+		return "", invalid(err.Error())
+	}
+	input.SortOrder = 0
+	if previous != nil {
+		input.SortOrder = previous.SortOrder
+	}
+	return after, nil
+}
+
+// placeMethod renumera los métodos en la misma transacción y audita a los que cambiaron de orden.
+func (handler *service) placeMethod(input methodInput, id, after string, joining bool) error {
+	if input.Position == nil {
+		return nil
+	}
+	result, err := ordering.Place(handler.ctx, handler.tx, ordering.PaymentMethods, "", id, after, joining)
+	var problem *ordering.Error
+	if errors.As(err, &problem) {
+		return invalid(problem.Message)
+	}
+	if err != nil {
+		return err
+	}
+	if len(result.Changes) == 0 {
+		return nil
+	}
+	return handler.audit(handler.ctx, handler.tx, "payments.methods_reordered", "payment_method", &id, nil, map[string]any{
+		"placed_id":  id,
+		"after":      after,
+		"sort_order": result.SortOrder,
+		"changes":    result.Changes,
+	})
+}
+
 func duplicateName(err error) bool {
 	var problem *pgconn.PgError
 	return errors.As(err, &problem) && problem.Code == "23505"
@@ -106,13 +151,20 @@ func (handler *service) createMethod(_ []string) (any, error) {
 		return nil, err
 	}
 	id := newID()
-	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.payment_methods(id,name,icon,active,sort_order,is_cash,reference_mode,allows_tip,allows_refund)
+	after, err := input.preparePosition(id, nil)
+	if err != nil {
+		return nil, err
+	}
+	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.payment_methods(id,name,icon,active,sort_order,is_cash,reference_mode,allows_tip,allows_refund)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, id, input.Name, input.Icon, input.Active, input.SortOrder, input.IsCash,
 		input.ReferenceMode, input.AllowsTip, input.AllowsRefund)
 	if duplicateName(err) {
 		return nil, conflict("DUPLICATE_NAME", "Ya existe un método de pago con ese nombre.")
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := handler.placeMethod(input, id, after, true); err != nil {
 		return nil, err
 	}
 	saved, err := handler.readMethod(id)
@@ -142,6 +194,10 @@ func (handler *service) updateMethod(parts []string) (any, error) {
 	if previous.Revision != input.Revision {
 		return nil, conflict("REVISION_CONFLICT", "El método cambió en otra terminal. Actualiza y vuelve a guardar.")
 	}
+	after, err := input.preparePosition(previous.ID, previous)
+	if err != nil {
+		return nil, err
+	}
 	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.payment_methods SET name=$1,icon=$2,active=$3,sort_order=$4,is_cash=$5,
         reference_mode=$6,allows_tip=$7,allows_refund=$8,revision=revision+1,updated_at=now() WHERE id=$9`,
 		input.Name, input.Icon, input.Active, input.SortOrder, input.IsCash, input.ReferenceMode, input.AllowsTip, input.AllowsRefund, previous.ID)
@@ -149,6 +205,9 @@ func (handler *service) updateMethod(parts []string) (any, error) {
 		return nil, conflict("DUPLICATE_NAME", "Ya existe un método de pago con ese nombre.")
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := handler.placeMethod(input, previous.ID, after, false); err != nil {
 		return nil, err
 	}
 	saved, err := handler.readMethod(previous.ID)

@@ -1,6 +1,8 @@
 // Package catalog administra el catálogo y centraliza sus cálculos comerciales exactos.
 package catalog
 
+import "local/ad-el-pos/server/internal/ordering"
+
 type Metadata struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -27,6 +29,9 @@ type Category struct {
 	Color        string   `json:"color"`
 	ImageID      *string  `json:"image_id"`
 	Availability Schedule `json:"availability"`
+	// Position solo se recibe al crear o guardar: el orden visual se elige por posición y Go
+	// recalcula sort_order. No es una columna ni aparece en las lecturas.
+	Position *ordering.Position `json:"position,omitempty"`
 }
 
 type Ingredient struct {
@@ -139,6 +144,8 @@ type Product struct {
 	Ingredients          []ProductIngredient `json:"ingredients"`
 	Groups               []ProductGroup      `json:"groups"`
 	Slots                []ComboSlot         `json:"slots"`
+	// Position coloca el producto entre los de su categoría (combos incluidos); solo de entrada.
+	Position *ordering.Position `json:"position,omitempty"`
 }
 
 type PriceEntry struct {

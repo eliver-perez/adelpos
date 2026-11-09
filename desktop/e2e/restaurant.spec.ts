@@ -20,10 +20,34 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
   await page.getByRole('button', { name: 'Áreas y distribución', exact: true }).click();
   await page.getByRole('button', { name: 'Crear área', exact: true }).click();
+  // Etapa 6.1 §2.2: el orden se elige por posición, no con un número.
+  await expect(page.getByLabel('Orden del área', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Posición del área', exact: true })).toHaveValue(
+    '',
+  );
   await page.getByLabel('Nombre del área', { exact: true }).fill('Salón principal');
   await page.getByRole('button', { name: 'Guardar área', exact: true }).click();
   await page.getByRole('button', { name: 'Crear mesa', exact: true }).click();
   await page.getByLabel('Nombre o número de mesa', { exact: true }).fill('Mesa 1');
+  // Etapa 6.1 §2.1: la barra de acciones queda fija al pie del área desplazable, sin subir. Con
+  // el inicio del formulario a la vista (WebKit no desplaza al rellenar), el botón principal debe
+  // verse aunque el final del formulario quede fuera de la ventana.
+  await page.getByLabel('Nombre o número de mesa', { exact: true }).scrollIntoViewIfNeeded();
+  await expect(
+    page.getByRole('button', { name: 'Guardar y crear otra', exact: true }),
+  ).toBeVisible();
+  const tableActions = await page
+    .getByRole('button', { name: 'Guardar mesa', exact: true })
+    .boundingBox();
+  expect(tableActions!.y + tableActions!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  const tableForm = await page
+    .getByRole('button', { name: 'Guardar mesa', exact: true })
+    .locator('xpath=ancestor::form')
+    .boundingBox();
+  // El formulario continúa por debajo de la barra: está fija, no en su lugar natural al final.
+  expect(tableForm!.y + tableForm!.height).toBeGreaterThan(
+    tableActions!.y + tableActions!.height + 20,
+  );
   // Etapa 6.1 §1.1: una mesa redonda de 100 × 100 debe dibujarse como círculo en cualquier ventana.
   await page.getByRole('combobox', { name: /^Forma/ }).selectOption('round');
   await page.getByLabel('Alto', { exact: true }).fill('100');
@@ -151,7 +175,12 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(keyboard!.y);
   await page.screenshot({ path: testInfo.outputPath('keyboard-1280x720.png') });
   await page.getByRole('button', { name: 'Cerrar teclado', exact: true }).click();
-  await page.getByRole('button', { name: 'Probar personalización', exact: true }).click();
+  // Etapa 6.1 §2.6: la vista previa salió del menú principal y vive dentro de Catálogo.
+  await expect(
+    page.getByRole('button', { name: 'Probar personalización', exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
+  await page.getByRole('tab', { name: 'Vista previa', exact: true }).click();
   await page
     .getByRole('button', { name: 'Excepción autorizada de disponibilidad', exact: true })
     .click();

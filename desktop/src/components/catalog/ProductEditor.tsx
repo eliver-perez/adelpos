@@ -1,12 +1,7 @@
 import type { Lookups, Product } from '../../services/catalog';
-import {
-  Check,
-  DecimalField,
-  IntegerField,
-  ReferenceField,
-  ScheduleEditor,
-  TextField,
-} from './EditorFields';
+import { productSiblings } from '../../services/catalogPositions';
+import { PositionField } from '../PositionField';
+import { Check, DecimalField, ReferenceField, ScheduleEditor, TextField } from './EditorFields';
 import { ImageEditor } from './ImageEditor';
 import { VariantEditor, IngredientRulesEditor, ProductGroupsEditor } from './ProductDetailsEditors';
 import { ComboEditor } from './ComboEditor';
@@ -16,11 +11,14 @@ export function ProductEditor({
   onChange,
   lookups,
   can,
+  onCodeEdited,
 }: {
   value: Product;
   onChange: (value: Product) => void;
   lookups: Lookups;
   can: (permission: string) => boolean;
+  // Avisa que el código se editó a mano: desde entonces deja de sugerirse a partir del nombre.
+  onCodeEdited?: () => void;
 }) {
   return (
     <>
@@ -29,13 +27,19 @@ export function ProductEditor({
           label="Categoría"
           value={value.category_id}
           options={lookups.categories}
-          onChange={(category_id) => onChange({ ...value, category_id })}
+          // Otra categoría es otra lista de posiciones: la elección anterior deja de aplicar y se
+          // propone «después del último» de la nueva categoría.
+          onChange={(category_id) => onChange({ ...value, category_id, position: undefined })}
         />
         <TextField
           label="Código interno único"
           required
           value={value.code}
-          onChange={(code) => onChange({ ...value, code })}
+          hint={value.id ? undefined : 'Se sugiere a partir del nombre mientras no lo edites.'}
+          onChange={(code) => {
+            onCodeEdited?.();
+            onChange({ ...value, code });
+          }}
         />
         <TextField
           label="Código de barras opcional"
@@ -47,10 +51,13 @@ export function ProductEditor({
           value={value.base_price}
           onChange={(base_price) => onChange({ ...value, base_price })}
         />
-        <IntegerField
-          label="Orden visual"
-          value={value.sort_order}
-          onChange={(sort_order) => onChange({ ...value, sort_order })}
+        <PositionField
+          label="Posición en su categoría"
+          siblings={productSiblings(lookups, value.category_id)}
+          recordID={value.id}
+          value={value.position?.after}
+          onChange={(after) => onChange({ ...value, position: { after } })}
+          hint={value.category_id ? undefined : 'Elige primero la categoría.'}
         />
       </div>
       {can('catalog.products.state') && (

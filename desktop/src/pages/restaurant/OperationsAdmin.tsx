@@ -8,13 +8,41 @@ import {
   TextField,
 } from '../../components/catalog/EditorFields';
 import { TableMap } from '../../components/restaurant/TableMap';
+import { PositionField } from '../../components/PositionField';
+import { positionPayload } from '../../services/positions';
 import type { Operation } from '../../services/api';
+import type { Position } from '../../services/catalog';
 import type {
   Area,
   Overview,
   RestaurantTable,
   RestaurantSettings,
 } from '../../services/restaurant';
+
+// Borrador local del área: la posición elegida solo viaja al guardar.
+type AreaDraft = Area & { position?: Position };
+
+// Alta continua de mesas: si el nombre termina en número propone el siguiente («Mesa 4» →
+// «Mesa 5», «M09» → «M10») sin repetir un nombre ya usado en el área; si no, deja el nombre
+// vacío.
+export function nextTableName(name: string, taken: string[]): string {
+  const match = /^(.*?)([0-9]+)$/.exec(name.trim());
+  if (!match) {
+    return '';
+  }
+  const prefix = match[1] ?? '';
+  const digits = match[2] ?? '';
+  const used = new Set(taken.map((entry) => entry.trim().toLowerCase()));
+  let number = Number(digits) + 1;
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const candidate = `${prefix}${String(number).padStart(digits.length, '0')}`;
+    if (!used.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+    number++;
+  }
+  return '';
+}
 
 export type ExecuteMutation = <T>(
   operation: Operation,
@@ -58,7 +86,7 @@ export function OperationsAdmin({
   execute: ExecuteMutation;
   busy: boolean;
 }) {
-  const [area, setArea] = useState<Area | null>(null);
+  const [area, setArea] = useState<AreaDraft | null>(null);
   const [table, setTable] = useState<RestaurantTable | null>(null);
   const [areaID, setAreaID] = useState(overview.areas[0]?.id ?? '');
   const [positions, setPositions] = useState<Record<string, RestaurantTable>>({});
@@ -68,6 +96,20 @@ export function OperationsAdmin({
   const selectedArea = overview.areas.some((entry) => entry.id === areaID)
     ? areaID
     : (overview.areas[0]?.id ?? '');
+
+  async function saveTable(current: RestaurantTable) {
+    const saved = await execute<RestaurantTable>(
+      current.id ? 'restaurant_save_table' : 'restaurant_create_table',
+      { id: current.id || undefined, body: { ...current } },
+    );
+    setPositions((existing) => {
+      const remaining = { ...existing };
+      delete remaining[saved.id];
+      return remaining;
+    });
+    setAreaID(saved.area_id);
+    return saved;
+  }
 
   return (
     <div className="operations-admin form-stack">
@@ -113,9 +155,15 @@ export function OperationsAdmin({
             disabled={busy}
             label="Guardar área"
             onSave={async () => {
+              const body: Record<string, unknown> = { ...area };
+              delete body.position;
+              const position = positionPayload(overview.areas, area.id, area.position?.after);
+              if (position) {
+                body.position = position;
+              }
               const saved = await execute<Area>(
                 area.id ? 'restaurant_save_area' : 'restaurant_create_area',
-                { id: area.id || undefined, body: { ...area } },
+                { id: area.id || undefined, body },
               );
               setArea(saved);
               setAreaID(saved.id);
@@ -128,10 +176,12 @@ export function OperationsAdmin({
                 value={area.name}
                 onChange={(name) => setArea({ ...area, name })}
               />
-              <IntegerField
-                label="Orden del área"
-                value={area.sort_order}
-                onChange={(sort_order) => setArea({ ...area, sort_order })}
+              <PositionField
+                label="Posición del área"
+                siblings={overview.areas}
+                recordID={area.id}
+                value={area.position?.after}
+                onChange={(after) => setArea({ ...area, position: { after } })}
               />
             </div>
             <TextField
@@ -153,17 +203,18 @@ export function OperationsAdmin({
             disabled={busy}
             label="Guardar mesa"
             onSave={async () => {
-              const saved = await execute<RestaurantTable>(
-                table.id ? 'restaurant_save_table' : 'restaurant_create_table',
-                { id: table.id || undefined, body: { ...table } },
-              );
-              setPositions((current) => {
-                const remaining = { ...current };
-                delete remaining[saved.id];
-                return remaining;
+              setTable(await saveTable(table));
+            }}
+            onSaveAndNew={async () => {
+              const saved = await saveTable(table);
+              // El formulario queda limpio para la siguiente mesa, en la misma área.
+              const taken = overview.tables
+                .filter((entry) => entry.area_id === saved.area_id && entry.id !== saved.id)
+                .map((entry) => entry.name);
+              setTable({
+                ...newTable(saved.area_id),
+                name: nextTableName(saved.name, [...taken, saved.name]),
               });
-              setTable(saved);
-              setAreaID(saved.area_id);
             }}
           >
             <div className="form-grid">

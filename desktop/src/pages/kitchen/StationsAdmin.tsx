@@ -7,8 +7,14 @@ import {
   ReferenceField,
   TextField,
 } from '../../components/catalog/EditorFields';
+import { PositionField } from '../../components/PositionField';
 import { useLiveResource } from '../../hooks/useLiveResource';
+import { positionPayload } from '../../services/positions';
+import type { Position } from '../../services/catalog';
 import type { DeviceScope, ExecuteKitchen, Station } from '../../services/kitchen';
+
+// Borrador local de la estación: la posición elegida solo viaja al guardar.
+type StationDraft = Station & { position?: Position };
 
 const emptyStation = (): Station => ({
   id: '',
@@ -39,7 +45,7 @@ export function StationsAdmin({
   const outputs = useLiveResource<{ id: string; name: string }[]>('kitchen_outputs', {
     enabled: can('kitchen.stations.manage'),
   });
-  const [selected, setSelected] = useState<Station | null>(null);
+  const [selected, setSelected] = useState<StationDraft | null>(null);
   const current = stations.data?.find((station) => station.id === selected?.id);
   const stale = !!selected?.id && current?.revision !== selected.revision;
 
@@ -104,9 +110,19 @@ export function StationsAdmin({
             disabled={busy || stale || !can('kitchen.stations.manage')}
             label="Guardar estación"
             onSave={async () => {
+              const body: Record<string, unknown> = { ...selected };
+              delete body.position;
+              const position = positionPayload(
+                stations.data ?? [],
+                selected.id,
+                selected.position?.after,
+              );
+              if (position) {
+                body.position = position;
+              }
               const saved = await execute<Station>(
                 selected.id ? 'kitchen_save_station' : 'kitchen_create_station',
-                { id: selected.id || undefined, body: { ...selected } },
+                { id: selected.id || undefined, body },
               );
               setSelected(saved);
             }}
@@ -122,10 +138,12 @@ export function StationsAdmin({
               value={selected.description}
               onChange={(description) => setSelected({ ...selected, description })}
             />
-            <IntegerField
-              label="Orden de la estación"
-              value={selected.sort_order}
-              onChange={(sort_order) => setSelected({ ...selected, sort_order })}
+            <PositionField
+              label="Posición de la estación"
+              siblings={stations.data ?? []}
+              recordID={selected.id}
+              value={selected.position?.after}
+              onChange={(after) => setSelected({ ...selected, position: { after } })}
             />
             <Field label="Recepción de comandas">
               <select

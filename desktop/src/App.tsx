@@ -5,7 +5,6 @@ import { VirtualKeyboard } from './components/VirtualKeyboard';
 import { Notice } from './components/Forms';
 import { BrandLogo } from './components/BrandLogo';
 import { CatalogPage } from './pages/catalog/CatalogPage';
-import { PreviewPage } from './pages/catalog/PreviewPage';
 import { Icon } from './components/Icon';
 import { useSession } from './hooks/useSession';
 import { useRealtime } from './hooks/useRealtime';
@@ -13,7 +12,13 @@ import { KitchenPage } from './pages/kitchen/KitchenPage';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
 import { AuditPage } from './pages/AuditPage';
 import { DevicesPage } from './pages/DevicesPage';
-import { PasswordPage, PreferencesPage, screenAuthorized, screens } from './pages/PreferencesPage';
+import {
+  PasswordPage,
+  PreferencesPage,
+  homeScreen,
+  screenAuthorized,
+  screens,
+} from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { PendingOperationsProvider } from './hooks/pendingOperations';
 import { RegistersPage } from './pages/RegistersPage';
@@ -50,11 +55,7 @@ function ApplicationContent() {
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const available = screens.filter((entry) => {
     const authorized = screenAuthorized(entry, identity?.user.permissions ?? []);
-    return (
-      authorized &&
-      (entry.id !== 'preview' || can('catalog.read')) &&
-      (entry.id !== 'takeaway' || can('accounts.read'))
-    );
+    return authorized && (entry.id !== 'takeaway' || can('accounts.read'));
   });
 
   useEffect(() => {
@@ -64,7 +65,7 @@ function ApplicationContent() {
     }
     document.documentElement.dataset.theme = identity.preferences.theme;
     if (initializedUser.current !== identity.user.id) {
-      setScreen(identity.preferences.home_screen);
+      setScreen(homeScreen(identity.preferences.home_screen));
       initializedUser.current = identity.user.id;
     }
     const current = screens.find((entry) => entry.id === screen);
@@ -157,8 +158,6 @@ function ApplicationContent() {
         return <KitchenPage can={can} timezone={identity.establishment.timezone} />;
       case 'catalog':
         return <CatalogPage can={can} />;
-      case 'preview':
-        return <PreviewPage can={can} />;
       case 'users':
         return <UsersPage can={can} onChanged={session.refresh} />;
       case 'roles':

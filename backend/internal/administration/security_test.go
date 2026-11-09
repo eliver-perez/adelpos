@@ -25,3 +25,61 @@ func TestHomeScreenFallsBackWhenPermissionIsMissing(t *testing.T) {
 		t.Fatal("No se respetó una pantalla permitida")
 	}
 }
+
+func TestLegacyPreviewHomeOpensCatalog(t *testing.T) {
+	// Etapa 6.1 §2.6: «Probar personalización» salió del menú principal y vive en Catálogo.
+	if allowedHome("preview", []string{"catalog.read", "catalog.prices.read"}) != "catalog" {
+		t.Fatal("La pantalla de inicio heredada debe abrir Catálogo")
+	}
+	if allowedHome("preview", []string{"catalog.prices.read"}) != "status" {
+		t.Fatal("Sin permiso de catálogo la pantalla heredada debe volver a Estado del sistema")
+	}
+	if allowedHome("catalog", []string{"catalog.read"}) != "catalog" {
+		t.Fatal("Catálogo debe seguir siendo una pantalla de inicio válida")
+	}
+}
+
+func TestTimezoneMustBeAnExistingIANAIdentifier(t *testing.T) {
+	// Etapa 6.1 §2.7: la zona se elige de una lista; Go confirma que exista al guardar.
+	for _, name := range []string{
+		"America/Monterrey",
+		"America/Mexico_City",
+		"America/Tijuana",
+		"America/Hermosillo",
+		"America/Chihuahua",
+		"America/Ciudad_Juarez",
+		"America/Matamoros",
+		"America/Mazatlan",
+		"America/Bahia_Banderas",
+		"America/Merida",
+		"America/Cancun",
+		"America/Ojinaga",
+		"Europe/Madrid",
+		"UTC",
+	} {
+		if !validTimezone(name) {
+			t.Fatalf("Se rechazó la zona válida %q", name)
+		}
+	}
+	for _, name := range []string{
+		"",
+		"Local",
+		"America/Monterey",
+		"Hora del centro",
+		" America/Monterrey",
+		"America/Monterrey ",
+		"../etc/passwd",
+	} {
+		if validTimezone(name) {
+			t.Fatalf("Se aceptó la zona inexistente %q", name)
+		}
+	}
+	input := EstablishmentInput{Name: "ADEL POS", Timezone: "America/Monterey", Currency: "MXN", Theme: "light"}
+	if err := input.validate(); err == nil {
+		t.Fatal("El guardado de ajustes aceptó una zona inexistente")
+	}
+	input.Timezone = "America/Monterrey"
+	if err := input.validate(); err != nil {
+		t.Fatalf("El guardado de ajustes rechazó una zona válida: %v", err)
+	}
+}

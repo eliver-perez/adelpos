@@ -88,6 +88,7 @@ const lookups: Lookups = {
   groups: [group],
   'price-lists': [],
   products: [{ ...product, variants: [] }],
+  palette: [],
 };
 const configuration: Configuration = {
   product,

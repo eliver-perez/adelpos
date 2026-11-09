@@ -48,6 +48,8 @@ function reference(id: string, name: string, kind = 'product'): ProductReference
     active: true,
     archived: false,
     revision: 1,
+    category_id: 'category',
+    sort_order: 0,
     variants: [],
   };
 }
@@ -63,6 +65,7 @@ const lookups: Lookups = {
   groups: [],
   'price-lists': [],
   products: [burger, fries, comboSelf],
+  palette: [],
 };
 
 beforeEach(() => {
@@ -252,9 +255,7 @@ describe('etapa 6.1 · errores del catálogo', () => {
       return <ScheduleEditor value={schedule} onChange={setSchedule} />;
     }
     render(<Editor />);
-    fireEvent.click(
-      screen.getByRole('button', { name: /Fechas, días y horarios|Restricciones de horario/ }),
-    );
+    fireEvent.click(screen.getByRole('button', { name: /Restricciones de horario/ }));
     const from = screen.getByLabelText('Desde la fecha') as HTMLInputElement;
     // El control nativo type="date" de WebKit mostraba la fecha de hoy con el valor vacío.
     expect(from.type).toBe('text');

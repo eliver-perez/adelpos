@@ -1,12 +1,16 @@
+import { useState } from 'react';
 import { Field, Form } from '../../components/Forms';
 import {
   Check,
   DecimalField,
-  IntegerField,
   ReferenceField,
   ScheduleEditor,
   TextField,
 } from '../../components/catalog/EditorFields';
+import { ColorField } from '../../components/catalog/ColorField';
+import { PositionField } from '../../components/PositionField';
+import { categorySiblings } from '../../services/catalogPositions';
+import { suggestProductCode } from '../../services/productCode';
 import { ImageEditor } from '../../components/catalog/ImageEditor';
 import { ProductEditor } from '../../components/catalog/ProductEditor';
 import {
@@ -35,7 +39,10 @@ export function CatalogEditor({
   lookups,
   can,
   onSave,
+  onSaveAndNew,
+  saveAndNewLabel,
   editable,
+  focusName = false,
 }: {
   resource: Resource;
   value: CatalogDocument;
@@ -43,27 +50,59 @@ export function CatalogEditor({
   lookups: Lookups;
   can: (permission: string) => boolean;
   onSave: () => Promise<void>;
+  // Alta continua: guarda y abre un documento nuevo del mismo recurso.
+  onSaveAndNew?: () => Promise<void>;
+  // Etiqueta con la concordancia del recurso («otra categoría», «otro producto»).
+  saveAndNewLabel?: string;
   editable: boolean;
+  // Enfoca el nombre al abrir (después de «Guardar y crear otra»).
+  focusName?: boolean;
 }) {
+  // En el alta de productos y combos el código interno se sugiere a partir del nombre hasta que
+  // el usuario lo edita a mano. Al editar un producto existente nunca cambia.
+  const [codeEdited, setCodeEdited] = useState(false);
+  const suggestCode = resource === 'products' && !value.id && !codeEdited;
+
+  function changeName(name: string) {
+    if (suggestCode) {
+      const product = value as Product;
+      const code = suggestProductCode(
+        name,
+        lookups.products.map((entry) => entry.code),
+      );
+      onChange({ ...product, name, code });
+      return;
+    }
+    onChange({ ...value, name });
+  }
+
   function fields() {
     switch (resource) {
       case 'products':
         return (
-          <ProductEditor value={value as Product} onChange={onChange} lookups={lookups} can={can} />
+          <ProductEditor
+            value={value as Product}
+            onChange={onChange}
+            lookups={lookups}
+            can={can}
+            onCodeEdited={() => setCodeEdited(true)}
+          />
         );
       case 'categories': {
         const category = value as Category;
         return (
           <>
             <div className="form-grid">
-              <IntegerField
-                label="Orden visual"
-                value={category.sort_order}
-                onChange={(sort_order) => onChange({ ...category, sort_order })}
+              <PositionField
+                label="Posición de la categoría"
+                siblings={categorySiblings(lookups)}
+                recordID={category.id}
+                value={category.position?.after}
+                onChange={(after) => onChange({ ...category, position: { after } })}
               />
-              <TextField
-                label="Color opcional #RRGGBB"
+              <ColorField
                 value={category.color}
+                palette={lookups.palette ?? []}
                 onChange={(color) => onChange({ ...category, color })}
               />
             </div>
@@ -140,6 +179,8 @@ export function CatalogEditor({
   return (
     <Form
       onSave={onSave}
+      onSaveAndNew={onSaveAndNew}
+      saveAndNewLabel={saveAndNewLabel}
       disabled={!editable}
       label={value.id ? 'Guardar configuración' : 'Crear registro'}
     >
@@ -147,8 +188,9 @@ export function CatalogEditor({
         <TextField
           label="Nombre"
           required
+          autoFocus={focusName}
           value={value.name}
-          onChange={(name) => onChange({ ...value, name })}
+          onChange={changeName}
         />
         {(resource !== 'products' || can('catalog.products.state') || !value.id) && (
           <Check
