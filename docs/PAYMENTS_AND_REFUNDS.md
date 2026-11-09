@@ -1,6 +1,6 @@
 # Cobros, pagos, descuentos y devoluciones · Etapa 6
 
-Versión 0.6.2, esquema 7: etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable. Este documento describe únicamente lo implementado y probado. La administración completa de caja y cortes pertenece a la etapa 7.
+Versión 0.7.0, esquema 8: etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
 
 ## Autoridad y estructura
 
@@ -158,13 +158,13 @@ Función activable del establecimiento, **desactivada por defecto** (Configuraci
 - **Operaciones inciertas**: todas las escrituras financieras de una cuenta comparten la clave `payments:<cuenta>` del almacén global de pendientes (la impresión de precuentas y reimpresiones usa `documents:<cuenta>`). Mientras exista una operación incierta, la cuenta bloquea nuevas escrituras financieras y ofrece reintentar con el mismo `operation_id` o consultar el resultado.
 - **Cobros (administración)**: métodos de pago, IVA con botones 16/8/0, políticas (turno compartido, impresión predeterminada, impresora de tickets, umbral de devoluciones), «Pago en dólares» (rango y porcentaje de alerta, solo con la función activa) y movimientos del turno actual con su tipo de cambio y, si movió dólares, el efectivo físico por moneda.
 
-## Contratos para la etapa 7
+## Integración con la etapa 7
 
-- `cash_shifts` ya distingue `open`/`closed` y conserva fondo inicial, quién abrió, terminal y hora; el cierre, cortes, arqueos y conteos se agregarán sin modificar pagos.
-- `cash_movements` contiene cada efecto en caja (cobro, devolución, reverso de corrección) firmado, por método, con efectivo recibido y cambio y, desde la 0007, entradas y salidas físicas por moneda. `GET payments/shifts/{id}/movements` ya calcula totales por método, efectivo esperado = fondo inicial + efectivo neto y `by_currency` (pesos y dólares físicos esperados).
-- Con dólares, el registro usa el tipo de cambio vigente del turno abierto; al existir cierres (etapa 7) convendrá que el cobro envíe el tipo de cambio que mostró la vista previa para detectar un turno distinto.
-- Cerrar un turno no exigirá liquidar cuentas pendientes; los pagos quedan siempre ligados a su turno y caja.
-- **Etapa 7 (fase A, migración 0008)**: el turno admite el estado «Cierre en curso» (`closing`), durante el cual cobros, devoluciones y correcciones responden 409 `SHIFT_CLOSING`; el efectivo esperado y `by_currency` de `GET payments/shifts/{id}/movements` solo se entregan con `cash.expected.read` y nunca durante el arqueo; el cobro y la devolución aceptan `shift_id` opcional. Ingresos, retiros, gastos, cortes, arqueos y cierre: [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md).
+- `cash_shifts` distingue `open`, `closing` (arqueo de cierre en curso) y `closed`, con un solo turno activo por caja; los pagos, devoluciones y reversos quedan siempre ligados a su turno y caja, y cerrar un turno no exige liquidar cuentas pendientes.
+- Durante el arqueo, cobros, devoluciones y correcciones de pago responden 409 `SHIFT_CLOSING`; tras el cierre, `SHIFT_CLOSED`. El cobro y la devolución aceptan `shift_id` opcional (parte de la huella): la interfaz envía el turno que muestra, de modo que un reintento incierto sobre una caja pausada o cerrada se rechaza en lugar de registrarse en otro turno (`SHIFT_CHANGED` si la caja ya tiene otro).
+- `cash_movements` contiene cada efecto en caja (cobro, devolución, reverso de corrección) firmado, por método, con efectivo recibido y cambio y, desde la 0007, entradas y salidas físicas por moneda. `GET payments/shifts/{id}/movements` conserva su contrato, pero `expected_cash` y `by_currency` solo se entregan con `cash.expected.read` y nunca durante el arqueo; el esperado se calcula en `cash_expected.go` e incluye las operaciones de efectivo de la caja.
+- El cobro y la devolución con efectivo físico abren el cajón cuando la caja lo tiene activado (respuesta `drawer`), nunca con pagos exclusivamente electrónicos; una corrección del método no lo abre. El turno actual del cobro incluye `cash_limit_warning` solo para quien ve el esperado. Ninguno de los dos impide cobrar.
+- Ingresos, retiros, gastos, cortes, arqueo, cierre, documentos de caja, cajón y tope: [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md).
 
 ## Pruebas
 

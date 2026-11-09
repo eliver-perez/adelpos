@@ -77,15 +77,24 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 - Una unidad con asignación neta de pago o con descuento manual vigente no se transfiere, divide, combina, cancela, edita ni anula. Una cuenta nunca queda con total menor que lo pagado.
 - Toda escritura de `payments/` toma el lock 7820148305 exclusivo, guarda su resultado en `restaurant_operations` y audita en la misma transacción. La huella de idempotencia excluye `authorization.password`; un reintento conserva el mismo `operation_id`.
 - La autorización de supervisor es puntual: valida usuario y contraseña con el límite de intentos del inicio de sesión, no crea sesión, rechaza la autoautorización y nunca se conserva en React (el almacén de operaciones pendientes descarta la contraseña).
-- Cobrar exige turno abierto en la caja de la terminal. El cierre, arqueo y conciliación de turno pertenecen a la etapa 7: no presentar `expected_cash` como arqueo.
+- Cobrar exige turno abierto en la caja de la terminal. Desde la etapa 7 el arqueo y el cierre existen: no presentar `expected_cash` como arqueo ni entregarlo sin `cash.expected.read`.
 - Precuentas y tickets de pago son documentos comerciales: viven en la cola de impresión con `kind` `precheck`/`receipt`, no aparecen entre las comandas, no constituyen CFDI y un fallo de impresión nunca revierte un pago.
 
 ## Reglas permanentes desde etapa 6.1
 
-- 0001–0007 están aplicadas en la instalación real y son inmutables; la siguiente ampliación requiere 0008 y, sobre la instalación real, autorización expresa previa con respaldo y ensayo de restauración. Un CHECK que evalúa a NULL se acepta en PostgreSQL: las restricciones con columnas opcionales deben exigir `IS NOT NULL` explícito en la rama que valida datos.
+- 0001–0007 están aplicadas en la instalación real y son inmutables; toda migración sobre la instalación real requiere autorización expresa previa con respaldo y ensayo de restauración. Un CHECK que evalúa a NULL se acepta en PostgreSQL: las restricciones con columnas opcionales deben exigir `IS NOT NULL` explícito en la rama que valida datos.
 - Nunca usar `window.confirm`, `window.alert` ni `window.prompt`: el WebView nativo de macOS no los muestra. Usar `components/ConfirmDialog.tsx` o formularios dentro de la pantalla.
 - Campos numéricos con `services/numericInput.ts` (importes 2 decimales, cantidades 3, enteros solo dígitos) o el teclado de cobro; nunca `type="number"`. Fechas opcionales con `OptionalDateField` (el control nativo de WebKit muestra la fecha de hoy con el valor vacío).
 - Orden visual por posiciones (`position: {after}`) con `internal/ordering`; no volver a capturar números de orden. Colores de categoría solo de la paleta de Go.
 - Funciones activables: registrar la función en `internal/features`, hacerla cumplir en Go aunque la interfaz la oculte y no borrar ni alterar registros al desactivarla. El pago en dólares (`usd_cash`) está desactivado por defecto; con él desactivado el cobro es idéntico al de la etapa 6.
 - IVA por producto: NULL hereda la tasa general; cada versión confirmada guarda la tasa efectiva. Dólares: solo efectivo, tipo de cambio fijo por turno, conversiones redondeadas a centavos en Go y devoluciones solo en pesos.
 - Captura táctil: un solo flujo de pedidos (borrador persistido + confirmación con huella). El borrador se sincroniza con antirrebote y una sola petición en vuelo; no crear una petición por toque ni un segundo flujo.
+
+## Reglas permanentes desde etapa 7
+
+- La 0008 (`0008_cash_shifts_and_reconciliation.sql`) no está aplicada en la instalación real hasta que el propietario lo autorice; una vez aplicada es inmutable y la siguiente ampliación requiere 0009. 0001–0007 siguen inmutables.
+- La caja vive en `payments` (`cash_*.go`): un turno activo por caja (`open` o `closing`), escrituras con el lock 7820148305, idempotencia, auditoría y evento `cash` en la misma transacción. El efectivo esperado se calcula en un solo lugar (`cash_expected.go`) a partir de registros reales y por moneda.
+- Cierre ciego para todos: durante `closing` ninguna respuesta, documento, aviso ni auditoría contiene el esperado o las diferencias, ni siquiera para el administrador; fuera del arqueo solo con `cash.expected.read`. Los rechazos por efectivo insuficiente nunca llevan cifras.
+- Retiros y gastos siempre autorizados (permiso propio `cash.outflows.authorize` o autorización puntual de otra persona). Las correcciones son compensatorias y las regularizaciones de un turno cerrado van al turno abierto vigente de la misma caja, sin cambiar la diferencia del cerrado.
+- Imprimir o abrir el cajón nunca revierte ni bloquea una operación o un cierre: se ejecutan en un punto de guardado y la respuesta informa su estado. El cajón solo se abre por ESC/POS TCP y nunca por pagos exclusivamente electrónicos; sus comandos no se reintentan solos. Mensajes: «Comando de apertura enviado», nunca «cajón abierto»; «enviado», nunca «impreso».
+- El tope de caja (`cash_limit`) es solo un aviso para quien ve el esperado y nunca bloquea cobros.

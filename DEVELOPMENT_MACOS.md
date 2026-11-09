@@ -1,4 +1,4 @@
-# Desarrollo macOS · Etapa 6
+# Desarrollo macOS · Etapa 7
 
 ## Entorno preparado
 
@@ -167,3 +167,9 @@ La prueba CUPS es opt-in: `ADEL_TEST_PACKAGE=./internal/operations ADEL_TEST_RUN
 Versión 0.6.2/esquema 7 (la 0.6.2 no agrega migraciones). La migración `0007_features_product_tax_and_usd_cash.sql` (etapa 6.1) se aplicó a la instalación real el 8 de noviembre de 2026 con autorización del propietario; las migraciones futuras también requieren autorización. La migración `0006_payments_and_refunds.sql` se aplicó a la instalación real el 8 de noviembre de 2026 con autorización del propietario; las migraciones futuras también requieren autorización. Procedimiento: `backup`, `python3 scripts/restore-check.py backups/NOMBRE.dump`, `server-stop`, `migrate`, `server-start`, `build-macos` y `open-app`. La migración asigna IVA 16 % a los productos ya confirmados, siembra cinco métodos de pago y concede los permisos nuevos al rol administrador con límite de descuento de 100 %; no crea turnos, pagos ni datos ficticios.
 
 Para cobrar, la terminal debe estar asociada a una caja (Cajas físicas / Terminales) y abrir turno desde la pantalla de cobro. La impresora de tickets se elige en Cobros → Políticas entre las impresoras de cocina registradas. Las pruebas de integración incluyen `internal/payments` y los recorridos de cobro de `internal/operations`; las bases temporales se eliminan al terminar.
+
+## Caja y cortes · etapa 7
+
+Versión 0.7.0/esquema 8. La migración `0008_cash_shifts_and_reconciliation.sql` **no se ha aplicado a la instalación real**: requiere autorización expresa del propietario. Procedimiento: `backup`, `python3 scripts/restore-check.py backups/NOMBRE.dump`, `server-stop`, `migrate`, `server-start`, comprobaciones de solo lectura, `build-macos` y `open-app`. La 0008 no modifica 0001–0007 ni registros históricos: los turnos existentes conservan su estado, la fecha comercial de un turno anterior se deriva al consultarlo de su apertura en la zona del establecimiento (la fila no se modifica), siembra las denominaciones habituales (billetes y monedas de pesos y billetes de dólares), la función `cash_limit` desactivada y concede los diecinueve permisos `cash.*` nuevos solo al rol administrador; no crea turnos, operaciones ni datos ficticios.
+
+La pantalla **Caja** (permiso `cash.shifts.read`) administra el turno de la caja de la terminal. El cajón requiere una impresora ESC/POS por red registrada en Cocina y preparación y asociada en Caja → Configuración; una impresora por CUPS no puede abrirlo. Las pruebas de integración de caja están en `internal/operations/cash_*_test.go` (encadenadas a `TestRestaurantAcceptance`) y usan el adaptador controlado de la cola: ninguna envía nada a CUPS, a una impresora ni a una conexión TCP.

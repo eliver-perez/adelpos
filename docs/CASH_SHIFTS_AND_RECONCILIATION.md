@@ -1,6 +1,6 @@
 # Administración de caja, arqueos y cortes · Etapa 7
 
-Estado: **fases A, B y C** (migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`). La entrega final (fase D) completará este documento. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
+Estado: **etapa 7 completa (fases 0 y A–D), versión 0.7.0, esquema 8**: migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. **La 0008 no se ha aplicado a la instalación real**: requiere la autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
 
 ## Autoridad y estructura
 
@@ -61,6 +61,13 @@ Una sola función (`cash_expected.go`), usada por movimientos, cortes, cierre y 
 
 `GET payments/shifts/{id}/movements` conserva su contrato, pero `expected_cash` (ahora: pesos físicos esperados, incluidas las operaciones de efectivo) y `by_currency` solo se incluyen con `cash.expected.read`.
 
+## Movimientos por moneda (MXN y USD)
+
+- Con la función `usd_cash` desactivada, el turno es solo en pesos: no se aceptan fondo, conteo, operaciones ni topes en dólares (409 `FEATURE_DISABLED`) y la caja se comporta como en la etapa 6.
+- Con la función activa, el turno lleva un tipo de cambio fijo (etapa 6.1) y puede abrirse con fondo en pesos y en dólares. Los cobros conservan lo físico de cada moneda: con dólares y cambio en pesos, entran dólares y salen pesos; con pesos y cambio en dólares, entran pesos y salen dólares. Las devoluciones son solo en pesos (etapa 6.1).
+- Ingresos, retiros, gastos y correcciones se registran en su moneda y guardan el tipo de cambio del turno. Un retiro en dólares se compara con los dólares esperados, no con el total equivalente.
+- El arqueo cuenta cada moneda por denominaciones; el esperado, lo contado y la diferencia se guardan por moneda. La equivalencia en pesos (dólares × tipo de cambio histórico del turno, redondeada a centavos) solo informa: nunca sustituye las cantidades físicas ni compensa una moneda con otra.
+
 ## Cortes parciales
 
 - `cash.partial_cuts.create`. No cierran el turno, no reinician acumulados, no mueven dinero, no pausan la caja ni generan movimientos. Varios por turno, idempotentes.
@@ -85,7 +92,16 @@ Durante `closing`, ninguna respuesta (turno, movimientos, operaciones, cortes, a
 
 ## Operaciones inciertas
 
-El servidor es la fuente de verdad: una operación pertenece al turno si su transacción se confirmó. Un reintento con el mismo `operation_id` de una operación confirmada devuelve su resultado sin duplicarla; uno que no se confirmó recibe `SHIFT_CLOSING` o `SHIFT_CLOSED` y debe registrarse como operación nueva en un turno abierto. Las operaciones de efectivo llevan el turno en la ruta; el cobro y la devolución aceptan `shift_id` opcional en el cuerpo (parte de la huella) con el mismo efecto (`SHIFT_CHANGED` si la caja ya tiene otro turno). La interfaz de la fase B lo enviará y explicará el rechazo con el almacén global de pendientes.
+El servidor es la fuente de verdad: una operación pertenece al turno si su transacción se confirmó. Un reintento con el mismo `operation_id` de una operación confirmada devuelve su resultado sin duplicarla; uno que no se confirmó recibe `SHIFT_CLOSING` o `SHIFT_CLOSED` y debe registrarse como operación nueva en un turno abierto. Las operaciones de efectivo llevan el turno en la ruta; el cobro y la devolución aceptan `shift_id` opcional en el cuerpo (parte de la huella) con el mismo efecto (`SHIFT_CHANGED` si la caja ya tiene otro turno). La interfaz lo envía y explica el rechazo con el almacén global de pendientes.
+
+## Reglas de concurrencia
+
+- Toda escritura de caja toma el lock operativo 7820148305 en modo exclusivo, el mismo de cobros, restaurante y cocina; las lecturas y vistas previas lo toman compartido. Un cobro y el inicio o la confirmación del arqueo de su turno nunca se intercalan. No hay locks nuevos.
+- Un solo turno activo por caja: el lock serializa las aperturas y el índice único `cash_shifts_one_active_idx` lo garantiza aunque fallara la serialización (`SHIFT_ALREADY_OPEN`).
+- El arqueo no mantiene bloqueos de base de datos mientras se cuenta: el estado `closing` es persistente y cada escritura lo comprueba. El inicio registra `clock_timestamp()` después de tomar el lock y cuántos movimientos y operaciones tenía el turno; la confirmación compara ambos (cantidad y fecha) y rechaza con `CLOSING_MOVEMENTS_CHANGED` si apareció un registro posterior. Dos confirmaciones simultáneas: la primera cierra y la segunda recibe `SHIFT_CLOSED`.
+- El borrador del conteo, la configuración del cajón y la del tope usan revisión optimista (`COUNT_CHANGED`, `REVISION_CONFLICT`); el tope comparte la revisión de `payment_settings`.
+- Idempotencia por `operation_id` en `restaurant_operations`: un reintento con el mismo cuerpo devuelve el resultado guardado, sin duplicar operaciones, documentos ni comandos del cajón; con otro cuerpo responde `IDEMPOTENCY_CONFLICT`. La huella excluye la contraseña de autorización e incluye la bandera `print` y, en cobros y devoluciones, `shift_id` (en las operaciones de efectivo el turno va en la ruta).
+- La impresión y el pulso del cajón los ejecutan los trabajadores de la cola fuera de la transacción de la operación, con el lease y la semántica `uncertain` de la etapa 5.
 
 ## Permisos
 
@@ -162,6 +178,10 @@ Rutas de solo lectura agregadas en la fase B (contratos en [API_CONTRACTS.md](..
 - `backend/internal/database/existing_install_test.go`: tipo `cash_drawer` y CHECK de documentos y comandos del cajón tras actualizar desde esquema 7. Unitarias en `payments/cash_documents_test.go` (contenido de cortes y comprobantes) y `kitchen/template_test.go` (bytes del pulso y transporte incompatible).
 - Vitest en `pages/cash/printing.test.tsx`, `checkout/checkout.test.tsx` y `hooks/useRealtime.test.tsx`; Playwright en `e2e/cash-flow.ts` (vista previa de los cortes parcial y definitivo, tope activado y desactivado).
 
+## Pruebas ejecutadas (fase D, regresión final)
+
+Sobre el árbol 0.7.0 en el entorno aislado: estáticas, `go vet` y `go test -race` en todos los paquetes; integración PostgreSQL de `database`, `administration`, `catalog`, `operations` (etapas 4–6.2 y caja C1–C47), `payments` y `kitchen`; Vitest 175 pruebas en 30 archivos; `tsc`, build y `cargo test`; Playwright Chromium y WebKit; y compilación aislada del `.app` 0.7.0. Resultados en [VERIFICATION.md](VERIFICATION.md).
+
 ## Limitaciones reales
 
 - Un pendiente incierto de un turno que después se cierra queda guardado con la clave de ese turno y ya no se muestra en Caja; su reintento sería rechazado (`SHIFT_CLOSED`) y no se duplica, pero no hay una lista global de pendientes.
@@ -170,4 +190,5 @@ Rutas de solo lectura agregadas en la fase B (contratos en [API_CONTRACTS.md](..
 - Los usuarios sin `events.read` se actualizan por sondeo; no se probaron dos terminales nativas simultáneas.
 - Un usuario con permiso de autorizar salidas, pero sin `cash.expected.read`, podría inferir por tanteo si un importe excede el disponible (cada rechazo no revela cifras ni queda auditado).
 - Las filas individuales de movimientos y operaciones se muestran a quien tiene su permiso de consulta aunque no tenga `cash.expected.read`; los totales que equivalen al esperado se omiten.
-- `config/product.json` conserva `schema_version: 7` hasta el versionado de la fase D (0.7.0); la 0008 no se ha aplicado a la instalación real.
+- La 0008 no se ha aplicado a la instalación real: hasta que el propietario lo autorice, el servidor real (0.6.2, esquema 7) conserva el turno mínimo sin arqueo ni cierre.
+- Sin verificar en la ventana nativa WKWebView, con pantalla táctil física ni con dos terminales nativas simultáneas.

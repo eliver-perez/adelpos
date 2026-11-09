@@ -1,6 +1,6 @@
-# AD-EL POS · Etapa 6
+# AD-EL POS · Etapa 7
 
-Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible. No registra cierres de turno, arqueos ni movimientos físicos de inventario.
+Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Administra la caja: apertura con fondo, ingresos, retiros y gastos autorizados, cortes parciales, arqueo y cierre ciego con diferencias por moneda, comprobantes y cortes impresos, cajón de dinero y tope de caja. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible. No registra movimientos físicos de inventario.
 
 ## Inicio en este Mac
 
@@ -31,13 +31,25 @@ Los acordeones comparten un componente accesible en pantallas anteriores y nueva
 
 ## Cobros, pagos y devoluciones
 
-Antes de cobrar, la terminal debe estar asociada a una caja con turno abierto; la apertura mínima se hace en la misma pantalla de cobro con un fondo explícito (puede ser $0). El cierre, arqueo y conciliación del turno pertenecen a la etapa 7.
+Antes de cobrar, la terminal debe estar asociada a una caja con turno abierto; la apertura se hace en la pantalla de cobro o en **Caja** con un fondo explícito (puede ser $0). Mientras la caja está en arqueo de cierre no se cobra ni se devuelve.
 
 Desde una cuenta, **Cobrar** abre la pantalla de cobro sin salir de la operación: productos con su estado de pago, métodos como botones con icono, teclado numérico fijo y captura de efectivo recibido, cambio, propina y referencia. Go calcula cada importe; la interfaz solo muestra el resultado. Se admiten pagos totales, abonos parciales y pagos mixtos sucesivos, y el cobro de productos o cantidades seleccionados. Una cuenta de salón liquidada se cierra y libera la mesa; un pedido para llevar se cierra al entregarse.
 
 Descuentos por partida o generales, por porcentaje o importe, cortesías del 100 % y cargos extras generales se administran desde las acciones de la cuenta, con un acceso contextual desde el cobro. Cada rol tiene un límite de descuento configurable; superarlo, devolver sin permiso suficiente o corregir un pago requiere la autorización puntual de un supervisor, que no inicia sesión ni afecta la suya. Las devoluciones (totales, de un pago o por productos) y las correcciones de método son registros compensatorios; nunca se edita el pago original.
 
 El IVA está incluido en los precios. En **Cobros** se elige la tasa del establecimiento con botones (16 %, 8 % o 0 %), se administran métodos de pago y políticas, y se consultan los movimientos del turno actual. Cada producto confirmado conserva la tasa vigente al confirmarse. Las precuentas y tickets se imprimen en la impresora de tickets configurada; un fallo de impresión no revierte el pago y los documentos no son comprobantes fiscales (CFDI). Consulta [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md).
+
+## Caja, arqueos y cortes
+
+En **Caja** se administra el turno de la caja física de la terminal, según los permisos de cada usuario:
+
+- **Operación**: apertura por total o por denominaciones (el fondo puede ser $0, en pesos y, con la función de dólares, también en dólares), ingresos, retiros y gastos con categoría, cortes parciales, «Abrir cajón» y el arqueo de cierre. Los retiros y gastos siempre quedan autorizados: con el permiso propio de autorizar no se pide otra contraseña; sin él, autoriza un supervisor. Un retiro mayor que el efectivo disponible se rechaza sin mostrar cifras.
+- **Arqueo y cierre ciego**: «Iniciar arqueo» pausa la caja (no se cobra, devuelve ni registra efectivo) y el cajero cuenta por denominaciones, más un importe adicional identificado, sin ver el esperado; nadie lo ve durante el arqueo, ni el administrador. El borrador se guarda en el servidor. Se cancela para reanudar la caja o se confirma; las diferencias (sobrante o faltante, por moneda) no impiden cerrar y las cuentas abiertas tampoco. Después del cierre, quien tiene el permiso consulta el esperado y las diferencias.
+- **Movimientos, Historial y Reportes**: movimientos del turno con su detalle y correcciones compensatorias, turnos anteriores con sus cortes y regularizaciones posteriores, y resumen del turno. **Configuración**: denominaciones, categorías de gasto, cajón por caja y tope de caja.
+- **Documentos**: comprobantes de ingreso, retiro y gasto, y cortes parcial y definitivo con vista previa, impresión opcional y reimpresión; el esperado solo se imprime para quien puede consultarlo. Un fallo de impresión nunca revierte la operación ni el cierre, y «enviado» no confirma que el papel salió.
+- **Cajón y tope**: el cajón se abre con un pulso de una impresora ESC/POS por red tras operaciones con efectivo, nunca por pagos electrónicos; la interfaz dice «Comando de apertura enviado». El tope de caja es una función activable (desactivada por defecto) que solo avisa, a quien ve el esperado, que conviene un retiro; nunca bloquea cobros.
+
+Consulta [docs/CASH_SHIFTS_AND_RECONCILIATION.md](docs/CASH_SHIFTS_AND_RECONCILIATION.md). La migración `0008_cash_shifts_and_reconciliation.sql` se aplica a una instalación existente con el procedimiento de respaldo y ensayo de restauración de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md).
 
 ## Cocina e impresión
 
@@ -53,7 +65,7 @@ En **Catálogo** administra categorías, productos independientes, presentacione
 
 En **Probar personalización** retira o sustituye todos los complementos, cambia cantidades, ingredientes, componentes y observaciones. Go valida y devuelve el desglose exacto; no se crea una venta. Las listas conservan la identidad del producto y las promociones explican su aplicación o exclusión. Los PNG originales locales cambian con el tema.
 
-Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql` y la etapa 6 `0006_payments_and_refunds.sql`. Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
+Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql` y la etapa 7 `0008_cash_shifts_and_reconciliation.sql`. Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
 
 ## Credencial reservada de soporte
 
@@ -78,10 +90,10 @@ ad-el-pos/
 │   ├── internal/kitchen/       # Preparación, documentos, transportes y trabajadores
 │   ├── internal/events/        # Outbox, cursor y replay autenticado
 │   ├── internal/operations/    # Mesas, cuentas, pedidos, unidades e historial
-│   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, turno mínimo y tickets
+│   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, tickets y caja (turnos, cortes, arqueo y cierre)
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 a 0007; inmutables después de aplicarse
+│   └── migrations/             # 0001 a 0008; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad
@@ -115,7 +127,8 @@ Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_
 - [API_CONTRACTS.md](API_CONTRACTS.md): rutas y permisos.
 - [docs/CATALOG.md](docs/CATALOG.md): reglas comerciales, uso y límites del catálogo.
 - [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md): flujo de pedidos, unidades y concurrencia.
-- [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md): cobros, IVA, descuentos, devoluciones, turno mínimo y tickets.
+- [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md): cobros, IVA, descuentos, devoluciones y tickets.
+- [docs/CASH_SHIFTS_AND_RECONCILIATION.md](docs/CASH_SHIFTS_AND_RECONCILIATION.md): caja, arqueos, cierre ciego, cortes, documentos, cajón y tope.
 - [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
 - [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): continuidad y decisiones pendientes.
 

@@ -121,7 +121,7 @@ func (handler *service) saveCashLimitSettings(_ []string) (any, error) {
 		return nil, err
 	}
 	if !previous.Enabled {
-		return nil, featureDisabled()
+		return nil, conflict("FEATURE_DISABLED", "El tope de caja está desactivado en las funciones del establecimiento. Actívalo en Configuración → Funciones.")
 	}
 	limitMXN, err := optionalLimit(input.CashLimitMXN, "tope en pesos")
 	if err != nil {
