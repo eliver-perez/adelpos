@@ -19,6 +19,9 @@ type RefundInput struct {
 	Reference     string              `json:"reference"`
 	Reason        string              `json:"reason"`
 	Authorization *AuthorizationInput `json:"authorization"`
+	// ShiftID es el turno que mostraba la terminal al preparar la devolución (opcional). Un
+	// reintento sobre un turno pausado o cerrado se rechaza en lugar de caer en otro turno.
+	ShiftID string `json:"shift_id"`
 }
 
 type RefundUnit struct {
@@ -366,15 +369,17 @@ func (handler *service) refund(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// El turno se verifica antes que la autorización: con la caja en arqueo o cerrada no se
+	// consume un intento de la contraseña del supervisor.
+	shift, err := handler.usableShiftFor(input.ShiftID)
+	if err != nil {
+		return nil, err
+	}
 	approved, err := handler.approve("refund", !plan.RequiresAuthorization, input.Authorization,
 		"Esta devolución requiere la autorización de un supervisor.",
 		func(supervisor *Supervisor) (bool, error) {
 			return supervisor.Can("payments.refunds.authorize"), nil
 		})
-	if err != nil {
-		return nil, err
-	}
-	shift, err := handler.usableShift()
 	if err != nil {
 		return nil, err
 	}
@@ -496,9 +501,13 @@ func (handler *service) correct(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Invariante del modelo: una vez cerrado el turno, sus movimientos no se modifican.
-	if shift == nil || shift.State != "open" {
+	// Invariante del modelo: una vez cerrado el turno, sus movimientos no se modifican; durante el
+	// arqueo de cierre la caja está pausada y tampoco admite correcciones.
+	if shift == nil || shift.State == shiftClosed {
 		return nil, conflict("SHIFT_CLOSED", "El turno del pago ya está cerrado. Las regularizaciones posteriores usan un procedimiento separado.")
+	}
+	if err := shiftStateError(shift); err != nil {
+		return nil, err
 	}
 	approved, err := handler.approve("correction", handler.request.Actor.Can("payments.corrections"), input.Authorization,
 		"Corregir un pago requiere la autorización de un supervisor.",

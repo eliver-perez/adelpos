@@ -498,13 +498,26 @@ export interface Shift {
   id: string;
   register_id: string;
   register_name: string;
+  // open, closing («Cierre en curso»: la caja está pausada por el arqueo) o closed.
   state: string;
   opening_float: string;
+  // Etapa 7: fondo en dólares, observaciones de apertura, fecha comercial y datos del arqueo y
+  // del cierre. Opcionales para conservar la compatibilidad con respuestas anteriores.
+  opening_float_usd?: string | null;
+  opening_notes?: string;
+  business_date?: string;
   opened_by: string;
   opened_by_name: string;
   opened_device_name: string;
   opened_at: string;
+  closing_started_by?: string | null;
+  closing_started_by_name?: string | null;
+  closing_started_at?: string | null;
+  closing_device_name?: string | null;
   closed_at: string | null;
+  closed_by?: string | null;
+  closed_by_name?: string | null;
+  closed_device_name?: string | null;
   revision: number;
   shared_allowed: boolean;
   // Tipo de cambio fijo del turno; null mientras no se captura.
@@ -561,8 +574,17 @@ export interface ShiftMovements {
   movements: ShiftMovement[];
   by_method: MethodTotal[];
   cash_net: string;
-  expected_cash: string;
-  // Efectivo físico por moneda (no es arqueo: el cierre pertenece a la etapa 7).
+  // Etapa 7: el efectivo esperado y los totales físicos por moneda solo llegan con el permiso
+  // «Consultar importes esperados y diferencias» y nunca durante el arqueo de cierre.
+  expected_visible?: boolean;
+  expected_cash?: string;
+  expected?: {
+    mxn: string;
+    usd: string;
+    usd_rate: string | null;
+    usd_equivalent_mxn: string | null;
+    total_equivalent_mxn: string | null;
+  };
   by_currency?: {
     mxn_in: string;
     mxn_out: string;
@@ -792,6 +814,25 @@ export const paymentPermissionLabels: Record<string, string> = {
   'takeaway.deliver': 'Registrar entrega de pedidos para llevar',
   'cash.shifts.open': 'Abrir turno de caja',
   'cash.shifts.read': 'Consultar turnos y movimientos de caja',
+  'cash.shifts.read_all': 'Consultar turnos de otras cajas',
+  'cash.income.record': 'Registrar ingresos de efectivo',
+  'cash.withdrawals.record': 'Registrar retiros de efectivo',
+  'cash.expenses.record': 'Registrar gastos pagados desde caja',
+  'cash.outflows.authorize': 'Autorizar retiros y gastos de efectivo',
+  'cash.corrections.record': 'Corregir y regularizar movimientos de efectivo',
+  'cash.corrections.authorize': 'Autorizar correcciones y regularizaciones de efectivo',
+  'cash.movements.read': 'Consultar movimientos de efectivo',
+  'cash.partial_cuts.create': 'Realizar cortes parciales',
+  'cash.counts.perform': 'Realizar arqueos',
+  'cash.shifts.close': 'Cerrar turnos de caja',
+  'cash.closing.cancel_any': 'Cancelar el arqueo de cierre iniciado por otro usuario',
+  'cash.history.read': 'Consultar turnos y cortes históricos',
+  'cash.expected.read': 'Consultar importes esperados y diferencias',
+  'cash.closures.review': 'Comentar cierres de caja',
+  'cash.reports.print': 'Imprimir cortes y comprobantes de caja',
+  'cash.reports.reprint': 'Reimprimir cortes y comprobantes de caja',
+  'cash.drawer.open': 'Abrir el cajón de dinero manualmente',
+  'cash.settings.manage': 'Administrar denominaciones, categorías de gasto, tope de caja y cajón',
   'payments.usd_rate.manage': 'Capturar el tipo de cambio del dólar del turno',
   'kitchen.printers.manage': 'Administrar impresoras',
 };
@@ -821,11 +862,13 @@ export const refreshCodes = [
   'NOTHING_TO_REFUND',
 ];
 
-// Códigos que exigen revisar o abrir el turno de la caja de la terminal.
+// Códigos que exigen revisar o abrir el turno de la caja de la terminal. SHIFT_CLOSING indica que
+// la caja está pausada por el arqueo de cierre (etapa 7).
 export const shiftCodes = [
   'SHIFT_REQUIRED',
   'REGISTER_REQUIRED',
   'SHIFT_NOT_SHARED',
+  'SHIFT_CLOSING',
   'USD_RATE_REQUIRED',
   'FEATURE_DISABLED',
 ];

@@ -22,6 +22,8 @@ const (
 	KitchenStations
 	// PaymentMethods ordena los métodos de pago.
 	PaymentMethods
+	// CashExpenseCategories ordena las categorías de gasto pagado desde caja.
+	CashExpenseCategories
 )
 
 type scopeDefinition struct {
@@ -37,6 +39,8 @@ var scopes = map[Scope]scopeDefinition{
 	RestaurantAreas:   {table: "app.restaurant_areas"},
 	KitchenStations:   {table: "app.kitchen_stations"},
 	PaymentMethods:    {table: "app.payment_methods"},
+	// Categorías de gasto de caja (etapa 7).
+	CashExpenseCategories: {table: "app.cash_expense_categories"},
 }
 
 // Result informa el orden final del registro colocado y los hermanos que cambiaron de número.

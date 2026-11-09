@@ -25,7 +25,7 @@ type Permission struct {
 }
 
 // Permissions enumera las operaciones financieras reales. Cada clave también se inserta en la
-// migración que la introdujo (0006 o 0007) y se concede inicialmente solo al rol administrador.
+// migración que la introdujo (0006, 0007 u 0008) y se concede inicialmente solo al rol administrador.
 var Permissions = []Permission{
 	{"payments.read", "Consultar información financiera y pagos de cuentas"},
 	{"payments.collect", "Registrar cobros"},
@@ -49,6 +49,26 @@ var Permissions = []Permission{
 	{"cash.shifts.read", "Consultar turnos y movimientos de caja"},
 	{"payments.usd_rate.manage", "Capturar el tipo de cambio del dólar del turno"},
 	{"takeaway.deliver", "Registrar entrega de pedidos para llevar"},
+	// Etapa 7 (migración 0008): administración de caja, arqueos y cortes.
+	{permissionShiftsReadAll, "Consultar turnos de otras cajas"},
+	{permissionIncome, "Registrar ingresos de efectivo"},
+	{permissionWithdrawals, "Registrar retiros de efectivo"},
+	{permissionExpenses, "Registrar gastos pagados desde caja"},
+	{permissionOutflowsAuthorize, "Autorizar retiros y gastos de efectivo"},
+	{permissionCorrections, "Corregir y regularizar movimientos de efectivo"},
+	{permissionCorrectionsAuthorize, "Autorizar correcciones y regularizaciones de efectivo"},
+	{permissionMovementsRead, "Consultar movimientos de efectivo"},
+	{permissionPartialCuts, "Realizar cortes parciales"},
+	{permissionCounts, "Realizar arqueos"},
+	{permissionClose, "Cerrar turnos de caja"},
+	{permissionCancelAnyClosing, "Cancelar el arqueo de cierre iniciado por otro usuario"},
+	{permissionHistoryRead, "Consultar turnos y cortes históricos"},
+	{permissionExpectedRead, "Consultar importes esperados y diferencias"},
+	{permissionClosuresReview, "Comentar cierres de caja"},
+	{"cash.reports.print", "Imprimir cortes y comprobantes de caja"},
+	{"cash.reports.reprint", "Reimprimir cortes y comprobantes de caja"},
+	{"cash.drawer.open", "Abrir el cajón de dinero manualmente"},
+	{permissionCashSettings, "Administrar denominaciones, categorías de gasto, tope de caja y cajón"},
 }
 
 type Actor struct {

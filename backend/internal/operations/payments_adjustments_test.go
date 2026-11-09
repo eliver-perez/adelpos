@@ -354,7 +354,9 @@ func testPaymentAdjustments(t *testing.T, fixture *paymentsFixture) {
 			"payment_id": wrong.Payment.ID, "method_id": debit, "reason": "Era tarjeta",
 		}, 403)
 		shiftID := wrong.Payment.ShiftID
-		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.cash_shifts SET state='closed',closed_at=now() WHERE id=$1", shiftID); err != nil {
+		// Desde la 0008 un turno cerrado registra quién lo cerró y desde qué terminal.
+		if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.cash_shifts SET state='closed',closed_at=now(),closed_by=opened_by,
+            closed_device_id=opened_device_id WHERE id=$1`, shiftID); err != nil {
 			t.Fatal(err)
 		}
 		if errorCode(t, fixture.post(t, fixture.admin, bill.Account.ID, "corrections", map[string]any{
@@ -362,7 +364,8 @@ func testPaymentAdjustments(t *testing.T, fixture *paymentsFixture) {
 		}, 409)) != "SHIFT_CLOSED" {
 			t.Fatal("Se corrigió un pago de un turno cerrado")
 		}
-		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.cash_shifts SET state='open',closed_at=NULL WHERE id=$1", shiftID); err != nil {
+		if _, err := fixture.pool.Exec(fixture.ctx, `UPDATE app.cash_shifts SET state='open',closed_at=NULL,closed_by=NULL,
+            closed_device_id=NULL WHERE id=$1`, shiftID); err != nil {
 			t.Fatal(err)
 		}
 		corrected := decodeResponse[struct {

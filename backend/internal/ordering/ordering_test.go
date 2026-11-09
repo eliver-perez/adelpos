@@ -179,6 +179,7 @@ func TestScopesAreClosedAndComplete(t *testing.T) {
 		RestaurantAreas,
 		KitchenStations,
 		PaymentMethods,
+		CashExpenseCategories,
 	} {
 		if _, known := scopes[scope]; !known {
 			t.Fatalf("falta la definición del alcance %d", scope)

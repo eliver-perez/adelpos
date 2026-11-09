@@ -96,6 +96,12 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_current_shift" => Some((Method::GET, "payments/shifts/current")),
         "payments_open_shift" => Some((Method::POST, "payments/shifts")),
         "payments_save_usd_settings" => Some((Method::PUT, "payments/settings/usd")),
+        // Administración de caja (etapa 7): historial, catálogo y cajas con su turno activo.
+        "payments_shifts" => Some((Method::GET, "payments/shifts")),
+        "payments_cash_catalog" => Some((Method::GET, "payments/cash/catalog")),
+        "payments_cash_registers" => Some((Method::GET, "payments/cash/registers")),
+        "payments_create_denomination" => Some((Method::POST, "payments/cash/denominations")),
+        "payments_create_category" => Some((Method::POST, "payments/cash/expense-categories")),
         "restaurant_overview" => Some((Method::GET, "restaurant/overview")),
         "restaurant_areas" => Some((Method::GET, "restaurant/areas")),
         "restaurant_create_area" => Some((Method::POST, "restaurant/areas")),
@@ -233,6 +239,61 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_shift_usd_rate" => (
             Method::POST,
             format!("payments/shifts/{identifier}/usd-rate"),
+        ),
+        // Turno de caja (etapa 7): un solo identificador por ruta; los registros relacionados
+        // (la operación que se corrige) viajan en el cuerpo.
+        "payments_shift" => (Method::GET, format!("payments/shifts/{identifier}")),
+        "payments_shift_operations" => (
+            Method::GET,
+            format!("payments/shifts/{identifier}/operations"),
+        ),
+        "payments_shift_income" => (Method::POST, format!("payments/shifts/{identifier}/income")),
+        "payments_shift_withdrawal" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/withdrawals"),
+        ),
+        "payments_shift_expense" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/expenses"),
+        ),
+        "payments_shift_correction" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/corrections"),
+        ),
+        "payments_shift_partial_cut" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/partial-cuts"),
+        ),
+        "payments_shift_start_closing" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/closing"),
+        ),
+        "payments_shift_closing" => (Method::GET, format!("payments/shifts/{identifier}/closing")),
+        "payments_shift_save_count" => (
+            Method::PUT,
+            format!("payments/shifts/{identifier}/closing/count"),
+        ),
+        "payments_shift_cancel_closing" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/closing/cancel"),
+        ),
+        "payments_shift_confirm_closing" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/closing/confirm"),
+        ),
+        "payments_shift_closure" => (Method::GET, format!("payments/shifts/{identifier}/closure")),
+        "payments_shift_comment_closure" => (
+            Method::POST,
+            format!("payments/shifts/{identifier}/closure/comments"),
+        ),
+        "payments_cash_report" => (Method::GET, format!("payments/cash-reports/{identifier}")),
+        "payments_save_denomination" => (
+            Method::PATCH,
+            format!("payments/cash/denominations/{identifier}"),
+        ),
+        "payments_save_category" => (
+            Method::PATCH,
+            format!("payments/cash/expense-categories/{identifier}"),
         ),
         "payments_account" => (Method::GET, format!("payments/accounts/{identifier}")),
         "payments_preview" => (
@@ -376,6 +437,9 @@ pub async fn api_request(
             ]
         } else if operation.starts_with("kitchen_") {
             &["page", "station_id", "state", "account_id"]
+        } else if operation == "payments_shifts" {
+            // Historial de turnos: caja, intervalo de fechas comerciales, estado y página.
+            &["page", "register_id", "from", "until", "state"]
         } else if operation.starts_with("restaurant_") {
             &["page", "page_size", "search", "mode", "table_id", "state"]
         } else if operation.starts_with("catalog_") {
@@ -527,6 +591,124 @@ mod tests {
         assert!(route("payments_shift_usd_rate", Some("../../settings")).is_err());
         assert!(route("payments_shift_usd_rate", None).is_err());
         assert!(route("save_settings_feature_usd_cash", None).is_err());
+    }
+
+    #[test]
+    fn cash_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            (
+                "payments_shift",
+                Method::GET,
+                format!("payments/shifts/{identifier}"),
+            ),
+            (
+                "payments_shift_income",
+                Method::POST,
+                format!("payments/shifts/{identifier}/income"),
+            ),
+            (
+                "payments_shift_withdrawal",
+                Method::POST,
+                format!("payments/shifts/{identifier}/withdrawals"),
+            ),
+            (
+                "payments_shift_expense",
+                Method::POST,
+                format!("payments/shifts/{identifier}/expenses"),
+            ),
+            (
+                "payments_shift_correction",
+                Method::POST,
+                format!("payments/shifts/{identifier}/corrections"),
+            ),
+            (
+                "payments_shift_partial_cut",
+                Method::POST,
+                format!("payments/shifts/{identifier}/partial-cuts"),
+            ),
+            (
+                "payments_shift_start_closing",
+                Method::POST,
+                format!("payments/shifts/{identifier}/closing"),
+            ),
+            (
+                "payments_shift_closing",
+                Method::GET,
+                format!("payments/shifts/{identifier}/closing"),
+            ),
+            (
+                "payments_shift_save_count",
+                Method::PUT,
+                format!("payments/shifts/{identifier}/closing/count"),
+            ),
+            (
+                "payments_shift_cancel_closing",
+                Method::POST,
+                format!("payments/shifts/{identifier}/closing/cancel"),
+            ),
+            (
+                "payments_shift_confirm_closing",
+                Method::POST,
+                format!("payments/shifts/{identifier}/closing/confirm"),
+            ),
+            (
+                "payments_shift_closure",
+                Method::GET,
+                format!("payments/shifts/{identifier}/closure"),
+            ),
+            (
+                "payments_shift_comment_closure",
+                Method::POST,
+                format!("payments/shifts/{identifier}/closure/comments"),
+            ),
+            (
+                "payments_cash_report",
+                Method::GET,
+                format!("payments/cash-reports/{identifier}"),
+            ),
+            (
+                "payments_save_denomination",
+                Method::PATCH,
+                format!("payments/cash/denominations/{identifier}"),
+            ),
+            (
+                "payments_save_category",
+                Method::PATCH,
+                format!("payments/cash/expense-categories/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        for (operation, method, path) in [
+            ("payments_shifts", Method::GET, "payments/shifts"),
+            (
+                "payments_cash_catalog",
+                Method::GET,
+                "payments/cash/catalog",
+            ),
+            (
+                "payments_cash_registers",
+                Method::GET,
+                "payments/cash/registers",
+            ),
+            (
+                "payments_create_denomination",
+                Method::POST,
+                "payments/cash/denominations",
+            ),
+            (
+                "payments_create_category",
+                Method::POST,
+                "payments/cash/expense-categories",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        assert!(route("payments_shift_delete", Some(identifier)).is_err());
+        assert!(route("payments_shift_reopen", Some(identifier)).is_err());
     }
 
     #[test]

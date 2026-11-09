@@ -1,0 +1,108 @@
+package payments
+
+import (
+	"strings"
+)
+
+// cashRoute resuelve las rutas de administración de caja (etapa 7) bajo /api/v1/payments/. Cada
+// ruta lleva como máximo un identificador, como exige el puente nativo: los registros
+// relacionados (la operación que se corrige, por ejemplo) viajan en el cuerpo. El permiso de la
+// ruta se comprueba antes de cualquier lectura con bloqueo o escritura; los permisos que dependen
+// del caso (autorizaciones, otras cajas, historial) se resuelven dentro de la acción, también
+// antes de escribir.
+func cashRoute(method string, parts []string) *route {
+	length := len(parts)
+	switch {
+	case length == 1 && parts[0] == "shifts" && method == "GET":
+		return &route{permissionHistoryRead, true, (*service).listShifts}
+	case length == 2 && parts[0] == "shifts" && parts[1] != "current" && method == "GET":
+		return &route{permissionShiftsRead, true, (*service).readShiftDetail}
+	case length == 2 && parts[0] == "cash-reports" && method == "GET":
+		return &route{permissionShiftsRead, true, (*service).readReport}
+	case length >= 2 && parts[0] == "cash":
+		return cashSettingsRoute(method, parts)
+	case length >= 3 && parts[0] == "shifts":
+		return shiftActionRoute(method, strings.Join(parts[2:], "/"))
+	}
+	return nil
+}
+
+// cashSettingsRoute atiende el catálogo de caja y las cajas con su turno activo.
+func cashSettingsRoute(method string, parts []string) *route {
+	resource := parts[1]
+	if len(parts) == 2 {
+		switch {
+		case resource == "catalog" && method == "GET":
+			return &route{"payments.read", true, (*service).readCashCatalog}
+		case resource == "registers" && method == "GET":
+			return &route{permissionShiftsRead, true, (*service).listCashRegisters}
+		case resource == "denominations" && method == "POST":
+			return &route{permissionCashSettings, false, (*service).createDenomination}
+		case resource == "expense-categories" && method == "POST":
+			return &route{permissionCashSettings, false, (*service).createExpenseCategory}
+		}
+		return nil
+	}
+	if len(parts) == 3 && method == "PATCH" {
+		switch resource {
+		case "denominations":
+			return &route{permissionCashSettings, false, (*service).updateDenomination}
+		case "expense-categories":
+			return &route{permissionCashSettings, false, (*service).updateExpenseCategory}
+		}
+	}
+	return nil
+}
+
+// shiftActionRoute atiende las acciones sobre un turno: payments/shifts/{id}/<acción>.
+func shiftActionRoute(method, action string) *route {
+	if method == "GET" {
+		switch action {
+		case "operations":
+			return &route{permissionMovementsRead, true, (*service).shiftOperations}
+		case "closing":
+			return &route{permissionCounts, true, (*service).readClosing}
+		case "closure":
+			return &route{permissionShiftsRead, true, (*service).readClosure}
+		}
+		return nil
+	}
+	if method == "PUT" && action == "closing/count" {
+		return &route{permissionCounts, false, (*service).saveClosingCount}
+	}
+	if method != "POST" {
+		return nil
+	}
+	switch action {
+	case "income":
+		return &route{permissionIncome, false, (*service).recordIncome}
+	case "withdrawals":
+		return &route{permissionWithdrawals, false, (*service).recordWithdrawal}
+	case "expenses":
+		return &route{permissionExpenses, false, (*service).recordExpense}
+	case "corrections":
+		return &route{permissionCorrections, false, (*service).correctCashOperation}
+	case "partial-cuts":
+		return &route{permissionPartialCuts, false, (*service).createPartialCut}
+	case "closing":
+		return &route{permissionCounts, false, (*service).startClosing}
+	case "closing/cancel":
+		return &route{permissionCounts, false, (*service).cancelClosing}
+	case "closing/confirm":
+		return &route{permissionClose, false, (*service).confirmClosing}
+	case "closure/comments":
+		return &route{permissionClosuresReview, false, (*service).commentClosure}
+	}
+	return nil
+}
+
+// cashIdentifier devuelve el identificador de la ruta que debe validarse como UUID, si existe.
+func cashIdentifier(parts []string) (string, bool) {
+	switch {
+	case len(parts) > 1 && parts[0] == "cash-reports":
+		return parts[1], true
+	case len(parts) > 2 && parts[0] == "cash":
+		return parts[2], true
+	}
+	return "", false
+}

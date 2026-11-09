@@ -93,6 +93,12 @@ func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, dev
 }
 
 func allowed(scope string, permissions []string) bool {
+	// Los eventos de caja (etapa 7) solo informan qué turno cambió, sin importes. Los reciben
+	// quienes consultan turnos y quienes cobran (payments.read), para que una terminal sepa de
+	// inmediato que la caja entró en arqueo o se cerró.
+	if scope == "cash" {
+		return slices.Contains(permissions, "cash.shifts.read") || slices.Contains(permissions, "payments.read")
+	}
 	required := map[string]string{
 		"restaurant":    "accounts.read",
 		"takeaway":      "takeaway.read",
