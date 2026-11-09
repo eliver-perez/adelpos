@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { checkCashShift } from './cash-flow';
 import { configureKitchen, checkPreparation } from './kitchen-flow';
 import {
   checkDineInPayment,
@@ -379,6 +380,10 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await panelAccounts.getByRole('button', { name: 'Cuenta #2', exact: true }).click();
   await expect(tablePanel.getByRole('heading', { name: 'Cuenta #2', exact: true })).toBeVisible();
   await tablePanel.getByRole('button', { name: 'Capturar', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
+  // Etapa 7 (fase B): turno por denominaciones, ingreso, retiro, corte parcial, arqueo ciego que
+  // bloquea el cobro y cierre con faltante. Luego el cobro abre un turno nuevo en la misma caja.
+  await checkCashShift(page, testInfo);
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
   await checkDineInPayment(page);
   await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();

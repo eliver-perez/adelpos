@@ -3740,3 +3740,225 @@ summary {
     min-height: 420px;
   }
 }
+
+/* Administración de caja (etapa 7, fase B). Tokens de tema, objetivos táctiles ≥ 44 px y
+   distribuciones fluidas: la captura y el teclado se apilan en ventanas angostas. */
+.cash-page {
+  width: 100%;
+  min-width: 0;
+}
+.cash-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.cash-panel-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cash-panel-header h3,
+.cash-panel-header h4 {
+  font-size: 15px;
+  font-weight: 650;
+}
+.cash-closing-banner {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 2px solid var(--warning);
+  border-radius: 14px;
+  background: var(--banner);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.cash-closing-banner strong {
+  color: var(--warning);
+  font-size: 15px;
+}
+.cash-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+.cash-actions button,
+.cash-choice-grid button {
+  display: grid;
+  gap: 2px;
+  align-content: center;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+.cash-actions .cash-choice-selected,
+.cash-choice-grid .cash-choice-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cash-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 8px;
+}
+.cash-capture {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 18px;
+  align-items: start;
+}
+.cash-capture-fields,
+.cash-capture-keypad {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.cash-capture-keypad {
+  position: sticky;
+  top: 12px;
+}
+@media (max-width: 960px) {
+  .cash-capture {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cash-capture-keypad {
+    position: static;
+  }
+}
+.denomination-count {
+  display: grid;
+  gap: 14px;
+}
+.denomination-group {
+  display: grid;
+  gap: 8px;
+}
+.denomination-group legend {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.denomination-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.denomination-field {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+  font-size: 12px;
+}
+.denomination-field-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.denomination-field input {
+  min-height: 44px;
+  font-size: 18px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.denomination-amount {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.cash-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+.cash-figures > div {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+  font-size: 12px;
+}
+.cash-figures strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.cash-table {
+  border: 1px solid var(--border);
+}
+.cash-table-caption {
+  padding: 10px 18px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+  background: var(--subtle);
+}
+.cash-row-selected td {
+  background: var(--accent-soft);
+}
+.cash-self-authorized,
+.cash-terminology {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.cash-warning,
+.cash-retry-rejected,
+.cash-exceptional {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--warning);
+  border-radius: 12px;
+  background: var(--banner);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.cash-count-lines {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+  list-style: disc;
+  font-size: 13px;
+}
+.cash-detail-list {
+  display: grid;
+  gap: 2px;
+}
+.cash-state-closing,
+.cash-result-short strong {
+  color: var(--warning);
+}
+.cash-result-over strong,
+.cash-result-even strong {
+  color: var(--accent);
+}
+.cash-report {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+/* La apertura reutilizada en Caja aprovecha el ancho sin estirar el teclado numérico. */
+.cash-panel .checkout-shift .numeric-keypad {
+  width: min(100%, 520px);
+}

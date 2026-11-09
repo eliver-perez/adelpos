@@ -230,8 +230,8 @@ export function ShiftOverview({
         </p>
       )}
       <p className="muted text-xs">
-        La apertura del turno se realiza desde la pantalla de cobro. Cortes y cierres de caja
-        pertenecen a la siguiente etapa.
+        La apertura del turno se realiza desde el cobro o desde la pantalla «Caja», donde también se
+        registran ingresos, retiros, gastos, cortes parciales, el arqueo y el cierre.
       </p>
     </div>
   );

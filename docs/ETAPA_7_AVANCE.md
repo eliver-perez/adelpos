@@ -102,3 +102,59 @@ Implementada sobre el diseño aprobado. Detalle funcional en [CASH_SHIFTS_AND_RE
 | Playwright                                                    | Recorrido existente aprobado en Chromium y WebKit.                                                                                                                                           |
 
 Las suites se repitieron de forma independiente sobre la copia sincronizada con el mismo resultado (sin fallos; Playwright `1 passed` en Chromium y WebKit). Commit local en `etapa-7`.
+
+## Fase B · Interfaz de administración de caja
+
+Implementada sobre el backend de la fase A. Detalle funcional en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md) («Interfaz (fase B)») y contratos de las rutas nuevas en [API_CONTRACTS.md](../API_CONTRACTS.md). Sin impresión, cajón, tope ni cableado SSE del ámbito `cash` (fase C). La 0008 no se modificó ni se aplicó a la instalación real.
+
+### Pantallas
+
+- **Caja** (`desktop/src/pages/cash/`, id `cash`, permiso `cash.shifts.read`) en la navegación y como pantalla de inicio (Go la acepta en `administration/preferences.go`). Secciones según permisos: Operación, Movimientos, Historial, Reportes y Configuración.
+- **Operación**: caja seleccionada (la de la terminal; otras con `cash.shifts.read_all`), estado, responsable, apertura y fecha comercial del turno, aviso «Cierre en curso» (quién, cuándo y desde qué terminal), apertura ampliada, ingreso, retiro, gasto, corte parcial, arqueo y cierre; las correcciones y regularizaciones se abren desde el detalle del movimiento.
+- **Movimientos**: cobros, devoluciones y reversos junto con las operaciones de efectivo, filtros por turno, tipo y usuario, detalle sin identificadores internos.
+- **Historial**: filtros por caja, fechas comerciales, estado y página; detalle con apertura, cierre, responsables, totales, cortes parciales y definitivo, movimientos, regularizaciones enlazadas y comentarios del supervisor; diferencias solo si Go las entrega.
+- **Reportes**: resumen en vivo del turno actual y cierres recientes.
+- **Configuración**: denominaciones (activar, desactivar, agregar) y categorías de gasto (crear, renombrar, activar, ordenar por posiciones).
+- **Apertura ampliada** compartida por el cobro y Caja (`checkout/ShiftOpening.tsx` + `useShiftOpening.ts`): por total o por denominaciones, fondo en dólares y tipo de cambio solo con `usd_cash`, observaciones.
+- **Cobro y devolución**: envían `shift_id`; los reintentos rechazados con `SHIFT_CLOSING`, `SHIFT_CLOSED` o `SHIFT_CHANGED` se explican y el pendiente se descarta.
+
+### Rutas nuevas (solo lectura)
+
+- `POST payments/cash/count-preview`: vista previa del conteo con `evaluateCount` (la misma del arqueo y de la apertura), sin escribir; `payments.read` más `cash.shifts.open` (apertura) o `cash.counts.perform` y acceso al turno (arqueo).
+- `GET payments/shifts/{id}/summary`: resumen en vivo con `readShiftTotals` y lo ocurrido desde el último corte; esperado y efectivo físico por moneda solo si `expectedVisible`; ciego durante el arqueo.
+- Ambas en la lista cerrada de `desktop/src-tauri/src/api.rs` (formato que lee `native-driver.ts`) y en la prueba Rust `cash_routes_are_closed_and_keep_write_methods`.
+
+### Decisiones menores y desviaciones
+
+1. **Resumen durante el arqueo**: además del esperado, omite los totales (`blind: true`). La regla pedía solo el esperado; se eligió lo más conservador porque el neto en efectivo del turno, con el fondo y las operaciones, permite deducirlo.
+2. **Efectivo recibido y entregado por moneda** (`physical`) solo con `cash.expected.read` y fuera del arqueo, con el mismo criterio que `by_currency` de los movimientos (fase A).
+3. **Vista previa del conteo** con permiso base `payments.read` (el del catálogo) y el permiso propio dentro de la acción; se admite durante el arqueo porque solo devuelve lo declarado.
+4. **Defecto de la fase A corregido**: el catálogo de denominaciones se ordenaba como texto (500, 50, 200, 20, 1000…) porque `ORDER BY value` tomaba la columna de salida `value::text`. Se calificó con la tabla en `payments/cash_settings.go` y se agregó la prueba C26. No cambia esquema ni datos.
+5. **Apertura por denominaciones**: envía los totales que calculó Go en la vista previa como fondo y el desglose como `count`; Go vuelve a validar la coincidencia. No ofrece importe adicional en la apertura (sí en el arqueo).
+6. **Borrador del arqueo**: guardado automático 0.9 s después del último cambio, con una sola petición en vuelo (almacén de pendientes). Un sondeo solo adopta revisiones mayores y sin cambios locales; tras `COUNT_CHANGED` el guardado automático se detiene hasta que el cajero pulsa «Guardar mi conteo» (su captura sustituye la de la otra terminal de forma explícita).
+7. **Correcciones** solo desde el detalle de una operación de la caja de la terminal, en su turno abierto (corrección) o como regularización si el turno original está cerrado. Los cobros se siguen corrigiendo desde el cobro de la cuenta.
+8. **Cobro**: `SHIFT_CLOSED` se muestra en el aviso general de cobros y devoluciones (antes solo en correcciones) y `SHIFT_CLOSED`/`SHIFT_CHANGED` vuelven a consultar el turno.
+9. **Componentes compartidos**: `NumericKeypad` admite `integer` (desactiva el punto para cantidades); `ShiftRateCapture` pasó a su propio archivo; las fechas comerciales se muestran como dd/mm/aaaa.
+10. **Playwright**: el recorrido de caja se ejecuta antes del cobro de la mesa y cierra su turno; el recorrido de cobro existente abre después un turno nuevo en la misma caja. El recorrido de caja no captura tipo de cambio para no provocar la confirmación por diferencia del siguiente turno.
+
+### Limitaciones de la fase B
+
+- Sin cableado SSE del ámbito `cash`, impresión de comprobantes y cortes, cajón ni tope (fase C); la interfaz se actualiza por sondeo y por la invalidación general existente.
+- Un pendiente incierto de un turno que luego se cierra queda guardado con la clave de ese turno y no se muestra en Caja (su reintento sería rechazado sin duplicar).
+- Lo tecleado en el arqueo durante los 0.9 s previos al guardado automático se pierde si se cierra el proceso.
+- Verificado en Chromium y WebKit con el puente de pruebas; ventana nativa, pantalla táctil física y Keychain no verificados.
+- `config/product.json` sigue en 0.6.2 y esquema 7 hasta la fase D.
+
+### Verificación (entorno aislado: copia del repositorio, clúster temporal 55499, Go temporal 8183)
+
+| Suite                                                         | Resultado                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prettier, gofmt, cargo fmt, `sync-metadata --check`, `go vet` | Aprobados (`go vet` también con `-tags=integration`).                                                                                                                                                                                          |
+| `go test -race ./...` (unitarias)                             | `ok` en todos los paquetes con pruebas (incluye la pantalla `cash` como inicio en `administration`).                                                                                                                                           |
+| Integración PostgreSQL (`-race -tags=integration`)            | `ok` en `database`, `administration`, `catalog`, `operations` y `payments`; en `operations`, `TestRestaurantAcceptance` incluye C26–C30 (orden del catálogo, vista previa sin escritura, resumen con y sin permiso, ciego en arqueo, cerrado). |
+| Vitest                                                        | 29 archivos, 161 pruebas aprobadas (nuevas: `pages/cash/opening`, `operations`, `closing`, `history` y dos casos en `checkout/checkout.test.tsx`).                                                                                             |
+| `tsc --noEmit`, `npm run build`                               | Aprobados.                                                                                                                                                                                                                                     |
+| `cargo test --locked --offline`                               | 13 aprobadas, 1 ignorada (la prueba de rutas de caja incluye las dos operaciones nuevas).                                                                                                                                                      |
+| Playwright                                                    | `1 passed` en Chromium y en WebKit: recorrido existente más `e2e/cash-flow.ts` (apertura por denominaciones, ingreso y retiro autoautorizado, corte parcial, arqueo que bloquea el cobro, conteo, cierre con faltante e historial).            |
+
+Las capturas de Playwright (claro y oscuro, 1280 × 720 y 1920 × 1080) se revisaron; mostraron el orden de texto de las denominaciones (decisión 4) y una puntuación doble tras las horas, ambos corregidos antes de la verificación final. Las suites se repitieron de forma independiente sobre la copia sincronizada con el mismo resultado (Vitest 161 aprobadas, integración sin fallos, Playwright `1 passed` en Chromium y WebKit). Commit local en `etapa-7`.

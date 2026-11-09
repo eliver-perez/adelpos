@@ -1,0 +1,233 @@
+import { expect } from '@playwright/test';
+import type { Locator, Page, TestInfo } from '@playwright/test';
+
+// Recorrido de caja de la etapa 7 (fase B) contra Go y PostgreSQL reales: apertura por
+// denominaciones, ingreso y retiro autoautorizado, corte parcial, arqueo ciego que pausa el cobro
+// y cierre con faltante. Todas las cifras que se verifican las calcula Go; la interfaz solo las
+// muestra. El administrador tiene todos los permisos, por lo que su propio permiso autoriza el
+// retiro y ve el esperado y las diferencias después del cierre.
+
+async function typeOnKeypad(keypad: Locator, digits: string) {
+  for (const digit of digits) {
+    const name = digit === '.' ? 'Punto decimal' : digit;
+    await keypad.getByRole('button', { name, exact: true }).click();
+  }
+}
+
+// Sin desplazamiento horizontal en tema claro y oscuro, con capturas para la revisión visual.
+async function cashThemes(page: Page, testInfo: TestInfo, name: string) {
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((value) => {
+        document.documentElement.dataset.theme = value;
+      }, theme);
+      await page.waitForTimeout(300);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+      await page.screenshot({
+        path: testInfo.outputPath(`${name}-${theme}-${size.width}x${size.height}.png`),
+      });
+    }
+  }
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'light';
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
+
+function cashActions(page: Page) {
+  return page.getByRole('group', { name: 'Acciones del turno' });
+}
+
+// 1. Apertura por denominaciones: 2 × $200 + 1 × $100; Go calcula el fondo de $500.00.
+async function openByDenominations(page: Page, testInfo: TestInfo) {
+  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  const opening = page.getByRole('region', { name: 'Turno de caja', exact: true });
+  await expect(opening).toContainText('No hay un turno abierto en Caja 1');
+  await opening.getByRole('button', { name: 'Por denominaciones', exact: true }).click();
+  const keypad = opening.getByRole('group', { name: 'Teclado numérico del conteo' });
+  const twoHundred = opening.getByLabel('Billetes de $200', { exact: true });
+  await twoHundred.click();
+  await typeOnKeypad(keypad, '2');
+  await opening.getByLabel('Billetes de $100', { exact: true }).click();
+  await typeOnKeypad(keypad, '1');
+  await expect(twoHundred).toHaveValue('2');
+  const box = await twoHundred.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await expect(opening.getByLabel('Importe de Billetes de $200', { exact: true })).toHaveText(
+    '$400.00',
+  );
+  await expect(opening.getByLabel('Fondo contado', { exact: true })).toContainText('$500.00');
+  await cashThemes(page, testInfo, 'cash-opening');
+  await opening
+    .getByRole('button', { name: 'Abrir turno con fondo de $500.00', exact: true })
+    .click();
+  const status = page.getByLabel('Turno de Caja 1', { exact: true });
+  await expect(status).toContainText('Abierto');
+  await expect(status).toContainText('$500.00');
+}
+
+// 2. Ingreso de $100 y retiro de $200 autoautorizado por el permiso del administrador.
+async function incomeAndWithdrawal(page: Page) {
+  await cashActions(page).getByRole('button', { name: 'Ingreso', exact: true }).click();
+  const income = page.getByRole('region', { name: 'Ingreso de efectivo', exact: true });
+  await income.getByRole('button', { name: 'Aportación adicional al fondo', exact: true }).click();
+  await typeOnKeypad(income.getByRole('group', { name: 'Teclado numérico del importe' }), '100');
+  await income.getByRole('button', { name: 'Registrar ingreso $100', exact: true }).click();
+  await expect(
+    income.getByText('Ingreso registrado: $100.00 · Aportación adicional al fondo'),
+  ).toBeVisible();
+
+  await cashActions(page).getByRole('button', { name: 'Retiro de efectivo', exact: true }).click();
+  const withdrawal = page.getByRole('region', { name: 'Retiro de efectivo', exact: true });
+  await withdrawal.getByRole('button', { name: 'Resguardo', exact: true }).click();
+  await typeOnKeypad(
+    withdrawal.getByRole('group', { name: 'Teclado numérico del importe' }),
+    '200',
+  );
+  // §0-B: con su propio permiso no se pide una segunda contraseña.
+  await expect(withdrawal.getByText(/Autorización propia/)).toBeVisible();
+  await expect(withdrawal.getByLabel('Contraseña del supervisor')).toHaveCount(0);
+  await withdrawal.getByRole('button', { name: 'Registrar retiro $200', exact: true }).click();
+  await expect(withdrawal.getByText('Retiro registrado: $200.00 · Resguardo')).toBeVisible();
+  await expect(
+    withdrawal.getByText('Autorizado con el permiso propio de Administrador'),
+  ).toBeVisible();
+}
+
+// 3. Corte parcial: informe que no mueve dinero; con permiso, Go entrega el esperado ($400.00).
+async function partialCut(page: Page) {
+  await cashActions(page).getByRole('button', { name: 'Corte parcial', exact: true }).click();
+  const cut = page.getByRole('region', { name: 'Corte parcial', exact: true });
+  await expect(cut).toContainText('no mueve dinero');
+  await expect(cut.getByRole('button', { name: 'Retirar efectivo', exact: true })).toBeVisible();
+  await cut.getByRole('button', { name: 'Generar corte parcial', exact: true }).click();
+  const report = cut.getByRole('article', { name: 'Corte parcial #1', exact: true });
+  await expect(report).toBeVisible();
+  await expect(report.getByLabel('Efectivo esperado en caja', { exact: true })).toContainText(
+    '$400.00',
+  );
+  await expect(report).toContainText('$200.00');
+}
+
+// 4. Arqueo: se confirma la pausa y el cobro de la cuenta queda bloqueado con el mensaje de Go.
+async function startClosingAndCheckCheckout(page: Page) {
+  await cashActions(page).getByRole('button', { name: 'Arqueo y cierre', exact: true }).click();
+  await page
+    .getByRole('region', { name: 'Arqueo de cierre', exact: true })
+    .getByRole('button', { name: 'Iniciar arqueo de cierre', exact: true })
+    .click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('quedará pausada');
+  await dialog
+    .getByRole('button', { name: 'Iniciar arqueo y pausar la caja', exact: true })
+    .click();
+  const banner = page.getByRole('status', { name: 'Cierre en curso', exact: true });
+  await expect(banner).toContainText('Arqueo iniciado por Administrador');
+  await expect(banner).toContainText('WebView temporal');
+  await expect(
+    page.getByRole('region', { name: 'Arqueo de cierre en curso', exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
+  await bill.getByRole('button', { name: 'Cobrar · $150.00', exact: true }).click();
+  const shift = page.getByRole('region', { name: 'Turno de caja', exact: true });
+  await expect(shift).toContainText('La caja Caja 1 está en arqueo de cierre');
+  await expect(shift.getByRole('button', { name: /^Abrir turno/ })).toHaveCount(0);
+  await expect(
+    page
+      .getByRole('group', { name: 'Métodos de pago disponibles' })
+      .getByRole('button', { name: 'Efectivo', exact: true }),
+  ).toBeDisabled();
+  await page.getByRole('button', { name: 'Volver a la cuenta', exact: true }).first().click();
+}
+
+// 5. Conteo ciego (1 × $200 + 1 × $100 = $300.00 declarados), confirmación y resultado con el
+// faltante de $100.00 que calcula Go frente a los $400.00 esperados.
+async function countAndClose(page: Page, testInfo: TestInfo) {
+  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  const closing = page.getByRole('region', { name: 'Arqueo de cierre en curso', exact: true });
+  await expect(closing).toBeVisible();
+  const keypad = closing.getByRole('group', { name: 'Teclado numérico del arqueo' });
+  await closing.getByLabel('Billetes de $200', { exact: true }).click();
+  await typeOnKeypad(keypad, '1');
+  await closing.getByLabel('Billetes de $100', { exact: true }).click();
+  await typeOnKeypad(keypad, '1');
+  await expect(closing.getByLabel('Total declarado', { exact: true })).toContainText('$300.00');
+  // El borrador se guarda solo en el servidor (sobrevive a la navegación y al cierre de la app).
+  await expect(closing.getByText(/Cambios sin guardar/)).toHaveCount(0);
+  await expect(closing.getByText(/Borrador guardado en el servidor/)).toBeVisible();
+  // Captura ciega: ninguna cifra del esperado ni de diferencias en la pantalla del arqueo.
+  const cashPage = page.locator('.cash-page');
+  await expect(cashPage.getByText(/Efectivo esperado/)).toHaveCount(0);
+  await expect(cashPage.getByText(/Diferencia/)).toHaveCount(0);
+  await expect(cashPage.getByText('$400.00')).toHaveCount(0);
+  await cashThemes(page, testInfo, 'cash-closing');
+  const confirm = closing.getByRole('button', { name: 'Confirmar cierre del turno', exact: true });
+  const bounds = await confirm.boundingBox();
+  expect(bounds!.height).toBeGreaterThanOrEqual(44);
+  await confirm.click();
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('$300.00');
+  await dialog.getByRole('button', { name: 'Cerrar el turno', exact: true }).click();
+
+  const result = page.getByRole('region', { name: 'Resultado del cierre', exact: true });
+  await expect(result).toContainText('quedó cerrado');
+  await expect(result.getByLabel('Efectivo declarado', { exact: true })).toContainText('$300.00');
+  await expect(result.getByLabel('Efectivo esperado en caja', { exact: true })).toContainText(
+    '$400.00',
+  );
+  const differences = result.getByLabel('Diferencias del arqueo', { exact: true });
+  await expect(differences).toContainText('Diferencia en pesos · Faltante');
+  await expect(differences).toContainText('−$100.00');
+  await cashThemes(page, testInfo, 'cash-closure');
+  await page.getByRole('button', { name: 'Volver a la caja', exact: true }).click();
+  await expect(page.getByText('No hay un turno abierto en Caja 1.', { exact: true })).toBeVisible();
+}
+
+// 6. Movimientos, historial y reportes del turno cerrado, con las cifras de Go.
+async function reviewClosedShift(page: Page) {
+  const sections = page.getByRole('tablist', { name: 'Secciones de caja' });
+  await sections.getByRole('tab', { name: 'Movimientos', exact: true }).click();
+  // El nombre accesible de un <select> dentro de su etiqueta incluye la opción elegida.
+  const chooser = page.getByRole('combobox', { name: /^Turno/ });
+  await expect(chooser).toHaveValue('');
+  const closedOption = chooser.locator('option', { hasText: 'Cerrado' }).first();
+  await chooser.selectOption({ value: (await closedOption.getAttribute('value'))! });
+  const table = page.locator('.cash-page table').first();
+  await expect(table).toContainText('Aportación adicional al fondo');
+  await expect(table).toContainText('Resguardo');
+  await expect(table).toContainText('Salida');
+
+  await sections.getByRole('tab', { name: 'Historial', exact: true }).click();
+  const closedRow = page.locator('.cash-page tbody tr', { hasText: 'Faltante' }).first();
+  await expect(closedRow).toContainText('$300.00');
+  await expect(closedRow).toContainText('−$100.00 · Faltante');
+  await closedRow.getByRole('button', { name: /^Detalle del turno de Caja 1/ }).click();
+  await expect(
+    page.getByRole('region', { name: 'Resultado del cierre', exact: true }),
+  ).toContainText('quedó cerrado');
+  await page.getByRole('button', { name: 'Volver al historial', exact: true }).click();
+
+  await sections.getByRole('tab', { name: 'Reportes', exact: true }).click();
+  await expect(page.getByText('La caja no tiene un turno activo.', { exact: true })).toBeVisible();
+  await sections.getByRole('tab', { name: 'Operación', exact: true }).click();
+}
+
+// Recorrido completo; termina en Restaurante con la cuenta lista para el recorrido de cobro, que
+// abre un turno nuevo en la misma caja.
+export async function checkCashShift(page: Page, testInfo: TestInfo) {
+  await openByDenominations(page, testInfo);
+  await incomeAndWithdrawal(page);
+  await partialCut(page);
+  await startClosingAndCheckCheckout(page);
+  await countAndClose(page, testInfo);
+  await reviewClosedShift(page);
+  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+}

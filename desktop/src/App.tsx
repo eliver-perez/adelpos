@@ -20,6 +20,7 @@ import {
   screens,
 } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
+import { CashPage } from './pages/cash/CashPage';
 import { PendingOperationsProvider } from './hooks/pendingOperations';
 import { RegistersPage } from './pages/RegistersPage';
 import { RolesPage } from './pages/RolesPage';
@@ -168,6 +169,14 @@ function ApplicationContent() {
         return <RegistersPage can={can} />;
       case 'payments':
         return <PaymentsAdminPage can={can} timezone={identity.establishment.timezone} />;
+      case 'cash':
+        return (
+          <CashPage
+            can={can}
+            userID={identity.user.id}
+            timezone={identity.establishment.timezone}
+          />
+        );
       case 'sessions':
         return <SessionsPage can={can} />;
       case 'settings':

@@ -392,6 +392,45 @@ describe('pantalla de cobro', () => {
     expect(requests('payments_pay')).toHaveLength(1);
   });
 
+  it('el cobro envía el turno que muestra la terminal (shift_id)', async () => {
+    render(<Checkout />);
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    fireEvent.click(registerButton());
+    await waitFor(() => expect(requests('payments_pay')).toHaveLength(1));
+    const sent = requests('payments_pay')[0]?.[1] as { body: Record<string, unknown> };
+    expect(sent.body.shift_id).toBe('shift');
+    // La vista previa solo calcula: no necesita el turno.
+    const preview = requests('payments_preview')[0]?.[1] as { body: Record<string, unknown> };
+    expect(preview.body).not.toHaveProperty('shift_id');
+  });
+
+  it('un reintento rechazado con SHIFT_CLOSING explica que no se duplicó', async () => {
+    payHandler = async () => {
+      throw 'No se pudo conectar con el servidor.';
+    };
+    render(<Checkout />);
+    await chooseCash();
+    await waitFor(() => expect(registerButton().disabled).toBe(false));
+    fireEvent.click(registerButton());
+    await screen.findByText(/No se pudo confirmar el resultado del pago/);
+    payHandler = async () => ({
+      status: 409,
+      body: {
+        error: {
+          code: 'SHIFT_CLOSING',
+          message: 'La caja Caja 1 está en arqueo de cierre (lo inició Supervisora).',
+        },
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    const notice = await screen.findByText(/no se registró ni se duplicó/);
+    expect(notice.textContent).toContain('La caja Caja 1 está en arqueo de cierre');
+    expect(
+      screen.queryByRole('button', { name: 'Reintentar con el mismo identificador' }),
+    ).toBeNull();
+  });
+
   it('muestra el conflicto de cobro y el saldo real tras BALANCE_CHANGED', async () => {
     payHandler = async () => {
       balance = '120.00';

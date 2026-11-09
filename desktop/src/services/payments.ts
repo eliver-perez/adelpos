@@ -259,6 +259,8 @@ export interface PaymentInput {
   expected_balance?: string;
   print?: boolean;
   deliver?: boolean;
+  // Turno que mostraba la terminal al registrar (etapa 7); forma parte de la huella.
+  shift_id?: string;
 }
 
 export interface SelectedUnit {
@@ -448,6 +450,8 @@ export interface RefundInput {
   reference?: string;
   reason?: string;
   authorization?: AuthorizationInput;
+  // Turno que mostraba la terminal al registrar la devolución (etapa 7).
+  shift_id?: string;
 }
 
 export interface RefundPart {
@@ -863,12 +867,15 @@ export const refreshCodes = [
 ];
 
 // Códigos que exigen revisar o abrir el turno de la caja de la terminal. SHIFT_CLOSING indica que
-// la caja está pausada por el arqueo de cierre (etapa 7).
+// la caja está pausada por el arqueo de cierre; SHIFT_CLOSED y SHIFT_CHANGED, que el turno que
+// mostraba la terminal ya se cerró o fue sustituido (etapa 7).
 export const shiftCodes = [
   'SHIFT_REQUIRED',
   'REGISTER_REQUIRED',
   'SHIFT_NOT_SHARED',
   'SHIFT_CLOSING',
+  'SHIFT_CLOSED',
+  'SHIFT_CHANGED',
   'USD_RATE_REQUIRED',
   'FEATURE_DISABLED',
 ];

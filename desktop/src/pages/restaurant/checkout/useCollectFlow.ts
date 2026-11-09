@@ -68,6 +68,7 @@ export function useCollectFlow({
   reloadFinance,
   reloadShift,
   dollarState = { enabled: false, rate: null },
+  shiftID = null,
 }: {
   accountID: string;
   finance: Finance | null;
@@ -81,6 +82,9 @@ export function useCollectFlow({
   reloadFinance: () => Promise<void>;
   reloadShift: () => Promise<void>;
   dollarState?: DollarState;
+  // Turno que muestra la terminal (etapa 7): viaja en el cobro y forma parte de la huella, de modo
+  // que un reintento sobre un turno pausado o cerrado se rechaza en lugar de caer en otro.
+  shiftID?: string | null;
 }) {
   const [capture, setCapture] = useState<CaptureState>(() => initialCapture(initialDeliver));
   const [lastResult, setLastResult] = useState<PaymentResult | null>(null);
@@ -192,15 +196,16 @@ export function useCollectFlow({
     setLastResult(null);
     setDeliverRequested(deliverEnabled);
     try {
-      await mutation.execute<PaymentResult>('payments_pay', {
-        id: accountID,
-        body: {
-          ...registerInput(previewInput, plan, finance, {
-            print: printEnabled,
-            deliver: deliverEnabled,
-          }),
-        },
-      });
+      const body: Record<string, unknown> = {
+        ...registerInput(previewInput, plan, finance, {
+          print: printEnabled,
+          deliver: deliverEnabled,
+        }),
+      };
+      if (shiftID) {
+        body.shift_id = shiftID;
+      }
+      await mutation.execute<PaymentResult>('payments_pay', { id: accountID, body });
     } catch (problem) {
       if (!(problem instanceof APIError)) {
         return;

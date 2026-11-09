@@ -15,9 +15,11 @@ import (
 
 const denominationColumns = `SELECT id,currency,value::text,kind,active,revision,updated_at FROM app.cash_denominations`
 
-// listDenominations devuelve el catálogo ordenado por moneda, billetes antes que monedas y valor.
+// listDenominations devuelve el catálogo ordenado por moneda, billetes antes que monedas y valor
+// descendente. El valor se califica con la tabla: sin calificar, ORDER BY usaría la columna de
+// salida value::text y ordenaría como texto (500, 50, 200, 20…).
 func (handler *service) listDenominations() ([]Denomination, error) {
-	rows, err := handler.tx.Query(handler.ctx, denominationColumns+" ORDER BY currency,kind,value DESC")
+	rows, err := handler.tx.Query(handler.ctx, denominationColumns+" ORDER BY currency,kind,cash_denominations.value DESC")
 	if err != nil {
 		return nil, err
 	}

@@ -63,16 +63,19 @@ export function NumericKeypad({
   label = 'Teclado numérico',
   captureKeyboard = false,
   disabled = false,
+  integer = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   label?: string;
   captureKeyboard?: boolean;
   disabled?: boolean;
+  // Cantidades enteras (por ejemplo, billetes contados): el punto decimal queda desactivado.
+  integer?: boolean;
 }) {
   // La referencia evita reinstalar el oyente del teclado físico en cada pulsación.
-  const latest = useRef({ value, onChange });
-  latest.current = { value, onChange };
+  const latest = useRef({ value, onChange, integer });
+  latest.current = { value, onChange, integer };
 
   useEffect(() => {
     if (!captureKeyboard || disabled) {
@@ -86,7 +89,7 @@ export function NumericKeypad({
         return;
       }
       const key = physicalAmountKey(event.key);
-      if (!key) {
+      if (!key || (latest.current.integer && key === '.')) {
         return;
       }
       event.preventDefault();
@@ -100,6 +103,9 @@ export function NumericKeypad({
   }, [captureKeyboard, disabled]);
 
   function press(key: AmountKey) {
+    if (integer && key === '.') {
+      return;
+    }
     const next = applyAmountKey(value, key);
     if (next !== value) {
       onChange(next);
@@ -120,7 +126,7 @@ export function NumericKeypad({
           key={definition.key}
           className={`numeric-key ${definition.className ?? ''}`}
           aria-label={definition.name}
-          disabled={disabled}
+          disabled={disabled || (integer && definition.key === '.')}
           onClick={() => press(definition.key)}
         >
           {definition.label}

@@ -36,6 +36,10 @@ func cashSettingsRoute(method string, parts []string) *route {
 			return &route{"payments.read", true, (*service).readCashCatalog}
 		case resource == "registers" && method == "GET":
 			return &route{permissionShiftsRead, true, (*service).listCashRegisters}
+		case resource == "count-preview" && method == "POST":
+			// Vista previa del conteo (fase B): solo calcula. El permiso propio de la apertura o del
+			// arqueo se comprueba dentro de la acción, según el conteo.
+			return &route{"payments.read", true, (*service).previewCount}
 		case resource == "denominations" && method == "POST":
 			return &route{permissionCashSettings, false, (*service).createDenomination}
 		case resource == "expense-categories" && method == "POST":
@@ -64,6 +68,8 @@ func shiftActionRoute(method, action string) *route {
 			return &route{permissionCounts, true, (*service).readClosing}
 		case "closure":
 			return &route{permissionShiftsRead, true, (*service).readClosure}
+		case "summary":
+			return &route{permissionShiftsRead, true, (*service).shiftSummary}
 		}
 		return nil
 	}

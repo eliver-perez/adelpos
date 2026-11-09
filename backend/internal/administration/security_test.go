@@ -24,6 +24,10 @@ func TestHomeScreenFallsBackWhenPermissionIsMissing(t *testing.T) {
 	if allowedHome("users", []string{"users.read"}) != "users" {
 		t.Fatal("No se respetó una pantalla permitida")
 	}
+	// Etapa 7: la pantalla «Caja» se admite como inicio con el permiso de consultar turnos.
+	if allowedHome("cash", []string{"cash.shifts.read"}) != "cash" || allowedHome("cash", []string{"payments.read"}) != "status" {
+		t.Fatal("La pantalla de caja no respeta su permiso como pantalla de inicio")
+	}
 }
 
 func TestLegacyPreviewHomeOpensCatalog(t *testing.T) {
