@@ -264,13 +264,13 @@ Sobre el árbol 0.7.0 en el entorno aislado (copia del repositorio, clúster tem
 
 Detalle en [VERIFICATION.md](VERIFICATION.md).
 
-### Procedimiento para aplicar la 0008 a la instalación real (en espera de autorización)
+### Procedimiento para aplicar la 0008 a la instalación real
 
-La instalación real sigue en 0.6.2 y esquema 7, con su servidor en ejecución. **No se ha modificado.** Con autorización expresa del propietario, desde la rama `etapa-7`:
+Propuesto al cierre de la fase D, con la instalación real en 0.6.2 y esquema 7 sin modificar. El propietario lo autorizó y se ejecutó el 9 de noviembre de 2026 (ver «Aplicación en la instalación real»). Con autorización expresa del propietario, desde la rama `etapa-7`:
 
 1. **Preparar.** Cerrar AD-EL POS en todas las terminales, sin cobros ni arqueos en curso. `./scripts/dev.sh status` confirma el servidor 0.6.2 en 8181.
 2. **Respaldar.** `./scripts/dev.sh backup` genera `backups/adel_pos-<fecha>.dump` y lo comprueba con `pg_restore --list`.
-3. **Ensayar la restauración.** `python3 scripts/restore-check.py backups/NOMBRE.dump` restaura en una base temporal, compara los conteos de todas las tablas (78 en esquema 7) y escribe `.local/stage8-restore-verification.json`. Si no coinciden, se detiene el procedimiento.
+3. **Ensayar la restauración.** `python3 scripts/restore-check.py backups/NOMBRE.dump` restaura en una base temporal, compara los conteos de todas las tablas (79 en esquema 7) y escribe `.local/stage8-restore-verification.json`. Si no coinciden, se detiene el procedimiento.
 4. **Detener.** `./scripts/dev.sh server-stop`, de forma ordenada.
 5. **Migrar.** `./scripts/dev.sh migrate` compila el servidor 0.7.0 y aplica la 0008 en una sola transacción. Resultado esperado `applied:1`; una segunda ejecución debe dar `applied:0`. Si falla, la transacción no deja cambios.
 6. **Arrancar.** `./scripts/dev.sh server-start`.
@@ -300,9 +300,28 @@ Mientras no se autorice, **no** ejecutar `migrate`, `server-start` ni `build-mac
 - `migrate` aplicaría la 0008 sin el respaldo previo.
 - `server-start` arrancaría un servidor 0.7.0 que vería el esquema 7 como incompatible (readiness 503).
 
+### Aplicación en la instalación real
+
+9 de noviembre de 2026, con autorización del propietario («Autorizo aplicar la 0008 con el procedimiento del punto 18»), desde `etapa-7` y con la aplicación cerrada:
+
+- **Preparación.** La comprobación de solo lectura previa encontró: migraciones 1–7, sin turnos, 1 caja, 0 pagos, 5 cuentas y 94 permisos.
+- **Respaldo y ensayo.**
+  - Respaldo `backups/adel_pos-20261109T184542Z-fb3ebf.dump`.
+  - `restore-check.py`: 79 tablas con conteos idénticos.
+  - El procedimiento decía 78, el número del esquema 6 antes de la 0007; el criterio de conteos idénticos se cumplió.
+- **Migración.** `server-stop` ordenado; `migrate` → `applied:1`; la repetición → `applied:0`.
+- **Arranque.** `server-start` inició el 0.7.0: readiness 200, esquema compatible y versión 0.7.0 con esquema 8.
+- **Comprobación de solo lectura posterior.**
+  - Mismos conteos de datos.
+  - 113 permisos: los 19 nuevos solo en el administrador; los demás roles sin cambios.
+  - `cash_limit` y `usd_cash` desactivadas.
+  - Denominaciones (12 MXN, 6 USD) y 4 categorías de gasto.
+  - Ningún dato de caja ficticio.
+- **Aplicación.** `build-macos` (`.app` 0.7.0) y `open-app`: la aplicación se inició y el servidor respondió 200.
+- **Inmutabilidad.** La 0008 es ahora inmutable; la siguiente ampliación requiere 0009.
+
 ### Limitaciones finales
 
 Las de [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md) («Limitaciones reales»). Además:
 
-- La 0008 no está aplicada en la instalación real.
 - No se verificó en la ventana nativa, con pantalla táctil física, con dos terminales nativas ni con impresoras o cajón reales.

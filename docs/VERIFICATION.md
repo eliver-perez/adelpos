@@ -2,7 +2,7 @@
 
 Ejecución del **9 de noviembre de 2026**, zona America/Monterrey. Versión **0.7.0**, API v1, esquema **8** (migración `0008_cash_shifts_and_reconciliation.sql`). Evidencia anterior: [etapa 6.2](VERIFICATION_STAGE6_2.md), [etapa 6.1](VERIFICATION_STAGE6_1.md), [etapa 6](VERIFICATION_STAGE6.md), [etapa 5](VERIFICATION_STAGE5.md), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance: [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Guía: [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md).
 
-**Las pruebas no tocaron la instalación real.** La 0008 **no se aplicó** a la instalación real, que sigue en 0.6.2 y esquema 7 con su servidor en ejecución; aplicarla requiere la autorización del propietario (procedimiento en el avance, «Fase D»). No se leyeron secretos de `.local` ni del Keychain, y ninguna prueba envió trabajos a CUPS, a una impresora ni a una conexión TCP.
+**Las pruebas no tocaron la instalación real.** Después, con autorización del propietario, se aplicó la 0008 y se instaló la 0.7.0 (ver «Instalación en la instalación real»). No se leyeron secretos de `.local` ni del Keychain, y ninguna prueba envió trabajos a CUPS, a una impresora ni a una conexión TCP.
 
 ## Entorno aislado
 
@@ -38,10 +38,32 @@ Recorrido Playwright `e2e/cash-flow.ts` (además de las comprobaciones de etapas
 
 ## No ejecutado o no verificado
 
-- **Migración 0008 en la instalación real**: pendiente de autorización del propietario.
 - Ventana nativa Tauri (WKWebView), pantalla táctil física, Keychain real y dos terminales nativas simultáneas.
 - Impresión física de comprobantes y cortes (papel y corte) y pulso físico del cajón con una impresora ESC/POS real: solo adaptador controlado y prueba unitaria de los bytes (`ESC p m 25 250`). Una impresora por CUPS no puede abrir el cajón.
 - Actualización en tiempo real entre dos terminales reales: verificada con la API de eventos (integración), Vitest y el puente de pruebas.
+
+## Instalación en la instalación real
+
+9 de noviembre de 2026, con autorización del propietario, desde la rama `etapa-7`, con la aplicación cerrada:
+
+1. **Preparación.** El servidor 0.6.2 estaba listo con esquema 7. La comprobación de solo lectura previa encontró: migraciones 1–7, sin turnos, 1 caja, 0 pagos, 5 cuentas y 94 permisos (todos en el administrador).
+2. **Respaldo.** `backup` generó `backups/adel_pos-20261109T184542Z-fb3ebf.dump`, con el catálogo legible.
+3. **Ensayo de restauración.** `restore-check.py` restauró el respaldo en una base temporal: **79 tablas con conteos idénticos** (`.local/stage8-restore-verification.json`).
+4. **Detención.** `server-stop` detuvo el servidor de forma ordenada.
+5. **Migración.** `migrate` → `applied:1`; la repetición → `applied:0`.
+6. **Arranque.** `server-start` inició el servidor 0.7.0.
+   - Readiness 200, con PostgreSQL disponible y esquema compatible.
+   - `GET /api/v1/version` informa 0.7.0 y esquema 8.
+7. **Comprobación de solo lectura posterior.** Transacción de solo lectura con los ayudantes del proyecto, sin imprimir credenciales.
+   - Migraciones 1–8.
+   - Mismos conteos de cajas, turnos, pagos, devoluciones, movimientos y cuentas.
+   - 113 permisos: los 19 `cash.*` nuevos solo en el administrador; cajero, finanzas y supervisor sin cambios.
+   - `cash_limit` y `usd_cash` desactivadas y sin tope configurado.
+   - Denominaciones: 12 en pesos y 6 en dólares; 4 categorías de gasto.
+   - Ninguna operación de efectivo, corte, cierre, cajón ni documento de caja.
+8. **Aplicación.** `build-macos` generó el `.app` 0.7.0 (9.48 MiB) y `open-app` lo inició.
+   - El servidor lo atendió con 28 respuestas 200 y dos 401 al arrancar (el registro no guarda la ruta).
+   - No se recorrió la caja en la ventana nativa.
 
 ## Repetir las comprobaciones
 
