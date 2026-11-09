@@ -236,3 +236,73 @@ Implementada sobre las fases A y B. Detalle funcional en [CASH_SHIFTS_AND_RECONC
 | Playwright                                                    | `1 passed` en Chromium y en WebKit: recorrido existente más vista previa del corte parcial y del corte definitivo y tope activado (aviso visible) y desactivado (sin aviso) en `e2e/cash-flow.ts`; capturas en claro y oscuro revisadas. |
 
 La prueba física opt-in (`TestControlledCUPSPrinter`) se omitió como siempre: ninguna suite envió trabajos a CUPS, a una impresora ni a una conexión TCP. Las capturas mostraron importes `$0` en sumas vacías de los totales (defecto de las fases A y B, decisión 8), corregido antes de la verificación final. Verificación independiente de la coordinación de la etapa sobre la copia sincronizada con el ajuste de la decisión 10: estáticas aprobadas; `go test -race` `ok` en los doce paquetes con pruebas; integración `ok` en `database`, `administration`, `catalog`, `operations` (106 s), `payments` y `kitchen`; Vitest 175/175 en 30 archivos; `tsc` y `build` correctos; Rust 14 aprobadas y 1 ignorada; Playwright `1 passed` en Chromium y en WebKit.
+
+## Fase D · Regresiones, documentación y entrega
+
+### Versionado y documentación
+
+- Versión **0.7.0** y `schema_version: 8` en `config/product.json`, con `sync-metadata` (metadatos de Go y del escritorio, `tauri.conf.json`, `package.json`, `Cargo.toml`) y la entrada raíz de `Cargo.lock` actualizada a mano.
+- Actualizados `CLAUDE.md` (estado de la etapa 7, decisiones vigentes, estructura, riesgos y reglas del esquema), `AGENTS.md` (reglas permanentes desde la etapa 7), `README.md`, `ARCHITECTURE.md`, `API_CONTRACTS.md`, `NEXT_STEPS_FOR_SOL.md`, `DEVELOPMENT_MACOS.md`, `docs/PAYMENTS_AND_REFUNDS.md` (integración con la caja), `docs/KITCHEN_AND_PRINTING.md` y `docs/CASH_SHIFTS_AND_RECONCILIATION.md` (movimientos por moneda, reglas de concurrencia, pruebas y limitaciones). La verificación de la etapa 6.2 quedó archivada en `docs/VERIFICATION_STAGE6_2.md` y la nueva [VERIFICATION.md](VERIFICATION.md) registra solo lo ejecutado.
+
+### Corrección de la fase D
+
+Guardar el tope de caja con la función `cash_limit` desactivada respondía `FEATURE_DISABLED` con el mensaje del pago en dólares. Ahora explica que el tope está desactivado y dónde activarlo; el código de error no cambia.
+
+### Regresión final
+
+Sobre el árbol 0.7.0 en el entorno aislado (copia del repositorio, clúster temporal 55499, Go temporal 8183), todo aprobado:
+
+- estáticas y metadatos;
+- `go vet`, con y sin `integration`;
+- `go test -race`: `ok` en los doce paquetes con pruebas;
+- integración PostgreSQL: `ok` en `database`, `administration`, `catalog`, `operations` (106 s), `payments` y `kitchen`;
+- Vitest: 175 pruebas en 30 archivos;
+- `tsc` y `build`;
+- Rust: 14 aprobadas y 1 ignorada (Keychain real, opt-in);
+- Playwright: `1 passed` en Chromium y en WebKit;
+- `.app` 0.7.0 arm64 de 9.48 MiB, compilado en un destino temporal.
+
+Detalle en [VERIFICATION.md](VERIFICATION.md).
+
+### Procedimiento para aplicar la 0008 a la instalación real (en espera de autorización)
+
+La instalación real sigue en 0.6.2 y esquema 7, con su servidor en ejecución. **No se ha modificado.** Con autorización expresa del propietario, desde la rama `etapa-7`:
+
+1. **Preparar.** Cerrar AD-EL POS en todas las terminales, sin cobros ni arqueos en curso. `./scripts/dev.sh status` confirma el servidor 0.6.2 en 8181.
+2. **Respaldar.** `./scripts/dev.sh backup` genera `backups/adel_pos-<fecha>.dump` y lo comprueba con `pg_restore --list`.
+3. **Ensayar la restauración.** `python3 scripts/restore-check.py backups/NOMBRE.dump` restaura en una base temporal, compara los conteos de todas las tablas (78 en esquema 7) y escribe `.local/stage8-restore-verification.json`. Si no coinciden, se detiene el procedimiento.
+4. **Detener.** `./scripts/dev.sh server-stop`, de forma ordenada.
+5. **Migrar.** `./scripts/dev.sh migrate` compila el servidor 0.7.0 y aplica la 0008 en una sola transacción. Resultado esperado `applied:1`; una segunda ejecución debe dar `applied:0`. Si falla, la transacción no deja cambios.
+6. **Arrancar.** `./scripts/dev.sh server-start`.
+   - `GET http://127.0.0.1:8181/api/v1/health/ready` debe responder 200, con PostgreSQL disponible y esquema compatible.
+   - `GET /api/v1/version` debe indicar 0.7.0 y esquema 8.
+7. **Comprobar.** Comprobaciones de solo lectura, desde la aplicación:
+   - Los turnos existentes conservan su estado (un turno abierto sigue abierto y se cierra con el arqueo nuevo).
+   - La función «Tope de efectivo en caja» está desactivada.
+   - El rol administrador tiene los diecinueve permisos `cash.*` nuevos.
+   - Ningún otro rol cambió.
+8. **Instalar la aplicación.** `./scripts/dev.sh build-macos` y `./scripts/dev.sh open-app`.
+
+Efectos de la 0008 sobre los datos existentes:
+
+- **No toca registros históricos.** No modifica pagos, devoluciones ni movimientos.
+- **Turnos anteriores.** La fecha comercial se deriva al consultarlos.
+- **Semillas.** Siembra las denominaciones habituales, cuatro categorías de gasto y `cash_limit` desactivada.
+- **Sin datos ficticios.** No crea turnos ni operaciones.
+
+Vuelta atrás:
+
+- **Antes del paso 5:** basta `server-start` desde `main` (0.6.2).
+- **Después de aplicarla:** solo con indicación del propietario, restaurar el respaldo del paso 2 con la aplicación cerrada y volver a la 0.6.2.
+
+Mientras no se autorice, **no** ejecutar `migrate`, `server-start` ni `build-macos` sobre la instalación real desde `etapa-7`:
+
+- `migrate` aplicaría la 0008 sin el respaldo previo.
+- `server-start` arrancaría un servidor 0.7.0 que vería el esquema 7 como incompatible (readiness 503).
+
+### Limitaciones finales
+
+Las de [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md) («Limitaciones reales»). Además:
+
+- La 0008 no está aplicada en la instalación real.
+- No se verificó en la ventana nativa, con pantalla táctil física, con dos terminales nativas ni con impresoras o cajón reales.

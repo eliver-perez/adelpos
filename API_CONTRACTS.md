@@ -1,4 +1,4 @@
-# API v1 · Etapa 5
+# API v1 · Etapa 7
 
 Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 
