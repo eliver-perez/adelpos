@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Field, Notice, PageTitle } from '../../components/Forms';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { CatalogRecord } from './CatalogRecord';
 import { useResource } from '../../hooks/useResource';
 import { api } from '../../services/api';
@@ -22,6 +23,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
   const [draft, setDraft] = useState<CatalogDocument | null>(null);
   const [savedDraft, setSavedDraft] = useState('');
   const [error, setError] = useState('');
+  const { confirm, dialog } = useConfirmDialog();
   const resource = tab === 'combos' ? 'products' : tab;
   const lookup = useResource<Lookups>('catalog_lookups');
   const query: Record<string, string> = { search, active, page: String(page), page_size: '20' };
@@ -37,19 +39,27 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
     (tab !== 'combos' || can('catalog.products.manage')) &&
     (!commercial || (can('catalog.prices.read') && can('catalog.prices.manage')));
 
-  function closeEditor() {
-    if (
-      draft &&
-      JSON.stringify(draft) !== savedDraft &&
-      !window.confirm('Tienes cambios sin guardar. ¿Descartarlos?')
-    )
-      return false;
+  // Cierra el editor actual. Con cambios sin guardar pregunta dentro de la aplicación: el WebView
+  // nativo no muestra window.confirm y lo resolvía como «no», por lo que «Volver al listado»
+  // parecía no responder.
+  async function closeEditor(): Promise<boolean> {
+    if (draft && JSON.stringify(draft) !== savedDraft) {
+      const discard = await confirm({
+        title: 'Cambios sin guardar',
+        message: 'Este registro tiene cambios que aún no se guardan. ¿Quieres descartarlos?',
+        confirmLabel: 'Descartar cambios',
+        cancelLabel: 'Seguir editando',
+      });
+      if (!discard) {
+        return false;
+      }
+    }
     setDraft(null);
     return true;
   }
 
   async function openEditor(id: string) {
-    if (!closeEditor()) return;
+    if (!(await closeEditor())) return;
     setError('');
     try {
       const record = await api<CatalogDocument>(catalogOperation(resource, 'get_'), { id });
@@ -101,13 +111,11 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
           <button
             className="primary-button"
             disabled={!lookup.data}
-            onClick={() => {
-              if (!closeEditor()) return;
-              const record = newCatalogDocument(
-                resource,
-                tab === 'combos',
-                category || lookup.data?.categories[0]?.id || '',
-              );
+            onClick={async () => {
+              if (!(await closeEditor())) return;
+              // La categoría solo se propone si el listado está filtrado por una; si no, el
+              // selector inicia vacío y exige una elección explícita.
+              const record = newCatalogDocument(resource, tab === 'combos', category);
               setDraft(record);
               setSavedDraft(JSON.stringify(record));
             }}
@@ -123,8 +131,8 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             role="tab"
             aria-selected={tab === item.id}
             className={tab === item.id ? 'tab-active' : ''}
-            onClick={() => {
-              if (!closeEditor()) return;
+            onClick={async () => {
+              if (!(await closeEditor())) return;
               setTab(item.id);
               setPage(1);
               setSearch('');
@@ -144,7 +152,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
                 {draft.id ? `Revisión ${draft.revision}` : 'Se guardará al confirmar'}
               </p>
             </div>
-            <button className="secondary-button" onClick={() => closeEditor()}>
+            <button type="button" className="secondary-button" onClick={() => void closeEditor()}>
               Volver al listado
             </button>
           </div>
@@ -315,6 +323,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
           </section>
         </>
       )}
+      {dialog}
     </>
   );
 }

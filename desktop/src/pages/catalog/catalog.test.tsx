@@ -143,8 +143,13 @@ describe('catálogo y personalización', () => {
     render(<CatalogPage can={() => true} />);
     await screen.findByText('Aún no hay registros');
     fireEvent.click(screen.getByRole('tab', { name: 'Categorías' }));
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Categorías' }).getAttribute('aria-selected')).toBe(
+        'true',
+      ),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Crear registro' }));
-    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Bebidas' } });
+    fireEvent.change(await screen.findByLabelText('Nombre'), { target: { value: 'Bebidas' } });
     fireEvent.click(screen.getByRole('button', { name: 'Crear registro' }));
     await waitFor(() =>
       expect(native.invoke).toHaveBeenCalledWith(

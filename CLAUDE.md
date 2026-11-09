@@ -296,17 +296,17 @@ Al iniciar cada etapa, antes de diseñar:
 
 Archivos de referencia por tema:
 
-| Tema | Archivos en `PoS/` |
-| --- | --- |
-| Captura de pedidos | `CapturaOrden.cs`, `Seleccionar_Producto.cs`, `ArticuloLista.cs` |
-| Mesas y punto de venta | `PuntoDeVenta.cs`, `AsignarMesa.cs`, `Pedidos.cs` |
-| Cobros | `PagarEfectivo.cs`, `PagarTarjeta.cs`, `PagoParcial.cs`, `PagoDivisa.cs`, `SeleccionaTipoPago.cs` |
-| Descuentos y cargos | `CapturaDescuento.cs`, `CapturaExtra.cs` |
-| División de cuentas | `DividirCuenta.cs` |
-| Caja y cortes | `IniciarCorte.cs`, `CorteParcial.cs`, `CerrarCorte.cs`, `Cortes.cs`, `Egresos.cs` |
-| Inventario y compras | `Inventario.cs`, `Entrada_Inventario.cs`, `AjusteInventario.cs`, `Control_Inventario.cs`, `Composicion.cs`, `Proveedores.cs` |
-| Reportes | `RegistroVentas.cs`, `RegistroEgresos.cs`, `RegistroCanceladas.cs`, `DetallesVenta.cs` |
-| Licencia y equipos | `Activacion.cs`, `License.cs`, `Registro_Equipo.cs` |
+| Tema                   | Archivos en `PoS/`                                                                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Captura de pedidos     | `CapturaOrden.cs`, `Seleccionar_Producto.cs`, `ArticuloLista.cs`                                                             |
+| Mesas y punto de venta | `PuntoDeVenta.cs`, `AsignarMesa.cs`, `Pedidos.cs`                                                                            |
+| Cobros                 | `PagarEfectivo.cs`, `PagarTarjeta.cs`, `PagoParcial.cs`, `PagoDivisa.cs`, `SeleccionaTipoPago.cs`                            |
+| Descuentos y cargos    | `CapturaDescuento.cs`, `CapturaExtra.cs`                                                                                     |
+| División de cuentas    | `DividirCuenta.cs`                                                                                                           |
+| Caja y cortes          | `IniciarCorte.cs`, `CorteParcial.cs`, `CerrarCorte.cs`, `Cortes.cs`, `Egresos.cs`                                            |
+| Inventario y compras   | `Inventario.cs`, `Entrada_Inventario.cs`, `AjusteInventario.cs`, `Control_Inventario.cs`, `Composicion.cs`, `Proveedores.cs` |
+| Reportes               | `RegistroVentas.cs`, `RegistroEgresos.cs`, `RegistroCanceladas.cs`, `DetallesVenta.cs`                                       |
+| Licencia y equipos     | `Activacion.cs`, `License.cs`, `Registro_Equipo.cs`                                                                          |
 
 Funciones del sistema anterior ya identificadas:
 

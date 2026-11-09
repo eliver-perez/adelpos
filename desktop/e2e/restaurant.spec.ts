@@ -24,8 +24,20 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByRole('button', { name: 'Guardar área', exact: true }).click();
   await page.getByRole('button', { name: 'Crear mesa', exact: true }).click();
   await page.getByLabel('Nombre o número de mesa', { exact: true }).fill('Mesa 1');
+  // Etapa 6.1 §1.1: una mesa redonda de 100 × 100 debe dibujarse como círculo en cualquier ventana.
+  await page.getByRole('combobox', { name: /^Forma/ }).selectOption('round');
+  await page.getByLabel('Alto', { exact: true }).fill('100');
   await page.getByRole('button', { name: 'Guardar mesa', exact: true }).click();
   await expect(page.getByRole('button', { name: /Mesa 1, Libre/ })).toBeVisible();
+  for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 1024, height: 768 },
+    { width: 1280, height: 720 },
+  ]) {
+    await page.setViewportSize(size);
+    const box = await page.getByRole('button', { name: /Mesa 1, Libre/ }).boundingBox();
+    expect(Math.abs(box!.width - box!.height)).toBeLessThanOrEqual(1.5);
+  }
   await page.getByRole('button', { name: /Mesa 1, Libre/ }).focus();
   await page.keyboard.press('ArrowRight');
   await page.getByRole('button', { name: 'Guardar distribución', exact: true }).click();

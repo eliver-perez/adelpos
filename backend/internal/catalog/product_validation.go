@@ -122,6 +122,33 @@ func validateBindings(ctx context.Context, tx pgx.Tx, bindings []ProductGroup) e
 	return nil
 }
 
+// validateSlotOriginal exige un producto original explícito, distinto del propio combo, y lo
+// incorpora como alternativa implícita cuando no viene en la lista. «Productos permitidos y
+// sustituciones» solo agrega alternativas: el original no necesita una fila propia. Se agrega sin
+// cargo de sustitución ni tramos; si las cantidades originales superan las cubiertas, la regla de
+// tramos explícitos de abajo sigue exigiéndolos. Los combos guardados ya contienen al original
+// entre sus opciones, por lo que su configuración no cambia.
+func validateSlotOriginal(product *Product, slot *ComboSlot) error {
+	if slot.DefaultProductID == "" {
+		return invalid("Elige el producto original de cada componente del combo.")
+	}
+	if product.ID != "" && slot.DefaultProductID == product.ID {
+		return invalid("Un combo no puede contenerse a sí mismo.")
+	}
+	for _, option := range slot.Options {
+		if option.ProductID == slot.DefaultProductID {
+			return nil
+		}
+	}
+	original := ComboOption{
+		ProductID:         slot.DefaultProductID,
+		SubstitutionPrice: "0.00",
+		Tiers:             []QuantityTier{},
+	}
+	slot.Options = append([]ComboOption{original}, slot.Options...)
+	return nil
+}
+
 func validateSlots(ctx context.Context, tx pgx.Tx, product *Product) error {
 	if product.Kind == "combo" && len(product.Slots) == 0 {
 		return invalid("Un combo necesita al menos un componente que reutilice un producto existente.")
@@ -143,8 +170,11 @@ func validateSlots(ctx context.Context, tx pgx.Tx, product *Product) error {
 			return invalid("Revisa el nombre, identidad y límites del componente de combo.")
 		}
 		seen[slot.ID] = true
-		if len(slot.Options) < 1 || len(slot.Options) > 30 {
-			return invalid("Cada componente requiere de 1 a 30 productos permitidos.")
+		if err := validateSlotOriginal(product, slot); err != nil {
+			return err
+		}
+		if len(slot.Options) > 30 {
+			return invalid("Cada componente admite hasta 30 productos, incluido el original.")
 		}
 		defaultAllowed := false
 		allowed := map[string]bool{}

@@ -25,13 +25,13 @@ Este documento vive en el repositorio. Si la conversación se compacta, vuelve a
 
 ### Trabajo por fases
 
-| Fase | Contenido |
-| ---- | --------- |
-| **A** | Errores (§1). |
-| **B** | Mejoras de formularios y configuración (§2). |
+| Fase  | Contenido                                                                        |
+| ----- | -------------------------------------------------------------------------------- |
+| **A** | Errores (§1).                                                                    |
+| **B** | Mejoras de formularios y configuración (§2).                                     |
 | **C** | Funciones activables, IVA por producto y pago en dólares, con su migración (§3). |
-| **D** | Rediseño de la captura de pedidos (§4). |
-| **E** | Regresiones completas, documentación y entrega final (§5 y §6). |
+| **D** | Rediseño de la captura de pedidos (§4).                                          |
+| **E** | Regresiones completas, documentación y entrega final (§5 y §6).                  |
 
 **Al terminar cada fase:**
 
@@ -125,7 +125,7 @@ Hoy, después de crear una mesa, el formulario se queda editando esa mesa y hay 
 En lugar de capturar un número de orden, el usuario elige la posición:
 
 - «Al inicio».
-- «Después de *Desayunos*», «Después de *Bebidas*», etc., con los registros existentes en su orden actual.
+- «Después de _Desayunos_», «Después de _Bebidas_», etc., con los registros existentes en su orden actual.
 - Al editar, la opción actual aparece seleccionada.
 
 Internamente puede seguir guardándose un número; la interfaz y Go se encargan de reacomodar. Aplícalo en **todos los catálogos que tienen orden visual**. La operación de reordenar debe ser transaccional y concurrente-segura.

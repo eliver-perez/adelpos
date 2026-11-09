@@ -1,9 +1,17 @@
 import { Accordion } from '../Accordion';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { Field, Notice } from '../Forms';
+import { Field } from '../Forms';
 import { api } from '../../services/api';
 import type { QuantityTier, Schedule } from '../../services/catalog';
+import {
+  acceptDecimalText,
+  acceptIntegerText,
+  amountShape,
+  digitsFor,
+  quantityShape,
+} from '../../services/numericInput';
+import { OptionalDateField } from './DateField';
 
 export function TextField({
   label,
@@ -46,42 +54,77 @@ export function DecimalField({
   optional?: boolean;
   quantity?: boolean;
 }) {
+  const shape = quantity ? quantityShape : amountShape;
+  const current = value ?? '';
   return (
     <Field label={label} hint={optional ? 'Vacío: heredar o sin límite.' : undefined}>
       <input
+        type="text"
         inputMode="decimal"
-        value={value ?? ''}
+        autoComplete="off"
+        value={current}
         required={!optional}
         pattern={quantity ? '[0-9]+([.][0-9]{1,3})?' : '[0-9]+([.][0-9]{1,2})?'}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          // Los caracteres no válidos se descartan al teclear; Go vuelve a validar al guardar.
+          const next = acceptDecimalText(event.target.value, current, shape);
+          if (next !== current) {
+            onChange(next);
+          }
+        }}
       />
     </Field>
   );
 }
 
+// Entero capturado como texto (nunca type="number", hallazgo M2): solo dígitos y hasta el
+// máximo indicado. Mientras el campo está vacío no se emite ningún valor; al salir del campo
+// vacío se restaura el último valor válido.
 export function IntegerField({
   label,
   value,
   onChange,
   min = 0,
   max = 10000,
+  hint,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
   min?: number;
   max?: number;
+  hint?: string;
 }) {
+  const [text, setText] = useState(String(value));
+
+  useEffect(() => {
+    setText((current) => (current === '' || Number(current) !== value ? String(value) : current));
+  }, [value]);
+
+  const number = text === '' ? null : Number(text);
+  const outOfRange = number !== null && (number < min || number > max);
+
   return (
-    <Field label={label}>
+    <Field label={label} hint={outOfRange ? `Valor permitido: ${min} a ${max}.` : hint}>
       <input
-        type="number"
-        step="1"
-        min={min}
-        max={max}
-        value={value}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        value={text}
         required
-        onChange={(event) => onChange(Number(event.target.value))}
+        aria-invalid={outOfRange}
+        onChange={(event) => {
+          const next = acceptIntegerText(event.target.value, text, digitsFor(max));
+          setText(next);
+          if (next !== '' && Number(next) >= min && Number(next) <= max) {
+            onChange(Number(next));
+          }
+        }}
+        onBlur={() => {
+          if (text === '' || outOfRange) {
+            setText(String(value));
+          }
+        }}
       />
     </Field>
   );
@@ -117,14 +160,24 @@ export function ReferenceField({
   onChange: (value: string) => void;
   optional?: boolean;
 }) {
+  // Si el valor guardado no está entre las opciones (registro inactivo o excluido), el navegador
+  // mostraría la primera opción de la lista como si estuviera elegida. Se agrega una opción que
+  // describe el valor real para no aparentar una elección que el usuario no hizo.
+  const current = value ?? '';
+  const missing = current !== '' && !options.some((option) => option.id === current);
   return (
     <Field label={label}>
       <select
-        value={value ?? ''}
+        value={current}
         required={!optional}
         onChange={(event) => onChange(event.target.value)}
       >
         <option value="">{optional ? 'Sin asignar' : 'Selecciona…'}</option>
+        {missing && (
+          <option value={current} disabled>
+            Registro no disponible en esta lista
+          </option>
+        )}
         {options.map((option) => (
           <option key={option.id} value={option.id}>
             {option.name}
@@ -161,10 +214,13 @@ export function RepeatSection({
   );
 }
 
-export function RemoveButton({ onClick }: { onClick: () => void }) {
+// Botón para retirar un elemento repetible. Siempre indica qué retira («Quitar tramo»,
+// «Quitar componente»…): un «Quitar fila» genérico a todo lo ancho parecía una fila vacía del
+// bloque anterior.
+export function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" className="secondary-button" onClick={onClick}>
-      Quitar fila
+    <button type="button" className="secondary-button remove-button" onClick={onClick}>
+      {label}
     </button>
   );
 }
@@ -212,6 +268,7 @@ export function TierEditor({
             }
           />
           <RemoveButton
+            label="Quitar tramo"
             onClick={() => onChange(value.filter((_, position) => position !== index))}
           />
         </div>
@@ -238,15 +295,13 @@ export function ScheduleEditor({
         fin del día.
       </p>
       <div className="form-grid">
-        <TextField
+        <OptionalDateField
           label="Desde la fecha"
-          type="date"
           value={value.starts_on ?? ''}
           onChange={(starts_on) => onChange({ ...value, starts_on })}
         />
-        <TextField
+        <OptionalDateField
           label="Hasta la fecha (incluida)"
-          type="date"
           value={value.ends_on ?? ''}
           onChange={(ends_on) => onChange({ ...value, ends_on })}
         />
@@ -306,6 +361,7 @@ export function ScheduleEditor({
               }
             />
             <RemoveButton
+              label="Quitar intervalo"
               onClick={() =>
                 onChange({
                   ...value,
@@ -342,64 +398,5 @@ export function CatalogImage({ id }: { id: string | null }) {
     <span className="catalog-image catalog-placeholder" aria-label="Sin fotografía">
       ◇
     </span>
-  );
-}
-
-export function ImageEditor({
-  id,
-  onChange,
-}: {
-  id: string | null;
-  onChange: (id: string | null) => void;
-}) {
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  return (
-    <section className="catalog-section">
-      <h3>Imagen opcional</h3>
-      <div className="button-row">
-        <CatalogImage id={id} />
-        <Field label={busy ? 'Cargando…' : 'PNG o JPEG · hasta 1 MiB y 2048 × 2048'}>
-          <input
-            type="file"
-            accept="image/png,image/jpeg"
-            disabled={busy}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              setError('');
-              if (file.size > 1024 * 1024) {
-                setError('La imagen excede 1 MiB.');
-                return;
-              }
-              setBusy(true);
-              const reader = new FileReader();
-              reader.onload = () => {
-                const content = String(reader.result).split(',')[1];
-                void api<{ id: string }>('catalog_upload_image', {
-                  body: { content_base64: content },
-                })
-                  .then((result) => onChange(result.id))
-                  .catch((problem: unknown) =>
-                    setError(problem instanceof Error ? problem.message : 'No se pudo cargar.'),
-                  )
-                  .finally(() => setBusy(false));
-              };
-              reader.onerror = () => {
-                setError('No se pudo leer la imagen.');
-                setBusy(false);
-              };
-              reader.readAsDataURL(file);
-            }}
-          />
-        </Field>
-        {id && (
-          <button type="button" className="secondary-button" onClick={() => onChange(null)}>
-            Retirar imagen
-          </button>
-        )}
-      </div>
-      <Notice>{error}</Notice>
-    </section>
   );
 }
