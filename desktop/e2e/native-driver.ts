@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 
-const serverURL = 'http://127.0.0.1:8183';
+// Servidor Go temporal de la aceptación. Por omisión el puerto 8183; ADEL_BROWSER_SERVER_URL permite
+// ejecutar dos aceptaciones aisladas a la vez con servidores temporales en otros puertos locales.
+const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
 
 // Terminal temporal que este mismo proceso de Playwright configuró, por token de aprovisionamiento.
 // La aceptación corre con un solo worker: cuando varias especificaciones comparten la base temporal

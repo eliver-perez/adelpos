@@ -1,4 +1,6 @@
-// Package kitchen administra preparación y transportes de impresión sin registrar cobros ni inventario.
+// Package kitchen administra preparación y transportes de impresión sin registrar cobros. Del
+// inventario solo registra las solicitudes de consumo de cada liberación y cambio (etapa 8); el
+// cálculo lo hace el trabajador de inventario.
 package kitchen
 
 import (
@@ -105,6 +107,9 @@ type Part struct {
 	Ingredients []catalog.IngredientBreakdown `json:"ingredients"`
 	Groups      []catalog.GroupBreakdown      `json:"groups"`
 	Notes       string                        `json:"notes"`
+	// QuickNotes son las indicaciones rápidas resueltas de esta parte (etapa 8). Se omiten sin
+	// indicaciones: las tareas y documentos anteriores no cambian de forma.
+	QuickNotes []catalog.QuickNoteBreakdown `json:"quick_notes,omitempty"`
 }
 
 type Instructions struct {

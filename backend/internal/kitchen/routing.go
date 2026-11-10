@@ -147,6 +147,9 @@ func resolveRouting(ctx context.Context, tx pgx.Tx, breakdown catalog.ProductBre
 		}
 		part := Part{Path: path, ProductID: product.ProductID, Name: product.Name, Variant: variantName, Quantity: quantity,
 			Ingredients: preparationIngredients(product.Ingredients), Groups: preparationGroups(product.Groups, snapshot), Notes: product.Notes}
+		// Las indicaciones rápidas resueltas viajan con su parte para que la comanda imprima una
+		// sola vez la que ya cubre la línea estructurada de su ingrediente.
+		part.QuickNotes = product.QuickNotes
 		if path == "root" {
 			part.Notes = ""
 		}

@@ -166,6 +166,13 @@ func (engine *calculator) product(id string, variantID *string, customization Cu
 	if err != nil {
 		return nil, err
 	}
+	// Las indicaciones rápidas elegidas se validan contra los ingredientes ya calculados y se
+	// congelan en el desglose; no generan cargos propios (etapa 8).
+	quickNotes, err := resolveQuickNotes(snapshot.QuickNotes, product, customization.QuickNotes, result.Ingredients)
+	if err != nil {
+		return nil, err
+	}
+	result.QuickNotes = quickNotes
 	groupExtras, err := engine.groups(product, customization, result)
 	if err != nil {
 		return nil, err

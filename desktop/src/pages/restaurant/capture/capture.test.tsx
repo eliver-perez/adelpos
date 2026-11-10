@@ -850,8 +850,14 @@ describe('captura táctil de pedidos', () => {
     const saved = saves[saves.length - 1]!.body.items.find(
       (item) => item.product_id === ids.burger,
     );
-    // Se guardan como texto en las observaciones de la partida, igual que las escritas.
+    // Se guardan como texto en las observaciones de la partida, igual que las escritas, y desde la
+    // etapa 8 también con su identificador (sin efecto: no cambian ingredientes).
     expect(saved?.customization.notes).toBe('Sin cebolla, Bien cocida');
+    expect(saved?.customization.quick_notes).toEqual([
+      { note_id: lookups.category_quick_notes[1]!.id, text: 'Sin cebolla' },
+      { note_id: lookups.category_quick_notes[0]!.id, text: 'Bien cocida' },
+    ]);
+    expect(saved?.customization.ingredients).toEqual([]);
   });
 
   it('«Enviar a cocina» confirma con la huella vigente y queda desactivado sin productos nuevos', async () => {

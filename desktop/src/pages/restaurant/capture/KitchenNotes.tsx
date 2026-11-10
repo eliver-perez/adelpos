@@ -1,5 +1,8 @@
 import { useState } from 'react';
+import type { Customization } from '../../../services/catalog';
 import { joinNotes, splitNotes } from './captureRules';
+import { quickNoteSelected, toggleQuickNote, withoutNoteText } from './quickNoteRules';
+import type { QuickNoteOption } from './quickNoteRules';
 
 // Límite de Go para las observaciones de preparación de una partida.
 const maximumNotesLength = 500;
@@ -10,40 +13,50 @@ const maximumNotesLength = 500;
 // (sin repetir ninguna) y «Escribir otra», que abre un campo de texto (con el teclado virtual de
 // la terminal). Todas se guardan en el mismo campo de observaciones de la partida, separadas por
 // comas, sin cargo automático, y llegan a la comanda igual.
+//
+// Etapa 8: quickNotes son solo las aplicables al producto. Una indicación con efecto aplica al
+// tocarla la misma selección del personalizador (y quita la otra con efecto sobre el mismo
+// ingrediente); hiddenTexts son las de la categoría que no aplican, que tampoco se ofrecen como
+// atajo de texto.
 export function KitchenNotes({
   value,
   onChange,
   shortcuts,
   quickNotes = [],
+  hiddenTexts = [],
 }: {
-  value: string;
-  onChange: (value: string) => void;
+  value: Customization;
+  onChange: (value: Customization) => void;
   shortcuts: string[];
-  quickNotes?: string[];
+  quickNotes?: QuickNoteOption[];
+  hiddenTexts?: string[];
 }) {
   const [writing, setWriting] = useState(false);
   const [draft, setDraft] = useState('');
-  const current = splitNotes(value);
-  const others = current.filter((entry) => !quickNotes.includes(entry));
+  const current = splitNotes(value.notes);
+  const quickTexts = quickNotes.map((note) => note.text);
+  // Las indicaciones escritas o de otra partida que no son una indicación rápida elegida. El texto
+  // de una indicación con efecto sin elegir (por ejemplo, escrito a mano) sigue aquí: es solo
+  // texto y no cambia ingredientes.
+  const others = current.filter(
+    (entry) => !quickNotes.some((note) => note.text === entry && quickNoteSelected(value, note)),
+  );
   const suggestions = shortcuts.filter(
-    (entry) => !current.includes(entry) && !quickNotes.includes(entry),
+    (entry) =>
+      !current.includes(entry) && !quickTexts.includes(entry) && !hiddenTexts.includes(entry),
   );
   const next = joinNotes([...current, draft.trim()]);
   const valid = draft.trim().length > 0 && next.length <= maximumNotesLength;
 
   function add() {
     if (!valid) return;
-    onChange(next);
+    onChange({ ...value, notes: next });
     setDraft('');
     setWriting(false);
   }
 
-  function toggleQuickNote(entry: string) {
-    if (current.includes(entry)) {
-      onChange(joinNotes(current.filter((note) => note !== entry)));
-      return;
-    }
-    onChange(joinNotes([...current, entry]));
+  function fits(entry: string) {
+    return current.includes(entry) || joinNotes([...current, entry]).length <= maximumNotesLength;
   }
 
   return (
@@ -53,19 +66,20 @@ export function KitchenNotes({
         <span className="capture-block-rule">Sin cargo</span>
       </header>
       <div className="capture-choices">
-        {quickNotes.map((entry) => {
-          const selected = current.includes(entry);
+        {quickNotes.map((note) => {
+          const selected = quickNoteSelected(value, note);
           return (
             <button
               type="button"
-              key={`rapida-${entry}`}
+              key={`rapida-${note.id}`}
               className="capture-choice"
               aria-pressed={selected}
-              aria-label={selected ? `Quitar indicación ${entry}` : undefined}
-              disabled={!selected && joinNotes([...current, entry]).length > maximumNotesLength}
-              onClick={() => toggleQuickNote(entry)}
+              aria-label={selected ? `Quitar indicación ${note.text}` : undefined}
+              data-effect={note.effect}
+              disabled={!selected && !fits(note.text)}
+              onClick={() => onChange(toggleQuickNote(value, note, quickNotes))}
             >
-              <span>{entry}</span>
+              <span>{note.text}</span>
             </button>
           );
         })}
@@ -76,7 +90,7 @@ export function KitchenNotes({
             className="capture-choice"
             aria-pressed="true"
             aria-label={`Quitar indicación ${entry}`}
-            onClick={() => onChange(joinNotes(current.filter((note) => note !== entry)))}
+            onClick={() => onChange(withoutNoteText(value, entry))}
           >
             <span>{entry}</span>
           </button>
@@ -87,8 +101,8 @@ export function KitchenNotes({
             key={`atajo-${entry}`}
             className="capture-choice"
             aria-pressed="false"
-            disabled={joinNotes([...current, entry]).length > maximumNotesLength}
-            onClick={() => onChange(joinNotes([...current, entry]))}
+            disabled={!fits(entry)}
+            onClick={() => onChange({ ...value, notes: joinNotes([...current, entry]) })}
           >
             <span>{entry}</span>
           </button>

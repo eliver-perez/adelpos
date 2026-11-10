@@ -22,11 +22,13 @@ import { QuantityStepper } from '../../../components/QuantityStepper';
 import { positiveAmount } from './captureRules';
 import { GroupBlock, IngredientBlock, VariantBlock } from './CustomizationBlocks';
 import { KitchenNotes } from './KitchenNotes';
+import { applicableQuickNotes, reconcileQuickNotes } from './quickNoteRules';
 
 // Presentación táctil de la personalización. Reutiliza la configuración que entrega Go
 // (`catalog_configuration`) y las mismas reglas de selección que ProductCustomizer; solo cambia
-// la presentación: bloques con botones grandes en lugar de campos de formulario. Un componente de
-// combo ofrece las indicaciones rápidas de la categoría de su propio producto.
+// la presentación: bloques con botones grandes en lugar de campos de formulario. Cada nivel (el
+// producto y cada componente de combo) termina con sus indicaciones para cocina: las rápidas de
+// la categoría de su propio producto, con efecto solo si aplican a sus ingredientes (etapa 8).
 export function TouchCustomizer({
   productID,
   variantID,
@@ -62,6 +64,11 @@ export function TouchCustomizer({
     return <Notice>El combo supera el límite de profundidad.</Notice>;
   }
   const product = data.product;
+  const categoryNotes = quickNotesFor(lookups, productID);
+  const quickNotes = applicableQuickNotes(categoryNotes, product.ingredients);
+  const hiddenTexts = categoryNotes
+    .filter((note) => !quickNotes.some((option) => option.id === note.id))
+    .map((note) => note.text);
   return (
     <div className="capture-customizer">
       {depth === 0 && (product.description || product.image_id) && (
@@ -93,7 +100,12 @@ export function TouchCustomizer({
           />
         );
       })}
-      <IngredientBlock product={product} value={value} onChange={onChange} lookups={lookups} />
+      <IngredientBlock
+        product={product}
+        value={value}
+        onChange={(next) => onChange(reconcileQuickNotes(next, quickNotes, product.ingredients))}
+        lookups={lookups}
+      />
       {product.slots.map((slot) => (
         <ComboComponentBlock
           key={slot.id}
@@ -106,14 +118,13 @@ export function TouchCustomizer({
           depth={depth}
         />
       ))}
-      {depth > 0 && (
-        <KitchenNotes
-          value={value.notes}
-          onChange={(notes) => onChange({ ...value, notes })}
-          shortcuts={noteShortcuts}
-          quickNotes={quickNotesFor(lookups, productID)}
-        />
-      )}
+      <KitchenNotes
+        value={value}
+        onChange={onChange}
+        shortcuts={noteShortcuts}
+        quickNotes={quickNotes}
+        hiddenTexts={hiddenTexts}
+      />
     </div>
   );
 }

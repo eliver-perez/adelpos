@@ -20,11 +20,22 @@ type ComponentSelection struct {
 	Customization Customization `json:"customization"`
 }
 
+// QuickNoteSelection es una indicación rápida elegida en la captura (etapa 8): su identificador y
+// el texto que vio el mesero. El texto sigue también en Notes, como en la etapa 7.1, para que la
+// comanda y los documentos funcionen igual.
+type QuickNoteSelection struct {
+	NoteID string `json:"note_id"`
+	Text   string `json:"text"`
+}
+
 type Customization struct {
 	Ingredients []IngredientSelection `json:"ingredients"`
 	Groups      []GroupSelection      `json:"groups"`
 	Components  []ComponentSelection  `json:"components"`
 	Notes       string                `json:"notes"`
+	// QuickNotes se omite cuando está vacío: los borradores, solicitudes y huellas anteriores a la
+	// etapa 8 (solo texto, sin efecto) se serializan exactamente igual que antes.
+	QuickNotes []QuickNoteSelection `json:"quick_notes,omitempty"`
 }
 
 type LineRequest struct {
@@ -52,6 +63,9 @@ type Snapshot struct {
 	Groups      map[string]OptionGroup
 	PriceList   PriceList
 	Promotions  []Promotion
+	// QuickNotes guarda solo las indicaciones rápidas que usa el cálculo (etapa 8), tal como
+	// estaban al confirmar. Se omite sin indicaciones para no cambiar los snapshots anteriores.
+	QuickNotes map[string]CategoryQuickNote `json:"QuickNotes,omitempty"`
 }
 
 type IngredientBreakdown struct {
@@ -84,6 +98,15 @@ type GroupBreakdown struct {
 	Options        []OptionBreakdown `json:"options"`
 }
 
+// QuickNoteBreakdown es una indicación rápida resuelta por Go al cotizar: congela su texto, su
+// efecto y su ingrediente para que editar la indicación después no cambie la partida confirmada.
+type QuickNoteBreakdown struct {
+	NoteID       string  `json:"note_id"`
+	Text         string  `json:"text"`
+	Effect       string  `json:"effect"`
+	IngredientID *string `json:"ingredient_id"`
+}
+
 type ComponentBreakdown struct {
 	SlotID   string            `json:"slot_id"`
 	Name     string            `json:"name"`
@@ -108,6 +131,9 @@ type ProductBreakdown struct {
 	Groups           []GroupBreakdown      `json:"groups"`
 	Components       []ComponentBreakdown  `json:"components"`
 	Notes            string                `json:"notes"`
+	// QuickNotes se omite sin indicaciones, así que las cotizaciones y huellas anteriores no
+	// cambian.
+	QuickNotes []QuickNoteBreakdown `json:"quick_notes,omitempty"`
 }
 
 type QuoteLine struct {

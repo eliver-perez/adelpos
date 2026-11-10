@@ -87,10 +87,13 @@ describe('indicaciones rápidas de una categoría', () => {
       fireEvent.click(add);
     });
     await waitFor(() => expect(requests('catalog_create_quick_note')).toHaveLength(1));
+    // Sin elegir efecto, la indicación es solo instrucción, como en la etapa 7.1.
     expect(requests('catalog_create_quick_note')[0]![1].body).toEqual({
       category_id: category.id,
       text: 'Término medio',
       active: true,
+      effect: 'none',
+      ingredient_id: null,
       position: { after: notes[2]!.id },
       revision: 0,
     });
@@ -123,5 +126,111 @@ describe('indicaciones rápidas de una categoría', () => {
     expect(
       (screen.getByRole('button', { name: 'Sin cebolla' }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it('configura el efecto con botones y el ingrediente vinculado, sin campos de gramos', async () => {
+    const changed = vi.fn(async () => undefined);
+    const ingredients = [
+      {
+        id: '00000000-0000-4000-8000-0000000003a1',
+        name: 'Cebolla',
+        description: '',
+        active: true,
+        revision: 1,
+        unit: 'porción',
+      },
+      {
+        id: '00000000-0000-4000-8000-0000000003a2',
+        name: 'Queso',
+        description: '',
+        active: true,
+        revision: 1,
+        unit: 'porción',
+      },
+    ];
+    const withEffect = [
+      ...notes,
+      {
+        ...note('05', 'Queso extra', 40),
+        effect: 'extra' as const,
+        ingredient_id: ingredients[1]!.id,
+        ingredient_name: 'Queso',
+      },
+    ];
+    render(
+      <CategoryQuickNotes
+        category={category}
+        notes={withEffect}
+        ingredients={ingredients}
+        editable
+        onChanged={changed}
+      />,
+    );
+    // El listado resume el efecto de las indicaciones que lo tienen.
+    const group = screen.getByRole('group', { name: 'Indicaciones de Hamburguesas' });
+    expect(within(group).getByRole('button', { name: /Queso extra/ }).textContent).toBe(
+      'Queso extra · Porción extra: Queso',
+    );
+    const form = screen.getByRole('form', { name: 'Nueva indicación rápida' });
+    const effects = within(form).getByRole('group', { name: 'Tipo de efecto' });
+    expect(
+      within(effects)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Solo instrucción', 'Omitir', 'Porción habitual', 'Porción extra']);
+    expect(
+      within(effects)
+        .getByRole('button', { name: 'Solo instrucción' })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    // Sin efecto no hay selector de ingrediente; ningún campo pide gramos.
+    expect(within(form).queryByRole('combobox', { name: /Ingrediente vinculado/ })).toBeNull();
+    expect(within(form).queryByText(/gramos/i)).toBeNull();
+    fireEvent.change(within(form).getByRole('textbox', { name: /Nueva indicación/ }), {
+      target: { value: 'Sin cebolla morada' },
+    });
+    fireEvent.click(within(effects).getByRole('button', { name: 'Omitir' }));
+    const add = within(form).getByRole('button', {
+      name: 'Agregar indicación',
+    }) as HTMLButtonElement;
+    // Un efecto exige su ingrediente.
+    expect(add.disabled).toBe(true);
+    const select = within(form).getByRole('combobox', { name: /Ingrediente vinculado/ });
+    fireEvent.change(select, { target: { value: ingredients[0]!.id } });
+    expect(add.disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(add);
+    });
+    await waitFor(() => expect(requests('catalog_create_quick_note')).toHaveLength(1));
+    expect(requests('catalog_create_quick_note')[0]![1].body).toMatchObject({
+      text: 'Sin cebolla morada',
+      effect: 'omit',
+      ingredient_id: ingredients[0]!.id,
+      revision: 0,
+    });
+    // Editar una indicación con efecto conserva su ingrediente y permite volver a solo instrucción.
+    fireEvent.click(within(group).getByRole('button', { name: /Queso extra/ }));
+    const editor = screen.getByRole('form', { name: 'Editar indicación Queso extra' });
+    const editorEffects = within(editor).getByRole('group', { name: 'Tipo de efecto' });
+    expect(
+      within(editorEffects)
+        .getByRole('button', { name: 'Porción extra' })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(
+      (within(editor).getByRole('combobox', { name: /Ingrediente vinculado/ }) as HTMLSelectElement)
+        .value,
+    ).toBe(ingredients[1]!.id);
+    fireEvent.click(within(editorEffects).getByRole('button', { name: 'Solo instrucción' }));
+    await act(async () => {
+      fireEvent.click(within(editor).getByRole('button', { name: 'Guardar indicación' }));
+    });
+    await waitFor(() => expect(requests('catalog_save_quick_note')).toHaveLength(1));
+    expect(requests('catalog_save_quick_note')[0]![1].body).toMatchObject({
+      text: 'Queso extra',
+      effect: 'none',
+      ingredient_id: null,
+      revision: 2,
+    });
   });
 });

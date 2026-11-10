@@ -599,3 +599,93 @@ fallan o se recuperan). Auditoría: `inventory.recipe_created`, `inventory.recip
 `inventory.ingredient_portion_saved`, `inventory.cancellation_classified`, `inventory.cancellation_corrected`,
 `inventory.production_recorded` y, con el proceso como responsable (`actor_kind: "process"`, `actor_username:
 "inventory_worker"`), `inventory.cancellation_reconciled`.
+
+# Cambios de contrato · Etapa 8, fase B (Bq): indicaciones rápidas con efecto
+
+Para integrar en `API_CONTRACTS.md` (sección de catálogo, junto al párrafo «Indicaciones rápidas por
+categoría (etapa 7.1, fase D; migración 0009)», y sección de restaurante, junto a la personalización).
+Sin rutas, permisos, locks ni operaciones del puente nuevos: `catalog_create_quick_note` y
+`catalog_save_quick_note` siguen igual en `api.rs`.
+
+## Catálogo · indicaciones rápidas (migración 0012)
+
+Párrafo sugerido, a continuación del de la etapa 7.1:
+
+> Indicaciones con efecto (etapa 8, fase B; migración 0012): `POST /quick-notes` y
+> `PATCH /quick-notes/{id}` aceptan además `effect` (`none` | `omit` | `normal` | `extra`) e
+> `ingredient_id` (UUID de `catalog_ingredients`, `null` sin efecto). Un efecto exige un ingrediente
+> existente y `none` no admite ingrediente (400 `CATALOG_VALIDATION`); un efecto desconocido también
+> responde 400. Sin `effect` en el cuerpo, una alta queda como `none` y una edición conserva el
+> efecto vigente (clientes de la etapa 7.1); enviar `ingredient_id` sin `effect` responde 400. No hay
+> campos de gramos. Respuesta (y cada elemento de `category_quick_notes` en `GET /lookups`):
+> `{id, category_id, text, effect, ingredient_id, ingredient_name, active, sort_order, revision,
+updated_at}`, con `ingredient_id` e `ingredient_name` nulos sin efecto. La auditoría
+> (`catalog.quick-notes.created`/`.updated`) guarda el efecto y el ingrediente antes y después.
+> PostgreSQL aplica `catalog_category_quick_notes_effect_check`,
+> `catalog_category_quick_notes_ingredient_id_fkey` y
+> `catalog_category_quick_notes_effect_ingredient_check` (`none` ⇔ ingrediente nulo).
+
+## Personalización · `customization.quick_notes`
+
+En cada nivel de `customization` (producto y cada `components[].customization`), campo opcional:
+
+```json
+"customization": {
+  "ingredients": [{ "ingredient_id": "<cebolla>", "quantity": "0" }],
+  "groups": [],
+  "components": [],
+  "notes": "Sin cebolla, Bien cocida",
+  "quick_notes": [
+    { "note_id": "<uuid de «Sin cebolla»>", "text": "Sin cebolla" },
+    { "note_id": "<uuid de «Bien cocida»>", "text": "Bien cocida" }
+  ]
+}
+```
+
+- Se omite cuando está vacío (`omitempty` en Go; la captura borra la clave): los borradores, las
+  solicitudes (`restaurant_item_versions.request`), los eventos y las huellas de borradores
+  existentes no cambian. Las partidas antiguas siguen con solo texto en `notes` y nunca tienen efecto.
+- El texto de cada indicación sigue también en `notes`, unido por comas como en la etapa 7.1 (la
+  comanda y los documentos imprimen `notes`). `text` en `quick_notes` es informativo: la resolución
+  usa el texto vigente del catálogo.
+- Forma (borrador `PUT /accounts/{id}/draft`, apertura con productos y motor de cálculo): hasta 40 por
+  nivel, `note_id` UUID sin repetir y `text` de 1 a 80 caracteres; si no, 400 `OPERATION_VALIDATION`
+  o `CATALOG_VALIDATION` (identificador repetido: 422 `QUICK_NOTE_INVALID`).
+- Validación al cotizar (`POST /catalog/preview`, `draft-preview`, `GET /accounts/{id}/preview`),
+  confirmar y modificar (`edit-preview`/`edit`), **422** con mensaje en español:
+  - `QUICK_NOTE_INVALID`: la indicación no existe o está inactiva; no pertenece a la categoría del
+    producto (o del producto del componente); su efecto no aplica al producto (ingrediente ausente de
+    sus reglas, o `omit` sin incluido > 0 y removible, `normal` sin incluido > 0 ni agregable con
+    máximo ≥ 1, `extra` sin agregable con máximo > incluido); o la cantidad solicitada del ingrediente
+    no coincide con la que fija el efecto (`omit` → 0; `normal` → lo incluido, o 1 si no estaba
+    incluido; `extra` → `min(incluido + 1, máximo)`).
+  - `QUICK_NOTE_CONFLICT`: dos indicaciones con efecto sobre el mismo ingrediente en el mismo nivel.
+- El precio sale solo de `ingredients` (una indicación nunca agrega cargos propios).
+
+## Desglose · `ProductBreakdown.quick_notes` (en `quote_line`)
+
+`ProductBreakdown` (raíz y `components[].product`) añade, solo si hay indicaciones:
+
+```json
+"quick_notes": [
+  { "note_id": "<uuid>", "text": "Sin cebolla", "effect": "omit", "ingredient_id": "<cebolla>" },
+  { "note_id": "<uuid>", "text": "Bien cocida", "effect": "none", "ingredient_id": null }
+]
+```
+
+Es la resolución congelada al cotizar: editar o desactivar la indicación después no cambia las
+partidas confirmadas. En el camino «Preserve» (cambios solo de observaciones o reducciones), las ya
+resueltas se copian tal como estaban y las nuevas se validan con las reglas del producto del
+`pricing_snapshot` del pedido y las cantidades congeladas. Sin indicaciones el campo se omite: las
+cotizaciones y huellas anteriores no cambian.
+
+`pricing_snapshot` (`catalog.Snapshot`) añade la clave `QuickNotes` (mapa por id con las indicaciones
+usadas por el cálculo, en la forma de `CategoryQuickNote`) solo cuando la cotización usa alguna.
+
+## Cocina
+
+`kitchen_tasks.instructions.parts[]` (y las partes de los documentos) añaden `quick_notes` (la misma
+forma del desglose), omitido sin indicaciones. La plantilla omite la línea estructurada de un
+ingrediente («SIN Cebolla», «Queso: 1 (incluido 0)») cuando una indicación con efecto sobre ese
+ingrediente aparece en la nota impresa de la partida o del componente; sin indicaciones con efecto
+la comanda es idéntica a la de la etapa 7.1.
