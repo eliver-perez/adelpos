@@ -128,16 +128,19 @@ type DrawerCommand struct {
 	DeviceID     string
 }
 
-// CompatibleDrawerTransport indica si un transporte entrega los bytes ESC/POS del pulso sin
-// alterar. CUPS filtra el contenido como texto y el agente de impresión aún no existe: solo la
-// conexión ESC/POS directa por red es compatible. No se asume que todo dispositivo admite el pulso.
+// CompatibleDrawerTransport indica si un transporte puede entregar los bytes ESC/POS del pulso sin
+// alterar: la conexión ESC/POS directa por red o, desde la etapa 7.1, una cola CUPS en modo raw.
+// Para CUPS no basta el transporte: la cola debe admitir datos raw (QueueInspector), lo que se
+// comprueba al configurar el cajón y otra vez antes de cada envío. El agente de impresión aún no
+// existe. No se asume que todo dispositivo admite el pulso.
 func CompatibleDrawerTransport(transport string) bool {
-	return transport == "escpos_tcp"
+	return transport == "escpos_tcp" || transport == "cups"
 }
 
 // EnqueueDrawerPulse guarda el comando de apertura del cajón y su trabajo en la transacción de la
 // operación. Se rechaza si la impresora no existe, está inactiva o su transporte no es compatible:
-// así nunca se encola un comando que no podría llegar al cajón.
+// así nunca se encola un comando que no podría llegar al cajón. La cola CUPS no se consulta aquí
+// (dentro de la transacción del cobro): el transporte la vuelve a verificar antes de enviar.
 func EnqueueDrawerPulse(ctx context.Context, tx pgx.Tx, command DrawerCommand) (*PrintJob, string, error) {
 	printer, err := one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", command.PrinterID)
 	if err != nil {
@@ -147,7 +150,7 @@ func EnqueueDrawerPulse(ctx context.Context, tx pgx.Tx, command DrawerCommand) (
 		return nil, "", &Error{Status: 409, Code: "DRAWER_UNAVAILABLE", Message: "La impresora del cajón está desactivada; no se envió el comando de apertura."}
 	}
 	if !CompatibleDrawerTransport(printer.Transport) {
-		return nil, "", &Error{Status: 409, Code: "DRAWER_PROTOCOL_UNSUPPORTED", Message: "La impresora del cajón no usa ESC/POS por red; no se envió el comando de apertura."}
+		return nil, "", &Error{Status: 409, Code: "DRAWER_PROTOCOL_UNSUPPORTED", Message: "La impresora del cajón no usa ESC/POS por red ni una cola CUPS; no se envió el comando de apertura."}
 	}
 	if command.Pin != 0 && command.Pin != 1 {
 		return nil, "", invalid("El pin del cajón debe ser 0 (conector 2) o 1 (conector 5).")

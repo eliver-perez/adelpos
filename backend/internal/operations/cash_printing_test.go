@@ -140,6 +140,7 @@ func testCashPrinting(t *testing.T, base *cashFixture) {
 	testCashLimit(t, fixture)
 	testCashEvents(t, fixture)
 	testFinalCutPrinting(t, fixture)
+	testCashStage71(t, fixture)
 	fixture.setReceiptPrinter(t, original.ReceiptPrinterID)
 }
 
@@ -414,13 +415,22 @@ func testCashDrawer(t *testing.T, fixture *printingFixture) {
 		fixture.call(t, fixture.cashier, "PUT", route, map[string]any{
 			"operation_id": randomID(), "revision": 0, "printer_id": fixture.drawerPrinter.ID, "pulse_pin": 0, "enabled": true,
 		}, 403)
-		for _, printer := range []kitchen.Printer{fixture.tickets, fixture.agent} {
-			problem := fixture.adminCall(t, "PUT", route, map[string]any{
-				"operation_id": randomID(), "revision": 0, "printer_id": printer.ID, "pulse_pin": 0, "enabled": true,
-			}, 400)
-			if errorCode(t, problem) != "DRAWER_PROTOCOL_UNSUPPORTED" || !strings.Contains(string(problem), "ESC/POS") {
-				t.Fatalf("Se aceptó el cajón en %s: %s", printer.Transport, problem)
-			}
+		// Etapa 7.1: el agente sigue sin entregar el pulso; una cola CUPS se acepta solo si admite
+		// datos raw (aquí, una cola AirPrint simulada que no los admite).
+		problem := fixture.adminCall(t, "PUT", route, map[string]any{
+			"operation_id": randomID(), "revision": 0, "printer_id": fixture.agent.ID, "pulse_pin": 0, "enabled": true,
+		}, 400)
+		if errorCode(t, problem) != "DRAWER_PROTOCOL_UNSUPPORTED" || !strings.Contains(string(problem), "ESC/POS") {
+			t.Fatalf("Se aceptó el cajón con el agente: %s", problem)
+		}
+		fixture.queues.set(fixture.tickets.Destination, map[string]string{
+			"device-uri": "dnssd://Tickets._ipps._tcp.local./", "printer-make-and-model": "Tickets de caja-AirPrint", "printer-type": "69243084",
+		})
+		problem = fixture.adminCall(t, "PUT", route, map[string]any{
+			"operation_id": randomID(), "revision": 0, "printer_id": fixture.tickets.ID, "pulse_pin": 0, "enabled": true,
+		}, 400)
+		if errorCode(t, problem) != "DRAWER_QUEUE_NOT_RAW" || !strings.Contains(string(problem), "AirPrint") {
+			t.Fatalf("Se aceptó el cajón en una cola CUPS sin datos raw: %s", problem)
 		}
 		fixture.adminCall(t, "PUT", route, map[string]any{"operation_id": randomID(), "revision": 0, "pulse_pin": 0, "enabled": true}, 400)
 		fixture.adminCall(t, "PUT", route, map[string]any{

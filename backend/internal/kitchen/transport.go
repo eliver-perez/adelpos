@@ -24,7 +24,21 @@ type Outcome struct {
 type Transport interface {
 	Submit(context.Context, PrintJob) Outcome
 }
-type HostTransport struct{}
+
+// HostTransport entrega los trabajos con los medios del equipo donde corre Go: CUPS local
+// (lpstat, lpoptions y lp con argumentos separados) o una conexión ESC/POS directa. commands
+// queda vacío en producción; las pruebas unitarias lo sustituyen para verificar los argumentos
+// de CUPS sin ejecutar nada.
+type HostTransport struct {
+	commands commandRunner
+}
+
+func (transport HostTransport) runner() commandRunner {
+	if transport.commands == nil {
+		return hostCommands{}
+	}
+	return transport.commands
+}
 
 type DiscoveredPrinter struct {
 	Queue   string `json:"queue"`
@@ -54,12 +68,12 @@ func DiscoverPrinters(ctx context.Context) ([]DiscoveredPrinter, error) {
 	return printers, nil
 }
 
-func (HostTransport) Submit(ctx context.Context, job PrintJob) Outcome {
+func (transport HostTransport) Submit(ctx context.Context, job PrintJob) Outcome {
 	if err := validatePrinter(&job.PrinterSnapshot); err != nil {
 		return Outcome{State: "intervention", Message: "El destino guardado requiere revisión."}
 	}
 	if job.DrawerPulse != nil {
-		return submitDrawerPulse(ctx, job)
+		return submitDrawerPulse(ctx, job, transport.runner())
 	}
 	switch job.PrinterSnapshot.Transport {
 	case "cups":
@@ -131,14 +145,24 @@ func submitCUPS(ctx context.Context, job PrintJob) Outcome {
 	command.Env = append(os.Environ(), "LC_ALL=C", "CHARSET=utf-8")
 	// Una vez iniciado lp, un timeout o error genérico puede ocultar aceptación del spooler.
 	output, err := command.CombinedOutput()
-	match := regexp.MustCompile(`(?:^|\s)(` + regexp.QuoteMeta(printer.Destination) + `-[0-9]+)(?:\s|$)`).FindStringSubmatch(string(output))
-	if err == nil && len(match) == 2 {
-		return Outcome{State: "submitted", Reference: match[1], Accepted: true, Message: "Aceptado por CUPS; no confirma salida física de papel."}
+	reference := cupsJobReference(printer.Destination, output)
+	if err == nil && reference != "" {
+		return Outcome{State: "submitted", Reference: reference, Accepted: true, Message: "Aceptado por CUPS; no confirma salida física de papel."}
 	}
 	if _, notStarted := err.(*exec.Error); notStarted {
 		return Outcome{State: "error", Message: "No se pudo ejecutar el transporte CUPS; no se envió el documento."}
 	}
 	return Outcome{State: "uncertain", Message: "CUPS no devolvió un resultado inequívoco. Revisar su cola antes de autorizar otra copia."}
+}
+
+// cupsJobReference extrae de la respuesta de lp el identificador del trabajo («cola-123»). La
+// búsqueda no depende del idioma del mensaje: macOS lo traduce aunque se pida LC_ALL=C.
+func cupsJobReference(queue string, output []byte) string {
+	match := regexp.MustCompile(`(?:^|\s)(` + regexp.QuoteMeta(queue) + `-[0-9]+)(?:\s|$)`).FindStringSubmatch(string(output))
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
 }
 
 func ESCPosBytes(content string, printer Printer, textSize ...string) []byte {
@@ -194,14 +218,22 @@ func DrawerPulseBytes(pin int) []byte {
 	return []byte{0x1b, 0x70, byte(pin), 0x19, 0xfa}
 }
 
-// submitDrawerPulse entrega el pulso del cajón por una conexión ESC/POS directa. Otros transportes
-// alterarían los bytes (CUPS los filtra como texto) o no existen aún (agente): el trabajo queda en
-// intervención sin enviar nada. La aceptación TCP no confirma que el cajón se abrió físicamente.
-func submitDrawerPulse(ctx context.Context, job PrintJob) Outcome {
-	printer := job.PrinterSnapshot
-	if !CompatibleDrawerTransport(printer.Transport) {
-		return Outcome{State: "intervention", Message: "El transporte de la impresora no entrega el pulso ESC/POS del cajón sin alterar; no se envió el comando."}
+// submitDrawerPulse entrega el pulso del cajón con el transporte de su impresora: una conexión
+// ESC/POS directa o una cola CUPS en modo raw (etapa 7.1). Otros transportes (el agente futuro)
+// quedan en intervención sin enviar nada. Ninguna aceptación confirma que el cajón se abrió.
+func submitDrawerPulse(ctx context.Context, job PrintJob, commands commandRunner) Outcome {
+	switch job.PrinterSnapshot.Transport {
+	case "escpos_tcp":
+		return submitDrawerPulseTCP(ctx, job)
+	case "cups":
+		return submitDrawerPulseCUPS(ctx, job, commands)
 	}
+	return Outcome{State: "intervention", Message: "El transporte de la impresora no entrega el pulso ESC/POS del cajón sin alterar; no se envió el comando."}
+}
+
+// submitDrawerPulseTCP escribe el pulso en una conexión ESC/POS directa por red.
+func submitDrawerPulseTCP(ctx context.Context, job PrintJob) Outcome {
+	printer := job.PrinterSnapshot
 	dialer := net.Dialer{Timeout: 4 * time.Second}
 	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(printer.Destination, strconv.Itoa(printer.Port)))
 	if err != nil {
@@ -215,4 +247,47 @@ func submitDrawerPulse(ctx context.Context, job PrintJob) Outcome {
 		return Outcome{State: "uncertain", Message: "La conexión se interrumpió al enviar el comando de apertura; revisa el cajón antes de volver a abrirlo."}
 	}
 	return Outcome{State: "submitted", Accepted: true, Message: "Comando de apertura entregado a la conexión de red; no confirma que el cajón se abrió."}
+}
+
+// drawerPulseArguments son los argumentos separados de lp para el pulso: la cola validada, modo
+// raw (CUPS no filtra los bytes), una sola copia y un título técnico con el trabajo de la cola.
+func drawerPulseArguments(queue, jobID, filename string) []string {
+	return []string{"-d", queue, "-o", "raw", "-n", "1", "-t", "ADEL-cajon-" + jobID, filename}
+}
+
+// submitDrawerPulseCUPS envía el pulso en modo raw a la cola CUPS de la impresora del cajón. Antes
+// vuelve a consultar la cola (la configuración de CUPS puede haber cambiado desde que se guardó el
+// cajón): si ya no admite datos raw, el trabajo queda en intervención sin enviar nada. El pulso se
+// escribe en un archivo temporal privado que se elimina al terminar. Una vez iniciado lp, un
+// resultado sin identificador de trabajo es incierto y nunca se reintenta solo.
+func submitDrawerPulseCUPS(ctx context.Context, job PrintJob, commands commandRunner) Outcome {
+	queue := job.PrinterSnapshot.Destination
+	capability := inspectQueue(ctx, commands, queue)
+	if !capability.Checked {
+		return Outcome{State: "error", Message: "No se pudo consultar la cola CUPS del cajón; no se envió el comando de apertura."}
+	}
+	if !capability.Raw {
+		return Outcome{State: "intervention", Message: capability.Reason + " No se envió el comando de apertura."}
+	}
+	file, err := os.CreateTemp("", "adel-drawer-*.bin")
+	if err != nil {
+		return Outcome{State: "error", Message: "No se pudo preparar el archivo privado; no se envió el comando de apertura."}
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(DrawerPulseBytes(job.DrawerPulse.Pin)); err != nil {
+		file.Close()
+		return Outcome{State: "error", Message: "No se pudo escribir el comando de apertura local; no se envió."}
+	}
+	if err := file.Close(); err != nil {
+		return Outcome{State: "error", Message: "No se pudo finalizar el comando de apertura local; no se envió."}
+	}
+	output, err := commands.run(ctx, true, "/usr/bin/lp", drawerPulseArguments(queue, job.ID, file.Name())...)
+	reference := cupsJobReference(queue, output)
+	if err == nil && reference != "" {
+		return Outcome{State: "submitted", Reference: reference, Accepted: true, Message: "Comando de apertura aceptado por CUPS; no confirma que el cajón se abrió."}
+	}
+	if _, notStarted := err.(*exec.Error); notStarted {
+		return Outcome{State: "error", Message: "No se pudo ejecutar el transporte CUPS; no se envió el comando de apertura."}
+	}
+	return Outcome{State: "uncertain", Message: "CUPS no devolvió un resultado inequívoco para el comando de apertura; revisa el cajón y la cola antes de volver a abrirlo."}
 }

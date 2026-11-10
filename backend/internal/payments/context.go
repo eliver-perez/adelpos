@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/kitchen"
 )
 
 type Permission struct {
@@ -112,6 +113,10 @@ type Request struct {
 	Body      json.RawMessage
 	Actor     Actor
 	Authorize Authorizer
+	// Queues consulta si una cola CUPS admite datos raw para el cajón (etapa 7.1). Sin valor se
+	// usan las consultas de solo lectura del equipo (lpstat y lpoptions); las pruebas de
+	// aceptación inyectan una simulada.
+	Queues kitchen.QueueInspector
 }
 
 type Audit func(ctx context.Context, tx pgx.Tx, action, entity string, entityID *string, before, after any) error
@@ -120,6 +125,19 @@ type Error struct {
 	Status  int
 	Code    string
 	Message string
+	// Rejection pide conservar la auditoría del rechazo aunque la operación se revierta (etapa
+	// 7.1): administration deshace todo lo escrito y confirma solo ese registro, con
+	// success=false, como la denegación de un permiso. Nunca se publica en la respuesta.
+	Rejection *Rejection
+}
+
+// Rejection es la auditoría de un rechazo que debe sobrevivir al rollback de la operación. Sus
+// detalles nunca incluyen el efectivo esperado ni contraseñas.
+type Rejection struct {
+	Action   string
+	Entity   string
+	EntityID string
+	Details  map[string]any
 }
 
 func (problem *Error) Error() string {

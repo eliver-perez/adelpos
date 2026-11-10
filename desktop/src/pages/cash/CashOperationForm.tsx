@@ -6,7 +6,7 @@ import { useSupervisorAuthorization } from '../../hooks/useSupervisorAuthorizati
 import { APIError } from '../../services/api';
 import { toWireAmount } from '../../services/amountInput';
 import type { CashCatalog, CashCurrency, RecordedCashOperation } from '../../services/cash';
-import { dismissNotice, notifyError, notifySuccess } from '../../services/notify';
+import { dismissNotice, notifyError } from '../../services/notify';
 import { permissionName, validReason } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 import { currencyAmount } from './DenominationCount';
@@ -14,7 +14,6 @@ import { cashEntries, entryBody, initialEntry, outflowPermissions } from './oper
 import type { CashEntryCapture, CashEntryKind } from './operationForm';
 import { OutflowAuthorization } from './OutflowAuthorization';
 import { PrintToggle } from './PrintToggle';
-import { RecordedOperation, recordedOperationTitle } from './RecordedOperation';
 import type { CashMutation } from './useCashMutation';
 
 // Opciones del tipo de ingreso, del motivo del retiro o de la categoría del gasto.
@@ -182,7 +181,9 @@ function EntryDetails({
 }
 
 // Ingreso, retiro o gasto del turno. Go valida el importe, la autorización y el efectivo
-// disponible; la interfaz envía la cadena capturada y muestra la operación registrada.
+// disponible; la interfaz envía la cadena capturada. Desde la etapa 7.1 el resultado confirmado
+// no se queda en el panel: la escritura (useCashRecording) lo anuncia con un aviso y quien abrió
+// el formulario lo cierra (vista de Operación de Caja u hoja del atajo «Caja»).
 export function CashOperationForm({
   kind,
   shift,
@@ -192,6 +193,7 @@ export function CashOperationForm({
   active,
   mutation,
   onClose,
+  backLabel = 'Volver a la caja',
 }: {
   kind: CashEntryKind;
   shift: Shift;
@@ -202,10 +204,11 @@ export function CashOperationForm({
   active: boolean;
   mutation: CashMutation;
   onClose: () => void;
+  // Texto del botón que cierra el formulario sin registrar.
+  backLabel?: string;
 }) {
   const definition = cashEntries[kind];
   const [capture, setCapture] = useState<CashEntryCapture>(initialEntry);
-  const [result, setResult] = useState<RecordedCashOperation | null>(null);
   // Imprimir el comprobante es opcional y se elige por operación (cash.reports.print).
   const [print, setPrint] = useState(false);
   const [insufficient, setInsufficient] = useState(false);
@@ -229,7 +232,6 @@ export function CashOperationForm({
       return;
     }
     setCapture((current) => ({ ...current, ...patch }));
-    setResult(null);
     // Cambiar la captura invalida el rechazo anterior; pedir o redactar la salida excepcional lo
     // conserva a la vista.
     const exceptionalOnly = Object.keys(patch).every(
@@ -256,16 +258,15 @@ export function CashOperationForm({
       body.print = true;
     }
     try {
-      const operation = await mutation.execute<RecordedCashOperation>(definition.operation, {
+      await mutation.execute<RecordedCashOperation>(definition.operation, {
         id: shift.id,
         body,
       });
-      setResult(operation);
+      // El aviso de confirmación y el cierre del panel los resuelve la escritura del turno.
       setCapture(initialEntry());
       setInsufficient(false);
       auth.reset();
       dismissNotice(insufficientNoticeID);
-      notifySuccess(recordedOperationTitle(operation));
     } catch (problem) {
       // Un problema de autorización se explica en el formulario de autorización.
       if (auth.handleError(problem)) {
@@ -288,10 +289,9 @@ export function CashOperationForm({
       <header className="cash-panel-header">
         <h3>{definition.title}</h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          <IconLabel icon="back">Volver a la caja</IconLabel>
+          <IconLabel icon="back">{backLabel}</IconLabel>
         </button>
       </header>
-      {result && <RecordedOperation operation={result} />}
       <div className="cash-capture">
         <div className="cash-capture-fields">
           <ChoiceGrid

@@ -282,6 +282,137 @@ func TestStage7UpgradeOfExistingInstallation(t *testing.T) {
 	checkCashConstraints(ctx, t, pool)
 }
 
+// Simula una instalación existente en esquema 8 (0.7.0) con un turno abierto, un cajón configurado
+// y un comando de apertura manual ya registrado, y aplica la 0009 (etapa 7.1): el comando anterior
+// se conserva, el CHECK de motivos del cajón conserva su nombre y admite test, y el índice parcial
+// de rechazos por efectivo insuficiente existe. Deja la base vacía al terminar.
+func TestStage71UpgradeOfExistingInstallation(t *testing.T) {
+	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
+	u, err := url.Parse(dsn)
+	if err != nil || !strings.HasPrefix(u.Path, "/adel_pos_test_") {
+		t.Fatal("integration requires an isolated adel_pos_test_ database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal("pool creation failed")
+	}
+	defer pool.Close()
+	reset := func() {
+		if _, err := pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.schema_migrations"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset()
+	defer reset()
+	expected, err := ReadMigrations(migrations.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageEight := fstest.MapFS{}
+	for _, migration := range expected {
+		if migration.Version <= 8 {
+			stageEight[migration.Name] = &fstest.MapFile{Data: []byte(migration.SQL)}
+		}
+	}
+	if n, err := Apply(ctx, pool, stageEight); err != nil || n != 8 {
+		t.Fatalf("no se preparó el esquema 8: %d %v", n, err)
+	}
+	// Datos de una instalación real en esquema 8: caja, cajera, terminal, turno abierto, cajón
+	// configurado con una impresora ESC/POS y un comando de apertura manual en la cola.
+	if _, err := pool.Exec(ctx, `INSERT INTO app.roles(code,name) VALUES ('administrator','Administrador'),('cashier','Cajero');
+        INSERT INTO app.registers(name) VALUES ('Caja 1');
+        INSERT INTO app.users(username,display_name,role_id) SELECT 'cajera','Cajera',id FROM app.roles WHERE code='cashier';
+        INSERT INTO app.devices(name,secret_hash,register_id) SELECT 'Terminal 1','hash-de-prueba',id FROM app.registers;
+        INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
+        SELECT op.id::uuid,u.id,d.id,op.route,'huella','{}' FROM app.users u,app.devices d,
+        (VALUES ('00000000-0000-4000-8000-000000000081','POST payments/shifts'),
+                ('00000000-0000-4000-8000-000000000082','POST payments/cash/open-drawer')) AS op(id,route)
+        WHERE u.username='cajera';
+        INSERT INTO app.cash_shifts(id,register_id,opening_float,opened_by,opened_device_id,operation_id,business_date)
+        SELECT '00000000-0000-4000-8000-000000000083',d.register_id,500,u.id,d.id,'00000000-0000-4000-8000-000000000081',current_date
+        FROM app.users u,app.devices d WHERE u.username='cajera';
+        INSERT INTO app.kitchen_printers(id,name,transport,destination,port)
+        VALUES ('00000000-0000-4000-8000-000000000084','Tickets de caja','escpos_tcp','192.168.1.80',9100);
+        INSERT INTO app.cash_drawer_settings(register_id,printer_id,pulse_pin,enabled)
+        SELECT id,'00000000-0000-4000-8000-000000000084',0,true FROM app.registers;
+        INSERT INTO app.kitchen_tickets(id,kind,station_ids,document)
+        VALUES ('00000000-0000-4000-8000-000000000085','cash_drawer','{}','{"drawer_pulse":{"pin":0}}');
+        INSERT INTO app.kitchen_print_jobs(id,ticket_id,printer_id,printer_snapshot,content,state)
+        VALUES ('00000000-0000-4000-8000-000000000086','00000000-0000-4000-8000-000000000085',
+            '00000000-0000-4000-8000-000000000084','{}','Comando de apertura del cajón de Caja 1','submitted');
+        INSERT INTO app.cash_drawer_events(id,register_id,shift_id,reason,notes,actor_id,device_id,job_id,operation_id)
+        SELECT '00000000-0000-4000-8000-000000000087',d.register_id,'00000000-0000-4000-8000-000000000083','manual',
+            'Cambio de billetes para el fondo',u.id,d.id,'00000000-0000-4000-8000-000000000086','00000000-0000-4000-8000-000000000082'
+        FROM app.users u,app.devices d WHERE u.username='cajera'`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-8 {
+		t.Fatalf("la 0009 no se aplicó sobre el esquema 8: %d %v", n, err)
+	}
+	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
+		t.Fatal("la 0009 no es repetible")
+	}
+	var reason, notes, shiftState string
+	if err := pool.QueryRow(ctx, `SELECT e.reason,e.notes,s.state FROM app.cash_drawer_events e JOIN app.cash_shifts s ON s.id=e.shift_id
+        WHERE e.id='00000000-0000-4000-8000-000000000087'`).Scan(&reason, &notes, &shiftState); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "manual" || notes != "Cambio de billetes para el fondo" || shiftState != "open" {
+		t.Fatalf("el comando o el turno existentes cambiaron al migrar: %s %s %s", reason, notes, shiftState)
+	}
+	var definitions []string
+	rows, err := pool.Query(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+        WHERE conrelid='app.cash_drawer_events'::regclass AND conname='cash_drawer_events_reason_check'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var definition string
+		if err := rows.Scan(&definition); err != nil {
+			t.Fatal(err)
+		}
+		definitions = append(definitions, definition)
+	}
+	rows.Close()
+	if len(definitions) != 1 || !strings.Contains(definitions[0], "'test'") || !strings.Contains(definitions[0], "'manual'") {
+		t.Fatalf("el CHECK de motivos del cajón no conserva su nombre con test: %v", definitions)
+	}
+	var indexDefinition string
+	if err := pool.QueryRow(ctx, `SELECT pg_get_indexdef('app.audit_events_cash_outflow_rejected_idx'::regclass)`).Scan(&indexDefinition); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(indexDefinition, "WHERE") || !strings.Contains(indexDefinition, "cash.outflow_rejected") {
+		t.Fatalf("el índice de rechazos no es parcial: %s", indexDefinition)
+	}
+	// La restricción nueva admite test y sigue rechazando motivos desconocidos o una apertura
+	// manual sin explicación (tabla temporal que copia solo los CHECK).
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Release()
+	if _, err := connection.Exec(ctx, "CREATE TEMP TABLE drawer_reason_check (LIKE app.cash_drawer_events INCLUDING CONSTRAINTS INCLUDING DEFAULTS)"); err != nil {
+		t.Fatal(err)
+	}
+	drawer := `INSERT INTO drawer_reason_check(id,register_id,reason,notes,actor_id,device_id,job_id,operation_id)
+        VALUES (gen_random_uuid(),gen_random_uuid(),%s,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),gen_random_uuid())`
+	for _, values := range []string{"'test','Prueba de apertura desde la configuración del cajón'", "'test',''", "'payment',''"} {
+		if _, err := connection.Exec(ctx, strings.Replace(drawer, "%s", values, 1)); err != nil {
+			t.Fatalf("PostgreSQL rechazó un comando válido (%s): %v", values, err)
+		}
+	}
+	for _, values := range []string{"'unknown',''", "'manual','No'", "'Test',''"} {
+		if _, err := connection.Exec(ctx, strings.Replace(drawer, "%s", values, 1)); err == nil {
+			t.Fatalf("PostgreSQL aceptó un comando incoherente: %s", values)
+		}
+	}
+	if _, err := connection.Exec(ctx, "DROP TABLE drawer_reason_check"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // checkCashConstraints prueba las expresiones CHECK de las operaciones de efectivo y de los
 // cierres con tablas temporales que copian solo esas restricciones (sin llaves foráneas).
 func checkCashConstraints(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {

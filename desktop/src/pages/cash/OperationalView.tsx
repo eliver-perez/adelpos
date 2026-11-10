@@ -19,8 +19,8 @@ import { DrawerControl } from './DrawerControl';
 import { ExpectedFigures } from './ExpectedBlock';
 import { PartialCutPanel } from './PartialCutPanel';
 import { PendingCashOperation } from './PendingCashOperation';
+import { useCashRecording } from './recordingFlow';
 import { ClosingNotice, ShiftStatusCard } from './ShiftStatusCard';
-import { useCashMutation } from './useCashMutation';
 import type { CashWorkspace } from './useCashWorkspace';
 
 export type CashSection = 'operation' | 'movements' | 'history' | 'reports' | 'settings';
@@ -89,7 +89,12 @@ function ShiftWorkspace({
   onClosed: (shiftID: string, printing?: PrintOutcome) => void;
 }) {
   const [chosen, setChosen] = useState<CashAction | null>(null);
-  const mutation = useCashMutation(shift.id);
+  // Flujo tras registrar (etapa 7.1): un ingreso, retiro, gasto o corte confirmado cierra su panel,
+  // vuelve a Operación con un aviso y recarga los datos del turno.
+  const { mutation, printer } = useCashRecording(shift.id, can, () => {
+    setChosen(null);
+    workspace.reload();
+  });
   const ownRegister = !!workspace.selected?.own;
   const catalog = workspace.catalog.data;
   const detail = workspace.detail;
@@ -168,6 +173,7 @@ function ShiftWorkspace({
       <ExpectedNow shift={shift} detail={detail} />
       {detail && shift.state === 'open' && <ShiftRecords detail={detail} />}
       <PendingCashOperation mutation={mutation} />
+      <PendingCashOperation mutation={printer} />
       <CashActions
         can={can}
         shift={shift}

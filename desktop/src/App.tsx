@@ -304,6 +304,7 @@ function ApplicationContent() {
                 active={operationMode}
                 requestedView={screen === 'takeaway' ? 'takeaway' : 'tables'}
                 can={can}
+                onOpenCash={() => setScreen('cash')}
               />
             </div>
           )}

@@ -7,13 +7,26 @@ import { toWireAmount } from '../../../services/amountInput';
 import type { CashCatalog, CountPreviewInput } from '../../../services/cash';
 import { notifySuccess } from '../../../services/notify';
 import { formatDollars, formatMoney, isZeroMoney } from '../../../services/payments';
-import type { CurrentShift } from '../../../services/payments';
+import type { CurrentShift, Shift } from '../../../services/payments';
 import { acceptQuantity, capturableDenominations, countLines } from '../../cash/countCapture';
 import type { CountQuantities } from '../../cash/countCapture';
 import { confirmationCode, shiftPendingKey } from './ShiftRateCapture';
 import { notifyActionError } from './actionErrors';
 
 export type OpeningMode = 'total' | 'denominations';
+
+// Confirmación de la apertura: caja y fondo declarados (pesos y, si se declararon, dólares).
+export function openedMessage(registerName: string, shift: Shift | null) {
+  const subject = registerName ? `Turno de ${registerName} abierto` : 'Turno abierto';
+  if (!shift?.opening_float) {
+    return `${subject}.`;
+  }
+  let message = `${subject} con fondo de ${formatMoney(shift.opening_float)}`;
+  if (shift.opening_float_usd) {
+    message += ` + ${formatDollars(shift.opening_float_usd)}`;
+  }
+  return `${message}.`;
+}
 
 // Campo que recibe el teclado numérico: fondo en pesos, fondo en dólares, tipo de cambio o la
 // cantidad de una denominación («count:<id>»).
@@ -26,10 +39,13 @@ export function useShiftOpening({
   current,
   can,
   onChanged,
+  onOpened,
 }: {
   current: CurrentShift;
   can: (permission: string) => boolean;
   onChanged: () => void;
+  // Etapa 7.1: se llama solo cuando Go confirmó la apertura (la hoja del atajo «Caja» se cierra).
+  onOpened?: () => void;
 }) {
   const [mode, setMode] = useState<OpeningMode>('total');
   const [opening, setOpening] = useState('');
@@ -40,9 +56,10 @@ export function useShiftOpening({
   const [target, setTarget] = useState<OpeningTarget>('opening');
   const [confirmation, setConfirmation] = useState('');
   const register = current.register;
-  const mutation = useRestaurantMutation(() => {
-    // El fondo es lo que declaró quien abre (no el esperado): el aviso solo confirma la apertura.
-    notifySuccess(register ? `Turno de ${register.name} abierto.` : 'Turno abierto.');
+  const mutation = useRestaurantMutation((_, result) => {
+    // Flujo tras registrar (etapa 7.1): el aviso confirma la apertura con el fondo que declaró
+    // quien abre, tal como lo devolvió Go. Nunca incluye el efectivo esperado.
+    notifySuccess(openedMessage(register?.name ?? '', result as Shift | null));
     setOpening('');
     setOpeningUSD('');
     setRate('');
@@ -50,6 +67,7 @@ export function useShiftOpening({
     setQuantities({});
     setTarget('opening');
     onChanged();
+    onOpened?.();
     window.dispatchEvent(new CustomEvent('adel-server-change'));
   }, shiftPendingKey);
   const openable = !!register && !current.shift && can('cash.shifts.open');

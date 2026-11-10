@@ -9,7 +9,7 @@ import type { Shift } from '../../services/payments';
 import { CashPage } from './CashPage';
 import { catalog, currentWith, registersWith, shiftOf } from './cashTestData';
 import { PartialCutPanel } from './PartialCutPanel';
-import { useCashMutation } from './useCashMutation';
+import { useCashRecording } from './recordingFlow';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -36,7 +36,7 @@ afterEach(() => {
 });
 
 function PartialHarness({ shift }: { shift: Shift }) {
-  const mutation = useCashMutation(shift.id);
+  const { mutation } = useCashRecording(shift.id, () => true);
   return (
     <PartialCutPanel
       shift={shift}
@@ -51,7 +51,7 @@ function PartialHarness({ shift }: { shift: Shift }) {
 }
 
 describe('avisos de caja (etapa 7.1)', () => {
-  it('el corte parcial se confirma con un aviso sin cifras y otro con su impresión', async () => {
+  it('el corte parcial se confirma con un solo aviso sin cifras que incluye su impresión', async () => {
     const shift = shiftOf();
     serve({
       payments_shift_partial_cut: () => ({
@@ -62,7 +62,12 @@ describe('avisos de caja (etapa 7.1)', () => {
           kind: 'partial',
           sequence: 2,
           expected_visible: true,
-          printing: { requested: true, status: 'pending', includes_expected: false },
+          printing: {
+            requested: true,
+            status: 'pending',
+            document_id: 'documento-2',
+            includes_expected: false,
+          },
         },
       }),
       payments_cash_report: () => ({
@@ -77,13 +82,15 @@ describe('avisos de caja (etapa 7.1)', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Generar corte parcial' }));
     const created = await screen.findByText('Corte parcial #2 generado.');
-    expect(created.closest('[role="status"]')?.getAttribute('aria-label')).toBe(
-      'Operación completada',
-    );
-    expect(await screen.findByText('Documento enviado a la cola de impresión.')).toBeTruthy();
-    // Ningún aviso lleva importes: el informe (y el esperado, con permiso) se consulta en el panel.
+    const toast = created.closest('[role="status"]');
+    expect(toast?.getAttribute('aria-label')).toBe('Operación completada');
+    // El envío a la cola va en la descripción del mismo aviso; ya se imprimió, así que no ofrece
+    // «Imprimir corte».
+    expect(toast?.textContent).toContain('Documento enviado a la cola de impresión.');
+    expect(screen.queryByRole('button', { name: 'Imprimir corte' })).toBeNull();
+    // Ningún aviso lleva importes: el informe (y el esperado, con permiso) se consulta en Caja.
     const notices = Array.from(document.querySelectorAll('.app-toast'));
-    expect(notices.length).toBe(2);
+    expect(notices.length).toBe(1);
     for (const notice of notices) {
       expect(notice.textContent).not.toMatch(/\$/);
     }

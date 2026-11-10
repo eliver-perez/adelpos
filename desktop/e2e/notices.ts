@@ -7,6 +7,22 @@ export function notice(page: Page, text: string | RegExp): Locator {
   return page.locator('[data-sonner-toaster]').getByText(text);
 }
 
+// Indica si el aviso dejó de moverse: dos mediciones separadas por 150 ms coinciden.
+async function settled(page: Page, toast: Locator) {
+  const first = await toast.boundingBox();
+  await page.waitForTimeout(150);
+  const second = await toast.boundingBox();
+  if (!first || !second) {
+    return false;
+  }
+  return (
+    first.x === second.x &&
+    first.y === second.y &&
+    first.width === second.width &&
+    first.height === second.height
+  );
+}
+
 // Comprueba la presentación de un aviso visible: arriba al centro, por debajo de la cabecera,
 // con un botón de cierre táctil de al menos 44 px que lo retira con un toque.
 export async function expectNoticeLayout(page: Page, text: string | RegExp) {
@@ -14,6 +30,14 @@ export async function expectNoticeLayout(page: Page, text: string | RegExp) {
   await expect(message).toBeVisible();
   const toast = page.locator('[data-sonner-toaster] .app-toast').filter({ hasText: text });
   const header = await page.locator('.application-header').boundingBox();
+  // La entrada del aviso es animada (se desliza y escala al pasar al frente de la pila): se mide
+  // cuando terminó. Si el aviso aparece justo al cerrarse un panel, la medición inmediata lo
+  // encontraría a medio camino.
+  await expect(page.locator('[data-sonner-toast]').filter({ hasText: text })).toHaveAttribute(
+    'data-mounted',
+    'true',
+  );
+  await expect.poll(async () => settled(page, toast)).toBe(true);
   const box = await toast.boundingBox();
   const viewport = page.viewportSize();
   expect(header).not.toBeNull();

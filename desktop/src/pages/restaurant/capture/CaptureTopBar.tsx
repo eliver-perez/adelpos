@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Icon, IconLabel } from '../../../components/Icon';
 import type { Account, RestaurantTable } from '../../../services/restaurant';
 import {
@@ -83,6 +84,7 @@ export function CaptureTopBar({
   onNewAccount,
   onDetails,
   onRefresh,
+  cashShortcut,
 }: {
   account: Account | null;
   backLabel: string;
@@ -97,6 +99,8 @@ export function CaptureTopBar({
   onNewAccount: () => void;
   onDetails: () => void;
   onRefresh: () => void;
+  // Atajo «Caja» con el estado del turno (etapa 7.1).
+  cashShortcut?: ReactNode;
 }) {
   const takeaway = account?.mode === 'takeaway';
   const title = captureTitle(account);
@@ -178,6 +182,7 @@ export function CaptureTopBar({
           )}
         </div>
       )}
+      {cashShortcut}
       <button
         type="button"
         className="secondary-button capture-topbar-refresh"

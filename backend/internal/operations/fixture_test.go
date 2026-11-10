@@ -48,6 +48,9 @@ type restaurantFixture struct {
 	account       operations.Bill
 	secondAccount operations.Bill
 	splitAccount  operations.Bill
+	// queues sustituye las consultas de CUPS del cajón (etapa 7.1): ninguna prueba ejecuta lpstat,
+	// lpoptions ni lp; una cola no registrada responde como no consultable.
+	queues *controlledQueues
 }
 
 func randomID() string {
@@ -91,7 +94,11 @@ func newFixture(t *testing.T) *restaurantFixture {
 	if err := os.WriteFile(filename, []byte(token), 0600); err != nil {
 		t.Fatal(err)
 	}
-	fixture := &restaurantFixture{ctx: ctx, pool: pool, service: &administration.Service{Pool: pool, ProvisioningFile: filename}, provisioning: token}
+	queues := newControlledQueues()
+	fixture := &restaurantFixture{
+		ctx: ctx, pool: pool, provisioning: token, queues: queues,
+		service: &administration.Service{Pool: pool, ProvisioningFile: filename, Queues: queues},
+	}
 	setup := fixture.call(t, testTerminal{}, "POST", "setup", map[string]string{
 		"name": "Restaurante temporal de etapa 4", "timezone": "America/Monterrey", "currency": "MXN", "theme": "light", "terminal_name": "Prueba principal",
 	}, 200)

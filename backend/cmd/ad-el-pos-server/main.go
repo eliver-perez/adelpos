@@ -87,6 +87,8 @@ func run(logger *slog.Logger) error {
 	application := &administration.Service{
 		Pool:             pool,
 		ProvisioningFile: filepath.Join(filepath.Dir(*filename), "provisioning-token"),
+		// Consultas de solo lectura de las colas CUPS del equipo para el cajón (etapa 7.1).
+		Queues: kitchen.HostQueueInspector{},
 	}
 	if command == "provision-sa" || command == "reset-sa" {
 		return provisionSupport(ctx, application, command == "reset-sa")

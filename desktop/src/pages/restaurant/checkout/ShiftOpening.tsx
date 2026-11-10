@@ -150,13 +150,15 @@ export function ShiftOpening({
   can,
   active,
   onChanged,
+  onOpened,
 }: {
   current: CurrentShift;
   can: (permission: string) => boolean;
   active: boolean;
   onChanged: () => void;
+  onOpened?: () => void;
 }) {
-  const state = useShiftOpening({ current, can, onChanged });
+  const state = useShiftOpening({ current, can, onChanged, onOpened });
   const { mutation, register } = state;
   return (
     <section className="checkout-shift" aria-label="Turno de caja">

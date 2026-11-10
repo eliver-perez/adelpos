@@ -1,12 +1,23 @@
 import { useId, useState } from 'react';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Field, Form, Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { ToggleButton } from '../../components/ToggleButton';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { acceptAmountText, toWireAmount } from '../../services/amountInput';
 import type { Operation } from '../../services/api';
-import type { CashLimitSettings, DrawerPrinter, DrawerSettings } from '../../services/cash';
+import { drawerConnectionLabel } from '../../services/cash';
+import type {
+  CashLimitSettings,
+  DrawerOutcome,
+  DrawerPrinter,
+  DrawerSettings,
+} from '../../services/cash';
 import { permissionName } from '../../services/payments';
+import { notifyDrawerOutcome } from './CashNotices';
+import { PendingCashOperation } from './PendingCashOperation';
+import { useCashMutation } from './useCashMutation';
 
 type Execute = <T>(
   operation: Operation,
@@ -97,8 +108,10 @@ function CashLimitForm({ settings, execute }: { settings: CashLimitSettings; exe
   );
 }
 
-// Cajón de dinero por caja física. Solo se admiten impresoras ESC/POS por red, que entregan el
-// comando de apertura sin alterar; Go lo valida al guardar y al enviar cada comando.
+// Cajón de dinero por caja física. Se admiten impresoras ESC/POS por red y, desde la etapa 7.1
+// (modo mixto), colas CUPS que admitan datos raw (USB, puerto serie o AppSocket): Go consulta la
+// cola con lpstat y lpoptions, sin imprimir nada, y explica por qué una cola no sirve. Lo valida al
+// guardar y otra vez antes de enviar cada comando.
 export function DrawerAdmin({ execute }: { execute: Execute }) {
   const drawers = useLiveResource<{ drawers: DrawerSettings[]; printers: DrawerPrinter[] }>(
     'payments_cash_drawers',
@@ -114,18 +127,20 @@ export function DrawerAdmin({ execute }: { execute: Execute }) {
   return (
     <div className="form-stack">
       <p className="muted text-sm">
-        El cajón se abre con un comando ESC/POS que envía la impresora a la que está conectado. Solo
-        sirven impresoras ESC/POS por red: CUPS altera los bytes y el agente de impresión aún no
-        existe. Con el cajón activado se abre tras cobros y devoluciones en efectivo e ingresos,
-        retiros y gastos; nunca con pagos electrónicos. La pantalla indica que el comando se envió,
-        no que el cajón se abrió.
+        El cajón se abre con un comando ESC/POS que envía la impresora a la que está conectado: una
+        impresora ESC/POS por red o una cola CUPS (por ejemplo, una impresora USB) que admita datos
+        raw. El servidor consulta cada cola sin imprimir nada y explica por qué una no sirve. Con el
+        cajón activado se abre tras cobros y devoluciones en efectivo e ingresos, retiros y gastos;
+        nunca con pagos electrónicos. La pantalla indica que el comando se envió, no que el cajón se
+        abrió.
       </p>
       {printers.every((printer) => !printer.compatible) && (
         <Notice>
-          No hay impresoras ESC/POS por red registradas. Regístralas en Cocina y preparación →
-          Impresoras.
+          No hay impresoras compatibles con el cajón: registra una impresora ESC/POS por red o una
+          cola CUPS con datos raw en Cocina y preparación → Impresoras.
         </Notice>
       )}
+      <IncompatiblePrinters printers={printers} />
       {drawers.data.drawers.map((drawer) => (
         <DrawerEditor
           key={`${drawer.register_id}-${drawer.revision}`}
@@ -134,6 +149,101 @@ export function DrawerAdmin({ execute }: { execute: Execute }) {
           execute={execute}
         />
       ))}
+    </div>
+  );
+}
+
+// Explica, sin ocultarlas, por qué las impresoras activas no sirven para el cajón (motivo de Go).
+function IncompatiblePrinters({ printers }: { printers: DrawerPrinter[] }) {
+  const rejected = printers.filter((printer) => printer.active && !printer.compatible);
+  if (rejected.length === 0) {
+    return null;
+  }
+  return (
+    <div className="cash-terminology" aria-label="Impresoras que no sirven para el cajón">
+      <strong>Impresoras que no sirven para el cajón</strong>
+      <ul className="cash-detail-list">
+        {rejected.map((printer) => (
+          <li key={printer.id}>
+            {printer.name} · {drawerConnectionLabel(printer)}: {printer.reason}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Clave del almacén de pendientes de «Probar apertura» de una caja: una prueba incierta se
+// reintenta con el mismo identificador y Go devuelve el mismo comando, sin otro pulso.
+export function drawerTestPendingKey(registerID: string) {
+  return `cash-drawer-test:${registerID}`;
+}
+
+// «Probar apertura» (etapa 7.1): envía un pulso con la configuración guardada, con
+// cash.settings.manage, y Go lo audita con el motivo test. Se confirma antes porque el cajón se
+// abre físicamente en su caja; el aviso solo informa que el comando se envió.
+function DrawerTest({
+  drawer,
+  printerName,
+  unsaved,
+}: {
+  drawer: DrawerSettings;
+  printerName: string;
+  unsaved: boolean;
+}) {
+  const { confirm, dialog } = useConfirmDialog();
+  const mutation = useCashMutation(
+    drawer.register_id,
+    (_, result) => notifyDrawerOutcome(result as DrawerOutcome),
+    drawerTestPendingKey(drawer.register_id),
+  );
+  const ready = !!drawer.printer_id && !unsaved && !mutation.locked;
+
+  async function test() {
+    if (!ready || mutation.isPending()) {
+      return;
+    }
+    const accepted = await confirm({
+      title: `¿Probar la apertura del cajón de ${drawer.register_name}?`,
+      message: `Se enviará el comando de apertura a ${printerName}. Hazlo con alguien frente a la caja: la prueba queda registrada y auditada.`,
+      confirmLabel: 'Enviar prueba de apertura',
+      cancelLabel: 'No enviar',
+    });
+    if (!accepted) {
+      return;
+    }
+    try {
+      await mutation.execute<DrawerOutcome>('payments_test_cash_drawer', {
+        id: drawer.register_id,
+        body: {},
+      });
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo enviar la prueba de apertura del cajón.');
+    }
+  }
+
+  return (
+    <div className="form-stack">
+      {dialog}
+      <div className="button-row">
+        <button
+          type="button"
+          className="secondary-button"
+          disabled={!ready}
+          onClick={() => void test()}
+        >
+          <IconLabel icon="drawer">
+            {mutation.busy ? 'Enviando prueba…' : 'Probar apertura'}
+          </IconLabel>
+        </button>
+      </div>
+      {!drawer.printer_id && (
+        <p className="muted text-xs">Guarda la impresora del cajón para probar la apertura.</p>
+      )}
+      {drawer.printer_id && unsaved && (
+        <p className="muted text-xs">Guarda los cambios para probar la apertura con ellos.</p>
+      )}
+      <PendingCashOperation mutation={mutation} />
     </div>
   );
 }
@@ -151,66 +261,81 @@ function DrawerEditor({
   const [printer, setPrinter] = useState(drawer.printer_id ?? '');
   const [pin, setPin] = useState<'0' | '1'>(drawer.pulse_pin === 1 ? '1' : '0');
   const [enabled, setEnabled] = useState(drawer.enabled);
+  const unsaved =
+    printer !== (drawer.printer_id ?? '') ||
+    pin !== (drawer.pulse_pin === 1 ? '1' : '0') ||
+    enabled !== drawer.enabled;
+  const selected = printers.find((option) => option.id === printer) ?? null;
   return (
-    <Form
-      label={`Guardar cajón de ${drawer.register_name}`}
-      successMessage={`Cajón de ${drawer.register_name} guardado.`}
-      onSave={async () => {
-        await execute('payments_save_cash_drawer', {
-          id: drawer.register_id,
-          body: {
-            revision: drawer.revision,
-            printer_id: printer || null,
-            pulse_pin: Number(pin),
-            enabled,
-          },
-        });
-      }}
-    >
-      <h4>{drawer.register_name}</h4>
-      <div className="form-grid">
-        <div className="field">
-          <label htmlFor={printerID}>Impresora del cajón</label>
-          <select
-            id={printerID}
-            value={printer}
-            onChange={(event) => setPrinter(event.target.value)}
-          >
-            <option value="">Sin impresora</option>
-            {printers.map((option) => (
-              <option
-                key={option.id}
-                value={option.id}
-                disabled={!option.compatible || !option.active}
-              >
-                {option.name}
-                {!option.compatible ? ' · no compatible (no es ESC/POS por red)' : ''}
-                {option.compatible && !option.active ? ' · desactivada' : ''}
-              </option>
-            ))}
-          </select>
+    <div className="form-stack">
+      <Form
+        label={`Guardar cajón de ${drawer.register_name}`}
+        successMessage={`Cajón de ${drawer.register_name} guardado.`}
+        onSave={async () => {
+          await execute('payments_save_cash_drawer', {
+            id: drawer.register_id,
+            body: {
+              revision: drawer.revision,
+              printer_id: printer || null,
+              pulse_pin: Number(pin),
+              enabled,
+            },
+          });
+        }}
+      >
+        <h4>{drawer.register_name}</h4>
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor={printerID}>Impresora del cajón</label>
+            <select
+              id={printerID}
+              value={printer}
+              onChange={(event) => setPrinter(event.target.value)}
+            >
+              <option value="">Sin impresora</option>
+              {printers.map((option) => (
+                <option
+                  key={option.id}
+                  value={option.id}
+                  disabled={!option.compatible || !option.active}
+                >
+                  {option.name} · {drawerConnectionLabel(option)}
+                  {!option.active ? ' · desactivada' : ''}
+                  {option.active && !option.compatible ? ' · no compatible' : ''}
+                </option>
+              ))}
+            </select>
+            {selected && selected.active && !selected.compatible && (
+              <small className="muted">{selected.reason}</small>
+            )}
+          </div>
+          <div className="field">
+            <span>Conector del pulso</span>
+            <SegmentedControl<'0' | '1'>
+              label={`Conector del cajón de ${drawer.register_name}`}
+              value={pin}
+              onChange={setPin}
+              options={[
+                { value: '0', label: 'Pin 2' },
+                { value: '1', label: 'Pin 5' },
+              ]}
+            />
+          </div>
+          <div className="field">
+            <span>Estado</span>
+            <ToggleButton
+              label={enabled ? 'Cajón activado' : 'Cajón desactivado'}
+              pressed={enabled}
+              onChange={setEnabled}
+            />
+          </div>
         </div>
-        <div className="field">
-          <span>Conector del pulso</span>
-          <SegmentedControl<'0' | '1'>
-            label={`Conector del cajón de ${drawer.register_name}`}
-            value={pin}
-            onChange={setPin}
-            options={[
-              { value: '0', label: 'Pin 2' },
-              { value: '1', label: 'Pin 5' },
-            ]}
-          />
-        </div>
-        <div className="field">
-          <span>Estado</span>
-          <ToggleButton
-            label={enabled ? 'Cajón activado' : 'Cajón desactivado'}
-            pressed={enabled}
-            onChange={setEnabled}
-          />
-        </div>
-      </div>
-    </Form>
+      </Form>
+      <DrawerTest
+        drawer={drawer}
+        printerName={drawer.printer_name ?? 'la impresora del cajón'}
+        unsaved={unsaved}
+      />
+    </div>
   );
 }

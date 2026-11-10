@@ -438,12 +438,63 @@ export interface DrawerSettings {
   updated_at: string | null;
 }
 
+// Impresora candidata para el cajón. Para una cola CUPS, Go la consulta con lpstat y lpoptions
+// (solo lecturas, etapa 7.1): connection es la conexión que informa CUPS y reason explica por qué
+// no admite datos raw.
 export interface DrawerPrinter {
   id: string;
   name: string;
   transport: string;
   active: boolean;
   compatible: boolean;
+  connection?: string;
+  reason?: string;
+}
+
+// Conexión de la impresora del cajón tal como la describe la configuración.
+export function drawerConnectionLabel(printer: DrawerPrinter) {
+  if (printer.transport === 'escpos_tcp') {
+    return 'ESC/POS por red';
+  }
+  if (printer.transport === 'cups') {
+    const connection = printer.connection ? drawerConnectionNames[printer.connection] : '';
+    return connection ? `CUPS · ${connection}` : 'CUPS';
+  }
+  return 'Agente de impresión';
+}
+
+const drawerConnectionNames: Record<string, string> = {
+  usb: 'USB',
+  serial: 'puerto serie',
+  parallel: 'puerto paralelo',
+  socket: 'AppSocket',
+  ipp: 'IPP',
+  ipps: 'IPPS',
+  dnssd: 'Bonjour',
+  lpd: 'LPD',
+};
+
+// Retiro o gasto rechazado por efectivo insuficiente (etapa 7.1). Solo lo consulta quien puede ver
+// el efectivo esperado; nunca incluye el esperado ni cuánto faltó.
+export interface RejectedOutflow {
+  id: string;
+  occurred_at: string;
+  kind: 'withdrawal' | 'expense';
+  currency: CashCurrency;
+  attempted_amount: string;
+  actor_name: string;
+  device_name: string;
+  register_name: string;
+  authorization_mode: 'self' | 'supervisor' | null;
+  authorized_by_name: string | null;
+}
+
+export interface RejectedOutflows {
+  shift_id: string;
+  // Falso durante el arqueo de cierre: la consulta es ciega, como el esperado.
+  visible: boolean;
+  message?: string;
+  rejections: RejectedOutflow[];
 }
 
 export interface CashLimitSettings {
@@ -533,6 +584,7 @@ export const cashOperationLabels: Partial<Record<Operation, string>> = {
   payments_print_cash_operation: 'de la impresión del comprobante',
   payments_reprint_cash_document: 'de la reimpresión del documento',
   payments_open_drawer: 'del comando de apertura del cajón',
+  payments_test_cash_drawer: 'de la prueba de apertura del cajón',
 };
 
 export const cashDocumentKindLabels: Record<CashDocumentKind, string> = {

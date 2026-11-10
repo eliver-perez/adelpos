@@ -1,6 +1,7 @@
 package payments
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/shopspring/decimal"
@@ -263,7 +264,7 @@ func (handler *service) recordCashOperation(shiftID, kind string) (any, error) {
 			return nil, err
 		}
 		if err := handler.checkAvailable(shift, draft); err != nil {
-			return nil, err
+			return nil, handler.outflowRejected(err, shift, draft, approved)
 		}
 	}
 	id, err := handler.insertCashOperation(shift, draft, rate, approved, nil, false)
@@ -286,6 +287,40 @@ func (handler *service) recordCashOperation(shiftID, kind string) (any, error) {
 		return nil, err
 	}
 	return result, handler.audit(handler.ctx, handler.tx, "cash.operation_recorded", "cash_operation", &id, nil, operation)
+}
+
+// outflowRejection es la acción de auditoría de un retiro o gasto rechazado por efectivo
+// insuficiente (etapa 7.1, §3.5).
+const outflowRejection = "cash.outflow_rejected"
+
+// outflowRejected adjunta al rechazo por efectivo insuficiente su auditoría: quién (el actor de la
+// auditoría), desde qué terminal, en qué caja y turno, tipo, moneda, importe intentado y cómo se
+// autorizó; la hora es la del registro. Nunca el efectivo esperado ni cuánto faltó. administration
+// revierte la operación y confirma solo este registro (success=false), como la denegación de un
+// permiso. El cajero recibe el mismo CASH_INSUFFICIENT sin cifras.
+func (handler *service) outflowRejected(err error, shift *Shift, draft *operationDraft, approved *approval) error {
+	var problem *Error
+	if !errors.As(err, &problem) || problem.Code != "CASH_INSUFFICIENT" {
+		return err
+	}
+	authorizedBy, mode := handler.approvalColumns(approved)
+	problem.Rejection = &Rejection{
+		Action:   outflowRejection,
+		Entity:   "cash_shift",
+		EntityID: shift.ID,
+		Details: map[string]any{
+			"register_id":        shift.RegisterID,
+			"shift_id":           shift.ID,
+			"device_id":          handler.request.Actor.DeviceID,
+			"kind":               draft.kind,
+			"currency":           draft.currency,
+			"attempted_amount":   money(draft.amount),
+			"authorization_mode": mode,
+			"authorized_by":      authorizedBy,
+			"operation_id":       handler.operationID,
+		},
+	}
+	return problem
 }
 
 // checkAvailable compara una salida con el efectivo esperado de su moneda. Sin solicitud

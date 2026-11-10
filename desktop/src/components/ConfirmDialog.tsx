@@ -38,8 +38,8 @@ const focusableSelector = [
 ].join(',');
 
 // Mantiene el foco dentro del panel: Tab en el último control vuelve al primero y Mayús+Tab en el
-// primero va al último.
-function trapFocus(event: KeyboardEvent<HTMLDivElement>, panel: HTMLDivElement) {
+// primero va al último. También la usa la hoja del atajo «Caja» (etapa 7.1).
+export function trapFocus(event: KeyboardEvent<HTMLElement>, panel: HTMLElement) {
   const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector));
   const first = focusable[0];
   const last = focusable[focusable.length - 1];

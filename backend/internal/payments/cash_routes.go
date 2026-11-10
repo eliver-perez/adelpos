@@ -69,6 +69,10 @@ func cashSettingsRoute(method string, parts []string) *route {
 	if len(parts) == 3 && method == "PUT" && resource == "drawers" {
 		return &route{permissionCashSettings, false, (*service).saveDrawerSettings}
 	}
+	// «Probar apertura» del cajón de una caja (etapa 7.1): payments/cash/drawers/{caja}/test.
+	if len(parts) == 4 && method == "POST" && resource == "drawers" && parts[3] == "test" {
+		return &route{permissionCashSettings, false, (*service).testDrawer}
+	}
 	return nil
 }
 
@@ -105,6 +109,10 @@ func shiftActionRoute(method, action string) *route {
 			return &route{permissionShiftsRead, true, (*service).shiftSummary}
 		case "documents":
 			return &route{permissionShiftsRead, true, (*service).shiftDocuments}
+		case "rejected-outflows":
+			// Retiros y gastos rechazados por efectivo insuficiente (etapa 7.1): solo para quien
+			// puede consultar el esperado.
+			return &route{permissionExpectedRead, true, (*service).shiftRejectedOutflows}
 		}
 		return nil
 	}

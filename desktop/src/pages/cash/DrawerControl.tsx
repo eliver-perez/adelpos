@@ -14,16 +14,21 @@ export function drawerPendingKey(registerID: string) {
 
 // Apertura manual del cajón de la caja de esta terminal (cash.drawer.open). Exige un motivo, es
 // idempotente y Go la audita. El aviso solo informa que el comando se envió: nunca afirma que el
-// cajón se abrió físicamente.
+// cajón se abrió físicamente. Desde el atajo «Caja» (etapa 7.1) se abre ya con el motivo a la
+// vista y avisa al enviarse para cerrar la hoja.
 export function DrawerControl({
   registerID,
   registerName,
+  initiallyOpen = false,
+  onSent,
 }: {
   registerID: string;
   registerName: string;
+  initiallyOpen?: boolean;
+  onSent?: () => void;
 }) {
   const reasonID = useId();
-  const [capturing, setCapturing] = useState(false);
+  const [capturing, setCapturing] = useState(initiallyOpen);
   const [reason, setReason] = useState('');
   // El resultado se avisa al confirmarse, también cuando llega por el reintento de un incierto.
   const mutation = useCashMutation(
@@ -43,6 +48,7 @@ export function DrawerControl({
       });
       setReason('');
       setCapturing(false);
+      onSent?.();
     } catch (problem) {
       mutation.reportFailure(problem, 'No se pudo enviar el comando de apertura del cajón.');
     }
