@@ -1,6 +1,6 @@
 # Cobros, pagos, descuentos y devoluciones · Etapa 6
 
-Versión 0.7.0, esquema 8: etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
+Versión 0.7.1, esquema 9: etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable; y de la etapa 7.1 (fase D, migración 0009, aún no aplicada a la instalación real): motivos de descuento y total en dólares en precuentas y tickets. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
 
 ## Autoridad y estructura
 
