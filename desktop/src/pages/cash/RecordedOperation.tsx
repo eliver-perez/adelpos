@@ -26,10 +26,10 @@ export function recordedOperationTitle(operation: CashOperation) {
   return `${kind} ${verb}: ${currencyAmount(operation.currency, operation.amount)} · ${operation.concept}`;
 }
 
-// Resultado confirmado de un ingreso, retiro, gasto o corrección, con lo que devolvió Go: también
-// el estado del comprobante y del comando del cajón, que nunca revierten la operación. En la fase A
-// de la etapa 7.1 sigue en pantalla como resultado de la operación (además del aviso de
-// confirmación); la fase C cerrará el panel y llevará estos estados al aviso.
+// Resultado confirmado de una corrección o regularización, con lo que devolvió Go: también el
+// estado del comprobante y del comando del cajón, que nunca revierten la operación. Desde la fase C
+// de la etapa 7.1 los ingresos, retiros y gastos ya no se muestran aquí: su panel se cierra y el
+// aviso de confirmación lleva esos estados (recordingFlow.ts).
 export function RecordedOperation({ operation }: { operation: RecordedCashOperation }) {
   return (
     <div className="checkout-result" role="status">

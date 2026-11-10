@@ -5,9 +5,11 @@ import { expectNoticeClosesUnderPointer, expectNoticeLayout, notice } from './no
 // Recorrido de caja de la etapa 7 (fases B y C) contra Go y PostgreSQL reales: apertura por
 // denominaciones, ingreso y retiro autoautorizado, corte parcial con su vista previa, tope de caja
 // activado y desactivado, arqueo ciego que pausa el cobro, cierre con faltante y vista previa del
-// corte definitivo. Nada se imprime: el destino de la aceptación no tiene hardware. Todas las cifras que se verifican las calcula Go; la interfaz solo las
-// muestra. El administrador tiene todos los permisos, por lo que su propio permiso autoriza el
-// retiro y ve el esperado y las diferencias después del cierre.
+// corte definitivo. Etapa 7.1 (fase C): aviso sin turno en la captura, ingreso desde el atajo
+// «Caja» con su aviso de confirmación y paneles que se cierran tras registrar. Nada se imprime: el
+// destino de la aceptación no tiene hardware. Todas las cifras que se verifican las calcula Go; la
+// interfaz solo las muestra. El administrador tiene todos los permisos, por lo que su propio
+// permiso autoriza el retiro y ve el esperado y las diferencias después del cierre.
 
 async function typeOnKeypad(keypad: Locator, digits: string) {
   for (const digit of digits) {
@@ -46,6 +48,25 @@ function cashActions(page: Page) {
   return page.getByRole('group', { name: 'Acciones del turno' });
 }
 
+function toastWith(page: Page, text: string | RegExp) {
+  return page.locator('[data-sonner-toaster] .app-toast').filter({ hasText: text });
+}
+
+// 0. Etapa 7.1: sin turno, la captura sigue disponible con un aviso discreto y el atajo «Caja» de
+// la barra lo indica.
+async function noShiftInCapture(page: Page) {
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
+  const notice = page.getByRole('status', { name: 'Turno de caja', exact: true });
+  await expect(notice).toContainText('No hay turno abierto: puedes capturar, pero no cobrar.');
+  await expect(notice.getByRole('button', { name: 'Abrir turno', exact: true })).toBeVisible();
+  const shortcut = page
+    .locator('.capture-topbar')
+    .getByRole('button', { name: 'Caja · Sin turno', exact: true });
+  await expect(shortcut).toBeVisible();
+  const box = await shortcut.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+}
+
 // 1. Apertura por denominaciones: 2 × $200 + 1 × $100; Go calcula el fondo de $500.00.
 async function openByDenominations(page: Page, testInfo: TestInfo) {
   await page.getByRole('button', { name: 'Caja', exact: true }).click();
@@ -69,26 +90,61 @@ async function openByDenominations(page: Page, testInfo: TestInfo) {
   await opening
     .getByRole('button', { name: 'Abrir turno con fondo de $500.00', exact: true })
     .click();
+  await expect(notice(page, 'Turno de Caja 1 abierto con fondo de $500.00.')).toBeVisible();
   const status = page.getByLabel('Turno de Caja 1', { exact: true });
   await expect(status).toContainText('Abierto');
   await expect(status).toContainText('$500.00');
 }
 
-// 2. Ingreso de $100 y retiro de $200 autoautorizado por el permiso del administrador.
-async function incomeAndWithdrawal(page: Page) {
-  await cashActions(page).getByRole('button', { name: 'Ingreso', exact: true }).click();
-  const income = page.getByRole('region', { name: 'Ingreso de efectivo', exact: true });
+// 2. Ingreso de $100 desde el atajo «Caja» de la captura (etapa 7.1) y retiro de $200 desde Caja,
+// autoautorizado por el permiso del administrador.
+async function incomeFromShortcut(page: Page, testInfo: TestInfo) {
+  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Turno de caja', exact: true })).toHaveCount(0);
+  const shortcut = page
+    .locator('.capture-topbar')
+    .getByRole('button', { name: 'Caja · Turno abierto', exact: true });
+  await shortcut.click();
+  const menu = page.getByRole('group', { name: 'Menú rápido de caja' });
+  for (const option of ['Ingreso', 'Retiro', 'Gasto', 'Corte parcial', 'Ir a Caja']) {
+    const button = menu.getByRole('button', { name: option, exact: true });
+    await expect(button).toBeEnabled();
+    const box = await button.boundingBox();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+  }
+  await menu.getByRole('button', { name: 'Ingreso', exact: true }).click();
+  // La hoja superpuesta contiene el mismo formulario de Caja.
+  const sheet = page.getByRole('dialog', { name: 'Ingreso de efectivo', exact: true });
+  const income = sheet.getByRole('region', { name: 'Ingreso de efectivo', exact: true });
   await income.getByRole('button', { name: 'Aportación adicional al fondo', exact: true }).click();
   await typeOnKeypad(income.getByRole('group', { name: 'Teclado numérico del importe' }), '100');
+  await cashThemes(page, testInfo, 'cash-shortcut-sheet');
   await income.getByRole('button', { name: 'Registrar ingreso $100.00', exact: true }).click();
+  // La hoja se cierra y el aviso confirma tipo, importe y concepto, con «Imprimir comprobante»
+  // (no se imprimió al registrar). No se pulsa: el destino de la aceptación no tiene hardware.
+  await expect(sheet).toHaveCount(0);
+  const title = 'Ingreso registrado: $100.00 · Aportación adicional al fondo';
   await expect(
-    income.getByText('Ingreso registrado: $100.00 · Aportación adicional al fondo'),
+    toastWith(page, title).getByRole('button', { name: 'Imprimir comprobante', exact: true }),
   ).toBeVisible();
-  // Además del resultado en el panel, el aviso confirma la operación arriba al centro, debajo
-  // de la cabecera, y se cierra con un toque.
-  await expectNoticeLayout(page, 'Ingreso registrado: $100.00 · Aportación adicional al fondo');
+  await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
+  // El aviso aparece arriba al centro, debajo de la cabecera, y se cierra con un toque.
+  await expectNoticeLayout(page, title);
+  // «Ir a Caja» abre la pantalla Caja; el ingreso ya cuenta en los registros del turno.
+  await shortcut.click();
+  await menu.getByRole('button', { name: 'Ir a Caja', exact: true }).click();
+  await expect(page.getByText(/1 operación de efectivo/)).toBeVisible();
+}
 
+async function withdrawalFromCash(page: Page, testInfo: TestInfo) {
+  // Etapa 7.1: tarjetas con icono grande y acento por tipo, en ambos temas.
+  await cashActions(page).scrollIntoViewIfNeeded();
+  await cashThemes(page, testInfo, 'cash-action-cards');
   await cashActions(page).getByRole('button', { name: 'Retiro de efectivo', exact: true }).click();
+  await expect(
+    cashActions(page).getByRole('button', { name: 'Retiro de efectivo', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   const withdrawal = page.getByRole('region', { name: 'Retiro de efectivo', exact: true });
   await withdrawal.getByRole('button', { name: 'Resguardo', exact: true }).click();
   await typeOnKeypad(
@@ -99,11 +155,13 @@ async function incomeAndWithdrawal(page: Page) {
   await expect(withdrawal.getByText(/Autorización propia/)).toBeVisible();
   await expect(withdrawal.getByLabel('Contraseña del supervisor')).toHaveCount(0);
   await withdrawal.getByRole('button', { name: 'Registrar retiro $200.00', exact: true }).click();
-  await expect(withdrawal.getByText('Retiro registrado: $200.00 · Resguardo')).toBeVisible();
+  // Etapa 7.1: el panel se cierra y vuelve a Operación; el aviso lleva la autorización.
+  await expect(withdrawal).toHaveCount(0);
+  await expect(cashActions(page)).toBeVisible();
+  await expect(toastWith(page, 'Retiro registrado: $200.00 · Resguardo')).toContainText(
+    'Autorizado con el permiso propio de Administrador',
+  );
   await expectNoticeClosesUnderPointer(page, 'Retiro registrado: $200.00 · Resguardo');
-  await expect(
-    withdrawal.getByText('Autorizado con el permiso propio de Administrador'),
-  ).toBeVisible();
 }
 
 // 3. Corte parcial: informe que no mueve dinero; con permiso, Go entrega el esperado ($400.00).
@@ -113,6 +171,11 @@ async function partialCut(page: Page) {
   await expect(cut).toContainText('no mueve dinero');
   await expect(cut.getByRole('button', { name: 'Retirar efectivo', exact: true })).toBeVisible();
   await cut.getByRole('button', { name: 'Generar corte parcial', exact: true }).click();
+  // Etapa 7.1: el panel se cierra con un aviso sin cifras; el corte se consulta al reabrirlo.
+  await expect(notice(page, 'Corte parcial #1 generado.')).toBeVisible();
+  await expect(cut).toHaveCount(0);
+  await cashActions(page).getByRole('button', { name: 'Corte parcial', exact: true }).click();
+  await cut.getByRole('button', { name: /^Corte parcial #1 · / }).click();
   const report = cut.getByRole('article', { name: 'Corte parcial #1', exact: true });
   await expect(report).toBeVisible();
   await expect(report.getByLabel('Efectivo esperado en caja', { exact: true })).toContainText(
@@ -194,6 +257,11 @@ async function startClosingAndCheckCheckout(page: Page) {
   ).toBeVisible();
 
   await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  // El atajo «Caja» de la captura refleja la pausa; no es el aviso sin turno.
+  await expect(
+    page.locator('.capture-topbar').getByRole('button', { name: 'Caja · En arqueo', exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Turno de caja', exact: true })).toHaveCount(0);
   const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
   await bill.getByRole('button', { name: 'Cobrar · $150.00', exact: true }).click();
   const shift = page.getByRole('region', { name: 'Turno de caja', exact: true });
@@ -290,8 +358,10 @@ async function reviewClosedShift(page: Page) {
 // Recorrido completo; termina en Restaurante con la cuenta lista para el recorrido de cobro, que
 // abre un turno nuevo en la misma caja.
 export async function checkCashShift(page: Page, testInfo: TestInfo) {
+  await noShiftInCapture(page);
   await openByDenominations(page, testInfo);
-  await incomeAndWithdrawal(page);
+  await incomeFromShortcut(page, testInfo);
+  await withdrawalFromCash(page, testInfo);
   await partialCut(page);
   await previewPartialCut(page, testInfo);
   await cashLimitWarning(page, testInfo);

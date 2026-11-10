@@ -1,14 +1,20 @@
-import { IconLabel } from '../../components/Icon';
+import { Icon } from '../../components/Icon';
 import type { IconName } from '../../components/Icon';
 import { permissionName } from '../../services/payments';
 import type { Shift } from '../../services/payments';
 
 export type CashAction = 'income' | 'withdrawal' | 'expense' | 'partial' | 'closing';
 
+// Acento de cada tarjeta (etapa 7.1, decisión 11): entradas en verde, salidas en ámbar, informes
+// neutros y el cierre con color propio. Los colores son tokens del tema (styles.css); el texto
+// conserva el color de lectura para mantener el contraste en ambos temas.
+export type CashActionTone = 'entry' | 'exit' | 'report' | 'closing';
+
 interface ActionDefinition {
   action: CashAction;
   label: string;
   icon: IconName;
+  tone: CashActionTone;
   permission: string;
   // Las operaciones de efectivo se registran desde una terminal de la caja del turno.
   ownRegister: boolean;
@@ -19,6 +25,7 @@ const definitions: ActionDefinition[] = [
     action: 'income',
     label: 'Ingreso',
     icon: 'income',
+    tone: 'entry',
     permission: 'cash.income.record',
     ownRegister: true,
   },
@@ -26,6 +33,7 @@ const definitions: ActionDefinition[] = [
     action: 'withdrawal',
     label: 'Retiro de efectivo',
     icon: 'withdrawal',
+    tone: 'exit',
     permission: 'cash.withdrawals.record',
     ownRegister: true,
   },
@@ -33,6 +41,7 @@ const definitions: ActionDefinition[] = [
     action: 'expense',
     label: 'Gasto',
     icon: 'expense',
+    tone: 'exit',
     permission: 'cash.expenses.record',
     ownRegister: true,
   },
@@ -40,6 +49,7 @@ const definitions: ActionDefinition[] = [
     action: 'partial',
     label: 'Corte parcial',
     icon: 'report',
+    tone: 'report',
     permission: 'cash.shifts.read',
     ownRegister: false,
   },
@@ -47,6 +57,7 @@ const definitions: ActionDefinition[] = [
     action: 'closing',
     label: 'Arqueo y cierre',
     icon: 'count',
+    tone: 'closing',
     permission: 'cash.counts.perform',
     ownRegister: false,
   },
@@ -70,7 +81,39 @@ export function availableActions(
   });
 }
 
-// Botones de acción del turno. Las correcciones se hacen desde el detalle de cada movimiento.
+// Tarjeta táctil de una acción: icono grande arriba del texto y acento por tipo. La seleccionada
+// se resalta con borde y fondo (aria-pressed), sin casillas.
+export function CashActionCard({
+  label,
+  icon,
+  tone,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  icon: IconName;
+  tone: CashActionTone;
+  // Sin valor, la tarjeta no es seleccionable (por ejemplo, la que lleva a Movimientos).
+  selected?: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`cash-action-card cash-action-${tone} ${selected ? 'cash-action-selected' : ''}`}
+      data-tone={tone}
+      aria-pressed={selected}
+      onClick={onSelect}
+    >
+      <span className="cash-action-icon">
+        <Icon name={icon} size={30} />
+      </span>
+      <span className="cash-action-label">{label}</span>
+    </button>
+  );
+}
+
+// Tarjetas de acción del turno. Las correcciones se hacen desde el detalle de cada movimiento.
 export function CashActions({
   can,
   shift,
@@ -96,24 +139,26 @@ export function CashActions({
     <div className="form-stack">
       <div className="cash-actions" role="group" aria-label="Acciones del turno">
         {actions.map((definition) => (
-          <button
-            type="button"
+          <CashActionCard
             key={definition.action}
-            className={selected === definition.action ? 'cash-choice-selected' : ''}
-            aria-pressed={selected === definition.action}
-            onClick={() => onSelect(definition.action)}
-          >
-            <IconLabel icon={definition.icon}>
-              {definition.action === 'closing' && shift.state === 'closing'
+            label={
+              definition.action === 'closing' && shift.state === 'closing'
                 ? 'Continuar arqueo'
-                : definition.label}
-            </IconLabel>
-          </button>
+                : definition.label
+            }
+            icon={definition.icon}
+            tone={definition.tone}
+            selected={selected === definition.action}
+            onSelect={() => onSelect(definition.action)}
+          />
         ))}
         {correctable && (
-          <button type="button" onClick={onCorrections}>
-            <IconLabel icon="edit">Corrección o regularización</IconLabel>
-          </button>
+          <CashActionCard
+            label="Corrección o regularización"
+            icon="edit"
+            tone="report"
+            onSelect={onCorrections}
+          />
         )}
       </div>
       {!ownRegister && shift.state === 'open' && (

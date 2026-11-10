@@ -167,3 +167,91 @@ Ejecutada sobre la copia aislada sincronizada con el repositorio (clúster tempo
 - Integración PostgreSQL (`tools/iter_snap.sh`): `database`, `administration`, `catalog`, `operations` (120,9 s), `payments` y `kitchen` en `ok`; la prueba de impresora física quedó omitida porque es opcional.
 - Playwright: 1 aprobada en Chromium (46,2 s) y 1 en WebKit (45,1 s), repetida tras el último cambio de la interfaz.
 - Repetida de forma independiente antes del commit, con los mismos resultados: estáticas aprobadas, Go unitarias en `ok`, Vitest con 290 pruebas aprobadas, `tsc`, `build` y cargo (14 aprobadas, 1 ignorada) sin errores, los seis paquetes de integración en `ok` (`operations` en 123,0 s) y Playwright con 1 aprobada en Chromium y 1 en WebKit.
+
+## Fase C · Caja
+
+Detalle funcional en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md) («Etapa 7.1 · fase C») y [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md) («Cajón por CUPS en modo raw · etapa 7.1»); contratos en [API_CONTRACTS.md](../API_CONTRACTS.md).
+
+### Migración 0009
+
+Se creó `backend/migrations/0009_operation_tables_cash_and_reasons.sql`, la única de la etapa (la fase D agregará sus tablas al final). Es transaccional: el migrador la aplica dentro de la transacción que la registra y no contiene sentencias que no admitan transacción. **No se aplicó a la instalación real**; `config/product.json` sigue en esquema 8 hasta la fase E. 0001–0008 no cambiaron.
+
+```sql
+ALTER TABLE app.cash_drawer_events DROP CONSTRAINT cash_drawer_events_reason_check;
+ALTER TABLE app.cash_drawer_events
+    ADD CONSTRAINT cash_drawer_events_reason_check
+        CHECK (reason IN ('payment', 'refund', 'operation', 'manual', 'test'));
+
+CREATE INDEX audit_events_cash_outflow_rejected_idx
+    ON app.audit_events (entity_id, occurred_at)
+    WHERE action = 'cash.outflow_rejected';
+```
+
+Sin permisos nuevos: «Probar apertura» usa `cash.settings.manage` y la consulta de rechazos `cash.expected.read`. Prueba de actualización desde el esquema 8 en `database/existing_install_test.go` (`TestStage71UpgradeOfExistingInstallation`): turno abierto, cajón configurado y un comando manual existentes se conservan, el CHECK conserva su nombre y admite `test`, sigue rechazando motivos desconocidos y la apertura manual sin explicación, el índice es parcial y la migración es repetible.
+
+### Contratos nuevos o cambiados
+
+| Contrato                                     | Cambio                                                                                                                                                                                                                                                                    |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET payments/cash/drawers`                  | Cada impresora informa `connection` y `reason`; las colas CUPS activas se consultan con `lpstat -p` y `lpoptions -p` (solo lecturas) y son compatibles si admiten datos raw.                                                                                              |
+| `PUT payments/cash/drawers/{caja}`           | Acepta una cola CUPS con datos raw. `DRAWER_QUEUE_NOT_RAW` (400, con el motivo) o `DRAWER_QUEUE_UNAVAILABLE` (409). Desactivar el cajón no consulta la cola. El agente sigue con `DRAWER_PROTOCOL_UNSUPPORTED`.                                                           |
+| `POST payments/cash/drawers/{caja}/test`     | Nueva («Probar apertura», `cash.settings.manage`): pulso con la configuración guardada, `cash_drawer_events.reason='test'` ligado al turno activo, auditoría `cash.drawer_tested`, evento `cash.drawer.command_queued`, idempotente. Puente: `payments_test_cash_drawer`. |
+| `GET payments/shifts/{id}/rejected-outflows` | Nueva (`cash.expected.read`): retiros y gastos rechazados por efectivo insuficiente, sin el esperado; vacía y `visible: false` durante el arqueo. Puente: `payments_shift_rejected_outflows`.                                                                             |
+| Retiros y gastos (`CASH_INSUFFICIENT`)       | La respuesta no cambia (sin cifras). La operación se revierte y se confirma solo la auditoría `cash.outflow_rejected` (`success=false`).                                                                                                                                  |
+
+### Implementación
+
+- **Go · cajón por CUPS.** `kitchen/cups_raw.go`: `QueueInspector` y `HostQueueInspector` (ejecutor `commandRunner` sustituible en pruebas), `ParseQueueOptions` y `EvaluateRawQueue`. `kitchen/transport.go`: `HostTransport` con ejecutor opcional; `submitDrawerPulse` elige ESC/POS TCP o CUPS; `submitDrawerPulseCUPS` vuelve a consultar la cola y envía `/usr/bin/lp -d <cola> -o raw -n 1 -t ADEL-cajon-<trabajo> <archivo>`; `cupsJobReference` comparte la lectura del trabajo con los documentos. `CompatibleDrawerTransport` admite `escpos_tcp` y `cups`. `payments/cash_drawer.go`: compatibilidad por impresora con presupuesto de tiempo, `requireRawQueue`, `testDrawer` y el motivo `test`. `payments.Request.Queues` y `administration.Service.Queues` llevan el inspector (`main.go` usa el del equipo; la aceptación inyecta uno simulado).
+- **Go · rechazos auditados.** `payments.Error` admite `Rejection`; `cash_operations.go` adjunta al `CASH_INSUFFICIENT` de retiros y gastos la auditoría (caja, turno, terminal, tipo, moneda, importe intentado, modo y autor de la autorización, `operation_id`). `administration/routes.go` la traduce en `Fault.Rejection` (`paymentFault`) y `runProtected` revierte el savepoint, escribe la auditoría con `success=false` en la transacción externa y la confirma, como el 403. `payments/cash_rejections.go` atiende la consulta con el índice parcial de la 0009.
+- **Puente nativo.** `payments_test_cash_drawer` y `payments_shift_rejected_outflows` en la lista cerrada de `api.rs`, con el formato `format!` que lee `e2e/native-driver.ts` y prueba Rust (`cash_printing_drawer_and_limit_routes_are_closed`: método, ruta, identificador obligatorio y rechazo de rutas arbitrarias).
+- **Atajo «Caja».** `pages/cash/CashShortcut.tsx`: `useCashShortcut` (una sola consulta de `payments_current_shift` y, con `cash.drawer.open`, de `payments_cash_registers`, más los eventos `cash`), `CashShortcut` (botón con estado y menú rápido), `CashShortcutSheet` (hoja modal con foco atrapado y Escape) y `NoShiftNotice`. `OperationalPage` lo crea una vez y lo coloca en la barra de mesas, para llevar, cuentas y cobro; `CaptureScreen` lo pasa a `CaptureTopBar` y el aviso sin turno a la columna de la cuenta. «Ir a Caja» usa la prop nueva `onOpenCash` de `App.tsx` (`setScreen('cash')`).
+- **Tarjetas y flujo tras registrar.** `CashActions` dibuja `CashActionCard` (icono de 30 px en un círculo con el acento, texto debajo, `data-tone`, `aria-pressed`); tokens `--cash-entry`, `--cash-exit`, `--cash-report`, `--cash-closing` y sus versiones suaves en claro y oscuro. `pages/cash/recordingFlow.ts` (`useCashRecording`, `announceRecordedOperation`, `announcePartialCut`) anuncia el resultado desde la escritura del turno (también tras un reintento incierto) y cierra el panel o la hoja; `CashOperationForm` y `PartialCutPanel` ya no muestran ni anuncian el resultado y admiten `backLabel`; `DrawerControl` admite `initiallyOpen` y `onSent`; `useShiftOpening`/`ShiftOpening` admiten `onOpened` y confirman con el fondo (`openedMessage`). `trapFocus` de `ConfirmDialog` se exporta para la hoja.
+- **Configuración del cajón.** `CashHardwareSettings`: conexión de cada impresora (`drawerConnectionLabel`), lista «Impresoras que no sirven para el cajón» con el motivo de Go y «Probar apertura» con confirmación estándar, deshabilitado sin impresora guardada o con cambios sin guardar.
+- **Intentos rechazados.** `MovementsView`: opción «Intentos rechazados» del filtro de tipo solo con `cash.expected.read`; tabla con fecha, hora, tipo, importe intentado, usuario, terminal, caja y autorización (consulta solo al elegir el filtro).
+
+### Decisiones menores
+
+- **Criterio de datos raw conservador**: solo `usb`, `serial`, `parallel` y `socket`; IPP, IPPS, Bonjour, LPD y HTTP se rechazan aunque tengan controlador, porque reciben documentos. Una impresora de red debe usar ESC/POS por red.
+- **La cola se consulta otra vez antes de cada pulso** (en el trabajador, fuera de la transacción) y no al encolar dentro de la transacción del cobro: así un cobro nunca espera a CUPS. Las consultas al configurar sí ocurren dentro de la transacción con el lock operativo, con un límite de 3 s por consulta y 4 s por petición.
+- **Desactivar el cajón no consulta la cola**, para poder desactivarlo aunque CUPS no responda.
+- **«Probar apertura» se permite desde cualquier terminal** con `cash.settings.manage` y aunque el cajón no esté activado (para comprobar la conexión antes de activarlo); la interfaz pide confirmación nombrando la caja y la impresora («Hazlo con alguien frente a la caja») y exige guardar antes los cambios.
+- **Corte parcial desde el atajo** con `cash.partial_cuts.create` (en Caja la tarjeta sigue con `cash.shifts.read`, porque el panel también consulta cortes).
+- **Abrir cajón en el atajo** solo si la caja de la terminal tiene el cajón activado (como en Caja); no depende del turno.
+- **Un solo aviso por operación**: tipo, importe y concepto como mensaje; autorización, cola de impresión y cajón en la descripción. Lo que exige atención (sin impresora, falla al encolar, cajón no disponible o incierto) queda además como aviso persistente. En el corte la acción se llama «Imprimir corte».
+- **Apertura de turno**: el aviso incluye el fondo declarado tal como lo devuelve Go («Turno de Caja 1 abierto con fondo de $500.00.»); antes no llevaba importes. No es el esperado.
+- **Auditoría del rechazo** incluye además el modo de autorización y quién autorizó (útil para detectar el tanteo de un supervisor) y el `operation_id`; el usuario y la terminal son los del registro de auditoría.
+- **Consulta de rechazos ciega durante el arqueo** (un importe rechazado acota el esperado), como el esperado mismo.
+- **Aviso sin turno en la columna de la cuenta**, junto a «Cobrar», y no como franja sobre la captura: una franja reducía la altura de la pantalla y el menú «Más…» de la cuenta ya no cabía a 1280 × 720 (lo detectó Playwright).
+- `e2e/notices.ts` (`expectNoticeLayout`) espera a que termine la animación de entrada antes de medir el aviso: medido al cerrarse la hoja, lo encontraba a medio camino.
+
+### Limitaciones
+
+- **Hardware pendiente**: el pulso por CUPS solo se verificó con el adaptador controlado de la cola y con un ejecutor simulado de `lp` (argumentos y contenido del archivo); no se ejecutó `lp` ni se envió nada a una impresora o cajón real. La prueba física queda pendiente hasta que el propietario tenga una impresora USB con cajón. La detección se comprobó en este Mac solo con lecturas (`lpstat`, `lpoptions`) sobre sus cuatro colas.
+- Un controlador CUPS que se anuncie con un modelo genérico pero convierta los datos (filtros propios del fabricante con `-o raw` ignorado) no se detecta: el criterio se basa en la conexión y el modelo que informa CUPS.
+- Las consultas a CUPS de la configuración retienen el lock operativo hasta 4 s si CUPS no responde.
+- El tanteo por importes se detecta después (auditoría y filtro), no se impide.
+- A 1280 × 720 el atajo ocupa espacio en la barra de la captura: el título y los detalles de la cuenta se recortan con puntos suspensivos antes. En el cobro va junto a las pestañas de vista para no agregar otra fila.
+- Observado, anterior a esta fase: a 1280 × 720 el pie de la cuenta de la captura recorta a la derecha los importes y «Más…» (se comprobó igual con la rama sin la fase C, `58c461e`, en Chromium). No se corrigió aquí.
+- Observado en las capturas de Playwright: un aviso de éxito anterior puede seguir visible detrás de los nuevos más de sus 4 s mientras la pila cambia. No se investigó (componente de la fase A).
+- Sin verificar en la ventana nativa (WKWebView) ni en pantalla táctil física.
+
+### Pruebas de la fase C
+
+- **Integración PostgreSQL** (`operations/cash_stage71_test.go`, encadenada al final de `testCashPrinting`, con la consulta de colas simulada `controlledQueues` —evalúa atributos simulados con `kitchen.EvaluateRawQueue`, nunca ejecuta `lpstat`, `lpoptions` ni `lp`— y el adaptador controlado `recordingTransport`): C48 cola USB compatible, AirPrint incompatible con su motivo, cola sin respuesta, configuraciones rechazadas sin cambios ni auditoría, desactivar sin consultar la cola y cajón guardado con la cola USB; C49 pulso por CUPS con un cobro en efectivo (trabajo en la impresora CUPS, adaptador con el pulso del conector 5, una copia) y ninguno con tarjeta; C50 apertura manual por CUPS con permiso y rechazada sin él; C51 «Probar apertura» rechazada sin `cash.settings.manage` (403 auditado, sin comando), aceptada e idempotente con motivo `test`, turno, auditoría y evento, rechazada en una caja sin impresora y con una cola que dejó de admitir datos raw; C52 resultado incierto por CUPS sin reintento del trabajador ni reenvío desde la cola; C53 retiro rechazado sin cifras para el cajero, sin operación, sin resultado idempotente, sin comandos del cajón ni eventos, con su auditoría `success=false` (usuario, terminal, turno, caja, tipo, moneda, importe intentado, autorización) y sin el esperado, y gasto rechazado con su autorizador; C54 consulta rechazada sin `cash.expected.read` (cajero y observador), completa con el permiso y sin el esperado, y ciega durante el arqueo. C37 se actualizó: el agente sigue rechazado y una cola AirPrint simulada responde `DRAWER_QUEUE_NOT_RAW`. Se inyecta la consulta simulada en `fixture_test.go` para que ninguna prueba consulte CUPS.
+- **Actualización desde el esquema 8** (`database/existing_install_test.go`, `TestStage71UpgradeOfExistingInstallation`).
+- **Go unitarias** (`kitchen/cups_raw_test.go`): detección a partir de las salidas grabadas de `lpoptions -p` de las cuatro colas de este Mac (USB y AppSocket compatibles; IPP y AirPrint no) y de la salida de una cola desconocida; clases, colas remotas, IPP Everywhere, LPD e IPPS rechazadas y puerto serie aceptado; consultas de solo lectura con argumentos separados (`lpstat -p`, `lpoptions -p`) y nombre de cola inválido sin ejecutar nada; argumentos de `lp` (`-d cola -o raw -n 1 -t ADEL-cajon-<trabajo> <archivo>`) con un ejecutor simulado, contenido del archivo (bytes ESC p del conector) y archivo eliminado; resultados incierto, error y cola que ya no admite datos raw sin llamar a `lp`. `template_test.go` actualizado (CUPS compatible; el agente queda en intervención sin ejecutar programas).
+- **Vitest** (`pages/cash/stage71.test.tsx`, `restaurant/capture/capture.test.tsx` y pruebas de caja actualizadas): tarjetas de Caja (icono grande, acento por tipo, selección con `aria-pressed` y sin casillas); cierre del panel tras registrar con un solo aviso, recarga del turno e «Imprimir comprobante» que llama a la impresión posterior (y sin el permiso no se ofrece); corte parcial con «Imprimir corte» y sin cifras; atajo con los tres estados, opciones según permisos, operaciones desactivadas en el arqueo, «Abrir turno» sin turno, «Ir a Caja», ingreso desde la hoja con su aviso y cierre, Escape sin registrar; aviso sin turno con y sin `cash.shifts.open` y ausente con turno; aviso en la captura dentro de la cuenta con la captura disponible; filtro «Intentos rechazados» solo con permiso y sin consultar sin él; configuración del cajón con la conexión de cada cola, el motivo de las incompatibles y «Probar apertura» confirmada (y deshabilitada con cambios sin guardar).
+- **Prueba Rust** del puente: rutas nuevas con método, ruta, identificador obligatorio y rechazo de rutas arbitrarias.
+- **Playwright** (`e2e/cash-flow.ts`, Chromium y WebKit): aviso sin turno en la captura con «Abrir turno» y el atajo «Caja · Sin turno» de 44 px o más; apertura con su aviso del fondo; ingreso de $100 desde el atajo de la captura (menú con sus opciones de 44 px o más, hoja con el formulario de Caja, capturas en claro y oscuro a 1280 × 720 y 1920 × 1080, hoja cerrada, aviso con «Imprimir comprobante» —no se pulsa: el destino no tiene hardware—, posición del aviso y cierre); «Ir a Caja»; tarjetas en ambos temas; retiro desde Caja con el panel cerrado y el aviso con la autorización; corte parcial con su aviso y consulta al reabrir; atajo «Caja · En arqueo» durante el arqueo. El resto del recorrido (cierre, cobro, precuenta, para llevar) sigue igual.
+
+### Verificación de la fase C
+
+Ejecutada sobre la copia aislada sincronizada con el repositorio (clúster temporal 55499, Go temporal 8183), después de `tools/format71.sh`:
+
+- Estáticas (`tools/suite.sh`): Prettier, gofmt, `cargo fmt`, `sync-metadata --check`, `go vet` y `go vet -tags=integration` aprobados.
+- Go unitarias con `-race`: `ok` en todos los paquetes, incluido `kitchen` con las pruebas de CUPS.
+- Vitest: 37 archivos y 306 pruebas aprobadas; `tsc` y `npm run build` sin errores; cargo: 14 aprobadas, 1 ignorada.
+- Integración PostgreSQL (`tools/iter_snap.sh`): `database`, `administration`, `catalog`, `operations` (121,0 s), `payments` y `kitchen` en `ok`; la prueba de impresora física quedó omitida porque es opcional. Una segunda ejecución detallada confirmó `TestStage71UpgradeOfExistingInstallation` y C37–C54 aprobadas.
+- Playwright: 1 aprobada en Chromium y 1 en WebKit.
+- Ningún trabajo ni pulso se envió a una impresora o cajón real: solo consultas de lectura `lpstat`/`lpoptions` en este Mac para investigar el criterio y grabar las salidas de prueba. La 0009 no se aplicó a la instalación real.
+- Repetida de forma independiente antes del commit, con los mismos resultados: estáticas aprobadas, Go unitarias en `ok`, Vitest con 306 pruebas aprobadas, `tsc`, `build` y cargo (14 aprobadas, 1 ignorada) sin errores, los seis paquetes de integración en `ok` (`operations` en 125,8 s) y Playwright con 1 aprobada en Chromium y 1 en WebKit.

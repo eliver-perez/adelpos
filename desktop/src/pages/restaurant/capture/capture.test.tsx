@@ -191,6 +191,9 @@ let saveRequests: Record<string, unknown>[];
 let opens: Record<string, unknown>[];
 let otherTerminal: ServerAccount | null;
 let catalogPreviews: Record<string, unknown>[];
+// Turno de la caja de la terminal que entrega Go al atajo «Caja» (etapa 7.1); sin valor, un
+// cuerpo vacío como cualquier consulta no preparada.
+let terminalShift: unknown;
 
 function account(state: ServerAccount) {
   return {
@@ -561,6 +564,8 @@ function respond(
         timezone: 'America/Monterrey',
         availability_reason: '',
       };
+    case 'payments_current_shift':
+      return terminalShift;
     default:
       return {};
   }
@@ -597,6 +602,7 @@ beforeEach(() => {
   opens = [];
   otherTerminal = null;
   catalogPreviews = [];
+  terminalShift = {};
   native.invoke.mockImplementation(
     async (
       command: string,
@@ -1138,5 +1144,62 @@ describe('captura de una mesa sin cuenta (etapa 7.1)', () => {
     expect(Object.values(accounts).filter((entry) => entry.table === ids.freeTable)).toHaveLength(
       2,
     );
+  });
+});
+
+describe('aviso sin turno en la captura (etapa 7.1)', () => {
+  const register = { id: '00000000-0000-4000-8000-000000000201', name: 'Caja 1', active: true };
+
+  it('sin turno se puede capturar con un aviso discreto y «Abrir turno» con permiso', async () => {
+    terminalShift = {
+      register,
+      shift: null,
+      shared_shifts: false,
+      usable: false,
+      reason: 'No hay un turno abierto en Caja 1. Ábrelo con su fondo inicial antes de cobrar.',
+    };
+    const bill = await openFirstAccount();
+    // El aviso está en la cuenta, junto a «Cobrar»; el atajo de la barra indica «Sin turno».
+    const notice = await within(bill).findByRole('status', { name: 'Turno de caja' });
+    expect(notice.textContent).toContain('No hay turno abierto: puedes capturar, pero no cobrar.');
+    expect(within(notice).getByRole('button', { name: 'Abrir turno' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Caja · Sin turno' }).closest('.capture-topbar'),
+    ).not.toBeNull();
+    fireEvent.click(productButton('Filete de prueba'));
+    await waitFor(() =>
+      expect(within(bill).getAllByText(/Filete de prueba/).length).toBeGreaterThan(0),
+    );
+    fireEvent.click(within(notice).getByRole('button', { name: 'Abrir turno' }));
+    expect(await screen.findByRole('dialog', { name: 'Abrir turno' })).toBeTruthy();
+  });
+
+  it('con el turno abierto no hay aviso y el atajo lo indica en la barra', async () => {
+    terminalShift = {
+      register,
+      shift: {
+        id: '00000000-0000-4000-8000-000000000202',
+        register_id: register.id,
+        register_name: 'Caja 1',
+        state: 'open',
+        opening_float: '500.00',
+        opening_float_usd: null,
+        opening_notes: '',
+        business_date: '2026-11-09',
+        opened_by: 'usuario',
+        opened_by_name: 'Administrador',
+        opened_device_name: 'Terminal 1',
+        opened_at: '2026-11-09T15:00:00Z',
+        closed_at: null,
+        revision: 1,
+        shared_allowed: false,
+      },
+      shared_shifts: false,
+      usable: true,
+      reason: '',
+    };
+    await openFirstAccount();
+    expect(await screen.findByRole('button', { name: 'Caja · Turno abierto' })).toBeTruthy();
+    expect(screen.queryByRole('status', { name: 'Turno de caja' })).toBeNull();
   });
 });

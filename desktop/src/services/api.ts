@@ -176,6 +176,9 @@ export type Operation =
   | 'payments_print_cash_operation'
   | 'payments_reprint_cash_document'
   | 'payments_shift_documents'
+  // Etapa 7.1 (fase C): «Probar apertura» del cajón e intentos rechazados por efectivo insuficiente.
+  | 'payments_test_cash_drawer'
+  | 'payments_shift_rejected_outflows'
   | 'restaurant_overview'
   | 'restaurant_areas'
   | 'restaurant_create_area'

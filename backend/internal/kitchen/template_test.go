@@ -82,15 +82,17 @@ func TestDrawerPulseBytesAndCompatibleTransport(t *testing.T) {
 	if !bytes.Equal(DrawerPulseBytes(7), DrawerPulseBytes(0)) {
 		t.Fatal("Un pin desconocido generó un comando distinto del pin 2")
 	}
-	if !CompatibleDrawerTransport("escpos_tcp") || CompatibleDrawerTransport("cups") || CompatibleDrawerTransport("agent") {
-		t.Fatal("La compatibilidad del cajón no se limita a ESC/POS por red")
+	if !CompatibleDrawerTransport("escpos_tcp") || !CompatibleDrawerTransport("cups") || CompatibleDrawerTransport("agent") {
+		t.Fatal("La compatibilidad del cajón no se limita a ESC/POS por red y CUPS")
 	}
-	// Con un transporte incompatible el comando queda en intervención sin abrir conexiones.
-	outcome := HostTransport{}.Submit(context.Background(), PrintJob{
+	// Con un transporte incompatible el comando queda en intervención sin abrir conexiones ni
+	// ejecutar programas (el ejecutor simulado falla la prueba si se le llama).
+	commands := &recordedCommands{t: t, forbidden: true}
+	outcome := HostTransport{commands: commands}.Submit(context.Background(), PrintJob{
 		DrawerPulse:     &DrawerPulse{Pin: 0},
-		PrinterSnapshot: Printer{Name: "Tickets", Transport: "cups", Destination: "ADEL_TEST_ONLY", PaperWidth: 80, Copies: 1, Port: 9100},
+		PrinterSnapshot: Printer{Name: "Agente", Transport: "agent", Destination: "Agente futuro", PaperWidth: 80, Copies: 1, Port: 9100},
 	})
 	if outcome.State != "intervention" || outcome.Accepted || !strings.Contains(outcome.Message, "pulso") {
-		t.Fatalf("Un pulso por CUPS no quedó en intervención: %+v", outcome)
+		t.Fatalf("Un pulso por el agente no quedó en intervención: %+v", outcome)
 	}
 }

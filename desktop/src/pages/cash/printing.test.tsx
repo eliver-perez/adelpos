@@ -18,7 +18,7 @@ import {
   shiftID,
   shiftOf,
 } from './cashTestData';
-import { useCashMutation } from './useCashMutation';
+import { useCashRecording } from './recordingFlow';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -119,7 +119,7 @@ describe('tope de caja', () => {
 });
 
 function FormHarness({ can }: { can: (permission: string) => boolean }) {
-  const mutation = useCashMutation(shiftID);
+  const { mutation } = useCashRecording(shiftID, can);
   return (
     <CashOperationForm
       kind="income"
@@ -186,7 +186,12 @@ describe('impresión y reimpresión según permisos', () => {
         status: 200,
         body: {
           ...operationOf({ kind: 'income', concept: 'Aportación adicional al fondo' }),
-          printing: { requested: true, status: 'pending', includes_expected: false },
+          printing: {
+            requested: true,
+            status: 'pending',
+            document_id: 'documento-1',
+            includes_expected: false,
+          },
           drawer: { requested: true, status: 'pending', job_id: 'cajon' },
         },
       }),
@@ -210,8 +215,12 @@ describe('impresión y reimpresión según permisos', () => {
     const keypad = screen.getByRole('group', { name: 'Teclado numérico del importe' });
     fireEvent.click(within(keypad).getByRole('button', { name: '5' }));
     fireEvent.click(screen.getByRole('button', { name: /^Registrar ingreso/ }));
-    await screen.findByText('Documento enviado a la cola de impresión.');
-    expect(screen.getByText('Comando de apertura enviado.')).toBeTruthy();
+    // Un solo aviso: la cola de impresión y el comando del cajón van en su descripción con su
+    // texto de siempre. Ya se imprimió: el aviso no vuelve a ofrecer el comprobante.
+    const confirmation = await screen.findByRole('status', { name: 'Operación completada' });
+    expect(confirmation.textContent).toContain('Documento enviado a la cola de impresión.');
+    expect(confirmation.textContent).toContain('Comando de apertura enviado.');
+    expect(within(confirmation).queryByRole('button', { name: 'Imprimir comprobante' })).toBeNull();
     expect(sent('payments_shift_income')[0]?.body.print).toBe(true);
   });
 

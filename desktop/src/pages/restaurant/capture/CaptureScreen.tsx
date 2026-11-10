@@ -29,6 +29,8 @@ export function CaptureScreen({
   onCheckout,
   onDeliverCheckout,
   onNewAccount,
+  cashShortcut,
+  shiftNotice,
 }: {
   workspace: Workspace;
   can: (permission: string) => boolean;
@@ -40,6 +42,9 @@ export function CaptureScreen({
   onCheckout: () => void;
   onDeliverCheckout: () => void;
   onNewAccount: () => void;
+  // Atajo «Caja» de la barra y aviso discreto sin turno (etapa 7.1).
+  cashShortcut?: ReactNode;
+  shiftNotice?: ReactNode;
 }) {
   const { bill, lookups, editor, view } = workspace;
   const [category, setCategory] = useState('');
@@ -131,6 +136,7 @@ export function CaptureScreen({
         onNewAccount={onNewAccount}
         onDetails={() => onAction('metadata')}
         onRefresh={workspace.refresh}
+        cashShortcut={cashShortcut}
       />
       <div className="capture-body">
         {panelContent ? (
@@ -185,6 +191,7 @@ export function CaptureScreen({
           onAction={onAction}
           onCheckout={onCheckout}
           onDeliverCheckout={onDeliverCheckout}
+          notice={shiftNotice}
         />
       </div>
     </div>
@@ -202,6 +209,7 @@ export function WorkspaceBill({
   onCheckout,
   onDeliverCheckout,
   onCapture,
+  notice,
 }: {
   workspace: Workspace;
   can: (permission: string) => boolean;
@@ -211,6 +219,7 @@ export function WorkspaceBill({
   onCheckout: () => void;
   onDeliverCheckout: () => void;
   onCapture?: () => void;
+  notice?: ReactNode;
 }) {
   const { bill, lookups } = workspace;
   return (
@@ -245,6 +254,7 @@ export function WorkspaceBill({
       onKeepMine={() => bill && workspace.draft.keepMine(bill.account.id)}
       onDiscard={() => bill && workspace.draft.discard(bill.account.id)}
       onCapture={onCapture}
+      notice={notice}
     />
   );
 }

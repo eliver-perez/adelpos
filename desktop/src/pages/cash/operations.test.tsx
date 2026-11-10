@@ -7,7 +7,7 @@ import { CashOperationForm } from './CashOperationForm';
 import { catalog, failure, operationOf, shiftID, shiftOf } from './cashTestData';
 import type { CashEntryKind } from './operationForm';
 import { PendingCashOperation } from './PendingCashOperation';
-import { useCashMutation } from './useCashMutation';
+import { useCashRecording } from './recordingFlow';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -41,7 +41,7 @@ function sent(operation: string) {
 }
 
 function Harness({ kind, can }: { kind: CashEntryKind; can: (permission: string) => boolean }) {
-  const mutation = useCashMutation(shiftID);
+  const { mutation } = useCashRecording(shiftID, can);
   return (
     <>
       <PendingCashOperation mutation={mutation} />
@@ -94,11 +94,12 @@ describe('operaciones de efectivo', () => {
     expect(screen.getByText(/Autorización propia/)).toBeTruthy();
     expect(screen.queryByLabelText('Contraseña del supervisor')).toBeNull();
     submit(/^Registrar retiro \$200\.00$/);
-    // La confirmación llega como aviso y el resultado sigue en el panel (fase A de la 7.1).
+    // Fase C de la 7.1: el resultado ya no queda en el panel; un solo aviso lo confirma con el
+    // tipo, el importe, el concepto y la autorización.
     const confirmation = await screen.findByRole('status', { name: 'Operación completada' });
     expect(confirmation.textContent).toContain('Retiro registrado: $200.00 · Resguardo');
-    expect(screen.getAllByText('Retiro registrado: $200.00 · Resguardo')).toHaveLength(2);
-    expect(screen.getByText('Autorizado con el permiso propio de Administrador')).toBeTruthy();
+    expect(screen.getAllByText('Retiro registrado: $200.00 · Resguardo')).toHaveLength(1);
+    expect(confirmation.textContent).toContain('Autorizado con el permiso propio de Administrador');
     const call = sent('payments_shift_withdrawal')[0]!;
     expect(call.resourceId).toBe(shiftID);
     expect(call.body).toMatchObject({ type: 'safekeeping', amount: '200' });
@@ -129,7 +130,7 @@ describe('operaciones de efectivo', () => {
     });
     expect(button.disabled).toBe(false);
     fireEvent.click(button);
-    await screen.findByText('Autorizado por Supervisora Ana');
+    await screen.findByText(/Autorizado por Supervisora Ana/);
     expect(sent('payments_shift_withdrawal')[0]!.body.authorization).toEqual({
       username: 'ana',
       password: 'secreta',

@@ -131,6 +131,16 @@
   --table-out-stripe: #cfd5dc;
   --table-out-border: #98a3b0;
   --table-out-text: #4f5b69;
+  /* Etapa 7.1: acentos de las tarjetas de Caja (entradas, salidas, informes y cierre) y estado del
+     turno en el atajo «Caja». */
+  --cash-entry: #1d7a4b;
+  --cash-entry-soft: #e3f3ea;
+  --cash-exit: #9a5b0c;
+  --cash-exit-soft: #fbefdc;
+  --cash-report: #5a6878;
+  --cash-report-soft: #eef1f5;
+  --cash-closing: #5b46b0;
+  --cash-closing-soft: #eeebfa;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -172,6 +182,14 @@
   --table-out-stripe: #27313d;
   --table-out-border: #56637a;
   --table-out-text: #9baabd;
+  --cash-entry: #7fd3a4;
+  --cash-entry-soft: #1b3a2a;
+  --cash-exit: #e6b15f;
+  --cash-exit-soft: #3a2f1c;
+  --cash-report: #a9b6c6;
+  --cash-report-soft: #243140;
+  --cash-closing: #b7a9f2;
+  --cash-closing-soft: #2c2748;
 }
 body {
   margin: 0;
@@ -3931,12 +3949,67 @@ summary {
   color: var(--warning);
   font-size: 15px;
 }
+/* Tarjetas de acción de Caja (etapa 7.1, decisión 11): icono grande arriba del texto y acento por
+   tipo con tokens del tema. La tarjeta elegida se resalta con borde y fondo; el texto conserva el
+   color de lectura para no depender del acento. */
 .cash-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
-.cash-actions button,
+.cash-action-card {
+  --cash-action-accent: var(--cash-report);
+  --cash-action-soft: var(--cash-report-soft);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 112px;
+  padding: 14px 12px;
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--cash-action-accent);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  text-align: center;
+  line-height: 1.25;
+}
+.cash-action-entry {
+  --cash-action-accent: var(--cash-entry);
+  --cash-action-soft: var(--cash-entry-soft);
+}
+.cash-action-exit {
+  --cash-action-accent: var(--cash-exit);
+  --cash-action-soft: var(--cash-exit-soft);
+}
+.cash-action-closing {
+  --cash-action-accent: var(--cash-closing);
+  --cash-action-soft: var(--cash-closing-soft);
+}
+.cash-action-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--cash-action-soft);
+  color: var(--cash-action-accent);
+}
+@media (hover: hover) {
+  .cash-action-card:hover {
+    border-color: var(--cash-action-accent);
+  }
+}
+.cash-action-card.cash-action-selected {
+  border: 2px solid var(--cash-action-accent);
+  border-top-width: 4px;
+  background: var(--cash-action-soft);
+}
+.cash-action-card.cash-action-selected .cash-action-icon {
+  background: var(--panel);
+}
 .cash-choice-grid button {
   display: grid;
   gap: 2px;
@@ -3951,7 +4024,6 @@ summary {
   font-weight: 600;
   text-align: left;
 }
-.cash-actions .cash-choice-selected,
 .cash-choice-grid .cash-choice-selected {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -4319,4 +4391,152 @@ summary {
 }
 .icon-label-text {
   min-width: 0;
+}
+
+/* Etapa 7.1 · Atajo «Caja» de las pantallas operativas: botón compacto con el estado del turno,
+   menú rápido y hoja superpuesta con los componentes de Caja. Objetivos de 44 px o más y tokens
+   del tema; la hoja se adapta al ancho disponible y desplaza su contenido. */
+.cash-shortcut {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+.cash-shortcut-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+/* En la barra operativa va junto a las pestañas de vista y conserva su altura (44 px). */
+.operation-toolbar > .cash-shortcut {
+  margin-right: auto;
+}
+.operation-toolbar .cash-shortcut-button {
+  min-height: 44px;
+  padding: 4px 12px;
+}
+.cash-shortcut-button .app-icon {
+  flex: 0 0 auto;
+}
+.cash-shortcut-state {
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.cash-shortcut-open .cash-shortcut-state {
+  border-color: var(--cash-entry);
+  background: var(--cash-entry-soft);
+  color: var(--cash-entry);
+}
+.cash-shortcut-closing .cash-shortcut-state {
+  border-color: var(--cash-exit);
+  background: var(--cash-exit-soft);
+  color: var(--cash-exit);
+}
+.cash-shortcut-none .cash-shortcut-state {
+  border-color: var(--border);
+  background: var(--subtle);
+  color: var(--muted);
+}
+.cash-shortcut-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  width: min(280px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.cash-shortcut-menu > p {
+  margin: 0 2px 2px;
+  line-height: 1.45;
+}
+.cash-shortcut-menu .secondary-button {
+  min-height: 48px;
+  padding: 0 14px;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: 13px;
+}
+.cash-shortcut-menu .secondary-button .icon-label {
+  justify-content: flex-start;
+}
+.cash-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: start center;
+  padding: 24px 16px;
+  overflow-y: auto;
+  background: rgb(15 23 32 / 45%);
+}
+.cash-sheet {
+  display: grid;
+  gap: 12px;
+  width: min(1100px, 100%);
+  min-width: 0;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 28%);
+}
+.cash-sheet:focus {
+  outline: none;
+}
+.cash-sheet-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.cash-sheet-header h3 {
+  font-size: 17px;
+}
+/* Aviso sin turno en la columna de la cuenta de la captura, junto a los totales y «Cobrar»: reduce
+   la lista de partidas (que se desplaza), no la altura de la pantalla. */
+.capture-shift-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0 10px 8px;
+  padding: 4px 4px 4px 10px;
+  border: 1px dashed var(--warning);
+  border-radius: 10px;
+  background: var(--warning-soft);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  flex-shrink: 0;
+}
+.capture-shift-notice > .app-icon {
+  color: var(--warning);
+  flex: 0 0 auto;
+}
+.capture-shift-notice > span {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+.capture-shift-notice .secondary-button {
+  min-height: 44px;
+  padding: 6px 10px;
+}
+/* Intentos rechazados por efectivo insuficiente en Caja → Movimientos. */
+.cash-rejected-note {
+  margin: 0;
 }

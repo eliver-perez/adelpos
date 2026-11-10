@@ -64,7 +64,7 @@ export function DrawerNotice({ outcome }: { outcome?: DrawerOutcome | null }) {
 
 // Estados en los que el documento o el comando se entregó a la cola o a la impresora. Ninguno
 // confirma papel impreso ni cajón abierto.
-const sentStatuses = ['pending', 'processing', 'submitted'];
+export const sentStatuses = ['pending', 'processing', 'submitted'];
 
 // Resultado de una impresión de caja pedida como acción propia (imprimir o reimprimir un documento,
 // imprimir un corte): se avisa con el sistema único de mensajes, con el mismo texto que el

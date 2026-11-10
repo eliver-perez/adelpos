@@ -9,6 +9,12 @@ import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWo
 import { notifyError, notifySuccess } from '../../services/notify';
 import { accountLabel } from '../../services/restaurant';
 import type { Account, RestaurantTable } from '../../services/restaurant';
+import {
+  CashShortcut,
+  CashShortcutSheet,
+  NoShiftNotice,
+  useCashShortcut,
+} from '../cash/CashShortcut';
 import { uncertainError } from './capture/draftSync';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
@@ -33,13 +39,19 @@ export function OperationalPage({
   timezone,
   requestedView,
   can,
+  onOpenCash,
 }: {
   active: boolean;
   timezone: string;
   requestedView: 'tables' | 'takeaway';
   can: (permission: string) => boolean;
+  // «Ir a Caja» del atajo «Caja» (etapa 7.1): abre la pantalla Caja del menú principal.
+  onOpenCash?: () => void;
 }) {
   const workspace = useRestaurantWorkspace(active, requestedView, can);
+  // Atajo «Caja» (etapa 7.1): una sola consulta del turno de la terminal para la barra, la captura
+  // y la hoja superpuesta.
+  const cashShortcut = useCashShortcut({ active, can, onOpenCash });
   const { view, panel, bill, overview, lookups, editor, mutation } = workspace;
   // Panel al que vuelve una acción de cuenta: dividir o transferir desde el cobro regresa al cobro.
   const [actionReturn, setActionReturn] = useState<WorkspacePanel>('capture');
@@ -289,6 +301,8 @@ export function OperationalPage({
             </button>
           ))}
       </div>
+      {/* Atajo «Caja» junto a las vistas: en el cobro no agrega otra fila a la barra. */}
+      <CashShortcut shortcut={cashShortcut} can={can} />
       {checkoutOpen && bill && (
         <CheckoutToolbar
           bill={bill}
@@ -327,6 +341,7 @@ export function OperationalPage({
   const banners = (
     <>
       {dialog}
+      <CashShortcutSheet shortcut={cashShortcut} can={can} timezone={timezone} />
       {conflict && (
         <ChoiceDialog
           title="Esta mesa ya tiene una cuenta"
@@ -459,6 +474,8 @@ export function OperationalPage({
           onNewAccount={() =>
             openAccount('dine_in', bill?.account.table_id ?? (workspace.tableID || null))
           }
+          cashShortcut={<CashShortcut shortcut={cashShortcut} can={can} />}
+          shiftNotice={<NoShiftNotice shortcut={cashShortcut} can={can} />}
         />
       </div>
     );

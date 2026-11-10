@@ -123,8 +123,12 @@ export function movementRows(
   });
 }
 
+// «Intentos rechazados» (etapa 7.1) no es un tipo de movimiento: muestra los retiros y gastos
+// rechazados por efectivo insuficiente, solo con cash.expected.read.
+export const rejectedFilter = 'rejected';
+
 export interface MovementFilters {
-  type: MovementType | '';
+  type: MovementType | typeof rejectedFilter | '';
   user: string;
 }
 

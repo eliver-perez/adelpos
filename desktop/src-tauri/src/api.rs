@@ -332,6 +332,16 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             format!("payments/shifts/{identifier}/documents"),
         ),
         "payments_save_cash_drawer" => (Method::PUT, format!("payments/cash/drawers/{identifier}")),
+        // Etapa 7.1 (fase C): «Probar apertura» del cajón de una caja y retiros o gastos rechazados
+        // por efectivo insuficiente de un turno (solo con el permiso de consultar el esperado).
+        "payments_test_cash_drawer" => (
+            Method::POST,
+            format!("payments/cash/drawers/{identifier}/test"),
+        ),
+        "payments_shift_rejected_outflows" => (
+            Method::GET,
+            format!("payments/shifts/{identifier}/rejected-outflows"),
+        ),
         "payments_save_denomination" => (
             Method::PATCH,
             format!("payments/cash/denominations/{identifier}"),
@@ -805,6 +815,16 @@ mod tests {
                 Method::PUT,
                 format!("payments/cash/drawers/{identifier}"),
             ),
+            (
+                "payments_test_cash_drawer",
+                Method::POST,
+                format!("payments/cash/drawers/{identifier}/test"),
+            ),
+            (
+                "payments_shift_rejected_outflows",
+                Method::GET,
+                format!("payments/shifts/{identifier}/rejected-outflows"),
+            ),
         ] {
             assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
             assert!(route(operation, None).is_err());
@@ -830,8 +850,11 @@ mod tests {
         ] {
             assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
         }
-        // Ninguna operación permite abrir el cajón de otra caja ni reimprimir por ruta libre.
+        // Ninguna operación permite abrir el cajón de otra caja ni reimprimir por ruta libre; la
+        // prueba de apertura exige el identificador de su caja y no admite rutas arbitrarias.
         assert!(route("payments_open_drawer_register", Some(identifier)).is_err());
+        assert!(route("payments_test_cash_drawer", Some("../open-drawer")).is_err());
+        assert!(route("payments_shift_rejected_outflows", None).is_err());
         assert!(route("payments_cash_document_delete", Some(identifier)).is_err());
     }
 

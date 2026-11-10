@@ -13,13 +13,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"local/ad-el-pos/server/internal/kitchen"
 )
 
 type Service struct {
 	Pool             *pgxpool.Pool
 	ProvisioningFile string
-	streamMutex      sync.Mutex
-	streams          map[string]int
+	// Queues consulta las colas CUPS para el cajón (etapa 7.1). Sin valor, payments usa las
+	// consultas de solo lectura del equipo; las pruebas de aceptación inyectan una simulada.
+	Queues      kitchen.QueueInspector
+	streamMutex sync.Mutex
+	streams     map[string]int
 }
 
 type Request struct {
@@ -41,6 +45,17 @@ type Fault struct {
 	Commit  bool
 	// Details son datos públicos opcionales del rechazo; se publican en error.details.
 	Details any
+	// Rejection es la auditoría de un rechazo que debe conservarse aunque la operación se
+	// revierta (etapa 7.1, rechazos por efectivo insuficiente). Nunca se publica en la respuesta.
+	Rejection *RejectionAudit
+}
+
+// RejectionAudit describe el registro de auditoría (success=false) de un rechazo.
+type RejectionAudit struct {
+	Action   string
+	Entity   string
+	EntityID *string
+	Details  any
 }
 
 func (fault *Fault) Error() string {
@@ -156,7 +171,9 @@ func shouldCommit(operationError error) bool {
 // termina en 403, se deshace todo lo que hubiera escrito, aunque la verificación de permiso
 // ocurriera después de una escritura, y solo se conserva la auditoría de la denegación.
 // Así la regla "toda autorización antes de la primera escritura" no depende de convención:
-// una autorización tardía nunca confirma cambios parciales.
+// una autorización tardía nunca confirma cambios parciales. Un rechazo que pide su propia
+// auditoría (etapa 7.1: retiro o gasto por encima del efectivo disponible) sigue el mismo
+// camino: se revierte el trabajo y se confirma solo su registro con success=false.
 func runProtected(ctx context.Context, tx pgx.Tx, principal Principal, request Request, route string, operation func(pgx.Tx) (any, error)) (any, error) {
 	work, err := tx.Begin(ctx)
 	if err != nil {
@@ -170,6 +187,17 @@ func runProtected(ctx context.Context, tx pgx.Tx, principal Principal, request R
 		}
 		details := map[string]string{"method": request.Method, "operation": strings.Split(route, "/")[0]}
 		if err := audit(ctx, tx, principal, "access.denied", "authorization", nil, nil, details, false); err != nil {
+			return nil, err
+		}
+		fault.Commit = true
+		return nil, operationError
+	}
+	if fault != nil && fault.Rejection != nil {
+		if err := work.Rollback(ctx); err != nil {
+			return nil, err
+		}
+		rejection := fault.Rejection
+		if err := audit(ctx, tx, principal, rejection.Action, rejection.Entity, rejection.EntityID, nil, rejection.Details, false); err != nil {
 			return nil, err
 		}
 		fault.Commit = true

@@ -1,0 +1,1 @@
+/usr/bin/lpstat: nombre de destino no válido en la lista “ADEL_NO_EXISTE”.

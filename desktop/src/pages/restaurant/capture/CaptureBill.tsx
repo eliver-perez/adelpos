@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Notice } from '../../../components/Forms';
 import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
@@ -93,6 +94,7 @@ export function CaptureBill({
   onKeepMine,
   onDiscard,
   onCapture,
+  notice,
 }: {
   bill: Bill | null;
   error: string;
@@ -121,6 +123,9 @@ export function CaptureBill({
   onKeepMine: () => void;
   onDiscard: () => void;
   onCapture?: () => void;
+  // Aviso de la captura sin turno (etapa 7.1), junto a los totales y «Cobrar». Ocupa espacio de la
+  // lista de partidas, no de la pantalla: el menú «Más…» conserva su altura.
+  notice?: ReactNode;
 }) {
   const { confirm, dialog } = useConfirmDialog();
   const paymentPending = usePendingEntry(paymentPendingKey(bill?.account.id ?? ''));
@@ -296,6 +301,7 @@ export function CaptureBill({
         )}
         {account.notes && <p className="bill-account-notes">Observaciones: {account.notes}</p>}
       </div>
+      {notice}
       <BillFooter
         account={account}
         localDraft={localDraft}

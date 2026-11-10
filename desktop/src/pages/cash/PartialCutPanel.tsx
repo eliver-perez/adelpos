@@ -3,11 +3,9 @@ import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { CashReport, CashReportSummary, CreatedCashReport } from '../../services/cash';
-import { notifySuccess } from '../../services/notify';
 import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
 import { CashDocumentActions } from './CashDocumentActions';
-import { notifyPrintOutcome } from './CashNotices';
 import { CashReportView, reportTitle } from './CashReportView';
 import { PrintToggle } from './PrintToggle';
 import type { CashMutation } from './useCashMutation';
@@ -76,7 +74,9 @@ export function ReportList({
 }
 
 // Corte parcial: informe del turno hasta este momento. No retira dinero ni pausa la caja; para
-// sacar efectivo se ofrece el acceso directo «Retirar efectivo» (terminología de §0-B).
+// sacar efectivo se ofrece el acceso directo «Retirar efectivo» (terminología de §0-B). Desde la
+// etapa 7.1, generar el corte lo anuncia la escritura del turno (useCashRecording) y quien abrió
+// el panel lo cierra; los cortes anteriores se consultan desde la lista.
 export function PartialCutPanel({
   shift,
   reports,
@@ -85,6 +85,7 @@ export function PartialCutPanel({
   timezone,
   onWithdraw,
   onClose,
+  backLabel = 'Volver a la caja',
 }: {
   shift: Shift;
   reports: CashReportSummary[];
@@ -93,6 +94,7 @@ export function PartialCutPanel({
   timezone: string;
   onWithdraw: () => void;
   onClose: () => void;
+  backLabel?: string;
 }) {
   const [selectedID, setSelectedID] = useState('');
   const [print, setPrint] = useState(false);
@@ -104,15 +106,13 @@ export function PartialCutPanel({
       return;
     }
     try {
+      // El aviso confirma el corte sin cifras; el informe se consulta en la lista, con el
+      // esperado solo si Go lo entrega a quien tiene permiso.
       const report = await mutation.execute<CreatedCashReport>('payments_shift_partial_cut', {
         id: shift.id,
         body: print ? { print: true } : {},
       });
       setSelectedID(report.id);
-      // El aviso confirma el corte sin cifras: el informe se consulta abajo, con el esperado solo
-      // si Go lo entrega a quien tiene permiso.
-      notifySuccess(`${reportTitle(report)} generado.`);
-      notifyPrintOutcome(report.printing, 'el corte');
     } catch (problem) {
       mutation.reportFailure(problem, 'No se pudo generar el corte parcial.');
     }
@@ -123,7 +123,7 @@ export function PartialCutPanel({
       <header className="cash-panel-header">
         <h3>Corte parcial</h3>
         <button type="button" className="secondary-button" onClick={onClose}>
-          <IconLabel icon="back">Volver a la caja</IconLabel>
+          <IconLabel icon="back">{backLabel}</IconLabel>
         </button>
       </header>
       <p className="cash-terminology">

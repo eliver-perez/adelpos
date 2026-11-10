@@ -1,6 +1,7 @@
 package payments
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -14,8 +15,12 @@ import (
 // cash_drawer_events ligado a su trabajo.
 //
 //   - Configuración por caja (cash.settings.manage, auditada). Solo se admiten impresoras cuyo
-//     transporte entregue los bytes ESC/POS sin alterar (ESC/POS por red); con CUPS o el agente
-//     futuro se rechaza: no se asume que todos los dispositivos admiten el mismo protocolo.
+//     transporte entregue los bytes ESC/POS sin alterar: ESC/POS por red o, desde la etapa 7.1
+//     (modo mixto), una cola CUPS que admita datos raw según lpstat y lpoptions (USB, serie o
+//     AppSocket). Una cola sin controlador, IPP, una clase o el agente futuro se rechazan con su
+//     motivo: no se asume que todos los dispositivos admiten el mismo protocolo.
+//   - «Probar apertura» desde la configuración (etapa 7.1): mismo permiso, auditada y registrada
+//     con el motivo test.
 //   - Apertura automática, con el cajón activado: después de cobros y devoluciones con efectivo
 //     físico y de ingresos, retiros y gastos registrados. Nunca por pagos exclusivamente
 //     electrónicos. Si el comando no puede encolarse, la operación ya válida se confirma igual.
@@ -32,6 +37,8 @@ const (
 	drawerRefund    = "refund"
 	drawerOperation = "operation"
 	drawerManual    = "manual"
+	// drawerTest es la prueba de apertura desde la configuración (etapa 7.1, migración 0009).
+	drawerTest = "test"
 )
 
 // DrawerOutcome es el resultado de solicitar la apertura del cajón. Status es el estado del
@@ -58,13 +65,17 @@ type DrawerSettings struct {
 	UpdatedAt    *time.Time `json:"updated_at"`
 }
 
-// DrawerPrinter es una impresora candidata con su compatibilidad para el pulso del cajón.
+// DrawerPrinter es una impresora candidata con su compatibilidad para el pulso del cajón. Para una
+// cola CUPS, Connection es la conexión que informa CUPS (usb, socket, ipp…) y Reason explica por
+// qué no admite datos raw; nunca se imprime nada para averiguarlo.
 type DrawerPrinter struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Transport  string `json:"transport"`
 	Active     bool   `json:"active"`
 	Compatible bool   `json:"compatible"`
+	Connection string `json:"connection,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // drawerConfig es la configuración vigente del cajón de una caja con su impresora.
@@ -73,6 +84,7 @@ type drawerConfig struct {
 	printerID    *string
 	printerName  *string
 	transport    *string
+	destination  *string
 	active       *bool
 	pin          int
 	enabled      bool
@@ -82,11 +94,12 @@ type drawerConfig struct {
 // readDrawerConfig lee la configuración del cajón de una caja; sin fila, revisión 0 y desactivado.
 func (handler *service) readDrawerConfig(registerID string) (*drawerConfig, error) {
 	config := &drawerConfig{}
-	err := handler.tx.QueryRow(handler.ctx, `SELECT r.name,c.printer_id,p.name,p.transport,p.active,coalesce(c.pulse_pin,0),
+	err := handler.tx.QueryRow(handler.ctx, `SELECT r.name,c.printer_id,p.name,p.transport,p.destination,p.active,coalesce(c.pulse_pin,0),
         coalesce(c.enabled,false),coalesce(c.revision,0)
         FROM app.registers r LEFT JOIN app.cash_drawer_settings c ON c.register_id=r.id
         LEFT JOIN app.kitchen_printers p ON p.id=c.printer_id WHERE r.id=$1`, registerID).Scan(&config.registerName,
-		&config.printerID, &config.printerName, &config.transport, &config.active, &config.pin, &config.enabled, &config.revision)
+		&config.printerID, &config.printerName, &config.transport, &config.destination, &config.active, &config.pin,
+		&config.enabled, &config.revision)
 	if isNoRows(err) {
 		return nil, notFound("La caja no existe.")
 	}
@@ -102,9 +115,44 @@ func drawerUnavailable(config *drawerConfig) string {
 		return "La impresora del cajón de " + config.registerName + " está desactivada; no se envió el comando de apertura."
 	}
 	if !kitchen.CompatibleDrawerTransport(*config.transport) {
-		return "La impresora del cajón de " + config.registerName + " no usa ESC/POS por red; no se envió el comando de apertura."
+		return "La impresora del cajón de " + config.registerName + " no usa ESC/POS por red ni una cola CUPS; no se envió el comando de apertura."
 	}
 	return ""
+}
+
+// queueInspector devuelve quien consulta las colas CUPS: el de la petición o, sin él, las
+// consultas de solo lectura del equipo donde corre Go.
+func (handler *service) queueInspector() kitchen.QueueInspector {
+	if handler.request.Queues != nil {
+		return handler.request.Queues
+	}
+	return kitchen.HostQueueInspector{}
+}
+
+// drawerProbeBudget limita el tiempo total de las consultas a CUPS de una petición: se ejecutan
+// dentro de la transacción y con el lock operativo, que no deben retenerse por una cola que no
+// responde.
+const drawerProbeBudget = 4 * time.Second
+
+// drawerPrinterCompatibility completa la compatibilidad de una impresora para el pulso del cajón.
+// Una cola CUPS activa se consulta (solo lecturas); una desactivada no se consulta.
+func drawerPrinterCompatibility(ctx context.Context, inspector kitchen.QueueInspector, item *DrawerPrinter, destination string) {
+	switch item.Transport {
+	case "escpos_tcp":
+		item.Compatible = true
+		item.Connection = "network"
+	case "cups":
+		if !item.Active {
+			item.Reason = "Impresora desactivada; su cola CUPS no se consultó."
+			return
+		}
+		capability := inspector.InspectQueue(ctx, destination)
+		item.Compatible = capability.Checked && capability.Raw
+		item.Connection = capability.Connection
+		item.Reason = capability.Reason
+	default:
+		item.Reason = "El agente de impresión aún no existe: no puede entregar el comando del cajón."
+	}
 }
 
 // queueDrawerCommand encola el pulso y registra el comando con la transacción del servicio.
@@ -206,6 +254,53 @@ func (handler *service) openDrawerManually(_ []string) (any, error) {
 	})
 }
 
+// testDrawer atiende POST payments/cash/drawers/{caja}/test (cash.settings.manage, etapa 7.1):
+// «Probar apertura» envía un pulso con la configuración guardada de esa caja, aunque el cajón aún
+// no esté activado, para comprobar la conexión antes de activarlo. Se registra con el motivo test,
+// ligado al turno activo si lo hay, se audita y es idempotente por operation_id: el reintento
+// devuelve el mismo comando sin otro pulso. Como toda apertura, la respuesta solo informa que el
+// comando se envió.
+func (handler *service) testDrawer(parts []string) (any, error) {
+	var input struct {
+		OperationID string `json:"operation_id"`
+	}
+	if err := decode(handler.request.Body, &input); err != nil {
+		return nil, err
+	}
+	registerID := parts[2]
+	config, err := handler.readDrawerConfig(registerID)
+	if err != nil {
+		return nil, err
+	}
+	if config.printerID == nil {
+		return nil, conflict("DRAWER_NOT_CONFIGURED", "Guarda primero la impresora a la que está conectado el cajón de "+config.registerName+".")
+	}
+	if message := drawerUnavailable(config); message != "" {
+		return nil, conflict("DRAWER_UNAVAILABLE", message)
+	}
+	if *config.transport == "cups" {
+		if err := handler.requireRawQueue(*config.printerName, *config.destination); err != nil {
+			return nil, err
+		}
+	}
+	shift, err := handler.activeShift(registerID)
+	if err != nil {
+		return nil, err
+	}
+	var shiftID *string
+	if shift != nil {
+		shiftID = &shift.ID
+	}
+	outcome, err := handler.queueDrawerCommand(registerID, shiftID, config, drawerTest, "Prueba de apertura desde la configuración del cajón")
+	if err != nil {
+		return nil, err
+	}
+	return outcome, handler.audit(handler.ctx, handler.tx, "cash.drawer_tested", "register", &registerID, nil, map[string]any{
+		"reason": drawerTest, "printer_id": config.printerID, "job_id": outcome.JobID, "event_id": outcome.EventID, "shift_id": shiftID,
+		"enabled": config.enabled,
+	})
+}
+
 // listDrawerSettings atiende GET payments/cash/drawers (cash.settings.manage): la configuración
 // del cajón de cada caja y las impresoras con su compatibilidad.
 func (handler *service) listDrawerSettings(_ []string) (any, error) {
@@ -231,29 +326,39 @@ func (handler *service) listDrawerSettings(_ []string) (any, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	printerRows, err := handler.tx.Query(handler.ctx, "SELECT id,name,transport,active FROM app.kitchen_printers ORDER BY name,id")
+	printerRows, err := handler.tx.Query(handler.ctx, "SELECT id,name,transport,destination,active FROM app.kitchen_printers ORDER BY name,id")
 	if err != nil {
 		return nil, err
 	}
-	defer printerRows.Close()
 	printers := []DrawerPrinter{}
+	destinations := []string{}
 	for printerRows.Next() {
 		var item DrawerPrinter
-		if err := printerRows.Scan(&item.ID, &item.Name, &item.Transport, &item.Active); err != nil {
+		var destination string
+		if err := printerRows.Scan(&item.ID, &item.Name, &item.Transport, &destination, &item.Active); err != nil {
+			printerRows.Close()
 			return nil, err
 		}
-		item.Compatible = kitchen.CompatibleDrawerTransport(item.Transport)
 		printers = append(printers, item)
+		destinations = append(destinations, destination)
 	}
+	printerRows.Close()
 	if err := printerRows.Err(); err != nil {
 		return nil, err
+	}
+	// Las colas CUPS se consultan después de leer las filas, con un tiempo total acotado.
+	probe, cancel := context.WithTimeout(handler.ctx, drawerProbeBudget)
+	defer cancel()
+	inspector := handler.queueInspector()
+	for index := range printers {
+		drawerPrinterCompatibility(probe, inspector, &printers[index], destinations[index])
 	}
 	return map[string]any{"drawers": drawers, "printers": printers}, nil
 }
 
 // drawerProtocolUnsupported rechaza una impresora cuyo transporte no entrega el pulso sin alterar.
 func drawerProtocolUnsupported(name, transport string) error {
-	labels := map[string]string{"cups": "CUPS", "agent": "un agente de impresión"}
+	labels := map[string]string{"agent": "un agente de impresión"}
 	label := labels[transport]
 	if label == "" {
 		label = transport
@@ -262,8 +367,19 @@ func drawerProtocolUnsupported(name, transport string) error {
 		Status: 400,
 		Code:   "DRAWER_PROTOCOL_UNSUPPORTED",
 		Message: "La impresora " + name + " usa " + label + ", que no entrega el comando ESC/POS de apertura sin alterar. " +
-			"El cajón solo se abre con una impresora ESC/POS conectada por red.",
+			"El cajón se abre con una impresora ESC/POS por red o con una cola CUPS que admita datos raw.",
 	}
+}
+
+// drawerQueueRejected explica por qué una cola CUPS no sirve para el cajón: no se pudo consultar
+// (DRAWER_QUEUE_UNAVAILABLE) o no admite datos raw (DRAWER_QUEUE_NOT_RAW).
+func drawerQueueRejected(name string, capability kitchen.QueueCapability) error {
+	if !capability.Checked {
+		return &Error{Status: 409, Code: "DRAWER_QUEUE_UNAVAILABLE", Message: capability.Reason +
+			" No se guardó la impresora " + name + " para el cajón."}
+	}
+	return &Error{Status: 400, Code: "DRAWER_QUEUE_NOT_RAW", Message: capability.Reason +
+		" Elige otra cola o una impresora ESC/POS por red para el cajón."}
 }
 
 // saveDrawerSettings atiende PUT payments/cash/drawers/{caja} (cash.settings.manage). Valida la
@@ -293,7 +409,9 @@ func (handler *service) saveDrawerSettings(parts []string) (any, error) {
 		if err := validateID(*input.PrinterID); err != nil {
 			return nil, err
 		}
-		if err := handler.requireDrawerPrinter(*input.PrinterID); err != nil {
+		// La cola CUPS se consulta solo si el cajón queda activado: desactivarlo nunca depende de
+		// que CUPS responda; al volver a activarlo se consulta otra vez.
+		if err := handler.requireDrawerPrinter(*input.PrinterID, input.Enabled); err != nil {
 			return nil, err
 		}
 	}
@@ -327,12 +445,14 @@ func (handler *service) saveDrawerSettings(parts []string) (any, error) {
 		map[string]any{"printer_id": saved.printerID, "pulse_pin": saved.pin, "enabled": saved.enabled})
 }
 
-// requireDrawerPrinter exige una impresora existente, activa y con un transporte compatible.
-func (handler *service) requireDrawerPrinter(printerID string) error {
-	var name, transport string
+// requireDrawerPrinter exige una impresora existente, activa y con un transporte compatible. Con
+// probeQueue, una cola CUPS se consulta además con lpstat y lpoptions (solo lecturas): si no
+// admite datos raw, se rechaza con su motivo en lugar de fallar en silencio al primer cobro.
+func (handler *service) requireDrawerPrinter(printerID string, probeQueue bool) error {
+	var name, transport, destination string
 	var active bool
-	err := handler.tx.QueryRow(handler.ctx, "SELECT name,transport,active FROM app.kitchen_printers WHERE id=$1", printerID).Scan(
-		&name, &transport, &active)
+	err := handler.tx.QueryRow(handler.ctx, "SELECT name,transport,destination,active FROM app.kitchen_printers WHERE id=$1", printerID).Scan(
+		&name, &transport, &destination, &active)
 	if isNoRows(err) {
 		return invalid("La impresora seleccionada no existe.")
 	}
@@ -345,7 +465,22 @@ func (handler *service) requireDrawerPrinter(printerID string) error {
 	if !active {
 		return invalid("La impresora " + name + " está desactivada.")
 	}
+	if transport == "cups" && probeQueue {
+		return handler.requireRawQueue(name, destination)
+	}
 	return nil
+}
+
+// requireRawQueue consulta la cola CUPS del cajón con un tiempo acotado y la rechaza si no admite
+// datos raw o no responde.
+func (handler *service) requireRawQueue(name, queue string) error {
+	probe, cancel := context.WithTimeout(handler.ctx, drawerProbeBudget)
+	defer cancel()
+	capability := handler.queueInspector().InspectQueue(probe, queue)
+	if capability.Checked && capability.Raw {
+		return nil
+	}
+	return drawerQueueRejected(name, capability)
 }
 
 // drawerEnabled indica si la caja tiene un cajón activado (sin datos de su impresora).

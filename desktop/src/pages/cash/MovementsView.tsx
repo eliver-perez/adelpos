@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { Field, Notice } from '../../components/Forms';
 import { useLiveResource } from '../../hooks/useLiveResource';
+import { formatMoney } from '../../services/money';
 import { shiftStateLabels } from '../../services/cash';
-import type { CashOperation, ShiftHistory } from '../../services/cash';
+import type {
+  CashOperation,
+  RejectedOutflow,
+  RejectedOutflows,
+  ShiftHistory,
+} from '../../services/cash';
 import { permissionName } from '../../services/payments';
 import type { Shift, ShiftMovements } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
@@ -12,6 +18,7 @@ import {
   filterRows,
   movementRows,
   movementTypeLabels,
+  rejectedFilter,
   rowUsers,
   serverDate,
   serverTime,
@@ -135,10 +142,13 @@ function ShiftChooser({
 function Filters({
   filters,
   users,
+  rejections,
   onChange,
 }: {
   filters: MovementFilters;
   users: string[];
+  // El filtro «Intentos rechazados» solo existe con cash.expected.read.
+  rejections: boolean;
   onChange: (filters: MovementFilters) => void;
 }) {
   return (
@@ -147,7 +157,7 @@ function Filters({
         <select
           value={filters.type}
           onChange={(event) =>
-            onChange({ ...filters, type: event.target.value as MovementType | '' })
+            onChange({ ...filters, type: event.target.value as MovementFilters['type'] })
           }
         >
           <option value="">Todos</option>
@@ -156,6 +166,7 @@ function Filters({
               {movementTypeLabels[type]}
             </option>
           ))}
+          {rejections && <option value={rejectedFilter}>Intentos rechazados</option>}
         </select>
       </Field>
       <Field label="Usuario">
@@ -175,8 +186,101 @@ function Filters({
   );
 }
 
+const rejectedKindLabels: Record<RejectedOutflow['kind'], string> = {
+  withdrawal: 'Retiro',
+  expense: 'Gasto',
+};
+
+function rejectedAuthorization(rejection: RejectedOutflow) {
+  if (rejection.authorization_mode === 'supervisor') {
+    return `Autorizó ${rejection.authorized_by_name ?? 'un supervisor'}`;
+  }
+  if (rejection.authorization_mode === 'self') {
+    return 'Permiso propio';
+  }
+  return '—';
+}
+
+// Retiros y gastos rechazados por efectivo insuficiente (etapa 7.1, §3.5): Go los audita aunque
+// la operación no se registre y solo los entrega con cash.expected.read, fuera del arqueo. Sirven
+// para detectar a quien prueba importes para deducir el esperado; nunca muestran el esperado.
+export function RejectedOutflowsTable({
+  rejected,
+  error,
+  user,
+  timezone,
+}: {
+  rejected: RejectedOutflows | null;
+  error: string;
+  user: string;
+  timezone: string;
+}) {
+  if (error) {
+    return <Notice>{error}</Notice>;
+  }
+  if (!rejected) {
+    return <p className="muted">Consultando los intentos rechazados…</p>;
+  }
+  if (!rejected.visible) {
+    return (
+      <p className="muted text-sm">
+        {rejected.message ?? 'Los intentos rechazados no están disponibles en este momento.'}
+      </p>
+    );
+  }
+  const rows = rejected.rejections.filter((item) => !user || item.actor_name === user);
+  return (
+    <div className="form-stack">
+      <p className="muted text-xs cash-rejected-note">
+        Retiros y gastos rechazados por exceder el efectivo de la caja. Al cajero no se le mostró
+        ninguna cifra; esta lista tampoco muestra el efectivo esperado.
+      </p>
+      <div className="table-container cash-table">
+        <table aria-label="Intentos rechazados">
+          <thead>
+            <tr>
+              <th scope="col">Fecha</th>
+              <th scope="col">Hora</th>
+              <th scope="col">Tipo</th>
+              <th scope="col">Importe intentado</th>
+              <th scope="col">Usuario</th>
+              <th scope="col">Terminal</th>
+              <th scope="col">Caja</th>
+              <th scope="col">Autorización</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item) => (
+              <tr key={item.id}>
+                <td>{serverDate(item.occurred_at, timezone)}</td>
+                <td>{serverTime(item.occurred_at, timezone)}</td>
+                <td>{rejectedKindLabels[item.kind] ?? item.kind}</td>
+                <td>
+                  <strong>{formatMoney(item.attempted_amount, item.currency)}</strong>
+                </td>
+                <td>{item.actor_name}</td>
+                <td>{item.device_name}</td>
+                <td>{item.register_name}</td>
+                <td>{rejectedAuthorization(item)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={8} className="muted">
+                  Sin intentos rechazados en este turno.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // Movimientos de un turno: cobros, devoluciones y correcciones de pago (movements) junto con sus
-// operaciones de efectivo (operations, con cash.movements.read). Filtros por turno, tipo y usuario.
+// operaciones de efectivo (operations, con cash.movements.read). Filtros por turno, tipo y usuario;
+// con cash.expected.read, también los intentos rechazados por efectivo insuficiente.
 export function MovementsTimeline({
   shiftID,
   ownShift,
@@ -199,13 +303,46 @@ export function MovementsTimeline({
     'payments_shift_operations',
     { id: shiftID, enabled: !!shiftID && can('cash.movements.read'), interval: 15000 },
   );
+  const rejections = can('cash.expected.read');
+  const showRejected = rejections && filters.type === rejectedFilter;
+  const rejected = useLiveResource<RejectedOutflows>('payments_shift_rejected_outflows', {
+    id: shiftID,
+    enabled: !!shiftID && showRejected,
+    interval: 15000,
+  });
   const operationList = operations.data?.operations ?? [];
   const rows = movementRows(movements.data?.movements ?? [], operationList);
   const visible = filterRows(rows, filters);
+  if (showRejected) {
+    const names = (rejected.data?.rejections ?? []).map((item) => item.actor_name);
+    return (
+      <div className="form-stack">
+        <div className="catalog-filters">
+          <Filters
+            filters={filters}
+            users={[...new Set(names)].sort((first, second) => first.localeCompare(second, 'es'))}
+            rejections={rejections}
+            onChange={setFilters}
+          />
+        </div>
+        <RejectedOutflowsTable
+          rejected={rejected.data}
+          error={rejected.error}
+          user={filters.user}
+          timezone={timezone}
+        />
+      </div>
+    );
+  }
   return (
     <div className="form-stack">
       <div className="catalog-filters">
-        <Filters filters={filters} users={rowUsers(rows)} onChange={setFilters} />
+        <Filters
+          filters={filters}
+          users={rowUsers(rows)}
+          rejections={rejections}
+          onChange={setFilters}
+        />
       </div>
       <Notice>{movements.error || operations.error}</Notice>
       {!can('cash.movements.read') && (

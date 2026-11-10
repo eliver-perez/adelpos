@@ -65,7 +65,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		// ambas se traducen a su error público en lugar de un 503 genérico.
 		var paymentProblem *payments.Error
 		if errors.As(err, &paymentProblem) {
-			return nil, &Fault{Status: paymentProblem.Status, Code: paymentProblem.Code, Message: paymentProblem.Message}
+			return nil, paymentFault(paymentProblem)
 		}
 		var kitchenProblem *kitchen.Error
 		if errors.As(err, &kitchenProblem) {
@@ -78,12 +78,13 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
 			Actor:     payments.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
 			Authorize: supervisorAuthorizer(principal),
+			Queues:    service.Queues,
 		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
 			return audit(ctx, tx, principal, action, entity, id, before, after, true)
 		})
 		var problem *payments.Error
 		if errors.As(err, &problem) {
-			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+			return nil, paymentFault(problem)
 		}
 		var kitchenProblem *kitchen.Error
 		if errors.As(err, &kitchenProblem) {
@@ -141,6 +142,22 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return result, err
 	}
 	return nil, &Fault{Status: 404, Code: "NOT_FOUND", Message: "Ruta no disponible."}
+}
+
+// paymentFault traduce un error financiero a su respuesta pública. Si el rechazo pide su propia
+// auditoría (etapa 7.1), runProtected revierte la operación y confirma solo ese registro.
+func paymentFault(problem *payments.Error) *Fault {
+	fault := &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+	if problem.Rejection != nil {
+		entityID := problem.Rejection.EntityID
+		fault.Rejection = &RejectionAudit{
+			Action:   problem.Rejection.Action,
+			Entity:   problem.Rejection.Entity,
+			EntityID: &entityID,
+			Details:  problem.Rejection.Details,
+		}
+	}
+	return fault
 }
 
 func currentIdentity(ctx context.Context, tx pgx.Tx, principal Principal) (any, error) {
