@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.7.1, esquema 9 (la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
+Versión 0.8.0, esquema 14 (la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 todavía no se aplican a la instalación real). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
@@ -20,7 +20,7 @@ La ruta de producto prevalece sobre categoría. Los componentes elegidos de un c
 
 Guardar o previsualizar un borrador no crea comandas. Confirmar registra el pedido y su intención durable de preparación en la misma transacción. Un pedido inmediato intenta liberarse; la ausencia de configuración conserva el pedido y muestra qué corregir. Después de corregir, usar **Liberar** con la revisión actual.
 
-`kitchen_unit_releases` es el punto canónico de liberación futura para inventario: una fila por UUID de unidad comercial, con versión y liberación. Las tareas por estación y las copias de impresión no representan ventas o consumos adicionales. Esta etapa no descuenta existencias.
+`kitchen_unit_releases` es el punto canónico de liberación para inventario: una fila por UUID de unidad comercial, con versión y liberación. Las tareas por estación y las copias de impresión no representan ventas o consumos adicionales. La etapa 5 no descontaba existencias; desde la etapa 8 cada fila canónica origina, con el control de inventario activado, una sola solicitud de consumo (ver «Consumo de inventario · etapa 8»).
 
 Al liberar se congelan ruta, estaciones, contexto y documento; una edición de configuración posterior no altera la comanda histórica. Dividir, transferir, combinar o mover cuentas conserva las unidades y no vuelve a liberar ni imprimir. Las consultas de preparación siguen la pertenencia actual de esas unidades; los documentos originales conservan su contexto histórico.
 
@@ -127,7 +127,7 @@ La configuración usa las APIs oficiales de [Tauri](https://v2.tauri.app/referen
 
 Antes de aplicar a una instalación existente: respaldo custom, restauración completa en base temporal con comparación de todas las tablas, detener Go, migrar, verificar reaplicación sin cambios y reiniciar. No ejecutar setup de nuevo ni borrar `.local` o Keychain. La evidencia de instalación se registra por etapa.
 
-Quedan fuera: agente remoto, KDS independiente, Android, offline durable, inventario físico, facturación electrónica, diseñador arbitrario, servicio comercial de licencias e instaladores Windows. No se ha certificado cada modelo de impresora, corte físico, detección de papel, muchas terminales o resistencia a pérdida eléctrica. Deben medirse volumen, retención de eventos/auditoría y tamaño de snapshots antes de uso comercial; el replay acotado no elimina físicamente filas del outbox.
+Quedan fuera: agente remoto, KDS independiente, Android, offline durable, facturación electrónica, diseñador arbitrario, servicio comercial de licencias e instaladores Windows. No se ha certificado cada modelo de impresora, corte físico, detección de papel, muchas terminales o resistencia a pérdida eléctrica. Deben medirse volumen, retención de eventos/auditoría y tamaño de snapshots antes de uso comercial; el replay acotado no elimina físicamente filas del outbox.
 
 ## Documentos comerciales · etapa 6
 
@@ -167,3 +167,13 @@ Criterio comprobado en este Mac solo con lecturas (`lpstat -a`, `lpstat -v`, `lp
 **Probar apertura**: Configuración → Cajón ofrece «Probar apertura» (`POST payments/cash/drawers/{caja}/test`, `cash.settings.manage`, auditada, motivo `test` de la migración 0009). Usa la misma cola y las mismas reglas.
 
 **Verificación**: pruebas unitarias con un ejecutor simulado que registra los argumentos de `lpstat`, `lpoptions` y `lp` y el contenido del archivo del pulso sin ejecutar nada, y aceptación PostgreSQL con una consulta de colas simulada y el adaptador controlado de la cola. **Pendiente en hardware**: no se envió ningún trabajo ni pulso a una impresora real; la prueba física queda pendiente hasta que el propietario tenga una impresora USB con cajón. No se agregó una prueba de hardware del cajón: cuando exista, deberá ser opt-in y con destino explícito, como `TestControlledCUPSPrinter`.
+
+## Consumo de inventario · etapa 8
+
+El inventario lee la liberación canónica; la cocina no espera al inventario ni cambia su comportamiento. Detalle en [INVENTORY_AND_PURCHASING.md](INVENTORY_AND_PURCHASING.md).
+
+- **Solicitud en la liberación**: `prepareRelease` (`kitchen/releases.go`), justo después de insertar las filas de `kitchen_unit_releases` y antes de los documentos, llama a `inventory.RecordReleases`. Con la función «Control de inventario» activada, un solo `INSERT … SELECT … ON CONFLICT DO NOTHING` registra una solicitud por unidad con la versión y la hora de la liberación canónica y la modalidad congelada; no toma el lock de inventario 7820148308 ni lee recetas, de modo que la transacción de la liberación (lock 7820148305) apenas cambia (≈ 0.2 ms de media en la confirmación, medido). Cubre los cuatro caminos que liberan: confirmación inmediata, planificador de programados, liberación manual y reintento de un cambio pendiente. Una liberación bloqueada por advertencias no crea filas canónicas ni solicitudes hasta resolverse.
+- **Cambios**: `kitchen.Integrate` llama a `inventory.RecordChange` para `item.modified` e `item.cancelled` antes de procesar cocina, también cuando el cambio de cocina queda pendiente: `amend` para las unidades modificadas y `cancel` para las canceladas o sobrantes de una reducción, solo si la unidad tiene fila canónica y solicitud de liberación.
+- **Una sola vez por unidad**: varias estaciones, copias, reimpresiones, cambios de impresora, divisiones, transferencias, combinaciones y cambios de mesa no crean solicitudes; un reintento HTTP devuelve la respuesta guardada y un evento reprocesado lo detiene `kitchen_event_receipts`.
+- **Estaciones y almacenes**: el trabajador de inventario lee `kitchen_tasks.instructions.parts[].path` (también de tareas canceladas) para elegir el almacén de cada parte según la estación que la recibió y la asignación estación → almacén vigente a la hora de la liberación; los productos «Sin preparación» consumen del almacén predeterminado.
+- **Comandas**: las indicaciones con efecto se imprimen una sola vez (ver «Documentos»); sin indicaciones con efecto la comanda es idéntica a la de la etapa 7.1. La pantalla de preparación no lista ingredientes y no cambió.

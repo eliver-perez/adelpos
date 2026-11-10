@@ -24,7 +24,7 @@ Redondeo comercial a dos decimales, mitad alejándose de cero: `0.005 → 0.01`.
 
 `Precio unitario = base + ingredientes adicionales + suma(diferencia de grupo + extras explícitos) + cargos de componentes`.
 
-Cada diferencia de grupo es `máximo(0, valor solicitado − valor originalmente incluido)`. Los dos valores se calculan con cantidades y valores de referencia vigentes de las opciones. El factor físico de porción queda como metadato para la futura receta: no multiplica automáticamente los importes configurados por porción.
+Cada diferencia de grupo es `máximo(0, valor solicitado − valor originalmente incluido)`. Los dos valores se calculan con cantidades y valores de referencia vigentes de las opciones. El factor físico de porción queda como metadato para la futura receta: no multiplica automáticamente los importes configurados por porción. Desde la etapa 8, el inventario lo usa como multiplicador del consumo de la opción (sigue sin intervenir en el precio).
 
 | Configuración del filete de $150             | Valor original | Solicitado | Diferencia | Resultado |
 | -------------------------------------------- | -------------- | ---------- | ---------- | --------- |
@@ -51,7 +51,7 @@ En previsualización, seleccionar 0, 1 y 2 papas produce $90, $100 y $140. Los t
 
 Las unidades cubiertas por el combo cobran únicamente su cargo explícito de sustitución; las adicionales usan tramos. La personalización de un hijo agrega `precio personalizado del hijo − precio base efectivo del hijo`, por cada unidad, sin sumar otra vez su precio de venta individual. La lista elegida también valida el precio del hijo: con respaldo `reject`, este debe tener entrada explícita aunque su base esté cubierta por el combo.
 
-El motor entrega un árbol de componentes con UUID, revisión y selección, apto para preparar consumo por componentes en otra etapa. No descuenta inventario. Se rechazan ciclos al guardar, incluso entre alternativas, y se limitan profundidad y expansión del cálculo.
+El motor entrega un árbol de componentes con UUID, revisión y selección, apto para preparar consumo por componentes en otra etapa. El catálogo no descuenta inventario: desde la etapa 8 lo hace el inventario a partir de la partida liberada a cocina (ver «Inventario · etapa 8»). Se rechazan ciclos al guardar, incluso entre alternativas, y se limitan profundidad y expansión del cálculo.
 
 ## Listas y promociones
 
@@ -99,6 +99,17 @@ Una indicación puede tener un **efecto** sobre un ingrediente del catálogo: `n
 - **Compatibilidad**: `quick_notes` se omite cuando está vacío, así que los borradores, solicitudes, desgloses, snapshots y huellas anteriores no cambian. Las partidas antiguas tienen solo texto y nunca tienen efecto.
 - **Captura**: se muestran las indicaciones sin efecto (como en la 7.1) y las con efecto que aplican a los ingredientes del producto; una con efecto sobre la cebolla no aparece en un producto sin cebolla (ni su texto como atajo). Dos indicaciones con efecto sobre el mismo ingrediente son excluyentes (tocar una quita la otra) y cambiar ese ingrediente en el personalizador quita la indicación con efecto y su texto.
 - **Lookups**: cada elemento de `category_quick_notes` incluye `effect`, `ingredient_id` e `ingredient_name` (nulos sin efecto).
+
+## Inventario · etapa 8
+
+El catálogo no cambió su modelo ni sus precios para el inventario: el inventario **lee** las selecciones estructuradas que la partida ya guarda. Detalle en [INVENTORY_AND_PURCHASING.md](INVENTORY_AND_PURCHASING.md).
+
+- **Porciones**: cada ingrediente y cada opción de grupo de la partida guarda un número decimal de porciones solicitadas (`quote_line`); el consumo es ese número × la porción habitual del ingrediente («20 g de Cebolla blanca»), que se configura en Inventarios → Recetas → Porciones habituales (o en el renglón de ingrediente de la receta del producto). «Sin», «Con» y «Extra» dan 0, 1 y 2 porciones cuando lo incluido es 1; sin porción configurada no se inventa consumo. No existe un segundo modelo «sin / normal / extra».
+- **Complementos**: una opción consume porciones elegidas × factor de la porción × la receta del complemento o, si no tiene, la configuración del producto o la porción del ingrediente al que está ligado. La equivalencia por valor solo afecta el precio: quitar arroz y poner pasta a $140 consume pasta, no arroz.
+- **Combos**: su propia receta (si la tiene) y cada componente elegido con su personalización.
+- **«Cantidad para receta futura»** (`catalog_product_ingredients.recipe_quantity`): sigue sin uso; el inventario no la lee.
+- **Recetas**: se administran en Inventarios → Recetas por producto, variante o complemento; el catálogo no se modifica. La alerta «Producto sin receta» señala los productos activos (no combos ni archivados, de categoría activa) sin receta activa, si el aviso está activado en la configuración de inventario.
+- Editar el catálogo después no cambia los consumos registrados: el inventario resuelve con la partida y el snapshot congelados al confirmar y con las recetas vigentes a la hora de la liberación.
 
 ## Disponibilidad, imágenes y concurrencia
 

@@ -1,6 +1,8 @@
-# API v1 · Etapa 7
+# API v1 · Etapa 8
 
 Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
+
+Etapa 8 (inventarios, recetas, almacenes, compras y costos; guía en [INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md)): sus contratos están al final, en el orden de sus migraciones: «Inventario · fase A: núcleo (esquema 10)», «Inventario · fase B: recetas y consumo (esquema 11)», «Catálogo · indicaciones rápidas con efecto (esquema 12)», «Inventario · fase C: compras (esquema 13)» e «Inventario · fase D: control de inventario (esquema 14)». Las reglas comunes de inventario (permisos, lock, `operation_id`, cantidades y visibilidad de costos) se describen en la fase A y rigen las demás.
 
 HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
@@ -14,7 +16,7 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
 | GET        | `/health/live`            | Público; proceso activo.                                                                              |
 | GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                                                 |
-| GET        | `/version`                | Público; producto, versión, API y versión del esquema (9 en la 0.7.1).                                |
+| GET        | `/version`                | Público; producto, versión, API y versión del esquema (14 en la 0.8.0).                               |
 | GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                                              |
 | GET        | `/setup/status`           | Público; solo configured booleano.                                                                    |
 | POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                                                |
@@ -126,7 +128,7 @@ Color de categoría (etapa 6.1): `""` o un `hex` de la paleta cerrada de Go (16 
 
 Captura táctil (etapa 6.1, fase D; sin rutas nuevas): en el listado de productos, `search` busca por nombre **o código interno** (`ILIKE` en ambos; los demás recursos siguen buscando solo por nombre). `GET /lookups` añade en cada categoría `available_now` (booleano de solo lectura: activa y dentro de su horario en este momento, con el reloj de Go y la zona del establecimiento); la captura solo muestra las categorías disponibles y Go sigue rechazando al cotizar cualquier producto no disponible. `available_now` no forma parte del cuerpo de edición de la categoría.
 
-Indicaciones rápidas por categoría (etapa 7.1, fase D; migración 0009): `POST /quick-notes` con `{category_id, text, active, revision: 0, position?: {after}}` y `PATCH /quick-notes/{id}` con `{revision, text, active, category_id?, position?: {after}}` (`catalog.categories.manage`, comprobado antes de leer con bloqueo o escribir; lock exclusivo 7820148304; auditoría `catalog.quick-notes.created`, `catalog.quick-notes.updated` y `catalog.quick-notes.reordered`, entidad `quick-notes`). El texto se recorta y debe tener de 1 a 80 caracteres, sin comas ni saltos de línea o caracteres de control (400 `CATALOG_VALIDATION`); dos indicaciones de la misma categoría que solo difieren en mayúsculas responden 409 `DUPLICATE_QUICK_NOTE`; una indicación no cambia de categoría (400) y la revisión obsoleta responde 409 `REVISION_CONFLICT`; hasta 40 por categoría. La posición sigue `internal/ordering` dentro de la categoría (sin `position` se crea al final). No hay borrado: se desactivan. Respuesta: `{id, category_id, text, active, sort_order, revision, updated_at}`. `GET /lookups` añade `category_quick_notes` con todas las indicaciones (activas e inactivas) en el orden de sus categorías y su orden visual; la captura usa solo las activas de la categoría del producto (o del producto de cada componente de combo), sin otra petición. Puente: `catalog_create_quick_note` y `catalog_save_quick_note`.
+Indicaciones rápidas por categoría (etapa 7.1, fase D; migración 0009): `POST /quick-notes` con `{category_id, text, active, revision: 0, position?: {after}}` y `PATCH /quick-notes/{id}` con `{revision, text, active, category_id?, position?: {after}}` (`catalog.categories.manage`, comprobado antes de leer con bloqueo o escribir; lock exclusivo 7820148304; auditoría `catalog.quick-notes.created`, `catalog.quick-notes.updated` y `catalog.quick-notes.reordered`, entidad `quick-notes`). El texto se recorta y debe tener de 1 a 80 caracteres, sin comas ni saltos de línea o caracteres de control (400 `CATALOG_VALIDATION`); dos indicaciones de la misma categoría que solo difieren en mayúsculas responden 409 `DUPLICATE_QUICK_NOTE`; una indicación no cambia de categoría (400) y la revisión obsoleta responde 409 `REVISION_CONFLICT`; hasta 40 por categoría. La posición sigue `internal/ordering` dentro de la categoría (sin `position` se crea al final). No hay borrado: se desactivan. Respuesta: `{id, category_id, text, active, sort_order, revision, updated_at}`. `GET /lookups` añade `category_quick_notes` con todas las indicaciones (activas e inactivas) en el orden de sus categorías y su orden visual; la captura usa solo las activas de la categoría del producto (o del producto de cada componente de combo), sin otra petición. Puente: `catalog_create_quick_note` y `catalog_save_quick_note`. Desde la etapa 8 (migración 0012) una indicación admite además un efecto sobre un ingrediente: ver «Catálogo · indicaciones rápidas con efecto (esquema 12)».
 
 Horarios: `{starts_on?:"AAAA-MM-DD",ends_on?:"AAAA-MM-DD",days:[0..6],windows:[{start:"HH:mm",end:"HH:mm"}]}`. Arrays vacíos: sin restricción. Fin exclusivo; `24:00` solo como final. La zona proviene del establecimiento y el instante de Go, nunca del cliente.
 
@@ -445,7 +447,7 @@ Errores de caja: `SHIFT_CLOSING`, `SHIFT_CLOSED`, `SHIFT_CHANGED`, `SHIFT_ALREAD
 
 Eventos SSE en el ámbito `cash` (sin importes; los reciben `cash.shifts.read` y `payments.read`): `cash.shift.opened`, `cash.shift.usd_rate_set`, `cash.operation.recorded`, `cash.report.created`, `cash.shift.closing_started`, `cash.closing.count_saved`, `cash.shift.closing_cancelled`, `cash.shift.closed`, `cash.closure.commented`, `cash.settings.changed` y, desde la fase C, `cash.movement.recorded` (cobros, devoluciones y correcciones de pago del turno), `cash.document.printed`, `cash.document.reprinted`, `cash.drawer.command_queued` y `cash.print.updated` (resultado de un trabajo de caja en la cola; identifica el trabajo). `cash.settings.changed` se publica también al configurar el cajón o el tope y al activar o desactivar `cash_limit` o `usd_cash`. Todos se escriben en la transacción de su operación.
 
-## Inventario · esquema 10 (etapa 8, fase A)
+## Inventario · fase A: núcleo (esquema 10)
 
 Prefijo `/api/v1/inventory`, misma transacción autenticada y callback de auditoría. Toda ruta exige `inventory.read` además del permiso indicado, y todos los permisos se comprueban antes de escribir (un 403 revierte). Lock 7820148308: compartido en lecturas, exclusivo en escrituras (se toma después de 7820148305 y 7820148304 cuando concurren). **Toda escritura exige `operation_id`** (UUID en el cuerpo) y se guarda en `restaurant_operations` con su huella: un reintento con el mismo cuerpo devuelve la respuesta guardada sin repetir efectos y uno con otro cuerpo responde 409 `IDEMPOTENCY_CONFLICT`. Las entidades administrables usan además `revision` (409 `REVISION_CONFLICT`). Un solo identificador por ruta (requisito del puente nativo). Cantidades y dinero son cadenas decimales: cantidades con hasta 6 decimales en la unidad base del insumo y sin ceros finales (`"20"`, `"0.25"`); valores exactos con al menos dos decimales (`"500.00"`, `"33.3333333333"`) y su versión para mostrar `*_display` (valores a centavos, costos unitarios a cuatro decimales). Las capturas aceptan cantidades sin signo con hasta 6 decimales y costos con hasta 10. Los costos y valores solo se entregan con `inventory.costs.read` (si falta, llegan en `null` y la respuesta trae `costs_visible: false`); la valuación total solo con `inventory.valuation.read` (`valuation_visible`). `inventory.stock.read` nunca implica costos.
 
@@ -494,7 +496,7 @@ Errores de inventario: `INVENTORY_VALIDATION` (400, mensaje en español sin cost
 
 Eventos SSE en el ámbito `inventory` (sin costos ni importes; los recibe `inventory.read`): `inventory.items.changed` (unidades, categorías, insumos y presentaciones), `inventory.settings.changed` (configuración, almacenes, asignaciones de estaciones y la función `inventory_control`), `inventory.stock.changed` y `inventory.movements.recorded`. Auditoría en la misma transacción: `inventory.unit_created|updated`, `inventory.category_created|updated`, `inventory.categories_reordered`, `inventory.item_created|updated`, `inventory.presentation_created|updated`, `inventory.warehouse_created|updated`, `inventory.station_warehouse_assigned`, `inventory.initial_balance_recorded` y `inventory.settings_changed`. Los registros de auditoría de inventario pueden contener costos (solo los consulta `audit.read`).
 
-## Inventario · fase B (esquema 11)
+## Inventario · fase B: recetas y consumo (esquema 11)
 
 Mismas reglas que la fase A: prefijo `/api/v1/inventory`, `inventory.read` en toda ruta además del permiso indicado,
 permisos comprobados antes de escribir (un 403 revierte), lock 7820148308 (compartido en lecturas, exclusivo en
@@ -600,29 +602,27 @@ fallan o se recuperan). Auditoría: `inventory.recipe_created`, `inventory.recip
 `inventory.production_recorded` y, con el proceso como responsable (`actor_kind: "process"`, `actor_username:
 "inventory_worker"`), `inventory.cancellation_reconciled`.
 
-## Catálogo · indicaciones rápidas con efecto · esquema 12 (etapa 8, fase B)
+## Catálogo · indicaciones rápidas con efecto (esquema 12)
 
-Amplía las indicaciones rápidas por categoría (etapa 7.1, fase D; migración 0009) y la personalización de las partidas.
+Etapa 8, fase B. Amplía las indicaciones rápidas por categoría (etapa 7.1, fase D; migración 0009) y la personalización de las partidas.
 Sin rutas, permisos, locks ni operaciones del puente nuevos: `catalog_create_quick_note` y
 `catalog_save_quick_note` siguen igual en `api.rs`.
 
 ### Catálogo · indicaciones rápidas (migración 0012)
 
-Párrafo sugerido, a continuación del de la etapa 7.1:
-
-> Indicaciones con efecto (etapa 8, fase B; migración 0012): `POST /quick-notes` y
-> `PATCH /quick-notes/{id}` aceptan además `effect` (`none` | `omit` | `normal` | `extra`) e
-> `ingredient_id` (UUID de `catalog_ingredients`, `null` sin efecto). Un efecto exige un ingrediente
-> existente y `none` no admite ingrediente (400 `CATALOG_VALIDATION`); un efecto desconocido también
-> responde 400. Sin `effect` en el cuerpo, una alta queda como `none` y una edición conserva el
-> efecto vigente (clientes de la etapa 7.1); enviar `ingredient_id` sin `effect` responde 400. No hay
-> campos de gramos. Respuesta (y cada elemento de `category_quick_notes` en `GET /lookups`):
-> `{id, category_id, text, effect, ingredient_id, ingredient_name, active, sort_order, revision,
+Indicaciones con efecto (etapa 8, fase B; migración 0012): `POST /quick-notes` y
+`PATCH /quick-notes/{id}` aceptan además `effect` (`none` | `omit` | `normal` | `extra`) e
+`ingredient_id` (UUID de `catalog_ingredients`, `null` sin efecto). Un efecto exige un ingrediente
+existente y `none` no admite ingrediente (400 `CATALOG_VALIDATION`); un efecto desconocido también
+responde 400. Sin `effect` en el cuerpo, una alta queda como `none` y una edición conserva el
+efecto vigente (clientes de la etapa 7.1); enviar `ingredient_id` sin `effect` responde 400. No hay
+campos de gramos. Respuesta (y cada elemento de `category_quick_notes` en `GET /lookups`):
+`{id, category_id, text, effect, ingredient_id, ingredient_name, active, sort_order, revision,
 updated_at}`, con `ingredient_id` e `ingredient_name` nulos sin efecto. La auditoría
-> (`catalog.quick-notes.created`/`.updated`) guarda el efecto y el ingrediente antes y después.
-> PostgreSQL aplica `catalog_category_quick_notes_effect_check`,
-> `catalog_category_quick_notes_ingredient_id_fkey` y
-> `catalog_category_quick_notes_effect_ingredient_check` (`none` ⇔ ingrediente nulo).
+(`catalog.quick-notes.created`/`.updated`) guarda el efecto y el ingrediente antes y después.
+PostgreSQL aplica `catalog_category_quick_notes_effect_check`,
+`catalog_category_quick_notes_ingredient_id_fkey` y
+`catalog_category_quick_notes_effect_ingredient_check` (`none` ⇔ ingrediente nulo).
 
 ### Personalización · `customization.quick_notes`
 
