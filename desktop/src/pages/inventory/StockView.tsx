@@ -153,6 +153,12 @@ function StockTags({ row }: { row: StockRow }) {
   );
 }
 
+// Origen del nivel comparado (fase D): con el filtro de almacén, el nivel propio del almacén
+// («warehouse») o el del insumo contra la existencia total («item»).
+function levelScope(row: StockRow) {
+  return (row as StockRow & { level_scope?: 'item' | 'warehouse' }).level_scope ?? 'item';
+}
+
 // Desglose por almacén que entrega Go (solo almacenes con existencia distinta de cero).
 function WarehouseBreakdown({ row }: { row: StockRow }) {
   if (row.warehouses.length === 0) {
@@ -174,7 +180,10 @@ function WarehouseBreakdown({ row }: { row: StockRow }) {
 
 function StockTable({ page }: { page: StockPage }) {
   const scoped = page.warehouse !== null;
-  const columns = 6 + (scoped ? 1 : 0) + (page.costs_visible ? 2 : 0);
+  // El costo promedio llega con inventory.costs.read; el valor del insumo exige además
+  // inventory.valuation.read (Go lo envía en null sin ese permiso aunque haya costos).
+  const valueVisible = page.costs_visible && page.valuation_visible;
+  const columns = 6 + (scoped ? 1 : 0) + (page.costs_visible ? 1 : 0) + (valueVisible ? 1 : 0);
   return (
     <div className="table-container cash-table">
       <table className="inventory-table">
@@ -186,7 +195,7 @@ function StockTable({ page }: { page: StockPage }) {
             <th scope="col">Por almacén</th>
             <th scope="col">Mínimo y reabastecimiento</th>
             {page.costs_visible && <th scope="col">Costo promedio</th>}
-            {page.costs_visible && <th scope="col">Valor del insumo</th>}
+            {valueVisible && <th scope="col">Valor del insumo</th>}
             <th scope="col">Situación</th>
             <th scope="col">Categoría</th>
           </tr>
@@ -220,6 +229,13 @@ function StockTable({ page }: { page: StockPage }) {
                     {row.reorder_point !== null && (
                       <span>Reabastecer en {formatQuantity(row.reorder_point, row.unit)}</span>
                     )}
+                    {scoped && (
+                      <span className="muted text-xs">
+                        {levelScope(row) === 'warehouse'
+                          ? `Nivel de ${page.warehouse?.name}`
+                          : 'Nivel del insumo (existencia total)'}
+                      </span>
+                    )}
                   </span>
                 )}
               </td>
@@ -230,7 +246,7 @@ function StockTable({ page }: { page: StockPage }) {
                     : '—'}
                 </td>
               )}
-              {page.costs_visible && (
+              {valueVisible && (
                 <td className="inventory-number">{formatMoney(row.value_display)}</td>
               )}
               <td>
@@ -253,27 +269,32 @@ function StockTable({ page }: { page: StockPage }) {
 }
 
 // Pestaña «Existencias» (inventory.stock.read): existencia total y por almacén de cada insumo.
-// Costos y valores solo con inventory.costs.read y el valor total del inventario solo con
-// inventory.valuation.read; Go los omite en los demás casos. Una existencia negativa se resalta,
+// El costo promedio solo con inventory.costs.read; el valor de cada insumo y el total del
+// inventario solo con inventory.valuation.read; Go los omite en los demás casos. Una existencia negativa se resalta,
 // pero nunca bloquea nada (§6).
 export function StockView({
   can,
   execute,
   busy,
   initialState,
+  initialSearch = '',
+  initialWarehouse = '',
   timezone,
 }: {
   can: (permission: string) => boolean;
   execute: InventoryExecute;
   busy: boolean;
   initialState: StockState | '';
+  // Insumo (por su código) y almacén con los que se abre desde una alerta del resumen.
+  initialSearch?: string;
+  initialWarehouse?: string;
   timezone: string;
 }) {
   const [filter, setFilter] = useState<StockFilter>({
-    warehouse: '',
+    warehouse: initialWarehouse,
     category: '',
     state: initialState,
-    search: '',
+    search: initialSearch,
     active: 'true',
     page: 1,
   });

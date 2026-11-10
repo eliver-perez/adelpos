@@ -280,8 +280,9 @@ export function stockPage(costsVisible: boolean, valuationVisible: boolean): Sto
       ...row,
       average_cost: costsVisible ? row.average_cost : null,
       average_cost_display: costsVisible ? row.average_cost_display : null,
-      value: costsVisible ? row.value : null,
-      value_display: costsVisible ? row.value_display : null,
+      // Fase D: el valor de cada insumo solo con inventory.valuation.read.
+      value: valuationVisible ? row.value : null,
+      value_display: valuationVisible ? row.value_display : null,
       cost_pending: costsVisible ? row.cost_pending : null,
     })),
     total: rows.length,
@@ -295,7 +296,9 @@ export function stockPage(costsVisible: boolean, valuationVisible: boolean): Sto
   };
 }
 
-export function movementPage(costsVisible: boolean): MovementPage {
+// La valuación posterior al movimiento exige costos y valuación (fase D); por omisión, ambos con
+// costsVisible.
+export function movementPage(costsVisible: boolean, valuationVisible = costsVisible): MovementPage {
   const movement: InventoryMovement = {
     id: ids.movement,
     seq: 1,
@@ -318,7 +321,8 @@ export function movementPage(costsVisible: boolean): MovementPage {
     cost_basis: costsVisible ? 'document' : null,
     cost_basis_label: costsVisible ? 'Costo del documento' : null,
     cost_pending: costsVisible ? false : null,
-    valuation_value_after: costsVisible ? '225.00' : null,
+    valuation_visible: costsVisible && valuationVisible,
+    valuation_value_after: costsVisible && valuationVisible ? '225.00' : null,
     occurred_at: '2026-11-10T14:30:00Z',
     recorded_at: '2026-11-10T14:31:00Z',
     source_kind: 'initial',
@@ -333,7 +337,14 @@ export function movementPage(costsVisible: boolean): MovementPage {
     process_label: null,
     operation_id: ids.operation,
   };
-  return { items: [movement], total: 1, page: 1, page_size: 50, costs_visible: costsVisible };
+  return {
+    items: [movement],
+    total: 1,
+    page: 1,
+    page_size: 50,
+    costs_visible: costsVisible,
+    valuation_visible: costsVisible && valuationVisible,
+  };
 }
 
 export function settings(extra: Partial<InventorySettings> = {}): InventorySettings {
@@ -461,6 +472,45 @@ export function inventoryTransport(override: Responder = () => undefined) {
         return {
           status: 200,
           body: { items: [], total: 0, page: 1, page_size: 25, costs_visible: true },
+        };
+      // Fase D: listados vacíos y sin alertas salvo que la prueba los sustituya.
+      case 'inventory_adjustments':
+      case 'inventory_transfers':
+        return {
+          status: 200,
+          body: { items: [], total: 0, page: 1, page_size: 25, costs_visible: true },
+        };
+      case 'inventory_counts':
+      case 'inventory_stock_levels':
+        return { status: 200, body: { items: [], total: 0, page: 1, page_size: 25 } };
+      case 'inventory_alerts':
+        return {
+          status: 200,
+          body: {
+            items: [],
+            total: 0,
+            page: 1,
+            page_size: 100,
+            counts: { total: 0, critical: 0, warning: 0, info: 0, by_type: {} },
+            costs_visible: true,
+            stock_visible: true,
+            purchasing_visible: false,
+            generated_at: stamp,
+          },
+        };
+      case 'inventory_purchase_orders':
+        return { status: 200, body: { items: [], total: 0, page: 1, page_size: 25 } };
+      case 'inventory_purchase_suggestions':
+        return {
+          status: 200,
+          body: {
+            items: [],
+            total: 0,
+            page: 1,
+            page_size: 100,
+            stock_visible: true,
+            purchasing_visible: false,
+          },
         };
       default:
         return { status: 200, body: {} };

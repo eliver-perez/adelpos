@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Notice, PageTitle } from '../../components/Forms';
-import type { StockState } from '../../services/inventory';
 import { AdjustmentsView } from './AdjustmentsView';
+import { CountsView } from './CountsView';
 import { inventoryPermissionName } from './inventoryFormat';
+import type { InventoryTarget } from './inventoryNavigation';
 import { ItemsView } from './ItemsView';
 import { MovementsView } from './MovementsView';
 import { PurchaseOrdersView } from './PurchaseOrdersView';
@@ -14,6 +15,7 @@ import { SettingsView } from './SettingsView';
 import { StockView } from './StockView';
 import { SummaryView } from './SummaryView';
 import { SuppliersView } from './SuppliersView';
+import { TransfersView } from './TransfersView';
 import { useInventoryMutation } from './useInventoryMutation';
 import { WarehousesView } from './WarehousesView';
 
@@ -24,7 +26,9 @@ export type InventorySection =
   | 'warehouses'
   | 'stock'
   | 'movements'
+  | 'transfers'
   | 'adjustments'
+  | 'counts'
   | 'purchases'
   | 'receipts'
   | 'suppliers'
@@ -37,11 +41,12 @@ interface SectionDefinition {
   permission: string | string[];
 }
 
-// Pestañas en el orden de la especificación (§25). La fase B agrega Recetas y Ajustes y mermas
-// (por ahora con las cancelaciones por clasificar); la fase C, Compras, Recepciones y Proveedores
-// (con cualquiera de los seis permisos de compras, como la lectura en Go); la fase D agrega
-// Transferencias y Conteos. No se muestran pestañas vacías. Go vuelve a comprobar cada permiso
-// en cada consulta y escritura.
+// Pestañas en el orden de la especificación (§25): Resumen, Insumos, Recetas, Almacenes,
+// Existencias, Movimientos, Transferencias, Ajustes y mermas, Conteos, Compras, Recepciones,
+// Proveedores y Configuración. Cada una se muestra con alguno de los permisos con los que Go deja
+// leer su contenido (Transferencias: transferir o leer movimientos; Conteos: realizarlos o
+// aprobarlos; Compras, Recepciones y Proveedores: cualquiera de los seis permisos de compras). No se
+// muestran pestañas vacías. Go vuelve a comprobar cada permiso en cada consulta y escritura.
 const sections: SectionDefinition[] = [
   { id: 'summary', label: 'Resumen', permission: 'inventory.read' },
   { id: 'items', label: 'Insumos', permission: 'inventory.read' },
@@ -49,7 +54,17 @@ const sections: SectionDefinition[] = [
   { id: 'warehouses', label: 'Almacenes', permission: 'inventory.read' },
   { id: 'stock', label: 'Existencias', permission: 'inventory.stock.read' },
   { id: 'movements', label: 'Movimientos', permission: 'inventory.movements.read' },
+  {
+    id: 'transfers',
+    label: 'Transferencias',
+    permission: ['inventory.transfers.record', 'inventory.movements.read'],
+  },
   { id: 'adjustments', label: 'Ajustes y mermas', permission: 'inventory.read' },
+  {
+    id: 'counts',
+    label: 'Conteos',
+    permission: ['inventory.counts.perform', 'inventory.counts.approve'],
+  },
   { id: 'purchases', label: 'Compras', permission: purchasingReadPermissions },
   { id: 'receipts', label: 'Recepciones', permission: purchasingReadPermissions },
   { id: 'suppliers', label: 'Proveedores', permission: purchasingReadPermissions },
@@ -61,17 +76,17 @@ function allowed(entry: SectionDefinition, can: (permission: string) => boolean)
   return permissions.some((permission) => can(permission));
 }
 
-// Documento que una pestaña de compras abre al llegar desde otra (una orden desde una recepción,
-// una recepción desde el historial de un proveedor…). La versión vuelve a montar la pestaña.
-interface PurchasingFocus {
-  section: InventorySection;
-  id: string | null;
+// Lo que una pestaña abre al llegar desde otra (una orden desde una recepción, un insumo desde una
+// alerta…). La versión vuelve a montar la pestaña para aplicar los valores aunque ya estuviera
+// abierta; elegir una pestaña desde la barra la abre sin destino.
+interface Destination {
   version: number;
+  target: InventoryTarget | null;
 }
 
 // Sección principal «Inventarios» (etapa 8): resumen, insumos, recetas, almacenes, existencias,
-// movimientos, ajustes y mermas, compras, recepciones, proveedores y configuración, cada pestaña
-// según sus permisos. Go es la autoridad de cantidades,
+// movimientos, transferencias, ajustes y mermas, conteos, compras, recepciones, proveedores y
+// configuración, cada pestaña según sus permisos. Go es la autoridad de cantidades,
 // existencias y costos: la pantalla muestra lo que entrega, sin aritmética de cantidades ni dinero.
 export function InventoryPage({
   can,
@@ -84,63 +99,69 @@ export function InventoryPage({
   onOpenSettings: () => void;
 }) {
   const [section, setSection] = useState<InventorySection>('summary');
-  // Filtro con el que el resumen abre Existencias (por ejemplo, solo las negativas). El contador
-  // vuelve a montar la vista para aplicar el filtro aunque ya estuviera abierta.
-  const [stockPreset, setStockPreset] = useState<{ state: StockState | ''; version: number }>({
-    state: '',
-    version: 0,
-  });
-  const [focus, setFocus] = useState<PurchasingFocus>({ section: 'summary', id: null, version: 0 });
+  const [destination, setDestination] = useState<Destination>({ version: 0, target: null });
   const mutation = useInventoryMutation();
   const available = sections.filter((entry) => allowed(entry, can));
   const current = available.some((entry) => entry.id === section) ? section : 'summary';
 
-  function openDocument(target: InventorySection, id: string) {
-    setFocus((previous) => ({ section: target, id, version: previous.version + 1 }));
-    setSection(target);
+  function navigate(target: InventoryTarget) {
+    setDestination((previous) => ({ version: previous.version + 1, target }));
+    setSection(target.section);
   }
 
   const navigation: PurchasingNavigation = {
-    openOrder: (id) => openDocument('purchases', id),
-    openReceipt: (id) => openDocument('receipts', id),
-    openSupplier: (id) => openDocument('suppliers', id),
+    openOrder: (id) => navigate({ section: 'purchases', orderID: id }),
+    openReceipt: (id) => navigate({ section: 'receipts', receiptID: id }),
+    openSupplier: (id) => navigate({ section: 'suppliers', supplierID: id }),
   };
 
   // Elegir una pestaña desde la barra abre su listado, no el último documento enfocado.
   function chooseSection(target: InventorySection) {
-    setFocus((previous) => ({ section: target, id: null, version: previous.version + 1 }));
+    setDestination((previous) => ({ version: previous.version + 1, target: null }));
     setSection(target);
   }
 
-  function focusedID(target: InventorySection) {
-    return focus.section === target ? focus.id : null;
-  }
-
-  function showStock(state: StockState | '') {
-    setStockPreset((previous) => ({ state, version: previous.version + 1 }));
-    setSection('stock');
+  // Destino vigente de la pestaña indicada (o null si se abrió desde la barra).
+  function arrival<S extends InventoryTarget['section']>(target: S) {
+    const value = destination.target;
+    return value && value.section === target
+      ? (value as Extract<InventoryTarget, { section: S }>)
+      : null;
   }
 
   function content() {
+    const key = destination.version;
     switch (current) {
       case 'items':
-        return <ItemsView can={can} execute={mutation.execute} busy={mutation.busy} />;
+        return (
+          <ItemsView
+            key={key}
+            can={can}
+            execute={mutation.execute}
+            busy={mutation.busy}
+            initialItemID={arrival('items')?.itemID ?? null}
+          />
+        );
       case 'recipes':
         return (
           <RecipesView
+            key={key}
             can={can}
             execute={mutation.execute}
             busy={mutation.busy}
             timezone={timezone}
+            initialSearch={arrival('recipes')?.search ?? ''}
           />
         );
       case 'adjustments':
         return (
           <AdjustmentsView
+            key={key}
             can={can}
             execute={mutation.execute}
             busy={mutation.busy}
             timezone={timezone}
+            onNavigate={navigate}
           />
         );
       case 'warehouses':
@@ -152,52 +173,84 @@ export function InventoryPage({
             timezone={timezone}
           />
         );
-      case 'stock':
+      case 'stock': {
+        const preset = arrival('stock');
         return (
           <StockView
-            key={stockPreset.version}
+            key={key}
             can={can}
             execute={mutation.execute}
             busy={mutation.busy}
-            initialState={stockPreset.state}
+            initialState={preset?.state ?? ''}
+            initialSearch={preset?.search ?? ''}
+            initialWarehouse={preset?.warehouseID ?? ''}
             timezone={timezone}
           />
         );
+      }
       case 'movements':
-        return <MovementsView timezone={timezone} />;
-      case 'purchases':
+        return <MovementsView key={key} timezone={timezone} />;
+      case 'transfers':
         return (
-          <PurchaseOrdersView
-            key={focus.version}
+          <TransfersView
+            key={key}
             can={can}
             execute={mutation.execute}
             busy={mutation.busy}
             timezone={timezone}
-            initialOrderID={focusedID('purchases')}
+          />
+        );
+      case 'counts': {
+        const preset = arrival('counts');
+        return (
+          <CountsView
+            key={key}
+            can={can}
+            execute={mutation.execute}
+            busy={mutation.busy}
+            timezone={timezone}
+            initialCountID={preset?.countID ?? null}
+            initialWarehouseID={preset?.warehouseID ?? null}
+            onNavigate={navigate}
+          />
+        );
+      }
+      case 'purchases': {
+        const preset = arrival('purchases');
+        return (
+          <PurchaseOrdersView
+            key={key}
+            can={can}
+            execute={mutation.execute}
+            busy={mutation.busy}
+            timezone={timezone}
+            initialOrderID={preset?.orderID ?? null}
+            initialSubsection={preset?.subsection ?? 'orders'}
             navigation={navigation}
           />
         );
+      }
       case 'receipts':
         return (
           <ReceiptsView
-            key={focus.version}
+            key={key}
             can={can}
             execute={mutation.execute}
             busy={mutation.busy}
             timezone={timezone}
-            initialReceiptID={focusedID('receipts')}
+            initialReceiptID={arrival('receipts')?.receiptID ?? null}
             navigation={navigation}
           />
         );
       case 'suppliers':
         return (
           <SuppliersView
-            key={focus.version}
+            key={key}
             can={can}
             execute={mutation.execute}
             busy={mutation.busy}
             timezone={timezone}
-            initialSupplierID={focusedID('suppliers')}
+            initialSupplierID={arrival('suppliers')?.supplierID ?? null}
             navigation={navigation}
           />
         );
@@ -206,10 +259,10 @@ export function InventoryPage({
       default:
         return (
           <SummaryView
+            key={key}
             can={can}
             timezone={timezone}
-            onShowStock={showStock}
-            onShowSection={setSection}
+            onNavigate={navigate}
             onOpenSettings={onOpenSettings}
           />
         );

@@ -17,6 +17,7 @@ import { inventoryCostShape, inventoryQuantityShape } from '../../services/numer
 import { ActiveToggle, DecimalTextField } from './InventoryFields';
 import { inventoryPermissionName } from './inventoryFormat';
 import { PresentationsEditor } from './PresentationsEditor';
+import { StockLevelsEditor } from './StockLevelsEditor';
 
 interface ItemFormState {
   code: string;
@@ -431,6 +432,14 @@ export function ItemEditorPanel({
           execute={execute}
           busy={busy}
           onChanged={setSnapshot}
+        />
+      )}
+      {item && (
+        <StockLevelsEditor
+          item={item}
+          editable={can('inventory.items.manage')}
+          execute={execute}
+          busy={busy}
         />
       )}
       {dialog}

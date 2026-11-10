@@ -217,10 +217,13 @@ export function ItemsView({
   can,
   execute,
   busy,
+  initialItemID = null,
 }: {
   can: (permission: string) => boolean;
   execute: InventoryExecute;
   busy: boolean;
+  // Insumo que se abre al llegar desde una alerta del resumen.
+  initialItemID?: string | null;
 }) {
   const [filter, setFilter] = useState<ItemFilter>({
     search: '',
@@ -230,7 +233,7 @@ export function ItemsView({
     page: 1,
   });
   // null: listado; '': insumo nuevo; id: insumo abierto.
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(initialItemID);
   const categories = useResource<InventoryCategory[]>('inventory_categories', {
     reloadEvent: inventoryChangeEvent,
   });

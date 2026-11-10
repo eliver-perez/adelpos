@@ -25,11 +25,14 @@ export function RecipesView({
   execute,
   busy,
   timezone,
+  initialSearch = '',
 }: {
   can: (permission: string) => boolean;
   execute: InventoryExecute;
   busy: boolean;
   timezone: string;
+  // Búsqueda inicial de productos (alerta «Producto sin receta» del resumen).
+  initialSearch?: string;
 }) {
   const [section, setSection] = useState<RecipesSection>('targets');
   const [open, setOpen] = useState<OpenRecipe | null>(null);
@@ -81,6 +84,7 @@ export function RecipesView({
       {current === 'targets' && (
         <RecipeTargetsView
           editable={can('inventory.recipes.manage')}
+          initialSearch={initialSearch}
           onOpenRecipe={openRecipe}
           onCreateRecipe={createRecipe}
         />

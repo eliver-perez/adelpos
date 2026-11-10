@@ -14,9 +14,11 @@ import type {
 import { notifyError, notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
+import { AdjustmentRecords } from './AdjustmentRecords';
 import { ConsumptionLinesTable, ConsumptionTraceView } from './ConsumptionTrace';
 import { Pagination } from './InventoryFields';
 import { inventoryPermissionName } from './inventoryFormat';
+import type { InventoryNavigate } from './inventoryNavigation';
 import { cancellationAccount, operatingDateText } from './recipeFormat';
 
 const pageSize = 25;
@@ -517,18 +519,23 @@ function CancellationHistory({
   );
 }
 
-// Pestaña «Ajustes y mermas» (inventory.read). En la fase B contiene las cancelaciones por
-// clasificar y su historial; la fase D le agrega los ajustes y las mermas.
+// Pestaña «Ajustes y mermas» (inventory.read): alta y listado de ajustes de discrepancia y mermas
+// operativas (fase D) y las cancelaciones por clasificar con su historial (fase B), en una sola
+// vista: primero las cancelaciones pendientes (vencen al corte del día operativo), después los
+// ajustes y mermas registrados y al final el historial de clasificaciones.
 export function AdjustmentsView({
   can,
   execute,
   busy,
   timezone,
+  onNavigate,
 }: {
   can: (permission: string) => boolean;
   execute: InventoryExecute;
   busy: boolean;
   timezone: string;
+  // Lleva a otra pestaña (por ejemplo, al insumo sin costo de un sobrante rechazado).
+  onNavigate?: InventoryNavigate;
 }) {
   const [trace, setTrace] = useState<string | null>(null);
   const canTrace = can('inventory.movements.read');
@@ -543,19 +550,22 @@ export function AdjustmentsView({
     );
   }
   return (
-    <div className="form-stack">
-      <p className="muted text-sm">
-        Las partidas canceladas después de liberarse a cocina se clasifican para decidir si su
-        consumo se revierte. Las devoluciones de dinero no reintegran ingredientes.
-      </p>
-      <PendingCancellations
-        execute={execute}
-        busy={busy}
-        timezone={timezone}
-        canTrace={canTrace}
-        onShowTrace={setTrace}
-      />
-      <CancellationHistory execute={execute} busy={busy} timezone={timezone} />
-    </div>
+    <AdjustmentRecords
+      can={can}
+      execute={execute}
+      busy={busy}
+      timezone={timezone}
+      onNavigate={onNavigate}
+      before={
+        <PendingCancellations
+          execute={execute}
+          busy={busy}
+          timezone={timezone}
+          canTrace={canTrace}
+          onShowTrace={setTrace}
+        />
+      }
+      after={<CancellationHistory execute={execute} busy={busy} timezone={timezone} />}
+    />
   );
 }

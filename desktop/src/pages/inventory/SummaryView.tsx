@@ -3,11 +3,21 @@ import { Notice } from '../../components/Forms';
 import { inventoryChangeEvent } from '../../hooks/useInventoryEvents';
 import { useResource } from '../../hooks/useResource';
 import { serverDateTime } from '../../services/restaurant';
-import type { InventorySummary, StockState } from '../../services/inventory';
+import type { InventorySummary, Page, StockState } from '../../services/inventory';
+import type {
+  AdjustmentPage,
+  CountSummary,
+  PurchaseSuggestionPage,
+} from '../../services/inventoryControl';
+import type { PurchaseOrderSummary } from '../../services/inventoryPurchasing';
 import type { CancellationPage, ConsumptionRequestPage } from '../../services/inventoryRecipes';
 import { formatMoney } from '../../services/money';
 import { countLabel } from '../../services/plural';
+import { canReadAdjustments } from './AdjustmentRecords';
+import { AlertsSection } from './AlertsSection';
 import { inventoryPermissionName } from './inventoryFormat';
+import type { InventoryNavigate } from './inventoryNavigation';
+import { canReadPurchasing } from './purchasingFormat';
 
 // Tarjeta de una cifra del resumen. Con permiso de existencias, las que corresponden a un filtro
 // abren Existencias con ese filtro aplicado.
@@ -98,12 +108,10 @@ function FeatureStatus({
 // Si una consulta falla o falta el permiso, la cifra no se muestra: nunca se inventa.
 function ConsumptionFigures({
   can,
-  onShowCancellations,
-  onShowMovements,
+  onNavigate,
 }: {
   can: (permission: string) => boolean;
-  onShowCancellations: () => void;
-  onShowMovements: () => void;
+  onNavigate: InventoryNavigate;
 }) {
   const movementsReadable = can('inventory.movements.read');
   const cancellations = useResource<CancellationPage>('inventory_cancellations', {
@@ -126,7 +134,7 @@ function ConsumptionFigures({
           value={pending}
           detail={pending > 0 ? 'Al cierre del día se consideran «No preparado»' : undefined}
           tone={pending > 0 ? 'warning' : 'default'}
-          onOpen={onShowCancellations}
+          onOpen={() => onNavigate({ section: 'adjustments' })}
         />
       )}
       {failed !== null && (
@@ -135,28 +143,105 @@ function ConsumptionFigures({
           value={failed}
           detail={waiting !== null ? countLabel(waiting, 'pendiente', 'pendientes') : undefined}
           tone={failed > 0 ? 'warning' : 'default'}
-          onOpen={onShowMovements}
+          onOpen={() => onNavigate({ section: 'movements' })}
         />
       )}
     </>
   );
 }
 
-// Resumen de inventario: estado de la función y conteos que calcula Go. El valor total solo
-// aparece si Go lo entrega (inventory.valuation.read) y los insumos con costo pendiente solo con
-// inventory.costs.read.
+// Cifras de las fases C y D tal como las entregan los listados de Go (su total): ajustes por
+// autorizar, conteos en curso, órdenes de compra abiertas e insumos con sugerencia de compra. Cada
+// una aparece solo con el permiso que Go exige para consultarla.
+function ControlFigures({
+  can,
+  onNavigate,
+}: {
+  can: (permission: string) => boolean;
+  onNavigate: InventoryNavigate;
+}) {
+  const adjustmentsReadable = canReadAdjustments(can);
+  const countsReadable = can('inventory.counts.perform') || can('inventory.counts.approve');
+  const purchasingReadable = canReadPurchasing(can);
+  const adjustments = useResource<AdjustmentPage>('inventory_adjustments', {
+    query: { state: 'pending_authorization', page_size: '1' },
+    enabled: adjustmentsReadable,
+    reloadEvent: inventoryChangeEvent,
+  });
+  const counts = useResource<Page<CountSummary>>('inventory_counts', {
+    query: { state: 'active', page_size: '1' },
+    enabled: countsReadable,
+    reloadEvent: inventoryChangeEvent,
+  });
+  const orders = useResource<Page<PurchaseOrderSummary>>('inventory_purchase_orders', {
+    query: { state: 'open', page_size: '1' },
+    enabled: purchasingReadable,
+    reloadEvent: inventoryChangeEvent,
+  });
+  const suggestions = useResource<PurchaseSuggestionPage>('inventory_purchase_suggestions', {
+    query: { page_size: '1' },
+    reloadEvent: inventoryChangeEvent,
+  });
+  const pendingAdjustments = adjustmentsReadable ? (adjustments.data?.total ?? null) : null;
+  const activeCounts = countsReadable ? (counts.data?.total ?? null) : null;
+  const openOrders = purchasingReadable ? (orders.data?.total ?? null) : null;
+  const suggested = suggestions.data?.total ?? null;
+  return (
+    <>
+      {pendingAdjustments !== null && (
+        <SummaryFigure
+          label="Ajustes por autorizar"
+          value={pendingAdjustments}
+          detail={pendingAdjustments > 0 ? 'No afectan existencias hasta autorizarse' : undefined}
+          tone={pendingAdjustments > 0 ? 'warning' : 'default'}
+          onOpen={() => onNavigate({ section: 'adjustments' })}
+        />
+      )}
+      {activeCounts !== null && (
+        <SummaryFigure
+          label="Conteos en curso"
+          value={activeCounts}
+          detail="Abiertos, enviados o aprobados"
+          onOpen={() => onNavigate({ section: 'counts' })}
+        />
+      )}
+      {openOrders !== null && (
+        <SummaryFigure
+          label="Órdenes de compra abiertas"
+          value={openOrders}
+          detail="Emitidas o parcialmente recibidas"
+          onOpen={() => onNavigate({ section: 'purchases', subsection: 'orders' })}
+        />
+      )}
+      {suggested !== null && (
+        <SummaryFigure
+          label="Insumos por reabastecer"
+          value={suggested}
+          detail="Con sugerencia de compra"
+          tone={suggested > 0 ? 'warning' : 'default'}
+          onOpen={
+            purchasingReadable
+              ? () => onNavigate({ section: 'purchases', subsection: 'suggestions' })
+              : undefined
+          }
+        />
+      )}
+    </>
+  );
+}
+
+// Resumen de inventario: estado de la función, cifras de todas las fases y alertas, todo calculado
+// por Go. El valor total solo aparece si Go lo entrega (inventory.valuation.read) y los insumos con
+// costo pendiente solo con inventory.costs.read.
 export function SummaryView({
   can,
   timezone,
-  onShowStock,
-  onShowSection,
+  onNavigate,
   onOpenSettings,
 }: {
   can: (permission: string) => boolean;
   timezone: string;
-  onShowStock: (state: StockState | '') => void;
-  // Abre otra pestaña de la sección (cancelaciones o movimientos).
-  onShowSection: (section: 'adjustments' | 'movements') => void;
+  onNavigate: InventoryNavigate;
   onOpenSettings: () => void;
 }) {
   const resource = useResource<InventorySummary>('inventory_summary', {
@@ -167,7 +252,8 @@ export function SummaryView({
     return <Notice>{resource.error || 'Consultando el resumen de inventario…'}</Notice>;
   }
   const stockReadable = can('inventory.stock.read');
-  const open = (state: StockState | '') => (stockReadable ? () => onShowStock(state) : undefined);
+  const open = (state: StockState | '') =>
+    stockReadable ? () => onNavigate({ section: 'stock', state }) : undefined;
   return (
     <div className="form-stack">
       <Notice>{resource.error}</Notice>
@@ -218,12 +304,10 @@ export function SummaryView({
             detail="Costo promedio de todos los insumos"
           />
         )}
-        <ConsumptionFigures
-          can={can}
-          onShowCancellations={() => onShowSection('adjustments')}
-          onShowMovements={() => onShowSection('movements')}
-        />
+        <ConsumptionFigures can={can} onNavigate={onNavigate} />
+        <ControlFigures can={can} onNavigate={onNavigate} />
       </section>
+      <AlertsSection can={can} timezone={timezone} onNavigate={onNavigate} />
     </div>
   );
 }

@@ -151,6 +151,8 @@ describe('pestañas y resumen', () => {
       'Almacenes',
       'Existencias',
       'Movimientos',
+      // Transferencias se consulta también con inventory.movements.read (fase D).
+      'Transferencias',
       'Ajustes y mermas',
       'Configuración',
     ]);

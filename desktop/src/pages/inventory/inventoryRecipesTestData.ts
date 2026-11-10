@@ -779,6 +779,7 @@ export function consumptionMovement(costsVisible: boolean): InventoryMovement {
     cost_basis: costsVisible ? 'average' : null,
     cost_basis_label: costsVisible ? 'Costo promedio' : null,
     cost_pending: costsVisible ? false : null,
+    valuation_visible: costsVisible,
     valuation_value_after: costsVisible ? '867.60' : null,
     occurred_at: '2026-11-10T20:00:00Z',
     recorded_at: '2026-11-10T20:00:01Z',

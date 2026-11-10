@@ -2010,3 +2010,201 @@ del otro agente) y el clúster temporal del puerto 55499 (nunca la instalación 
   `inventory_d_events_audit_and_ledger`); en el motor, con el `Restore` y el `settle` anteriores fallan los casos de
   reversión, último costo válido, invariante y secuencias pseudoaleatorias.
 - Playwright no se ejecutó (esta parte no cambia pantallas).
+
+## Fase D · interfaz de control de inventario (D2)
+
+Interfaz de ajustes de discrepancia, mermas operativas, transferencias entre almacenes, conteos físicos, niveles por
+almacén, alertas, sugerencias de compra y el Resumen completo, sobre el backend de la fase D (`ba2be6e`) y con los
+cambios de contrato que el agente principal anunció durante el trabajo (valor por insumo y valuación posterior solo con
+`inventory.valuation.read`, `COST_REQUIRED`, sugerencias con `reorder_point`/`suggested_quantity` en `null` sin
+existencias, `movement_kind` de un conteo solo con teórico visible). Sin cambios de backend, `api.rs`, `services/api.ts`,
+`native-driver.ts`, `playwright.config.ts` ni `services/inventory*.ts` (los cambios que aparecen en `services/inventory.ts`
+e `inventoryControl.ts` son del otro agente).
+
+### Archivos
+
+| Archivo (`desktop/src/pages/inventory/`)                                                                | Contenido                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `controlFormat.ts` (nuevo)                                                                              | Folios legibles («Ajuste 12», «Merma 3», «Transferencia 4», «Conteo 7»), tonos de estado, opciones de filtros, motivos por tipo, sentido efectivo por motivo, cuerpo del renglón (`controlLineInput`: antepone «-» al texto en una salida, sin aritmética), texto de lo capturado y etiquetas de alertas. |
+| `ControlLinesEditor.tsx` (nuevo)                                                                        | Renglones de ajuste, merma y transferencia (insumo con búsqueda, unidad o presentación, cantidad sin signo y, en ajustes, «Faltante (salida)» / «Sobrante (entrada)» con botones; el motivo puede imponer el sentido).                                                                                    |
+| `ControlShared.tsx` (nuevo)                                                                             | Avisos de Go (`WarningList`), selector de almacén activo, almacén propuesto y acción del aviso `COST_REQUIRED` («Abrir insumo» / «Ir a Insumos»).                                                                                                                                                         |
+| `AdjustmentRecords.tsx` (nuevo)                                                                         | Alta de ajustes y mermas, listado con filtros, detalle y autorización o rechazo.                                                                                                                                                                                                                          |
+| `AdjustmentsView.tsx`                                                                                   | La pestaña reúne ajustes y mermas con las cancelaciones por clasificar y su historial (fase B) en una sola vista.                                                                                                                                                                                         |
+| `TransfersView.tsx` (nuevo)                                                                             | Pestaña Transferencias: listado, alta y detalle.                                                                                                                                                                                                                                                          |
+| `CountsView.tsx` (nuevo)                                                                                | Pestaña Conteos: listado y alta.                                                                                                                                                                                                                                                                          |
+| `CountPanel.tsx` (nuevo)                                                                                | Hoja de conteo: captura, avance, diferencias de Go, pasos y transiciones.                                                                                                                                                                                                                                 |
+| `StockLevelsEditor.tsx` (nuevo)                                                                         | «Niveles por almacén» en el editor de insumo.                                                                                                                                                                                                                                                             |
+| `AlertsSection.tsx` (nuevo)                                                                             | Alertas del Resumen agrupadas por tipo, filtro por gravedad y acceso directo.                                                                                                                                                                                                                             |
+| `PurchaseSuggestionsView.tsx` (nuevo)                                                                   | Apartado «Sugerencias de compra» de la pestaña Compras y borrador explícito.                                                                                                                                                                                                                              |
+| `inventoryNavigation.ts` (nuevo)                                                                        | Tipo del destino de una navegación entre pestañas (`InventoryTarget`).                                                                                                                                                                                                                                    |
+| `InventoryPage.tsx`                                                                                     | 13 pestañas en el orden de §25, destino genérico (documento, búsqueda, almacén, apartado) que vuelve a montar la pestaña.                                                                                                                                                                                 |
+| `SummaryView.tsx`                                                                                       | Resumen completo: cifras de A–D y alertas.                                                                                                                                                                                                                                                                |
+| `StockView.tsx`                                                                                         | Búsqueda y almacén iniciales (desde alertas), origen del nivel comparado (`level_scope`) y valor del insumo solo con valuación.                                                                                                                                                                           |
+| `ItemsView.tsx`, `ItemEditor.tsx`, `RecipesView.tsx`, `RecipeTargetsView.tsx`, `PurchaseOrdersView.tsx` | Valores iniciales para la navegación (insumo abierto, búsqueda de producto, apartado de sugerencias) y la sección de niveles.                                                                                                                                                                             |
+| `inventoryFormat.ts`                                                                                    | Nombres de los permisos nuevos y orígenes de movimiento de la fase D en el filtro del libro.                                                                                                                                                                                                              |
+| `inventoryControl.test.tsx`, `inventoryControlTestData.ts` (nuevos)                                     | 18 pruebas de la fase D y sus datos de Go.                                                                                                                                                                                                                                                                |
+| `inventoryTestData.ts`, `inventoryRecipesTestData.ts`, `inventory.test.tsx`                             | Respuestas vacías por omisión de las rutas de la fase D, valor por insumo solo con valuación, `valuation_visible` en movimientos y la pestaña Transferencias en la lista esperada.                                                                                                                        |
+| `desktop/e2e/warehouse-control.spec.ts` (nuevo)                                                         | Recorrido Playwright de la fase D.                                                                                                                                                                                                                                                                        |
+| `desktop/e2e/inventory.spec.ts`, `stock-consumption.spec.ts`, `vendor-purchases.spec.ts`                | Solo la lista esperada de pestañas (agregan «Transferencias» y «Conteos»).                                                                                                                                                                                                                                |
+| `desktop/src/styles.css`                                                                                | Reglas al final del bloque «Etapa 8: Inventarios» (ver abajo).                                                                                                                                                                                                                                            |
+
+### Pantallas
+
+- **Pestañas**: Resumen, Insumos, Recetas, Almacenes, Existencias, Movimientos, Transferencias, Ajustes y mermas,
+  Conteos, Compras, Recepciones, Proveedores y Configuración (§25). Transferencias con `inventory.transfers.record` o
+  `inventory.movements.read`; Conteos con `inventory.counts.perform` o `inventory.counts.approve` (los permisos con los que
+  Go deja leerlos). A 1280 × 720 forman una rejilla de columnas iguales de dos filas (7 + 6), sin desplazamiento horizontal;
+  cada pestaña mide al menos 44 px.
+- **Ajustes y mermas** (una sola vista): «Registrar ajuste» (`adjustments.record`) y «Registrar merma» (`waste.record`),
+  luego «Cancelaciones por clasificar» (fase B, sin cambios), «Ajustes y mermas registrados» (con los permisos de lectura de
+  Go) y «Historial de clasificaciones». Formulario: motivo de lista cerrada con botones (la merma solo ofrece Rotura,
+  Derrame, Caducidad, Consumo extraordinario y Otro), almacén, detalle del motivo (obligatorio con «Otro»), renglones con
+  cantidad **sin signo** y «Faltante (salida)» / «Sobrante (entrada)» (deshabilitado el que el motivo no admite; la merma no
+  muestra sentido: «solo registra salidas»), observaciones y confirmación que resume cada renglón y si se aplicará o quedará
+  pendiente. Listado con filtros (folio, tipo, estado, motivo, almacén, fechas), estado con etiqueta y renglón pendiente
+  resaltado. Detalle: tipo, motivo, almacén, quién registró, autorizó, aplicó o rechazó y cuándo, valor neto (con costos),
+  renglones con lo capturado, la cantidad base con signo, el movimiento, la existencia después y el valor, y los avisos
+  `NEGATIVE_STOCK` que devolvió Go. Pendiente: «Autorizar y aplicar» y «Rechazar» (motivo 5–500) solo si Go entrega
+  `authorizable` (otra persona con el permiso), ambos con confirmación; si no, un aviso explica que quien lo registró no
+  puede autorizarlo.
+- **Transferencias**: listado (folio, almacén de origen o destino, fechas, valor con costos), alta con origen y destino
+  (el destino no ofrece el origen; elegir el mismo deja el destino vacío y no se envía), renglones sin signo y
+  confirmación (aviso de que una existencia negativa en el origen no bloquea); detalle con «En <origen> después» y «En
+  <destino> después» de Go (negativa resaltada), valor trasladado y avisos.
+- **Conteos**: listado (por omisión «En curso»; estado, almacén, folio, fechas; avance «x de y», diferencias aplicadas).
+  Alta: almacén, alcance con botones (todos los insumos, una categoría, selección con búsqueda) y notas. Hoja de conteo
+  para tableta: aviso «La venta sigue durante el conteo…», búsqueda rápida sin acentos, filtro Todos / Sin contar /
+  Contados, renglones grandes (nombre 16 px, campo de 52 px y 20 px) con «Cantidad contada» (`numericInput`), unidad
+  (base y la capturada; «Otra unidad o presentación…» consulta solo ese insumo), «Borrar captura», «Quitar», estado
+  «Contado · hora · quién» y «Sin guardar»; «Guardar avance» envía los renglones cambiados en bloques de 200 (cada bloque una
+  operación). Con `theoretical_visible`: teórico a la hora del renglón, diferencia con signo y etiqueta
+  Sobrante/Faltante/Sin diferencia y existencia actual (al aplicar, «Teórico aplicado» y el movimiento). Sin él, aviso
+  «Conteo a ciegas» y ninguna de esas columnas. Pasos con quién y cuándo (creó, envió, aprobó, aplicó, canceló, motivo,
+  hora de referencia, diferencias aplicadas, valor con costos). Acciones por estado y permiso: «Enviar a revisión»
+  (`perform`, bloqueado con capturas sin guardar), «Aprobar» y «Aplicar ajustes» (`approve`), «Cancelar conteo» (motivo;
+  abierto: `perform` o `approve`; enviado o aprobado: `approve`), todas con confirmación; avisos vigentes de Go.
+- **Niveles por almacén**: en el editor del insumo, debajo de las presentaciones: cada almacén activo (y los inactivos
+  con nivel) con su nivel o «Usa los niveles del insumo», existencia y marcas «Bajo mínimo» / «Reabastecer» (con
+  `stock.read`); «Definir nivel» / «Editar nivel» (`items.manage`) con mínimo y punto de reabastecimiento en la unidad base
+  y «Quitar nivel». En Existencias filtrada por almacén se indica si el nivel comparado es «Nivel de <almacén>» o «Nivel
+  del insumo (existencia total)».
+- **Resumen completo**: estado de la función, cifras de la fase A, cancelaciones y solicitudes de consumo (B), «Ajustes por
+  autorizar», «Conteos en curso», «Órdenes de compra abiertas» e «Insumos por reabastecer» (totales de los listados de Go,
+  cada uno con su permiso y con acceso a su pestaña) y «Alertas de inventario»: conteos por gravedad de Go, filtro por
+  gravedad, grupos por tipo con `Accordion` (críticas y advertencias abiertas, avisos cerrados), texto de Go con el almacén
+  o «Existencia total» y acceso directo según la referencia y los permisos: existencias filtradas por el insumo y el
+  almacén (sin existencias, el insumo), insumo, recetas con la búsqueda del producto, conteo, nuevo conteo del almacén
+  (sin `perform`, los conteos del almacén), orden, recepción, Ajustes y mermas o Movimientos. Sin identificadores crudos.
+- **Sugerencias de compra** (Compras → «Sugerencias de compra»): búsqueda y categoría; grupos por proveedor preferido en el
+  orden de Go; por insumo la existencia, lo pendiente de recibir (y en borradores), el punto de reabastecimiento y su
+  origen, la necesidad, lo sugerido en la presentación de compra y el último precio, cada dato solo si Go lo entrega
+  («—» si llega en `null`). Con `purchases.create`: botón «Incluir» por insumo (todos incluidos al abrir), proveedor del
+  borrador para los que no tienen preferido y «Crear orden en borrador» con confirmación; al crearlo se abre el borrador en
+  Compras. Nunca se emite.
+
+### Decisiones y desviaciones menores
+
+1. **Ajustes y mermas en una sola vista** (no en apartados): las cancelaciones por clasificar vencen al corte del día y
+   quedan arriba del listado; así no cambia lo que comprueban las pruebas existentes de la fase B. Mientras se captura o se
+   consulta un ajuste, la vista muestra solo el formulario o el detalle.
+2. **Signo sin captura**: la cantidad se teclea sin signo (`numericInput` descarta el «-») y el sentido se elige con botones;
+   el cuerpo antepone «-» al texto en una salida (operación de texto, no aritmética). Go sigue validando el sentido contra
+   el motivo.
+3. **Niveles por almacén en el editor del insumo** (junto al mínimo y el punto de reabastecimiento del insumo), y en
+   Existencias solo la indicación del nivel comparado.
+4. **Sugerencias en la pestaña Compras** como apartado (control segmentado «Órdenes de compra» / «Sugerencias de compra»),
+   porque el resultado es una orden; el Resumen muestra el total y lleva ahí.
+5. **Unidad de un renglón de conteo**: la hoja solo trae la referencia del insumo; para no consultar todos los insumos se
+   ofrece la unidad base y la capturada, y «Otra unidad o presentación…» consulta ese insumo.
+6. **Navegación**: un destino genérico (`InventoryTarget`) sustituye el enfoque de documentos de compras; la barra sigue
+   abriendo cada pestaña en su listado.
+7. **Contadores en textos**: los conteos de alertas y renglones salen de Go; la pantalla solo cuenta elementos de las listas
+   que ya recibió (renglones con cambios, alertas de un grupo, renglones con diferencia en la confirmación de aplicar).
+   Ninguna cantidad ni importe se calcula.
+8. **Pruebas existentes tocadas**: listas esperadas de pestañas (Vitest y tres especificaciones de Playwright) y datos de
+   prueba (`stockPage` con el valor por insumo solo con valuación, `movementPage` con `valuation_visible`), por los cambios
+   de esta fase y del contrato.
+
+### CSS añadido (`styles.css`, al final del bloque «Etapa 8: Inventarios»)
+
+Rejilla de las pestañas de Inventarios (columnas iguales de 128 px mínimo, texto centrado sin cortes), `.tag-danger`,
+rejilla de renglones de captura y del sentido, motivo en botones que se reacomodan, renglón pendiente resaltado, acentos de
+alerta por gravedad (crítica, advertencia, aviso), aviso «La venta sigue» del conteo, barra de búsqueda de la hoja,
+renglones de conteo (contado, sin guardar, campo grande, cifras de diferencia) y su reacomodo a una columna bajo 720 px.
+Solo tokens de ambos temas.
+
+### Limitaciones
+
+- La hoja de conteo muestra 50 renglones a la vez («Mostrar más renglones»); la búsqueda filtra en la pantalla lo que
+  devolvió Go (hasta 2000).
+- «Otra unidad o presentación…» consulta un insumo por renglón; capturar muchos renglones en presentaciones exige
+  abrirlo en cada uno.
+- Las alertas se piden de 100 en 100 (máximo de Go) y se agrupan por página.
+- Si un bloque del guardado del conteo falla, los anteriores quedan guardados (cada uno es una operación) y el aviso dice
+  cuántos.
+- El acceso «Abrir insumo» del aviso `COST_REQUIRED` abre el insumo solo si Go incluye `item_id` en `details`; si no,
+  lleva al listado de Insumos.
+- En las capturas de página completa la barra fija «Guardar avance» / «Registrar…» aparece sobre el contenido a la altura
+  del borde de la ventana (comportamiento de `.form-actions`, igual que en los formularios existentes).
+- Sin prueba en la ventana nativa (WKWebView) ni en pantalla táctil física.
+
+### Pruebas (D2)
+
+- **Vitest** (`inventoryControl.test.tsx`, 18 pruebas nuevas, solo con el transporte nativo simulado): orden de las 13
+  pestañas y su visibilidad por permiso (todos; solo `counts.approve`; solo `transfers.record`); ajuste con «Error de
+  registro», un renglón «Sobrante» y otro «Faltante» (el «-» tecleado se descarta; cuerpo `"3"` y `"-2"`), «Faltante físico»
+  deshabilita «Sobrante», confirmación con cada renglón, queda pendiente y quien lo registró no ve «Autorizar» ni
+  «Rechazar»; autorización por otra persona (`authorizable`) solo después de confirmar, con `revision`, y el movimiento,
+  existencia después, valor y autorizador de Go; merma con solo los cinco motivos de pérdida, sin selector de sentido,
+  sin motivo no se envía, cuerpo `"-1"` en presentación y aviso `NEGATIVE_STOCK`; sobrante rechazado con `COST_REQUIRED`
+  (mensaje de Go y «Ir a Insumos»); transferencia con destino que excluye el origen, origen = destino deja el destino vacío
+  y deshabilita el envío, cuerpo sin signo y existencias después (negativa) y avisos de Go; conteo a ciegas (sin teórico ni
+  diferencias), búsqueda rápida, captura con `inputmode="decimal"`, «Sin guardar», «Enviar» bloqueado con cambios, cuerpo de
+  `PUT lines`, hora y responsable del renglón, envío con confirmación y sin «Aprobar» ni «Aplicar» sin `counts.approve`;
+  quien aprueba (desde la alerta del resumen) ve teórico, diferencia, etiqueta y existencia actual de Go, no captura ni
+  envía, aprueba y aplica solo después de confirmar (con `revision` 3 y 4) y ve «Faltante de conteo» y «Teórico aplicado»;
+  aplicación rechazada con `COST_REQUIRED` (el conteo sigue aplicable y «Abrir insumo» abre el insumo de `details`); niveles
+  por almacén (alta con `revision` 0 y `reorder_point: null`, quitar con los dos `null` y la revisión vigente) y solo
+  consulta sin `items.manage`; alertas agrupadas por tipo con los conteos de Go, avisos cerrados, sin identificadores
+  crudos, filtro por gravedad, acceso a Existencias (búsqueda `TOM-01` y almacén), Recetas («Agua fresca») e Insumos, y sin
+  acceso al conteo sin permisos de conteos; sugerencias con lo sugerido en presentación, «Incluir», confirmación antes de
+  `draft-order` (cuerpo con proveedor e insumos), apertura del borrador y ninguna emisión; sugerencias con
+  `reorder_point`, `suggested_quantity` y existencias en `null` («—», sin columnas de existencias ni botón de borrador);
+  Existencias con costos y sin valuación (costo promedio visible, «Valor del insumo» oculto y `value` en `null`);
+  Movimientos con `valuation_value_after` en `null`; ningún `type="number"` en ajustes, transferencias, conteos ni niveles.
+- **Playwright** (`e2e/warehouse-control.spec.ts`, Chromium y WebKit): precondiciones por la API (insumo «Harina E2E D» en
+  kg con mínimo de 100, 20 kg a $18 en el almacén general y el almacén «Barra E2E D»); las 13 pestañas en orden, barra de
+  pestañas sin desplazamiento a 1280 × 720 y cada una ≥ 44 px; transferencia de 5 kg General → Barra E2E D (el destino no
+  ofrece el origen; 15 kg y 5 kg después, $90.00); merma de 1 kg por rotura (−1 kg, «Merma», 14 kg; «Aplicado» en el
+  listado, con las cancelaciones por clasificar en la misma pestaña); conteo de la barra por selección con 4.5 kg contados
+  (teórico 5 kg, −0.5 kg «Faltante»), enviado, aprobado y aplicado con confirmación («Faltante de conteo») y el movimiento
+  `count_out` de −0.5 kg con origen «Conteo físico» en Movimientos; alerta «Bajo mínimo» del insumo en el Resumen con
+  acceso a Existencias (búsqueda del código, 18.5 kg); recorrido de las 13 pestañas sin desbordamiento horizontal a
+  1920 × 1080 y 1280 × 720 en claro y oscuro; Go confirma 18.5 kg y el conteo aplicado; sin errores de página. Capturas a
+  1280 × 720 en claro y oscuro.
+- **Pruebas existentes**: lista esperada de pestañas en `inventory.test.tsx` y en `inventory.spec.ts`,
+  `stock-consumption.spec.ts` y `vendor-purchases.spec.ts`; datos de prueba de existencias y movimientos según el contrato.
+
+### Verificación (D2)
+
+En la copia aislada `scratchpad/repoD2` (sincronizada desde el árbol de trabajo, con los cambios de backend en curso del
+otro agente), con el clúster temporal del puerto 55499, Go temporal en 8184 y vista previa en 1424 (nunca la instalación
+real):
+
+- `prettier --check` de los archivos propios: sin diferencias.
+- `tsc --noEmit`: sin errores.
+- Vitest (`npx vitest run src`): 46 archivos, 404 pruebas aprobadas (386 antes de la fase D2 + 18).
+- `npm run build`: compilación correcta (solo el aviso conocido de tamaño de bloque).
+- Playwright, especificación nueva sola (`SPEC=e2e/warehouse-control.spec.ts`): Chromium 1 aprobada (55.8 s) y WebKit 1
+  aprobada (55.3 s). En una corrida intermedia, WebKit falló una vez al pulsar «Entrar» en el inicio de sesión («html
+  intercepts pointer events», antes de llegar a Inventarios) y aprobó al repetirla sin cambios.
+- Playwright, recorrido completo (sin `SPEC`): Chromium 6 aprobadas (3.6 min) y WebKit 6 aprobadas (3.6 min), incluidas
+  `inventory`, `restaurant`, `stock-consumption`, `takeaway-quick-notes`, `vendor-purchases` y `warehouse-control`. En la
+  corrida anterior de Chromium, `vendor-purchases.spec.ts` falló una vez en su comprobación de tema antes de una captura
+  (la aplicación volvió a aplicar el tema claro al refrescar la sesión; paso «vinculo-gasto») y, al reiniciarse el
+  proceso de Playwright, `warehouse-control.spec.ts` rechazó la base ya configurada; repetida sin cambios en esos pasos,
+  aprobó completa. La especificación nueva fija el tema hasta que se conserva antes de cada captura para no depender de ese
+  momento.
+- Capturas (claro y oscuro, 1280 × 720) en `scratchpad/shots8D2/chromium/` y `scratchpad/shots8D2/webkit/`:
+  `d2-pestanas-*`, `d2-resumen-alertas-*`, `d2-ajustes-y-mermas-*`, `d2-merma-captura-*`, `d2-transferencia-captura-*`,
+  `d2-transferencia-*`, `d2-conteo-captura-*` y `d2-conteo-diferencias-*`.
