@@ -688,3 +688,146 @@ forma del desglose), omitido sin indicaciones. La plantilla omite la línea estr
 ingrediente («SIN Cebolla», «Queso: 1 (incluido 0)») cuando una indicación con efecto sobre ese
 ingrediente aparece en la nota impresa de la partida o del componente; sin indicaciones con efecto
 la comanda es idéntica a la de la etapa 7.1.
+
+## Inventario · fase C: compras (esquema 13)
+
+Mismas reglas que las fases A y B: prefijo `/api/v1/inventory`, `inventory.read` en toda ruta además del permiso indicado,
+permisos comprobados antes de escribir (un 403 revierte), lock 7820148308 (compartido en lecturas, exclusivo en
+escrituras), **toda escritura con `operation_id`** guardada en `restaurant_operations` (reintento con el mismo cuerpo →
+misma respuesta sin repetir efectos; otro cuerpo → 409 `IDEMPOTENCY_CONFLICT`), `revision` en proveedores, insumos de
+proveedor y órdenes (409 `REVISION_CONFLICT`), un solo identificador por ruta, cantidades e importes como cadenas
+decimales. Tipos TS: `desktop/src/services/inventoryPurchasing.ts`.
+
+**Lectura de compras** («compras»): cualquiera de `inventory.suppliers.manage`, `inventory.purchases.create`,
+`inventory.purchases.authorize`, `inventory.purchases.receive`, `inventory.supplier_returns.record` o
+`inventory.purchases.link_cash`. Los **importes de compra** (precio sin IVA, importe, descuento, subtotal, IVA, total, valor
+asociado de una devolución) los ve quien lee compras; el **costeo de inventario** (`inventory_value`, `unit_cost`,
+`outflow_value`, `cost_adjustment`, `unabsorbed`, `value_exact`, `original_unit_cost`) solo con `inventory.costs.read`
+(`null` y `costs_visible: false` si falta).
+
+Las rutas de gastos de caja toman además **7820148305 compartido antes que 7820148308** y exigen `cash.movements.read`; un
+gasto de otra caja (la de la terminal, `devices.register_id`) exige `cash.shifts.read_all` y uno de un turno cerrado
+`cash.history.read` (sin la excepción «quien cerró el turno» de payments).
+
+| Método | Ruta bajo `/inventory`                                                                         | Permiso (además de `inventory.read`)                                         | Contrato                                                                                                                                                                                                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/suppliers?search&active&item_id&page&page_size`                                              | compras                                                                      | `{items: [Supplier], total, page, page_size}`; activos primero, por nombre                                                                                                                                                                                                 |
+| POST   | `/suppliers`                                                                                   | `inventory.suppliers.manage`                                                 | `SupplierInput` → `SupplierDetail`; 409 `DUPLICATE_NAME`                                                                                                                                                                                                                   |
+| GET    | `/suppliers/{id}`                                                                              | compras                                                                      | `SupplierDetail`                                                                                                                                                                                                                                                           |
+| PATCH  | `/suppliers/{id}`                                                                              | `inventory.suppliers.manage`                                                 | `SupplierInput` con `revision` → `SupplierDetail`; desactivar = `active: false` (no hay borrado)                                                                                                                                                                           |
+| PUT    | `/suppliers/{id}/items`                                                                        | `inventory.suppliers.manage`                                                 | `{operation_id, revision (0 si es nuevo), item_id, presentation_id?, supplier_code?, preferred?}` → `SupplierDetail`; 409 `ITEM_INACTIVE`, `PRESENTATION_INACTIVE`                                                                                                         |
+| POST   | `/suppliers/{id}/items/remove`                                                                 | `inventory.suppliers.manage`                                                 | `{operation_id, revision, item_id}` → `SupplierDetail` (configuración, no historia)                                                                                                                                                                                        |
+| GET    | `/purchase-orders?search&state&supplier_id&from&until&page&page_size`                          | compras                                                                      | `{items: [PurchaseOrderSummary], total, page, page_size}`; `state` uno de los seis u `open` (emitidas y parciales); `from`/`until` fecha de la orden; `search` folio exacto o proveedor                                                                                    |
+| POST   | `/purchase-orders`                                                                             | `inventory.purchases.create`                                                 | `PurchaseOrderInput` → `PurchaseOrder` en `draft`; 409 `SUPPLIER_INACTIVE`, `ITEM_INACTIVE`, `PRESENTATION_INACTIVE`, `WAREHOUSE_INACTIVE`                                                                                                                                 |
+| GET    | `/purchase-orders/{id}`                                                                        | compras                                                                      | `PurchaseOrder`                                                                                                                                                                                                                                                            |
+| PATCH  | `/purchase-orders/{id}`                                                                        | `inventory.purchases.create`                                                 | `PurchaseOrderInput` con `revision` (reemplaza datos y renglones) → `PurchaseOrder`; 409 `ORDER_NOT_EDITABLE` si no es borrador                                                                                                                                            |
+| POST   | `/purchase-orders/{id}/issue`                                                                  | `inventory.purchases.authorize`                                              | `{operation_id, revision}` → `PurchaseOrder` `issued`; 409 `ORDER_NOT_DRAFT`, `ORDER_EMPTY`, `SUPPLIER_INACTIVE`, `ITEM_INACTIVE`                                                                                                                                          |
+| POST   | `/purchase-orders/{id}/cancel`                                                                 | `inventory.purchases.authorize`                                              | `{operation_id, revision, reason (5–500)}` → `cancelled` desde borrador, emitida o parcial (conserva lo recibido); 409 `ORDER_NOT_CANCELLABLE`                                                                                                                             |
+| POST   | `/purchase-orders/{id}/close`                                                                  | `inventory.purchases.authorize`                                              | `{operation_id, revision, reason (5–500)}` → `closed` desde emitida o parcial; 409 `ORDER_NOT_CLOSABLE`                                                                                                                                                                    |
+| GET    | `/receipts?search&supplier_id&purchase_order_id&warehouse_id&direct&from&until&page&page_size` | compras                                                                      | `{items: [ReceiptSummary], total, page, page_size, costs_visible}`; `from`/`until` días de negocio; `search` folio exacto, referencia del proveedor o proveedor                                                                                                            |
+| POST   | `/receipts`                                                                                    | `inventory.purchases.receive` (+ `inventory.purchases.create` si es directa) | `OrderReceiptInput` o `DirectReceiptInput` → `Receipt` con `warnings`; 409 `ORDER_NOT_RECEIVABLE`, `RECEIPT_EXCEEDS_PENDING`, `SUPPLIER_INACTIVE`, `WAREHOUSE_INACTIVE`                                                                                                    |
+| GET    | `/receipts/{id}`                                                                               | compras                                                                      | `Receipt`                                                                                                                                                                                                                                                                  |
+| GET    | `/supplier-returns?receipt_id&supplier_id&from&until&page&page_size`                           | compras                                                                      | `{items: [SupplierReturnSummary], total, page, page_size, costs_visible}`                                                                                                                                                                                                  |
+| POST   | `/supplier-returns`                                                                            | `inventory.supplier_returns.record`                                          | `SupplierReturnInput` → `SupplierReturn` con `warnings` (`NEGATIVE_STOCK`); 409 `RETURN_EXCEEDS_RECEIVED`, `WAREHOUSE_INACTIVE`                                                                                                                                            |
+| GET    | `/supplier-returns/{id}`                                                                       | compras                                                                      | `SupplierReturn`                                                                                                                                                                                                                                                           |
+| GET    | `/cash-expenses?from&until&min_amount&max_amount&register_id&receipt_id&page&page_size`        | `inventory.purchases.link_cash` + `cash.movements.read`                      | `{items: [CashExpense], total, page, page_size}`: gastos (`kind='expense'`) que el actor puede leer, el más reciente primero; `register_id` de otra caja sin `read_all` → 403; sin caja ni `read_all` → lista vacía                                                        |
+| POST   | `/receipts/{id}/cash-links`                                                                    | `inventory.purchases.link_cash` + `cash.movements.read`                      | `{operation_id, cash_operation_id, amount (> 0, 2 decimales), notes? (≤ 500)}` → `Receipt`; 403 gasto no legible; 409 `CASH_OPERATION_NOT_EXPENSE`, `CASH_EXPENSE_CURRENCY`, `CASH_EXPENSE_CORRECTED`, `CASH_LINK_EXISTS`, `CASH_EXPENSE_OVERLINKED`, `RECEIPT_OVERLINKED` |
+| POST   | `/cash-links/{id}/unlink`                                                                      | `inventory.purchases.link_cash` + `cash.movements.read`                      | `{operation_id, reason (5–500)}` → `Receipt`; 403 gasto no legible; 409 `CASH_LINK_INACTIVE`                                                                                                                                                                               |
+
+No existen rutas de borrado (proveedores, órdenes, recepciones, devoluciones, vínculos) ni de edición de recepciones o
+devoluciones; ninguna ruta crea, modifica o corrige operaciones de caja.
+
+### Importes, IVA y costo (Go, `inventory/purchasing.go`)
+
+- Renglón: `gross = redondeo(cantidad capturada × precio unitario sin IVA)`; `discount` en pesos (≤ `gross`);
+  `subtotal = gross − discount`; `tax = redondeo(subtotal × tasa ÷ 100)`; `total = subtotal + tax`. Redondeo a centavos
+  mitad alejándose de cero. Tasa de lista cerrada **16, 8 o 0** (entero en JSON). Precio hasta 6 decimales (≤ 1,000,000);
+  importe del renglón ≤ 9,999,999,999.99.
+- Documento (orden o recepción): suma exacta de los renglones (`subtotal`, `discount`, `tax`, `total`); el IVA no se
+  recalcula sobre el total. `gross` del documento no se entrega (es `subtotal + discount`).
+- Recepción de una orden: precio y tasa por omisión los del renglón de la orden; el descuento se **prorratea de forma
+  acumulada** por lo recibido: `redondeo(D × min(antes + ahora, Q) ÷ Q) − redondeo(D × min(antes, Q) ÷ Q)` (12 + 8 de 20
+  cajas con $50: $30.00 y $20.00; lo recibido de más no lleva descuento). Se pueden capturar otro precio, otro descuento u
+  otra tasa (factura real).
+- Valor de inventario de cada renglón = `total` (con IVA) si la recepción tiene `tax_in_cost: true`, si no `subtotal`;
+  `tax_in_cost` se copia de `inventory_settings.purchase_tax_in_cost` al recibir. Costo por unidad base =
+  valor ÷ `base_quantity` (10 decimales). El movimiento `receipt` lleva ese valor (regla 2 del motor: con existencia
+  negativa, el ajuste `cost_adjustment` va aparte, ligado al movimiento de la recepción).
+- Devolución: valor asociado = cantidad base × valor del renglón ÷ cantidad base recibida (exacto al devolver todo lo que
+  quedaba); salida al promedio vigente; la diferencia se absorbe como `cost_adjustment` solo si queda existencia positiva
+  (sin dejar el valor negativo) y el resto se guarda como `unabsorbed` en el documento.
+
+### Cuerpos y respuestas
+
+- `SupplierInput`: `{operation_id, revision? (PATCH), trade_name (1–100, único sin mayúsculas), legal_name? (≤ 200), rfc?
+(3–4 letras A–Z, Ñ o &, fecha AAMMDD válida y 3 de homoclave; se guarda en mayúsculas; vacío o null = sin RFC; no
+único), phone? (≤ 40), email? (≤ 120, formato nombre@dominio), address? (≤ 500, admite saltos de línea), contact? (≤ 100),
+notes? (≤ 2000), active? (ausente: activo al crear, sin cambio al editar)}`.
+- `Supplier`: `{id, trade_name, legal_name, rfc, phone, email, address, contact, notes, active, item_count, has_purchases,
+last_receipt_at, revision, created_at, updated_at, updated_by_name}`.
+- `SupplierDetail`: `Supplier` + `{items: [SupplierItem], history: {order_count, receipt_count, return_count,
+receipts_total, returns_value, orders: [PurchaseOrderSummary], receipts: [ReceiptSummary], returns:
+[SupplierReturnSummary]}}` (las 20 más recientes de cada tipo).
+- `SupplierItem`: `{item: ItemReference, presentation: PresentationReference|null, supplier_code, preferred,
+last_unit_price (sin IVA, antes del descuento), last_price_unit_label (presentación o unidad de esa recepción),
+last_price_at, last_receipt_folio, revision, updated_at}`. Un preferido por insumo: marcar otro quita la marca del
+  anterior (auditado). Las recepciones crean la relación si no existía y actualizan el último precio si son iguales o
+  más recientes que la anterior.
+- `PresentationReference`: `{id, name, base_quantity, active}`; `SupplierReference`: `{id, trade_name, active}`.
+- `PurchaseLineInput`: `{item_id, presentation_id? | unit_id? (por omisión la unidad base; nunca ambos), quantity (> 0, 6
+decimales), unit_price, discount? ("0" por omisión), tax_rate: 16|8|0}`; un insumo una sola vez por documento.
+- `PurchaseOrderInput`: `{operation_id, revision? (PATCH), supplier_id (activo), order_date? (AAAA-MM-DD, no futura; por
+omisión hoy en la zona del establecimiento), expected_warehouse_id? (por omisión «Almacén general»), notes? (≤ 2000),
+lines: [PurchaseLineInput] (0–200; emitir exige al menos uno)}`.
+- `PurchaseLine` (común): `{line_no, item: ItemReference, presentation, unit (unidad de captura o null), capture_label,
+quantity, base_quantity, unit_price, gross, discount, subtotal, tax_rate, tax, total}`.
+- `PurchaseOrderSummary`: `{id, folio, supplier, state, state_label, order_date, expected_warehouse: {id, name}, subtotal,
+discount, tax, total, line_count, receipt_count, created_by_name, issued_at, revision, created_at, updated_at}`.
+- `PurchaseOrder`: `PurchaseOrderSummary` + `{notes, updated_by_name, issued_by_name, cancelled_at, cancelled_by_name,
+cancel_reason, closed_at, closed_by_name, close_reason, editable, issuable, cancellable, closable, receivable (según el
+estado), lines: [PurchaseLine + {received_quantity, pending_quantity, excess_quantity, received_base_quantity,
+pending_base_quantity, fully_received}], receipts: [ReceiptSummary]}`. Cada recepción aumenta la revisión de la orden.
+- `OrderReceiptInput`: `{operation_id, purchase_order_id (emitida o parcial), supplier_id? (si se envía, el de la orden),
+warehouse_id? (por omisión el previsto), occurred_at? (RFC 3339, no futura), supplier_reference? (≤ 60, una línea),
+notes? (≤ 2000), allow_excess? (false), lines: [{order_line_no, quantity (en la presentación o unidad del renglón de la
+orden), unit_price?, discount?, tax_rate?}] (1–200, sin item_id/presentation_id/unit_id, cada renglón una vez)}`.
+- `DirectReceiptInput`: `{operation_id, supplier_id (activo, obligatorio), warehouse_id?, occurred_at?, supplier_reference?,
+notes?, lines: [PurchaseLineInput] (1–200)}`.
+- `ReceiptSummary`: `{id, folio, supplier, purchase_order_id, purchase_order_folio, direct, warehouse, occurred_at,
+received_by_name, supplier_reference, tax_in_cost, subtotal, discount, tax, total, line_count, excess, linked_amount,
+linkable_amount, cash_link_attention (algún gasto vinculado vigente se corrigió o regularizó después), returned_value,
+costs_visible, inventory_value, inventory_value_display, created_at}`.
+- `Receipt`: `ReceiptSummary` + `{notes, lines: [ReceiptLine], returns: [SupplierReturnSummary], cash_links: [CashLink],
+warnings: [{code: "RECEIPT_EXCESS", message, item_id}] (solo en la respuesta del registro)}`.
+- `ReceiptLine`: `PurchaseLine` + `{order_line_no, ordered_quantity, received_before_quantity (recepciones anteriores de
+ese renglón), pending_after_quantity (pendiente después de esta), returned_quantity, returnable_quantity,
+returned_base_quantity, returnable_base_quantity, movement_id, stock_after (existencia del almacén tras el movimiento),
+costs_visible, inventory_value, inventory_value_display, unit_cost (por unidad base), unit_cost_display}`.
+- `SupplierReturnInput`: `{operation_id, receipt_id, warehouse_id? (por omisión el de la recepción), occurred_at? (no
+futura ni anterior a la recepción), reason (5–500), lines: [{receipt_line_no, quantity (en la presentación o unidad del
+renglón recibido, ≤ returnable_quantity)}] (1–200, cada renglón una vez)}`.
+- `SupplierReturnSummary`: `{id, folio, receipt_id, receipt_folio, supplier, warehouse, occurred_at, reason, actor_name,
+value (valor asociado a centavos), line_count, costs_visible, unabsorbed, unabsorbed_display, value_exact, created_at,
+receipt_supplier_reference}`.
+- `SupplierReturn`: `SupplierReturnSummary` + `{lines: [{line_no, receipt_line_no, item, capture_label, quantity,
+base_quantity, value, movement_id, stock_after, costs_visible, original_unit_cost, original_unit_cost_display,
+outflow_value, outflow_value_display, cost_adjustment, cost_adjustment_display, unabsorbed, unabsorbed_display,
+cost_adjustment_movement_id}], warnings}`.
+- `CashExpense`: `{id, shift_id, register_id, register_name, shift_state: open|closing|closed, shift_business_date,
+currency: MXN|USD, amount, concept, category_name, reference, created_at, actor_name, status: recorded|corrected|regularized,
+status_label, corrected_at, linked_amount (Σ vínculos vigentes), available_amount, linked_to_receipt (con receipt_id),
+linkable, unavailable_reason: not_expense|currency|corrected|fully_linked|null, unavailable_label}`.
+- `CashLink`: `{id, receipt_id, receipt_folio, cash_operation_id, amount, notes, linked_at, linked_by_name, status:
+active|expense_corrected|expense_regularized|unlinked, status_label, active, unlinked_at, unlinked_by_name, unlink_reason,
+expense_visible, expense: CashExpense|null (solo si el actor puede leer el gasto)}`. Reglas: gasto existente, `kind`
+  `expense`, en pesos y sin corrección; Σ vínculos vigentes del gasto ≤ su importe y de la recepción ≤ su total; un vínculo
+  vigente por par recepción–gasto (para cambiar el importe se desvincula y se vincula de nuevo). Un vínculo con un gasto
+  corregido después sigue contando hasta desvincularlo.
+
+Eventos SSE (ámbito `inventory`, sin contenido): `inventory.purchases.changed` (proveedores, sus insumos y órdenes; también
+al recibir una orden), `inventory.receipts.changed` (recepciones, devoluciones y vínculos con gastos),
+`inventory.stock.changed` (almacén de la recepción o devolución) e `inventory.movements.recorded` (recepción o devolución).
+
+Libro: movimientos `receipt` (`source_kind` `receipt`, `source_id` = recepción, `source_line` = renglón, `entry_key`
+`receipt:<recepción>:<renglón>`) con su `cost_adjustment` (`…:cost`) y `supplier_return` (`source_kind` `supplier_return`,
+`entry_key` `supplier_return:<devolución>:<renglón>`). `GET movements?source_kind=receipt&source_id=…` los consulta.

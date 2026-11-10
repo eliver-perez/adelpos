@@ -252,7 +252,30 @@ export type Operation =
   | 'inventory_productions'
   | 'inventory_record_production'
   | 'inventory_consumption_requests'
-  | 'inventory_unit_consumption';
+  | 'inventory_unit_consumption'
+  // Etapa 8 (fase C): proveedores, órdenes de compra, recepciones, devoluciones y gastos de caja.
+  | 'inventory_suppliers'
+  | 'inventory_create_supplier'
+  | 'inventory_supplier'
+  | 'inventory_save_supplier'
+  | 'inventory_save_supplier_item'
+  | 'inventory_remove_supplier_item'
+  | 'inventory_purchase_orders'
+  | 'inventory_create_purchase_order'
+  | 'inventory_purchase_order'
+  | 'inventory_save_purchase_order'
+  | 'inventory_issue_purchase_order'
+  | 'inventory_cancel_purchase_order'
+  | 'inventory_close_purchase_order'
+  | 'inventory_receipts'
+  | 'inventory_record_receipt'
+  | 'inventory_receipt'
+  | 'inventory_supplier_returns'
+  | 'inventory_record_supplier_return'
+  | 'inventory_supplier_return'
+  | 'inventory_cash_expenses'
+  | 'inventory_link_cash_expense'
+  | 'inventory_unlink_cash_expense';
 
 export class APIError extends Error {
   constructor(

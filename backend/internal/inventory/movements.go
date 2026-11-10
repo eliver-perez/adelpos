@@ -45,6 +45,9 @@ var sourceKindLabels = map[string]string{
 	"amendment":    "Modificación de partida",
 	"cancellation": "Cancelación de partida",
 	"production":   "Elaboración",
+	// Fase C: compras.
+	"receipt":         "Recepción de mercancía",
+	"supplier_return": "Devolución a proveedor",
 }
 
 // processLabels nombra los procesos de Go responsables de movimientos (fase B en adelante).

@@ -1212,3 +1212,236 @@ Sobre una copia exacta del commit `a1d4e74` (sin cambios en curso de otras fases
 - Playwright en Chromium y en WebKit: 4 de 4 aprobadas cada uno (`inventory`, `restaurant`, `stock-consumption`,
   que activa el control, envía un producto con receta a cocina y comprueba el consumo y la clasificación de una
   cancelación, y `takeaway-quick-notes`).
+
+## Fase C · backend de compras (C1)
+
+Proveedores con sus insumos, órdenes de compra, recepciones de mercancía (de una orden o directas), devoluciones a
+proveedor y vínculo opcional de una recepción con gastos de caja: migración `0013_inventory_purchasing.sql`, archivos
+nuevos en `backend/internal/inventory` (`purchasing.go`, `purchase_lines.go`, `suppliers.go`, `purchase_orders.go`,
+`receipts.go`, `supplier_returns.go`, `cash_links.go`), rutas `inventory/*`, puente Tauri y
+`desktop/src/services/inventoryPurchasing.ts`. La interfaz de Compras, Recepciones y Proveedores es la otra parte de la
+fase C. La 0013 no se aplicó a la instalación real.
+
+### Migración 0013
+
+Transaccional, sin tocar 0001–0012 ni filas existentes (el único `ALTER` es sobre su propia tabla
+`inventory_supplier_items`, para la llave al último recibo), **sin siembras** y con 138 restricciones de nombre explícito
+(todos los nombres caben en los 63 caracteres de PostgreSQL); los CHECK con columnas opcionales exigen `IS NOT NULL` en la
+rama que valida. Folios propios por documento con `GENERATED ALWAYS AS IDENTITY` (como el folio de las cuentas: puede
+haber huecos si una transacción se revierte).
+
+| Estructura                        | Contenido                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inventory_suppliers`             | Nombre comercial único sin mayúsculas, razón social, RFC opcional con formato del SAT (CHECK; no único), teléfono, correo, domicilio, contacto, observaciones, `active`, revisión y responsables. Sin borrado.                                                                                                                                                                                                    |
+| `inventory_supplier_items`        | `(supplier_id, item_id)`: presentación habitual, código del proveedor, `preferred` (índice único parcial por insumo) y el último precio recibido completo o ausente (precio sin IVA antes del descuento, presentación **o** unidad de captura, fecha y recepción).                                                                                                                                                |
+| `inventory_purchase_orders`       | Folio, proveedor, estado (`draft`, `issued`, `partially_received`, `received`, `cancelled`, `closed`), fecha, almacén previsto, observaciones, subtotal/descuento/IVA/total (`numeric(18,2)`, `total = subtotal + IVA`), responsable, emisión, cancelación y cierre con quién, cuándo y motivo (CHECK por estado), revisión y `operation_id`.                                                                     |
+| `inventory_purchase_order_lines`  | Insumo, presentación **o** unidad, cantidad capturada y base, precio sin IVA `numeric(18,6)`, descuento, tasa 16/8/0, subtotal, IVA y total; un insumo por orden. **Disparador**: solo se insertan, cambian o quitan mientras la orden es borrador.                                                                                                                                                               |
+| `inventory_receipts`              | Folio, proveedor obligatorio, orden opcional (NULL = directa), almacén, hora, quién recibió, referencia del proveedor, `tax_in_cost` copiado, importes, `inventory_value` (CHECK: total con IVA o subtotal según `tax_in_cost`), `excess` (solo con orden), `operation_id` único. Solo inserción.                                                                                                                 |
+| `inventory_receipt_lines`         | Renglón de la orden (llaves compuestas: la orden debe ser la de su recepción), insumo, captura, cantidades, importes, valor de inventario, costo por unidad base y su movimiento `receipt`. Solo inserción.                                                                                                                                                                                                       |
+| `inventory_supplier_returns`      | Folio, recepción, proveedor, almacén, hora, motivo (5–500), responsable, valor asociado, diferencia no absorbida, `operation_id` único. Solo inserción.                                                                                                                                                                                                                                                           |
+| `inventory_supplier_return_lines` | Renglón de la recepción (un renglón por devolución, de la misma recepción), cantidad capturada y base, costo original, valor, valor de salida, ajuste de costo y no absorbida (CHECK `valor − salida = no absorbida − ajuste`; ajuste ⇔ su movimiento). Solo inserción.                                                                                                                                           |
+| `inventory_receipt_cash_links`    | Recepción, `cash_operation_id` (FK a `cash_operations`, que no se modifica), importe > 0, notas, quién y cuándo vinculó, `operation_id` único, y la desvinculación completa o ausente (quién, cuándo, motivo 5–500 y su operación). Un vínculo vigente por par recepción–gasto (índice único parcial). **Disparador**: no se borra ni se modifica; la única actualización es registrar la desvinculación una vez. |
+| Permisos                          | `inventory.suppliers.manage`, `inventory.purchases.create`, `inventory.purchases.authorize`, `inventory.purchases.receive`, `inventory.supplier_returns.record`, `inventory.purchases.link_cash`, solo al administrador (20 permisos de inventario en total).                                                                                                                                                     |
+
+### Proveedores, órdenes, recepciones y devoluciones
+
+- **Proveedores**: alta y edición con revisión, búsqueda (nombre, razón social, RFC, contacto, teléfono, correo), filtros de
+  estado e insumo surtido, desactivación (`active: false`; nunca hay borrado y un proveedor con compras se conserva con su
+  historial), insumos que surte (código, presentación, preferido único: marcar otro quita la marca del anterior y queda
+  auditado) e historial (conteos, total recibido, valor devuelto y las 20 órdenes, recepciones y devoluciones más
+  recientes). Un proveedor desactivado no admite órdenes nuevas ni recepciones directas; la mercancía de una orden ya
+  emitida se puede recibir.
+- **Órdenes**: borrador (crear y editar con `purchases.create`; reemplaza datos y renglones), emisión (`purchases.authorize`,
+  exige al menos un renglón, proveedor e insumos activos), cancelación (con motivo, desde borrador, emitida o parcial: lo
+  recibido se conserva) y cierre administrativo (con motivo, desde emitida o parcial). Crear o emitir no toca existencias
+  ni caja. Cada recepción cambia el estado (parcial o recibida) y la revisión.
+- **Recepciones**: `purchases.receive`; la directa además `purchases.create` y proveedor activo. Por renglón: solicitado,
+  recibido antes, pendiente después, devuelto y devolvible. Exceso solo con `allow_excess` (aviso `RECEIPT_EXCESS`). Copia
+  `tax_in_cost`, registra un `receipt` por renglón con el libro (regla 2: el ajuste de costo de un déficit va aparte),
+  actualiza el último precio del proveedor (y crea la relación si no existía) y no crea gastos.
+- **Devoluciones**: `supplier_returns.record`, ligadas a una recepción, por renglón y en su misma presentación o unidad,
+  nunca más de lo recibido menos lo devuelto; salida `supplier_return` con la regla 5 del motor; sin ingresos de caja.
+- **Vínculos con gastos**: ver «Decisiones» y el contrato.
+
+### Reglas de importes, IVA y costo
+
+- Renglón: importe = redondeo(cantidad × precio sin IVA); subtotal = importe − descuento comercial (en pesos, nunca mayor
+  que el importe); IVA = redondeo(subtotal × tasa ÷ 100) con tasa de lista cerrada 16/8/0; total = subtotal + IVA. Redondeo
+  a centavos mitad alejándose de cero. El documento es la suma exacta de sus renglones (el IVA no se recalcula sobre el
+  total), igual que el sistema anterior, así que siempre cuadra.
+- Recepción de una orden: precio y tasa los de la orden salvo que se capturen otros (factura real); el descuento del
+  renglón de la orden se **prorratea de forma acumulada** por lo recibido (redondeo(D × min(antes + ahora, Q) ÷ Q) −
+  redondeo(D × min(antes, Q) ÷ Q)), de modo que las recepciones que completan la cantidad suman exactamente el descuento
+  (12 + 8 de 20 cajas con $50: $30.00 y $20.00) y lo recibido de más no lleva descuento. No se usa `payments.allocate`
+  porque no hay descuento de documento que repartir entre renglones.
+- Valor de inventario de cada renglón = total con IVA si `tax_in_cost`, si no subtotal; costo por unidad base = valor ÷
+  cantidad base (10 decimales, lo calcula el libro). Cambiar la configuración solo afecta recepciones futuras.
+- Devolución: valor asociado = cantidad base × valor del renglón ÷ cantidad base recibida, con un costo de 20 decimales
+  para que devolver todo lo que quedaba dé exactamente el valor restante; el documento guarda el costo a 10 decimales.
+
+### Rutas y permisos
+
+Todas exigen `inventory.read`; contrato completo en la sección «Inventario · fase C: compras (esquema 13)» de
+`API_CONTRACTS.md` (texto en `docs8C1/api_contracts.md`).
+
+| Ruta                                                                                                                                                                               | Permiso adicional                                                                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `GET suppliers`, `GET suppliers/{id}`, `GET purchase-orders`, `GET purchase-orders/{id}`, `GET receipts`, `GET receipts/{id}`, `GET supplier-returns`, `GET supplier-returns/{id}` | cualquiera de los seis permisos de compras (costeo solo con `inventory.costs.read`)         |
+| `POST suppliers`, `PATCH suppliers/{id}`, `PUT suppliers/{id}/items`, `POST suppliers/{id}/items/remove`                                                                           | `inventory.suppliers.manage`                                                                |
+| `POST purchase-orders`, `PATCH purchase-orders/{id}`                                                                                                                               | `inventory.purchases.create`                                                                |
+| `POST purchase-orders/{id}/issue`, `…/cancel`, `…/close`                                                                                                                           | `inventory.purchases.authorize`                                                             |
+| `POST receipts`                                                                                                                                                                    | `inventory.purchases.receive` (+ `inventory.purchases.create` en la directa)                |
+| `POST supplier-returns`                                                                                                                                                            | `inventory.supplier_returns.record`                                                         |
+| `GET cash-expenses`, `POST receipts/{id}/cash-links`, `POST cash-links/{id}/unlink`                                                                                                | `inventory.purchases.link_cash` + `cash.movements.read` (+ reglas de caja; locks 305 → 308) |
+
+Puente Tauri: 22 operaciones nuevas en `api.rs` (9 fijas y 13 con un identificador; las 22 las descubre el driver de
+Playwright) con la prueba `inventory_purchasing_routes_are_closed`; lista blanca de consulta ampliada con `supplier_id`,
+`purchase_order_id`, `receipt_id`, `register_id`, `direct`, `min_amount` y `max_amount`. `Operation` de
+`desktop/src/services/api.ts` ampliado con esas 22 operaciones (cambio mínimo al final). Los orígenes `receipt` y
+`supplier_return` tienen etiqueta en la consulta de movimientos.
+
+### Decisiones y desviaciones (fase C, backend)
+
+1. **Lectura de compras** con cualquiera de los seis permisos de compras (no existe `purchases.read`); los importes de
+   compra son visibles para ellos y el costeo de inventario solo con `inventory.costs.read` (lo conservador del brief). El
+   valor asociado de una devolución se trata como importe de compra; su valor exacto, el de salida, el ajuste y la
+   diferencia no absorbida, como costeo.
+2. **Insumo de un proveedor en el cuerpo** (`PUT suppliers/{id}/items` y `POST suppliers/{id}/items/remove`) en lugar de
+   `suppliers/{id}/items/{item_id}`: el puente admite un solo identificador por ruta y no hay método DELETE. Quitar un
+   insumo del proveedor borra la fila de configuración (no historia; auditado con el antes).
+3. **Último precio**: el de la recepción más reciente (por hora de la recepción), sin IVA y antes del descuento, en la
+   presentación o unidad de esa recepción (columnas adicionales `last_price_presentation_id`, `last_price_unit_id`,
+   `last_price_at`, `last_receipt_id`). Una recepción crea la relación proveedor–insumo si no existía.
+4. **Un insumo una sola vez** por orden o recepción directa; la recepción de una orden recibe solo sus renglones (cada uno
+   una vez) en su misma presentación o unidad; los artículos no ordenados van en una recepción directa.
+5. **Recepción de una orden**: con orden emitida o parcial; con un proveedor, insumo o presentación desactivados después de
+   emitirla se puede recibir (la mercancía ya estaba comprometida). Una orden recibida no admite más recepciones (lo que
+   llegue después es una recepción directa); recibir más de lo pendiente exige `allow_excess`.
+6. **Cancelación y cierre**: cancelar procede desde borrador, emitida o parcial (conserva las entradas); cerrar
+   administrativamente desde emitida o parcial. Una orden recibida no se cancela ni se cierra.
+7. **Fecha de la orden** AAAA-MM-DD no futura (zona del establecimiento); la hora de la recepción y de la devolución no es
+   futura y la devolución no es anterior a su recepción.
+8. **Vínculos con gastos**: se toma 7820148305 **compartido** antes de 7820148308 en `GET cash-expenses` y en vincular y
+   desvincular (orden de `CLAUDE.md` §3: inventario después de 305); el resto de las rutas de inventario no toman 305 y la
+   lectura del estado del vínculo en una recepción es una sola sentencia. Leer un gasto exige `cash.movements.read` y las
+   reglas de `readableShift`, **sin** la excepción de payments para quien cerró el turno (decisión conservadora); desvincular
+   exige poder leer el gasto, como vincularlo. Un vínculo vigente por par recepción–gasto (para cambiar el importe se
+   desvincula y se vincula de nuevo). Un vínculo con un gasto corregido o regularizado **después** sigue contando en los
+   límites hasta desvincularlo; su estado (`expense_corrected` / `expense_regularized`) y `cash_link_attention` de la
+   recepción son la señal para la alerta de la fase D. Los datos del gasto de un vínculo solo se entregan a quien puede
+   leerlo (`expense_visible`); el estado, siempre.
+9. **Gastos candidatos**: solo `kind='expense'`, con `linkable`, lo disponible y el motivo si no se puede vincular
+   (`currency`, `corrected`, `fully_linked`); filtros por días de negocio del registro, importe mínimo y máximo, caja y
+   lo vinculado con una recepción. Sin caja en la terminal ni `cash.shifts.read_all`, la lista es vacía.
+10. **Eventos**: proveedores e insumos de proveedor publican `inventory.purchases.changed` (no hay un tipo propio de
+    proveedores en el diseño); devoluciones y vínculos publican `inventory.receipts.changed`.
+11. Prueba de la fase A/B no modificada salvo el encadenamiento: `testInventoryCore` llama a `testInventoryPurchasing` al
+    final, y la prueba de actualización cuenta 20 permisos de inventario y llama a `checkStage8PhaseC`.
+
+### Limitaciones
+
+- Sin interfaz (otra parte de la fase C) ni alertas (fase D: los datos existen en `cash_link_attention`, `status` de los
+  vínculos, `GET purchase-orders?state=partially_received` y `GET suppliers?item_id=`).
+- Sin cuentas por pagar, reporte de compras por periodo (etapa 9), devoluciones de una recepción directa sin recepción ni
+  notas de crédito: una devolución no genera ingreso de caja ni saldo a favor.
+- La recepción de una orden usa la equivalencia vigente de la presentación o unidad del renglón (si cambió después de
+  emitir la orden, la cantidad base recibida usa la nueva); lo pendiente se cuenta en la presentación o unidad capturada.
+- Los folios usan identidad de PostgreSQL: un registro revertido deja un hueco en la serie.
+- El gasto en dólares de la prueba se insertó directamente en `cash_operations` (el pago en dólares es una función
+  activable ajena a la prueba); los demás gastos, correcciones, regularizaciones y el cierre se hicieron por la API de caja.
+
+### Pruebas de la fase C (backend)
+
+- **Unitarias** (`internal/inventory/purchasing_test.go`; 45 pruebas del paquete en total):
+  - `TestPurchaseLineAmounts`: 20 cajas × $250 − $50 = $4,950.00 + IVA $792.00 = $5,742.00; 3 × 33.333333 = $100.00 + 8 %;
+    7 × 12.345 = $86.42 exento (mitad alejándose de cero); IVA de $10.03 al 16 % = $1.60 y al 8 % = $0.80; de $10.05 al
+    16 % = $1.61; medio centavo; descuento igual al importe; documento = suma de renglones ($5,782.08); rechazos (descuento
+    mayor que el importe, tasa 15 %, cantidad cero, precio negativo, importe excesivo).
+  - `TestProratedDiscount`: 12 + 8 de 20 cajas con $50 → $30.00 y $20.00; $10 en tercios → 3.33, 3.34, 3.33; excedente
+    parcial (18 + 5 de 20 → $5.00) y total (sin descuento); recibir todo de una vez.
+  - `TestNormalizeRFC`: persona moral y física, público en general, Ñ y 29 de febrero bisiesto, `&`; rechazos de mes 13,
+    30 de febrero, 29 de febrero no bisiesto, longitudes y guiones.
+  - `TestPrepareReturnLines`: 4 de 10 cajas = 96 piezas por $464.000000 y las 6 restantes = 144 piezas por $696.000000
+    exactos; una caja de más → `RETURN_EXCEEDS_RECEIVED`; renglón inexistente o repetido.
+  - `TestInventoryPermissionsAreMigratedAndGrantedToAdministrator`: los 20 permisos de Go en la 0010, 0011 o 0013 con la
+    misma descripción, solo para el administrador.
+- **Integración** (`operations/inventory_purchasing_test.go`, encadenada al final de la fase B con insumos, proveedores,
+  usuarios y una caja propios; 10 subpruebas):
+  - proveedores: alta con RFC normalizado, domicilio de varias líneas, 403 sin `suppliers.manage` y sin permisos de compras
+    (nada registrado), nombre comercial repetido sin mayúsculas, RFC y correo inválidos, RFC compartido, edición con revisión
+    y revisión obsoleta, insumos surtidos (preferido único: el segundo quita la marca al primero), presentación ajena,
+    quitar un insumo, búsqueda por RFC, filtros por insumo y estado, parámetro desconocido 400, 7 auditorías;
+  - órdenes: borrador ($6,797.40) y edición a 5 l (subtotal $6,036.00, descuento $50.00, IVA $810.00, total $6,846.00;
+    480 piezas, 50,000 g y 5,000 ml), rechazos (tasa 15 %, descuento mayor, insumo repetido, presentación ajena, fecha
+    futura), 403 al crear sin `purchases.create` y al emitir sin `purchases.authorize`, emisión, segunda emisión
+    `ORDER_NOT_DRAFT`, edición de emitida `ORDER_NOT_EDITABLE`, renglones de emitida inmutables en PostgreSQL, ningún
+    movimiento ni operación de caja al crear o emitir, orden vacía `ORDER_EMPTY`, cancelación con motivo corto (400) y
+    válida, cierre de un borrador `ORDER_NOT_CLOSABLE`, recibir una cancelada `ORDER_NOT_RECEIVABLE`, filtro `open` y
+    búsqueda por folio;
+  - recepción parcial y total (12 + 8 de 20 cajas): la primera por quien solo recibe ($3,875.70: 3,445.20 del refresco con
+    $30.00 de descuento prorrateado y $430.50 del costal), solicitado 20 / recibido antes 0 / pendiente después 8, sin
+    costos para quien no tiene `costs.read` y con ellos 11.9625 por pieza y 0.01722 por gramo; orden parcial (12/8, 1/1,
+    0/5, pendiente base 192); repetición con el mismo `operation_id` (misma recepción, sin movimientos nuevos) y otro cuerpo
+    409 `IDEMPOTENCY_CONFLICT`; 9 cajas sin `allow_excess` 409 `RECEIPT_EXCEEDS_PENDING`; insumo propio en un renglón de
+    orden 400; segunda recepción ($2,970.30: $20.00 de descuento, recibido antes 12, pendiente 0); orden recibida (las dos
+    suman $6,846.00 = la orden); 480 piezas por $5,742.00; tres movimientos `receipt`; último precio $250.00 «Caja con 24»;
+    historial del proveedor; ninguna operación de caja;
+  - exceso con `allow_excess` (3 de 2 costales, aviso `RECEIPT_EXCESS`, excedente 1), cierre administrativo con 4 de 10
+    cajas recibidas (403 sin `authorize`, las entradas se conservan, recibir después `ORDER_NOT_RECEIVABLE`) y cancelación
+    con recepciones (revisión anterior 409, las entradas y su movimiento se conservan);
+  - recepción directa: 403 para quien solo recibe sin dejar registros, proveedor obligatorio (400), IVA incluido ($116.00 →
+    0.058 por ml) y excluido tras cambiar la configuración (mismo documento → $100.00, 0.05 por ml, movimiento de
+    100.000000), la recepción anterior conserva `tax_in_cost` y su valor, filtro `direct`;
+  - recepción con existencia negativa: 10 piezas a $20 y un consumo de 15 del trabajador → −5 y −$100; 8 piezas a $30 →
+    movimiento `receipt` de 240 con existencia 3 y `cost_adjustment` ligado de −50 (100 provisional − 150 real); 3 piezas
+    por $90; consistencia del libro;
+  - devoluciones: 100 vasos a $2 y 100 a $3 con IVA (200 por $580); 403 sin `supplier_returns.record`; diferencia
+    absorbida (10 vasos: salida $29.00, valor $34.80, ajuste −$5.80, 190 por $545.20); duplicada (mismo documento, sin
+    movimientos) y otro cuerpo 409; más de lo recibido (101 de 100 y 91 de 90) `RETURN_EXCEEDS_RECEIVED`; motivo corto;
+    consumo de 185 (→ 5 vasos por $14.347368) y diferencia no absorbida (salida $14.347368, valor $17.40, sin ajuste,
+    3.052632 en el documento; 0 vasos, $0); devuelto 15 / devolvible 85; ninguna operación de caja; recepciones y
+    devoluciones de solo inserción en PostgreSQL;
+  - vínculos con gastos (caja «Caja de compras C» operada por la API de caja: apertura, 5 gastos, correcciones,
+    regularización y cierre ciego por conteo): gasto sin compra (no crea compras), 403 sin `cash.movements.read`, sin
+    `link_cash` y desde una terminal sin caja (nada registrado; su lista de candidatos vacía y `register_id` ajeno 403);
+    vinculación total ($850 ↔ $850) y parcial ($500 de $3,875.70); egresos duplicados (`CASH_EXPENSE_OVERLINKED` para los
+    gastos de $850 y $500 ya vinculados, `RECEIPT_OVERLINKED` para la recepción de $850 con un gasto disponible,
+    `CASH_LINK_EXISTS`); gasto corregido `CASH_EXPENSE_CORRECTED` y corrección `CASH_OPERATION_NOT_EXPENSE`; corrección
+    posterior detectada (`expense_corrected`, `cash_link_attention`, el gasto sin cambios); candidatos por importe y con lo
+    vinculado a la recepción; turno cerrado (403 sin `cash.history.read`, ausente de sus candidatos, 200 con el permiso,
+    datos del gasto ocultos sin él, turno, cierre y operaciones idénticos); regularización posterior detectada
+    (`expense_regularized`) sin cambiar el cierre; gasto en dólares `CASH_EXPENSE_CURRENCY`; desvinculación (motivo corto
+    400, 403 sin leer el gasto, registro con motivo, segunda 409 `CASH_LINK_INACTIVE`, nuevo vínculo); vínculos sin
+    modificación ni borrado en PostgreSQL; solo 9 operaciones de caja nuevas (las de la caja); 5 + 1 auditorías;
+  - desactivación de un proveedor con compras (historial conservado, orden nueva y recepción directa `SUPPLIER_INACTIVE`,
+    la orden ya emitida se recibe, `DELETE` 404), eventos `inventory.purchases.changed`, `inventory.receipts.changed`,
+    `inventory.stock.changed` e `inventory.movements.recorded`, auditoría de órdenes, recepciones, devoluciones y
+    desactivación, consistencia del libro.
+- **Actualización desde el esquema 9** (`TestStage8UpgradeOfExistingInstallation`, ampliada con
+  `database/stage8_purchasing_upgrade_test.go`): todas las migraciones de la etapa 8 del árbol (0010–0013) se aplican y no
+  se repiten; 20 permisos de inventario solo del administrador; la 0013 no siembra filas; sus 138 restricciones con nombre;
+  CHECK con tablas temporales (RFC, último precio, estados de la orden con emisión, cancelación y cierre, total, renglones
+  con captura y tasa, valor de inventario según `tax_in_cost`, exceso sin orden, ajuste y diferencia de una devolución,
+  desvinculación completa); disparadores reales (renglones de una orden emitida, recepción de solo inserción, vínculo que
+  solo se desvincula una vez) y gastos de caja sin cambios.
+- **Rust**: `inventory_purchasing_routes_are_closed` (22 operaciones, sin identificador o con `../../settings` rechazadas,
+  sin borrado de proveedores ni edición o borrado de recepciones, devoluciones y vínculos, ni creación de gastos; lista
+  blanca de consulta).
+
+### Verificación de la fase C (backend)
+
+En la copia aislada `scratchpad/repoC1` (sincronizada desde el árbol de trabajo, con la 0012 ya presente), con el clúster
+temporal del puerto 55499 (nunca la instalación real):
+
+- `gofmt -l` (archivos Go propios), `rustfmt --check` de `api.rs` y `prettier --check` de `inventoryPurchasing.ts` y
+  `api.ts`: sin diferencias.
+- `go vet ./...` y `go vet -tags=integration ./...`: aprobados.
+- `go test -race -count=1 ./...` (unitarias): 15 paquetes `ok`, incluido `internal/inventory` (45 pruebas).
+- Integración (`go test -race -tags=integration`): `internal/database` ok (3.4 s, actualización desde el esquema 9 hasta la
+  0013), `internal/administration` ok (54.7 s), `internal/operations` ok (186.5 s, con la aceptación completa de las
+  etapas 4–7.1 y las fases A, B y C; las 10 subpruebas `inventory_c_*` aprobadas), `internal/payments` ok (1.3 s) e
+  `internal/catalog` ok (6.8 s).
+- `cargo test --locked --offline`: 19 aprobadas (1 ignorada, la misma de antes), incluida
+  `inventory_purchasing_routes_are_closed`.
+- `tsc --noEmit`: sin errores.
+- Playwright no se ejecutó: esta parte no cambia pantallas.

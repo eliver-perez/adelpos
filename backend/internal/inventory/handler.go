@@ -14,8 +14,14 @@ import (
 // lee y qué acción la atiende.
 type route struct {
 	permissions []string
-	readOnly    bool
-	action      func(handler *service, parts []string) (any, error)
+	// anyPermission exige al menos uno de estos permisos (por ejemplo, consultar compras con
+	// cualquiera de los permisos de compras).
+	anyPermission []string
+	// cashRead indica que la ruta lee gastos de caja: toma 7820148305 compartido antes que
+	// 7820148308 para leerlos de forma consistente con payments (orden de locks de CLAUDE.md §3).
+	cashRead bool
+	readOnly bool
+	action   func(handler *service, parts []string) (any, error)
 }
 
 func read(action func(handler *service, parts []string) (any, error), permissions ...string) *route {
@@ -26,9 +32,24 @@ func write(action func(handler *service, parts []string) (any, error), permissio
 	return &route{permissions: permissions, readOnly: false, action: action}
 }
 
-// resolve enumera las rutas de inventario (fases A y B). El puente nativo admite un solo identificador por ruta,
+// purchasingRead es una lectura de compras: la ve quien tiene cualquiera de los permisos de
+// compras (proveedores, órdenes, recepciones, devoluciones o vínculos con caja).
+func purchasingRead(action func(handler *service, parts []string) (any, error)) *route {
+	return &route{anyPermission: purchasingPermissions, readOnly: true, action: action}
+}
+
+// withCash marca una ruta que lee gastos de caja.
+func (selected *route) withCash() *route {
+	selected.cashRead = true
+	return selected
+}
+
+// resolve enumera las rutas de inventario (fases A, B y C). El puente nativo admite un solo identificador por ruta,
 // siempre en la segunda posición; los registros relacionados viajan en el cuerpo.
 func resolve(method string, parts []string) *route {
+	if selected := resolvePurchasing(method, parts); selected != nil {
+		return selected
+	}
 	length := len(parts)
 	resource := parts[0]
 	if length == 1 {
@@ -150,11 +171,19 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err := request.Actor.Require(selected.permissions...); err != nil {
 		return nil, err
 	}
+	if err := request.Actor.RequireAny(selected.anyPermission...); err != nil {
+		return nil, err
+	}
 	if len(parts) > 1 {
 		if err := validateID(parts[1]); err != nil {
 			return nil, err
 		}
 		parts[1] = strings.ToLower(parts[1])
+	}
+	if selected.cashRead {
+		if _, err := tx.Exec(ctx, fmt.Sprintf("SELECT pg_advisory_xact_lock_shared(%d)", cashLockKey)); err != nil {
+			return nil, err
+		}
 	}
 	lock := fmt.Sprintf("SELECT pg_advisory_xact_lock(%d)", lockKey)
 	if selected.readOnly {

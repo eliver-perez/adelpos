@@ -687,11 +687,12 @@ var inventoryConstraints = []string{
 }
 
 // Simula una instalación existente en esquema 9 (0.7.1) con datos de las etapas anteriores y aplica
-// la 0010 y la 0011 (etapa 8, fases A y B): nada existente cambia (funciones, permisos de otros
-// roles, gastos de caja con y sin corrección, eventos y estaciones), las migraciones son repetibles
-// según el migrador (una segunda ejecución no aplica nada), las siembras son solo de referencia
-// (la 0011 no siembra nada), los permisos de inventario se conceden solo al administrador y las
-// restricciones nuevas tienen nombre y rechazan datos incoherentes. Deja la base vacía al terminar.
+// las migraciones de la etapa 8 que existan (0010 en adelante; fases A, B y C): nada existente
+// cambia (funciones, permisos de otros roles, gastos de caja con y sin corrección, eventos y
+// estaciones), las migraciones son repetibles según el migrador (una segunda ejecución no aplica
+// nada), las siembras son solo de referencia (la 0011 y la 0013 no siembran nada), los permisos de
+// inventario se conceden solo al administrador y las restricciones nuevas tienen nombre y rechazan
+// datos incoherentes. Deja la base vacía al terminar.
 func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
 	u, err := url.Parse(dsn)
@@ -775,15 +776,16 @@ func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-9 {
-		t.Fatalf("la 0010 y la 0011 no se aplicaron sobre el esquema 9: %d %v", n, err)
+		t.Fatalf("las migraciones de la etapa 8 (0010 en adelante) no se aplicaron sobre el esquema 9: %d %v", n, err)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
-		t.Fatal("la 0010 y la 0011 no son repetibles")
+		t.Fatal("las migraciones de la etapa 8 no son repetibles")
 	}
 	checkStage8ExistingData(ctx, t, pool, permissionsBefore, cashierBefore)
 	checkStage8Seeds(ctx, t, pool)
 	checkStage8Constraints(ctx, t, pool)
 	checkStage8PhaseB(ctx, t, pool)
+	checkStage8PhaseC(ctx, t, pool)
 }
 
 // checkStage8ExistingData comprueba que la 0010 no alteró los datos de las etapas anteriores.
@@ -814,8 +816,8 @@ func checkStage8ExistingData(ctx context.Context, t *testing.T, pool *pgxpool.Po
         (SELECT count(*) FROM app.realtime_events WHERE scope='cash')`).Scan(&permissionsAfter, &cashierAfter, &inventoryRole, &events); err != nil {
 		t.Fatal(err)
 	}
-	// 10 permisos de la 0010 (fase A) y 4 de la 0011 (fase B).
-	if permissionsAfter != permissionsBefore+14 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
+	// 10 permisos de la 0010 (fase A), 4 de la 0011 (fase B) y 6 de la 0013 (fase C).
+	if permissionsAfter != permissionsBefore+20 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
 		t.Fatalf("Permisos o eventos existentes: %d→%d, cajera %d→%d, inventarios %d, eventos %d",
 			permissionsBefore, permissionsAfter, cashierBefore, cashierAfter, inventoryRole, events)
 	}
@@ -844,7 +846,7 @@ func checkStage8Seeds(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if enabled || enabledAt != nil || units != 6 || warehouses != 1 || items != 0 || movements != 0 || settings != 1 ||
-		administrator != 14 || others != 0 {
+		administrator != 20 || others != 0 {
 		t.Fatalf("Siembras de la 0010: %v %v %d %d %d %d %d %d %d", enabled, enabledAt, units, warehouses, items, movements, settings,
 			administrator, others)
 	}

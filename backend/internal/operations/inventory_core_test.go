@@ -111,6 +111,8 @@ func testInventoryCore(t *testing.T, base *restaurantFixture) {
 	})
 	// Fase B: recetas, subrecetas, porciones, elaboraciones y consumo por liberación.
 	testInventoryRecipesAndConsumption(t, fixture)
+	// Fase C: proveedores, órdenes de compra, recepciones, devoluciones y vínculos con gastos de caja.
+	testInventoryPurchasing(t, fixture)
 }
 
 // testInventorySeed comprueba las siembras de referencia de la 0010 y que los permisos de
