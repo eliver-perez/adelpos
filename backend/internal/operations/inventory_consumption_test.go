@@ -532,6 +532,9 @@ func testConsumption(t *testing.T, fixture *recipesFixture) {
 			t.Fatalf("Valor del arroz rojo consumido: %s", value)
 		}
 	})
+	t.Run("inventory_b_entries_with_negative_stock", func(t *testing.T) {
+		testEntriesWithNegativeStock(t, fixture)
+	})
 	t.Run("inventory_b_refund_without_reintegration", func(t *testing.T) {
 		testRefundWithoutReintegration(t, fixture)
 	})
@@ -576,6 +579,152 @@ func testConsumption(t *testing.T, fixture *recipesFixture) {
 		}
 	})
 	measureReleaseWithInventory(t, fixture)
+}
+
+// ledgerRows describe los movimientos de un insumo con un filtro adicional, en orden: «tipo valor
+// base relacionado» (relacionado es «ligado» si apunta al movimiento anterior de la lista).
+func (fixture *recipesFixture) ledgerRows(t *testing.T, itemID, filter, argument string) []string {
+	t.Helper()
+	rows, err := fixture.pool.Query(fixture.ctx, `SELECT id,kind,value::text,cost_basis,coalesce(related_movement_id::text,'')
+        FROM app.inventory_movements WHERE item_id=$1 AND `+filter+` ORDER BY seq`, itemID, argument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	described, previous := []string{}, ""
+	for rows.Next() {
+		var id, kind, value, basis, related string
+		if err := rows.Scan(&id, &kind, &value, &basis, &related); err != nil {
+			t.Fatal(err)
+		}
+		link := "-"
+		if related != "" && related == previous {
+			link = "ligado"
+		}
+		described = append(described, kind+" "+decimal.RequireFromString(value).String()+" "+basis+" "+link)
+		previous = id
+	}
+	return described
+}
+
+// valuationState devuelve «cantidad/valor/último costo válido» de un insumo.
+func (fixture *recipesFixture) valuationState(t *testing.T, itemID string) string {
+	t.Helper()
+	var quantity, value string
+	var last *string
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT quantity::text,value::text,last_valid_cost::text FROM app.inventory_valuations
+        WHERE item_id=$1`, itemID).Scan(&quantity, &value, &last); err != nil {
+		t.Fatal(err)
+	}
+	state := decimal.RequireFromString(quantity).String() + "/" + decimal.RequireFromString(value).String() + "/"
+	if last != nil {
+		state += decimal.RequireFromString(*last).String()
+	}
+	return state
+}
+
+// testEntriesWithNegativeStock: entradas que cubren existencias negativas (revisión de la etapa 8).
+//   - Una elaboración es una entrada con documento: el déficit del insumo preparado (vendido antes de
+//     elaborarlo, al costo de referencia) se valora al costo real de la elaboración y la diferencia es
+//     un ajuste de costo separado ligado a la entrada.
+//   - La reversión de un consumo («No preparado») conserva el valor original del consumo y, si cubre
+//     un déficit valorado a otro costo, lo realinea con un ajuste de costo separado.
+func testEntriesWithNegativeStock(t *testing.T, fixture *recipesFixture) {
+	units := fixture.units
+	cocina, freidora := fixture.warehouses["cocina"], fixture.warehouses["freidora"]
+	item := func(code, name, unit, kind string, reference any) inventory.Item {
+		body := map[string]any{"code": code, "name": name, "base_unit_id": units[unit].ID, "kind": kind, "active": true}
+		if reference != nil {
+			body["reference_cost"] = reference
+		}
+		return fixture.createItem(t, body)
+	}
+	product := func(name, code string, lines ...map[string]any) catalog.Product {
+		created := decodeResponse[catalog.Product](t, fixture.adminCall(t, "POST", "catalog/products", catalog.Product{
+			Metadata: catalog.Metadata{Name: name, Active: true}, CategoryID: fixture.category.ID, Code: code, Kind: "product", BasePrice: "60",
+		}, 200))
+		fixture.saveRecipe(t, fixture.recipeManager, code, map[string]any{"owner_kind": "product", "product_id": created.ID, "active": true,
+			"lines": lines}, 200)
+		return created
+	}
+	initial := func(warehouse inventory.Warehouse, entry inventory.Item, quantity, cost string) {
+		fixture.adminWrite(t, "POST", "inventory/initial-balances", map[string]any{"warehouse_id": warehouse.ID,
+			"lines": []map[string]any{{"item_id": entry.ID, "quantity": quantity, "unit_cost": cost}}}, 200)
+	}
+
+	// Elaboración con existencia negativa. Salsa verde (preparada, costo de referencia 0.1/g):
+	// 3000 g de chile verde a 0.1 ($300) rinden 1 kg. Se venden unos tacos con 500 g de salsa antes de
+	// elaborarla: 500 × 0.1 = $50 → −500 g, −$50.
+	chile := item("B-CHILEV", "Chile verde B", "g", "purchased", nil)
+	salsa := item("B-SALSAV", "Salsa verde B", "g", "prepared", "0.1")
+	initial(cocina, chile, "3000", "0.1")
+	recipe := fixture.saveRecipe(t, fixture.subrecipeManager, "salsa_verde", map[string]any{"owner_kind": "preparation",
+		"preparation_mode": "stored", "preparation_item_id": salsa.ID, "active": true, "yield_quantity": "1",
+		"yield_unit_id": units["kg"].ID, "lines": []map[string]any{recipeItemLine(chile, "3000", units["g"], false)}}, 200)
+	tacos := product("Tacos verdes B", "INV-TACOV", map[string]any{"component_kind": "preparation", "preparation_recipe_id": recipe.ID,
+		"quantity": "500", "unit_id": units["g"].ID})
+	fixture.order(t, "Tacos antes de elaborar", "dine_in", "", catalog.LineRequest{ProductID: tacos.ID, Quantity: 1})
+	fixture.process(t)
+	if state := fixture.valuationState(t, salsa.ID); state != "-500/-50/" {
+		t.Fatalf("Salsa vendida antes de elaborarla: %s", state)
+	}
+	// Elaboración de 1 lote (1000 g) con valor consumido $300 (0.3/g): el déficit de 500 g tenía valor
+	// provisional $50 y cuesta realmente 300 × 500 / 1000 = $150 → ajuste de costo −$100 ligado a la
+	// entrada. Quedan 500 g por −50 + 300 − 100 = $150: promedio 0.3/g (como reversión habría quedado
+	// en $250, 0.5/g).
+	production := decodeResponse[inventory.Production](t, fixture.adminWrite(t, "POST", "inventory/productions", map[string]any{
+		"recipe_id": recipe.ID, "warehouse_id": cocina.ID, "batches": "1",
+	}, 200))
+	if production.ProducedQuantity != "1000" || text(production.ConsumedValue) != "300.00" {
+		t.Fatalf("Elaboración con existencia negativa: %+v", production)
+	}
+	if rows := fixture.ledgerRows(t, salsa.ID, "source_id=$2", production.ID); !slices.Equal(rows, []string{
+		"production_in 300 document -", "cost_adjustment -100 difference ligado",
+	}) {
+		t.Fatalf("Movimientos de la elaboración: %v", rows)
+	}
+	if state := fixture.valuationState(t, salsa.ID); state != "500/150/0.3" {
+		t.Fatalf("Salsa elaborada: %s", state)
+	}
+
+	// Reversión que cruza a positivo. Crema: entran 10 a $20 en la cocina; el postre A consume 10
+	// ($200 exactos, 0 u); entran 10 a $30 en la freidora; un postre y un café (5) consumen 15: 10 por
+	// $300 y 5 al último costo válido $30 = $450 → −5 u, −$150.
+	crema := item("B-CREMA", "Crema B", "pza", "purchased", nil)
+	initial(cocina, crema, "10", "20")
+	dessert := product("Postre B", "INV-POSTRE", recipeItemLine(crema, "10", units["pza"], false))
+	coffee := product("Café con crema B", "INV-CAFEC", recipeItemLine(crema, "5", units["pza"], false))
+	first := fixture.order(t, "Postre A", "dine_in", "", catalog.LineRequest{ProductID: dessert.ID, Quantity: 1})
+	fixture.process(t)
+	initial(freidora, crema, "10", "30")
+	fixture.order(t, "Postre y café", "dine_in", "", catalog.LineRequest{ProductID: dessert.ID, Quantity: 1},
+		catalog.LineRequest{ProductID: coffee.ID, Quantity: 1})
+	fixture.process(t)
+	if state := fixture.valuationState(t, crema.ID); state != "-5/-150/30" {
+		t.Fatalf("Crema antes de revertir: %s", state)
+	}
+	// Se cancela el postre A y se clasifica «No preparado»: la reversión lleva su valor original $200
+	// y cubre el déficit de 5 u, con valor provisional $150 y real 200 × 5 / 10 = $100 → ajuste +$50.
+	// Quedan 5 u por −150 + 200 + 50 = $100: promedio $20 (sin el ajuste, $50 y $10).
+	unit := fixture.accountUnits(t, first.Account.ID)[0]
+	fixture.cancelOne(t, first)
+	fixture.process(t)
+	pending := fixture.classification(t, unit)
+	fixture.write(t, fixture.wasteClerk, "POST", "inventory/cancellations/"+pending.ID+"/classify",
+		map[string]any{"revision": pending.Revision, "state": "not_prepared"}, 200)
+	if rows := fixture.ledgerRows(t, crema.ID, "restaurant_unit_id=$2", unit); !slices.Equal(rows, []string{
+		"consumption -200 average -", "consumption_reversal 200 original -", "cost_adjustment 50 difference ligado",
+	}) {
+		t.Fatalf("Movimientos de la unidad revertida: %v", rows)
+	}
+	if state := fixture.valuationState(t, crema.ID); state != "5/100/20" || len(fixture.unitConsumption(t, unit)) != 0 {
+		t.Fatalf("Crema después de revertir: %s %v", state, fixture.unitConsumption(t, unit))
+	}
+	// Ningún insumo queda con valor negativo y existencia positiva.
+	if negative := rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_valuations WHERE quantity>0 AND value<0"); negative != 0 {
+		t.Fatalf("Insumos con existencia positiva y valor negativo: %d", negative)
+	}
+	checkLedgerConsistency(t, fixture.inventoryFixture)
 }
 
 func testCancellations(t *testing.T, fixture *recipesFixture) {

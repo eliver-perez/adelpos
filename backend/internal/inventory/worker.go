@@ -551,8 +551,11 @@ type consumptionTarget struct {
 
 // adjustUnitConsumption escribe la diferencia entre el objetivo y el consumo neto registrado de la
 // unidad por (insumo, almacén): consumption si falta consumir y consumption_reversal (al valor
-// proporcional registrado, exacto si revierte todo) si sobra. Devuelve cuántos movimientos
-// escribió. Idempotente por entry_key.
+// proporcional registrado, exacto si revierte todo) si sobra. La reversión conserva ese valor en su
+// movimiento y, si el insumo tiene existencia negativa, el motor agrega el ajuste de costo que
+// realinea el déficit cubierto (Restore); el consumo neto de la unidad solo suma consumos y
+// reversiones, por lo que sigue siendo exacto. Devuelve cuántos movimientos escribió. Idempotente
+// por entry_key.
 func adjustUnitConsumption(ctx context.Context, tx pgx.Tx, plan consumptionTarget) (int, error) {
 	net := plan.net
 	if net == nil {

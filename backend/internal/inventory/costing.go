@@ -1,6 +1,8 @@
 package inventory
 
 import (
+	"errors"
+
 	"github.com/shopspring/decimal"
 )
 
@@ -16,6 +18,14 @@ import (
 //
 // Redondeo: valores a 6 decimales y costos unitarios a 10, mitad alejándose de cero
 // (decimal.DivRound redondea el cociente exacto, sin redondeo doble).
+//
+// Invariantes que mantiene toda operación: Q = 0 ⇒ V = 0; Q > 0 ⇒ V ≥ 0; L es nulo o mayor que
+// cero; 0 ≤ cantidad pendiente ≤ déficit.
+
+// errCostRequired rechaza una entrada sin documento (ajuste positivo o sobrante de conteo) que
+// dejaría existencia positiva sin ningún costo disponible (§0-B.6: «nunca a un costo inventado»). El
+// libro la convierte en el rechazo público COST_REQUIRED con el nombre del insumo.
+var errCostRequired = errors.New("inventory: entrada sin costo disponible")
 
 // Bases de costo de un movimiento (inventory_movements.cost_basis).
 const (
@@ -59,8 +69,8 @@ type Entry struct {
 	Basis    string
 	// CostPending marca que una parte del movimiento se valoró en cero por falta de costo.
 	CostPending bool
-	// Adjustment es el ajuste de costo separado de una recepción que cubre un déficit (regla 2) o
-	// de una devolución a proveedor (regla 5).
+	// Adjustment es el ajuste de costo separado de una entrada con documento o de una reversión de
+	// consumo que cubren un déficit (regla 2) o de una devolución a proveedor (regla 5).
 	Adjustment *CostAdjustment
 	// Residual es el residuo de valuación que mantiene el invariante Q = 0 ⇒ V = 0 (regla 6).
 	Residual *CostAdjustment
@@ -161,8 +171,13 @@ func requirePositive(quantity decimal.Decimal) error {
 // settle aplica las reglas que siguen a toda operación:
 //   - regla 6: si la cantidad quedó en cero y el valor no, emite el residuo −V;
 //   - la cantidad pendiente de costo nunca excede el déficit vigente;
-//   - regla 7: el último costo válido pasa a ser V/Q cuando Q > 0 y V > 0. Un promedio de cero
-//     solo puede venir de entradas sin costo y no es un costo válido: no reemplaza a L.
+//   - regla 7: el último costo válido pasa a ser V/Q cuando Q > 0 y V > 0, solo si el promedio
+//     redondeado a 10 decimales es mayor que cero (un valor diminuto sobre una cantidad grande
+//     redondea a cero, que no es un costo válido y violaría last_valid_cost > 0). Un promedio de
+//     cero no reemplaza a L.
+//
+// Las reglas 2 y 3 ya dejan el valor exactamente en cero cuando una entrada cubre todo el déficit,
+// por lo que el residuo es una red de seguridad del invariante.
 func settle(entry *Entry, after Valuation) {
 	if after.Quantity.IsZero() && !after.Value.IsZero() {
 		entry.Residual = &CostAdjustment{Value: after.Value.Neg(), Basis: basisDifference}
@@ -175,8 +190,9 @@ func settle(entry *Entry, after Valuation) {
 		after.PendingQuantity = zero
 	}
 	if after.Quantity.IsPositive() && after.Value.IsPositive() {
-		average := after.Value.DivRound(after.Quantity, costScale)
-		after.LastValidCost = &average
+		if average := after.Value.DivRound(after.Quantity, costScale); average.IsPositive() {
+			after.LastValidCost = &average
+		}
 	}
 	entry.After = after
 }
@@ -232,8 +248,9 @@ func Issue(state Valuation, quantity decimal.Decimal) (Entry, error) {
 	return entry, nil
 }
 
-// Receive registra una entrada con documento (recepción o existencia inicial, regla 4) de q > 0
-// con el valor total del documento (q × costo). Regla 2:
+// Receive registra una entrada con documento (recepción, existencia inicial o entrada de una
+// elaboración, regla 4) de q > 0 con el valor total del documento (q × costo; en una elaboración,
+// el valor de lo consumido). Regla 2:
 //   - Q ≥ 0: V += valor, Q += q (promedio ponderado normal);
 //   - Q < 0: las d = min(q, −Q) unidades que cubren el déficit se valoran al costo real del
 //     documento. Su valor provisional era d × V/Q (exactamente −V si d = −Q). La diferencia
@@ -282,8 +299,11 @@ func provisionalValue(state Valuation, covered decimal.Decimal) decimal.Decimal 
 // Admit registra una entrada sin costo propio: ajuste positivo o sobrante de conteo (regla 3).
 //   - Q > 0: al promedio vigente V/Q;
 //   - Q ≤ 0: el déficit cubierto d = min(q, −Q) se valora a su valor provisional d × V/Q (exacto
-//     si cubre todo) y el resto al costo de referencia vigente; sin ningún costo, el resto vale
-//     cero y el movimiento queda con «costo pendiente». Nunca se inventa un costo.
+//     si cubre todo) y el resto al costo de referencia vigente (L o, si nunca hubo, R).
+//
+// Si el resto (la parte que queda en existencia positiva) no tiene ningún costo disponible, la
+// entrada se rechaza con errCostRequired: nunca se inventa un costo ni entra existencia positiva a
+// valor cero sin marca (§0-B.6). Cubrir solo el déficit sigue permitido, al provisional.
 //
 // Interpretación de §0-B.6 que conserva exacto el valor: cubrir el déficit al provisional deja el
 // promedio del déficit restante sin cambio y, si lo cubre todo, el valor vuelve exactamente a cero.
@@ -307,11 +327,10 @@ func Admit(state Valuation, quantity decimal.Decimal) (Entry, error) {
 		}
 		if remainder.IsPositive() {
 			reference, basis := state.reference()
-			if reference != nil {
-				value = value.Add(remainder.Mul(*reference).Round(valueScale))
-			} else {
-				entry.CostPending = true
+			if reference == nil {
+				return Entry{}, errCostRequired
 			}
+			value = value.Add(remainder.Mul(*reference).Round(valueScale))
 			if covered.IsZero() {
 				entry.Basis = basis
 			}
@@ -319,20 +338,20 @@ func Admit(state Valuation, quantity decimal.Decimal) (Entry, error) {
 		after.PendingQuantity = after.PendingQuantity.Sub(minimum(after.PendingQuantity, covered))
 	}
 	entry.Value = value
-	if entry.Basis != basisPending {
-		entry.UnitCost = unitCostOf(value, quantity)
-	}
+	entry.UnitCost = unitCostOf(value, quantity)
 	after.Quantity = state.Quantity.Add(quantity)
 	after.Value = state.Value.Add(value)
 	settle(&entry, after)
 	return entry, nil
 }
 
-// Restore registra una entrada a valor exacto: la reversión de un consumo (valor original del
-// consumo que compensa) o la entrada de una elaboración (valor de lo consumido). Si la entrada
-// cubre parte del déficit, la cantidad pendiente de costo baja en la misma proporción que en una
-// recepción. Si deja la cantidad en cero con valor distinto de cero, el residuo lo corrige
-// (regla 6).
+// Restore registra la reversión de un consumo (consumption_reversal). El movimiento conserva
+// exactamente el valor original del consumo que compensa (así el consumo neto de la partida sigue
+// siendo exacto) y se aplica como una entrada con documento (regla 2, Receive): con Q < 0, las
+// d = min(q, −Q) unidades que cubren el déficit se realinean con un ajuste de costo separado
+// (provisional de d − valor original × d / q) y la cantidad pendiente de costo baja en
+// min(pendiente, d). Sin ese ajuste, sumar el valor original a un valor negativo acumulado a otro
+// costo distorsionaría el promedio o dejaría V < 0 con Q > 0. Base «original».
 func Restore(state Valuation, quantity, value decimal.Decimal) (Entry, error) {
 	if err := requirePositive(quantity); err != nil {
 		return Entry{}, err
@@ -340,14 +359,11 @@ func Restore(state Valuation, quantity, value decimal.Decimal) (Entry, error) {
 	if value.IsNegative() {
 		return Entry{}, invalid("El valor de la reversión no puede ser negativo.")
 	}
-	exact := value.Round(valueScale)
-	after := state.clone()
-	entry := Entry{Value: exact, UnitCost: unitCostOf(exact, quantity), Basis: basisOriginal}
-	covered := minimum(quantity, state.deficit())
-	after.PendingQuantity = after.PendingQuantity.Sub(minimum(after.PendingQuantity, covered))
-	after.Quantity = state.Quantity.Add(quantity)
-	after.Value = state.Value.Add(exact)
-	settle(&entry, after)
+	entry, err := Receive(state, quantity, value)
+	if err != nil {
+		return Entry{}, err
+	}
+	entry.Basis = basisOriginal
 	return entry, nil
 }
 

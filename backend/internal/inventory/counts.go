@@ -107,9 +107,9 @@ type Count struct {
 }
 
 // CountLine es un renglón del conteo. Sin captura, counted es false y los datos de captura son null.
-// La existencia teórica (a la hora del renglón), la diferencia y la existencia actual del almacén
-// solo con theoretical_visible: en un conteo sin aplicar se calculan al consultar; en uno aplicado
-// son las que se aplicaron.
+// La existencia teórica (a la hora del renglón), la diferencia, la existencia actual del almacén y
+// el movimiento aplicado (movement_id, movement_kind, movement_label) solo con theoretical_visible:
+// en un conteo sin aplicar se calculan al consultar; en uno aplicado son las que se aplicaron.
 type CountLine struct {
 	LineNo              int                    `json:"line_no"`
 	Item                ItemReference          `json:"item"`
@@ -271,6 +271,11 @@ func (handler *service) attachCountLines(count *Count) error {
 			line.CountedQuantity = optionalQuantityText(parseDatabaseOptional(counted))
 			line.CapturedQuantity = optionalQuantityText(parseDatabaseOptional(captured))
 			line.Presentation, line.Unit, line.CaptureLabel = presentation, unit, &label
+		}
+		if !count.TheoreticalVisible {
+			// El movimiento de un renglón aplicado (sobrante o faltante) revelaría el sentido de la
+			// diferencia y, su existencia, qué renglones tuvieron diferencia.
+			line.MovementID, line.MovementKind = nil, nil
 		}
 		if line.MovementKind != nil {
 			movementLabel := movementKindLabels[*line.MovementKind]

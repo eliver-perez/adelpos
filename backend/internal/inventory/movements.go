@@ -5,9 +5,10 @@ import (
 )
 
 // Consulta del libro de movimientos (inventory.movements.read). Las cantidades son visibles con el
-// permiso; valores, costos unitarios, base de costo, «costo pendiente» y valuación posterior solo
-// con inventory.costs.read. Sin ese permiso tampoco se listan los ajustes de costo, que son solo
-// valor (cantidad cero).
+// permiso; valores, costos unitarios, base de costo y «costo pendiente» solo con
+// inventory.costs.read. Sin ese permiso tampoco se listan los ajustes de costo, que son solo valor
+// (cantidad cero). La valuación del insumo después del movimiento (valuation_value_after) es una
+// valuación por insumo: exige además inventory.valuation.read.
 
 var movementKindLabels = map[string]string{
 	KindInitial:             "Existencia inicial",
@@ -83,6 +84,7 @@ type Movement struct {
 	CostBasis              *string       `json:"cost_basis"`
 	CostBasisLabel         *string       `json:"cost_basis_label"`
 	CostPending            *bool         `json:"cost_pending"`
+	ValuationVisible       bool          `json:"valuation_visible"`
 	ValuationValueAfter    *string       `json:"valuation_value_after"`
 	OccurredAt             time.Time     `json:"occurred_at"`
 	RecordedAt             time.Time     `json:"recorded_at"`
@@ -106,6 +108,9 @@ type MovementPage struct {
 	Page         int        `json:"page"`
 	PageSize     int        `json:"page_size"`
 	CostsVisible bool       `json:"costs_visible"`
+	// ValuationVisible indica que valuation_value_after viaja (costs_visible y
+	// inventory.valuation.read).
+	ValuationVisible bool `json:"valuation_visible"`
 }
 
 const movementColumns = `SELECT m.id,m.seq,m.item_id,i.code,i.name,u.id,u.code,u.name,u.dimension,m.warehouse_id,w.name,m.kind,
@@ -158,10 +163,20 @@ func (handler *service) scanMovement(row interface{ Scan(...any) error }) (Movem
 		label := costBasisLabels[basis]
 		movement.CostBasis, movement.CostBasisLabel = &basis, &label
 		movement.CostPending = &pending
+	}
+	movement.ValuationVisible = handler.movementValuationVisible()
+	if movement.ValuationVisible {
 		valuation := exactMoneyText(parseDatabaseDecimal(valuationValue))
 		movement.ValuationValueAfter = &valuation
 	}
 	return movement, nil
+}
+
+// movementValuationVisible indica si un movimiento puede llevar la valuación del insumo después de
+// aplicarlo: es un valor por insumo (inventory.valuation.read) y, como la diferencia entre dos
+// movimientos consecutivos revela el valor de cada uno, también exige inventory.costs.read.
+func (handler *service) movementValuationVisible() bool {
+	return handler.costsVisible() && handler.valuationVisible()
 }
 
 // listMovements consulta el libro con filtros de insumo, almacén, tipo, origen y fechas de negocio
@@ -211,7 +226,8 @@ func (handler *service) listMovements(_ []string) (any, error) {
 	if until != nil {
 		set.add("m.occurred_at<$%d", *until)
 	}
-	result := MovementPage{Items: []Movement{}, Page: page, PageSize: size, CostsVisible: handler.costsVisible()}
+	result := MovementPage{Items: []Movement{}, Page: page, PageSize: size, CostsVisible: handler.costsVisible(),
+		ValuationVisible: handler.movementValuationVisible()}
 	err = handler.tx.QueryRow(handler.ctx, "SELECT count(*) FROM app.inventory_movements m"+set.where(), set.arguments...).Scan(&result.Total)
 	if err != nil {
 		return nil, err
