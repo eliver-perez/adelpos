@@ -3,6 +3,13 @@ import type { Page } from '@playwright/test';
 
 const serverURL = 'http://127.0.0.1:8183';
 
+// Terminal temporal que este mismo proceso de Playwright configuró, por token de aprovisionamiento.
+// La aceptación corre con un solo worker: cuando varias especificaciones comparten la base temporal
+// (por ejemplo restaurant.spec.ts e inventory.spec.ts en la corrida completa), la primera configura
+// el establecimiento y el catálogo mínimo, y las siguientes reutilizan esa terminal en lugar de
+// rechazar la base. Una base configurada por otro proceso se sigue rechazando.
+const preparedTerminals = new Map<string, { deviceID: string; deviceToken: string }>();
+
 export async function installDriver(page: Page) {
   let fullscreen = true;
   let streamGeneration = 0;
@@ -57,6 +64,7 @@ export async function installDriver(page: Page) {
     return { status: response.status, body: result };
   }
   const setup = await request('GET', 'setup/status');
+  const prepared = setup.body.configured ? preparedTerminals.get(provisioning) : undefined;
   if (!setup.body.configured) {
     await request('POST', 'setup', {
       name: 'Aceptación temporal',
@@ -65,85 +73,95 @@ export async function installDriver(page: Page) {
       theme: 'light',
       terminal_name: 'WebView temporal',
     });
+    preparedTerminals.set(provisioning, { deviceID, deviceToken });
+  } else if (prepared) {
+    deviceID = prepared.deviceID;
+    deviceToken = prepared.deviceToken;
   } else {
     throw new Error('La aceptación debe comenzar con una base sin configurar');
   }
-  await request('POST', 'auth/login', { username: 'admin', password: 'admin' });
-  // Catálogo mínimo de la base temporal: una categoría con color de la paleta, un producto que se
-  // agrega con un toque y otro con una elección obligatoria (guarnición, con papas incluidas y
-  // aros de cebolla con cargo extra) para el recorrido de la captura táctil.
-  const category = (
-    await request('POST', 'catalog/categories', {
-      name: 'Platillos',
-      active: true,
-      color: '#d64545',
-    })
-  ).body;
-  const product = (
-    await request('POST', 'catalog/products', {
-      name: 'Filete de prueba',
-      active: true,
-      category_id: category.id,
-      code: 'FILETE',
-      kind: 'product',
-      base_price: '150',
-    })
-  ).body;
-  const complements: { id: string }[] = [];
-  for (const name of ['Papas a la francesa', 'Aros de cebolla']) {
-    complements.push(
-      (
-        await request('POST', 'catalog/complements', {
-          name,
-          active: true,
-          product_id: null,
-          ingredient_id: null,
-        })
-      ).body,
-    );
-  }
-  const garnish = (
-    await request('POST', 'catalog/groups', {
-      name: 'Guarnición',
-      active: true,
-      pricing_mode: 'value',
-      min_quantity: '1',
-      max_quantity: '1',
-      options: complements.map((complement, index) => ({
-        complement_id: complement.id,
-        portion_id: null,
-        reference_value: '0',
-        extra_price: index === 0 ? '0' : '10',
-        max_quantity: null,
+  // Catálogo mínimo, solo al configurar la base: una especificación posterior lo encuentra hecho.
+  async function prepareCatalog() {
+    await request('POST', 'auth/login', { username: 'admin', password: 'admin' });
+    // Catálogo mínimo de la base temporal: una categoría con color de la paleta, un producto que se
+    // agrega con un toque y otro con una elección obligatoria (guarnición, con papas incluidas y
+    // aros de cebolla con cargo extra) para el recorrido de la captura táctil.
+    const category = (
+      await request('POST', 'catalog/categories', {
+        name: 'Platillos',
         active: true,
-        tiers: [],
-      })),
-    })
-  ).body;
-  const fries = garnish.options?.find(
-    (option: { complement_id: string }) => option.complement_id === complements[0]?.id,
-  );
-  const burger = (
-    await request('POST', 'catalog/products', {
-      name: 'Hamburguesa de prueba',
-      active: true,
-      category_id: category.id,
-      code: 'HAMBURGUESA',
-      kind: 'product',
-      base_price: '120',
-      groups: [
-        {
-          group_id: garnish.id,
-          min_quantity: null,
+        color: '#d64545',
+      })
+    ).body;
+    const product = (
+      await request('POST', 'catalog/products', {
+        name: 'Filete de prueba',
+        active: true,
+        category_id: category.id,
+        code: 'FILETE',
+        kind: 'product',
+        base_price: '150',
+      })
+    ).body;
+    const complements: { id: string }[] = [];
+    for (const name of ['Papas a la francesa', 'Aros de cebolla']) {
+      complements.push(
+        (
+          await request('POST', 'catalog/complements', {
+            name,
+            active: true,
+            product_id: null,
+            ingredient_id: null,
+          })
+        ).body,
+      );
+    }
+    const garnish = (
+      await request('POST', 'catalog/groups', {
+        name: 'Guarnición',
+        active: true,
+        pricing_mode: 'value',
+        min_quantity: '1',
+        max_quantity: '1',
+        options: complements.map((complement, index) => ({
+          complement_id: complement.id,
+          portion_id: null,
+          reference_value: '0',
+          extra_price: index === 0 ? '0' : '10',
           max_quantity: null,
-          included: [{ option_id: fries?.id, quantity: '1' }],
-        },
-      ],
-    })
-  ).body;
-  if (!product.id || !fries || !burger.id)
-    throw new Error('No se pudo preparar el catálogo temporal');
-  await request('POST', 'auth/logout');
+          active: true,
+          tiers: [],
+        })),
+      })
+    ).body;
+    const fries = garnish.options?.find(
+      (option: { complement_id: string }) => option.complement_id === complements[0]?.id,
+    );
+    const burger = (
+      await request('POST', 'catalog/products', {
+        name: 'Hamburguesa de prueba',
+        active: true,
+        category_id: category.id,
+        code: 'HAMBURGUESA',
+        kind: 'product',
+        base_price: '120',
+        groups: [
+          {
+            group_id: garnish.id,
+            min_quantity: null,
+            max_quantity: null,
+            included: [{ option_id: fries?.id, quantity: '1' }],
+          },
+        ],
+      })
+    ).body;
+    if (!product.id || !fries || !burger.id)
+      throw new Error('No se pudo preparar el catálogo temporal');
+    await request('POST', 'auth/logout');
+  }
+  if (!prepared) {
+    await prepareCatalog();
+  }
 
   async function streamEvents(
     identifier: number,

@@ -109,3 +109,45 @@ it('publica los eventos de caja con su tipo y turno para refrescar Caja y el cob
   unmount();
   window.removeEventListener('adel-cash-change', listener);
 });
+
+it('publica los eventos de inventario solo con su tipo para recargar la pestaña visible', async () => {
+  const inventory = vi.fn();
+  const listener = (event: Event) => inventory((event as CustomEvent).detail);
+  window.addEventListener('adel-inventory-change', listener);
+  const { unmount } = renderHook(() => useRealtime('usuario-inventario', true));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('events_start', expect.any(Object)));
+  const options = vi.mocked(invoke).mock.calls[0]?.[1] as {
+    channel: { onmessage: (message: unknown) => void };
+  };
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        { id: 'cocina-2', sequence: 1, kind: 'kitchen.changed', scope: 'kitchen', version: 1 },
+      ],
+      cursor: 1,
+    }),
+  );
+  // Los cambios de otras áreas no recargan Inventarios.
+  expect(inventory).not.toHaveBeenCalled();
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        {
+          id: 'inventario-1',
+          sequence: 2,
+          kind: 'inventory.stock.changed',
+          scope: 'inventory',
+          version: 1,
+          aggregate_id: 'almacen-1',
+        },
+      ],
+      cursor: 2,
+    }),
+  );
+  expect(inventory).toHaveBeenCalledWith({ kinds: ['inventory.stock.changed'] });
+  // Un reinicio del cursor también obliga a consultar de nuevo.
+  act(() => options.channel.onmessage({ reset: true, cursor: 9000 }));
+  expect(inventory).toHaveBeenLastCalledWith({ kinds: [] });
+  unmount();
+  window.removeEventListener('adel-inventory-change', listener);
+});

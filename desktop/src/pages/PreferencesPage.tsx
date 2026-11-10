@@ -21,6 +21,8 @@ export const screens: ScreenEntry[] = [
   // Etapa 7: administración de caja (turno, movimientos, arqueo, historial y reportes).
   { id: 'cash', label: 'Caja', permission: 'cash.shifts.read' },
   { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
+  // Etapa 8: inventarios (insumos, almacenes, existencias, movimientos y su configuración).
+  { id: 'inventory', label: 'Inventarios', permission: 'inventory.read' },
   { id: 'status', label: 'Estado del sistema', permission: '' },
   { id: 'users', label: 'Usuarios', permission: 'users.read' },
   { id: 'roles', label: 'Roles', permission: 'roles.read' },

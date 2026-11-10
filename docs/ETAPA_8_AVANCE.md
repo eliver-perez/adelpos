@@ -390,3 +390,145 @@ En la copia aislada del scratchpad, con el clúster temporal del puerto 55499 (n
 - `cargo test --locked --offline`: 17 aprobadas (las 15 anteriores y las 2 de inventario; 1 ignorada, la misma de
   antes).
 - Playwright no se ejecutó: la fase A no cambia pantallas (la interfaz es A2).
+
+## Fase A · interfaz (A2)
+
+Sección principal **Inventarios** (`desktop/src/pages/inventory/`) sobre el contrato de A1. En Go solo cambió la
+pantalla de inicio (`"inventory": "inventory.read"` en `administration/preferences.go`, con su prueba en
+`security_test.go` y la nota en `API_CONTRACTS.md`); el contrato de inventario no cambió. La 0010 no se aplicó a la
+instalación real.
+
+### Pantallas
+
+La pantalla `inventory` «Inventarios» está en la lista `screens` después de Catálogo, visible con `inventory.read`, y
+se puede elegir como pantalla de inicio. El menú principal no usa iconos; el icono nuevo `inventory` de `Icon.tsx`
+(caja, mismo trazo) acompaña al botón «Existencia inicial». `InventoryPage.tsx` sigue el patrón de `CashPage`:
+pestañas por permiso, sin pestañas vacías, y el panel «Reintentar con el mismo identificador» si una escritura quedó
+incierta.
+
+| Pestaña       | Permiso                                                      | Contenido                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resumen       | `inventory.read`                                             | «Control de inventario» activado (desde cuándo) o desactivado, con la explicación de que solo consume lo liberado a cocina después de activarlo; «Administrar funciones» abre Configuración → Funciones del establecimiento (con `settings.features.manage` y `settings.read`), sin un segundo interruptor. Cifras de Go: insumos activos e inactivos, almacenes, existencias negativas, bajo mínimo, punto de reabastecimiento, costo pendiente (solo con costos) y valor del inventario (solo con valuación). Las tres de existencia abren Existencias filtrada.          |
+| Insumos       | `inventory.read` (edición con `inventory.items.manage`)      | Listado con búsqueda, categoría (incluida «Sin categoría»), estado, tipo y paginación de 25. Panel de alta y edición (nombre, código, código de barras, descripción, categoría, unidad base, activo, costo de referencia, existencia mínima y punto de reabastecimiento) y, en el mismo panel, presentaciones de compra (nombre, contenido en la unidad base o en otra unidad de la dimensión, código de barras, predeterminada para compra, activa). Acordeones «Categorías de insumos» (con `PositionField`) y «Unidades de medida» (alta y edición de unidades propias). |
+| Almacenes     | `inventory.read` (edición con `inventory.warehouses.manage`) | Almacenes con su descripción, estado, estaciones que consumen de cada uno y «Predeterminado» marcado (su interruptor de activo está deshabilitado). «Almacén de consumo por estación»: almacén vigente, «Usar el predeterminado», desde cuándo y quién, y el historial en un acordeón por estación.                                                                                                                                                                                                                                                                         |
+| Existencias   | `inventory.stock.read`                                       | Por insumo: existencia (total o en el almacén filtrado), total, desglose por almacén, mínimo y reabastecimiento, situación y categoría; costo promedio y valor del insumo solo con `costs_visible`, valor total solo con `valuation_visible`. Filtros de búsqueda, almacén, categoría, situación (negativas, en cero, positivas, bajo mínimo, reabastecimiento) e insumos activos o inactivos. Las negativas se resaltan con borde y fondo de advertencia, etiqueta y un aviso de estado que aclara que no bloquean.                                                        |
+| Movimientos   | `inventory.movements.read`                                   | Libro del más reciente al más antiguo: fecha de negocio y de registro, insumo, almacén, tipo, cantidad con signo, existencia después, origen legible y motivo, responsable (persona o proceso) y, con costos, valor con signo, costo unitario y base de costo. Filtros de insumo, almacén, tipo, origen y fechas de negocio con `OptionalDateField`; paginación de 50. Sin identificadores técnicos.                                                                                                                                                                        |
+| Configuración | `inventory.settings.manage`                                  | «El IVA de las compras forma parte del costo», hora de corte del día operativo (HH:MM), aviso de productos sin receta y frecuencia de conteo con intervalo personalizado (1–365 días), con revisión.                                                                                                                                                                                                                                                                                                                                                                        |
+
+«Existencia inicial» (en Existencias, con `inventory.adjustments.authorize` e `inventory.costs.manage`): almacén
+(el predeterminado propuesto), motivo opcional y renglones con insumo (búsqueda por nombre, código o código de barras),
+cantidad, unidad base, otra unidad de la dimensión o presentación, y costo unitario por lo capturado o «Usar el costo
+de referencia». El resultado muestra cada renglón convertido por Go, la existencia después, el valor (con costos) y
+las advertencias que devuelva Go (además de un aviso por cada una).
+
+### Decisiones y desviaciones menores
+
+1. **Configuración solo con `inventory.settings.manage`.** Go deja leer los parámetros con `inventory.read`, pero la
+   pestaña de solo lectura no aporta; las categorías y unidades, que administra `inventory.items.manage`, viven en
+   Insumos por la misma razón.
+2. **Presentaciones después del alta.** Go necesita el identificador del insumo: «Crear insumo» deja el panel abierto
+   con el insumo guardado y su sección de presentaciones, sin volver al listado.
+3. **Costo de referencia.** Sin `costs_visible` no aparece en el listado ni en el panel y nunca se envía. Con
+   `costs_visible` y sin `inventory.costs.manage` se muestra de solo lectura. Al editar se envía solo si cambió o si
+   cambió la unidad base (el costo es por unidad base; Go exige recapturarlo). El tipo (`kind`) se envía siempre: Go
+   pondría `purchased` si faltara.
+4. **Cantidades.** `inventoryFormat.ts` solo da formato al texto de Go: miles, menos tipográfico, signo explícito en
+   movimientos y la abreviatura de la unidad unida por un espacio de no separación («25,000 g», «+50 kg»). La captura
+   usa campos de texto con dos formas nuevas en `services/numericInput.ts`: `inventoryQuantityShape` (6 decimales,
+   hasta 10 enteros) e `inventoryCostShape` (10 decimales, hasta 7 enteros, también para equivalencias), iguales a los
+   límites de Go. La unidad del sistema «porción» se muestra con su abreviatura (`porcion`).
+5. **Escrituras.** `useInventoryMutation` envuelve `useRestaurantMutation` con la clave `inventory` del almacén global
+   de pendientes. Ante `REVISION_CONFLICT` o `IDEMPOTENCY_CONFLICT` la pestaña recarga y el aviso dice «Se cargaron los
+   datos vigentes: revísalos y vuelve a guardar»; los editores llevan la clave `id:revisión`, así que se vuelven a
+   montar con la versión vigente (lo capturado y no guardado se pierde, igual que en Cobros).
+6. **Desactivar se confirma al pulsar el interruptor** (`ActiveToggle`, tono de peligro) en insumos, presentaciones,
+   categorías, unidades y almacenes; el cambio se aplica al guardar. `Form` no permite cancelar un guardado desde
+   `onSave` sin mostrar un error, por eso la confirmación va antes.
+7. **Existencia inicial.** Siempre se confirma (el libro no se edita ni se borra) y la confirmación nombra los insumos
+   que usarán el costo de referencia y su costo si es visible. Las cadenas viajan tal como se capturaron; la unidad
+   base no envía `unit_id`. La fecha de negocio no se captura (Go usa la hora del servidor; el contrato la admite como
+   opcional). Sin costos visibles no se sabe si hay costo de referencia: el interruptor se ofrece y Go responde
+   `REFERENCE_COST_MISSING` si falta.
+8. **Estación → almacén.** El almacén predeterminado no se ofrece como opción explícita: «Usar el predeterminado» envía
+   `null`, para que una estación sin asignación siga siempre al predeterminado.
+9. **Eventos.** `useRealtime` publica además `adel-inventory-change` con los tipos `inventory.*` (y ante un reinicio
+   del cursor), como ya hacía con `adel-cash-change`; `useResource` acepta `reloadEvent` y las consultas de la sección
+   se recargan solo con ese evento y después de una escritura propia, no con los cambios de cocina o caja ni por
+   sondeo. Una estación creada en Cocina aparece en Almacenes al volver a abrir la pestaña.
+10. **Existencias** filtra por omisión los insumos activos, como cuentan las cifras del resumen.
+11. **Listas de interfaz.** Los tipos de movimiento del filtro repiten las etiquetas de Go; el filtro de origen solo
+    ofrece «Existencia inicial», el único origen de la fase A (las fases B–D agregan los suyos).
+12. **`<select>` en WebKit.** El WebView de macOS dibuja los `<select>` con su apariencia nativa e ignora la altura de
+    44 px; en Inventarios se dibujan como los demás campos (`appearance: none` y una flecha con los tokens del tema).
+    El resto de la aplicación no se tocó: allí los `<select>` siguen con la apariencia nativa en WebKit.
+13. **Playwright con varias especificaciones.** `e2e.sh` sin `SPEC` corre todas las especificaciones en una sola base
+    temporal. `native-driver.ts` recuerda, en memoria del proceso de Playwright (un solo worker), la terminal que
+    configuró y la reutiliza en las especificaciones siguientes (sin volver a sembrar el catálogo); una base
+    configurada por otro proceso se sigue rechazando.
+
+### CSS añadido (`styles.css`, bloque «Etapa 8: Inventarios»)
+
+Solo tokens existentes de ambos temas: tarjetas de cifras (`inventory-figures`, `inventory-figure`, variante de
+advertencia), estado de la función, listas de presentaciones, almacenes y estaciones, etiquetas (`tag-warning`),
+celdas numéricas alineadas a la derecha, fila negativa resaltada (`inventory-row-negative`, `inventory-negative-text`
+y `inventory-negative-notice`), total del inventario, selector de insumo, renglones de la existencia inicial,
+parámetros de configuración, la apariencia de los `<select>` de la sección y espaciado sin márgenes dobles dentro de
+`form-stack`. Las tablas se desplazan dentro de su contenedor; la página no se desborda a 1280 × 720 ni a
+1920 × 1080.
+
+### Limitaciones
+
+- La explicación del resumen describe el comportamiento final del control de inventario; en la fase A todavía no
+  hay consumo (llega en la fase B).
+- La fecha de negocio de la existencia inicial no se captura; la búsqueda de insumos consulta a Go en cada tecla,
+  como el Catálogo.
+- «Existencias negativas» del resumen cuenta pares insumo-almacén (Go), mientras que el filtro «Negativas» sin almacén
+  usa la existencia total del insumo: con existencias de signo distinto en dos almacenes las cifras pueden diferir.
+- Sin verificar en la ventana nativa (WKWebView), con teclado virtual ni en pantalla táctil física.
+
+### Pruebas de la fase A (interfaz)
+
+- **Vitest** (`pages/inventory/inventory.test.tsx` e `inventoryStock.test.tsx`, con `inventoryTestData.ts` y el
+  transporte nativo simulado): la pantalla solo aparece con `inventory.read` (lista `screens` y el menú principal de
+  `App`); pestañas según permisos; resumen con la explicación, «Administrar funciones» sin segundo interruptor, cifras
+  sin costos ni valuación y la de negativas abriendo Existencias filtrada; alta de un insumo (cuerpo exacto, costo y
+  existencia mínima como cadenas, carácter inválido descartado) seguida de una presentación capturada en kilogramos
+  para un insumo en gramos (Go devuelve 2,500 g); costo de referencia oculto y no enviado sin `costs_visible`
+  (aunque haya `inventory.costs.manage`) y `kind` conservado; confirmación al desactivar un insumo y al salir con
+  cambios; almacén predeterminado marcado y sin desactivar, asignación de estación con su revisión y confirmación de
+  peligro al desactivar un almacén; existencias con la negativa resaltada, costos y valuación con permiso y ocultos
+  sin él, filtros de almacén y situación en la consulta, y recarga con eventos de inventario pero no con los de otras
+  áreas; existencia inicial con dos renglones (presentación con costo de referencia y otra unidad con costo capturado)
+  enviados tal como se capturaron, la confirmación que nombra el costo de referencia, cancelarla sin enviar nada y el
+  resultado con advertencias; movimientos sin identificadores, con y sin costos, y todos los filtros en la consulta;
+  configuración con `REVISION_CONFLICT` que recarga la versión vigente y lo explica; formato de cantidades; ningún
+  `type="number"` en el DOM de las pestañas ni en el código de la sección. En `hooks/useRealtime.test.tsx`, el evento
+  `adel-inventory-change` solo con eventos `inventory.*` y ante un reinicio del cursor.
+- **Go**: `TestHomeScreenFallsBackWhenPermissionIsMissing` admite `inventory` con `inventory.read` y lo rechaza sin él.
+- **Playwright** (`desktop/e2e/inventory.spec.ts`, mismo transporte que `restaurant.spec.ts`): abre Inventarios,
+  comprueba las pestañas y el resumen, crea «Harina de prueba» en kilogramos con costo de referencia y la presentación
+  «Costal 25 kg» capturada en gramos (Go la muestra como 25 kg), registra la existencia inicial de 2 costales a $450
+  (50 kg y $900.00), la comprueba en Existencias (desglose, costo promedio $18.00 / kg, valor y total) y en Movimientos
+  (+50 kg, origen, motivo, responsable y valor), vuelve al resumen y consulta a Go la existencia y el movimiento. En
+  cada pestaña comprueba que la página no se desborde a 1280 × 720 ni a 1920 × 1080 en claro y oscuro, y guarda
+  capturas a 1280 × 720.
+
+### Verificación de la fase A (interfaz)
+
+En la copia aislada del scratchpad, con el clúster temporal del puerto 55499 y Go temporal en 8183 (nunca la
+instalación real). La copia incluía el trabajo en curso del servidor de la fase B que había en el árbol al
+sincronizar (la 0011 se aplicó en las bases temporales del navegador).
+
+- `prettier --check`, `gofmt -l`, `cargo fmt --check`, `sync-metadata --check`, `go vet` y
+  `go vet -tags=integration`: aprobados en la última sincronización (en una anterior, `go vet -tags=integration`
+  falló solo en una prueba en curso de la fase B, `internal/operations/inventory_recipes_test.go`, ajena a esta
+  interfaz).
+- `go test -race ./...` (unitarias): todos los paquetes `ok`. Integración de `internal/administration`
+  (`go test -race -tags=integration`): `ok` (53.8 s).
+- Vitest: 41 archivos y 337 pruebas aprobadas (19 nuevas de Inventarios y 1 de `useRealtime`); `tsc --noEmit` y
+  `npm run build` aprobados.
+- `cargo test --locked --offline`: 17 aprobadas, 1 ignorada (la misma de antes).
+- Playwright `inventory.spec.ts`: Chromium aprobado (20.8 s) y WebKit aprobado (20.2 s). Recorrido completo sin
+  `SPEC` (`inventory.spec.ts` y `restaurant.spec.ts` en la misma base temporal): Chromium 2 aprobadas (20.7 s y
+  53.6 s) y WebKit 2 aprobadas (20.2 s y 53.7 s). `restaurant.spec.ts` solo, en una base nueva: Chromium aprobado
+  (54.4 s).

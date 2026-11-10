@@ -28,6 +28,14 @@ func TestHomeScreenFallsBackWhenPermissionIsMissing(t *testing.T) {
 	if allowedHome("cash", []string{"cash.shifts.read"}) != "cash" || allowedHome("cash", []string{"payments.read"}) != "status" {
 		t.Fatal("La pantalla de caja no respeta su permiso como pantalla de inicio")
 	}
+	// Etapa 8: «Inventarios» se admite como inicio con el permiso de consultar inventario; las
+	// existencias sin la sección no bastan.
+	if allowedHome("inventory", []string{"inventory.read"}) != "inventory" {
+		t.Fatal("La pantalla de inventarios debe admitirse como inicio con inventory.read")
+	}
+	if allowedHome("inventory", []string{"inventory.stock.read"}) != "status" {
+		t.Fatal("Sin inventory.read la pantalla de inventarios debe volver a Estado del sistema")
+	}
 }
 
 func TestLegacyPreviewHomeOpensCatalog(t *testing.T) {

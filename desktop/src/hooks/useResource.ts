@@ -8,12 +8,15 @@ export function useResource<T>(
     id?: string;
     query?: Record<string, string>;
     enabled?: boolean;
+    // Evento de la aplicación que vuelve a consultar el recurso. Por omisión, cualquier cambio del
+    // servidor; la sección Inventarios usa solo sus propios cambios (hooks/useInventoryEvents.ts).
+    reloadEvent?: string;
   } = {},
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const { id, enabled = true } = options;
+  const { id, enabled = true, reloadEvent = 'adel-server-change' } = options;
   const queryKey = JSON.stringify(options.query ?? {});
   const generation = useRef(0);
 
@@ -46,13 +49,13 @@ export function useResource<T>(
       window.clearTimeout(timer);
       timer = window.setTimeout(() => void reload(), 75);
     };
-    if (enabled) window.addEventListener('adel-server-change', invalidate);
+    if (enabled) window.addEventListener(reloadEvent, invalidate);
     return () => {
       generation.current++;
       window.clearTimeout(timer);
-      window.removeEventListener('adel-server-change', invalidate);
+      window.removeEventListener(reloadEvent, invalidate);
     };
-  }, [reload, enabled]);
+  }, [reload, enabled, reloadEvent]);
 
   return { data, error, loading, reload };
 }

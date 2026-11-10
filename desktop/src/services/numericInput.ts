@@ -13,6 +13,10 @@ export interface DecimalShape {
 
 export const amountShape: DecimalShape = { decimals: 2, integerDigits: 10 };
 export const quantityShape: DecimalShape = { decimals: 3, integerDigits: 4 };
+// Inventario (etapa 8): cantidades con 6 decimales hasta 1,000,000,000 en la unidad base, y costos
+// unitarios o equivalencias de unidad con 10 decimales hasta 1,000,000 (los límites de Go).
+export const inventoryQuantityShape: DecimalShape = { decimals: 6, integerDigits: 10 };
+export const inventoryCostShape: DecimalShape = { decimals: 10, integerDigits: 7 };
 
 function partialDecimalPattern(shape: DecimalShape): RegExp {
   // Forma parcial aceptable mientras se captura: vacío, "0", "12", "12.", "12.5" o "12.50".
