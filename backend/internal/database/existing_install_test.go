@@ -687,11 +687,11 @@ var inventoryConstraints = []string{
 }
 
 // Simula una instalación existente en esquema 9 (0.7.1) con datos de las etapas anteriores y aplica
-// la 0010 (etapa 8, fase A): nada existente cambia (funciones, permisos de otros roles, gastos de
-// caja con y sin corrección, eventos y estaciones), la 0010 es repetible según el migrador (una
-// segunda ejecución no aplica nada), las siembras son solo de referencia, los permisos de inventario
-// se conceden solo al administrador y las restricciones nuevas tienen nombre y rechazan datos
-// incoherentes. Deja la base vacía al terminar.
+// la 0010 y la 0011 (etapa 8, fases A y B): nada existente cambia (funciones, permisos de otros
+// roles, gastos de caja con y sin corrección, eventos y estaciones), las migraciones son repetibles
+// según el migrador (una segunda ejecución no aplica nada), las siembras son solo de referencia
+// (la 0011 no siembra nada), los permisos de inventario se conceden solo al administrador y las
+// restricciones nuevas tienen nombre y rechazan datos incoherentes. Deja la base vacía al terminar.
 func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
 	u, err := url.Parse(dsn)
@@ -775,14 +775,15 @@ func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-9 {
-		t.Fatalf("la 0010 no se aplicó sobre el esquema 9: %d %v", n, err)
+		t.Fatalf("la 0010 y la 0011 no se aplicaron sobre el esquema 9: %d %v", n, err)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
-		t.Fatal("la 0010 no es repetible")
+		t.Fatal("la 0010 y la 0011 no son repetibles")
 	}
 	checkStage8ExistingData(ctx, t, pool, permissionsBefore, cashierBefore)
 	checkStage8Seeds(ctx, t, pool)
 	checkStage8Constraints(ctx, t, pool)
+	checkStage8PhaseB(ctx, t, pool)
 }
 
 // checkStage8ExistingData comprueba que la 0010 no alteró los datos de las etapas anteriores.
@@ -813,7 +814,8 @@ func checkStage8ExistingData(ctx context.Context, t *testing.T, pool *pgxpool.Po
         (SELECT count(*) FROM app.realtime_events WHERE scope='cash')`).Scan(&permissionsAfter, &cashierAfter, &inventoryRole, &events); err != nil {
 		t.Fatal(err)
 	}
-	if permissionsAfter != permissionsBefore+10 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
+	// 10 permisos de la 0010 (fase A) y 4 de la 0011 (fase B).
+	if permissionsAfter != permissionsBefore+14 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
 		t.Fatalf("Permisos o eventos existentes: %d→%d, cajera %d→%d, inventarios %d, eventos %d",
 			permissionsBefore, permissionsAfter, cashierBefore, cashierAfter, inventoryRole, events)
 	}
@@ -842,7 +844,7 @@ func checkStage8Seeds(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if enabled || enabledAt != nil || units != 6 || warehouses != 1 || items != 0 || movements != 0 || settings != 1 ||
-		administrator != 10 || others != 0 {
+		administrator != 14 || others != 0 {
 		t.Fatalf("Siembras de la 0010: %v %v %d %d %d %d %d %d %d", enabled, enabledAt, units, warehouses, items, movements, settings,
 			administrator, others)
 	}
@@ -981,5 +983,209 @@ func checkStage8Constraints(ctx context.Context, t *testing.T, pool *pgxpool.Poo
 		if _, err := pool.Exec(ctx, statement); err == nil {
 			t.Fatalf("PostgreSQL aceptó %s sobre el libro", statement)
 		}
+	}
+}
+
+// recipeConstraints son las restricciones con nombre explícito de la 0011 (etapa 8, fase B).
+var recipeConstraints = []string{
+	"inventory_ingredient_portions_ingredient_id_fkey", "inventory_ingredient_portions_item_id_fkey",
+	"inventory_ingredient_portions_unit_id_fkey", "inventory_ingredient_portions_actor_id_fkey",
+	"inventory_ingredient_portions_operation_id_fkey", "inventory_ingredient_portions_seq_key",
+	"inventory_ingredient_portions_shape_check", "inventory_recipes_owner_kind_check", "inventory_recipes_product_id_fkey",
+	"inventory_recipes_complement_id_fkey", "inventory_recipes_preparation_mode_check",
+	"inventory_recipes_preparation_item_id_fkey", "inventory_recipes_name_check", "inventory_recipes_revision_check",
+	"inventory_recipes_created_by_fkey", "inventory_recipes_updated_by_fkey", "inventory_recipes_variant_id_fkey",
+	"inventory_recipes_owner_check", "inventory_recipe_versions_recipe_id_fkey", "inventory_recipe_versions_version_check",
+	"inventory_recipe_versions_name_check", "inventory_recipe_versions_yield_quantity_check",
+	"inventory_recipe_versions_yield_unit_id_fkey", "inventory_recipe_versions_yield_base_quantity_check",
+	"inventory_recipe_versions_waste_check", "inventory_recipe_versions_notes_check",
+	"inventory_recipe_versions_created_by_fkey", "inventory_recipe_versions_operation_id_fkey",
+	"inventory_recipe_versions_recipe_version_key", "inventory_recipe_lines_version_id_fkey",
+	"inventory_recipe_lines_line_no_check", "inventory_recipe_lines_component_kind_check",
+	"inventory_recipe_lines_item_id_fkey", "inventory_recipe_lines_preparation_recipe_id_fkey",
+	"inventory_recipe_lines_ingredient_id_fkey", "inventory_recipe_lines_quantity_check", "inventory_recipe_lines_unit_id_fkey",
+	"inventory_recipe_lines_base_quantity_check", "inventory_recipe_lines_pkey", "inventory_recipe_lines_component_check",
+	"inventory_consumption_requests_kind_check", "inventory_consumption_requests_restaurant_unit_id_fkey",
+	"inventory_consumption_requests_version_id_fkey", "inventory_consumption_requests_service_mode_check",
+	"inventory_consumption_requests_state_check", "inventory_consumption_requests_attempts_check",
+	"inventory_consumption_requests_last_error_check", "inventory_consumption_requests_diagnostics_check",
+	"inventory_consumption_requests_seq_key", "inventory_consumption_requests_source_key",
+	"inventory_consumption_requests_processed_check", "inventory_consumption_requests_failed_check",
+	"inventory_unit_consumptions_restaurant_unit_id_fkey", "inventory_unit_consumptions_release_request_id_fkey",
+	"inventory_unit_consumptions_last_request_id_fkey", "inventory_unit_consumptions_last_version_id_fkey",
+	"inventory_unit_consumptions_service_mode_check", "inventory_unit_consumptions_state_check",
+	"inventory_unit_consumptions_release_request_key", "inventory_cancellation_classifications_restaurant_unit_id_fkey",
+	"inventory_cancellation_classifications_request_id_fkey", "inventory_cancellation_classifications_state_check",
+	"inventory_cancellation_classifications_resolution_check", "inventory_cancellation_classifications_classified_by_fkey",
+	"inventory_cancellation_classifications_notes_check", "inventory_cancellation_classifications_revision_check",
+	"inventory_cancellation_classifications_unit_key", "inventory_cancellation_classifications_request_key",
+	"inventory_cancellation_classifications_deadline_check", "inventory_cancellation_classifications_resolution_shape_check",
+	"inventory_productions_recipe_id_fkey", "inventory_productions_recipe_version_id_fkey",
+	"inventory_productions_item_id_fkey", "inventory_productions_warehouse_id_fkey", "inventory_productions_batches_check",
+	"inventory_productions_expected_quantity_check", "inventory_productions_produced_quantity_check",
+	"inventory_productions_waste_quantity_check", "inventory_productions_consumed_value_check",
+	"inventory_productions_notes_check", "inventory_productions_actor_id_fkey", "inventory_productions_operation_id_fkey",
+	"inventory_productions_movement_id_fkey", "inventory_productions_operation_id_key",
+}
+
+// checkStage8PhaseB comprueba la 0011: sin siembras, permisos de la fase B solo del administrador,
+// restricciones con nombre, CHECK seguros ante NULL (con tablas temporales) y versiones, renglones
+// y porciones de solo inserción.
+func checkStage8PhaseB(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var named, rows, granted, others int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM pg_constraint WHERE conname = ANY($1)", recipeConstraints).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != len(recipeConstraints) {
+		t.Fatalf("Faltan restricciones con nombre explícito en la 0011: %d de %d", named, len(recipeConstraints))
+	}
+	err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.inventory_recipes)+(SELECT count(*) FROM app.inventory_recipe_versions)
+            +(SELECT count(*) FROM app.inventory_recipe_lines)+(SELECT count(*) FROM app.inventory_ingredient_portions)
+            +(SELECT count(*) FROM app.inventory_consumption_requests)+(SELECT count(*) FROM app.inventory_unit_consumptions)
+            +(SELECT count(*) FROM app.inventory_cancellation_classifications)+(SELECT count(*) FROM app.inventory_productions),
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='administrator'
+            AND p.permission_key IN ('inventory.recipes.manage','inventory.subrecipes.manage','inventory.production.record',
+                'inventory.waste.record')),
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code<>'administrator'
+            AND p.permission_key IN ('inventory.recipes.manage','inventory.subrecipes.manage','inventory.production.record',
+                'inventory.waste.record'))`).Scan(&rows, &granted, &others)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 || granted != 4 || others != 0 {
+		t.Fatalf("La 0011 no debe sembrar datos y solo concede al administrador: filas %d, administrador %d, otros %d", rows, granted, others)
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Release()
+	if _, err := connection.Exec(ctx, `CREATE TEMP TABLE recipes_check (LIKE app.inventory_recipes INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE lines_check (LIKE app.inventory_recipe_lines INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE portions_check (LIKE app.inventory_ingredient_portions INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE requests_check (LIKE app.inventory_consumption_requests INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE classifications_check (LIKE app.inventory_cancellation_classifications INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE versions_check (LIKE app.inventory_recipe_versions INCLUDING CONSTRAINTS INCLUDING DEFAULTS)`); err != nil {
+		t.Fatal(err)
+	}
+	recipe := "INSERT INTO recipes_check(owner_kind,product_id,variant_id,complement_id,preparation_mode,preparation_item_id,name," +
+		"created_by,updated_by) VALUES (%s,'Receta',gen_random_uuid(),gen_random_uuid())"
+	line := "INSERT INTO lines_check(version_id,line_no,component_kind,item_id,preparation_recipe_id,ingredient_id,quantity,unit_id," +
+		"base_quantity,takeaway_only) VALUES (gen_random_uuid(),1,%s)"
+	request := "INSERT INTO requests_check(kind,restaurant_unit_id,source_id,version_id,released_at,occurred_at,service_mode,state," +
+		"attempts,last_error,processed_at) VALUES (%s)"
+	classification := "INSERT INTO classifications_check(restaurant_unit_id,request_id,cancelled_at,operating_date,deadline_at,state," +
+		"resolution,classified_by,classified_at) VALUES (gen_random_uuid(),gen_random_uuid(),now(),current_date,%s)"
+	fill := func(template, values string) string {
+		return strings.Replace(template, "%s", values, 1)
+	}
+	accepted := []string{
+		fill(recipe, "'product',gen_random_uuid(),NULL,NULL,NULL,NULL"),
+		fill(recipe, "'complement',NULL,NULL,gen_random_uuid(),NULL,NULL"),
+		fill(recipe, "'preparation',NULL,NULL,NULL,'immediate',NULL"),
+		fill(recipe, "'preparation',NULL,NULL,NULL,'stored',gen_random_uuid()"),
+		fill(line, "'item',gen_random_uuid(),NULL,NULL,150,gen_random_uuid(),150,false"),
+		fill(line, "'preparation',NULL,gen_random_uuid(),NULL,50,gen_random_uuid(),50,true"),
+		fill(line, "'ingredient',gen_random_uuid(),NULL,gen_random_uuid(),20,gen_random_uuid(),20,false"),
+		"INSERT INTO portions_check(ingredient_id,actor_id) VALUES (gen_random_uuid(),gen_random_uuid())",
+		"INSERT INTO portions_check(ingredient_id,item_id,quantity,unit_id,base_quantity,actor_id) VALUES " +
+			"(gen_random_uuid(),gen_random_uuid(),0.02,gen_random_uuid(),20,gen_random_uuid())",
+		fill(request, "'release',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'takeaway','pending',0,NULL,NULL"),
+		fill(request, "'amend',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'dine_in','processed',0,NULL,now()"),
+		fill(request, "'cancel',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'dine_in','failed',1,'Error genérico',NULL"),
+		fill(classification, "now()+interval '1 day','pending',NULL,NULL,NULL"),
+		fill(classification, "now()+interval '1 day','not_prepared','automatic',NULL,now()"),
+		fill(classification, "now()+interval '1 day','prepared_waste','manual',gen_random_uuid(),now()"),
+		fill(classification, "now()+interval '1 day','prepared_waste','correction',gen_random_uuid(),now()"),
+	}
+	rejected := []string{
+		// Recetas incoherentes con su tipo (incluido el NULL en la rama que valida).
+		fill(recipe, "'product',NULL,NULL,NULL,NULL,NULL"),
+		fill(recipe, "'product',gen_random_uuid(),NULL,gen_random_uuid(),NULL,NULL"),
+		fill(recipe, "'complement',NULL,gen_random_uuid(),gen_random_uuid(),NULL,NULL"),
+		fill(recipe, "'preparation',NULL,NULL,NULL,NULL,NULL"),
+		fill(recipe, "'preparation',NULL,NULL,NULL,'stored',NULL"),
+		fill(recipe, "'preparation',NULL,NULL,NULL,'immediate',gen_random_uuid()"),
+		fill(recipe, "'menu',gen_random_uuid(),NULL,NULL,NULL,NULL"),
+		// Renglones sin su componente, con dos o con cantidad no positiva; «solo para llevar» en un
+		// renglón de ingrediente.
+		fill(line, "'item',NULL,NULL,NULL,1,gen_random_uuid(),1,false"),
+		fill(line, "'item',gen_random_uuid(),gen_random_uuid(),NULL,1,gen_random_uuid(),1,false"),
+		fill(line, "'ingredient',NULL,NULL,gen_random_uuid(),1,gen_random_uuid(),1,false"),
+		fill(line, "'ingredient',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),1,gen_random_uuid(),1,false"),
+		fill(line, "'ingredient',gen_random_uuid(),NULL,gen_random_uuid(),1,gen_random_uuid(),1,true"),
+		fill(line, "'item',gen_random_uuid(),NULL,NULL,0,gen_random_uuid(),0,false"),
+		// Porción a medias.
+		"INSERT INTO portions_check(ingredient_id,item_id,actor_id) VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid())",
+		"INSERT INTO portions_check(ingredient_id,item_id,quantity,unit_id,base_quantity,actor_id) VALUES " +
+			"(gen_random_uuid(),gen_random_uuid(),0,gen_random_uuid(),0,gen_random_uuid())",
+		// Solicitudes procesadas sin fecha, fallidas sin error, tipo o modalidad desconocidos.
+		fill(request, "'release',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'dine_in','processed',0,NULL,NULL"),
+		fill(request, "'release',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'dine_in','pending',0,NULL,now()"),
+		fill(request, "'release',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'dine_in','failed',0,NULL,NULL"),
+		fill(request, "'refund',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'dine_in','pending',0,NULL,NULL"),
+		fill(request, "'release',gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),now(),now(),'delivery','pending',0,NULL,NULL"),
+		// Clasificaciones: pendiente con resolución, automática como merma o con usuario, manual sin
+		// usuario y corte anterior a la cancelación.
+		fill(classification, "now()+interval '1 day','pending','manual',gen_random_uuid(),now()"),
+		fill(classification, "now()+interval '1 day','prepared_waste','automatic',NULL,now()"),
+		fill(classification, "now()+interval '1 day','not_prepared','automatic',gen_random_uuid(),now()"),
+		fill(classification, "now()+interval '1 day','not_prepared','manual',NULL,now()"),
+		fill(classification, "now()+interval '1 day','not_prepared',NULL,NULL,now()"),
+		fill(classification, "now()-interval '1 day','pending',NULL,NULL,NULL"),
+		// Versión con merma de 100 % o rendimiento cero.
+		"INSERT INTO versions_check(recipe_id,version,name,active,yield_quantity,yield_unit_id,yield_base_quantity," +
+			"production_waste_percent,created_by) VALUES (gen_random_uuid(),1,'V',true,1,gen_random_uuid(),1,100,gen_random_uuid())",
+		"INSERT INTO versions_check(recipe_id,version,name,active,yield_quantity,yield_unit_id,yield_base_quantity,created_by) " +
+			"VALUES (gen_random_uuid(),1,'V',true,0,gen_random_uuid(),0,gen_random_uuid())",
+	}
+	for _, statement := range accepted {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("PostgreSQL rechazó un registro válido de la 0011 (%s): %v", statement, err)
+		}
+	}
+	for _, statement := range rejected {
+		if _, err := connection.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó un registro incoherente de la 0011: %s", statement)
+		}
+	}
+	if _, err := connection.Exec(ctx, "DROP TABLE recipes_check, lines_check, portions_check, requests_check, classifications_check, "+
+		"versions_check"); err != nil {
+		t.Fatal(err)
+	}
+	// Versiones, renglones y porciones reales son de solo inserción.
+	if _, err := pool.Exec(ctx, `INSERT INTO app.catalog_ingredients(id,name) VALUES ('00000000-0000-4000-8000-0000000000b1','Cebolla');
+        INSERT INTO app.inventory_recipes(id,owner_kind,preparation_mode,name,created_by,updated_by)
+            SELECT '00000000-0000-4000-8000-0000000000b2','preparation','immediate','Salsa',id,id FROM app.users WHERE username='cajera';
+        INSERT INTO app.inventory_recipe_versions(id,recipe_id,version,name,active,yield_quantity,yield_unit_id,yield_base_quantity,created_by)
+            SELECT '00000000-0000-4000-8000-0000000000b3','00000000-0000-4000-8000-0000000000b2',1,'Salsa',true,500,un.id,500,u.id
+            FROM app.users u, app.inventory_units un WHERE u.username='cajera' AND un.code='ml';
+        INSERT INTO app.inventory_recipe_lines(version_id,line_no,component_kind,item_id,quantity,unit_id,base_quantity)
+            SELECT '00000000-0000-4000-8000-0000000000b3',1,'item','00000000-0000-4000-8000-0000000000a0',0.4,un.id,0.4
+            FROM app.inventory_units un WHERE un.code='kg';
+        INSERT INTO app.inventory_ingredient_portions(ingredient_id,item_id,quantity,unit_id,base_quantity,actor_id)
+            SELECT '00000000-0000-4000-8000-0000000000b1','00000000-0000-4000-8000-0000000000a0',0.02,un.id,0.02,u.id
+            FROM app.users u, app.inventory_units un WHERE u.username='cajera' AND un.code='kg'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"UPDATE app.inventory_recipe_versions SET active=false",
+		"DELETE FROM app.inventory_recipe_versions",
+		"UPDATE app.inventory_recipe_lines SET quantity=1",
+		"DELETE FROM app.inventory_recipe_lines",
+		"TRUNCATE app.inventory_recipe_lines",
+		"UPDATE app.inventory_ingredient_portions SET item_id=NULL,quantity=NULL,unit_id=NULL,base_quantity=NULL",
+		"DELETE FROM app.inventory_ingredient_portions",
+		"TRUNCATE app.inventory_ingredient_portions",
+	} {
+		if _, err := pool.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó %s sobre un registro de solo inserción", statement)
+		}
+	}
+	// Una variante debe pertenecer al producto de la receta (llave compuesta).
+	if _, err := pool.Exec(ctx, `INSERT INTO app.inventory_recipes(owner_kind,product_id,variant_id,name,created_by,updated_by)
+        SELECT 'product',gen_random_uuid(),gen_random_uuid(),'Ajena',id,id FROM app.users WHERE username='cajera'`); err == nil {
+		t.Fatal("PostgreSQL aceptó una receta de una variante y un producto inexistentes")
 	}
 }

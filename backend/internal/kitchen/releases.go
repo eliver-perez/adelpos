@@ -9,6 +9,7 @@ import (
 
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/inventory"
 )
 
 type unitRecord struct {
@@ -165,6 +166,16 @@ func (handler *service) prepareRelease(release *Release) error {
 			}
 		}
 	}
+	// Inventario (etapa 8, §0-B): con «Control de inventario» activado, una solicitud de consumo por
+	// unidad liberada en esta misma transacción. Es una sola inserción, sin el lock de inventario ni
+	// cálculo de recetas: el trabajador de inventario la procesa después.
+	released := make([]inventory.ReleasedUnit, 0, len(plan))
+	for _, entry := range plan {
+		released = append(released, inventory.ReleasedUnit{UnitID: entry.Unit.ID, VersionID: entry.Unit.VersionID})
+	}
+	if err := inventory.RecordReleases(handler.ctx, handler.tx, release.ID, released, contextSnapshot.Mode); err != nil {
+		return err
+	}
 	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_releases SET state='released',released_at=now(),warnings='[]',
         routing_snapshot=$1,context_snapshot=$2,station_snapshot=$3,revision=revision+1 WHERE id=$4`,
 		encoded(routingSnapshot), encoded(contextSnapshot), encoded(stationSnapshot), release.ID)
@@ -297,6 +308,12 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 			return err
 		}
 	case "item.modified", "item.cancelled":
+		// Inventario (etapa 8): las modificaciones y cancelaciones de unidades ya liberadas se
+		// registran antes de procesar cocina, para que queden aunque el cambio de cocina quede
+		// pendiente por advertencias.
+		if err := inventory.RecordChange(ctx, tx, eventID, kind, payload); err != nil {
+			return err
+		}
 		if err := handler.integrateChange(eventID, accountID, kind, change.After); err != nil {
 			return err
 		}

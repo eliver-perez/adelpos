@@ -237,7 +237,22 @@ export type Operation =
   | 'inventory_assign_station_warehouse'
   | 'inventory_stock'
   | 'inventory_movements'
-  | 'inventory_record_initial_balances';
+  | 'inventory_record_initial_balances'
+  // Etapa 8 (fase B): recetas, porciones, cancelaciones, elaboraciones y diagnóstico del consumo.
+  | 'inventory_recipes'
+  | 'inventory_create_recipe'
+  | 'inventory_recipe'
+  | 'inventory_save_recipe'
+  | 'inventory_recipe_version'
+  | 'inventory_recipe_targets'
+  | 'inventory_ingredient_portions'
+  | 'inventory_save_ingredient_portion'
+  | 'inventory_cancellations'
+  | 'inventory_classify_cancellation'
+  | 'inventory_productions'
+  | 'inventory_record_production'
+  | 'inventory_consumption_requests'
+  | 'inventory_unit_consumption';
 
 export class APIError extends Error {
   constructor(

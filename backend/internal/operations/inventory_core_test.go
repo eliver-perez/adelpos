@@ -109,6 +109,8 @@ func testInventoryCore(t *testing.T, base *restaurantFixture) {
 	t.Run("inventory_settings_feature_and_events", func(t *testing.T) {
 		testInventorySettingsAndFeature(t, fixture)
 	})
+	// Fase B: recetas, subrecetas, porciones, elaboraciones y consumo por liberación.
+	testInventoryRecipesAndConsumption(t, fixture)
 }
 
 // testInventorySeed comprueba las siembras de referencia de la 0010 y que los permisos de

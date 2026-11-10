@@ -40,7 +40,11 @@ var costBasisLabels = map[string]string{
 
 // sourceKindLabels nombra el origen de un movimiento; las fases B–D agregan los suyos.
 var sourceKindLabels = map[string]string{
-	"initial": "Existencia inicial",
+	"initial":      "Existencia inicial",
+	"consumption":  "Liberación a cocina",
+	"amendment":    "Modificación de partida",
+	"cancellation": "Cancelación de partida",
+	"production":   "Elaboración",
 }
 
 // processLabels nombra los procesos de Go responsables de movimientos (fase B en adelante).

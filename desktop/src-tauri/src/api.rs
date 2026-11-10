@@ -141,6 +141,15 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "inventory_stock" => Some((Method::GET, "inventory/stock")),
         "inventory_movements" => Some((Method::GET, "inventory/movements")),
         "inventory_record_initial_balances" => Some((Method::POST, "inventory/initial-balances")),
+        // Etapa 8 (fase B): recetas, porciones, cancelaciones, elaboraciones y diagnóstico del consumo.
+        "inventory_recipes" => Some((Method::GET, "inventory/recipes")),
+        "inventory_create_recipe" => Some((Method::POST, "inventory/recipes")),
+        "inventory_recipe_targets" => Some((Method::GET, "inventory/recipe-targets")),
+        "inventory_ingredient_portions" => Some((Method::GET, "inventory/ingredient-portions")),
+        "inventory_cancellations" => Some((Method::GET, "inventory/cancellations")),
+        "inventory_productions" => Some((Method::GET, "inventory/productions")),
+        "inventory_record_production" => Some((Method::POST, "inventory/productions")),
+        "inventory_consumption_requests" => Some((Method::GET, "inventory/consumption-requests")),
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -457,6 +466,24 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             Method::PUT,
             format!("inventory/station-warehouses/{identifier}"),
         ),
+        // Etapa 8 (fase B): un solo identificador por ruta (la versión de receta tiene ruta propia).
+        "inventory_recipe" => (Method::GET, format!("inventory/recipes/{identifier}")),
+        "inventory_save_recipe" => (Method::PUT, format!("inventory/recipes/{identifier}")),
+        "inventory_recipe_version" => (
+            Method::GET,
+            format!("inventory/recipe-versions/{identifier}"),
+        ),
+        "inventory_save_ingredient_portion" => (
+            Method::PUT,
+            format!("inventory/ingredient-portions/{identifier}"),
+        ),
+        "inventory_classify_cancellation" => (
+            Method::POST,
+            format!("inventory/cancellations/{identifier}/classify"),
+        ),
+        "inventory_unit_consumption" => {
+            (Method::GET, format!("inventory/consumption/{identifier}"))
+        }
         _ => return Err("Operación no autorizada por el puente nativo.".into()),
     };
     Ok((method, path))
@@ -633,6 +660,10 @@ fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "source_id",
             "from",
             "until",
+            // Fase B: tipo de receta, producto, porción configurada.
+            "owner_kind",
+            "product_id",
+            "configured",
         ]
     } else {
         &[]
@@ -1143,6 +1174,96 @@ mod tests {
         assert!(route("inventory_delete_item", Some(identifier)).is_err());
         assert!(route("inventory_save_stock", Some(identifier)).is_err());
         assert!(route("inventory_save_movement", Some(identifier)).is_err());
+    }
+
+    #[test]
+    fn inventory_recipe_and_consumption_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            ("inventory_recipes", Method::GET, "inventory/recipes"),
+            ("inventory_create_recipe", Method::POST, "inventory/recipes"),
+            (
+                "inventory_recipe_targets",
+                Method::GET,
+                "inventory/recipe-targets",
+            ),
+            (
+                "inventory_ingredient_portions",
+                Method::GET,
+                "inventory/ingredient-portions",
+            ),
+            (
+                "inventory_cancellations",
+                Method::GET,
+                "inventory/cancellations",
+            ),
+            (
+                "inventory_productions",
+                Method::GET,
+                "inventory/productions",
+            ),
+            (
+                "inventory_record_production",
+                Method::POST,
+                "inventory/productions",
+            ),
+            (
+                "inventory_consumption_requests",
+                Method::GET,
+                "inventory/consumption-requests",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        for (operation, method, path) in [
+            (
+                "inventory_recipe",
+                Method::GET,
+                format!("inventory/recipes/{identifier}"),
+            ),
+            (
+                "inventory_save_recipe",
+                Method::PUT,
+                format!("inventory/recipes/{identifier}"),
+            ),
+            (
+                "inventory_recipe_version",
+                Method::GET,
+                format!("inventory/recipe-versions/{identifier}"),
+            ),
+            (
+                "inventory_save_ingredient_portion",
+                Method::PUT,
+                format!("inventory/ingredient-portions/{identifier}"),
+            ),
+            (
+                "inventory_classify_cancellation",
+                Method::POST,
+                format!("inventory/cancellations/{identifier}/classify"),
+            ),
+            (
+                "inventory_unit_consumption",
+                Method::GET,
+                format!("inventory/consumption/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        // Las recetas no se borran (se desactivan con una versión nueva) y el consumo no se escribe
+        // desde la interfaz: lo calcula el trabajador de Go.
+        assert!(route("inventory_delete_recipe", Some(identifier)).is_err());
+        assert!(route("inventory_record_consumption", None).is_err());
+        assert!(route("inventory_process_consumption", None).is_err());
+        let mut query = BTreeMap::new();
+        query.insert("owner_kind".to_string(), "preparation".to_string());
+        query.insert("configured".to_string(), "true".to_string());
+        query.insert("state".to_string(), "pending".to_string());
+        assert!(query_allowed("inventory_recipes", &query));
+        let mut rejected = BTreeMap::new();
+        rejected.insert("include_costs".to_string(), "true".to_string());
+        assert!(!query_allowed("inventory_recipes", &rejected));
     }
 
     #[test]

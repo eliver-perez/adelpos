@@ -26,7 +26,7 @@ func write(action func(handler *service, parts []string) (any, error), permissio
 	return &route{permissions: permissions, readOnly: false, action: action}
 }
 
-// resolve enumera las rutas de la fase A. El puente nativo admite un solo identificador por ruta,
+// resolve enumera las rutas de inventario (fases A y B). El puente nativo admite un solo identificador por ruta,
 // siempre en la segunda posición; los registros relacionados viajan en el cuerpo.
 func resolve(method string, parts []string) *route {
 	length := len(parts)
@@ -65,6 +65,25 @@ func resolve(method string, parts []string) *route {
 			// La existencia inicial es una entrada autorizada con costo: exige autorizar ajustes y
 			// administrar costos (§0-B, regla 7 del motor).
 			return write((*service).recordInitialBalances, permissionAdjustmentsAuthorize, permissionCostsManage)
+		// Fase B: recetas, porciones, cancelaciones, elaboraciones y diagnóstico del consumo. Alta de
+		// receta: el permiso depende del tipo (recetas o subrecetas) y se comprueba al decodificar.
+		case "recipes GET":
+			return read((*service).listRecipes)
+		case "recipes POST":
+			return write((*service).createRecipe)
+		case "recipe-targets GET":
+			return read((*service).listRecipeTargets)
+		case "ingredient-portions GET":
+			return read((*service).listIngredientPortions)
+		case "cancellations GET":
+			return read((*service).listCancellations)
+		case "productions GET":
+			// Elaborar o consultar movimientos (se comprueba en la acción).
+			return read((*service).listProductions)
+		case "productions POST":
+			return write((*service).recordProduction, permissionProductionRecord)
+		case "consumption-requests GET":
+			return read((*service).listConsumptionRequests, permissionMovementsRead)
 		}
 		return nil
 	}
@@ -84,11 +103,27 @@ func resolve(method string, parts []string) *route {
 			return write((*service).updateWarehouse, permissionWarehousesManage)
 		case "station-warehouses PUT":
 			return write((*service).assignStationWarehouse, permissionWarehousesManage)
+		case "recipes GET":
+			return read((*service).readRecipeRoute)
+		case "recipes PUT":
+			// Nueva versión: el permiso depende del tipo de la receta (se comprueba antes de escribir).
+			return write((*service).updateRecipe)
+		case "recipe-versions GET":
+			return read((*service).readRecipeVersionRoute)
+		case "ingredient-portions PUT":
+			return write((*service).saveIngredientPortion, permissionRecipesManage)
+		case "consumption GET":
+			return read((*service).readUnitConsumption, permissionMovementsRead)
 		}
 		return nil
 	}
 	if length == 3 && resource == "items" && parts[2] == "presentations" && method == "POST" {
 		return write((*service).createPresentation, permissionItemsManage)
+	}
+	if length == 3 && resource == "cancellations" && parts[2] == "classify" && method == "POST" {
+		// inventory.waste.record hasta el corte o inventory.adjustments.authorize después (se
+		// comprueba en la acción, antes de escribir).
+		return write((*service).classifyCancellation)
 	}
 	return nil
 }

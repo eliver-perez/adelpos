@@ -258,7 +258,8 @@ func checkLedgerConsistency(t *testing.T, fixture *inventoryFixture) {
 			t.Fatalf("El libro no coincide (%s): %d insumos", label, count)
 		}
 	}
-	if rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_valuations") != 4 {
+	if rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_valuations") !=
+		rowCount(t, fixture.restaurantFixture, "SELECT count(DISTINCT item_id) FROM app.inventory_movements") {
 		t.Fatal("Cada insumo con movimientos debe tener su valuación")
 	}
 }
