@@ -180,6 +180,7 @@ func TestScopesAreClosedAndComplete(t *testing.T) {
 		KitchenStations,
 		PaymentMethods,
 		CashExpenseCategories,
+		InventoryCategories,
 	} {
 		if _, known := scopes[scope]; !known {
 			t.Fatalf("falta la definición del alcance %d", scope)
@@ -199,7 +200,7 @@ func TestScopesTiebreakByVisibleColumn(t *testing.T) {
 	if scopes[CategoryQuickNotes].tiebreak() != "text" || scopes[CategoryQuickNotes].group != "category_id" {
 		t.Fatalf("Las indicaciones rápidas no se ordenan por categoría y texto: %+v", scopes[CategoryQuickNotes])
 	}
-	for _, scope := range []Scope{CatalogCategories, PaymentMethods, CashExpenseCategories, DiscountReasons} {
+	for _, scope := range []Scope{CatalogCategories, PaymentMethods, CashExpenseCategories, DiscountReasons, InventoryCategories} {
 		if scopes[scope].tiebreak() != "name" {
 			t.Fatalf("El alcance %d dejó de desempatar por nombre", scope)
 		}

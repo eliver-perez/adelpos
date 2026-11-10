@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
 	"local/ad-el-pos/server/internal/payments"
@@ -100,6 +101,20 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 			return audit(ctx, tx, principal, action, entity, id, before, after, true)
 		})
 		var problem *catalog.Error
+		if errors.As(err, &problem) {
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+		}
+		return result, err
+	}
+	// Inventario (etapa 8): insumos, almacenes, existencias, libro de movimientos y costos.
+	if strings.HasPrefix(route, "inventory/") {
+		result, err := inventory.Handle(ctx, tx, inventory.Request{
+			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
+			Actor: inventory.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
+			return audit(ctx, tx, principal, action, entity, id, before, after, true)
+		})
+		var problem *inventory.Error
 		if errors.As(err, &problem) {
 			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
 		}

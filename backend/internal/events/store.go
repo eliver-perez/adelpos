@@ -99,12 +99,15 @@ func allowed(scope string, permissions []string) bool {
 	if scope == "cash" {
 		return slices.Contains(permissions, "cash.shifts.read") || slices.Contains(permissions, "payments.read")
 	}
+	// Los eventos de inventario (etapa 8) solo identifican el agregado que cambió, nunca costos;
+	// los recibe quien consulta inventario.
 	required := map[string]string{
 		"restaurant":    "accounts.read",
 		"takeaway":      "takeaway.read",
 		"kitchen":       "kitchen.states.read",
 		"printing":      "kitchen.queue.read",
 		"configuration": "kitchen.stations.read",
+		"inventory":     "inventory.read",
 	}[scope]
 	return slices.Contains(permissions, required)
 }

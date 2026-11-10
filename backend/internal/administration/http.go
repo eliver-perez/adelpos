@@ -30,6 +30,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if strings.HasPrefix(request.URL.Path, "/api/v1/catalog/") || strings.HasPrefix(request.URL.Path, "/api/v1/restaurant/") || strings.HasPrefix(request.URL.Path, "/api/v1/kitchen/") {
 		limit = 2 * 1024 * 1024
 	}
+	// La existencia inicial admite hasta 500 renglones por operación (etapa 8).
+	if strings.HasPrefix(request.URL.Path, "/api/v1/inventory/") {
+		limit = 2 * 1024 * 1024
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, limit))
 	if err != nil {
 		writeFault(writer, request, &Fault{Status: 413, Code: "REQUEST_TOO_LARGE", Message: "La solicitud excede el tamaño permitido."})

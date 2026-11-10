@@ -4,13 +4,16 @@ import { api } from './api';
 // existen, guarda su estado en PostgreSQL y lo hace cumplir; la interfaz solo oculta lo que no
 // aplica según esta lista.
 
-export type FeatureCode = 'usd_cash';
+export type FeatureCode = 'usd_cash' | 'inventory_control';
 
 export interface EstablishmentFeature {
   code: FeatureCode | string;
   name: string;
   description: string;
   enabled: boolean;
+  // Fecha y hora en que la función pasó de desactivada a activada por última vez (etapa 8); null si
+  // nunca se activó. Desactivarla la conserva.
+  enabled_at?: string | null;
   revision: number;
   updated_at: string | null;
   updated_by_name: string | null;
