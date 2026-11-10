@@ -45,6 +45,14 @@ func resolve(method string, parts []string) *route {
 		return &route{"cash.shifts.read", true, (*service).shiftMovements}
 	case length == 3 && parts[0] == "shifts" && parts[2] == "usd-rate" && method == "POST":
 		return &route{"payments.usd_rate.manage", false, (*service).setShiftRate}
+	// Motivos de descuento (etapa 7.1): la lista la consulta el formulario de descuento y su
+	// administración usa el permiso de políticas de cobro.
+	case length == 1 && parts[0] == "discount-reasons" && method == "GET":
+		return &route{"payments.read", true, (*service).listDiscountReasons}
+	case length == 1 && parts[0] == "discount-reasons" && method == "POST":
+		return &route{"payments.settings.manage", false, (*service).createDiscountReason}
+	case length == 2 && parts[0] == "discount-reasons" && method == "PATCH":
+		return &route{"payments.settings.manage", false, (*service).updateDiscountReason}
 	}
 	if length < 2 || parts[0] != "accounts" {
 		return nil
@@ -76,7 +84,8 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err := request.Actor.Require(selected.permission); err != nil {
 		return nil, err
 	}
-	if len(parts) > 1 && (parts[0] == "accounts" || parts[0] == "methods" || (parts[0] == "shifts" && parts[1] != "current")) {
+	if len(parts) > 1 && (parts[0] == "accounts" || parts[0] == "methods" || parts[0] == "discount-reasons" ||
+		(parts[0] == "shifts" && parts[1] != "current")) {
 		if err := validateID(parts[1]); err != nil {
 			return nil, err
 		}

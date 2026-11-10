@@ -120,6 +120,10 @@ export async function checkDineInPayment(page: Page) {
   await expect(preview).toContainText('PAGOS REGISTRADOS');
   await expect(preview).toContainText('$50.00');
   await expect(preview).toContainText('CFDI');
+  // Etapa 7.1: con el pago en dólares activo, la precuenta informa el total equivalente con el tipo
+  // de cambio del turno de la caja de esta terminal.
+  await expect(preview).toContainText('Total en dólares (T.C. $');
+  await expect(preview).toContainText('US$');
   const precheck = page.getByRole('region', { name: 'Precuenta' });
   await precheck.getByRole('button', { name: 'Imprimir precuenta', exact: true }).click();
   // El destino de aceptación no tiene hardware: el trabajo queda en la cola con su estado real.
@@ -131,10 +135,27 @@ export async function checkDineInPayment(page: Page) {
   await toolbar.getByRole('button', { name: 'Descuentos y cargos', exact: true }).click();
   const adjustments = page.getByRole('region', { name: 'Descuentos y cargos' });
   await adjustments.getByLabel(/Porcentaje de descuento/).fill('10');
-  await adjustments.getByLabel(/^Motivo/).fill('Cliente frecuente');
+  // Etapa 7.1: el motivo se elige con botones del catálogo sembrado; «Atención» no exige
+  // descripción.
+  const reasons = adjustments.getByRole('group', { name: 'Motivo del descuento' });
+  await expect(reasons.getByRole('button')).toHaveText([
+    'Atención',
+    'Promoción',
+    'Demora',
+    'Cortesía de la casa',
+    'Otro',
+  ]);
+  const attention = reasons.getByRole('button', { name: 'Atención', exact: true });
+  expect((await attention.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await attention.click();
+  await expect(attention).toHaveAttribute('aria-pressed', 'true');
+  await adjustments.getByLabel('Descripción (opcional)').fill('Cliente frecuente');
   await expect(adjustments.getByText('Autorización de supervisor')).toHaveCount(0);
   await adjustments.getByRole('button', { name: /^Aplicar descuento \$15\.00/ }).click();
   await expect(notice(page, 'Descuento registrado: −$15.00.')).toBeVisible();
+  await expect(adjustments.getByRole('list', { name: 'Ajustes de la cuenta' })).toContainText(
+    'Motivo: Atención · Cliente frecuente',
+  );
   await adjustments.getByRole('button', { name: 'Volver', exact: true }).click();
 
   // Pago mixto sucesivo: el saldo restante de $35 con tarjeta liquida y cierra la cuenta.

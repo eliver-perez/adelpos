@@ -7,6 +7,9 @@ import (
 	"local/ad-el-pos/server/internal/events"
 )
 
+// DiscountInput es la captura de un descuento o cortesía. ReasonID es el motivo del catálogo
+// (etapa 7.1), opcional por compatibilidad: sin él rige la regla de la etapa 6 (motivo escrito de
+// 5 a 500 caracteres).
 type DiscountInput struct {
 	OperationID     string              `json:"operation_id"`
 	Scope           string              `json:"scope"`
@@ -15,6 +18,7 @@ type DiscountInput struct {
 	Courtesy        bool                `json:"courtesy"`
 	Concept         string              `json:"concept"`
 	Reason          string              `json:"reason"`
+	ReasonID        *string             `json:"reason_id"`
 	Selections      []Selection         `json:"selections"`
 	ExpectedBalance string              `json:"expected_balance"`
 	Authorization   *AuthorizationInput `json:"authorization"`
@@ -210,9 +214,10 @@ func (handler *service) applyDiscount(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	reason := strings.TrimSpace(input.Reason)
-	if textLength(reason) < 5 || textLength(reason) > 500 {
-		return nil, invalid("Indica el motivo del descuento (5–500 caracteres).")
+	// El motivo se valida antes de cualquier escritura: activo, y con descripción si la exige.
+	choice, err := handler.resolveDiscountReason(input.ReasonID, input.Reason)
+	if err != nil {
+		return nil, err
 	}
 	fallback := "Descuento manual"
 	scope := "discount"
@@ -248,8 +253,10 @@ func (handler *service) applyDiscount(parts []string) (any, error) {
 	// A partir de aquí se escribe: la autorización ya se verificó.
 	id := newID()
 	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.account_adjustments(id,account_id,kind,scope,method,value,amount,courtesy,
-        concept,reason,actor_id,device_id,authorized_by,operation_id) VALUES ($1,$2,'discount',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		id, accountID, input.Scope, input.Method, money(plan.value), plan.Amount, input.Courtesy, concept, reason,
+        concept,reason,reason_id,reason_name,actor_id,device_id,authorized_by,operation_id)
+        VALUES ($1,$2,'discount',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		id, accountID, input.Scope, input.Method, money(plan.value), plan.Amount, input.Courtesy, concept, choice.reason, choice.id,
+		choice.snapshotName(),
 		handler.request.Actor.UserID, handler.request.Actor.DeviceID, approved.authorizedBy(), handler.operationID)
 	if err != nil {
 		return nil, err
@@ -266,7 +273,16 @@ func (handler *service) applyDiscount(parts []string) (any, error) {
 	if err := handler.recordApproval(approved, accountID, plan.amount); err != nil {
 		return nil, err
 	}
-	return handler.finishAdjustment(accountID, id, "payments.discount_applied", plan)
+	return handler.finishAdjustment(accountID, id, "payments.discount_applied", discountAudit{
+		DiscountPlan: plan, ReasonID: choice.id, ReasonName: choice.name,
+	})
+}
+
+// discountAudit conserva en la auditoría el cálculo del descuento y agrega su motivo del catálogo.
+type discountAudit struct {
+	*DiscountPlan
+	ReasonID   *string `json:"reason_id"`
+	ReasonName string  `json:"reason_name,omitempty"`
 }
 
 func (handler *service) finishAdjustment(accountID, adjustmentID, action string, detail any) (any, error) {

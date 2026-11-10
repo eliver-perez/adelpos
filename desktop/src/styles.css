@@ -3514,11 +3514,17 @@ summary {
 }
 .capture-bill-footer {
   display: grid;
+  /* Una sola columna que nunca excede el ancho de la cuenta: con la pista automática, el ancho
+     mínimo de las acciones (icono y texto) la ensanchaba y la cuenta recortaba a la derecha los
+     importes y «Más…» (etapa 7.1, fase D). */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   padding: 10px 14px 12px;
   border-top: 1px solid var(--border);
   background: var(--subtle);
   flex-shrink: 0;
+  /* Contenedor de consulta: las acciones secundarias se compactan según el ancho real del pie. */
+  container: capture-footer / inline-size;
 }
 .capture-totals {
   display: grid;
@@ -3568,6 +3574,23 @@ summary {
   padding: 0 6px;
   font-size: 12px;
 }
+/* Pie angosto (cuenta de 1280 px o menos): el icono va sobre el texto para que las cuatro acciones
+   secundarias quepan en una fila y las principales conserven su texto en una línea, sin cambiar
+   su altura (44 y 56 px) ni su orden. */
+@container capture-footer (max-width: 420px) {
+  .capture-secondary-actions .secondary-button {
+    padding: 2px 3px;
+  }
+  .capture-secondary-actions .icon-label,
+  .capture-primary-actions .icon-label {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .capture-send,
+  .capture-checkout {
+    padding: 4px 8px;
+  }
+}
 .capture-more {
   position: relative;
   display: flex;
@@ -3594,7 +3617,7 @@ summary {
 }
 .capture-primary-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 .capture-primary-actions > :only-child {
@@ -4234,17 +4257,23 @@ summary {
 .app-toast-frame {
   width: var(--width);
 }
-/* Avisos anteriores de la pila apilada: solo asoma su borde detrás del más reciente (la pila no se
-   despliega con el puntero; ver AppToaster). */
+/* Avisos anteriores de la pila apilada: solo asoma el borde de su tarjeta detrás del más reciente
+   (la pila no se despliega con el puntero; ver AppToaster). Sonner envuelve cada aviso propio en
+   [data-content] > [data-title] dentro de su <li>, por eso los selectores son descendientes: con el
+   hijo directo que se usaba antes no se aplicaban, y el texto y los botones de los avisos
+   anteriores asomaban debajo del más reciente (etapa 7.1, fase D). visibility, y no solo la
+   opacidad, impide además tocar sin verlos la acción o el cierre de un aviso tapado. */
 .app-toast-frame[data-expanded='false'][data-front='false'] {
   overflow: hidden;
   border-radius: 14px;
 }
-.app-toast-frame[data-expanded='false'][data-front='false'] > .app-toast {
+.app-toast-frame[data-expanded='false'][data-front='false'] [data-content],
+.app-toast-frame[data-expanded='false'][data-front='false'] [data-title],
+.app-toast-frame[data-expanded='false'][data-front='false'] .app-toast {
   height: 100%;
 }
-.app-toast-frame[data-expanded='false'][data-front='false'] > .app-toast > * {
-  opacity: 0;
+.app-toast-frame[data-expanded='false'][data-front='false'] .app-toast > * {
+  visibility: hidden;
 }
 .app-toast {
   --toast-accent: var(--accent);

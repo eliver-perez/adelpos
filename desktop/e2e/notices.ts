@@ -58,6 +58,91 @@ export async function expectNoticeLayout(page: Page, text: string | RegExp) {
   await expect(message).toHaveCount(0);
 }
 
+// Registro de la vida de los avisos durante todo un recorrido (etapa 7.1, fase D). La página
+// observa la pila cada 100 ms: anota cuándo apareció cada aviso, cuándo Sonner empezó a retirarlo
+// y, mientras otro más reciente lo tapa, si su contenido quedó oculto (solo debe asomar el borde de
+// su tarjeta). Se instala antes de abrir la página.
+interface NoticeLife {
+  tone: string;
+  text: string;
+  first: number;
+  removed: number | null;
+  last: number;
+}
+
+interface NoticeWatch {
+  lives: NoticeLife[];
+  stackedSamples: number;
+  exposed: string[];
+}
+
+export async function watchNotices(page: Page) {
+  await page.addInitScript(() => {
+    const lives = new WeakMap<Element, NoticeLife>();
+    const watch: NoticeWatch = { lives: [], stackedSamples: 0, exposed: [] };
+    (window as unknown as { __adelNotices: NoticeWatch }).__adelNotices = watch;
+    window.setInterval(() => {
+      const now = performance.now();
+      for (const frame of Array.from(document.querySelectorAll('[data-sonner-toast]'))) {
+        const toast = frame.querySelector('.app-toast');
+        if (!toast) {
+          continue;
+        }
+        let life = lives.get(frame);
+        if (!life) {
+          life = {
+            tone: toast.getAttribute('data-tone') ?? '',
+            text: frame.querySelector('.app-toast-message')?.textContent ?? '',
+            first: now,
+            removed: null,
+            last: now,
+          };
+          lives.set(frame, life);
+          watch.lives.push(life);
+        }
+        life.last = now;
+        const removed = frame.getAttribute('data-removed') === 'true';
+        if (removed && life.removed === null) {
+          life.removed = now;
+        }
+        const covered =
+          !removed &&
+          frame.getAttribute('data-mounted') === 'true' &&
+          frame.getAttribute('data-front') === 'false' &&
+          frame.getAttribute('data-expanded') === 'false';
+        if (covered) {
+          watch.stackedSamples += 1;
+          const content = frame.querySelector('.app-toast-content');
+          const visible = content && getComputedStyle(content).visibility !== 'hidden';
+          if (visible && !watch.exposed.includes(life.text)) {
+            watch.exposed.push(life.text);
+          }
+        }
+      }
+    }, 100);
+  });
+}
+
+// Cada aviso de éxito empieza a retirarse a sus 4 s aunque otros más recientes lo tapen (margen
+// para la animación de entrada y el muestreo; un éxito idéntico repetido lo sustituiría y
+// reiniciaría su tiempo, cosa que este recorrido no hace), y un aviso tapado nunca deja ver su
+// texto ni sus botones debajo del más reciente.
+export async function expectNoticesClosedOnTime(page: Page) {
+  const watch = await page.evaluate(
+    () => (window as unknown as { __adelNotices: NoticeWatch }).__adelNotices,
+  );
+  const successes = watch.lives.filter((life) => life.tone === 'success');
+  expect(successes.length).toBeGreaterThan(10);
+  expect(watch.stackedSamples).toBeGreaterThan(0);
+  expect(watch.exposed).toEqual([]);
+  for (const life of successes) {
+    const shown = (life.removed ?? life.last) - life.first;
+    expect(shown, `El aviso «${life.text}» siguió visible ${Math.round(shown)} ms`).toBeLessThan(
+      5000,
+    );
+  }
+}
+
 // En pantalla táctil el puntero queda donde fue el último toque. Un aviso de éxito que aparece
 // bajo ese punto no despliega la pila ni detiene su cierre automático (unos 4 s).
 export async function expectNoticeClosesUnderPointer(page: Page, text: string | RegExp) {

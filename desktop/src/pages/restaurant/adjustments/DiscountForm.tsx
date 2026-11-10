@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Field } from '../../../components/Forms';
+import { Field, Notice } from '../../../components/Forms';
 import { IconLabel } from '../../../components/Icon';
 import { QuantityStepper } from '../../../components/QuantityStepper';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
 import type { FinancialMutation } from '../../../hooks/useFinancialMutation';
 import { useDiscountPreview } from '../../../hooks/usePaymentPreview';
+import { useResource } from '../../../hooks/useResource';
 import { useSupervisorAuthorization } from '../../../hooks/useSupervisorAuthorization';
 import { APIError } from '../../../services/api';
 import { acceptAmountText, toWireAmount } from '../../../services/amountInput';
@@ -15,12 +16,13 @@ import {
   isZeroMoney,
   refreshCodes,
   textLength,
-  validReason,
+  validReasonDescription,
 } from '../../../services/payments';
 import type {
   DiscountInput,
   DiscountMethod,
   DiscountPlan,
+  DiscountReason,
   DiscountScope,
   Finance,
   FinanceLine,
@@ -86,6 +88,86 @@ function DiscountPreview({ plan, courtesy }: { plan: DiscountPlan; courtesy: boo
   );
 }
 
+// Motivo del descuento o la cortesía (etapa 7.1): los motivos activos del catálogo como botones,
+// en su orden visual. Al elegir uno aparece su descripción, obligatoria si el motivo la exige
+// («Otro») y opcional en los demás.
+function ReasonChoice({
+  courtesy,
+  reasons,
+  error,
+  selected,
+  onSelect,
+  description,
+  onDescription,
+  disabled,
+}: {
+  courtesy: boolean;
+  reasons: DiscountReason[] | null;
+  error: string;
+  selected: DiscountReason | null;
+  onSelect: (reason: DiscountReason) => void;
+  description: string;
+  onDescription: (value: string) => void;
+  disabled: boolean;
+}) {
+  const label = courtesy ? 'Motivo de la cortesía' : 'Motivo del descuento';
+  if (error) {
+    return <Notice>{error}</Notice>;
+  }
+  if (!reasons) {
+    return <p className="muted text-sm">Consultando los motivos de descuento…</p>;
+  }
+  if (reasons.length === 0) {
+    return (
+      <Notice>
+        No hay motivos de descuento activos. Actívalos en Cobros, sección «Motivos de descuento».
+      </Notice>
+    );
+  }
+  return (
+    <div className="field">
+      <span>{label}</span>
+      <div className="capture-choices" role="group" aria-label={label}>
+        {reasons.map((reason) => (
+          <button
+            type="button"
+            key={reason.id}
+            className="capture-choice"
+            aria-pressed={selected?.id === reason.id}
+            disabled={disabled}
+            onClick={() => onSelect(reason)}
+          >
+            <span>{reason.name}</span>
+          </button>
+        ))}
+      </div>
+      {selected && (
+        <Field
+          label={
+            selected.requires_description
+              ? `Descripción del motivo «${selected.name}»`
+              : 'Descripción (opcional)'
+          }
+          hint={
+            selected.requires_description
+              ? 'Obligatoria, de 5 a 500 caracteres.'
+              : 'Hasta 500 caracteres.'
+          }
+        >
+          <input
+            type="text"
+            maxLength={500}
+            autoComplete="off"
+            value={description}
+            disabled={disabled}
+            onChange={(event) => onDescription(event.target.value)}
+          />
+        </Field>
+      )}
+    </div>
+  );
+}
+
 // Descuento manual o cortesía (100 %). Go calcula base, importe, porcentaje efectivo y saldo; el
 // límite del usuario y la autorización también los decide Go.
 export function DiscountForm({
@@ -105,7 +187,11 @@ export function DiscountForm({
   const [method, setMethod] = useState<DiscountMethod>('percent');
   const [value, setValue] = useState('');
   const [concept, setConcept] = useState('');
+  const [reasonID, setReasonID] = useState('');
   const [reason, setReason] = useState('');
+  const reasons = useResource<DiscountReason[]>('payments_discount_reasons');
+  const activeReasons = reasons.data ? reasons.data.filter((entry) => entry.active) : null;
+  const selectedReason = activeReasons?.find((entry) => entry.id === reasonID) ?? null;
   const [selections, setSelections] = useState<Record<string, number>>({});
   const [conflict, setConflict] = useState('');
   const locked = mutation.busy || !!mutation.pending;
@@ -132,13 +218,13 @@ export function DiscountForm({
     !!input &&
     !!plan &&
     !preview.validating &&
-    validReason(reason) &&
+    validReasonDescription(selectedReason, reason) &&
     conceptValid &&
     auth.ready &&
     !locked;
 
   async function submit() {
-    if (!input || !canSubmit || mutation.isPending()) {
+    if (!input || !selectedReason || !canSubmit || mutation.isPending()) {
       return;
     }
     // La contraseña se retira del formulario antes de enviar, sea cual sea el resultado.
@@ -146,6 +232,7 @@ export function DiscountForm({
     const body: DiscountInput = {
       ...input,
       concept: concept.trim(),
+      reason_id: selectedReason.id,
       reason: reason.trim(),
       expected_balance: finance.balance,
     };
@@ -256,28 +343,26 @@ export function DiscountForm({
           ))}
         </div>
       )}
-      <div className="form-grid">
-        <Field label="Concepto (opcional)" hint="Hasta 120 caracteres.">
-          <input
-            type="text"
-            maxLength={120}
-            autoComplete="off"
-            value={concept}
-            disabled={locked}
-            onChange={(event) => setConcept(event.target.value)}
-          />
-        </Field>
-        <Field label="Motivo" hint="Obligatorio, de 5 a 500 caracteres.">
-          <input
-            type="text"
-            maxLength={500}
-            autoComplete="off"
-            value={reason}
-            disabled={locked}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
-      </div>
+      <ReasonChoice
+        courtesy={courtesy}
+        reasons={activeReasons}
+        error={reasons.error}
+        selected={selectedReason}
+        onSelect={(next) => setReasonID(next.id)}
+        description={reason}
+        onDescription={setReason}
+        disabled={locked}
+      />
+      <Field label="Concepto (opcional)" hint="Hasta 120 caracteres.">
+        <input
+          type="text"
+          maxLength={120}
+          autoComplete="off"
+          value={concept}
+          disabled={locked}
+          onChange={(event) => setConcept(event.target.value)}
+        />
+      </Field>
       {plan && <DiscountPreview plan={plan} courtesy={courtesy} />}
       {preview.error && (
         <p className="checkout-inline-note" role="alert">

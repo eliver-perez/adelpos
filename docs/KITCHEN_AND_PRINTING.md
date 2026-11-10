@@ -47,6 +47,8 @@ Documentos independientes: una comanda por estación aunque compartan impresora.
 
 El formato admite nombre del establecimiento, notas, precios, texto normal/grande, separación 1–3 y cantidad delante o multiplicador. Los controles de usuario, ESC/GS y caracteres invisibles se eliminan del texto; solo el controlador genera comandos. No existe diseñador visual arbitrario ni ejecución de plantillas.
 
+Indicaciones rápidas por categoría (etapa 7.1): la captura las guarda como texto en las observaciones de la partida (`customization.notes`), unidas por comas con las escritas, por lo que la comanda las imprime en la misma línea «NOTA:» (ajustada al ancho del papel) sin ningún cambio en el enrutamiento, la plantilla ni la cola. Administración en [CATALOG.md](CATALOG.md).
+
 ## Transportes e impresoras
 
 **CUPS**: usa `lpstat`, `lpoptions` y `lp` locales mediante argumentos separados, sin shell. Descubre nombres de colas y opciones; una consulta fallida informa indisponibilidad, no una lista vacía ficticia. Envía archivo temporal privado UTF-8, ancho personalizado, tamaño de letra, copias y título técnico. Lo elimina al terminar. El corte exige una opción admitida por el controlador (`CutMedia`, `CutType` o `Cutter`), capacidad declarada y activación explícita.
@@ -128,6 +130,8 @@ Quedan fuera: agente remoto, KDS independiente, Android, offline durable, invent
 ## Documentos comerciales · etapa 6
 
 Precuentas y tickets de pago se generan en `payments/documents.go` y se encolan con `kitchen.EnqueueCommercial` en la impresora de tickets elegida en las políticas de cobro. Usan `kitchen_tickets.kind` `precheck` o `receipt` y la misma cola, lease, serialización por impresora y resolución de incertidumbre que las comandas, pero no crean liberaciones ni tareas y no aparecen en el listado de comandas (`GET /kitchen/tickets`); sí pueden consultarse por identificador. La reimpresión (`payments/accounts/{id}/documents/reprint`) conserva el contenido exacto; exige que el trabajo original esté enviado o cancelado (un trabajo con error o incierto se resuelve primero en la cola) y responde `PRINT_COPY_PENDING` mientras otra copia siga sin resolver. Un fallo de impresión nunca revierte el pago y el estado del trabajo aparece en los documentos de la cuenta.
+
+Etapa 7.1 (fase D): la precuenta y el ticket imprimen el motivo del catálogo de cada descuento o cortesía junto a su concepto («Descuento manual · Atención») y, con `usd_cash` activa y tipo de cambio del turno, la línea informativa «Total en dólares (T.C. $Y)» con `US$X` después del TOTAL (detalle en [PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md)). Las pruebas unitarias de `payments/documents_test.go` cubren ambas líneas, incluido el ajuste al papel de 58 mm; no se imprimió nada en papel.
 
 ## Documentos de caja y cajón de dinero · etapa 7 (fase C)
 

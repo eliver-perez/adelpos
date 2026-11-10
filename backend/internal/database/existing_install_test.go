@@ -328,7 +328,8 @@ func TestStage71UpgradeOfExistingInstallation(t *testing.T) {
         INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
         SELECT op.id::uuid,u.id,d.id,op.route,'huella','{}' FROM app.users u,app.devices d,
         (VALUES ('00000000-0000-4000-8000-000000000081','POST payments/shifts'),
-                ('00000000-0000-4000-8000-000000000082','POST payments/cash/open-drawer')) AS op(id,route)
+                ('00000000-0000-4000-8000-000000000082','POST payments/cash/open-drawer'),
+                ('00000000-0000-4000-8000-000000000088','POST payments/accounts/descuento')) AS op(id,route)
         WHERE u.username='cajera';
         INSERT INTO app.cash_shifts(id,register_id,opening_float,opened_by,opened_device_id,operation_id,business_date)
         SELECT '00000000-0000-4000-8000-000000000083',d.register_id,500,u.id,d.id,'00000000-0000-4000-8000-000000000081',current_date
@@ -345,6 +346,15 @@ func TestStage71UpgradeOfExistingInstallation(t *testing.T) {
         INSERT INTO app.cash_drawer_events(id,register_id,shift_id,reason,notes,actor_id,device_id,job_id,operation_id)
         SELECT '00000000-0000-4000-8000-000000000087',d.register_id,'00000000-0000-4000-8000-000000000083','manual',
             'Cambio de billetes para el fondo',u.id,d.id,'00000000-0000-4000-8000-000000000086','00000000-0000-4000-8000-000000000082'
+        FROM app.users u,app.devices d WHERE u.username='cajera';
+        INSERT INTO app.catalog_price_lists(name,fallback) VALUES ('Lista de la etapa 7','base');
+        INSERT INTO app.catalog_categories(id,name) VALUES ('00000000-0000-4000-8000-00000000008b','Hamburguesas');
+        INSERT INTO app.restaurant_accounts(id,mode,name,price_list_id,opened_by,assigned_user_id,device_id)
+        SELECT '00000000-0000-4000-8000-000000000089','dine_in','Mesa 4',l.id,u.id,u.id,d.id
+        FROM app.catalog_price_lists l,app.users u,app.devices d WHERE u.username='cajera' AND l.name='Lista de la etapa 7';
+        INSERT INTO app.account_adjustments(id,account_id,kind,scope,method,value,amount,concept,reason,actor_id,device_id,operation_id)
+        SELECT '00000000-0000-4000-8000-00000000008a','00000000-0000-4000-8000-000000000089','discount','account','percent',10,27,
+            'Descuento manual','Cliente frecuente de la etapa 6',u.id,d.id,'00000000-0000-4000-8000-000000000088'
         FROM app.users u,app.devices d WHERE u.username='cajera'`); err != nil {
 		t.Fatal(err)
 	}
@@ -410,6 +420,114 @@ func TestStage71UpgradeOfExistingInstallation(t *testing.T) {
 	}
 	if _, err := connection.Exec(ctx, "DROP TABLE drawer_reason_check"); err != nil {
 		t.Fatal(err)
+	}
+	checkStage71PhaseD(ctx, t, pool, connection)
+}
+
+// checkStage71PhaseD comprueba la fase D de la 0009 sobre la instalación de esquema 8: el descuento
+// histórico queda sin motivo y sin cambios, el catálogo de motivos se siembra, las restricciones
+// tienen nombre explícito y los CHECK no evalúan a NULL.
+func checkStage71PhaseD(ctx context.Context, t *testing.T, pool *pgxpool.Pool, connection *pgxpool.Conn) {
+	t.Helper()
+	var reasonID *string
+	var reason, amount string
+	if err := pool.QueryRow(ctx, `SELECT reason_id::text,reason,amount::text FROM app.account_adjustments
+        WHERE id='00000000-0000-4000-8000-00000000008a'`).Scan(&reasonID, &reason, &amount); err != nil {
+		t.Fatal(err)
+	}
+	if reasonID != nil || reason != "Cliente frecuente de la etapa 6" || amount != "27.00" {
+		t.Fatalf("El descuento histórico cambió al migrar: %v %s %s", reasonID, reason, amount)
+	}
+	var seeded string
+	if err := pool.QueryRow(ctx, `SELECT string_agg(name||':'||requires_description||':'||active||':'||sort_order,'|' ORDER BY sort_order)
+        FROM app.discount_reasons`).Scan(&seeded); err != nil {
+		t.Fatal(err)
+	}
+	if seeded != "Atención:false:true:10|Promoción:false:true:20|Demora:false:true:30|Cortesía de la casa:false:true:40|Otro:true:true:50" {
+		t.Fatalf("Siembra de motivos de descuento: %s", seeded)
+	}
+	var named int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint WHERE conname IN (
+            'discount_reasons_name_check','discount_reasons_name_key','discount_reasons_sort_order_check','discount_reasons_revision_check',
+            'account_adjustments_reason_id_fkey','account_adjustments_reason_kind_check','account_adjustments_reason_name_check',
+            'catalog_category_quick_notes_category_id_fkey','catalog_category_quick_notes_text_check',
+            'catalog_category_quick_notes_sort_order_check','catalog_category_quick_notes_revision_check')`).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != 11 {
+		t.Fatalf("Faltan restricciones con nombre explícito en la fase D: %d de 11", named)
+	}
+	var uniqueIndex bool
+	if err := pool.QueryRow(ctx, `SELECT indisunique FROM pg_index WHERE indexrelid='app.catalog_category_quick_notes_text_key'::regclass`).Scan(&uniqueIndex); err != nil || !uniqueIndex {
+		t.Fatalf("El índice único de indicaciones no existe: %v", err)
+	}
+	// CHECK con tablas temporales que copian solo las restricciones (sin llaves foráneas).
+	if _, err := connection.Exec(ctx, `CREATE TEMP TABLE reasons_check (LIKE app.discount_reasons INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE quick_notes_check (LIKE app.catalog_category_quick_notes INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE adjustments_check (LIKE app.account_adjustments INCLUDING CONSTRAINTS INCLUDING DEFAULTS)`); err != nil {
+		t.Fatal(err)
+	}
+	adjustment := `INSERT INTO adjustments_check(id,account_id,kind,scope,method,value,amount,tax_rate,concept,actor_id,device_id,operation_id,reason_id,reason_name)
+        VALUES (gen_random_uuid(),gen_random_uuid(),%s,gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),%s,%s)`
+	build := func(statement string, values ...string) string {
+		for _, value := range values {
+			statement = strings.Replace(statement, "%s", value, 1)
+		}
+		return statement
+	}
+	accepted := []string{
+		"INSERT INTO reasons_check(name) VALUES ('Atención')",
+		"INSERT INTO reasons_check(name,requires_description) VALUES ('Otro motivo',true)",
+		"INSERT INTO quick_notes_check(category_id,text) VALUES (gen_random_uuid(),'Sin cebolla')",
+		"INSERT INTO quick_notes_check(category_id,text) VALUES (gen_random_uuid(),'Término ½ · sin sal')",
+		build(adjustment, "'discount','account','percent',10,5,NULL,'Descuento'", "gen_random_uuid()", "'Atención'"),
+		build(adjustment, "'discount','account','percent',10,5,NULL,'Descuento'", "NULL", "NULL"),
+		build(adjustment, "'charge','account','amount',30,30,16,'Servicio'", "NULL", "NULL"),
+	}
+	rejected := []string{
+		"INSERT INTO reasons_check(name) VALUES ('')",
+		"INSERT INTO reasons_check(name) VALUES (' Atención')",
+		"INSERT INTO reasons_check(name) VALUES ('" + strings.Repeat("m", 61) + "')",
+		"INSERT INTO reasons_check(name,sort_order) VALUES ('Orden negativo',-10)",
+		"INSERT INTO quick_notes_check(category_id,text) VALUES (gen_random_uuid(),'Sin cebolla, sin sal')",
+		"INSERT INTO quick_notes_check(category_id,text) VALUES (gen_random_uuid(),'')",
+		"INSERT INTO quick_notes_check(category_id,text) VALUES (gen_random_uuid(),'Sin sal ')",
+		"INSERT INTO quick_notes_check(category_id,text) VALUES (gen_random_uuid(),'" + strings.Repeat("a", 81) + "')",
+		"INSERT INTO quick_notes_check(category_id,text,revision) VALUES (gen_random_uuid(),'Sin hielo',0)",
+		// Un cargo nunca lleva motivo de descuento.
+		build(adjustment, "'charge','account','amount',30,30,16,'Servicio'", "gen_random_uuid()", "'Atención'"),
+		// El nombre guardado acompaña siempre al motivo, y solo a él.
+		build(adjustment, "'discount','account','percent',10,5,NULL,'Descuento'", "gen_random_uuid()", "NULL"),
+		build(adjustment, "'discount','account','percent',10,5,NULL,'Descuento'", "NULL", "'Atención'"),
+		build(adjustment, "'discount','account','percent',10,5,NULL,'Descuento'", "gen_random_uuid()", "''"),
+	}
+	for _, statement := range accepted {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("PostgreSQL rechazó un registro válido (%s): %v", statement, err)
+		}
+	}
+	for _, statement := range rejected {
+		if _, err := connection.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó un registro incoherente: %s", statement)
+		}
+	}
+	if _, err := connection.Exec(ctx, "DROP TABLE reasons_check, quick_notes_check, adjustments_check"); err != nil {
+		t.Fatal(err)
+	}
+	// Llaves foráneas e índice único sobre las tablas reales: categoría inexistente y texto que solo
+	// difiere en mayúsculas dentro de la misma categoría.
+	category := "'00000000-0000-4000-8000-00000000008b'"
+	if _, err := pool.Exec(ctx, "INSERT INTO app.catalog_category_quick_notes(category_id,text) VALUES ("+category+",'Sin cebolla')"); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"INSERT INTO app.catalog_category_quick_notes(category_id,text) VALUES (" + category + ",'SIN CEBOLLA')",
+		"INSERT INTO app.catalog_category_quick_notes(category_id,text) VALUES (gen_random_uuid(),'Sin hielo')",
+		"UPDATE app.account_adjustments SET reason_id=gen_random_uuid() WHERE id='00000000-0000-4000-8000-00000000008a'",
+	} {
+		if _, err := pool.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó una referencia o duplicado inválido: %s", statement)
+		}
 	}
 }
 

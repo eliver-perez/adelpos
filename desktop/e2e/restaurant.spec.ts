@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
-import { notice } from './notices';
+import { expectNoticesClosedOnTime, notice, watchNotices } from './notices';
 import { checkCashShift } from './cash-flow';
 import { configureKitchen, checkPreparation } from './kitchen-flow';
 import {
@@ -33,6 +33,72 @@ async function captureThemes(page: Page, testInfo: TestInfo, name: string) {
       await page.screenshot({
         path: testInfo.outputPath(`${name}-${theme}-${size.width}x${size.height}.png`),
       });
+    }
+  }
+  await page.evaluate(() => {
+    document.documentElement.dataset.theme = 'light';
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
+
+// Etapa 7.1 (fase D): el pie de la cuenta de la captura cabe completo a 1280 × 720 y 1920 × 1080
+// en claro y oscuro. Ni el pie ni sus filas (totales, acciones secundarias y principales) se
+// desbordan a lo ancho, y los importes y todos sus botones, «Más…» incluido, quedan dentro de la
+// cuenta y de la ventana (la cuenta oculta lo que sobresale, así que un desborde los recortaba).
+async function expectBillFooterFits(page: Page) {
+  for (const size of [
+    { width: 1280, height: 720 },
+    { width: 1920, height: 1080 },
+  ]) {
+    await page.setViewportSize(size);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((value) => {
+        document.documentElement.dataset.theme = value;
+      }, theme);
+      await page.waitForTimeout(300);
+      const layout = await page.evaluate(() => {
+        const bill = document.querySelector('.capture-bill')!.getBoundingClientRect();
+        const footer = document.querySelector<HTMLElement>('.capture-bill-footer')!;
+        const boxes = [
+          footer,
+          ...Array.from(footer.children),
+          ...Array.from(footer.querySelectorAll('button, dd')),
+        ] as HTMLElement[];
+        return {
+          viewport: window.innerWidth,
+          billLeft: bill.left,
+          billRight: bill.right,
+          boxes: boxes.map((element) => {
+            const box = element.getBoundingClientRect();
+            return {
+              // Botones e importes por su texto; el pie y sus filas por su clase.
+              label: element.matches('button, dd')
+                ? (element.textContent?.trim() ?? '')
+                : `.${element.className.split(' ').join('.')}`,
+              left: box.left,
+              right: box.right,
+              scrollWidth: element.scrollWidth,
+              clientWidth: element.clientWidth,
+            };
+          }),
+        };
+      });
+      expect(layout.boxes.length).toBeGreaterThan(4);
+      for (const box of layout.boxes) {
+        expect(box.scrollWidth, `${box.label} se desborda`).toBeLessThanOrEqual(box.clientWidth);
+        expect(box.left, `${box.label} sale de la cuenta`).toBeGreaterThanOrEqual(
+          layout.billLeft - 0.5,
+        );
+        expect(box.right, `${box.label} sale de la cuenta`).toBeLessThanOrEqual(
+          layout.billRight + 0.5,
+        );
+        expect(box.right, `${box.label} sale de la ventana`).toBeLessThanOrEqual(layout.viewport);
+      }
+      const footer = page.locator('.capture-bill-footer');
+      await expect(footer.getByRole('button', { name: 'Más…', exact: true })).toBeInViewport({
+        ratio: 1,
+      });
+      await expect(footer.locator('.capture-grand-total dd')).toBeInViewport({ ratio: 1 });
     }
   }
   await page.evaluate(() => {
@@ -92,6 +158,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const driver = await installDriver(page);
+  await watchNotices(page);
   await page.goto('/');
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
@@ -281,6 +348,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   }
   await expect(bill.locator('.capture-sync-status')).toHaveText('Guardado');
   await captureThemes(page, testInfo, 'capture');
+  await expectBillFooterFits(page);
   const send = bill.getByRole('button', { name: 'Enviar a cocina · 3', exact: true });
   await expect(send).toBeEnabled();
   await send.click();
@@ -547,5 +615,8 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(
     page.getByRole('button', { name: 'Excepción autorizada de disponibilidad', exact: true }),
   ).toHaveAttribute('aria-expanded', 'false');
+  // Etapa 7.1 (fase D): en todo el recorrido cada éxito se retiró a su tiempo y ningún aviso tapado
+  // dejó ver su contenido debajo del más reciente.
+  await expectNoticesClosedOnTime(page);
   expect(errors).toEqual([]);
 });

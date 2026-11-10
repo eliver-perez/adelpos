@@ -79,6 +79,15 @@ Cada producto y cada combo tienen una **tasa de IVA** elegida con botones en su 
 - Duplicar conserva la tasa. Cambiar la tasa incrementa la revisión del producto, por lo que un borrador abierto recibe `QUOTE_CHANGED` al confirmarse y pide revisar el desglose.
 - La tasa solo afecta lo que se confirme después: cada versión de partida guarda su tasa efectiva al confirmarse (ver [PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md)). Un combo aplica su propia tasa a todo su importe, aunque sus componentes tengan otra.
 
+## Indicaciones rápidas por categoría · etapa 7.1
+
+Cada categoría puede tener una lista ordenada de **indicaciones rápidas para cocina** sin precio (por ejemplo, Hamburguesas: «Sin cebolla», «Bien cocida»; Bebidas: «Sin hielo»), en `app.catalog_category_quick_notes` (migración 0009). Completa la propuesta de [ETAPA_6_1_AVANCE.md](ETAPA_6_1_AVANCE.md) por categoría; las indicaciones propias y exclusiones por producto y los identificadores para reportes quedan fuera.
+
+- **Administración**: en Catálogo → Categorías, al editar una categoría guardada, sección «Indicaciones rápidas para cocina». Requiere `catalog.categories.manage`; cada indicación se guarda por separado (`POST catalog/quick-notes`, `PATCH catalog/quick-notes/{id}`) con su revisión optimista, orden visual por posiciones dentro de su categoría (`internal/ordering`), activación y auditoría en la misma transacción (`catalog.quick-notes.created`, `.updated`, `.reordered`). No se borran: se desactivan. Hasta 40 por categoría.
+- **Texto**: de 1 a 80 caracteres, sin comas (las indicaciones de una partida se guardan unidas por comas), sin saltos de línea ni caracteres de control y sin espacios al inicio o al final; dos indicaciones de la misma categoría no pueden diferir solo en mayúsculas. Go y PostgreSQL (CHECK e índice único con nombre) aplican las mismas reglas.
+- **Captura**: `GET catalog/lookups` entrega `category_quick_notes` (la captura ya carga los lookups una vez; no se agrega ninguna petición por toque). Al personalizar un producto, la sección «Indicaciones para cocina» muestra primero las indicaciones activas de su categoría, en su orden, como botones que se marcan y desmarcan en su lugar; después, las demás indicaciones de la partida, los atajos de las ya usadas en la cuenta (sin repetir ninguna) y «Escribir otra». Cada componente de un combo ofrece las de la categoría de su propio producto.
+- **Pedido y cocina**: la indicación se guarda como texto en `customization.notes`, igual que las escritas; llega a la comanda como «NOTA:» sin cambios en cocina. Editar o desactivar una indicación no cambia las partidas que ya la usan.
+
 ## Disponibilidad, imágenes y concurrencia
 
 Fechas inclusivas, días domingo 0 a sábado 6 e intervalos `[inicio, fin)` en hora del establecimiento. Vacío significa sin restricciones. `24:00` se admite como fin; para cruzar medianoche crear intervalos separados. No se acepta un reloj enviado por el cliente.

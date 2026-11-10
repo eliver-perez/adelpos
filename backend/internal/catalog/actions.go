@@ -110,6 +110,13 @@ func lookups(ctx context.Context, tx pgx.Tx, actor Actor) (any, error) {
 	}
 	result["products"] = products
 	result["palette"] = Palette
+	// La captura recibe las indicaciones rápidas de todas las categorías en esta misma consulta
+	// (una sola petición al abrir la captura, nunca una por toque).
+	notes, err := listQuickNotes(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	result["category_quick_notes"] = notes
 	return result, nil
 }
 

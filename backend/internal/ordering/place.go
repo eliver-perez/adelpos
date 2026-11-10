@@ -24,13 +24,27 @@ const (
 	PaymentMethods
 	// CashExpenseCategories ordena las categorías de gasto pagado desde caja.
 	CashExpenseCategories
+	// DiscountReasons ordena los motivos de descuento (etapa 7.1).
+	DiscountReasons
+	// CategoryQuickNotes ordena las indicaciones rápidas dentro de su categoría (etapa 7.1).
+	CategoryQuickNotes
 )
 
 type scopeDefinition struct {
-	// table es la tabla calificada; todas tienen id, name, sort_order, revision y updated_at.
+	// table es la tabla calificada; todas tienen id, sort_order, revision y updated_at.
 	table string
 	// group es la columna que separa listas independientes; vacía si la lista es única.
 	group string
+	// label es la columna visible que desempata el orden; vacía equivale a name.
+	label string
+}
+
+// tiebreak devuelve la columna que desempata registros con el mismo sort_order.
+func (definition scopeDefinition) tiebreak() string {
+	if definition.label == "" {
+		return "name"
+	}
+	return definition.label
 }
 
 var scopes = map[Scope]scopeDefinition{
@@ -41,6 +55,10 @@ var scopes = map[Scope]scopeDefinition{
 	PaymentMethods:    {table: "app.payment_methods"},
 	// Categorías de gasto de caja (etapa 7).
 	CashExpenseCategories: {table: "app.cash_expense_categories"},
+	// Motivos de descuento e indicaciones rápidas por categoría (etapa 7.1); las indicaciones se
+	// ordenan dentro de su categoría y desempatan por su texto.
+	DiscountReasons:    {table: "app.discount_reasons"},
+	CategoryQuickNotes: {table: "app.catalog_category_quick_notes", group: "category_id", label: "text"},
 }
 
 // Result informa el orden final del registro colocado y los hermanos que cambiaron de número.
@@ -71,7 +89,7 @@ func Place(ctx context.Context, tx pgx.Tx, scope Scope, group string, id, after 
 		query += " WHERE " + definition.group + "=$1"
 		arguments = append(arguments, group)
 	}
-	query += " ORDER BY sort_order,name,id FOR UPDATE"
+	query += " ORDER BY sort_order," + definition.tiebreak() + ",id FOR UPDATE"
 	rows, err := tx.Query(ctx, query, arguments...)
 	if err != nil {
 		return Result{}, err

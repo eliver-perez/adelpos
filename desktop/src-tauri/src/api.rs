@@ -88,6 +88,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_preview" => Some((Method::POST, "catalog/preview")),
         "catalog_upload_image" => Some((Method::POST, "catalog/images")),
         "catalog_reorder_categories" => Some((Method::POST, "catalog/categories/reorder")),
+        // Etapa 7.1 (fase D): indicaciones rápidas por categoría; se leen en los lookups.
+        "catalog_create_quick_note" => Some((Method::POST, "catalog/quick-notes")),
         "payments_settings" => Some((Method::GET, "payments/settings")),
         "payments_save_settings" => Some((Method::PUT, "payments/settings")),
         "payments_save_tax" => Some((Method::PUT, "payments/tax")),
@@ -96,6 +98,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_current_shift" => Some((Method::GET, "payments/shifts/current")),
         "payments_open_shift" => Some((Method::POST, "payments/shifts")),
         "payments_save_usd_settings" => Some((Method::PUT, "payments/settings/usd")),
+        // Etapa 7.1 (fase D): catálogo de motivos de descuento.
+        "payments_discount_reasons" => Some((Method::GET, "payments/discount-reasons")),
+        "payments_create_discount_reason" => Some((Method::POST, "payments/discount-reasons")),
         // Administración de caja (etapa 7): historial, catálogo y cajas con su turno activo.
         "payments_shifts" => Some((Method::GET, "payments/shifts")),
         "payments_cash_catalog" => Some((Method::GET, "payments/cash/catalog")),
@@ -166,6 +171,7 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_get_promotions" => (Method::GET, format!("catalog/promotions/{identifier}")),
         "catalog_save_promotions" => (Method::PATCH, format!("catalog/promotions/{identifier}")),
         "catalog_image" => (Method::GET, format!("catalog/images/{identifier}")),
+        "catalog_save_quick_note" => (Method::PATCH, format!("catalog/quick-notes/{identifier}")),
         "catalog_configuration" => (
             Method::GET,
             format!("catalog/products/{identifier}/configuration"),
@@ -249,6 +255,10 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             format!("restaurant/accounts/{identifier}/release"),
         ),
         "payments_save_method" => (Method::PATCH, format!("payments/methods/{identifier}")),
+        "payments_save_discount_reason" => (
+            Method::PATCH,
+            format!("payments/discount-reasons/{identifier}"),
+        ),
         "payments_shift_movements" => (
             Method::GET,
             format!("payments/shifts/{identifier}/movements"),
@@ -939,6 +949,49 @@ mod tests {
         assert!(route("restaurant_deliver", Some(identifier)).is_err());
         assert!(route("restaurant_pay", Some(identifier)).is_err());
         assert!(route("restaurant_confirm", Some("../../settings")).is_err());
+    }
+
+    #[test]
+    fn discount_reasons_and_quick_notes_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            (
+                "payments_discount_reasons",
+                Method::GET,
+                "payments/discount-reasons",
+            ),
+            (
+                "payments_create_discount_reason",
+                Method::POST,
+                "payments/discount-reasons",
+            ),
+            (
+                "catalog_create_quick_note",
+                Method::POST,
+                "catalog/quick-notes",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        for (operation, method, path) in [
+            (
+                "payments_save_discount_reason",
+                Method::PATCH,
+                format!("payments/discount-reasons/{identifier}"),
+            ),
+            (
+                "catalog_save_quick_note",
+                Method::PATCH,
+                format!("catalog/quick-notes/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        // No hay borrado de motivos ni de indicaciones: se desactivan.
+        assert!(route("payments_delete_discount_reason", Some(identifier)).is_err());
+        assert!(route("catalog_delete_quick_note", Some(identifier)).is_err());
     }
 
     #[test]
