@@ -2,9 +2,9 @@
 
 Verificación por fases del **9 de noviembre de 2026**, zona America/Monterrey, antes de cada commit local de la rama `etapa-7.1` (fase A `9eb7f47`, fase B `58c461e`, fase C `8433b63`, fase D `2df3ecb`). Versión **0.7.1**, API v1, esquema **9** (migración `0009_operation_tables_cash_and_reasons.sql`). Evidencia anterior: [etapa 7](VERIFICATION_STAGE7.md), [etapa 6.2](VERIFICATION_STAGE6_2.md), [etapa 6.1](VERIFICATION_STAGE6_1.md), [etapa 6](VERIFICATION_STAGE6.md), [etapa 5](VERIFICATION_STAGE5.md), [etapa 4](VERIFICATION_STAGE4.md), [etapa 3](VERIFICATION_STAGE3.md), [etapa 2](VERIFICATION_STAGE2.md) y [etapa 1](VERIFICATION_STAGE1.md). Avance: [ETAPA_7_1_AVANCE.md](ETAPA_7_1_AVANCE.md). Guías: [RESTAURANT_OPERATIONS.md](RESTAURANT_OPERATIONS.md), [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md), [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md), [PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md) y [CATALOG.md](CATALOG.md).
 
-**Alcance de esta evidencia.** Las cifras son las que cada fase registró en el avance. Se obtuvieron con `config/product.json` todavía en 0.7.0 y esquema 8 (la 0009 ya estaba embebida desde la fase C); la versión 0.7.1 y el esquema 9 se fijaron en la fase E. La regresión completa sobre el árbol 0.7.1 y la compilación del `.app` 0.7.1 corresponden a «Regresión final (fase E)», todavía pendiente.
+**Alcance de esta evidencia.** Las cifras son las que cada fase registró en el avance. Se obtuvieron con `config/product.json` todavía en 0.7.0 y esquema 8 (la 0009 ya estaba embebida desde la fase C); la versión 0.7.1 y el esquema 9 se fijaron en la fase E. La regresión completa sobre el árbol 0.7.1 y la compilación del `.app` 0.7.1 corresponden a «Regresión final (fase E)».
 
-**Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432): la 0009 no se aplicó y la instalación real sigue en esquema 8 con la 0.7.0. Ninguna prueba envió trabajos ni pulsos a CUPS, a una impresora, a un cajón ni a una conexión TCP. Las únicas consultas al CUPS de este Mac fueron lecturas (`lpstat`, `lpoptions`) de la fase C para investigar el criterio de datos raw y grabar sus salidas de prueba.
+**Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432): la 0009 se aplicó a la instalación real después de la regresión final, con el procedimiento que registra «Instalación real». Ninguna prueba envió trabajos ni pulsos a CUPS, a una impresora, a un cajón ni a una conexión TCP. Las únicas consultas al CUPS de este Mac fueron lecturas (`lpstat`, `lpoptions`) de la fase C para investigar el criterio de datos raw y grabar sus salidas de prueba.
 
 ## Entorno aislado
 
@@ -99,7 +99,7 @@ Ejecutada el 9 de noviembre de 2026 con la versión 0.7.1 y `schema_version: 9`,
 
 ## Instalación real
 
-<!-- PENDIENTE: lo completa quien ejecuta -->
+El 9 de noviembre de 2026, con autorización previa del propietario para aplicar los cambios al terminar si todo aprobaba: respaldo `backups/adel_pos-20261110T022252Z-c7e1e4.dump` con restauración verificada (90 tablas idénticas, `.local/stage9-restore-verification.json`), `server-stop` ordenado, `migrate` `applied:1` y repetición `applied:0`, servidor 0.7.1 iniciado con readiness 200 (PostgreSQL disponible, esquema compatible) y `/api/v1/version` con 0.7.1 y esquema 9, y `.app` 0.7.1 compilado con `build-macos` y abierto con `open-app`. Comprobaciones de solo lectura antes y después: migraciones 1–9; 90 → 92 tablas en `app`; los mismos conteos de cuentas (4 abiertas y 2 cerradas), pagos (2), ajustes (0), turnos (1 cerrado), comandos del cajón (0), categorías (4), auditoría (107) y permisos (113, ninguno nuevo); los cinco motivos de descuento activos en su orden, solo «Otro» con descripción; ningún ajuste con motivo ni indicación rápida; el CHECK del cajón admite `test`, existe el índice de rechazos y las once restricciones con nombre de la 0009; `usd_cash` desactivada. El recorrido en la ventana nativa no se verificó. La 0009 es ahora inmutable; la siguiente ampliación requiere 0010.
 
 ## Repetir las comprobaciones
 
