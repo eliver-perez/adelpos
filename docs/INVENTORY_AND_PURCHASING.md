@@ -1,8 +1,8 @@
 # Inventarios, recetas, compras y costos · Etapa 8
 
-Versión 0.8.0, API v1, esquema 14 (migraciones `0010` a `0014`). **Las migraciones 0010–0014 no se han aplicado a la
-instalación real**: requieren autorización expresa del propietario (§28 de la especificación), con respaldo y ensayo de
-restauración previos; hasta entonces la instalación real sigue en 0.7.1 y esquema 9. Este documento describe solo lo
+Versión 0.8.0, API v1, esquema 14 (migraciones `0010` a `0014`). Las migraciones 0010–0014 se aplicaron a la instalación real el
+10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración; «Control de inventario»
+quedó desactivado hasta que el restaurante lo active. Este documento describe solo lo
 implementado y probado en la rama `etapa-8`. Las decisiones del propietario están en [etapas/ETAPA_8.md](etapas/ETAPA_8.md)
 §0-B; las decisiones menores, las cifras de cada prueba y las mediciones, en [ETAPA_8_AVANCE.md](ETAPA_8_AVANCE.md); los
 contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md) (secciones «Inventario · fase A» a «fase D»); la

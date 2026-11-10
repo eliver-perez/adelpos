@@ -16,10 +16,7 @@ Evidencia detallada por fase: [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). 
   suites aprobadas en un entorno aislado (clúster PostgreSQL temporal en el puerto 55499 y Go temporal para Playwright),
   según [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). La regresión final de la fase E sobre una copia exacta del commit
   `3a145e9` aprobó completa (ver «Regresión final»).
-- **Instalación real**: sigue en **0.7.1 y esquema 9**. Las migraciones 0010–0014 **no se han aplicado**: requieren
-  autorización expresa del propietario, con respaldo, ensayo de restauración y el procedimiento de
-  [DEVELOPMENT_MACOS.md](../DEVELOPMENT_MACOS.md). La última actualización registrada de la instalación real es la de la
-  etapa 7.1 ([VERIFICATION_STAGE7_1.md](VERIFICATION_STAGE7_1.md), «Instalación real»).
+- **Instalación real**: en **0.8.0 y esquema 14**. 0010–0014 se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización del propietario (respaldo `backups/adel_pos-20261110T212540Z-35f5fe.dump` con restauración verificada: 92 tablas idénticas; `migrate` `applied:5` y repetición `applied:0`; readiness 200 con esquema compatible; servidor y `.app` 0.8.0); detalle en [ETAPA_8_AVANCE.md](ETAPA_8_AVANCE.md), «Instalación real».
 - **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) ni enviaron trabajos a
   CUPS, a una impresora, a un cajón o a una conexión TCP.
 
@@ -41,7 +38,6 @@ Evidencia detallada por fase: [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). 
 
 ## No ejecutado o no verificado
 
-- Aplicación de 0010–0014 a la instalación real y su respaldo y ensayo de restauración con estas migraciones.
 - Ventana nativa Tauri (WKWebView), pantalla táctil física y teclado virtual en Inventarios y en la captura.
 - Papel: ninguna comanda con indicaciones con efecto se imprimió.
 - Volumen real, muchas terminales a la vez, LAN con otra máquina, Keychain real y Windows.

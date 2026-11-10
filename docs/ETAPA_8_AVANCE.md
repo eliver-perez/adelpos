@@ -2274,7 +2274,7 @@ que la liberación ocupa el lock 7820148305, por lo que el consumo se mantiene a
 
 ### Procedimiento para aplicar 0010–0014 a la instalación real (en espera de autorización)
 
-La autorización de migraciones anteriores no se extiende a estas (§28). La instalación real sigue en 0.7.1 y esquema 9.
+La autorización de migraciones anteriores no se extiende a estas (§28). El propietario autorizó este procedimiento y se ejecutó el 10 de noviembre de 2026 (ver «Instalación real»).
 Procedimiento propuesto, desde la rama `etapa-8`:
 
 1. **Preparar.** Cerrar AD-EL POS en todas las terminales, sin cobros ni arqueos en curso. `./scripts/dev.sh status`
@@ -2343,7 +2343,36 @@ Mientras no se autorice, **no** ejecutar `migrate`, `server-start` ni `build-mac
 
 ### No verificado
 
-- Aplicación de 0010–0014 a la instalación real (pendiente de autorización).
 - Ventana nativa Tauri, pantalla táctil física y teclado virtual en Inventarios y en la captura.
 - Papel de comandas con indicaciones con efecto.
 - Volumen real, varias terminales a la vez, LAN con otra máquina y Windows.
+
+### Instalación real
+
+El propietario autorizó aplicar 0010–0014 con el procedimiento propuesto. Se ejecutó el 10 de noviembre de 2026 desde
+`etapa-8` (commit `11fa48a`):
+
+1. **Estado previo**: servidor 0.7.1 en 8181, readiness 200, esquema 9.
+2. **Respaldo**: `backups/adel_pos-20261110T212540Z-35f5fe.dump`; `restore-check.py` verificó 92 tablas con conteos
+   idénticos.
+3. **Comprobación previa** de solo lectura: migraciones 1–9 y 92 tablas en `app`.
+4. **Migración**:
+   - `server-stop` ordenado;
+   - `migrate` `applied:5`, y la repetición `applied:0`;
+   - `server-start` con readiness 200 (PostgreSQL disponible, esquema compatible);
+   - `/api/v1/version` responde 0.8.0 y esquema 14.
+5. **Comprobación posterior** de solo lectura:
+   - migraciones 1–14 y 126 tablas en `app` (34 nuevas);
+   - conteos sin cambio: cuentas (5 abiertas, 2 cerradas), unidades comerciales (15), liberaciones (0), pagos (2),
+     ajustes de cuenta (0), turnos (1 abierto, 1 cerrado), operaciones de caja (5), categorías (4), productos (6),
+     indicaciones rápidas (0) y auditoría (117);
+   - permisos de 113 a 137: los 24 de inventario, concedidos solo al administrador y a ningún otro rol;
+   - «Control de inventario» desactivado y nunca activado;
+   - las 6 unidades del sistema, «Almacén general» predeterminado y la configuración por omisión (IVA de compras en el
+     costo, corte a las 05:00, sin frecuencia de conteo);
+   - ningún insumo, movimiento ni solicitud de consumo;
+   - el ámbito `inventory` en los eventos.
+6. **Aplicación**: `build-macos` generó `AD-EL POS.app` 0.8.0 (9.56 MiB) y `open-app` la abrió.
+
+El recorrido en la ventana nativa no se verificó. Las migraciones 0010–0014 son ahora inmutables; la siguiente
+ampliación requiere 0015.
