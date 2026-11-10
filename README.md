@@ -63,8 +63,9 @@ En **Inventarios** (visible con el permiso de consultar inventario) se administr
 - **Consumo**: con la función **Control de inventario** activada (Configuración → Funciones del establecimiento; desactivada por omisión), cada producto liberado a cocina descuenta una sola vez los insumos de su receta y de las personalizaciones confirmadas: «Sin cebolla» omite la porción, «Con cebolla» usa la porción habitual y «Cebolla extra» el doble, sin pedir gramos al mesero. Las observaciones libres no cambian el inventario. Go calcula el consumo en segundo plano, así que la captura no espera.
 - **Cancelaciones y mermas**: una partida cancelada después de liberarse se clasifica como «No preparado» (se revierte el consumo) o «Preparado (merma)» hasta el corte del día operativo; sin clasificar, Go la considera «No preparado» al cierre.
 - **Compras**: proveedores, órdenes de compra, recepciones (de una orden o directas) con IVA 16/8/0, devoluciones a proveedor y vínculo opcional de una recepción con gastos de caja ya registrados. Una compra nunca crea un gasto de caja ni un gasto crea una compra.
+- **Control**: ajustes de discrepancia (los que registra alguien sin permiso de autorizar esperan a que otra persona los autorice), mermas operativas, transferencias entre almacenes, conteos físicos por almacén con hoja de captura para tableta (a ciegas para quien solo cuenta) y niveles mínimos por almacén. El Resumen reúne las alertas (existencias negativas, bajo mínimo, consumos sin calcular, conteos pendientes…) y Compras ofrece sugerencias de compra que solo crean borradores.
 
-Ajustes con autorización, mermas operativas, transferencias entre almacenes, conteos físicos, alertas y sugerencias de compra están implementados en el servidor (fase D); su interfaz se estaba terminando al redactar esta guía. Consulta [docs/INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md).
+Consulta [docs/INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md).
 
 ## Cocina e impresión
 

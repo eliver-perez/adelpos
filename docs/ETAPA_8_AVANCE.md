@@ -1767,9 +1767,9 @@ Puente Tauri: 22 operaciones nuevas en `api.rs` (11 fijas y 11 con un identifica
 ### Limitaciones
 
 - Sin interfaz (otra parte de la fase D).
-- `desktop/e2e/native-driver.ts` descubre las rutas fijas solo con la forma `"op" => Some((…))` en una línea; `rustfmt`
-  escribe `inventory_draft_order_from_suggestions` con llaves (la ruta es larga), así que el driver de Playwright no la verá
-  hasta aceptar `\{?\s*` también en esa expresión (cambio de una línea fuera del alcance de D1; las 21 demás sí las ve).
+- ~~`native-driver.ts` no ve `inventory_draft_order_from_suggestions`~~ **Resuelto en el mismo commit `ba2be6e`**: `rustfmt`
+  escribe esa entrada con llaves (la ruta es larga) y la expresión del driver de Playwright ya acepta `\{?\s*` en las dos
+  formas de `api.rs`, así que reconoce las 22 operaciones de la fase D.
 - Una liberación a cocina que se confirma (lock 305) en los milisegundos entre la comprobación de consumos pendientes y la
   aplicación de un conteo, con `released_at` anterior a su referencia, no se incluiría en esa aplicación.
 - Una cancelación clasificada como «No preparado» después de aplicar un conteo, con hora anterior a la del conteo, revierte
@@ -1869,8 +1869,8 @@ otro agente), con el clúster temporal del puerto 55499 (nunca la instalación r
   `inventory_control_routes_are_closed`.
 - `tsc --noEmit`: sin errores.
 - Playwright no se ejecutó: esta parte no cambia pantallas.
-- Nota: la aceptación encadenada de `internal/operations` dura 213 s con `-race` y su contexto (`newFixture`) vence a los
-  300 s; la fase D agregó ≈ 27 s.
+- Nota: la aceptación encadenada de `internal/operations` dura 213 s con `-race` (la fase D agregó ≈ 27 s); en el mismo
+  commit `ba2be6e` el plazo de su contexto (`newFixture`) se amplió de 300 a 600 s.
 
 ### Verificación de cierre de la fase C
 
@@ -2000,8 +2000,8 @@ del otro agente) y el clúster temporal del puerto 55499 (nunca la instalación 
 - `go vet ./...` y `go vet -tags=integration ./...`: aprobados.
 - `go test -race -count=1 ./...`: todos los paquetes `ok`, incluido `internal/inventory`.
 - Integración con `-race`: `internal/database` ok (4.0 s), `internal/administration` ok (55.4 s) e
-  `internal/operations` ok (220.7 s; las subpruebas nuevas no acercan la aceptación encadenada al límite de 300 s de su
-  contexto).
+  `internal/operations` ok (220.7 s; el contexto de la aceptación encadenada vence a los 600 s desde `ba2be6e`, así que
+  queda margen).
 - `tsc --noEmit` (desktop): sin errores.
 - Prueba de mutación: en otra copia se reintrodujeron los seis defectos (`production_in` como reversión, `Restore`
   anterior, `Admit` a cero, valor por insumo con solo `costs.read`, y las tres fugas) y fallaron
