@@ -47,7 +47,7 @@ En **Caja** se administra el turno de la caja física de la terminal, según los
 - **Arqueo y cierre ciego**: «Iniciar arqueo» pausa la caja (no se cobra, devuelve ni registra efectivo) y el cajero cuenta por denominaciones, más un importe adicional identificado, sin ver el esperado; nadie lo ve durante el arqueo, ni el administrador. El borrador se guarda en el servidor. Se cancela para reanudar la caja o se confirma; las diferencias (sobrante o faltante, por moneda) no impiden cerrar y las cuentas abiertas tampoco. Después del cierre, quien tiene el permiso consulta el esperado y las diferencias.
 - **Movimientos, Historial y Reportes**: movimientos del turno con su detalle y correcciones compensatorias, turnos anteriores con sus cortes y regularizaciones posteriores, y resumen del turno. **Configuración**: denominaciones, categorías de gasto, cajón por caja y tope de caja.
 - **Documentos**: comprobantes de ingreso, retiro y gasto, y cortes parcial y definitivo con vista previa, impresión opcional y reimpresión; el esperado solo se imprime para quien puede consultarlo. Un fallo de impresión nunca revierte la operación ni el cierre, y «enviado» no confirma que el papel salió.
-- **Cajón y tope**: el cajón se abre con un pulso de una impresora ESC/POS por red tras operaciones con efectivo, nunca por pagos electrónicos; la interfaz dice «Comando de apertura enviado». El tope de caja es una función activable (desactivada por defecto) que solo avisa, a quien ve el esperado, que conviene un retiro; nunca bloquea cobros.
+- **Cajón y tope**: el cajón se abre con un pulso de una impresora ESC/POS por red o de una cola CUPS en modo raw (etapa 7.1) tras operaciones con efectivo, nunca por pagos electrónicos; la interfaz dice «Comando de apertura enviado». El tope de caja es una función activable (desactivada por defecto) que solo avisa, a quien ve el esperado, que conviene un retiro; nunca bloquea cobros.
 
 Consulta [docs/CASH_SHIFTS_AND_RECONCILIATION.md](docs/CASH_SHIFTS_AND_RECONCILIATION.md). La migración `0008_cash_shifts_and_reconciliation.sql` se aplica a una instalación existente con el procedimiento de respaldo y ensayo de restauración de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md).
 
@@ -65,7 +65,7 @@ En **Catálogo** administra categorías, productos independientes, presentacione
 
 En **Probar personalización** retira o sustituye todos los complementos, cambia cantidades, ingredientes, componentes y observaciones. Go valida y devuelve el desglose exacto; no se crea una venta. Las listas conservan la identidad del producto y las promociones explican su aplicación o exclusión. Los PNG originales locales cambian con el tema.
 
-Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql` y la etapa 7 `0008_cash_shifts_and_reconciliation.sql`. Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
+Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql`, la etapa 7 `0008_cash_shifts_and_reconciliation.sql` y la etapa 7.1 `0009_operation_tables_cash_and_reasons.sql`. Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
 
 ## Credencial reservada de soporte
 
@@ -93,7 +93,7 @@ ad-el-pos/
 │   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, tickets y caja (turnos, cortes, arqueo y cierre)
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 a 0008; inmutables después de aplicarse
+│   └── migrations/             # 0001 a 0009; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad

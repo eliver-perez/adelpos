@@ -380,3 +380,62 @@ Ejecutada sobre la copia aislada sincronizada con el repositorio (clúster tempo
 - Playwright: 1 aprobada en Chromium (55,1 s) y 1 en WebKit (53,5 s), con el descuento con motivo, el total en dólares de la precuenta, el pie de la cuenta sin desbordamiento y los avisos que se cierran a tiempo.
 - Ningún documento se envió a una impresora ni a un cajón real. La 0009 no se aplicó a la instalación real.
 - Revisión antes del commit: se agregó `account_adjustments.reason_name` para que renombrar un motivo no altere los descuentos registrados (ver decisiones), con su CHECK con nombre, la prueba de actualización ampliada y la subprueba `71D_renombrar_un_motivo_no_altera_lo_registrado`. Repetidas después todas las suites: estáticas aprobadas, Go unitarias en `ok`, Vitest con 317 pruebas aprobadas, `tsc`, `build` y cargo (15 aprobadas, 1 ignorada) sin errores, los seis paquetes de integración en `ok` (`operations` en 126,7 s) y Playwright con 1 aprobada en Chromium y 1 en WebKit.
+
+## Fase E · Cierre
+
+### Versión y documentación
+
+- Versión **0.7.1** y `schema_version: 9` en `config/product.json`, con los derivados actualizados: `backend/internal/product/metadata.json`, `desktop/src/generated/product.json`, `desktop/package.json`, la entrada raíz de `desktop/package-lock.json`, `desktop/src-tauri/Cargo.toml`, la entrada raíz de `desktop/src-tauri/Cargo.lock` y `desktop/src-tauri/tauri.conf.json`. La 0009 sigue sin aplicarse a la instalación real, que continúa en esquema 8 con la 0.7.0.
+- Verificación: la de la etapa 7 quedó archivada sin cambios como `docs/VERIFICATION_STAGE7.md` (`git mv`) y la nueva [VERIFICATION.md](VERIFICATION.md) registra, por fase, solo lo ejecutado en las fases A–D y lo que no se verificó.
+- `CLAUDE.md`: encabezado (0.7.1, esquema 9 con la 0009 sin aplicar), tecnologías, estructura (migraciones 0001–0009, con 0001–0008 aplicadas), patrones de avisos, confirmación e iconos, fila 7.1 del plan, decisiones de la etapa 7.1 (y corrección de la frase de la etapa 7 que limitaba el cajón a ESC/POS TCP), archivos de referencia, riesgos y limitaciones, y criterios de esquema, frontend y documentación.
+- `README.md` (lista de migraciones y estructura), `ARCHITECTURE.md` (migración 0009) y `DEVELOPMENT_MACOS.md` (versión, esquema y procedimiento de la 0009).
+- Revisión de las guías actualizadas por las fases: `docs/KITCHEN_AND_PRINTING.md`, `docs/PAYMENTS_AND_REFUNDS.md` y `docs/CASH_SHIFTS_AND_RECONCILIATION.md` pasan a 0.7.1 y esquema 9 (la guía de caja enlaza ahora la regresión de la etapa 7 en `VERIFICATION_STAGE7.md`); `API_CONTRACTS.md` corrige la fila de `/version`, que seguía diciendo «esquema 5»; `docs/RESTAURANT_OPERATIONS.md` aclara en la sección de la etapa 6.2 que «Nueva cuenta» también crea la cuenta con el primer producto. `docs/CATALOG.md` y `docs/DEPENDENCIES.md` ya cubrían la 7.1.
+- `AGENTS.md`, `README.md`, `ARCHITECTURE.md` y `DEVELOPMENT_MACOS.md` describen el cajón por ESC/POS TCP o por una cola CUPS en modo raw. El estado de las migraciones en `AGENTS.md` y `NEXT_STEPS_FOR_SOL.md` se actualiza al aplicar la 0009.
+
+### Regresión final
+
+Ejecutada el 9 de noviembre de 2026 con la versión 0.7.1 y `schema_version: 9`, sobre la copia aislada sincronizada con el repositorio (clúster temporal 127.0.0.1:55499, Go temporal en 8183):
+
+- **Estáticas** (`tools/suite.sh`): Prettier («All matched files use Prettier code style!», sin las especificaciones del propietario), gofmt sin archivos, `cargo fmt --check`, `sync-metadata --check`, `go vet` y `go vet -tags=integration`, todos con salida 0.
+- **Go unitarias** con `-race`: `ok` en todos los paquetes, incluidos `moneytext` y `plural`.
+- **Vitest**: 39 archivos y 317 pruebas aprobadas; `tsc` y `npm run build` sin errores.
+- **Rust**: `cargo test`, 15 aprobadas, 0 fallidas y 1 ignorada (Keychain real).
+- **Integración PostgreSQL** (`tools/iter_snap.sh`): `database` (2,4 s), `administration` (53,7 s), `catalog` (6,2 s), `operations` (126,3 s), `payments` (1,4 s) y `kitchen` (1,4 s) en `ok`. La prueba de impresora física quedó omitida porque es opcional. Los paquetes con pruebas de integración son los mismos que lista `scripts/database.py`, más `kitchen`.
+- **Playwright**: 1 aprobada en Chromium (1,0 min) y 1 en WebKit (1,0 min).
+- **Paquete de escritorio**: `tauri build --bundles app` en la copia aislada, con `CARGO_TARGET_DIR` en el scratchpad: `AD-EL POS.app` 0.7.1, ejecutable Mach-O arm64, 9,5 MB.
+- Ninguna suite envió trabajos a una impresora ni a un cajón real.
+- `./scripts/dev.sh format-check` sobre el repositorio completo no aprueba solo por las especificaciones del propietario `docs/etapas/ETAPA_7.md` y `ETAPA_7_1.md`, que no se formatean.
+
+Detalle en [VERIFICATION.md](VERIFICATION.md).
+
+### Procedimiento para aplicar la 0009 a la instalación real
+
+Propuesto al cierre, con la instalación real en 0.7.0 y esquema 8 sin modificar. **No se ha ejecutado.** Con autorización expresa del propietario, desde la rama `etapa-7.1`:
+
+1. **Preparar.** Cerrar AD-EL POS en todas las terminales, sin cobros ni arqueos en curso. `./scripts/dev.sh status` confirma el servidor 0.7.0 en 8181.
+2. **Respaldar.** `./scripts/dev.sh backup` genera `backups/adel_pos-<fecha>.dump` y lo comprueba con `pg_restore --list`.
+3. **Ensayar la restauración.** `python3 scripts/restore-check.py backups/NOMBRE.dump` restaura en una base temporal y compara los conteos de todas las tablas (79 en el ensayo de la etapa 7, ya en esquema 8). Si no coinciden, se detiene el procedimiento.
+4. **Detener.** `./scripts/dev.sh server-stop`, de forma ordenada.
+5. **Migrar.** `./scripts/dev.sh migrate` compila el servidor 0.7.1 y aplica la 0009 en una sola transacción. Resultado esperado `applied:1`; una segunda ejecución debe dar `applied:0`. Si falla, la transacción no deja cambios.
+6. **Arrancar.** `./scripts/dev.sh server-start`.
+   - `GET http://127.0.0.1:8181/api/v1/health/ready` debe responder 200, con PostgreSQL disponible y esquema compatible.
+   - `GET /api/v1/version` debe indicar 0.7.1 y esquema 9.
+7. **Comprobar.** Comprobaciones de solo lectura:
+   - Migraciones 1–9 y los mismos conteos de cuentas, pagos, ajustes, turnos y comandos del cajón.
+   - Cinco motivos de descuento activos en su orden (Atención, Promoción, Demora, Cortesía de la casa y Otro), solo «Otro» con descripción obligatoria.
+   - Los descuentos anteriores conservan su motivo escrito con `reason_id` y `reason_name` nulos.
+   - Ninguna indicación rápida y ningún permiso nuevo (el total de permisos no cambia).
+8. **Instalar la aplicación.** `./scripts/dev.sh build-macos` y `./scripts/dev.sh open-app`.
+
+Efectos de la 0009 sobre los datos existentes: no modifica 0001–0008 ni filas existentes; reemplaza con el mismo nombre el CHECK de motivos del cajón (las filas anteriores siguen siendo válidas), agrega un índice parcial de auditoría, dos tablas y dos columnas nulas; su única siembra son los cinco motivos de descuento. Las cuentas vacías que ya existen en la instalación real no cambian con la migración: se liberan desde el panel de la mesa con «Liberar mesa».
+
+Vuelta atrás:
+
+- **Antes del paso 5:** basta `server-start` desde `main` (0.7.0).
+- **Después de aplicarla:** solo con indicación del propietario, restaurar el respaldo del paso 2 con la aplicación cerrada y volver a la 0.7.0.
+
+Mientras no se autorice, **no** ejecutar `migrate`, `server-start` ni `build-macos` sobre la instalación real desde `etapa-7.1`: `migrate` aplicaría la 0009 sin el respaldo previo, y un servidor 0.7.1 vería el esquema 8 como incompatible (readiness 503), porque el migrador rechaza un historial con migraciones pendientes (según su diseño en [ARCHITECTURE.md](../ARCHITECTURE.md); no se ejecutó).
+
+### Instalación real
+
+<!-- PENDIENTE: instalación real -->

@@ -14,7 +14,7 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
 | GET        | `/health/live`            | Público; proceso activo.                                                                              |
 | GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                                                 |
-| GET        | `/version`                | Público; producto, versión, API y esquema 5.                                                          |
+| GET        | `/version`                | Público; producto, versión, API y versión del esquema (9 en la 0.7.1).                                |
 | GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                                              |
 | GET        | `/setup/status`           | Público; solo configured booleano.                                                                    |
 | POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                                                |

@@ -1,6 +1,6 @@
 # Administración de caja, arqueos y cortes · Etapa 7
 
-Estado: **etapa 7 completa (fases 0 y A–D), versión 0.7.0, esquema 8**, con los ajustes de la **fase C de la etapa 7.1** descritos en «Etapa 7.1 · fase C» (migración 0009 en desarrollo, no aplicada a la instalación real): migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. La 0008 se aplicó a la instalación real el 9 de noviembre de 2026 con autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
+Estado: **etapa 7 completa (fases 0 y A–D)**, con los ajustes de la **fase C de la etapa 7.1** descritos en «Etapa 7.1 · fase C»; **versión 0.7.1, esquema 9** (la migración 0009 aún no se aplica a la instalación real). Etapa 7: migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. La 0008 se aplicó a la instalación real el 9 de noviembre de 2026 con autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
 
 ## Autoridad y estructura
 
@@ -180,7 +180,7 @@ Rutas de solo lectura agregadas en la fase B (contratos en [API_CONTRACTS.md](..
 
 ## Pruebas ejecutadas (fase D, regresión final)
 
-Sobre el árbol 0.7.0 en el entorno aislado: estáticas, `go vet` y `go test -race` en todos los paquetes; integración PostgreSQL de `database`, `administration`, `catalog`, `operations` (etapas 4–6.2 y caja C1–C47), `payments` y `kitchen`; Vitest 175 pruebas en 30 archivos; `tsc`, build y `cargo test`; Playwright Chromium y WebKit; y compilación aislada del `.app` 0.7.0. Resultados en [VERIFICATION.md](VERIFICATION.md).
+Sobre el árbol 0.7.0 en el entorno aislado: estáticas, `go vet` y `go test -race` en todos los paquetes; integración PostgreSQL de `database`, `administration`, `catalog`, `operations` (etapas 4–6.2 y caja C1–C47), `payments` y `kitchen`; Vitest 175 pruebas en 30 archivos; `tsc`, build y `cargo test`; Playwright Chromium y WebKit; y compilación aislada del `.app` 0.7.0. Resultados en [VERIFICATION_STAGE7.md](VERIFICATION_STAGE7.md).
 
 ## Etapa 7.1 · fase C
 

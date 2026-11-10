@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.7.0, esquema 8 (la etapa 7.1 agrega la migración 0009 en desarrollo; ver «Cajón por CUPS en modo raw · etapa 7.1»). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
+Versión 0.7.1, esquema 9 (la migración 0009 de la etapa 7.1 aún no se aplica a la instalación real; ver «Cajón por CUPS en modo raw · etapa 7.1»). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existen inventario físico ni aplicación KDS independiente. La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
