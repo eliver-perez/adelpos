@@ -206,8 +206,20 @@ func markFailed(ctx context.Context, pool *pgxpool.Pool, request *consumptionReq
 	return tx.Commit(ctx)
 }
 
-// processRequest aplica una solicitud según su tipo y la marca procesada con su diagnóstico.
+// processRequest aplica una solicitud según su tipo, la marca procesada con su diagnóstico y publica
+// sus eventos.
 func processRequest(ctx context.Context, tx pgx.Tx, request *consumptionRequest) error {
+	outcome, err := applyRequest(ctx, tx, request)
+	if err != nil {
+		return err
+	}
+	return publishRequestOutcome(ctx, tx, request, outcome)
+}
+
+// applyRequest aplica una solicitud y la marca procesada, sin publicar eventos: así la aplicación de
+// un conteo (counts.go) puede procesar las solicitudes pendientes dentro de su transacción y publicar
+// todo al final, sin retener antes de tiempo el lock del outbox (7820148306).
+func applyRequest(ctx context.Context, tx pgx.Tx, request *consumptionRequest) (requestOutcome, error) {
 	var outcome requestOutcome
 	var err error
 	switch request.Kind {
@@ -221,7 +233,7 @@ func processRequest(ctx context.Context, tx pgx.Tx, request *consumptionRequest)
 		err = errors.New("inventory: tipo de solicitud desconocido")
 	}
 	if err != nil {
-		return err
+		return requestOutcome{}, err
 	}
 	diagnostics := outcome.diagnostics
 	if diagnostics == nil {
@@ -230,8 +242,14 @@ func processRequest(ctx context.Context, tx pgx.Tx, request *consumptionRequest)
 	_, err = tx.Exec(ctx, `UPDATE app.inventory_consumption_requests SET state='processed',processed_at=clock_timestamp(),
             last_error=NULL,diagnostics=$2 WHERE id=$1`, request.ID, jsonValue(diagnostics))
 	if err != nil {
-		return err
+		return requestOutcome{}, err
 	}
+	return outcome, nil
+}
+
+// publishRequestOutcome publica los eventos de una solicitud procesada: existencias y movimientos si
+// escribió alguno, y alertas si cambió alguna (o si antes había fallado).
+func publishRequestOutcome(ctx context.Context, tx pgx.Tx, request *consumptionRequest, outcome requestOutcome) error {
 	if outcome.movements > 0 {
 		if err := events.Append(ctx, tx, "inventory.stock.changed", Scope, &request.UnitID, nil); err != nil {
 			return err

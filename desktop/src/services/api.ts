@@ -275,7 +275,30 @@ export type Operation =
   | 'inventory_supplier_return'
   | 'inventory_cash_expenses'
   | 'inventory_link_cash_expense'
-  | 'inventory_unlink_cash_expense';
+  | 'inventory_unlink_cash_expense'
+  // Etapa 8 (fase D): ajustes, mermas, transferencias, conteos, niveles, alertas y sugerencias.
+  | 'inventory_adjustments'
+  | 'inventory_record_adjustment'
+  | 'inventory_adjustment'
+  | 'inventory_authorize_adjustment'
+  | 'inventory_reject_adjustment'
+  | 'inventory_transfers'
+  | 'inventory_record_transfer'
+  | 'inventory_transfer'
+  | 'inventory_counts'
+  | 'inventory_create_count'
+  | 'inventory_count'
+  | 'inventory_save_count'
+  | 'inventory_capture_count_lines'
+  | 'inventory_submit_count'
+  | 'inventory_approve_count'
+  | 'inventory_apply_count'
+  | 'inventory_cancel_count'
+  | 'inventory_stock_levels'
+  | 'inventory_save_stock_level'
+  | 'inventory_alerts'
+  | 'inventory_purchase_suggestions'
+  | 'inventory_draft_order_from_suggestions';
 
 export class APIError extends Error {
   constructor(

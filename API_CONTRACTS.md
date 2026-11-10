@@ -831,3 +831,227 @@ al recibir una orden), `inventory.receipts.changed` (recepciones, devoluciones y
 Libro: movimientos `receipt` (`source_kind` `receipt`, `source_id` = recepción, `source_line` = renglón, `entry_key`
 `receipt:<recepción>:<renglón>`) con su `cost_adjustment` (`…:cost`) y `supplier_return` (`source_kind` `supplier_return`,
 `entry_key` `supplier_return:<devolución>:<renglón>`). `GET movements?source_kind=receipt&source_id=…` los consulta.
+
+## Inventario · fase D: control de inventario (esquema 14)
+
+Mismas reglas que las fases A–C: prefijo `/api/v1/inventory`, `inventory.read` en toda ruta además del permiso indicado,
+permisos comprobados antes de escribir (un 403 revierte y audita `access.denied`), lock 7820148308 (compartido en
+lecturas, exclusivo en escrituras), **toda escritura con `operation_id`** guardada en `restaurant_operations` (reintento
+con el mismo cuerpo → misma respuesta sin repetir efectos; otro cuerpo → 409 `IDEMPOTENCY_CONFLICT`), `revision` en
+autorizaciones, rechazos, transiciones de conteos y niveles (409 `REVISION_CONFLICT`), un solo identificador por ruta,
+cantidades y valores como cadenas decimales. Tipos TS: `desktop/src/services/inventoryControl.ts`.
+
+**Ninguna ruta edita existencias**: cada efecto es un movimiento del libro con el motor de costos (`adjustment_in`,
+`adjustment_out`, `waste`, `transfer_out`/`transfer_in`, `count_in`, `count_out`, más los ajustes de costo o residuos que
+el motor agregue). Una existencia negativa **nunca bloquea**: llega como aviso `{code: "NEGATIVE_STOCK", message,
+item_id}` en `warnings`. Valores (`value`, `value_display`) solo con `inventory.costs.read`; si falta llegan en `null` y
+`costs_visible: false`.
+
+Lecturas por documento: **ajustes** con `inventory.adjustments.record`, `inventory.adjustments.authorize`,
+`inventory.waste.record` o `inventory.movements.read`; **transferencias** con `inventory.transfers.record` o
+`inventory.movements.read`; **conteos** con `inventory.counts.perform` o `inventory.counts.approve`.
+
+| Método | Ruta bajo `/inventory`                                                                 | Permiso (además de `inventory.read`)                                                         | Contrato                                                                                                                                                                           |
+| ------ | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/adjustments?kind&state&reason&warehouse_id&item_id&from&until&search&page&page_size` | lectura de ajustes                                                                           | `{items: [AdjustmentSummary], total, page, page_size, costs_visible}`; el más reciente primero; `from`/`until` días de negocio del registro; `search` folio exacto                 |
+| POST   | `/adjustments`                                                                         | `inventory.adjustments.record` (discrepancia) o `inventory.waste.record` (merma)             | `AdjustmentInput` → `Adjustment` con `warnings`; discrepancia aplicada si la sesión tiene `inventory.adjustments.authorize`, si no `pending_authorization`; merma siempre aplicada |
+| GET    | `/adjustments/{id}`                                                                    | lectura de ajustes                                                                           | `Adjustment` (`authorizable`: pendiente, con el permiso y registrado por otra persona)                                                                                             |
+| POST   | `/adjustments/{id}/authorize`                                                          | `inventory.adjustments.authorize`                                                            | `{operation_id, revision}` → `Adjustment` aplicado (movimientos con la hora de la autorización) con `warnings`; 403 `SELF_AUTHORIZATION_FORBIDDEN`; 409 `ADJUSTMENT_NOT_PENDING`   |
+| POST   | `/adjustments/{id}/reject`                                                             | `inventory.adjustments.authorize`                                                            | `{operation_id, revision, reason (5–500)}` → `Adjustment` `rejected` (sin movimientos); 403 `SELF_AUTHORIZATION_FORBIDDEN`; 409 `ADJUSTMENT_NOT_PENDING`                           |
+| GET    | `/transfers?warehouse_id&item_id&from&until&search&page&page_size`                     | lectura de transferencias                                                                    | `{items: [TransferSummary], total, page, page_size, costs_visible}`; `warehouse_id` origen o destino                                                                               |
+| POST   | `/transfers`                                                                           | `inventory.transfers.record`                                                                 | `TransferInput` → `Transfer` con `warnings` (`NEGATIVE_STOCK` del origen); 400 mismo almacén; 409 `WAREHOUSE_INACTIVE`                                                             |
+| GET    | `/transfers/{id}`                                                                      | lectura de transferencias                                                                    | `Transfer`                                                                                                                                                                         |
+| GET    | `/counts?warehouse_id&state&from&until&search&page&page_size`                          | lectura de conteos                                                                           | `{items: [CountSummary], total, page, page_size}`; `state` uno de los cinco o `active` (abiertos, enviados y aprobados); `from`/`until` días de negocio de creación                |
+| POST   | `/counts`                                                                              | `inventory.counts.perform`                                                                   | `CountInput` → `Count` abierto; 409 `COUNT_ITEM_IN_PROGRESS`, `COUNT_EMPTY`, `WAREHOUSE_INACTIVE`                                                                                  |
+| GET    | `/counts/{id}`                                                                         | lectura de conteos                                                                           | `Count` (existencia teórica y diferencias solo con `theoretical_visible`; avisos vigentes en `warnings`)                                                                           |
+| PATCH  | `/counts/{id}`                                                                         | `inventory.counts.perform`                                                                   | `{operation_id, revision, notes?, add_item_ids?, remove_item_ids?}` → `Count`; solo abierto (409 `COUNT_NOT_OPEN`); 409 `COUNT_ITEM_IN_PROGRESS`                                   |
+| PUT    | `/counts/{id}/lines`                                                                   | `inventory.counts.perform`                                                                   | `CountCaptureInput` (1–200 renglones, **sin revisión**) → `Count`; solo abierto (409 `COUNT_NOT_OPEN`)                                                                             |
+| POST   | `/counts/{id}/submit`                                                                  | `inventory.counts.perform`                                                                   | `{operation_id, revision}` → `submitted`; 409 `COUNT_NOT_OPEN`, `COUNT_NOTHING_COUNTED`                                                                                            |
+| POST   | `/counts/{id}/approve`                                                                 | `inventory.counts.approve`                                                                   | `{operation_id, revision}` → `approved`; 409 `COUNT_NOT_SUBMITTED`                                                                                                                 |
+| POST   | `/counts/{id}/apply`                                                                   | `inventory.counts.approve`                                                                   | `{operation_id, revision}` → `applied` con `warnings`; 409 `COUNT_NOT_APPROVED`, `COUNT_ALREADY_APPLIED`, `COUNT_CONSUMPTION_PENDING`                                              |
+| POST   | `/counts/{id}/cancel`                                                                  | `inventory.counts.perform` o `inventory.counts.approve` (enviado o aprobado: solo `approve`) | `{operation_id, revision, reason (5–500)}` → `cancelled`; 409 `COUNT_NOT_CANCELLABLE`                                                                                              |
+| GET    | `/stock-levels?warehouse_id&item_id&search&page&page_size`                             | —                                                                                            | `{items: [StockLevel], total, page, page_size}`: niveles configurados (existencia y banderas solo con `inventory.stock.read`)                                                      |
+| PUT    | `/stock-levels`                                                                        | `inventory.items.manage`                                                                     | `StockLevelInput` → `StockLevel`; los dos valores `null` quitan el nivel (`configured: false`, `revision: 0`)                                                                      |
+| GET    | `/alerts?type&severity&page&page_size`                                                 | —                                                                                            | `AlertPage`; `counts` siempre de todas las alertas visibles (sin filtros)                                                                                                          |
+| GET    | `/purchase-suggestions?supplier_id&category_id&search&page&page_size`                  | —                                                                                            | `PurchaseSuggestionPage`; `supplier_id` (o `none`) solo con algún permiso de compras (si no, 403)                                                                                  |
+| POST   | `/purchase-suggestions/draft-order`                                                    | `inventory.purchases.create`                                                                 | `{operation_id, supplier_id, item_ids (1–200), expected_warehouse_id?, notes?}` → `PurchaseOrder` en `draft` (nunca emitida); 409 `SUGGESTION_CHANGED`, `SUPPLIER_INACTIVE`        |
+
+`GET /summary` agrega `alerts: AlertCounts` (`{total, critical, warning, info, by_type: {tipo: n}}`), con la misma
+visibilidad que `GET /alerts`. `GET /stock` agrega a cada fila `level_scope` (`item` | `warehouse`): con `warehouse_id`, un
+insumo con nivel en ese almacén compara su existencia del almacén con ese nivel (`min_stock`, `reorder_point`,
+`below_minimum`, `at_reorder_point` y los filtros `state=below_minimum|reorder` usan el nivel del almacén); sin nivel o sin
+filtro, los del insumo contra la existencia total (como en la fase A).
+
+No existen rutas de edición o borrado de ajustes, transferencias o conteos (se autoriza, rechaza, cancela o se registra
+otro documento), ni de edición directa de existencias, ni de emisión desde sugerencias.
+
+### Ajustes y mermas
+
+```
+AdjustmentInput = {operation_id, kind: "discrepancy"|"waste", reason, reason_detail?, warehouse_id, notes? (≤ 500),
+                   lines: [{item_id, quantity, presentation_id?, unit_id?}] (1–200, un insumo una vez)}
+```
+
+- `quantity` con signo: `"-2.5"` salida, `"3"` entrada (hasta 6 decimales; cero no). Capturada en una presentación del
+  insumo, en una unidad de su dimensión o (sin ninguna) en su unidad base; se guarda también convertida
+  (`captured_quantity` y `quantity` de la respuesta, ambas con signo).
+- `reason` (lista cerrada) y su sentido: `breakage` Rotura, `spill` Derrame, `expiry` Caducidad, `physical_shortage`
+  Faltante físico, `extraordinary_use` Consumo extraordinario → solo salidas; `surplus` Sobrante → solo entradas;
+  `entry_error` Error de registro y `other` Otro → ambos. `other` exige `reason_detail` (3–200, una línea).
+- Merma (`waste`): solo salidas y solo `breakage`, `spill`, `expiry`, `extraordinary_use` u `other`; movimiento `waste`.
+  Un ajuste negativo de discrepancia es `adjustment_out` (nunca se convierte en merma).
+- Entradas: `adjustment_in` al promedio vigente (o, con existencia negativa, al provisional del faltante y el resto a la
+  referencia; sin costo, valor 0 con costo pendiente). Salidas: al promedio (regla 1 del motor).
+- Insumos y presentaciones desactivados se admiten (para ajustar la existencia que les quede); el almacén debe estar
+  activo.
+
+```
+AdjustmentSummary = {id, folio, kind, kind_label, reason, reason_label, reason_detail, warehouse: {id, name}, state,
+                     state_label, notes, line_count, requested_by_name, requested_at, authorized_by_name, authorized_at,
+                     applied_at, rejected_by_name, rejected_at, rejection_reason, revision, updated_at, costs_visible,
+                     value, value_display}
+Adjustment = AdjustmentSummary + {authorizable, warnings, lines: [{line_no, item, presentation, unit, capture_label,
+             captured_quantity, quantity, direction: "in"|"out", movement_id, movement_kind, movement_label, stock_after,
+             value, value_display}]}
+```
+
+`state`: `pending_authorization` | `applied` | `rejected`. `authorized_by_name` solo cuando otra persona autorizó un
+pendiente (un ajuste aplicado al registrarse no tiene autorizador). `value` = valor neto de sus movimientos (con costos).
+
+### Transferencias
+
+```
+TransferInput = {operation_id, from_warehouse_id, to_warehouse_id, notes? (≤ 500),
+                 lines: [{item_id, quantity (> 0), presentation_id?, unit_id?}] (1–200, un insumo una vez)}
+Transfer = {id, folio, from_warehouse, to_warehouse, occurred_at, actor_name, notes, line_count, created_at, costs_visible,
+            value, value_display, warnings, lines: [{line_no, item, presentation, unit, capture_label, captured_quantity,
+            quantity, out_movement_id, in_movement_id, from_stock_after, to_stock_after, value, value_display}]}
+```
+
+Salida y entrada vinculadas con el mismo valor (`value` = valor trasladado); el costo del insumo no cambia. Ambos almacenes
+activos y distintos.
+
+### Conteos físicos
+
+```
+CountInput = {operation_id, warehouse_id, scope: "all"|"category"|"items", category_id? (solo category),
+              item_ids? (solo items, 1–2000), notes? (≤ 1000)}
+CountCaptureInput = {operation_id, lines: [{item_id, counted_quantity: "12"|"0"|null, presentation_id?, unit_id?}]}
+```
+
+- `all`: todos los insumos activos; `category`: los activos de la categoría; `items`: la lista (también desactivados). Orden
+  de hoja de conteo: categoría y nombre. Un insumo no puede estar en dos conteos sin terminar del mismo almacén
+  (`COUNT_ITEM_IN_PROGRESS`).
+- Captura: cantidad física (cero admitido) en presentación, unidad o unidad base; `null` borra la captura. La hora del
+  renglón (`captured_at`) es la de la transacción del guardado; capturar otra vez sustituye. Sin revisión (varias terminales
+  capturan a la vez); cada guardado es una transacción corta.
+- Estados: `open` → `submitted` (≥ 1 renglón contado) → `approved` → `applied`; `cancelled` desde `open`, `submitted` o
+  `approved`.
+- Diferencia = contado − existencia teórica a `captured_at` (Σ del libro del almacén con `occurred_at ≤ captured_at`). En un
+  conteo sin aplicar se calcula al consultar; al aplicar se guarda la definitiva.
+- Aplicar: procesa en la misma transacción las solicitudes de consumo sin procesar con `released_at ≤` la hora máxima de
+  los renglones contados (con el procesador del trabajador); si alguna falla, 409 `COUNT_CONSUMPTION_PENDING` y nada se
+  registra. Después, un `count_in` (sobrante) o `count_out` (faltante) por renglón contado con diferencia, con
+  `occurred_at = captured_at`, `entry_key = count:<conteo>:<insumo>`, origen `count`; los renglones sin contar no se
+  ajustan. `reference_at` = hora máxima aplicada. Una segunda aplicación responde `COUNT_ALREADY_APPLIED`.
+
+```
+CountSummary = {id, folio, warehouse, scope, scope_label, category: {id, name}|null, state, state_label, notes, line_count,
+                counted_lines, difference_lines (aplicado y visible), created_by_name, created_at, updated_by_name,
+                updated_at, submitted_by_name, submitted_at, approved_by_name, approved_at, applied_by_name, applied_at,
+                reference_at, cancelled_by_name, cancelled_at, cancel_reason, revision, theoretical_visible}
+Count = CountSummary + {editable, submittable, approvable, applicable, cancellable, costs_visible, value, value_display,
+        warnings, lines: [CountLine]}
+CountLine = {line_no, item, category_name, counted, counted_quantity, captured_quantity, presentation, unit, capture_label,
+             captured_at, captured_by_name, theoretical_quantity, difference, difference_kind: "surplus"|"shortage"|"none",
+             current_quantity, movement_id, movement_kind, movement_label, value, value_display}
+```
+
+`theoretical_visible` = `inventory.counts.approve` o `inventory.stock.read`: sin él, `theoretical_quantity`, `difference`,
+`difference_kind`, `current_quantity`, `difference_lines` y valores llegan en `null` (captura a ciegas). Valores además con
+`inventory.costs.read`. `warnings` de un conteo sin terminar: `COUNT_UNCOUNTED_LINES`, `COUNT_PENDING_CONSUMPTION`,
+`COUNT_PENDING_CANCELLATIONS` (cancelaciones sin clasificar anteriores a la hora del conteo que consumieron en el almacén),
+`COUNT_PENDING_ADJUSTMENTS` (ajustes por autorizar del almacén sobre insumos contados); al aplicar, `NEGATIVE_STOCK`.
+
+### Niveles por almacén
+
+```
+StockLevelInput = {operation_id, item_id, warehouse_id, revision (0 sin nivel), min_stock: string|null, reorder_point: string|null}
+StockLevel = {item, warehouse, min_stock, reorder_point, item_min_stock, item_reorder_point, stock_visible, quantity,
+              below_minimum, at_reorder_point, configured, revision, updated_at, updated_by_name}
+```
+
+En la unidad base, ≥ 0 y hasta 6 decimales. Sobrescriben los del insumo **para ese almacén** (alertas del almacén y
+`GET /stock?warehouse_id`); los del insumo siguen comparándose con la existencia total.
+
+### Alertas
+
+```
+AlertPage = {items: [Alert], total, page, page_size, counts: AlertCounts, costs_visible, stock_visible,
+             purchasing_visible, generated_at}
+Alert = {type, type_label, severity: "critical"|"warning"|"info", severity_label, message, reference: {kind, id, label},
+         item, warehouse, quantity, threshold, count, occurred_at}
+```
+
+| `type`                        | Gravedad | Cuándo                                                                                                              | `reference.kind`                | Visibilidad              |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------ |
+| `negative_stock`              | critical | insumo activo con existencia < 0 en un almacén                                                                      | `stock`                         | todos                    |
+| `consumption_failed`          | critical | solicitudes de consumo `failed` (una alerta con `count`, `occurred_at` = la más antigua)                            | `consumption_requests` (sin id) | todos                    |
+| `below_minimum`               | warning  | nivel del almacén (existencia del almacén) o del insumo (existencia total, `warehouse: null`)                       | `stock`                         | todos                    |
+| `cost_pending`                | warning  | valuación con `pending_cost_quantity > 0`                                                                           | `item`                          | `inventory.costs.read`   |
+| `count_difference_pending`    | warning  | conteo enviado o aprobado sin aplicar (`count` = diferencias calculadas ahora)                                      | `count`                         | todos                    |
+| `cancellations_unclassified`  | warning  | cancelaciones `pending` (una alerta con `count`, `occurred_at` = vencimiento más próximo)                           | `cancellations` (sin id)        | todos                    |
+| `cash_link_expense_corrected` | warning  | recepción con vínculo vigente a un gasto corregido o regularizado después (`count` = vínculos)                      | `receipt`                       | algún permiso de compras |
+| `reorder_point`               | info     | existencia ≤ punto de reabastecimiento (por almacén o total, como `below_minimum`)                                  | `stock`                         | todos                    |
+| `count_due`                   | info     | almacén activo con existencias cuyo último conteo aplicado venció según `count_frequency` (o nunca contado)         | `warehouse`                     | todos                    |
+| `purchase_order_partial`      | info     | orden `partially_received`                                                                                          | `purchase_order`                | algún permiso de compras |
+| `item_without_supplier`       | info     | insumo comprado activo sin proveedor activo que lo surta                                                            | `item`                          | todos                    |
+| `product_without_recipe`      | info     | producto (no combo) activo, no archivado, de categoría activa, sin receta activa; si `warn_products_without_recipe` | `product`                       | todos                    |
+
+Orden: gravedad, tipo (el de la tabla) y nombre del destino. `quantity` y `threshold` (unidad base) y las cantidades del
+texto solo con `inventory.stock.read`. Los textos no llevan identificadores (sí folios y nombres).
+
+### Sugerencias de compra
+
+```
+PurchaseSuggestion = {item, category_name, reorder_point, reorder_source: "item"|"warehouses", min_stock, stock_visible,
+                      stock, pending_quantity, draft_quantity, need_quantity, below_minimum, purchasing_visible, supplier,
+                      supplier_code, presentation, unit, capture_label, suggested_quantity, suggested_base_quantity,
+                      last_unit_price, last_price_label, last_price_at}
+PurchaseSuggestionPage = {items, total, page, page_size, stock_visible, purchasing_visible}
+```
+
+- Insumos comprados activos con punto de reabastecimiento: el del insumo o, si no tiene, la suma de los de sus almacenes
+  (`reorder_source: "warehouses"`). `need = reorder_point − (existencia total + pendiente de órdenes issued/partially_received)`;
+  solo si `need > 0`. Los borradores no cuentan como pendiente (se informan en `draft_quantity`).
+- Presentación: la habitual del proveedor preferido (activa) → la predeterminada de compra del insumo → la unidad base
+  (`unit`). Redondeo hacia arriba a presentaciones completas (`ceil(need ÷ base_quantity)`) o a unidades base enteras.
+- `stock`, `pending_quantity`, `draft_quantity`, `need_quantity`, `below_minimum` con `inventory.stock.read` o
+  `inventory.purchases.create`; `supplier`, `supplier_code` y último precio con algún permiso de compras.
+- Orden: por proveedor preferido (los que no tienen, al final) e insumo.
+- Borrador: para el proveedor indicado, renglón por insumo con la cantidad sugerida en su presentación (la habitual de ese
+  proveedor), precio = último precio del proveedor si se capturó en la misma presentación o unidad (si no, `0`), tasa de IVA
+  = la de su última recepción con ese proveedor (si no, 16). Audita `inventory.purchase_order_drafted_from_suggestions` y
+  publica `inventory.purchases.changed`. Se revisa y emite con las rutas de órdenes de la fase C.
+
+### Eventos y auditoría
+
+Eventos del ámbito `inventory` (sin contenido): `inventory.adjustments.changed`, `inventory.transfers.changed`,
+`inventory.counts.changed`, `inventory.alerts.changed`, `inventory.stock.changed`, `inventory.movements.recorded`,
+`inventory.items.changed` (niveles) e `inventory.purchases.changed` (borrador). Auditoría:
+`inventory.adjustment_recorded`, `inventory.adjustment_requested`, `inventory.waste_recorded`,
+`inventory.adjustment_authorized`, `inventory.adjustment_rejected`, `inventory.transfer_recorded`,
+`inventory.count_created`, `inventory.count_updated`, `inventory.count_lines_captured`, `inventory.count_submitted`,
+`inventory.count_approved`, `inventory.count_applied`, `inventory.count_cancelled`, `inventory.stock_level_saved`,
+`inventory.purchase_order_drafted_from_suggestions`. Orígenes del libro: `adjustment` «Ajuste de inventario», `waste`
+«Merma operativa», `transfer` «Transferencia entre almacenes», `count` «Conteo físico».
+
+### Puente nativo
+
+22 operaciones en `api.rs` (`inventory_adjustments`, `inventory_record_adjustment`, `inventory_adjustment`,
+`inventory_authorize_adjustment`, `inventory_reject_adjustment`, `inventory_transfers`, `inventory_record_transfer`,
+`inventory_transfer`, `inventory_counts`, `inventory_create_count`, `inventory_count`, `inventory_save_count`,
+`inventory_capture_count_lines`, `inventory_submit_count`, `inventory_approve_count`, `inventory_apply_count`,
+`inventory_cancel_count`, `inventory_stock_levels`, `inventory_save_stock_level`, `inventory_alerts`,
+`inventory_purchase_suggestions`, `inventory_draft_order_from_suggestions`); parámetros de consulta nuevos en la lista
+blanca `inventory_`: `type`, `severity`, `reason`.

@@ -48,6 +48,11 @@ var sourceKindLabels = map[string]string{
 	// Fase C: compras.
 	"receipt":         "Recepción de mercancía",
 	"supplier_return": "Devolución a proveedor",
+	// Fase D: control de inventario.
+	"adjustment": "Ajuste de inventario",
+	"waste":      "Merma operativa",
+	"transfer":   "Transferencia entre almacenes",
+	"count":      "Conteo físico",
 }
 
 // processLabels nombra los procesos de Go responsables de movimientos (fase B en adelante).

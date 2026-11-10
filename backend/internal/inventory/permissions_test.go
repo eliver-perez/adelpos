@@ -9,12 +9,13 @@ import (
 )
 
 // Todo permiso de inventario registrado en Go existe en la migración de su fase (0010 la fase A,
-// 0011 la fase B, 0013 la fase C) con la misma descripción y se concede al administrador (para que
-// siga contando como administrador completo); ninguna migración registra permisos de inventario que
-// Go no conozca ni los concede a otros roles.
+// 0011 la fase B, 0013 la fase C, 0014 la fase D) con la misma descripción y se concede al
+// administrador (para que siga contando como administrador completo); ninguna migración registra
+// permisos de inventario que Go no conozca ni los concede a otros roles.
 func TestInventoryPermissionsAreMigratedAndGrantedToAdministrator(t *testing.T) {
 	expected := map[string]int{
 		"0010_inventory_core.sql": 10, "0011_inventory_recipes_and_consumption.sql": 4, "0013_inventory_purchasing.sql": 6,
+		"0014_inventory_control.sql": 4,
 	}
 	registered := map[string]bool{}
 	total := 0
@@ -55,7 +56,7 @@ func TestInventoryPermissionsAreMigratedAndGrantedToAdministrator(t *testing.T) 
 			t.Fatalf("ninguna migración registra %s con la misma descripción", permission.Key)
 		}
 	}
-	if total != len(Permissions) || len(Permissions) != 20 {
-		t.Fatalf("se esperaban 20 permisos de inventario en Go y en las migraciones: %d y %d", len(Permissions), total)
+	if total != len(Permissions) || len(Permissions) != 24 {
+		t.Fatalf("se esperaban 24 permisos de inventario en Go y en las migraciones: %d y %d", len(Permissions), total)
 	}
 }

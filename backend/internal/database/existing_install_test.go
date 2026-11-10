@@ -687,10 +687,10 @@ var inventoryConstraints = []string{
 }
 
 // Simula una instalación existente en esquema 9 (0.7.1) con datos de las etapas anteriores y aplica
-// las migraciones de la etapa 8 que existan (0010 en adelante; fases A, B y C): nada existente
+// las migraciones de la etapa 8 que existan (0010 en adelante; fases A, B, C y D): nada existente
 // cambia (funciones, permisos de otros roles, gastos de caja con y sin corrección, eventos y
 // estaciones), las migraciones son repetibles según el migrador (una segunda ejecución no aplica
-// nada), las siembras son solo de referencia (la 0011 y la 0013 no siembran nada), los permisos de
+// nada), las siembras son solo de referencia (la 0011, la 0013 y la 0014 no siembran nada), los permisos de
 // inventario se conceden solo al administrador y las restricciones nuevas tienen nombre y rechazan
 // datos incoherentes. Deja la base vacía al terminar.
 func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
@@ -786,6 +786,7 @@ func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
 	checkStage8Constraints(ctx, t, pool)
 	checkStage8PhaseB(ctx, t, pool)
 	checkStage8PhaseC(ctx, t, pool)
+	checkStage8PhaseD(ctx, t, pool)
 }
 
 // checkStage8ExistingData comprueba que la 0010 no alteró los datos de las etapas anteriores.
@@ -816,8 +817,8 @@ func checkStage8ExistingData(ctx context.Context, t *testing.T, pool *pgxpool.Po
         (SELECT count(*) FROM app.realtime_events WHERE scope='cash')`).Scan(&permissionsAfter, &cashierAfter, &inventoryRole, &events); err != nil {
 		t.Fatal(err)
 	}
-	// 10 permisos de la 0010 (fase A), 4 de la 0011 (fase B) y 6 de la 0013 (fase C).
-	if permissionsAfter != permissionsBefore+20 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
+	// 10 permisos de la 0010 (fase A), 4 de la 0011 (fase B), 6 de la 0013 (fase C) y 4 de la 0014 (fase D).
+	if permissionsAfter != permissionsBefore+24 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
 		t.Fatalf("Permisos o eventos existentes: %d→%d, cajera %d→%d, inventarios %d, eventos %d",
 			permissionsBefore, permissionsAfter, cashierBefore, cashierAfter, inventoryRole, events)
 	}
@@ -846,7 +847,7 @@ func checkStage8Seeds(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if enabled || enabledAt != nil || units != 6 || warehouses != 1 || items != 0 || movements != 0 || settings != 1 ||
-		administrator != 20 || others != 0 {
+		administrator != 24 || others != 0 {
 		t.Fatalf("Siembras de la 0010: %v %v %d %d %d %d %d %d %d", enabled, enabledAt, units, warehouses, items, movements, settings,
 			administrator, others)
 	}

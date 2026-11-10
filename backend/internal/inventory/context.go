@@ -63,6 +63,11 @@ const (
 	permissionPurchasesReceive   = "inventory.purchases.receive"
 	permissionSupplierReturns    = "inventory.supplier_returns.record"
 	permissionPurchasesLinkCash  = "inventory.purchases.link_cash"
+	// Fase D (0014): ajustes, conteos y transferencias.
+	permissionAdjustmentsRecord = "inventory.adjustments.record"
+	permissionCountsPerform     = "inventory.counts.perform"
+	permissionCountsApprove     = "inventory.counts.approve"
+	permissionTransfersRecord   = "inventory.transfers.record"
 )
 
 type Permission struct {
@@ -71,8 +76,8 @@ type Permission struct {
 }
 
 // Permissions enumera los permisos de inventario. Cada clave también se inserta en la migración de
-// su fase (0010 la fase A, 0011 la fase B, 0013 la fase C) con la misma descripción y se concede
-// inicialmente solo al rol administrador; la fase D agrega las suyas en su migración.
+// su fase (0010 la fase A, 0011 la fase B, 0013 la fase C, 0014 la fase D) con la misma descripción y
+// se concede inicialmente solo al rol administrador.
 var Permissions = []Permission{
 	{permissionRead, "Consultar inventario (sección y resumen)"},
 	{permissionItemsManage, "Administrar insumos, unidades y presentaciones"},
@@ -94,6 +99,10 @@ var Permissions = []Permission{
 	{permissionPurchasesReceive, "Recibir mercancía"},
 	{permissionSupplierReturns, "Registrar devoluciones a proveedores"},
 	{permissionPurchasesLinkCash, "Vincular compras con gastos de caja"},
+	{permissionAdjustmentsRecord, "Registrar ajustes de inventario"},
+	{permissionCountsPerform, "Realizar conteos físicos"},
+	{permissionCountsApprove, "Aprobar y aplicar conteos"},
+	{permissionTransfersRecord, "Transferir mercancía entre almacenes"},
 }
 
 type Actor struct {
