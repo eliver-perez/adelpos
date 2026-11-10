@@ -2208,3 +2208,142 @@ real):
 - Capturas (claro y oscuro, 1280 × 720) en `scratchpad/shots8D2/chromium/` y `scratchpad/shots8D2/webkit/`:
   `d2-pestanas-*`, `d2-resumen-alertas-*`, `d2-ajustes-y-mermas-*`, `d2-merma-captura-*`, `d2-transferencia-captura-*`,
   `d2-transferencia-*`, `d2-conteo-captura-*` y `d2-conteo-diferencias-*`.
+
+## Fase E · integración, regresiones, documentación y entrega
+
+### Integración
+
+La etapa se desarrolló por partes, algunas en paralelo y cada una probada en su propia copia aislada, y se integró en
+commits locales de `etapa-8`:
+
+| Commit    | Contenido                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| `3d63681` | Fase 0: verificación contra el código                                                                   |
+| `6d19dcf` | Fase A servidor: 0010, motor de costos, libro, insumos, almacenes y existencias                         |
+| `45e373e` | Fase A interfaz: sección Inventarios                                                                    |
+| `6e063dc` | Fase B servidor: 0011, recetas, subrecetas, porciones, consumo asíncrono, cancelaciones y elaboraciones |
+| `700ec1a` | Fase B: 0012, indicaciones rápidas con efecto y complementos en la captura                              |
+| `a1d4e74` | Fase B interfaz: recetas, porciones, elaboraciones, cancelaciones por clasificar y traza de consumo     |
+| `00a79d4` | Fase B: verificación de cierre                                                                          |
+| `b2bccb1` | Fase C servidor: 0013, proveedores, órdenes, recepciones, devoluciones y vínculo con gastos             |
+| `ec5d8d7` | Fase C interfaz                                                                                         |
+| `4820308` | Fase C: verificación de cierre                                                                          |
+| `ba2be6e` | Fase D servidor: 0014, ajustes, mermas, transferencias, conteos, niveles, alertas y sugerencias         |
+| `45b7047` | Fase E: versión 0.8.0 con esquema 14 y documentación                                                    |
+| `343ad77` | Correcciones de la revisión independiente (fase F)                                                      |
+| `3a145e9` | Fase D interfaz                                                                                         |
+| `2220338` | Fase E: documentación al día con las correcciones y la interfaz de la fase D                            |
+
+- **Revisión independiente** (fase F): un revisor que no participó en el desarrollo leyó todo el backend de la etapa.
+  No encontró defectos críticos; los seis que encontró (uno alto, tres medios, dos bajos) se corrigieron con pruebas,
+  incluida una prueba de mutación que los reintroduce y los detecta (ver «Fase F»).
+- **Versión**: 0.8.0 con `schema_version: 14` en `config/product.json` y sus derivados (`metadata.json`,
+  `generated/product.json`, `tauri.conf.json`, `package.json`, `Cargo.toml`) y, a mano, la entrada raíz de
+  `package-lock.json` y la del paquete propio de `Cargo.lock`.
+- **Documentación**: `docs/INVENTORY_AND_PURCHASING.md` (nuevo), `docs/VERIFICATION_STAGE8.md` (nuevo),
+  `docs/VERIFICATION.md`, `CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `API_CONTRACTS.md`, `README.md`,
+  `NEXT_STEPS_FOR_SOL.md`, `DEVELOPMENT_MACOS.md` y las guías de catálogo, operación, cocina, cobros y caja.
+
+### Regresión final
+
+Sobre una copia exacta del commit `3a145e9` (los commits posteriores solo cambian documentación), clúster temporal 55499
+y Go temporal en un puerto propio:
+
+- Prettier, gofmt, `cargo fmt`, `sync-metadata --check`, `go vet` y `go vet -tags=integration`: aprobados.
+- Go unitarias con `-race`: todos los paquetes `ok`.
+- Integración PostgreSQL con `-race`: `database` (3.5 s), `administration` (55.0 s), `catalog` (6.8 s), `operations`
+  (216.5 s, aceptación encadenada de las etapas 4–8), `payments` (1.5 s), `kitchen` (1.3 s) e `inventory` (1.5 s): `ok`.
+- Vitest: 46 archivos y 404 pruebas; `tsc --noEmit` y build sin errores.
+- `cargo test --locked --offline`: 20 aprobadas y 1 ignorada (la de Keychain de siempre).
+- Playwright en Chromium y en WebKit: 6 de 6 en cada motor, 3.6 min por motor, sin reintentos.
+- `tauri build --bundles app` en la copia aislada: `AD-EL POS.app` 0.8.0, Mach-O arm64, 9.6 MB (no se instaló ni se abrió).
+- Las consultas de solo lectura previstas para la instalación real se ejecutaron contra una base temporal migrada hasta el
+  esquema 14 (repetir la migración dio `applied:0`).
+
+### Mediciones del consumo asíncrono (§32.17)
+
+Tiempo de la confirmación con envío a cocina, 200 por caso en bloques alternados (fase B):
+
+| Ejecución | Inventario desactivado (media / p95) | Inventario activado (media / p95) |
+| --------- | ------------------------------------ | --------------------------------- |
+| sin -race | 6.79 / 7.83 ms                       | 7.01 / 7.74 ms                    |
+| con -race | 17.58 / 20.70 ms                     | 18.03 / 21.22 ms                  |
+
+El trabajador procesa cada solicitud en unos 6 ms. Calcularlo dentro de la liberación alargaría unas 30 veces el tiempo
+que la liberación ocupa el lock 7820148305, por lo que el consumo se mantiene asíncrono.
+
+### Procedimiento para aplicar 0010–0014 a la instalación real (en espera de autorización)
+
+La autorización de migraciones anteriores no se extiende a estas (§28). La instalación real sigue en 0.7.1 y esquema 9.
+Procedimiento propuesto, desde la rama `etapa-8`:
+
+1. **Preparar.** Cerrar AD-EL POS en todas las terminales, sin cobros ni arqueos en curso. `./scripts/dev.sh status`
+   confirma el servidor 0.7.1 en 8181.
+2. **Respaldar.** `./scripts/dev.sh backup` genera `backups/adel_pos-<fecha>.dump` y lo comprueba con `pg_restore --list`.
+3. **Ensayar la restauración.** `python3 scripts/restore-check.py backups/NOMBRE.dump` restaura en una base temporal y
+   compara los conteos de todas las tablas (92 en la instalación real, en esquema 9). Si no coinciden, se detiene.
+4. **Comprobación previa** de solo lectura (conteos, sin credenciales): migraciones 1–9, tablas, cuentas, unidades
+   comerciales, liberaciones, pagos, ajustes, turnos, operaciones de caja, catálogo, indicaciones rápidas, funciones,
+   auditoría y permisos.
+5. **Detener.** `./scripts/dev.sh server-stop`, de forma ordenada.
+6. **Migrar.** `./scripts/dev.sh migrate` compila el servidor 0.8.0 y aplica 0010–0014, cada una en su transacción.
+   Resultado esperado `applied:5`; una segunda ejecución debe dar `applied:0`.
+7. **Arrancar.** `./scripts/dev.sh server-start`. `GET /api/v1/health/ready` debe responder 200 (PostgreSQL disponible,
+   esquema compatible) y `GET /api/v1/version` indicar 0.8.0 y esquema 14.
+8. **Comprobar** (solo lectura):
+   - migraciones 1–14 y 126 tablas en `app` (34 nuevas);
+   - los mismos conteos del paso 4 en cuentas, unidades, liberaciones, pagos, ajustes, turnos, operaciones de caja,
+     catálogo e indicaciones rápidas (todas con efecto `none`);
+   - 24 permisos `inventory.*` nuevos, concedidos solo al rol administrador (ninguno a otros roles, tampoco a
+     «Inventarios»);
+   - «Control de inventario» desactivado y nunca activado;
+   - las 6 unidades del sistema, «Almacén general» como predeterminado y la configuración por omisión (IVA de compras
+     en el costo, corte del día operativo a las 05:00, sin frecuencia de conteo);
+   - ningún insumo, movimiento ni solicitud de consumo.
+9. **Instalar la aplicación.** `./scripts/dev.sh build-macos` y `./scripts/dev.sh open-app`.
+
+Efectos sobre los datos existentes:
+
+- **Filas:** 0010–0014 no modifican filas existentes ni 0001–0009.
+- **Columnas nuevas:**
+  - `establishment_features.enabled_at` (nula);
+  - `catalog_category_quick_notes.effect` (`none`);
+  - `catalog_category_quick_notes.ingredient_id` (nula).
+- **Restricción:** el CHECK de ámbitos de `realtime_events` se recrea con el mismo nombre, y las filas anteriores siguen
+  siendo válidas.
+- **Tablas:** se crean 34.
+- **Siembras:** solo de referencia, sin datos ficticios:
+  - las 6 unidades;
+  - «Almacén general»;
+  - la configuración de inventario;
+  - la función desactivada;
+  - los permisos para el administrador.
+- **Venta:** con el control desactivado es idéntica a la 0.7.1.
+
+Después de instalar, el restaurante prepara cuando quiera:
+
+1. insumos, presentaciones, almacenes y la asignación de estaciones;
+2. recetas y porciones habituales;
+3. existencias iniciales con su costo.
+
+Cuando esté listo, activa «Control de inventario» en Configuración → Funciones. Solo las liberaciones a cocina
+posteriores consumen.
+
+Vuelta atrás:
+
+- **Antes del paso 6:** basta `server-start` desde `main` (0.7.1).
+- **Después de aplicarlas:** solo con indicación del propietario, se restaura el respaldo del paso 2 con la aplicación
+  cerrada y se vuelve a la 0.7.1.
+
+Mientras no se autorice, **no** ejecutar `migrate`, `server-start` ni `build-macos` sobre la instalación real desde
+`etapa-8`:
+
+- `migrate` aplicaría 0010–0014 sin el respaldo previo.
+- Un servidor 0.8.0 vería el esquema 9 como incompatible (readiness 503).
+
+### No verificado
+
+- Aplicación de 0010–0014 a la instalación real (pendiente de autorización).
+- Ventana nativa Tauri, pantalla táctil física y teclado virtual en Inventarios y en la captura.
+- Papel de comandas con indicaciones con efecto.
+- Volumen real, varias terminales a la vez, LAN con otra máquina y Windows.

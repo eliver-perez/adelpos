@@ -14,8 +14,8 @@ Evidencia detallada por fase: [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). 
 - **Código**: fases 0, A, B, C y D (servidor e interfaz), versión y documentación de la fase E y las correcciones de la
   revisión independiente (fase F del avance) en commits locales de la rama `etapa-8` (hasta `3a145e9`), cada parte con sus
   suites aprobadas en un entorno aislado (clúster PostgreSQL temporal en el puerto 55499 y Go temporal para Playwright),
-  según [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). La regresión final sobre el árbol completo estaba en curso al
-  redactar este documento.
+  según [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). La regresión final de la fase E sobre una copia exacta del commit
+  `3a145e9` aprobó completa (ver «Regresión final»).
 - **Instalación real**: sigue en **0.7.1 y esquema 9**. Las migraciones 0010–0014 **no se han aplicado**: requieren
   autorización expresa del propietario, con respaldo, ensayo de restauración y el procedimiento de
   [DEVELOPMENT_MACOS.md](../DEVELOPMENT_MACOS.md). La última actualización registrada de la instalación real es la de la
@@ -45,13 +45,26 @@ Evidencia detallada por fase: [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md). 
 - Ventana nativa Tauri (WKWebView), pantalla táctil física y teclado virtual en Inventarios y en la captura.
 - Papel: ninguna comanda con indicaciones con efecto se imprimió.
 - Volumen real, muchas terminales a la vez, LAN con otra máquina, Keychain real y Windows.
-- Regresión final sobre el árbol completo (en curso al redactar este documento).
 
 ## Regresión final (fase E)
 
-**Pendiente.** La regresión completa sobre el árbol 0.8.0 y esquema 14 con las correcciones de la fase F y la interfaz de la
-fase D (estáticas, Go con `-race`, integración PostgreSQL, Vitest, `tsc` y build, Rust, Playwright Chromium y WebKit y el
-paquete `.app`) se registrará aquí al terminar.
+**Aprobada** el 10 de noviembre de 2026 sobre una copia exacta del commit `3a145e9` (0.8.0, esquema 14, con las
+correcciones de la fase F y la interfaz de la fase D; los commits posteriores solo cambian documentación), con el clúster
+temporal 55499 y Go temporal en un puerto propio:
+
+- Prettier, gofmt, `cargo fmt`, `sync-metadata --check`, `go vet` y `go vet -tags=integration`: aprobados.
+- Go unitarias con `-race`: todos los paquetes `ok`.
+- Integración PostgreSQL con `-race`: `database` (3.5 s, actualización desde el esquema 9 hasta la 0014), `administration`
+  (55.0 s), `catalog` (6.8 s), `operations` (216.5 s, aceptación encadenada de las etapas 4–8), `payments` (1.5 s),
+  `kitchen` (1.3 s) e `inventory` (1.5 s): `ok`.
+- Vitest: 46 archivos y 404 pruebas aprobadas; `tsc --noEmit` y build sin errores.
+- `cargo test --locked --offline`: 20 aprobadas y 1 ignorada (la de Keychain de siempre).
+- Playwright en Chromium y en WebKit: 6 de 6 aprobadas en cada motor (`inventory`, `restaurant`, `stock-consumption`,
+  `takeaway-quick-notes`, `vendor-purchases` y `warehouse-control`), 3.6 min por motor, sin reintentos.
+- Paquete de escritorio: `tauri build --bundles app` en la copia aislada, con `CARGO_TARGET_DIR` en el scratchpad: `AD-EL
+POS.app` 0.8.0, ejecutable Mach-O arm64, 9.6 MB. No se instaló ni se abrió.
+- Las consultas de solo lectura previstas para la instalación real se probaron contra una base temporal migrada hasta el
+  esquema 14 (migración repetida: `applied:0`).
 
 ## Repetir las comprobaciones
 
