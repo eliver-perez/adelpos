@@ -325,6 +325,8 @@ export interface CountLine {
   difference: string | null;
   difference_kind: CountDifferenceKind | null;
   current_quantity: string | null;
+  // Movimiento aplicado (sobrante o faltante): también solo con theoretical_visible, porque revela
+  // el sentido de la diferencia.
   movement_id: string | null;
   movement_kind: MovementKind | null;
   movement_label: string | null;
@@ -511,8 +513,9 @@ export interface InventorySummaryWithAlerts extends InventorySummary {
 export interface PurchaseSuggestion {
   item: ItemReference;
   category_name: string | null;
-  // Punto de reabastecimiento usado: el del insumo o la suma de los de sus almacenes.
-  reorder_point: string;
+  // Punto de reabastecimiento usado: el del insumo o la suma de los de sus almacenes. null sin
+  // stock_visible (con lo sugerido se deduciría la existencia).
+  reorder_point: string | null;
   reorder_source: 'item' | 'warehouses';
   min_stock: string | null;
   // Existencia total, pendiente de órdenes emitidas, en borradores y necesidad (unidad base): con
@@ -531,9 +534,10 @@ export interface PurchaseSuggestion {
   presentation: PresentationReference | null;
   unit: UnitReference | null;
   capture_label: string;
-  // Redondeado hacia arriba a presentaciones completas (o unidades base enteras).
-  suggested_quantity: string;
-  suggested_base_quantity: string;
+  // Redondeado hacia arriba a presentaciones completas (o unidades base enteras). null sin
+  // stock_visible.
+  suggested_quantity: string | null;
+  suggested_base_quantity: string | null;
   last_unit_price: string | null;
   last_price_label: string | null;
   last_price_at: string | null;

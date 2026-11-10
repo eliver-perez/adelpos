@@ -8,7 +8,9 @@ import type { Operation } from './api';
 //   - Valores y costos exactos (value, unit_cost, average_cost…) y su versión para mostrar
 //     (*_display): valores a centavos y costos unitarios a cuatro decimales.
 //   - Los campos de costo llegan en null cuando la sesión no tiene inventory.costs.read
-//     (costs_visible: false) y la valuación total cuando no tiene inventory.valuation.read.
+//     (costs_visible: false) y la valuación total cuando no tiene inventory.valuation.read
+//     (valuation_visible: false). La valuación por insumo (value de una existencia,
+//     valuation_value_after de un movimiento) exige ambos permisos.
 // Toda escritura lleva operation_id (lo agrega useRestaurantMutation) y las entidades
 // administrables, además, su revision (409 REVISION_CONFLICT si otra terminal la cambió).
 
@@ -257,11 +259,14 @@ export interface StockRow {
   below_minimum: boolean;
   at_reorder_point: boolean;
   warehouses: StockByWarehouse[];
-  // Solo con inventory.costs.read. value es el valor total del insumo (el costo es uno por insumo).
+  // Solo con inventory.costs.read (costs_visible).
   average_cost: string | null;
   average_cost_display: string | null;
+  // Valor total del insumo (el costo es uno por insumo): solo con inventory.costs.read e
+  // inventory.valuation.read (costs_visible y valuation_visible de la página).
   value: string | null;
   value_display: string | null;
+  // Solo con inventory.costs.read.
   cost_pending: boolean | null;
   updated_at: string | null;
 }
@@ -310,6 +315,9 @@ export interface InventoryMovement {
   cost_basis: CostBasis | null;
   cost_basis_label: string | null;
   cost_pending: boolean | null;
+  // Valuación del insumo después del movimiento: solo con inventory.costs.read e
+  // inventory.valuation.read (valuation_visible).
+  valuation_visible: boolean;
   valuation_value_after: string | null;
   // Hora de negocio (liberación, recepción, conteo) y hora de registro.
   occurred_at: string;
@@ -329,6 +337,8 @@ export interface InventoryMovement {
 
 export interface MovementPage extends Page<InventoryMovement> {
   costs_visible: boolean;
+  // valuation_value_after viaja: inventory.costs.read e inventory.valuation.read.
+  valuation_visible: boolean;
 }
 
 export interface MovementQuery {

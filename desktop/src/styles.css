@@ -5132,3 +5132,206 @@ th.inventory-number {
 .inventory-page .panel {
   min-width: 0;
 }
+/* Etapa 8, fase D (interfaz de ajustes, mermas, transferencias, conteos, niveles por almacén,
+   alertas y sugerencias de compra). Solo tokens de ambos temas. Las trece pestañas de
+   Inventarios forman una rejilla de columnas iguales que se reacomoda en filas completas sin
+   desbordar a 1280 × 720; la hoja de conteo usa renglones grandes para tableta. */
+.inventory-page .catalog-tabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 128px), 1fr));
+}
+.inventory-page .catalog-tabs button {
+  padding: 10px 8px;
+  text-align: center;
+  white-space: nowrap;
+}
+.tag-danger {
+  gap: 4px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  font-weight: 600;
+}
+.control-line-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+.control-line-fixed {
+  align-self: end;
+  margin: 0 0 12px;
+}
+.control-direction-field .segmented-control,
+.control-reason-field .segmented-control {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.control-direction-field .segmented-control button {
+  flex: 1 1 140px;
+  white-space: nowrap;
+}
+.control-reason-field .segmented-control button {
+  flex: 1 1 150px;
+}
+.control-row-pending td:first-child {
+  box-shadow: inset 4px 0 0 var(--warning);
+}
+.control-actions .muted {
+  flex: 1 1 240px;
+}
+.control-level-row > form {
+  flex: 1 1 100%;
+}
+.control-select-button {
+  min-width: 104px;
+}
+/* Alertas: acento por gravedad además de la etiqueta con su nombre (no solo color). */
+.control-alert {
+  background: var(--panel);
+}
+.control-alert-critical {
+  box-shadow: inset 4px 0 0 var(--danger);
+}
+.control-alert-warning {
+  box-shadow: inset 4px 0 0 var(--warning);
+}
+.control-alert-info {
+  box-shadow: inset 4px 0 0 var(--info);
+}
+.control-alert-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+.control-alert-group .accordion-content > .inventory-list {
+  padding: 4px 0;
+}
+.control-alerts-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+/* Hoja de conteo: un renglón por insumo con nombre, captura y diferencia. */
+.count-sales-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  box-shadow: inset 4px 0 0 var(--accent);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.count-sales-note > .app-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.count-sales-note p {
+  margin: 0;
+}
+.count-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px 20px;
+}
+.count-search {
+  flex: 2 1 280px;
+  min-width: 0;
+}
+.count-toolbar > .field:not(.count-search) {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.count-toolbar .segmented-control button {
+  white-space: nowrap;
+}
+.count-lines {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.count-line {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  align-items: start;
+  gap: 12px 20px;
+  min-height: 76px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--subtle);
+}
+.count-line-counted {
+  box-shadow: inset 4px 0 0 var(--accent);
+}
+.count-line-dirty {
+  border-color: var(--warning);
+  box-shadow: inset 4px 0 0 var(--warning);
+}
+.count-line-item {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.count-line-item strong {
+  font-size: 16px;
+  font-weight: 650;
+}
+.count-line-unsaved {
+  color: var(--warning);
+  font-weight: 650;
+}
+.count-line-capture {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(170px, 1.4fr);
+  gap: 10px 12px;
+  min-width: 0;
+}
+.count-line-quantity input {
+  min-height: 52px;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.count-line-capture select {
+  min-height: 52px;
+}
+.count-line-actions {
+  grid-column: 1 / -1;
+}
+.count-line-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0;
+}
+.count-line-figures div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.count-line-figures dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.count-line-figures dd {
+  margin: 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.count-line-empty {
+  padding: 12px 0;
+}
+@media (max-width: 720px) {
+  .count-line-capture {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

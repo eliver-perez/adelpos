@@ -82,7 +82,7 @@ export function formatSignedQuantity(
   return withUnit(`${sign}${parsed.text}`, unit);
 }
 
-// Nombres de los permisos de inventario (fases A y B), iguales a las descripciones de Go
+// Nombres de los permisos de inventario (fases A, B y D), iguales a las descripciones de Go
 // (inventory.Permissions), para explicar en pantalla qué permiso falta.
 const permissionLabels: Record<string, string> = {
   'inventory.read': 'Consultar inventario (sección y resumen)',
@@ -101,6 +101,11 @@ const permissionLabels: Record<string, string> = {
   'inventory.subrecipes.manage': 'Administrar subrecetas (preparaciones)',
   'inventory.production.record': 'Registrar elaboraciones de subrecetas almacenables',
   'inventory.waste.record': 'Registrar mermas y clasificar cancelaciones',
+  'inventory.adjustments.record': 'Registrar ajustes de inventario',
+  'inventory.counts.perform': 'Realizar conteos físicos',
+  'inventory.counts.approve': 'Aprobar y aplicar conteos',
+  'inventory.transfers.record': 'Transferir mercancía entre almacenes',
+  'inventory.purchases.create': 'Crear órdenes de compra',
   'settings.features.manage': 'Activar o desactivar funciones del establecimiento',
 };
 
@@ -128,8 +133,8 @@ export const movementKindOptions: { value: MovementKind; label: string }[] = [
   { value: 'cost_adjustment', label: 'Ajuste de costo' },
 ];
 
-// Orígenes de movimiento que existen hasta la fase C (Go: sourceKindLabels). La fase D agrega los
-// suyos (ajuste, transferencia, conteo…).
+// Orígenes de movimiento (Go: sourceKindLabels), con los de la fase D: ajustes, mermas,
+// transferencias y conteos.
 export const sourceKindOptions: { value: string; label: string }[] = [
   { value: 'initial', label: 'Existencia inicial' },
   { value: 'consumption', label: 'Liberación a cocina' },
@@ -138,6 +143,10 @@ export const sourceKindOptions: { value: string; label: string }[] = [
   { value: 'production', label: 'Elaboración' },
   { value: 'receipt', label: 'Recepción de mercancía' },
   { value: 'supplier_return', label: 'Devolución a proveedor' },
+  { value: 'adjustment', label: 'Ajuste de inventario' },
+  { value: 'waste', label: 'Merma operativa' },
+  { value: 'transfer', label: 'Transferencia entre almacenes' },
+  { value: 'count', label: 'Conteo físico' },
 ];
 
 export const stockStateOptions: { value: StockState; label: string }[] = [

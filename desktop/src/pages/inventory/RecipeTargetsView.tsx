@@ -156,13 +156,16 @@ export function RecipeTargetsView({
   editable,
   onOpenRecipe,
   onCreateRecipe,
+  initialSearch = '',
 }: {
   editable: boolean;
   onOpenRecipe: (recipeID: string) => void;
   onCreateRecipe: (target: RecipeDraftTarget) => void;
+  // Producto que se busca al llegar desde la alerta «Producto sin receta».
+  initialSearch?: string;
 }) {
   const [filter, setFilter] = useState<TargetFilter>({
-    search: '',
+    search: initialSearch,
     kind: '',
     state: '',
     active: 'true',
