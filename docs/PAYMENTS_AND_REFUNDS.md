@@ -1,6 +1,6 @@
 # Cobros, pagos, descuentos y devoluciones · Etapa 6
 
-Versión 0.7.1, esquema 9: etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable; y de la etapa 7.1 (fase D, migración 0009, aplicada a la instalación real el 9 de noviembre de 2026): motivos de descuento y total en dólares en precuentas y tickets. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
+Versión 0.8.0, esquema 14 (la etapa 8 no modifica cobros; sus migraciones 0010–0014 aún no se aplican a la instalación real): etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable; y de la etapa 7.1 (fase D, migración 0009, aplicada a la instalación real el 9 de noviembre de 2026): motivos de descuento y total en dólares en precuentas y tickets. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
 
 ## Autoridad y estructura
 
@@ -131,6 +131,7 @@ Función activable del establecimiento, **desactivada por defecto** (Configuraci
 - El método de salida puede ser distinto del original y debe admitir devoluciones; se registra el impacto real en el turno abierto de la terminal (movimiento negativo).
 - Autorización configurable: con `payments.refunds.execute` el cajero devuelve sin contraseña; sin ese permiso, o si el importe supera el umbral configurado, se requiere un supervisor con `payments.refunds.authorize`.
 - Una devolución financiera no reintegra inventario ni cancela la preparación. Tras devolver unidades, estas vuelven a poder cancelarse, editarse o transferirse con las reglas normales.
+- **Inventario (etapa 8)**: `payments` no toca solicitudes de consumo ni movimientos de inventario. Una devolución (total, de un pago o por productos) **no reintegra ingredientes**: el consumo de una unidad liberada a cocina solo cambia con una modificación de la partida o si la unidad se cancela y se clasifica «No preparado» en Inventarios (o lo hace el reconciliador al corte del día operativo). Cobrar tampoco consume: el consumo nace de la liberación a cocina. Probado en `backend/internal/operations/inventory_consumption_test.go` (devolución financiera sin reintegración). Ver [INVENTORY_AND_PURCHASING.md](INVENTORY_AND_PURCHASING.md).
 
 ## Correcciones de pago
 
