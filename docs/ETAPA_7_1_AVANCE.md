@@ -255,3 +255,128 @@ Ejecutada sobre la copia aislada sincronizada con el repositorio (clúster tempo
 - Playwright: 1 aprobada en Chromium y 1 en WebKit.
 - Ningún trabajo ni pulso se envió a una impresora o cajón real: solo consultas de lectura `lpstat`/`lpoptions` en este Mac para investigar el criterio y grabar las salidas de prueba. La 0009 no se aplicó a la instalación real.
 - Repetida de forma independiente antes del commit, con los mismos resultados: estáticas aprobadas, Go unitarias en `ok`, Vitest con 306 pruebas aprobadas, `tsc`, `build` y cargo (14 aprobadas, 1 ignorada) sin errores, los seis paquetes de integración en `ok` (`operations` en 125,8 s) y Playwright con 1 aprobada en Chromium y 1 en WebKit.
+
+## Fase D · Pendientes acordados
+
+Detalle funcional en [PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md) («Motivos de descuento · etapa 7.1» y «Precuentas y tickets»), [CATALOG.md](CATALOG.md) («Indicaciones rápidas por categoría · etapa 7.1») y [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md); contratos en [API_CONTRACTS.md](../API_CONTRACTS.md). Sin permisos nuevos: los motivos usan `payments.read` y `payments.settings.manage`, y las indicaciones `catalog.read` y `catalog.categories.manage`.
+
+### Migración 0009 (ampliada)
+
+La fase D agregó tres secciones al final de `0009_operation_tables_cash_and_reasons.sql`, sin tocar las dos de la fase C. Sigue siendo una sola migración, transaccional y repetible (el migrador la registra en la misma transacción; una segunda ejecución aplica 0). **No se aplicó a la instalación real**; `config/product.json` sigue en esquema 8 hasta la fase E. 0001–0008 no cambiaron.
+
+```sql
+-- 3. Motivos de descuento: catálogo sembrado por decisión del propietario.
+CREATE TABLE app.discount_reasons (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL CONSTRAINT discount_reasons_name_check
+        CHECK (length(name) BETWEEN 1 AND 60 AND name = btrim(name)),
+    requires_description boolean NOT NULL DEFAULT false,
+    active boolean NOT NULL DEFAULT true,
+    sort_order integer NOT NULL DEFAULT 0 CONSTRAINT discount_reasons_sort_order_check CHECK (sort_order >= 0),
+    revision integer NOT NULL DEFAULT 1 CONSTRAINT discount_reasons_revision_check CHECK (revision > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT discount_reasons_name_key UNIQUE (name)
+);
+INSERT INTO app.discount_reasons(name, requires_description, sort_order) VALUES
+    ('Atención', false, 10), ('Promoción', false, 20), ('Demora', false, 30),
+    ('Cortesía de la casa', false, 40), ('Otro', true, 50);
+
+-- 4. Motivo de cada descuento o cortesía y su nombre al registrar; las filas existentes quedan en NULL.
+ALTER TABLE app.account_adjustments
+    ADD COLUMN reason_id uuid CONSTRAINT account_adjustments_reason_id_fkey REFERENCES app.discount_reasons(id),
+    ADD COLUMN reason_name text;
+ALTER TABLE app.account_adjustments
+    ADD CONSTRAINT account_adjustments_reason_kind_check CHECK (reason_id IS NULL OR kind = 'discount');
+ALTER TABLE app.account_adjustments
+    ADD CONSTRAINT account_adjustments_reason_name_check CHECK (
+        (reason_id IS NULL AND reason_name IS NULL)
+        OR (reason_id IS NOT NULL AND reason_name IS NOT NULL AND length(reason_name) BETWEEN 1 AND 60)
+    );
+CREATE INDEX account_adjustments_reason_idx ON app.account_adjustments (reason_id) WHERE reason_id IS NOT NULL;
+
+-- 5. Indicaciones rápidas por categoría: texto sin comas, orden, activa y revisión.
+CREATE TABLE app.catalog_category_quick_notes (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    category_id uuid NOT NULL
+        CONSTRAINT catalog_category_quick_notes_category_id_fkey REFERENCES app.catalog_categories(id),
+    text text NOT NULL CONSTRAINT catalog_category_quick_notes_text_check
+        CHECK (length(text) BETWEEN 1 AND 80 AND text = btrim(text) AND strpos(text, ',') = 0),
+    active boolean NOT NULL DEFAULT true,
+    sort_order integer NOT NULL DEFAULT 0
+        CONSTRAINT catalog_category_quick_notes_sort_order_check CHECK (sort_order >= 0),
+    revision integer NOT NULL DEFAULT 1 CONSTRAINT catalog_category_quick_notes_revision_check CHECK (revision > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX catalog_category_quick_notes_text_key
+    ON app.catalog_category_quick_notes (category_id, lower(text));
+```
+
+Todas las restricciones nuevas tienen nombre explícito; las de columnas opcionales (`account_adjustments_reason_kind_check` y `account_adjustments_reason_name_check`) exigen `IS NULL` en la rama que las omite y nunca evalúan a NULL (las demás columnas que validan son `NOT NULL`). La prueba de actualización desde el esquema 8 (`TestStage71UpgradeOfExistingInstallation`, ampliada con `checkStage71PhaseD`) parte de una instalación con un descuento de la etapa 6 y comprueba: el descuento conserva motivo escrito e importe con `reason_id` nulo, la siembra (nombres, orden, solo «Otro» con descripción, todos activos), las once restricciones con nombre y el índice único, los CHECK con tablas temporales (nombres vacíos, con espacios o de más de 60, orden negativo, textos con coma, vacíos, con espacio final o de más de 81, revisión 0, un cargo con motivo, un motivo sin nombre guardado, un nombre sin motivo y un nombre vacío, rechazados; un descuento con y sin motivo y un cargo sin motivo, aceptados), la llave foránea de la categoría y del motivo y el índice que rechaza «SIN CEBOLLA» si ya existe «Sin cebolla». La migración sigue siendo repetible.
+
+### Contratos nuevos o cambiados
+
+| Contrato                                          | Cambio                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET payments/discount-reasons`                   | Nueva (`payments.read`): todos los motivos en su orden visual, con `requires_description` y `active`. Puente: `payments_discount_reasons`.                                                                                                                                                                                                                                                                           |
+| `POST` / `PATCH payments/discount-reasons[/{id}]` | Nuevas (`payments.settings.manage`): `{operation_id, revision?, name, requires_description, active, position?}`; idempotentes, auditadas (`payments.discount_reason_created`/`updated`/`discount_reasons_reordered`) con evento `payments.discount_reasons.changed`; `DUPLICATE_NAME`, `REVISION_CONFLICT` y `LAST_ACTIVE_REASON` (409). Puente: `payments_create_discount_reason`, `payments_save_discount_reason`. |
+| `POST payments/accounts/{id}/discounts`           | `reason_id` opcional. Con él: motivo existente y activo (`DISCOUNT_REASON_INACTIVE`), descripción obligatoria de 5 a 500 si el motivo la exige y opcional (≤ 500) si no. Sin él: regla de la etapa 6 y `reason_id` nulo.                                                                                                                                                                                             |
+| `finance.adjustments[]`                           | Agrega `reason_id` y `reason_name`.                                                                                                                                                                                                                                                                                                                                                                                  |
+| Precuenta y ticket (`CommercialDocument`)         | Cada ajuste agrega `reason` («Concepto · Motivo» en el texto); con `usd_cash` y tipo de cambio, `usd_total`, `usd_rate` y la línea «Total en dólares (T.C. $Y)» con `US$X`.                                                                                                                                                                                                                                          |
+| `POST` / `PATCH catalog/quick-notes[/{id}]`       | Nuevas (`catalog.categories.manage`): `{category_id, text, active, revision, position?}`; revisión optimista, orden por categoría, auditoría `catalog.quick-notes.created`/`updated`/`reordered`; `CATALOG_VALIDATION` (400), `DUPLICATE_QUICK_NOTE` y `REVISION_CONFLICT` (409). Puente: `catalog_create_quick_note`, `catalog_save_quick_note`.                                                                    |
+| `GET catalog/lookups`                             | Agrega `category_quick_notes` (todas, con `active`, en el orden de categorías e indicaciones).                                                                                                                                                                                                                                                                                                                       |
+
+### Implementación
+
+- **Go · motivos.** `payments/discount_reasons.go`: lista, alta y edición con `internal/ordering` (alcance nuevo `DiscountReasons`), revisión, idempotencia en `restaurant_operations` (la de todas las escrituras de `payments`), lock 7820148305, auditoría y evento en la misma transacción, y `resolveDiscountReason`, que aplica las reglas de la decisión 15 antes de la primera escritura. `payments/adjustments.go` guarda `reason_id` y audita el motivo junto al plan (`discountAudit`); `payments/finance.go` lee `reason_id` y el nombre guardado con el descuento (`reason_name`).
+- **Go · total en dólares.** `payments/documents.go`: `addDollarTotal` (función `usd_cash`, turno activo de la caja de la terminal para la precuenta y turno del pago para el ticket, `mxnToUSD` sobre el total que ya calculó Go) y `renderDocument` con «Concepto · Motivo» y la línea «Total en dólares (T.C. $Y)» con `US$X` en el formato único de `moneytext`, ajustada al ancho del papel.
+- **Go · indicaciones.** `catalog/quick_notes.go`: alta y edición con permiso antes de leer con bloqueo, validación (1–80, sin comas ni caracteres de control), revisión, orden por categoría con `internal/ordering` (alcance `CategoryQuickNotes`; `ordering` admite ahora una columna de desempate distinta de `name`, aquí `text`) y auditoría en la transacción del catálogo (lock 7820148304, el único que toman las escrituras de catálogo). `catalog/actions.go` agrega las indicaciones a los lookups.
+- **Puente nativo.** Cinco operaciones nuevas en la lista cerrada de `api.rs`, con el formato que lee `e2e/native-driver.ts`, y la prueba Rust `discount_reasons_and_quick_notes_routes_are_closed` (método, ruta, identificador obligatorio, rechazo de rutas arbitrarias y de borrados inexistentes).
+- **Interfaz · descuentos.** `DiscountForm` muestra los motivos activos como botones (`capture-choice`, 56 px, `aria-pressed`) en descuentos y cortesías; al elegir uno aparece su descripción («Descripción del motivo «Otro»», obligatoria de 5 a 500, o «Descripción (opcional)»), y el envío lleva `reason_id`. `AdjustmentList` muestra «Motivo: Atención · descripción». Cobros (administración) tiene la sección «Motivos de descuento» (`DiscountReasonsAdmin`: botones por motivo, alta, nombre, «Exige descripción», «Motivo activo» y posición; solo consulta sin `payments.settings.manage`).
+- **Interfaz · indicaciones.** `CategoryQuickNotes`, en el editor de una categoría guardada del Catálogo: lista en orden, alta y edición por indicación (texto sin comas con aviso inmediato, activa, posición) fuera del formulario de la categoría. En la captura, `KitchenNotes` recibe las indicaciones activas de la categoría del producto (`quickNotesFor` sobre los lookups que la captura ya consulta cada 15 s) y las muestra primero, en su orden, como botones que se marcan en su lugar; después las demás de la partida, los atajos de la cuenta sin repetir y «Escribir otra». `CustomizationPanel` las pasa para el producto y `TouchCustomizer` para el producto de cada componente de combo.
+
+### Correcciones de interfaz detectadas en la fase C
+
+- **Pie de la cuenta en la captura.** A 1280 × 720 recortaba a la derecha los importes y «Más…». No ocurría en `main` (`d9228b5`): medido con Playwright en Chromium sobre una copia de esa versión en el scratchpad (`git archive`, sin cambiar de rama), las filas del pie medían 328 px y todo quedaba dentro de la cuenta; con la fase C crecían a 373 px y se perdían 29 px. Lo introdujo la fase A: con los iconos, el ancho mínimo de los botones de una sola palabra («Descuento», «Precuenta») superaba su cuarta parte del pie, y la cuadrícula del pie, sin columnas definidas, crecía dentro de una cuenta de 356 px que oculta lo que sobresale. El pie usa ahora una sola columna `minmax(0, 1fr)` y es contenedor de consulta: con 420 px o menos, el icono va sobre el texto en las acciones secundarias y principales, sin cambiar alturas (44 y 56 px) ni orden; las principales usan `repeat(2, minmax(0, 1fr))`. Playwright (`expectBillFooterFits` en `e2e/restaurant.spec.ts`) comprueba a 1280 × 720 y 1920 × 1080, en claro y oscuro, que el pie, sus filas, botones e importes no se desbordan y quedan dentro de la cuenta y de la ventana, con «Más…» y el total completos (falla con el CSS de la fase C). El título de la captura no se recorta en el recorrido; con nombres largos conserva sus puntos suspensivos y no se cambió.
+- **Avisos de éxito «visibles más de 4 s».** El registro de la vida de cada aviso en el recorrido completo (cada 100 ms, Chromium y WebKit) mostró que todos los éxitos empiezan a retirarse a sus 4 s (máximo 4.3 s), también los tapados por otros más recientes: ni la pila apilada, ni la supresión de «hover» de `AppToaster` ni los temporizadores de los avisos tapados los retenían. La causa era visual: las reglas que ocultan el contenido de los avisos tapados usaban `.app-toast-frame > .app-toast`, pero Sonner 2.0.8 envuelve cada aviso propio en `[data-content] > [data-title]`, así que el texto y los botones de los avisos anteriores asomaban bajo el más reciente durante toda su vida. Los selectores son ahora descendientes, la tarjeta tapada ocupa la altura del aviso del frente y su contenido queda con `visibility: hidden`, de modo que tampoco se pueden tocar sin verlos su acción o su cierre. El error sigue sin cerrarse solo, el toque lo cierra y la sustitución por mismo texto o `id` no cambia (`AppToaster`, `AppToast` y `notify` no cambiaron). Lo cubren Vitest (`components/messages.test.tsx`: tres éxitos y un error apilados con temporizadores falsos; cada éxito se cierra a sus 4 s y el error tapado permanece hasta tocar «Cerrar aviso») y Playwright (`watchNotices`/`expectNoticesClosedOnTime` en `e2e/notices.ts`: en todo el recorrido cada éxito se retira antes de 5 s y ningún aviso tapado muestra su contenido; falla sin la corrección).
+
+### Decisiones menores
+
+- **Sin `reason_id` el descuento se guarda sin motivo del catálogo** (`reason_id` nulo, como las filas históricas) en lugar de asignarle «Otro»: así la API anterior produce exactamente lo mismo que en la etapa 6 aunque «Otro» se desactive o se renombre. La interfaz siempre envía el motivo; los reportes de la etapa 9 tratarán el nulo como «sin motivo del catálogo».
+- **El descuento guarda el nombre de su motivo** (`account_adjustments.reason_name`, añadido en la revisión de la fase D): el diseño solo preveía `reason_id`, y unir con el catálogo hacía que renombrar un motivo cambiara cómo se veían los descuentos anteriores. Ahora el historial, la precuenta, el ticket y los reportes de la etapa 9 muestran el nombre tal como era al registrar; renombrar o desactivar un motivo no altera nada de lo registrado. Un CHECK con nombre (`account_adjustments_reason_name_check`) exige que el nombre acompañe siempre al motivo y solo a él.
+- **Debe quedar al menos un motivo activo** (`LAST_ACTIVE_REASON`), porque el formulario de descuento exige elegir uno. Nombre de 1 a 60 caracteres, único, sin saltos de línea (se imprime).
+- **Ningún motivo viene preseleccionado**, tampoco en la cortesía: se elige con un toque. La descripción aparece al elegir el motivo; en los que no la exigen es opcional.
+- **Texto impreso**: «Concepto · Motivo» con los conceptos existentes, por lo que se imprime «Descuento manual · Atención» (o el concepto capturado) en lugar del ejemplo «Descuento · Atención». La línea de dólares va alineada como las demás: «Total en dólares (T.C. $18.50)» a la izquierda y «US$X» a la derecha, en lugar de «Total en dólares: US$X (T.C. $Y)» en una sola cadena.
+- **La vista previa de la precuenta en pantalla** (`GET …/precheck`) muestra la misma línea con el turno de la terminal que la consulta.
+- **Indicaciones rápidas con las convenciones del catálogo**: revisión optimista sin `operation_id` (las escrituras del catálogo nunca usaron `restaurant_operations`); un alta repetida tras un resultado incierto responde `DUPLICATE_QUICK_NOTE` en lugar de duplicarse. Solo toman el lock del catálogo (7820148304), como todas sus escrituras.
+- **Unicidad sin distinguir mayúsculas** por categoría, hasta 40 por categoría, una indicación no cambia de categoría y no se borra (se desactiva). Solo se administran en categorías ya guardadas.
+- Los lookups entregan también las inactivas (con `active`) para la administración; la captura usa solo las activas y las recibe con el sondeo existente de los lookups (15 s), sin peticiones nuevas.
+- **En la captura**, las indicaciones de la categoría se marcan y desmarcan en su lugar (no se mueven al principio como las demás elegidas), para que la paleta de la categoría no cambie de orden con cada toque.
+
+### Limitaciones
+
+- No verificado en la ventana nativa (WKWebView) ni en pantalla táctil física; ninguna precuenta ni ticket se imprimió en papel (la impresora de las pruebas es un agente no disponible y los trabajos quedan en intervención).
+- Las indicaciones solo existen por categoría: no hay indicaciones propias ni exclusiones por producto, ni se guardan sus identificadores en la partida (la propuesta de la etapa 6.1 las dejaba como opción); los reportes solo verán el texto.
+- Playwright cubre el descuento con motivo y el total en dólares de la precuenta en pantalla; las indicaciones rápidas en la captura y la administración de motivos e indicaciones solo con Vitest y la integración de Go.
+
+### Pruebas de la fase D
+
+- **Integración PostgreSQL** (`operations/stage71_phase_d_test.go`, encadenada al final de `TestRestaurantAcceptance` con caja, cajero con límite de 100 % y turno propios, e impresora de tickets sin hardware): siembra y orden de los motivos y consulta rechazada sin `payments.read`; descuento con «Atención» (`reason_id` guardado, `reason_name`, auditoría con el motivo) y cortesía con «Cortesía de la casa» y descripción; «Otro» sin descripción, con menos de 5 o más de 500 caracteres, motivo inexistente o inválido y descripción opcional de más de 500, rechazados sin registros, y «Otro» con descripción aceptado; sin `reason_id` como en la etapa 6 (sin motivo rechazado, con motivo escrito guardado con `reason_id` nulo); motivo desactivado rechazado (`DISCOUNT_REASON_INACTIVE`) sin registros y desactivar sin alterar el descuento ya registrado; renombrar un motivo sin alterar el nombre guardado en el descuento anterior, y un descuento nuevo con el nombre vigente; precuenta impresa y ticket impreso con «Descuento manual · Atención» e historial con el motivo; administración sin permiso (403 sin registros) y con permiso, idempotente con el mismo `operation_id`, auditada (alta, orden, edición), con nombre duplicado, revisión obsoleta y nombre vacío rechazados, posición al inicio y después de «Otro», y `LAST_ACTIVE_REASON`; total en dólares ausente con la función desactivada y con un turno sin tipo de cambio, presente en la precuenta y el ticket con el tipo del turno (`usd_rate` del documento, importes en pesos sin cambios), ausente en la precuenta de una terminal cuya caja no tiene turno y otra vez ausente al desactivar la función; indicaciones rápidas sin permiso (403 sin registros), creadas con permiso y auditadas, con comas, vacías, de más de 80, con salto de línea, repetidas en mayúsculas (`DUPLICATE_QUICK_NOTE`) y de una categoría inexistente rechazadas, edición con revisión obsoleta, con coma, sin permiso o cambiando de categoría rechazada, orden al inicio auditado, exposición en los lookups (orden y estado) y llegada a la comanda: una partida con dos indicaciones rápidas y una escrita conserva el texto y su comanda imprime «NOTA: Bien cocida, Sin cebolla, Sin sal».
+- **Actualización desde el esquema 8**: `database/existing_install_test.go` (ver «Migración 0009 (ampliada)»).
+- **Go unitarias**: `payments/documents_test.go` (`TestCommercialDocumentShowsReasonAndDollarTotal`: «Descuento · Atención», «Cortesía · Cortesía de la casa», cargo sin separador, «Total en dólares (T.C. $18.50)» con «US$88.92» después del TOTAL, ancho de 58 mm sin perder el importe y sin la línea cuando faltan los datos) y `ordering/ordering_test.go` (desempate por texto de las indicaciones y por nombre en los demás alcances).
+- **Vitest**: `adjustments.test.tsx` (motivos activos como botones en su orden, sin el inactivo; aplicar exige elegir; «Atención» sin descripción envía `reason_id`; «Otro» exige de 5 a 500; la cortesía elige su motivo; el historial muestra «Motivo: Promoción»; las pruebas anteriores de autorización y reintento ahora eligen «Otro» con su descripción); `capture.test.tsx` (indicaciones de la categoría antes de «Escribir otra», sin la inactiva ni las de otra categoría, sin duplicar el atajo de la cuenta, marcadas en su lugar y guardadas como «Sin cebolla, Bien cocida» en `customization.notes`); `pages/catalog/quickNotes.test.tsx` (regla de texto, orden, alta con posición y aviso, edición con revisión, sin permiso solo consulta); `pages/payments/discountReasons.test.tsx` (orden, alta con posición y «Exige descripción», desactivar con revisión, sin permiso solo consulta).
+- **Rust**: `discount_reasons_and_quick_notes_routes_are_closed`.
+- **Playwright** (`e2e/payments-flow.ts`, Chromium y WebKit): la precuenta en pantalla muestra «Total en dólares (T.C. $…)» con la función de dólares activa del recorrido; el descuento del 10 % elige «Atención» (botones del catálogo sembrado en su orden, de 44 px o más, `aria-pressed`) con descripción opcional y el historial de ajustes muestra «Motivo: Atención · Cliente frecuente». Además, las comprobaciones del pie y de los avisos de la sección anterior.
+
+### Verificación de la fase D
+
+Ejecutada sobre la copia aislada sincronizada con el repositorio (clúster temporal 55499, Go temporal 8183) después de `tools/format71.sh`:
+
+- Estáticas (`tools/suite.sh`): Prettier, gofmt, `cargo fmt`, `sync-metadata --check`, `go vet` y `go vet -tags=integration` aprobados.
+- Go unitarias con `-race`: `ok` en todos los paquetes, incluidos `payments` (plantilla con motivo y total en dólares) y `ordering`.
+- Vitest: 39 archivos y 317 pruebas aprobadas; `tsc` y `npm run build` sin errores; cargo: 15 aprobadas, 1 ignorada.
+- Integración PostgreSQL (`tools/iter_snap.sh`): `database`, `administration`, `catalog`, `operations` (126,4 s), `payments` y `kitchen` en `ok`; la prueba de impresora física quedó omitida porque es opcional. Una segunda ejecución detallada confirmó `TestStage71UpgradeOfExistingInstallation` y las doce subpruebas `71D_` aprobadas.
+- Playwright: 1 aprobada en Chromium (55,1 s) y 1 en WebKit (53,5 s), con el descuento con motivo, el total en dólares de la precuenta, el pie de la cuenta sin desbordamiento y los avisos que se cierran a tiempo.
+- Ningún documento se envió a una impresora ni a un cajón real. La 0009 no se aplicó a la instalación real.
+- Revisión antes del commit: se agregó `account_adjustments.reason_name` para que renombrar un motivo no altere los descuentos registrados (ver decisiones), con su CHECK con nombre, la prueba de actualización ampliada y la subprueba `71D_renombrar_un_motivo_no_altera_lo_registrado`. Repetidas después todas las suites: estáticas aprobadas, Go unitarias en `ok`, Vitest con 317 pruebas aprobadas, `tsc`, `build` y cargo (15 aprobadas, 1 ignorada) sin errores, los seis paquetes de integración en `ok` (`operations` en 126,7 s) y Playwright con 1 aprobada en Chromium y 1 en WebKit.

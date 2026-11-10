@@ -4,7 +4,12 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PendingOperationsProvider, usePendingEntry } from '../../../hooks/pendingOperations';
 import { paymentPendingKey } from '../../../services/payments';
-import type { DiscountInput, DiscountPlan, Finance } from '../../../services/payments';
+import type {
+  DiscountInput,
+  DiscountPlan,
+  DiscountReason,
+  Finance,
+} from '../../../services/payments';
 import type { Bill } from '../../../services/restaurant';
 import { AccountAdjustments } from './AccountAdjustments';
 
@@ -80,6 +85,8 @@ const finance: Finance = {
       tax_rate: null,
       concept: 'Descuento manual',
       reason: 'Promoción del día',
+      reason_id: '00000000-0000-0000-0000-0000000000e2',
+      reason_name: 'Promoción',
       actor_name: 'Cajero',
       authorized_by_name: null,
       created_at: '2026-11-08T12:00:00Z',
@@ -99,6 +106,8 @@ const finance: Finance = {
       tax_rate: 16,
       concept: 'Servicio a domicilio',
       reason: '',
+      reason_id: null,
+      reason_name: null,
       actor_name: 'Cajero',
       authorized_by_name: null,
       created_at: '2026-11-08T12:01:00Z',
@@ -137,6 +146,29 @@ function plan(input: DiscountInput, requiresAuthorization: boolean): DiscountPla
   };
 }
 
+// Catálogo sembrado por la 0009 más un motivo desactivado, que no debe ofrecerse.
+function reason(id: string, name: string, sortOrder: number, extra: Partial<DiscountReason> = {}) {
+  return {
+    id: `00000000-0000-0000-0000-0000000000${id}`,
+    name,
+    requires_description: false,
+    active: true,
+    sort_order: sortOrder,
+    revision: 1,
+    updated_at: '2026-11-09T12:00:00Z',
+    ...extra,
+  };
+}
+
+const reasons: DiscountReason[] = [
+  reason('e1', 'Atención', 10),
+  reason('e2', 'Promoción', 20),
+  reason('e3', 'Demora', 30),
+  reason('e4', 'Cortesía de la casa', 40),
+  reason('e6', 'Cumpleaños', 45, { active: false }),
+  reason('e5', 'Otro', 50, { requires_description: true }),
+];
+
 type Response = { status: number; body: unknown };
 let granted: string[] = [];
 let requiresAuthorization = false;
@@ -174,6 +206,8 @@ beforeEach(() => {
       switch (args.operation) {
         case 'payments_account':
           return { status: 200, body: finance };
+        case 'payments_discount_reasons':
+          return { status: 200, body: reasons };
         case 'payments_discount_preview':
           return {
             status: 200,
@@ -229,11 +263,19 @@ function submitButton(name: RegExp) {
   return screen.getByRole('button', { name }) as HTMLButtonElement;
 }
 
+function reasonButton(name: string) {
+  const group = screen.getByRole('group', { name: /^Motivo de/ });
+  return within(group).getByRole('button', { name }) as HTMLButtonElement;
+}
+
+const otherDescription = 'Descripción del motivo «Otro»';
+
 async function captureDiscount() {
   renderAdjustments();
   await screen.findByText('Porcentaje de descuento (%)');
   fireEvent.change(input('Porcentaje de descuento (%)'), { target: { value: '30' } });
-  fireEvent.change(input('Motivo'), { target: { value: 'Cliente frecuente' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Otro' }));
+  fireEvent.change(input(otherDescription), { target: { value: 'Cliente frecuente' } });
 }
 
 describe('descuentos, cortesías, cargos y cancelaciones', () => {
@@ -260,6 +302,7 @@ describe('descuentos, cortesías, cargos y cancelaciones', () => {
       method: 'percent',
       value: '30',
       courtesy: false,
+      reason_id: '00000000-0000-0000-0000-0000000000e5',
       reason: 'Cliente frecuente',
       expected_balance: '270.00',
       authorization: { username: 'supervisor', password: 'secreto' },
@@ -333,7 +376,7 @@ describe('descuentos, cortesías, cargos y cancelaciones', () => {
     expect(sessionInvalid).not.toHaveBeenCalled();
     window.removeEventListener('session-invalid', sessionInvalid);
     expect((screen.getByLabelText('Contraseña del supervisor') as HTMLInputElement).value).toBe('');
-    expect(input('Motivo').value).toBe('Cliente frecuente');
+    expect(input(otherDescription).value).toBe('Cliente frecuente');
     expect(screen.getByTestId('pendiente').textContent).toBe('');
   });
 
@@ -410,6 +453,87 @@ describe('descuentos, cortesías, cargos y cancelaciones', () => {
     expect(notice.textContent).toContain('El descuento supera el límite permitido.');
     expect(notice.textContent).not.toContain('DISCOUNT_LIMIT_EXCEEDED');
     expect(document.querySelector('.adjustments-panel .notice')).toBeNull();
+  });
+
+  it('ofrece los motivos activos como botones y envía el elegido sin descripción', async () => {
+    renderAdjustments();
+    fireEvent.change(await waitFor(() => input('Porcentaje de descuento (%)')), {
+      target: { value: '10' },
+    });
+    const group = await screen.findByRole('group', { name: 'Motivo del descuento' });
+    const names = within(group)
+      .getAllByRole('button')
+      .map((button) => button.textContent);
+    // En su orden visual y sin el motivo desactivado.
+    expect(names).toEqual(['Atención', 'Promoción', 'Demora', 'Cortesía de la casa', 'Otro']);
+    await waitFor(() => expect(requests('payments_discount_preview').length).toBeGreaterThan(0));
+    // Sin motivo elegido no se puede aplicar.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Aplicar descuento \$/ })).toBeTruthy(),
+    );
+    expect(submitButton(/Aplicar descuento/).disabled).toBe(true);
+    fireEvent.click(reasonButton('Atención'));
+    expect(reasonButton('Atención').getAttribute('aria-pressed')).toBe('true');
+    expect(reasonButton('Otro').getAttribute('aria-pressed')).toBe('false');
+    // La descripción de Atención es opcional.
+    expect(input('Descripción (opcional)').value).toBe('');
+    await waitFor(() => expect(submitButton(/Aplicar descuento \$/).disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(submitButton(/Aplicar descuento/));
+    });
+    expect(lastBody('payments_discount')).toMatchObject({
+      reason_id: '00000000-0000-0000-0000-0000000000e1',
+      reason: '',
+      courtesy: false,
+    });
+  });
+
+  it('«Otro» pide una descripción de 5 a 500 caracteres antes de aplicar', async () => {
+    renderAdjustments();
+    fireEvent.change(await waitFor(() => input('Porcentaje de descuento (%)')), {
+      target: { value: '10' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Otro' }));
+    await waitFor(() => expect(requests('payments_discount_preview').length).toBeGreaterThan(0));
+    expect(screen.getByText('Obligatoria, de 5 a 500 caracteres.')).toBeTruthy();
+    fireEvent.change(input(otherDescription), { target: { value: 'Mal' } });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Aplicar descuento \$/ })).toBeTruthy(),
+    );
+    expect(submitButton(/Aplicar descuento/).disabled).toBe(true);
+    fireEvent.change(input(otherDescription), { target: { value: 'Platillo frío' } });
+    await waitFor(() => expect(submitButton(/Aplicar descuento \$/).disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(submitButton(/Aplicar descuento/));
+    });
+    expect(lastBody('payments_discount')).toMatchObject({
+      reason_id: '00000000-0000-0000-0000-0000000000e5',
+      reason: 'Platillo frío',
+    });
+  });
+
+  it('la cortesía también elige su motivo con botones', async () => {
+    renderAdjustments();
+    fireEvent.click(await screen.findByRole('button', { name: 'Cortesía' }));
+    const group = await screen.findByRole('group', { name: 'Motivo de la cortesía' });
+    fireEvent.click(within(group).getByRole('button', { name: 'Cortesía de la casa' }));
+    await waitFor(() => expect(submitButton(/Otorgar cortesía \$/).disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(submitButton(/Otorgar cortesía/));
+    });
+    expect(lastBody('payments_discount')).toMatchObject({
+      courtesy: true,
+      reason_id: '00000000-0000-0000-0000-0000000000e4',
+    });
+  });
+
+  it('muestra el motivo del catálogo en el historial de ajustes', async () => {
+    renderAdjustments();
+    const list = await screen.findByRole('list', { name: 'Ajustes de la cuenta' });
+    expect(
+      within(list).getByText(/Descuento manual · Motivo: Promoción · Promoción del día/),
+    ).toBeTruthy();
+    expect(within(list).queryByText(/Servicio a domicilio · Motivo/)).toBeNull();
   });
 
   it('cancela un ajuste con motivo y conserva los cancelados como históricos', async () => {

@@ -55,6 +55,10 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if len(parts) == 1 && parts[0] == "lookups" && request.Method == "GET" {
 		return lookups(ctx, tx, request.Actor)
 	}
+	// Indicaciones rápidas por categoría (etapa 7.1): se leen en los lookups y se administran aquí.
+	if parts[0] == "quick-notes" {
+		return quickNotes(ctx, tx, request, parts, audit)
+	}
 	resource := parts[0]
 	if _, exists := documentQueries[resource]; !exists {
 		return nil, &Error{Status: 404, Code: "NOT_FOUND", Message: "Ruta de catálogo no disponible."}

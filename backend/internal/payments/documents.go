@@ -7,6 +7,7 @@ import (
 
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/features"
 	"local/ad-el-pos/server/internal/kitchen"
 )
 
@@ -20,8 +21,11 @@ type DocumentLine struct {
 	Amount   string `json:"amount"`
 }
 
+// DocumentAdjustment es una línea de ajuste del documento. Reason es el nombre del motivo del
+// catálogo de un descuento o cortesía (etapa 7.1); vacío en cargos y descuentos sin motivo.
 type DocumentAdjustment struct {
 	Concept string `json:"concept"`
+	Reason  string `json:"reason,omitempty"`
 	Amount  string `json:"amount"`
 }
 
@@ -40,7 +44,9 @@ type DocumentPayment struct {
 	ChangeUSD      *string `json:"change_usd"`
 }
 
-// CommercialDocument es la información de una precuenta o ticket. No es un CFDI.
+// CommercialDocument es la información de una precuenta o ticket. No es un CFDI. USDTotal y
+// USDRate son el total equivalente en dólares (etapa 7.1, informativo): solo con usd_cash activa y
+// tipo de cambio del turno disponible; nil en otro caso. No alteran ningún importe.
 type CommercialDocument struct {
 	Kind          string               `json:"kind"`
 	Establishment string               `json:"establishment"`
@@ -60,6 +66,8 @@ type CommercialDocument struct {
 	Paid          string               `json:"paid"`
 	Tips          string               `json:"tips"`
 	Balance       string               `json:"balance"`
+	USDTotal      *string              `json:"usd_total,omitempty"`
+	USDRate       *string              `json:"usd_rate,omitempty"`
 	Payment       *DocumentPayment     `json:"payment"`
 	Content       string               `json:"content"`
 }
@@ -105,7 +113,11 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 		if adjustment.Kind == "discount" {
 			amount = "-" + amount
 		}
-		document.Adjustments = append(document.Adjustments, DocumentAdjustment{Concept: adjustment.Concept, Amount: amount})
+		item := DocumentAdjustment{Concept: adjustment.Concept, Amount: amount}
+		if adjustment.ReasonName != nil {
+			item.Reason = *adjustment.ReasonName
+		}
+		document.Adjustments = append(document.Adjustments, item)
 	}
 	for _, record := range finance.Payments {
 		item := DocumentPayment{
@@ -119,8 +131,51 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 			document.Payment = &copied
 		}
 	}
+	if err := handler.addDollarTotal(document, kind, payment); err != nil {
+		return nil, err
+	}
 	document.Content = renderDocument(document, width)
 	return document, nil
+}
+
+// addDollarTotal agrega el total equivalente en dólares (decisión 16) cuando la función usd_cash
+// está activa y hay tipo de cambio: el de la precuenta es el del turno activo (abierto o en
+// arqueo) de la caja de la terminal que la imprime o consulta, y el del ticket, el del turno en
+// que se registró su pago. Es informativo: se calcula con mxnToUSD sobre el total que ya calculó
+// Go y no cambia ningún importe del documento.
+func (handler *service) addDollarTotal(document *CommercialDocument, kind string, payment *PaymentRecord) error {
+	enabled, err := features.Enabled(handler.ctx, handler.tx, features.USDCash)
+	if err != nil || !enabled {
+		return err
+	}
+	var rate *string
+	if kind == "receipt" && payment != nil {
+		if err := handler.tx.QueryRow(handler.ctx, "SELECT usd_rate::text FROM app.cash_shifts WHERE id=$1", payment.ShiftID).Scan(&rate); err != nil {
+			return err
+		}
+	} else if kind == "precheck" {
+		register, err := handler.deviceRegister()
+		if err != nil || register == nil {
+			return err
+		}
+		shift, err := handler.activeShift(register.ID)
+		if err != nil || shift == nil {
+			return err
+		}
+		rate = shift.USDRate
+	}
+	if rate == nil {
+		return nil
+	}
+	value, err := decimal.NewFromString(*rate)
+	if err != nil || value.Sign() <= 0 {
+		return nil
+	}
+	total := money(mxnToUSD(decimal.RequireFromString(document.Total), value))
+	formatted := money(value)
+	document.USDTotal = &total
+	document.USDRate = &formatted
+	return nil
 }
 
 // printable elimina controles e invisibles: solo el controlador de impresión genera comandos.
@@ -179,9 +234,14 @@ func renderDocument(document *CommercialDocument, width int) string {
 			add(fit("   Nota: "+line.Notes, width)...)
 		}
 	}
-	// Los importes usan el formato único de moneytext; un descuento se imprime «-$50.00».
+	// Los importes usan el formato único de moneytext; un descuento se imprime «-$50.00». Un
+	// descuento o cortesía con motivo del catálogo lo muestra junto al concepto («Descuento · Atención»).
 	for _, adjustment := range document.Adjustments {
-		add(row(adjustment.Concept, pesosText(adjustment.Amount), width)...)
+		concept := adjustment.Concept
+		if adjustment.Reason != "" {
+			concept += " · " + adjustment.Reason
+		}
+		add(row(concept, pesosText(adjustment.Amount), width)...)
 	}
 	add(divider)
 	for _, tax := range document.Tax {
@@ -189,6 +249,10 @@ func renderDocument(document *CommercialDocument, width int) string {
 		add(row("IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", pesosText(tax.Tax), width)...)
 	}
 	add(row("TOTAL", pesosText(document.Total), width)...)
+	// Línea informativa (etapa 7.1): el total en dólares con el tipo de cambio del turno.
+	if document.USDTotal != nil && document.USDRate != nil {
+		add(row("Total en dólares (T.C. "+pesosText(*document.USDRate)+")", dollarsText(*document.USDTotal), width)...)
+	}
 	if document.Payment != nil {
 		add(divider)
 		add("ESTE PAGO")

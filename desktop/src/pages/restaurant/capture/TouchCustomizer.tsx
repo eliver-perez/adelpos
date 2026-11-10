@@ -9,6 +9,7 @@ import {
   withComponent,
 } from '../../../components/catalog/customizationRules';
 import { useResource } from '../../../hooks/useResource';
+import { quickNotesFor } from '../../../services/catalog';
 import type {
   ComboSlot,
   ComponentSelection,
@@ -24,7 +25,8 @@ import { KitchenNotes } from './KitchenNotes';
 
 // Presentación táctil de la personalización. Reutiliza la configuración que entrega Go
 // (`catalog_configuration`) y las mismas reglas de selección que ProductCustomizer; solo cambia
-// la presentación: bloques con botones grandes en lugar de campos de formulario.
+// la presentación: bloques con botones grandes en lugar de campos de formulario. Un componente de
+// combo ofrece las indicaciones rápidas de la categoría de su propio producto.
 export function TouchCustomizer({
   productID,
   variantID,
@@ -109,6 +111,7 @@ export function TouchCustomizer({
           value={value.notes}
           onChange={(notes) => onChange({ ...value, notes })}
           shortcuts={noteShortcuts}
+          quickNotes={quickNotesFor(lookups, productID)}
         />
       )}
     </div>

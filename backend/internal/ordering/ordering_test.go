@@ -192,3 +192,16 @@ func TestScopesAreClosedAndComplete(t *testing.T) {
 		t.Fatal("los productos deben ordenarse dentro de su categoría")
 	}
 }
+
+// Las indicaciones rápidas (etapa 7.1) se ordenan dentro de su categoría y desempatan por su
+// texto; las demás listas siguen desempatando por nombre.
+func TestScopesTiebreakByVisibleColumn(t *testing.T) {
+	if scopes[CategoryQuickNotes].tiebreak() != "text" || scopes[CategoryQuickNotes].group != "category_id" {
+		t.Fatalf("Las indicaciones rápidas no se ordenan por categoría y texto: %+v", scopes[CategoryQuickNotes])
+	}
+	for _, scope := range []Scope{CatalogCategories, PaymentMethods, CashExpenseCategories, DiscountReasons} {
+		if scopes[scope].tiebreak() != "name" {
+			t.Fatalf("El alcance %d dejó de desempatar por nombre", scope)
+		}
+	}
+}

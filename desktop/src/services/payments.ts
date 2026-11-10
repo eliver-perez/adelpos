@@ -168,6 +168,9 @@ export interface Adjustment {
   tax_rate: number | null;
   concept: string;
   reason: string;
+  // Motivo del catálogo (etapa 7.1); null en descuentos anteriores o sin motivo y en cargos.
+  reason_id: string | null;
+  reason_name: string | null;
   actor_name: string;
   authorized_by_name: string | null;
   created_at: string;
@@ -403,9 +406,34 @@ export interface DiscountInput {
   courtesy: boolean;
   concept?: string;
   reason?: string;
+  // Motivo del catálogo (etapa 7.1). La interfaz siempre lo envía; Go lo admite opcional.
+  reason_id?: string;
   selections?: Selection[];
   expected_balance?: string;
   authorization?: AuthorizationInput;
+}
+
+// Motivo de descuento del catálogo configurable (etapa 7.1). Solo «Otro» exige descripción.
+export interface DiscountReason {
+  id: string;
+  name: string;
+  requires_description: boolean;
+  active: boolean;
+  sort_order: number;
+  revision: number;
+  updated_at: string;
+}
+
+// Descripción del motivo: obligatoria de 5 a 500 caracteres si el motivo la exige; opcional
+// (hasta 500) en otro caso. Go aplica la misma regla.
+export function validReasonDescription(reason: DiscountReason | null, text: string) {
+  if (!reason) {
+    return false;
+  }
+  if (reason.requires_description) {
+    return validReason(text);
+  }
+  return textLength(text) <= 500;
 }
 
 export interface DiscountPlan {

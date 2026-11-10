@@ -164,7 +164,27 @@ const lookups = {
       variants: [],
     },
   ],
+  // Indicaciones rápidas por categoría (etapa 7.1): llegan en los mismos lookups, con su orden y
+  // estado. La inactiva y la de otra categoría no se ofrecen al personalizar un platillo.
+  category_quick_notes: [
+    quickNote('q1', ids.dishes, 'Bien cocida', 20),
+    quickNote('q2', ids.dishes, 'Sin cebolla', 10),
+    quickNote('q3', ids.dishes, 'Sin sal', 30, false),
+    quickNote('q4', ids.drinks, 'Sin hielo', 10),
+  ],
 };
+
+function quickNote(id: string, categoryID: string, text: string, order: number, active = true) {
+  return {
+    id: `00000000-0000-4000-8000-0000000002${id.slice(1).padStart(2, '0')}`,
+    category_id: categoryID,
+    text,
+    active,
+    sort_order: order,
+    revision: 1,
+    updated_at: '2026-11-09T12:00:00Z',
+  };
+}
 
 interface ServerAccount {
   id: string;
@@ -786,6 +806,52 @@ describe('captura táctil de pedidos', () => {
     expect(saves[0]!.body.items[0]?.customization.groups).toEqual([
       { group_id: ids.garnish, options: [{ option_id: ids.rings, quantity: '1' }] },
     ]);
+  });
+
+  it('ofrece las indicaciones rápidas de la categoría antes de «Escribir otra» sin duplicar atajos', async () => {
+    // La cuenta ya usó «Sin cebolla» y «Salsa aparte» en otra partida.
+    accounts[ids.first]!.draft = [
+      {
+        id: '00000000-0000-4000-8000-000000000301',
+        product_id: ids.steak,
+        variant_id: null,
+        quantity: 1,
+        customization: { ...emptyCustomization(), notes: 'Sin cebolla, Salsa aparte' },
+      },
+    ];
+    await openFirstAccount();
+    const burger = await waitFor(() => {
+      const button = productButton('Hamburguesa de prueba');
+      expect(disabled(button)).toBe(false);
+      return button;
+    });
+    fireEvent.click(burger);
+    const panel = screen.getByRole('region', { name: 'Personalizar Hamburguesa de prueba' });
+    const notes = await within(panel).findByRole('region', { name: 'Indicaciones para cocina' });
+    const names = () =>
+      within(notes)
+        .getAllByRole('button')
+        .map((button) => button.textContent);
+    // En el orden del catálogo, sin la inactiva ni la de Bebidas, y «Sin cebolla» una sola vez.
+    expect(names()).toEqual(['Sin cebolla', 'Bien cocida', 'Salsa aparte', 'Escribir otra']);
+    const onion = within(notes).getByRole('button', { name: 'Sin cebolla' });
+    expect(pressed(onion)).toBe('false');
+    fireEvent.click(onion);
+    // Se marca en su lugar y se puede quitar con otro toque.
+    const marked = within(notes).getByRole('button', { name: 'Quitar indicación Sin cebolla' });
+    expect(pressed(marked)).toBe('true');
+    expect(names()).toEqual(['Sin cebolla', 'Bien cocida', 'Salsa aparte', 'Escribir otra']);
+    fireEvent.click(within(notes).getByRole('button', { name: 'Bien cocida' }));
+    const add = within(panel).getByRole('button', { name: /^Agregar a la cuenta/ });
+    await waitFor(() => expect(disabled(add)).toBe(false));
+    fireEvent.click(add);
+    await screen.findByRole('region', { name: 'Productos' });
+    await waitFor(() => expect(saves.length).toBeGreaterThan(0), { timeout: 2500 });
+    const saved = saves[saves.length - 1]!.body.items.find(
+      (item) => item.product_id === ids.burger,
+    );
+    // Se guardan como texto en las observaciones de la partida, igual que las escritas.
+    expect(saved?.customization.notes).toBe('Sin cebolla, Bien cocida');
   });
 
   it('«Enviar a cocina» confirma con la huella vigente y queda desactivado sin productos nuevos', async () => {

@@ -7,6 +7,7 @@ import { TextField } from '../../../components/catalog/EditorFields';
 import { QuoteBreakdown } from '../../../components/catalog/QuoteBreakdown';
 import { originalCustomization } from '../../../components/catalog/customizationRules';
 import { api } from '../../../services/api';
+import { quickNotesFor } from '../../../services/catalog';
 import type { Lookups, Quote } from '../../../services/catalog';
 import { formatMoney } from '../../../services/money';
 import { notifyError, notifySuccess } from '../../../services/notify';
@@ -244,6 +245,7 @@ export function CustomizationPanel({
               })
             }
             shortcuts={noteShortcuts}
+            quickNotes={quickNotesFor(lookups, editor.line.product_id)}
           />
           {confirmed && (
             <TextField

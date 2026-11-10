@@ -9,10 +9,12 @@ import { api } from '../../services/api';
 import type {
   CatalogDocument,
   CatalogPage as Page,
+  Category,
   Lookups,
   Product,
 } from '../../services/catalog';
 import { CatalogEditor } from './CatalogEditor';
+import { CategoryQuickNotes } from './CategoryQuickNotes';
 import { PreviewPage } from './PreviewPage';
 import { catalogOperation, catalogTabs, newCatalogDocument } from './catalogState';
 import { catalogRequestBody } from '../../services/catalogPositions';
@@ -260,6 +262,14 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
                 : undefined
             }
           />
+          {resource === 'categories' && draft.id && (
+            <CategoryQuickNotes
+              category={draft as Category}
+              notes={lookup.data.category_quick_notes ?? []}
+              editable={can('catalog.categories.manage')}
+              onChanged={lookup.reload}
+            />
+          )}
         </section>
       ) : (
         <>

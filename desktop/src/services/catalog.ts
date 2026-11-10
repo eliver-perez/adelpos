@@ -1,3 +1,5 @@
+import { orderSiblings } from './positions';
+
 // Contratos del catálogo: importes como cadenas; Go conserva la autoridad financiera.
 
 export interface Metadata {
@@ -202,6 +204,18 @@ export interface ProductReference extends Metadata {
   sort_order: number;
   variants: Pick<Variant, 'id' | 'name' | 'active'>[];
 }
+// Indicación rápida de una categoría (etapa 7.1): texto sin comas que la captura agrega a las
+// indicaciones para cocina de la partida.
+export interface CategoryQuickNote {
+  id: string;
+  category_id: string;
+  text: string;
+  active: boolean;
+  sort_order: number;
+  revision: number;
+  updated_at: string;
+}
+
 export interface Lookups {
   categories: Category[];
   ingredients: Ingredient[];
@@ -212,6 +226,21 @@ export interface Lookups {
   products: ProductReference[];
   // Paleta cerrada de colores de categoría definida en Go.
   palette: PaletteColor[];
+  // Indicaciones rápidas de todas las categorías, activas e inactivas, en su orden visual.
+  category_quick_notes?: CategoryQuickNote[];
+}
+
+// Indicaciones rápidas activas de la categoría de un producto, en su orden visual (Go ya las
+// entrega ordenadas; se reordenan por sort_order para no depender de ello).
+export function quickNotesFor(lookups: Lookups, productID: string): string[] {
+  const product = lookups.products.find((entry) => entry.id === productID);
+  if (!product) {
+    return [];
+  }
+  const notes = (lookups.category_quick_notes ?? []).filter(
+    (note) => note.active && note.category_id === product.category_id,
+  );
+  return orderSiblings(notes).map((note) => note.text);
 }
 export interface CatalogPage {
   items: CatalogDocument[];

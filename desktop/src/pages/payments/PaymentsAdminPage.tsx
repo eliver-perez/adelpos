@@ -8,9 +8,10 @@ import { formatMoney } from '../../services/money';
 import { notifyError, notifySuccess } from '../../services/notify';
 import type { EstablishmentFeature } from '../../services/features';
 import { permissionName } from '../../services/payments';
-import type { PaymentMethod, PaymentSettings } from '../../services/payments';
+import type { DiscountReason, PaymentMethod, PaymentSettings } from '../../services/payments';
 import { countLabel } from '../../services/plural';
 import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
+import { DiscountReasonsAdmin } from './DiscountReasonsAdmin';
 import { MethodsAdmin } from './MethodsAdmin';
 import { PaymentPoliciesForm } from './PaymentPoliciesForm';
 import { ShiftOverview } from './ShiftOverview';
@@ -23,7 +24,8 @@ function changed() {
   window.dispatchEvent(new CustomEvent('adel-server-change'));
 }
 
-// Administración de cobros: métodos de pago, IVA, políticas y turno actual con sus movimientos.
+// Administración de cobros: métodos de pago, motivos de descuento, IVA, políticas y turno actual
+// con sus movimientos.
 export function PaymentsAdminPage({
   can,
   timezone,
@@ -34,6 +36,9 @@ export function PaymentsAdminPage({
   const readable = can('payments.read');
   const settings = useResource<PaymentSettings>('payments_settings', { enabled: readable });
   const methods = useResource<PaymentMethod[]>('payments_methods', { enabled: readable });
+  const reasons = useResource<DiscountReason[]>('payments_discount_reasons', {
+    enabled: readable,
+  });
   // El rango del tipo de cambio solo aparece con el pago en dólares activo.
   const features = useResource<EstablishmentFeature[]>('settings_features');
   const dollars = featureEnabled(features.data, 'usd_cash');
@@ -63,12 +68,13 @@ export function PaymentsAdminPage({
     }
   }
   const activeMethods = methods.data?.filter((method) => method.active).length ?? 0;
+  const activeReasons = reasons.data?.filter((reason) => reason.active).length ?? 0;
 
   return (
     <div className="payments-admin form-stack">
       <PageTitle
         title="Cobros"
-        description="Métodos de pago, IVA, políticas de cobro y turno de caja. Los importes y las validaciones se calculan en el servidor."
+        description="Métodos de pago, motivos de descuento, IVA, políticas de cobro y turno de caja. Los importes y las validaciones se calculan en el servidor."
       />
       {!readable && (
         <Notice>
@@ -105,6 +111,22 @@ export function PaymentsAdminPage({
           >
             <Notice>{methods.error}</Notice>
             <MethodsAdmin methods={methods.data ?? []} can={can} execute={execute} busy={busy} />
+          </Accordion>
+          <Accordion
+            title="Motivos de descuento"
+            summary={
+              reasons.data
+                ? `${countLabel(activeReasons, 'activo', 'activos')} de ${reasons.data.length}`
+                : 'Consultando motivos…'
+            }
+          >
+            <Notice>{reasons.error}</Notice>
+            <DiscountReasonsAdmin
+              reasons={reasons.data ?? []}
+              can={can}
+              execute={execute}
+              busy={busy}
+            />
           </Accordion>
           <Accordion
             title="IVA"

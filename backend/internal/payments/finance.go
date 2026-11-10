@@ -102,6 +102,9 @@ func readUnits(ctx context.Context, tx pgx.Tx, accountID string) ([]unitState, e
 	return units, rows.Err()
 }
 
+// Adjustment es un descuento, cortesía o cargo de la cuenta. ReasonID y ReasonName son el motivo
+// del catálogo (etapa 7.1): nil en descuentos anteriores o registrados sin él y en cargos.
+// ReasonName es el nombre guardado al registrar el descuento, no el vigente en el catálogo.
 type Adjustment struct {
 	ID           string     `json:"id"`
 	Kind         string     `json:"kind"`
@@ -113,6 +116,8 @@ type Adjustment struct {
 	TaxRate      *int       `json:"tax_rate"`
 	Concept      string     `json:"concept"`
 	Reason       string     `json:"reason"`
+	ReasonID     *string    `json:"reason_id"`
+	ReasonName   *string    `json:"reason_name"`
 	ActorName    string     `json:"actor_name"`
 	AuthorizedBy *string    `json:"authorized_by_name"`
 	CreatedAt    time.Time  `json:"created_at"`
@@ -124,7 +129,7 @@ type Adjustment struct {
 
 func readAdjustments(ctx context.Context, tx pgx.Tx, accountID string) ([]Adjustment, error) {
 	rows, err := tx.Query(ctx, `SELECT j.id,j.kind,j.scope,j.method,j.value::text,j.amount::text,j.courtesy,j.tax_rate,j.concept,j.reason,
-        actor.display_name,authorizer.display_name,j.created_at,v.adjustment_id IS NOT NULL,v.created_at,v.reason,
+        j.reason_id,j.reason_name,actor.display_name,authorizer.display_name,j.created_at,v.adjustment_id IS NOT NULL,v.created_at,v.reason,
         coalesce((SELECT array_agg(a.unit_id::text ORDER BY a.unit_id) FROM app.account_adjustment_allocations a WHERE a.adjustment_id=j.id),'{}')
         FROM app.account_adjustments j JOIN app.users actor ON actor.id=j.actor_id
         LEFT JOIN app.users authorizer ON authorizer.id=j.authorized_by
@@ -138,7 +143,8 @@ func readAdjustments(ctx context.Context, tx pgx.Tx, accountID string) ([]Adjust
 	for rows.Next() {
 		var item Adjustment
 		if err := rows.Scan(&item.ID, &item.Kind, &item.Scope, &item.Method, &item.Value, &item.Amount, &item.Courtesy, &item.TaxRate,
-			&item.Concept, &item.Reason, &item.ActorName, &item.AuthorizedBy, &item.CreatedAt, &item.Voided, &item.VoidedAt,
+			&item.Concept, &item.Reason, &item.ReasonID, &item.ReasonName, &item.ActorName, &item.AuthorizedBy, &item.CreatedAt,
+			&item.Voided, &item.VoidedAt,
 			&item.VoidReason, &item.UnitIDs); err != nil {
 			return nil, err
 		}

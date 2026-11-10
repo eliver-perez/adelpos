@@ -89,6 +89,53 @@ describe('avisos (Sonner)', () => {
     expect(screen.queryByText('Pedido enviado a cocina')).toBeNull();
   });
 
+  // Etapa 7.1 (fase D): en la pila apilada los avisos anteriores quedan tapados por el más reciente,
+  // pero su temporizador sigue corriendo; cada éxito se cierra a sus 4 s y un error tapado sigue
+  // ahí hasta que se cierra.
+  it('los avisos tapados por otros más recientes se cierran a su tiempo', async () => {
+    useToastClock();
+    notifySuccess('Uno');
+    await advance(50);
+    notifyError('Falla persistente');
+    await advance(950);
+    notifySuccess('Dos');
+    await advance(1000);
+    notifySuccess('Tres');
+    await advance(100);
+    const stacked = Array.from(document.querySelectorAll('[data-sonner-toast]'));
+    expect(stacked.map((frame) => frame.querySelector('.app-toast-message')?.textContent)).toEqual([
+      'Tres',
+      'Dos',
+      'Falla persistente',
+      'Uno',
+    ]);
+    // Las reglas de la pila (styles.css) dependen de esta estructura: el aviso propio vive dentro
+    // del <li> de Sonner con la clase app-toast-frame, y solo el más reciente es el frente.
+    for (const [index, frame] of stacked.entries()) {
+      expect(frame.classList.contains('app-toast-frame')).toBe(true);
+      expect(frame.querySelector('.app-toast')).not.toBeNull();
+      expect(frame.getAttribute('data-front')).toBe(index === 0 ? 'true' : 'false');
+      expect(frame.getAttribute('data-expanded')).toBe('false');
+    }
+    // «Uno» (t = 0) se retira a los 4 s aunque tres avisos lo tapen (más la animación de salida).
+    await advance(2300);
+    expect(screen.queryByText('Uno')).toBeNull();
+    expect(screen.queryByText('Dos')).not.toBeNull();
+    // «Dos» (t = 1 s) y «Tres» (t = 2 s), cada uno a su tiempo.
+    await advance(1100);
+    expect(screen.queryByText('Dos')).toBeNull();
+    expect(screen.queryByText('Tres')).not.toBeNull();
+    await advance(1100);
+    expect(screen.queryByText('Tres')).toBeNull();
+    // El error no se cierra solo: queda al frente hasta que se toca «Cerrar aviso».
+    await advance(10000);
+    const alert = screen.getByRole('alert', { name: 'Error' });
+    expect(alert.closest('[data-sonner-toast]')?.getAttribute('data-front')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+    await advance(500);
+    expect(screen.queryByRole('alert', { name: 'Error' })).toBeNull();
+  });
+
   it('el error permanece hasta que se cierra con un toque y no muestra el código interno', async () => {
     useToastClock();
     notifyError(

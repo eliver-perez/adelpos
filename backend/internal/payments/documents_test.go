@@ -56,6 +56,55 @@ func TestCashWithDollarsUsesSharedMoneyFormat(t *testing.T) {
 	}
 }
 
+// Etapa 7.1: un descuento o cortesía con motivo del catálogo lo imprime junto al concepto y la
+// línea informativa del total en dólares usa el formato único de importes con el tipo de cambio.
+// Sin esos datos el documento queda como antes.
+func TestCommercialDocumentShowsReasonAndDollarTotal(t *testing.T) {
+	document := &CommercialDocument{
+		Kind: "precheck", Establishment: "ADEL POS", Folio: 34, AccountName: "Mesa 7", Context: "Mesa 7",
+		LocalTime: "09/11/2026 21:00", Cashier: "Cajera",
+		Lines: []DocumentLine{{Quantity: 1, Name: "Corte de res", Amount: "1850.00"}},
+		Adjustments: []DocumentAdjustment{
+			{Concept: "Descuento", Reason: "Atención", Amount: "-185.00"},
+			{Concept: "Cortesía", Reason: "Cortesía de la casa", Amount: "-50.00"},
+			{Concept: "Servicio a domicilio", Amount: "30.00"},
+		},
+		Total: "1645.00", Paid: "0.00", Tips: "0.00", Balance: "1645.00",
+		USDTotal: textPointer("88.92"), USDRate: textPointer("18.50"),
+	}
+	text := renderDocument(document, 42)
+	for _, fragment := range []string{
+		"Descuento · Atención", "-$185.00", "Cortesía · Cortesía de la casa", "-$50.00",
+		"Total en dólares (T.C. $18.50)", "US$88.92", "$1,645.00",
+	} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("La precuenta no muestra %q:\n%s", fragment, text)
+		}
+	}
+	if strings.Contains(text, "Servicio a domicilio ·") {
+		t.Fatalf("Un cargo sin motivo mostró un separador de motivo:\n%s", text)
+	}
+	// El total en dólares va después del TOTAL en pesos y no lo sustituye.
+	if strings.Index(text, "TOTAL ") > strings.Index(text, "Total en dólares") {
+		t.Fatalf("El total en dólares no sigue al total en pesos:\n%s", text)
+	}
+	// En papel de 58 mm la línea se ajusta al ancho sin perder el importe.
+	narrow := renderDocument(document, 30)
+	for _, line := range strings.Split(narrow, "\n") {
+		if len([]rune(line)) > 30 {
+			t.Fatalf("Una línea excede el ancho de 58 mm: %q", line)
+		}
+	}
+	if !strings.Contains(narrow, "US$88.92") {
+		t.Fatalf("El ticket angosto perdió el total en dólares:\n%s", narrow)
+	}
+	document.USDTotal = nil
+	document.USDRate = nil
+	if strings.Contains(renderDocument(document, 42), "dólares") {
+		t.Fatal("Sin tipo de cambio o con la función desactivada apareció el total en dólares")
+	}
+}
+
 // Los mensajes con importes usan el mismo formato que los documentos.
 func TestMessageAmountsUseSharedMoneyFormat(t *testing.T) {
 	if formatPesos(amount("1234.5")) != "$1,234.50" || formatDollars(amount("2.7")) != "US$2.70" {

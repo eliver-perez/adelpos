@@ -159,6 +159,7 @@ export function AdjustmentList({
           </div>
           <p className="payment-history-detail">
             {adjustment.concept}
+            {adjustment.reason_name && ` · Motivo: ${adjustment.reason_name}`}
             {adjustment.reason && ` · ${adjustment.reason}`}
           </p>
           <p className="muted text-xs">
