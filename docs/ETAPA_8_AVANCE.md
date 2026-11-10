@@ -1871,3 +1871,17 @@ otro agente), con el clúster temporal del puerto 55499 (nunca la instalación r
 - Playwright no se ejecutó: esta parte no cambia pantallas.
 - Nota: la aceptación encadenada de `internal/operations` dura 213 s con `-race` y su contexto (`newFixture`) vence a los
   300 s; la fase D agregó ≈ 27 s.
+
+### Verificación de cierre de la fase C
+
+Sobre una copia exacta del commit `ec5d8d7` (fases A–C completas, sin cambios en curso de la fase D), clúster
+temporal 55499:
+
+- Prettier, gofmt, `cargo fmt`, `sync-metadata`, `go vet` y `go vet -tags=integration`: aprobados.
+- Go unitarias con `-race`: todos los paquetes `ok`.
+- Integración PostgreSQL con `-race`: `database`, `administration`, `catalog`, `operations` y `payments` `ok`.
+- Vitest: 45 archivos y 386 pruebas aprobadas; `tsc --noEmit` y build sin errores.
+- `cargo test`: 19 aprobadas y 1 ignorada (la misma de antes).
+- Playwright en Chromium y en WebKit: 5 de 5 aprobadas cada uno (`inventory`, `restaurant`, `stock-consumption`,
+  `takeaway-quick-notes` y `vendor-purchases`: proveedor, orden de 20 cajas recibida en 12 + 8, recepción directa y
+  vínculo con un gasto de caja).
