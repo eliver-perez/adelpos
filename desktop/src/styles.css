@@ -3313,21 +3313,82 @@ summary {
 .capture-choice-write {
   border-style: dashed;
 }
-.capture-choice-stepper {
+/* Etapa 8: encabezado del grupo con las porciones elegidas («2 de 2»), aviso de máximo y tarjetas
+   de porciones (un toque suma; «−» en la propia tarjeta resta). */
+.capture-block-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.capture-block-count {
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.capture-block-warning {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--warning);
+}
+.capture-portion-card {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 4px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+}
+.capture-portion-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.capture-portion-add {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
 }
-.capture-choice-stepper .secondary-button {
+.capture-portion-add:disabled {
+  cursor: not-allowed;
+}
+.capture-portion-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.capture-portion-quantity {
+  flex-shrink: 0;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.capture-portion-remove {
+  flex-shrink: 0;
+  align-self: center;
   min-width: 44px;
   min-height: 44px;
   padding: 0;
-  font-size: 18px;
-}
-.capture-choice-stepper output {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+  font-size: 20px;
 }
 .capture-block-clear,
 .capture-reset {

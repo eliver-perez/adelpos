@@ -13,6 +13,11 @@ func validateCustomizationShape(customization catalog.Customization, depth int) 
 			return invalid("Un grupo admite hasta 100 opciones seleccionadas.")
 		}
 	}
+	// Indicaciones rápidas elegidas (etapa 8): solo su forma; el borrador no ejecuta el motor y
+	// Go las valida contra el catálogo al cotizar y al confirmar.
+	if err := catalog.CheckQuickNoteShape(customization.QuickNotes); err != nil {
+		return err
+	}
 	for _, component := range customization.Components {
 		if component.Quantity < 0 || component.Quantity > 100 {
 			return invalid("La cantidad de un componente no es válida.")

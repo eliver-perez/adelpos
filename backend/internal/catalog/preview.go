@@ -129,6 +129,9 @@ func loadSnapshot(ctx context.Context, tx pgx.Tx, input PreviewRequest) (Snapsho
 			return snapshot, err
 		}
 	}
+	if err := loadQuickNotes(ctx, tx, &snapshot, input.Lines); err != nil {
+		return snapshot, err
+	}
 	return snapshot, nil
 }
 

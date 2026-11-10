@@ -266,6 +266,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
             <CategoryQuickNotes
               category={draft as Category}
               notes={lookup.data.category_quick_notes ?? []}
+              ingredients={lookup.data.ingredients}
               editable={can('catalog.categories.manage')}
               onChanged={lookup.reload}
             />

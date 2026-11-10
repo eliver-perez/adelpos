@@ -805,3 +805,242 @@ En la copia aislada `scratchpad/repoB1`, con el clúster temporal del puerto 554
   medición), `internal/payments` ok (1.3 s) e `internal/catalog` ok (6.5 s).
 - `cargo test --locked --offline`: 18 aprobadas (1 ignorada, la misma de antes).
 - `tsc --noEmit`: sin errores.
+
+## Fase B · indicaciones rápidas con efecto y captura de complementos (Bq)
+
+Parte de la fase B desarrollada en paralelo con recetas y consumo (B1): migración
+`0012_quick_note_effects.sql`, efecto de las indicaciones rápidas en el catálogo, la captura, la
+partida y la comanda, y el ajuste de la captura de complementos (§8 del diseño). Detalle funcional en
+[CATALOG.md](CATALOG.md) («Indicaciones con efecto · etapa 8») y
+[KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md); contratos en [API_CONTRACTS.md](../API_CONTRACTS.md).
+Sin permisos, locks, rutas ni operaciones del puente nuevos (las indicaciones siguen con
+`catalog.read` y `catalog.categories.manage`). La 0012 no se aplicó a la instalación real.
+
+### Migración 0012
+
+Transaccional (sin `CONCURRENTLY` ni `VACUUM`), sin tocar 0001–0011 ni sembrar datos. Agregar
+columnas con un valor predeterminado constante no reescribe la tabla y las indicaciones existentes
+quedan como solo instrucción.
+
+```sql
+ALTER TABLE app.catalog_category_quick_notes
+    ADD COLUMN effect text NOT NULL DEFAULT 'none'
+        CONSTRAINT catalog_category_quick_notes_effect_check CHECK (effect IN ('none', 'omit', 'normal', 'extra')),
+    ADD COLUMN ingredient_id uuid
+        CONSTRAINT catalog_category_quick_notes_ingredient_id_fkey REFERENCES app.catalog_ingredients(id);
+
+ALTER TABLE app.catalog_category_quick_notes
+    ADD CONSTRAINT catalog_category_quick_notes_effect_ingredient_check CHECK (
+        (effect = 'none' AND ingredient_id IS NULL)
+        OR (effect IN ('omit', 'normal', 'extra') AND ingredient_id IS NOT NULL)
+    );
+
+CREATE INDEX catalog_category_quick_notes_ingredient_idx
+    ON app.catalog_category_quick_notes (ingredient_id)
+    WHERE ingredient_id IS NOT NULL;
+```
+
+El CHECK de coherencia compara con `IS NULL`/`IS NOT NULL` explícitos en ambas ramas y nunca evalúa
+a NULL. La prueba `catalog/quick_note_effects_migration_test.go` parte de un esquema 11 con dos
+indicaciones de la 7.1 (una inactiva), aplica la 0012 y comprueba que texto, estado, orden, revisión
+y fechas no cambian, que quedan `none` sin ingrediente, las tres restricciones con nombre y el
+índice, que PostgreSQL rechaza efecto sin ingrediente, instrucción con ingrediente, efecto
+desconocido e ingrediente inexistente y acepta las combinaciones válidas, y que es repetible.
+
+### Contratos
+
+- **Administración** (`POST`/`PATCH catalog/quick-notes`): `effect` (`none|omit|normal|extra`) e
+  `ingredient_id`. Un efecto exige un ingrediente existente; `none` no admite ingrediente (400). Sin
+  `effect` en el cuerpo, una alta queda `none` y una edición conserva el efecto vigente (clientes de
+  la 7.1). Respuesta y `category_quick_notes` de `catalog/lookups`: `effect`, `ingredient_id` e
+  `ingredient_name` (nulos sin efecto). Auditoría con el efecto antes y después.
+- **Partida**: `customization.quick_notes: [{note_id, text}]` en cada nivel (raíz y componentes de
+  combo), `omitempty`. El texto sigue también en `notes`. Forma validada al guardar el borrador
+  (hasta 40 por nivel, UUID sin repetir, texto de 1 a 80 caracteres).
+- **Desglose** (`quote_line`): `ProductBreakdown.quick_notes: [{note_id, text, effect,
+ingredient_id}]`, `omitempty`: la resolución congelada. `pricing_snapshot` añade `QuickNotes` (solo
+  las usadas) únicamente si la cotización usa alguna.
+- **Cocina**: `instructions.parts[].quick_notes`, `omitempty`.
+- Errores 422 en español: `QUICK_NOTE_INVALID` y `QUICK_NOTE_CONFLICT` (detalle abajo).
+
+### Reglas de validación (Go, `catalog/quick_note_effects.go`)
+
+Se aplican al cotizar (catálogo, borrador, cuenta pendiente), al confirmar y al modificar, en cada
+nivel, después de calcular los ingredientes:
+
+1. La indicación existe, está activa y pertenece a la categoría del producto (o del producto del
+   componente). Si no: 422 `QUICK_NOTE_INVALID`.
+2. Con efecto, su ingrediente está en las reglas del producto y el efecto es aplicable (`QuickNoteTarget`):
+   `omit` exige incluido > 0 y removible; `normal`, incluido > 0 o agregable con máximo ≥ 1; `extra`,
+   agregable con máximo > incluido. Si no: 422 `QUICK_NOTE_INVALID` («no aplica a …»).
+3. Dos indicaciones con efecto sobre el mismo ingrediente: 422 `QUICK_NOTE_CONFLICT` («cambian el
+   mismo ingrediente (…); elige solo una»). Se comprueba antes de las cantidades, para que el
+   conflicto se informe como tal.
+4. La cantidad solicitada efectiva del ingrediente (explícita o la incluida) coincide exactamente con
+   el efecto: `omit` → 0; `normal` → lo incluido, o 1 si no estaba incluido; `extra` →
+   `min(incluido + 1, máximo)`, igual que el botón «Extra». Si no: 422 `QUICK_NOTE_INVALID`.
+
+Las indicaciones no tienen cargo propio: el precio (y el consumo de inventario de B1) sale solo de
+`ingredients`, así que «Queso extra» cobra lo mismo que el botón «Extra queso» y nunca se acumulan
+multiplicadores. El desglose guarda la indicación con el texto vigente del catálogo; el `text` de la
+solicitud es informativo.
+
+**Camino «Preserve»** (cambios solo de observaciones o reducciones de cantidad): `normalizeRecipe`
+trata `quick_notes` como `notes` (preparación, no receta). El desglose se copia completo
+(`cloneQuoteLine`) y `catalog.PreserveQuickNotes` conserva las indicaciones ya resueltas en el mismo
+nivel tal como se congelaron (aunque la indicación cambie después) y valida las nuevas con el
+catálogo vigente, las reglas del producto del `pricing_snapshot` del pedido anterior y las cantidades
+congeladas del desglose (que no cambian, porque la receta es la misma).
+
+### Captura
+
+- `quickNotesFor` devuelve las indicaciones completas; `quickNoteRules.ts` (nuevo) decide cuáles se
+  muestran (`applicableQuickNotes`: todas las sin efecto y las con efecto aplicables a las reglas del
+  producto, con la misma regla de Go) y qué selección enviar.
+- Al tocar una con efecto se aplica **la misma selección estructurada** que el personalizador
+  (`withIngredient` con la cantidad del efecto, o la configuración original para «Con cebolla» en un
+  producto que ya la lleva) y se guarda `{note_id, text}`; su texto se agrega a `notes` sin repetirse.
+  Desmarcarla quita su identificador, su texto y su selección del ingrediente.
+- Dos indicaciones con efecto sobre el mismo ingrediente son excluyentes: tocar una quita la otra.
+- Cambiar ese ingrediente en el personalizador (botones «Sin …» / «Extra …») quita la indicación con
+  efecto y su texto (`reconcileQuickNotes`); las demás se conservan.
+- Las con efecto que no aplican no se muestran, y su texto tampoco aparece como atajo de la cuenta.
+  Los atajos de indicaciones ya usadas en la cuenta siguen sin duplicarse. Las indicaciones sin efecto
+  se marcan por texto como en la 7.1 (también en partidas anteriores sin identificador) y ahora
+  guardan además su identificador.
+- Las indicaciones para cocina del producto principal se dibujan dentro de `TouchCustomizer` (antes
+  en `CustomizationPanel`), en el mismo lugar, porque necesitan la configuración del producto; cada
+  componente de combo sigue con las suyas.
+- El resumen de la partida en la cuenta (`describeBreakdown`/`describeSelection`) muestra la
+  indicación con efecto una sola vez, como la comanda.
+- `normalizeSelection` (`services/restaurant.ts`) conserva `quick_notes` al abrir una partida para
+  editarla; sin indicaciones se omite la clave (la partida queda idéntica).
+
+### Comanda
+
+`routing.go` copia las indicaciones resueltas a cada `Part`. `template.go` omite la línea
+estructurada de un ingrediente («SIN Cebolla», «Queso: 1 (incluido 0)») cuando una indicación con
+efecto sobre ese ingrediente está entre las indicaciones de la nota impresa: la de la partida para la
+parte principal y la del componente para cada componente de combo, también en ANTES/AHORA. Si la
+comanda no muestra notas o la nota ya no contiene el texto, la línea estructurada se conserva. Sin
+indicaciones con efecto la comanda es idéntica a la de la 7.1 (prueba con el texto exacto obtenido de
+la plantilla anterior).
+
+### Complementos en la captura (§8 del diseño)
+
+Se ajustó `GroupBlock` sin rehacer el panel:
+
+- Grupos de varias porciones: la opción es una tarjeta con su botón principal («Agregar una porción
+  de …»: **un toque suma una porción**), la cantidad grande dentro de la tarjeta (24 px) y un botón
+  **−** de 44 × 44 px en la propia tarjeta, visible con cantidad > 0. Se quitó el `− cantidad +` que
+  aparecía debajo y el toque ya no quita la opción completa. Sustituir es de dos toques (− en arroz,
+  toque en pasta).
+- Los grupos de elección única (máximo 1) siguen reemplazando con un toque, como en la 6.1.
+- Precio en la tarjeta: valor de referencia en grupos por equivalencia («$30.00», solo si es mayor que
+  cero) más el extra explícito si existe («+$10.00»); en grupos por cantidad, el extra explícito o, sin
+  él, el precio del primer tramo. Con `money.ts`, sin aritmética.
+- Encabezado «2 de 2» (porciones elegidas de las incluidas; «1 elegida» si el producto no incluye
+  ninguna) junto a la regla de mínimo y máximo de siempre.
+- Cambio de precio del grupo en vivo con el desglose de Go: «+$10.00», «Sin cambio» o, con
+  equivalencia y extras a la vez, los dos importes; «Calculando…» mientras Go recalcula.
+- Intentar pasar del máximo del grupo o de la opción muestra un aviso en el propio grupo
+  («Guarniciones admite hasta 2 porciones: toca «−» en otra opción para cambiarla.») en lugar de
+  desactivar la tarjeta sin explicación; el aviso se retira con el siguiente cambio. Mínimos y máximos
+  los sigue validando Go.
+
+### Decisiones y desviaciones menores
+
+1. **Errores 422**: los rechazos de indicaciones usan 422 (`QUICK_NOTE_INVALID`, `QUICK_NOTE_CONFLICT`),
+   distintos del 400 `CATALOG_VALIDATION` de forma, para que la captura los distinga.
+2. **Texto de la solicitud informativo**: la resolución usa el texto vigente del catálogo, no el de
+   la solicitud; si una indicación se renombra con un borrador abierto, la comanda imprime la nota del
+   borrador y, como su texto ya no coincide, conserva también la línea estructurada (nunca se pierde
+   el cambio). No se exige que el texto coincida para no bloquear borradores.
+3. **Indicaciones sin efecto con identificador**: también se guardan en `quick_notes` (la
+   especificación pide conservar la identidad de la indicación elegida). Se siguen marcando por texto,
+   así que una partida antigua con «Bien cocida» escrita aparece marcada.
+4. **«Con cebolla» incluida** se aplica como la configuración original (sin cantidad explícita): la
+   solicitud no cambia de receta y una modificación que solo agrega esa indicación sigue el camino
+   «Preserve».
+5. **Preserve** valida las indicaciones nuevas con el snapshot del pedido anterior y el catálogo
+   vigente de la indicación; una nueva con efecto que no coincide con la receta conservada se rechaza
+   con 422 (no se recotiza en silencio). Al recotizar (otros cambios) todas se validan con el catálogo
+   vigente.
+6. **Copia del desglose en Preserve**: `cloneQuoteLine` evita que copiar observaciones modificara
+   también los componentes de la versión anterior (compartían punteros), de modo que el evento
+   `item.modified` conserva en `quote_line` las notas anteriores de los componentes de combo.
+7. **Sin aviso emergente al pasar del máximo**: el aviso es texto en el grupo (`role="status"`), no
+   `notifyWarning`, porque describe el estado del grupo junto a sus tarjetas.
+8. **Precio de los grupos por cantidad**: sin extra explícito se muestra el precio del primer tramo
+   (lo que cuesta la primera porción adicional).
+
+### Limitaciones
+
+- Las indicaciones con efecto actúan solo sobre los ingredientes del producto
+  (`catalog_product_ingredients`), no sobre opciones de grupo cuyo complemento esté ligado a un
+  ingrediente.
+- La pantalla de preparación (KDS) no lista ingredientes, así que no necesitó cambios; los documentos
+  históricos conservan su texto.
+- Un borrador con una indicación que después se desactiva o se cambia de efecto se rechaza al cotizar
+  (422) hasta quitarla; la captura la muestra como indicación escrita para poder quitarla.
+- Sin prueba en la ventana nativa ni en pantalla táctil física; ninguna comanda se imprimió en papel.
+
+### Pruebas de la fase Bq
+
+- **Go unitarias**: `catalog/quick_note_effects_test.go` (cantidades de `QuickNoteTarget` por efecto y
+  regla; aceptadas y rechazadas con cantidades exactas de `omit`/`normal`/`extra`, efectos no
+  aplicables, conflicto de dos efectos, inactiva, otra categoría, inexistente y repetida; «Cebolla
+  extra», «Queso extra» y «Chile extra» cobran lo mismo que el botón; desglose congelado en la raíz y
+  en un componente de combo; Preserve conserva la resolución congelada y rechaza una nueva
+  incompatible); `kitchen/quick_notes_template_test.go` (sin efecto idéntica a la plantilla anterior
+  con el texto exacto, una sola impresión en la raíz y en un componente, línea estructurada conservada
+  sin notas impresas o sin el texto); `operations/quick_notes_fingerprint_test.go` (huella de un
+  borrador sin indicaciones igual a la calculada con el código anterior, sin `quick_notes` en la
+  serialización; las indicaciones son preparación en `sameRecipe`; la copia del desglose no comparte
+  componentes).
+- **Integración PostgreSQL**: `catalog/quick_note_effects_migration_test.go` (0012 sobre esquema 11) y
+  `operations/quick_note_effects_test.go`, encadenada al final de la aceptación
+  (`8Bq_indicaciones_con_efecto_administradas_con_permiso`: 403 sin permiso, efecto sin ingrediente,
+  efecto desconocido, instrucción con ingrediente, ingrediente inexistente y texto con coma
+  rechazados sin registros, auditoría, edición sin efecto que lo conserva y lookups con efecto e
+  ingrediente; `8Bq_confirmacion_con_indicaciones_con_efecto`: precio igual al del botón Extra, 422 de
+  cantidad y de conflicto, `quote_line` congelado y comanda sin la línea duplicada;
+  `8Bq_editar_la_indicacion_no_cambia_la_partida_confirmada`; `8Bq_partida_antigua_y_borrador_sin_quick_notes`:
+  borrador, solicitud, desglose y snapshot sin `quick_notes`, huella estable y comanda de la 7.1;
+  `8Bq_modificacion_preserve_conserva_las_indicaciones`: reducción con observaciones e indicación
+  nueva por el camino Preserve con las indicaciones congeladas y 422 de una incompatible;
+  `8Bq_componente_de_combo_con_indicacion`).
+- **Vitest**: `pages/restaurant/capture/quickNotesCapture.test.tsx` (cantidades por efecto; selección
+  estructurada, identificador y texto; exclusión mutua; «Con cebolla» sin cambio; desmarcar; quitar al
+  cambiar el ingrediente; ocultas en un producto sin el ingrediente y sin atajo; resumen sin duplicar;
+  complementos: toque suma, − en la tarjeta, «2 de 2», «3 de 2», aviso de máximo, sustitución en dos
+  toques, «Calculando…», «+$10.00» y «Sin cambio»); `capture.test.tsx` (las indicaciones sin efecto
+  se guardan también con su identificador); `pages/catalog/quickNotes.test.tsx` (efecto con botones,
+  ingrediente exigido, sin campos de gramos, resumen del efecto en el listado, edición que vuelve a
+  solo instrucción).
+- **Playwright** (`e2e/takeaway-quick-notes.spec.ts`, nuevo; su catálogo va en una categoría propia,
+  «Platos fuertes», creada por la API, y el nombre lo ordena después de `restaurant.spec.ts`, que
+  espera la cuenta #1 y dos productos en «Platillos»): pedido para llevar con un filete de $140 (arroz
+  y ensalada incluidos): «2 de 2», «Sin cambio», precio en la tarjeta, aviso de máximo, − de 44 px,
+  sustitución en dos toques (arroz → papas, «+$5.00» y $145.00 de Go), «Queso extra» marca «Extra
+  queso» del personalizador y cobra $12.50, «Sin cebolla» marca el ingrediente, resumen sin
+  duplicados y borrador con identificadores; sin desbordamiento del panel ni de la página a 1280 × 720
+  y 1920 × 1080 en ambos temas.
+
+### Verificación de la fase Bq
+
+Ejecutada sobre una copia aislada con el `HEAD` de `etapa-8` (`6e063dc`, con la 0011 de B1) más solo
+los cambios de Bq (los cambios en curso de otros agentes, como la 0013, se excluyeron de la copia),
+con el clúster temporal 55499 y Go temporal en 8185 (vista previa 1425):
+
+- Estáticas: Prettier (`--check`), gofmt, `cargo fmt --check`, `sync-metadata --check`, `go vet` y
+  `go vet -tags=integration` aprobados.
+- Go unitarias con `-race`: `ok` en todos los paquetes (`catalog`, `kitchen` y `operations` incluidos).
+- Vitest: 42 archivos y 345 pruebas aprobadas; `tsc --noEmit` y `npm run build` sin errores; cargo: 18
+  aprobadas, 1 ignorada.
+- Integración PostgreSQL: `catalog` (7,0 s, con la prueba de la 0012 sobre esquema 11), `operations`
+  (157,3 s, con las seis subpruebas `8Bq_`) y `database` (3,0 s) en `ok`; la prueba de impresora física
+  quedó omitida porque es opcional.
+- Playwright: `inventory.spec.ts`, `restaurant.spec.ts` y `takeaway-quick-notes.spec.ts` aprobadas en
+  Chromium (3 en 1,5 min) y en WebKit (3 en 1,5 min).
+- Ninguna comanda se envió a una impresora real. La 0012 no se aplicó a la instalación real.

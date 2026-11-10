@@ -71,8 +71,12 @@ func sameRecipe(first, second catalog.LineRequest) bool {
 	return reflect.DeepEqual(normalized(first), normalized(second))
 }
 
+// normalizeRecipe deja solo la receta para comparar dos solicitudes: las observaciones y las
+// indicaciones rápidas elegidas se tratan como preparación, no como receta. Una indicación con
+// efecto ya se refleja en sus ingredientes, que sí se comparan.
 func normalizeRecipe(customization *catalog.Customization) {
 	customization.Notes = ""
+	customization.QuickNotes = nil
 	if customization.Ingredients == nil {
 		customization.Ingredients = []catalog.IngredientSelection{}
 	}
@@ -122,6 +126,57 @@ func copyPreparationNotes(breakdown *catalog.ProductBreakdown, customization cat
 	}
 }
 
+// cloneQuoteLine copia el desglose completo, incluidos los componentes enlazados por puntero.
+func cloneQuoteLine(source catalog.QuoteLine) (catalog.QuoteLine, error) {
+	var copied catalog.QuoteLine
+	err := json.Unmarshal(jsonValue(source), &copied)
+	return copied, err
+}
+
+// preserveQuickNotes conserva en el camino «Preserve» las indicaciones rápidas igual que las
+// observaciones: las ya resueltas quedan congeladas y las nuevas se validan con las reglas del
+// snapshot del pedido de la versión anterior (las mismas con que se calcularon sus importes).
+func (handler *service) preserveQuickNotes(orderID string, breakdown *catalog.ProductBreakdown, customization catalog.Customization) error {
+	if !hasQuickNotes(customization, 0) && !hasResolvedQuickNotes(breakdown, 0) {
+		return nil
+	}
+	snapshot, err := readOne[catalog.Snapshot](handler.ctx, handler.tx, "SELECT pricing_snapshot FROM app.restaurant_orders WHERE id=$1", orderID)
+	if err != nil {
+		return err
+	}
+	return catalog.PreserveQuickNotes(handler.ctx, handler.tx, *snapshot, breakdown, customization)
+}
+
+func hasQuickNotes(customization catalog.Customization, depth int) bool {
+	if len(customization.QuickNotes) > 0 {
+		return true
+	}
+	if depth > 8 {
+		return false
+	}
+	for _, component := range customization.Components {
+		if hasQuickNotes(component.Customization, depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasResolvedQuickNotes(breakdown *catalog.ProductBreakdown, depth int) bool {
+	if breakdown == nil || depth > 8 {
+		return false
+	}
+	if len(breakdown.QuickNotes) > 0 {
+		return true
+	}
+	for _, component := range breakdown.Components {
+		if hasResolvedQuickNotes(component.Product, depth+1) {
+			return true
+		}
+	}
+	return false
+}
+
 func (handler *service) calculateEdit(account *Account, input EditInput) (*editCalculation, error) {
 	if err := ensureOpen(account, input.Revision); err != nil {
 		return nil, err
@@ -165,8 +220,15 @@ func (handler *service) calculateEdit(account *Account, input EditInput) (*editC
 			return nil, err
 		}
 		totals := unitTotals(units[:input.Line.Quantity])
-		line := previous.QuoteLine
+		// Copia propia del desglose: el anterior sigue intacto para el evento item.modified.
+		line, err := cloneQuoteLine(previous.QuoteLine)
+		if err != nil {
+			return nil, err
+		}
 		copyPreparationNotes(&line.ProductBreakdown, input.Line.Customization)
+		if err := handler.preserveQuickNotes(previous.OrderID, &line.ProductBreakdown, input.Line.Customization); err != nil {
+			return nil, err
+		}
 		line.Quantity = input.Line.Quantity
 		line.Subtotal, line.Discount, line.Total = totals.Subtotal, totals.Discount, totals.Total
 		quote.Lines = []catalog.QuoteLine{line}

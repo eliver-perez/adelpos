@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   groupLimits,
   groupSelection,
@@ -10,13 +11,14 @@ import {
 } from '../../../components/catalog/customizationRules';
 import type {
   Customization,
+  GroupOption,
   Lookups,
   OptionGroup,
   Product,
   ProductBreakdown,
   ProductGroup,
 } from '../../../services/catalog';
-import { formatSignedMoney } from '../../../services/money';
+import { formatMoney, formatSignedMoney } from '../../../services/money';
 import { positiveAmount } from './captureRules';
 import { displayQuantity, fromThousandths, toThousandths, unit } from './quantities';
 
@@ -87,6 +89,54 @@ function groupRule(minimum: number, maximum: number | null) {
   return maximum === unit ? 'Opcional · elige 1' : `Opcional${upTo}`;
 }
 
+// Precio que se muestra en la tarjeta de una opción, tal como lo configura el catálogo (Go valida
+// y calcula el cargo real): en grupos por equivalencia, el valor de referencia de la opción
+// («$30.00») y, si existe, su extra explícito («+$10.00»); en grupos por cantidad, el extra
+// explícito o, sin él, el precio del primer tramo adicional. La interfaz no suma importes.
+function optionPrices(group: OptionGroup, option: GroupOption): string[] {
+  const prices: string[] = [];
+  if (group.pricing_mode === 'value' && positiveAmount(option.reference_value)) {
+    prices.push(formatMoney(option.reference_value));
+  }
+  if (positiveAmount(option.extra_price)) {
+    prices.push(formatSignedMoney(option.extra_price));
+  } else if (group.pricing_mode === 'quantity' && positiveAmount(option.tiers[0]?.unit_price)) {
+    prices.push(formatSignedMoney(option.tiers[0]?.unit_price));
+  }
+  return prices;
+}
+
+// Cambio de precio del grupo con lo que devolvió Go: «+$10.00» o «Sin cambio». Mientras Go
+// recalcula, «Calculando…». Si hay equivalencia y extras se muestran los dos importes de Go.
+function groupDelta(charge: ProductBreakdown['groups'][number] | undefined): string {
+  if (!charge) {
+    return 'Calculando…';
+  }
+  const difference = positiveAmount(charge.difference);
+  const extras = positiveAmount(charge.extras);
+  if (difference && extras) {
+    return `Equivalencia ${formatSignedMoney(charge.difference)} · Extras ${formatSignedMoney(charge.extras)}`;
+  }
+  if (difference) {
+    return formatSignedMoney(charge.difference);
+  }
+  if (extras) {
+    return formatSignedMoney(charge.extras);
+  }
+  return 'Sin cambio';
+}
+
+function portionsLabel(quantity: number) {
+  const text = displayQuantity(fromThousandths(quantity));
+  return `${text} ${quantity === unit ? 'porción' : 'porciones'}`;
+}
+
+// Grupo de complementos o guarniciones. Con máximo de una porción es una elección única (un toque
+// sustituye, como en la etapa 6.1). Con varias porciones (etapa 8, ajuste de la captura): un
+// toque en la tarjeta suma una porción, el botón «−» de la propia tarjeta resta una, la cantidad
+// se ve grande y sustituir es de dos toques («−» en arroz y toque en pasta). El encabezado
+// muestra las porciones elegidas respecto de las incluidas («2 de 2») y el cambio de precio que
+// calculó Go; al intentar pasar del máximo aparece un aviso en el propio grupo.
 export function GroupBlock({
   binding,
   group,
@@ -100,21 +150,35 @@ export function GroupBlock({
   onChange: (value: Customization) => void;
   breakdown: ProductBreakdown | null;
 }) {
+  const [warning, setWarning] = useState('');
   const selection = groupSelection(value, binding);
   const limits = groupLimits(binding, group);
   const minimum = toThousandths(limits.minimum);
   const maximum = limits.maximum === null ? null : toThousandths(limits.maximum);
   const total = selection.reduce((sum, option) => sum + toThousandths(option.quantity), 0);
+  const included = binding.included.reduce(
+    (sum, option) => sum + toThousandths(option.quantity),
+    0,
+  );
   // Con máximo de una porción el grupo se comporta como una elección única.
   const single = maximum === unit;
   const charge = breakdown?.groups.find((entry) => entry.group_id === group.id);
+  const counter =
+    included > 0
+      ? `${displayQuantity(fromThousandths(total))} de ${displayQuantity(fromThousandths(included))}`
+      : `${displayQuantity(fromThousandths(total))} ${total === unit ? 'elegida' : 'elegidas'}`;
 
   function quantityOf(optionID: string) {
     return toThousandths(selection.find((entry) => entry.option_id === optionID)?.quantity);
   }
 
+  function change(next: Customization) {
+    setWarning('');
+    onChange(next);
+  }
+
   function remove(optionID: string) {
-    onChange(
+    change(
       withGroupSelection(
         value,
         group.id,
@@ -128,97 +192,133 @@ export function GroupBlock({
       remove(optionID);
       return;
     }
-    onChange(withGroupOption(value, binding, optionID, fromThousandths(quantity)));
+    change(withGroupOption(value, binding, optionID, fromThousandths(quantity)));
+  }
+
+  // Un toque suma una porción si cabe en el máximo del grupo y en el de la opción; si no, avisa
+  // en el grupo en lugar de desactivar la tarjeta sin explicación.
+  function addPortion(option: GroupOption, name: string) {
+    const quantity = quantityOf(option.id);
+    const optionMaximum = option.max_quantity === null ? null : toThousandths(option.max_quantity);
+    if (maximum !== null && total + unit > maximum) {
+      setWarning(
+        `${group.name} admite hasta ${portionsLabel(maximum)}: toca «−» en otra opción para cambiarla.`,
+      );
+      return;
+    }
+    if (optionMaximum !== null && quantity + unit > optionMaximum) {
+      setWarning(`${name} admite hasta ${portionsLabel(optionMaximum)}.`);
+      return;
+    }
+    setQuantity(option.id, quantity + unit);
+  }
+
+  function chooseSingle(option: GroupOption) {
+    if (quantityOf(option.id) > 0) {
+      // Una elección obligatoria no se deja vacía con un toque.
+      if (minimum === 0) remove(option.id);
+      return;
+    }
+    change(withGroupSelection(value, group.id, [{ option_id: option.id, quantity: '1' }]));
   }
 
   return (
     <section className="capture-block" aria-label={group.name}>
       <header className="capture-block-header">
         <h3>{group.name}</h3>
-        <span
-          className={`capture-block-rule ${minimum > 0 && total < minimum ? 'capture-block-required' : ''}`}
-        >
-          {groupRule(minimum, maximum)}
+        <span className="capture-block-meta">
+          <span
+            className="capture-block-count"
+            aria-label={`${displayQuantity(fromThousandths(total))} porciones elegidas de ${displayQuantity(fromThousandths(included))} incluidas`}
+          >
+            {counter}
+          </span>
+          <span
+            className={`capture-block-rule ${minimum > 0 && total < minimum ? 'capture-block-required' : ''}`}
+          >
+            {groupRule(minimum, maximum)}
+          </span>
         </span>
       </header>
-      {charge && (positiveAmount(charge.difference) || positiveAmount(charge.extras)) && (
-        <p className="capture-block-charge">
-          {positiveAmount(charge.difference) &&
-            `Diferencia por equivalencia ${formatSignedMoney(charge.difference)}`}
-          {positiveAmount(charge.difference) && positiveAmount(charge.extras) && ' · '}
-          {positiveAmount(charge.extras) && `Extras ${formatSignedMoney(charge.extras)}`}
+      <p className="capture-block-charge" aria-live="polite">
+        {groupDelta(charge)}
+      </p>
+      {warning && (
+        <p className="capture-block-warning" role="status">
+          {warning}
         </p>
       )}
       <div className="capture-choices">
         {group.options.map((option) => {
           const quantity = quantityOf(option.id);
           const selected = quantity > 0;
-          const optionMaximum =
-            option.max_quantity === null ? null : toThousandths(option.max_quantity);
-          const room =
-            (maximum === null || total + unit <= maximum) &&
-            (optionMaximum === null || quantity + unit <= optionMaximum);
-          const stepper = selected && !single && (maximum === null || maximum > unit);
           // La porción solo se nombra cuando la opción tiene una porción propia configurada.
+          const optionName = option.name ?? 'Opción';
           const name =
             option.portion_id && option.portion_name
-              ? `${option.name} · ${option.portion_name}`
-              : option.name;
+              ? `${optionName} · ${option.portion_name}`
+              : optionName;
+          const prices = optionPrices(group, option);
+          if (single) {
+            return (
+              <div className="capture-choice-cell" key={option.id}>
+                <button
+                  type="button"
+                  className="capture-choice"
+                  aria-pressed={selected}
+                  disabled={!option.active}
+                  onClick={() => chooseSingle(option)}
+                >
+                  <span>{name}</span>{' '}
+                  {prices.map((price) => (
+                    <span className="capture-choice-extra" key={price}>
+                      {price}
+                    </span>
+                  ))}
+                  {!option.active && <span className="capture-choice-extra">No disponible</span>}
+                </button>
+              </div>
+            );
+          }
           return (
-            <div className="capture-choice-cell" key={option.id}>
+            <div
+              className={`capture-portion-card ${selected ? 'capture-portion-selected' : ''}`}
+              key={option.id}
+              role="group"
+              aria-label={`${name}: ${selected ? portionsLabel(quantity) : 'sin elegir'}`}
+            >
               <button
                 type="button"
-                className="capture-choice"
+                className="capture-portion-add"
                 aria-pressed={selected}
-                disabled={!option.active || (!selected && !single && !room)}
-                onClick={() => {
-                  if (single) {
-                    if (selected) {
-                      // Una elección obligatoria no se deja vacía con un toque.
-                      if (minimum === 0) remove(option.id);
-                      return;
-                    }
-                    onChange(
-                      withGroupSelection(value, group.id, [
-                        { option_id: option.id, quantity: '1' },
-                      ]),
-                    );
-                    return;
-                  }
-                  setQuantity(option.id, selected ? 0 : unit);
-                }}
+                aria-label={`Agregar una porción de ${name}`}
+                disabled={!option.active}
+                onClick={() => addPortion(option, name)}
               >
-                <span>{name}</span>{' '}
-                {extraLabel(option.extra_price) && (
-                  <span className="capture-choice-extra">{extraLabel(option.extra_price)}</span>
+                <span className="capture-portion-text">
+                  <span>{name}</span>
+                  {prices.map((price) => (
+                    <span className="capture-choice-extra" key={price}>
+                      {price}
+                    </span>
+                  ))}
+                  {!option.active && <span className="capture-choice-extra">No disponible</span>}
+                </span>
+                {selected && (
+                  <span className="capture-portion-quantity" aria-hidden="true">
+                    {displayQuantity(fromThousandths(quantity))}
+                  </span>
                 )}
-                {!option.active && <span className="capture-choice-extra">No disponible</span>}
               </button>
-              {stepper && (
-                <div
-                  className="capture-choice-stepper"
-                  role="group"
-                  aria-label={`Porciones de ${name}`}
+              {selected && (
+                <button
+                  type="button"
+                  className="secondary-button capture-portion-remove"
+                  aria-label={`Quitar una porción de ${name}`}
+                  onClick={() => setQuantity(option.id, quantity - unit)}
                 >
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    aria-label={`Quitar una porción de ${name}`}
-                    onClick={() => setQuantity(option.id, quantity - unit)}
-                  >
-                    −
-                  </button>
-                  <output>{displayQuantity(fromThousandths(quantity))}</output>
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    aria-label={`Agregar una porción de ${name}`}
-                    disabled={!room}
-                    onClick={() => setQuantity(option.id, quantity + unit)}
-                  >
-                    +
-                  </button>
-                </div>
+                  −
+                </button>
               )}
             </div>
           );
@@ -228,7 +328,7 @@ export function GroupBlock({
         <button
           type="button"
           className="secondary-button capture-block-clear"
-          onClick={() => onChange(withoutGroupOptions(value, group.id))}
+          onClick={() => change(withoutGroupOptions(value, group.id))}
         >
           Sin {group.name.toLocaleLowerCase('es')}
         </button>

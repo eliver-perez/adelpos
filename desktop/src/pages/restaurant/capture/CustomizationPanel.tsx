@@ -7,7 +7,6 @@ import { TextField } from '../../../components/catalog/EditorFields';
 import { QuoteBreakdown } from '../../../components/catalog/QuoteBreakdown';
 import { originalCustomization } from '../../../components/catalog/customizationRules';
 import { api } from '../../../services/api';
-import { quickNotesFor } from '../../../services/catalog';
 import type { Lookups, Quote } from '../../../services/catalog';
 import { formatMoney } from '../../../services/money';
 import { notifyError, notifySuccess } from '../../../services/notify';
@@ -15,7 +14,6 @@ import { isPendingAccount } from '../../../services/restaurant';
 import type { Bill, DraftItem, EditorState, OrderQuote } from '../../../services/restaurant';
 import type { ExecuteMutation } from '../OperationsAdmin';
 import { uncertainError } from './draftSync';
-import { KitchenNotes } from './KitchenNotes';
 import { TouchCustomizer } from './TouchCustomizer';
 
 // Borrador con la partida en edición: se agrega al final (nueva) o sustituye a la del borrador.
@@ -232,20 +230,6 @@ export function CustomizationPanel({
             breakdown={quoteLine}
             noteShortcuts={noteShortcuts}
             basePriceUnavailable={editor.basePriceUnavailable}
-          />
-          <KitchenNotes
-            value={editor.line.customization.notes}
-            onChange={(notes) =>
-              onChange({
-                ...editor,
-                line: {
-                  ...editor.line,
-                  customization: { ...editor.line.customization, notes },
-                },
-              })
-            }
-            shortcuts={noteShortcuts}
-            quickNotes={quickNotesFor(lookups, editor.line.product_id)}
           />
           {confirmed && (
             <TextField

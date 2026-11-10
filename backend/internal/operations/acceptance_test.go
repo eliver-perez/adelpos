@@ -218,6 +218,8 @@ func TestRestaurantAcceptance(t *testing.T) {
 	testTablesStage71(t, fixture)
 	testStage71PhaseD(t, fixture)
 	testInventoryCore(t, fixture)
+	// Etapa 8, fase B (Bq): indicaciones rápidas con efecto (usa las indicaciones de la 7.1).
+	testQuickNoteEffects(t, fixture)
 }
 
 func mustJSON(value any) []byte {

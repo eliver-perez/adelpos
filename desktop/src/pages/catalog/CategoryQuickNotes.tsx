@@ -2,9 +2,17 @@ import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Field } from '../../components/Forms';
 import { PositionField } from '../../components/PositionField';
+import { SegmentedControl } from '../../components/SegmentedControl';
 import { ToggleButton } from '../../components/ToggleButton';
+import { ReferenceField } from '../../components/catalog/EditorFields';
 import { api } from '../../services/api';
-import type { Category, CategoryQuickNote } from '../../services/catalog';
+import { quickNoteEffect } from '../../services/catalog';
+import type {
+  Category,
+  CategoryQuickNote,
+  Ingredient,
+  QuickNoteEffect,
+} from '../../services/catalog';
 import { notifyError, notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import { orderSiblings, positionPayload } from '../../services/positions';
@@ -25,25 +33,59 @@ export function quickNoteProblem(text: string): string {
   return '';
 }
 
-// Captura o edición de una indicación rápida: texto, estado y posición dentro de la categoría.
+// Tipos de efecto de la etapa 8, con botones. Ninguno pide gramos: la cantidad la fija cada
+// producto (lo incluido, el máximo y la porción habitual del inventario).
+const effectOptions: { value: QuickNoteEffect; label: string }[] = [
+  { value: 'none', label: 'Solo instrucción' },
+  { value: 'omit', label: 'Omitir' },
+  { value: 'normal', label: 'Porción habitual' },
+  { value: 'extra', label: 'Porción extra' },
+];
+
+const effectHints: Record<QuickNoteEffect, string> = {
+  none: 'Solo llega a cocina; no cambia ingredientes, precio ni inventario.',
+  omit: 'Al tocarla en la captura retira el ingrediente, como «Sin …» del personalizador.',
+  normal:
+    'Deja la porción incluida; si el producto no lo incluye, agrega una porción (con su cargo, si existe).',
+  extra: 'Aplica la porción extra del personalizador (una más de lo incluido), con su cargo.',
+};
+
+// Resumen del efecto para el listado: «Omitir: Cebolla».
+export function quickNoteEffectLabel(note: CategoryQuickNote): string {
+  const effect = quickNoteEffect(note);
+  if (effect === 'none') {
+    return '';
+  }
+  const label = effectOptions.find((option) => option.value === effect)?.label ?? effect;
+  return `${label}: ${note.ingredient_name ?? 'ingrediente'}`;
+}
+
+// Captura o edición de una indicación rápida: texto, efecto con su ingrediente, estado y posición
+// dentro de la categoría.
 function QuickNoteEditor({
   category,
   note,
   notes,
+  ingredients,
   onSaved,
   onCancel,
 }: {
   category: Category;
   note: CategoryQuickNote | null;
   notes: CategoryQuickNote[];
+  ingredients: Ingredient[];
   onSaved: () => Promise<void>;
   onCancel?: () => void;
 }) {
   const [text, setText] = useState(note?.text ?? '');
   const [active, setActive] = useState(note?.active ?? true);
+  const [effect, setEffect] = useState<QuickNoteEffect>(note ? quickNoteEffect(note) : 'none');
+  const [ingredientID, setIngredientID] = useState(note?.ingredient_id ?? '');
   const [after, setAfter] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const problem = quickNoteProblem(text);
+  const missingIngredient = effect !== 'none' && ingredientID === '';
+  const problem =
+    quickNoteProblem(text) || (missingIngredient ? 'Elige el ingrediente del efecto.' : '');
   const siblings = notes.map((item) => ({
     id: item.id,
     name: item.text,
@@ -58,6 +100,8 @@ function QuickNoteEditor({
       category_id: category.id,
       text: text.trim(),
       active,
+      effect,
+      ingredient_id: effect === 'none' ? null : ingredientID,
     };
     const position = positionPayload(notes, note?.id ?? '', after);
     if (position) {
@@ -75,6 +119,8 @@ function QuickNoteEditor({
         await api('catalog_create_quick_note', { body: { ...body, revision: 0 } });
         notifySuccess(`Indicación «${text.trim()}» agregada a ${category.name}.`);
         setText('');
+        setEffect('none');
+        setIngredientID('');
         setAfter(undefined);
       }
       await onSaved();
@@ -97,7 +143,11 @@ function QuickNoteEditor({
       <div className="form-grid">
         <Field
           label={note ? 'Texto de la indicación' : 'Nueva indicación'}
-          hint={problem && text.length > 0 ? problem : 'Hasta 80 caracteres, sin comas.'}
+          hint={
+            quickNoteProblem(text) && text.length > 0
+              ? quickNoteProblem(text)
+              : 'Hasta 80 caracteres, sin comas.'
+          }
         >
           <input
             type="text"
@@ -105,7 +155,7 @@ function QuickNoteEditor({
             autoComplete="off"
             value={text}
             placeholder="Por ejemplo: Sin cebolla"
-            aria-invalid={!!problem && text.length > 0}
+            aria-invalid={!!quickNoteProblem(text) && text.length > 0}
             onChange={(event) => setText(event.target.value)}
           />
         </Field>
@@ -116,6 +166,32 @@ function QuickNoteEditor({
           value={after}
           onChange={setAfter}
         />
+      </div>
+      <div className="form-grid">
+        <div className="field">
+          <span>Efecto en el pedido</span>
+          <SegmentedControl<QuickNoteEffect>
+            label="Tipo de efecto"
+            value={effect}
+            options={effectOptions}
+            onChange={setEffect}
+          />
+          <small className="muted">{effectHints[effect]}</small>
+        </div>
+        {effect !== 'none' && (
+          <div className="form-stack">
+            <ReferenceField
+              label="Ingrediente vinculado"
+              value={ingredientID || null}
+              options={ingredients}
+              onChange={setIngredientID}
+            />
+            <small className="muted">
+              En la captura solo aparece en los productos que tienen este ingrediente con esa
+              opción.
+            </small>
+          </div>
+        )}
       </div>
       <div className="button-row">
         <ToggleButton label="Indicación activa" pressed={active} onChange={setActive} />
@@ -138,11 +214,13 @@ function QuickNoteEditor({
 export function CategoryQuickNotes({
   category,
   notes,
+  ingredients = [],
   editable,
   onChanged,
 }: {
   category: Category;
   notes: CategoryQuickNote[];
+  ingredients?: Ingredient[];
   editable: boolean;
   onChanged: () => Promise<void>;
 }) {
@@ -162,7 +240,8 @@ export function CategoryQuickNotes({
     >
       <p className="muted text-sm">
         Aparecen como botones al personalizar un producto de «{category.name}», junto a «Escribir
-        otra». No tienen precio: lo que se cobra sigue siendo un complemento o un ingrediente.
+        otra». No tienen precio propio: una indicación con efecto (omitir, porción habitual o extra)
+        aplica la misma selección del ingrediente que el personalizador, con su cargo.
       </p>
       {ordered.length > 0 && (
         <div
@@ -180,6 +259,9 @@ export function CategoryQuickNotes({
               onClick={() => setEditing(note.id)}
             >
               {note.text}
+              {quickNoteEffectLabel(note) && (
+                <span className="muted text-xs"> · {quickNoteEffectLabel(note)}</span>
+              )}
               {!note.active && <span className="muted text-xs"> · inactiva</span>}
             </button>
           ))}
@@ -191,6 +273,7 @@ export function CategoryQuickNotes({
           category={category}
           note={current}
           notes={ordered}
+          ingredients={ingredients}
           onSaved={async () => {
             setEditing(null);
             await onChanged();
@@ -199,7 +282,13 @@ export function CategoryQuickNotes({
         />
       )}
       {editable && !current && (
-        <QuickNoteEditor category={category} note={null} notes={ordered} onSaved={onChanged} />
+        <QuickNoteEditor
+          category={category}
+          note={null}
+          notes={ordered}
+          ingredients={ingredients}
+          onSaved={onChanged}
+        />
       )}
     </Accordion>
   );

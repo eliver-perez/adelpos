@@ -74,7 +74,8 @@ export function emptyCustomizationValue(value: Customization): boolean {
     value.ingredients.length === 0 &&
     value.groups.length === 0 &&
     value.components.length === 0 &&
-    value.notes.trim() === ''
+    value.notes.trim() === '' &&
+    (value.quick_notes ?? []).length === 0
   );
 }
 
@@ -114,6 +115,27 @@ export function joinNotes(entries: string[]): string {
   return entries.join(', ');
 }
 
+// Ingredientes cuyo cambio ya describe una indicación con efecto que está en las indicaciones de
+// la partida (etapa 8): el resumen la muestra una sola vez, como la comanda.
+function coveredIngredients(
+  notes: string,
+  quickNotes: { text: string; effect?: string; ingredient_id?: string | null }[],
+): Set<string> {
+  const entries = splitNotes(notes);
+  const covered = new Set<string>();
+  for (const note of quickNotes) {
+    if (
+      note.effect &&
+      note.effect !== 'none' &&
+      note.ingredient_id &&
+      entries.includes(note.text)
+    ) {
+      covered.add(note.ingredient_id);
+    }
+  }
+  return covered;
+}
+
 // Resumen breve de una partida desde el desglose de Go (nombres y cantidades que devolvió el
 // motor). Solo describe lo que cambió respecto de la configuración original.
 export function describeBreakdown(breakdown: ProductBreakdown | null | undefined): string[] {
@@ -121,7 +143,11 @@ export function describeBreakdown(breakdown: ProductBreakdown | null | undefined
     return [];
   }
   const parts: string[] = [];
+  const covered = coveredIngredients(breakdown.notes ?? '', breakdown.quick_notes ?? []);
   for (const ingredient of breakdown.ingredients ?? []) {
+    if (covered.has(ingredient.ingredient_id)) {
+      continue;
+    }
     const requested = toThousandths(ingredient.requested);
     const included = toThousandths(ingredient.included);
     if (requested === 0 && included > 0) {
@@ -172,7 +198,16 @@ export function describeSelection(line: PreviewLine, lookups: Lookups | null): s
       parts.push(variant.name);
     }
   }
+  // Las indicaciones elegidas se describen con su texto (en las notas); su efecto no se repite.
+  const chosen = (customization.quick_notes ?? []).map((entry) => {
+    const note = lookups?.category_quick_notes?.find((item) => item.id === entry.note_id);
+    return { text: entry.text, effect: note?.effect, ingredient_id: note?.ingredient_id };
+  });
+  const covered = coveredIngredients(customization.notes, chosen);
   for (const ingredient of customization.ingredients) {
+    if (covered.has(ingredient.ingredient_id)) {
+      continue;
+    }
     const name = lookups?.ingredients.find((entry) => entry.id === ingredient.ingredient_id)?.name;
     if (name && toThousandths(ingredient.quantity) === 0) {
       parts.push(`Sin ${name}`);

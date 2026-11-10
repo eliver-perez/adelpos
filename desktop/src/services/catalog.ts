@@ -204,16 +204,40 @@ export interface ProductReference extends Metadata {
   sort_order: number;
   variants: Pick<Variant, 'id' | 'name' | 'active'>[];
 }
+// Efecto de una indicación rápida sobre su ingrediente vinculado (etapa 8): «none» es solo
+// instrucción de cocina; «omit», «normal» y «extra» fijan la cantidad del ingrediente igual que
+// los botones del personalizador.
+export type QuickNoteEffect = 'none' | 'omit' | 'normal' | 'extra';
+
 // Indicación rápida de una categoría (etapa 7.1): texto sin comas que la captura agrega a las
-// indicaciones para cocina de la partida.
+// indicaciones para cocina de la partida. Desde la etapa 8 puede tener un efecto sobre un
+// ingrediente del catálogo; sin efecto (o en datos anteriores, sin el campo) es solo instrucción.
 export interface CategoryQuickNote {
   id: string;
   category_id: string;
   text: string;
+  effect?: QuickNoteEffect;
+  ingredient_id?: string | null;
+  ingredient_name?: string | null;
   active: boolean;
   sort_order: number;
   revision: number;
   updated_at: string;
+}
+
+// Indicación rápida elegida en una partida: identificador y texto (el texto sigue también en
+// notes, como en la etapa 7.1).
+export interface QuickNoteSelection {
+  note_id: string;
+  text: string;
+}
+
+// Indicación resuelta por Go en el desglose: texto, efecto e ingrediente congelados al cotizar.
+export interface QuickNoteBreakdown {
+  note_id: string;
+  text: string;
+  effect: QuickNoteEffect;
+  ingredient_id: string | null;
 }
 
 export interface Lookups {
@@ -230,9 +254,14 @@ export interface Lookups {
   category_quick_notes?: CategoryQuickNote[];
 }
 
+export function quickNoteEffect(note: Pick<CategoryQuickNote, 'effect'>): QuickNoteEffect {
+  return note.effect ?? 'none';
+}
+
 // Indicaciones rápidas activas de la categoría de un producto, en su orden visual (Go ya las
-// entrega ordenadas; se reordenan por sort_order para no depender de ello).
-export function quickNotesFor(lookups: Lookups, productID: string): string[] {
+// entrega ordenadas; se reordenan por sort_order para no depender de ello). Devuelve las
+// indicaciones completas, con su efecto; la captura decide cuáles con efecto aplican al producto.
+export function quickNotesFor(lookups: Lookups, productID: string): CategoryQuickNote[] {
   const product = lookups.products.find((entry) => entry.id === productID);
   if (!product) {
     return [];
@@ -240,7 +269,7 @@ export function quickNotesFor(lookups: Lookups, productID: string): string[] {
   const notes = (lookups.category_quick_notes ?? []).filter(
     (note) => note.active && note.category_id === product.category_id,
   );
-  return orderSiblings(notes).map((note) => note.text);
+  return orderSiblings(notes);
 }
 export interface CatalogPage {
   items: CatalogDocument[];
@@ -261,6 +290,9 @@ export interface Customization {
   groups: { group_id: string; options: IncludedOption[] }[];
   components: ComponentSelection[];
   notes: string;
+  // Indicaciones rápidas elegidas (etapa 8). Se omite cuando no hay ninguna: así los borradores
+  // existentes y su huella no cambian.
+  quick_notes?: QuickNoteSelection[];
 }
 
 export interface ComponentSelection {
@@ -313,6 +345,8 @@ export interface ProductBreakdown {
     charge: string;
     product: ProductBreakdown | null;
   }[];
+  // Indicaciones rápidas resueltas por Go; ausente sin indicaciones.
+  quick_notes?: QuickNoteBreakdown[];
 }
 
 export interface Quote {

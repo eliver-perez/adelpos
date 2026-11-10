@@ -227,15 +227,23 @@ export function emptyCustomization(): Customization {
 }
 
 export function normalizeSelection(line: PreviewLine): PreviewLine {
-  const normalize = (value: Customization): Customization => ({
-    ingredients: value.ingredients ?? [],
-    groups: (value.groups ?? []).map((group) => ({ ...group, options: group.options ?? [] })),
-    components: (value.components ?? []).map((component) => ({
-      ...component,
-      customization: normalize(component.customization),
-    })),
-    notes: value.notes ?? '',
-  });
+  const normalize = (value: Customization): Customization => {
+    const result: Customization = {
+      ingredients: value.ingredients ?? [],
+      groups: (value.groups ?? []).map((group) => ({ ...group, options: group.options ?? [] })),
+      components: (value.components ?? []).map((component) => ({
+        ...component,
+        customization: normalize(component.customization),
+      })),
+      notes: value.notes ?? '',
+    };
+    // Las indicaciones rápidas elegidas (etapa 8) se conservan solo si existen, para que una
+    // partida sin ellas siga idéntica a la guardada.
+    if (value.quick_notes && value.quick_notes.length > 0) {
+      result.quick_notes = value.quick_notes;
+    }
+    return result;
+  };
   return {
     product_id: line.product_id,
     variant_id: line.variant_id ?? null,
