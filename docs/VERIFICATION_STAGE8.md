@@ -168,5 +168,5 @@ real de terminales.
 - **Volumen y concurrencia**: sin medición con catálogos, existencias o libros grandes, con muchas terminales capturando o
   contando a la vez, ni de las alertas calculadas en cada consulta; la medición del consumo es de un solo equipo.
 - **Keychain real**, **LAN** con otra máquina y **Windows**: no probados.
-- **Regresión final de la fase E** sobre el árbol completo: pendiente al redactar este documento (ver
-  [VERIFICATION.md](VERIFICATION.md)).
+- **Regresión final de la fase E**: aprobada sobre una copia exacta de `3a145e9`, incluidos Playwright en Chromium y WebKit
+  (6 de 6 por motor) y el paquete `.app` 0.8.0 (ver «Regresión final» en [VERIFICATION.md](VERIFICATION.md)).

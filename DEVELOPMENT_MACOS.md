@@ -177,3 +177,22 @@ La pantalla **Caja** (permiso `cash.shifts.read`) administra el turno de la caja
 ## Ajustes de operación, mesas y caja · etapa 7.1
 
 Versión 0.7.1/esquema 9. La migración `0009_operation_tables_cash_and_reasons.sql` se aplicó a la instalación real el 9 de noviembre de 2026 con autorización del propietario, con este procedimiento: `backup`, `python3 scripts/restore-check.py backups/NOMBRE.dump`, `server-stop`, `migrate`, `server-start`, comprobaciones de solo lectura, `build-macos` y `open-app`. La 0009 no modifica 0001–0008 ni registros existentes (los descuentos anteriores quedan sin motivo del catálogo), no concede permisos nuevos y su única siembra son los cinco motivos de descuento (Atención, Promoción, Demora, Cortesía de la casa y Otro); no crea datos ficticios.
+
+## Inventarios, recetas y compras · etapa 8
+
+Versión 0.8.0/esquema 14. Las migraciones `0010_inventory_core.sql` a `0014_inventory_control.sql` **no están aplicadas en
+la instalación real**: requieren autorización expresa del propietario y el procedimiento de
+[docs/ETAPA_8_AVANCE.md](docs/ETAPA_8_AVANCE.md) («Procedimiento para aplicar 0010–0014 a la instalación real»):
+
+1. `backup`.
+2. `python3 scripts/restore-check.py backups/NOMBRE.dump`.
+3. Comprobación previa de solo lectura.
+4. `server-stop`.
+5. `migrate` (`applied:5`, y `applied:0` al repetirla).
+6. `server-start`.
+7. Comprobaciones de solo lectura.
+8. `build-macos` y `open-app`.
+
+No modifican registros existentes, conceden los 24 permisos de inventario solo al administrador y dejan «Control de
+inventario» desactivado: la venta es idéntica a la 0.7.1 hasta activarlo. Mientras no se autorice, no ejecutar `migrate`,
+`server-start` ni `build-macos` sobre la instalación real desde `etapa-8`.
