@@ -22,6 +22,7 @@ import {
 } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
+import { InventoryPage } from './pages/inventory/InventoryPage';
 import { PendingOperationsProvider } from './hooks/pendingOperations';
 import { RegistersPage } from './pages/RegistersPage';
 import { RolesPage } from './pages/RolesPage';
@@ -196,6 +197,14 @@ function ApplicationContent() {
             can={can}
             userID={identity.user.id}
             timezone={identity.establishment.timezone}
+          />
+        );
+      case 'inventory':
+        return (
+          <InventoryPage
+            can={can}
+            timezone={identity.establishment.timezone}
+            onOpenSettings={() => setScreen('settings')}
           />
         );
       case 'sessions':

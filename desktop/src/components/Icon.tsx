@@ -46,7 +46,8 @@ export type IconName =
   | 'success'
   | 'info'
   | 'alert'
-  | 'error';
+  | 'error'
+  | 'inventory';
 
 const paths: Record<IconName, ReactNode> = {
   server: (
@@ -273,6 +274,14 @@ const paths: Record<IconName, ReactNode> = {
     <>
       <circle cx="12" cy="12" r="9" />
       <path d="m9 9 6 6M15 9l-6 6" />
+    </>
+  ),
+  // Etapa 8: caja de mercancía para Inventarios (existencias y entradas de insumos).
+  inventory: (
+    <>
+      <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5v-9Z" />
+      <path d="m3.5 7.5 8.5 4.5 8.5-4.5M12 12v9" />
+      <path d="m7.75 5.25 8.5 4.5" />
     </>
   ),
 };
