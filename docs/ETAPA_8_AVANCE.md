@@ -1199,3 +1199,16 @@ instalación real):
 - La fase B se desarrolló en tres partes paralelas (B1 backend de recetas y consumo, Bq indicaciones con efecto y
   complementos, B2 interfaz) y por eso tiene dos migraciones: 0011 (recetas y consumo) y 0012 (indicaciones con
   efecto). Las suites completas se ejecutaron sobre una copia exacta del commit de cierre de la fase.
+
+### Verificación de cierre de la fase B
+
+Sobre una copia exacta del commit `a1d4e74` (sin cambios en curso de otras fases), clúster temporal 55499:
+
+- Prettier, gofmt, `cargo fmt`, `sync-metadata`, `go vet` y `go vet -tags=integration`: aprobados.
+- Go unitarias con `-race`: todos los paquetes `ok`.
+- Integración PostgreSQL con `-race`: `database`, `administration`, `catalog`, `operations` y `payments` `ok`.
+- Vitest: 44 archivos y 365 pruebas aprobadas; `tsc --noEmit` y build sin errores.
+- `cargo test`: 18 aprobadas y 1 ignorada (la misma de antes).
+- Playwright en Chromium y en WebKit: 4 de 4 aprobadas cada uno (`inventory`, `restaurant`, `stock-consumption`,
+  que activa el control, envía un producto con receta a cocina y comprueba el consumo y la clasificación de una
+  cancelación, y `takeaway-quick-notes`).
