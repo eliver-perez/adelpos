@@ -180,8 +180,8 @@ Versión 0.7.1/esquema 9. La migración `0009_operation_tables_cash_and_reasons.
 
 ## Inventarios, recetas y compras · etapa 8
 
-Versión 0.8.0/esquema 14. Las migraciones `0010_inventory_core.sql` a `0014_inventory_control.sql` **no están aplicadas en
-la instalación real**: requieren autorización expresa del propietario y el procedimiento de
+Versión 0.8.0/esquema 14. Las migraciones `0010_inventory_core.sql` a `0014_inventory_control.sql` se aplicaron a la instalación
+real el 10 de noviembre de 2026 con autorización del propietario, con el procedimiento de
 [docs/ETAPA_8_AVANCE.md](docs/ETAPA_8_AVANCE.md) («Procedimiento para aplicar 0010–0014 a la instalación real»):
 
 1. `backup`.
@@ -194,5 +194,5 @@ la instalación real**: requieren autorización expresa del propietario y el pro
 8. `build-macos` y `open-app`.
 
 No modifican registros existentes, conceden los 24 permisos de inventario solo al administrador y dejan «Control de
-inventario» desactivado: la venta es idéntica a la 0.7.1 hasta activarlo. Mientras no se autorice, no ejecutar `migrate`,
-`server-start` ni `build-macos` sobre la instalación real desde `etapa-8`.
+inventario» desactivado: la venta es idéntica a la 0.7.1 hasta activarlo. Resultado: `applied:5` y `applied:0`,
+readiness 200 y servidor y `.app` 0.8.0.

@@ -13,7 +13,7 @@ cd "/Users/eliver/Documents/ADEL POS/ad-el-pos"
 ./scripts/dev.sh open-app
 ```
 
-**Instalación existente de este Mac:** la versión 0.8.0 incluye las migraciones 0010–0014 de la etapa 8, que todavía no se aplican a la instalación real; `migrate` las aplicaría y el servidor 0.8.0 no acepta una base con migraciones pendientes. No ejecutar `migrate` ni iniciar el servidor o el `.app` 0.8.0 sobre la instalación real sin la autorización del propietario y el procedimiento de respaldo y ensayo de restauración de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md).
+**Instalación existente de este Mac:** las migraciones 0010–0014 de la etapa 8 se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración; el servidor y el `.app` 0.8.0 están instalados. Toda migración futura exige la misma autorización y el procedimiento de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md).
 
 Para desarrollo con recarga: `./scripts/dev.sh desktop`. Para construir el `.app`: `./scripts/dev.sh build-macos`. La compilación está en `desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app`.
 

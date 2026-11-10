@@ -18,8 +18,8 @@ de la fase D. La regresión completa sobre el árbol final se registra en [VERIF
 final»).
 
 **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432): las migraciones
-0010–0014 **no se aplicaron** a la instalación real, que sigue en 0.7.1 y esquema 9 hasta la autorización expresa del
-propietario. No se leyeron secretos y ninguna prueba envió trabajos a CUPS, a una impresora, a un cajón ni a una conexión
+0010–0014 se aplicaron a la instalación real después, el 10 de noviembre de 2026, con autorización del propietario (ver
+«Instalación real» en [ETAPA_8_AVANCE.md](ETAPA_8_AVANCE.md)). No se leyeron secretos y ninguna prueba envió trabajos a CUPS, a una impresora, a un cajón ni a una conexión
 TCP.
 
 ## Entorno aislado
