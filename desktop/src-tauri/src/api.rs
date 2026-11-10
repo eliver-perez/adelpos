@@ -150,6 +150,16 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "inventory_productions" => Some((Method::GET, "inventory/productions")),
         "inventory_record_production" => Some((Method::POST, "inventory/productions")),
         "inventory_consumption_requests" => Some((Method::GET, "inventory/consumption-requests")),
+        // Etapa 8 (fase C): proveedores, órdenes de compra, recepciones, devoluciones y gastos de caja.
+        "inventory_suppliers" => Some((Method::GET, "inventory/suppliers")),
+        "inventory_create_supplier" => Some((Method::POST, "inventory/suppliers")),
+        "inventory_purchase_orders" => Some((Method::GET, "inventory/purchase-orders")),
+        "inventory_create_purchase_order" => Some((Method::POST, "inventory/purchase-orders")),
+        "inventory_receipts" => Some((Method::GET, "inventory/receipts")),
+        "inventory_record_receipt" => Some((Method::POST, "inventory/receipts")),
+        "inventory_supplier_returns" => Some((Method::GET, "inventory/supplier-returns")),
+        "inventory_record_supplier_return" => Some((Method::POST, "inventory/supplier-returns")),
+        "inventory_cash_expenses" => Some((Method::GET, "inventory/cash-expenses")),
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -484,6 +494,50 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "inventory_unit_consumption" => {
             (Method::GET, format!("inventory/consumption/{identifier}"))
         }
+        // Etapa 8 (fase C): el insumo de un proveedor viaja en el cuerpo (un solo identificador).
+        "inventory_supplier" => (Method::GET, format!("inventory/suppliers/{identifier}")),
+        "inventory_save_supplier" => (Method::PATCH, format!("inventory/suppliers/{identifier}")),
+        "inventory_save_supplier_item" => (
+            Method::PUT,
+            format!("inventory/suppliers/{identifier}/items"),
+        ),
+        "inventory_remove_supplier_item" => (
+            Method::POST,
+            format!("inventory/suppliers/{identifier}/items/remove"),
+        ),
+        "inventory_purchase_order" => (
+            Method::GET,
+            format!("inventory/purchase-orders/{identifier}"),
+        ),
+        "inventory_save_purchase_order" => (
+            Method::PATCH,
+            format!("inventory/purchase-orders/{identifier}"),
+        ),
+        "inventory_issue_purchase_order" => (
+            Method::POST,
+            format!("inventory/purchase-orders/{identifier}/issue"),
+        ),
+        "inventory_cancel_purchase_order" => (
+            Method::POST,
+            format!("inventory/purchase-orders/{identifier}/cancel"),
+        ),
+        "inventory_close_purchase_order" => (
+            Method::POST,
+            format!("inventory/purchase-orders/{identifier}/close"),
+        ),
+        "inventory_receipt" => (Method::GET, format!("inventory/receipts/{identifier}")),
+        "inventory_link_cash_expense" => (
+            Method::POST,
+            format!("inventory/receipts/{identifier}/cash-links"),
+        ),
+        "inventory_unlink_cash_expense" => (
+            Method::POST,
+            format!("inventory/cash-links/{identifier}/unlink"),
+        ),
+        "inventory_supplier_return" => (
+            Method::GET,
+            format!("inventory/supplier-returns/{identifier}"),
+        ),
         _ => return Err("Operación no autorizada por el puente nativo.".into()),
     };
     Ok((method, path))
@@ -664,6 +718,14 @@ fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "owner_kind",
             "product_id",
             "configured",
+            // Fase C: proveedor, orden, recepción, caja, recepción directa e importes de gastos.
+            "supplier_id",
+            "purchase_order_id",
+            "receipt_id",
+            "register_id",
+            "direct",
+            "min_amount",
+            "max_amount",
         ]
     } else {
         &[]
@@ -1264,6 +1326,148 @@ mod tests {
         let mut rejected = BTreeMap::new();
         rejected.insert("include_costs".to_string(), "true".to_string());
         assert!(!query_allowed("inventory_recipes", &rejected));
+    }
+
+    #[test]
+    fn inventory_purchasing_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            ("inventory_suppliers", Method::GET, "inventory/suppliers"),
+            (
+                "inventory_create_supplier",
+                Method::POST,
+                "inventory/suppliers",
+            ),
+            (
+                "inventory_purchase_orders",
+                Method::GET,
+                "inventory/purchase-orders",
+            ),
+            (
+                "inventory_create_purchase_order",
+                Method::POST,
+                "inventory/purchase-orders",
+            ),
+            ("inventory_receipts", Method::GET, "inventory/receipts"),
+            (
+                "inventory_record_receipt",
+                Method::POST,
+                "inventory/receipts",
+            ),
+            (
+                "inventory_supplier_returns",
+                Method::GET,
+                "inventory/supplier-returns",
+            ),
+            (
+                "inventory_record_supplier_return",
+                Method::POST,
+                "inventory/supplier-returns",
+            ),
+            (
+                "inventory_cash_expenses",
+                Method::GET,
+                "inventory/cash-expenses",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        for (operation, method, path) in [
+            (
+                "inventory_supplier",
+                Method::GET,
+                format!("inventory/suppliers/{identifier}"),
+            ),
+            (
+                "inventory_save_supplier",
+                Method::PATCH,
+                format!("inventory/suppliers/{identifier}"),
+            ),
+            (
+                "inventory_save_supplier_item",
+                Method::PUT,
+                format!("inventory/suppliers/{identifier}/items"),
+            ),
+            (
+                "inventory_remove_supplier_item",
+                Method::POST,
+                format!("inventory/suppliers/{identifier}/items/remove"),
+            ),
+            (
+                "inventory_purchase_order",
+                Method::GET,
+                format!("inventory/purchase-orders/{identifier}"),
+            ),
+            (
+                "inventory_save_purchase_order",
+                Method::PATCH,
+                format!("inventory/purchase-orders/{identifier}"),
+            ),
+            (
+                "inventory_issue_purchase_order",
+                Method::POST,
+                format!("inventory/purchase-orders/{identifier}/issue"),
+            ),
+            (
+                "inventory_cancel_purchase_order",
+                Method::POST,
+                format!("inventory/purchase-orders/{identifier}/cancel"),
+            ),
+            (
+                "inventory_close_purchase_order",
+                Method::POST,
+                format!("inventory/purchase-orders/{identifier}/close"),
+            ),
+            (
+                "inventory_receipt",
+                Method::GET,
+                format!("inventory/receipts/{identifier}"),
+            ),
+            (
+                "inventory_link_cash_expense",
+                Method::POST,
+                format!("inventory/receipts/{identifier}/cash-links"),
+            ),
+            (
+                "inventory_unlink_cash_expense",
+                Method::POST,
+                format!("inventory/cash-links/{identifier}/unlink"),
+            ),
+            (
+                "inventory_supplier_return",
+                Method::GET,
+                format!("inventory/supplier-returns/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        // Los proveedores no se borran (se desactivan) y las recepciones, devoluciones y vínculos no
+        // se editan ni se borran: se registran documentos nuevos o se desvincula con motivo. Ninguna
+        // ruta crea gastos de caja.
+        assert!(route("inventory_delete_supplier", Some(identifier)).is_err());
+        assert!(route("inventory_save_receipt", Some(identifier)).is_err());
+        assert!(route("inventory_delete_receipt", Some(identifier)).is_err());
+        assert!(route("inventory_save_supplier_return", Some(identifier)).is_err());
+        assert!(route("inventory_delete_cash_link", Some(identifier)).is_err());
+        assert!(route("inventory_record_cash_expense", None).is_err());
+        let mut query = BTreeMap::new();
+        query.insert("supplier_id".to_string(), "x".to_string());
+        query.insert("purchase_order_id".to_string(), "x".to_string());
+        query.insert("direct".to_string(), "true".to_string());
+        assert!(query_allowed("inventory_receipts", &query));
+        let mut expenses = BTreeMap::new();
+        expenses.insert("min_amount".to_string(), "850".to_string());
+        expenses.insert("max_amount".to_string(), "850".to_string());
+        expenses.insert("register_id".to_string(), "x".to_string());
+        expenses.insert("receipt_id".to_string(), "x".to_string());
+        assert!(query_allowed("inventory_cash_expenses", &expenses));
+        let mut rejected = BTreeMap::new();
+        rejected.insert("shift_state".to_string(), "closed".to_string());
+        assert!(!query_allowed("inventory_cash_expenses", &rejected));
+        // Los parámetros de compras no se admiten fuera de inventario.
+        assert!(!query_allowed("payments_shifts", &expenses));
     }
 
     #[test]

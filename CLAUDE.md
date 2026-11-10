@@ -48,16 +48,16 @@ React/TS (WebView) ──IPC: operaciones enumeradas──▶ Rust/Tauri ──H
 
 Locks consultivos en uso (no reutilizar números para otro fin; respetar el orden de adquisición):
 
-| Clave      | Uso                                                                                                                                                                                               |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 7820148301 | Migrador                                                                                                                                                                                          |
-| 7820148302 | Asistente inicial y aprovisionamiento de `sa`                                                                                                                                                     |
-| 7820148303 | Usuarios/sesiones (`administration/users.go`)                                                                                                                                                     |
-| 7820148304 | Catálogo: compartido en lecturas/cálculos, exclusivo en escrituras                                                                                                                                |
-| 7820148305 | Operación del restaurante, **cocina y cobros** (incluye el planificador y `payments/*`): compartido en lecturas, exclusivo en escrituras; se toma **antes** que 7820148304                        |
-| 7820148306 | Publicación ordenada del outbox `realtime_events`                                                                                                                                                 |
-| 7820148307 | Semilla de `hashtextextended` para el lock de sesión por impresora                                                                                                                                |
-| 7820148308 | Inventario (etapa 8): libro de movimientos, existencias y documentos de inventario; exclusivo en escrituras y compartido en lecturas consistentes; se toma **después** de 7820148305 y 7820148304 |
+| Clave      | Uso                                                                                                                                                                                                                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7820148301 | Migrador                                                                                                                                                                                                                                                                |
+| 7820148302 | Asistente inicial y aprovisionamiento de `sa`                                                                                                                                                                                                                           |
+| 7820148303 | Usuarios/sesiones (`administration/users.go`)                                                                                                                                                                                                                           |
+| 7820148304 | Catálogo: compartido en lecturas/cálculos, exclusivo en escrituras                                                                                                                                                                                                      |
+| 7820148305 | Operación del restaurante, **cocina y cobros** (incluye el planificador y `payments/*`): compartido en lecturas, exclusivo en escrituras; se toma **antes** que 7820148304                                                                                              |
+| 7820148306 | Publicación ordenada del outbox `realtime_events`                                                                                                                                                                                                                       |
+| 7820148307 | Semilla de `hashtextextended` para el lock de sesión por impresora                                                                                                                                                                                                      |
+| 7820148308 | Inventario (etapa 8): libro de movimientos, existencias y documentos de inventario; exclusivo en escrituras y compartido en lecturas consistentes; se toma **después** de 7820148305 y 7820148304 (las rutas que leen gastos de caja toman antes 7820148305 compartido) |
 
 ## 4. Estructura real del repositorio
 

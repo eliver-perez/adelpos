@@ -32,6 +32,10 @@ import (
 // inventario. Exclusivo en escrituras y compartido en lecturas que deben ser consistentes.
 const lockKey = 7820148308
 
+// cashLockKey es el lock de restaurante, cocina, cobros y caja (payments). Las rutas que leen gastos
+// de caja lo toman compartido antes que lockKey; inventory nunca lo toma exclusivo.
+const cashLockKey = 7820148305
+
 // Scope es el ámbito SSE de inventario; lo reciben quienes tienen inventory.read.
 const Scope = "inventory"
 
@@ -52,6 +56,13 @@ const (
 	permissionSubrecipesManage = "inventory.subrecipes.manage"
 	permissionProductionRecord = "inventory.production.record"
 	permissionWasteRecord      = "inventory.waste.record"
+	// Fase C (0013): compras.
+	permissionSuppliersManage    = "inventory.suppliers.manage"
+	permissionPurchasesCreate    = "inventory.purchases.create"
+	permissionPurchasesAuthorize = "inventory.purchases.authorize"
+	permissionPurchasesReceive   = "inventory.purchases.receive"
+	permissionSupplierReturns    = "inventory.supplier_returns.record"
+	permissionPurchasesLinkCash  = "inventory.purchases.link_cash"
 )
 
 type Permission struct {
@@ -60,8 +71,8 @@ type Permission struct {
 }
 
 // Permissions enumera los permisos de inventario. Cada clave también se inserta en la migración de
-// su fase (0010 la fase A, 0011 la fase B) con la misma descripción y se concede inicialmente solo
-// al rol administrador; las fases C y D agregan las suyas en sus migraciones.
+// su fase (0010 la fase A, 0011 la fase B, 0013 la fase C) con la misma descripción y se concede
+// inicialmente solo al rol administrador; la fase D agrega las suyas en su migración.
 var Permissions = []Permission{
 	{permissionRead, "Consultar inventario (sección y resumen)"},
 	{permissionItemsManage, "Administrar insumos, unidades y presentaciones"},
@@ -77,6 +88,12 @@ var Permissions = []Permission{
 	{permissionSubrecipesManage, "Administrar subrecetas (preparaciones)"},
 	{permissionProductionRecord, "Registrar elaboraciones de subrecetas almacenables"},
 	{permissionWasteRecord, "Registrar mermas y clasificar cancelaciones"},
+	{permissionSuppliersManage, "Administrar proveedores"},
+	{permissionPurchasesCreate, "Crear órdenes de compra"},
+	{permissionPurchasesAuthorize, "Emitir (autorizar), cancelar y cerrar órdenes de compra"},
+	{permissionPurchasesReceive, "Recibir mercancía"},
+	{permissionSupplierReturns, "Registrar devoluciones a proveedores"},
+	{permissionPurchasesLinkCash, "Vincular compras con gastos de caja"},
 }
 
 type Actor struct {
@@ -96,6 +113,19 @@ func (actor Actor) Require(permissions ...string) error {
 		}
 	}
 	return nil
+}
+
+// RequireAny exige al menos uno de los permisos; una lista vacía no exige nada.
+func (actor Actor) RequireAny(permissions ...string) error {
+	if len(permissions) == 0 {
+		return nil
+	}
+	for _, permission := range permissions {
+		if actor.Can(permission) {
+			return nil
+		}
+	}
+	return denied()
 }
 
 type Request struct {
