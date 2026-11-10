@@ -4,6 +4,7 @@ import { inventoryChangeEvent } from '../../hooks/useInventoryEvents';
 import { useResource } from '../../hooks/useResource';
 import { serverDateTime } from '../../services/restaurant';
 import type { InventorySummary, StockState } from '../../services/inventory';
+import type { CancellationPage, ConsumptionRequestPage } from '../../services/inventoryRecipes';
 import { formatMoney } from '../../services/money';
 import { countLabel } from '../../services/plural';
 import { inventoryPermissionName } from './inventoryFormat';
@@ -92,6 +93,55 @@ function FeatureStatus({
   );
 }
 
+// Cifras de la fase B que Go ya entrega en sus listados: cancelaciones por clasificar (con
+// inventory.read) y solicitudes de consumo pendientes o con error (con inventory.movements.read).
+// Si una consulta falla o falta el permiso, la cifra no se muestra: nunca se inventa.
+function ConsumptionFigures({
+  can,
+  onShowCancellations,
+  onShowMovements,
+}: {
+  can: (permission: string) => boolean;
+  onShowCancellations: () => void;
+  onShowMovements: () => void;
+}) {
+  const movementsReadable = can('inventory.movements.read');
+  const cancellations = useResource<CancellationPage>('inventory_cancellations', {
+    query: { state: 'pending', page_size: '1' },
+    reloadEvent: inventoryChangeEvent,
+  });
+  const requests = useResource<ConsumptionRequestPage>('inventory_consumption_requests', {
+    query: { page_size: '1' },
+    enabled: movementsReadable,
+    reloadEvent: inventoryChangeEvent,
+  });
+  const pending = cancellations.data?.pending ?? null;
+  const failed = movementsReadable ? (requests.data?.failed ?? null) : null;
+  const waiting = movementsReadable ? (requests.data?.pending ?? null) : null;
+  return (
+    <>
+      {pending !== null && (
+        <SummaryFigure
+          label="Cancelaciones por clasificar"
+          value={pending}
+          detail={pending > 0 ? 'Al cierre del día se consideran «No preparado»' : undefined}
+          tone={pending > 0 ? 'warning' : 'default'}
+          onOpen={onShowCancellations}
+        />
+      )}
+      {failed !== null && (
+        <SummaryFigure
+          label="Solicitudes de consumo con error"
+          value={failed}
+          detail={waiting !== null ? countLabel(waiting, 'pendiente', 'pendientes') : undefined}
+          tone={failed > 0 ? 'warning' : 'default'}
+          onOpen={onShowMovements}
+        />
+      )}
+    </>
+  );
+}
+
 // Resumen de inventario: estado de la función y conteos que calcula Go. El valor total solo
 // aparece si Go lo entrega (inventory.valuation.read) y los insumos con costo pendiente solo con
 // inventory.costs.read.
@@ -99,11 +149,14 @@ export function SummaryView({
   can,
   timezone,
   onShowStock,
+  onShowSection,
   onOpenSettings,
 }: {
   can: (permission: string) => boolean;
   timezone: string;
   onShowStock: (state: StockState | '') => void;
+  // Abre otra pestaña de la sección (cancelaciones o movimientos).
+  onShowSection: (section: 'adjustments' | 'movements') => void;
   onOpenSettings: () => void;
 }) {
   const resource = useResource<InventorySummary>('inventory_summary', {
@@ -165,6 +218,11 @@ export function SummaryView({
             detail="Costo promedio de todos los insumos"
           />
         )}
+        <ConsumptionFigures
+          can={can}
+          onShowCancellations={() => onShowSection('adjustments')}
+          onShowMovements={() => onShowSection('movements')}
+        />
       </section>
     </div>
   );

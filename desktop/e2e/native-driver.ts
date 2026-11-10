@@ -32,8 +32,10 @@ export async function installDriver(page: Page) {
     if (!operation || !method || !route) continue;
     routes.set(operation, { method, path: route });
   }
+  // rustfmt escribe algunas entradas con llaves (`"op" => { (Method::GET, format!(…)) }`): se aceptan
+  // ambas formas para que el puente conozca todas las rutas de la lista cerrada.
   for (const match of rust.matchAll(
-    /"([a-z_]+)"\s*=>\s*\(\s*Method::(\w+),\s*format!\("([^"]+)"\)/g,
+    /"([a-z_]+)"\s*=>\s*\{?\s*\(\s*Method::(\w+),\s*format!\("([^"]+)"\)/g,
   )) {
     const [, operation, method, route] = match;
     if (!operation || !method || !route) continue;

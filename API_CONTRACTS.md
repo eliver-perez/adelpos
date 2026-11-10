@@ -600,14 +600,13 @@ fallan o se recuperan). Auditoría: `inventory.recipe_created`, `inventory.recip
 `inventory.production_recorded` y, con el proceso como responsable (`actor_kind: "process"`, `actor_username:
 "inventory_worker"`), `inventory.cancellation_reconciled`.
 
-# Cambios de contrato · Etapa 8, fase B (Bq): indicaciones rápidas con efecto
+## Catálogo · indicaciones rápidas con efecto · esquema 12 (etapa 8, fase B)
 
-Para integrar en `API_CONTRACTS.md` (sección de catálogo, junto al párrafo «Indicaciones rápidas por
-categoría (etapa 7.1, fase D; migración 0009)», y sección de restaurante, junto a la personalización).
+Amplía las indicaciones rápidas por categoría (etapa 7.1, fase D; migración 0009) y la personalización de las partidas.
 Sin rutas, permisos, locks ni operaciones del puente nuevos: `catalog_create_quick_note` y
 `catalog_save_quick_note` siguen igual en `api.rs`.
 
-## Catálogo · indicaciones rápidas (migración 0012)
+### Catálogo · indicaciones rápidas (migración 0012)
 
 Párrafo sugerido, a continuación del de la etapa 7.1:
 
@@ -625,7 +624,7 @@ updated_at}`, con `ingredient_id` e `ingredient_name` nulos sin efecto. La audit
 > `catalog_category_quick_notes_ingredient_id_fkey` y
 > `catalog_category_quick_notes_effect_ingredient_check` (`none` ⇔ ingrediente nulo).
 
-## Personalización · `customization.quick_notes`
+### Personalización · `customization.quick_notes`
 
 En cada nivel de `customization` (producto y cada `components[].customization`), campo opcional:
 
@@ -662,7 +661,7 @@ En cada nivel de `customization` (producto y cada `components[].customization`),
   - `QUICK_NOTE_CONFLICT`: dos indicaciones con efecto sobre el mismo ingrediente en el mismo nivel.
 - El precio sale solo de `ingredients` (una indicación nunca agrega cargos propios).
 
-## Desglose · `ProductBreakdown.quick_notes` (en `quote_line`)
+### Desglose · `ProductBreakdown.quick_notes` (en `quote_line`)
 
 `ProductBreakdown` (raíz y `components[].product`) añade, solo si hay indicaciones:
 
@@ -682,7 +681,7 @@ cotizaciones y huellas anteriores no cambian.
 `pricing_snapshot` (`catalog.Snapshot`) añade la clave `QuickNotes` (mapa por id con las indicaciones
 usadas por el cálculo, en la forma de `CategoryQuickNote`) solo cuando la cotización usa alguna.
 
-## Cocina
+### Cocina
 
 `kitchen_tasks.instructions.parts[]` (y las partes de los documentos) añaden `quick_notes` (la misma
 forma del desglose), omitido sin indicaciones. La plantilla omite la línea estructurada de un

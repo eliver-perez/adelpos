@@ -1044,3 +1044,158 @@ con el clúster temporal 55499 y Go temporal en 8185 (vista previa 1425):
 - Playwright: `inventory.spec.ts`, `restaurant.spec.ts` y `takeaway-quick-notes.spec.ts` aprobadas en
   Chromium (3 en 1,5 min) y en WebKit (3 en 1,5 min).
 - Ninguna comanda se envió a una impresora real. La 0012 no se aplicó a la instalación real.
+
+## Fase B · interfaz de recetas, consumo y cancelaciones (B2)
+
+Interfaz de la fase B sobre el contrato de B1 (`desktop/src/services/inventoryRecipes.ts`, sin cambios): pestaña
+**Recetas** (destinos del catálogo, editor versionado, preparaciones, porciones habituales y elaboraciones), pestaña
+**Ajustes y mermas** con las cancelaciones por clasificar y su historial, diagnóstico de las solicitudes de consumo y
+traza de una partida en **Movimientos**, y dos cifras nuevas en el **Resumen**. Sin cambios en Go, `api.rs`,
+`services/api.ts`, la captura ni el catálogo. Ninguna migración se aplicó a la instalación real.
+
+### Pantallas
+
+| Pestaña / apartado                              | Permiso                                                                                                                          | Contenido                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recetas → Productos y complementos              | `inventory.read` (crear y editar con `inventory.recipes.manage`)                                                                 | `GET recipe-targets`: productos, variantes y complementos con su estado («Con receta», «Sin receta», «Sin preparación»), tipo (con «Combo»), qué consumen sin receta («1 de 2 ingredientes con porción», vínculo del complemento, «Usa la receta del producto», «No consume inventario todavía») y la receta con su estado. Búsqueda, tipo, estado de receta (el filtro «Sin receta» deja lo pendiente) y disponibilidad (activos por omisión); paginación de 25. «Configurar receta», «Editar receta» / «Ver receta» y, en variantes que heredan, «Ver receta del producto».                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Editor de receta                                | `inventory.read`; escritura con `inventory.recipes.manage` (producto, complemento) o `inventory.subrecipes.manage` (preparación) | Destino fijo, nombre, rendimiento (porciones en productos y complementos; por lote con unidad y merma de elaboración en preparaciones, con el rendimiento efectivo de Go), renglones de tipo insumo, preparación o ingrediente del catálogo (con «Un insumo» / «Una preparación» que consume cada porción), cantidad con `numericInput`, unidad filtrada por la dimensión que entrega Go (la de la unidad base del insumo o la del rendimiento de la preparación), «Solo para llevar» (insumos y preparaciones de productos y complementos), notas e interruptor «Receta activa». El botón dice «Crear receta (versión 1)» o «Guardar como versión N» y un aviso explica que cada guardado crea una versión vigente desde ese momento sin alterar lo ya consumido. Cada renglón guardado muestra la conversión de Go a la unidad base y su costo (solo si Go lo entrega). Debajo: costo teórico de la versión vigente (por porción y adicional para llevar, o lote y costo por unidad base), ingredientes del catálogo con la porción que les aplica, recetas que usan una preparación e historial de versiones (acordeón) con la consulta de una versión anterior. Los rechazos de Go (`RECIPE_CYCLE`, unidades incompatibles, `PREPARATION_IN_USE`, `YIELD_DIMENSION_LOCKED`…) se avisan con su mensaje. |
+| Recetas → Preparaciones                         | `inventory.read` (edición con `inventory.subrecipes.manage`)                                                                     | Dos secciones separadas: «Elaboración inmediata» y «Preparadas previamente (almacenables)», cada una con su alta y su tabla (rendimiento por lote, componentes, versión vigente, estado). Búsqueda y estado. Una almacenable nueva elige su insumo preparado (solo insumos de tipo «Preparación almacenable»).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Recetas → Porciones habituales                  | `inventory.read` (edición con `inventory.recipes.manage`)                                                                        | Ingredientes del catálogo con su porción vigente («20 g de Cebolla blanca»), su equivalencia en la unidad base y el último cambio; filtros de búsqueda, con o sin porción y estado. Panel por ingrediente con insumo, cantidad y unidad de la dimensión del insumo, «Quitar porción» (confirmación de peligro) e historial (acordeón).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Recetas → Elaboraciones                         | `inventory.production.record` o `inventory.movements.read` (registrar con `inventory.production.record`)                         | Listado (fecha, preparación y versión, almacén, lotes, esperado, producido, merma, valor con costos, responsable). «Registrar elaboración»: preparación almacenable activa, almacén (el predeterminado propuesto), lotes, cantidad producida real opcional (con el rendimiento efectivo por lote de Go en la ayuda) y nota; se confirma antes de enviar y muestra el resultado de Go (esperado, producido, merma, valor consumido, insumos consumidos con su existencia después) y un aviso por cada advertencia.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Ajustes y mermas → Cancelaciones por clasificar | `inventory.read` (clasificar según `can_classify` de Go)                                                                         | Tarjeta por partida cancelada después de liberarse: producto, cuenta legible («Cuenta #12 · Mesa 4», «Pedido #7»), hora, día operativo, límite para clasificar (o «Corte del día operativo» si ya pasó), consumo por insumo y almacén (valor solo con costos), «No preparado» y «Preparado (merma)» con `inventory.waste.record`; después del corte, «Corregir: …» con `inventory.adjustments.authorize` y confirmación de peligro. Sin permiso se explica cuál falta. «Ver consumo de la partida» con `inventory.movements.read`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Ajustes y mermas → Historial de clasificaciones | `inventory.read`                                                                                                                 | Todas las cancelaciones (o por clasificación) y días operativos (`OptionalDateField`): estado, resolución de Go, quién clasificó («Por cierre del día operativo» en las automáticas), hora y nota. «Cambiar» antes del corte y «Corregir» después (panel con motivo opcional y confirmación; de peligro en las correcciones).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Movimientos                                     | `inventory.movements.read`                                                                                                       | Acordeón «Solicitudes de consumo» con «N pendientes · M con error» (se abre solo si hay errores), filtro (sin procesar, pendientes, con error, procesadas, todas), partida y cuenta, tipo, liberación, estado con intentos y próximo intento, mensaje genérico de Go y diagnósticos traducidos (sin códigos ni identificadores). «Ver consumo» en cada solicitud y «Ver consumo de la partida» en cada movimiento ligado a una partida. El filtro de origen agrega Liberación a cocina, Modificación de partida, Cancelación de partida y Elaboración.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Traza de la partida                             | `inventory.movements.read` (valores con `inventory.costs.read`)                                                                  | `GET consumption/{unidad}`: estado (consumo registrado, revertido o sin consumo), cuenta, hora de liberación y modalidad, consumo por insumo y almacén (consumido y neto), cancelación si la hubo, movimientos del libro y solicitudes con sus diagnósticos.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Resumen                                         | `inventory.read` / `inventory.movements.read`                                                                                    | «Cancelaciones por clasificar» (`pending` de `GET cancellations`) abre Ajustes y mermas; «Solicitudes de consumo con error» (`failed` y `pending` de `GET consumption-requests`, solo con `inventory.movements.read`) abre Movimientos. Si la consulta falla, la cifra no aparece.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+Insumos: el panel del insumo agrega «Tipo de insumo» (Comprado / Preparación almacenable), necesario para crear la
+preparación almacenable que lo produce.
+
+### Decisiones y desviaciones menores
+
+1. **Apartados de Recetas** con `SegmentedControl` («Productos y complementos», «Preparaciones», «Porciones
+   habituales», «Elaboraciones»); el editor reemplaza al listado como en Insumos y al cerrarlo se vuelve al mismo
+   apartado. «Elaboraciones» solo aparece con `inventory.production.record` o `inventory.movements.read` (el permiso de
+   `GET productions`).
+2. **Tipo de insumo en Insumos.** La interfaz de la fase A siempre creaba insumos «Comprado», así que no había forma de
+   crear el insumo de una preparación almacenable. Se agregó el selector; Go sigue rechazando cambiar el tipo de un
+   insumo que produce una preparación (`ITEM_PRODUCED_BY_RECIPE`).
+3. **Unidad de cada renglón**: se envía siempre la unidad elegida (`unit_id`), propuesta con la unidad base del insumo
+   o la del rendimiento de la preparación; las opciones son las unidades activas de la dimensión que entrega Go (más
+   la guardada si se desactivó). La conversión y el costo del renglón guardado se muestran mientras no cambien.
+4. **Ingrediente del catálogo** de un renglón: los del producto (de `Recipe.ingredients`, cuando la receta ya existe)
+   y después los demás del catálogo que coincidan, consultados con `GET ingredient-portions` (no exige permisos de
+   catálogo). En una receta nueva todavía no se conocen los del producto.
+5. **Activar y desactivar** se confirman al pulsar el interruptor (desactivar con tono de peligro) y se aplican al
+   guardar como una versión nueva, igual que el interruptor de activo de la fase A.
+6. **Preparaciones**: una página de hasta 100 (el máximo de Go) repartida entre las dos modalidades, porque
+   `GET recipes` no filtra por modalidad; con más, un aviso pide usar la búsqueda.
+7. **Clasificar** una cancelación pendiente no pide confirmación (es la acción cotidiana del encargado); una pendiente
+   vencida y toda corrección posterior al corte sí, con tono de peligro. Cambiar una clasificación antes del corte se
+   ofrece («Cambiar», confirmación normal) porque Go lo admite con `inventory.waste.record`. La nota solo se captura
+   en el cambio o la corrección.
+8. **Historial**: el filtro de Go admite un solo estado, así que «Todas» incluye las pendientes (con su etiqueta).
+9. **Cuenta legible** de una cancelación: `Cancellation` no trae la modalidad; con el nombre neutro de Go se muestra
+   «Pedido #N» (para llevar) y, si no, «Cuenta #N» más el nombre de la mesa o el capturado.
+10. **Cifras del Resumen** tomadas de los listados de la fase B (`pending` y `failed`), porque `GET summary` aún no las
+    trae; no se calcula nada en React.
+11. **Elaboraciones**: la fecha no se captura (Go usa la hora del servidor, como la existencia inicial) y siempre se
+    confirma antes de enviar porque una elaboración no se anula.
+12. **Traza** de una partida dentro de la pestaña (Movimientos o Ajustes y mermas), con «Volver a …», sin otra ventana.
+13. **Playwright**: la especificación nueva se llama `stock-consumption.spec.ts` para correr después de
+    `inventory.spec.ts` y `restaurant.spec.ts` (orden alfabético) y no alterar lo que comprueban; prepara por la API lo
+    que no se prueba (ruta «Sin preparación» del filete si no hay ruta, un ingrediente del catálogo y el teclado
+    virtual desactivado, que `restaurant.spec.ts` deja en «siempre»). `inventory.spec.ts` solo cambió en la lista de
+    pestañas.
+14. **Puente de prueba**: `native-driver.ts` descubre las rutas de `api.rs` con expresiones regulares y no reconoce la
+    forma con llaves de `inventory_unit_consumption` (`=> {\n (Method::GET, format!(…)) }`). La especificación nueva
+    atiende solo esa operación con la misma sesión del puente y la misma ruta de Go (`bridgeUnitConsumption`). En la
+    aplicación nativa no hay problema (la ruta está en `api.rs`); conviene ajustar la expresión del puente o el formato
+    de `api.rs` en la integración.
+
+### CSS añadido (`styles.css`, al final del bloque «Etapa 8: Inventarios»)
+
+Solo tokens existentes de ambos temas: títulos de tercer nivel de la sección (sin tocar los de los acordeones),
+apartados de Recetas que se acomodan en varias líneas, aviso de versión nueva (`recipe-version-note`), renglones de
+receta, detalle de una versión del historial, acciones de las filas de destinos, botón de traza en el libro, tarjeta de
+cancelación con acento de advertencia (`inventory-cancellation`), lista de datos (`inventory-facts`), acciones de
+clasificación, panel de cambio o corrección, filtros del historial y el filtro de solicitudes. A 720 px o menos los
+botones de clasificación ocupan el ancho. La página no se desborda a 1280 × 720 ni a 1920 × 1080 (comprobado en
+Playwright en claro y oscuro en Recetas, el editor, Porciones, la traza y Cancelaciones).
+
+### Limitaciones
+
+- `inventory_unit_consumption` no funciona en el puente de prueba de Playwright sin el ajuste local de la
+  especificación (ver la decisión 14).
+- La cuenta de una cancelación para llevar con nombre del cliente se muestra como «Cuenta #N · Nombre» (Go no entrega la
+  modalidad en `Cancellation`).
+- En una receta nueva el selector de ingrediente no distingue los del producto hasta el primer guardado.
+- El costo teórico es el que entrega Go (sin complementos ni componentes de combo); «Adicional para llevar» aparece
+  aunque sea $0.00.
+- Las elaboraciones no se anulan ni se editan (contrato de B1); el historial de una porción muestra los últimos 20
+  cambios y el de una receta las últimas 50 versiones (límites de Go).
+- Sin verificar en la ventana nativa (WKWebView), con pantalla táctil física ni con teclado virtual activo en estas
+  pantallas.
+
+### Pruebas (B2)
+
+- **Vitest** (`pages/inventory/inventoryRecipes.test.tsx`, `inventoryConsumption.test.tsx` con
+  `inventoryRecipesTestData.ts`; 20 pruebas nuevas): destinos con el filtro «Sin receta» en la consulta, variantes que
+  heredan, vínculo de complementos y consulta sin permiso (botón de guardar deshabilitado y aviso del permiso); alta de
+  la versión 1 con renglones de los tres tipos, unidades filtradas por dimensión (masa: g y kg; volumen: l y ml; piezas:
+  pza), carácter no válido descartado, «solo para llevar» (ausente en el renglón de ingrediente) y el cuerpo exacto
+  enviado a Go; versión nueva con la revisión vigente, conversión y costo del renglón mientras no cambie, costo teórico
+  e ingredientes del catálogo con permiso y ocultos sin `inventory.costs.read`, historial con la versión 1 (150 g frente
+  a 180 g vigentes); desactivar con confirmación de peligro (`active: false`); error `RECIPE_CYCLE` de Go mostrado con su
+  mensaje (sin el código) en una preparación, que no ofrece «solo para llevar» y conserva la dimensión del rendimiento;
+  porciones (filtro «Sin porción», guardar con revisión, historial y retirar con confirmación de peligro); elaboración
+  (solo almacenables, almacén predeterminado, confirmación, cuerpo, resultado de Go con merma, existencia negativa y su
+  advertencia) y visibilidad del apartado según permisos; cancelaciones (datos legibles sin identificadores, «No
+  preparado» con revisión, botones según `can_classify` con el permiso que falta, corrección vencida con confirmación
+  de peligro que se puede cancelar sin escribir, historial con «Por cierre del día operativo», corrección con motivo y
+  filtro); solicitudes con error (acordeón abierto, intentos, mensaje genérico, diagnósticos traducidos sin códigos ni
+  identificadores) y traza desde la solicitud (sin valores sin costos) y desde un movimiento de consumo (con valores);
+  cifras del Resumen y su ausencia sin `inventory.movements.read`; ningún `type="number"` en Recetas, el editor ni
+  Ajustes y mermas. En `inventory.test.tsx` se actualizaron las listas de pestañas y en `inventoryTestData.ts` las
+  respuestas vacías de la fase B y los permisos nuevos.
+- **Playwright** (`desktop/e2e/stock-consumption.spec.ts`): insumo «Carne de prueba E2E» en kilogramos con existencia
+  inicial de 5 kg a $180, receta de «Filete de prueba» encontrada con el filtro de lo pendiente (150 g capturados en
+  gramos; solo unidades de masa; Go muestra 0.15 kg y costo teórico $27.00), porción habitual de 50 g de un
+  ingrediente del catálogo, «Control de inventario» activado en Configuración → Funciones del establecimiento, pedido
+  para llevar con el filete enviado a cocina, consumo esperado con `expect.poll` sobre Go y comprobado en Movimientos
+  (−0.15 kg, «Liberación a cocina», «Proceso de consumo de inventario», −$27.00), traza de la partida, cancelación de la
+  partida en la captura, tarjeta en «Cancelaciones por clasificar», «No preparado», historial y reversión (+0.15 kg y
+  existencia de vuelta en 5 kg según Go). Sin desbordamiento a 1280 × 720 ni 1920 × 1080 en claro y oscuro en cada
+  pantalla, con capturas a 1280 × 720.
+
+### Verificación (B2)
+
+En la copia aislada `scratchpad/repoB2` (sincronizada con el árbol de trabajo, incluido el trabajo en curso de otras
+partes de la fase), con el clúster temporal del puerto 55499, Go temporal en 8184 y la vista previa en 1424 (nunca la
+instalación real):
+
+- `prettier --check` de los archivos de B2 y de `styles.css`: sin diferencias.
+- `tsc --noEmit`: sin errores. `npm run build`: aprobado (el aviso de tamaño del paquete ya existía).
+- Vitest (`vitest run src`, como `npm test`): 44 archivos y 365 pruebas aprobadas; `src/pages/inventory`: 4 archivos y
+  39 pruebas (20 nuevas de la fase B). Sin avisos de React.
+- Playwright `stock-consumption.spec.ts` sola (base nueva, ruta «Sin preparación» preparada por la API): Chromium
+  aprobada (27.2 s) y WebKit aprobada (26.5 s).
+- Recorrido completo sin `SPEC` (una base por motor; `inventory.spec.ts`, `restaurant.spec.ts`,
+  `stock-consumption.spec.ts` y `takeaway-quick-notes.spec.ts` de Bq): Chromium 4 aprobadas (20.8 s, 54.3 s, 26.0 s y
+  8.1 s) y WebKit 4 aprobadas (20.2 s, 52.2 s, 26.1 s y 8.0 s). Una corrida anterior falló en Chromium porque
+  `restaurant.spec.ts` deja el teclado virtual en «siempre» y el primer toque de «Confirmar cancelación de unidades» se
+  perdía; la especificación ahora lo desactiva por la API y reintenta ese toque si el diálogo no aparece.
+- Capturas a 1280 × 720 en claro y oscuro (Chromium; también las de WebKit en subcarpeta): `scratchpad/shots8B2/`
+  (`b2-recetas-lista-*`, `b2-recetas-editor-*`, `b2-porciones-*`, `b2-cancelaciones-*`, `b2-traza-consumo-*`), con el
+  tema comprobado por un píxel de fondo (`docs8B2/check_dark.py`).
+
+### Integración de la fase B (agente principal)
+
+- El puente de prueba de Playwright (`desktop/e2e/native-driver.ts`) ahora reconoce también las entradas de `api.rs`
+  que `rustfmt` escribe con llaves (`"op" => { (Method::GET, format!(…)) }`), como `inventory_unit_consumption`; se
+  quitó el atajo provisional de `stock-consumption.spec.ts`.
+- `native-driver.ts` y `playwright.config.ts` leen `ADEL_BROWSER_SERVER_URL` y `ADEL_BROWSER_PREVIEW_PORT` (por omisión
+  `http://127.0.0.1:8183` y `1421`, como antes) para ejecutar dos aceptaciones aisladas a la vez.
+- La fase B se desarrolló en tres partes paralelas (B1 backend de recetas y consumo, Bq indicaciones con efecto y
+  complementos, B2 interfaz) y por eso tiene dos migraciones: 0011 (recetas y consumo) y 0012 (indicaciones con
+  efecto). Las suites completas se ejecutaron sobre una copia exacta del commit de cierre de la fase.

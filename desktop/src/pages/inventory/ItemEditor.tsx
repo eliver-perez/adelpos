@@ -10,6 +10,7 @@ import type {
   InventoryItem,
   InventoryUnit,
   ItemInput,
+  ItemKind,
 } from '../../services/inventory';
 import { formatMoney } from '../../services/money';
 import { inventoryCostShape, inventoryQuantityShape } from '../../services/numericInput';
@@ -24,6 +25,8 @@ interface ItemFormState {
   description: string;
   categoryID: string;
   baseUnitID: string;
+  // Comprado o preparación almacenable (la que produce una elaboración, fase B).
+  kind: ItemKind;
   active: boolean;
   referenceCost: string;
   minStock: string;
@@ -38,6 +41,7 @@ function initialForm(item: InventoryItem | null): ItemFormState {
     description: item?.description ?? '',
     categoryID: item?.category_id ?? '',
     baseUnitID: item?.base_unit.id ?? '',
+    kind: item?.kind ?? 'purchased',
     active: item?.active ?? true,
     referenceCost: item?.reference_cost ?? '',
     minStock: item?.min_stock ?? '',
@@ -54,8 +58,8 @@ function optionalText(value: string) {
 
 // Cuerpo del insumo para Go. El costo de referencia solo viaja si quien guarda puede administrar
 // costos y lo cambió (o cambió la unidad base, porque el costo es por unidad base): omitirlo
-// conserva el vigente. El tipo se envía siempre para no convertir una preparación almacenable en
-// insumo comprado.
+// conserva el vigente. El tipo se envía siempre (Go pondría «comprado» si faltara); el de un
+// insumo que produce una preparación almacenable no cambia (Go: ITEM_PRODUCED_BY_RECIPE).
 export function itemInput(
   form: ItemFormState,
   item: InventoryItem | null,
@@ -68,7 +72,7 @@ export function itemInput(
     description: form.description,
     category_id: form.categoryID === '' ? null : form.categoryID,
     base_unit_id: form.baseUnitID,
-    kind: item?.kind ?? 'purchased',
+    kind: form.kind,
     active: form.active,
     min_stock: optionalText(form.minStock),
     reorder_point: optionalText(form.reorderPoint),
@@ -244,6 +248,18 @@ function ItemForm({
             onChange={(value) => update('baseUnitID', value)}
             locked={unitLocked}
           />
+        </Field>
+        <Field
+          label="Tipo de insumo"
+          hint="Una preparación almacenable aumenta con cada elaboración registrada en Recetas."
+        >
+          <select
+            value={form.kind}
+            onChange={(event) => update('kind', event.target.value as ItemKind)}
+          >
+            <option value="purchased">Comprado</option>
+            <option value="prepared">Preparación almacenable</option>
+          </select>
         </Field>
         {costEditable && (
           <DecimalTextField

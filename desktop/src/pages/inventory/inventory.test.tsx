@@ -126,7 +126,7 @@ describe('navegación de Inventarios', () => {
     fireEvent.click(within(navigation).getByRole('button', { name: 'Inventarios' }));
     await screen.findByRole('heading', { name: 'Inventarios' });
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual(['Resumen', 'Insumos', 'Almacenes']);
+    expect(tabNames()).toEqual(['Resumen', 'Insumos', 'Recetas', 'Almacenes', 'Ajustes y mermas']);
     unmount();
     permissions = ['inventory.stock.read'];
     render(<App />);
@@ -140,16 +140,18 @@ describe('pestañas y resumen', () => {
     useTransport();
     const { unmount } = renderInventory(['inventory.read']);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual(['Resumen', 'Insumos', 'Almacenes']);
+    expect(tabNames()).toEqual(['Resumen', 'Insumos', 'Recetas', 'Almacenes', 'Ajustes y mermas']);
     unmount();
     renderInventory(allInventoryPermissions);
     await screen.findByText('Control de inventario');
     expect(tabNames()).toEqual([
       'Resumen',
       'Insumos',
+      'Recetas',
       'Almacenes',
       'Existencias',
       'Movimientos',
+      'Ajustes y mermas',
       'Configuración',
     ]);
   });

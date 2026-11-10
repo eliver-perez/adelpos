@@ -66,7 +66,16 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
   await expect(
     page.getByRole('tablist', { name: 'Secciones de inventario' }).getByRole('tab'),
-  ).toHaveText(['Resumen', 'Insumos', 'Almacenes', 'Existencias', 'Movimientos', 'Configuración']);
+  ).toHaveText([
+    'Resumen',
+    'Insumos',
+    'Recetas',
+    'Almacenes',
+    'Existencias',
+    'Movimientos',
+    'Ajustes y mermas',
+    'Configuración',
+  ]);
 
   // Resumen: la función sembrada por la 0010 está desactivada y se administra en Configuración.
   const feature = page.getByRole('region', { name: 'Control de inventario' });

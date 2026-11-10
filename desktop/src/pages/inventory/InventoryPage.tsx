@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { Notice, PageTitle } from '../../components/Forms';
 import type { StockState } from '../../services/inventory';
+import { AdjustmentsView } from './AdjustmentsView';
 import { inventoryPermissionName } from './inventoryFormat';
 import { ItemsView } from './ItemsView';
 import { MovementsView } from './MovementsView';
+import { RecipesView } from './RecipesView';
 import { SettingsView } from './SettingsView';
 import { StockView } from './StockView';
 import { SummaryView } from './SummaryView';
@@ -11,7 +13,14 @@ import { useInventoryMutation } from './useInventoryMutation';
 import { WarehousesView } from './WarehousesView';
 
 export type InventorySection =
-  'summary' | 'items' | 'warehouses' | 'stock' | 'movements' | 'settings';
+  | 'summary'
+  | 'items'
+  | 'recipes'
+  | 'warehouses'
+  | 'stock'
+  | 'movements'
+  | 'adjustments'
+  | 'settings';
 
 interface SectionDefinition {
   id: InventorySection;
@@ -19,20 +28,23 @@ interface SectionDefinition {
   permission: string;
 }
 
-// Pestañas de la fase A en el orden de la especificación (§25). Las fases B–D agregan Recetas,
-// Transferencias, Ajustes y mermas, Conteos, Compras, Recepciones y Proveedores; no se muestran
-// pestañas vacías. Go vuelve a comprobar cada permiso en cada consulta y escritura.
+// Pestañas en el orden de la especificación (§25). La fase B agrega Recetas y Ajustes y mermas
+// (por ahora con las cancelaciones por clasificar); las fases C y D agregan Transferencias,
+// Conteos, Compras, Recepciones y Proveedores. No se muestran pestañas vacías. Go vuelve a
+// comprobar cada permiso en cada consulta y escritura.
 const sections: SectionDefinition[] = [
   { id: 'summary', label: 'Resumen', permission: 'inventory.read' },
   { id: 'items', label: 'Insumos', permission: 'inventory.read' },
+  { id: 'recipes', label: 'Recetas', permission: 'inventory.read' },
   { id: 'warehouses', label: 'Almacenes', permission: 'inventory.read' },
   { id: 'stock', label: 'Existencias', permission: 'inventory.stock.read' },
   { id: 'movements', label: 'Movimientos', permission: 'inventory.movements.read' },
+  { id: 'adjustments', label: 'Ajustes y mermas', permission: 'inventory.read' },
   { id: 'settings', label: 'Configuración', permission: 'inventory.settings.manage' },
 ];
 
-// Sección principal «Inventarios» (etapa 8, fase A): resumen, insumos, almacenes, existencias,
-// movimientos y configuración, cada pestaña según sus permisos. Go es la autoridad de cantidades,
+// Sección principal «Inventarios» (etapa 8): resumen, insumos, recetas, almacenes, existencias,
+// movimientos, ajustes y mermas y configuración, cada pestaña según sus permisos. Go es la autoridad de cantidades,
 // existencias y costos: la pantalla muestra lo que entrega, sin aritmética de cantidades ni dinero.
 export function InventoryPage({
   can,
@@ -64,6 +76,24 @@ export function InventoryPage({
     switch (current) {
       case 'items':
         return <ItemsView can={can} execute={mutation.execute} busy={mutation.busy} />;
+      case 'recipes':
+        return (
+          <RecipesView
+            can={can}
+            execute={mutation.execute}
+            busy={mutation.busy}
+            timezone={timezone}
+          />
+        );
+      case 'adjustments':
+        return (
+          <AdjustmentsView
+            can={can}
+            execute={mutation.execute}
+            busy={mutation.busy}
+            timezone={timezone}
+          />
+        );
       case 'warehouses':
         return (
           <WarehousesView
@@ -94,6 +124,7 @@ export function InventoryPage({
             can={can}
             timezone={timezone}
             onShowStock={showStock}
+            onShowSection={setSection}
             onOpenSettings={onOpenSettings}
           />
         );
@@ -104,7 +135,7 @@ export function InventoryPage({
     <div className="inventory-page form-stack">
       <PageTitle
         title="Inventarios"
-        description="Insumos, almacenes, existencias y movimientos. Las cantidades, conversiones y costos los calcula y valida el servidor."
+        description="Insumos, recetas, almacenes, existencias y movimientos. Las cantidades, conversiones y costos los calcula y valida el servidor."
       />
       {!can('inventory.read') && (
         <Notice>
