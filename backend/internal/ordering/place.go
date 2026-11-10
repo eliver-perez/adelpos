@@ -28,6 +28,8 @@ const (
 	DiscountReasons
 	// CategoryQuickNotes ordena las indicaciones rápidas dentro de su categoría (etapa 7.1).
 	CategoryQuickNotes
+	// InventoryCategories ordena las categorías de insumos (etapa 8).
+	InventoryCategories
 )
 
 type scopeDefinition struct {
@@ -59,6 +61,8 @@ var scopes = map[Scope]scopeDefinition{
 	// ordenan dentro de su categoría y desempatan por su texto.
 	DiscountReasons:    {table: "app.discount_reasons"},
 	CategoryQuickNotes: {table: "app.catalog_category_quick_notes", group: "category_id", label: "text"},
+	// Categorías de insumos (etapa 8).
+	InventoryCategories: {table: "app.inventory_categories"},
 }
 
 // Result informa el orden final del registro colocado y los hermanos que cambiaron de número.

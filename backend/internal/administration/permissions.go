@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
 	"local/ad-el-pos/server/internal/payments"
@@ -47,6 +48,9 @@ func init() {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}
 	for _, permission := range payments.Permissions {
+		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
+	}
+	for _, permission := range inventory.Permissions {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}
 }

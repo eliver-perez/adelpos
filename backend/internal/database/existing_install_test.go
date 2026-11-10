@@ -656,3 +656,330 @@ func checkPrintingConstraints(ctx context.Context, t *testing.T, connection *pgx
 		t.Fatal(err)
 	}
 }
+
+// inventoryConstraints son las restricciones con nombre explícito de la 0010 (etapa 8, fase A).
+var inventoryConstraints = []string{
+	"inventory_settings_singleton_check", "inventory_settings_count_frequency_check", "inventory_settings_revision_check",
+	"inventory_settings_updated_by_fkey", "inventory_settings_count_interval_check",
+	"inventory_units_code_check", "inventory_units_name_check", "inventory_units_dimension_check", "inventory_units_factor_check",
+	"inventory_units_revision_check", "inventory_units_code_key", "inventory_units_system_active_check",
+	"inventory_categories_name_check", "inventory_categories_sort_order_check", "inventory_categories_revision_check",
+	"inventory_items_code_check", "inventory_items_barcode_check", "inventory_items_name_check", "inventory_items_description_check",
+	"inventory_items_category_id_fkey", "inventory_items_base_unit_id_fkey", "inventory_items_kind_check",
+	"inventory_items_reference_cost_check", "inventory_items_min_stock_check", "inventory_items_reorder_point_check",
+	"inventory_items_revision_check", "inventory_items_created_by_fkey", "inventory_items_updated_by_fkey",
+	"inventory_presentations_item_id_fkey", "inventory_presentations_name_check", "inventory_presentations_base_quantity_check",
+	"inventory_presentations_barcode_check", "inventory_presentations_revision_check", "inventory_presentations_default_active_check",
+	"inventory_warehouses_name_check", "inventory_warehouses_description_check", "inventory_warehouses_revision_check",
+	"inventory_warehouses_default_active_check",
+	"inventory_station_warehouses_station_id_fkey", "inventory_station_warehouses_warehouse_id_fkey",
+	"inventory_station_warehouses_actor_id_fkey", "inventory_station_warehouses_operation_id_fkey", "inventory_station_warehouses_seq_key",
+	"inventory_stock_item_id_fkey", "inventory_stock_warehouse_id_fkey", "inventory_stock_pkey",
+	"inventory_valuations_item_id_fkey", "inventory_valuations_last_valid_cost_check", "inventory_valuations_pending_cost_quantity_check",
+	"inventory_valuations_zero_check",
+	"inventory_movements_item_id_fkey", "inventory_movements_warehouse_id_fkey", "inventory_movements_kind_check",
+	"inventory_movements_unit_cost_check", "inventory_movements_cost_basis_check", "inventory_movements_source_kind_check",
+	"inventory_movements_source_line_check", "inventory_movements_restaurant_unit_id_fkey",
+	"inventory_movements_related_movement_id_fkey", "inventory_movements_reason_check", "inventory_movements_actor_id_fkey",
+	"inventory_movements_process_check", "inventory_movements_operation_id_fkey", "inventory_movements_entry_key_check",
+	"inventory_movements_seq_key", "inventory_movements_entry_key_key", "inventory_movements_responsible_check",
+	"inventory_movements_shape_check", "inventory_movements_sign_check", "inventory_movements_pending_check",
+}
+
+// Simula una instalación existente en esquema 9 (0.7.1) con datos de las etapas anteriores y aplica
+// la 0010 (etapa 8, fase A): nada existente cambia (funciones, permisos de otros roles, gastos de
+// caja con y sin corrección, eventos y estaciones), la 0010 es repetible según el migrador (una
+// segunda ejecución no aplica nada), las siembras son solo de referencia, los permisos de inventario
+// se conceden solo al administrador y las restricciones nuevas tienen nombre y rechazan datos
+// incoherentes. Deja la base vacía al terminar.
+func TestStage8UpgradeOfExistingInstallation(t *testing.T) {
+	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
+	u, err := url.Parse(dsn)
+	if err != nil || !strings.HasPrefix(u.Path, "/adel_pos_test_") {
+		t.Fatal("integration requires an isolated adel_pos_test_ database")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal("pool creation failed")
+	}
+	defer pool.Close()
+	reset := func() {
+		if _, err := pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS app CASCADE; DROP TABLE IF EXISTS public.schema_migrations"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reset()
+	defer reset()
+	expected, err := ReadMigrations(migrations.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stageNine := fstest.MapFS{}
+	for _, migration := range expected {
+		if migration.Version <= 9 {
+			stageNine[migration.Name] = &fstest.MapFile{Data: []byte(migration.SQL)}
+		}
+	}
+	if n, err := Apply(ctx, pool, stageNine); err != nil || n != 9 {
+		t.Fatalf("no se preparó el esquema 9: %d %v", n, err)
+	}
+	// Datos de una instalación real en esquema 9: roles (incluido «Inventarios» sin permisos), el
+	// administrador con todos los permisos, una cajera con los suyos, caja, terminal, estación de
+	// cocina, pago en dólares activo, un turno abierto con un gasto corregido y otro vigente y un
+	// evento de caja en el outbox.
+	if _, err := pool.Exec(ctx, `INSERT INTO app.roles(code,name) VALUES ('administrator','Administrador'),('cashier','Cajero'),
+            ('inventory','Inventarios');
+        INSERT INTO app.role_permissions(role_id,permission_key) SELECT r.id,p.key FROM app.roles r,app.permissions p
+            WHERE r.code='administrator';
+        INSERT INTO app.role_permissions(role_id,permission_key) SELECT r.id,p.key FROM app.roles r,app.permissions p
+            WHERE r.code='cashier' AND p.key IN ('cash.shifts.open','cash.expenses.record','payments.collect');
+        INSERT INTO app.registers(name) VALUES ('Caja 1');
+        INSERT INTO app.users(username,display_name,role_id) SELECT 'cajera','Cajera',id FROM app.roles WHERE code='cashier';
+        INSERT INTO app.devices(name,secret_hash,register_id) SELECT 'Terminal 1','hash-de-prueba',id FROM app.registers;
+        INSERT INTO app.kitchen_stations(id,name,reception) VALUES ('00000000-0000-4000-8000-000000000090','Cocina caliente','kds');
+        UPDATE app.establishment_features SET enabled=true,revision=2 WHERE code='usd_cash';
+        INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
+        SELECT op.id::uuid,u.id,d.id,op.route,'huella','{}' FROM app.users u,app.devices d,
+        (VALUES ('00000000-0000-4000-8000-000000000091','POST payments/shifts'),
+                ('00000000-0000-4000-8000-000000000092','POST payments/shifts/gasto'),
+                ('00000000-0000-4000-8000-000000000093','POST payments/shifts/correccion'),
+                ('00000000-0000-4000-8000-000000000094','POST payments/shifts/gasto')) AS op(id,route)
+        WHERE u.username='cajera';
+        INSERT INTO app.cash_shifts(id,register_id,opening_float,opened_by,opened_device_id,operation_id,business_date)
+        SELECT '00000000-0000-4000-8000-000000000095',d.register_id,500,u.id,d.id,'00000000-0000-4000-8000-000000000091',current_date
+        FROM app.users u,app.devices d WHERE u.username='cajera';
+        INSERT INTO app.cash_operations(id,shift_id,register_id,kind,currency,amount,direction,concept,category_id,actor_id,device_id,
+            authorized_by,authorization_mode,operation_id)
+        SELECT op.id::uuid,'00000000-0000-4000-8000-000000000095',d.register_id,'expense','MXN',op.amount,'out','Insumos',c.id,u.id,d.id,
+            u.id,'self',op.operation::uuid
+        FROM app.users u,app.devices d,app.cash_expense_categories c,
+        (VALUES ('00000000-0000-4000-8000-000000000096',250.00,'00000000-0000-4000-8000-000000000092'),
+                ('00000000-0000-4000-8000-000000000097',180.50,'00000000-0000-4000-8000-000000000094')) AS op(id,amount,operation)
+        WHERE u.username='cajera' AND c.name='Insumos';
+        INSERT INTO app.cash_operations(id,shift_id,register_id,kind,currency,amount,direction,concept,reason,corrects_operation_id,
+            actor_id,device_id,authorized_by,authorization_mode,operation_id)
+        SELECT '00000000-0000-4000-8000-000000000098','00000000-0000-4000-8000-000000000095',d.register_id,'correction','MXN',250,'in',
+            'Corrección','Gasto capturado dos veces','00000000-0000-4000-8000-000000000096',u.id,d.id,u.id,'self',
+            '00000000-0000-4000-8000-000000000093'
+        FROM app.users u,app.devices d WHERE u.username='cajera';
+        INSERT INTO app.realtime_events(id,kind,scope,aggregate_id)
+        VALUES ('00000000-0000-4000-8000-000000000099','cash.operation.recorded','cash','00000000-0000-4000-8000-000000000095')`); err != nil {
+		t.Fatal(err)
+	}
+	var permissionsBefore, cashierBefore int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.permissions),
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='cashier')`).
+		Scan(&permissionsBefore, &cashierBefore); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-9 {
+		t.Fatalf("la 0010 no se aplicó sobre el esquema 9: %d %v", n, err)
+	}
+	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
+		t.Fatal("la 0010 no es repetible")
+	}
+	checkStage8ExistingData(ctx, t, pool, permissionsBefore, cashierBefore)
+	checkStage8Seeds(ctx, t, pool)
+	checkStage8Constraints(ctx, t, pool)
+}
+
+// checkStage8ExistingData comprueba que la 0010 no alteró los datos de las etapas anteriores.
+func checkStage8ExistingData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, permissionsBefore, cashierBefore int) {
+	t.Helper()
+	var usdEnabled bool
+	var usdRevision int
+	var usdEnabledAt *time.Time
+	if err := pool.QueryRow(ctx, "SELECT enabled,revision,enabled_at FROM app.establishment_features WHERE code='usd_cash'").
+		Scan(&usdEnabled, &usdRevision, &usdEnabledAt); err != nil {
+		t.Fatal(err)
+	}
+	if !usdEnabled || usdRevision != 2 || usdEnabledAt != nil {
+		t.Fatalf("La función existente cambió al migrar: %v %d %v", usdEnabled, usdRevision, usdEnabledAt)
+	}
+	var operations string
+	if err := pool.QueryRow(ctx, `SELECT string_agg(kind||':'||amount::text||':'||coalesce(corrects_operation_id::text,'-'),'|' ORDER BY id)
+        FROM app.cash_operations`).Scan(&operations); err != nil {
+		t.Fatal(err)
+	}
+	if operations != "expense:250.00:-|expense:180.50:-|correction:250.00:00000000-0000-4000-8000-000000000096" {
+		t.Fatalf("Los gastos de caja cambiaron al migrar: %s", operations)
+	}
+	var permissionsAfter, cashierAfter, inventoryRole, events int
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.permissions),
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='cashier'),
+        (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='inventory'),
+        (SELECT count(*) FROM app.realtime_events WHERE scope='cash')`).Scan(&permissionsAfter, &cashierAfter, &inventoryRole, &events); err != nil {
+		t.Fatal(err)
+	}
+	if permissionsAfter != permissionsBefore+10 || cashierAfter != cashierBefore || inventoryRole != 0 || events != 1 {
+		t.Fatalf("Permisos o eventos existentes: %d→%d, cajera %d→%d, inventarios %d, eventos %d",
+			permissionsBefore, permissionsAfter, cashierBefore, cashierAfter, inventoryRole, events)
+	}
+}
+
+// checkStage8Seeds comprueba las siembras de referencia y la concesión de permisos de la 0010.
+func checkStage8Seeds(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var enabled bool
+	var enabledAt *time.Time
+	var units, warehouses, items, movements, settings, administrator, others int
+	err := pool.QueryRow(ctx, `SELECT (SELECT enabled FROM app.establishment_features WHERE code='inventory_control'),
+            (SELECT enabled_at FROM app.establishment_features WHERE code='inventory_control'),
+            (SELECT count(*) FROM app.inventory_units WHERE system AND active),
+            (SELECT count(*) FROM app.inventory_warehouses WHERE is_default AND active AND name='Almacén general'),
+            (SELECT count(*) FROM app.inventory_items),
+            (SELECT count(*) FROM app.inventory_movements),
+            (SELECT count(*) FROM app.inventory_settings WHERE purchase_tax_in_cost AND operating_day_cutoff='05:00'
+                AND warn_products_without_recipe AND count_frequency='none' AND count_interval_days IS NULL),
+            (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
+                WHERE r.code='administrator' AND p.permission_key LIKE 'inventory.%'),
+            (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id
+                WHERE r.code<>'administrator' AND p.permission_key LIKE 'inventory.%')`).
+		Scan(&enabled, &enabledAt, &units, &warehouses, &items, &movements, &settings, &administrator, &others)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled || enabledAt != nil || units != 6 || warehouses != 1 || items != 0 || movements != 0 || settings != 1 ||
+		administrator != 10 || others != 0 {
+		t.Fatalf("Siembras de la 0010: %v %v %d %d %d %d %d %d %d", enabled, enabledAt, units, warehouses, items, movements, settings,
+			administrator, others)
+	}
+	// El ámbito de eventos inventory se agregó conservando los anteriores.
+	for _, scope := range []string{"restaurant", "takeaway", "kitchen", "printing", "configuration", "cash", "inventory"} {
+		if _, err := pool.Exec(ctx, "INSERT INTO app.realtime_events(id,kind,scope) VALUES (gen_random_uuid(),'prueba.ambito',$1)", scope); err != nil {
+			t.Fatalf("El ámbito %s no se admite: %v", scope, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO app.realtime_events(id,kind,scope) VALUES (gen_random_uuid(),'prueba.ambito','reports')"); err == nil {
+		t.Fatal("Se aceptó un ámbito de eventos desconocido")
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM app.realtime_events WHERE kind='prueba.ambito'"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkStage8Constraints comprueba nombres, CHECK seguros ante NULL y el libro de solo inserción.
+func checkStage8Constraints(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var named int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM pg_constraint WHERE conname = ANY($1)", inventoryConstraints).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != len(inventoryConstraints) {
+		t.Fatalf("Faltan restricciones con nombre explícito en la 0010: %d de %d", named, len(inventoryConstraints))
+	}
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Release()
+	if _, err := connection.Exec(ctx, `CREATE TEMP TABLE movements_check (LIKE app.inventory_movements INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE settings_check (LIKE app.inventory_settings INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE valuations_check (LIKE app.inventory_valuations INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE units_check (LIKE app.inventory_units INCLUDING CONSTRAINTS INCLUDING DEFAULTS);
+        CREATE TEMP TABLE items_check (LIKE app.inventory_items INCLUDING CONSTRAINTS INCLUDING DEFAULTS)`); err != nil {
+		t.Fatal(err)
+	}
+	movement := `INSERT INTO movements_check(id,seq,item_id,warehouse_id,kind,quantity,value,unit_cost,cost_basis,cost_pending,occurred_at,
+        source_kind,actor_id,process,entry_key,stock_after,valuation_quantity_after,valuation_value_after)
+        VALUES (gen_random_uuid(),1,gen_random_uuid(),%s,now(),'initial',%s,'clave',%s,0,0)`
+	build := func(values ...string) string {
+		statement := movement
+		for _, value := range values {
+			statement = strings.Replace(statement, "%s", value, 1)
+		}
+		return statement
+	}
+	warehouse := "gen_random_uuid()"
+	actor := "gen_random_uuid(),NULL"
+	accepted := []string{
+		build(warehouse+",'initial',10,200,20,'document',false", actor, "10"),
+		build(warehouse+",'consumption',-2,-40,20,'average',false", "NULL,'inventory_worker'", "8"),
+		build(warehouse+",'consumption',-1,0,NULL,'pending',true", "NULL,'inventory_worker'", "-1"),
+		build("NULL,'cost_adjustment',0,-10,NULL,'difference',false", actor, "NULL"),
+	}
+	rejected := []string{
+		// Una entrada con cantidad negativa o una salida positiva.
+		build(warehouse+",'initial',-10,200,20,'document',false", actor, "10"),
+		build(warehouse+",'consumption',2,-40,20,'average',false", actor, "8"),
+		// Un movimiento de existencias sin almacén, en cero o sin existencia posterior.
+		build("NULL,'initial',10,200,20,'document',false", actor, "10"),
+		build(warehouse+",'adjustment_in',0,0,NULL,'average',false", actor, "0"),
+		build(warehouse+",'initial',10,200,20,'document',false", actor, "NULL"),
+		// Un ajuste de costo con almacén o con cantidad.
+		build(warehouse+",'cost_adjustment',0,-10,NULL,'difference',false", actor, "NULL"),
+		build("NULL,'cost_adjustment',1,-10,NULL,'difference',false", actor, "NULL"),
+		// Sin responsable o con dos responsables.
+		build(warehouse+",'initial',10,200,20,'document',false", "NULL,NULL", "10"),
+		build(warehouse+",'initial',10,200,20,'document',false", "gen_random_uuid(),'inventory_worker'", "10"),
+		// Costo pendiente sin la marca, tipo o base desconocidos y costo negativo.
+		build(warehouse+",'consumption',-1,0,NULL,'pending',false", actor, "-1"),
+		build(warehouse+",'robo',-1,0,NULL,'average',false", actor, "-1"),
+		build(warehouse+",'initial',10,200,20,'inventado',false", actor, "10"),
+		build(warehouse+",'initial',10,200,-20,'document',false", actor, "10"),
+	}
+	for _, statement := range accepted {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("PostgreSQL rechazó un movimiento válido (%s): %v", statement, err)
+		}
+	}
+	for _, statement := range rejected {
+		if _, err := connection.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó un movimiento incoherente: %s", statement)
+		}
+	}
+	for _, statement := range []string{
+		"INSERT INTO settings_check(count_frequency) VALUES ('custom')",
+		"INSERT INTO settings_check(count_frequency,count_interval_days) VALUES ('weekly',7)",
+		"INSERT INTO settings_check(count_frequency,count_interval_days) VALUES ('custom',0)",
+		"INSERT INTO settings_check(singleton) VALUES (false)",
+		"INSERT INTO valuations_check(item_id,quantity,value) VALUES (gen_random_uuid(),0,1)",
+		"INSERT INTO valuations_check(item_id,pending_cost_quantity) VALUES (gen_random_uuid(),-1)",
+		"INSERT INTO units_check(code,name,dimension,factor) VALUES ('oz','Onza','weight',28.35)",
+		"INSERT INTO units_check(code,name,dimension,factor) VALUES ('oz','Onza','mass',0)",
+		"INSERT INTO units_check(code,name,dimension,factor) VALUES ('Oz','Onza','mass',28.35)",
+		"INSERT INTO units_check(code,name,dimension,factor,system,active) VALUES ('oz','Onza','mass',28.35,true,false)",
+		"INSERT INTO items_check(code,name,base_unit_id,reference_cost) VALUES ('A','Arroz',gen_random_uuid(),0)",
+		"INSERT INTO items_check(code,name,base_unit_id,kind) VALUES ('A','Arroz',gen_random_uuid(),'servicio')",
+		"INSERT INTO items_check(code,name,base_unit_id,min_stock) VALUES ('A','Arroz',gen_random_uuid(),-1)",
+		"INSERT INTO items_check(code,name,base_unit_id,barcode) VALUES ('A','Arroz',gen_random_uuid(),'con espacio')",
+		"INSERT INTO items_check(code,name,base_unit_id) VALUES (' A','Arroz',gen_random_uuid())",
+	} {
+		if _, err := connection.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó un registro incoherente: %s", statement)
+		}
+	}
+	for _, statement := range []string{
+		"INSERT INTO settings_check(singleton,count_frequency,count_interval_days) VALUES (true,'custom',14)",
+		"INSERT INTO valuations_check(item_id,quantity,value,last_valid_cost) VALUES (gen_random_uuid(),-5,-100,20)",
+		"INSERT INTO units_check(code,name,dimension,factor) VALUES ('oz','Onza','mass',28.349523125)",
+		"INSERT INTO items_check(code,name,base_unit_id,reference_cost,barcode) VALUES ('A','Arroz',gen_random_uuid(),18.5,'7501')",
+	} {
+		if _, err := connection.Exec(ctx, statement); err != nil {
+			t.Fatalf("PostgreSQL rechazó un registro válido (%s): %v", statement, err)
+		}
+	}
+	if _, err := connection.Exec(ctx, "DROP TABLE movements_check, settings_check, valuations_check, units_check, items_check"); err != nil {
+		t.Fatal(err)
+	}
+	// El libro real es de solo inserción: un movimiento se registra pero no se modifica ni se borra.
+	if _, err := pool.Exec(ctx, `INSERT INTO app.inventory_items(id,code,name,base_unit_id)
+            SELECT '00000000-0000-4000-8000-0000000000a0','ARZ','Arroz',id FROM app.inventory_units WHERE code='kg';
+        INSERT INTO app.inventory_movements(id,item_id,warehouse_id,kind,quantity,value,unit_cost,cost_basis,occurred_at,source_kind,
+            process,entry_key,stock_after,valuation_quantity_after,valuation_value_after)
+        SELECT gen_random_uuid(),'00000000-0000-4000-8000-0000000000a0',w.id,'initial',10,200,20,'document',now(),'initial',
+            'migration_check','prueba:1',10,10,200 FROM app.inventory_warehouses w WHERE w.is_default`); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"UPDATE app.inventory_movements SET value=0",
+		"DELETE FROM app.inventory_movements",
+		"TRUNCATE app.inventory_movements",
+	} {
+		if _, err := pool.Exec(ctx, statement); err == nil {
+			t.Fatalf("PostgreSQL aceptó %s sobre el libro", statement)
+		}
+	}
+}

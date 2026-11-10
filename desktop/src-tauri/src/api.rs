@@ -125,6 +125,22 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "restaurant_staff" => Some((Method::GET, "restaurant/staff")),
         "restaurant_accounts" => Some((Method::GET, "restaurant/accounts")),
         "restaurant_open_account" => Some((Method::POST, "restaurant/accounts")),
+        // Etapa 8 (fase A): inventario.
+        "inventory_summary" => Some((Method::GET, "inventory/summary")),
+        "inventory_settings" => Some((Method::GET, "inventory/settings")),
+        "inventory_save_settings" => Some((Method::PUT, "inventory/settings")),
+        "inventory_units" => Some((Method::GET, "inventory/units")),
+        "inventory_create_unit" => Some((Method::POST, "inventory/units")),
+        "inventory_categories" => Some((Method::GET, "inventory/categories")),
+        "inventory_create_category" => Some((Method::POST, "inventory/categories")),
+        "inventory_items" => Some((Method::GET, "inventory/items")),
+        "inventory_create_item" => Some((Method::POST, "inventory/items")),
+        "inventory_warehouses" => Some((Method::GET, "inventory/warehouses")),
+        "inventory_create_warehouse" => Some((Method::POST, "inventory/warehouses")),
+        "inventory_station_warehouses" => Some((Method::GET, "inventory/station-warehouses")),
+        "inventory_stock" => Some((Method::GET, "inventory/stock")),
+        "inventory_movements" => Some((Method::GET, "inventory/movements")),
+        "inventory_record_initial_balances" => Some((Method::POST, "inventory/initial-balances")),
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -423,6 +439,24 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "update_device" => (Method::PATCH, format!("devices/{identifier}")),
         "revoke_device" => (Method::POST, format!("devices/{identifier}/revoke")),
         "revoke_session" => (Method::POST, format!("sessions/{identifier}/revoke")),
+        // Etapa 8 (fase A): inventario, un solo identificador por ruta.
+        "inventory_save_unit" => (Method::PATCH, format!("inventory/units/{identifier}")),
+        "inventory_save_category" => (Method::PATCH, format!("inventory/categories/{identifier}")),
+        "inventory_item" => (Method::GET, format!("inventory/items/{identifier}")),
+        "inventory_save_item" => (Method::PATCH, format!("inventory/items/{identifier}")),
+        "inventory_create_presentation" => (
+            Method::POST,
+            format!("inventory/items/{identifier}/presentations"),
+        ),
+        "inventory_save_presentation" => (
+            Method::PATCH,
+            format!("inventory/presentations/{identifier}"),
+        ),
+        "inventory_save_warehouse" => (Method::PATCH, format!("inventory/warehouses/{identifier}")),
+        "inventory_assign_station_warehouse" => (
+            Method::PUT,
+            format!("inventory/station-warehouses/{identifier}"),
+        ),
         _ => return Err("Operación no autorizada por el puente nativo.".into()),
     };
     Ok((method, path))
@@ -490,38 +524,7 @@ pub async fn api_request(
         body = Some(serde_json::json!({"name": name, "code": code}));
     }
     if let Some(query) = query {
-        let allowed: &[&str] = if operation == "audit" {
-            &[
-                "page",
-                "page_size",
-                "actor",
-                "action",
-                "device_id",
-                "from",
-                "until",
-            ]
-        } else if operation.starts_with("kitchen_") {
-            &["page", "station_id", "state", "account_id"]
-        } else if operation == "payments_shifts" {
-            // Historial de turnos: caja, intervalo de fechas comerciales, estado y página.
-            &["page", "register_id", "from", "until", "state"]
-        } else if operation.starts_with("restaurant_") {
-            &["page", "page_size", "search", "mode", "table_id", "state"]
-        } else if operation.starts_with("catalog_") {
-            &[
-                "page",
-                "page_size",
-                "search",
-                "active",
-                "category_id",
-                "kind",
-                "archived",
-                "price_list_id",
-            ]
-        } else {
-            &[]
-        };
-        if query.keys().any(|key| !allowed.contains(&key.as_str())) {
+        if !query_allowed(&operation, &query) {
             return Err("Parámetros de consulta no autorizados.".into());
         }
         request = request.query(&query);
@@ -581,6 +584,64 @@ pub async fn api_request(
         status,
         body: result,
     })
+}
+
+// Lista blanca de parámetros de consulta por operación: cualquier otro parámetro se rechaza antes
+// de llegar a Go.
+fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
+    if operation == "audit" {
+        &[
+            "page",
+            "page_size",
+            "actor",
+            "action",
+            "device_id",
+            "from",
+            "until",
+        ]
+    } else if operation.starts_with("kitchen_") {
+        &["page", "station_id", "state", "account_id"]
+    } else if operation == "payments_shifts" {
+        // Historial de turnos: caja, intervalo de fechas comerciales, estado y página.
+        &["page", "register_id", "from", "until", "state"]
+    } else if operation.starts_with("restaurant_") {
+        &["page", "page_size", "search", "mode", "table_id", "state"]
+    } else if operation.starts_with("catalog_") {
+        &[
+            "page",
+            "page_size",
+            "search",
+            "active",
+            "category_id",
+            "kind",
+            "archived",
+            "price_list_id",
+        ]
+    } else if operation.starts_with("inventory_") {
+        // Inventario (etapa 8): búsqueda, filtros de listados y paginación.
+        &[
+            "page",
+            "page_size",
+            "search",
+            "active",
+            "category_id",
+            "kind",
+            "warehouse_id",
+            "item_id",
+            "state",
+            "source_kind",
+            "source_id",
+            "from",
+            "until",
+        ]
+    } else {
+        &[]
+    }
+}
+
+fn query_allowed(operation: &str, query: &BTreeMap<String, String>) -> bool {
+    let allowed = allowed_query_keys(operation);
+    query.keys().all(|key| allowed.contains(&key.as_str()))
 }
 
 fn sanitize_response(result: &mut Value) {
@@ -992,6 +1053,117 @@ mod tests {
         // No hay borrado de motivos ni de indicaciones: se desactivan.
         assert!(route("payments_delete_discount_reason", Some(identifier)).is_err());
         assert!(route("catalog_delete_quick_note", Some(identifier)).is_err());
+    }
+
+    #[test]
+    fn inventory_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            ("inventory_summary", Method::GET, "inventory/summary"),
+            ("inventory_settings", Method::GET, "inventory/settings"),
+            ("inventory_save_settings", Method::PUT, "inventory/settings"),
+            ("inventory_units", Method::GET, "inventory/units"),
+            ("inventory_create_unit", Method::POST, "inventory/units"),
+            ("inventory_categories", Method::GET, "inventory/categories"),
+            (
+                "inventory_create_category",
+                Method::POST,
+                "inventory/categories",
+            ),
+            ("inventory_items", Method::GET, "inventory/items"),
+            ("inventory_create_item", Method::POST, "inventory/items"),
+            ("inventory_warehouses", Method::GET, "inventory/warehouses"),
+            (
+                "inventory_create_warehouse",
+                Method::POST,
+                "inventory/warehouses",
+            ),
+            (
+                "inventory_station_warehouses",
+                Method::GET,
+                "inventory/station-warehouses",
+            ),
+            ("inventory_stock", Method::GET, "inventory/stock"),
+            ("inventory_movements", Method::GET, "inventory/movements"),
+            (
+                "inventory_record_initial_balances",
+                Method::POST,
+                "inventory/initial-balances",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        for (operation, method, path) in [
+            (
+                "inventory_save_unit",
+                Method::PATCH,
+                format!("inventory/units/{identifier}"),
+            ),
+            (
+                "inventory_save_category",
+                Method::PATCH,
+                format!("inventory/categories/{identifier}"),
+            ),
+            (
+                "inventory_item",
+                Method::GET,
+                format!("inventory/items/{identifier}"),
+            ),
+            (
+                "inventory_save_item",
+                Method::PATCH,
+                format!("inventory/items/{identifier}"),
+            ),
+            (
+                "inventory_create_presentation",
+                Method::POST,
+                format!("inventory/items/{identifier}/presentations"),
+            ),
+            (
+                "inventory_save_presentation",
+                Method::PATCH,
+                format!("inventory/presentations/{identifier}"),
+            ),
+            (
+                "inventory_save_warehouse",
+                Method::PATCH,
+                format!("inventory/warehouses/{identifier}"),
+            ),
+            (
+                "inventory_assign_station_warehouse",
+                Method::PUT,
+                format!("inventory/station-warehouses/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        // No hay borrado ni edición directa de existencias o movimientos: solo el libro las cambia.
+        assert!(route("inventory_delete_item", Some(identifier)).is_err());
+        assert!(route("inventory_save_stock", Some(identifier)).is_err());
+        assert!(route("inventory_save_movement", Some(identifier)).is_err());
+    }
+
+    #[test]
+    fn inventory_query_parameters_are_whitelisted() {
+        let mut query = BTreeMap::new();
+        query.insert("warehouse_id".to_string(), "x".to_string());
+        query.insert("search".to_string(), "arroz".to_string());
+        query.insert("page".to_string(), "2".to_string());
+        assert!(query_allowed("inventory_stock", &query));
+        query.insert("from".to_string(), "2026-11-01".to_string());
+        assert!(query_allowed("inventory_movements", &query));
+        let mut rejected = BTreeMap::new();
+        rejected.insert("order_by".to_string(), "value".to_string());
+        assert!(!query_allowed("inventory_movements", &rejected));
+        let mut costs = BTreeMap::new();
+        costs.insert("include_costs".to_string(), "true".to_string());
+        assert!(!query_allowed("inventory_stock", &costs));
+        // Los parámetros de inventario no se admiten en otras operaciones.
+        let mut foreign = BTreeMap::new();
+        foreign.insert("warehouse_id".to_string(), "x".to_string());
+        assert!(!query_allowed("payments_shifts", &foreign));
     }
 
     #[test]

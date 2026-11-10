@@ -213,7 +213,31 @@ export type Operation =
   | 'restaurant_move'
   | 'restaurant_assign'
   | 'restaurant_void'
-  | 'restaurant_release_account';
+  | 'restaurant_release_account'
+  // Etapa 8 (fase A): inventario.
+  | 'inventory_summary'
+  | 'inventory_settings'
+  | 'inventory_save_settings'
+  | 'inventory_units'
+  | 'inventory_create_unit'
+  | 'inventory_save_unit'
+  | 'inventory_categories'
+  | 'inventory_create_category'
+  | 'inventory_save_category'
+  | 'inventory_items'
+  | 'inventory_create_item'
+  | 'inventory_item'
+  | 'inventory_save_item'
+  | 'inventory_create_presentation'
+  | 'inventory_save_presentation'
+  | 'inventory_warehouses'
+  | 'inventory_create_warehouse'
+  | 'inventory_save_warehouse'
+  | 'inventory_station_warehouses'
+  | 'inventory_assign_station_warehouse'
+  | 'inventory_stock'
+  | 'inventory_movements'
+  | 'inventory_record_initial_balances';
 
 export class APIError extends Error {
   constructor(

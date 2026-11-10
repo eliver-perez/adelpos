@@ -61,5 +61,12 @@ func establishmentFeatures(ctx context.Context, tx pgx.Tx, request Request, prin
 			return nil, err
 		}
 	}
+	// El control de inventario (etapa 8) cambia el resumen de Inventarios: se avisa en su ámbito,
+	// que reciben quienes consultan inventario.
+	if code == features.InventoryControl {
+		if err := events.Append(ctx, tx, "inventory.settings.changed", "inventory", nil, nil); err != nil {
+			return nil, err
+		}
+	}
 	return saved, audit(ctx, tx, principal, "settings.feature_changed", "establishment_feature", nil, previous, saved, true)
 }

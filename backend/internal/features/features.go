@@ -29,6 +29,11 @@ const USDCash = "usd_cash"
 // esperado de una caja supera el importe configurado.
 const CashLimit = "cash_limit"
 
+// InventoryControl habilita el consumo de inventario al liberar partidas a cocina (etapa 8). La
+// administración de inventario (insumos, almacenes, existencias iniciales) funciona aunque esté
+// desactivada; solo el consumo depende de ella y solo a partir de enabled_at.
+const InventoryControl = "inventory_control"
+
 // Definition describe una función conocida por el sistema.
 type Definition struct {
 	Code        string
@@ -52,14 +57,25 @@ var Known = []Definition{
 			"para sugerir un retiro. Nunca bloquea cobros. Los importes del tope (en pesos y, con el pago en dólares, en " +
 			"dólares) se configuran en Caja → Configuración con el permiso de administrar la caja.",
 	},
+	{
+		Code: InventoryControl,
+		Name: "Control de inventario",
+		Description: "Descuenta de las existencias los insumos de cada partida cuando se libera a cocina, según sus recetas " +
+			"y porciones. Solo consume lo que se libere después de activarla: los pedidos ya liberados nunca consumen. " +
+			"Insumos, almacenes y existencias iniciales pueden prepararse antes de activarla. Desactivarla deja de " +
+			"generar consumos nuevos y conserva todo el historial de existencias y movimientos.",
+	},
 }
 
 // Feature es el estado público de una función.
 type Feature struct {
-	Code          string     `json:"code"`
-	Name          string     `json:"name"`
-	Description   string     `json:"description"`
-	Enabled       bool       `json:"enabled"`
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	// EnabledAt es la fecha y hora en que la función pasó de desactivada a activada por última vez
+	// (etapa 8); desactivarla la conserva. Nil si nunca se activó desde la migración 0010.
+	EnabledAt     *time.Time `json:"enabled_at"`
 	Revision      int        `json:"revision"`
 	UpdatedAt     *time.Time `json:"updated_at"`
 	UpdatedByName *string    `json:"updated_by_name"`
@@ -104,10 +120,10 @@ func Read(ctx context.Context, tx pgx.Tx, code string) (*Feature, error) {
 	feature := &Feature{Code: definition.Code, Name: definition.Name, Description: definition.Description}
 	err := tx.QueryRow(
 		ctx,
-		`SELECT f.enabled,f.revision,f.updated_at,u.display_name FROM app.establishment_features f
+		`SELECT f.enabled,f.enabled_at,f.revision,f.updated_at,u.display_name FROM app.establishment_features f
         LEFT JOIN app.users u ON u.id=f.updated_by WHERE f.code=$1`,
 		code,
-	).Scan(&feature.Enabled, &feature.Revision, &feature.UpdatedAt, &feature.UpdatedByName)
+	).Scan(&feature.Enabled, &feature.EnabledAt, &feature.Revision, &feature.UpdatedAt, &feature.UpdatedByName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return feature, nil
 	}
@@ -132,7 +148,9 @@ func List(ctx context.Context, tx pgx.Tx) ([]Feature, error) {
 
 // Set cambia el estado de una función con revisión optimista y devuelve el estado anterior y el
 // nuevo. La fila se bloquea para que dos terminales no cambien la misma función a la vez; una
-// función sin fila se crea con revisión 1 (la revisión esperada debe ser 0).
+// función sin fila se crea con revisión 1 (la revisión esperada debe ser 0). Al pasar de
+// desactivada a activada se fija enabled_at con la hora de la transacción; activarla otra vez sin
+// haberla desactivado o desactivarla conserva la fecha anterior.
 func Set(ctx context.Context, tx pgx.Tx, code string, enabled bool, revision int, actorID string) (*Feature, *Feature, error) {
 	if _, known := Lookup(code); !known {
 		return nil, nil, ErrUnknown
@@ -154,7 +172,8 @@ func Set(ctx context.Context, tx pgx.Tx, code string, enabled bool, revision int
 	if previous.Revision == 0 {
 		_, err = tx.Exec(
 			ctx,
-			"INSERT INTO app.establishment_features(code,enabled,updated_by) VALUES ($1,$2,$3)",
+			`INSERT INTO app.establishment_features(code,enabled,enabled_at,updated_by)
+            VALUES ($1,$2,CASE WHEN $2 THEN now() END,$3)`,
 			code,
 			enabled,
 			actor,
@@ -162,7 +181,9 @@ func Set(ctx context.Context, tx pgx.Tx, code string, enabled bool, revision int
 	} else {
 		_, err = tx.Exec(
 			ctx,
-			`UPDATE app.establishment_features SET enabled=$2,updated_by=$3,revision=revision+1,updated_at=now()
+			`UPDATE app.establishment_features SET enabled=$2,
+                enabled_at=CASE WHEN $2 AND NOT enabled THEN now() ELSE enabled_at END,
+                updated_by=$3,revision=revision+1,updated_at=now()
             WHERE code=$1`,
 			code,
 			enabled,
