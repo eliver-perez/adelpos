@@ -47,6 +47,11 @@ const (
 	permissionAdjustmentsAuthorize = "inventory.adjustments.authorize"
 	permissionValuationRead        = "inventory.valuation.read"
 	permissionSettingsManage       = "inventory.settings.manage"
+	// Fase B (0011).
+	permissionRecipesManage    = "inventory.recipes.manage"
+	permissionSubrecipesManage = "inventory.subrecipes.manage"
+	permissionProductionRecord = "inventory.production.record"
+	permissionWasteRecord      = "inventory.waste.record"
 )
 
 type Permission struct {
@@ -54,9 +59,9 @@ type Permission struct {
 	Description string
 }
 
-// Permissions enumera los permisos de inventario de la fase A. Cada clave también se inserta en la
-// 0010 con la misma descripción y se concede inicialmente solo al rol administrador; las fases B–D
-// agregan las suyas en sus migraciones.
+// Permissions enumera los permisos de inventario. Cada clave también se inserta en la migración de
+// su fase (0010 la fase A, 0011 la fase B) con la misma descripción y se concede inicialmente solo
+// al rol administrador; las fases C y D agregan las suyas en sus migraciones.
 var Permissions = []Permission{
 	{permissionRead, "Consultar inventario (sección y resumen)"},
 	{permissionItemsManage, "Administrar insumos, unidades y presentaciones"},
@@ -68,6 +73,10 @@ var Permissions = []Permission{
 	{permissionAdjustmentsAuthorize, "Autorizar ajustes y corregir clasificaciones vencidas"},
 	{permissionValuationRead, "Consultar valuaciones (valor total del inventario por insumo/almacén)"},
 	{permissionSettingsManage, "Administrar parámetros de inventario"},
+	{permissionRecipesManage, "Administrar recetas y porciones habituales"},
+	{permissionSubrecipesManage, "Administrar subrecetas (preparaciones)"},
+	{permissionProductionRecord, "Registrar elaboraciones de subrecetas almacenables"},
+	{permissionWasteRecord, "Registrar mermas y clasificar cancelaciones"},
 }
 
 type Actor struct {

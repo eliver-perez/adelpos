@@ -493,3 +493,109 @@ Prefijo `/api/v1/inventory`, misma transacción autenticada y callback de audito
 Errores de inventario: `INVENTORY_VALIDATION` (400, mensaje en español sin costos), `PERMISSION_DENIED` (403), `NOT_FOUND` (404) y los 409 de cada ruta, más `REVISION_CONFLICT` e `IDEMPOTENCY_CONFLICT`. Una existencia negativa nunca bloquea: el libro la informa como aviso y las operaciones de las fases siguientes que puedan producirla (consumos, ajustes, transferencias) la expondrán en `warnings` (`NEGATIVE_STOCK`); en la fase A la existencia inicial no puede producirla, por lo que `warnings` llega vacío.
 
 Eventos SSE en el ámbito `inventory` (sin costos ni importes; los recibe `inventory.read`): `inventory.items.changed` (unidades, categorías, insumos y presentaciones), `inventory.settings.changed` (configuración, almacenes, asignaciones de estaciones y la función `inventory_control`), `inventory.stock.changed` y `inventory.movements.recorded`. Auditoría en la misma transacción: `inventory.unit_created|updated`, `inventory.category_created|updated`, `inventory.categories_reordered`, `inventory.item_created|updated`, `inventory.presentation_created|updated`, `inventory.warehouse_created|updated`, `inventory.station_warehouse_assigned`, `inventory.initial_balance_recorded` y `inventory.settings_changed`. Los registros de auditoría de inventario pueden contener costos (solo los consulta `audit.read`).
+
+## Inventario · fase B (esquema 11)
+
+Mismas reglas que la fase A: prefijo `/api/v1/inventory`, `inventory.read` en toda ruta además del permiso indicado,
+permisos comprobados antes de escribir (un 403 revierte), lock 7820148308 (compartido en lecturas, exclusivo en
+escrituras), **toda escritura con `operation_id`** guardada en `restaurant_operations` (reintento con el mismo cuerpo →
+misma respuesta; otro cuerpo → 409 `IDEMPOTENCY_CONFLICT`), `revision` en recetas, porciones y cancelaciones (409
+`REVISION_CONFLICT`), un solo identificador por ruta, cantidades y dinero como cadenas decimales, costos solo con
+`inventory.costs.read` (`null` y `costs_visible: false` si falta). Tipos TS: `desktop/src/services/inventoryRecipes.ts`.
+
+| Método | Ruta bajo `/inventory`                                         | Permiso (además de `inventory.read`)                                                             | Contrato                                                                                                                                                                                                      |
+| ------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/recipes?search&owner_kind&active&product_id&page&page_size`  | —                                                                                                | `{items: [RecipeSummary], total, page, page_size}`; activas primero, luego producto, complemento y preparación                                                                                                |
+| POST   | `/recipes`                                                     | `inventory.recipes.manage` (producto, complemento) o `inventory.subrecipes.manage` (preparación) | `RecipeCreateInput` → `Recipe`; 404 producto, variante, complemento o insumo inexistente; 409 `RECIPE_EXISTS`, `DUPLICATE_NAME`, `ITEM_NOT_PREPARED`, `ITEM_INACTIVE`, `PREPARATION_INACTIVE`, `RECIPE_CYCLE` |
+| GET    | `/recipes/{id}`                                                | — (costos con `inventory.costs.read`)                                                            | `Recipe`                                                                                                                                                                                                      |
+| PUT    | `/recipes/{id}`                                                | el de su tipo                                                                                    | `RecipeVersionInput` → `Recipe` con la versión nueva; 409 `REVISION_CONFLICT`, `RECIPE_TARGET_IMMUTABLE`, `YIELD_DIMENSION_LOCKED`, `PREPARATION_IN_USE`, `RECIPE_CYCLE`                                      |
+| GET    | `/recipe-versions/{version_id}`                                | —                                                                                                | `RecipeVersionDetail` (historial, sin costos)                                                                                                                                                                 |
+| GET    | `/recipe-targets?search&kind&state&active&page&page_size`      | —                                                                                                | `{items: [RecipeTarget], total, page, page_size}`; `kind`: `product`, `variant`, `complement`; `state`: `with_recipe`, `without_recipe`, `no_preparation`                                                     |
+| GET    | `/ingredient-portions?search&active&configured&page&page_size` | —                                                                                                | `{items: [IngredientPortion], total, page, page_size}` (ingredientes del catálogo; `configured` true/false)                                                                                                   |
+| PUT    | `/ingredient-portions/{ingredient_id}`                         | `inventory.recipes.manage`                                                                       | `{operation_id, revision, item_id: uuid\|null, quantity?, unit_id?}` → `IngredientPortion`; `item_id` null retira la porción; repetir la vigente no agrega historial; 409 `ITEM_INACTIVE`                     |
+| GET    | `/cancellations?state&from&until&page&page_size`               | — (valores con `inventory.costs.read`)                                                           | `{items: [Cancellation], total, pending, page, page_size, costs_visible}`; pendientes primero por vencimiento; `from`/`until` = días operativos `AAAA-MM-DD`                                                  |
+| POST   | `/cancellations/{id}/classify`                                 | `inventory.waste.record` hasta el corte; `inventory.adjustments.authorize` después               | `{operation_id, revision, state: "not_prepared"\|"prepared_waste", notes?}` → `Cancellation`; repetir el estado vigente no escribe                                                                            |
+| GET    | `/productions?item_id&warehouse_id&from&until&page&page_size`  | `inventory.production.record` o `inventory.movements.read`                                       | `{items: [Production], total, page, page_size, costs_visible}`, la más reciente primero                                                                                                                       |
+| POST   | `/productions`                                                 | `inventory.production.record`                                                                    | `ProductionInput` → `Production`; 409 `RECIPE_NOT_STORED`, `RECIPE_INACTIVE`, `PREPARATION_INACTIVE`, `RECIPE_EMPTY`, `WAREHOUSE_INACTIVE`                                                                    |
+| GET    | `/consumption-requests?state&page&page_size`                   | `inventory.movements.read`                                                                       | `{items: [ConsumptionRequest], total, pending, failed, page, page_size}`; sin `state`, las no procesadas; `state`: `pending`, `processed`, `failed`, `all`                                                    |
+| GET    | `/consumption/{restaurant_unit_id}`                            | `inventory.movements.read` (valores con `inventory.costs.read`)                                  | `UnitConsumptionTrace`                                                                                                                                                                                        |
+
+### Cuerpos y respuestas
+
+- `RecipeLineInput`: `{component_kind: "item"|"preparation"|"ingredient", item_id?, preparation_recipe_id?, ingredient_id?,
+quantity, unit_id?, takeaway_only?}`. `item`: insumo; `preparation`: receta de preparación; `ingredient` (solo recetas de
+  producto): `ingredient_id` del catálogo con `item_id` **o** `preparation_recipe_id`, sobrescribe la porción habitual de
+  ese ingrediente para este producto (se multiplica por las porciones pedidas). `unit_id` por omisión es la unidad base
+  del destino y debe ser de su misma dimensión. `takeaway_only` (consumo solo en para llevar y ventanilla) no aplica a
+  renglones de ingrediente ni a preparaciones. Hasta 200 renglones; una receta activa requiere al menos uno; un
+  ingrediente una sola vez.
+- `RecipeCreateInput`: `{operation_id, owner_kind: "product"|"complement"|"preparation", product_id?, variant_id?,
+complement_id?, preparation_mode?: "immediate"|"stored", preparation_item_id? (solo stored: insumo de tipo prepared),
+name? (vacío: el del producto · variante, complemento o insumo preparado; obligatorio en preparaciones inmediatas),
+active, yield_quantity? ("1" por omisión), yield_unit_id? (porción en productos y complementos; por omisión la unidad
+base del insumo preparado), production_waste_percent? (solo preparaciones, 0 ≤ x < 100, hasta 4 decimales), notes?
+(≤ 1000), lines: [RecipeLineInput]}`.
+- `RecipeVersionInput`: `{operation_id, revision (= versión vigente), name?, active, yield_quantity?, yield_unit_id?,
+production_waste_percent?, notes?, lines}`. El destino no cambia (enviarlo distinto → `RECIPE_TARGET_IMMUTABLE`);
+  desactivar es una versión con `active: false`.
+- `RecipeSummary`: `{id, owner_kind, owner_kind_label, name, target_name, product_id, variant_id, complement_id,
+preparation_mode, preparation_mode_label, preparation_item_id, active, revision, effective_from, line_count,
+yield_quantity, yield_unit: {id, code, name, dimension}, updated_at, updated_by_name}`.
+- `Recipe`: `RecipeSummary` + `{product_name, variant_name, complement_name, preparation_item: ItemReference|null,
+version: RecipeVersionDetail, versions: [{id, version, active, effective_from, line_count, created_by_name}] (las 50
+más recientes), ingredients: [RecipeIngredient] (solo recetas de producto), used_by: [{id, name, owner_kind, active}]
+(recetas cuya versión vigente usa la preparación), cost: RecipeCost}`.
+- `RecipeVersionDetail`: `{id, recipe_id, version, name, active, yield_quantity, yield_unit, yield_base_quantity,
+production_waste_percent, effective_yield, effective_from, notes, created_by_name, lines: [RecipeLine]}`.
+- `RecipeLine`: `{line_no, component_kind, component_kind_label, item: ItemReference|null, preparation_recipe_id,
+preparation_name, ingredient_id, ingredient_name, quantity, unit, base_quantity, base_unit, takeaway_only, cost,
+cost_display, cost_pending}` (costo del renglón por rendimiento, solo en la versión vigente y con `costs.read`).
+- `RecipeIngredient`: `{ingredient_id, name, included, removable, addable, portion_source: "recipe"|"habitual"|"none",
+item, preparation_name, portion_quantity, included_quantity, cost, cost_display, cost_pending}`.
+- `RecipeCost`: `{costs_visible, unit_cost, unit_cost_display, takeaway_cost, takeaway_cost_display, batch_cost,
+batch_cost_display, yield_unit_cost, yield_unit_cost_display, cost_pending}`. Producto/complemento: `unit_cost` (renglones
+  fijos ÷ rendimiento + ingredientes incluidos × porción) y `takeaway_cost` (renglones «solo para llevar»); preparación:
+  `batch_cost` y `yield_unit_cost` (por unidad base del rendimiento). `cost_pending`: algún componente sin costo.
+- `ItemReference`: `{id, code, name, kind, active, unit: {id, code, name, dimension}}`.
+- `RecipeTarget`: `{kind, product_id, variant_id, complement_id, name, variant_name, category_name, product_kind, active,
+recipe_id, recipe_name, recipe_active, inherited_recipe_id, status, kitchen_route_mode, ingredients_total,
+ingredients_with_portion, linked_product_name, linked_ingredient_name, configured}`.
+- `IngredientPortion`: `{ingredient_id, ingredient_name, catalog_unit, active, configured, item, quantity, unit,
+base_quantity, effective_from, updated_by_name, revision (filas del historial), history: [{item_name, quantity,
+unit_code, base_quantity, effective_from, actor_name}] (hasta 20)}`.
+- `Cancellation`: `{id, restaurant_unit_id, product_name, account_folio, account_name, cancelled_at, operating_date
+(AAAA-MM-DD), deadline_at, expired, state, state_label, resolution: "manual"|"automatic"|"correction"|null,
+resolution_label, classified_by_name, classified_at, notes, revision, required_permission, can_classify, costs_visible,
+lines: [ConsumptionLine]}`. `expired`: pasó el corte o ya la resolvió el reconciliador.
+- `ConsumptionLine`: `{item, warehouse: {id, name}, consumed_quantity (liberación y modificaciones), net_quantity (tras
+clasificaciones), value, value_display}`.
+- `ProductionInput`: `{operation_id, recipe_id (almacenable activa), warehouse_id? (por omisión «Almacén general»),
+batches, produced_quantity? (por omisión lo esperado, en la unidad base del insumo preparado), occurred_at? (RFC 3339, no
+futura), notes? (≤ 500)}`.
+- `Production`: `{id, recipe_id, recipe_name, recipe_version, item, warehouse, batches, expected_quantity,
+produced_quantity, waste_quantity, occurred_at, notes, actor_name, costs_visible, consumed_value,
+consumed_value_display, unit_cost, unit_cost_display, lines: [{item, quantity, stock_after, value, value_display}],
+warnings: [{code: "NEGATIVE_STOCK", message, item_id}]}` (`lines` y `warnings` solo en la respuesta del registro).
+- `ConsumptionRequest`: `{id, seq, kind: "release"|"amend"|"cancel", kind_label, restaurant_unit_id, product_name,
+account_folio, service_mode, released_at, occurred_at, state, state_label, attempts, last_error (genérico),
+next_attempt_at, processed_at, created_at, diagnostics: [{code, path, product_id?, ingredient_id?, complement_id?,
+recipe_id?}]}`. Códigos: `no_configuration`, `ingredient_without_portion`, `complement_without_configuration`,
+  `preparation_unavailable`, `depth_exceeded`, `preparation_cycle`, `unit_not_consumed`, `nothing_consumed`,
+  `unit_reversed`, `unit_already_registered`.
+- `UnitConsumptionTrace`: `{restaurant_unit_id, consumed, state: "consumed"|"reversed"|null, released_at, service_mode,
+costs_visible, requests: [ConsumptionRequest], lines: [ConsumptionLine], movements: [Movement], cancellation:
+Cancellation|null}`.
+
+Consumo (sin rutas de escritura): la liberación a cocina registra una solicitud por unidad con la función
+`inventory_control` activada; las modificaciones y cancelaciones de unidades ya consumidas registran `amend` y `cancel`;
+el trabajador de Go escribe los movimientos `consumption` / `consumption_reversal` (`source_kind` `consumption`,
+`amendment` o `cancellation`, `process` `inventory_worker` o el usuario que clasificó) y las elaboraciones
+`production_out` / `production_in` (`source_kind` `production`).
+
+Eventos SSE (ámbito `inventory`, sin contenido): `inventory.recipes.changed` (recetas y porciones),
+`inventory.stock.changed` e `inventory.movements.recorded` (consumos del trabajador, clasificaciones con movimientos y
+elaboraciones), `inventory.alerts.changed` (cancelaciones por clasificar, clasificadas o reconciliadas y solicitudes que
+fallan o se recuperan). Auditoría: `inventory.recipe_created`, `inventory.recipe_versioned`,
+`inventory.ingredient_portion_saved`, `inventory.cancellation_classified`, `inventory.cancellation_corrected`,
+`inventory.production_recorded` y, con el proceso como responsable (`actor_kind: "process"`, `actor_username:
+"inventory_worker"`), `inventory.cancellation_reconciled`.

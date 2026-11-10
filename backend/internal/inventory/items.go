@@ -488,6 +488,9 @@ func (handler *service) updateItem(parts []string) (any, error) {
 	if err := handler.barcodeTaken(values.barcode, previous.ID, ""); err != nil {
 		return nil, err
 	}
+	if err := handler.checkKindChange(previous, input.Kind); err != nil {
+		return nil, err
+	}
 	reference := parseOptionalCostText(previous.ReferenceCost)
 	if input.ReferenceCost.Set {
 		reference = values.referenceCost
@@ -529,6 +532,35 @@ func (handler *service) checkBaseUnitChange(previous *Item, referenceSent bool) 
 	if previous.ReferenceCost != nil && !referenceSent {
 		return conflict("REFERENCE_COST_REQUIRED",
 			"Cambiar la unidad base exige capturar de nuevo el costo de referencia por la unidad nueva.")
+	}
+	// Recetas y porciones guardan cantidades convertidas a la unidad base (fase B).
+	var referenced bool
+	err := handler.tx.QueryRow(handler.ctx, `SELECT EXISTS(SELECT FROM app.inventory_recipe_lines WHERE item_id=$1)
+        OR EXISTS(SELECT FROM app.inventory_ingredient_portions WHERE item_id=$1)
+        OR EXISTS(SELECT FROM app.inventory_recipes WHERE preparation_item_id=$1)`, previous.ID).Scan(&referenced)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return conflict("BASE_UNIT_IN_RECIPES",
+			"El insumo se usa en recetas o porciones expresadas en su unidad base: no se puede cambiar la unidad.")
+	}
+	return nil
+}
+
+// checkKindChange impide que un insumo preparado que produce una receta almacenable deje de ser
+// «Preparación almacenable» (sus elaboraciones lo producen).
+func (handler *service) checkKindChange(previous *Item, kind string) error {
+	if previous.Kind != "prepared" || kind == "prepared" {
+		return nil
+	}
+	var produced bool
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.inventory_recipes WHERE preparation_item_id=$1)",
+		previous.ID).Scan(&produced); err != nil {
+		return err
+	}
+	if produced {
+		return conflict("ITEM_PRODUCED_BY_RECIPE", "El insumo lo produce una preparación almacenable: conserva su tipo.")
 	}
 	return nil
 }

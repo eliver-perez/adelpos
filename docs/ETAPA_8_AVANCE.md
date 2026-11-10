@@ -532,3 +532,276 @@ sincronizar (la 0011 se aplicó en las bases temporales del navegador).
   `SPEC` (`inventory.spec.ts` y `restaurant.spec.ts` en la misma base temporal): Chromium 2 aprobadas (20.7 s y
   53.6 s) y WebKit 2 aprobadas (20.2 s y 53.7 s). `restaurant.spec.ts` solo, en una base nueva: Chromium aprobado
   (54.4 s).
+
+## Fase B · backend de recetas y consumo (B1)
+
+Recetas versionadas, subrecetas, porciones habituales, solicitudes de consumo por liberación a cocina, trabajador de
+consumo de Go, ajustes por modificación, clasificación de cancelaciones con reconciliador, elaboraciones de subrecetas
+almacenables, diagnóstico del consumo, rutas `inventory/*`, puente Tauri y `desktop/src/services/inventoryRecipes.ts`.
+Las indicaciones rápidas con efecto (cambio de `catalog_category_quick_notes`) y la interfaz de Recetas y cancelaciones
+son de otras partes de la fase B. La 0011 no se aplicó a la instalación real.
+
+### Migración 0011
+
+Transaccional, sin tocar 0001–0010 (no hizo falta ningún ALTER de la fase A) ni filas existentes, **sin siembras** y con
+84 restricciones de nombre explícito; los CHECK con columnas opcionales exigen `IS NOT NULL` en la rama que valida (la
+prueba de actualización encontró uno que aceptaba una preparación sin modalidad y se corrigió antes de cualquier
+aplicación).
+
+| Estructura                               | Contenido                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inventory_ingredient_portions`          | Porción habitual por ingrediente del catálogo, historial de **solo inserción** (`seq`, `effective_from`): insumo, cantidad y unidad capturadas y `base_quantity` convertida al guardar. Una fila sin insumo retira la porción.                                                                                                        |
+| `inventory_recipes`                      | Identidad: `owner_kind` `product` (con `variant_id` opcional, llave compuesta a la variante del producto), `complement` o `preparation` (`preparation_mode` `immediate`/`stored` + `preparation_item_id`). Únicos parciales por destino; nombre único entre preparaciones. `name`, `active` y `revision` reflejan la versión vigente. |
+| `inventory_recipe_versions`              | Versiones **inmutables** con `active` (desactivar crea una versión), `yield_quantity`/`yield_unit_id` y `yield_base_quantity`, `production_waste_percent` (0 ≤ x < 100), `effective_from` (hora del guardado), notas, autor y `operation_id`.                                                                                         |
+| `inventory_recipe_lines`                 | Renglones inmutables `item`, `preparation` o `ingredient` (este último con insumo **o** preparación), cantidad y unidad capturadas, `base_quantity`, `takeaway_only` (no en renglones de ingrediente). Un renglón por ingrediente y versión.                                                                                          |
+| `inventory_consumption_requests`         | Solicitudes `release`/`amend`/`cancel` por unidad comercial: versión, `released_at` de la liberación canónica, `occurred_at`, `service_mode` congelado, `state` `pending`/`processed`/`failed`, intentos, `last_error` genérico, `next_attempt_at`, `diagnostics` (arreglo JSON). `UNIQUE(kind, restaurant_unit_id, source_id)`.      |
+| `inventory_unit_consumptions`            | Estado por unidad consumida (`consumed`/`reversed`, última versión y solicitud, `released_at`, modalidad).                                                                                                                                                                                                                            |
+| `inventory_cancellation_classifications` | Una por unidad cancelada con consumo: `cancelled_at`, `operating_date`, `deadline_at`, `state` `pending`/`not_prepared`/`prepared_waste`, `resolution` `manual`/`automatic`/`correction`, `classified_by`, notas, revisión. CHECK: la automática solo como «No preparado» y sin usuario.                                              |
+| `inventory_productions`                  | Elaboraciones **inmutables**: versión, insumo, almacén, lotes, esperado, producido, merma, valor consumido (confidencial), actor, `operation_id` único y movimiento de entrada.                                                                                                                                                       |
+| Disparadores                             | `app.inventory_reject_mutation()` (de la 0010) en porciones, versiones, renglones y elaboraciones (UPDATE, DELETE, TRUNCATE).                                                                                                                                                                                                         |
+| Permisos                                 | `inventory.recipes.manage`, `inventory.subrecipes.manage`, `inventory.production.record`, `inventory.waste.record`, solo al administrador (14 permisos de inventario en total).                                                                                                                                                       |
+
+### Recetas, subrecetas y porciones
+
+- **Tipos**: producto (la receta de la variante prevalece; si falta o está inactiva, la del producto), complemento y
+  preparación inmediata (se descompone en sus insumos) o almacenable (produce un insumo de tipo `prepared`; al venderse se
+  consume ese insumo y nunca sus ingredientes). El destino, la modalidad y el insumo producido se fijan al crear
+  (`RECIPE_TARGET_IMMUTABLE`); producto, variante y complemento deben existir en el catálogo.
+- **Versionado**: cada guardado (también desactivar) crea una versión inmutable con `effective_from`; el `PUT` exige la
+  `revision` (= versión vigente). El trabajador resuelve con la versión vigente **a la fecha de la liberación**.
+- **Rendimiento**: en productos y complementos se expresa en porciones (1 por omisión) y cada unidad consume
+  renglones ÷ rendimiento. En preparaciones, la cantidad de un lote; el rendimiento efectivo es
+  `rendimiento × (1 − merma/100)`. La unidad base de una preparación es la de su insumo preparado (almacenable) o la de
+  equivalencia 1 de su dimensión (inmediata: g, ml, pza o porción); la dimensión del rendimiento no cambia entre
+  versiones (`YIELD_DIMENSION_LOCKED`).
+- **Unidades**: cada renglón se captura en cualquier unidad de la dimensión de su destino y se guarda también en la
+  unidad base; cambiar después la equivalencia de una unidad propia no altera recetas ni consumos. Un insumo usado en
+  recetas o porciones ya no cambia de unidad base (`BASE_UNIT_IN_RECIPES`) y el insumo que produce una almacenable no
+  deja de ser «Preparación almacenable» (`ITEM_PRODUCED_BY_RECIPE`).
+- **Ciclos**: se rechazan (`RECIPE_CYCLE`) con un recorrido sobre las versiones vigentes de las preparaciones, cuyas
+  aristas son las preparaciones que usan y la almacenable que produce cada insumo que consumen; también una preparación
+  que se usa a sí misma o una almacenable que consume su propio insumo. La resolución corta además en 8 niveles.
+- **Preparación en uso**: no se desactiva si la usa la versión vigente de una receta activa (`PREPARATION_IN_USE`).
+- **Porción habitual** (`inventory.recipes.manage`): cantidad de un insumo por porción del ingrediente del catálogo;
+  un renglón de ingrediente de la receta del producto la sobrescribe para ese producto. Repetir la vigente no agrega
+  historial.
+- **Costo teórico** (solo `inventory.costs.read`): costo vigente de cada insumo (V/Q con existencia y valor positivos;
+  si no, último costo válido; si no, costo de referencia; si no, «pendiente» y no suma); preparaciones inmediatas
+  recursivas por rendimiento efectivo; almacenables al costo vigente de su insumo. En productos: renglones fijos ÷
+  rendimiento + ingredientes incluidos del catálogo × su porción; los «solo para llevar» aparte. Opciones de grupo y
+  componentes de combo tienen sus propias recetas y no se suman.
+- **Destinos de receta**: productos, variantes y complementos con estado `with_recipe`, `without_recipe` o
+  `no_preparation` (sin receta y ruta «Sin preparación») y `configured` (consumiría algo por porciones o vínculos).
+
+### Consumo por liberación
+
+- **Al liberar**: `kitchen/releases.go prepareRelease`, justo después del bucle que inserta `kitchen_unit_releases` y
+  antes de los tickets, llama a `inventory.RecordReleases(ctx, tx, releaseID, units, contextSnapshot.Mode)`: con
+  `inventory_control` activada, **un solo** `INSERT … SELECT … FROM kitchen_unit_releases … ON CONFLICT DO NOTHING`
+  (versión y `released_at` de la fila canónica). Sin lock 7820148308 ni lectura de recetas. Cubre los cuatro caminos
+  (confirmación, planificador, liberación manual y reintento de un cambio pendiente).
+- **Al cambiar**: `kitchen.Integrate` llama a `inventory.RecordChange(ctx, tx, eventID, kind, payload)` para
+  `item.modified`/`item.cancelled` **antes** de procesar cocina: `amend` para `modified_unit_ids` (versión vigente de la
+  unidad) y `cancel` para `cancelled_unit_ids` (reducciones) o `unit_ids` (cancelación), solo para unidades con fila
+  canónica **y** solicitud de liberación (decisión 2).
+- **Trabajador** `inventory.Worker` (en `main.go`, mismo contexto cancelable y apagado ordenado que cocina): sondeo de
+  1 s sin LISTEN/NOTIFY; cada vuelta procesa lo pendiente en lotes de 50 hasta vaciarlo y luego reconcilia. Cada
+  solicitud en su propia transacción con 7820148308 exclusivo, tomada con `FOR UPDATE SKIP LOCKED` en orden de `seq` y
+  solo si su unidad no tiene otra anterior sin procesar. Idempotente por estado, por `inventory_unit_consumptions` y por
+  `entry_key` (`consumption:<solicitud>:<insumo>:<almacén>`, `amend:…`, `classification:<id>:<revisión>:…`). Un fallo
+  revierte esa solicitud y, en otra transacción, la marca `failed` con el mensaje genérico «No se pudo calcular el
+  consumo; se reintentará automáticamente.», `attempts+1` y espera 2, 4, 8 … 256 s (tope 300 s); no detiene las demás
+  unidades. `ProcessPending(ctx, pool, limit)` y `ReconcileCancellations(ctx, pool, now)` son las funciones que llaman
+  las pruebas. Eventos `inventory.stock.changed`, `inventory.movements.recorded` y `inventory.alerts.changed` en la
+  transacción del trabajador.
+- **Resolución** (`inventory/resolution.go`, función pura con 13 pruebas unitarias), a `released_at`:
+  1. producto o variante: renglones `item` × 1/rendimiento; `preparation` inmediata descompuesta por rendimiento
+     efectivo (recursiva); almacenable o insumo preparado consumido como insumo;
+  2. ingredientes de `quote_line.ingredients[]`: `requested ×` porción (renglón de ingrediente de la receta o porción
+     habitual vigente); sin porción, nada (diagnóstico `ingredient_without_portion`);
+  3. opciones de `groups[].options[]`: `requested × factor de la porción del pricing_snapshot (1 si no tiene) ×` receta
+     del complemento; si no, configuración estándar del producto vinculado (renglones de su receta + ingredientes
+     incluidos × porción); si no, porción habitual del ingrediente vinculado; si no, nada
+     (`complement_without_configuration`). El precio no interviene;
+  4. componentes de combo × su cantidad, recursivos, con su propia personalización (`root/0`, `root/1`…);
+  5. `takeaway_only` solo con modalidad `takeaway` (incluye ventanilla);
+  6. almacén por parte: estaciones de `kitchen_tasks.instructions.parts[].path` de la unidad (también tareas
+     canceladas); con varias, la primera por nombre con almacén asignado a esa fecha; sin asignación, «Almacén general»;
+     una parte sin estación hereda la de su padre. El motivo del movimiento lleva «Liberación a cocina · Estación: …»;
+  7. resultado redondeado a 6 decimales por (insumo, almacén); un movimiento `consumption` por par con
+     `occurred_at = released_at`. Sin configuración no se inventa nada: queda `no_configuration` en `diagnostics`.
+- **Modificación** (`amend`): objetivo = consumo de la versión nueva a la fecha de liberación de la unidad; se escribe la
+  diferencia con el neto registrado por (insumo, almacén): `consumption` (falta) o `consumption_reversal` al valor
+  proporcional registrado (exacto si revierte todo); `occurred_at` = hora del cambio. Sin consumo previo: sin efecto.
+- **Cancelación** (`cancel`): clasificación `pending` con el día operativo de la hora de cancelación; si la unidad no
+  consumió nada, no se crea (`nothing_consumed`).
+- **Clasificación**: «No preparado» revierte el neto exacto; «Preparado / merma» conserva el consumo (si antes se revirtió,
+  vuelve a consumir lo revertido, a costo vigente). Hasta el corte, `inventory.waste.record` (resolución `manual`, también
+  para cambiarla); después del corte o tras la automática, solo `inventory.adjustments.authorize` (resolución
+  `correction`). Repetir el estado vigente no escribe nada. Los movimientos llevan la hora de la cancelación y origen
+  `cancellation`.
+- **Reconciliador**: «No preparado» automático a toda pendiente con `deadline_at ≤ now`, una por transacción con el
+  lock, `UPDATE … WHERE revision` (idempotente), auditoría `inventory.cancellation_reconciled` con `actor_kind='process'`
+  y `actor_username='inventory_worker'`; al iniciar Go procesa los días que estuvo apagado.
+- **Día operativo** (`operating_day.go`): un instante pertenece al día cuya fecha local tiene la hora de corte en o antes
+  de él (zona del establecimiento); vence en el corte del día siguiente. Si la hora de corte no existe (adelanto de
+  horario), el corte es el primer instante tras el salto; si ocurre dos veces (atraso), la primera.
+- **Elaboraciones** (`inventory.production.record`): consumen la versión vigente × lotes (`production_out`), producen el
+  insumo preparado con el valor total consumido (`production_in`, entrada a valor exacto) y guardan esperado, producido
+  (por omisión, lo esperado) y merma (`lotes × rendimiento − producido`, mínimo 0). Idempotentes; existencias negativas
+  con aviso `NEGATIVE_STOCK`.
+- **Devoluciones financieras**: `payments` no toca solicitudes ni movimientos (probado).
+
+### Rutas y permisos
+
+Todas exigen `inventory.read`; contrato completo en la sección «Inventario · fase B (esquema 11)» de `API_CONTRACTS.md`
+(texto en `docs8B1/api_contracts.md`) y tipos en `desktop/src/services/inventoryRecipes.ts`.
+
+| Ruta                                                                                                                                | Permiso adicional                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `GET recipes`, `GET recipes/{id}`, `GET recipe-versions/{id}`, `GET recipe-targets`, `GET ingredient-portions`, `GET cancellations` | — (costos solo con `inventory.costs.read`)                                                       |
+| `POST recipes`, `PUT recipes/{id}`                                                                                                  | `inventory.recipes.manage` (producto, complemento) o `inventory.subrecipes.manage` (preparación) |
+| `PUT ingredient-portions/{ingrediente}`                                                                                             | `inventory.recipes.manage`                                                                       |
+| `POST cancellations/{id}/classify`                                                                                                  | `inventory.waste.record` hasta el corte; `inventory.adjustments.authorize` después               |
+| `POST productions`                                                                                                                  | `inventory.production.record`                                                                    |
+| `GET productions`                                                                                                                   | `inventory.production.record` o `inventory.movements.read`                                       |
+| `GET consumption-requests`, `GET consumption/{unidad}`                                                                              | `inventory.movements.read`                                                                       |
+
+Puente Tauri: 14 operaciones nuevas en `api.rs` (8 fijas y 6 con un identificador) con la prueba
+`inventory_recipe_and_consumption_routes_are_closed`; lista blanca de consulta ampliada con `owner_kind`, `product_id`
+y `configured`. `Operation` de `desktop/src/services/api.ts` ampliado con esas 14 operaciones (cambio mínimo al final).
+
+### Decisiones y desviaciones (fase B, backend)
+
+1. **Versión de receta por su identificador**: `GET inventory/recipe-versions/{version_id}` en lugar de
+   `recipes/{id}/versions/{versión}`, porque el puente nativo admite un solo identificador por ruta.
+2. `RecordChange` registra `amend`/`cancel` solo si la unidad tiene fila canónica **y** solicitud de liberación: una
+   unidad liberada antes de activar (o con la función apagada al liberarse) no deja solicitudes vacías. El trabajador,
+   además, ignora una solicitud sin consumo previo de la unidad.
+3. Destino, modalidad e insumo de una preparación inmutables; dimensión del rendimiento de una preparación inmutable;
+   unidad base de una preparación = la de su insumo (almacenable) o la de equivalencia 1 de su dimensión (inmediata).
+4. Rendimiento en recetas de producto y complemento (en porciones; 1 por omisión). La merma de elaboración solo existe
+   en preparaciones y define el rendimiento efectivo (descomposición inmediata y esperado de una elaboración); la merma
+   registrada de una elaboración es lotes × rendimiento − producido y el costo del insumo preparado incluye esa merma
+   (entra con todo el valor consumido).
+5. Un renglón de ingrediente puede apuntar a un insumo o a una preparación (extensión natural: «Salsa de la casa» como
+   ingrediente del catálogo); la porción habitual solo apunta a insumos.
+6. Complemento ligado a un producto sin receta propia: se consume la configuración **estándar** del producto (renglones
+   de su receta e ingredientes incluidos × porción); sus grupos y componentes no se recorren.
+7. Una receta de variante inactiva cede a la del producto; una receta inactiva cuenta como «sin receta».
+8. Horas de negocio: liberación → `released_at`; modificación → hora del cambio; clasificación (manual, automática o
+   corrección) → hora de la cancelación (es cuando el insumo dejó o no de usarse, y así un conteo posterior la ve).
+9. El vencimiento de una cancelación se calcula y guarda al registrarla (zona y corte vigentes); cambiar después la hora
+   de corte no mueve los vencimientos ya registrados. La resuelta automáticamente cuenta como vencida.
+10. «Preparado / merma» después de un «No preparado» vuelve a consumir a costo vigente (el valor puede diferir del
+    original: nada histórico se reescribe).
+11. Una solicitud fallida se reintenta indefinidamente con espera creciente (tope 300 s) y bloquea solo las posteriores
+    de su unidad; queda visible en `GET consumption-requests` y publica `inventory.alerts.changed` la primera vez.
+12. Una unidad sin consumo neto al cancelarse no genera clasificación (`nothing_consumed`).
+13. Los productos «Sin preparación» no tienen tareas: consumen del almacén predeterminado (o del de la estación del
+    combo, si son componente).
+14. La consulta del libro se amplió con los orígenes `consumption`, `amendment`, `cancellation` y `production`.
+15. Prueba de la fase A `checkLedgerConsistency`: el conteo fijo de 4 valuaciones se generalizó a «una valuación por
+    insumo con movimientos» porque la fase B agrega insumos; el resto de la verificación no cambió.
+
+### Mediciones (§32.17)
+
+Prueba `inventory_b_measure_release` (opt-in con `ADEL_INVENTORY_MEASURE=1`): 200 confirmaciones con envío a cocina con
+la función activada y 200 desactivada, en bloques alternados de 50 tras 5 de calentamiento por caso; se mide solo el
+`POST …/confirm` (una hamburguesa por cuenta nueva) en la copia aislada contra el clúster temporal 55499.
+
+| Ejecución                   | Desactivada (media / p95 / máx.) | Activada (media / p95 / máx.) | Trabajador                             |
+| --------------------------- | -------------------------------- | ----------------------------- | -------------------------------------- |
+| `go test -tags=integration` | 6.79 / 7.83 / 9.73 ms            | 7.01 / 7.74 / 8.11 ms         | 205 solicitudes en 1.23 s (6.0 ms c/u) |
+| `go test -race` (final)     | 17.58 / 20.70 / 21.76 ms         | 18.03 / 21.22 / 23.04 ms      | 205 en 1.35 s (6.6 ms c/u)             |
+
+La liberación con la función activada solo agrega una lectura por clave primaria y un `INSERT … SELECT` (≈ 0.2 ms de
+media sin el detector de carreras; el p95 queda dentro del ruido). Resolver y escribir el consumo de una unidad cuesta
+≈ 6 ms en el trabajador: hacerlo síncrono alargaría el lock 7820148305 unas 30 veces más que el registro de la
+solicitud por cada unidad liberada, así que **se conserva el consumo asíncrono**.
+
+### Limitaciones
+
+- Sin interfaz (Recetas, cancelaciones pendientes y diagnóstico se construyen sobre este contrato) y sin alertas (fase D:
+  los datos ya existen en `GET cancellations?state=pending`, `GET consumption-requests`, `diagnostics` y
+  `GET recipe-targets?state=without_recipe`).
+- El costo teórico de un producto no incluye complementos ni componentes de combo; el de un complemento vinculado a un
+  producto no recorre los grupos ni componentes de ese producto.
+- La clasificación guarda solo su estado vigente; el historial está en la auditoría y en los movimientos compensatorios.
+- Las elaboraciones no se anulan por API (una corrección será un ajuste de la fase D).
+- El trabajador no audita cada consumo en `audit_events` (los movimientos registran `process='inventory_worker'`); sí la
+  reconciliación automática.
+- Las mediciones son de este equipo y del clúster temporal, sin concurrencia real de terminales.
+- Las indicaciones rápidas con efecto no forman parte de este trabajo.
+
+### Pruebas de la fase B (backend)
+
+- **Unitarias** (`internal/inventory`, 41 pruebas en total con las de la fase A):
+  - `resolution_test.go` (13): producto normal, «Sin cebolla» → 0, «Con cebolla» → 1, «Cebolla extra» → 2, 3 porciones
+    y media porción; observación libre ignorada; ingrediente sin porción sin consumo inventado; producto sin
+    configuración; renglón de ingrediente que sobrescribe la porción; complementos sustituidos (filete: pasta y ensalada,
+    no arroz), «2 porciones de papas», factor de porción, complemento sin configuración; complemento ligado a producto y
+    receta propia que prevalece; «solo para llevar» en salón y para llevar; preparación inmediata con y sin merma,
+    almacenable consumida como insumo, rendimiento de 3 porciones redondeado, preparación inactiva y ciclo defensivo;
+    receta de variante y su retirada; combo en dos estaciones con almacenes distintos y componente heredado; elección
+    de almacén (primera por nombre con asignación, sin asignación, sin estación); límite de profundidad; lotes de una
+    elaboración; detección de ciclos (también a través del insumo producido).
+  - `operating_day_test.go` (2 pruebas, 14 casos): corte 05:00 en Monterrey (antes, en el corte, un minuto antes, noche,
+    medianoche, 04:30 y fin de año) y en Tijuana con el adelanto (8/3/2026: corte a las 05:00 y corte inexistente a las
+    02:30) y el atraso (1/11/2026: primera y segunda pasada de la 01:30 y corte a las 05:00).
+  - `permissions_test.go`: los 14 permisos de Go están en la 0010 o la 0011 con la misma descripción, solo para el
+    administrador.
+- **Integración** (`operations/inventory_recipes_test.go` e `inventory_consumption_test.go`, encadenadas al final del
+  núcleo de inventario con su propio catálogo, estaciones, almacenes e insumos; 21 subpruebas + la medición):
+  - porciones con conversión, revisión, historial, retirada, 403 y solo inserción;
+  - recetas: alta con conversión kg → g, permisos (403 sin escribir nada), rechazos (duplicada, producto o variante
+    ajenos, dimensión, ingrediente en complemento, «solo para llevar» en ingrediente, sin renglones), versiones 2 y 3,
+    revisión obsoleta, destino inmutable, versión 1 conservada, renglones de solo inserción, costo teórico $39.35 +
+    $2.00 para llevar con `costs.read` y oculto sin él, eventos y auditoría;
+  - subrecetas: salsa inmediata (lote $17.00, $0.034/ml), almacenable que exige insumo preparado, rendimiento efectivo
+    con 4 % de merma, ciclos a través del insumo producido, autouso y propio insumo, dimensión bloqueada, preparación en
+    uso, costo pendiente; elaboración (2 lotes: 2000 g de arroz, 160 g de tomate, 20 g de chile = $56.80; esperado 4800,
+    producido 4750, merma 250), 403, idempotencia y consistencia del libro;
+  - destinos de receta (estado, porciones y complementos);
+  - función desactivada sin solicitudes ni movimientos; activación; unidad liberada antes de activar modificada y
+    cancelada sin efecto; pedido programado antes de activar y liberado después que consume (con bolsa para llevar);
+  - borrador y cuenta sin consumo; confirmación que termina con la solicitud pendiente (trabajador detenido); una
+    solicitud por unidad; reintento HTTP idempotente; reproceso (vuelta repetida y solicitud devuelta a pendiente) sin
+    duplicar; estación en el motivo; queso con saldo 1, 0 y −1 en el libro real (−$5 promedio, exacto y a referencia);
+  - personalizaciones (las seis de arriba con diagnóstico del jalapeño), filete en dos estaciones con una solicitud,
+    arroz por pasta a $140, dos porciones de papas, medias porciones; combo personalizado en dos estaciones y dos
+    almacenes sin duplicar; bolsa en para llevar y ventanilla y no en salón;
+  - reimpresión con cambio de impresora, división, cambio de mesa y combinación sin consumo;
+  - modificación de partida liberada (solo +20 g de cebolla y la reversión exacta de la lechuga); receta modificada
+    entre liberación y procesamiento (consume la anterior; la siguiente, la nueva);
+  - reducción de cantidad → cancelación pendiente con su día operativo y vencimiento; «No preparado» con reversión exacta
+    (cantidad y valor netos en cero); «Preparado / merma» sin movimientos, repetición sin efecto y cambio a «No
+    preparado»; reconciliación antes del corte (nada), después (automática) e idempotente, con auditoría del proceso;
+    corrección después del corte (403 con `waste.record`, 200 con `adjustments.authorize` y nuevo consumo); trabajador
+    que al iniciar procesa lo pendiente y reconcilia una vencida;
+  - subreceta elaborada sin doble descuento (enchiladas: arroz rojo a 200 × 56.80 / 4750 = $2.391579);
+  - devolución financiera sin reintegración;
+  - falla controlada de una unidad (disparador de prueba): `failed`, mensaje genérico, sin reintento inmediato, la otra
+    unidad se procesa, diagnóstico de solicitudes, recuperación sin duplicar; traza de una unidad con y sin costos;
+    eventos del trabajador;
+  - eventos `inventory.*` sin contenido y consistencia del libro al final.
+- **Actualización desde el esquema 9** (`TestStage8UpgradeOfExistingInstallation`, ampliada): la 0010 y la 0011 se aplican
+  y no se repiten; 14 permisos nuevos solo del administrador; la 0011 no siembra filas; sus 84 restricciones con nombre;
+  CHECK con tablas temporales (recetas por tipo, renglones, porciones, solicitudes, clasificaciones y versiones); versiones,
+  renglones y porciones de solo inserción; llave compuesta de la variante.
+- **Rust**: `inventory_recipe_and_consumption_routes_are_closed` (14 operaciones, sin identificador o con `../../settings`
+  rechazadas, sin borrado de recetas ni escritura de consumo, lista blanca de consulta).
+
+### Verificación de la fase B (backend)
+
+En la copia aislada `scratchpad/repoB1`, con el clúster temporal del puerto 55499 (nunca la instalación real):
+
+- `gofmt -l` (archivos Go propios), `rustfmt --check` de `api.rs` y `prettier --check` de los servicios TS: sin
+  diferencias.
+- `go vet ./...` y `go vet -tags=integration ./...`: aprobados.
+- `go test -race -count=1 ./...` (unitarias): todos los paquetes `ok`, incluido `internal/inventory`.
+- Integración (`go test -race -tags=integration`): `internal/database` ok (3.2 s), `internal/administration` ok
+  (56.8 s), `internal/operations` ok (165.4 s, con la aceptación completa de las etapas 4–7.1, la fase A, la fase B y la
+  medición), `internal/payments` ok (1.3 s) e `internal/catalog` ok (6.5 s).
+- `cargo test --locked --offline`: 18 aprobadas (1 ignorada, la misma de antes).
+- `tsc --noEmit`: sin errores.

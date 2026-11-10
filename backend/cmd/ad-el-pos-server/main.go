@@ -19,6 +19,7 @@ import (
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
@@ -129,7 +130,14 @@ func run(logger *slog.Logger) error {
 		defer close(workerDone)
 		(&kitchen.Worker{Pool: pool, Transport: kitchen.HostTransport{}, Logger: logger}).Run(workerContext)
 	}()
-	defer func() { stopWorker(); <-workerDone }()
+	// Trabajador de consumo de inventario (etapa 8): procesa las solicitudes de consumo y reconcilia
+	// las cancelaciones vencidas; al iniciar procesa lo que quedó pendiente.
+	inventoryDone := make(chan struct{})
+	go func() {
+		defer close(inventoryDone)
+		(&inventory.Worker{Pool: pool, Logger: logger}).Run(workerContext)
+	}()
+	defer func() { stopWorker(); <-workerDone; <-inventoryDone }()
 	stopped := make(chan error, 1)
 	go func() {
 		if cfg.TLSCertificate != "" {
