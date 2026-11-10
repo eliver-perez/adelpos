@@ -467,9 +467,23 @@ func (handler *service) createPurchaseOrder(_ []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	saved, err := handler.insertDraftOrder(prepared)
+	if err != nil {
+		return nil, err
+	}
+	id := saved.ID
+	if err := handler.publish("inventory.purchases.changed", &id); err != nil {
+		return nil, err
+	}
+	return saved, handler.audit(handler.ctx, handler.tx, "inventory.purchase_order_created", "inventory_purchase_order", &id, nil, saved)
+}
+
+// insertDraftOrder guarda un borrador validado con sus renglones y lo devuelve completo. Lo usan el
+// alta de una orden y el borrador creado desde las sugerencias de compra (fase D).
+func (handler *service) insertDraftOrder(prepared preparedOrder) (*PurchaseOrder, error) {
 	id := newID()
 	actor := handler.request.Actor.UserID
-	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.inventory_purchase_orders(id,supplier_id,order_date,expected_warehouse_id,notes,
+	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.inventory_purchase_orders(id,supplier_id,order_date,expected_warehouse_id,notes,
             subtotal,discount,tax,total,line_count,created_by,updated_by,operation_id)
         VALUES ($1,$2,$3::date,$4,$5,$6::numeric,$7::numeric,$8::numeric,$9::numeric,$10,$11,$11,$12)`,
 		id, prepared.supplier.ID, prepared.date, prepared.warehouse.ID, prepared.notes, money(prepared.totals.Subtotal),
@@ -481,14 +495,7 @@ func (handler *service) createPurchaseOrder(_ []string) (any, error) {
 	if err := handler.insertOrderLines(id, prepared.lines); err != nil {
 		return nil, err
 	}
-	saved, err := handler.readPurchaseOrder(id)
-	if err != nil {
-		return nil, err
-	}
-	if err := handler.publish("inventory.purchases.changed", &id); err != nil {
-		return nil, err
-	}
-	return saved, handler.audit(handler.ctx, handler.tx, "inventory.purchase_order_created", "inventory_purchase_order", &id, nil, saved)
+	return handler.readPurchaseOrder(id)
 }
 
 // updatePurchaseOrder reemplaza los datos y renglones de un borrador con revisión optimista.

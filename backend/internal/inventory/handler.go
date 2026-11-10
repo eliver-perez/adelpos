@@ -20,8 +20,11 @@ type route struct {
 	// cashRead indica que la ruta lee gastos de caja: toma 7820148305 compartido antes que
 	// 7820148308 para leerlos de forma consistente con payments (orden de locks de CLAUDE.md §3).
 	cashRead bool
-	readOnly bool
-	action   func(handler *service, parts []string) (any, error)
+	// staticPath indica que la segunda posición de la ruta es un nombre fijo (por ejemplo
+	// purchase-suggestions/draft-order) y no un identificador.
+	staticPath bool
+	readOnly   bool
+	action     func(handler *service, parts []string) (any, error)
 }
 
 func read(action func(handler *service, parts []string) (any, error), permissions ...string) *route {
@@ -44,10 +47,13 @@ func (selected *route) withCash() *route {
 	return selected
 }
 
-// resolve enumera las rutas de inventario (fases A, B y C). El puente nativo admite un solo identificador por ruta,
+// resolve enumera las rutas de inventario (fases A, B, C y D). El puente nativo admite un solo identificador por ruta,
 // siempre en la segunda posición; los registros relacionados viajan en el cuerpo.
 func resolve(method string, parts []string) *route {
 	if selected := resolvePurchasing(method, parts); selected != nil {
+		return selected
+	}
+	if selected := resolveControl(method, parts); selected != nil {
 		return selected
 	}
 	length := len(parts)
@@ -174,7 +180,7 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err := request.Actor.RequireAny(selected.anyPermission...); err != nil {
 		return nil, err
 	}
-	if len(parts) > 1 {
+	if len(parts) > 1 && !selected.staticPath {
 		if err := validateID(parts[1]); err != nil {
 			return nil, err
 		}

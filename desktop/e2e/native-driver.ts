@@ -27,13 +27,16 @@ export async function installDriver(page: Page) {
   const provisioning = readFileSync(process.env.ADEL_BROWSER_PROVISIONING!, 'utf8').trim();
   const rust = readFileSync(new URL('../src-tauri/src/api.rs', import.meta.url), 'utf8');
   const routes = new Map<string, { method: string; path: string }>();
-  for (const match of rust.matchAll(/"([a-z_]+)"\s*=>\s*Some\(\(Method::(\w+),\s*"([^"]+)"\)\)/g)) {
+  for (const match of rust.matchAll(
+    /"([a-z_]+)"\s*=>\s*\{?\s*Some\(\(\s*Method::(\w+),\s*"([^"]+)"\s*\)\)/g,
+  )) {
     const [, operation, method, route] = match;
     if (!operation || !method || !route) continue;
     routes.set(operation, { method, path: route });
   }
-  // rustfmt escribe algunas entradas con llaves (`"op" => { (Method::GET, format!(…)) }`): se aceptan
-  // ambas formas para que el puente conozca todas las rutas de la lista cerrada.
+  // rustfmt escribe algunas entradas con llaves (`"op" => { (Method::GET, format!(…)) }` o
+  // `"op" => { Some((Method::POST, "…")) }`): las dos expresiones aceptan ambas formas para que el
+  // puente conozca todas las rutas de la lista cerrada.
   for (const match of rust.matchAll(
     /"([a-z_]+)"\s*=>\s*\{?\s*\(\s*Method::(\w+),\s*format!\("([^"]+)"\)/g,
   )) {

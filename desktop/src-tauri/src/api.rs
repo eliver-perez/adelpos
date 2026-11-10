@@ -160,6 +160,21 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "inventory_supplier_returns" => Some((Method::GET, "inventory/supplier-returns")),
         "inventory_record_supplier_return" => Some((Method::POST, "inventory/supplier-returns")),
         "inventory_cash_expenses" => Some((Method::GET, "inventory/cash-expenses")),
+        // Etapa 8 (fase D): ajustes, mermas, transferencias, conteos, niveles por almacén, alertas y
+        // sugerencias de compra (el borrador desde sugerencias es una acción explícita; nunca emite).
+        "inventory_adjustments" => Some((Method::GET, "inventory/adjustments")),
+        "inventory_record_adjustment" => Some((Method::POST, "inventory/adjustments")),
+        "inventory_transfers" => Some((Method::GET, "inventory/transfers")),
+        "inventory_record_transfer" => Some((Method::POST, "inventory/transfers")),
+        "inventory_counts" => Some((Method::GET, "inventory/counts")),
+        "inventory_create_count" => Some((Method::POST, "inventory/counts")),
+        "inventory_stock_levels" => Some((Method::GET, "inventory/stock-levels")),
+        "inventory_save_stock_level" => Some((Method::PUT, "inventory/stock-levels")),
+        "inventory_alerts" => Some((Method::GET, "inventory/alerts")),
+        "inventory_purchase_suggestions" => Some((Method::GET, "inventory/purchase-suggestions")),
+        "inventory_draft_order_from_suggestions" => {
+            Some((Method::POST, "inventory/purchase-suggestions/draft-order"))
+        }
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -538,6 +553,35 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             Method::GET,
             format!("inventory/supplier-returns/{identifier}"),
         ),
+        // Etapa 8 (fase D): un solo identificador por ruta.
+        "inventory_adjustment" => (Method::GET, format!("inventory/adjustments/{identifier}")),
+        "inventory_authorize_adjustment" => (
+            Method::POST,
+            format!("inventory/adjustments/{identifier}/authorize"),
+        ),
+        "inventory_reject_adjustment" => (
+            Method::POST,
+            format!("inventory/adjustments/{identifier}/reject"),
+        ),
+        "inventory_transfer" => (Method::GET, format!("inventory/transfers/{identifier}")),
+        "inventory_count" => (Method::GET, format!("inventory/counts/{identifier}")),
+        "inventory_save_count" => (Method::PATCH, format!("inventory/counts/{identifier}")),
+        "inventory_capture_count_lines" => {
+            (Method::PUT, format!("inventory/counts/{identifier}/lines"))
+        }
+        "inventory_submit_count" => (
+            Method::POST,
+            format!("inventory/counts/{identifier}/submit"),
+        ),
+        "inventory_approve_count" => (
+            Method::POST,
+            format!("inventory/counts/{identifier}/approve"),
+        ),
+        "inventory_apply_count" => (Method::POST, format!("inventory/counts/{identifier}/apply")),
+        "inventory_cancel_count" => (
+            Method::POST,
+            format!("inventory/counts/{identifier}/cancel"),
+        ),
         _ => return Err("Operación no autorizada por el puente nativo.".into()),
     };
     Ok((method, path))
@@ -726,6 +770,10 @@ fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "direct",
             "min_amount",
             "max_amount",
+            // Fase D: tipo y gravedad de alertas y motivo de ajustes.
+            "type",
+            "severity",
+            "reason",
         ]
     } else {
         &[]
@@ -1468,6 +1516,138 @@ mod tests {
         assert!(!query_allowed("inventory_cash_expenses", &rejected));
         // Los parámetros de compras no se admiten fuera de inventario.
         assert!(!query_allowed("payments_shifts", &expenses));
+    }
+
+    #[test]
+    fn inventory_control_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            (
+                "inventory_adjustments",
+                Method::GET,
+                "inventory/adjustments",
+            ),
+            (
+                "inventory_record_adjustment",
+                Method::POST,
+                "inventory/adjustments",
+            ),
+            ("inventory_transfers", Method::GET, "inventory/transfers"),
+            (
+                "inventory_record_transfer",
+                Method::POST,
+                "inventory/transfers",
+            ),
+            ("inventory_counts", Method::GET, "inventory/counts"),
+            ("inventory_create_count", Method::POST, "inventory/counts"),
+            (
+                "inventory_stock_levels",
+                Method::GET,
+                "inventory/stock-levels",
+            ),
+            (
+                "inventory_save_stock_level",
+                Method::PUT,
+                "inventory/stock-levels",
+            ),
+            ("inventory_alerts", Method::GET, "inventory/alerts"),
+            (
+                "inventory_purchase_suggestions",
+                Method::GET,
+                "inventory/purchase-suggestions",
+            ),
+            (
+                "inventory_draft_order_from_suggestions",
+                Method::POST,
+                "inventory/purchase-suggestions/draft-order",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        for (operation, method, path) in [
+            (
+                "inventory_adjustment",
+                Method::GET,
+                format!("inventory/adjustments/{identifier}"),
+            ),
+            (
+                "inventory_authorize_adjustment",
+                Method::POST,
+                format!("inventory/adjustments/{identifier}/authorize"),
+            ),
+            (
+                "inventory_reject_adjustment",
+                Method::POST,
+                format!("inventory/adjustments/{identifier}/reject"),
+            ),
+            (
+                "inventory_transfer",
+                Method::GET,
+                format!("inventory/transfers/{identifier}"),
+            ),
+            (
+                "inventory_count",
+                Method::GET,
+                format!("inventory/counts/{identifier}"),
+            ),
+            (
+                "inventory_save_count",
+                Method::PATCH,
+                format!("inventory/counts/{identifier}"),
+            ),
+            (
+                "inventory_capture_count_lines",
+                Method::PUT,
+                format!("inventory/counts/{identifier}/lines"),
+            ),
+            (
+                "inventory_submit_count",
+                Method::POST,
+                format!("inventory/counts/{identifier}/submit"),
+            ),
+            (
+                "inventory_approve_count",
+                Method::POST,
+                format!("inventory/counts/{identifier}/approve"),
+            ),
+            (
+                "inventory_apply_count",
+                Method::POST,
+                format!("inventory/counts/{identifier}/apply"),
+            ),
+            (
+                "inventory_cancel_count",
+                Method::POST,
+                format!("inventory/counts/{identifier}/cancel"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, None).is_err());
+            assert!(route(operation, Some("../../settings")).is_err());
+        }
+        // Los ajustes, transferencias y conteos no se editan ni se borran (se autorizan, rechazan,
+        // cancelan o corrigen con documentos nuevos), ninguna ruta edita existencias ni emite órdenes
+        // desde las sugerencias.
+        assert!(route("inventory_save_adjustment", Some(identifier)).is_err());
+        assert!(route("inventory_delete_adjustment", Some(identifier)).is_err());
+        assert!(route("inventory_save_transfer", Some(identifier)).is_err());
+        assert!(route("inventory_delete_count", Some(identifier)).is_err());
+        assert!(route("inventory_save_stock", None).is_err());
+        assert!(route("inventory_issue_order_from_suggestions", None).is_err());
+        let mut alerts = BTreeMap::new();
+        alerts.insert("type".to_string(), "negative_stock".to_string());
+        alerts.insert("severity".to_string(), "critical".to_string());
+        assert!(query_allowed("inventory_alerts", &alerts));
+        let mut adjustments = BTreeMap::new();
+        adjustments.insert("reason".to_string(), "breakage".to_string());
+        adjustments.insert("kind".to_string(), "waste".to_string());
+        adjustments.insert("state".to_string(), "pending_authorization".to_string());
+        assert!(query_allowed("inventory_adjustments", &adjustments));
+        let mut rejected = BTreeMap::new();
+        rejected.insert("auto_issue".to_string(), "true".to_string());
+        assert!(!query_allowed("inventory_purchase_suggestions", &rejected));
+        // Los parámetros de alertas no se admiten fuera de inventario.
+        assert!(!query_allowed("payments_shifts", &alerts));
     }
 
     #[test]

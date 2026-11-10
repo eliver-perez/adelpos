@@ -1594,3 +1594,280 @@ del otro agente, incluida su `0014`), con el clúster temporal 55499, Go tempora
 - Playwright `vendor-purchases.spec.ts`: Chromium 1 aprobada, WebKit 1 aprobada.
 - Playwright recorrido completo (sin `SPEC`): Chromium 5 aprobadas (2.7 min) y WebKit 5 aprobadas (2.6 min).
 - Capturas (claro y oscuro, 1280 × 720) en `scratchpad/shots8C2/` (Chromium) y `scratchpad/shots8C2/webkit/`.
+
+## Fase D · backend de control de inventario (D1)
+
+Ajustes de discrepancia, mermas operativas, transferencias entre almacenes, conteos físicos por almacén, niveles por
+almacén, alertas y sugerencias de compra: migración `0014_inventory_control.sql`, archivos nuevos en
+`backend/internal/inventory` (`control.go`, `adjustments.go`, `transfers.go`, `counts.go`, `stock_levels.go`,
+`alerts.go`, `suggestions.go`), rutas `inventory/*`, puente Tauri y `desktop/src/services/inventoryControl.ts`. La
+interfaz de la fase D es otra parte. La 0014 no se aplicó a la instalación real.
+
+### Migración 0014
+
+Transaccional, sin tocar 0001–0013 ni filas existentes, **sin siembras** y con 100 restricciones de nombre explícito (todas
+caben en 63 caracteres); los CHECK con columnas opcionales exigen `IS NOT NULL` en la rama que valida. Folios propios por
+documento (`GENERATED ALWAYS AS IDENTITY`, con posibles huecos si una transacción se revierte).
+
+| Estructura                   | Contenido                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inventory_adjustments`      | Folio, `kind` (`discrepancy`, `waste`), `reason` de lista cerrada (8) + `reason_detail` (obligatorio con `other`), almacén, `state` (`pending_authorization`, `applied`, `rejected`), notas, solicitante y hora, autorización (`authorized_by ≠ requested_by`), `applied_at`, rechazo con motivo 5–500 (`rejected_by ≠ requested_by`), revisión, `operation_id` y `decision_operation_id`. CHECK: una merma solo con motivos de pérdida y nunca pendiente ni autorizada aparte. **Disparador**: solo cambia un pendiente (autorizar o rechazar) sin tocar lo registrado; no se borra. |
+| `inventory_adjustment_lines` | Insumo (una vez por ajuste), cantidad con signo capturada (presentación **o** unidad) y en la unidad base (mismo signo, ≠ 0), movimiento (vacío mientras está pendiente). **Disparador**: los renglones de una merma son salidas; la única actualización es registrar una vez su movimiento; no se borran.                                                                                                                                                                                                                                                                            |
+| `inventory_transfers`        | Folio, origen ≠ destino, hora, responsable, notas, renglones, `operation_id`. Solo inserción.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `inventory_transfer_lines`   | Insumo (una vez), cantidad capturada y base (> 0), movimientos de salida y entrada (distintos, únicos). Solo inserción.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `inventory_counts`           | Folio, almacén, `scope` (`all`, `category` con su categoría, `items`), `state` (`open`, `submitted`, `approved`, `applied`, `cancelled`) con quién y cuándo de cada paso (CHECK por estado), `reference_at` (hora de referencia aplicada), cancelación con motivo 5–500, notas, hasta 2000 renglones, revisión, `operation_id`. **Disparador**: aplicado o cancelado ya no cambia; nunca cambia de almacén, alcance o autor; no se borra.                                                                                                                                             |
+| `inventory_count_lines`      | Un insumo por conteo; captura completa o ausente (cantidad base y capturada ≥ 0, presentación **o** unidad, hora y responsable), teórico y diferencia (`difference = counted − theoretical` exacto), movimiento solo con diferencia ≠ 0. **Disparador**: se agregan, quitan y capturan solo con el conteo abierto; al aplicar uno aprobado se registra una vez teórico, diferencia y movimiento sin tocar la captura.                                                                                                                                                                 |
+| `inventory_stock_levels`     | `(insumo, almacén)`: `min_stock` y `reorder_point` (al menos uno), revisión, responsable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Permisos                     | `inventory.adjustments.record`, `inventory.counts.perform`, `inventory.counts.approve`, `inventory.transfers.record`, solo al administrador (24 permisos de inventario en total; el rol «Inventarios» sigue sin permisos).                                                                                                                                                                                                                                                                                                                                                            |
+
+### Ajustes y mermas
+
+- Discrepancia (`inventory.adjustments.record`): con `inventory.adjustments.authorize` se aplica al registrarla; sin él
+  queda `pending_authorization` sin movimientos hasta que **otra persona** con el permiso la autorice (movimientos con la
+  hora de la autorización) o la rechace con motivo. Quien la registró nunca la autoriza ni la rechaza, aunque después
+  reciba el permiso (403 `SELF_AUTHORIZATION_FORBIDDEN`; también CHECK en la base).
+- Merma (`inventory.waste.record`): se aplica directamente, solo salidas y solo rotura, derrame, caducidad, consumo
+  extraordinario u otro; movimiento `waste`. Un ajuste negativo de discrepancia es `adjustment_out` (nunca merma).
+- Sentido por motivo: rotura, derrame, caducidad, faltante físico y consumo extraordinario solo salidas; sobrante solo
+  entradas; error de registro y otro, ambos. «Otro» exige texto (3–200).
+- Entradas `adjustment_in` con la regla 3 del motor (promedio; con existencia negativa, provisional del faltante y el resto a
+  la referencia; sin costo, cero con costo pendiente); salidas con la regla 1. Pueden dejar existencia negativa
+  (`NEGATIVE_STOCK`, sin bloqueo). `entry_key` `adjustment:<ajuste>:<renglón>`, origen `adjustment` o `waste`.
+
+### Transferencias
+
+`inventory.transfers.record`; origen y destino activos y distintos; de 1 a 200 renglones; `ApplyTransfer` por renglón
+(`transfer:<transferencia>:<renglón>:out|in`, mismo valor, el costo del insumo no cambia); no se bloquea por existencia
+negativa en el origen (aviso); no crea compras ni ventas; documento de solo inserción.
+
+### Conteos físicos (reglas tal como quedaron)
+
+1. Crear (`inventory.counts.perform`) en un almacén activo con todos los insumos activos, los activos de una categoría o
+   una lista (también desactivados), en orden de hoja de conteo (categoría y nombre). Un insumo no puede estar en dos
+   conteos sin terminar del mismo almacén (`COUNT_ITEM_IN_PROGRESS`); mientras está abierto se agregan o quitan insumos y
+   se cambian las notas (`PATCH`, con revisión).
+2. Capturar (`PUT counts/{id}/lines`, 1–200 por guardado, sin revisión para que varias terminales capturen a la vez):
+   cantidad física (cero admitido) en presentación, unidad o unidad base; `null` borra la captura. `captured_at` = hora de
+   la transacción del guardado (Go, no el cliente). Cada guardado es una transacción corta: no hay locks entre capturas y la
+   venta sigue.
+3. Existencia teórica de un renglón = Σ de los movimientos del almacén con `occurred_at ≤ captured_at`; diferencia =
+   contado − teórico. Se guarda al capturar y se recalcula al consultar un conteo sin aplicar y al aplicarlo.
+4. Enviar (`perform`, ≥ 1 renglón contado) → aprobar (`inventory.counts.approve`) → aplicar (`approve`). Quien tiene
+   `counts.approve` puede aprobar y aplicar su propio conteo; nadie sin él.
+5. Aplicar: dentro de la misma transacción (lock 7820148308 exclusivo, así que el trabajador no está a la mitad de ninguna
+   solicitud) procesa con el procesador del trabajador las solicitudes de consumo sin procesar (pendientes o fallidas) con
+   `released_at ≤` la hora máxima de los renglones contados, en orden de `seq`; si alguna falla, se revierte todo y responde
+   409 `COUNT_CONSUMPTION_PENDING`. Después, por renglón contado con diferencia, `count_in` (sobrante, regla 3) o
+   `count_out` (faltante, regla 1) con `occurred_at = captured_at`, `entry_key count:<conteo>:<insumo>` y origen `count`;
+   los movimientos posteriores a la hora del renglón se conservan. Los renglones sin contar no se ajustan. Guarda teórico,
+   diferencia y movimiento de cada renglón y `reference_at`. Los eventos (también los de los consumos procesados) se
+   publican al final.
+6. Aplicar dos veces no genera otro ajuste: el mismo `operation_id` devuelve la respuesta guardada y uno nuevo responde
+   `COUNT_ALREADY_APPLIED` (estado + `entry_key` por renglón).
+7. Cancelar con motivo: uno abierto, quien cuenta o quien aprueba; uno enviado o aprobado, solo quien aprueba.
+8. Conteo a ciegas: la existencia teórica, las diferencias, la existencia actual y los valores solo con
+   `inventory.counts.approve` o `inventory.stock.read` (valores además con `inventory.costs.read`).
+9. Avisos de un conteo sin terminar (no bloquean): renglones sin contar, consumos anteriores pendientes de calcular,
+   cancelaciones sin clasificar anteriores a la hora del conteo que consumieron en el almacén y ajustes por autorizar del
+   almacén sobre insumos contados.
+
+### Niveles por almacén y alertas (reglas tal como quedaron)
+
+- Niveles (`inventory.items.manage`, `PUT stock-levels` con revisión; los dos vacíos quitan el nivel): sobrescriben los del
+  insumo para ese almacén. Las alertas del almacén y `GET stock?warehouse_id` (campo nuevo `level_scope`) comparan la
+  existencia del almacén con su nivel; los niveles del insumo siguen comparándose con la existencia total (decisión 13 de
+  la fase A); sin niveles por almacén nada cambia.
+- Alertas (`GET alerts`, `inventory.read`, calculadas al consultar, nunca bloquean): existencia negativa (crítica); consumo
+  sin calcular (crítica, una alerta con el número de solicitudes fallidas); bajo mínimo (por almacén y total); costo
+  pendiente (solo con `inventory.costs.read`); diferencia de conteo pendiente (conteos enviados o aprobados, con las
+  diferencias calculadas ahora); cancelaciones sin clasificar (una alerta con el número y el vencimiento más próximo); gasto
+  vinculado corregido o regularizado después del vínculo (por recepción, solo con permisos de compras); reabastecimiento
+  (por almacén y total); conteo pendiente por frecuencia; orden parcialmente recibida (solo con permisos de compras);
+  insumo comprado activo sin proveedor activo; producto sin receta (producto, no combo, activo, no archivado, de categoría
+  activa, sin receta activa, si `warn_products_without_recipe`). Cada una con tipo, gravedad, texto sin identificadores
+  crudos y referencia navegable; cantidades solo con `inventory.stock.read`. `GET summary` agrega `alerts` con los conteos
+  por gravedad y tipo.
+- Conteo pendiente: con `count_frequency` distinta de `none`, por almacén activo con existencias registradas, comparando el
+  día operativo (hora de corte y zona del establecimiento) del último conteo aplicado (`reference_at`) con el de hoy: diaria
+  si es de un día anterior; semanal con 7 días o más; mensual si es del mismo día del mes anterior o antes; cada N días con
+  N días o más; nunca contado, siempre.
+
+### Sugerencias de compra
+
+`GET purchase-suggestions` (`inventory.read`): insumos comprados activos con punto de reabastecimiento (el propio o la suma
+de los de sus almacenes); necesidad = punto − (existencia total + pendiente de órdenes emitidas o parciales); se expresa en
+la presentación habitual del proveedor preferido, si no en la predeterminada de compra, si no en la unidad base, con
+redondeo hacia arriba a presentaciones completas (o unidades base enteras). Proveedor y último precio solo con permisos de
+compras; existencias, pendiente, borradores y necesidad con `inventory.stock.read` o `inventory.purchases.create`.
+`POST purchase-suggestions/draft-order` (`inventory.purchases.create`) crea **un borrador** para el proveedor elegido (precio
+= su último precio si se capturó en la misma presentación o unidad, si no 0; IVA de su última recepción, si no 16 %) y
+nunca lo emite; si una sugerencia ya no aplica responde 409 `SUGGESTION_CHANGED` sin crear nada.
+
+### Rutas y permisos
+
+Todas exigen `inventory.read`; contrato completo en `docs8D1/api_contracts.md` (sección «Inventario · fase D: control de
+inventario (esquema 14)» para `API_CONTRACTS.md`).
+
+| Ruta                                                                                   | Permiso adicional                                                                                                        |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `GET adjustments`, `GET adjustments/{id}`                                              | `inventory.adjustments.record`, `inventory.adjustments.authorize`, `inventory.waste.record` o `inventory.movements.read` |
+| `POST adjustments`                                                                     | `inventory.adjustments.record` (discrepancia) o `inventory.waste.record` (merma)                                         |
+| `POST adjustments/{id}/authorize`, `…/reject`                                          | `inventory.adjustments.authorize` (y no haberlo registrado)                                                              |
+| `GET transfers`, `GET transfers/{id}`                                                  | `inventory.transfers.record` o `inventory.movements.read`                                                                |
+| `POST transfers`                                                                       | `inventory.transfers.record`                                                                                             |
+| `GET counts`, `GET counts/{id}`                                                        | `inventory.counts.perform` o `inventory.counts.approve`                                                                  |
+| `POST counts`, `PATCH counts/{id}`, `PUT counts/{id}/lines`, `POST counts/{id}/submit` | `inventory.counts.perform`                                                                                               |
+| `POST counts/{id}/approve`, `…/apply`                                                  | `inventory.counts.approve`                                                                                               |
+| `POST counts/{id}/cancel`                                                              | `perform` o `approve` (enviado o aprobado: solo `approve`)                                                               |
+| `GET stock-levels`, `GET alerts`, `GET purchase-suggestions`                           | —                                                                                                                        |
+| `PUT stock-levels`                                                                     | `inventory.items.manage`                                                                                                 |
+| `POST purchase-suggestions/draft-order`                                                | `inventory.purchases.create`                                                                                             |
+
+Puente Tauri: 22 operaciones nuevas en `api.rs` (11 fijas y 11 con un identificador) con la prueba
+`inventory_control_routes_are_closed`; lista blanca de consulta ampliada con `type`, `severity` y `reason`. `Operation` de
+`desktop/src/services/api.ts` ampliado con esas 22 operaciones (cambio mínimo al final).
+
+### Decisiones y desviaciones (fase D, backend)
+
+1. **Hora de negocio de un ajuste = hora de su aplicación** (al registrarlo o al autorizarlo), no la de la solicitud: así
+   un ajuste autorizado después de aplicar un conteo no altera retroactivamente la base de ese conteo (nada histórico se
+   reescribe). La solicitud conserva su hora (`requested_at`).
+2. Ajuste aplicado al registrarlo por quien puede autorizar: sin autorizador separado (`authorized_by` vacío; la auditoría
+   registra al responsable). La autoautorización se prohíbe también para **rechazar**.
+3. Motivos con sentido obligatorio y motivos admitidos en mermas (lista de arriba); `reason_detail` obligatorio solo con
+   «Otro» y opcional en los demás.
+4. Insumos, presentaciones y unidades desactivados se admiten en ajustes, mermas, transferencias y conteos por lista (para
+   ajustar, mover o contar lo que les quede); los almacenes deben estar activos.
+5. Conteos: un conteo sin terminar por (almacén, insumo); hora del renglón fijada por Go (no por el cliente); captura sin
+   revisión; aprobar y aplicar son pasos separados (los dos con `counts.approve`); renglones sin contar no se ajustan;
+   aplicar se rechaza si un consumo anterior a la hora del conteo no se puede calcular (si se aplicara, el trabajador lo
+   registraría después con una fecha anterior y la diferencia se contaría dos veces); conteo a ciegas para quien solo
+   cuenta.
+6. Frecuencia de conteo: cualquier conteo aplicado del almacén cuenta (también uno parcial); solo almacenes activos con
+   existencias registradas; días operativos con la hora de corte.
+7. Alertas agregadas (una sola alerta con `count`) para cancelaciones sin clasificar y consumos fallidos; «bajo mínimo» y
+   «reabastecimiento» se emiten por separado aunque coincidan; las de compras solo para quien tiene algún permiso de
+   compras; «producto sin receta» incluye los «Sin preparación» sin receta y avisa en el texto si solo consume porciones.
+8. Sugerencias: punto de reabastecimiento del insumo o, si no tiene, la suma de los de sus almacenes; los borradores no
+   cuentan como pendiente (se informan); el borrador es todo o nada (`SUGGESTION_CHANGED`).
+9. Ruta con nombre fijo `purchase-suggestions/draft-order`: `Handle` ganó la marca `staticPath` para no validar como UUID
+   esa segunda posición (las demás rutas no cambian).
+10. Refactorizaciones sin cambio de comportamiento: `processRequest` del trabajador se separó en `applyRequest` +
+    `publishRequestOutcome` (la aplicación de un conteo procesa consumos y publica todo al final, sin retener antes de
+    tiempo el lock del outbox 7820148306), y `createPurchaseOrder` en `insertDraftOrder` (reutilizado por el borrador desde
+    sugerencias).
+11. Eventos: `inventory.adjustments.changed`, `inventory.transfers.changed`, `inventory.counts.changed`; toda operación de
+    la fase D que cambia existencias o conteos publica además `inventory.alerts.changed`; los niveles publican
+    `inventory.items.changed` (no hay un tipo propio en el diseño) y el borrador `inventory.purchases.changed`.
+12. El documento de transferencia es `TransferDocument` en Go (`Transfer` ya es la operación del motor). `StockRow` y
+    `Summary` solo ganaron campos (`level_scope`, `alerts`).
+13. Pruebas anteriores tocadas solo para contar y encadenar: `testInventoryCore` llama a `testInventoryControl`, la prueba
+    de permisos espera 24 (0014: 4) y la de actualización cuenta 24 y llama a `checkStage8PhaseD`.
+
+### Limitaciones
+
+- Sin interfaz (otra parte de la fase D).
+- `desktop/e2e/native-driver.ts` descubre las rutas fijas solo con la forma `"op" => Some((…))` en una línea; `rustfmt`
+  escribe `inventory_draft_order_from_suggestions` con llaves (la ruta es larga), así que el driver de Playwright no la verá
+  hasta aceptar `\{?\s*` también en esa expresión (cambio de una línea fuera del alcance de D1; las 21 demás sí las ve).
+- Una liberación a cocina que se confirma (lock 305) en los milisegundos entre la comprobación de consumos pendientes y la
+  aplicación de un conteo, con `released_at` anterior a su referencia, no se incluiría en esa aplicación.
+- Una cancelación clasificada como «No preparado» después de aplicar un conteo, con hora anterior a la del conteo, revierte
+  su consumo con esa hora y la diferencia queda contada dos veces; lo mismo un ajuste pendiente autorizado después (aunque
+  con la hora de autorización). Se avisa al revisar el conteo; no se bloquea.
+- Las alertas se calculan en cada consulta (también en `GET summary`), sin historial ni medición con volumen real.
+- El borrador desde sugerencias no convierte precios entre presentaciones (precio 0 si el último se capturó en otra) y usa
+  16 % sin recepción previa; se revisa antes de emitir.
+- Los valores de los ajustes de conteo usan el promedio vigente al aplicar (el costo es uno por insumo; nada se revalúa a la
+  hora del renglón).
+- La frecuencia mensual al final de mes sigue la normalización de fechas de Go (31 de marzo − 1 mes = 3 de marzo).
+
+### Pruebas de la fase D (backend)
+
+- **Unitarias** (`internal/inventory/control_test.go`, 6 pruebas nuevas; `permissions_test.go` ahora con 24 permisos):
+  redondeo de sugerencias (30 piezas en cajas de 24 → 2 cajas = 48; 48 → 2; 48.000001 → 3; 1250.5 g en costales de 25 kg →
+  1; 700 ml en botellas de 500 → 2; sin presentación 2.5 → 3); vencimiento por frecuencia (sin frecuencia, nunca contado,
+  diaria, semanal, mensual con fin de mes, cada 3 días e intervalo ausente); clasificación de diferencias; coherencia de
+  motivos, mermas y motivo del movimiento; resolución de rutas (incluida la ruta fija `draft-order` y las de las fases
+  anteriores sin cambios); tipos de alerta únicos (12).
+- **Integración** (`operations/inventory_control_test.go`, encadenada al final de la fase C con insumos, almacén «Barra
+  D», estación de pantalla, catálogo, proveedor y usuarios propios; 9 subpruebas `inventory_d_*`):
+  - ajustes y mermas (aceite 10,000 ml por $500): sobrante +200 ml aplicado al registrarlo (+$10.00; 10,200/510),
+    repetición con el mismo `operation_id` sin movimientos nuevos y otro cuerpo 409; rotura de 1 l capturada en litros
+    (−$50.00 exactos; 9,200/460); faltante de 300 ml pendiente sin movimientos, 403 a quien no autoriza, revisión obsoleta
+    409, autorizado por otra persona (−$15; 8,900/445) y segunda autorización 409 `ADJUSTMENT_NOT_PENDING`; sin
+    autoautorización (el rol del solicitante recibe el permiso y aun así autorizar y rechazar su ajuste dan 403
+    `SELF_AUTHORIZATION_FORBIDDEN`), rechazo con motivo corto 400 y válido sin movimientos; con el permiso, su siguiente
+    ajuste se aplica directo (+$5; 9,000/450); merma `waste` (−$25; 8,500/425), merma positiva o con «Sobrante» 400, cada
+    tipo exige su permiso (403); merma que deja negativo (−9,000 ml: $425 + 500 × 0.05 = −$450; −500 ml, −$25) con
+    `NEGATIVE_STOCK`; validaciones («Otro» sin texto, sentido contrario al motivo, cero, insumo repetido, sin renglones,
+    tipo y motivo desconocidos); «Otro» con texto pendiente y rechazado; listados con y sin costos, filtro no válido, 403
+    sin permiso de lectura; movimiento `waste` con origen «Merma operativa» y motivo «Rotura»;
+  - transferencias del vino (50 a $120): General 50 → Barra 20 deja General 30 y Barra 20, salida −$2,400 y entrada
+    +$2,400, valuación 50/$6,000 sin cambio; idempotente (mismo documento, 2 movimientos); 35 más con aviso
+    `NEGATIVE_STOCK` (General −5, Barra 55, costo igual) y regreso de 5; mismo almacén, cero y negativo 400; 403 sin
+    permiso; listado por almacén, valores solo con costos, costo promedio $120 sin cambio;
+  - conteo con ventas concurrentes (limón 100 a $2, azúcar 5,000 g a $0.02, vino 50 en la barra): una limonada (3 limones)
+    cuya solicitud falla con un disparador de prueba (alerta crítica «1 consumo de ventas no se pudo calcular»), otra
+    pendiente, conteo de los tres insumos (409 `COUNT_ITEM_IN_PROGRESS` para un segundo conteo del limón, 403 sin
+    `counts.perform`), captura a ciegas de 93 limones, 5.2 kg de azúcar y 8 cajas de 6 botellas, insumo ajeno y cantidad
+    negativa 400; venta posterior a la captura; quien aprueba ve teórico 100 (diferencia −7) y el aviso de 2 consumos
+    pendientes; enviar, 403 al aprobar y aplicar sin `counts.approve`, captura de un enviado 409; aplicar con el consumo que
+    falla → 409 `COUNT_CONSUMPTION_PENDING` sin registrar nada; corregida la falla, aplicar procesa los dos consumos
+    anteriores (no el posterior) y registra limón teórico 94 → `count_out` 1 (−$2), azúcar 5,000 → `count_in` 200 g
+    (+$4), vino 50 → `count_out` 2 (−$240), con `occurred_at = captured_at`, `entry_key` por renglón y origen `count`;
+    valuaciones 93/186, 5,200/104 y 48/5,760; valor del conteo −$238.00 con costos; reintento con el mismo `operation_id`
+    sin duplicar y aplicación nueva 409 `COUNT_ALREADY_APPLIED`; el consumo posterior se conserva (93 − 3 = 90); a ciegas
+    sigue sin teórico; 403 sin permiso de conteos;
+  - flujo de conteos: cancelar uno abierto (motivo corto 400), capturar o cancelar otra vez 409; por categoría (2
+    insumos), agregar y quitar insumos con revisión (repetido 400, revisión vieja 409), enviar sin capturas 409
+    `COUNT_NOTHING_COUNTED`, renglón sin contar con aviso y sin ajuste, vino sin diferencia sin movimiento; captura en
+    cero, borrada y repetida (diferencia −5,200); quien cuenta no cancela uno enviado (403); filtro `active`;
+  - niveles por almacén: 403 sin `items.manage`, alta (90 < 105 bajo mínimo), revisión obsoleta 409, cambio, quitar con los
+    dos vacíos, negativo 400; lista sin existencias para quien no las ve; existencias filtradas por la barra con
+    `level_scope: warehouse` y sin filtro con los del insumo; proveedor con insumos preferidos, orden de 2 bolsas emitida y
+    recibida a medias (parcial, barra 102);
+  - alertas (cada tipo al menos una vez): existencia negativa del aceite (−500 ml), limón bajo mínimo y reabastecimiento en
+    la barra, vino bajo mínimo y reabastecimiento total, aceite sin proveedor, «Agua fresca D» sin receta, costo
+    pendiente del hielo (merma sin costo), conteo pendiente del almacén general con frecuencia diaria (la barra, contada
+    hoy, no), orden parcialmente recibida, cancelaciones sin clasificar, diferencia de conteo pendiente (1 diferencia),
+    gastos vinculados corregidos (una por recepción de la fase C) y, en la subprueba de conteos, consumo sin calcular;
+    ausentes las que no corresponden; orden por gravedad y conteos; `GET summary` con los mismos conteos; sin costos,
+    compras ni existencias no se ven costo pendiente ni alertas de compras ni cantidades; filtros de gravedad y tipo
+    (desconocidos 400); sin advertencia de productos sin receta ni frecuencia, esas alertas desaparecen;
+  - sugerencias: limón (punto de sus almacenes 120 − (99 + 12 pendientes) = 9 → 1 bolsa de 12 a $30) y vino (70 − 48 = 22
+    → 4 cajas de 6); sin permisos de compras ni existencias, sin proveedor, precio ni existencia (filtro de proveedor 403);
+    borrador: 403 sin `purchases.create`, 409 `SUGGESTION_CHANGED` con un insumo sin sugerencia (nada creado), borrador de
+    2 renglones (1 bolsa a $30 con IVA 0 de la última recepción, 4 cajas a $0 con 16 %), nunca emitido, idempotente, sin
+    tocar existencias ni caja; la sugerencia sigue e informa 12 en borradores; auditoría;
+  - eventos `inventory.*` de la fase D, auditoría de cada acción, faltante del aceite cubierto al provisional exacto (0 ml,
+    $0), consistencia del libro (`checkLedgerConsistency`) y documentos protegidos en PostgreSQL.
+- **Actualización desde el esquema 9** (`TestStage8UpgradeOfExistingInstallation` + `database/stage8_control_upgrade_test.go`):
+  0010–0014 se aplican y no se repiten; 24 permisos de inventario solo del administrador; la 0014 no siembra filas; sus 100
+  restricciones con nombre; CHECK con tablas temporales (estados de ajuste con autoautorización y ramas NULL, mermas,
+  renglones con signo y captura, transferencias, estados de conteo, capturas y diferencias, niveles); disparadores reales
+  (merma solo de salida, ajuste solo pendiente modificable, movimiento del renglón una vez, transferencias de solo
+  inserción, conteo cancelado o aplicado inmutable, captura solo abierto, aplicación de un aprobado).
+- **Rust**: `inventory_control_routes_are_closed` (22 operaciones, sin identificador o con `../../settings` rechazadas, sin
+  edición ni borrado de documentos ni de existencias ni emisión desde sugerencias; lista blanca `type`, `severity`,
+  `reason`).
+
+### Verificación de la fase D (backend)
+
+En la copia aislada `scratchpad/repoD1` (sincronizada desde el árbol de trabajo, con la interfaz de compras en curso del
+otro agente), con el clúster temporal del puerto 55499 (nunca la instalación real):
+
+- `gofmt -l` (archivos Go propios), `rustfmt --check` de `api.rs` y `prettier --check` de `inventoryControl.ts` y `api.ts`:
+  sin diferencias.
+- `go vet ./...` y `go vet -tags=integration ./...`: aprobados.
+- `go test -race -count=1 ./...` (unitarias): todos los paquetes `ok`, incluido `internal/inventory`.
+- Integración (`go test -race -tags=integration`): `internal/database` ok (3.7 s, actualización desde el esquema 9 hasta la
+  0014), `internal/administration` ok (55.2 s), `internal/payments` ok (1.3 s), `internal/catalog` ok (6.8 s) e
+  `internal/operations` ok (216.0 s; `TestRestaurantAcceptance` 213.1 s con las etapas 4–7.1 y las fases A–D; las 10
+  subpruebas `inventory_c_*` y las 9 `inventory_d_*` aprobadas).
+- `cargo test --locked --offline`: 20 aprobadas (1 ignorada, la misma de antes), incluida
+  `inventory_control_routes_are_closed`.
+- `tsc --noEmit`: sin errores.
+- Playwright no se ejecutó: esta parte no cambia pantallas.
+- Nota: la aceptación encadenada de `internal/operations` dura 213 s con `-race` y su contexto (`newFixture`) vence a los
+  300 s; la fase D agregó ≈ 27 s.

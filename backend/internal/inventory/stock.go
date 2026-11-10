@@ -13,19 +13,22 @@ import (
 
 // StockRow es la existencia de un insumo: en el almacén filtrado o total si no hay filtro.
 type StockRow struct {
-	ItemID             string             `json:"item_id"`
-	ItemCode           string             `json:"item_code"`
-	ItemName           string             `json:"item_name"`
-	CategoryName       *string            `json:"category_name"`
-	Unit               UnitReference      `json:"unit"`
-	Active             bool               `json:"active"`
-	Quantity           string             `json:"quantity"`
-	TotalQuantity      string             `json:"total_quantity"`
-	Negative           bool               `json:"negative"`
-	MinStock           *string            `json:"min_stock"`
-	ReorderPoint       *string            `json:"reorder_point"`
-	BelowMinimum       bool               `json:"below_minimum"`
-	AtReorderPoint     bool               `json:"at_reorder_point"`
+	ItemID         string        `json:"item_id"`
+	ItemCode       string        `json:"item_code"`
+	ItemName       string        `json:"item_name"`
+	CategoryName   *string       `json:"category_name"`
+	Unit           UnitReference `json:"unit"`
+	Active         bool          `json:"active"`
+	Quantity       string        `json:"quantity"`
+	TotalQuantity  string        `json:"total_quantity"`
+	Negative       bool          `json:"negative"`
+	MinStock       *string       `json:"min_stock"`
+	ReorderPoint   *string       `json:"reorder_point"`
+	BelowMinimum   bool          `json:"below_minimum"`
+	AtReorderPoint bool          `json:"at_reorder_point"`
+	// LevelScope indica con qué se comparan los niveles: «item» (los del insumo contra la existencia
+	// total) o «warehouse» (el nivel del almacén filtrado contra su existencia; fase D).
+	LevelScope         string             `json:"level_scope"`
 	Warehouses         []StockByWarehouse `json:"warehouses"`
 	AverageCost        *string            `json:"average_cost"`
 	AverageCostDisplay *string            `json:"average_cost_display"`
@@ -62,17 +65,44 @@ type WarehouseReference struct {
 	Name string `json:"name"`
 }
 
-var stockStates = map[string]string{
-	// existencia (filtrada) negativa
-	"negative": "scoped.quantity < 0",
-	// existencia filtrada en cero
-	"zero": "scoped.quantity = 0",
-	// existencia filtrada positiva
-	"positive": "scoped.quantity > 0",
-	// existencia total por debajo del mínimo del insumo
-	"below_minimum": "i.min_stock IS NOT NULL AND coalesce(v.quantity,0) < i.min_stock",
-	// existencia total en el punto de reabastecimiento o por debajo
-	"reorder": "i.reorder_point IS NOT NULL AND coalesce(v.quantity,0) <= i.reorder_point",
+// stockLevels son las expresiones SQL de los niveles que se comparan en el listado: sin filtro de
+// almacén, los del insumo contra la existencia total; con filtro, el nivel del almacén (fase D) contra
+// la existencia del almacén cuando existe, y si no, los del insumo contra la existencia total.
+type stockLevels struct {
+	join     string
+	minimum  string
+	reorder  string
+	quantity string
+	scope    string
+}
+
+var totalStockLevels = stockLevels{
+	minimum: "i.min_stock", reorder: "i.reorder_point", quantity: "coalesce(v.quantity,0)", scope: "'item'",
+}
+
+// warehouseStockLevels usa el nivel del almacén del primer argumento de la consulta.
+var warehouseStockLevels = stockLevels{
+	join:     " LEFT JOIN app.inventory_stock_levels sl ON sl.item_id=i.id AND sl.warehouse_id=$1",
+	minimum:  "CASE WHEN sl.item_id IS NULL THEN i.min_stock ELSE sl.min_stock END",
+	reorder:  "CASE WHEN sl.item_id IS NULL THEN i.reorder_point ELSE sl.reorder_point END",
+	quantity: "CASE WHEN sl.item_id IS NULL THEN coalesce(v.quantity,0) ELSE scoped.quantity END",
+	scope:    "CASE WHEN sl.item_id IS NULL THEN 'item' ELSE 'warehouse' END",
+}
+
+// stockStates son los filtros de situación de la existencia.
+func (levels stockLevels) stockStates() map[string]string {
+	return map[string]string{
+		// existencia (filtrada) negativa
+		"negative": "scoped.quantity < 0",
+		// existencia filtrada en cero
+		"zero": "scoped.quantity = 0",
+		// existencia filtrada positiva
+		"positive": "scoped.quantity > 0",
+		// existencia por debajo del mínimo (total con el del insumo; del almacén con su nivel)
+		"below_minimum": "(" + levels.minimum + ") IS NOT NULL AND " + levels.quantity + " < (" + levels.minimum + ")",
+		// existencia en el punto de reabastecimiento o por debajo
+		"reorder": "(" + levels.reorder + ") IS NOT NULL AND " + levels.quantity + " <= (" + levels.reorder + ")",
+	}
 }
 
 // listStock lista la existencia por insumo con filtros de almacén, categoría, estado del insumo,
@@ -94,6 +124,7 @@ func (handler *service) listStock(_ []string) (any, error) {
 		return nil, err
 	}
 	scope := "TRUE"
+	levels := totalStockLevels
 	if warehouseID != nil {
 		warehouse, err := handler.readWarehouse(*warehouseID)
 		if err != nil {
@@ -102,8 +133,9 @@ func (handler *service) listStock(_ []string) (any, error) {
 		result.Warehouse = &WarehouseReference{ID: warehouse.ID, Name: warehouse.Name}
 		set.arguments = append(set.arguments, warehouse.ID)
 		scope = "s.warehouse_id=$1"
+		levels = warehouseStockLevels
 	}
-	if err := handler.stockFilters(&set); err != nil {
+	if err := handler.stockFilters(&set, levels); err != nil {
 		return nil, err
 	}
 	from := `FROM app.inventory_items i
@@ -111,13 +143,14 @@ func (handler *service) listStock(_ []string) (any, error) {
         LEFT JOIN app.inventory_categories c ON c.id=i.category_id
         LEFT JOIN app.inventory_valuations v ON v.item_id=i.id
         CROSS JOIN LATERAL (SELECT coalesce(sum(s.quantity),0) AS quantity, max(s.updated_at) AS updated_at
-            FROM app.inventory_stock s WHERE s.item_id=i.id AND ` + scope + `) scoped`
+            FROM app.inventory_stock s WHERE s.item_id=i.id AND ` + scope + `) scoped` + levels.join
 	if err := handler.tx.QueryRow(handler.ctx, "SELECT count(*) "+from+set.where(), set.arguments...).Scan(&result.Total); err != nil {
 		return nil, err
 	}
 	statement := `SELECT i.id,i.code,i.name,c.name,u.id,u.code,u.name,u.dimension,i.active,scoped.quantity::text,
-            coalesce(v.quantity,0)::text,i.min_stock::text,i.reorder_point::text,coalesce(v.value,0)::text,v.last_valid_cost::text,
-            coalesce(v.pending_cost_quantity,0)::text,scoped.updated_at ` + from + set.where() +
+            coalesce(v.quantity,0)::text,(` + levels.minimum + `)::text,(` + levels.reorder + `)::text,coalesce(v.value,0)::text,
+            v.last_valid_cost::text,coalesce(v.pending_cost_quantity,0)::text,scoped.updated_at,(` + levels.quantity + `)::text,
+            ` + levels.scope + ` ` + from + set.where() +
 		" ORDER BY i.active DESC, i.name, i.id LIMIT " + set.next(size) + " OFFSET " + set.next((page-1)*size)
 	rows, err := handler.tx.Query(handler.ctx, statement, set.arguments...)
 	if err != nil {
@@ -152,7 +185,7 @@ func (handler *service) listStock(_ []string) (any, error) {
 }
 
 // stockFilters agrega los filtros de categoría, búsqueda, estado del insumo y situación.
-func (handler *service) stockFilters(set *filters) error {
+func (handler *service) stockFilters(set *filters, levels stockLevels) error {
 	query := handler.request.Query
 	if category := query.Get("category_id"); category == "none" {
 		set.clauses = append(set.clauses, "i.category_id IS NULL")
@@ -180,7 +213,7 @@ func (handler *service) stockFilters(set *filters) error {
 		set.add("i.active=$%d", *active)
 	}
 	if state := query.Get("state"); state != "" {
-		condition, known := stockStates[state]
+		condition, known := levels.stockStates()[state]
 		if !known {
 			return invalid("El filtro de situación de la existencia no es válido.")
 		}
@@ -191,10 +224,11 @@ func (handler *service) stockFilters(set *filters) error {
 
 func (handler *service) scanStockRow(rows interface{ Scan(...any) error }) (*StockRow, error) {
 	row := &StockRow{Warehouses: []StockByWarehouse{}}
-	var quantity, total, value, pending string
+	var quantity, total, value, pending, levelQuantity string
 	var minimumStock, reorder, last *string
 	err := rows.Scan(&row.ItemID, &row.ItemCode, &row.ItemName, &row.CategoryName, &row.Unit.ID, &row.Unit.Code, &row.Unit.Name,
-		&row.Unit.Dimension, &row.Active, &quantity, &total, &minimumStock, &reorder, &value, &last, &pending, &row.UpdatedAt)
+		&row.Unit.Dimension, &row.Active, &quantity, &total, &minimumStock, &reorder, &value, &last, &pending, &row.UpdatedAt,
+		&levelQuantity, &row.LevelScope)
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +241,9 @@ func (handler *service) scanStockRow(rows interface{ Scan(...any) error }) (*Sto
 	reorderValue := parseDatabaseOptional(reorder)
 	row.MinStock = optionalQuantityText(minimumValue)
 	row.ReorderPoint = optionalQuantityText(reorderValue)
-	row.BelowMinimum = minimumValue != nil && totalQuantity.LessThan(*minimumValue)
-	row.AtReorderPoint = reorderValue != nil && totalQuantity.LessThanOrEqual(*reorderValue)
+	compared := parseDatabaseDecimal(levelQuantity)
+	row.BelowMinimum = minimumValue != nil && compared.LessThan(*minimumValue)
+	row.AtReorderPoint = reorderValue != nil && compared.LessThanOrEqual(*reorderValue)
 	if handler.costsVisible() {
 		totalValue := parseDatabaseDecimal(value)
 		average := averageCost(totalQuantity, totalValue, parseDatabaseOptional(last))

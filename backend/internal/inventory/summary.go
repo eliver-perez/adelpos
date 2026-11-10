@@ -8,7 +8,8 @@ import (
 
 // Resumen básico de la pestaña «Resumen» (fase A). Con inventory.read muestra conteos que no
 // revelan costos; la cantidad de insumos con costo pendiente solo con inventory.costs.read y el
-// valor total del inventario solo con inventory.valuation.read. La fase D lo completa con alertas.
+// valor total del inventario solo con inventory.valuation.read. La fase D agrega los conteos de las
+// alertas visibles para la sesión (alerts.go), con las mismas reglas de visibilidad que GET alerts.
 
 type Summary struct {
 	Feature          FeatureState `json:"feature"`
@@ -25,6 +26,8 @@ type Summary struct {
 	ValuationVisible  bool    `json:"valuation_visible"`
 	TotalValue        *string `json:"total_value"`
 	TotalValueDisplay *string `json:"total_value_display"`
+	// Alerts cuenta las alertas visibles por gravedad y tipo (fase D).
+	Alerts AlertCounts `json:"alerts"`
 }
 
 // FeatureState es el estado de la función «Control de inventario».
@@ -79,5 +82,10 @@ func (handler *service) summary(_ []string) (any, error) {
 		exact, display := exactMoneyText(total), displayMoneyText(total)
 		result.TotalValue, result.TotalValueDisplay = &exact, &display
 	}
+	alerts, err := handler.collectAlerts()
+	if err != nil {
+		return nil, err
+	}
+	result.Alerts = countAlerts(alerts)
 	return result, nil
 }
