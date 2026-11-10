@@ -375,7 +375,7 @@ export function summary(extra: Partial<InventorySummary> = {}): InventorySummary
   };
 }
 
-// Todos los permisos de inventario de la fase A.
+// Todos los permisos de inventario de las fases A y B.
 export const allInventoryPermissions = [
   'inventory.read',
   'inventory.items.manage',
@@ -387,6 +387,10 @@ export const allInventoryPermissions = [
   'inventory.adjustments.authorize',
   'inventory.valuation.read',
   'inventory.settings.manage',
+  'inventory.recipes.manage',
+  'inventory.subrecipes.manage',
+  'inventory.production.record',
+  'inventory.waste.record',
 ];
 
 export interface RecordedRequest {
@@ -438,6 +442,26 @@ export function inventoryTransport(override: Responder = () => undefined) {
         return { status: 200, body: movementPage(true) };
       case 'inventory_settings':
         return { status: 200, body: settings() };
+      // Fase B: listados vacíos salvo que la prueba los sustituya.
+      case 'inventory_recipes':
+      case 'inventory_recipe_targets':
+      case 'inventory_ingredient_portions':
+        return { status: 200, body: { items: [], total: 0, page: 1, page_size: 25 } };
+      case 'inventory_cancellations':
+        return {
+          status: 200,
+          body: { items: [], total: 0, pending: 0, page: 1, page_size: 25, costs_visible: true },
+        };
+      case 'inventory_consumption_requests':
+        return {
+          status: 200,
+          body: { items: [], total: 0, pending: 0, failed: 0, page: 1, page_size: 25 },
+        };
+      case 'inventory_productions':
+        return {
+          status: 200,
+          body: { items: [], total: 0, page: 1, page_size: 25, costs_visible: true },
+        };
       default:
         return { status: 200, body: {} };
     }

@@ -82,7 +82,7 @@ export function formatSignedQuantity(
   return withUnit(`${sign}${parsed.text}`, unit);
 }
 
-// Nombres de los permisos de inventario de la fase A, iguales a las descripciones de Go
+// Nombres de los permisos de inventario (fases A y B), iguales a las descripciones de Go
 // (inventory.Permissions), para explicar en pantalla qué permiso falta.
 const permissionLabels: Record<string, string> = {
   'inventory.read': 'Consultar inventario (sección y resumen)',
@@ -97,6 +97,10 @@ const permissionLabels: Record<string, string> = {
   'inventory.valuation.read':
     'Consultar valuaciones (valor total del inventario por insumo/almacén)',
   'inventory.settings.manage': 'Administrar parámetros de inventario',
+  'inventory.recipes.manage': 'Administrar recetas y porciones habituales',
+  'inventory.subrecipes.manage': 'Administrar subrecetas (preparaciones)',
+  'inventory.production.record': 'Registrar elaboraciones de subrecetas almacenables',
+  'inventory.waste.record': 'Registrar mermas y clasificar cancelaciones',
   'settings.features.manage': 'Activar o desactivar funciones del establecimiento',
 };
 
@@ -124,10 +128,14 @@ export const movementKindOptions: { value: MovementKind; label: string }[] = [
   { value: 'cost_adjustment', label: 'Ajuste de costo' },
 ];
 
-// Orígenes de movimiento que existen en la fase A (Go: sourceKindLabels). Las fases B–D agregan
-// los suyos (consumo, recepción, ajuste, transferencia, conteo…).
+// Orígenes de movimiento que existen hasta la fase B (Go: sourceKindLabels). Las fases C y D
+// agregan los suyos (recepción, ajuste, transferencia, conteo…).
 export const sourceKindOptions: { value: string; label: string }[] = [
   { value: 'initial', label: 'Existencia inicial' },
+  { value: 'consumption', label: 'Liberación a cocina' },
+  { value: 'amendment', label: 'Modificación de partida' },
+  { value: 'cancellation', label: 'Cancelación de partida' },
+  { value: 'production', label: 'Elaboración' },
 ];
 
 export const stockStateOptions: { value: StockState; label: string }[] = [

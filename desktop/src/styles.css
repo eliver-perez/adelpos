@@ -4945,3 +4945,128 @@ th.inventory-number {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Etapa 8, fase B (interfaz de recetas, porciones, elaboraciones, cancelaciones por clasificar y
+   diagnóstico del consumo). Solo tokens de ambos temas; las tablas siguen desplazándose dentro de
+   su contenedor. */
+.inventory-page h3:not(.accordion-heading) {
+  font-size: 15px;
+  font-weight: 600;
+}
+.inventory-subnav .segmented-control {
+  flex-wrap: wrap;
+}
+.inventory-subnav .segmented-control button {
+  flex: 1 1 160px;
+}
+.recipe-version-note {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  box-shadow: inset 4px 0 0 var(--accent);
+  line-height: 1.55;
+}
+.recipe-line .segmented-control {
+  max-width: 420px;
+}
+.recipe-line .button-row .muted {
+  flex: 1 1 220px;
+}
+.recipe-line-detail {
+  margin: 0;
+}
+.recipe-version-detail {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.recipe-version-detail h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.recipe-version-detail .section-heading,
+.inventory-cancellation .section-heading {
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+.recipe-version-detail p {
+  margin: 0;
+}
+.recipe-row-actions {
+  justify-content: flex-end;
+}
+.recipe-row-actions button,
+.inventory-trace-button {
+  white-space: nowrap;
+}
+.inventory-trace-button {
+  display: block;
+  margin-top: 6px;
+}
+.inventory-pending-heading > div {
+  flex: 1 1 360px;
+  min-width: 0;
+}
+.inventory-cancellation {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--subtle);
+  box-shadow: inset 4px 0 0 var(--warning);
+  min-width: 0;
+}
+.inventory-cancellation p {
+  margin: 0;
+}
+.inventory-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+.inventory-facts div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.inventory-facts dt {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.inventory-facts dd {
+  margin: 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.inventory-classify-actions button {
+  min-width: 160px;
+}
+.inventory-classify-actions .muted {
+  flex: 1 1 260px;
+}
+.inventory-correction {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.inventory-correction p {
+  margin: 0;
+}
+.inventory-inline-filters {
+  gap: 12px 16px;
+}
+.inventory-requests .accordion-content > .form-stack > .field {
+  max-width: 420px;
+}
+@media (max-width: 720px) {
+  .inventory-classify-actions button {
+    flex: 1 1 100%;
+  }
+}

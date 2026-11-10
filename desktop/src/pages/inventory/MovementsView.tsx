@@ -12,6 +12,8 @@ import type {
 } from '../../services/inventory';
 import { formatMoney, formatSignedMoney } from '../../services/money';
 import { serverDateTime } from '../../services/restaurant';
+import { ConsumptionRequestsSection } from './ConsumptionRequestsSection';
+import { ConsumptionTraceView } from './ConsumptionTrace';
 import { ItemPicker, Pagination } from './InventoryFields';
 import {
   formatQuantity,
@@ -143,11 +145,14 @@ function MovementRow({
   movement,
   costsVisible,
   timezone,
+  onShowTrace,
 }: {
   movement: InventoryMovement;
   costsVisible: boolean;
   timezone: string;
+  onShowTrace: (unitID: string) => void;
 }) {
+  const unitID = movement.restaurant_unit_id;
   const quantity =
     movement.kind === 'cost_adjustment'
       ? '—'
@@ -177,6 +182,16 @@ function MovementRow({
         {movement.reason && (
           <span className="muted text-xs inventory-cell-detail">{movement.reason}</span>
         )}
+        {unitID && (
+          <button
+            type="button"
+            className="secondary-button inventory-trace-button"
+            aria-label={`Ver consumo de la partida del movimiento de ${movement.item_name}`}
+            onClick={() => onShowTrace(unitID)}
+          >
+            Ver consumo de la partida
+          </button>
+        )}
       </td>
       <td>{responsible(movement)}</td>
       {costsVisible && (
@@ -201,8 +216,11 @@ function MovementRow({
 
 // Pestaña «Movimientos» (inventory.movements.read): libro de solo inserción, del más reciente al
 // más antiguo por hora de negocio. Valores y costos solo con inventory.costs.read; sin ese permiso
-// Go tampoco lista los ajustes de costo. No se muestran identificadores técnicos.
+// Go tampoco lista los ajustes de costo. No se muestran identificadores técnicos. Desde la fase B
+// también muestra las solicitudes de consumo pendientes o con error y, desde un movimiento de una
+// partida, la traza de su consumo.
 export function MovementsView({ timezone }: { timezone: string }) {
+  const [trace, setTrace] = useState<string | null>(null);
   const [filter, setFilter] = useState<MovementFilter>({
     item: null,
     warehouse: '',
@@ -221,12 +239,23 @@ export function MovementsView({ timezone }: { timezone: string }) {
   });
   const page = movements.data;
   const costsVisible = page?.costs_visible ?? false;
+  if (trace) {
+    return (
+      <ConsumptionTraceView
+        unitID={trace}
+        timezone={timezone}
+        closeLabel="Volver a movimientos"
+        onClose={() => setTrace(null)}
+      />
+    );
+  }
   return (
     <div className="form-stack">
       <p className="muted text-sm">
         Cada cambio de existencia queda en este libro con su origen y responsable. Los movimientos
         no se editan ni se borran: una corrección es otro movimiento.
       </p>
+      <ConsumptionRequestsSection timezone={timezone} onShowTrace={setTrace} />
       <MovementFilters filter={filter} warehouses={warehouses.data ?? []} onChange={setFilter} />
       <Notice>{movements.error || warehouses.error}</Notice>
       {!page && !movements.error && <p className="muted">Consultando movimientos…</p>}
@@ -254,6 +283,7 @@ export function MovementsView({ timezone }: { timezone: string }) {
                     movement={movement}
                     costsVisible={costsVisible}
                     timezone={timezone}
+                    onShowTrace={setTrace}
                   />
                 ))}
                 {page.items.length === 0 && (
