@@ -1885,3 +1885,128 @@ temporal 55499:
 - Playwright en Chromium y en WebKit: 5 de 5 aprobadas cada uno (`inventory`, `restaurant`, `stock-consumption`,
   `takeaway-quick-notes` y `vendor-purchases`: proveedor, orden de 20 cajas recibida en 12 + 8, recepción directa y
   vínculo con un gasto de caja).
+
+## Fase F · correcciones de la revisión independiente (motor de costos y permisos)
+
+Una revisión independiente del motor y de los permisos de la etapa 8 encontró seis defectos. Todos se confirmaron con
+reproducciones en el motor o leyendo el código y se corrigieron con pruebas. Ningún movimiento histórico se reescribe y
+las migraciones 0010–0014 no cambiaron.
+
+### Hallazgos y correcciones
+
+| #   | Gravedad | Hallazgo (confirmado)                                                                                                                                                                                                                                                                                                              | Corrección                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Alta     | `production_in` usaba `Restore` (entrada a valor exacto): con el insumo preparado en negativo, el valor consumido se sumaba al valor negativo acumulado al costo de referencia. Salsa con referencia 0.1/g, 500 g vendidos (−500 g, −$50) y 1000 g elaborados por $300 quedaban en 500 g por $250 (0.5/g, un costo que no existe). | `production_in` es una **entrada con documento** (`Receive`, `documentKinds` en `ledger.go`): el déficit cubierto se valora al costo real de la elaboración, la diferencia es un `cost_adjustment` separado ligado a la entrada y la cantidad pendiente de costo baja como en una recepción. El ejemplo queda con ajuste −$100 y 500 g por $150 (0.3/g). Base del movimiento: `document`.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 2   | Media    | La reversión de consumo (`Restore`) con existencia negativa sumaba el valor original tal cual: distorsionaba el promedio (entran 10 a $20, A consume 10, entran 10 a $30, se consumen 15 → −5 u, −$150; revertir A dejaba 5 u por $50, promedio $10) o dejaba V < 0 con Q > 0 (−5 u, −$500; revertir 6 u por $6 → 1 u por −$494).  | `Restore` se implementa sobre `Receive`: el movimiento `consumption_reversal` conserva **exactamente** el valor original que compensa (base `original`; el consumo neto de la partida sigue exacto) y, si Q < 0, el déficit cubierto d = min(q, −Q) se realinea con un `cost_adjustment` separado = provisional de d − valor original × d ÷ q. Los ejemplos quedan en 5 u por $100 (promedio $20, ajuste +$50) y 1 u por $1 (ajuste +$495).                                                                                                                                                                                                                                                                                                                                                        |
+| 3   | Media    | Una entrada sin documento (ajuste positivo, sobrante de conteo) con Q ≤ 0 y sin último costo válido ni costo de referencia dejaba existencia positiva a valor cero sin marca (un costo inventado, y la siguiente salida la valoraba en cero).                                                                                      | Decisión conservadora (§0-B.6 «nunca a un costo inventado»): **se rechaza** con 409 `COST_REQUIRED` cuando la entrada dejaría existencia positiva sin ningún costo disponible. Mensaje: «El insumo «X» no tiene costo: configura su costo de referencia antes de registrar una entrada sin documento (ajuste positivo o sobrante de conteo).» La parte que solo cubre déficit sigue permitida (a su valor provisional). El motor devuelve `errCostRequired` y el libro lo traduce con el nombre del insumo; la transacción completa se revierte.                                                                                                                                                                                                                                                   |
+| 4   | Media    | `GET stock` entregaba `value`/`value_display` por insumo y `GET movements` `valuation_value_after` con solo `inventory.costs.read`, aunque `inventory.valuation.read` es «valor total del inventario por insumo/almacén».                                                                                                          | El valor por insumo (`StockRow.value`, `value_display`) y la valuación posterior de cada movimiento (`valuation_value_after`) exigen `inventory.costs.read` **e** `inventory.valuation.read`. Se exigen los dos porque con existencias o con movimientos consecutivos cualquiera de ellos revelaría el otro (valor ÷ cantidad = costo; diferencia de valuaciones = valor del movimiento). `costs.read` sigue dando costo promedio, «costo pendiente» y el valor de cada movimiento. Nueva bandera `valuation_visible` en `Movement` y `MovementPage`.                                                                                                                                                                                                                                              |
+| 5   | Baja     | `settle` fijaba `last_valid_cost` con cualquier V > 0, aunque el promedio redondeado a 10 decimales fuera 0 (p. ej. $0.000001 sobre 10⁹ u), lo que viola el CHECK `last_valid_cost > 0` y aborta la operación.                                                                                                                     | L solo se actualiza si el promedio redondeado es mayor que cero; si no, se conserva el anterior.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| 6   | Baja     | Fugas de existencias sin `inventory.stock.read`: sugerencias de compra con `reorder_point` y `suggested_quantity` (con ambos se deduce la existencia); la alerta `count_difference_pending` con el número de diferencias; `movement_kind` por renglón de un conteo aplicado (revela el sentido de la diferencia).                  | Sugerencias: se siguen listando (qué insumos reabastecer, como la alerta de reabastecimiento sin cantidades), pero sin `stock_visible` (`inventory.stock.read` o `inventory.purchases.create`) `reorder_point`, `suggested_quantity` y `suggested_base_quantity` llegan en `null`; se eligió esto en lugar de un 403 porque la interfaz ya muestra «—» y el listado sigue siendo útil para compras. Alerta de conteo: el número de diferencias (en el texto y en `count`) solo con `inventory.counts.approve` o `inventory.stock.read`; sin ellos, «El conteo N de «Almacén» está pendiente de aprobar.» con `count` 1. Conteos: `movement_id`, `movement_kind` y `movement_label` por renglón solo con `theoretical_visible` (su existencia también revelaría qué renglones tuvieron diferencia). |
+
+### Reglas del motor que cambian (sustituyen las de la fase A)
+
+- `Receive` (regla 2/4): recepción, existencia inicial **y entrada de elaboración**.
+- `Restore` (reversión de consumo): `Receive` con base `original`; el movimiento lleva el valor original exacto y el
+  ajuste de costo realinea el déficit cubierto. Ya no hay entradas «a valor exacto» que ignoren el déficit.
+- `Admit` (regla 3, ajuste positivo y sobrante): Q > 0 al promedio; Q ≤ 0 el déficit al provisional y el resto a L o R;
+  sin ninguno de los dos, `errCostRequired` (antes: valor cero con «costo pendiente»). `Admit` ya no produce
+  `cost_pending`.
+- Último costo válido: Q > 0, V > 0 **y** promedio redondeado a 10 decimales > 0.
+- Invariantes que mantiene toda operación (comprobados en cada estado de las pruebas): Q = 0 ⇒ V = 0; Q > 0 ⇒ V ≥ 0;
+  L nulo o > 0; 0 ≤ pendiente ≤ déficit. Como las entradas que cubren todo el déficit ya dejan V exactamente en cero, el
+  residuo de valuación queda como red de seguridad (`TestCostingResidualSafetyNet`).
+- Límite conocido (sin cambio): si un déficit pendiente de costo solo se cubre en parte con recepciones, L sigue sin valor
+  (solo se fija con existencia positiva); un sobrante que cruce a positivo pide configurar el costo de referencia.
+
+### Decisiones de la fase F
+
+1. `COST_REQUIRED` se evalúa al **aplicar** la entrada: un ajuste registrado sin `inventory.adjustments.authorize` queda
+   pendiente como antes y el rechazo llega al autorizarlo (el ajuste sigue pendiente y sin cambios); uno aplicado al
+   registrarlo se rechaza sin guardar nada. Un conteo falla al aplicarse sin registrar nada (todo o nada: tampoco los
+   consumos procesados en esa transacción) y sigue aprobado: se configura el costo de referencia (Insumos, con
+   `inventory.costs.manage`) y se vuelve a aplicar. Si hay varios insumos sin costo, el mensaje nombra el primero.
+2. Sugerencias sin permiso de existencias: campos en `null` (no 403), explicado arriba.
+3. Valor por insumo: exige ambos permisos (costos y valuación); el total del inventario sigue con solo
+   `inventory.valuation.read`.
+
+### Contratos que cambian (para la interfaz)
+
+- `GET /inventory/stock`: `StockRow.value` y `value_display` en `null` salvo `costs_visible && valuation_visible`.
+  `average_cost`, `average_cost_display` y `cost_pending` siguen con `costs_visible`; `total_value` con `valuation_visible`.
+- `GET /inventory/movements` y `Movement` de la traza de consumo: nuevo `valuation_visible` (en cada movimiento y en la
+  página) = `inventory.costs.read` e `inventory.valuation.read`; `valuation_value_after` en `null` sin él.
+- `GET /inventory/purchase-suggestions`: `reorder_point`, `suggested_quantity` y `suggested_base_quantity` pasan a
+  `string | null` (null sin `stock_visible`).
+- `GET /inventory/counts/{id}`: `CountLine.movement_id`, `movement_kind` y `movement_label` en `null` sin
+  `theoretical_visible`.
+- `GET /inventory/alerts` (y `summary.alerts`): `count_difference_pending` sin el número de diferencias ni `count` > 1 sin
+  `inventory.counts.approve` o `inventory.stock.read`.
+- 409 `COST_REQUIRED` nuevo en `POST /adjustments` (aplicado al registrarlo), `POST /adjustments/{id}/authorize` y
+  `POST /counts/{id}/apply`.
+- `production_in` lleva base `document` (antes `original`) y, con existencia negativa del insumo preparado, un
+  `cost_adjustment` ligado (`entry_key production:<elaboración>:in:cost`). `consumption_reversal` puede llevar un
+  `cost_adjustment` ligado (`<clave>:cost`, con la misma unidad comercial).
+- Tipos de `desktop/src/services/inventory.ts` (`InventoryMovement.valuation_visible`, `MovementPage.valuation_visible`,
+  comentarios de `StockRow.value`) y `inventoryControl.ts` (`PurchaseSuggestion.reorder_point`, `suggested_quantity`,
+  `suggested_base_quantity` como `string | null`; comentario de `CountLine`).
+
+### Pruebas de la fase F
+
+Motor (`costing_test.go`, cifras a mano en cada caso; `expectState` comprueba además los invariantes en cada estado):
+
+| Caso                                           | Datos                                                                                                                                                                                                                                | Resultado                                                                                                                                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Elaboración con déficit (hallazgo 1)           | R = 0.1/g; salen 500 g; entran 1000 g por $300                                                                                                                                                                                       | −$50 (−500 g, −$50); ajuste 50 − 150 = −$100; 500 g, $150, L 0.3                                                                                                                               |
+| Reversión con existencia negativa (hallazgo 2) | (a) 10 u a $20, sale 10, 10 u a $30, sale 15, revertir 10 u por $200; (b) −5 u, −$500, revertir 6 u por $6; (c) −10 u, −$200, revertir 4 u por $120; (d) 10 u, $300, revertir 5 u por $100; (e) −5 u pendientes, revertir 2 u por $0 | (a) −5 u, −$150 → ajuste +$50, 5 u, $100, L 20; (b) ajuste +$495, 1 u, $1; (c) ajuste −$40, −6 u, −$120 (provisional 20/u sin cambio); (d) sin ajuste, 15 u, $400; (e) sin ajuste, pendiente 3 |
+| Entrada sin costo (hallazgo 3)                 | 0 u sin L ni R, +2; −3 u pendientes +3, +2, +5; con L = 4, +5                                                                                                                                                                        | rechazo; $0 (0 u), $0 (−1 u, 1 pendiente), rechazo sin cambiar el estado; $8 (2 u, $8)                                                                                                         |
+| Ajuste positivo a R                            | 0 u, R = 12, +2                                                                                                                                                                                                                      | +$24, base `configured`, 2 u, $24, L 12 (sustituye el caso «sin costos» que entraba a $0 pendiente)                                                                                            |
+| Último costo válido (hallazgo 5)               | 10⁹ u por $0.000001 (sin L y con L = 5); 1 u por $0.000001                                                                                                                                                                           | L sin valor; L = 5 conservado; L = 0.000001                                                                                                                                                    |
+| Invariante Q = 0 ⇒ V = 0                       | −5 u, −$100 (L = 20); revertir 5 u por $150 y por $100                                                                                                                                                                               | ajuste de costo −$50 y ningún residuo (antes residuo −$50); exacta sin ajuste                                                                                                                  |
+| Red de seguridad del residuo                   | `settle` con 0 u y $0.000004                                                                                                                                                                                                         | residuo −0.000004                                                                                                                                                                              |
+| Secuencias pseudoaleatorias                    | 200 secuencias de 60 operaciones (semilla fija, con y sin R) de todas las operaciones                                                                                                                                                | invariantes y V después = V antes + Σ movimientos en cada paso; las transferencias no cambian el estado                                                                                        |
+
+Con el `Restore` y el `settle` anteriores fallan los casos de reversión, último costo válido, invariante y secuencias
+(estas detectan V < 0 con Q > 0).
+
+Integración (`internal/operations`):
+
+- `inventory_b_entries_with_negative_stock` (nueva): salsa verde (referencia 0.1/g) vendida en unos tacos antes de
+  elaborarla (−500 g, −$50) y elaborada con 3000 g de chile verde de $300: movimientos `production_in 300 document` y
+  `cost_adjustment −100 difference` ligado; valuación 500 g, $150, L 0.3. Crema: 10 a $20, postre A (10), 10 a $30 en
+  otro almacén, postre y café (15) → −5, −$150; «No preparado» del postre A: `consumption −200`,
+  `consumption_reversal 200 original` y `cost_adjustment +50` ligado, todos con la unidad; 5 u, $100, L 20; consumo neto
+  de la unidad cero; ningún insumo con Q > 0 y V < 0; libro consistente.
+- `inventory_d_entries_without_cost` (nueva): hielo (−2, $0, 2 pendientes, sin costos): conteo con sobrante 6 → aplicar
+  409 `COST_REQUIRED` con el mensaje, el conteo sigue aprobado con la misma revisión y sin ningún movimiento nuevo;
+  ajuste pendiente +5 → autorizar 409 (sigue pendiente, sin movimientos); ajuste directo +3 → 409 sin guardar el ajuste;
+  +2 (solo el déficit) aplicado a $0 (0 u, nada pendiente); con costo de referencia $1.50 se autoriza el +5 ($7.50) y se
+  aplica el conteo (teórico −2 a la hora del renglón, sobrante 6 a $1.50 → 11 u, $16.50).
+- `inventory_cost_visibility`: usuario con `costs.read` sin `valuation.read`: costo promedio $25 sí, `value` y
+  `total_value` null, `valuation_visible` false en existencias, libro (página y cada movimiento, con su valor visible y
+  `valuation_value_after` null) y resumen; con ambos permisos, `valuation_value_after` en cada movimiento.
+- `inventory_d_counts_with_concurrent_sales`: quien solo cuenta no recibe `movement_id`, `movement_kind` ni
+  `movement_label` de los renglones aplicados.
+- `inventory_d_alerts`: el número de diferencias del conteo pendiente lo ven quien aprueba y quien consulta existencias;
+  quien solo cuenta y quien solo consulta inventario reciben «… está pendiente de aprobar.» con `count` 1.
+- `inventory_d_purchase_suggestions` (ajustada): quien solo consulta inventario ya no recibe la cantidad sugerida («1»):
+  `reorder_point`, `suggested_quantity` y `suggested_base_quantity` null; quien compra (`purchases.create`) sí los ve.
+
+### Verificación de la fase F
+
+En la copia aislada `scratchpad/repoF` (sincronizada desde el árbol de trabajo, con los cambios en curso de la interfaz
+del otro agente) y el clúster temporal del puerto 55499 (nunca la instalación real):
+
+- `gofmt -l` (archivos Go propios) y `prettier --check` de `inventory.ts` e `inventoryControl.ts`: sin diferencias.
+- `go vet ./...` y `go vet -tags=integration ./...`: aprobados.
+- `go test -race -count=1 ./...`: todos los paquetes `ok`, incluido `internal/inventory`.
+- Integración con `-race`: `internal/database` ok (4.0 s), `internal/administration` ok (55.4 s) e
+  `internal/operations` ok (220.7 s; las subpruebas nuevas no acercan la aceptación encadenada al límite de 300 s de su
+  contexto).
+- `tsc --noEmit` (desktop): sin errores.
+- Prueba de mutación: en otra copia se reintrodujeron los seis defectos (`production_in` como reversión, `Restore`
+  anterior, `Admit` a cero, valor por insumo con solo `costs.read`, y las tres fugas) y fallaron
+  `inventory_cost_visibility`, `inventory_b_entries_with_negative_stock`, `inventory_d_counts_with_concurrent_sales`,
+  `inventory_d_alerts`, `inventory_d_purchase_suggestions` e `inventory_d_entries_without_cost` (y en cascada
+  `inventory_d_events_audit_and_ledger`); en el motor, con el `Restore` y el `settle` anteriores fallan los casos de
+  reversión, último costo válido, invariante y secuencias pseudoaleatorias.
+- Playwright no se ejecutó (esta parte no cambia pantallas).

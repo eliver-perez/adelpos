@@ -13,7 +13,8 @@ import (
 // Clasificación de cancelaciones de unidades ya consumidas (§14 y §0-B «Cancelaciones sin
 // clasificar»):
 //   - «No preparado» (not_prepared): revierte exactamente el consumo neto registrado de la unidad
-//     (consumption_reversal al valor original);
+//     (consumption_reversal al valor original; con existencia negativa, el déficit cubierto se
+//     realinea con un ajuste de costo separado, como en una recepción);
 //   - «Preparado / merma» (prepared_waste): conserva el consumo y lo marca como merma; si antes se
 //     había revertido, vuelve a consumir lo que esa clasificación revirtió (movimientos nuevos);
 //   - hasta el corte del día operativo la clasifica inventory.waste.record; después, solo una

@@ -6,8 +6,9 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// Existencias por insumo y almacén (§6). Se consultan con inventory.stock.read; los costos y el
-// valor del insumo solo con inventory.costs.read y el valor total del inventario solo con
+// Existencias por insumo y almacén (§6). Se consultan con inventory.stock.read; el costo promedio y
+// «costo pendiente» solo con inventory.costs.read; el valor del insumo (valuación por insumo) solo
+// con inventory.costs.read e inventory.valuation.read, y el valor total del inventario solo con
 // inventory.valuation.read. El costo es uno solo por insumo: value es el valor total del insumo en
 // todos los almacenes, aunque el listado se filtre por almacén.
 
@@ -32,10 +33,11 @@ type StockRow struct {
 	Warehouses         []StockByWarehouse `json:"warehouses"`
 	AverageCost        *string            `json:"average_cost"`
 	AverageCostDisplay *string            `json:"average_cost_display"`
-	Value              *string            `json:"value"`
-	ValueDisplay       *string            `json:"value_display"`
-	CostPending        *bool              `json:"cost_pending"`
-	UpdatedAt          *time.Time         `json:"updated_at"`
+	// Value es la valuación del insumo: solo con costs_visible y valuation_visible.
+	Value        *string    `json:"value"`
+	ValueDisplay *string    `json:"value_display"`
+	CostPending  *bool      `json:"cost_pending"`
+	UpdatedAt    *time.Time `json:"updated_at"`
 }
 
 // StockByWarehouse es el desglose por almacén (solo almacenes con existencia distinta de cero).
@@ -251,8 +253,10 @@ func (handler *service) scanStockRow(rows interface{ Scan(...any) error }) (*Sto
 			exact, display := exactMoneyText(*average), displayUnitCostText(*average)
 			row.AverageCost, row.AverageCostDisplay = &exact, &display
 		}
-		exactValue, displayValue := exactMoneyText(totalValue), displayMoneyText(totalValue)
-		row.Value, row.ValueDisplay = &exactValue, &displayValue
+		if handler.valuationVisible() {
+			exactValue, displayValue := exactMoneyText(totalValue), displayMoneyText(totalValue)
+			row.Value, row.ValueDisplay = &exactValue, &displayValue
+		}
 		pendingCost := parseDatabaseDecimal(pending).IsPositive()
 		row.CostPending = &pendingCost
 	}

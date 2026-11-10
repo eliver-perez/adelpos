@@ -22,7 +22,12 @@ import (
 //   - la consulta no escribe nada; crear un borrador es una acción explícita
 //     (POST purchase-suggestions/draft-order, inventory.purchases.create) que nunca emite la orden;
 //   - el proveedor y el último precio solo con algún permiso de compras; las cantidades de
-//     existencia y pendiente solo con inventory.stock.read o inventory.purchases.create.
+//     existencia y pendiente solo con inventory.stock.read o inventory.purchases.create;
+//   - sin esos permisos (stock_visible false) tampoco viajan el punto de reabastecimiento ni la
+//     cantidad sugerida (en presentaciones y en la unidad base): con el punto y lo sugerido se
+//     deduciría la existencia. La sugerencia sigue listando el insumo, igual que la alerta de
+//     reabastecimiento sin cantidades. Crear el borrador exige inventory.purchases.create, que sí
+//     los ve.
 
 var one = decimal.NewFromInt(1)
 
@@ -34,7 +39,7 @@ const defaultSuggestionTaxRate = 16
 type PurchaseSuggestion struct {
 	Item                  ItemReference          `json:"item"`
 	CategoryName          *string                `json:"category_name"`
-	ReorderPoint          string                 `json:"reorder_point"`
+	ReorderPoint          *string                `json:"reorder_point"`
 	ReorderSource         string                 `json:"reorder_source"`
 	MinStock              *string                `json:"min_stock"`
 	StockVisible          bool                   `json:"stock_visible"`
@@ -49,8 +54,8 @@ type PurchaseSuggestion struct {
 	Presentation          *PresentationReference `json:"presentation"`
 	Unit                  *UnitReference         `json:"unit"`
 	CaptureLabel          string                 `json:"capture_label"`
-	SuggestedQuantity     string                 `json:"suggested_quantity"`
-	SuggestedBaseQuantity string                 `json:"suggested_base_quantity"`
+	SuggestedQuantity     *string                `json:"suggested_quantity"`
+	SuggestedBaseQuantity *string                `json:"suggested_base_quantity"`
 	LastUnitPrice         *string                `json:"last_unit_price"`
 	LastPriceLabel        *string                `json:"last_price_label"`
 	LastPriceAt           *time.Time             `json:"last_price_at"`
@@ -262,14 +267,14 @@ func (handler *service) buildSuggestions(itemIDs []string, supplierID string) ([
 	suggestions := make([]PurchaseSuggestion, 0, len(needs))
 	for _, entry := range needs {
 		item := entry.item
-		suggestion := PurchaseSuggestion{Item: item, CategoryName: entry.categoryName, ReorderPoint: quantityText(entry.reorder),
-			ReorderSource: "item", MinStock: optionalQuantityText(entry.minimum), StockVisible: stockVisible,
-			PurchasingVisible: purchasing}
+		suggestion := PurchaseSuggestion{Item: item, CategoryName: entry.categoryName, ReorderSource: "item",
+			MinStock: optionalQuantityText(entry.minimum), StockVisible: stockVisible, PurchasingVisible: purchasing}
 		if entry.fromWarehouses {
 			suggestion.ReorderSource = "warehouses"
 		}
 		if stockVisible {
-			stock, pending, drafted, need := entry.stock, entry.pending, entry.drafted, entry.need
+			stock, pending, drafted, need, reorder := entry.stock, entry.pending, entry.drafted, entry.need, entry.reorder
+			suggestion.ReorderPoint = optionalQuantityText(&reorder)
 			suggestion.Stock = optionalQuantityText(&stock)
 			suggestion.PendingQuantity = optionalQuantityText(&pending)
 			suggestion.DraftQuantity = optionalQuantityText(&drafted)
@@ -296,8 +301,10 @@ func (handler *service) buildSuggestions(itemIDs []string, supplierID string) ([
 		}
 		quantity, base := suggestedQuantity(entry.need, presentationBase)
 		suggestion.suggested = quantity
-		suggestion.SuggestedQuantity = quantityText(quantity)
-		suggestion.SuggestedBaseQuantity = quantityText(base)
+		if stockVisible {
+			suggestion.SuggestedQuantity = optionalQuantityText(&quantity)
+			suggestion.SuggestedBaseQuantity = optionalQuantityText(&base)
+		}
 		if offer != nil {
 			// El último precio solo sirve para el borrador si se capturó en la misma presentación o
 			// unidad que la sugerencia.

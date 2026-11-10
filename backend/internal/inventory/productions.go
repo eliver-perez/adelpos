@@ -11,8 +11,11 @@ import (
 // elaboración (inventory.production.record):
 //   - consume los insumos de la versión vigente de la receta × lotes (production_out; las
 //     preparaciones inmediatas se descomponen y los insumos preparados se consumen como insumo);
-//   - produce el insumo preparado con el valor total consumido (production_in, entrada a valor
-//     exacto), de modo que su costo refleja lo que costó elaborarlo;
+//   - produce el insumo preparado con el valor total consumido (production_in, entrada con
+//     documento como una recepción), de modo que su costo refleja lo que costó elaborarlo; si el
+//     insumo preparado tenía existencia negativa (se vendió antes de elaborarlo), el déficit
+//     cubierto se valora al costo real de la elaboración y la diferencia contra su valor
+//     provisional se registra como ajuste de costo separado (regla 4 de §0-B);
 //   - guarda lo esperado (lotes × rendimiento efectivo), lo producido realmente y la merma de
 //     elaboración (lotes × rendimiento − producido, nunca negativa).
 // Después, vender un producto que usa la preparación consume el insumo preparado y nunca vuelve a

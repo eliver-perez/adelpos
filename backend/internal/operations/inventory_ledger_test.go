@@ -352,6 +352,38 @@ func testInventoryCostVisibility(t *testing.T, fixture *inventoryFixture) {
 	if *visible.TotalValue != "985.50" || *visible.TotalValueDisplay != "985.50" {
 		t.Fatalf("Valuación total: %s", *visible.TotalValue)
 	}
+	// Con costos pero sin inventory.valuation.read: el costo promedio sí; el valor del insumo no (es
+	// la valuación por insumo), ni la valuación posterior de cada movimiento del libro (la diferencia
+	// entre dos movimientos revela el valor acumulado). El valor de cada movimiento sigue visible.
+	unvalued := inventoryUser(t, fixture.restaurantFixture, "inventario_costos_sin_valuacion", []string{
+		"inventory.read", "inventory.stock.read", "inventory.movements.read", "inventory.costs.read",
+	})
+	partial := decodeResponse[inventory.StockPage](t, fixture.call(t, unvalued, "GET", "inventory/stock?search=ARZ", nil, 200))
+	if !partial.CostsVisible || partial.ValuationVisible || partial.TotalValue != nil || len(partial.Items) != 1 ||
+		text(partial.Items[0].AverageCost) != "25.00" || partial.Items[0].Value != nil || partial.Items[0].ValueDisplay != nil ||
+		partial.Items[0].CostPending == nil {
+		t.Fatalf("Existencias con costos y sin valuación: %+v %+v", partial, partial.Items)
+	}
+	for _, viewer := range []struct {
+		terminal testTerminal
+		valued   bool
+	}{{unvalued, false}, {fixture.costs, true}} {
+		ledger := decodeResponse[inventory.MovementPage](t, fixture.call(t, viewer.terminal, "GET", "inventory/movements?item_id="+rice.ID, nil,
+			200))
+		if !ledger.CostsVisible || ledger.ValuationVisible != viewer.valued || ledger.Total == 0 {
+			t.Fatalf("Libro con valuación %v: %+v", viewer.valued, ledger)
+		}
+		for _, movement := range ledger.Items {
+			if movement.Value == nil || movement.ValuationVisible != viewer.valued || (movement.ValuationValueAfter != nil) != viewer.valued {
+				t.Fatalf("Movimiento con valuación %v: %+v", viewer.valued, movement)
+			}
+		}
+	}
+	partialSummary := decodeResponse[inventory.Summary](t, fixture.call(t, unvalued, "GET", "inventory/summary", nil, 200))
+	if !partialSummary.CostsVisible || partialSummary.ValuationVisible || partialSummary.TotalValue != nil ||
+		partialSummary.PendingCostItems == nil {
+		t.Fatalf("Resumen con costos y sin valuación: %+v", partialSummary)
+	}
 	// Por almacén: el arroz tiene 2 kg en el general y 1 kg en Barra.
 	general := decodeResponse[inventory.StockPage](t, fixture.call(t, fixture.costs, "GET",
 		"inventory/stock?search=ARZ&warehouse_id="+fixture.general.ID, nil, 200))

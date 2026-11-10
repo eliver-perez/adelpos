@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
@@ -44,13 +45,16 @@ const (
 	KindCostAdjustment      = "cost_adjustment"
 )
 
+// Una elaboración (production_in) es una entrada con documento: su valor es el de lo consumido y,
+// con existencia negativa del insumo preparado, el déficit cubierto se realinea con un ajuste de
+// costo separado como en una recepción (regla 4 de §0-B).
 var (
-	documentKinds = map[string]bool{KindInitial: true, KindReceipt: true}
+	documentKinds = map[string]bool{KindInitial: true, KindReceipt: true, KindProductionIn: true}
 	issueKinds    = map[string]bool{
 		KindConsumption: true, KindWaste: true, KindAdjustmentOut: true, KindProductionOut: true, KindCountOut: true,
 	}
 	admitKinds   = map[string]bool{KindAdjustmentIn: true, KindCountIn: true}
-	restoreKinds = map[string]bool{KindConsumptionReversal: true, KindProductionIn: true}
+	restoreKinds = map[string]bool{KindConsumptionReversal: true}
 )
 
 var processPattern = regexp.MustCompile(`^[a-z][a-z_]{1,39}$`)
@@ -64,8 +68,8 @@ type MovementInput struct {
 	ItemID      string
 	WarehouseID string
 	Quantity    decimal.Decimal
-	// Value es el valor del documento (initial, receipt) o el valor exacto que se compensa
-	// (consumption_reversal, production_in). Positivo.
+	// Value es el valor del documento (initial, receipt; en production_in, el valor de lo consumido)
+	// o el valor original exacto del consumo que se compensa (consumption_reversal). No negativo.
 	Value *decimal.Decimal
 	// OriginalCost es el costo unitario original de lo devuelto (supplier_return).
 	OriginalCost      *decimal.Decimal
@@ -204,6 +208,9 @@ func Apply(ctx context.Context, tx pgx.Tx, input MovementInput) (LedgerResult, e
 		return LedgerResult{}, err
 	}
 	entry, extra, err := evaluate(before, input)
+	if errors.Is(err, errCostRequired) {
+		return LedgerResult{}, costRequired(ctx, tx, input.ItemID)
+	}
 	if err != nil {
 		return LedgerResult{}, err
 	}
@@ -258,6 +265,18 @@ func Apply(ctx context.Context, tx pgx.Tx, input MovementInput) (LedgerResult, e
 	result.Valuation = entry.After
 	result.NegativeStock = stockAfter.IsNegative()
 	return result, nil
+}
+
+// costRequired es el rechazo de una entrada sin documento que dejaría existencia positiva sin ningún
+// costo: el usuario configura el costo de referencia del insumo y vuelve a intentarlo. La
+// transacción completa se revierte (en un conteo no se aplica ningún renglón).
+func costRequired(ctx context.Context, tx pgx.Tx, itemID string) error {
+	var name string
+	if err := tx.QueryRow(ctx, "SELECT name FROM app.inventory_items WHERE id=$1", itemID).Scan(&name); err != nil {
+		return err
+	}
+	return conflict("COST_REQUIRED", "El insumo «"+name+"» no tiene costo: configura su costo de referencia antes de registrar "+
+		"una entrada sin documento (ajuste positivo o sobrante de conteo).")
 }
 
 // returnExtras son los datos de una devolución que no son movimientos.

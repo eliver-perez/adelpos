@@ -14,7 +14,8 @@ import (
 // los datos vigentes, y nunca bloquean ventas ni otras operaciones. Cada alerta tiene tipo,
 // gravedad, texto en español sin identificadores crudos y una referencia navegable (tipo de destino,
 // identificador y nombre). Visibilidad (además de inventory.read):
-//   - las cantidades de existencia solo aparecen con inventory.stock.read;
+//   - las cantidades de existencia solo aparecen con inventory.stock.read, y el número de
+//     diferencias de un conteo pendiente con inventory.counts.approve o inventory.stock.read;
 //   - «costo pendiente» solo con inventory.costs.read;
 //   - las alertas de compras (orden parcialmente recibida, gasto vinculado corregido) solo con algún
 //     permiso de compras;
@@ -433,8 +434,11 @@ func (collector *alertCollector) pendingCosts() error {
 }
 
 // countDifferences: conteos enviados o aprobados sin aplicar, con sus diferencias calculadas ahora
-// (contado − teórico a la hora de cada renglón).
+// (contado − teórico a la hora de cada renglón). El número de diferencias solo con
+// inventory.counts.approve o inventory.stock.read (quien ve la existencia teórica del conteo); sin
+// ellos la alerta solo informa que el conteo está pendiente.
 func (collector *alertCollector) countDifferences() error {
+	visible := collector.handler.theoreticalVisible()
 	rows, err := collector.handler.tx.Query(collector.handler.ctx, `SELECT c.id,c.folio,c.state,w.id,w.name,
             (SELECT count(*) FROM app.inventory_count_lines l WHERE l.count_id=c.id AND l.counted_quantity IS NOT NULL
                 AND l.counted_quantity <> (SELECT coalesce(sum(m.quantity),0) FROM app.inventory_movements m
@@ -462,10 +466,15 @@ func (collector *alertCollector) countDifferences() error {
 		}
 		countID := id
 		copied := warehouse
-		collector.add(Alert{Type: alertCountDifference, Warehouse: &copied,
-			Reference: AlertReference{Kind: "count", ID: &countID, Label: label}, Count: max(differences, 1), OccurredAt: since,
-			Message: "El conteo " + itoa(int(folio)) + " de «" + warehouse.Name + "» está " + pending + " con " +
-				plural.Count(differences, "diferencia", "diferencias") + "."})
+		alert := Alert{Type: alertCountDifference, Warehouse: &copied,
+			Reference: AlertReference{Kind: "count", ID: &countID, Label: label}, Count: 1, OccurredAt: since,
+			Message: "El conteo " + itoa(int(folio)) + " de «" + warehouse.Name + "» está " + pending + "."}
+		if visible {
+			alert.Count = max(differences, 1)
+			alert.Message = "El conteo " + itoa(int(folio)) + " de «" + warehouse.Name + "» está " + pending + " con " +
+				plural.Count(differences, "diferencia", "diferencias") + "."
+		}
+		collector.add(alert)
 	}
 	return rows.Err()
 }

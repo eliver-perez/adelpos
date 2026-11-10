@@ -93,6 +93,9 @@ func testInventoryControl(t *testing.T, base *inventoryFixture) {
 	t.Run("inventory_d_purchase_suggestions", func(t *testing.T) {
 		testControlSuggestions(t, fixture)
 	})
+	t.Run("inventory_d_entries_without_cost", func(t *testing.T) {
+		testControlEntriesWithoutCost(t, fixture)
+	})
 	t.Run("inventory_d_events_audit_and_ledger", func(t *testing.T) {
 		testControlEventsAndAudit(t, fixture, cursor)
 	})
@@ -637,9 +640,16 @@ func testControlCounts(t *testing.T, fixture *controlFixture) {
 		t.Fatalf("Consumo posterior al conteo: %s %s", fixture.requestState(t, later), fixture.stock(t, "limon", barra))
 	}
 	// Quien solo cuenta sigue sin ver la existencia teórica de un conteo aplicado.
+	// Tampoco ve el movimiento de cada renglón: su tipo (sobrante o faltante) revelaría el sentido de
+	// la diferencia y su existencia, qué renglones tuvieron diferencia.
 	blind := fixture.count(t, fixture.counter, count.ID)
 	if countLineOf(t, blind, limon).TheoreticalQuantity != nil || blind.DifferenceLines != nil || blind.Value != nil {
 		t.Fatalf("Conteo aplicado a ciegas: %+v", blind)
+	}
+	for _, line := range blind.Lines {
+		if line.MovementID != nil || line.MovementKind != nil || line.MovementLabel != nil {
+			t.Fatalf("Renglón aplicado a ciegas con su movimiento: %+v", line)
+		}
 	}
 	fixture.call(t, fixture.recorder, "GET", "inventory/counts/"+count.ID, nil, 403)
 }
@@ -928,6 +938,19 @@ func testControlAlerts(t *testing.T, fixture *controlFixture) {
 		!strings.Contains(differences[0].Message, "pendiente de aprobar con 1 diferencia") {
 		t.Fatalf("Alerta de diferencia de conteo: %+v", differences)
 	}
+	// El número de diferencias solo lo ve quien ve la existencia teórica del conteo (aprueba conteos o
+	// consulta existencias); quien solo cuenta o solo consulta inventario sabe que está pendiente.
+	for _, viewer := range []struct {
+		terminal testTerminal
+		visible  bool
+	}{{fixture.approver, true}, {fixture.recorder, true}, {fixture.counter, false}, {fixture.reader, false}} {
+		seen := alertsOf(decodeResponse[inventory.AlertPage](t, fixture.call(t, viewer.terminal, "GET",
+			"inventory/alerts?type=count_difference_pending", nil, 200)), "count_difference_pending")
+		if len(seen) != 1 || strings.Contains(seen[0].Message, "diferencia") == !viewer.visible ||
+			(!viewer.visible && (seen[0].Count != 1 || !strings.HasSuffix(seen[0].Message, "está pendiente de aprobar."))) {
+			t.Fatalf("Alerta de diferencia de conteo (visible %v): %+v", viewer.visible, seen)
+		}
+	}
 	// Gasto vinculado corregido después (vínculos que dejó la fase C): una alerta por recepción.
 	corrected := rowCount(t, fixture.restaurantFixture, `SELECT count(DISTINCT cl.receipt_id) FROM app.inventory_receipt_cash_links cl
         JOIN app.cash_operations fix ON fix.corrects_operation_id=cl.cash_operation_id WHERE cl.unlinked_at IS NULL`)
@@ -997,23 +1020,33 @@ func testControlSuggestions(t *testing.T, fixture *controlFixture) {
 		"inventory/purchase-suggestions?supplier_id="+fixture.supplier, nil, 200))
 	lemon := suggestionOf(t, page, limon)
 	wine := suggestionOf(t, page, vino)
-	if page.Total != 2 || lemon.ReorderSource != "warehouses" || lemon.ReorderPoint != "120" || text(lemon.Stock) != "99" ||
-		text(lemon.PendingQuantity) != "12" || text(lemon.NeedQuantity) != "9" || lemon.SuggestedQuantity != "1" ||
-		lemon.SuggestedBaseQuantity != "12" || lemon.Presentation == nil || lemon.CaptureLabel != "Bolsa con 12" ||
+	if page.Total != 2 || lemon.ReorderSource != "warehouses" || text(lemon.ReorderPoint) != "120" || text(lemon.Stock) != "99" ||
+		text(lemon.PendingQuantity) != "12" || text(lemon.NeedQuantity) != "9" || text(lemon.SuggestedQuantity) != "1" ||
+		text(lemon.SuggestedBaseQuantity) != "12" || lemon.Presentation == nil || lemon.CaptureLabel != "Bolsa con 12" ||
 		text(lemon.LastUnitPrice) != "30.00" || lemon.Supplier == nil || lemon.Supplier.ID != fixture.supplier {
 		t.Fatalf("Sugerencia del limón: %+v", lemon)
 	}
-	if wine.ReorderSource != "item" || text(wine.NeedQuantity) != "22" || wine.SuggestedQuantity != "4" || wine.SuggestedBaseQuantity != "24" ||
+	if wine.ReorderSource != "item" || text(wine.NeedQuantity) != "22" || text(wine.SuggestedQuantity) != "4" ||
+		text(wine.SuggestedBaseQuantity) != "24" ||
 		wine.LastUnitPrice != nil || wine.BelowMinimum == nil || !*wine.BelowMinimum {
 		t.Fatalf("Sugerencia del vino: %+v", wine)
 	}
-	// Quien solo consulta inventario ve la sugerencia sin proveedor, precios ni existencias.
+	// Quien solo consulta inventario ve qué insumos reabastecer, sin proveedor, precios ni existencias,
+	// y tampoco el punto de reabastecimiento ni lo sugerido (con ambos se deduciría la existencia).
+	// Antes recibía la cantidad sugerida («1»).
 	blind := decodeResponse[inventory.PurchaseSuggestionPage](t, fixture.call(t, fixture.reader, "GET", "inventory/purchase-suggestions",
 		nil, 200))
 	lemonBlind := suggestionOf(t, blind, limon)
 	if blind.PurchasingVisible || blind.StockVisible || lemonBlind.Supplier != nil || lemonBlind.LastUnitPrice != nil ||
-		lemonBlind.Stock != nil || lemonBlind.SuggestedQuantity != "1" {
+		lemonBlind.Stock != nil || lemonBlind.ReorderPoint != nil || lemonBlind.SuggestedQuantity != nil ||
+		lemonBlind.SuggestedBaseQuantity != nil || lemonBlind.NeedQuantity != nil || lemonBlind.CaptureLabel != "Bolsa con 12" {
 		t.Fatalf("Sugerencias sin permisos de compras: %+v", lemonBlind)
+	}
+	// Con inventory.purchases.create (quien arma el borrador) sí las ve.
+	buyerLemon := suggestionOf(t, decodeResponse[inventory.PurchaseSuggestionPage](t, fixture.call(t, fixture.buyer, "GET",
+		"inventory/purchase-suggestions", nil, 200)), limon)
+	if !buyerLemon.StockVisible || text(buyerLemon.ReorderPoint) != "120" || text(buyerLemon.SuggestedQuantity) != "1" {
+		t.Fatalf("Sugerencias de quien compra: %+v", buyerLemon)
 	}
 	fixture.call(t, fixture.reader, "GET", "inventory/purchase-suggestions?supplier_id="+fixture.supplier, nil, 403)
 	// El borrador es una acción explícita con inventory.purchases.create; nunca se emite.
@@ -1048,11 +1081,107 @@ func testControlSuggestions(t *testing.T, fixture *controlFixture) {
 	// El borrador no cuenta como pendiente: la sugerencia sigue e informa lo que ya está en borradores.
 	after := suggestionOf(t, decodeResponse[inventory.PurchaseSuggestionPage](t, fixture.adminCall(t, "GET", "inventory/purchase-suggestions",
 		nil, 200)), limon)
-	if after.SuggestedQuantity != "1" || text(after.DraftQuantity) != "12" {
+	if text(after.SuggestedQuantity) != "1" || text(after.DraftQuantity) != "12" {
 		t.Fatalf("Sugerencia después del borrador: %+v", after)
 	}
 	if rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.audit_events WHERE action='inventory.purchase_order_drafted_from_suggestions'") != 1 {
 		t.Fatal("Falta la auditoría del borrador desde sugerencias")
+	}
+}
+
+// errorMessage devuelve el mensaje de un rechazo de la API.
+func errorMessage(t *testing.T, body []byte) string {
+	t.Helper()
+	return decodeResponse[struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}](t, body).Error.Message
+}
+
+// testControlEntriesWithoutCost: una entrada sin documento (ajuste positivo o sobrante de conteo)
+// que dejaría existencia positiva sin ningún costo disponible se rechaza con COST_REQUIRED, sin
+// registrar nada (§0-B.6: nunca a un costo inventado); cubrir solo el déficit sigue permitido. El
+// hielo salió 2 piezas sin existencia ni costo en las alertas: −2 piezas, $0, 2 pendientes de costo.
+func testControlEntriesWithoutCost(t *testing.T, fixture *controlFixture) {
+	general, hielo := fixture.general.ID, fixture.items["hielo"].ID
+	required := "El insumo «Hielo D» no tiene costo: configura su costo de referencia antes de registrar una entrada sin documento"
+	expectRejected := func(label string, body []byte) {
+		t.Helper()
+		if errorCode(t, body) != "COST_REQUIRED" || !strings.HasPrefix(errorMessage(t, body), required) {
+			t.Fatalf("%s: %s", label, body)
+		}
+	}
+	if fixture.valuation(t, "hielo") != "-2/0" {
+		t.Fatalf("Hielo antes de las entradas: %s", fixture.valuation(t, "hielo"))
+	}
+	iceLine := func(quantity string) map[string]any {
+		return map[string]any{"kind": "discrepancy", "reason": "surplus", "warehouse_id": general,
+			"lines": []map[string]any{{"item_id": hielo, "quantity": quantity}}}
+	}
+	// Conteo del hielo en el almacén general: se cuentan 4 piezas con teórico −2 → sobrante 6, que
+	// cubriría el déficit de 2 y dejaría 4 piezas sin costo. Aplicar falla sin registrar nada: el
+	// conteo sigue aprobado, sin movimientos ni consumos procesados.
+	count := decodeResponse[inventory.Count](t, fixture.write(t, fixture.counter, "POST", "inventory/counts", map[string]any{
+		"warehouse_id": general, "scope": "items", "item_ids": []string{hielo},
+	}, 200))
+	route := "inventory/counts/" + count.ID
+	count = decodeResponse[inventory.Count](t, fixture.write(t, fixture.counter, "PUT", route+"/lines", map[string]any{
+		"lines": []map[string]any{{"item_id": hielo, "counted_quantity": "4"}},
+	}, 200))
+	count = decodeResponse[inventory.Count](t, fixture.write(t, fixture.counter, "POST", route+"/submit", map[string]any{"revision": count.Revision}, 200))
+	approved := decodeResponse[inventory.Count](t, fixture.write(t, fixture.approver, "POST", route+"/approve",
+		map[string]any{"revision": count.Revision}, 200))
+	movementsBefore := rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_movements")
+	expectRejected("Conteo con sobrante sin costo", fixture.write(t, fixture.approver, "POST", route+"/apply",
+		map[string]any{"revision": approved.Revision}, 409))
+	if current := fixture.count(t, fixture.approver, count.ID); current.State != "approved" || current.Revision != approved.Revision ||
+		fixture.movements(t, count.ID) != 0 || rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_movements") !=
+		movementsBefore || fixture.valuation(t, "hielo") != "-2/0" {
+		t.Fatalf("El conteo rechazado registró algo: %+v %s", current, fixture.valuation(t, "hielo"))
+	}
+	// Ajuste pendiente de +5 (quien no autoriza): registrarlo no aplica nada; autorizarlo falla igual y
+	// sigue pendiente.
+	pending := fixture.adjust(t, fixture.recorder, iceLine("5"), 200)
+	if pending.State != "pending_authorization" {
+		t.Fatalf("Ajuste pendiente del hielo: %+v", pending)
+	}
+	expectRejected("Autorización sin costo", fixture.write(t, fixture.authorizer, "POST", "inventory/adjustments/"+pending.ID+"/authorize",
+		map[string]any{"revision": pending.Revision}, 409))
+	stillPending := decodeResponse[inventory.Adjustment](t, fixture.call(t, fixture.authorizer, "GET", "inventory/adjustments/"+pending.ID, nil, 200))
+	if stillPending.State != "pending_authorization" || stillPending.Revision != pending.Revision || fixture.movements(t, pending.ID) != 0 {
+		t.Fatalf("El ajuste rechazado cambió: %+v", stillPending)
+	}
+	// Ajuste aplicado al registrarlo (+3): se rechaza sin guardar el ajuste.
+	adjustments := rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_adjustments")
+	expectRejected("Ajuste directo sin costo", fixture.write(t, fixture.admin, "POST", "inventory/adjustments", iceLine("3"), 409))
+	if rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_adjustments") != adjustments ||
+		fixture.valuation(t, "hielo") != "-2/0" {
+		t.Fatal("El ajuste rechazado se guardó")
+	}
+	// +2 solo cubre el déficit: entra a su valor provisional ($0) y deja 0 piezas, $0, sin pendiente.
+	covered := fixture.adjust(t, fixture.admin, iceLine("2"), 200)
+	if covered.State != "applied" || fixture.valuation(t, "hielo") != "0/0" ||
+		rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.inventory_valuations WHERE item_id=$1 AND pending_cost_quantity>0",
+			hielo) != 0 {
+		t.Fatalf("Ajuste que cubre el déficit: %+v %s", covered, fixture.valuation(t, "hielo"))
+	}
+	// Con el costo de referencia configurado ($1.50) el ajuste pendiente se autoriza (5 × 1.50 = $7.50)
+	// y el conteo se aplica: su teórico a la hora del renglón sigue en −2 (las entradas posteriores se
+	// conservan), sobrante 6 al promedio 1.50 = $9 → 11 piezas por $16.50.
+	ice := decodeResponse[inventory.Item](t, fixture.adminCall(t, "GET", "inventory/items/"+hielo, nil, 200))
+	fixture.adminWrite(t, "PATCH", "inventory/items/"+hielo, map[string]any{"revision": ice.Revision, "code": ice.Code, "name": ice.Name,
+		"base_unit_id": ice.BaseUnit.ID, "kind": ice.Kind, "active": true, "reference_cost": "1.5"}, 200)
+	authorized := decodeResponse[inventory.Adjustment](t, fixture.write(t, fixture.authorizer, "POST",
+		"inventory/adjustments/"+pending.ID+"/authorize", map[string]any{"revision": pending.Revision}, 200))
+	if authorized.State != "applied" || fixture.valuation(t, "hielo") != "5/7.5" {
+		t.Fatalf("Ajuste autorizado con costo de referencia: %+v %s", authorized, fixture.valuation(t, "hielo"))
+	}
+	applied := decodeResponse[inventory.Count](t, fixture.write(t, fixture.approver, "POST", route+"/apply",
+		map[string]any{"revision": approved.Revision}, 200))
+	if applied.State != "applied" || text(countLineOf(t, applied, hielo).Difference) != "6" || fixture.valuation(t, "hielo") != "11/16.5" ||
+		fixture.stock(t, "hielo", general) != "11" {
+		t.Fatalf("Conteo aplicado con costo de referencia: %+v %s", applied, fixture.valuation(t, "hielo"))
 	}
 }
 
