@@ -74,6 +74,9 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
     'Existencias',
     'Movimientos',
     'Ajustes y mermas',
+    'Compras',
+    'Recepciones',
+    'Proveedores',
     'Configuración',
   ]);
 

@@ -149,6 +149,9 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
     'Existencias',
     'Movimientos',
     'Ajustes y mermas',
+    'Compras',
+    'Recepciones',
+    'Proveedores',
     'Configuración',
   ]);
 

@@ -5070,3 +5070,65 @@ th.inventory-number {
     flex: 1 1 100%;
   }
 }
+/* Etapa 8, fase C (interfaz de compras: proveedores, órdenes, recepciones, devoluciones y vínculo
+   con gastos de caja). Solo tokens de ambos temas; las tablas siguen desplazándose dentro de su
+   contenedor y los renglones de captura se reacomodan sin desbordar a 1280 × 720. */
+.tag-info {
+  color: var(--info);
+  background: var(--info-soft);
+  font-weight: 600;
+}
+.tag-muted {
+  color: var(--muted);
+  background: var(--subtle);
+}
+.purchase-line-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+.purchase-tax-field .segmented-control {
+  min-width: 0;
+}
+.purchase-tax-field .segmented-control button {
+  min-width: 0;
+  white-space: nowrap;
+}
+.purchase-line-amounts {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.purchase-totals {
+  display: grid;
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+.purchase-totals p {
+  margin: 0;
+}
+.purchase-total-amount {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.purchase-actions .primary-button,
+.purchase-actions .secondary-button,
+.purchase-actions .danger-button {
+  min-height: 44px;
+}
+.inventory-page .danger-solid-button {
+  min-height: 44px;
+  padding: 9px 16px;
+}
+.inventory-facts dd .secondary-button {
+  min-height: 44px;
+}
+/* Las tablas anchas de compras (recepciones, renglones de órdenes) se desplazan dentro de su
+   contenedor: los elementos de las rejillas de Inventarios pueden encogerse por debajo del ancho
+   de su contenido en lugar de ensanchar la página. */
+.inventory-page .form-stack > *,
+.inventory-page .panel {
+  min-width: 0;
+}
