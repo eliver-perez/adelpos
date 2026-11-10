@@ -92,7 +92,7 @@ Leer README.md, ARCHITECTURE.md, API_CONTRACTS.md y NEXT_STEPS_FOR_SOL.md antes 
 
 ## Reglas permanentes desde etapa 7
 
-- 0001–0008 están aplicadas en la instalación real y son inmutables (la 0008 se aplicó el 9 de noviembre de 2026 con autorización del propietario); la siguiente ampliación requiere 0009 y, sobre la instalación real, autorización expresa previa con respaldo y ensayo de restauración.
+- 0001–0009 están aplicadas en la instalación real y son inmutables (la 0009 se aplicó el 9 de noviembre de 2026 con autorización del propietario); la siguiente ampliación requiere 0010 y, sobre la instalación real, autorización expresa previa con respaldo y ensayo de restauración.
 - La caja vive en `payments` (`cash_*.go`): un turno activo por caja (`open` o `closing`), escrituras con el lock 7820148305, idempotencia, auditoría y evento `cash` en la misma transacción. El efectivo esperado se calcula en un solo lugar (`cash_expected.go`) a partir de registros reales y por moneda.
 - Cierre ciego para todos: durante `closing` ninguna respuesta, documento, aviso ni auditoría contiene el esperado o las diferencias, ni siquiera para el administrador; fuera del arqueo solo con `cash.expected.read`. Los rechazos por efectivo insuficiente nunca llevan cifras.
 - Retiros y gastos siempre autorizados (permiso propio `cash.outflows.authorize` o autorización puntual de otra persona). Las correcciones son compensatorias y las regularizaciones de un turno cerrado van al turno abierto vigente de la misma caja, sin cambiar la diferencia del cerrado.

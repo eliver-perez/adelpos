@@ -385,9 +385,9 @@ Ejecutada sobre la copia aislada sincronizada con el repositorio (clúster tempo
 
 ### Versión y documentación
 
-- Versión **0.7.1** y `schema_version: 9` en `config/product.json`, con los derivados actualizados: `backend/internal/product/metadata.json`, `desktop/src/generated/product.json`, `desktop/package.json`, la entrada raíz de `desktop/package-lock.json`, `desktop/src-tauri/Cargo.toml`, la entrada raíz de `desktop/src-tauri/Cargo.lock` y `desktop/src-tauri/tauri.conf.json`. La 0009 sigue sin aplicarse a la instalación real, que continúa en esquema 8 con la 0.7.0.
+- Versión **0.7.1** y `schema_version: 9` en `config/product.json`, con los derivados actualizados: `backend/internal/product/metadata.json`, `desktop/src/generated/product.json`, `desktop/package.json`, la entrada raíz de `desktop/package-lock.json`, `desktop/src-tauri/Cargo.toml`, la entrada raíz de `desktop/src-tauri/Cargo.lock` y `desktop/src-tauri/tauri.conf.json`. La 0009 se aplicó después a la instalación real (ver «Instalación real»).
 - Verificación: la de la etapa 7 quedó archivada sin cambios como `docs/VERIFICATION_STAGE7.md` (`git mv`) y la nueva [VERIFICATION.md](VERIFICATION.md) registra, por fase, solo lo ejecutado en las fases A–D y lo que no se verificó.
-- `CLAUDE.md`: encabezado (0.7.1, esquema 9 con la 0009 sin aplicar), tecnologías, estructura (migraciones 0001–0009, con 0001–0008 aplicadas), patrones de avisos, confirmación e iconos, fila 7.1 del plan, decisiones de la etapa 7.1 (y corrección de la frase de la etapa 7 que limitaba el cajón a ESC/POS TCP), archivos de referencia, riesgos y limitaciones, y criterios de esquema, frontend y documentación.
+- `CLAUDE.md`: encabezado (0.7.1 y esquema 9), tecnologías, estructura (migraciones 0001–0009, con 0001–0008 aplicadas), patrones de avisos, confirmación e iconos, fila 7.1 del plan, decisiones de la etapa 7.1 (y corrección de la frase de la etapa 7 que limitaba el cajón a ESC/POS TCP), archivos de referencia, riesgos y limitaciones, y criterios de esquema, frontend y documentación.
 - `README.md` (lista de migraciones y estructura), `ARCHITECTURE.md` (migración 0009) y `DEVELOPMENT_MACOS.md` (versión, esquema y procedimiento de la 0009).
 - Revisión de las guías actualizadas por las fases: `docs/KITCHEN_AND_PRINTING.md`, `docs/PAYMENTS_AND_REFUNDS.md` y `docs/CASH_SHIFTS_AND_RECONCILIATION.md` pasan a 0.7.1 y esquema 9 (la guía de caja enlaza ahora la regresión de la etapa 7 en `VERIFICATION_STAGE7.md`); `API_CONTRACTS.md` corrige la fila de `/version`, que seguía diciendo «esquema 5»; `docs/RESTAURANT_OPERATIONS.md` aclara en la sección de la etapa 6.2 que «Nueva cuenta» también crea la cuenta con el primer producto. `docs/CATALOG.md` y `docs/DEPENDENCIES.md` ya cubrían la 7.1.
 - `AGENTS.md`, `README.md`, `ARCHITECTURE.md` y `DEVELOPMENT_MACOS.md` describen el cajón por ESC/POS TCP o por una cola CUPS en modo raw. El estado de las migraciones en `AGENTS.md` y `NEXT_STEPS_FOR_SOL.md` se actualiza al aplicar la 0009.
@@ -410,7 +410,7 @@ Detalle en [VERIFICATION.md](VERIFICATION.md).
 
 ### Procedimiento para aplicar la 0009 a la instalación real
 
-Propuesto al cierre, con la instalación real en 0.7.0 y esquema 8 sin modificar. **No se ha ejecutado.** Con autorización expresa del propietario, desde la rama `etapa-7.1`:
+Propuesto al cierre, con la instalación real en 0.7.0 y esquema 8 sin modificar. Se ejecutó el 9 de noviembre de 2026 desde la rama `etapa-7.1` (ver «Instalación real»):
 
 1. **Preparar.** Cerrar AD-EL POS en todas las terminales, sin cobros ni arqueos en curso. `./scripts/dev.sh status` confirma el servidor 0.7.0 en 8181.
 2. **Respaldar.** `./scripts/dev.sh backup` genera `backups/adel_pos-<fecha>.dump` y lo comprueba con `pg_restore --list`.
@@ -438,4 +438,4 @@ Mientras no se autorice, **no** ejecutar `migrate`, `server-start` ni `build-mac
 
 ### Instalación real
 
-<!-- PENDIENTE: instalación real -->
+El propietario autorizó por adelantado aplicar los cambios al terminar si todo aprobaba. Tras la regresión final y el commit de la fase E: respaldo `backups/adel_pos-20261110T022252Z-c7e1e4.dump` con restauración verificada (90 tablas idénticas, `.local/stage9-restore-verification.json`), `server-stop` ordenado, `migrate` `applied:1` y repetición `applied:0`, servidor 0.7.1 iniciado con readiness 200 (PostgreSQL disponible, esquema compatible) y `/api/v1/version` con 0.7.1 y esquema 9, y `.app` 0.7.1 compilado con `build-macos` y abierto con `open-app`. Comprobaciones de solo lectura antes y después: migraciones 1–9; 90 → 92 tablas en `app`; los mismos conteos de cuentas (4 abiertas y 2 cerradas), pagos (2), ajustes (0), turnos (1 cerrado), comandos del cajón (0), categorías (4), auditoría (107) y permisos (113, ninguno nuevo); los cinco motivos de descuento activos en su orden, solo «Otro» con descripción; ningún ajuste con motivo ni indicación rápida; el CHECK del cajón admite `test`, existe el índice de rechazos y las once restricciones con nombre de la 0009; `usd_cash` desactivada. El recorrido en la ventana nativa no se verificó. La 0009 es ahora inmutable; la siguiente ampliación requiere 0010.
