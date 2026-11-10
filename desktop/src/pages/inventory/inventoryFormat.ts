@@ -128,14 +128,16 @@ export const movementKindOptions: { value: MovementKind; label: string }[] = [
   { value: 'cost_adjustment', label: 'Ajuste de costo' },
 ];
 
-// Orígenes de movimiento que existen hasta la fase B (Go: sourceKindLabels). Las fases C y D
-// agregan los suyos (recepción, ajuste, transferencia, conteo…).
+// Orígenes de movimiento que existen hasta la fase C (Go: sourceKindLabels). La fase D agrega los
+// suyos (ajuste, transferencia, conteo…).
 export const sourceKindOptions: { value: string; label: string }[] = [
   { value: 'initial', label: 'Existencia inicial' },
   { value: 'consumption', label: 'Liberación a cocina' },
   { value: 'amendment', label: 'Modificación de partida' },
   { value: 'cancellation', label: 'Cancelación de partida' },
   { value: 'production', label: 'Elaboración' },
+  { value: 'receipt', label: 'Recepción de mercancía' },
+  { value: 'supplier_return', label: 'Devolución a proveedor' },
 ];
 
 export const stockStateOptions: { value: StockState; label: string }[] = [

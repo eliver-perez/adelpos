@@ -1445,3 +1445,152 @@ temporal del puerto 55499 (nunca la instalación real):
   `inventory_purchasing_routes_are_closed`.
 - `tsc --noEmit`: sin errores.
 - Playwright no se ejecutó: esta parte no cambia pantallas.
+
+## Fase C · interfaz de compras (C2)
+
+Pestañas **Compras**, **Recepciones** y **Proveedores** dentro de Inventarios, sobre el backend de compras (C1, migración
+0013, commit `b2bccb1`) y sus tipos de `desktop/src/services/inventoryPurchasing.ts` (sin cambios: el contrato de Go se
+usa tal cual). Sin cambios en Go, `api.rs`, `services/api.ts`, el puente de pruebas, la captura ni el catálogo.
+
+### Archivos
+
+- Nuevos en `desktop/src/pages/inventory/`: `purchasingFormat.ts` (permisos de lectura, folios legibles, estados, tasas
+  16/8/0 y armado de cuerpos copiando las cadenas capturadas), `purchasingNavigation.ts`, `PurchaseFields.tsx` (selector de
+  proveedor, unidad o presentación, renglón de compra, tasa de IVA con botones, importes y totales de Go, acción con
+  motivo), `SuppliersView.tsx` y `SupplierSections.tsx` (proveedores, insumos que surte e historial),
+  `PurchaseOrdersView.tsx` y `PurchaseOrderDetail.tsx` (órdenes), `ReceiptForms.tsx` (recepción de una orden y directa),
+  `ReceiptsView.tsx`, `ReceiptDetail.tsx`, `SupplierReturnForm.tsx`, `CashLinksSection.tsx`, y las pruebas
+  `inventoryPurchasing.test.tsx` con `inventoryPurchasingTestData.ts`.
+- Modificados: `InventoryPage.tsx` (tres pestañas y navegación entre documentos), `inventoryFormat.ts` (orígenes
+  «Recepción de mercancía» y «Devolución a proveedor» en el filtro de Movimientos, con las etiquetas de Go),
+  `styles.css` (reglas nuevas al final del bloque «Etapa 8: Inventarios»).
+- Playwright: `desktop/e2e/vendor-purchases.spec.ts` (nuevo) y la lista de pestañas esperada en `inventory.spec.ts` y
+  `stock-consumption.spec.ts` (tres renglones cada una: el administrador ahora ve Compras, Recepciones y Proveedores).
+
+### Pantallas
+
+- **Pestañas**: Compras, Recepciones y Proveedores, entre «Ajustes y mermas» y «Configuración» (orden de §25), visibles
+  con **cualquiera** de los seis permisos de compras (como la lectura en Go). Desde el historial de un proveedor se abre
+  una orden o una recepción; desde una recepción, su orden (la pestaña cambia y abre el documento).
+- **Proveedores**: listado (activos por omisión; búsqueda por nombre, razón social, RFC, contacto, teléfono o correo;
+  estado; insumo surtido; paginación) con RFC, contacto, insumos y última recepción. Alta y edición con
+  `inventory.suppliers.manage` (nombre comercial, razón social, RFC opcional que valida y normaliza Go, teléfono, correo,
+  domicilio de varias líneas, contacto, observaciones); desactivar con el interruptor «Proveedor activo» y confirmación
+  de peligro que explica que se conservan sus compras (no hay borrado). Insumos que surte: presentación habitual, código
+  del proveedor, preferido (uno por insumo) y último precio de Go (sin IVA, antes del descuento, con su presentación,
+  fecha y recepción); agregar, editar y quitar (con confirmación). Historial en un acordeón con los conteos y totales de
+  Go y las órdenes, recepciones y devoluciones recientes.
+- **Compras**: listado con búsqueda (folio o proveedor), estado (incluye «Abiertas»), proveedor y fechas, paginado.
+  Editor del borrador con `inventory.purchases.create`: proveedor, fecha (vacía = hoy), almacén previsto, renglones
+  (insumo, unidad base, otra unidad de su dimensión o presentación, cantidad, precio sin IVA hasta 6 decimales,
+  descuento en pesos y tasa con los botones «IVA 16 %», «IVA 8 %» e «IVA 0 %») y observaciones. Al elegir el insumo se
+  propone la presentación habitual con el proveedor (o la predeterminada de compra) y se muestra su último precio.
+  **Los importes y totales son los que devuelve Go al guardar**: antes de guardar se indica que los calcula el servidor,
+  y con cambios sin guardar se aclara que los totales son los del borrador guardado. Acciones según estado y permiso
+  (`inventory.purchases.authorize`): Emitir (confirmación con el total de Go; exige guardar antes), Cancelar y Cerrar
+  administrativamente (motivo de 5 a 500 caracteres y confirmación de peligro). Detalle con solicitado, recibido,
+  pendiente y excedente por renglón, totales, observaciones y sus recepciones.
+- **Recepciones**: listado con búsqueda (folio, referencia o proveedor), tipo (de orden o directa), almacén y fechas de
+  negocio; columnas de origen, almacén, responsable, total (con «IVA en el costo» o «fuera del costo»), valor de
+  inventario solo con `inventory.costs.read` y estado del vínculo con gastos.
+  - _Recibir una orden_ (desde la orden en Compras o eligiendo una orden abierta en Recepciones): por renglón muestra
+    solicitado, recibido antes y pendiente y **propone lo pendiente tal como lo entrega Go**; se capturan la cantidad,
+    el precio real (por omisión el de la orden), un descuento propio (vacío: el prorrateo de Go) y la tasa; almacén
+    (por omisión el previsto), referencia del proveedor y observaciones. Si Go responde `RECEIPT_EXCEEDS_PENDING`, un
+    diálogo de peligro muestra su mensaje y solo con «Registrar con excedente» se reenvía con `allow_excess: true`; el
+    aviso `RECEIPT_EXCESS` queda en el detalle.
+  - _Recepción directa_: una sola pantalla con proveedor obligatorio, almacén, referencia, observaciones y los mismos
+    renglones que la orden (exige además `inventory.purchases.create`).
+  - _Detalle_: proveedor, fecha, almacén, responsable, referencia, origen; cantidades (solicitado, recibido antes,
+    recibido con su equivalente en unidad base, pendiente después, devuelto y existencia después); importes por renglón
+    y costo recibido por unidad base solo con `inventory.costs.read`; totales; valor de inventario, devuelto y vinculado.
+  - _Devolución a proveedor_ (`inventory.supplier_returns.record`): renglones con lo devolvible de Go, cantidad por
+    devolver, almacén de salida y motivo; confirmación de peligro que aclara que no crea ingresos de efectivo.
+  - _Vínculo con gastos de caja_ (`inventory.purchases.link_cash` + `cash.movements.read`): total, vinculado y por
+    vincular de Go; vínculos con su estado (Vigente, «Gasto corregido después del vínculo», «Gasto regularizado después
+    del vínculo», Desvinculado) y aviso cuando `cash_link_attention`; búsqueda de gastos candidatos por fechas e importe
+    mínimo y máximo (con `receipt_id`), donde Go indica cuáles se pueden vincular y por qué no los demás (en dólares,
+    corregido, vinculado por completo); vínculo total o parcial con el importe capturado o copiado de «Disponible del
+    gasto» o «Por vincular de la recepción»; los rechazos de Go (`CASH_EXPENSE_OVERLINKED`, `RECEIPT_OVERLINKED`,
+    `CASH_EXPENSE_CURRENCY`, `CASH_EXPENSE_CORRECTED`…) se muestran con su mensaje; desvincular con motivo y
+    confirmación. Sin los permisos, el vínculo se consulta y se explica qué permiso falta.
+
+### Decisiones y desviaciones menores
+
+1. **Totales sin vista previa**: Go no tiene una vista previa de órdenes; el editor muestra los importes del borrador
+   guardado (cada renglón y el documento) y no calcula nada mientras se edita. Para recalcular se guarda el borrador.
+2. **Exceso**: no se compara en React lo capturado con lo pendiente; se envía sin `allow_excess` y, ante
+   `RECEIPT_EXCEEDS_PENDING`, se pide la confirmación explícita y se reenvía con `allow_excess: true` (otro
+   `operation_id`, porque el primer intento fue rechazado sin efectos).
+3. **Recepción de una orden**: el precio y la tasa solo viajan si se cambiaron respecto de la orden; el descuento solo
+   si se capturó (vacío = prorrateo acumulado de Go); los renglones con cantidad vacía o cero no se envían.
+4. **Resultado incierto**: el reintento usa el mecanismo existente (`useInventoryMutation`, mismo `operation_id`, aviso
+   «Reintentar con el mismo identificador» de la sección). Además, los formularios de recepción, devolución y vínculo
+   quedan bloqueados tras un resultado incierto, para que no se vuelvan a enviar con otro identificador aun después de
+   recuperarlo: hay que volver al listado y consultar el documento.
+5. **Importe del vínculo**: sin aritmética; botones que copian «Disponible del gasto» o «Por vincular de la recepción»
+   tal como los entrega Go; Go valida ambos límites.
+6. **Tasa por omisión 16 %** en renglones nuevos (como el sistema anterior); la de la orden en la recepción.
+7. **Folios legibles** «Orden 12», «Recepción 5», «Devolución 3» (Go nombra igual las recepciones en los movimientos).
+8. **Fecha de recepción y devolución**: se registran con la hora del servidor (no se expone `occurred_at`).
+9. **Filtro de proveedores**: activos por omisión (se pueden ver inactivos o todos).
+10. **Selector de proveedor**: búsqueda + lista de hasta 50 coincidencias (como el selector de insumos).
+11. **Pruebas de Playwright existentes**: se agregaron Compras, Recepciones y Proveedores a la lista de pestañas que
+    esperan `inventory.spec.ts` y `stock-consumption.spec.ts` (el administrador tiene todos los permisos); nada más cambió
+    en ellas.
+
+### CSS añadido (`styles.css`, al final del bloque «Etapa 8: Inventarios»)
+
+`tag-info` y `tag-muted` (tonos de estado), `purchase-line-grid` (rejilla de renglón que se reacomoda), `purchase-tax-field`
+(botones de IVA sin desbordar), `purchase-line-amounts` y `purchase-totals`/`purchase-total-amount` (importes de Go),
+`purchase-actions` y `danger-solid-button` en Inventarios (≥ 44 px), botón dentro de `inventory-facts` (≥ 44 px) y
+`min-width: 0` en los elementos de las rejillas de Inventarios (`.inventory-page .form-stack > *`, `.inventory-page .panel`)
+para que las tablas anchas (recepciones, renglones de órdenes) se desplacen en su contenedor en lugar de ensanchar la
+página a 1280 × 720. Solo tokens de ambos temas.
+
+### Limitaciones
+
+- Sin vista previa de totales antes de guardar el borrador (Go no la ofrece).
+- Un borrador o un proveedor cuyo resultado quedó incierto y se recuperó podría volver a crearse si se envía de nuevo
+  desde el mismo formulario (los de recepción, devolución y vínculo sí se bloquean); un borrador repetido se cancela.
+- La recepción y la devolución usan la hora del servidor; no se captura una fecha anterior.
+- La búsqueda de gastos no filtra por caja (Go lo admite con `register_id`); muestra las cajas que la sesión puede leer.
+- Sugerencias de compra, alertas y el resumen completo son de la fase D.
+- Sin recorrido en la ventana nativa (WKWebView) ni en pantalla táctil física; las capturas de página completa muestran
+  la barra fija de acciones y el botón de pantalla completa a media página (artefacto de la captura).
+
+### Pruebas (C2)
+
+- **Vitest** (`inventoryPurchasing.test.tsx`, 21 pruebas): pestañas con cualquiera de los permisos de compras; alta de
+  proveedor sin RFC (cuerpo exacto) e insumo surtido (revisión 0, presentación, código, preferido; último precio
+  mostrado); desactivación solo tras confirmar (`active: false` con revisión; sin botón de borrar); consulta sin
+  `suppliers.manage`; historial que abre la orden en Compras; borrador con renglón, presentación habitual propuesta,
+  último precio, IVA 8 % por botón y cuerpo exacto, **totales y renglón mostrados tal como llegan de Go** (cifras sin
+  relación aritmética con lo capturado) y emisión con confirmación; sin `purchases.authorize` no hay emitir, cancelar ni
+  cerrar; cierre y cancelación con motivo y confirmación de peligro; recepción parcial 12 de 20 (lo pendiente propuesto,
+  cuerpo sin precio ni tasa, pendiente 8, costo recibido) y total (8 pendientes propuestos, sin `allow_excess`); exceso
+  con confirmación que reenvía con `allow_excess`; resultado incierto que bloquea el formulario y se recupera con el
+  mismo `operation_id`; recepción directa (proveedor obligatorio, cuerpo exacto) y sin `purchases.create` no se ofrece;
+  devolución (cantidad, motivo, confirmación de peligro, cuerpo exacto); vínculo con gasto (candidatos con
+  `receipt_id`, gasto en dólares no elegible con la explicación de Go, filtro de importe, rechazo de Go mostrado,
+  vínculo parcial con cuerpo exacto); gasto corregido después del vínculo señalado y desvinculación con motivo; sin
+  `cash.movements.read` no se ofrece vincular; costos ocultos sin `inventory.costs.read`; ningún `type="number"`.
+- **Playwright** (`vendor-purchases.spec.ts`, Chromium y WebKit, con su propio proveedor e insumos preparados por la
+  API): pestañas; proveedor con RFC normalizado por Go e insumo surtido; orden de 20 cajas a $250 con $50 de descuento
+  ($4,950.00 + $792.00 = $5,742.00 de Go), emisión; recepción de 12 (pendiente 8, «Parcialmente recibida», $3,445.20,
+  $11.9625 por pieza) y de 8 (pendiente 0, «Recibida», $2,296.80, dos recepciones); existencia 480 pza y dos movimientos
+  «Entrada por compra» (+288 y +192), confirmados por la API; recepción directa de 50 vasos ($116.00); vínculo total con
+  un gasto de $116.00 registrado por la API en un turno abierto de Caja 1 (vigente, por vincular $0.00; Go lo confirma
+  como no vinculable después); sin desbordamiento a 1920 × 1080 y 1280 × 720 en ambos temas en cada pantalla.
+
+### Verificación (C2)
+
+En la copia aislada `scratchpad/repoC2` (sincronizada desde el árbol de trabajo, con el trabajo en curso de la fase D
+del otro agente, incluida su `0014`), con el clúster temporal 55499, Go temporal en 8184 y vista previa en 1424:
+
+- `npx vitest run src`: 45 archivos, 386 pruebas aprobadas (Inventarios: 5 archivos, 60 pruebas).
+- `npx tsc --noEmit`: sin errores. `npm run build`: correcto.
+- `prettier --check` de los archivos propios: sin diferencias.
+- Playwright `vendor-purchases.spec.ts`: Chromium 1 aprobada, WebKit 1 aprobada.
+- Playwright recorrido completo (sin `SPEC`): Chromium 5 aprobadas (2.7 min) y WebKit 5 aprobadas (2.6 min).
+- Capturas (claro y oscuro, 1280 × 720) en `scratchpad/shots8C2/` (Chromium) y `scratchpad/shots8C2/webkit/`.
