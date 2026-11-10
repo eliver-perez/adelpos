@@ -221,8 +221,10 @@ la captura). Registra un movimiento `initial` como entrada con documento (reglas
 El motor (`inventory/costing.go`) es una función pura sobre `shopspring/decimal`. Para que la política con existencias
 negativas sea exacta, mantiene por insumo la **cantidad total Q y el valor total V** (no solo un costo unitario), además del
 último costo válido L y del costo de referencia configurado R. El **costo de referencia vigente** es L o, si nunca hubo,
-R. Operaciones: `Issue` (salidas), `Receive` (entrada con documento y existencia inicial), `Admit` (ajuste positivo y
-sobrante de conteo), `Restore` (reversión a valor exacto y entrada de elaboración), `Transfer` y `ReturnToSupplier`.
+R. Operaciones: `Issue` (salidas), `Receive` (entrada con documento: recepción, existencia inicial y entrada de una
+elaboración), `Admit` (ajuste positivo y sobrante de conteo), `Restore` (reversión de consumo, aplicada como entrada con
+documento), `Transfer` y `ReturnToSupplier`. Las reglas son las de la fase A con las correcciones de la revisión
+independiente (fase F del avance), que se aplican a los movimientos nuevos: ningún movimiento histórico se reescribe.
 
 ### Reglas
 
@@ -237,31 +239,44 @@ La numeración es la del diseño, que usan también el código (`costing.go`), e
    - **sin ningún costo disponible**: valor cero con marca de **costo pendiente** (`pending_cost_quantity` aumenta). Esos
      movimientos aparecen en la alerta `cost_pending` y se valoran por diferencia con la entrada siguiente, sin
      reescribirlos.
-2. **Entrada con documento** (recepción) de r unidades:
+2. **Entrada con documento** de r unidades: recepción, existencia inicial (regla 4) y entrada de una elaboración
+   (`production_in`, base `document`, cuyo valor es el de lo consumido):
    - con Q ≥ 0: promedio ponderado (V += valor del documento, Q += r);
    - con existencia negativa: las unidades que cubren el déficit (d = mínimo entre r y el déficit) tenían un valor
      provisional d × V ÷ Q (exactamente −V si cubre todo); su valor real es valor del documento × d ÷ r. El movimiento
-     `receipt` lleva el valor del documento y la diferencia provisional − real se registra como `cost_adjustment` separado
-     (cantidad cero), ligado a la recepción y al insumo. La cantidad pendiente de costo baja en mínimo(pendiente, d).
+     de entrada lleva el valor del documento y la diferencia provisional − real se registra como `cost_adjustment`
+     separado (cantidad cero), ligado a la entrada y al insumo. La cantidad pendiente de costo baja en mínimo(pendiente, d).
+     Así, un insumo preparado vendido antes de elaborarlo queda valorado al costo real de la elaboración.
 3. **Entradas sin costo propio**:
-   - reversión de consumo: al valor proporcional registrado (exacto si revierte todo); la entrada de una elaboración también
-     entra a valor exacto (todo el valor consumido);
+   - reversión de consumo (`consumption_reversal`, base `original`): el movimiento conserva **exactamente** el valor
+     original (proporcional) del consumo que compensa, de modo que el consumo neto de la partida sigue siendo exacto; se
+     aplica como una entrada con documento: con existencia negativa, el déficit cubierto d = mínimo(q, −Q) se realinea con
+     un `cost_adjustment` separado ligado a la reversión (provisional de d − valor original × d ÷ q) y la cantidad pendiente
+     baja como en una recepción;
    - transferencia: salida y entrada con el mismo valor; Q, V y L del insumo no cambian;
-   - ajuste positivo y sobrante de conteo: con Q > 0, al promedio vigente; con existencia negativa, el déficit cubierto a su
-     provisional exacto y el resto a la referencia vigente; sin ningún costo, valor cero con costo pendiente. Nunca a un costo
-     inventado y sin ajuste de costo separado.
+   - ajuste positivo y sobrante de conteo (`Admit`): con Q > 0, al promedio vigente; con existencia negativa, el déficit
+     cubierto a su provisional exacto y el resto a la referencia vigente (L o R), sin ajuste de costo separado. **Si la parte
+     que quedaría en existencia positiva no tiene ningún costo** (ni L ni R), la entrada se rechaza con 409
+     `COST_REQUIRED` («nunca a un costo inventado», §0-B.6): se configura el costo de referencia del insumo y se vuelve a
+     intentar. La parte que solo cubre un déficit sigue permitida a su provisional. Estas entradas ya no producen «costo
+     pendiente».
 4. **Existencia inicial**: exige costo unitario o el costo de referencia confirmado explícitamente
    (`use_reference_cost`); se aplica como entrada con documento.
 5. **Devolución a proveedor**: sale por la regla 1 y el documento se valora al costo de la recepción original. La diferencia
    entre ambos se absorbe como `cost_adjustment` ligado a la devolución solo si queda existencia positiva y sin dejar V
    negativo; lo que no se absorbe se guarda en la devolución como «diferencia no absorbida», sin movimiento.
 6. **Invariante Q = 0 ⇒ V = 0**: si una operación deja la cantidad en cero con valor distinto de cero, se registra un
-   residuo `cost_adjustment` de −V; además lo exige el CHECK de la base.
-7. **Último costo válido**: L solo se actualiza con Q > 0 **y** V > 0 (un promedio de cero solo puede venir de entradas sin
-   costo y conserva la señal de costo pendiente).
+   residuo `cost_adjustment` de −V; además lo exige el CHECK de la base. Como las entradas que cubren todo el déficit ya
+   dejan el valor exactamente en cero, el residuo es una red de seguridad.
+7. **Último costo válido**: L solo se actualiza con Q > 0, V > 0 **y** un promedio redondeado a 10 decimales mayor que cero
+   (un valor diminuto sobre una cantidad grande redondearía a cero, que no es un costo válido); si no, se conserva el
+   anterior.
 8. **Redondeo**: ver «Precisión».
 
-**Ningún movimiento histórico se reescribe**: toda diferencia es un movimiento nuevo.
+Invariantes que mantiene toda operación (comprobados en cada estado de las pruebas): Q = 0 ⇒ V = 0; Q > 0 ⇒ V ≥ 0; L nulo
+o mayor que cero; 0 ≤ cantidad pendiente ≤ déficit. **Ningún movimiento histórico se reescribe**: toda diferencia es un
+movimiento nuevo. Límite conocido: si un déficit pendiente de costo solo se cubre en parte con recepciones, L sigue sin
+valor (solo se fija con existencia positiva) y un sobrante que cruce a positivo pide configurar el costo de referencia.
 
 ### Precisión
 
@@ -275,29 +290,41 @@ redondean a centavos solo para mostrar e imprimir.
 
 Pruebas unitarias de `inventory/costing_test.go`, cada una con el cálculo a mano anotado:
 
-| Caso                                      | Datos                                                              | Resultado                                                                                    |
-| ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| Promedio con existencia positiva          | 10 u a $20 + 10 u a $30                                            | 20 u, $500, promedio $25                                                                     |
-| Salida a cero exacto                      | 3 u por $10: sale 1 u y luego 2 u                                  | −3.333333 y −6.666667 (exacto V); 0 u, $0, sin residuo                                       |
-| Salida que cruza a negativo               | 2 u por $50 (L = 25), sale 5 u                                     | −$125 (50 + 3 × 25), base `reference`; −3 u, −$75                                            |
-| Salida con existencia negativa a L        | −3 u por −$75 (L = 25, R = 40), sale 2 u                           | −$50 a L; −5 u, −$125                                                                        |
-| Salida a R sin L                          | 0 u, R = 18, sale 4 u                                              | −$72, base `configured`; −4 u, −$72, L sin valor                                             |
-| Varias salidas negativas con R distinto   | R = 18 sale 4 u; R = 20 sale 2 u; recepción 10 u por $250          | −6 u, −$112; ajuste 112 − 150 = −$38; 4 u, $100 (L = 25)                                     |
-| Recepción que cubre parte del déficit     | −6 u, −$112; recepción 4 u por $100; después 2 u por $50           | ajuste −25.333333 (−2 u, −37.333333); ajuste −12.666667 (0 u, $0); total −$38                |
-| Recepción que cruza a positivo            | −5 u, −$100 (L = 20); recepción 8 u por $240                       | ajuste −$50; 3 u, $90, promedio $30                                                          |
-| Costo pendiente y su resolución           | sin L ni R sale 5 u; recepción 8 u por $240                        | salida $0 pendiente (5 u); ajuste −$150; 3 u, $90, nada pendiente                            |
-| Recepción parcial de un déficit pendiente | −5 u pendientes; recepción 3 u por $30; sale 1 u                   | ajuste −$30; −2 u, $0, pendiente 2; luego pendiente 3                                        |
-| Ajuste positivo                           | 20 u, $500 + 4 u; −5 u, −$100 (L = 20) + 8 u; 0 u sin costos + 2 u | +$100 (24 u, $600); +$160 base `provisional` (3 u, $60); $0 pendiente (2 u, $0, L sin valor) |
-| Transferencia                             | 20 u, $500 traslada 5 u; −2 u, −$50 (L = 25) traslada 1 u          | $125 y $25; Q, V y L sin cambio                                                              |
-| Devolución con diferencia absorbida       | 20 u, $500; devuelve 4 u a $30 (y a $20)                           | salida −$100, documento $120, ajuste −$20 (16 u, $380, L 23.75); a $20: ajuste +$20 ($420)   |
-| Devolución con diferencia no absorbida    | 4 u, $100 devuelve 4 a $30; 5 u, $10 devuelve 4 a $30              | sin ajuste, $20 sin absorber; ajuste limitado −$2 y $110 sin absorber (1 u, $0, L = 2)       |
-| Sobrante y faltante de conteo             | 10 u, $250: faltante 2 u; sobrante 3 u                             | −$50 (8 u, $200); +$75 (11 u, $275)                                                          |
-| Invariante Q = 0 ⇒ V = 0                  | −5 u, −$100; reversión de 5 u registradas en $150                  | residuo −$50; 0 u, $0                                                                        |
-| Redondeo fraccionario                     | 1250.5 g por $87.53; salidas de 12.3456 g, 0.000125 g y el resto   | costo 0.0699960016; −0.864143; −0.000009; −86.665848 exacto; 0 g, $0                         |
+| Caso                                      | Datos                                                                                                                                                                                                                                               | Resultado                                                                                                                                                        |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Promedio con existencia positiva          | 10 u a $20 + 10 u a $30                                                                                                                                                                                                                             | 20 u, $500, promedio $25                                                                                                                                         |
+| Salida a cero exacto                      | 3 u por $10: sale 1 u y luego 2 u                                                                                                                                                                                                                   | −3.333333 y −6.666667 (exacto V); 0 u, $0, sin residuo                                                                                                           |
+| Salida que cruza a negativo               | 2 u por $50 (L = 25), sale 5 u                                                                                                                                                                                                                      | −$125 (50 + 3 × 25), base `reference`; −3 u, −$75                                                                                                                |
+| Salida con existencia negativa a L        | −3 u por −$75 (L = 25, R = 40), sale 2 u                                                                                                                                                                                                            | −$50 a L; −5 u, −$125                                                                                                                                            |
+| Salida a R sin L                          | 0 u, R = 18, sale 4 u                                                                                                                                                                                                                               | −$72, base `configured`; −4 u, −$72, L sin valor                                                                                                                 |
+| Varias salidas negativas con R distinto   | R = 18 sale 4 u; R = 20 sale 2 u; recepción 10 u por $250                                                                                                                                                                                           | −6 u, −$112; ajuste 112 − 150 = −$38; 4 u, $100 (L = 25)                                                                                                         |
+| Recepción que cubre parte del déficit     | −6 u, −$112; recepción 4 u por $100; después 2 u por $50                                                                                                                                                                                            | ajuste −25.333333 (−2 u, −37.333333); ajuste −12.666667 (0 u, $0); total −$38                                                                                    |
+| Recepción que cruza a positivo            | −5 u, −$100 (L = 20); recepción 8 u por $240                                                                                                                                                                                                        | ajuste −$50; 3 u, $90, promedio $30                                                                                                                              |
+| Costo pendiente y su resolución           | sin L ni R sale 5 u; recepción 8 u por $240                                                                                                                                                                                                         | salida $0 pendiente (5 u); ajuste −$150; 3 u, $90, nada pendiente                                                                                                |
+| Recepción parcial de un déficit pendiente | −5 u pendientes; recepción 3 u por $30; sale 1 u                                                                                                                                                                                                    | ajuste −$30; −2 u, $0, pendiente 2; luego pendiente 3                                                                                                            |
+| Ajuste positivo                           | 20 u, $500 + 4 u; −5 u, −$100 (L = 20) + 8 u; 0 u, R = 12 + 2 u                                                                                                                                                                                     | +$100 (24 u, $600); +$160 base `provisional` (3 u, $60); +$24 base `configured` (2 u, $24, L 12)                                                                 |
+| Entrada sin ningún costo                  | 0 u sin L ni R + 2 u; −3 u pendientes + 3 u, + 2 u y + 5 u; con L = 4, + 5 u                                                                                                                                                                        | rechazo (`COST_REQUIRED`); $0 (0 u); $0 (−1 u, 1 pendiente); rechazo sin cambiar el estado; $8 (2 u, $8)                                                         |
+| Transferencia                             | 20 u, $500 traslada 5 u; −2 u, −$50 (L = 25) traslada 1 u                                                                                                                                                                                           | $125 y $25; Q, V y L sin cambio                                                                                                                                  |
+| Devolución con diferencia absorbida       | 20 u, $500; devuelve 4 u a $30 (y a $20)                                                                                                                                                                                                            | salida −$100, documento $120, ajuste −$20 (16 u, $380, L 23.75); a $20: ajuste +$20 ($420)                                                                       |
+| Devolución con diferencia no absorbida    | 4 u, $100 devuelve 4 a $30; 5 u, $10 devuelve 4 a $30                                                                                                                                                                                               | sin ajuste, $20 sin absorber; ajuste limitado −$2 y $110 sin absorber (1 u, $0, L = 2)                                                                           |
+| Sobrante y faltante de conteo             | 10 u, $250: faltante 2 u; sobrante 3 u                                                                                                                                                                                                              | −$50 (8 u, $200); +$75 (11 u, $275)                                                                                                                              |
+| Invariante Q = 0 ⇒ V = 0                  | −5 u, −$100 (L = 20); reversión de 5 u registradas en $150 y en $100                                                                                                                                                                                | ajuste de costo −$50 y ningún residuo (0 u, $0); la exacta, sin ajuste                                                                                           |
+| Red de seguridad del residuo              | estado de 0 u con $0.000004                                                                                                                                                                                                                         | residuo −0.000004                                                                                                                                                |
+| Elaboración con déficit                   | R = 0.1/g; salen 500 g; entran 1000 g por $300                                                                                                                                                                                                      | −$50 (−500 g); ajuste 50 − 150 = −$100; 500 g, $150, L 0.3                                                                                                       |
+| Reversión con existencia negativa         | (a) 10 u a $20, sale 10, 10 u a $30, sale 15, se revierten 10 u de $200; (b) −5 u, −$500, se revierten 6 u de $6; (c) −10 u, −$200, se revierten 4 u de $120; (d) 10 u, $300, se revierten 5 u de $100; (e) −5 u pendientes, se revierten 2 u de $0 | (a) −5 u, −$150 → ajuste +$50, 5 u, $100, L 20; (b) ajuste +$495, 1 u, $1; (c) ajuste −$40, −6 u, −$120; (d) sin ajuste, 15 u, $400; (e) sin ajuste, pendiente 3 |
+| Último costo válido                       | 10⁹ u por $0.000001 (sin L y con L = 5); 1 u por $0.000001                                                                                                                                                                                          | L sin valor; L = 5 conservado; L = 0.000001                                                                                                                      |
+| Secuencias pseudoaleatorias               | 200 secuencias de 60 operaciones de todos los tipos (semilla fija, con y sin R)                                                                                                                                                                     | invariantes y V después = V antes + Σ movimientos en cada paso; las transferencias no cambian el estado                                                          |
+| Redondeo fraccionario                     | 1250.5 g por $87.53; salidas de 12.3456 g, 0.000125 g y el resto                                                                                                                                                                                    | costo 0.0699960016; −0.864143; −0.000009; −86.665848 exacto; 0 g, $0                                                                                             |
 
 Las pruebas de integración repiten estas reglas con el libro real: una recepción de 8 piezas a $30 sobre −5 piezas y
-−$100 registra el `receipt` de $240 y un `cost_adjustment` de −$50 (provisional $100 − real $150), y un queso con
-existencia 1, 0 y −1 se valora al promedio, exacto y a la referencia.
+−$100 registra el `receipt` de $240 y un `cost_adjustment` de −$50 (provisional $100 − real $150); un queso con existencia
+1, 0 y −1 se valora al promedio, exacto y a la referencia; una salsa verde (referencia 0.1/g) vendida antes de elaborarla
+(−500 g, −$50) y elaborada con chile de $300 registra `production_in` de $300 base `document` y un `cost_adjustment` de
+−$100 (500 g, $150, L 0.3); el «No preparado» de un postre con la crema en −5 u y −$150 registra la reversión de $200 base
+`original` y un ajuste de +$50 (5 u, $100, consumo neto de la unidad en cero); y el hielo sin costo (−2 u pendientes)
+rechaza con `COST_REQUIRED` un conteo con sobrante de 6, un ajuste pendiente al autorizarlo y un ajuste directo de +3, sin
+registrar nada, mientras acepta +2 (solo el déficit, a $0); con costo de referencia de $1.50 se autoriza el ajuste ($7.50)
+y se aplica el conteo (11 u, $16.50).
 
 ### Costo teórico de las recetas
 
@@ -312,8 +339,10 @@ informan aparte. Las opciones de grupo y los componentes de combo tienen sus pro
 - No bloquean ventas, ajustes negativos, mermas, transferencias, elaboraciones ni devoluciones a proveedor. Las respuestas
   de esas operaciones las informan en `warnings` (`NEGATIVE_STOCK`); el consumo de ventas las registra sin avisar a la
   captura.
-- Se valoran con la referencia vigente o, sin ningún costo, con costo pendiente; la entrada siguiente corrige el valor con un
-  ajuste de costo separado (reglas 1 a 3 del motor).
+- Las salidas se valoran con la referencia vigente o, sin ningún costo, con costo pendiente; la entrada siguiente
+  (recepción, existencia inicial, elaboración o reversión de consumo) corrige el valor con un ajuste de costo separado y un
+  ajuste positivo o sobrante cubre el déficit a su provisional (reglas 1 a 3 del motor). Una entrada sin documento que
+  dejaría existencia positiva sin ningún costo se rechaza con `COST_REQUIRED`.
 - La existencia inicial no puede producirlas.
 - Se ven en Existencias (fila resaltada, etiqueta y aviso de que no bloquean), en el Resumen y en la alerta crítica
   `negative_stock`.
@@ -356,9 +385,11 @@ informan aparte. Las opciones de grupo y los componentes de combo tienen sus pro
   (`PREPARATION_IN_USE`).
 - **Elaboraciones** (`POST productions`, `inventory.production.record`): preparación almacenable activa, almacén (por
   omisión el predeterminado), lotes, cantidad producida real (por omisión la esperada) y nota. Consume la versión vigente ×
-  lotes (`production_out`) y produce el insumo preparado con todo el valor consumido (`production_in`, a valor exacto, así
-  que su costo incluye la merma); guarda esperado, producido y merma (lotes × rendimiento − producido, mínimo 0).
-  Idempotente; las existencias negativas se avisan. Ejemplo probado: 2 lotes consumen 2000 g de arroz, 160 g de tomate y
+  lotes (`production_out`) y produce el insumo preparado con todo el valor consumido (`production_in`, entrada con documento
+  de base `document`, así que su costo incluye la merma); si el insumo preparado tenía existencia negativa (se vendió antes
+  de elaborarlo), el déficit cubierto se valora al costo real de la elaboración y la diferencia contra su valor provisional
+  es un `cost_adjustment` ligado (`production:<elaboración>:in:cost`). Guarda esperado, producido y merma (lotes ×
+  rendimiento − producido, mínimo 0). Idempotente; las existencias negativas se avisan. Ejemplo probado: 2 lotes consumen 2000 g de arroz, 160 g de tomate y
   20 g de chile por $56.80; esperado 4800 g, producido 4750 g, merma 250 g. Una elaboración no se anula ni se edita.
 
 ## Porciones habituales
@@ -470,7 +501,8 @@ de la estación del combo, si son componente). El motivo del movimiento dice «L
 
 El objetivo es el consumo de la versión nueva resuelto a la fecha de liberación de la unidad; se registra la diferencia con
 el neto ya registrado por (insumo, almacén): `consumption` si falta o `consumption_reversal` al valor proporcional
-registrado (exacto si revierte todo), con `occurred_at` = hora del cambio. Una unidad sin consumo previo no tiene efecto
+registrado (exacto si revierte todo; con existencia negativa, con su ajuste de costo ligado, regla 3), con `occurred_at` =
+hora del cambio. Una unidad sin consumo previo no tiene efecto
 (probado: una modificación que solo agrega 20 g de cebolla y revierte exactamente la lechuga).
 
 ### Diagnóstico y traza
@@ -506,8 +538,8 @@ por insumo y almacén, cancelación, movimientos y solicitudes (valores solo con
   **día operativo** y su vencimiento (el corte del día siguiente), calculados al registrarla con la zona y la hora de corte
   vigentes (cambiarlas después no mueve los vencimientos registrados). Una reducción de cantidad cancela las unidades
   sobrantes. Si la unidad no consumió nada no se crea clasificación (`nothing_consumed`).
-- **Clasificar** (`POST cancellations/{id}/classify`): «No preparado» revierte el neto exacto (cantidad y valor netos en
-  cero); «Preparado / merma» conserva el consumo y, si antes se había revertido, vuelve a consumir lo revertido a costo
+- **Clasificar** (`POST cancellations/{id}/classify`): «No preparado» revierte el neto exacto (cantidad y valor netos de la
+  unidad en cero; con existencia negativa del insumo, la reversión lleva su ajuste de costo ligado, regla 3); «Preparado / merma» conserva el consumo y, si antes se había revertido, vuelve a consumir lo revertido a costo
   vigente. Hasta el corte, con `inventory.waste.record` (resolución `manual`, también para cambiarla); después del corte o de
   la resolución automática, solo con `inventory.adjustments.authorize` (resolución `correction`). Repetir el estado vigente
   no escribe nada. Los movimientos llevan la hora de la cancelación y el origen `cancellation`, así un conteo posterior los
@@ -537,6 +569,10 @@ por insumo y almacén, cancelación, movimientos y solicitudes (valores solo con
 - Cantidades con signo capturadas en una presentación, una unidad de la dimensión o la unidad base; de 1 a 200 renglones con
   cada insumo una vez. Entradas con la regla 3 del motor y salidas con la regla 1. Pueden dejar existencia negativa
   (`NEGATIVE_STOCK`). Insumos y presentaciones desactivados se admiten; el almacén debe estar activo.
+- **`COST_REQUIRED`** se evalúa al **aplicar** la entrada: un ajuste aplicado al registrarlo se rechaza sin guardar nada; uno
+  pendiente se registra como siempre y el rechazo llega al autorizarlo (sigue pendiente y sin cambios). El mensaje nombra el
+  insumo («El insumo «X» no tiene costo: configura su costo de referencia antes de registrar una entrada sin documento…»);
+  con varios insumos sin costo, el primero.
 - Un ajuste no se edita ni se borra: se autoriza, se rechaza o se registra otro. La hora de negocio es la de su aplicación.
 
 ## Transferencias
@@ -564,12 +600,15 @@ compras ni ventas y el documento es de solo inserción.
    solicitudes de consumo sin procesar con `released_at` hasta la hora máxima de los renglones contados (si alguna falla, se
    revierte todo y responde 409 `COUNT_CONSUMPTION_PENDING`); después registra por renglón con diferencia un `count_in`
    (sobrante, regla 3) o `count_out` (faltante, regla 1) con `occurred_at` = hora del renglón. **Los movimientos posteriores a
-   la hora del renglón se conservan**; los renglones sin contar no se ajustan.
+   la hora del renglón se conservan**; los renglones sin contar no se ajustan. Un sobrante sin ningún costo disponible hace
+   fallar la aplicación con 409 `COST_REQUIRED` sin registrar nada (tampoco los consumos procesados en esa transacción): el
+   conteo sigue aprobado con la misma revisión, se configura el costo de referencia y se vuelve a aplicar.
 6. **Aplicar dos veces no genera otro ajuste**: el mismo `operation_id` devuelve la respuesta guardada y uno nuevo responde
    `COUNT_ALREADY_APPLIED`.
 7. **Cancelar** con motivo: uno abierto, quien cuenta o quien aprueba; uno enviado o aprobado, solo quien aprueba.
-8. **Conteo a ciegas**: la existencia teórica, las diferencias, la existencia actual y los valores solo los ve quien tiene
-   `inventory.counts.approve` o `inventory.stock.read` (valores además con `inventory.costs.read`).
+8. **Conteo a ciegas**: la existencia teórica, las diferencias, la existencia actual, el movimiento aplicado de cada renglón
+   (`movement_id`, `movement_kind`, `movement_label`, que revelarían el sentido de la diferencia) y los valores solo los ve
+   quien tiene `inventory.counts.approve` o `inventory.stock.read` (valores además con `inventory.costs.read`).
 9. **Avisos** de un conteo sin terminar (no bloquean): renglones sin contar, consumos anteriores sin calcular, cancelaciones
    sin clasificar anteriores a la hora del conteo y ajustes por autorizar del almacén sobre insumos contados.
 
@@ -586,20 +625,20 @@ insumo en un almacén; sobrescriben los del insumo para ese almacén (alertas de
 **Alertas** (`GET alerts`, `inventory.read`): se calculan al consultar y nunca bloquean; `GET summary` agrega sus conteos
 por gravedad y tipo.
 
-| Tipo                          | Gravedad    | Cuándo                                                                                            | Visibilidad            |
-| ----------------------------- | ----------- | ------------------------------------------------------------------------------------------------- | ---------------------- |
-| `negative_stock`              | crítica     | insumo activo con existencia negativa en un almacén                                               | todos                  |
-| `consumption_failed`          | crítica     | solicitudes de consumo fallidas (una alerta con el número)                                        | todos                  |
-| `below_minimum`               | advertencia | existencia bajo el mínimo del almacén o, sin nivel de almacén, la total bajo el del insumo        | todos                  |
-| `cost_pending`                | advertencia | insumo con cantidad pendiente de costo                                                            | `inventory.costs.read` |
-| `count_difference_pending`    | advertencia | conteo enviado o aprobado sin aplicar, con sus diferencias calculadas ahora                       | todos                  |
-| `cancellations_unclassified`  | advertencia | cancelaciones pendientes (una alerta con el número y el vencimiento más próximo)                  | todos                  |
-| `cash_link_expense_corrected` | advertencia | recepción con un vínculo vigente a un gasto corregido o regularizado después                      | permisos de compras    |
-| `reorder_point`               | información | existencia en o bajo el punto de reabastecimiento (por almacén o total)                           | todos                  |
-| `count_due`                   | información | almacén activo con existencias cuyo último conteo aplicado venció según la frecuencia configurada | todos                  |
-| `purchase_order_partial`      | información | orden parcialmente recibida                                                                       | permisos de compras    |
-| `item_without_supplier`       | información | insumo comprado activo sin proveedor activo que lo surta                                          | todos                  |
-| `product_without_recipe`      | información | producto (no combo) activo y vendible sin receta activa, si el aviso está activado                | todos                  |
+| Tipo                          | Gravedad    | Cuándo                                                                                                                                                                          | Visibilidad            |
+| ----------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `negative_stock`              | crítica     | insumo activo con existencia negativa en un almacén                                                                                                                             | todos                  |
+| `consumption_failed`          | crítica     | solicitudes de consumo fallidas (una alerta con el número)                                                                                                                      | todos                  |
+| `below_minimum`               | advertencia | existencia bajo el mínimo del almacén o, sin nivel de almacén, la total bajo el del insumo                                                                                      | todos                  |
+| `cost_pending`                | advertencia | insumo con cantidad pendiente de costo (salidas sin ningún costo)                                                                                                               | `inventory.costs.read` |
+| `count_difference_pending`    | advertencia | conteo enviado o aprobado sin aplicar; el número de diferencias, calculadas ahora, solo con `counts.approve` o `stock.read` (si no, «… está pendiente de aprobar.» y `count` 1) | todos                  |
+| `cancellations_unclassified`  | advertencia | cancelaciones pendientes (una alerta con el número y el vencimiento más próximo)                                                                                                | todos                  |
+| `cash_link_expense_corrected` | advertencia | recepción con un vínculo vigente a un gasto corregido o regularizado después                                                                                                    | permisos de compras    |
+| `reorder_point`               | información | existencia en o bajo el punto de reabastecimiento (por almacén o total)                                                                                                         | todos                  |
+| `count_due`                   | información | almacén activo con existencias cuyo último conteo aplicado venció según la frecuencia configurada                                                                               | todos                  |
+| `purchase_order_partial`      | información | orden parcialmente recibida                                                                                                                                                     | permisos de compras    |
+| `item_without_supplier`       | información | insumo comprado activo sin proveedor activo que lo surta                                                                                                                        | todos                  |
+| `product_without_recipe`      | información | producto (no combo) activo y vendible sin receta activa, si el aviso está activado                                                                                              | todos                  |
 
 Cada alerta lleva texto sin identificadores crudos y una referencia navegable; las cantidades solo con
 `inventory.stock.read`. La frecuencia de conteo (`none`, diaria, semanal, mensual o cada N días de 1 a 365) compara días
@@ -611,7 +650,11 @@ borradores se informan aparte); se expresa en la presentación habitual del prov
 de compra, si no en la unidad base, redondeando hacia arriba a presentaciones completas. «Crear borrador»
 (`POST purchase-suggestions/draft-order`, `inventory.purchases.create`) crea **un borrador** para el proveedor elegido
 (precio = su último precio si se capturó en la misma presentación o unidad, si no 0; IVA de su última recepción, si no
-16 %) y **nunca lo emite**; si una sugerencia ya no aplica responde 409 `SUGGESTION_CHANGED` sin crear nada.
+16 %) y **nunca lo emite**; si una sugerencia ya no aplica responde 409 `SUGGESTION_CHANGED` sin crear nada. Visibilidad:
+existencia, pendiente, borradores, necesidad, punto de reabastecimiento y cantidad sugerida (en presentaciones y en la unidad
+base) solo con `inventory.stock.read` o `inventory.purchases.create`, porque con el punto y lo sugerido se deduciría la
+existencia; sin ellos la sugerencia sigue listando el insumo (con su presentación y su mínimo) con esos campos en `null`.
+Proveedor y último precio, solo con algún permiso de compras.
 
 ## Proveedores
 
@@ -719,24 +762,52 @@ importes con `money.ts`, objetivos táctiles de 44 px y temas claro y oscuro con
 técnicos ni `type="number"`; React no calcula cantidades ni importes. Las consultas se recargan con los eventos
 `inventory.*` (`adel-inventory-change`) y después de una escritura propia.
 
-| Pestaña          | Permiso                                                      | Contenido                                                                                                                                                                                                                                                         |
-| ---------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Resumen          | `inventory.read`                                             | Estado de «Control de inventario» con «Administrar funciones»; cifras de Go (insumos, almacenes, negativas, bajo mínimo, reabastecimiento, costo pendiente con costos, valor del inventario con valuación, cancelaciones por clasificar y solicitudes con error). |
-| Insumos          | `inventory.read` (edición con `inventory.items.manage`)      | Listado con búsqueda y filtros; alta y edición con tipo, unidad base, costo de referencia y niveles; presentaciones en el mismo panel; acordeones de categorías y unidades de medida.                                                                             |
-| Recetas          | `inventory.read` (escritura según el tipo)                   | Apartados «Productos y complementos» (destinos con su estado y filtro de lo pendiente), «Preparaciones» (inmediatas y almacenables), «Porciones habituales» y «Elaboraciones»; editor versionado con costo teórico e historial de versiones.                      |
-| Almacenes        | `inventory.read` (edición con `inventory.warehouses.manage`) | Almacenes con el predeterminado marcado y «Almacén de consumo por estación» con su historial.                                                                                                                                                                     |
-| Existencias      | `inventory.stock.read`                                       | Existencia por insumo, total y por almacén, mínimos y situación; costo y valor solo con costos; negativas resaltadas; «Existencia inicial».                                                                                                                       |
-| Movimientos      | `inventory.movements.read`                                   | Libro con filtros de insumo, almacén, tipo, origen y fechas de negocio; valores con costos; «Solicitudes de consumo» con errores y diagnósticos; traza de una partida.                                                                                            |
-| Ajustes y mermas | `inventory.read`                                             | «Cancelaciones por clasificar» e «Historial de clasificaciones».                                                                                                                                                                                                  |
-| Compras          | cualquiera de los permisos de compras                        | Órdenes con búsqueda y filtros; editor del borrador con renglones, tasa por botones y totales de Go; emitir, cancelar y cerrar con su permiso; detalle con lo recibido.                                                                                           |
-| Recepciones      | cualquiera de los permisos de compras                        | Recepciones de una orden (proponen lo pendiente de Go; exceso con confirmación) y directas; detalle; devolución a proveedor; vínculo con gastos de caja.                                                                                                          |
-| Proveedores      | cualquiera de los permisos de compras                        | Proveedores con búsqueda; alta, edición y desactivación con confirmación; insumos que surte con último precio; historial.                                                                                                                                         |
-| Configuración    | `inventory.settings.manage`                                  | IVA de las compras en el costo, hora de corte del día operativo, aviso de productos sin receta y frecuencia de conteo.                                                                                                                                            |
+Las 13 pestañas siguen el orden de §25 y, a 1280 × 720, forman una rejilla de dos filas sin desplazamiento horizontal
+(cada una de al menos 44 px):
 
-**Interfaz de la fase D**: al redactar este documento, las pantallas de ajustes de discrepancia y mermas operativas,
-transferencias, conteos físicos, niveles por almacén, alertas y sugerencias de compra se estaban construyendo sobre el
-contrato de la fase D (`desktop/src/services/inventoryControl.ts`); su servidor está completo y probado. El detalle de esas
-pantallas se registra en [ETAPA_8_AVANCE.md](ETAPA_8_AVANCE.md).
+| Pestaña          | Permiso                                                      | Contenido                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resumen          | `inventory.read`                                             | Estado de «Control de inventario» con «Administrar funciones»; cifras de Go de las fases A–D (insumos, almacenes, negativas, bajo mínimo, reabastecimiento, costo pendiente con costos, valor del inventario con valuación, cancelaciones por clasificar, solicitudes con error, ajustes por autorizar, conteos en curso, órdenes abiertas e insumos por reabastecer), cada una con su permiso y acceso a su pestaña, y «Alertas de inventario» (conteos por gravedad de Go, filtro por gravedad, grupos por tipo y acceso directo al insumo, existencia, receta, conteo, orden, recepción o movimientos según la referencia y los permisos). |
+| Insumos          | `inventory.read` (edición con `inventory.items.manage`)      | Listado con búsqueda y filtros; alta y edición con tipo, unidad base, costo de referencia y niveles del insumo; presentaciones y «Niveles por almacén» en el mismo panel; acordeones de categorías y unidades de medida.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Recetas          | `inventory.read` (escritura según el tipo)                   | Apartados «Productos y complementos» (destinos con su estado y filtro de lo pendiente), «Preparaciones» (inmediatas y almacenables), «Porciones habituales» y «Elaboraciones»; editor versionado con costo teórico e historial de versiones.                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Almacenes        | `inventory.read` (edición con `inventory.warehouses.manage`) | Almacenes con el predeterminado marcado y «Almacén de consumo por estación» con su historial.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Existencias      | `inventory.stock.read`                                       | Existencia por insumo, total y por almacén, mínimos y situación, e indicación del nivel comparado («Nivel de <almacén>» o «Nivel del insumo (existencia total)»); costo promedio con costos y valor del insumo solo con costos y valuación; negativas resaltadas; «Existencia inicial».                                                                                                                                                                                                                                                                                                                                                       |
+| Movimientos      | `inventory.movements.read`                                   | Libro con filtros de insumo, almacén, tipo, origen y fechas de negocio; valores con costos y valuación posterior con costos y valuación; «Solicitudes de consumo» con errores y diagnósticos; traza de una partida.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Transferencias   | `inventory.transfers.record` o `inventory.movements.read`    | Listado con filtros; alta con origen y destino distintos (el destino no ofrece el origen), renglones sin signo y confirmación; detalle con la existencia de Go en cada almacén después (negativa resaltada), valor trasladado y avisos.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Ajustes y mermas | `inventory.read`                                             | «Registrar ajuste» (`adjustments.record`) y «Registrar merma» (`waste.record`), «Cancelaciones por clasificar», «Ajustes y mermas registrados» (con sus permisos de lectura) e «Historial de clasificaciones» en una sola vista.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Conteos          | `inventory.counts.perform` o `inventory.counts.approve`      | Listado («En curso» por omisión), alta por almacén y alcance, hoja de conteo para tableta y pasos del conteo (ver abajo).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Compras          | cualquiera de los permisos de compras                        | «Órdenes de compra»: órdenes con búsqueda y filtros, editor del borrador con renglones, tasa por botones y totales de Go, emitir, cancelar y cerrar con su permiso y detalle con lo recibido. «Sugerencias de compra» (ver abajo).                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Recepciones      | cualquiera de los permisos de compras                        | Recepciones de una orden (proponen lo pendiente de Go; exceso con confirmación) y directas; detalle; devolución a proveedor; vínculo con gastos de caja.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Proveedores      | cualquiera de los permisos de compras                        | Proveedores con búsqueda; alta, edición y desactivación con confirmación; insumos que surte con último precio; historial.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Configuración    | `inventory.settings.manage`                                  | IVA de las compras en el costo, hora de corte del día operativo, aviso de productos sin receta y frecuencia de conteo.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+Pantallas de la fase D:
+
+- **Ajustes y mermas**: motivo de lista cerrada con botones (la merma solo ofrece Rotura, Derrame, Caducidad, Consumo
+  extraordinario y Otro), almacén, detalle del motivo (obligatorio con «Otro»), renglones con cantidad **sin signo** y
+  «Faltante (salida)» / «Sobrante (entrada)» (deshabilitado el sentido que el motivo no admite; la merma solo registra
+  salidas), observaciones y confirmación que resume cada renglón y si se aplicará o quedará pendiente; la pantalla antepone
+  «-» al texto de una salida (operación de texto, sin aritmética) y Go valida el sentido. Listado con filtros (folio, tipo,
+  estado, motivo, almacén, fechas) y detalle con quién registró, autorizó, aplicó o rechazó, renglones con lo capturado, la
+  cantidad base con signo, el movimiento, la existencia después y el valor, y los avisos de Go. «Autorizar y aplicar» y
+  «Rechazar» (con motivo) solo si Go entrega `authorizable`, ambos con confirmación; si no, se explica que quien registró el
+  ajuste no puede autorizarlo. Un rechazo `COST_REQUIRED` ofrece «Abrir insumo» o «Ir a Insumos».
+- **Hoja de conteo**: aviso «La venta sigue durante el conteo…», búsqueda rápida sin acentos, filtro Todos / Sin contar /
+  Contados, renglones grandes con «Cantidad contada» (`numericInput`), la unidad base y la capturada («Otra unidad o
+  presentación…» consulta solo ese insumo), «Borrar captura», «Quitar», estado «Contado · hora · quién» y «Sin guardar».
+  «Guardar avance» envía los renglones cambiados en bloques de 200 (cada bloque una operación). Con `theoretical_visible`,
+  el teórico a la hora del renglón, la diferencia con su etiqueta (Sobrante, Faltante, Sin diferencia), la existencia actual
+  y, al aplicar, «Teórico aplicado» y el movimiento; sin él, el aviso «Conteo a ciegas» y ninguna de esas columnas. Pasos
+  con quién y cuándo; «Enviar a revisión» (`perform`, bloqueado con capturas sin guardar), «Aprobar» y «Aplicar ajustes»
+  (`approve`) y «Cancelar conteo» (con motivo), todos con confirmación; avisos vigentes de Go.
+- **Niveles por almacén** (editor del insumo): cada almacén activo (y los inactivos con nivel) con su nivel o «Usa los
+  niveles del insumo», la existencia y «Bajo mínimo» / «Reabastecer» (con `stock.read`); «Definir nivel» / «Editar nivel» y
+  «Quitar nivel» con `items.manage`.
+- **Sugerencias de compra** (Compras): búsqueda y categoría; grupos por proveedor preferido en el orden de Go; por insumo la
+  existencia, lo pendiente de recibir y en borradores, el punto de reabastecimiento y su origen, la necesidad, lo sugerido en
+  la presentación de compra y el último precio, cada dato solo si Go lo entrega («—» si llega en `null`). Con
+  `purchases.create`: «Incluir» por insumo, proveedor del borrador para los que no tienen preferido y «Crear orden en
+  borrador» con confirmación, que abre el borrador en Compras. Nunca se emite.
 
 En la captura de pedidos la etapa solo cambió lo indispensable: las indicaciones con efecto y las tarjetas de complementos
 (ver arriba). No se agregaron formularios administrativos al flujo de captura.
@@ -758,14 +829,22 @@ de escribir (un 403 revierte y solo audita la denegación). Contratos, cuerpos, 
 La fase B (indicaciones con efecto) amplía además `catalog/quick-notes`, `customization.quick_notes` y el desglose de la
 partida, sin rutas nuevas. No existen rutas de borrado de documentos ni de edición directa de existencias: cada efecto es un
 movimiento del libro. Errores propios: `INVENTORY_VALIDATION` (400), `PERMISSION_DENIED` (403), `NOT_FOUND` (404), los 409
-de cada ruta, `REVISION_CONFLICT` e `IDEMPOTENCY_CONFLICT`; los mensajes no contienen costos.
+de cada ruta (entre ellos `COST_REQUIRED` en `POST adjustments`, `POST adjustments/{id}/authorize` y
+`POST counts/{id}/apply`), `REVISION_CONFLICT` e `IDEMPOTENCY_CONFLICT`; los mensajes no contienen costos.
 
 ## Permisos
 
 Los 24 permisos de `inventory.Permissions` (`inventory/context.go`), insertados por la migración de su fase con la misma
 descripción (una prueba lo compara) y concedidos inicialmente solo al rol `administrator`. **Consultar existencias nunca
 implica consultar costos**: sin `inventory.costs.read` los costos y valores llegan en `null` con `costs_visible: false`, no se
-listan los ajustes de costo ni la marca de costo pendiente; la valuación total exige `inventory.valuation.read`.
+listan los ajustes de costo ni la marca de costo pendiente. La valuación **por insumo** (el valor de una existencia,
+`StockRow.value`, y la valuación posterior de cada movimiento, `valuation_value_after`, con la bandera `valuation_visible`)
+exige `inventory.costs.read` **e** `inventory.valuation.read`, porque con existencias o con movimientos consecutivos
+cualquiera de los dos revelaría el otro; la valuación total del inventario exige `inventory.valuation.read`. Con solo
+`inventory.costs.read` se ven el costo promedio, la marca de costo pendiente y el valor de cada movimiento. Sin
+`inventory.stock.read` tampoco se filtran existencias por otras vías: las sugerencias de compra ocultan punto de
+reabastecimiento y cantidad sugerida, la alerta de un conteo pendiente no dice cuántas diferencias tiene y un conteo a
+ciegas oculta el movimiento de cada renglón.
 
 | Permiso                             | Descripción                                                             | Migración |
 | ----------------------------------- | ----------------------------------------------------------------------- | --------- |
@@ -842,7 +921,9 @@ Todas se ejecutaron en una copia aislada con un clúster PostgreSQL temporal (pu
 real; resultados y tiempos por fase en [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md).
 
 - **Go unitarias** (`backend/internal/inventory`):
-  - `costing_test.go`: el motor con todos los casos de la tabla de arriba y entradas inválidas.
+  - `costing_test.go`: el motor con todos los casos de la tabla de arriba, entradas inválidas y 200 secuencias
+    pseudoaleatorias; cada estado comprueba los invariantes. Con el `Restore` y el `settle` anteriores a la fase F fallan los
+    casos de reversión, último costo válido, invariante y secuencias.
   - `units_test.go`: kg ↔ g, l ↔ ml, onza redondeada a 6 decimales, conversión que se redondea a cero, caja de 24, paquete de
     12, costal de 25 kg en un insumo en gramos y rechazo entre dimensiones.
   - `resolution_test.go`: producto normal, «Sin cebolla» → 0, «Con cebolla» → 1, «Cebolla extra» → 2, 3 porciones y media
@@ -885,6 +966,13 @@ real; resultados y tiempos por fase en [VERIFICATION_STAGE8.md](VERIFICATION_STA
   - `inventory_control_test.go` (fase D, 9 subpruebas): ajustes y mermas con autorización y sin autoautorización,
     transferencias sin cambio de costo, conteo con ventas concurrentes y aplicación idempotente, flujo de conteos, niveles
     por almacén, cada tipo de alerta, sugerencias y borrador, eventos, auditoría y consistencia del libro.
+  - Correcciones de la fase F: `inventory_b_entries_with_negative_stock` (salsa elaborada después de venderse y reversión
+    de un postre con la crema en negativo, con sus ajustes de costo y el consumo neto de la unidad en cero),
+    `inventory_d_entries_without_cost` (`COST_REQUIRED` en el conteo, el ajuste pendiente y el directo, sin registrar nada,
+    y aplicación después de configurar el costo de referencia), `inventory_cost_visibility` (costo promedio sin valor por
+    insumo ni valuación posterior con solo `costs.read`; con `valuation.read`, ambos) y las ampliaciones de conteos a ciegas,
+    alertas y sugerencias sin `stock.read`. En una prueba de mutación que reintrodujo los seis defectos fallaron esas
+    subpruebas.
   - En cada fase, consistencia del libro: Σ existencias = cantidad de la valuación, Σ valores = valor de la valuación y
     último estado = valuación.
 - **Actualización desde el esquema 9** (`database/existing_install_test.go`, `TestStage8UpgradeOfExistingInstallation`, con
@@ -896,15 +984,21 @@ real; resultados y tiempos por fase en [VERIFICATION_STAGE8.md](VERIFICATION_STA
   `inventory_control_routes_are_closed`: lista cerrada, métodos, rutas sin identificador o con `../../settings` rechazadas,
   sin rutas de borrado ni de edición de existencias y parámetros de consulta en lista blanca.
 - **Vitest**: `pages/inventory/inventory.test.tsx` e `inventoryStock.test.tsx` (fase A), `inventoryRecipes.test.tsx` e
-  `inventoryConsumption.test.tsx` (fase B), `inventoryPurchasing.test.tsx` (fase C);
+  `inventoryConsumption.test.tsx` (fase B), `inventoryPurchasing.test.tsx` (fase C), `inventoryControl.test.tsx` (fase D:
+  13 pestañas por permiso, ajustes con sentido por botones y sin autoautorización, mermas, `COST_REQUIRED`, transferencias,
+  conteo a ciegas y con diferencias, niveles por almacén, alertas agrupadas, sugerencias con y sin existencias, valor por
+  insumo y valuación posterior ocultos sin `valuation.read`);
   `pages/restaurant/capture/quickNotesCapture.test.tsx` y `capture.test.tsx` (indicaciones y complementos en la captura);
   `pages/catalog/quickNotes.test.tsx` (efecto en el catálogo); `hooks/useRealtime.test.tsx` (`adel-inventory-change`).
   Comprueban cuerpos exactos enviados a Go, permisos, costos ocultos, confirmaciones y que no haya `type="number"`.
 - **Playwright** (Chromium y WebKit, con Go y PostgreSQL temporales reales): `inventory.spec.ts` (insumo, presentación y
   existencia inicial), `takeaway-quick-notes.spec.ts` (complementos e indicaciones con efecto en la captura),
   `stock-consumption.spec.ts` (receta, porción, activación, pedido enviado a cocina, consumo en Movimientos, traza,
-  cancelación y «No preparado») y `vendor-purchases.spec.ts` (proveedor, orden, recepción parcial y total, recepción
-  directa y vínculo con un gasto). Cada pantalla se comprueba sin desbordamiento a 1280 × 720 y 1920 × 1080 en ambos temas.
+  cancelación y «No preparado»), `vendor-purchases.spec.ts` (proveedor, orden, recepción parcial y total, recepción
+  directa y vínculo con un gasto) y `warehouse-control.spec.ts` (13 pestañas en orden sin desplazamiento a 1280 × 720,
+  transferencia de 5 kg entre almacenes, merma de 1 kg por rotura, conteo de la barra con faltante de 0.5 kg enviado,
+  aprobado y aplicado, el `count_out` en Movimientos y la alerta «Bajo mínimo» con acceso a Existencias, confirmados en Go).
+  Cada pantalla se comprueba sin desbordamiento a 1280 × 720 y 1920 × 1080 en ambos temas.
 
 ## Mediciones del consumo asíncrono
 
@@ -932,12 +1026,14 @@ Reunidas de todas las fases del avance (las que se resolvieron en una fase poste
   comanda con indicaciones con efecto se imprimió en papel.
 - **Volumen y concurrencia**: las mediciones son de este equipo, sin varias terminales reales; las alertas (también las de
   `GET summary`) se calculan en cada consulta, sin historial ni medición con volumen real; la cantidad pendiente de costo es
-  un indicador agregado no probado bajo carga. La aceptación encadenada de `internal/operations` dura unos 213 s con
-  `-race` (su contexto se amplió a 600 s en la fase D).
+  un indicador agregado no probado bajo carga. La aceptación encadenada de `internal/operations` dura unos 221 s con
+  `-race` (fase F; su contexto se amplió a 600 s en la fase D).
 - **Costos**: un solo costo por insumo, sin valuación por almacén; los ajustes de conteo usan el promedio vigente al aplicar
   (nada se revalúa a la hora del renglón); el costo teórico de un producto no incluye complementos ni componentes de combo
   y el de un complemento ligado a un producto no recorre los grupos ni componentes de ese producto; «Adicional para llevar»
-  aparece aunque sea $0.00.
+  aparece aunque sea $0.00. Si un déficit pendiente de costo solo se cubre en parte con recepciones, el último costo válido
+  sigue sin valor y un sobrante que cruce a positivo pide configurar el costo de referencia (`COST_REQUIRED`, que nombra
+  solo el primer insumo sin costo).
 - **Recetas y consumo**: la clasificación de una cancelación guarda solo su estado vigente (el historial está en la
   auditoría y en los movimientos compensatorios); las elaboraciones no se anulan ni se editan (una corrección es un
   ajuste); el trabajador no audita cada consumo; el historial de una porción muestra los últimos 20 cambios y el de una
@@ -960,7 +1056,11 @@ Reunidas de todas las fases del avance (las que se resolvieron en una fase poste
   servidor (la interfaz no captura otra fecha); la búsqueda de gastos de la interfaz no filtra por caja (Go lo admite); el
   borrador desde sugerencias no convierte precios entre presentaciones (precio 0) y usa 16 % sin recepción previa.
 - **Interfaz**: «Existencias negativas» del Resumen cuenta pares insumo-almacén, mientras que el filtro «Negativas» sin
-  almacén usa la existencia total; la búsqueda de insumos consulta a Go en cada tecla.
+  almacén usa la existencia total; la búsqueda de insumos consulta a Go en cada tecla. La hoja de conteo muestra 50 renglones
+  a la vez y su búsqueda filtra en pantalla lo que devolvió Go (hasta 2000); «Otra unidad o presentación…» consulta un
+  insumo por renglón; si un bloque del guardado del conteo falla, los anteriores quedan guardados (el aviso dice cuántos);
+  las alertas se piden de 100 en 100 y se agrupan por página; «Abrir insumo» del aviso `COST_REQUIRED` abre el insumo solo si
+  Go incluye su identificador en el error (si no, lleva a Insumos).
 
 ## Sistema anterior
 
