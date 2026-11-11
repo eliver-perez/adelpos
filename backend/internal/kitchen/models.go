@@ -25,19 +25,23 @@ type Settings struct {
 }
 
 type Printer struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Transport    string  `json:"transport"`
-	Destination  string  `json:"destination"`
-	Port         int     `json:"port"`
-	PaperWidth   int     `json:"paper_width"`
-	Copies       int     `json:"copies"`
-	SupportsCut  bool    `json:"supports_cut"`
-	Cut          bool    `json:"cut"`
-	CutterOption string  `json:"cutter_option"`
-	Active       bool    `json:"active"`
-	FallbackID   *string `json:"fallback_id"`
-	Revision     int     `json:"revision"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Transport    string `json:"transport"`
+	Destination  string `json:"destination"`
+	Port         int    `json:"port"`
+	PaperWidth   int    `json:"paper_width"`
+	Copies       int    `json:"copies"`
+	SupportsCut  bool   `json:"supports_cut"`
+	Cut          bool   `json:"cut"`
+	CutterOption string `json:"cutter_option"`
+	// AcceptsESCPos marca una impresora CUPS que entiende ESC/POS (etapa 9B): solo entonces, y si su
+	// cola admite datos raw, recibe documentos con negrita, tamaños o logotipo. Desactivada por
+	// omisión; en ESC/POS por red no aplica (siempre recibe ESC/POS).
+	AcceptsESCPos bool    `json:"accepts_escpos"`
+	Active        bool    `json:"active"`
+	FallbackID    *string `json:"fallback_id"`
+	Revision      int     `json:"revision"`
 }
 
 type Station struct {

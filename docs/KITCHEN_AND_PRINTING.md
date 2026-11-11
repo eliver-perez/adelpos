@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.9.0, esquema 17 (la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
+Versión 0.9.1, esquema 19 (la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B **no se han aplicado** a la instalación real, en espera de la autorización del propietario). Desde la etapa 9B todos los documentos impresos salen de un renderizador único con plantillas por bloques, versiones e identidad del establecimiento, sin cambiar enrutamiento, cola ni reglas de resultado (ver «Plantillas, formato y logotipo · etapa 9B» y [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
@@ -45,7 +45,7 @@ Las modificaciones antes de la primera liberación se integran en el documento i
 
 Documentos independientes: una comanda por estación aunque compartan impresora. Unificación: estaciones compatibles que seleccionan la misma impresora y agrupación unificada comparten documento, manteniendo secciones. Las estaciones KDS conservan su propia tarea y requisito de recepción, aunque compartan papel con otras.
 
-El formato admite nombre del establecimiento, notas, precios, texto normal/grande, separación 1–3 y cantidad delante o multiplicador. Los controles de usuario, ESC/GS y caracteres invisibles se eliminan del texto; solo el controlador genera comandos. No existe diseñador visual arbitrario ni ejecución de plantillas.
+El formato admite nombre del establecimiento, notas, precios, texto normal/grande, separación 1–3 y cantidad delante o multiplicador. Los controles de usuario, ESC/GS y caracteres invisibles se eliminan del texto; solo el controlador genera comandos. No existe diseñador visual arbitrario ni ejecución de plantillas: desde la etapa 9B la presentación se configura con plantillas de bloques de una lista cerrada (sección «Plantillas, formato y logotipo · etapa 9B»), y estas opciones de Cocina siguen copiándose en cada comanda y valiendo como «Según Cocina».
 
 Indicaciones rápidas por categoría (etapa 7.1): la captura las guarda como texto en las observaciones de la partida (`customization.notes`), unidas por comas con las escritas, por lo que la comanda las imprime en la misma línea «NOTA:» (ajustada al ancho del papel) sin ningún cambio en el enrutamiento, la plantilla ni la cola. Administración en [CATALOG.md](CATALOG.md).
 
@@ -177,3 +177,48 @@ El inventario lee la liberación canónica; la cocina no espera al inventario ni
 - **Una sola vez por unidad**: varias estaciones, copias, reimpresiones, cambios de impresora, divisiones, transferencias, combinaciones y cambios de mesa no crean solicitudes; un reintento HTTP devuelve la respuesta guardada y un evento reprocesado lo detiene `kitchen_event_receipts`.
 - **Estaciones y almacenes**: el trabajador de inventario lee `kitchen_tasks.instructions.parts[].path` (también de tareas canceladas) para elegir el almacén de cada parte según la estación que la recibió y la asignación estación → almacén vigente a la hora de la liberación; los productos «Sin preparación» consumen del almacén predeterminado.
 - **Comandas**: las indicaciones con efecto se imprimen una sola vez (ver «Documentos»); sin indicaciones con efecto la comanda es idéntica a la de la etapa 7.1. La pantalla de preparación no lista ingredientes y no cambió.
+
+## Plantillas, formato y logotipo · etapa 9B
+
+La etapa 9B reemplaza las tres plantillas de texto escritas en código (`kitchen/template.go`, `payments/documents.go` y
+`payments/cash_documents.go`) por un **renderizador único** en `internal/documents` con plantillas de bloques versionadas.
+**La plantilla define cómo aparece cada documento, nunca a dónde va**: estaciones, rutas, impresoras, unificación,
+respaldo, cola, lease, serialización por impresora, reintentos y resultados inciertos no cambian. Guía completa en
+[DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md).
+
+- **Representación intermedia (IR)**: Go convierte la plantilla y los datos del documento en líneas ya cortadas y
+  alineadas con atributos (negrita, tamaño) e imágenes (`documents.Layout`). La vista previa del diseñador y la impresión
+  usan la misma IR. `kitchen_print_jobs.content` guarda `Text()` y la columna nueva `layout` (0018) guarda la IR solo si
+  lleva atributos o logotipo; con las plantillas predeterminadas es NULL y el trabajo es idéntico al anterior a la 9B
+  (equivalencia byte a byte comprobada en 6 144 comandas y avisos, 168 precuentas y tickets y más de 1 000 documentos de
+  caja, a 58 y 80 mm, incluidos los bytes ESC/POS y los argumentos de `lp`).
+- **Transportes** (`kitchen/transport_formatted.go`): una IR plana viaja por el camino anterior. Con atributos o logotipo,
+  ESC/POS por red recibe `GS !`, `ESC E` y la imagen con `GS v 0` en franjas de hasta 128 filas
+  (`documents.EncodeESCPos`). Una impresora CUPS solo los recibe, con `/usr/bin/lp -o raw` y argumentos separados, si
+  tiene activada la opción **«Esta impresora entiende ESC/POS (formato y logotipo)» (`accepts_escpos`)** (desactivada por omisión; corrección
+  de la revisión independiente: una cola que admite raw no implica una impresora ESC/POS) y la cola admite datos raw según
+  la detección de solo lectura de la 7.1 (`cups_raw.go`), consultada otra vez antes de enviar. En cualquier otro caso se
+  imprime el texto por el camino anterior, sin negrita, tamaños ni logotipo, y el mensaje del resultado lo dice; **nunca
+  falla por eso**. Si CUPS no responde a la consulta, el trabajo queda en error confirmado sin enviar nada.
+- **Logotipo**: el trabajador carga los bits ya convertidos por identificador (`Worker.Rasters`, `identity.Rasters`) sin
+  transacción abierta; si no los encuentra, la imagen se omite con aviso. Un trabajo que se envía a una impresora de otro
+  ancho (respaldo, redirección o copia a otra impresora) no envía el logotipo del ancho original.
+- **Comandas**: al crear el ticket se guardan la versión activa (`kitchen_tickets.template_version_id`), la copia de la
+  identidad y el tamaño efectivo; la configuración de Cocina sigue copiada en el `Document`. **La reimpresión desde la cola
+  vuelve a renderizar con la versión guardada** (sin versión = versión 1 del sistema, idéntica al formato anterior), sin
+  leyenda REIMPRESIÓN. Precuentas, tickets y documentos de caja copian el contenido y el layout del trabajo original.
+- **Imprimir con la plantilla vigente** (`POST kitchen/print-jobs/rerender`, `kitchen.reprint` + `kitchen.stations.all` +
+  `documents.history.render_current`, motivo de 5–500 caracteres): acción distinta de la reimpresión, con un ticket
+  `document_rerender`, auditoría `print.rerendered` y la impresora del trabajo original (otra con
+  `kitchen.printers.manage`). La reimpresión exacta y esta acción se bloquean entre sí mientras haya una copia sin
+  resolver (`PRINT_COPY_PENDING`).
+- **Muestras**: `document_sample`, con «*** MUESTRA · NO ES UN DOCUMENTO VÁLIDO ***» al inicio y al final, por la misma
+  cola; su resultado se resuelve en la Cola de impresión como cualquier trabajo. Ni `document_sample` ni
+  `document_rerender` aparecen entre las comandas (`GET kitchen/tickets`).
+- **Lista de cocina en la plantilla**: «Importes» solo admite «Según Cocina» u «Ocultar» (las comandas se guardan sin
+  precios si Cocina los oculta); observaciones, estilo de cantidad y espaciado admiten «Según Cocina» o un valor propio.
+  El tamaño de texto del documento admite «Según Cocina», normal o grande.
+- **Prueba técnica** (`kitchen/printers/test`): sigue igual, con la versión 1 de la comanda.
+- **Verificación**: solo con el transporte controlado de la cola, un puerto TCP de loopback y un ejecutor simulado de
+  CUPS. **Ningún documento con formato o logotipo se imprimió en papel**: el resultado en cada impresora es una prueba
+  física pendiente del propietario.

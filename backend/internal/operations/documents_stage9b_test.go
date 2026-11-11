@@ -253,11 +253,29 @@ func testStage9BKitchen(t *testing.T, fixture *stage9BFixture) {
 			t.Fatal("La impresión con la plantilla vigente creó registros operativos o no se auditó")
 		}
 		fixture.mutate(t, "POST", "kitchen/print-jobs/rerender", map[string]any{"job_id": original.ID, "reason": "Otra copia pendiente"}, 409)
+		// Revisión de la 9B (hallazgo bajo 4): con la impresión con la plantilla vigente sin resolver
+		// tampoco se acepta una reimpresión exacta del mismo documento.
+		blocked := fixture.mutate(t, "POST", "kitchen/reprint", map[string]any{"job_id": original.ID, "reason": "Copia con otra pendiente"}, 409)
+		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
+			t.Fatal("La reimpresión exacta no se bloqueó con una impresión con la plantilla vigente pendiente")
+		}
 		listed := string(fixture.adminCall(t, "GET", "kitchen/tickets", nil, 200))
 		if strings.Contains(listed, result.TicketID) {
 			t.Fatal("La impresión con la plantilla vigente apareció entre las comandas")
 		}
 		fixture.settle(t, result.Job.ID)
+		// Una copia desde la cola de la impresión con la plantilla vigente es de la misma familia:
+		// mientras siga sin resolver, el original no admite otra copia exacta ni con la plantilla vigente.
+		rerenderCopy := decodeResponse[kitchen.PrintJob](t, fixture.mutate(t, "POST", "kitchen/reprint", map[string]any{
+			"job_id": result.Job.ID, "reason": "Copia de la impresión con la plantilla vigente",
+		}, 200))
+		for _, route := range []string{"kitchen/reprint", "kitchen/print-jobs/rerender"} {
+			blocked := fixture.mutate(t, "POST", route, map[string]any{"job_id": original.ID, "reason": "Otra copia del mismo documento"}, 409)
+			if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
+				t.Fatalf("%s no se bloqueó con una copia de la impresión con la plantilla vigente pendiente", route)
+			}
+		}
+		fixture.settle(t, rerenderCopy.ID)
 		// Una comanda nueva usa la versión activa; la prueba técnica sigue con el formato de siempre.
 		fresh := fixture.job(t, fixture.releasedJob(t, "Comanda 9B después").ID)
 		if fresh.versionID == nil || *fresh.versionID != versionID || !strings.Contains(fresh.content, "COMANDA 9B") || fresh.layout == nil {
@@ -364,6 +382,13 @@ func testStage9BCommercial(t *testing.T, fixture *stage9BFixture) {
 		if copy := fixture.job(t, precheckCopy.JobID); copy.content != fixture.job(t, precheck.JobID).content || strings.Contains(copy.content, "PRECUENTA 9B") {
 			t.Fatal("La reimpresión de la precuenta no es idéntica al original")
 		}
+		// Revisión de la 9B (hallazgo bajo 4): con la copia exacta sin resolver no se imprime con la
+		// plantilla vigente.
+		blocked := fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 409)
+		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
+			t.Fatal("La impresión con la plantilla vigente no se bloqueó con una copia exacta pendiente")
+		}
 		fixture.settle(t, copied.JobID, precheckCopy.JobID)
 		fixture.call(t, fixture.noCurrent, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
 			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 403)
@@ -381,6 +406,12 @@ func testStage9BCommercial(t *testing.T, fixture *stage9BFixture) {
 		}
 		if fixture.writeCounts(t) != before || fixture.countRows(t, "SELECT count(*) FROM app.audit_events WHERE action='payments.document_rerendered'") != 1 {
 			t.Fatal("Imprimir con la plantilla vigente creó pagos o documentos comerciales, o no se auditó")
+		}
+		// Y con la impresión con la plantilla vigente sin resolver no se acepta la copia exacta.
+		blocked = fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/reprint",
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 409)
+		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
+			t.Fatal("La copia exacta no se bloqueó con una impresión con la plantilla vigente pendiente")
 		}
 		// La vista previa de la precuenta usa la plantilla activa sin registrar nada.
 		document := decodeResponse[payments.CommercialDocument](t, fixture.call(t, fixture.cashier, "GET", "payments/accounts/"+bill.Account.ID+"/precheck", nil, 200))
@@ -454,12 +485,25 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 		if fixture.job(t, cutCopy.JobID).content != fixture.job(t, visibleCut.JobID).content {
 			t.Fatal("La reimpresión del corte no es idéntica al original")
 		}
+		// Revisión de la 9B (hallazgo bajo 4): con la copia exacta sin resolver no se imprime con la
+		// plantilla vigente; al resolverla, sí.
+		blocked := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender",
+			map[string]any{"operation_id": randomID()}, 409)
+		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
+			t.Fatal("La impresión con la plantilla vigente de caja no se bloqueó con una copia exacta pendiente")
+		}
+		fixture.settle(t, copied.JobID, cutCopy.JobID)
 		fixture.call(t, fixture.noCurrent, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 403)
 		rerendered := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender",
 			map[string]any{"operation_id": randomID()}, 200))
 		if job := fixture.job(t, rerendered.JobID); job.ticketKind != documents.TicketKindRerender || !strings.Contains(job.content, "INGRESO 9B") ||
 			!strings.Contains(job.content, "Sobre 9B") {
 			t.Fatalf("El comprobante no se imprimió con la plantilla vigente:\n%s", job.content)
+		}
+		blocked = fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/reprint",
+			map[string]any{"operation_id": randomID()}, 409)
+		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
+			t.Fatal("La copia exacta de caja no se bloqueó con una impresión con la plantilla vigente pendiente")
 		}
 		cut := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/rerender",
 			map[string]any{"operation_id": randomID()}, 200))
@@ -482,17 +526,27 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 	})
 	t.Run("9B_esperado_ausente_sin_permiso_y_durante_el_arqueo", func(t *testing.T) {
 		layout := json.RawMessage(documents.Default(documents.KindCashPartialCut).Encode())
-		preview := func(client testTerminal) (bool, string) {
+		previewOf := func(client testTerminal, ticketID string) (bool, string) {
 			result := decodeResponse[struct {
 				IncludesExpected bool   `json:"includes_expected"`
 				Text             string `json:"text"`
 			}](t, fixture.call(t, client, "POST", "documents/preview", map[string]any{
-				"kind": "cash_partial_cut", "layout": layout, "paper_width": 80, "source": map[string]any{"ticket_id": visibleCut.TicketID},
+				"kind": "cash_partial_cut", "layout": layout, "paper_width": 80, "source": map[string]any{"ticket_id": ticketID},
 			}, 200))
 			return result.IncludesExpected, result.Text
 		}
+		preview := func(client testTerminal) (bool, string) {
+			return previewOf(client, visibleCut.TicketID)
+		}
 		if include, text := preview(fixture.cashier); !include || !strings.Contains(text, "EFECTIVO ESPERADO") {
 			t.Fatalf("Con permiso la vista previa real no mostró el esperado:\n%s", text)
+		}
+		// Revisión de la 9B (hallazgo bajo 7): la vista previa usa los datos guardados del documento,
+		// como «Imprimir con la plantilla vigente». El corte que imprimió alguien sin
+		// cash.expected.read no guardó el esperado: tampoco lo muestra a quien sí puede verlo.
+		if include, text := previewOf(fixture.cashier, hiddenCut.TicketID); include || strings.Contains(text, "EFECTIVO ESPERADO") ||
+			!strings.Contains(text, "no incluidos") {
+			t.Fatalf("La vista previa del corte impreso sin el esperado no anticipa lo que se imprime:\n%s", text)
 		}
 		if include, text := preview(fixture.limited); include || strings.Contains(text, "EFECTIVO ESPERADO") || !strings.Contains(text, "no incluidos") {
 			t.Fatalf("Sin permiso la vista previa real mostró el esperado:\n%s", text)
@@ -509,9 +563,62 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 			"operation_id": randomID(), "reason": "Fin de la prueba de documentos",
 		}, 200)
 	})
+	t.Run("9B_vista_previa_y_recientes_de_caja_con_los_permisos_de_origen", func(t *testing.T) {
+		// La vista previa del comprobante reproduce el texto que se imprimió (datos guardados).
+		voucherPreview := decodeResponse[struct {
+			Text     string   `json:"text"`
+			Warnings []string `json:"warnings"`
+		}](t, fixture.call(t, fixture.cashier, "POST", "documents/preview", map[string]any{
+			"kind": "cash_income", "layout": json.RawMessage(documents.Default(documents.KindCashIncome).Encode()), "paper_width": 58,
+			"source": map[string]any{"ticket_id": voucher.TicketID},
+		}, 200))
+		if voucherPreview.Text != fixture.job(t, voucher.JobID).content || len(voucherPreview.Warnings) != 0 {
+			t.Fatalf("La vista previa del comprobante no reproduce lo impreso: %v\n%s", voucherPreview.Warnings, voucherPreview.Text)
+		}
+		// Revisión de la 9B (hallazgo bajo 8): los comprobantes recientes exigen cash.movements.read
+		// (como su vista previa); los cortes, consultar el turno. El alcance de los turnos se aplica.
+		documentsOnly := []string{documents.PermissionTemplatesRead, documents.PermissionPreviewReal, "cash.shifts.read"}
+		shiftsReader := newCashier(t, fixture.paymentsFixture, "recientes_sin_movimientos", documentsOnly, fixture.registerID)
+		denied := fixture.call(t, shiftsReader, "GET", "documents/recent?kind=cash_income", nil, 403)
+		if errorCode(t, denied) != "PERMISSION_DENIED" {
+			t.Fatal("Los comprobantes recientes se listaron sin cash.movements.read")
+		}
+		if cuts := string(fixture.call(t, shiftsReader, "GET", "documents/recent?kind=cash_partial_cut", nil, 200)); !strings.Contains(cuts, visibleCut.TicketID) {
+			t.Fatal("Los cortes recientes no se listaron con cash.shifts.read")
+		}
+		recent := decodeResponse[[]documents.RecentDocument](t, fixture.call(t, fixture.cashier, "GET", "documents/recent?kind=cash_income", nil, 200))
+		if len(recent) == 0 || recent[0].TicketID != voucher.TicketID || !strings.HasPrefix(recent[0].Label, "Caja de documentos · ") {
+			t.Fatalf("Los comprobantes recientes no incluyen el ingreso con su caja: %+v", recent)
+		}
+		otherRegister := decodeResponse[struct {
+			ID string `json:"id"`
+		}](t, fixture.adminCall(t, "POST", "registers", map[string]any{"name": "Caja ajena 9B", "description": "", "active": true}, 200)).ID
+		foreign := newCashier(t, fixture.paymentsFixture, "recientes_de_otra_caja",
+			append(append([]string{}, documentsOnly...), "cash.movements.read"), otherRegister)
+		for _, kind := range []string{"cash_income", "cash_partial_cut"} {
+			if listed := decodeResponse[[]documents.RecentDocument](t, fixture.call(t, foreign, "GET", "documents/recent?kind="+kind, nil, 200)); len(listed) != 0 {
+				t.Fatalf("Una terminal de otra caja sin cash.shifts.read_all vio los documentos de %s: %+v", kind, listed)
+			}
+		}
+		withAll := newCashier(t, fixture.paymentsFixture, "recientes_de_todas_las_cajas",
+			append(append([]string{}, documentsOnly...), "cash.movements.read", "cash.shifts.read_all"), otherRegister)
+		if listed := string(fixture.call(t, withAll, "GET", "documents/recent?kind=cash_income", nil, 200)); !strings.Contains(listed, voucher.TicketID) {
+			t.Fatal("Con cash.shifts.read_all no se listaron los comprobantes de otra caja")
+		}
+	})
 	t.Run("9B_documento_anterior_solo_admite_reimpresion_exacta", func(t *testing.T) {
 		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_tickets SET document=document-'data'-'template_version_id' WHERE id=$1", hiddenCut.TicketID); err != nil {
 			t.Fatal(err)
+		}
+		// La vista previa de un documento anterior a la 9B lee el corte actual y lo avisa.
+		legacy := decodeResponse[struct {
+			Warnings []string `json:"warnings"`
+		}](t, fixture.call(t, fixture.cashier, "POST", "documents/preview", map[string]any{
+			"kind": "cash_partial_cut", "layout": json.RawMessage(documents.Default(documents.KindCashPartialCut).Encode()), "paper_width": 80,
+			"source": map[string]any{"ticket_id": hiddenCut.TicketID},
+		}, 200))
+		if len(legacy.Warnings) == 0 || !strings.Contains(legacy.Warnings[0], "se emitió antes de las plantillas de documentos") {
+			t.Fatalf("La vista previa de un documento anterior no lo avisó: %v", legacy.Warnings)
 		}
 		unavailable := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+hiddenCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 409)
 		if errorCode(t, unavailable) != "DOCUMENT_DATA_UNAVAILABLE" {

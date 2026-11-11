@@ -17,6 +17,17 @@ const (
 
 	FormatPNG  = "png"
 	FormatJPEG = "jpeg"
+
+	// MaxJPEGScans es el número máximo de barridos (marcadores SOS) de un JPEG. Decodificar cada
+	// barrido de un JPEG progresivo recorre todos los bloques de la imagen, y el decodificador de Go
+	// no limita su número: un archivo válido de 1 MiB con unos 61 000 barridos vacíos tardaba más de
+	// un minuto (revisión de la etapa 9B). Los codificadores comunes usan alrededor de 10 barridos en
+	// un JPEG progresivo y 1 a 3 en uno secuencial; 100 deja un margen amplio (como -maxscans de
+	// libjpeg-turbo) y acota la validación de un logotipo de 2048 × 2048 a una fracción de segundo.
+	MaxJPEGScans = 100
+	// MaxJPEGSegments es el número máximo de segmentos con longitud (tablas, metadatos, encabezados y
+	// barridos) de un JPEG; uno común tiene menos de 50.
+	MaxJPEGSegments = 1024
 )
 
 // Firmas de los únicos formatos aceptados. La de JPEG es el marcador SOI (FF D8) seguido del inicio
@@ -52,9 +63,11 @@ type Logo struct {
 }
 
 // Validate comprueba que content sea un PNG o JPEG íntegro dentro de los límites y lo decodifica.
-// El orden importa: primero tamaño y firma, luego las dimensiones del encabezado (sin decodificar
-// los píxeles, para que un archivo que declara dimensiones enormes no reserve memoria) y al final
-// la decodificación completa, que detecta archivos truncados o dañados.
+// El orden importa: primero tamaño y firma; en un JPEG, el número de barridos y segmentos (un
+// recorrido de los marcadores sin decodificar, para que un archivo con miles de barridos no ocupe
+// el procesador durante minutos); luego las dimensiones del encabezado (sin decodificar los píxeles,
+// para que un archivo que declara dimensiones enormes no reserve memoria) y al final la
+// decodificación completa, que detecta archivos truncados o dañados.
 func Validate(content []byte) (*Logo, error) {
 	if len(content) == 0 {
 		return nil, invalid("El archivo del logotipo está vacío.")
@@ -65,6 +78,11 @@ func Validate(content []byte) (*Logo, error) {
 	format := detectFormat(content)
 	if format == "" {
 		return nil, invalid("El logotipo debe ser una imagen PNG o JPEG; no se aceptan SVG, GIF, WebP ni otros formatos.")
+	}
+	if format == FormatJPEG {
+		if err := checkJPEGSegments(content); err != nil {
+			return nil, err
+		}
 	}
 	configuration, decodedFormat, err := image.DecodeConfig(bytes.NewReader(content))
 	if err != nil {
@@ -126,4 +144,95 @@ func decodeFull(content []byte, format string) (image.Image, error) {
 		return png.Decode(bytes.NewReader(content))
 	}
 	return jpeg.Decode(bytes.NewReader(content))
+}
+
+// Marcadores JPEG que importan al recorrido: SOS (inicio de barrido), EOI (fin de imagen) y los
+// reinicios RST0–RST7, que van dentro de los datos comprimidos o sueltos y no llevan longitud.
+const (
+	jpegMarkerSOS  = 0xDA
+	jpegMarkerEOI  = 0xD9
+	jpegMarkerRST0 = 0xD0
+	jpegMarkerRST7 = 0xD7
+)
+
+// checkJPEGSegments recorre los marcadores de un JPEG como lo hace el decodificador (sin decodificar
+// nada ni reservar memoria) y rechaza los que exceden MaxJPEGScans barridos o MaxJPEGSegments
+// segmentos. Un archivo mal formado o truncado no se rechaza aquí: lo detecta la decodificación.
+func checkJPEGSegments(content []byte) error {
+	scans := 0
+	segments := 0
+	index := len(jpegSignature) - 1
+	for {
+		marker, next, found := nextJPEGMarker(content, index)
+		if !found || marker == jpegMarkerEOI {
+			return nil
+		}
+		index = next
+		if marker >= jpegMarkerRST0 && marker <= jpegMarkerRST7 {
+			continue
+		}
+		if index+2 > len(content) {
+			return nil
+		}
+		// La longitud del segmento incluye sus dos bytes.
+		length := int(content[index])<<8 | int(content[index+1])
+		if length < 2 {
+			return nil
+		}
+		segments++
+		if segments > MaxJPEGSegments {
+			return invalid("El logotipo JPEG tiene demasiados segmentos. Guárdalo de nuevo como PNG o como JPEG estándar.")
+		}
+		index += length
+		if marker == jpegMarkerSOS {
+			scans++
+			if scans > MaxJPEGScans {
+				return invalid("El logotipo JPEG tiene demasiados barridos progresivos. Guárdalo de nuevo como PNG o como JPEG estándar.")
+			}
+			index = skipJPEGEntropyData(content, index)
+		}
+	}
+}
+
+// nextJPEGMarker devuelve el siguiente marcador desde index y la posición que lo sigue. Como el
+// decodificador, ignora los bytes sueltos que no son 0xFF, los 0xFF de relleno y los pares FF 00.
+func nextJPEGMarker(content []byte, index int) (byte, int, bool) {
+	for index+1 < len(content) {
+		if content[index] != 0xFF {
+			index++
+			continue
+		}
+		marker := content[index+1]
+		switch marker {
+		case 0xFF:
+			index++
+		case 0x00:
+			index += 2
+		default:
+			return marker, index + 2, true
+		}
+	}
+	return 0, index, false
+}
+
+// skipJPEGEntropyData avanza sobre los datos comprimidos de un barrido hasta el siguiente marcador
+// que no sea un byte escapado (FF 00), un reinicio (RST0–RST7) ni un relleno (FF FF).
+func skipJPEGEntropyData(content []byte, index int) int {
+	for index+1 < len(content) {
+		if content[index] != 0xFF {
+			index++
+			continue
+		}
+		marker := content[index+1]
+		if marker == 0x00 || (marker >= jpegMarkerRST0 && marker <= jpegMarkerRST7) {
+			index += 2
+			continue
+		}
+		if marker == 0xFF {
+			index++
+			continue
+		}
+		return index
+	}
+	return len(content)
 }

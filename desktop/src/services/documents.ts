@@ -69,6 +69,8 @@ export interface OptionSpec {
   min?: number;
   max?: number;
   required?: boolean;
+  // Explicación breve de Go que el editor muestra junto al control.
+  help?: string;
 }
 
 export type BlockProperty =
@@ -200,8 +202,12 @@ export interface RecentDocument {
   label: string;
 }
 
+// Compatibilidad de una impresora (documents/printers). code identifica el motivo: escpos_network,
+// escpos_disabled (marca ESC/POS desactivada en una impresora CUPS), queue_raw, queue_not_raw (cola
+// sin raw), queue_unavailable, queue_timeout o agent; reason lo explica en español.
 export interface Compatibility {
   status: 'supported' | 'unsupported' | 'unknown';
+  code: string;
   reason: string;
 }
 

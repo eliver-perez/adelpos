@@ -49,6 +49,8 @@ type OptionSpec struct {
 	Min       *int          `json:"min,omitempty"`
 	Max       *int          `json:"max,omitempty"`
 	Required  bool          `json:"required,omitempty"`
+	// Help es una explicación breve que el editor muestra junto al control.
+	Help string `json:"help,omitempty"`
 }
 
 // blockDefinition describe un tipo de bloque.
@@ -108,6 +110,19 @@ var inheritValues = []OptionValue{
 	{OptionYes, "Sí"},
 	{OptionNo, "No"},
 }
+
+// priceValues son los valores de «Importes» de la lista de cocina. No existe «Sí»: la comanda solo
+// guarda los precios cuando Cocina tiene activado «Mostrar precios» (kitchen/documents.go), así
+// que una plantilla no puede imprimir importes que el documento no conserva (revisión de la 9B).
+var priceValues = []OptionValue{
+	{Inherit, "Según la configuración de Cocina"},
+	{OptionNo, "Ocultar"},
+}
+
+// priceHelp explica cómo se imprimen los importes de la lista de cocina, con el nombre de la opción
+// de Cocina que muestra los precios (KitchenSettingsForm.tsx).
+const priceHelp = "Para imprimir los importes, activa «Incluir importes comerciales en comandas» en Cocina → " +
+	"Comandas y tiempos; con «Ocultar», esta plantilla no los imprime aunque Cocina los muestre."
 
 // Límites de las plantillas (§2 del diseño).
 const (
@@ -333,7 +348,7 @@ var definitions = []blockDefinition{
 		options: func(Kind) []OptionSpec {
 			return []OptionSpec{
 				{Key: "show_notes", Label: "Observaciones", Type: "enum", Default: Inherit, Values: inheritValues},
-				{Key: "show_prices", Label: "Importes", Type: "enum", Default: Inherit, Values: inheritValues},
+				{Key: "show_prices", Label: "Importes", Type: "enum", Default: Inherit, Values: priceValues, Help: priceHelp},
 				{
 					Key: "quantity_style", Label: "Cantidades", Type: "enum", Default: Inherit,
 					Values: []OptionValue{{Inherit, "Según la configuración de Cocina"}, {QuantityPrefix, "«2 x Producto»"}, {QuantityMulti, "«Producto × 2»"}},

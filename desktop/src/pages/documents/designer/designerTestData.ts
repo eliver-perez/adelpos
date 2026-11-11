@@ -277,7 +277,11 @@ export const printers: PrinterCompatibility[] = [
     transport: 'agent',
     paper_width: 80,
     columns: 42,
-    format: { status: 'unsupported', reason: 'El agente de impresión aún no existe.' },
-    logo: { status: 'unsupported', reason: 'El agente de impresión aún no existe.' },
+    format: {
+      status: 'unsupported',
+      code: 'agent',
+      reason: 'El agente de impresión aún no existe.',
+    },
+    logo: { status: 'unsupported', code: 'agent', reason: 'El agente de impresión aún no existe.' },
   },
 ];

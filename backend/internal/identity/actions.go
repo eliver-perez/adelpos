@@ -112,31 +112,48 @@ type uploadInput struct {
 	Content     string `json:"content_base64"`
 }
 
-// uploadLogo atiende POST documents/identity/logo: carga o reemplaza el logotipo. El archivo se
-// valida con logoraster (PNG o JPEG, ≤ 1 MiB, ≤ 2048 × 2048, dimensiones antes de decodificar y
-// decodificación completa), se guarda el original inmutable y sus conversiones de 58 y 80 mm con la
-// presentación vigente. El logotipo anterior y sus conversiones se conservan para los documentos ya
-// emitidos.
-func (handler *service) uploadLogo() (any, error) {
+// preparedUpload es una carga de logotipo ya validada antes de tomar el lock de la identidad.
+type preparedUpload struct {
+	revision int
+	content  []byte
+	logo     *logoraster.Logo
+}
+
+// prepareUpload decodifica y valida el archivo del logotipo antes del lock de la identidad: PNG o
+// JPEG, ≤ 1 MiB, ≤ 2048 × 2048, a lo más logoraster.MaxJPEGScans barridos, dimensiones antes de
+// decodificar y decodificación completa. Es trabajo de procesador que no necesita la fila; un
+// archivo rechazado responde sin haberla bloqueado.
+func (handler *service) prepareUpload() error {
 	var input uploadInput
 	if err := decodeStrict(handler.request.Body, &input); err != nil {
-		return nil, err
-	}
-	if err := handler.checkRevision(input.Revision); err != nil {
-		return nil, err
+		return err
 	}
 	if len(input.Content) > maxEncodedLogo {
-		return nil, invalid("El logotipo debe ocupar como máximo 1 MiB.")
+		return invalid("El logotipo debe ocupar como máximo 1 MiB.")
 	}
 	content, err := base64.StdEncoding.Strict().DecodeString(input.Content)
 	if err != nil {
-		return nil, invalid("El archivo del logotipo no se recibió completo. Vuelve a elegirlo.")
+		return invalid("El archivo del logotipo no se recibió completo. Vuelve a elegirlo.")
 	}
 	logo, err := logoraster.Validate(content)
 	if err != nil {
-		return nil, publicError(err)
+		return publicError(err)
 	}
-	logoID, _, err := storeLogo(handler.ctx, handler.tx, logo, content, handler.request.Actor.UserID)
+	handler.upload = &preparedUpload{revision: input.Revision, content: content, logo: logo}
+	return nil
+}
+
+// uploadLogo atiende POST documents/identity/logo: carga o reemplaza el logotipo ya validado por
+// prepareUpload. Con la fila bloqueada exige la revisión vigente, guarda el original inmutable y sus
+// conversiones de 58 y 80 mm con la presentación vigente. El logotipo anterior y sus conversiones se
+// conservan para los documentos ya emitidos.
+func (handler *service) uploadLogo() (any, error) {
+	upload := handler.upload
+	if err := handler.checkRevision(upload.revision); err != nil {
+		return nil, err
+	}
+	logo := upload.logo
+	logoID, _, err := storeLogo(handler.ctx, handler.tx, logo, upload.content, handler.request.Actor.UserID)
 	if err != nil {
 		return nil, err
 	}

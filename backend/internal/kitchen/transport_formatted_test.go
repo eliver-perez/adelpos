@@ -24,9 +24,11 @@ func formattedLayout() *documents.Layout {
 	}
 }
 
+// formattedJob es un trabajo con atributos para una impresora del transporte indicado. En CUPS la
+// impresora está marcada «Esta impresora entiende ESC/POS (formato y logotipo)».
 func formattedJob(transport string) PrintJob {
 	printer := Printer{Name: "Tickets", Transport: transport, Destination: "Printer_POS_80", PaperWidth: 80, Copies: 2, Port: 9100,
-		Cut: true, SupportsCut: true, CutterOption: ""}
+		Cut: true, SupportsCut: true, CutterOption: "", AcceptsESCPos: transport == "cups"}
 	return PrintJob{ID: "00000000-0000-4000-8000-0000000000f1", PrinterSnapshot: printer, Content: "RESTAURANTE\nCafé ñ", Layout: formattedLayout()}
 }
 
@@ -171,5 +173,96 @@ func TestPlainLayoutKeepsESCPosBytesOverTCP(t *testing.T) {
 	outcome := submitESCPos(context.Background(), job)
 	if !job.Layout.Plain() || outcome.State != "submitted" || !bytes.Equal(<-received, ESCPosBytes("Solo texto", job.PrinterSnapshot, "large")) {
 		t.Fatalf("Un layout plano no conservó los bytes del texto: %+v", outcome)
+	}
+}
+
+// Una cola CUPS que admite datos raw no basta (revisión de la 9B, hallazgo medio 4): sin la marca
+// explícita de la impresora el documento se imprime como texto por el camino anterior, con aviso y
+// sin consultar la cola ni fallar. Con la marca y una cola raw viaja como ESC/POS.
+func TestCUPSWithoutESCPosOptionPrintsText(t *testing.T) {
+	job := formattedJob("cups")
+	job.PrinterSnapshot.AcceptsESCPos = false
+	job.Rasters = map[string]*documents.Raster{"logo-80": {WidthDots: 16, HeightDots: 2, Bits: []byte{0xff, 0x00, 0x0f, 0xf0}}}
+	var received *PrintJob
+	transport := HostTransport{commands: &recordedCommands{t: t, forbidden: true}, textCUPS: func(_ context.Context, sent PrintJob) Outcome {
+		received = &sent
+		return Outcome{State: "submitted", Accepted: true, Reference: "Q-3", Message: "Aceptado por CUPS; no confirma salida física de papel."}
+	}}
+	outcome := transport.Submit(context.Background(), job)
+	if received == nil || received.Content != job.Content || outcome.State != "submitted" || !outcome.Accepted ||
+		!strings.Contains(outcome.Message, "no está marcada como «Esta impresora entiende ESC/POS") {
+		t.Fatalf("Sin la marca ESC/POS no se imprimió el texto con aviso: %+v", outcome)
+	}
+	// El resultado incierto del camino de texto se conserva.
+	uncertain := HostTransport{commands: &recordedCommands{t: t, forbidden: true}, textCUPS: func(context.Context, PrintJob) Outcome {
+		return Outcome{State: "uncertain", Message: "CUPS no devolvió un resultado inequívoco."}
+	}}.Submit(context.Background(), job)
+	if uncertain.State != "uncertain" || uncertain.Accepted {
+		t.Fatalf("El resultado incierto cambió sin la marca ESC/POS: %+v", uncertain)
+	}
+	// Con la marca y la misma cola raw, los bytes ESC/POS viajan con lp -o raw.
+	job.PrinterSnapshot.AcceptsESCPos = true
+	raw := &recordedCommands{t: t, replies: map[string]recordedReply{
+		"/usr/bin/lpstat":    {output: recorded(t, "lpstat-p-usb-pos80.txt")},
+		"/usr/bin/lpoptions": {output: recorded(t, "lpoptions-usb-pos80.txt")},
+		"/usr/bin/lp":        {output: []byte("la id. de petición es Printer_POS_80-302 (1 archivo(s))\n")},
+	}}
+	marked := HostTransport{commands: raw}.Submit(context.Background(), job)
+	if marked.State != "submitted" || raw.calls[len(raw.calls)-1].program != "/usr/bin/lp" {
+		t.Fatalf("Con la marca y la cola raw el documento no viajó como ESC/POS: %+v", marked)
+	}
+	// La marca solo existe en CUPS: ESC/POS por red y el agente la rechazan.
+	for _, transportName := range []string{"escpos_tcp", "agent"} {
+		printer := formattedJob(transportName).PrinterSnapshot
+		printer.Destination = "192.168.1.50"
+		printer.AcceptsESCPos = true
+		err := validatePrinter(&printer)
+		problem, isPublic := err.(*Error)
+		if !isPublic || !strings.Contains(problem.Message, "solo se configura en colas CUPS") {
+			t.Fatalf("La marca ESC/POS se aceptó en %s: %v", transportName, err)
+		}
+	}
+}
+
+// Un trabajo redirigido, con respaldo o copiado a una impresora de otro ancho conserva su IR
+// (revisión de la 9B, hallazgo bajo 5): el logotipo convertido para el ancho original no se envía;
+// se omite con aviso y el resto del documento se imprime.
+func TestLogoOfOtherPaperWidthIsOmitted(t *testing.T) {
+	logo := []byte{0xff, 0x00, 0x0f, 0xf0}
+	job := formattedJob("cups")
+	job.PrinterSnapshot.PaperWidth = 58
+	job.Rasters = map[string]*documents.Raster{"logo-80": {WidthDots: 16, HeightDots: 2, Bits: logo}}
+	replies := map[string]recordedReply{
+		"/usr/bin/lpstat":    {output: recorded(t, "lpstat-p-usb-pos80.txt")},
+		"/usr/bin/lpoptions": {output: recorded(t, "lpoptions-usb-pos80.txt")},
+		"/usr/bin/lp":        {output: []byte("la id. de petición es Printer_POS_80-303 (1 archivo(s))\n")},
+	}
+	raw := &recordedCommands{t: t, replies: replies}
+	outcome := HostTransport{commands: raw}.Submit(context.Background(), job)
+	sent := raw.calls[len(raw.calls)-1].pulse
+	if outcome.State != "submitted" || bytes.Contains(sent, []byte{0x1d, 0x76, 0x30, 0x00}) || !bytes.Contains(sent, []byte("RESTAURANTE")) {
+		t.Fatalf("El logotipo de otro ancho de papel viajó o el documento no se imprimió: %+v % x", outcome, sent)
+	}
+	if !strings.Contains(outcome.Message, "otro ancho de papel") || strings.Contains(outcome.Message, "No se encontró") {
+		t.Fatalf("El aviso no explica el logotipo omitido: %q", outcome.Message)
+	}
+	// Un raster más ancho que el área imprimible de la impresora tampoco se envía.
+	wide := formattedJob("cups")
+	wide.Layout.PaperWidth = 58
+	wide.PrinterSnapshot.PaperWidth = 58
+	wide.Rasters = map[string]*documents.Raster{"logo-80": {WidthDots: 576, HeightDots: 1, Bits: make([]byte, 72)}}
+	raw = &recordedCommands{t: t, replies: replies}
+	outcome = HostTransport{commands: raw}.Submit(context.Background(), wide)
+	if bytes.Contains(raw.calls[len(raw.calls)-1].pulse, []byte{0x1d, 0x76, 0x30, 0x00}) || !strings.Contains(outcome.Message, "otro ancho de papel") {
+		t.Fatalf("Un raster de 576 puntos se envió a una impresora de 58 mm: %+v", outcome)
+	}
+	// Con el mismo ancho el logotipo sí viaja.
+	same := formattedJob("cups")
+	same.Rasters = map[string]*documents.Raster{"logo-80": {WidthDots: 16, HeightDots: 2, Bits: logo}}
+	raw = &recordedCommands{t: t, replies: replies}
+	outcome = HostTransport{commands: raw}.Submit(context.Background(), same)
+	if !bytes.Contains(raw.calls[len(raw.calls)-1].pulse, append([]byte{0x1d, 0x76, 0x30, 0x00, 0x02, 0x00, 0x02, 0x00}, logo...)) ||
+		strings.Contains(outcome.Message, "logotipo") {
+		t.Fatalf("El logotipo del mismo ancho no viajó: %+v", outcome)
 	}
 }

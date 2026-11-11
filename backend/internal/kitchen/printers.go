@@ -40,6 +40,9 @@ func validatePrinter(printer *Printer) error {
 			return invalid("La opción de corte CUPS debe corresponder a CutMedia, CutType o Cutter del controlador.")
 		}
 	case "escpos_tcp":
+		if printer.AcceptsESCPos {
+			return invalid("La opción «Esta impresora entiende ESC/POS» solo se configura en colas CUPS: ESC/POS por red ya recibe formato y logotipo.")
+		}
 		address := net.ParseIP(printer.Destination)
 		if address == nil || !(address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast()) {
 			return invalid("ESC/POS requiere una dirección IP privada explícita de la impresora.")
@@ -48,6 +51,9 @@ func validatePrinter(printer *Printer) error {
 			return invalid("El corte ESC/POS lo implementa su controlador, no una opción CUPS.")
 		}
 	case "agent":
+		if printer.AcceptsESCPos {
+			return invalid("La opción «Esta impresora entiende ESC/POS» solo se configura en colas CUPS.")
+		}
 		if strings.ContainsAny(printer.Destination, "\r\n\x00") {
 			return invalid("El destino de agente no es válido.")
 		}
@@ -99,9 +105,9 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 		}
 		printer.ID = events.NewID()
 		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_printers(id,name,transport,destination,port,paper_width,
-            copies,supports_cut,cut,cutter_option,active,fallback_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 			printer.ID, printer.Name, printer.Transport, printer.Destination, printer.Port, printer.PaperWidth, printer.Copies,
-			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID)
+			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos)
 		if err != nil {
 			return nil, err
 		}
@@ -115,9 +121,10 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 			return nil, conflict()
 		}
 		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_printers SET name=$1,transport=$2,destination=$3,port=$4,
-            paper_width=$5,copies=$6,supports_cut=$7,cut=$8,cutter_option=$9,active=$10,fallback_id=$11,
-            revision=revision+1,updated_at=now() WHERE id=$12`, printer.Name, printer.Transport, printer.Destination, printer.Port,
-			printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.ID)
+            paper_width=$5,copies=$6,supports_cut=$7,cut=$8,cutter_option=$9,active=$10,fallback_id=$11,accepts_escpos=$12,
+            revision=revision+1,updated_at=now() WHERE id=$13`, printer.Name, printer.Transport, printer.Destination, printer.Port,
+			printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID,
+			printer.AcceptsESCPos, printer.ID)
 		if err != nil {
 			return nil, err
 		}

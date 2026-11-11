@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9A
+# Arquitectura · Etapa 9B
 
 ## Responsabilidades
 
@@ -31,6 +31,10 @@ Tauri no inicia ni detiene Go o PostgreSQL. Los modos `server-terminal`, `termin
 - `inventory` (etapa 8): insumos, unidades y presentaciones, almacenes, existencias, libro de movimientos y motor de costos, recetas y subrecetas, consumo por liberación a cocina con su trabajador, cancelaciones, elaboraciones, compras (proveedores, órdenes, recepciones, devoluciones y vínculo opcional con gastos de caja), ajustes, mermas, transferencias, conteos, alertas y sugerencias. Recibe transacción, actor y auditoría desde administración; no importa `operations`, `kitchen`, `payments` ni `administration` y lee sus tablas solo por SQL de lectura. `kitchen` lo llama para registrar solicitudes de consumo. Desde la etapa 9A agrega el proveedor especial «Compras de mostrador» y la comprobación del código interno sugerido.
 - `businessday` (etapa 9A): paquete neutral, sin dependencias de otros módulos, con el día comercial («Hora de inicio del día», `inventory_settings.operating_day_cutoff`) y los periodos con semana ISO 8601 en la zona del establecimiento. Lo usan inventario (día operativo de las cancelaciones y alertas) y reportes.
 - `reports` (etapa 9A): registro cerrado de reportes, motor de orden, página y totales, ejecutor de solo lectura con semáforo propio, resumen ejecutivo, opciones de filtros y exportación PDF/XLSX. Recibe de administración la transacción de autenticación solo para validar ruta, permisos y parámetros; consulta después en su propia transacción. No importa `administration` ni llama handlers de otros módulos: lee sus tablas por SQL y usa funciones puras exportadas de `payments`, `inventory`, `businessday` y `moneytext` (importes de los PDF).
+- `documents` (etapa 9B): paquete neutral, sin importar `kitchen`, `payments`, `operations` ni `administration`, con los diez tipos de documento, el modelo de plantilla por bloques de un catálogo cerrado, su validación, los datos tipados de cada familia (cocina, comercial y caja), el renderizador único que produce la representación intermedia (IR), las plantillas predeterminadas, los datos de muestra, la codificación ESC/POS de una IR con atributos y el acceso a versiones e identidad. `kitchen` y `payments` convierten sus estructuras a esos datos.
+- `designer` (etapa 9B): rutas `documents/*` (catálogo, plantillas, versiones, vista previa, recientes, muestras e impresoras); usa `documents`, `kitchen` (cola y documentos de cocina) y `payments` (fuentes de vista previa).
+- `identity` (etapa 9B): rutas `documents/identity*`, identidad documental combinada con `app.establishment`, logotipo con sus conversiones guardadas, fuente de bits para el trabajador de impresión y fuente del logotipo de los reportes (un `SELECT` en la transacción de solo lectura del reporte).
+- `logoraster` y `brand` (etapa 9B): puros; validación y conversión monocromática del logotipo y bytes `GS v 0`, y copia embebida de la marca de AD-EL POS para los reportes.
 
 Las escrituras y sus eventos de auditoría se confirman en la misma transacción. Los fallos de autenticación y denegaciones relevantes se auditan deliberadamente aunque no se autorice la operación. Cada operación autenticada se ejecuta dentro de un savepoint (`administration.runProtected`): un 403 deshace todo lo que la operación hubiera escrito, aunque la verificación de permiso ocurriera después de una escritura, y solo se confirma la auditoría `access.denied`. Así la regla "toda autorización antes de la primera escritura" no depende de convención. Los errores públicos no incluyen SQL, hashes, DSN, secretos o detalles del driver.
 
@@ -175,3 +179,49 @@ Tres migraciones nuevas, sin modificar 0001–0014 y con todas sus restricciones
 **Exportaciones y puente.** `GET reports/export/{id}` ejecuta el mismo reporte en el ejecutor (conserva su lugar del semáforo mientras genera el archivo), arma el PDF con `go-pdf/fpdf` y las fuentes Go o el XLSX con `excelize` sin fórmulas ni contenido activo, audita `report.exported` en una transacción corta aparte antes de enviarlo y responde el archivo binario sin guardarlo en el servidor. En el escritorio, la operación cerrada `export_report` (`desktop/src-tauri/src/export.rs`) pide el archivo con las credenciales de Keychain, valida tipo y firma, abre el diálogo nativo «Guardar como» de `tauri-plugin-dialog` desde Rust (sin permisos `dialog:*` ni `fs:*` en la ventana) y escribe de forma atómica; React solo recibe el resultado (`saved` o `cancelled`, nombre y tamaño).
 
 **Interfaz.** La sección Reportes se construye desde el catálogo de Go (grupos, reportes, filtros y columnas), consulta solo al abrir, al cambiar periodo, filtros, orden o página, o a pedido (no escucha SSE), y dibuja gráficos SVG propios con tabla alternativa; no calcula importes.
+
+## Identidad del establecimiento y diseñador de documentos · etapa 9B
+
+Dos migraciones nuevas, sin modificar 0001–0017 y con restricciones nombradas y CHECK seguros ante NULL:
+`0018_document_templates.sql` (plantillas y versiones inmutables, semilla de las diez plantillas del sistema,
+`kitchen_tickets.template_version_id`, tipos de ticket `document_sample` y `document_rerender`, `kitchen_print_jobs.layout`,
+ámbito SSE `documents` y seis permisos `documents.*` solo al administrador) y `0019_document_identity.sql` (logotipos
+originales y conversiones inmutables e identidad documental de fila única). **No se han aplicado a la instalación real**:
+esperan la autorización del propietario. Sin locks consultivos nuevos. Guía: [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md).
+
+**Un solo renderizador.** Las tres plantillas de texto anteriores (`kitchen.RenderText`, `payments.renderDocument` y
+`payments.renderCashDocument`) se reemplazaron por `documents.Render`, que convierte una versión de plantilla y los datos
+del documento en una IR de líneas ya cortadas y alineadas con atributos (negrita, tamaño) e imágenes. La vista previa del
+diseñador y la impresión usan la misma IR; React solo la dibuja. Las plantillas predeterminadas reproducen byte a byte los
+documentos anteriores (pruebas contra copias literales de las plantillas antiguas en los diez tipos y ambos anchos), así que
+instalar la 9B no cambia ningún papel. Una plantilla guardada inválida o ausente imprime con la versión 1 del sistema: la
+impresión nunca falla por una plantilla.
+
+**La plantilla no toca el negocio.** Los módulos arman sus datos como antes; enrutamiento, estaciones, impresoras,
+unificación, cola, lease, serialización por impresora, respaldo, reintentos y resultados inciertos no cambian. El trabajo
+guarda `content = Text()` y, solo si la IR lleva atributos o logotipo, `layout`; los transportes traducen: plano = camino
+anterior; con atributos, ESC/POS por red recibe `GS !`, `ESC E` y `GS v 0`, y una impresora CUPS solo si está marcada
+«Esta impresora entiende ESC/POS (formato y logotipo)» y su cola admite datos raw (detección de solo lectura de la 7.1);
+si no, se imprime el texto con aviso, sin fallar. Los bits del logotipo se cargan por identificador al enviar, sin
+transacción abierta.
+
+**Historia.** Cada documento emitido guarda la versión usada y una copia de la identidad; los de caja, además, sus datos
+estructurados. La reimpresión es idéntica al original (comandas: se vuelve a renderizar con su versión; precuentas, tickets
+y caja: se copia el contenido) y sin leyenda. «Imprimir con la plantilla vigente» es una acción distinta en cada módulo de
+origen, con `documents.history.render_current`, un ticket `document_rerender` y auditoría propia; nunca crea
+`payment_documents` ni `cash_documents`. Versiones, logotipos y conversiones son inmutables por disparador.
+
+**Seguridad.** Modelo cerrado de bloques con decodificación estricta y validación en Go al guardar, previsualizar e
+imprimir una muestra; textos saneados de controles al guardar y de nuevo al renderizar; el bloque protegido de esperado y
+diferencias solo existe en los cortes y solo se renderiza con `cash.expected.read` fuera del arqueo; el logotipo se valida
+antes de decodificar (formato por contenido, dimensiones, tamaño y barridos JPEG) y fuera del lock de la identidad. La
+vista previa con un documento real exige el permiso de su origen.
+
+**Identidad y reportes.** Nombre, dirección, teléfono y correo siguen en `app.establishment`; la identidad agrega el resto.
+Los reportes PDF y Excel de la 9A cambian solo su encabezado (logotipo del restaurante o, sin él, el de AD-EL POS con el
+nombre del establecimiento), leído en la misma transacción de solo lectura del reporte. El logotipo del restaurante nunca
+sustituye a la marca de la aplicación.
+
+**Interfaz y puente.** Pantalla «Documentos» (`pages/documents/`) con las pestañas «Plantillas» e «Identidad del
+establecimiento»; editor en tres áreas con antirrebote y una sola vista previa en vuelo, conflicto de revisión con
+borrador conservado e invalidación por SSE (ámbito `documents`). 22 operaciones nuevas en la lista cerrada de `api.rs`.

@@ -1,6 +1,6 @@
 # Cobros, pagos, descuentos y devoluciones · Etapa 6
 
-Versión 0.9.0, esquema 17 (la etapa 8 no modifica cobros; sus migraciones 0010–0014 se aplicaron a la instalación real el 10 de noviembre de 2026; la etapa 9A agrega la vigencia de la precuenta por revisión y el reconocimiento de ventas al cierre, con las migraciones 0015 y 0017, aplicadas a la instalación real el 10 de noviembre de 2026; ver «Reportes · etapa 9A»): etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable; y de la etapa 7.1 (fase D, migración 0009, aplicada a la instalación real el 9 de noviembre de 2026): motivos de descuento y total en dólares en precuentas y tickets. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
+Versión 0.9.1, esquema 19 (la etapa 9B cambia solo la presentación de precuentas y tickets: plantillas, identidad e impresión con la plantilla vigente, con las migraciones 0018 y 0019, **no aplicadas** a la instalación real hasta la autorización del propietario; ver «Plantillas e impresión con la plantilla vigente · etapa 9B». La etapa 8 no modifica cobros; sus migraciones 0010–0014 se aplicaron a la instalación real el 10 de noviembre de 2026; la etapa 9A agrega la vigencia de la precuenta por revisión y el reconocimiento de ventas al cierre, con las migraciones 0015 y 0017, aplicadas a la instalación real el 10 de noviembre de 2026; ver «Reportes · etapa 9A»): etapa 6 más las ampliaciones de la etapa 6.1 (fase C, migración 0007): IVA por producto y pago en dólares en efectivo como función activable; y de la etapa 7.1 (fase D, migración 0009, aplicada a la instalación real el 9 de noviembre de 2026): motivos de descuento y total en dólares en precuentas y tickets. Este documento describe únicamente lo implementado y probado. La administración de caja de la etapa 7 (arqueo, cierre ciego, cortes, operaciones de efectivo, documentos de caja, cajón y tope; migración 0008) está en [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md); aquí solo se resume su efecto sobre cobros y devoluciones.
 
 ## Autoridad y estructura
 
@@ -146,7 +146,7 @@ Función activable del establecimiento, **desactivada por defecto** (Configuraci
 - El ticket de pago muestra además el pago concreto: método, referencia, efectivo recibido, cambio y propina separada, más pagos registrados y saldo. Ambos documentos indican que **no son un CFDI**.
 - Un fallo de impresión nunca revierte el pago: el trabajo queda con su estado en la cola (error, incierto o intervención) y la cuenta lo muestra. Sin impresora configurada, el pago se registra y la respuesta lo indica.
 - `POST …/documents/reprint` (`payments.tickets.reprint`) genera otra copia idéntica sin duplicar cobros. Exige que el trabajo original esté enviado o cancelado (con error o incierto se resuelve antes en la cola de impresión, `400`) y se rechaza mientras exista otra copia pendiente o incierta (`409 PRINT_COPY_PENDING`). Los documentos comerciales no aparecen entre las comandas de cocina.
-- El formato base separa datos (`CommercialDocument`), plantilla de texto y transporte; el editor visual corresponde a la etapa 9B.
+- El formato base separa datos (`CommercialDocument`), plantilla de texto y transporte; el editor visual corresponde a la etapa 9B (desde la 9B la plantilla de texto es el renderizador único de `internal/documents`; ver la sección de la etapa 9B).
 - **Vigencia de la precuenta (etapa 9A, §33; migración 0015)**: al imprimir una precuenta, Go guarda en `payment_documents` la revisión de la cuenta (`account_revision`) y el número de ajustes (`adjustment_count`: descuentos y cargos registrados más sus cancelaciones), leídos bajo el lock exclusivo de cobros. La precuenta es **vigente** mientras la cuenta conserve esa revisión y ese número de ajustes; el predicado único es `precheck_current` de `AccountStandingSQL` (`payments/standing.go`), que usa el estado «Esperando pago» del mapa de mesas. Cualquier cambio de contenido (borrador, confirmación, modificación, cancelación, datos, mesa, combinación, transferencia, cierre o reapertura) incrementa la revisión y la invalida; un ajuste o su cancelación la invalida por el número de ajustes, sin cambiar la revisión de la cuenta (así no provoca conflictos de revisión en las capturas abiertas); un pago no la invalida. Ya no se comparan instantes de inicio de transacción: una modificación que esperaba el lock mientras se imprimía la precuenta se confirma después con la revisión siguiente y la deja obsoleta (prueba concurrente que controla el lock en `operations/stage9a_test.go`). Las precuentas anteriores a la 0015 (columnas en NULL) conservan la regla por marcas de tiempo (impresa después del último cambio de la cuenta y del último ajuste). Los tickets de pago no guardan estos datos (restricción `payment_documents_precheck_version_check`). No es una segunda fuente de verdad: ambos valores se derivan de la cuenta y de sus ajustes de solo inserción.
 - **Total en dólares (etapa 7.1)**: con la función `usd_cash` activa y tipo de cambio disponible, la precuenta y el ticket agregan después del TOTAL la línea informativa «Total en dólares (T.C. $Y)» con `US$X`, calculada en Go con `mxnToUSD` (total en pesos entre el tipo de cambio, redondeado a centavos) y el formato único de `internal/moneytext`. La precuenta usa el tipo de cambio del turno activo (abierto o en arqueo) de la caja de la terminal que la consulta o imprime; el ticket, el del turno en que se registró su pago. Sin la función, sin caja, sin turno o sin tipo de cambio la línea no aparece. No cambia ningún importe del documento ni del cobro, y la reimpresión conserva el contenido original.
 
@@ -187,6 +187,34 @@ Función activable del establecimiento, **desactivada por defecto** (Configuraci
 - **Turnos en arqueo**: sus cobros se excluyen de todo agregado de los reportes para todos, con un aviso.
 - **Motivos de descuento**: los reportes agrupan por el nombre histórico guardado (`reason_name`); sin motivo del catálogo, «Sin motivo del catálogo».
 - **Funciones reutilizadas sin locks**: `AccountStandingSQL` (saldo y «En curso»), `ExpectedCash` con `ExpectedPaymentsMXNSQL` / `ExpectedPaymentsUSDSQL` (las mismas expresiones que usa `readCashFlows`) y `CashOperationTypeLabel`.
+
+## Plantillas e impresión con la plantilla vigente · etapa 9B
+
+La 9B no cambia ningún importe, cobro ni regla de `payments`: la precuenta y el ticket se arman con el mismo
+`CommercialDocument` y solo cambia cómo se convierten en líneas. Guía en [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md).
+
+- **Renderizado**: `renderDocument` dejó de ser una plantilla en código; `payments/document_data.go` convierte el
+  documento a los datos comerciales de `internal/documents` y lo renderiza con la versión activa del tipo (`receipt` o
+  `precheck`). La versión 1 del sistema produce exactamente el mismo texto que antes (168 precuentas y tickets comparados
+  byte a byte con una copia literal de la plantilla anterior, con `usd_cash`, motivos y ambos anchos).
+- **Datos guardados**: el documento guardado en `kitchen_tickets.document` agrega `template_version_id` y una copia de la
+  identidad (`identity`); también la vista previa `GET payments/accounts/{id}/precheck`. Los importes y el `content` no
+  cambian con la plantilla predeterminada.
+- **Reimpresión exacta** (`POST …/documents/reprint`, `payments.tickets.reprint`): como antes, copia el contenido (y, si
+  lo hay, el layout) del trabajo original, aunque la plantilla o la identidad hayan cambiado; sin leyenda de reimpresión.
+- **Imprimir con la plantilla vigente** (`POST payments/accounts/{id}/documents/rerender`, `payments.tickets.reprint` +
+  `documents.history.render_current`, `{operation_id, ticket_id}`): vuelve a renderizar el `CommercialDocument` guardado
+  —los mismos productos, importes y pagos— con la plantilla activa hoy y la identidad vigente, en un ticket
+  `document_rerender` con su trabajo en la impresora del original. **Nunca** crea un `payment_documents`: no cambia
+  «Esperando pago», la vigencia de la precuenta ni ningún cobro. Auditoría `payments.document_rerendered`. Se rechaza
+  mientras el original esté pendiente o incierto y mientras haya una copia sin resolver de la reimpresión o de otra
+  impresión con la plantilla vigente del mismo documento (`409 PRINT_COPY_PENDING`; bloqueo mutuo desde las correcciones
+  de la revisión independiente).
+- **Aviso fiscal**: «Documento comercial. No es un comprobante fiscal (CFDI).» es un bloque obligatorio de la precuenta y
+  del ticket: se puede mover o cambiar su formato, nunca quitar ni ocultar.
+- **Pruebas**: equivalencia en `payments/legacy_documents_test.go` y `documents_equivalence_test.go`; integración en
+  `operations/documents_stage9b_test.go` (versión activa guardada, reimpresión idéntica tras editar la plantilla,
+  impresión con la plantilla vigente con permiso y auditoría, sin documentos de cobro nuevos). Sin papel.
 
 ## Pruebas
 

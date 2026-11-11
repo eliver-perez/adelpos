@@ -1,10 +1,12 @@
-# API v1 · Etapa 9A
+# API v1 · Etapa 9B
 
 Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 
 Etapa 8 (inventarios, recetas, almacenes, compras y costos; guía en [INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md)): sus contratos están al final, en el orden de sus migraciones: «Inventario · fase A: núcleo (esquema 10)», «Inventario · fase B: recetas y consumo (esquema 11)», «Catálogo · indicaciones rápidas con efecto (esquema 12)», «Inventario · fase C: compras (esquema 13)» e «Inventario · fase D: control de inventario (esquema 14)». Las reglas comunes de inventario (permisos, lock, `operation_id`, cantidades y visibilidad de costos) se describen en la fase A y rigen las demás. Las correcciones de la revisión independiente (fase F del avance: valuación por insumo, elaboraciones y reversiones con existencia negativa, `COST_REQUIRED` y campos ocultos sin `inventory.stock.read`) están integradas en la sección de cada ruta.
 
 Etapa 9A (ajustes pendientes de catálogo e inventarios, reportes, indicadores y exportaciones; guía en [REPORTS.md](docs/REPORTS.md)): sus contratos están al final, en el orden de sus partes: «Etapa 9A · precio de complementos y vigencia de la precuenta (parte A1, esquema 15)», «Etapa 9A · proveedores, compras de mostrador, código sugerido, categorías y navegación de Inventarios (parte A2, esquema 16)», «Etapa 9A · reportes, día comercial y reconocimiento de ventas (parte B1, esquema 17)», «Etapa 9A · reportes de caja, inventarios, costos y márgenes, compras, proveedores y empleados (parte B2, sin migración nueva)», «Etapa 9A · exportación PDF y Excel y operación del puente (parte C1, sin migración nueva)» y «Etapa 9A · interfaz de Reportes (parte C2, sin cambios de contrato)». Las reglas comunes de los reportes (ejecución en una transacción de solo lectura, resultado único, permisos, formato de valores y errores) se describen en la parte B1 y rigen las partes B2, C1 y C2.
+
+Etapa 9B (identidad del establecimiento y diseñador visual de documentos; guía en [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md)): sus contratos están al final: «Etapa 9B · plantillas de documentos, vista previa, muestras e impresión con la plantilla vigente (fase A, esquema 18)», «Etapa 9B · identidad del establecimiento y logotipo (fase B, esquema 19)» y «Etapa 9B · editor visual (fase C, sin cambios de contrato)». Las correcciones de la revisión independiente de la fase D están integradas en la sección de cada ruta. Las reglas comunes del diseñador (`operation_id`, revisión, errores y validación del layout) se describen en la fase A y rigen la B.
 
 HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
@@ -1878,3 +1880,626 @@ campos nuevos se omiten y la prueba de huellas SHA-256 anteriores a la 9A sigue 
   abrir en la misma carpeta con el nombre completo (hasta 4 aperturas por exportación; después, el error de siempre).
 - El temporal de la escritura atómica es `.adel-export-<pid>-<ns>-<seq>.part` (menos de 80 bytes, independiente del
   nombre elegido).
+
+## Etapa 9B · plantillas de documentos, vista previa, muestras e impresión con la plantilla vigente (fase A, esquema 18)
+
+Todas bajo `/api/v1`, autenticadas como el resto (dispositivo + sesión + permisos leídos en cada petición) y con una
+transacción por petición. Rutas del paquete `backend/internal/designer`, delegadas desde `administration/routes.go` con el
+prefijo `documents/` (salvo `documents/identity*`, fase B). Ninguna ruta acepta HTML, CSS, SQL ni bytes ESC/POS: una
+plantilla es una lista de bloques de un catálogo cerrado validado en Go. Operación del puente (`api.rs`) entre corchetes.
+
+### Reglas comunes
+
+- Permisos comprobados antes de leer el cuerpo, de tomar locks y de buscar el resultado idempotente; un 403 revierte con
+  el savepoint y audita `access.denied`. Ruta o método inexistente → `404 NOT_FOUND`. Cuerpo ≤ 64 KiB.
+- Escrituras: `operation_id` UUID obligatorio, idempotencia en `app.restaurant_operations` (mismo cuerpo → respuesta
+  guardada; otro cuerpo → `409 IDEMPOTENCY_CONFLICT`). Las que cambian una plantilla llevan `revision` y bloquean su fila
+  (`FOR UPDATE`).
+- Errores (`{"error": {"code", "message", "request_id", "details"?}}`, mensaje en español): `400 DOCUMENTS_VALIDATION`
+  (identificador, tipo, ancho, fuente o cuerpo inválidos); `422 TEMPLATE_INVALID` con `details.block_id` (vacío si el
+  problema es del documento); `409 REVISION_CONFLICT` con `details: {revision, current_version_id}` (otro administrador
+  guardó antes; el cliente conserva su borrador); `409 TEMPLATE_READ_ONLY` («La plantilla predeterminada no se modifica:
+  duplícala para editarla.»); `409 TEMPLATE_NAME_TAKEN` (nombre repetido en el tipo, sin distinguir mayúsculas); `409
+SOURCE_KIND_MISMATCH` (versión de origen o documento real de otro tipo); `403 PERMISSION_DENIED` y los errores de origen
+  (`STATION_SCOPE_DENIED`, etc.) en la vista previa real; `404 NOT_FOUND`.
+- `kind` (lista cerrada): `receipt`, `precheck`, `kitchen_order`, `kitchen_modification`, `kitchen_cancellation`,
+  `cash_income`, `cash_withdrawal`, `cash_expense`, `cash_partial_cut`, `cash_final_cut`.
+
+### Layout (JSON de una versión)
+
+```json
+{
+  "options": { "text_size": "inherit" },
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "field",
+      "visible": true,
+      "align": "left",
+      "size": "normal",
+      "bold": false,
+      "uppercase": false,
+      "spacing_before": 0,
+      "spacing_after": 0,
+      "options": {
+        "items": [{ "key": "date", "label": "Fecha:" }],
+        "layout": "inline",
+        "omit_empty": true
+      }
+    }
+  ]
+}
+```
+
+- `id` `^[a-z0-9-]{1,40}$` único; `align` `left|center|right`; `size` `normal|double_height|double_width|double`;
+  `spacing_*` 0–3. Propiedades ausentes toman su valor por omisión; claves desconocidas (también en `options`) se
+  rechazan; `options` ausentes = las del tipo. `options.text_size`: `inherit|normal|large` en cocina, `normal` en las
+  demás familias.
+- Límites: 1–60 bloques, 32 KiB; texto fijo ≤ 300 caracteres y ≤ 8 líneas; etiquetas y título ≤ 40; campo de datos 1–4
+  datos (`pair`, exactamente 1); hasta 3 logotipos. Los textos se sanean al guardar (controles e invisibles eliminados,
+  tabuladores a espacio, `\r\n` → `\n`). Se guarda la forma canónica (todas las propiedades y opciones explícitas).
+- Bloques compatibles por tipo, opciones y claves de `field`: [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md),
+  «Catálogo de bloques» y «Campos de datos». En `kitchen_items`, `show_prices` admite `inherit|no` (corrección de la
+  revisión: para imprimir importes se activa «Incluir importes comerciales en comandas» en Cocina).
+
+### Plantillas
+
+`TemplateSummary`:
+
+```json
+{
+  "id": "uuid",
+  "kind": "receipt",
+  "kind_name": "Ticket de venta",
+  "name": "Predeterminada",
+  "system": true,
+  "active": true,
+  "revision": 1,
+  "current_version": {
+    "id": "uuid",
+    "number": 1,
+    "note": "…",
+    "created_at": "…",
+    "created_by_name": null,
+    "block_count": 17
+  },
+  "created_at": "…",
+  "created_by_name": null,
+  "updated_at": "…",
+  "updated_by_name": null
+}
+```
+
+`TemplateDetail` = `TemplateSummary` + `"layout"`. Plantillas del sistema: `9b0d0c00-0000-4000-8000-0000000000NN`
+(versión 1: `9b0d0c01-0000-4000-8000-0000000000NN`), NN = 01 `receipt` … 10 `cash_final_cut` en el orden de `kind`.
+
+| Ruta                                                                     | Permisos                                                                                                   | Cuerpo / consulta                                                                        | Respuesta                                                                               |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `GET documents/catalog` [`documents_catalog`]                            | `documents.templates.read`                                                                                 | —                                                                                        | `Catalog`                                                                               |
+| `GET documents/templates?kind=` [`documents_templates`]                  | read                                                                                                       | `kind` opcional                                                                          | `TemplateSummary[]` (por tipo; la activa primero)                                       |
+| `GET documents/templates/{id}` [`documents_template`]                    | read                                                                                                       | —                                                                                        | `TemplateDetail`                                                                        |
+| `POST documents/templates` [`documents_create_template`]                 | read + `documents.templates.manage`                                                                        | `{operation_id, kind, name, source_version_id?}`                                         | `TemplateDetail` inactiva; versión 1 = copia del origen o la predeterminada del tipo    |
+| `PUT documents/templates/{id}` [`documents_save_template`]               | read + manage                                                                                              | `{operation_id, revision, layout, note?}` (nota ≤ 200)                                   | `TemplateDetail` con la versión nueva (revisión + 1)                                    |
+| `POST documents/templates/{id}/rename` [`documents_rename_template`]     | read + manage                                                                                              | `{operation_id, revision, name}` (1–80)                                                  | `TemplateDetail`                                                                        |
+| `POST documents/templates/{id}/activate` [`documents_activate_template`] | read + manage                                                                                              | `{operation_id, revision}`                                                               | `TemplateDetail` activa; la anterior queda inactiva y solo la activada sube de revisión |
+| `GET documents/templates/{id}/versions` [`documents_template_versions`]  | read                                                                                                       | —                                                                                        | `VersionSummary[]` (la más reciente primero, hasta 200)                                 |
+| `GET documents/versions/{id}` [`documents_version`]                      | read                                                                                                       | —                                                                                        | `VersionDetail` = `VersionSummary` + `template_id`, `template_name`, `kind`, `layout`   |
+| `POST documents/restore-default` [`documents_restore_default`]           | read + manage                                                                                              | `{operation_id, kind}`                                                                   | `TemplateDetail` de la plantilla del sistema, activa                                    |
+| `POST documents/preview` [`documents_preview`]                           | read; con documento real además `documents.preview.real` y el permiso de lectura de su origen              | `{kind, layout, paper_width: 58\|80, source: {"sample": true} \| {"ticket_id": "uuid"}}` | `Preview`. Sin escrituras                                                               |
+| `GET documents/recent?kind=` [`documents_recent`]                        | read + `documents.preview.real` + el permiso de lectura de su origen (comprobantes: `cash.movements.read`) | `kind` obligatorio                                                                       | `[{ticket_id, kind, created_at, label}]` (hasta 20; la etiqueta no lleva importes)      |
+| `POST documents/samples` [`documents_print_sample`]                      | `documents.samples.print`                                                                                  | `{operation_id, kind, layout, printer_id}`                                               | `{status, job_id, ticket_id, printer_id, message}`                                      |
+| `GET documents/printers` [`documents_printers`]                          | read                                                                                                       | —                                                                                        | `PrinterCompatibility[]`                                                                |
+
+- Restaurar una versión anterior = `PUT` con el `layout` de `GET documents/versions/{id}` (la interfaz agrega la nota
+  «Restaurada desde la versión N»).
+- La vista previa y los recientes toman el lock 7820148305 compartido; la muestra, exclusivo.
+- Permisos de origen de la vista previa real y de los recientes: comandas `kitchen.tickets.read` (ámbito de estaciones;
+  importes con `catalog.prices.read`); precuenta y ticket `payments.read` (recientes: `payments.read` + `accounts.read`, y
+  para llevar con `takeaway.read`); caja `cash.shifts.read` con el alcance de Caja y, en comprobantes, `cash.movements.read`.
+
+### `Catalog`
+
+```json
+{
+  "kinds": [
+    {
+      "kind": "receipt",
+      "name": "Ticket de venta",
+      "family": "commercial",
+      "text_sizes": ["normal"],
+      "blocks": [
+        {
+          "type": "field",
+          "name": "Campo de datos",
+          "group": "common",
+          "description": "…",
+          "properties": [
+            "visible",
+            "align",
+            "size",
+            "bold",
+            "uppercase",
+            "spacing_before",
+            "spacing_after"
+          ],
+          "options": [
+            {
+              "key": "items",
+              "label": "Datos",
+              "type": "field_items",
+              "default": [],
+              "max_length": 40,
+              "min": 1,
+              "max": 4,
+              "required": true
+            },
+            {
+              "key": "layout",
+              "label": "Disposición",
+              "type": "enum",
+              "default": "inline",
+              "values": [
+                { "value": "inline", "label": "…" },
+                { "value": "pair", "label": "…" }
+              ]
+            },
+            {
+              "key": "omit_empty",
+              "label": "Omitir el renglón si no hay datos",
+              "type": "boolean",
+              "default": true
+            }
+          ],
+          "max": 0,
+          "required": false,
+          "protected": false
+        }
+      ],
+      "field_keys": [{ "key": "date", "name": "Fecha", "default_label": "Fecha:" }],
+      "shortcuts": [
+        {
+          "name": "Fecha",
+          "options": {
+            "items": [{ "key": "date", "label": "Fecha:" }],
+            "layout": "inline",
+            "omit_empty": true
+          }
+        }
+      ]
+    }
+  ],
+  "paper_widths": [
+    { "paper_width": 58, "columns": 30 },
+    { "paper_width": 80, "columns": 42 }
+  ],
+  "properties": {
+    "align": [{ "value": "left", "label": "…" }],
+    "size": [{ "value": "normal", "label": "…" }],
+    "spacing": { "min": 0, "max": 3 }
+  },
+  "limits": {
+    "blocks": 60,
+    "bytes": 32768,
+    "fixed_text_chars": 300,
+    "fixed_text_lines": 8,
+    "label_chars": 40,
+    "field_items": 4,
+    "spacing": 3,
+    "spacer_lines": 5
+  }
+}
+```
+
+`OptionSpec.type`: `enum` (con `values`), `boolean`, `text` (`max_length`, `max_lines`), `integer` (`min`, `max`),
+`field_items` (lista de `{key, label}` con claves de `field_keys`). `max`: apariciones permitidas (0 = sin límite propio);
+`required`: exactamente uno y visible (aviso fiscal); `protected`: esperado y diferencias.
+
+### `Preview`
+
+```json
+{
+  "kind": "receipt",
+  "paper_width": 58,
+  "columns": 30,
+  "text_size": "normal",
+  "sample": true,
+  "includes_expected": false,
+  "lines": [
+    {
+      "text": "TOTAL         $500.00",
+      "bold": true,
+      "size": "double_height",
+      "block_id": "total",
+      "image": null
+    },
+    {
+      "text": "",
+      "bold": false,
+      "size": "normal",
+      "block_id": "logo",
+      "image": {
+        "raster_id": "uuid",
+        "width_dots": 384,
+        "height_dots": 96,
+        "data_uri": "data:image/png;base64,…"
+      }
+    }
+  ],
+  "text": "…proyección de texto (lo que va en kitchen_print_jobs.content)…",
+  "warnings": ["No hay logotipo cargado: el bloque no imprime nada."],
+  "empty_blocks": [{ "block_id": "usd-total", "reason": "…" }]
+}
+```
+
+`columns` es el ancho de una línea normal (15/21 con texto grande de cocina); una línea `double_width`/`double` tiene a lo
+más `columns/2` caracteres. `includes_expected` indica si el bloque protegido se renderizó: con datos de muestra, según
+`cash.expected.read`; con un documento real, además fuera del arqueo de su turno y solo si el original lo incluía. Con un
+documento de caja real emitido desde la 9B se usan sus datos guardados; con uno anterior, el corte o la operación
+actuales, con un aviso en `warnings` (corrección de la revisión).
+
+### `PrinterCompatibility`
+
+```json
+{
+  "id": "uuid",
+  "name": "Tickets",
+  "transport": "cups",
+  "paper_width": 80,
+  "columns": 42,
+  "format": { "status": "supported|unsupported|unknown", "reason": "…" },
+  "logo": { "status": "supported|unsupported|unknown", "reason": "…" }
+}
+```
+
+Solo impresoras activas. ESC/POS por red: `supported`. CUPS (consulta de solo lectura `lpstat`/`lpoptions`, con un límite
+total de tiempo por petición): `supported` solo si la impresora tiene activada la opción «Esta impresora entiende ESC/POS
+(formato y logotipo)» y la cola admite raw; `unsupported` sin la opción o sin raw («imprime el texto sin negrita, tamaños
+ni logotipo»); `unknown` si la cola no se pudo consultar. Agente: `unsupported`. Sin logotipo cargado, `logo.reason`
+empieza con «No hay logotipo cargado: el bloque «Logotipo» no imprime nada.».
+
+### Cambios de la revisión independiente (fase D)
+
+Correcciones posteriores a las fases A y B, verificadas con pruebas que fallaban antes de corregir (detalle en [docs/ETAPA_9B_AVANCE.md](docs/ETAPA_9B_AVANCE.md), fase D).
+
+Todos bajo `/api/v1`. No hay rutas nuevas ni cambios en `api.rs`; solo campos, valores y mensajes.
+
+#### Impresoras de Cocina: `accepts_escpos`
+
+`GET kitchen/printers`, `POST kitchen/printers` y `PATCH kitchen/printers/{id}` (permiso `kitchen.printers.manage`, sin
+cambios) llevan un campo nuevo en el objeto de impresora:
+
+```json
+{
+  "id": "…",
+  "name": "Tickets USB",
+  "transport": "cups",
+  "destination": "POS_80",
+  "port": 9100,
+  "paper_width": 80,
+  "copies": 1,
+  "supports_cut": false,
+  "cut": false,
+  "cutter_option": "",
+  "accepts_escpos": false,
+  "active": true,
+  "fallback_id": null,
+  "revision": 1
+}
+```
+
+- `accepts_escpos` (boolean, por omisión `false`; ausente en el cuerpo = `false`): «Esta impresora entiende ESC/POS
+  (formato y logotipo)». Solo se admite en `transport = "cups"`. Con `escpos_tcp` o `agent` y `true` → `400
+KITCHEN_VALIDATION` («La opción «Esta impresora entiende ESC/POS» solo se configura en colas CUPS…»). Defensa en la
+  base: `kitchen_printers_accepts_escpos_check CHECK (NOT accepts_escpos OR transport = 'cups')` (migración 0018).
+- Las impresoras existentes quedan en `false`. ESC/POS por red recibe formato y logotipo sin la marca.
+- La fotografía de la impresora en cada trabajo (`printer_snapshot`) lleva el campo; los trabajos anteriores sin él se
+  tratan como `false`.
+
+Efecto en la cola (un documento **con** negrita, tamaños o logotipo; los planos, incluidas las plantillas
+predeterminadas, siguen el camino de siempre sin cambios):
+
+| Transporte   | Marca   | Cola raw         | Envío                             | Aviso añadido a `last_error`/`message`                                                                                                      |
+| ------------ | ------- | ---------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `escpos_tcp` | —       | —                | ESC/POS con atributos             | —                                                                                                                                           |
+| `cups`       | `false` | (no se consulta) | texto por el camino anterior      | « La impresora no está marcada como «Esta impresora entiende ESC/POS (formato y logotipo)»: el documento se envió sin formato ni logotipo.» |
+| `cups`       | `true`  | no               | texto por el camino anterior      | « La cola no admite datos raw: el documento se envió sin formato ni logotipo.»                                                              |
+| `cups`       | `true`  | sí               | `lp -o raw` con los bytes ESC/POS | —                                                                                                                                           |
+| `cups`       | `true`  | no responde      | `error` como antes                | «No se pudo consultar la cola CUPS…»                                                                                                        |
+
+Las reglas de `submitted`/`uncertain`/`error` y de respaldo no cambian.
+
+#### `GET documents/printers`
+
+`format` y `logo` llevan un campo nuevo `code`:
+
+```json
+{
+  "id": "…",
+  "name": "…",
+  "transport": "cups",
+  "paper_width": 80,
+  "columns": 42,
+  "format": {
+    "status": "unsupported",
+    "code": "escpos_disabled",
+    "reason": "Desactivado en la impresora: …"
+  },
+  "logo": { "status": "unsupported", "code": "escpos_disabled", "reason": "…" }
+}
+```
+
+| `code`              | `status`      | Cuándo                                                                                     |
+| ------------------- | ------------- | ------------------------------------------------------------------------------------------ |
+| `escpos_network`    | `supported`   | ESC/POS por red                                                                            |
+| `escpos_disabled`   | `unsupported` | CUPS con `accepts_escpos=false` («Desactivado en la impresora: …»; la cola no se consulta) |
+| `queue_raw`         | `supported`   | CUPS marcada y cola raw                                                                    |
+| `queue_not_raw`     | `unsupported` | CUPS marcada y cola sin raw («Cola sin raw: …» + motivo de CUPS)                           |
+| `queue_unavailable` | `unknown`     | CUPS no respondió por la cola (motivo de `cups_raw.go`)                                    |
+| `queue_timeout`     | `unknown`     | se agotó el límite total antes de consultar la cola («CUPS no respondió a tiempo: …»)      |
+| `agent`             | `unsupported` | agente futuro                                                                              |
+
+- Límite total de 4 s para todas las consultas a CUPS de la petición (como el cajón; cada consulta conserva su límite de
+  3 s), una cola tras otra. La ruta no toma locks consultivos.
+- Sin logotipo cargado, `logo.reason` empieza con «No hay logotipo cargado: …» (sin cambios).
+
+#### Catálogo del diseñador: «Importes» de la lista de cocina
+
+`GET documents/catalog`: el bloque `kitchen_items` declara
+
+```json
+{
+  "key": "show_prices",
+  "label": "Importes",
+  "type": "enum",
+  "default": "inherit",
+  "values": [
+    { "value": "inherit", "label": "Según la configuración de Cocina" },
+    { "value": "no", "label": "Ocultar" }
+  ],
+  "help": "Para imprimir los importes, activa «Incluir importes comerciales en comandas» en Cocina → Comandas y tiempos; con «Ocultar», esta plantilla no los imprime aunque Cocina los muestre."
+}
+```
+
+- `OptionSpec.help` (cadena opcional, `omitempty`) es nuevo para cualquier opción; hoy solo lo usa `show_prices`.
+- `show_prices: "yes"` ya no es válido: `PUT documents/templates/{id}`, `POST documents/preview` y `POST documents/samples`
+  responden `422 TEMPLATE_INVALID` con `details.block_id` del bloque y el mensaje «Los importes se imprimen según la
+  configuración de Cocina o se ocultan. Para imprimirlos, activa «Incluir importes comerciales en comandas» en Cocina.»
+  `show_notes` conserva `inherit | yes | no`.
+- Datos de muestra de cocina (vista previa con `{"sample": true}` y `POST documents/samples`): toman la configuración
+  vigente de Cocina (`show_prices`, `show_notes`, `show_establishment`, `text_size`, `line_spacing`, `quantity_style`)
+  y, sin `show_prices`, la muestra no lleva importes (la misma regla que la comanda real). Con la configuración por
+  omisión de Cocina el resultado es el de antes.
+
+#### `POST documents/preview` con un documento de caja real
+
+- Documento emitido desde la 9B: usa los datos guardados en su ticket (los de «Imprimir con la plantilla vigente») y la
+  misma regla del esperado: `includes_expected` solo si el original lo incluía, quien consulta tiene `cash.expected.read`
+  y el turno no está en arqueo. Permisos de origen sin cambios (`cash.shifts.read`, reglas del turno y, en
+  comprobantes, `cash.movements.read`).
+- Documento anterior a la 9B (sin datos guardados): se lee el corte u operación actuales y `warnings[0]` es «Este
+  documento se emitió antes de las plantillas de documentos y no guardó sus datos: la vista previa usa los datos actuales
+  de su corte u operación y puede no coincidir con lo que se imprimió.» (los avisos de los bloques siguen después).
+
+#### `GET documents/recent?kind=` de caja
+
+- `cash_income`, `cash_withdrawal`, `cash_expense`: exigen además `cash.movements.read` → `403 PERMISSION_DENIED`.
+- `cash_partial_cut`, `cash_final_cut`: `cash.shifts.read` (sin cambios).
+- Alcance de turnos en una sola consulta con `LIMIT 20` (la caja de la terminal o todas con `cash.shifts.read_all`;
+  los cerrados con `cash.history.read` o para quien los cerró). La forma de la respuesta no cambia.
+
+#### `409 PRINT_COPY_PENDING` entre familias
+
+Las rutas `POST kitchen/reprint`, `POST kitchen/print-jobs/rerender`, `POST payments/accounts/{id}/documents/reprint`,
+`POST payments/accounts/{id}/documents/rerender`, `POST payments/cash-documents/{id}/reprint` y
+`POST payments/cash-documents/{id}/rerender` responden `409 PRINT_COPY_PENDING` mientras el documento de origen tenga
+cualquier trabajo sin resolver (`pending`, `processing`, `uncertain`, `error`, `intervention`): sus copias exactas, sus
+impresiones con la plantilla vigente o las copias de estas desde la cola. Mensaje único: «Ya existe una copia de este
+documento pendiente o sin resolver (reimpresión o impresión con la plantilla vigente). Revisa ese trabajo antes de
+solicitar otra.» Si el trabajo original sigue sin resolver se mantiene el `400` anterior.
+
+#### Trabajo enviado a una impresora de otro ancho
+
+Si el layout de un trabajo se renderizó para otro ancho de papel que el de su impresora (respaldo, redirección o copia a
+otra impresora), o un raster es más ancho que el área imprimible, la imagen no se envía; el resto se imprime y el
+resultado agrega « El logotipo se preparó para otro ancho de papel que el de esta impresora: se omitió.»
+
+#### Logotipo
+
+`POST documents/identity/logo`: el archivo se valida antes del lock de la identidad, así que un archivo inválido
+responde `422 VALIDATION_ERROR` aunque la revisión sea vieja (antes se comprobaba primero la revisión). Rechazos nuevos
+de JPEG: «El logotipo JPEG tiene demasiados barridos progresivos. Guárdalo de nuevo como PNG o como JPEG estándar.»
+(más de 100 SOS) y «El logotipo JPEG tiene demasiados segmentos. …» (más de 1024 segmentos con longitud).
+
+#### Migración 0019
+
+`document_identity` agrega `logo_raster_58_paper integer NOT NULL DEFAULT 58 CHECK (= 58)` y
+`logo_raster_80_paper … DEFAULT 80 CHECK (= 80)` (constantes que Go no escribe) y sus llaves compuestas pasan a
+`(logo_raster_58_id, logo_id, logo_raster_58_paper)` / `(…80…)` → `document_logo_rasters (id, logo_id, paper_width)`
+(la llave única `document_logo_rasters_logo_key` es ahora `(id, logo_id, paper_width)`). La API no cambia.
+
+### Impresión con la plantilla vigente (en sus módulos de origen)
+
+Acción distinta de la reimpresión exacta: renderiza los datos históricos con la plantilla activa del tipo y la identidad
+vigente, en la impresora del trabajo original, en un ticket nuevo `document_rerender`. Nunca crea `payment_documents`,
+`cash_documents`, ventas ni movimientos. Se rechaza con `400 KITCHEN_VALIDATION` si el original sigue pendiente o incierto
+y con `409 PRINT_COPY_PENDING` mientras haya una copia sin resolver del mismo documento, sea una reimpresión exacta, una
+impresión con la plantilla vigente o una copia de esta (el bloqueo es mutuo también para `…/reprint`).
+
+| Ruta                                                                             | Permisos                                                                                                                                                     | Cuerpo                                                | Respuesta                                                                                                                                          | Auditoría                                                                     |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `POST kitchen/print-jobs/rerender` [`kitchen_rerender`]                          | `kitchen.reprint` + `kitchen.stations.all` + `documents.history.render_current` (otra impresora: `kitchen.printers.manage`)                                  | `{operation_id, job_id, reason (5–500), printer_id?}` | `{job: PrintJob, ticket_id, template_version_id}`                                                                                                  | `print.rerendered` (+ historial de cocina)                                    |
+| `POST payments/accounts/{id}/documents/rerender` [`payments_rerender`]           | `payments.tickets.reprint` (+ acceso a la cuenta) + `documents.history.render_current`                                                                       | `{operation_id, ticket_id}`                           | `{status, job_id, ticket_id, source_ticket_id, template_version_id}`                                                                               | `payments.document_rerendered`                                                |
+| `POST payments/cash-documents/{id}/rerender` [`payments_rerender_cash_document`] | `cash.reports.reprint` (+ turno) + `documents.history.render_current`; si incluye el esperado, `cash.expected.read` y fuera del arqueo (`409 SHIFT_CLOSING`) | `{operation_id}`                                      | `PrintOutcome` (`requested`, `status`, `document_id` = el documento de caja original, `ticket_id` nuevo, `job_id`, `includes_expected`, `message`) | `cash.document_rerendered`; evento `cash.document.rerendered` (ámbito `cash`) |
+
+`kitchen/print-jobs/rerender` solo acepta comandas y avisos (`normal`, `modification`, `cancellation`). Un documento de
+caja anterior a la 9B (sin datos estructurados) responde `409 DOCUMENT_DATA_UNAVAILABLE`.
+
+### Cambios en contratos existentes
+
+- `GET payments/accounts/{id}/precheck` y los documentos comerciales guardados agregan `template_version_id` e `identity`
+  (`{name, address?, phone?, email?, …}`). Los importes y el `content` no cambian con las plantillas predeterminadas.
+- `GET kitchen/tickets` no lista `document_sample` ni `document_rerender`; `GET kitchen/tickets/{id}` de esos tipos aplica
+  las reglas de su origen (caja: `cash.shifts.read` y el esperado con `cash.expected.read` fuera del arqueo; comerciales:
+  cobros; comanda con importes: `catalog.prices.read`). `POST kitchen/reprint` de un documento de caja impreso con la
+  plantilla vigente responde 400 («se reimprimen desde Caja»).
+- Las respuestas de trabajos de la cola no incluyen la columna nueva `layout` (ni `content`).
+- Un trabajo que se envía a una impresora de otro ancho (respaldo, redirección o copia a otra impresora) no envía el
+  logotipo convertido para el ancho original.
+
+### SSE y auditoría
+
+- `documents.templates.changed` (ámbito nuevo `documents`, `aggregate_id` = plantilla, sin contenido) en la misma
+  transacción de cada creación, guardado, renombre, activación y restauración. El ámbito lo reciben quienes tienen
+  `documents.templates.read` (`events/store.go`).
+- Auditoría (nunca el layout): `documents.template_created` (tipo, nombre, versión, origen, bloques),
+  `documents.template_saved` (versión anterior y nueva, número, bloques, bytes, nota), `documents.template_renamed`,
+  `documents.template_activated` y `documents.default_restored` (plantilla activa antes y después),
+  `documents.sample_printed` (tipo, trabajo, ticket, bloques; entidad: la impresora; historial de la cola
+  `print.sample_requested`), `print.rerendered`, `payments.document_rerendered` y `cash.document_rerendered`.
+
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+17 operaciones nuevas en la lista cerrada, en el formato que lee `e2e/native-driver.ts`, con un identificador por ruta y
+la prueba Rust de la lista: `documents_catalog`, `documents_templates`, `documents_create_template`,
+`documents_restore_default`, `documents_preview`, `documents_recent`, `documents_print_sample`, `documents_printers`,
+`kitchen_rerender` (fijas); `documents_template`, `documents_save_template`, `documents_rename_template`,
+`documents_activate_template`, `documents_template_versions`, `documents_version`, `payments_rerender` y
+`payments_rerender_cash_document` (con identificador). Única clave de consulta admitida: `kind`.
+
+### Permisos nuevos (0018, solo al administrador)
+
+`documents.templates.read`, `documents.templates.manage`, `documents.preview.real`, `documents.samples.print`,
+`documents.identity.manage` (la usa la fase B) y `documents.history.render_current`.
+
+## Etapa 9B · identidad del establecimiento y logotipo (fase B, esquema 19)
+
+Paquete `backend/internal/identity`, delegado desde `administration/routes.go` (prefijo `documents/identity`, antes que el
+diseñador) con la misma transacción, `Actor` y auditoría. La identidad es única: ninguna ruta lleva identificador. Sin
+permisos nuevos.
+
+| Ruta                                   | Operación del puente              | Permisos (Go)                                    | Cuerpo                                                                              | Respuesta                         |
+| -------------------------------------- | --------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------- | --------------------------------- |
+| `GET documents/identity`               | `documents_identity`              | `documents.templates.read` **o** `settings.read` | —                                                                                   | `IdentityView` con vistas previas |
+| `PUT documents/identity`               | `documents_save_identity`         | `documents.identity.manage`                      | `{operation_id, revision, additional_info, header_text, footer_text, presentation}` | `IdentityView` sin vistas previas |
+| `POST documents/identity/logo`         | `documents_upload_identity_logo`  | `documents.identity.manage`                      | `{operation_id, revision, content_base64}`                                          | `IdentityView` sin vistas previas |
+| `POST documents/identity/logo/remove`  | `documents_remove_identity_logo`  | `documents.identity.manage`                      | `{operation_id, revision}`                                                          | `IdentityView` sin vistas previas |
+| `POST documents/identity/logo/preview` | `documents_preview_identity_logo` | `documents.identity.manage`                      | `{presentation}`                                                                    | `LogoPreview` (no escribe)        |
+
+- Permisos antes de leer el cuerpo o escribir; un 403 revierte con el savepoint y audita `access.denied`. Otro método o
+  subruta de `documents/identity*` → `404 NOT_FOUND`. El cuerpo de `POST documents/identity/logo` admite 2 MiB; el resto,
+  64 KiB.
+- Escrituras: `operation_id` UUID obligatorio (`422 VALIDATION_ERROR` si falta). El archivo se valida **antes** de tomar
+  el lock de la fila de `app.document_identity` (corrección de la revisión); después se toma el lock y se busca el
+  resultado idempotente (mismo actor, terminal y huella → respuesta guardada; otra huella → `409 IDEMPOTENCY_CONFLICT`;
+  la huella incluye el archivo). `revision` distinta de la vigente → `409 REVISION_CONFLICT` («Otra persona guardó la
+  identidad del establecimiento. Tus cambios siguen en pantalla…»), sin escribir.
+- Decodificación estricta (claves desconocidas → `422`). Textos: saltos unificados, tabuladores a espacio, controles e
+  invisibles eliminados (ESC, GS, C1, formato Unicode), espacios finales de cada renglón y renglones vacíos al inicio y al
+  final recortados; después ≤ 300 caracteres y ≤ 8 renglones (`422` con el campo en el mensaje, p. ej. «El texto de pie
+  admite como máximo 300 caracteres.»).
+- `presentation`: `width_percent` 25–100, `align` `left|center|right`, `method` `threshold|dither`, `threshold` 1–255 (se
+  valida siempre; con difuminado no interviene).
+- Logotipo: base64 estándar estricto, ≤ 1 398 104 caracteres antes de decodificar; después PNG o JPEG por firma y
+  `DecodeConfig`, ≤ 1 MiB, 1–2048 px por lado antes de decodificar, JPEG con un número acotado de barridos (corrección de
+  la revisión) y decodificación completa. Mensajes (`422`): «El archivo del logotipo está vacío.», «El logotipo debe
+  ocupar como máximo 1 MiB.», «El logotipo debe ser una imagen PNG o JPEG; no se aceptan SVG, GIF, WebP ni otros
+  formatos.», «El logotipo debe medir entre 1 × 1 y 2048 × 2048 píxeles.», «El logotipo está dañado o incompleto.», «El
+  archivo del logotipo no se recibió completo. Vuelve a elegirlo.» (base64 inválido).
+- Retirar o previsualizar sin logotipo → `409 NO_LOGO` («No hay un logotipo cargado.»). Guardar sin cambios devuelve la
+  vista sin crear revisión, auditoría ni evento. Las escrituras devuelven la vista **sin** `data_uri` (así se guarda en
+  `restaurant_operations`); la interfaz vuelve a consultar `GET`.
+
+### `IdentityView`
+
+```json
+{
+  "revision": 4,
+  "establishment": {
+    "name": "Fonda Doña Rosa",
+    "address": "Calle 1",
+    "phone": "81 1234 5678",
+    "email": ""
+  },
+  "additional_info": "RFC: XAXX010101000",
+  "header_text": "¡Bienvenidos!",
+  "footer_text": "Gracias por su visita",
+  "presentation": {
+    "width_percent": 60,
+    "align": "center",
+    "method": "threshold",
+    "threshold": 128
+  },
+  "logo": null,
+  "updated_at": "RFC 3339",
+  "updated_by": null,
+  "limits": {
+    "text_max_characters": 300,
+    "text_max_lines": 8,
+    "logo_max_bytes": 1048576,
+    "logo_max_dimension": 2048,
+    "width_percent_min": 25,
+    "width_percent_max": 100,
+    "threshold_min": 1,
+    "threshold_max": 255,
+    "max_height_dots": 320,
+    "paper_widths": [
+      { "paper_width": 58, "width_dots": 384 },
+      { "paper_width": 80, "width_dots": 576 }
+    ]
+  },
+  "warnings": []
+}
+```
+
+Con logotipo, `logo` es `{id, media_type: image/png|image/jpeg, width, height, size_bytes, sha256, uploaded_at,
+uploaded_by: {id, name}, data_uri (solo GET: el original), rasters: [{paper_width: 58|80, raster_id, width_dots: 384|576,
+height_dots, data_uri (solo GET)}]}`. `establishment` es de solo lectura (Configuración general) y nunca se duplica.
+`rasters[].data_uri` es un PNG de 1 bit con exactamente los puntos que se imprimen. Un GET con un original de 1 MiB pesa
+≈ 1,4 MB (límite del puente: 2 MiB).
+
+### `LogoPreview` (`POST documents/identity/logo/preview`)
+
+`{"presentation": {…}, "rasters": [{"paper_width": 58, "raster_id": "uuid (solo si ya estaba guardada)", "width_dots":
+384, "height_dots": 154, "data_uri": "…"}, {…80}]}`. Usa la conversión guardada si la combinación existe; si no, convierte
+en memoria y no guarda nada.
+
+### SSE, auditoría y puente
+
+- `documents.identity.changed` (ámbito `documents`, sin agregado ni contenido) en la misma transacción de cada escritura
+  con cambios; lo reciben quienes tienen `documents.templates.read`.
+- Auditoría (sin bytes ni base64): `documents.identity_updated` (entidad `document_identity`; antes y después con
+  `additional_info`, `header_text`, `footer_text`, `presentation`, `logo_id` y `revision`), `documents.logo_uploaded`
+  (entidad `document_logo`; después `{logo_id, media_type, width, height, size_bytes, sha256, rasters, replaced_logo_id,
+revision}`) y `documents.logo_removed` (`{logo_id, revision}`).
+- Cinco operaciones fijas nuevas en `api.rs` (`documents_identity`, `documents_save_identity`,
+  `documents_upload_identity_logo`, `documents_remove_identity_logo`, `documents_preview_identity_logo`) con la prueba
+  `document_identity_routes_are_closed_and_keep_write_methods`; sin parámetros de consulta.
+
+### Exportaciones de reportes (`GET reports/export/{id}`)
+
+Conserva parámetros, permisos, límites, cabeceras, nombre de archivo y auditoría de la 9A; cambia solo el encabezado:
+
+- **PDF**: la primera página empieza con el logotipo (a lo más 50 × 14 mm) y, a su derecha, el nombre, la dirección y
+  «Tel. {teléfono} · {correo}» (solo los datos no vacíos de `app.establishment`) y una línea divisoria. Una sola imagen por
+  documento: PNG RGB o JPEG (`DCTDecode`) de a lo más 600 × 168 px.
+- **XLSX**, hoja «Filtros»: logotipo en A1 (`xl/drawings/drawing1.xml`, `oneCellAnchor`, ≤ 200 × 56 px, sin hipervínculo;
+  `xl/media/image1.png` o `image1.jpeg`) y el nombre en B1; renglón 2 vacío; la tabla «Concepto | Valor» desde el renglón
+  3 con «Establecimiento» y, si existen, «Dirección», «Teléfono» y «Correo electrónico». La hoja «Datos» es idéntica a la de
+  la 9A. Sin fórmulas, hipervínculos, nombres definidos, vínculos externos ni macros.
+- Logotipo: el del restaurante si la fuente (`identity.ReportLogo`, un `SELECT` en la transacción de solo lectura del
+  reporte, sin locks) devuelve uno válido; si no, el de AD-EL POS (`assets/brand/adel-pos-tema-claro.png`).
+
+## Etapa 9B · editor visual (fase C, sin cambios de contrato)
+
+La fase C no agrega rutas, permisos, migraciones ni operaciones del puente: usa las de las fases A y B y la de cocina
+existente `kitchen_job` (seguimiento del trabajo de una muestra, con `kitchen.queue.read` + `kitchen.stations.all`).
+
+- `services/documents.ts` agrega `documentPermissions` (las seis claves `documents.*`) y el evento de la aplicación
+  `templatesChangeEvent = 'adel-document-templates-change'` con `detail: { templates: string[] }`; `hooks/useRealtime.ts`
+  lo publica al recibir `documents.templates.changed` (un reinicio del cursor lo publica sin identificadores) y publica
+  `adel-documents-identity-change` con `documents.identity.changed`. Los eventos solo invalidan.
+- Pantalla nueva `documents` en `screens` (`documents.templates.read`, `home: false`).
+- Vista previa con el borrador local, antirrebote de 250 ms y una sola petición en vuelo; `422 TEMPLATE_INVALID` con
+  `details.block_id` marca el bloque. `409 REVISION_CONFLICT` → `GET documents/templates/{id}` y diálogo de opciones;
+  «guardar mi borrador» repite el `PUT` con la revisión leída. El `operation_id` de cada acción se conserva mientras su
+  resultado sea incierto (sin conexión o error ≥ 500) y el cuerpo no cambie.

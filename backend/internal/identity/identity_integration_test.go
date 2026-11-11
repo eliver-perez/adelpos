@@ -701,6 +701,7 @@ func TestDocumentIdentity(t *testing.T) {
 	})
 
 	routeSubtests(t, fixture)
+	reviewFixSubtests(t, fixture)
 }
 
 // compact devuelve el JSON canónico de una respuesta: la guardada en restaurant_operations (jsonb)

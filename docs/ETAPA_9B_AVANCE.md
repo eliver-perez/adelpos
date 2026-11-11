@@ -412,3 +412,166 @@ En la copia aislada del agente (puertos 8186/1424): Vitest 60 archivos / 529 pru
 `pages/documents/designer`, `templates` y `rerender.test.tsx`), `tsc --noEmit` y `npm run build`
 aprobados; Playwright Chromium y WebKit: `documents-designer.spec.ts` (nueva),
 `documents-identity.spec.ts` (B2), `restaurant.spec.ts` y `stock-consumption.spec.ts` aprobadas.
+
+## Fase D · Correcciones, documentación y entrega
+
+### Versión
+
+`config/product.json` pasa a la versión **0.9.1** y el esquema **19** (0018 y 0019), con `./scripts/dev.sh sync`
+(`sync --check`: «Metadatos coherentes»). Como en la 9A, en `Cargo.lock` y `package-lock.json` solo cambia la entrada del
+propio paquete; ninguna dependencia.
+
+### Orden de las pruebas de navegador
+
+En el cierre de la fase C (copia exacta de `f3509d3`) pasaron el formato, `tsc --noEmit`, Vitest de `src` (60 archivos,
+529 pruebas) y `npm run build`, pero la suite completa de Playwright dio 9 fallos por motor: las especificaciones nuevas
+(`documents-designer.spec.ts` y `documents-identity.spec.ts`, nombre propuesto por el coordinador) se ordenaban antes que
+`restaurant.spec.ts` y le consumían el folio 1 que espera, porque todas comparten la base de cada motor y corren en orden
+alfabético. Se renombraron a `workflow-stage9b-designer.spec.ts` y `workflow-stage9b-identity.spec.ts`, con una nota en su
+encabezado; con ese orden la suite completa aprobó en una copia del árbol (Chromium 12/12 y WebKit 12/12, 4.7 min cada
+uno). Además, el filtro de archivos de Playwright no distingue mayúsculas y la ruta del directorio temporal contiene
+«Documents-ADEL-POS»: un filtro `documents-` selecciona todas las especificaciones.
+
+### Revisión independiente
+
+Un revisor de solo lectura revisó las fases 0, A y B (commit `5fe33a2`) en copias exactas, con pruebas de reproducción
+propias. **Sin hallazgos críticos ni altos**; ninguna fuga del efectivo esperado ni de las diferencias (impresión, vistas
+previas, reimpresión, plantilla vigente, auditoría, eventos, errores, datos guardados y cola); permisos comprobados en Go
+antes de escribir; puente cerrado; reimpresión idéntica también de documentos anteriores a la 9B; lease, reintentos y
+resultados inciertos sin cambios; equivalencia exacta del texto, los bytes ESC/POS y los argumentos de `lp`; migraciones
+correctas sobre un esquema 17 con datos. Encontró 5 hallazgos medios y 8 bajos, todos corregidos.
+
+### Correcciones de la revisión
+
+La revisión independiente de las fases 0, A y B no encontró hallazgos críticos ni altos ni fugas de datos protegidos.
+Sus cinco hallazgos medios y ocho bajos se corrigieron, cada uno con pruebas que fallaban antes de corregirlo y pasan
+después. Las migraciones 0018 y 0019 se ajustaron antes de aplicarse a cualquier instalación y el esquema sigue en 19.
+
+- **Logotipo al final del documento (medio 1).** `documents/escpos.go` emite el salto de línea antes de `GS v 0` cuando
+  la última línea de texto quedó sin salto (tickets, precuentas y caja). El texto y el camino plano no cambian.
+- **JPEG progresivo lento (medio 2).** `logoraster.Validate` recorre los marcadores antes de decodificar y rechaza más de
+  100 barridos (SOS) o 1024 segmentos. El JPEG de la revisión (1 MiB, ≈ 61 000 barridos, 70 s) se rechaza al momento;
+  validar uno de 2048 × 2048 con 100 barridos tarda ≈ 0,15 s. La carga valida y decodifica el archivo antes del lock de
+  la identidad (`identity/handler.go`, paso `prepare`).
+- **«Importes» de la lista de cocina (medio 3).** La comanda solo guarda precios si Cocina los muestra, así que la opción
+  queda en «Según la configuración de Cocina» u «Ocultar». Go rechaza «Sí» con `422 TEMPLATE_INVALID` y el catálogo
+  explica que se active «Incluir importes comerciales en comandas» en Cocina. La vista previa y la muestra impresa con
+  datos de muestra aplican la configuración vigente de Cocina con la misma regla que el papel.
+- **Colas CUPS raw (medio 4).** Opción explícita por impresora, «Esta impresora entiende ESC/POS (formato y logotipo)»
+  (`kitchen_printers.accepts_escpos`, desactivada por omisión, solo en CUPS, en la 0018). Se edita en Cocina →
+  Impresoras, con texto explicativo. Con atributos o logotipo, una impresora CUPS solo recibe ESC/POS si está marcada
+  **y** su cola admite raw; si no, se imprime el texto con aviso, sin fallar. `GET documents/printers` distingue
+  «Desactivado en la impresora» de «Cola sin raw» (campo `code`). Las predeterminadas siguen planas e idénticas.
+- **Identidad (medio 5, bajos 1 y 2).** Mientras haya un guardado en curso o sin confirmar, los textos, la presentación y
+  el logotipo quedan en solo lectura; el reintento envía exactamente el cuerpo original. La vista previa sin guardar se
+  vuelve a pedir al reemplazar el logotipo. Tras una escritura correcta se aplica primero su respuesta: si la relectura
+  falla, la pantalla conserva lo guardado y su revisión, avisa y permite volver a cargar, sin falso conflicto.
+- **Reimpresión y plantilla vigente (bajo 4).** Ambas responden `409 PRINT_COPY_PENDING` mientras el documento tenga
+  cualquier trabajo sin resolver de cualquiera de las dos familias (copias exactas, impresiones con la plantilla vigente
+  y sus copias), con una sola consulta (`kitchen/rerender.go`).
+- **Otro ancho de papel (bajo 5).** Un trabajo con respaldo, redirigido o copiado a una impresora de otro ancho no envía
+  el raster de otro ancho: la imagen se omite con aviso y el resto se imprime.
+- **`GET documents/printers` (bajo 6).** Las consultas a CUPS tienen un límite total de 4 s, como el cajón. La ruta no
+  toma locks consultivos y no consulta la cola de una impresora CUPS sin la marca ESC/POS.
+- **Vista previa de caja real (bajo 7).** Un documento emitido desde la 9B usa los datos guardados en su ticket (lo
+  mismo que imprime «Imprimir con la plantilla vigente»), con la misma regla del esperado. Solo los anteriores a la 9B
+  leen el corte o la operación, y la vista previa lo avisa.
+- **`GET documents/recent` (bajo 8).** Los comprobantes exigen `cash.movements.read` y los cortes `cash.shifts.read`. El
+  alcance de los turnos se resuelve en una sola consulta con `LIMIT 20`, sin consultas por documento bajo el lock.
+
+**Notas.**
+
+- **Bajo 3 (sin cambio de comportamiento).** Al volver a subir un archivo ya cargado se reutiliza el original por su
+  SHA-256, así que «Cargado: …» muestra el autor y la fecha de la primera carga. La auditoría registra bien la nueva
+  carga, y la identidad muestra en «Última modificación» quién y cuándo la cambió.
+- **Observación de la 0019 (aplicada).** Cada conversión vigente debe ser de su ancho de papel. Las llaves compuestas
+  incluyen ahora `paper_width`, mediante las columnas constantes `logo_raster_58_paper` y `logo_raster_80_paper`.
+- **Fuera del alcance.** `catalog/images.go` (etapa 3) decodifica las imágenes del catálogo con `image.Decode` sin
+  limitar los barridos de un JPEG progresivo. Es el mismo riesgo del hallazgo medio 2 y no se cambió.
+
+### Documentación
+
+Guía nueva [docs/DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md) (uso para el restaurante y referencia técnica) y
+[docs/VERIFICATION_STAGE9B.md](VERIFICATION_STAGE9B.md); actualizados `CLAUDE.md`, `AGENTS.md`, `README.md`,
+`ARCHITECTURE.md`, `API_CONTRACTS.md` (rutas, contratos, permisos y los cambios de la revisión), `NEXT_STEPS_FOR_SOL.md`,
+`docs/VERIFICATION.md`, `docs/KITCHEN_AND_PRINTING.md`, `docs/PAYMENTS_AND_REFUNDS.md`,
+`docs/CASH_SHIFTS_AND_RECONCILIATION.md`, `docs/REPORTS.md` y `docs/DEPENDENCIES.md`.
+
+### Procedimiento para la instalación real (en espera de autorización)
+
+**No ejecutado.** Aplicar `0018_document_templates.sql` y `0019_document_identity.sql` a la instalación real
+(`adel_pos`, clúster 55432, servidor 8181) requiere la **autorización expresa del propietario**; la de la etapa 9A no se
+extiende a esta (§30 de la especificación). Hasta entonces la instalación sigue en 0.9.0 y esquema 17.
+
+**Advertencia.** Desde la rama `etapa-9b`, `./scripts/dev.sh migrate`, `server-start` y `build-macos` **tocan la
+instalación real**: `migrate` aplica 0018 y 0019 a `adel_pos`; `server-start` compila el binario 0.9.1, que declara
+incompatible el esquema 17 (readiness distinta de 200) si se inicia sin migrar; `build-macos` sustituye el `.app` 0.9.0.
+No ejecutar ninguno sin la autorización. Tampoco ejecutar `./scripts/dev.sh format` (reescribe `docs/etapas/`).
+
+Requisitos previos: regresión final de la fase D aprobada; árbol confirmado en `etapa-9b` (anotar el commit); ningún
+trabajo real en curso en el restaurante (sin cobros, cortes ni arqueo abiertos durante la ventana, y la cola de impresión
+sin trabajos `processing`); servidor y clúster reales en marcha como hoy.
+
+1. **Estado previo** (solo lectura): `./scripts/dev.sh status`; `GET /api/v1/version` responde 0.9.0 y esquema 17.
+2. **Respaldo**: `./scripts/dev.sh backup` → anotar `backups/adel_pos-<fecha>.dump` y que `pg_restore --list` terminó
+   sin error.
+3. **Ensayo de restauración**: `python3 scripts/restore-check.py backups/adel_pos-<fecha>.dump` → todas las tablas con
+   conteos idénticos (esperado: 127 tablas, las de `app` tras la 9A; en el ensayo de la 9A, antes de la 0017, fueron 126) y `.local/stageN-restore-verification.json` escrito. Si alguna tabla difiere, **detenerse**.
+4. **Comprobación previa de solo lectura** (script en el directorio temporal que carga `scripts/database.py` con
+   `runpy`, usa `admin_env()` con `PGOPTIONS=-c default_transaction_read_only=on` y `PGDATABASE=adel_pos`, y solo imprime
+   conteos, nunca credenciales; el de la 9A, `stage9a_readonly_check.py`, sirve de base):
+   - `SHOW transaction_read_only` = `on`;
+   - migraciones registradas `1–17`;
+   - tablas en `app` (esperado 127) y permisos registrados (esperado 147, según el registro de la instalación real de la
+     9A);
+   - conteos que la 0018 y la 0019 no deben cambiar: cuentas por estado, unidades comerciales, liberaciones canónicas,
+     pagos, ajustes de cuenta, `payment_documents`, turnos por estado, operaciones de caja, `cash_documents`,
+     `kitchen_tickets` por `kind`, `kitchen_print_jobs` por estado, impresoras de cocina, categorías, productos, auditoría
+     (`audit_events`), `sales_recognitions` y la fila de `app.establishment` (solo si tiene dirección, teléfono y correo:
+     sí/no, sin imprimir los valores);
+   - que no existen `app.document_templates`, `app.document_template_versions`, `app.document_logos`,
+     `app.document_logo_rasters` ni `app.document_identity`.
+5. **Detener el servidor**: `./scripts/dev.sh server-stop` (ordenado) y `status` sin proceso.
+6. **Migrar**: `./scripts/dev.sh migrate` → `applied:2`; repetirlo → `applied:0`.
+7. **Iniciar el servidor**: `./scripts/dev.sh server-start` → readiness 200 (PostgreSQL disponible, esquema compatible)
+   y `GET /api/v1/version` con 0.9.1 y esquema 19.
+8. **Comprobación posterior de solo lectura** (el mismo script en modo posterior):
+   - migraciones `1–19`; tablas en `app` 127 → 132 (las cinco nuevas);
+   - todos los conteos del paso 4 iguales (la 0018 y la 0019 no modifican filas existentes; los tickets y trabajos
+     anteriores quedan con `template_version_id` y `layout` en NULL: contar que **todos** los `kitchen_tickets` existentes
+     tienen `template_version_id` NULL y todos los `kitchen_print_jobs`, `layout` NULL);
+   - **plantillas del sistema**: 10 filas en `app.document_templates`, todas `system` y `active`, nombre «Predeterminada»,
+     identificadores `9b0d0c00-0000-4000-8000-000000000001` … `…010` (uno por tipo) y `revision` 1; 10 filas en
+     `app.document_template_versions`, número 1, identificadores `9b0d0c01-…-000000000001` … `…010`, `created_by` NULL y
+     `current_version_id` de cada plantilla igual a su versión 1; ninguna plantilla propia;
+   - **permisos**: 147 → 153 (+6; medido en bases nuevas del clúster temporal: +5 tablas y +6 permisos); los seis `documents.*` (`documents.templates.read`, `documents.templates.manage`,
+     `documents.preview.real`, `documents.samples.print`, `documents.identity.manage`,
+     `documents.history.render_current`) concedidos **solo** al rol `administrator` (contar concesiones por rol); los
+     demás roles sin cambios;
+   - **identidad vacía**: 1 fila en `app.document_identity` con `additional_info`, `header_text` y `footer_text` vacíos,
+     `logo_id`, `logo_raster_58_id` y `logo_raster_80_id` NULL, presentación por omisión (60, `center`, `threshold`, 128)
+     y `revision` 1; 0 filas en `app.document_logos` y en `app.document_logo_rasters`;
+   - restricciones: `kitchen_tickets_kind_check` admite `document_sample` y `document_rerender`;
+     `realtime_events_scope_check` admite `documents`;
+   - **impresoras**: todas las existentes con `kitchen_printers.accepts_escpos` en `false` («Esta impresora entiende
+     ESC/POS (formato y logotipo)» desactivada; la 0018 la agrega con ese valor) y la restricción
+     `kitchen_printers_accepts_escpos_check`.
+9. **Aplicación de escritorio**: `./scripts/dev.sh build-macos` → `AD-EL POS.app` 0.9.1 (anotar el tamaño) y
+   `./scripts/dev.sh open-app`.
+10. **Registro**: anotar en el avance la hora de inicio y fin, el commit, el respaldo, el resultado del ensayo de
+    restauración, `applied:2`/`applied:0`, la readiness, la versión y las comprobaciones antes y después. El recorrido en la
+    ventana nativa (Documentos, identidad, editor, muestra en una impresora real) queda como verificación del propietario:
+    no darlo por hecho.
+
+**Vuelta atrás** (si algo falla después de migrar): no hay migración de bajada. Detener el servidor, restaurar el
+respaldo del paso 2 con el procedimiento de `DEVELOPMENT_MACOS.md` (sin borrar `.local` ni el Keychain), volver a
+compilar e iniciar desde `main` (0.9.0) y repetir la comprobación del paso 4. Si el fallo ocurre **antes** de que
+`migrate` responda, la migración es transaccional y no deja cambios parciales: basta iniciar el servidor 0.9.0 desde
+`main`.
+
+Después de aplicarlas, 0018 y 0019 son inmutables y la siguiente ampliación requiere 0020; actualizar `CLAUDE.md`,
+`README.md`, `NEXT_STEPS_FOR_SOL.md`, `docs/VERIFICATION.md` y las guías que dicen «no aplicadas».
+
+### Regresión final de la fase D
+
+PENDIENTE: la completa el coordinador con la salida real.

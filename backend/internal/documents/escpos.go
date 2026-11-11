@@ -46,6 +46,11 @@ func sizeCommand(size string) byte {
 // imagen, GS v 0 con los bits que entregue rasters (una imagen sin bits se omite). Con el texto
 // grande de Cocina cada línea va a doble tamaño, como antes de la 9B. Al final, tres saltos y el
 // corte GS V 0 si cut lo pide.
+//
+// GS v 0 se ejecuta al inicio de una línea, con el búfer de impresión vacío (muchas impresoras
+// ignoran la imagen o la mezclan con el texto si no). Por eso, si una imagen sigue a la última
+// línea de texto y esa línea quedó sin salto (tickets, precuentas y documentos de caja no terminan
+// con salto), el salto se emite antes de la imagen. El texto del documento (Text) no cambia.
 func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut bool) []byte {
 	result := []byte{0x1b, 0x40, 0x1b, 0x74, 0x02}
 	lastText := -1
@@ -54,9 +59,16 @@ func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut bool) []byte {
 			lastText = index
 		}
 	}
+	// lineOpen indica que la última línea de texto se escribió sin su salto.
+	lineOpen := false
 	for index, line := range layout.Lines {
 		if line.Image != nil {
-			result = append(result, imageCommand(line.Image, rasters)...)
+			command := imageCommand(line.Image, rasters)
+			if lineOpen && len(command) > 0 {
+				result = append(result, '\n')
+				lineOpen = false
+			}
+			result = append(result, command...)
 			continue
 		}
 		size := sizeCommand(line.Size)
@@ -74,6 +86,8 @@ func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut bool) []byte {
 		// él (comandas), como el texto plano.
 		if index != lastText || layout.TrailingNewline {
 			result = append(result, '\n')
+		} else {
+			lineOpen = true
 		}
 	}
 	result = append(result, '\n', '\n', '\n')

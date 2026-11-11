@@ -80,77 +80,113 @@ func (handler *service) preview(_ []string) (any, error) {
 	if err != nil {
 		return nil, templateInvalid(err)
 	}
-	data, includeExpected, err := handler.previewData(kind, input.Source)
+	source, err := handler.previewData(kind, input.Source)
 	if err != nil {
 		return nil, err
 	}
-	layout, err := documents.Render(kind, template, data, documents.RenderOptions{PaperWidth: input.PaperWidth, IncludeExpected: includeExpected})
+	layout, err := documents.Render(kind, template, source.data, documents.RenderOptions{
+		PaperWidth: input.PaperWidth, IncludeExpected: source.includeExpected,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return handler.previewResponse(kind, layout, input.Source.Sample, includeExpected), nil
+	// Los avisos del origen (p. ej. un documento de caja anterior a la 9B) van antes que los de los
+	// bloques.
+	layout.Warnings = append(source.notices, layout.Warnings...)
+	return handler.previewResponse(kind, layout, input.Source.Sample, source.includeExpected), nil
+}
+
+// previewInputData son los datos con que se renderiza una vista previa: includeExpected decide el
+// bloque protegido de los cortes y notices son avisos del origen para la vista previa.
+type previewInputData struct {
+	data            documents.Data
+	includeExpected bool
+	notices         []string
 }
 
 // previewData obtiene los datos de muestra (con la identidad real) o los de un documento real con
-// los permisos de su origen. includeExpected decide el bloque protegido de los cortes.
-func (handler *service) previewData(kind documents.Kind, source previewSource) (documents.Data, bool, error) {
+// los permisos de su origen.
+func (handler *service) previewData(kind documents.Kind, source previewSource) (previewInputData, error) {
 	actor := handler.request.Actor
 	if source.Sample {
-		identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
+		data, err := handler.sampleData(kind)
 		if err != nil {
-			return documents.Data{}, false, err
+			return previewInputData{}, err
 		}
 		// Los datos de muestra son ficticios; aun así, el bloque protegido sigue la regla del permiso.
-		return documents.SampleData(kind, identity), actor.Can("cash.expected.read"), nil
+		return previewInputData{data: data, includeExpected: actor.Can("cash.expected.read"), notices: []string{}}, nil
 	}
 	if err := actor.Require(documents.PermissionPreviewReal); err != nil {
-		return documents.Data{}, false, err
+		return previewInputData{}, err
 	}
 	ticketID := *source.TicketID
 	if err := validID(ticketID); err != nil {
-		return documents.Data{}, false, err
+		return previewInputData{}, err
 	}
 	var found documents.Kind
-	data := documents.Data{}
-	includeExpected := false
+	result := previewInputData{notices: []string{}}
 	switch kind.Family() {
 	case documents.FamilyKitchen:
 		kitchenData, ticketKind, err := kitchen.PreviewSource(handler.ctx, handler.tx, handler.kitchenActor(), ticketID)
 		if err != nil {
-			return data, false, err
+			return result, err
 		}
-		data.Kitchen, found = kitchenData, ticketKind
+		result.data.Kitchen, found = kitchenData, ticketKind
 	case documents.FamilyCommercial:
 		commercial, ticketKind, err := payments.CommercialPreviewSource(handler.ctx, handler.tx, handler.paymentsActor(), ticketID)
 		if err != nil {
-			return data, false, err
+			return result, err
 		}
-		data.Commercial, found = commercial, ticketKind
+		result.data.Commercial, found = commercial, ticketKind
 	case documents.FamilyCash:
-		cash, include, ticketKind, err := payments.CashPreviewSource(handler.ctx, handler.tx, handler.paymentsActor(), ticketID)
+		// Con los datos que guardó el documento (los mismos que imprime «Imprimir con la plantilla
+		// vigente»); solo un documento anterior a la 9B se lee de su corte u operación, con aviso.
+		cash, err := payments.CashPreviewSource(handler.ctx, handler.tx, handler.paymentsActor(), ticketID)
 		if err != nil {
-			return data, false, err
+			return result, err
 		}
-		data.Cash, found, includeExpected = cash, ticketKind, include
+		result.data.Cash, found, result.includeExpected = cash.Data, cash.Kind, cash.IncludeExpected
+		if cash.Notice != "" {
+			result.notices = append(result.notices, cash.Notice)
+		}
 	}
 	// Como al imprimir con la plantilla vigente, la vista previa con un documento real usa sus
 	// datos históricos y la identidad vigente del establecimiento.
 	identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
 	if err != nil {
-		return data, false, err
+		return result, err
 	}
 	switch {
-	case data.Kitchen != nil:
-		data.Kitchen.Identity = identity
-	case data.Commercial != nil:
-		data.Commercial.Identity = identity
-	case data.Cash != nil:
-		data.Cash.Identity = identity
+	case result.data.Kitchen != nil:
+		result.data.Kitchen.Identity = identity
+	case result.data.Commercial != nil:
+		result.data.Commercial.Identity = identity
+	case result.data.Cash != nil:
+		result.data.Cash.Identity = identity
 	}
 	if found != kind {
-		return data, false, conflict("SOURCE_KIND_MISMATCH", "El documento elegido es de otro tipo; elige uno de "+strings.ToLower(kind.Name())+".")
+		return previewInputData{}, conflict("SOURCE_KIND_MISMATCH", "El documento elegido es de otro tipo; elige uno de "+strings.ToLower(kind.Name())+".")
 	}
-	return data, includeExpected, nil
+	return result, nil
+}
+
+// sampleData son los datos de muestra de un tipo con la identidad real del establecimiento. En
+// cocina aplican además la configuración vigente de Cocina con la regla de una comanda real (sin
+// «Mostrar precios», sin importes), para que la vista previa y la muestra impresa anticipen el papel.
+func (handler *service) sampleData(kind documents.Kind) (documents.Data, error) {
+	identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
+	if err != nil {
+		return documents.Data{}, err
+	}
+	data := documents.SampleData(kind, identity)
+	if data.Kitchen != nil {
+		settings, err := kitchen.SampleSettings(handler.ctx, handler.tx)
+		if err != nil {
+			return documents.Data{}, err
+		}
+		data.Kitchen.UseSettings(settings)
+	}
+	return data, nil
 }
 
 func (handler *service) kitchenActor() kitchen.Actor {

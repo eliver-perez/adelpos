@@ -1,6 +1,7 @@
 -- Etapa 9B, fase A: plantillas de documentos por bloques ordenados con versiones inmutables, versión
 -- de plantilla de cada documento emitido, IR de los trabajos con atributos, nuevos tipos de ticket de
--- la cola (muestras e impresión con la plantilla vigente) y permisos del diseñador.
+-- la cola (muestras e impresión con la plantilla vigente), opción ESC/POS de las impresoras CUPS y
+-- permisos del diseñador.
 -- Transaccional: el migrador la aplica dentro de la misma transacción que la registra en
 -- schema_migrations y no contiene sentencias que no admitan transacción (ni CREATE INDEX
 -- CONCURRENTLY ni VACUUM), de modo que un fallo la revierte completa. No modifica 0001–0017 ni
@@ -297,7 +298,18 @@ ALTER TABLE app.kitchen_print_jobs
     ADD COLUMN layout jsonb
         CONSTRAINT kitchen_print_jobs_layout_check CHECK (layout IS NULL OR (layout IS NOT NULL AND jsonb_typeof(layout) = 'object'));
 
--- 6. Ámbito SSE de los documentos: avisa que cambió una plantilla (y, desde la fase B, la identidad
+-- 6. Impresoras CUPS que entienden ESC/POS. Una cola CUPS que admite datos raw entrega los bytes tal
+-- cual, pero eso no garantiza que la impresora entienda ESC/POS (una impresora de oficina o una que
+-- solo admite raster con su controlador imprimiría basura). Por eso los documentos con negrita,
+-- tamaños o logotipo solo viajan como ESC/POS a una cola CUPS si quien administra la impresora lo
+-- indica de forma explícita («Esta impresora entiende ESC/POS (formato y logotipo)»), desactivado por
+-- omisión, y además la cola admite raw; si no, se imprime el texto con aviso. ESC/POS por red ya los
+-- recibe: la opción solo existe en CUPS. Las impresoras existentes quedan desactivadas.
+ALTER TABLE app.kitchen_printers
+    ADD COLUMN accepts_escpos boolean NOT NULL DEFAULT false,
+    ADD CONSTRAINT kitchen_printers_accepts_escpos_check CHECK (NOT accepts_escpos OR transport = 'cups');
+
+-- 7. Ámbito SSE de los documentos: avisa que cambió una plantilla (y, desde la fase B, la identidad
 -- documental), sin contenido. Lo reciben quienes consultan plantillas (events/store.go).
 ALTER TABLE app.realtime_events DROP CONSTRAINT realtime_events_scope_check;
 ALTER TABLE app.realtime_events
@@ -305,7 +317,7 @@ ALTER TABLE app.realtime_events
         scope IN ('restaurant', 'takeaway', 'kitchen', 'printing', 'configuration', 'cash', 'inventory', 'documents')
     );
 
--- 7. Permisos del diseñador de documentos. Se registran también en Go (documents.Permissions) con la
+-- 8. Permisos del diseñador de documentos. Se registran también en Go (documents.Permissions) con la
 -- misma descripción y se conceden solo al administrador (para que siga contando como administrador
 -- completo); ningún otro rol los recibe por inferencia. La vista previa con un documento real y la
 -- impresión con la plantilla vigente exigen además los permisos de su origen.

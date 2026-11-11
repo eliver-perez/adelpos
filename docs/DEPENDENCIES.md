@@ -18,7 +18,7 @@ Verificado durante la entrega del 7 de noviembre de 2026. Se consultó documenta
 | reqwest                | 0.12.28                  | HTTP nativo restringido para destinos configurables sin abrir CSP; TLS Rustls, sin proxy automático; [documentación](https://docs.rs/reqwest/0.12.28/reqwest/).                 |
 | Vitest                 | 5.1.0                    | Pruebas del contrato/servicio frontend; [guía](https://vitest.dev/guide/).                                                                                                      |
 
-Go estándar cubre HTTP, JSON, logs, configuración, señales y hashing. Las dependencias directas del backend son pgx, decimal, x/crypto, x/term, x/text y, desde la etapa 9A, excelize, fpdf y x/image (fuentes), detalladas por etapa a continuación. No hay Redis, broker, Docker, ORM, servicio cloud ni framework Go adicional. Rust y paquetes npm son herramientas de compilación; no deben instalarse en cada terminal comercial. Python 3 y Bash se usan únicamente en scripts de desarrollo macOS.
+Go estándar cubre HTTP, JSON, logs, configuración, señales y hashing. Las dependencias directas del backend son pgx, decimal, x/crypto, x/term, x/text y, desde la etapa 9A, excelize, fpdf y x/image (fuentes y, desde la etapa 9B, también el escalado del logotipo), detalladas por etapa a continuación. No hay Redis, broker, Docker, ORM, servicio cloud ni framework Go adicional. Rust y paquetes npm son herramientas de compilación; no deben instalarse en cada terminal comercial. Python 3 y Bash se usan únicamente en scripts de desarrollo macOS.
 
 Otras referencias: [pg_dump y respaldo](https://www.postgresql.org/docs/18/backup-dump.html), [bundle macOS Tauri](https://v2.tauri.app/distribute/macos-application-bundle/), [launchd de Apple](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
 
@@ -124,3 +124,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   `Cargo.lock` solo agrega esos cuatro paquetes. [Documentación](https://v2.tauri.app/plugin/dialog/).
 
 Sin dependencias npm nuevas. La interfaz de Reportes dibuja sus gráficos con componentes SVG propios (`desktop/src/components/reports/`), sin librería de gráficos.
+
+## Etapa 9B
+
+**Sin módulos, crates ni paquetes npm nuevos** (`backend/go.mod`, `go.sum`, `Cargo.lock` y `package-lock.json` sin
+dependencias nuevas; `Cargo.toml` y `package.json` solo cambian de versión, 0.9.1).
+
+- `golang.org/x/image` **0.47.0**, ya fijado en la etapa 9A para las fuentes Go, aporta ahora también el paquete `draw`
+  (escalado Catmull-Rom) en `internal/logoraster`, que convierte el logotipo del restaurante a puntos blancos y negros
+  para las impresoras térmicas. La decodificación usa `image/png` e `image/jpeg` de la biblioteca estándar; el umbral, el
+  difuminado Floyd–Steinberg, el PNG de vista previa y los bytes `GS v 0` son código propio sin dependencias.
+- `internal/brand` incrusta con `go:embed` una copia byte a byte de `assets/brand/adel-pos-tema-claro.png` (respaldo del
+  encabezado de los reportes); el original no se modificó y una prueba compara bytes y SHA-256.
+- El editor visual usa solo React y los componentes propios (`Icon`, `ConfirmDialog`, `notify.ts`); el arrastre y la
+  reordenación no usan librería externa.

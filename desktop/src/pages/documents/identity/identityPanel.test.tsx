@@ -414,6 +414,140 @@ describe('IdentityPanel', () => {
     await screen.findByText('Sin cambios pendientes.');
   });
 
+  // Revisión de la 9B (medio 5): mientras un guardado queda sin confirmar, lo escrito no puede
+  // cambiar; el reintento envía exactamente el cuerpo original y nada se pierde sin aviso.
+  it('durante un guardado sin confirmar los textos y la presentación quedan en solo lectura y el reintento envía lo original', async () => {
+    let attempts = 0;
+    let current = withLogo();
+    serve(() => current, {
+      documents_save_identity: (body) => {
+        attempts++;
+        if (attempts === 1) {
+          return Promise.reject(new Error('No se pudo conectar con el servidor.'));
+        }
+        current = withLogo({ revision: 4, footer_text: String(body?.footer_text) });
+        return respond(200, current);
+      },
+    });
+    await renderPanel();
+    fireEvent.change(screen.getByLabelText('Texto de pie'), { target: { value: 'Pie nuevo' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await screen.findByText(/No se confirmó si se pudo guardar la identidad/);
+    const footer = screen.getByLabelText('Texto de pie') as HTMLTextAreaElement;
+    expect(footer.readOnly).toBe(true);
+    for (const name of ['Derecha', 'Difuminado', '80 %']) {
+      expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(
+      (screen.getByRole('button', { name: 'Guardar cambios' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText(/no se pueden cambiar hasta confirmar/)).toBeTruthy();
+    // Un cambio que llegue de todos modos se ignora: lo que se reintenta es lo que se ve.
+    fireEvent.change(footer, { target: { value: 'Pie corregido después' } });
+    expect((screen.getByLabelText('Texto de pie') as HTMLTextAreaElement).value).toBe('Pie nuevo');
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(callsTo('documents_save_identity')).toHaveLength(2));
+    expect(bodyOf('documents_save_identity', 1)).toEqual(bodyOf('documents_save_identity', 0));
+    await screen.findByText('Sin cambios pendientes.');
+    const saved = screen.getByLabelText('Texto de pie') as HTMLTextAreaElement;
+    expect(saved.value).toBe('Pie nuevo');
+    expect(saved.readOnly).toBe(false);
+  });
+
+  // Revisión de la 9B (bajo 2): la respuesta de la escritura se aplica antes de recargar; si la
+  // recarga falla, la pantalla no vuelve a lo anterior ni provoca un falso conflicto.
+  it('si la recarga falla después de guardar muestra lo guardado, avisa y la siguiente edición parte de la revisión nueva', async () => {
+    let reads = 0;
+    let current = identity();
+    handlers = {
+      documents_identity: () => {
+        reads++;
+        if (reads === 2) {
+          return Promise.reject(new Error('No se pudo conectar con el servidor.'));
+        }
+        return respond(200, current);
+      },
+      documents_save_identity: (body) => {
+        if (body?.revision !== current.revision) {
+          return respond(409, { error: { code: 'REVISION_CONFLICT', message: 'Conflicto.' } });
+        }
+        current = identity({
+          revision: current.revision + 1,
+          header_text: String(body?.header_text),
+          footer_text: String(body?.footer_text),
+        });
+        return respond(200, current);
+      },
+    };
+    await renderPanel();
+    fireEvent.change(screen.getByLabelText('Texto de pie'), { target: { value: 'Pie guardado' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(callsTo('documents_identity')).toHaveLength(2));
+    await screen.findByText('Sin cambios pendientes.');
+    expect((screen.getByLabelText('Texto de pie') as HTMLTextAreaElement).value).toBe(
+      'Pie guardado',
+    );
+    expect(await screen.findByText(/No se pudo comunicar con el servidor/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Volver a cargar la identidad' })).toBeTruthy();
+    // La siguiente edición usa la revisión de la respuesta (4), no la anterior.
+    fireEvent.change(screen.getByLabelText('Texto de encabezado'), {
+      target: { value: 'Bienvenidos' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(callsTo('documents_save_identity')).toHaveLength(2));
+    expect(bodyOf('documents_save_identity', 1).revision).toBe(4);
+    await screen.findByText('Sin cambios pendientes.');
+    expect(screen.queryByText(/Otra persona guardó/)).toBeNull();
+    // La recarga posterior al segundo guardado sí responde: el aviso desaparece.
+    await waitFor(() =>
+      expect(screen.queryByText(/No se pudo comunicar con el servidor/)).toBeNull(),
+    );
+    expect((screen.getByLabelText('Texto de encabezado') as HTMLTextAreaElement).value).toBe(
+      'Bienvenidos',
+    );
+  });
+
+  // Revisión de la 9B (bajo 1): la vista previa sin guardar pertenece al logotipo con el que se
+  // pidió; al reemplazarlo se pide otra y nunca se muestra la del anterior.
+  it('tras reemplazar el logotipo la vista previa sin guardar se vuelve a pedir y no muestra la del anterior', async () => {
+    let current = withLogo();
+    serve(() => current, {
+      documents_preview_identity_logo: (body) => {
+        const height = current.logo?.id === 'l1' ? 111 : 222;
+        return respond(200, {
+          presentation: body?.presentation,
+          rasters: [
+            { paper_width: 58, width_dots: 384, height_dots: height, data_uri: pixel },
+            { paper_width: 80, width_dots: 576, height_dots: height, data_uri: pixel },
+          ],
+        });
+      },
+      documents_upload_identity_logo: () => {
+        const replaced = withLogo({ revision: 4 });
+        current = { ...replaced, logo: { ...replaced.logo!, id: 'l2' } };
+        return respond(200, current);
+      },
+    });
+    await renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: '80 %' }));
+    await waitFor(() => expect(callsTo('documents_preview_identity_logo')).toHaveLength(1));
+    await screen.findAllByText('384 × 111 puntos');
+    const input = screen.getByLabelText('Reemplazar logotipo') as HTMLInputElement;
+    const file = new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], 'logo.png', {
+      type: 'image/png',
+    });
+    fireEvent.change(input, { target: { files: [file] } });
+    await waitFor(() => expect(callsTo('documents_upload_identity_logo')).toHaveLength(1));
+    await screen.findByText(/Logotipo cargado/);
+    await waitFor(() => expect(callsTo('documents_preview_identity_logo')).toHaveLength(2));
+    await screen.findByText('384 × 222 puntos');
+    expect(screen.queryAllByText('384 × 111 puntos')).toHaveLength(0);
+    expect(bodyOf('documents_preview_identity_logo', 1)).toEqual(
+      bodyOf('documents_preview_identity_logo', 0),
+    );
+    expect(screen.getByText(/Vista previa sin guardar/)).toBeTruthy();
+  });
+
   it('el código del panel no usa campos numéricos ni diálogos nativos', () => {
     const sources = [
       '../IdentityPanel.tsx',

@@ -44,7 +44,10 @@ type route struct {
 	// anyPermission exige al menos uno de estos permisos.
 	anyPermission []string
 	write         bool
-	action        func(handler *service) (any, error)
+	// prepare valida el cuerpo antes de tomar el lock de la identidad (opcional): el trabajo costoso
+	// que no necesita la fila, como validar y decodificar un logotipo, no la retiene.
+	prepare func(handler *service) error
+	action  func(handler *service) (any, error)
 }
 
 // service es el contexto de una petición.
@@ -55,6 +58,8 @@ type service struct {
 	audit   Audit
 	// current es la fila de la identidad bloqueada para escribir (solo en escrituras).
 	current *identityRow
+	// upload es el logotipo ya validado antes del lock (solo en POST documents/identity/logo).
+	upload *preparedUpload
 }
 
 var identifierPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -82,7 +87,7 @@ func resolve(method, path string) *route {
 	case "PUT documents/identity":
 		return &route{anyPermission: managers, write: true, action: (*service).save}
 	case "POST documents/identity/logo":
-		return &route{anyPermission: managers, write: true, action: (*service).uploadLogo}
+		return &route{anyPermission: managers, write: true, prepare: (*service).prepareUpload, action: (*service).uploadLogo}
 	case "POST documents/identity/logo/remove":
 		return &route{anyPermission: managers, write: true, action: (*service).removeLogo}
 	case "POST documents/identity/logo/preview":
@@ -95,7 +100,9 @@ func resolve(method, path string) *route {
 
 // Handle atiende documents/identity* dentro de la transacción autenticada de la administración.
 //   - Los permisos se comprueban antes de leer el cuerpo y de cualquier escritura.
-//   - Las escrituras toman primero el lock de fila de la identidad: así dos peticiones con el
+//   - El archivo de un logotipo se valida y decodifica antes del lock (prepare): un archivo lento o
+//     dañado no retiene la fila de la identidad ni bloquea a los demás administradores.
+//   - Las escrituras toman después el lock de fila de la identidad: así dos peticiones con el
 //     mismo operation_id se serializan y la segunda recibe la respuesta guardada de la primera.
 //   - Toda escritura exige operation_id y se registra en restaurant_operations con su huella: un
 //     reintento con el mismo cuerpo devuelve la respuesta guardada sin repetir efectos y uno con otro
@@ -116,6 +123,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	operationID, err := readOperationID(request.Body)
 	if err != nil {
 		return nil, err
+	}
+	if selected.prepare != nil {
+		if err := selected.prepare(handler); err != nil {
+			return nil, err
+		}
 	}
 	handler.current, err = lockIdentity(ctx, tx)
 	if err != nil {

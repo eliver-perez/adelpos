@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AD-EL POS",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "identifier": "local.adel.pos.dev",
   "build": {
     "beforeDevCommand": "npm run dev",
