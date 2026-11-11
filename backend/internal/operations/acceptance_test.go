@@ -220,6 +220,8 @@ func TestRestaurantAcceptance(t *testing.T) {
 	testInventoryCore(t, fixture)
 	// Etapa 8, fase B (Bq): indicaciones rápidas con efecto (usa las indicaciones de la 7.1).
 	testQuickNoteEffects(t, fixture)
+	// Etapa 9A, parte A1: precio de complementos configurable y vigencia de la precuenta (§3.1, §33).
+	testStage9A(t, fixture)
 }
 
 func mustJSON(value any) []byte {

@@ -487,4 +487,22 @@ describe('complementos de varias porciones en la captura', () => {
     rerender(<Harness productID={ids.burger} breakdown={groupBreakdown('0.00', '0.00')} />);
     await waitFor(() => expect(within(group).getByText('Sin cambio')).toBeTruthy());
   });
+
+  // Etapa 9A, §3.1: con la opción «El precio puede bajar al cambiar complementos» Go entrega la
+  // diferencia del grupo con signo y la captura la muestra tal cual, sin calcularla.
+  it('muestra con signo la diferencia negativa que calcula Go', async () => {
+    const { rerender } = render(
+      <Harness productID={ids.burger} breakdown={groupBreakdown('-10.00', '0.00')} />,
+    );
+    const group = await screen.findByRole('region', { name: 'Guarniciones' });
+    await waitFor(() => expect(within(group).getByText('−$10.00')).toBeTruthy());
+    rerender(<Harness productID={ids.burger} breakdown={groupBreakdown('-10.00', '3.00')} />);
+    await waitFor(() =>
+      expect(within(group).getByText('Equivalencia −$10.00 · Extras +$3.00')).toBeTruthy(),
+    );
+    rerender(<Harness productID={ids.burger} breakdown={groupBreakdown('5.00', '0.00')} />);
+    await waitFor(() => expect(within(group).getByText('+$5.00')).toBeTruthy());
+    rerender(<Harness productID={ids.burger} breakdown={groupBreakdown('0.00', '0.00')} />);
+    await waitFor(() => expect(within(group).getByText('Sin cambio')).toBeTruthy());
+  });
 });

@@ -11,9 +11,11 @@ import (
 //
 //   - out_of_service: mesa desactivada o fuera de servicio;
 //   - free: sin cuentas abiertas;
-//   - awaiting_payment: alguna cuenta tiene una precuenta impresa posterior a su último cambio de
-//     contenido (revisión de la cuenta, ajustes o sus cancelaciones) y le queda saldo; los pagos
-//     posteriores a la precuenta no la invalidan;
+//   - awaiting_payment: alguna cuenta tiene una precuenta vigente y le queda saldo. La vigencia es
+//     el predicado único de payments (precheck_current de AccountStandingSQL, etapa 9A): la
+//     precuenta se imprimió con la revisión de la cuenta y el número de ajustes actuales, así que
+//     cualquier cambio de contenido, ajuste o cancelación de ajuste posterior la invalida aunque
+//     haya esperado el lock mientras se imprimía; los pagos posteriores no la invalidan;
 //   - partial_payment: alguna cuenta tiene pagado neto mayor que cero y saldo pendiente;
 //   - occupied: cualquier otra cuenta abierta, también la que aún no tiene productos.
 //
@@ -34,8 +36,7 @@ var tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
         min(a.created_at) AS occupied_since,
         greatest(0,coalesce(floor(extract(epoch FROM now()-min(a.created_at))),0))::bigint AS occupied_seconds,
         coalesce(sum(f.balance),0)::numeric(18,2) AS balance,
-        coalesce(bool_or(f.balance>0 AND f.precheck_at IS NOT NULL
-            AND f.precheck_at>greatest(a.updated_at,f.adjusted_at)),false) AS awaiting_payment,
+        coalesce(bool_or(f.balance>0 AND f.precheck_current),false) AS awaiting_payment,
         coalesce(bool_or(f.paid>0 AND f.balance>0),false) AS partial_payment
         FROM app.restaurant_accounts a
         CROSS JOIN LATERAL (` + payments.AccountStandingSQL("a.id") + `) f

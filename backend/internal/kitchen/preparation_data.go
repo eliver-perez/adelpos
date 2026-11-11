@@ -10,6 +10,9 @@ func preparationIngredients(source []catalog.IngredientBreakdown) []catalog.Ingr
 	return result
 }
 
+// preparationGroups copia los grupos de una parte sin importes: la cocina ve opciones y porciones,
+// nunca valores, diferencias (con o sin signo, etapa 9A) ni extras. Los importes del producto
+// (precio unitario, ajuste por complementos) nunca se copian a una parte.
 func preparationGroups(source []catalog.GroupBreakdown, snapshot catalog.Snapshot) []catalog.GroupBreakdown {
 	result := append([]catalog.GroupBreakdown{}, source...)
 	for index := range result {

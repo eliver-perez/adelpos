@@ -249,3 +249,12 @@ export function positiveAmount(value: string | null | undefined): boolean {
   }
   return !/^0*(\.0*)?$/.test(value.trim());
 }
+
+// Importe de Go distinto de cero, con o sin signo (por ejemplo «-10.00»). Solo decide si se
+// muestra una diferencia; no hace aritmética con dinero.
+export function nonZeroAmount(value: string | null | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return positiveAmount(value.trim().replace(/^-/, ''));
+}

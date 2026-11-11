@@ -8,6 +8,25 @@ function addition(value: string) {
   return formatSignedMoney(value);
 }
 
+// Rótulo de la diferencia de un grupo. En modo valor es la equivalencia (con la opción «El precio
+// puede bajar al cambiar complementos» puede ser negativa); en modo cantidad, el cargo por tramos o,
+// con la opción, los tramos menos el valor de las porciones incluidas que se retiraron.
+function differenceLabel(mode: string, priceCanDecrease: boolean | undefined) {
+  if (mode === 'value') {
+    return 'Diferencia';
+  }
+  return priceCanDecrease ? 'Tramos menos porciones retiradas' : 'Cargo por tramos';
+}
+
+// Efecto de la opción en el producto, con el ajuste que calculó Go (cero o negativo). Solo se
+// inspecciona el signo del texto; no hay aritmética.
+function complementEffect(adjustment: string | undefined) {
+  if (adjustment?.startsWith('-')) {
+    return `el precio bajó ${formatSignedMoney(adjustment)} por los complementos elegidos (incluido en «Complementos»).`;
+  }
+  return 'sin reducción con los complementos elegidos.';
+}
+
 export function ProductDetails({ value }: { value: ProductBreakdown }) {
   return (
     <div className="quote-product-details">
@@ -26,6 +45,12 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
         <dt>Precio por unidad</dt>
         <dd>{formatMoney(value.unit_price)}</dd>
       </dl>
+      {value.price_can_decrease && (
+        <p className="muted text-xs">
+          El precio puede bajar al cambiar complementos:{' '}
+          {complementEffect(value.complement_adjustment)}
+        </p>
+      )}
       {value.groups.map((group) => (
         <Accordion key={group.group_id} defaultOpen title={group.name}>
           <dl className="price-breakdown">
@@ -33,8 +58,8 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
             <dd>{formatMoney(group.original_value)}</dd>
             <dt>Valor solicitado</dt>
             <dd>{formatMoney(group.requested_value)}</dd>
-            <dt>{group.mode === 'value' ? 'Diferencia positiva' : 'Cargo por tramos'}</dt>
-            <dd>{formatMoney(group.difference)}</dd>
+            <dt>{differenceLabel(group.mode, value.price_can_decrease)}</dt>
+            <dd>{formatSignedMoney(group.difference)}</dd>
             <dt>Extras explícitos separados</dt>
             <dd>{formatMoney(group.extras)}</dd>
           </dl>

@@ -1076,3 +1076,74 @@ Eventos del ámbito `inventory` (sin contenido): `inventory.adjustments.changed`
 `inventory_cancel_count`, `inventory_stock_levels`, `inventory_save_stock_level`, `inventory_alerts`,
 `inventory_purchase_suggestions`, `inventory_draft_order_from_suggestions`); parámetros de consulta nuevos en la lista
 blanca `inventory_`: `type`, `severity`, `reason`.
+
+## Etapa 9A · precio de complementos y vigencia de la precuenta (parte A1, esquema 15)
+
+Sin rutas, permisos ni operaciones del puente nuevos. Esquema 15 con la migración
+`0015_catalog_price_and_precheck.sql`.
+
+### Catálogo · productos (`catalog/products`, `catalog/products/{id}`, duplicar, lookups)
+
+- Campo nuevo `price_can_decrease` (boolean) en el documento del producto y del combo: «El precio puede
+  bajar al cambiar complementos». Siempre presente en las lecturas; `false` por omisión (todos los
+  productos existentes). En `POST`/`PATCH` el documento completo se envía tal como se leyó: omitirlo
+  equivale a `false` (desactivarla).
+- Cambiarlo (como el precio, las presentaciones, los grupos o la tasa de IVA) exige
+  `catalog.prices.manage`; sin él, `403 PERMISSION_DENIED` sin cambios. Queda auditado con el guardado
+  (`catalog.products.updated`, `before_state`/`after_state` con `price_can_decrease`). Duplicar lo
+  conserva. Incrementa la revisión del producto.
+- No es un importe: `RedactPrices` no lo oculta.
+
+### Cotizaciones (`catalog/preview`, `restaurant/accounts/{id}/draft-preview`, `…/preview`, `…/edit-preview`)
+
+Desglose del producto (`ProductBreakdown`, también en cada componente de combo y en `quote_line` de
+`restaurant_item_versions`):
+
+```json
+{
+  "base_price": "150.00",
+  "group_extras": "-10.00",
+  "unit_price": "140.00",
+  "price_can_decrease": true,
+  "complement_adjustment": "-10.00",
+  "groups": [
+    {
+      "mode": "value",
+      "original_value": "35.00",
+      "requested_value": "25.00",
+      "difference": "-10.00",
+      "extras": "0.00"
+    }
+  ]
+}
+```
+
+- `price_can_decrease` y `complement_adjustment` solo aparecen cuando la opción **se aplicó** a ese
+  cálculo (producto con la opción; en un componente, además el combo con la opción). Sin la opción se
+  omiten (`omitempty`): las cotizaciones, borradores y huellas (`expected_fingerprint`) anteriores son
+  idénticos byte a byte.
+- `complement_adjustment`: reducción respecto de la regla con piso, cadena con signo `"-10.00"` o
+  `"0.00"`; nunca positiva. Ya está incluida en `group_extras` y `unit_price` (se mantiene
+  `unit_price = base_price + ingredient_extras + group_extras + component_extras`). `group_extras`
+  puede ser negativo con la opción.
+- `groups[].difference`: con la opción lleva signo (modo valor: solicitado − incluido; modo cantidad:
+  tramos − valor de las porciones incluidas retiradas). Sin la opción, como siempre (≥ 0).
+- `components[].charge` nunca es negativo: la reducción de los complementos de un componente se aplica
+  en el núcleo del combo, no en su cargo.
+- Promociones (`promotions[].discount`, `lines[].discount`): con la opción, su base sin extras es
+  `(base_price + complement_adjustment) × quantity` (mínimo 0).
+- La cocina no recibe ninguno de estos importes (las partes de preparación no llevan importes).
+
+### Cobros · precuentas (interno; sin cambio de respuesta)
+
+- `POST payments/accounts/{id}/precheck/print` guarda además en `payment_documents`
+  `account_revision` (revisión de la cuenta) y `adjustment_count` (descuentos y cargos registrados más
+  sus cancelaciones), leídos bajo el lock exclusivo 7820148305. Los tickets de pago y las filas
+  anteriores a la 0015 los dejan en `NULL` (CHECK `payment_documents_precheck_version_check`). El
+  listado `documents` de la cuenta no cambia.
+- `payments.AccountStandingSQL` agrega la columna `precheck_current` (predicado único de vigencia):
+  precuenta con la revisión y el número de ajustes actuales; las filas `NULL` siguen la regla por
+  marcas de tiempo. `precheck_at` y `adjusted_at` se conservan como informativas.
+- `restaurant/overview` y `restaurant/tables`: `state = awaiting_payment` ⇔ saldo > 0 y
+  `precheck_current`. Mismo contrato JSON; cambia solo cuándo una precuenta deja de estar vigente
+  (también con una modificación que esperaba el lock mientras se imprimía).

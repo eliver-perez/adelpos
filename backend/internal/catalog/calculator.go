@@ -45,7 +45,8 @@ func Calculate(snapshot Snapshot, request PreviewRequest, now time.Time, locatio
 		if line.Quantity < 1 || units > 1000 {
 			return nil, invalid("Las cantidades deben ser enteras positivas; el límite de previsualización es 1000 unidades.")
 		}
-		breakdown, err := engine.product(line.ProductID, line.VariantID, line.Customization, 0)
+		// En la raíz nada restringe la opción de bajar el precio: decide la del propio producto.
+		breakdown, err := engine.product(line.ProductID, line.VariantID, line.Customization, 0, true)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +111,10 @@ func effectivePrice(
 	return amount(price), origin + " (respaldo de " + list.Name + ")", nil
 }
 
-func (engine *calculator) product(id string, variantID *string, customization Customization, depth int) (*ProductBreakdown, error) {
+// product calcula el desglose de un producto. allowDecrease indica si el contexto admite la opción
+// «El precio puede bajar al cambiar complementos» (§3.1): siempre en la raíz; en el componente de
+// un combo, solo si el combo también la aplica.
+func (engine *calculator) product(id string, variantID *string, customization Customization, depth int, allowDecrease bool) (*ProductBreakdown, error) {
 	engine.remaining--
 	if engine.remaining < 0 {
 		return nil, invalid("La configuración expande demasiados componentes para una previsualización.")
@@ -173,19 +177,66 @@ func (engine *calculator) product(id string, variantID *string, customization Cu
 		return nil, err
 	}
 	result.QuickNotes = quickNotes
-	groupExtras, err := engine.groups(product, customization, result)
+	decrease := product.PriceCanDecrease && allowDecrease
+	groups, err := engine.groups(product, customization, result, decrease)
 	if err != nil {
 		return nil, err
 	}
-	componentExtras, err := engine.components(product, customization, result, depth)
+	components, err := engine.components(product, customization, result, depth, decrease)
 	if err != nil {
 		return nil, err
+	}
+	// Sin la opción, el camino es el de siempre: base + ingredientes + Σ(diferencia + extras de cada
+	// grupo) + cargos de componentes.
+	groupExtras := groups.differences.Add(groups.extras)
+	if decrease {
+		adjustment := complementAdjustment(base, groups, components, result)
+		groupExtras = groups.floorDifferences.Add(adjustment).Add(groups.extras)
+		result.PriceCanDecrease = true
+		result.ComplementAdjustment = money(adjustment)
 	}
 	result.IngredientExtras = money(ingredientExtras)
 	result.GroupExtras = money(groupExtras)
-	result.ComponentExtras = money(componentExtras)
-	result.UnitPrice = money(base.Add(ingredientExtras).Add(groupExtras).Add(componentExtras))
+	result.ComponentExtras = money(components.charges)
+	result.UnitPrice = money(base.Add(ingredientExtras).Add(groupExtras).Add(components.charges))
 	return result, nil
+}
+
+// complementAdjustment aplica la opción «El precio puede bajar al cambiar complementos» (§3.1) y
+// devuelve la reducción respecto de la regla con piso: cero o negativa, nunca positiva. El núcleo
+// del precio es base + diferencias con signo de los grupos + reducciones de los componentes (en un
+// combo que también tiene la opción), y nunca queda:
+//   - por debajo de cero;
+//   - por debajo del valor de referencia de los complementos que permanecen seleccionados (los
+//     propios y, en un combo, los de sus componentes);
+//   - por encima del núcleo con la regla con piso: la opción solo permite bajar el precio.
+//
+// Los extras explícitos, los ingredientes adicionales y los cargos de los componentes se suman
+// después del núcleo, así que estos cargos independientes nunca se descuentan.
+func complementAdjustment(base decimal.Decimal, groups groupTotals, components componentTotals, result *ProductBreakdown) decimal.Decimal {
+	floorCore := base.Add(groups.floorDifferences)
+	signedCore := base.Add(groups.differences).Add(components.adjustments)
+	core := decimal.Max(signedCore, remainingComplementValue(result), decimal.Zero)
+	core = decimal.Min(core, floorCore)
+	return core.Sub(floorCore)
+}
+
+// remainingComplementValue es el valor de referencia de los complementos que permanecen
+// seleccionados en un desglose: el valor solicitado de sus grupos y, en un combo, el de sus
+// componentes por cada unidad.
+func remainingComplementValue(breakdown *ProductBreakdown) decimal.Decimal {
+	total := decimal.Zero
+	for _, group := range breakdown.Groups {
+		total = total.Add(amount(group.RequestedValue))
+	}
+	for _, component := range breakdown.Components {
+		if component.Product == nil {
+			continue
+		}
+		units := decimal.NewFromInt(int64(component.Quantity))
+		total = total.Add(remainingComplementValue(component.Product).Mul(units))
+	}
+	return total
 }
 
 func calculateIngredients(snapshot Snapshot, product Product, customization Customization, result *ProductBreakdown) (decimal.Decimal, error) {

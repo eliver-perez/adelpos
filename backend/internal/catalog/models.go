@@ -137,7 +137,12 @@ type Product struct {
 	BasePrice  string  `json:"base_price"`
 	// TaxRate es la tasa de IVA propia (0, 8 o 16); nil hereda la tasa general del establecimiento.
 	// En un combo aplica a todo su importe.
-	TaxRate              *int                `json:"tax_rate"`
+	TaxRate *int `json:"tax_rate"`
+	// PriceCanDecrease es la opción «El precio puede bajar al cambiar complementos» (etapa 9A,
+	// §3.1). Desactivada (por omisión) rige la equivalencia por valor con piso: sustituir por un
+	// complemento más barato o quitarlo sin reemplazo nunca baja el precio. Es un atributo
+	// comercial: cambiarla exige catalog.prices.manage. Queda congelada en el snapshot del pedido.
+	PriceCanDecrease     bool                `json:"price_can_decrease"`
 	ImageID              *string             `json:"image_id"`
 	SortOrder            int                 `json:"sort_order"`
 	Archived             bool                `json:"archived"`
