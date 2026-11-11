@@ -1318,3 +1318,32 @@ Efectos sobre los datos existentes:
 
 La venta, la captura, los cobros y la caja no cambian. El precio solo puede bajar en los productos que el propietario
 active.
+
+### Instalación real
+
+El propietario autorizó por adelantado aplicar 0015–0017 con el procedimiento propuesto. Se ejecutó el 10 de noviembre de
+2026, de 23:07 a 23:10 (hora local), desde `etapa-9a` (commit `f9c60ba`):
+
+1. **Estado previo**: instalación en 0.8.0 y esquema 14.
+2. **Respaldo**: `backups/adel_pos-20261111T050739Z-c64463.dump`; `restore-check.py` verificó 126 tablas con conteos
+   idénticos.
+3. **Comprobación previa** de solo lectura: migraciones 1–14 y 126 tablas en `app`.
+4. **Migración**:
+   - `server-stop` ordenado;
+   - `migrate` `applied:3`, y la repetición `applied:0`;
+   - `server-start` del servidor 0.9.0 con readiness 200 (PostgreSQL disponible, esquema compatible);
+   - `/api/v1/version` responde 0.9.0 y esquema 17.
+5. **Comprobación posterior** de solo lectura:
+   - migraciones 1–17 y 127 tablas en `app`;
+   - conteos sin cambio: cuentas (5 abiertas, 2 cerradas), unidades comerciales (15), liberaciones (0), pagos (2),
+     ajustes de cuenta (0), turnos (1 abierto, 1 cerrado), operaciones de caja (5), categorías (4), productos (6),
+     indicaciones rápidas (0) y auditoría (118);
+   - permisos de 137 a 147: los 10 `reports.*`, concedidos solo al administrador;
+   - ningún producto con «El precio puede bajar al cambiar complementos» y ningún documento con revisión;
+   - el proveedor «Compras de mostrador» único y activo, sin recepciones;
+   - el reconocimiento inicial (`backfill`) de las 2 cuentas cerradas: 9 renglones, venta neta reconocida $695.00;
+   - la «Hora de inicio del día» a las 05:00 y «Control de inventario» desactivado, sin cambios.
+6. **Aplicación**: `build-macos` generó `AD-EL POS.app` 0.9.0 (9.91 MiB) y `open-app` la abrió.
+
+El recorrido en la ventana nativa no se verificó. Las migraciones 0015–0017 son ahora inmutables; la siguiente
+ampliación requiere 0018.

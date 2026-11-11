@@ -1,8 +1,9 @@
 # Reportes, indicadores y exportaciones · Etapa 9A
 
 Versión 0.9.0, API v1, esquema 17 (migraciones `0015` a `0017`; el módulo Reportes usa la
-`0017_reports.sql`). **Las migraciones 0015–0017 no se han aplicado a la instalación real**: requieren autorización
-expresa del propietario, con respaldo y ensayo de restauración. Este documento describe solo lo implementado y probado en
+`0017_reports.sql`). **Las migraciones 0015–0017 se aplicaron a la instalación real el 10 de noviembre de 2026** con
+autorización previa del propietario, tras respaldo y ensayo de restauración (registro en
+[ETAPA_9A_AVANCE.md](ETAPA_9A_AVANCE.md), «Instalación real»). Este documento describe solo lo implementado y probado en
 la rama `etapa-9a`. Las decisiones del propietario están en [etapas/ETAPA_9A.md](etapas/ETAPA_9A.md) §0-B; las decisiones
 menores, las cifras de cada prueba y las mediciones, en [ETAPA_9A_AVANCE.md](ETAPA_9A_AVANCE.md) (fases B y C); los
 contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md) (secciones «Etapa 9A» de las partes B1, B2, C1 y
@@ -790,8 +791,10 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
 
 ## Limitaciones conocidas
 
-- **Instalación real**: las migraciones 0015–0017 no se han aplicado; nada del módulo existe todavía en `adel_pos` hasta
-  la autorización del propietario.
+- **Instalación real**: las migraciones 0015–0017 se aplicaron a `adel_pos` el 10 de noviembre de 2026; el relleno
+  inicial reconoció las 2 cuentas cerradas (9 renglones, venta neta reconocida $695.00) y los 10 permisos `reports.*`
+  quedaron solo para el administrador. El recorrido de Reportes en la ventana nativa de la instalación real no se
+  verificó.
 - **Sin verificar en hardware**: la ventana nativa (WKWebView), el diálogo nativo real de guardado y la escritura en disco
   desde la ventana Tauri, y la pantalla táctil física. La escritura atómica se probó como función pura con un destino
   simulado y el flujo completo con la simulación de Playwright.
