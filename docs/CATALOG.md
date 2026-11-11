@@ -95,6 +95,10 @@ Cada producto y cada combo tienen la opción **«El precio puede bajar al cambia
 - **Historial**: la opción queda congelada en el snapshot del pedido y en la cotización de cada partida al confirmar; cambiarla después no altera partidas confirmadas. Como con un cambio de precio, una modificación que vuelve a cotizar una partida (más cantidad o cambio de personalización) usa la regla vigente; cambiar solo observaciones conserva los importes.
 - **Captura y desglose**: el grupo muestra el cambio que calcula Go con signo («+$5.00», «−$10.00» o «Sin cambio»); el desglose rotula «Diferencia» (ya no «Diferencia positiva») y, con la opción, indica la reducción aplicada. La cocina no recibe ninguno de estos importes. El inventario consume según las selecciones, no según el importe.
 
+## Reportes · etapa 9A
+
+Los reportes de ventas y productos ([REPORTS.md](REPORTS.md)) no vuelven a cotizar nada: leen los importes que cada unidad comercial tenía al cerrarse su cuenta (bruto, promoción y neto, ya con la reducción de la opción anterior si se aplicó), copiados al libro de reconocimiento con el nombre, el código, el tipo, la variante, la categoría y la lista de precios de ese momento. Renombrar un producto o cambiar su precio después no cambia los reportes. Un combo es la unidad vendida; sus componentes solo aparecen como cantidades preparadas, sin importe, y los complementos seleccionados se reportan desde la cotización congelada de la partida. «Productos menos vendidos» agrega con cero los productos activos sin ventas del periodo.
+
 ## Indicaciones rápidas por categoría · etapa 7.1
 
 Cada categoría puede tener una lista ordenada de **indicaciones rápidas para cocina** sin precio (por ejemplo, Hamburguesas: «Sin cebolla», «Bien cocida»; Bebidas: «Sin hielo»), en `app.catalog_category_quick_notes` (migración 0009). Completa la propuesta de [ETAPA_6_1_AVANCE.md](ETAPA_6_1_AVANCE.md) por categoría; las indicaciones propias y exclusiones por producto quedan fuera (desde la etapa 8 la partida guarda además el identificador de cada indicación elegida; ver «Indicaciones con efecto»).

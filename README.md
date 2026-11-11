@@ -1,6 +1,6 @@
-# AD-EL POS · Etapa 8
+# AD-EL POS · Etapa 9A
 
-Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Administra la caja: apertura con fondo, ingresos, retiros y gastos autorizados, cortes parciales, arqueo y cierre ciego con diferencias por moneda, comprobantes y cortes impresos, cajón de dinero y tope de caja. Registra inventario (etapa 8): insumos con unidades y presentaciones, almacenes, existencias y un libro de movimientos inmutable con costo promedio; recetas versionadas, subrecetas y porciones habituales; consumo teórico al liberar a cocina como función activable; mermas, ajustes, transferencias y conteos físicos; proveedores, órdenes de compra, recepciones y devoluciones a proveedor con vínculo opcional a gastos de caja; alertas y sugerencias de compra. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible.
+Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Administra la caja: apertura con fondo, ingresos, retiros y gastos autorizados, cortes parciales, arqueo y cierre ciego con diferencias por moneda, comprobantes y cortes impresos, cajón de dinero y tope de caja. Registra inventario (etapa 8): insumos con unidades y presentaciones, almacenes, existencias y un libro de movimientos inmutable con costo promedio; recetas versionadas, subrecetas y porciones habituales; consumo teórico al liberar a cocina como función activable; mermas, ajustes, transferencias y conteos físicos; proveedores, órdenes de compra, recepciones y devoluciones a proveedor con vínculo opcional a gastos de caja; alertas y sugerencias de compra. Consulta reportes (etapa 9A): un resumen ejecutivo y 92 reportes de ventas, productos, categorías, cocina, cobros, descuentos, caja, inventarios, compras, proveedores, costos y márgenes y empleados, calculados en Go con la «Hora de inicio del día» y la semana ISO, y exportables a PDF y Excel con los mismos permisos. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible.
 
 ## Inicio en este Mac
 
@@ -13,7 +13,7 @@ cd "/Users/eliver/Documents/ADEL POS/ad-el-pos"
 ./scripts/dev.sh open-app
 ```
 
-**Instalación existente de este Mac:** las migraciones 0010–0014 de la etapa 8 se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración; el servidor y el `.app` 0.8.0 están instalados. Toda migración futura exige la misma autorización y el procedimiento de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md).
+**Instalación existente de este Mac:** las migraciones 0010–0014 de la etapa 8 se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración; el servidor y el `.app` 0.8.0 están instalados. **Las migraciones 0015–0017 de la etapa 9A (versión 0.9.0, esquema 17) no se han aplicado a la instalación real**: requieren la misma autorización y el procedimiento de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md). Mientras tanto, no ejecutar `migrate` contra la base real con este código.
 
 Para desarrollo con recarga: `./scripts/dev.sh desktop`. Para construir el `.app`: `./scripts/dev.sh build-macos`. La compilación está en `desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app`.
 
@@ -65,7 +65,21 @@ En **Inventarios** (visible con el permiso de consultar inventario) se administr
 - **Compras**: proveedores, órdenes de compra, recepciones (de una orden o directas) con IVA 16/8/0, devoluciones a proveedor y vínculo opcional de una recepción con gastos de caja ya registrados. Una compra nunca crea un gasto de caja ni un gasto crea una compra.
 - **Control**: ajustes de discrepancia (los que registra alguien sin permiso de autorizar esperan a que otra persona los autorice), mermas operativas, transferencias entre almacenes, conteos físicos por almacén con hoja de captura para tableta (a ciegas para quien solo cuenta) y niveles mínimos por almacén. El Resumen reúne las alertas (existencias negativas, bajo mínimo, consumos sin calcular, conteos pendientes…) y Compras ofrece sugerencias de compra que solo crean borradores.
 
+Desde la etapa 9A, Inventarios se organiza en cinco grupos (Resumen, Catálogo, Existencias, Compras y Configuración), los proveedores admiten segundo teléfono, celular y página web, las recepciones directas pueden registrarse como **Compra de mostrador** sin un proveedor formal, el alta de insumos sugiere el código interno y las categorías de insumos se administran y se crean desde el editor del insumo.
+
 Consulta [docs/INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md).
+
+## Reportes e indicadores
+
+En **Reportes** (visible con el permiso de consultar reportes; etapa 9A) se consultan, según los permisos de cada usuario:
+
+- **Resumen ejecutivo**: ventas, cobros, descuentos, caja, compras, inventario y margen estimado del periodo, comparados con el periodo anterior equivalente; cada tarjeta abre su reporte detallado. Se actualiza con «Actualizar» o cada 5 minutos con la ventana visible, no con cada cambio.
+- **Reportes** agrupados en Ventas, Productos, Categorías, Pagos, Descuentos y cortesías, Caja, Cocina y operación, Inventarios, Compras, Proveedores, Costos y márgenes y Empleados, con filtro de periodo (hoy, ayer, semana, mes o año actuales, un día, una semana del año ISO, un mes, un año o un rango), filtros propios de cada reporte, tablas con los totales de todo el periodo calculados en Go, orden, paginación y gráficos con su tabla alternativa.
+- **Cuándo cuenta una venta**: cuando la cuenta se cierra liquidada, en el día del cierre; las cuentas abiertas aparecen en «En curso» y una devolución se reporta en su propio día. El día comercial lo define la **Hora de inicio del día** (Configuración general; con 05:00, una venta de la 01:30 pertenece al día anterior).
+- **Permisos**: los reportes respetan los de Caja e Inventarios: el esperado y las diferencias de caja solo con el permiso de consultarlos (y nunca durante un arqueo), los costos y márgenes solo con el de consultar costos.
+- **Exportar PDF** y **Exportar Excel** guardan el reporte con el diálogo nativo de macOS, con el mismo contenido que la pantalla.
+
+Consulta [docs/REPORTS.md](docs/REPORTS.md).
 
 ## Cocina e impresión
 
@@ -81,7 +95,7 @@ En **Catálogo** administra categorías, productos independientes, presentacione
 
 En **Probar personalización** retira o sustituye todos los complementos, cambia cantidades, ingredientes, componentes y observaciones. Go valida y devuelve el desglose exacto; no se crea una venta. Las listas conservan la identidad del producto y las promociones explican su aplicación o exclusión. Los PNG originales locales cambian con el tema.
 
-Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql`, la etapa 7 `0008_cash_shifts_and_reconciliation.sql`, la etapa 7.1 `0009_operation_tables_cash_and_reasons.sql` y la etapa 8 `0010_inventory_core.sql` a `0014_inventory_control.sql` (sin aplicar aún en la instalación real). Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
+Desde la etapa 9A cada producto puede activar **«El precio puede bajar al cambiar complementos»** (desactivada por omisión): sin ella, quitar o cambiar un complemento nunca baja el precio. Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas, $150 → $140 con la opción al cambiar arroz por frijoles, y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql`, la etapa 7 `0008_cash_shifts_and_reconciliation.sql`, la etapa 7.1 `0009_operation_tables_cash_and_reasons.sql` la etapa 8 `0010_inventory_core.sql` a `0014_inventory_control.sql` (aplicadas en la instalación real) y la etapa 9A `0015_catalog_price_and_precheck.sql`, `0016_inventory_suppliers_counter.sql` y `0017_reports.sql` (sin aplicar aún en la instalación real). Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
 
 ## Credencial reservada de soporte
 
@@ -108,15 +122,17 @@ ad-el-pos/
 │   ├── internal/operations/    # Mesas, cuentas, pedidos, unidades e historial
 │   ├── internal/payments/      # Cobros, IVA, descuentos, devoluciones, tickets y caja (turnos, cortes, arqueo y cierre)
 │   ├── internal/inventory/     # Insumos, almacenes, existencias, costos, recetas, consumo, compras, ajustes y conteos
+│   ├── internal/reports/       # Reportes, resumen ejecutivo y exportación PDF/Excel (solo lectura)
+│   ├── internal/businessday/   # Día comercial y periodos con semana ISO
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 a 0014; inmutables después de aplicarse
+│   └── migrations/             # 0001 a 0017; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad
 │   ├── pages/                  # Administración y operación del restaurante
 │   └── services/               # Contratos tipados y puente API
-├── desktop/src-tauri/src/       # Rutas enumeradas, TLS y credenciales en Keychain
+├── desktop/src-tauri/src/       # Rutas enumeradas, TLS, credenciales en Keychain y exportación con diálogo nativo
 ├── config/                     # Identidad canónica y ejemplos sin secretos
 ├── scripts/                    # Desarrollo, formato, procesos y PostgreSQL
 ├── tests/                      # Pruebas operativas macOS
@@ -147,6 +163,7 @@ Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_
 - [docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md): cobros, IVA, descuentos, devoluciones y tickets.
 - [docs/CASH_SHIFTS_AND_RECONCILIATION.md](docs/CASH_SHIFTS_AND_RECONCILIATION.md): caja, arqueos, cierre ciego, cortes, documentos, cajón y tope.
 - [docs/INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md): inventarios, recetas, consumo, costos, compras, ajustes y conteos.
+- [docs/REPORTS.md](docs/REPORTS.md): reportes, métricas, fechas comerciales, permisos y exportaciones.
 - [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
 - [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): continuidad y decisiones pendientes.
 

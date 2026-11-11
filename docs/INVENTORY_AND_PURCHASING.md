@@ -1,9 +1,9 @@
 # Inventarios, recetas, compras y costos · Etapa 8
 
-Versión 0.8.0, API v1, esquema 14 (migraciones `0010` a `0014`). Las migraciones 0010–0014 se aplicaron a la instalación real el
+Versión 0.9.0, API v1, esquema 17 (inventario en las migraciones `0010` a `0014` y, desde la etapa 9A, `0016`). Las migraciones 0010–0014 se aplicaron a la instalación real el
 10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración; «Control de inventario»
 quedó desactivado hasta que el restaurante lo active. Este documento describe solo lo
-implementado y probado en la rama `etapa-8`. Las decisiones del propietario están en [etapas/ETAPA_8.md](etapas/ETAPA_8.md)
+implementado y probado en las ramas `etapa-8` y `etapa-9a`. Las decisiones del propietario están en [etapas/ETAPA_8.md](etapas/ETAPA_8.md)
 §0-B; las decisiones menores, las cifras de cada prueba y las mediciones, en [ETAPA_8_AVANCE.md](ETAPA_8_AVANCE.md); los
 contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md) (secciones «Inventario · fase A» a «fase D»); la
 evidencia de verificación, en [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md).
@@ -13,7 +13,10 @@ segundo teléfono, celular y página web a los proveedores, el proveedor especia
 comercio concreto en cada recepción directa, y la interfaz agrega el código interno sugerido de insumos (con comprobación
 en Go), la administración completa de categorías con alta rápida desde el insumo y la navegación de Inventarios en cinco
 grupos. **La 0016 no se ha aplicado a la instalación real**: requiere autorización expresa del propietario. Las secciones
-de abajo marcan lo que cambió con «(9A)».
+de abajo marcan lo que cambió con «(9A)». En la fase B de la 9A, el cálculo del día operativo pasó al paquete neutral
+`internal/businessday` sin cambiar su comportamiento y su hora de corte (la «Hora de inicio del día») se edita solo en
+Configuración general; los reportes de inventarios, costos y márgenes, compras y proveedores están en
+[REPORTS.md](REPORTS.md) (ver «Reportes · etapa 9A»).
 
 ## Contenido
 
@@ -47,6 +50,7 @@ de abajo marcan lo que cambió con «(9A)».
 - [Eventos en tiempo real](#eventos-en-tiempo-real)
 - [Auditoría](#auditoría)
 - [Pruebas](#pruebas)
+- [Reportes · etapa 9A](#reportes--etapa-9a)
 - [Mediciones del consumo asíncrono](#mediciones-del-consumo-asíncrono)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Sistema anterior](#sistema-anterior)
@@ -565,9 +569,10 @@ por insumo y almacén, cancelación, movimientos y solicitudes (valores solo con
   la resolución automática, solo con `inventory.adjustments.authorize` (resolución `correction`). Repetir el estado vigente
   no escribe nada. Los movimientos llevan la hora de la cancelación y el origen `cancellation`, así un conteo posterior los
   ve en su lugar.
-- **Día operativo** (`operating_day.go`): un instante pertenece al día cuya fecha local tiene la hora de corte en o antes de
-  él, en la zona horaria del establecimiento; la hora de corte es configurable (05:00 por omisión) y no depende de los
-  turnos de caja. Si la hora de corte no existe por un adelanto de horario, el corte es el primer instante tras el salto; si
+- **Día operativo** (`operating_day.go`, que desde la 9A delega en `internal/businessday`): un instante pertenece al día
+  cuya fecha local tiene la hora de corte en o antes de él, en la zona horaria del establecimiento; la hora de corte es
+  configurable (05:00 por omisión; desde la 9A es la «Hora de inicio del día» de los reportes y se cambia solo en
+  Configuración general) y no depende de los turnos de caja. Si la hora de corte no existe por un adelanto de horario, el corte es el primer instante tras el salto; si
   ocurre dos veces por un atraso, la primera (probado con Monterrey y Tijuana).
 - **Reconciliador** (mismo trabajador): aplica «No preparado» automático a toda pendiente cuyo vencimiento ya pasó, una por
   transacción con el lock y `UPDATE … WHERE revision`, y lo audita como `inventory.cancellation_reconciled` con el proceso
@@ -801,6 +806,8 @@ recepción de origen, donde se registran.
   [CASH_SHIFTS_AND_RECONCILIATION.md](CASH_SHIFTS_AND_RECONCILIATION.md).
 - **Catálogo**: el inventario lee las selecciones estructuradas que ya guarda la partida; el `factor` de la porción del
   catálogo multiplica el consumo de una opción (no el precio). Ver [CATALOG.md](CATALOG.md).
+- **Reportes (9A)**: leen el libro, las existencias, los conteos y las compras por SQL de solo lectura, sin el lock
+  7820148308, y usan `inventory.TheoreticalCosts` para el costo teórico. Ver «Reportes · etapa 9A».
 
 ## Interfaz
 
@@ -840,7 +847,7 @@ aplicación no cambió.
 | Compras       | Devoluciones a proveedor | cualquiera de los permisos de compras                        | Lista nueva (9A): todas las devoluciones con proveedor, fechas, valor y acceso a la recepción.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Configuración | Unidades                 | `inventory.read` (edición con `inventory.items.manage`)      | Unidades de medida por dimensión (antes, acordeón de Insumos).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Configuración | Categorías               | `inventory.read` (edición con `inventory.items.manage`)      | Categorías de insumos con búsqueda, «Ver insumos», activar o desactivar y editar (9A; antes, acordeón de Insumos).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Configuración | Parámetros               | `inventory.settings.manage`                                  | IVA de las compras en el costo, hora de corte del día operativo, aviso de productos sin receta y frecuencia de conteo.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Configuración | Parámetros               | `inventory.settings.manage`                                  | IVA de las compras en el costo, hora de corte del día operativo (desde la 9A, solo lectura: se cambia en Configuración general), aviso de productos sin receta y frecuencia de conteo.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Pantallas de la fase D:
 
@@ -1083,6 +1090,32 @@ real; resultados y tiempos por fase en [VERIFICATION_STAGE8.md](VERIFICATION_STA
     ambos temas, código sugerido por Go, categoría creada desde el editor, «Ver insumos», compra de mostrador con comercio y
     devoluciones) y las especificaciones de inventario de la etapa 8 adaptadas a los grupos (`e2e/inventory-navigation.ts`).
 
+## Reportes · etapa 9A
+
+Los reportes de inventarios, costos y márgenes, compras y proveedores del módulo Reportes ([REPORTS.md](REPORTS.md))
+leen las tablas de este módulo en una transacción de solo lectura propia, **sin el lock 7820148308** y sin escribir nada;
+el inventario no cambió sus reglas para ellos.
+
+- **Permisos**: además de `reports.inventory.read` (o `reports.purchases.read` para compras y proveedores, y
+  `reports.sales.read` + `inventory.costs.read` para costos y márgenes), cada reporte exige los permisos de la etapa 8:
+  existencias, negativos, bajo mínimo y conteos con `inventory.stock.read`; kardex, entradas, salidas, transferencias,
+  ajustes, mermas y consumos con `inventory.movements.read`; valuación con `inventory.valuation.read` (el valor por insumo
+  además con `inventory.costs.read`) y costos promedio con `inventory.costs.read`. Sin `inventory.costs.read` no viaja
+  ningún costo, valor, base de costo ni ajuste de costo, tampoco en los archivos PDF y Excel.
+- **Consumo**: el neto de `consumption` + `consumption_reversal` de las unidades, fechado con la liberación canónica; una
+  unidad comercial se cuenta una sola vez aunque consuma en varios almacenes. Con solicitudes pendientes o con error en el
+  periodo, el aviso `CONSUMPTION_PENDING` advierte que los datos pueden estar incompletos.
+- **Mermas**: la merma operativa con su motivo y las cancelaciones «Preparado / merma» con su consumo conservado; las
+  cancelaciones «No preparado» y por clasificar se cuentan aparte. Una devolución de dinero nunca es merma.
+- **Costo de lo vendido y margen**: el costo neto de los consumos de cada unidad reconocida como venta (sin los
+  `cost_adjustment`, que se reportan como concepto del periodo), con los estados «Sin costo», «Estimado» y firme.
+- **Compras recibidas por periodo** (el reporte que tenía el sistema anterior): recepciones de una orden, directas y
+  «Compras de mostrador» con el comercio, por proveedor, insumo, categoría, almacén, modalidad y estado de la orden; lo
+  pagado desde caja se muestra como parte del total, nunca como otra compra, y las devoluciones a proveedor van aparte.
+- **Límites**: no hay valuación por almacén (un costo por insumo) y el costo teórico es el vigente, sin historial; el
+  kardex de un año con mucho volumen puede exceder los 100 000 renglones de un reporte (se consulta por mes o con
+  filtros).
+
 ## Mediciones del consumo asíncrono
 
 Prueba `inventory_b_measure_release` (opcional con `ADEL_INVENTORY_MEASURE=1`): 200 confirmaciones con envío a cocina con la
@@ -1103,8 +1136,8 @@ terminales.
 
 Reunidas de todas las fases del avance (las que se resolvieron en una fase posterior no se repiten):
 
-- **Instalación real**: 0010–0014 no se aplicaron; nada de la etapa existe todavía en `adel_pos` hasta la autorización del
-  propietario.
+- **Instalación real**: 0010–0014 se aplicaron el 10 de noviembre de 2026 con autorización del propietario; la 0016 de la
+  etapa 9A todavía no.
 - **Sin verificar en hardware**: ventana nativa (WKWebView), pantalla táctil física y teclado virtual en Inventarios; ninguna
   comanda con indicaciones con efecto se imprimió en papel.
 - **Volumen y concurrencia**: las mediciones son de este equipo, sin varias terminales reales; las alertas (también las de
@@ -1138,8 +1171,8 @@ Reunidas de todas las fases del avance (las que se resolvieron en una fase poste
   presentaciones del mismo producto (Go rechaza al guardar los de presentaciones de otros productos). La sección recordada
   de cada grupo se pierde al salir de Inventarios. Las compras de mostrador no tienen último precio ni proveedor preferido,
   y desactivar el proveedor de mostrador deshabilita la modalidad en la recepción directa.
-- **Compras**: sin cuentas por pagar, reporte de compras por periodo (etapa 9), notas de crédito ni devoluciones sin
-  recepción; una devolución no genera ingreso de caja ni saldo a favor; la recepción de una orden usa la equivalencia vigente
+- **Compras**: sin cuentas por pagar, notas de crédito ni devoluciones sin recepción (el reporte de compras por periodo
+  llegó en la etapa 9A: ver [REPORTS.md](REPORTS.md)); una devolución no genera ingreso de caja ni saldo a favor; la recepción de una orden usa la equivalencia vigente
   de la presentación del renglón; no hay vista previa de totales antes de guardar un borrador; un borrador o un proveedor
   cuyo resultado quedó incierto y se recuperó podría volver a crearse desde el mismo formulario (los de recepción,
   devolución y vínculo sí se bloquean); recepciones, devoluciones, elaboraciones y existencias iniciales usan la hora del
@@ -1162,6 +1195,6 @@ AD-EL POS consume al liberar a cocina. Ignoraba personalizaciones y complementos
 registraba mermas y no relacionaba compras con caja.
 
 Funciones del sistema anterior que **no se incluyeron** (reportadas sin implementarlas, `CLAUDE.md` §21): imágenes de
-artículo; reporte de compras por periodo (etapa 9); domicilio desglosado del proveedor (el segundo teléfono, el celular y la
+artículo; domicilio desglosado del proveedor (el reporte de compras por periodo, el segundo teléfono, el celular y la
 página web llegaron en la 9A); RFC único y obligatorio; tasa de IVA de compra libre por renglón; bloqueo de ajustes que dejan existencia
 negativa; tipo de artículo «Utensilios». El mobiliario y el equipo son control de activos y quedan fuera.
