@@ -103,6 +103,13 @@ func (handler *service) printers(_ []string) (any, error) {
 	if inspector == nil {
 		inspector = kitchen.HostQueueInspector{}
 	}
+	// Sin logotipo cargado, el bloque «Logotipo» no imprime nada en ninguna impresora: el motivo lo
+	// dice (el estado sigue siendo el de la impresora).
+	identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, err
+	}
+	logoMissing := len(identity.Logo) == 0
 	result := []PrinterCompatibility{}
 	for _, printer := range printers {
 		item := PrinterCompatibility{
@@ -129,6 +136,9 @@ func (handler *service) printers(_ []string) (any, error) {
 		default:
 			unsupported := Compatibility{Status: "unsupported", Reason: "El agente de impresión aún no existe."}
 			item.Format, item.Logo = unsupported, unsupported
+		}
+		if logoMissing {
+			item.Logo.Reason = "No hay logotipo cargado: el bloque «Logotipo» no imprime nada. " + item.Logo.Reason
 		}
 		result = append(result, item)
 	}

@@ -98,9 +98,12 @@ func VersionByID(ctx context.Context, tx pgx.Tx, kind Kind, id *string) (*Versio
 	return &Version{ID: *id, TemplateID: templateID, Kind: kind, Number: number, Template: template}, nil
 }
 
-// LoadIdentity lee la identidad vigente del establecimiento para copiarla en un documento. En la
-// fase A son el nombre, la dirección, el teléfono y el correo de app.establishment; la fase B
-// agrega aquí la información adicional, el encabezado, el pie y las conversiones del logotipo.
+// LoadIdentity lee la identidad vigente del establecimiento para copiarla en un documento: el nombre,
+// la dirección, el teléfono y el correo de app.establishment (Configuración general) y, de la
+// identidad documental (0019, fase B), la información adicional, el encabezado, el pie y las
+// conversiones vigentes del logotipo para 58 y 80 mm (sin logotipo, Logo queda vacío y el bloque no
+// imprime nada). El documento guarda esta copia: su reimpresión es idéntica aunque la identidad, el
+// logotipo o su presentación cambien después (las conversiones son inmutables).
 func LoadIdentity(ctx context.Context, tx pgx.Tx) (Identity, error) {
 	var identity Identity
 	err := tx.QueryRow(ctx, `SELECT name,coalesce(address,''),coalesce(phone,''),coalesce(email,'')
@@ -108,5 +111,44 @@ func LoadIdentity(ctx context.Context, tx pgx.Tx) (Identity, error) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Identity{}, nil
 	}
-	return identity, err
+	if err != nil {
+		return Identity{}, err
+	}
+	return identity, loadDocumentIdentity(ctx, tx, &identity)
+}
+
+// loadDocumentIdentity completa la identidad con los textos y las conversiones vigentes del logotipo
+// (internal/identity las genera al cargar el logotipo o cambiar su presentación, nunca al imprimir).
+func loadDocumentIdentity(ctx context.Context, tx pgx.Tx, identity *Identity) error {
+	var raster58, raster80 *string
+	var width58, height58, width80, height80 *int
+	err := tx.QueryRow(ctx, `SELECT i.additional_info, i.header_text, i.footer_text,
+            r58.id, r58.width_dots, r58.height_dots, r80.id, r80.width_dots, r80.height_dots
+        FROM app.document_identity i
+        LEFT JOIN app.document_logo_rasters r58 ON r58.id = i.logo_raster_58_id
+        LEFT JOIN app.document_logo_rasters r80 ON r80.id = i.logo_raster_80_id
+        WHERE i.singleton`).Scan(
+		&identity.Extra,
+		&identity.Header,
+		&identity.Footer,
+		&raster58,
+		&width58,
+		&height58,
+		&raster80,
+		&width80,
+		&height80,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if raster58 != nil && width58 != nil && height58 != nil {
+		identity.Logo = append(identity.Logo, LogoRaster{PaperWidth: 58, RasterID: *raster58, WidthDots: *width58, HeightDots: *height58})
+	}
+	if raster80 != nil && width80 != nil && height80 != nil {
+		identity.Logo = append(identity.Logo, LogoRaster{PaperWidth: 80, RasterID: *raster80, WidthDots: *width80, HeightDots: *height80})
+	}
+	return nil
 }

@@ -87,10 +87,16 @@ type exportOptions struct {
 	Paper  string
 }
 
-// exportDocument es lo que reciben los generadores: el Result de la pantalla, el nombre del
-// establecimiento leído en la misma fotografía, la zona horaria y el papel.
+// exportDocument es lo que reciben los generadores: el Result de la pantalla, la identidad del
+// establecimiento leída en la misma fotografía (nombre, dirección, teléfono y correo, vacíos si no
+// existen, y la imagen del encabezado: el logotipo del restaurante o el de AD-EL POS), la zona
+// horaria y el papel.
 type exportDocument struct {
 	Establishment string
+	Address       string
+	Phone         string
+	Email         string
+	Logo          *exportLogo
 	Result        *Result
 	Location      *time.Location
 	Paper         string
@@ -200,18 +206,21 @@ func runExport(ctx context.Context, runner *Runner, actor Actor, definition *Def
 	}
 	defer release()
 	document := &exportDocument{Paper: options.Paper}
+	var identity exportIdentity
 	err := runner.read(ctx, func(tx pgx.Tx) error {
 		result, err := Execute(ctx, tx, actor, definition, raw)
 		if err != nil {
 			return err
 		}
 		document.Result = result
-		document.Establishment, err = establishmentName(ctx, tx)
+		identity, err = readExportIdentity(ctx, tx, runner.logoSource())
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	// La imagen del encabezado se prepara ya cerrada la transacción de solo lectura.
+	document.applyIdentity(identity)
 	result := document.Result
 	if len(result.AllRows) > MaxExportRows {
 		return nil, exportTooLarge(len(result.AllRows))
@@ -253,16 +262,6 @@ func runExport(ctx context.Context, runner *Runner, actor Actor, definition *Def
 		file.Audit.Filters[filter.Key] = filter.Value
 	}
 	return file, nil
-}
-
-// establishmentName lee el nombre del establecimiento en la misma fotografía del reporte.
-func establishmentName(ctx context.Context, tx pgx.Tx) (string, error) {
-	var name string
-	err := tx.QueryRow(ctx, "SELECT name FROM app.establishment").Scan(&name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
-	}
-	return name, err
 }
 
 // exportLocation es la zona horaria del restaurante para mostrar fechas y horas (UTC si no se

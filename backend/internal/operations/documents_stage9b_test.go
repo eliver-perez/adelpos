@@ -173,6 +173,8 @@ func testStage9BDocuments(t *testing.T, base *restaurantFixture) {
 	testStage9BKitchen(t, fixture)
 	testStage9BCommercial(t, fixture)
 	testStage9BCash(t, fixture)
+	// Fase B2: logotipo del restaurante en una comanda real (documents_logo_9b_test.go).
+	testStage9BLogo(t, fixture)
 	t.Run("9B_restaurar_predeterminadas", func(t *testing.T) {
 		for _, kind := range []documents.Kind{documents.KindKitchenOrder, documents.KindReceipt, documents.KindPrecheck,
 			documents.KindCashIncome, documents.KindCashPartialCut} {

@@ -151,3 +151,49 @@ it('publica los eventos de inventario solo con su tipo para recargar la pestaña
   unmount();
   window.removeEventListener('adel-inventory-change', listener);
 });
+
+it('publica el cambio de la identidad del establecimiento solo con su propio evento', async () => {
+  const identity = vi.fn();
+  window.addEventListener('adel-documents-identity-change', identity);
+  const { unmount } = renderHook(() => useRealtime('usuario-identidad', true));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('events_start', expect.any(Object)));
+  const options = vi.mocked(invoke).mock.calls[0]?.[1] as {
+    channel: { onmessage: (message: unknown) => void };
+  };
+  // Un cambio de plantillas en el mismo ámbito no vuelve a consultar la identidad (lleva imágenes).
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        {
+          id: 'plantilla-1',
+          sequence: 1,
+          kind: 'documents.templates.changed',
+          scope: 'documents',
+          version: 1,
+        },
+      ],
+      cursor: 1,
+    }),
+  );
+  expect(identity).not.toHaveBeenCalled();
+  act(() =>
+    options.channel.onmessage({
+      events: [
+        {
+          id: 'identidad-1',
+          sequence: 2,
+          kind: 'documents.identity.changed',
+          scope: 'documents',
+          version: 1,
+        },
+      ],
+      cursor: 2,
+    }),
+  );
+  expect(identity).toHaveBeenCalledTimes(1);
+  // Un reinicio del cursor también obliga a consultar de nuevo.
+  act(() => options.channel.onmessage({ reset: true, cursor: 9000 }));
+  expect(identity).toHaveBeenCalledTimes(2);
+  unmount();
+  window.removeEventListener('adel-documents-identity-change', identity);
+});

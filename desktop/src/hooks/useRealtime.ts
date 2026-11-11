@@ -4,6 +4,7 @@ import { cashChangeEvent } from './useCashEvents';
 import type { CashChange } from './useCashEvents';
 import { inventoryChangeEvent } from './useInventoryEvents';
 import type { InventoryChange } from './useInventoryEvents';
+import { identityChangeEvent } from '../services/documentIdentity';
 
 interface Change {
   id: string;
@@ -59,6 +60,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       // se recarga con los cambios de otras áreas. Solo llevan el tipo, nunca cantidades ni costos.
       const inventory: InventoryChange = { kinds: [] };
       let inventoryChanged = !!message.reset;
+      // Etapa 9B: la identidad del establecimiento (logotipo y textos) vuelve a consultarse solo
+      // con su propio evento, porque su lectura incluye las imágenes.
+      let identityChanged = !!message.reset;
       for (const event of message.events ?? []) {
         if (event.version !== 1) {
           changed = true;
@@ -72,6 +76,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
           cash.kinds.push(event.kind);
           if (event.aggregate_id) cash.aggregates.push(event.aggregate_id);
         }
+        if (event.scope === 'documents' && event.kind === 'documents.identity.changed') {
+          identityChanged = true;
+        }
         if (event.scope === 'inventory') {
           inventoryChanged = true;
           inventory.kinds.push(event.kind);
@@ -82,6 +89,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       // El evento invalida consultas; nunca sustituye el estado autoritativo del servidor.
       if (changed) window.dispatchEvent(new CustomEvent('adel-server-change'));
       if (cashChanged) window.dispatchEvent(new CustomEvent(cashChangeEvent, { detail: cash }));
+      if (identityChanged) {
+        window.dispatchEvent(new CustomEvent(identityChangeEvent));
+      }
       if (inventoryChanged) {
         window.dispatchEvent(new CustomEvent(inventoryChangeEvent, { detail: inventory }));
       }

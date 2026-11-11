@@ -89,6 +89,14 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
+        // Etapa 9B (fase B2): identidad del establecimiento y logotipo (sin identificador: es única).
+        "documents_identity" => Some((Method::GET, "documents/identity")),
+        "documents_save_identity" => Some((Method::PUT, "documents/identity")),
+        "documents_upload_identity_logo" => Some((Method::POST, "documents/identity/logo")),
+        "documents_remove_identity_logo" => Some((Method::POST, "documents/identity/logo/remove")),
+        "documents_preview_identity_logo" => {
+            Some((Method::POST, "documents/identity/logo/preview"))
+        }
         "registers" => Some((Method::GET, "registers")),
         "create_register" => Some((Method::POST, "registers")),
         "devices" => Some((Method::GET, "devices")),
@@ -1964,6 +1972,40 @@ mod tests {
         let mut foreign = BTreeMap::new();
         foreign.insert("warehouse_id".to_string(), "x".to_string());
         assert!(!query_allowed("payments_shifts", &foreign));
+    }
+
+    #[test]
+    fn document_identity_routes_are_closed_and_keep_write_methods() {
+        for (operation, method, path) in [
+            ("documents_identity", Method::GET, "documents/identity"),
+            ("documents_save_identity", Method::PUT, "documents/identity"),
+            (
+                "documents_upload_identity_logo",
+                Method::POST,
+                "documents/identity/logo",
+            ),
+            (
+                "documents_remove_identity_logo",
+                Method::POST,
+                "documents/identity/logo/remove",
+            ),
+            (
+                "documents_preview_identity_logo",
+                Method::POST,
+                "documents/identity/logo/preview",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+            // La identidad es única: un identificador no cambia la ruta.
+            assert_eq!(
+                route(operation, Some("../../etc/passwd")).unwrap().1,
+                path.to_string()
+            );
+        }
+        // Solo esas cinco operaciones: los rasters y los originales no tienen ruta propia.
+        assert!(route("documents_identity_logo", None).is_err());
+        assert!(route("documents_identity_raster", None).is_err());
+        assert!(route("documents_delete_identity_logo", None).is_err());
     }
 
     #[test]

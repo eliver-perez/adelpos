@@ -121,6 +121,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		}
 		return result, err
 	}
+	// Identidad documental (etapa 9B, fase B2): documents/identity*.
+	if strings.HasPrefix(route, "documents/identity") {
+		return handleDocumentIdentity(ctx, tx, request, principal, route)
+	}
 	// Diseñador de documentos (etapa 9B, fase A): plantillas, versiones, vista previa, muestras e
 	// impresoras compatibles. La identidad documental (documents/identity*) es de la fase B.
 	if strings.HasPrefix(route, "documents/") && !strings.HasPrefix(route, "documents/identity") {
@@ -181,7 +185,7 @@ func handleDesigner(ctx context.Context, tx pgx.Tx, request Request, principal P
 		Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
 		Actor:   designer.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
 		Queues:  service.Queues,
-		Rasters: service.Rasters,
+		Rasters: service.documentRasters(),
 	}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
 		return audit(ctx, tx, principal, action, entity, id, before, after, true)
 	})

@@ -15,8 +15,11 @@ import (
 //   - hoja «Datos»: encabezado distinguible y congelado, una columna por cada columna visible del
 //     reporte, anchos según el contenido y, al final, los totales calculados en Go (números, nunca
 //     fórmulas);
-//   - hoja «Filtros»: establecimiento, reporte, periodo, comparación, filtros aplicados, fecha usada,
-//     hora de inicio del día, orden, renglones, fecha de generación, cifras resumidas, avisos y notas.
+//   - hoja «Filtros»: encabezado de identidad (logotipo del restaurante o, si no tiene, el de AD-EL
+//     POS, junto al nombre del establecimiento; export_xlsx_identity.go) y la tabla de metadatos:
+//     establecimiento, dirección, teléfono y correo (solo los que existan), reporte, periodo,
+//     comparación, filtros aplicados, fecha usada, hora de inicio del día, orden, renglones, fecha de
+//     generación, cifras resumidas, avisos y notas.
 //
 // Tipos: importes, cantidades y porcentajes como números con formato por columna (pesos «$» y
 // dólares «US$» en columnas separadas, nunca sumados); un importe solo se escribe como número si el
@@ -28,7 +31,8 @@ import (
 // Seguridad: ningún valor se escribe como fórmula. Un texto que empieza por «=», «+», «-», «@»,
 // tabulador, retorno o salto de línea (o por sus formas de ancho completo) se escribe con un
 // apóstrofo inicial visible, para que tampoco se interprete como fórmula si alguien lo copia o lo
-// guarda como CSV. Sin hipervínculos, nombres definidos, vínculos externos, macros ni imágenes.
+// guarda como CSV. Sin hipervínculos, nombres definidos, vínculos externos ni macros; la única
+// imagen es el logotipo del encabezado de «Filtros» (PNG o JPEG preparado en Go, sin hipervínculo).
 
 const (
 	xlsxDataSheet = "Datos"
@@ -91,6 +95,7 @@ var xlsxFormats = map[string]string{
 type xlsxStyles struct {
 	header      int
 	headerRight int
+	title       int
 	label       int
 	section     int
 	wrapText    int
@@ -161,6 +166,15 @@ func newXLSXStyles(file *excelize.File) (*xlsxStyles, error) {
 	}
 	if styles.totalText, err = create(&excelize.Style{NumFmt: 49, Alignment: right, Font: &excelize.Font{Bold: true},
 		Fill: totalFill, Border: border("top", 2)}); err != nil {
+		return nil, err
+	}
+	// El estilo del nombre en el encabezado de «Filtros» (9B) se crea al final para que los demás
+	// conserven sus índices: la hoja «Datos» queda idéntica a la de la 9A.
+	title := &excelize.Style{
+		Font:      &excelize.Font{Bold: true, Size: 14, Color: "1C222A"},
+		Alignment: &excelize.Alignment{Vertical: "center", WrapText: true},
+	}
+	if styles.title, err = create(title); err != nil {
 		return nil, err
 	}
 	return styles, nil
@@ -360,12 +374,12 @@ func writeInfoSheet(file *excelize.File, writer *xlsxWriter, document *exportDoc
 	text := func(value string) excelize.Cell {
 		return excelize.Cell{StyleID: styles.wrapText, Value: excelText(value)}
 	}
-	rows := []infoRow{
-		{label: "Establecimiento", value: text(document.Establishment)},
-		{label: "Reporte", value: text(meta.Title)},
-		{label: "Descripción", value: text(result.Report.Description)},
-		{label: "Periodo", value: text(periodDescription(meta.Period))},
-	}
+	rows := []infoRow{{label: "Establecimiento", value: text(document.Establishment)}}
+	rows = append(rows, contactRows(document, text)...)
+	rows = append(rows,
+		infoRow{label: "Reporte", value: text(meta.Title)},
+		infoRow{label: "Descripción", value: text(result.Report.Description)},
+		infoRow{label: "Periodo", value: text(periodDescription(meta.Period))})
 	if period := meta.Period; period != nil {
 		rows = append(rows,
 			infoRow{label: "Primer día", value: writer.cell(TypeDate, period.First(), false)},
@@ -410,23 +424,32 @@ func writeInfoSheet(file *excelize.File, writer *xlsxWriter, document *exportDoc
 		rows = append(rows, infoRow{label: "Precisión", value: text(strconv.Itoa(writer.inexact) +
 			" valores con más de 15 dígitos significativos se escribieron como texto para conservarlos exactos.")})
 	}
+	// El logotipo se agrega antes de abrir el flujo de la hoja: el flujo conserva el dibujo del
+	// encabezado al escribir la hoja (excelize no admite imágenes después de iniciarlo).
+	if err := addInfoLogo(file, document.Logo); err != nil {
+		return err
+	}
 	stream, err := file.NewStreamWriter(xlsxInfoSheet)
 	if err != nil {
 		return err
 	}
-	if err := stream.SetColWidth(1, 1, 30); err != nil {
+	if err := stream.SetColWidth(1, 1, xlsxInfoLabelWidth); err != nil {
 		return err
 	}
 	if err := stream.SetColWidth(2, 2, 90); err != nil {
 		return err
 	}
-	if err := stream.SetRow("A1", []any{
+	if err := writeInfoIdentity(stream, styles, document); err != nil {
+		return err
+	}
+	headerCell, _ := excelize.CoordinatesToCellName(1, xlsxInfoTableRow)
+	if err := stream.SetRow(headerCell, []any{
 		excelize.Cell{StyleID: styles.header, Value: "Concepto"}, excelize.Cell{StyleID: styles.header, Value: "Valor"},
 	}); err != nil {
 		return err
 	}
 	for index, row := range rows {
-		cell, _ := excelize.CoordinatesToCellName(1, index+2)
+		cell, _ := excelize.CoordinatesToCellName(1, xlsxInfoTableRow+1+index)
 		values := []any{excelize.Cell{StyleID: styles.label, Value: excelText(row.label)}, row.value}
 		if row.section {
 			values = []any{excelize.Cell{StyleID: styles.section, Value: row.label}, excelize.Cell{StyleID: styles.section}}
