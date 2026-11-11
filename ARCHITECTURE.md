@@ -186,8 +186,8 @@ Dos migraciones nuevas, sin modificar 0001–0017 y con restricciones nombradas 
 `0018_document_templates.sql` (plantillas y versiones inmutables, semilla de las diez plantillas del sistema,
 `kitchen_tickets.template_version_id`, tipos de ticket `document_sample` y `document_rerender`, `kitchen_print_jobs.layout`,
 ámbito SSE `documents` y seis permisos `documents.*` solo al administrador) y `0019_document_identity.sql` (logotipos
-originales y conversiones inmutables e identidad documental de fila única). **No se han aplicado a la instalación real**:
-esperan la autorización del propietario. Sin locks consultivos nuevos. Guía: [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md).
+originales y conversiones inmutables e identidad documental de fila única). Aplicadas a la instalación real el 11 de
+noviembre de 2026 con autorización del propietario. Sin locks consultivos nuevos. Guía: [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md).
 
 **Un solo renderizador.** Las tres plantillas de texto anteriores (`kitchen.RenderText`, `payments.renderDocument` y
 `payments.renderCashDocument`) se reemplazaron por `documents.Render`, que convierte una versión de plantilla y los datos

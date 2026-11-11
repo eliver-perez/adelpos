@@ -1,8 +1,8 @@
 # Diseñador de documentos e identidad del establecimiento · Etapa 9B
 
-Versión 0.9.1, API v1, esquema 19 (migraciones `0018_document_templates.sql` y `0019_document_identity.sql`). **Las
-migraciones 0018 y 0019 no se han aplicado a la instalación real**: esperan la autorización del propietario y el
-procedimiento controlado de respaldo, ensayo de restauración y migración (ver «Instalación» al final). Este documento
+Versión 0.9.1, API v1, esquema 19 (migraciones `0018_document_templates.sql` y `0019_document_identity.sql`). Las
+migraciones 0018 y 0019 se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario,
+tras respaldo y ensayo de restauración (ver «Instalación» al final). Este documento
 describe solo lo implementado y probado en la rama `etapa-9b`. Las decisiones del propietario están en
 [etapas/ETAPA_9B.md](etapas/ETAPA_9B.md) §0-B; lo que se comprobó en cada fase, en
 [ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md); los contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md)
@@ -701,7 +701,7 @@ imprimió en papel**.
 
 Las migraciones 0018 y 0019 se aplican a una instalación existente con el procedimiento de
 [DEVELOPMENT_MACOS.md](../DEVELOPMENT_MACOS.md) (respaldo → `restore-check.py` → `server-stop` → `migrate` → repetición
-`applied:0` → `server-start` → `build-macos` → `open-app`), **solo con autorización expresa del propietario**. Hasta
-entonces, `migrate`, `server-start` y `build-macos` desde la rama `etapa-9b` tocarían la instalación real (el servidor
-0.9.1 declararía incompatible el esquema 17). Al aplicarlas, las diez plantillas del sistema quedan activas y la
+`applied:0` → `server-start` → `build-macos` → `open-app`), **solo con autorización expresa del propietario**. En la
+instalación de este Mac se aplicaron así el 11 de noviembre de 2026 (registro en
+[ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md), «Instalación real»). Al aplicarlas, las diez plantillas del sistema quedan activas y la
 identidad vacía y sin logotipo: ningún documento cambia hasta que el restaurante lo decida.

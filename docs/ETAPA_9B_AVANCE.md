@@ -498,11 +498,13 @@ Guía nueva [docs/DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md) (uso para el resta
 `docs/VERIFICATION.md`, `docs/KITCHEN_AND_PRINTING.md`, `docs/PAYMENTS_AND_REFUNDS.md`,
 `docs/CASH_SHIFTS_AND_RECONCILIATION.md`, `docs/REPORTS.md` y `docs/DEPENDENCIES.md`.
 
-### Procedimiento para la instalación real (en espera de autorización)
+### Procedimiento para la instalación real
+
+Ejecutado el 11 de noviembre de 2026 con autorización del propietario (ver «Instalación real» al final).
 
 **No ejecutado.** Aplicar `0018_document_templates.sql` y `0019_document_identity.sql` a la instalación real
 (`adel_pos`, clúster 55432, servidor 8181) requiere la **autorización expresa del propietario**; la de la etapa 9A no se
-extiende a esta (§30 de la especificación). Hasta entonces la instalación sigue en 0.9.0 y esquema 17.
+extiende a esta (§30 de la especificación). Hasta entonces la instalación seguía en 0.9.0 y esquema 17.
 
 **Advertencia.** Desde la rama `etapa-9b`, `./scripts/dev.sh migrate`, `server-start` y `build-macos` **tocan la
 instalación real**: `migrate` aplica 0018 y 0019 a `adel_pos`; `server-start` compila el binario 0.9.1, que declara
@@ -605,3 +607,41 @@ y pierde la terminal preparada). Corregida en `40c8d17`.
 No verificado (pruebas físicas pendientes, §32): papel de tickets, precuentas, comandas, cortes y del logotipo; cajón por
 red y por USB/CUPS; pantalla táctil física; dos terminales reales; ventana nativa (WKWebView) y diálogo nativo de
 guardado. Ninguna se da por hecha con los adaptadores simulados.
+
+### Instalación real
+
+Autorizada por el propietario el 11 de noviembre de 2026 («Autorizo aplicar 0018 y 0019 con el procedimiento del
+avance»), después de agregar `docs/etapas/` a `.prettierignore` y versionar las especificaciones (`0de4b6e`, árbol
+limpio en `etapa-9b`). Ejecutada de 12:57 a 12:59 (hora de Monterrey) con el procedimiento anterior:
+
+1. **Estado previo**: servidor 0.9.0 en marcha (`status` con su proceso), readiness 200 y `/api/v1/version` con 0.9.0 y
+   esquema 17.
+2. **Respaldo**: `backups/adel_pos-20261111T185713Z-bd1868.dump` (628 978 bytes), catálogo legible.
+3. **Ensayo de restauración**: `restore-check.py` → «Restauración completa verificada: 127 tablas con conteos
+   idénticos» (`.local/stage19-restore-verification.json`).
+4. **Comprobación previa** (solo lectura, `transaction_read_only = on`; el script de comprobación se ensayó antes en
+   bases temporales de esquema 17 y 19): migraciones 1–17, 127 tablas en `app`, 147 permisos (administrador 147, cajero
+   1, finanzas 1, supervisor 4), cuentas cerradas 2 y abiertas 5, 15 unidades comerciales, 2 pagos, 0 precuentas y
+   tickets guardados, turnos cerrado 1 y abierto 1 (**ninguno en arqueo**), 5 operaciones de caja, 0 documentos de caja,
+   0 tickets y 0 trabajos de impresión (**ninguno pendiente**), sin impresoras, 4 categorías, 6 productos, 118 eventos
+   de auditoría, 9 reconocimientos de venta, establecimiento sin dirección, teléfono ni correo, las tres funciones
+   activables desactivadas y ninguna tabla de la 9B. Repetida justo antes de detener el servidor: sin cambios.
+5. **Servidor detenido** de forma ordenada (`status`: detenido).
+6. **Migración**: `migrate` → `applied:2`; repetición → `applied:0`.
+7. **Servidor 0.9.1 iniciado**: readiness 200 (PostgreSQL disponible, esquema compatible) y `/api/v1/version` con 0.9.1
+   y esquema 19.
+8. **Comprobación posterior** (solo lectura): solo cambiaron las migraciones (1–19), las tablas (127 → 132, las cinco
+   nuevas), los permisos (147 → 153; administrador 153, los demás roles sin cambios) y la existencia de las tablas de la
+   9B; **todos los conteos operativos son idénticos** (cuentas, unidades, pagos, ajustes, documentos, turnos, caja,
+   cocina, catálogo, auditoría y ventas reconocidas). Diez plantillas del sistema activas, «Predeterminada», revisión 1,
+   con sus UUID fijos y una por tipo; diez versiones número 1 sin autor, cada una vigente en su plantilla; ninguna
+   plantilla propia; los seis permisos `documents.*` solo en el administrador; identidad de una fila con textos vacíos,
+   sin logotipo y presentación 60/`center`/`threshold`/128, revisión 1; 0 logotipos y 0 conversiones; restricciones de
+   tipo de ticket, ámbito SSE y `kitchen_printers_accepts_escpos_check` presentes (no hay impresoras, así que ninguna
+   con `accepts_escpos`).
+9. **Aplicación de escritorio**: `build-macos` → `AD-EL POS.app` 0.9.1 (9.94 MiB) y `open-app` (proceso de la
+   aplicación en marcha). El recorrido en la ventana nativa (Documentos, identidad, editor y muestra en una impresora
+   real) **no se verificó**: queda como verificación del propietario.
+
+0018 y 0019 son ahora inmutables; la siguiente ampliación requiere 0020 y, sobre la instalación real, autorización
+expresa previa con respaldo y ensayo de restauración.
