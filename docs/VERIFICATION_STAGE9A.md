@@ -14,8 +14,8 @@ y `0017_reports.sql`). Evidencia anterior: [etapa 8](VERIFICATION_STAGE8.md), [e
 **Alcance de esta evidencia.** Las cifras son las que cada parte registró en el avance (y, donde el avance no las trae,
 en los registros de la parte, como se indica). Hasta la parte C2 se obtuvieron con `config/product.json` todavía en 0.8.0
 y esquema 14 (las migraciones nuevas ya estaban embebidas); la versión 0.9.0 y el esquema 17 se fijaron en la fase D, con
-las comprobaciones de «Versión 0.9.0» de abajo. **La regresión final de la fase D está pendiente** y se registrará en
-[VERIFICATION.md](VERIFICATION.md) («Regresión final»).
+las comprobaciones de «Versión 0.9.0» de abajo. La regresión final de la fase D **aprobó** sobre `74e23c9` (detalle en
+[VERIFICATION.md](VERIFICATION.md), «Regresión final»).
 
 **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432): las migraciones
 0015–0017 no se han aplicado a la instalación real. No se leyeron secretos y ninguna prueba envió trabajos a CUPS, a una
@@ -112,7 +112,7 @@ se indique otra.
 | Reporte de un año con volumen sin bloquear un cobro                                                       | `TestReportsVolumeMeasurement` y `TestOperationalVolume` (opcionales, `ADEL_REPORTS_MEASURE=1`): cobro de 95 ms con el margen de un año en curso; `TestReportsAcceptance` (`REPORTS_BUSY` y cobro sin esperar a un reporte); `runner_integration_test.go`.                                                                                                                                                                               |
 | Relleno inicial de la 0017                                                                                | `TestReportsAcceptance` (el bloque de la migración sobre cuentas cerradas por la API, igual a Go por fuente) y `database/stage9a_reports_upgrade_test.go` (desde el esquema 14).                                                                                                                                                                                                                                                         |
 | Interfaz de Reportes                                                                                      | Vitest `reports.test.tsx` (27 pruebas) y `reportExport.test.ts`; Playwright `workflow-reports-9a.spec.ts` y `workflow-reports-export-9a.spec.ts`.                                                                                                                                                                                                                                                                                        |
-| Regresiones generales                                                                                     | En cada parte, la aceptación encadenada de `internal/operations` (etapas 4–8 y 9A) y las suites de `administration`, `catalog`, `payments` y `database`; Playwright completo en A1, B1 y C2. Compilación del `.app` 0.9.0 e independencia del servidor: pendientes de la regresión final.                                                                                                                                                |
+| Regresiones generales                                                                                     | En cada parte, la aceptación encadenada de `internal/operations` (etapas 4–8 y 9A) y las suites de `administration`, `catalog`, `payments` y `database`; Playwright completo en A1, B1 y C2. Compilación del `.app` 0.9.0: aprobada en la regresión final; el servidor sigue funcionando sin la ventana (Playwright usa Go temporal sin Tauri).                                                                                          |
 
 ## Mediciones
 
@@ -126,9 +126,6 @@ PDF y 7.7 s en Excel (con `-race`). Mediciones de un solo equipo (Apple M1 Max),
 
 ## No ejecutado o no verificado
 
-- **Regresión final de la fase D**: pendiente (Prettier, gofmt, `cargo fmt`, Go con `-race`, integración PostgreSQL de
-  todos los paquetes, Vitest, build, Rust, Playwright completo en Chromium y WebKit y compilación del `.app` 0.9.0 sobre
-  el árbol final).
 - **Instalación real**: 0015–0017 no se aplicaron; no se ensayaron todavía el respaldo, la restauración ni la migración
   de la base real con estas migraciones (solo las pruebas de actualización desde el esquema 14 sobre bases simuladas).
 - **Ventana nativa Tauri (WKWebView)**, **diálogo nativo real de guardado** y escritura en disco desde la ventana,

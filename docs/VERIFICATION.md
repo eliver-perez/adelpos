@@ -16,7 +16,7 @@ pendientes de catálogo e inventarios, reportes, indicadores y exportaciones). E
   el puerto 55499 y Go temporal para Playwright), según [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md). La versión
   0.9.0 y el esquema 17 se fijaron en la fase D, con `sync-metadata --check`, `go vet`, `go test`, `tsc` y `cargo test`
   aprobados sobre el árbol con la versión nueva.
-- **Regresión final (fase D)**: **Pendiente** (ver «Regresión final»).
+- **Regresión final (fase D)**: **aprobada** sobre `74e23c9` (ver «Regresión final»).
 - **Instalación real**: sigue en **0.8.0 y esquema 14**. Las migraciones 0015–0017 **no se han aplicado**: requieren
   autorización expresa del propietario, con respaldo y ensayo de restauración.
 - **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) ni enviaron trabajos
@@ -49,12 +49,20 @@ pendientes de catálogo e inventarios, reportes, indicadores y exportaciones). E
 
 ## Regresión final (fase D)
 
-**Pendiente.** Se ejecutará sobre una copia exacta del árbol final (0.9.0, esquema 17), con el clúster temporal 55499 y
-Go temporal en un puerto propio: Prettier, gofmt, `cargo fmt`, `sync-metadata --check`, `go vet` con y sin
-`integration`, Go unitarias con `-race`, integración PostgreSQL con `-race` de todos los paquetes de
-`scripts/database.py` (incluidos `internal/reports` e `internal/reports/operational`), Vitest, `tsc --noEmit` y build,
-`cargo test --locked --offline`, Playwright completo en Chromium y en WebKit y compilación del `.app` 0.9.0. Su resultado
-se registrará aquí.
+**Aprobada** el 10 de noviembre de 2026 sobre una copia exacta del commit `74e23c9` (0.9.0, esquema 17, con las
+correcciones de la revisión independiente), con el clúster temporal 55499 y Go temporal en un puerto propio:
+
+- Prettier, gofmt, `cargo fmt`, `sync-metadata --check`, `go vet` y `go vet -tags=integration`: aprobados.
+- Go unitarias con `-race`: todos los paquetes `ok`.
+- Integración PostgreSQL con `-race`: `database` (5.2 s), `administration` (54.5 s), `catalog` (7.0 s), `operations`
+  (216.3 s, aceptación encadenada de las etapas 4–9A), `payments` (1.5 s), `kitchen` (1.4 s), `inventory` (1.5 s),
+  `reports` (88.4 s) y `reports/operational` (38.9 s): `ok`.
+- Vitest: 54 archivos y 473 pruebas; `tsc --noEmit` y build sin errores.
+- `cargo test --locked --offline`: 31 aprobadas y 1 ignorada (la de Keychain real).
+- Playwright en Chromium y en WebKit: 10 de 10 en cada motor (4.4 y 4.3 min), sin reintentos.
+- `tauri build --bundles app` en la copia aislada: `AD-EL POS.app` 0.9.0 (9.9 MiB), sin instalarlo ni abrirlo.
+- Las comprobaciones de solo lectura previstas para la instalación real se ejecutaron contra una base temporal migrada
+  hasta el esquema 17 (repetir la migración dio `applied:0`).
 
 ## Repetir las comprobaciones
 

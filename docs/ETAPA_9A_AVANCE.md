@@ -1238,3 +1238,83 @@ integración `./internal/catalog` `ok` (7.5 s), `./internal/database` `ok` (5.6 
 de tamaño de bloque de siempre); `cargo test --locked --offline` 31 aprobadas y 1 ignorada (Keychain real); Playwright
 `table-price-decrease.spec.ts` y `workflow-reports-export-9a.spec.ts` en Chromium y WebKit (Go 8186, vista previa 1426):
 2 + 2 aprobadas.
+
+## Fase D · regresiones, revisión, documentación y entrega
+
+### Revisión independiente y correcciones
+
+Un revisor que no participó en el desarrollo leyó todo el código de la etapa. No encontró defectos críticos: uno alto,
+tres medios y varios bajos, todos confirmados y corregidos con pruebas que fallan antes y pasan después.
+
+- **Reportes** (`2c7d8c4`):
+  - Alcance de Caja en los reportes de cobros y en el de empleados (el hallazgo alto).
+  - Evolución de ventas con el total anterior completo.
+  - Ventas por turno, con las cifras alineadas con sus renglones.
+  - Reconocimiento de una unidad transferida y cancelada después de una reapertura.
+  - Filtros de compras.
+  - Pesos recibidos de cobros anteriores a la 6.1.
+  - Opciones de filtros sin un reporte visible.
+- **Precios y otras áreas** (`74e23c9`):
+  - Combos: la reducción ya no queda topada por el precio suelto del componente.
+  - Modo cantidad: el precio solo baja por diferencias negativas de valor.
+  - Efecto real de cada grupo en la captura (`applied_difference`).
+  - Puente: temporal corto y diálogo que se vuelve a abrir si el nombre ya existe.
+  - Inventario: normalización de códigos igual a la del índice, y los datos nuevos del proveedor se conservan en
+    ediciones que no los envían.
+
+### Documentación y versión
+
+`cc4f8e3` agrega:
+
+- la versión 0.9.0 con el esquema 17;
+- `docs/REPORTS.md` y `docs/VERIFICATION_STAGE9A.md` (nuevos);
+- `CLAUDE.md`, `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `API_CONTRACTS.md`, `NEXT_STEPS_FOR_SOL.md`,
+  `docs/VERIFICATION.md` y `docs/DEPENDENCIES.md` al día;
+- las guías de módulo con su sección de reportes.
+
+### Regresión final
+
+Se ejecutó sobre una copia exacta de `74e23c9`, con el clúster temporal 55499. Todo aprobó:
+
+| Suite                              | Resultado                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------- |
+| Estáticas                          | Prettier, gofmt, `cargo fmt`, `sync-metadata` y `go vet` (con y sin `integration`) |
+| Go unitarias con `-race`           | Todos los paquetes `ok`                                                            |
+| Integración PostgreSQL con `-race` | 9 paquetes `ok`, incluidos `reports` (88.4 s) y `reports/operational` (38.9 s)     |
+| Vitest                             | 473 pruebas en 54 archivos; `tsc` y build sin errores                              |
+| Rust                               | 31 pruebas aprobadas                                                               |
+| Playwright                         | 10 de 10 en Chromium y 10 de 10 en WebKit                                          |
+| Paquete de escritorio              | `.app` 0.9.0 compilado en la copia aislada                                         |
+
+Las consultas de solo lectura de la instalación real se probaron contra una base temporal en esquema 17. El detalle está
+en [VERIFICATION.md](VERIFICATION.md).
+
+### Procedimiento para aplicar 0015–0017 a la instalación real
+
+El propietario autorizó por adelantado aplicar los cambios de esta etapa si todo aprobaba («si todo lo ves bien aplica
+los cambios no esperes confirmacion»). El procedimiento es:
+
+1. **Respaldar:** `./scripts/dev.sh backup`.
+2. **Ensayar la restauración:** `python3 scripts/restore-check.py backups/NOMBRE.dump`.
+3. **Comprobar:** comprobación previa de solo lectura.
+4. **Detener el servidor:** `./scripts/dev.sh server-stop`.
+5. **Migrar:** `./scripts/dev.sh migrate`. Debe dar `applied:3` y, al repetirlo, `applied:0`.
+6. **Arrancar:** `./scripts/dev.sh server-start`. Debe responder readiness 200 y `/api/v1/version` con 0.9.0 y esquema 17.
+7. **Comprobar:** comprobación posterior de solo lectura.
+8. **Instalar la aplicación:** `./scripts/dev.sh build-macos` y `./scripts/dev.sh open-app`.
+
+Efectos sobre los datos existentes:
+
+- **Filas existentes:** no se modifican.
+- **Columnas nuevas:**
+  - `price_can_decrease`, desactivada en todos los productos;
+  - revisión y conteo de la precuenta, NULL en los documentos anteriores;
+  - datos de proveedor;
+  - comercio de mostrador.
+- **Proveedor:** el de mostrador, sin compras.
+- **Tabla nueva:** `sales_recognitions`, con el relleno de las cuentas cerradas.
+- **Índices:** de fecha.
+- **Permisos:** 10 `reports.*`, solo para el administrador.
+
+La venta, la captura, los cobros y la caja no cambian. El precio solo puede bajar en los productos que el propietario
+active.
