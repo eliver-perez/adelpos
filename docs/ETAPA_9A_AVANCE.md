@@ -958,3 +958,153 @@ El servidor HTTP tiene `WriteTimeout` de 15 s (`cmd/ad-el-pos-server/main.go`): 
   reutiliza esa lista); un reporte nuevo debe agregarse a `EXPORTABLE_REPORTS` (la prueba Go lo exige).
 - La prueba de integración de exportaciones borra y vuelve a crear el esquema de su base temporal al empezar y al
   terminar (como las pruebas de `internal/database`), para no alterar las demás pruebas del paquete.
+
+## Fase C · C2 · Interfaz de Reportes: navegación por catálogo, resumen ejecutivo, filtro de periodo, tablas, gráficos SVG propios y exportación
+
+Sin migraciones ni cambios de API, de Go, de Rust ni del puente. La interfaz es **genérica sobre el catálogo de Go**
+(`reports/catalog`): grupos, reportes, filtros, columnas tipadas, periodo y comparación salen de la declaración de
+cada reporte, de modo que los reportes de la parte B2 (caja, inventarios, compras, proveedores, costos y márgenes,
+empleados) aparecieron sin escribir pantallas nuevas. React no suma, resta, redondea ni ordena importes: muestra
+los valores tipados de Go con `services/money.ts` y sus reglas de texto.
+
+### Pantalla «Reportes»
+
+- `reports` en `PreferencesPage.tsx` (`reports.read`, admitida como pantalla de inicio) y en `App.tsx`
+  (`ReportsPage` con `can`, la zona del establecimiento y los permisos efectivos; si cambian, el catálogo se vuelve
+  a pedir). El menú principal global no cambió (solo una entrada más, después de Inventarios).
+- Navegación en dos niveles: grupos del catálogo en una pestaña cada uno («Resumen ejecutivo» primero si
+  `dashboard: true`), en columnas iguales de una o dos filas completas (hasta 7 por fila; con 13 grupos, 7 y 6).
+  Dentro del grupo, los reportes se listan a la izquierda en pantallas de 1440 px o más; por debajo, un selector
+  «Reporte» sobre el contenido deja todo el ancho a la tabla. Cada grupo recuerda su último reporte. Un grupo de un
+  solo reporte no lleva lista. Sin reportes visibles se explica el permiso que falta.
+- Periodo y filtros son de la pantalla (no de cada reporte): se conservan al cambiar de reporte y cada reporte envía
+  solo los que declara. Los valores se guardan por **parámetro y fuente** (`category_id:categories` ≠
+  `category_id:inventory_categories`), para que un identificador de categoría del catálogo nunca llegue a un
+  reporte de insumos con el mismo nombre de parámetro.
+
+### Filtro de periodo (`components/reports/PeriodFilter.tsx`, `period.ts`)
+
+- Dos controles segmentados: rápidos (Hoy, Ayer, Semana actual, Mes actual, Año actual: se aplican con un toque) y
+  con dato (Día, Semana del año, Mes, Año, Personalizado). Solo se ofrecen los periodos que Go lista en el catálogo.
+- Los campos se completan con el **último periodo que resolvió Go** (su día comercial, su año y semana ISO), no con
+  la fecha local de la terminal, y se aplican con «Aplicar periodo» o Intro: teclear nunca consulta. Las flechas de
+  semana anterior y siguiente aplican al momento (una consulta por toque) y cruzan el cambio de año ISO.
+- Semana del año ISO 8601 con su rango («Semana 53 de 2026: del 28 de diciembre de 2026 al 3 de enero de 2027, de
+  lunes a domingo»): el rango se calcula en el cliente solo como descripción del calendario antes de consultar; el
+  periodo que vale es el que devuelve Go (`meta.period.label`), que se muestra como «Periodo aplicado» con «En
+  curso», junto con «Comparado con» y «Inicio del día · zona».
+- Rango personalizado con dos `OptionalDateField` (dd/mm/aaaa, días incluidos). Comparación con el periodo anterior
+  como interruptor (`ToggleButton`), solo en reportes con `comparison: true` y en el resumen.
+- Parámetros enviados: `period` + `date` | `week=AAAA-Wss` | `month=AAAA-MM` | `year` | `from`/`until`, y
+  `compare=previous|none` cuando aplica.
+
+### Reporte (`pages/reports/ReportView.tsx`, `ReportFilterFields.tsx`, `components/reports/ReportTable.tsx`)
+
+- Un solo panel «Filtros del reporte» con el periodo y los filtros que declara el reporte: `choice` (con su valor
+  por omisión si lo trae), `id` con opciones de `reports/filters/{fuente}` (una consulta por fuente mientras la
+  pantalla está abierta), productos e insumos con búsqueda en Go al pulsar «Buscar» (hasta 100), texto libre con
+  «Aplicar». Cada elección consulta una vez y vuelve a la página 1.
+- Metadatos de Go: fecha usada, filtros aplicados (texto legible de Go) y fecha de generación; avisos de Go
+  (`meta.warnings`, p. ej. «Turnos en arqueo excluidos», datos de consumo pendientes) como avisos de estado; notas
+  al pie; cifras resumidas (`summary`) en tarjetas.
+- Tabla: columnas tal como llegan (las protegidas no llegan y no se dibujan); las `optional` ocultas por omisión con
+  «Mostrar columnas adicionales (n)». Cifras a la derecha con `tabular-nums`; códigos y fechas sin partir; textos
+  «Sin costo», «Estimado», «Firme», «En arqueo»… como etiquetas con texto. `<tfoot>` con los **totales de Go** de
+  todo el conjunto filtrado (no de la página; vacíos en columnas sin total). Orden en Go con botones en el
+  encabezado y `aria-sort`; paginación de Go (50 renglones) con el `Pagination` existente. Estados: «Cargando
+  reporte…», mensaje vacío con el periodo aplicado, error de Go con «Reintentar»; al volver a consultar se conserva
+  el resultado anterior atenuado (sin parpadeo).
+- «Actualizar» vuelve a consultar. Los reportes, el catálogo y el resumen **no** escuchan los eventos SSE
+  (`useReportData`): se consultan al abrir, al cambiar periodo, filtros, orden o página, y a pedido.
+
+### Gráficos SVG propios (`components/reports/`, sin dependencias)
+
+`TrendChart` (líneas), `ComparisonBars` (barras horizontales, una serie o actual frente a anterior),
+`SegmentedBar` (distribución), `Sparkline` (tarjetas) y `ChartFrame` (título, leyenda con dos o más series y
+«Ver como tabla» con la tabla alternativa accesible). Paleta validada (claro `#2a78d6 #eb6834 #1baf7a #eda100
+#e87ba4`, oscuro `#3987e5 #d95926 #199e70 #c98500 #d55181`) como tokens `--chart-1..5`, más `--chart-previous`,
+`--chart-grid` y `--chart-axis`, en ambos temas; validador de la skill dataviz: todas las comprobaciones aprobadas en
+ambos temas, con contraste < 3:1 en tres tonos del tema claro, compensado con rótulos visibles y la tabla
+alternativa (`palette.log`). Líneas de 2 px, punto final con anillo de la superficie, rejilla fina y continua,
+barras ≤ 20 px con extremo de datos redondeado y base recta en cero, separación de 2 px en la barra segmentada,
+cruceta y recuadro con todas las series y navegación con flechas en la tendencia; el texto nunca usa el color de la
+serie. Los números de la geometría salen de las cadenas de Go solo para posicionar marcas; todos los rótulos son
+los textos de Go formateados.
+
+Elección del gráfico por la forma del resultado (`pages/reports/ReportChart.tsx`), para que los reportes nuevos lo
+tengan sin pantalla propia: secuencia (día, semana, mes, hora o periodo de la evolución) → tendencia, con la serie
+`previous_*` en gris si el reporte la trae (Evolución de ventas); hasta 5 categorías no negativas con todo el
+conjunto en la página → barra segmentada; más categorías → barras con los primeros 10 renglones en el orden de la
+tabla; listados de detalle (fecha y hora o más de dos columnas de texto) → sin gráfico.
+
+### Resumen ejecutivo (`pages/reports/DashboardView.tsx`, `components/reports/MetricCard.tsx`)
+
+- Secciones e indicadores tal como los envía Go (cada uno con su permiso; lo que no llega no se muestra). Cada
+  tarjeta: valor, variación con flecha y texto («+13.57 % frente al periodo anterior»; con anterior en cero, la
+  variación absoluta), «Anterior: …», la explicación de Go y minigráfico si hay serie del indicador. Tono por
+  polaridad: subir es favorable en ventas y cobros, desfavorable en descuentos, cortesías, devoluciones y mermas,
+  neutral en lo demás (compras, consumo, caja). Con `report_id` la tarjeta es un botón que abre su reporte
+  detallado con el mismo periodo. Estados: carga, error con reintento, sin permisos, «No hay ventas cerradas en
+  este periodo» (las cuentas abiertas están en «En curso»).
+- Barras del periodo actual frente al anterior para los importes en pesos de cada sección (se omiten si todo es
+  cero) y tendencias de las series de Go (venta neta por día) con enlace a su reporte.
+- **No se recalcula con cada evento SSE**: «Actualizar», «Actualizado a las HH:MM» y un temporizador de 5 minutos que
+  solo consulta con la ventana visible (y solo existe mientras el resumen está en pantalla).
+
+### Exportación (`components/reports/ExportButtons.tsx`)
+
+Botones «Exportar PDF» y «Exportar Excel» solo con `export.pdf`/`export.excel` del catálogo **y** el permiso
+(`reports.export.pdf` / `reports.export.excel`); llaman a `exportReport` de la parte C1
+(`services/reportExport.ts`, operación cerrada `export_report`) con la misma consulta de la pantalla (periodo,
+comparación, orden y filtros; C1 quita la paginación). Resultado con `notify.ts`: «Cobros por método: PDF
+guardado.» con nombre y tamaño, «Exportación a PDF cancelada: no se guardó ningún archivo.» o el error de Go/puente.
+
+### «Hora de inicio del día»
+
+Revisada en Configuración general (`SettingsPage.tsx`, parte B1): un solo lugar, explicación de que define el día
+comercial de reportes e inventario, «Con 00:00 el día es la fecha del calendario», el ejemplo «con 05:00 una venta
+de la 01:30 pertenece al día anterior» y que cambiarla no modifica registros. Cumple §0-B; sin cambios.
+
+### Decisiones menores
+
+1. Lista lateral de reportes desde 1440 px; por debajo, selector «Reporte» (a 1280 × 720 la tabla recibe el ancho
+   completo). Ambos eligen lo mismo; solo uno es visible.
+2. Periodo y filtros compartidos entre reportes; valores por parámetro + fuente.
+3. La tendencia solo se dibuja con todo el periodo en una página y la tabla en orden temporal (si no, una nota lo
+   explica); en un periodo en curso el rótulo directo va en el valor más alto (los días siguientes aún valen 0).
+4. En la barra segmentada el color sigue al nombre de la parte (orden alfabético), no a su posición en la tabla.
+5. Polaridad de los indicadores por lista de claves conocidas; las claves nuevas se muestran sin tono.
+6. Tamaño de página fijo de 50 renglones (Go admite hasta 200); sin selector.
+7. `Pagination` se reutiliza desde `pages/inventory/InventoryFields.tsx` sin moverlo (no se tocó Inventarios).
+8. Búsqueda de productos e insumos solo con «Buscar» (nunca por tecla).
+
+### Limitaciones
+
+- Un periodo que no cabe en una página (p. ej. un año por día: 365 renglones) no dibuja tendencia; se sugiere el
+  reporte por semana o mes. Las barras de categorías muestran solo los primeros 10 renglones de la página.
+- Las opciones de filtros se consultan una vez por fuente mientras la pantalla está abierta (una categoría nueva
+  aparece al volver a entrar).
+- La interfaz no ofrece elegir papel A4 (C1 lo admite con `paper`); el PDF sale en carta.
+- A 1280 × 720 los reportes con muchas columnas se desplazan a lo ancho dentro de su tabla (la página no).
+- Sin verificación en la ventana nativa (WKWebView), con el diálogo nativo real ni en pantalla táctil física; la
+  exportación se comprobó con el diálogo simulado de `native-driver.ts`.
+
+### Pruebas ejecutadas (copia aislada `repo9aC2`, clúster temporal 55499, puertos 8187/1427)
+
+Salida resumida real (registros en `docs9aC2/*.log`):
+
+- `npx tsc --noEmit`: sin errores. `npx vitest run src`: 53 archivos, 467 pruebas aprobadas (incluye
+  `pages/reports/reports.test.tsx` con 27: navegación por catálogo y permisos, cada periodo, semana ISO 53 y cambio
+  de año, rango personalizado, totales de Go en el pie, paginación sin cambiar totales, columna que Go no entrega,
+  orden con `aria-sort`, filtros en un solo panel y por parámetro + fuente, estados de carga, vacío y error,
+  resumen sin recarga por SSE con «Actualizar» y temporizador solo visible, exportación por permiso con guardado,
+  cancelación y error, elección de gráficos y ningún `type="number"`). `npm run build`: compilado.
+- Playwright de la especificación nueva `e2e/workflow-reports-9a.spec.ts`: Chromium 1/1 y WebKit 1/1 (dos cuentas
+  cerradas por la API; resumen con la cifra de Go; tarjeta → «Ventas por día» con tendencia y su tabla; ventas
+  por producto en semana actual y semana ISO con el rango de Go; cobros por método con barra segmentada;
+  exportación PDF y Excel guardadas y una cancelada con el diálogo simulado de C1; sin desbordamiento a
+  1280 × 720 y 1920 × 1080 en ambos temas).
+- Playwright completo (sin `SPEC`): Chromium 10/10 y WebKit 10/10 (incluye la especificación de exportación de C1).
+- Validador de paleta (skill dataviz): claro y oscuro con todas las comprobaciones aprobadas (`palette.log`).
+- Capturas en `scratchpad/shots9aC2/` (Chromium y WebKit; claro y oscuro; 1280 × 720 y 1920 × 1080): resumen,
+  ventas por día (tendencia), ventas por producto, filtro de periodo (semana del año) y cobros por método.
