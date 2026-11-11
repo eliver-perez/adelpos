@@ -1108,3 +1108,68 @@ Salida resumida real (registros en `docs9aC2/*.log`):
 - Validador de paleta (skill dataviz): claro y oscuro con todas las comprobaciones aprobadas (`palette.log`).
 - Capturas en `scratchpad/shots9aC2/` (Chromium y WebKit; claro y oscuro; 1280 × 720 y 1920 × 1080): resumen,
   ventas por día (tendencia), ventas por producto, filtro de periodo (semana del año) y cobros por método.
+
+### Correcciones de la revisión independiente · F1 (reportes y reconocimiento)
+
+Sin migraciones, rutas ni permisos nuevos. Archivos: `backend/internal/reports/{cash,cash_day,payments,payments_details,
+dashboard,dashboard_sections,dashboard_operational,filters,handler,engine,sales,sales_progress,purchases,doc}.go`,
+`backend/internal/payments/recognition.go` y pruebas (`reports/sales_evolution_test.go` y `payments/recognition_test.go`
+nuevas; `reports/reports_integration_test.go`, `export_integration_test.go`, `volume_integration_test.go` y
+`reports/operational/operational_test.go` ampliadas). Cada prueba nueva se ejecutó primero contra el código de `cc4f8e3`
+(idéntico en backend a `793c099`) y falló; después pasó con las correcciones.
+
+1. **(Alto) Alcance de Caja en los cobros.** Los once reportes de cobros con turnos (`payments.*` salvo `payments.pending`), su
+   aviso de turnos en arqueo, la sección «Cobros» del resumen ejecutivo, las exportaciones (usan la misma consulta) y las
+   opciones y el nombre del filtro de turnos aplican `cashScopeSQL` (el mismo de `cash.*`) con `CASH_SCOPE`. El resumen
+   avisa `CASH_SCOPE` una vez si calculó una sección de caja o de cobros con alcance limitado. Prueba por API directa con
+   supervisores sin `read_all` (caja 1 y caja 2) y con y sin `history.read`: no ven la caja 2 ni su turno cerrado en
+   `payments.by_method`, `list`, `by_shift`, `by_register`, `tips` ni `currency` (con y sin `shift_id`), ni en la
+   exportación XLSX, las opciones de turnos o el resumen; el aviso `SHIFT_CLOSING` ya no cuenta turnos en arqueo ajenos.
+2. **(Medio) Evolución de ventas.** `evolutionRows` agrega al final las cubetas sobrantes del periodo anterior con solo su
+   valor anterior (sin fecha del periodo, venta ni variación) y una nota; el total anterior y su variación son los del
+   periodo completo. Prueba unitaria con febrero contra enero, marzo contra febrero, 2026/2025 y 2027/2026 (53 y 52 semanas
+   ISO, 53 cubetas cada uno), 2013/2012 (53 contra 54 cubetas), febrero/enero de 2027 por semana, un rango de tres días y el
+   año por mes.
+3. **(Bajo) Ventas por turno.** Las cifras resumidas se calculan con las mismas condiciones que los renglones (sin turnos en
+   arqueo); prueba con un turno en arqueo (cifras = totales).
+4. **(Bajo) Reconocimiento.** `readRecognizedSources` suma también lo reconocido de las unidades canceladas que hoy
+   pertenecen a la cuenta y `recognitionDeltas` las lleva a cero aunque se hayan reconocido en otra cuenta; la regla de la
+   unidad activa en otra cuenta no cambia. Prueba unitaria (cinco casos) y de integración con el escenario del revisor
+   (cierre, devolución que reabre, división del refresco a una cuenta nueva, cancelación ahí, cierre de la cuenta nueva con
+   −1/−25.00, nuevo cierre de la original sin segunda reversión y relleno de la 0017 idéntico a Go después).
+5. **(Bajo) Compras.** «Devoluciones a proveedor del periodo» aplica todos los filtros (por renglón de la devolución: insumo
+   y categoría exactos). «Pagado desde caja» ya respetaba los filtros por recepción; con filtro de insumo o categoría se
+   rotula «Pagado desde caja (recepciones completas)», porque un vínculo no se reparte por insumo. Prueba con modalidad,
+   proveedor, estado, insumo y almacén.
+6. **(Bajo) Pesos de cobros anteriores a la 6.1.** `payments.currency` usa la regla de Caja (`cash_received` y
+   `cash_received − net_amount`), compartida con `cash.*` en `physicalMXNInSQL`/`physicalMXNOutSQL`; prueba contra el
+   resumen de Caja y `cash.shifts` con un movimiento sin columnas por moneda.
+7. **(Bajo) Opciones de filtros.** `reports/filters/{source}` responde 403 si ningún reporte visible para el usuario usa la
+   fuente (404 si no existe); prueba con usuarios de ventas, cobros y descuentos.
+
+8. **(Complemento, pedido por el coordinador) Empleados.** `employees.activity`, el único reporte de Empleados con
+   cobros, devoluciones o movimientos de caja por usuario, aplica a esas cifras el mismo alcance (`paymentScope()` con
+   `cashArgs`), cuenta solo los turnos en arqueo del alcance y avisa `CASH_SCOPE` con un texto propio («Los cobros, las
+   devoluciones y los movimientos de caja solo incluyen…; la venta y lo demás no se limitan»). La venta como responsable,
+   confirmaciones, cancelaciones, descuentos y autorizaciones no cambian. Prueba por API directa en
+   `operational_test.go` (subprueba «cobros con el alcance de Caja»): los supervisores de la caja 1 (sin `read_all`) y de
+   la caja 2 (sin `history.read`) no ven al cajero de la caja 2; la fila del administrador es igual a la del administrador
+   en cobros, caja y venta; con `history.read` el cajero aparece con 25.00. Falló sin el cambio (con las demás correcciones)
+   y pasa con él.
+
+Limitaciones: `sales.by_shift` excluye todos los turnos en arqueo y su aviso los cuenta todos (es un reporte de ventas, sin alcance de
+Caja); el mensaje del 403 de opciones es el genérico «No tienes permiso para consultar este reporte.».
+
+Suites (copia `$SCR/repo9aF1` sincronizada al final; clúster temporal 55499): `go vet ./...` y `go vet -tags=integration
+./...` sin hallazgos; `go test -race -count=1 ./...` 17 paquetes `ok`; integración `./internal/reports` ok (92 s),
+`./internal/reports/operational` ok (40 s), `./internal/operations` ok (226 s) y `./internal/payments` ok (1 s). Antes de
+corregir (código de `cc4f8e3` con las pruebas nuevas, `$SCR/repo9aF1_before`): fallaron la evolución (4 escenarios), el
+reconocimiento (unitaria e integración: la cuenta nueva solo reconocía `unit:1:40.00`), las opciones de filtros
+(`registers` 200 sin reporte), las cifras de ventas por turno (cuentas 4 / neta 315.00 frente a 3 / 290.00 de los
+renglones), el alcance de Caja (la caja 1 veía 195.00 y el aviso de la caja 2), el efectivo por moneda (120.00/60.00
+frente a 150.00/90.00 de Caja) y las devoluciones de compras sin filtrar (29.00 con el proveedor de mostrador). Sin cambios
+en el puente (no se ejecutó `cargo test`).
+
+Tras el complemento de Empleados (copia sincronizada de nuevo): `go vet` y `go vet -tags=integration` sin hallazgos;
+`go test -race` de `./internal/reports/...` y `./internal/payments` ok; integración `./internal/reports` ok (91 s) y
+`./internal/reports/operational` ok (40 s).

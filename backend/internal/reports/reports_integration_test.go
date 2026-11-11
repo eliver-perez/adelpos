@@ -503,7 +503,9 @@ func TestReportsAcceptance(t *testing.T) {
 			t.Fatalf("Sin permisos de grupo el dashboard no calcula indicadores: %+v", dashboard.Sections)
 		}
 		sales := fixture.staff(t, "ventas", "reports.read", "reports.sales.read")
-		payer := fixture.staff(t, "cobros", "reports.read", "reports.payments.read")
+		// Con las consultas de Caja (todas las cajas e historial), para que los reportes de cobros tengan renglones.
+		payer := fixture.staff(t, "cobros", "reports.read", "reports.payments.read", "cash.shifts.read", "cash.shifts.read_all",
+			"cash.history.read")
 		discounter := fixture.staff(t, "descuentos", "reports.read", "reports.discounts.read")
 		members := map[string]terminal{
 			reports.PermissionSales: sales, reports.PermissionPayments: payer, reports.PermissionDiscounts: discounter,
@@ -517,8 +519,23 @@ func TestReportsAcceptance(t *testing.T) {
 				fixture.get(t, member, "reports/run/"+definition.ID, status)
 			}
 		}
+		// Opciones de filtros: solo de una fuente que use algún reporte que el usuario puede consultar.
+		fixture.get(t, readOnly, "reports/filters/registers", 403)
+		for route, status := range map[string]int{
+			"registers": 200, "products": 200, "payment_methods": 403, "shifts": 403, "discount_reasons": 403,
+		} {
+			fixture.get(t, sales, "reports/filters/"+route, status)
+		}
+		for route, status := range map[string]int{"payment_methods": 200, "shifts": 200, "users": 200, "products": 403, "nada": 404} {
+			fixture.get(t, payer, "reports/filters/"+route, status)
+		}
+		fixture.get(t, discounter, "reports/filters/discount_reasons", 200)
+		fixture.get(t, discounter, "reports/filters/payment_methods", 403)
 		// Sin cash.expected.read no se envían el efectivo físico ni sus totales, ni se puede ordenar por él.
 		list := fixture.report(t, payer, "payments.list", "")
+		if len(list.Rows) == 0 {
+			t.Fatal("Con las consultas de Caja el detalle de cobros tiene renglones")
+		}
 		for _, column := range list.Columns {
 			if column.Key == "received" || column.Key == "change" || column.Key == "received_usd" || column.Key == "usd_rate" {
 				t.Fatalf("Columna protegida enviada sin cash.expected.read: %s", column.Key)
@@ -670,6 +687,68 @@ func TestReportsAcceptance(t *testing.T) {
 		release()
 		if err := <-done; err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("unidad transferida tras una reapertura y cancelada en la cuenta nueva", func(t *testing.T) {
+		original := fixture.account(t, "Reabierta y dividida", "dine_in", &fixture.table, line(fixture.burger, 1), line(fixture.soda, 1))
+		soda := fixture.versionOf(t, original.Account.ID, fixture.soda)
+		unit := fixture.scalar(t, "SELECT id::text FROM app.restaurant_item_units WHERE account_id=$1 AND version_id=$2", original.Account.ID, soda)
+		payment := fixture.pay(t, original.Account.ID, map[string]any{"method_id": debit, "mode": "total"})
+		if !payment.Closed {
+			t.Fatal("El pago total debía cerrar la cuenta")
+		}
+		// Una devolución deja saldo y reabre la cuenta; el refresco pasa a una cuenta nueva y ahí se cancela.
+		refund := decode[struct {
+			Reopened bool `json:"reopened"`
+		}](t, fixture.post(t, original.Account.ID, "refunds", map[string]any{
+			"mode": "payment", "payment_id": payment.Payment.ID, "amount": "25", "method_id": cash, "reason": "Refresco no servido",
+		}, 200))
+		if !refund.Reopened {
+			t.Fatal("La devolución debía reabrir la cuenta")
+		}
+		current := fixture.refresh(t, original.Account.ID)
+		pair := decode[struct {
+			Target operations.Bill `json:"target"`
+		}](t, fixture.mutate(t, "POST", "restaurant/accounts/"+original.Account.ID+"/split", structToMap(operations.TransferInput{
+			Mutation:   operations.Mutation{Revision: current.Account.Revision},
+			NewAccount: &operations.AccountInput{Name: "Refresco aparte"},
+			Selections: []operations.Selection{{VersionID: soda, Quantity: 1}},
+		}), 200))
+		target := pair.Target
+		fixture.mutate(t, "POST", "restaurant/accounts/"+target.Account.ID+"/cancel", map[string]any{
+			"revision": target.Account.Revision, "version_id": soda, "quantity": 1, "reason": "Refresco no servido",
+		}, 200)
+		// La cuenta nueva se cierra con otro producto: su cierre reconoce la diferencia negativa del
+		// refresco aunque se haya reconocido en la cuenta original.
+		fixture.capture(t, target, line(fixture.fries, 1))
+		if !fixture.pay(t, target.Account.ID, map[string]any{"method_id": cash, "mode": "total"}).Closed {
+			t.Fatal("La cuenta nueva debía cerrarse")
+		}
+		rows := fixture.scalar(t, `SELECT string_agg(source_kind||':'||quantity||':'||net::text,',' ORDER BY net)
+            FROM app.sales_recognitions WHERE account_id=$1`, target.Account.ID)
+		if rows != "unit:-1:-25.00,unit:1:40.00" {
+			t.Fatalf("El cierre de la cuenta nueva debe revertir el refresco cancelado: %s", rows)
+		}
+		recognizedUnit := func() string {
+			return fixture.scalar(t, "SELECT sum(quantity)||'/'||sum(net)::text FROM app.sales_recognitions WHERE unit_id=$1", unit)
+		}
+		if got := recognizedUnit(); got != "0/0.00" {
+			t.Fatalf("El refresco cancelado queda en cero: %s", got)
+		}
+		// Al volver a cerrar la cuenta original nada del refresco se reconoce otra vez.
+		fixture.capture(t, fixture.refresh(t, original.Account.ID), line(fixture.soda, 1))
+		if !fixture.pay(t, original.Account.ID, map[string]any{"method_id": cash, "mode": "total"}).Closed {
+			t.Fatal("La cuenta original debía volver a cerrarse")
+		}
+		if got := recognizedUnit(); got != "0/0.00" {
+			t.Fatalf("El refresco cancelado se revierte una sola vez: %s", got)
+		}
+		total := fixture.scalar(t, "SELECT sum(net)::text FROM app.sales_recognitions WHERE account_id IN ($1,$2)", original.Account.ID,
+			target.Account.ID)
+		vigente := amount(t, fixture.finance(t, original.Account.ID).Total).Add(amount(t, fixture.finance(t, target.Account.ID).Total))
+		if !amount(t, total).Equal(vigente) {
+			t.Fatalf("Lo reconocido de ambas cuentas debe ser su total vigente: %s ≠ %s", total, vigente)
 		}
 	})
 

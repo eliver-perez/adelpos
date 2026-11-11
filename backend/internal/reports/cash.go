@@ -48,14 +48,40 @@ const cashScopeSQL = `(@scope_read AND (@scope_all OR s.register_id =
 // shiftBusinessDateSQL es la fecha comercial del turno s (fecha calendario de apertura).
 const shiftBusinessDateSQL = `coalesce(s.business_date,(s.opened_at AT TIME ZONE @tz)::date)`
 
+// physicalMXNInSQL y physicalMXNOutSQL son los pesos físicos que entraron y salieron con un
+// movimiento de efectivo c, con la misma regla que Caja (currencyTotals.add): un movimiento sin
+// columnas por moneda (anterior a la 0007) fue solo en pesos; entró lo recibido y salió lo recibido
+// menos el neto (el cambio de un cobro o el importe de una devolución).
+const (
+	physicalMXNInSQL  = `CASE WHEN c.mxn_in IS NULL THEN c.cash_received ELSE c.mxn_in END`
+	physicalMXNOutSQL = `CASE WHEN c.mxn_in IS NULL THEN c.cash_received-c.net_amount ELSE c.mxn_out END`
+)
+
+// withCashScope agrega a args los argumentos de cashScopeSQL para el actor.
+func withCashScope(actor Actor, args pgx.NamedArgs) pgx.NamedArgs {
+	args["scope_read"] = actor.Can(cashShiftsRead)
+	args["scope_all"] = actor.Can(cashShiftsReadAll)
+	args["scope_history"] = actor.Can(cashHistoryRead)
+	args["scope_user"] = actor.UserID
+	args["scope_device"] = actor.DeviceID
+	return args
+}
+
+// cashScopeLimited indica si el actor no puede consultar en Caja todos los turnos (los de otras
+// cajas o los cerrados por otros).
+func cashScopeLimited(actor Actor) bool {
+	return !actor.Can(cashShiftsRead) || !actor.Can(cashShiftsReadAll) || !actor.Can(cashHistoryRead)
+}
+
+// cashScopeWarning es el aviso de un reporte limitado a los turnos que el usuario puede consultar.
+func cashScopeWarning() Warning {
+	return Warning{Code: "CASH_SCOPE", Message: "Solo se incluyen los turnos que puedes consultar en " +
+		"Caja (los de otras cajas requieren consultar todas las cajas y los cerrados, el historial de turnos)."}
+}
+
 // cashArgs agrega a los argumentos comunes los del alcance de Caja y los días del periodo.
 func cashArgs(query *Query) pgx.NamedArgs {
-	args := query.Args()
-	args["scope_read"] = query.Actor.Can(cashShiftsRead)
-	args["scope_all"] = query.Actor.Can(cashShiftsReadAll)
-	args["scope_history"] = query.Actor.Can(cashHistoryRead)
-	args["scope_user"] = query.Actor.UserID
-	args["scope_device"] = query.Actor.DeviceID
+	args := withCashScope(query.Actor, query.Args())
 	if query.Params.Period != nil {
 		args["first_day"] = query.Params.Period.FirstDay
 		args["last_day"] = query.Params.Period.LastDay
@@ -90,10 +116,8 @@ func cashWarnings(ctx context.Context, query *Query, args pgx.NamedArgs) ([]Warn
 		warnings = append(warnings, Warning{Code: "SHIFT_CLOSING", Message: "Turnos en arqueo excluidos: " + strconv.Itoa(closing) +
 			". Sus importes se incluirán cuando termine el arqueo."})
 	}
-	actor := query.Actor
-	if !actor.Can(cashShiftsRead) || !actor.Can(cashShiftsReadAll) || !actor.Can(cashHistoryRead) {
-		warnings = append(warnings, Warning{Code: "CASH_SCOPE", Message: "Solo se incluyen los turnos que puedes consultar en " +
-			"Caja (los de otras cajas requieren consultar todas las cajas y los cerrados, el historial de turnos)."})
+	if cashScopeLimited(query.Actor) {
+		warnings = append(warnings, cashScopeWarning())
 	}
 	return warnings, nil
 }
@@ -139,9 +163,8 @@ func shiftMetricsSQL(list conditions, protected bool) string {
 		physical = `,
             coalesce(sum(` + payments.ExpectedPaymentsMXNSQL + `) FILTER (WHERE c.is_cash),0) AS flow_mxn,
             coalesce(sum(` + payments.ExpectedPaymentsUSDSQL + `) FILTER (WHERE c.is_cash),0) AS flow_usd,
-            coalesce(sum(CASE WHEN c.mxn_in IS NULL THEN c.cash_received ELSE c.mxn_in END) FILTER (WHERE c.is_cash),0) AS mxn_in,
-            coalesce(sum(CASE WHEN c.mxn_in IS NULL THEN c.cash_received-c.net_amount ELSE c.mxn_out END)
-                FILTER (WHERE c.is_cash),0) AS mxn_out,
+            coalesce(sum(` + physicalMXNInSQL + `) FILTER (WHERE c.is_cash),0) AS mxn_in,
+            coalesce(sum(` + physicalMXNOutSQL + `) FILTER (WHERE c.is_cash),0) AS mxn_out,
             coalesce(sum(coalesce(c.usd_in,0)) FILTER (WHERE c.is_cash),0) AS usd_in,
             coalesce(sum(coalesce(c.usd_out,0)) FILTER (WHERE c.is_cash),0) AS usd_out`
 	}

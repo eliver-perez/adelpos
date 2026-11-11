@@ -37,6 +37,9 @@ type DashboardSection struct {
 	Compute func(ctx context.Context, query *Query, period *businessday.Period) (map[string]any, error)
 	// Series devuelve series opcionales del periodo actual (tendencias).
 	Series func(ctx context.Context, query *Query) ([]Series, error)
+	// CashScoped indica que la sección se limita a los turnos que el usuario puede consultar en
+	// Caja (cashScopeSQL); el resumen avisa CASH_SCOPE una vez si el alcance es limitado.
+	CashScoped bool
 }
 
 // Point es un punto de una serie por día comercial.
@@ -139,6 +142,7 @@ func buildDashboard(ctx context.Context, tx pgx.Tx, actor Actor, raw *rawParams)
 		Period: params.Period, Comparison: params.Previous, GeneratedAt: now, Timezone: config.Timezone,
 		DayStart: config.Cutoff(), Sections: []DashboardSectionResult{}, Series: []SeriesResult{}, Warnings: []Warning{},
 	}
+	scopeWarned := false
 	for _, section := range dashboardSections {
 		if !actor.CanAll(section.Permissions) {
 			continue
@@ -171,6 +175,10 @@ func buildDashboard(ctx context.Context, tx pgx.Tx, actor Actor, raw *rawParams)
 			computed.Indicators = append(computed.Indicators, indicator)
 		}
 		result.Sections = append(result.Sections, computed)
+		if section.CashScoped && cashScopeLimited(actor) && !scopeWarned {
+			result.Warnings = append(result.Warnings, cashScopeWarning())
+			scopeWarned = true
+		}
 		if section.Series == nil {
 			continue
 		}

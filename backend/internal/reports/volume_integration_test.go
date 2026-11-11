@@ -63,7 +63,7 @@ func TestReportsVolumeMeasurement(t *testing.T) {
 	// Reportes de un año completos (consulta, totales, orden y página) en el ejecutor de solo lectura.
 	runner := reports.NewRunner(pool, reports.Slots)
 	actor := reports.Actor{Permissions: []string{reports.PermissionRead, reports.PermissionSales, reports.PermissionPayments,
-		reports.PermissionDiscounts, reports.PermissionCashExpected}}
+		reports.PermissionDiscounts, reports.PermissionCashExpected, "cash.shifts.read", "cash.shifts.read_all", "cash.history.read"}}
 	for _, id := range []string{"sales.by_day", "sales.by_product", "sales.by_month", "payments.by_method", "payments.by_day",
 		"discounts.summary", "sales.evolution"} {
 		begin := time.Now()

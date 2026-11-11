@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/payments"
+	"local/ad-el-pos/server/internal/plural"
 )
 
 // «En curso» (§0-B): las cuentas abiertas con su total, lo pagado y su saldo, con la fórmula única
@@ -120,7 +121,9 @@ func init() {
 }
 
 // Evolución de ventas (§8): venta neta por día, semana o mes del periodo frente al periodo anterior
-// equivalente, alineada por posición (primer día con primer día, etc.).
+// equivalente, alineada por posición (primer día con primer día, etc.). Si el anterior tiene más
+// cubetas (enero frente a febrero, un año de 54 semanas parciales), las sobrantes van al final con
+// solo su valor anterior: los totales comparan siempre los dos periodos completos.
 
 var evolutionGrouping = []Option{
 	{Value: "day", Label: "Por día"},
@@ -237,6 +240,22 @@ func salesEvolution(ctx context.Context, query *Query) (*Dataset, error) {
 	if err != nil {
 		return nil, err
 	}
+	rows, extra := evolutionRows(grouping, period, previous, current, before)
+	notes := productNotes(query)
+	if extra > 0 {
+		singular, pluralForm := bucketNouns(grouping)
+		notes = append(notes, "El periodo anterior tiene "+plural.Count(extra, singular, pluralForm)+" más: "+
+			plural.Word(extra, "aparece", "aparecen")+" al final con solo su venta anterior, para que el total anterior y la "+
+			"variación sean los del periodo anterior completo.")
+	}
+	return &Dataset{Rows: rows, Notes: notes}, nil
+}
+
+// evolutionRows alinea por posición las cubetas del periodo con las del periodo anterior. Las
+// cubetas del anterior sin equivalente (un mes, una semana o un año anterior con más cubetas)
+// aparecen al final como renglones con solo su valor anterior, de modo que el total «anterior» y su
+// variación usan la suma completa del periodo anterior. Devuelve también cuántos renglones extra hay.
+func evolutionRows(grouping string, period, previous *businessday.Period, current, before map[string]decimal.Decimal) ([]Row, int) {
 	currentBuckets := buckets(period, grouping)
 	previousBuckets := buckets(previous, grouping)
 	rows := []Row{}
@@ -253,5 +272,26 @@ func salesEvolution(ctx context.Context, query *Query) (*Dataset, error) {
 		row["change_percent"] = percentOf(change, decimalOf(row, "previous_net").Abs())
 		rows = append(rows, row)
 	}
-	return &Dataset{Rows: rows, Notes: productNotes(query)}, nil
+	extra := 0
+	for index := len(currentBuckets); index < len(previousBuckets); index++ {
+		previousStart := previousBuckets[index]
+		rows = append(rows, Row{
+			"bucket": bucketLabel(previousStart, grouping) + " (solo en el periodo anterior)", "bucket_start": nil, "net": nil,
+			"previous_start": previousStart, "previous_net": before[previousStart.Format("2006-01-02")], "change": nil,
+			"change_percent": nil,
+		})
+		extra++
+	}
+	return rows, extra
+}
+
+// bucketNouns son el singular y el plural de la cubeta de una agrupación.
+func bucketNouns(grouping string) (string, string) {
+	switch grouping {
+	case "week":
+		return "semana", "semanas"
+	case "month":
+		return "mes", "meses"
+	}
+	return "día", "días"
 }

@@ -165,7 +165,8 @@ func init() {
 			{Key: "expenses", Label: "Gastos de caja", Type: TypeMoneyMXN, ReportID: "cash.operations",
 				Hint: "Los vinculados con compras no son otra compra."},
 		},
-		Compute: cashSection,
+		Compute:    cashSection,
+		CashScoped: true,
 	})
 	registerDashboard(DashboardSection{
 		ID: "cash_differences", Title: "Diferencias de caja", Permissions: []string{PermissionCash, PermissionCashExpected},
@@ -175,7 +176,8 @@ func init() {
 			{Key: "short_mxn", Label: "Faltantes en pesos", Type: TypeMoneyMXN, ReportID: "cash.shifts"},
 			{Key: "difference_mxn", Label: "Diferencia neta en pesos", Type: TypeMoneyMXN, ReportID: "cash.by_register"},
 		},
-		Compute: cashDifferencesSection,
+		Compute:    cashDifferencesSection,
+		CashScoped: true,
 	})
 	registerDashboard(DashboardSection{
 		ID: "purchases", Title: "Compras", Permissions: []string{PermissionPurchases},

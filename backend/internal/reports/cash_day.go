@@ -19,9 +19,8 @@ func cashDaySQL(list conditions, protected bool) string {
 	physical, physicalSelect, closures, closureSelect := "", "", "", ""
 	if protected {
 		physical = `,
-                coalesce(sum(CASE WHEN c.mxn_in IS NULL THEN c.cash_received ELSE c.mxn_in END) FILTER (WHERE c.is_cash),0) AS mxn_in,
-                coalesce(sum(CASE WHEN c.mxn_in IS NULL THEN c.cash_received-c.net_amount ELSE c.mxn_out END)
-                    FILTER (WHERE c.is_cash),0) AS mxn_out,
+                coalesce(sum(` + physicalMXNInSQL + `) FILTER (WHERE c.is_cash),0) AS mxn_in,
+                coalesce(sum(` + physicalMXNOutSQL + `) FILTER (WHERE c.is_cash),0) AS mxn_out,
                 coalesce(sum(coalesce(c.usd_in,0)) FILTER (WHERE c.is_cash),0) AS usd_in,
                 coalesce(sum(coalesce(c.usd_out,0)) FILTER (WHERE c.is_cash),0) AS usd_out,
                 coalesce(sum(` + payments.ExpectedPaymentsMXNSQL + `) FILTER (WHERE c.is_cash),0) AS flow_mxn,
