@@ -1,18 +1,19 @@
 package payments
 
 import (
-	"strings"
 	"time"
-	"unicode"
 
 	"github.com/shopspring/decimal"
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/features"
 	"local/ad-el-pos/server/internal/kitchen"
 )
 
-// Precuentas y tickets: los datos se separan de la plantilla de texto y del transporte, que
-// pertenece a la cola durable de cocina. El editor visual de documentos es de la etapa 9.
+// Precuentas y tickets: los datos se separan de la plantilla y del transporte, que pertenece a la
+// cola durable de cocina. Desde la etapa 9B el texto lo produce el renderizador único de
+// internal/documents con la plantilla activa del tipo; el documento guarda la versión usada y una
+// copia de la identidad del establecimiento. La reimpresión exacta copia el trabajo original.
 
 type DocumentLine struct {
 	Quantity int    `json:"quantity"`
@@ -70,18 +71,23 @@ type CommercialDocument struct {
 	USDRate       *string              `json:"usd_rate,omitempty"`
 	Payment       *DocumentPayment     `json:"payment"`
 	Content       string               `json:"content"`
+	// Etapa 9B: versión de plantilla con la que se renderizó y copia de la identidad usada.
+	TemplateVersionID *string             `json:"template_version_id,omitempty"`
+	Identity          *documents.Identity `json:"identity,omitempty"`
 }
 
-func (handler *service) buildDocument(finance *Finance, kind string, payment *PaymentRecord, width int) (*CommercialDocument, error) {
+// buildDocument arma la precuenta o el ticket y lo renderiza con la plantilla activa de su tipo al
+// ancho de papel indicado. Devuelve también la IR para encolarla.
+func (handler *service) buildDocument(finance *Finance, kind string, payment *PaymentRecord, paper int) (*CommercialDocument, *documents.Layout, error) {
 	var establishment, timezone, cashier string
 	err := handler.tx.QueryRow(handler.ctx, "SELECT e.name,e.timezone,u.display_name FROM app.establishment e, app.users u WHERE u.id=$1",
 		handler.request.Actor.UserID).Scan(&establishment, &timezone, &cashier)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	location, err := time.LoadLocation(timezone)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	issued := time.Now().UTC()
 	context := "Para llevar"
@@ -132,10 +138,26 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 		}
 	}
 	if err := handler.addDollarTotal(document, kind, payment); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	document.Content = renderDocument(document, width)
-	return document, nil
+	version, err := documents.ActiveVersion(handler.ctx, handler.tx, documents.Kind(kind))
+	if err != nil {
+		return nil, nil, err
+	}
+	identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	identity.Name = establishment
+	versionID := version.ID
+	document.TemplateVersionID = &versionID
+	document.Identity = &identity
+	layout, err := renderCommercial(version, document, nil, paper)
+	if err != nil {
+		return nil, nil, err
+	}
+	document.Content = layout.Text()
+	return document, layout, nil
 }
 
 // addDollarTotal agrega el total equivalente en dólares (decisión 16) cuando la función usd_cash
@@ -178,141 +200,12 @@ func (handler *service) addDollarTotal(document *CommercialDocument, kind string
 	return nil
 }
 
-// printable elimina controles e invisibles: solo el controlador de impresión genera comandos.
-func printable(value string) string {
-	return strings.Map(func(character rune) rune {
-		if unicode.IsControl(character) || unicode.Is(unicode.Cf, character) {
-			return ' '
-		}
-		return character
-	}, value)
-}
-
-func fit(text string, width int) []string {
-	runes := []rune(printable(text))
-	lines := []string{}
-	for len(runes) > width {
-		lines = append(lines, string(runes[:width]))
-		runes = runes[width:]
+// paperWidth normaliza el ancho de papel de una impresora (58 u 80 mm).
+func paperWidth(paper int) int {
+	if paper == 58 {
+		return 58
 	}
-	return append(lines, string(runes))
-}
-
-// row alinea un concepto a la izquierda y un importe a la derecha dentro del ancho del papel.
-func row(left, right string, width int) []string {
-	left = printable(left)
-	right = printable(right)
-	space := width - len([]rune(right)) - 1
-	if space < 4 {
-		return append(fit(left, width), right)
-	}
-	parts := fit(left, space)
-	last := parts[len(parts)-1]
-	parts[len(parts)-1] = last + strings.Repeat(" ", width-len([]rune(last))-len([]rune(right))) + right
-	return parts
-}
-
-func renderDocument(document *CommercialDocument, width int) string {
-	lines := []string{}
-	add := func(values ...string) {
-		lines = append(lines, values...)
-	}
-	divider := strings.Repeat("-", width)
-	add(fit(document.Establishment, width)...)
-	if document.Kind == "precheck" {
-		add("PRECUENTA")
-	} else {
-		add("TICKET DE PAGO")
-	}
-	add(fit("Folio "+decimal.NewFromInt(document.Folio).String()+" · "+document.AccountName, width)...)
-	add(fit(document.Context+" · "+document.LocalTime, width)...)
-	add(fit("Atendió: "+document.Cashier, width)...)
-	add(divider)
-	for _, line := range document.Lines {
-		add(row(decimal.NewFromInt(int64(line.Quantity)).String()+" x "+line.Name, pesosText(line.Amount), width)...)
-		if strings.TrimSpace(line.Notes) != "" {
-			add(fit("   Nota: "+line.Notes, width)...)
-		}
-	}
-	// Los importes usan el formato único de moneytext; un descuento se imprime «-$50.00». Un
-	// descuento o cortesía con motivo del catálogo lo muestra junto al concepto («Descuento · Atención»).
-	for _, adjustment := range document.Adjustments {
-		concept := adjustment.Concept
-		if adjustment.Reason != "" {
-			concept += " · " + adjustment.Reason
-		}
-		add(row(concept, pesosText(adjustment.Amount), width)...)
-	}
-	add(divider)
-	for _, tax := range document.Tax {
-		add(row("Subtotal sin IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", pesosText(tax.Base), width)...)
-		add(row("IVA "+decimal.NewFromInt(int64(tax.Rate)).String()+" %", pesosText(tax.Tax), width)...)
-	}
-	add(row("TOTAL", pesosText(document.Total), width)...)
-	// Línea informativa (etapa 7.1): el total en dólares con el tipo de cambio del turno.
-	if document.USDTotal != nil && document.USDRate != nil {
-		add(row("Total en dólares (T.C. "+pesosText(*document.USDRate)+")", dollarsText(*document.USDTotal), width)...)
-	}
-	if document.Payment != nil {
-		add(divider)
-		add("ESTE PAGO")
-		add(row(document.Payment.Method, pesosText(document.Payment.Amount), width)...)
-		if document.Payment.Reference != "" {
-			add(fit("   Ref. "+document.Payment.Reference, width)...)
-		}
-		if document.Payment.ReceivedUSD != nil {
-			add(cashWithDollars(*document.Payment, width)...)
-		} else if document.Payment.Received != nil {
-			add(row("   Efectivo recibido", pesosText(*document.Payment.Received), width)...)
-			add(row("   Cambio", pesosText(document.Payment.Change), width)...)
-		}
-		if document.Payment.Tip != "0.00" {
-			add(row("   Propina (no es venta)", pesosText(document.Payment.Tip), width)...)
-		}
-	}
-	if len(document.Payments) > 0 {
-		add(divider)
-		add("PAGOS REGISTRADOS")
-		for _, payment := range document.Payments {
-			add(row(payment.Method, pesosText(payment.Amount), width)...)
-		}
-		add(row("Pagado", pesosText(document.Paid), width)...)
-		if document.Tips != "0.00" {
-			add(row("Propinas", pesosText(document.Tips), width)...)
-		}
-	}
-	if document.Balance != "0.00" {
-		add(row("SALDO PENDIENTE", pesosText(document.Balance), width)...)
-	}
-	add(divider)
-	add(fit("Documento comercial. No es un comprobante fiscal (CFDI).", width)...)
-	return strings.Join(lines, "\n")
-}
-
-// cashWithDollars detalla un efectivo con dólares: lo recibido en cada moneda, el tipo de cambio
-// del turno, el total en pesos y el cambio con la moneda en que se entregó.
-func cashWithDollars(payment DocumentPayment, width int) []string {
-	lines := []string{}
-	lines = append(lines, row("   Pesos recibidos", pesosText(*payment.ReceivedMXN), width)...)
-	lines = append(lines, row("   Dólares recibidos", dollarsText(*payment.ReceivedUSD), width)...)
-	lines = append(lines, row("   Tipo de cambio", rateText(*payment.USDRate), width)...)
-	if payment.Received != nil {
-		lines = append(lines, row("   Total recibido", pesosText(*payment.Received), width)...)
-	}
-	if payment.ChangeCurrency != nil && *payment.ChangeCurrency == currencyUSD && payment.ChangeUSD != nil {
-		lines = append(lines, row("   Cambio en dólares", dollarsText(*payment.ChangeUSD), width)...)
-		lines = append(lines, row("   Equivale a", pesosText(payment.Change), width)...)
-	} else {
-		lines = append(lines, row("   Cambio en pesos", pesosText(payment.Change), width)...)
-	}
-	return lines
-}
-
-func paperWidth(columns int) int {
-	if columns == 58 {
-		return 30
-	}
-	return 42
+	return 80
 }
 
 // requirePrintPermission valida antes de escribir el permiso para imprimir el ticket solicitado.
@@ -333,16 +226,17 @@ func (handler *service) enqueueDocument(finance *Finance, kind string, payment *
 		return map[string]any{"requested": true, "status": "not_configured",
 			"message": "No hay impresora de tickets configurada; el pago quedó registrado."}, nil
 	}
-	var columns int
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT paper_width FROM app.kitchen_printers WHERE id=$1", *settings.ReceiptPrinterID).Scan(&columns); err != nil {
+	var paper int
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT paper_width FROM app.kitchen_printers WHERE id=$1", *settings.ReceiptPrinterID).Scan(&paper); err != nil {
 		return nil, err
 	}
-	document, err := handler.buildDocument(finance, kind, payment, paperWidth(columns))
+	document, layout, err := handler.buildDocument(finance, kind, payment, paperWidth(paper))
 	if err != nil {
 		return nil, err
 	}
 	job, ticketID, err := kitchen.EnqueueCommercial(handler.ctx, handler.tx, kitchen.CommercialPrint{
-		Kind: kind, Document: document, Content: document.Content, PrinterID: *settings.ReceiptPrinterID,
+		Kind: kind, Document: document, Content: document.Content, Layout: layout, TemplateVersionID: document.TemplateVersionID,
+		PrinterID:   *settings.ReceiptPrinterID,
 		OperationID: handler.operationID, ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
 	})
 	if err != nil {
@@ -401,7 +295,9 @@ func (handler *service) precheck(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return handler.buildDocument(finance, "precheck", nil, 42)
+	// La vista previa usa la misma plantilla que la impresión, al ancho de 80 mm como antes.
+	document, _, err := handler.buildDocument(finance, "precheck", nil, 80)
+	return document, err
 }
 
 func (handler *service) printPrecheck(parts []string) (any, error) {

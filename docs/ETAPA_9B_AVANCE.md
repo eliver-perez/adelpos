@@ -127,3 +127,84 @@ confirmación del propietario, como manda §21):
   `HEAD` y en `ETAPA_9B.md` (sin versionar) se revirtieron sus dos cambios (la tabla de fases y una línea en blanco);
   aplicar Prettier al archivo restaurado reproduce exactamente la versión reformateada, de modo que no hubo otros
   cambios.
+
+## Fase A · Plantillas por bloques, renderizador único e impresión real
+
+Hecha sobre `etapa-9b` (fase 0 en `fd1de81`), en una copia aislada del repositorio con el clúster
+temporal 55499. Nada se ejecutó contra la instalación real.
+
+### Qué quedó
+
+- **Paquete neutral `internal/documents`** (no importa kitchen, payments, operations ni
+  administration): diez tipos de documento, modelo de plantilla por bloques ordenados con catálogo
+  cerrado por tipo (33 bloques; comunes, comerciales, de cocina y de caja; aviso fiscal obligatorio;
+  esperado y diferencias protegido solo en cortes), validación estricta en Go con límites y textos
+  saneados (`422` con el bloque afectado), datos tipados por familia, renderizador único a una IR
+  (`Layout`/`Line`/`Image`, `Text()`, `Plain()`, identificador de bloque por línea y bloques vacíos
+  con su motivo), plantillas predeterminadas, datos de muestra ficticios con las marcas de MUESTRA,
+  codificación ESC/POS de un layout con atributos (`GS !`, `ESC E`, `GS v 0` en franjas) y acceso a
+  las plantillas guardadas (`ActiveVersion`, `VersionByID`, identificadores fijos del sistema,
+  `LoadIdentity`), con la interfaz `RasterSource` para la fase B.
+- **Equivalencia exacta**: copias literales de `RenderText`, `renderParts`, `quickNoteCoverage`,
+  `renderDocument`, `cashWithDollars`, `renderCashDocument` y sus ayudantes en archivos `_test.go`;
+  la salida nueva es idéntica byte a byte en 6 144 comandas y avisos (incluida la prueba técnica), 168
+  precuentas y tickets y más de 1 000 comprobantes y cortes, a 58 y 80 mm. Las tres plantillas en
+  código se reemplazaron por el renderizador; los nombres antiguos quedan como envolturas finas solo
+  en los archivos de prueba y las pruebas anteriores pasan sin cambiar sus expectativas. El camino
+  plano conserva los bytes ESC/POS y los argumentos de `lp`.
+- **Migración `0018_document_templates.sql`**: `document_templates` (una activa por tipo, nombre
+  único por tipo sin distinguir mayúsculas, una del sistema por tipo, versión vigente de la misma
+  plantilla por llave compuesta diferida), `document_template_versions` inmutables (disparador contra
+  UPDATE, DELETE y TRUNCATE; plantillas del sistema de solo lectura y sin borrado), semilla de las diez
+  plantillas del sistema activas con UUID fijos y el layout exacto de Go,
+  `kitchen_tickets.template_version_id`, tipos de ticket `document_sample` y `document_rerender`,
+  `kitchen_print_jobs.layout`, ámbito SSE `documents` y seis permisos `documents.*` solo al
+  administrador.
+- **Impresión real** sin cambiar reglas de negocio ni enrutamiento: comandas (versión activa al crear
+  el ticket, copia de la identidad y tamaño efectivo; la reimpresión desde la cola usa la versión
+  guardada; sin versión = versión 1 del sistema), precuenta y ticket (incluida la vista previa
+  `GET …/precheck`), comprobantes y cortes (vista previa e impresión; el ticket guarda ahora los datos
+  estructurados, sin el esperado si no se incluyó), vista previa de la cola y prueba técnica (sin
+  cambios visibles). El trabajador carga los rasters y los transportes traducen la IR: plano = camino
+  anterior; con atributos = ESC/POS por red, CUPS raw o texto con aviso, sin fallar.
+- **API** `documents/*` (paquete `internal/designer`, delegado desde `administration/routes.go`):
+  catálogo, plantillas (crear, duplicar, guardar como versión nueva, renombrar, activar, restaurar
+  predeterminada), versiones, vista previa con muestra o documento real, recientes, muestras impresas
+  e impresoras compatibles. Permisos antes de escribir, idempotencia por `operation_id`, revisión
+  optimista (`409 REVISION_CONFLICT`), auditoría y evento `documents.templates.changed` en la misma
+  transacción. «Imprimir con la plantilla vigente» en sus módulos: `kitchen/print-jobs/rerender`,
+  `payments/accounts/{id}/documents/rerender` y `payments/cash-documents/{id}/rerender`.
+- **Puente y servicios**: 17 operaciones nuevas en la lista cerrada de `api.rs` (con su prueba y el
+  filtro `kind` en la lista blanca) y `desktop/src/services/documents.ts` (tipos y llamadas).
+
+### Decisiones
+
+- Las plantillas predeterminadas imprimen los renglones fijos aunque sus datos estén vacíos
+  (`omit_empty: false`, como «Pedido: » en la prueba técnica); los campos que agrega el editor los
+  omiten por omisión. La etiqueta de un campo se imprime seguida de un espacio y el valor.
+- El nombre del establecimiento de un documento es el copiado en él (contexto de la comanda o
+  `establishment` del ticket); la identidad copiada aporta los demás datos. La vista previa con un
+  documento real y la impresión con la plantilla vigente usan la identidad vigente.
+- Una plantilla guardada que dejara de ser válida para el catálogo (o la falta de plantilla activa)
+  imprime con la versión 1 del sistema: la impresión nunca falla por una plantilla.
+- Activar solo sube la revisión de la plantilla activada; la que se desactiva conserva la suya.
+- La vista previa con un documento de caja lee el corte (snapshot inmutable) o la operación, de
+  modo que también funciona con documentos anteriores a la 9B; la impresión con la plantilla vigente
+  solo con los datos guardados desde la 9B (`409 DOCUMENT_DATA_UNAVAILABLE`).
+- Las impresiones con la plantilla vigente usan la impresora del trabajo original (la cola admite
+  elegir otra con `kitchen.printers.manage`) y se rechazan mientras el original o una impresión
+  anterior con la plantilla vigente sigan sin resolver.
+
+### Pruebas de la fase A
+
+Ejecutadas por el agente de la fase en su copia aislada (clúster temporal 55499), con el árbol final:
+
+- `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race -count=1` aprobado en `documents`,
+  `kitchen`, `payments`, `designer`, `administration`, `database` y `operations`.
+- Integración PostgreSQL: `designer` (17.8 s), `database` con la prueba de la 0018 (6.3 s), `administration`
+  (55.6 s), `payments` (2.2 s) y `operations` con la cadena de aceptación completa y las aceptaciones de la 9B
+  (230.7 s): todas `ok`.
+- Equivalencia byte a byte contra las copias literales: 6 144 comandas y avisos, 168 precuentas y tickets y más de
+  1 000 comprobantes y cortes; bytes ESC/POS y argumentos de `lp` sin cambios en el camino plano.
+- `cargo test --locked --offline`: 32 aprobadas y 1 ignorada (la de hardware), incluida la de la lista cerrada de
+  `documents_*`; Vitest de `services/documents.test.ts` y `api.test.ts` (7 pruebas).

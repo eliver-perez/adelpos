@@ -811,8 +811,9 @@ func checkStage8ExistingData(ctx context.Context, t *testing.T, pool *pgxpool.Po
 		t.Fatalf("Los gastos de caja cambiaron al migrar: %s", operations)
 	}
 	var permissionsAfter, cashierAfter, inventoryRole, events int
-	// Los permisos reports.* de la 0017 (etapa 9A) se comprueban en stage9a_reports_upgrade_test.go.
-	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.permissions WHERE key NOT LIKE 'reports.%'),
+	// Los permisos reports.* de la 0017 (etapa 9A) se comprueban en stage9a_reports_upgrade_test.go y
+	// los documents.* de la 0018 (etapa 9B), en stage9b_templates_upgrade_test.go.
+	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.permissions WHERE key NOT LIKE 'reports.%' AND key NOT LIKE 'documents.%'),
         (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='cashier'),
         (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='inventory'),
         (SELECT count(*) FROM app.realtime_events WHERE scope='cash')`).Scan(&permissionsAfter, &cashierAfter, &inventoryRole, &events); err != nil {

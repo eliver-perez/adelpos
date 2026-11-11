@@ -108,6 +108,9 @@ func allowed(scope string, permissions []string) bool {
 		"printing":      "kitchen.queue.read",
 		"configuration": "kitchen.stations.read",
 		"inventory":     "inventory.read",
+		// Diseñador de documentos (etapa 9B): plantillas e identidad documental cambiaron, sin
+		// contenido; lo reciben quienes consultan plantillas.
+		"documents": "documents.templates.read",
 	}[scope]
 	return slices.Contains(permissions, required)
 }

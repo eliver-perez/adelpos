@@ -1,22 +1,18 @@
 package payments
 
 import (
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/shopspring/decimal"
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
-	"local/ad-el-pos/server/internal/moneytext"
-	"local/ad-el-pos/server/internal/plural"
 )
 
 // Documentos de caja (etapa 7, §20): comprobantes de ingreso, retiro y gasto, corte parcial y corte
-// definitivo. Go los renderiza con la misma plantilla de texto de los documentos comerciales y los
-// imprime por la cola durable de la etapa 5 (kitchen_tickets con tipo cash_report o cash_voucher),
-// en la impresora de tickets de Cobros.
+// definitivo. Desde la etapa 9B Go los renderiza con el renderizador único de internal/documents y
+// la plantilla activa de su tipo, y los imprime por la cola durable de la etapa 5 (kitchen_tickets
+// con tipo cash_report o cash_voucher), en la impresora de tickets de Cobros.
 //
 //   - La vista previa es de solo lectura y usa la misma plantilla que la impresión.
 //   - Imprimir nunca crea movimientos financieros, nunca vuelve a cerrar un turno y nunca cambia un
@@ -114,105 +110,13 @@ func displayDate(value string) string {
 	return parsed.Format("02/01/2006")
 }
 
-// currencyText expresa un importe guardado por Go en su moneda con el formato único de
-// moneytext: miles, dos decimales y el signo antes del símbolo («-$1,234.56», «US$20.00»).
-func currencyText(currency, amount string) string {
-	return moneytext.Format(currency, amount)
-}
-
-// rateText expresa el tipo de cambio de un turno: pesos por dólar («$18.50/US$»).
-func rateText(rate string) string {
-	return pesosText(rate) + "/US$"
-}
-
-// zeroAmount indica si un importe guardado es cero (o no es un importe).
-func zeroAmount(amount string) bool {
-	value, err := decimal.NewFromString(amount)
-	return err != nil || value.IsZero()
-}
-
-func pesosText(amount string) string {
-	return currencyText(currencyMXN, amount)
-}
-
-func dollarsText(amount string) string {
-	return currencyText(currencyUSD, amount)
-}
-
-var differenceLabels = map[string]string{
-	resultEven:  "Sin diferencia",
-	resultOver:  "Sobrante",
-	resultShort: "Faltante",
-}
-
-var currencyNames = map[string]string{
-	currencyMXN: "Pesos",
-	currencyUSD: "Dólares",
-}
-
 // documentTitle es el encabezado impreso de cada tipo de documento.
 func documentTitle(kind string, sequence int) string {
-	switch kind {
-	case documentPartialCut:
-		return "CORTE PARCIAL #" + strconv.Itoa(sequence)
-	case documentFinalCut:
-		return "CORTE DEFINITIVO"
-	case operationIncome:
-		return "COMPROBANTE DE INGRESO"
-	case operationWithdrawal:
-		return "COMPROBANTE DE RETIRO"
+	documentKind, found := documents.CashKind(kind)
+	if !found {
+		documentKind = documents.KindCashExpense
 	}
-	return "COMPROBANTE DE GASTO"
-}
-
-// documentLines acumula las líneas de un documento con el ancho del papel.
-type documentLines struct {
-	width int
-	lines []string
-}
-
-func (document *documentLines) text(value string) {
-	document.lines = append(document.lines, wrapWords(value, document.width)...)
-}
-
-// wrapWords reparte un texto en líneas del ancho del papel cortando entre palabras; una palabra
-// más larga que el ancho se corta como en los documentos comerciales.
-func wrapWords(value string, width int) []string {
-	words := strings.Fields(printable(value))
-	if len(words) == 0 {
-		return []string{""}
-	}
-	lines := []string{}
-	current := ""
-	for _, word := range words {
-		candidate := word
-		if current != "" {
-			candidate = current + " " + word
-		}
-		if len([]rune(candidate)) <= width {
-			current = candidate
-			continue
-		}
-		if current != "" {
-			lines = append(lines, current)
-		}
-		pieces := fit(word, width)
-		lines = append(lines, pieces[:len(pieces)-1]...)
-		current = pieces[len(pieces)-1]
-	}
-	return append(lines, current)
-}
-
-func (document *documentLines) pair(left, right string) {
-	document.lines = append(document.lines, row(left, right, document.width)...)
-}
-
-func (document *documentLines) divider() {
-	document.lines = append(document.lines, strings.Repeat("-", document.width))
-}
-
-func (document *documentLines) String() string {
-	return strings.Join(document.lines, "\n")
+	return documents.CashTitle(documentKind, sequence)
 }
 
 // sourceTitle es el título del documento según su origen.
@@ -232,222 +136,64 @@ func (handler *service) reportIncludesExpected(source cashDocumentSource) bool {
 	return handler.expectedVisible(source.shift)
 }
 
-// renderCashDocument produce el texto del documento con el ancho indicado.
-func (handler *service) renderCashDocument(source cashDocumentSource, includeExpected bool, width int) (string, error) {
+// renderedCash es un documento de caja renderizado con la plantilla activa de su tipo: la IR, los
+// datos estructurados que guarda el ticket (etapa 9B), la versión usada y si incluye lo protegido.
+type renderedCash struct {
+	layout          *documents.Layout
+	data            documents.CashData
+	version         *documents.Version
+	includeExpected bool
+}
+
+// renderCashSource renderiza un comprobante o corte al ancho de papel indicado con la plantilla
+// activa de su tipo. El esperado y las diferencias solo se incluyen para quien puede consultarlos y
+// fuera del arqueo; si no se incluyen, tampoco quedan en los datos estructurados.
+func (handler *service) renderCashSource(source cashDocumentSource, paper int) (*renderedCash, error) {
 	header, err := handler.readDocumentHeader()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	document := &documentLines{width: width}
-	document.text(header.establishment)
-	document.text(source.title())
-	if source.report != nil {
-		renderReport(document, header, source, includeExpected)
-	} else {
-		renderVoucher(document, header, source)
+	kind, found := documents.CashKind(source.kind)
+	if !found {
+		return nil, invalid("El tipo de documento de caja no existe.")
 	}
-	document.divider()
-	document.text("Documento interno de caja. No es un comprobante fiscal (CFDI).")
-	return document.String(), nil
-}
-
-// renderReport escribe el contenido de un corte (§20): control, ventas y pagos por método,
-// devoluciones, propinas, descuentos y cortesías, ingresos, retiros, gastos, lo declarado, el
-// esperado y las diferencias (según permisos) y las observaciones.
-func renderReport(document *documentLines, header *documentHeader, source cashDocumentSource, includeExpected bool) {
-	report := source.report
-	shift := source.shift
-	control := report.Snapshot.Control
-	totals := report.Snapshot.Accumulated
-	document.text("Caja: " + control.RegisterName)
-	document.text("Turno del " + displayDate(control.BusinessDate) + " · responsable " + control.OpenedByName)
-	document.pair("Apertura", header.local(shift.OpenedAt))
-	if report.Kind == "final" {
-		document.pair("Cierre", header.local(report.CoveredTo))
-		if shift.ClosedByName != nil {
-			document.text("Cerró: " + *shift.ClosedByName)
-		}
-	} else {
-		document.pair("Corte", header.local(report.CoveredTo))
-		if report.PreviousReportID != nil {
-			document.pair("Corte anterior", header.local(report.CoveredFrom))
-		}
+	includeExpected := handler.reportIncludesExpected(source)
+	data := cashData(header, source, includeExpected)
+	identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, err
 	}
-	document.text("Realizó: " + report.CreatedByName + " · " + report.DeviceName)
-	document.divider()
-	document.pair("Fondo inicial", pesosText(control.OpeningFloat))
-	if control.FloatUSD != nil {
-		document.pair("Fondo inicial en dólares", dollarsText(*control.FloatUSD))
+	identity.Name = header.establishment
+	data.Identity = identity
+	version, err := documents.ActiveVersion(handler.ctx, handler.tx, kind)
+	if err != nil {
+		return nil, err
 	}
-	if control.USDRate != nil {
-		document.pair("Tipo de cambio del turno", rateText(*control.USDRate))
+	layout, err := documents.Render(kind, version.Template, documents.Data{Cash: &data}, documents.RenderOptions{
+		PaperWidth: paper, IncludeExpected: includeExpected,
+	})
+	if err != nil {
+		return nil, err
 	}
-	document.divider()
-	document.text("VENTAS Y PAGOS POR MÉTODO")
-	if len(totals.Methods) == 0 {
-		document.text("Sin cobros registrados.")
-	}
-	for _, method := range totals.Methods {
-		document.pair(method.MethodName, pesosText(method.Sales))
-		if !zeroAmount(method.Tips) {
-			document.pair("   Propinas", pesosText(method.Tips))
-		}
-		if !zeroAmount(method.Refunds) {
-			document.pair("   Devoluciones", pesosText(method.Refunds))
-		}
-	}
-	document.pair("Ventas", pesosText(totals.Sales))
-	document.pair("Devoluciones", pesosText(totals.Refunded))
-	document.pair("Propinas (no son venta)", pesosText(totals.Tips))
-	document.pair("Descuentos ("+strconv.Itoa(totals.DiscountCount)+")", pesosText(totals.Discounts))
-	document.pair("Cortesías ("+strconv.Itoa(totals.CourtesyCount)+")", pesosText(totals.Courtesies))
-	document.pair("Cobros registrados", strconv.Itoa(totals.Payments))
-	document.divider()
-	document.text("INGRESOS, RETIROS Y GASTOS")
-	for _, cash := range totals.Cash {
-		document.text(currencyNames[cash.Currency])
-		document.pair("   Ingresos", currencyText(cash.Currency, cash.Income))
-		document.pair("   Retiros", currencyText(cash.Currency, cash.Withdrawals))
-		document.pair("   Gastos", currencyText(cash.Currency, cash.Expenses))
-		if !zeroAmount(cash.CorrectionsIn) || !zeroAmount(cash.CorrectionsOut) {
-			document.pair("   Correcciones que entran", currencyText(cash.Currency, cash.CorrectionsIn))
-			document.pair("   Correcciones que salen", currencyText(cash.Currency, cash.CorrectionsOut))
-		}
-	}
-	if totals.Regularizations > 0 {
-		// La frase concuerda con el número: «1 regularización de un turno cerrado; no cambia este
-		// turno.» y «2 regularizaciones de turnos cerrados; no cambian este turno.».
-		regularizations := plural.Count(
-			totals.Regularizations,
-			"regularización de un turno cerrado",
-			"regularizaciones de turnos cerrados",
-		)
-		verb := plural.Word(totals.Regularizations, "no cambia", "no cambian")
-		document.text(regularizations + "; " + verb + " este turno.")
-	}
-	renderDeclared(document, report, shiftHandlesDollars(shift))
-	renderSensitive(document, report, includeExpected)
-	if report.Snapshot.Declared != nil && strings.TrimSpace(report.Snapshot.Declared.CashierNotes) != "" {
-		document.divider()
-		document.text("OBSERVACIONES")
-		document.text(report.Snapshot.Declared.CashierNotes)
-	}
-}
-
-// renderDeclared escribe lo que el cajero contó en el arqueo (solo en el corte definitivo).
-func renderDeclared(document *documentLines, report *CashReport, dollars bool) {
-	declared := report.Snapshot.Declared
-	if declared == nil {
-		return
-	}
-	document.divider()
-	document.text("EFECTIVO DECLARADO")
-	document.pair("Pesos", pesosText(declared.CountedMXN))
-	if dollars {
-		document.pair("Dólares", dollarsText(declared.CountedUSD))
-	}
-	if !zeroAmount(declared.ExtraMXN) {
-		document.pair("   Incluye adicional en pesos", pesosText(declared.ExtraMXN))
-	}
-	if !zeroAmount(declared.ExtraUSD) {
-		document.pair("   Incluye adicional en dólares", dollarsText(declared.ExtraUSD))
-	}
-}
-
-// renderSensitive escribe el efectivo esperado y las diferencias por moneda, o una nota de que no
-// se incluyen.
-func renderSensitive(document *documentLines, report *CashReport, includeExpected bool) {
-	document.divider()
-	sensitive := report.Snapshot.Sensitive
-	if !includeExpected || sensitive == nil {
-		document.text("Esperado y diferencias: no incluidos.")
-		return
-	}
-	expected := sensitive.Expected
-	document.text("EFECTIVO ESPERADO")
-	document.pair("Pesos", pesosText(expected.MXN))
-	document.pair("Dólares", dollarsText(expected.USD))
-	if expected.TotalEquivalentMXN != nil {
-		document.pair("Total equivalente en pesos", pesosText(*expected.TotalEquivalentMXN))
-	}
-	differences := sensitive.Differences
-	if differences == nil {
-		return
-	}
-	document.text("DIFERENCIAS (CONTADO - ESPERADO)")
-	document.pair("Pesos · "+differenceLabels[differences.ResultMXN], pesosText(differences.MXN))
-	document.pair("Dólares · "+differenceLabels[differences.ResultUSD], dollarsText(differences.USD))
-	if differences.EquivalentMXN != nil {
-		document.pair("Equivalente en pesos", pesosText(*differences.EquivalentMXN))
-	}
-}
-
-// renderVoucher escribe el comprobante de un ingreso, retiro o gasto. Nunca contiene el efectivo
-// esperado de la caja.
-func renderVoucher(document *documentLines, header *documentHeader, source cashDocumentSource) {
-	operation := source.operation
-	document.text("Caja: " + operation.RegisterName)
-	document.text("Turno del " + displayDate(source.shift.BusinessDate))
-	document.pair("Fecha", header.local(operation.CreatedAt))
-	document.divider()
-	if operation.Kind == operationExpense && operation.CategoryName != nil {
-		document.text("Categoría: " + *operation.CategoryName)
-	}
-	if operation.TypeLabel != nil {
-		label := "Tipo: "
-		if operation.Kind == operationWithdrawal {
-			label = "Motivo: "
-		}
-		document.text(label + *operation.TypeLabel)
-	}
-	document.text("Concepto: " + operation.Concept)
-	document.pair("Importe", currencyText(operation.Currency, operation.Amount))
-	if operation.Currency == currencyUSD && operation.USDRate != nil {
-		document.pair("Tipo de cambio", rateText(*operation.USDRate))
-		document.pair("Equivale a", pesosText(operation.EquivalentMXN))
-	}
-	if operation.Reference != "" {
-		document.text("Referencia: " + operation.Reference)
-	}
-	if operation.Notes != "" {
-		document.text("Observaciones: " + operation.Notes)
-	}
-	if operation.Exceptional {
-		document.text("Salida excepcional: " + operation.Reason)
-	}
-	document.divider()
-	document.text("Registró: " + operation.ActorName + " · " + operation.DeviceName)
-	if operation.AuthorizedByName != nil && operation.AuthorizationMode != nil {
-		document.text("Autorizó: " + *operation.AuthorizedByName)
-		if *operation.AuthorizationMode == "supervisor" {
-			document.text("   Autorización de supervisor")
-		} else {
-			document.text("   Con su propio permiso")
-		}
-	}
-	if operation.Status == "corrected" {
-		document.text("Estado: corregido por una corrección posterior.")
-	}
-	document.text("")
-	document.text("Firma: ______________________")
+	return &renderedCash{layout: layout, data: data, version: version, includeExpected: includeExpected}, nil
 }
 
 // cashPrinter devuelve la impresora de tickets configurada en Cobros (el mismo criterio de los
-// documentos comerciales de la etapa 6) y el ancho de texto del papel.
+// documentos comerciales de la etapa 6) y el ancho de su papel (80 mm si no hay una configurada).
 func (handler *service) cashPrinter() (*string, int, error) {
 	settings, err := handler.settings()
 	if err != nil {
 		return nil, 0, err
 	}
 	if settings.ReceiptPrinterID == nil {
-		return nil, paperWidth(80), nil
+		return nil, 80, nil
 	}
-	var columns int
+	var paper int
 	if err := handler.tx.QueryRow(handler.ctx, "SELECT paper_width FROM app.kitchen_printers WHERE id=$1",
-		*settings.ReceiptPrinterID).Scan(&columns); err != nil {
+		*settings.ReceiptPrinterID).Scan(&paper); err != nil {
 		return nil, 0, err
 	}
-	return settings.ReceiptPrinterID, paperWidth(columns), nil
+	return settings.ReceiptPrinterID, paperWidth(paper), nil
 }
 
 // existingDocument devuelve el documento ya registrado de un corte o de una operación.
@@ -460,21 +206,22 @@ func (handler *service) existingDocument(source cashDocumentSource) (*CashDocume
 	} else {
 		identifier = source.operation.ID
 	}
-	documents, err := handler.listCashDocuments(condition, identifier)
-	if err != nil || len(documents) == 0 {
+	records, err := handler.listCashDocuments(condition, identifier)
+	if err != nil || len(records) == 0 {
 		return nil, err
 	}
-	return &documents[0], nil
+	return &records[0], nil
 }
 
 // enqueueCashDocument registra el documento y su trabajo en la cola con la transacción del
 // servicio. No valida permisos: lo hacen las acciones que lo llaman, antes de escribir.
-func (handler *service) enqueueCashDocument(source cashDocumentSource, printerID string, width int) (PrintOutcome, error) {
-	includeExpected := handler.reportIncludesExpected(source)
-	content, err := handler.renderCashDocument(source, includeExpected, width)
+func (handler *service) enqueueCashDocument(source cashDocumentSource, printerID string, paper int) (PrintOutcome, error) {
+	rendered, err := handler.renderCashSource(source, paper)
 	if err != nil {
 		return PrintOutcome{}, err
 	}
+	includeExpected := rendered.includeExpected
+	content := rendered.layout.Text()
 	ticketKind := kitchen.KindCashVoucher
 	var reportID, operationID *string
 	if source.report != nil {
@@ -486,13 +233,16 @@ func (handler *service) enqueueCashDocument(source cashDocumentSource, printerID
 	documentID := newID()
 	// El ticket conserva el contenido impreso y lo necesario para que la cola aplique los permisos
 	// de caja (turno e inclusión del esperado), sin claves que la cola interprete como comanda.
+	// Desde la 9B guarda además la versión de plantilla y los datos estructurados (sin el esperado
+	// si el documento no lo incluye) para poder imprimirlo después con la plantilla vigente.
 	ticket := map[string]any{
 		"kind": ticketKind, "document_kind": source.kind, "document_id": documentID, "shift_id": source.shift.ID,
 		"report_id": reportID, "cash_operation_id": operationID, "includes_expected": includeExpected,
-		"title": source.title(), "content": content,
+		"title": source.title(), "content": content, "template_version_id": rendered.version.ID, "data": rendered.data,
 	}
 	job, ticketID, err := kitchen.EnqueueCommercial(handler.ctx, handler.tx, kitchen.CommercialPrint{
-		Kind: ticketKind, Document: ticket, Content: content, PrinterID: printerID, OperationID: handler.operationID,
+		Kind: ticketKind, Document: ticket, Content: content, Layout: rendered.layout, TemplateVersionID: &rendered.version.ID,
+		PrinterID: printerID, OperationID: handler.operationID,
 		ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
 	})
 	if err != nil {
@@ -608,12 +358,11 @@ func (handler *service) operationSource(operationID string) (cashDocumentSource,
 // previewSource renderiza la vista previa sin escribir: los mismos datos, permisos y plantilla
 // que la impresión, con el ancho de la impresora de tickets (80 mm si no hay una configurada).
 func (handler *service) previewSource(source cashDocumentSource) (any, error) {
-	_, width, err := handler.cashPrinter()
+	_, paper, err := handler.cashPrinter()
 	if err != nil {
 		return nil, err
 	}
-	includeExpected := handler.reportIncludesExpected(source)
-	content, err := handler.renderCashDocument(source, includeExpected, width)
+	rendered, err := handler.renderCashSource(source, paper)
 	if err != nil {
 		return nil, err
 	}
@@ -621,13 +370,9 @@ func (handler *service) previewSource(source cashDocumentSource) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	columns := 80
-	if width == paperWidth(58) {
-		columns = 58
-	}
 	return CashDocumentPreview{
-		Kind: source.kind, Title: source.title(), Content: content, IncludesExpected: includeExpected, PaperWidth: columns,
-		Document: existing,
+		Kind: source.kind, Title: source.title(), Content: rendered.layout.Text(), IncludesExpected: rendered.includeExpected,
+		PaperWidth: paper, Document: existing,
 	}, nil
 }
 

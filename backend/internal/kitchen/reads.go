@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -169,7 +170,7 @@ func (handler *service) authorizeResource(parts []string) error {
 		_, err := handler.filteredDocument(parts[1])
 		return err
 	}
-	if parts[0] == "jobs" || parts[0] == "releases" || parts[0] == "changes" {
+	if parts[0] == "jobs" || parts[0] == "releases" || parts[0] == "changes" || parts[0] == "print-jobs" {
 		if !handler.request.Actor.Can("kitchen.stations.all") {
 			return &Error{Status: 403, Code: "STATION_SCOPE_DENIED", Message: "Esta operación requiere acceso a todas las estaciones afectadas."}
 		}
@@ -184,6 +185,9 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 	}
 	if isCashKind(kind) {
 		return handler.cashDocument(id, kind)
+	}
+	if isDesignerKind(kind) {
+		return handler.designerDocument(id, kind)
 	}
 	if isCommercialKind(kind) {
 		return handler.commercialDocument(id, kind)
@@ -207,8 +211,41 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 		return nil, &Error{Status: 403, Code: "STATION_SCOPE_DENIED", Message: "No tienes acceso a las estaciones de esta comanda."}
 	}
 	document.Sections = visible
-	document.Preview = RenderText(*document, 80)
+	// La vista previa de la cola usa la misma versión de plantilla que la impresión de la comanda.
+	layout, err := handler.renderStored(*document, 80)
+	if err != nil {
+		return nil, err
+	}
+	document.Preview = layout.Text()
 	return document, nil
+}
+
+// designerDocument muestra en la cola una muestra del diseñador o un histórico impreso con la
+// plantilla vigente con los permisos de su origen: un documento de caja sigue las reglas de caja
+// (incluido el efectivo esperado), uno comercial las de los documentos con importes y una comanda
+// exige consultar precios solo si los guardó. Una muestra solo contiene datos ficticios.
+func (handler *service) designerDocument(id, kind string) (*Document, error) {
+	if err := handler.request.Actor.Require("kitchen.stations.all"); err != nil {
+		return nil, err
+	}
+	if kind == documents.TicketKindSample {
+		return handler.renderedPreview(id, kind)
+	}
+	var sourceKind string
+	var withPrices bool
+	if err := handler.tx.QueryRow(handler.ctx, `SELECT coalesce(document->>'source_kind',''),
+        coalesce((document->>'has_prices')::boolean,false) FROM app.kitchen_tickets WHERE id=$1`, id).Scan(&sourceKind, &withPrices); err != nil {
+		return nil, err
+	}
+	switch {
+	case isCashKind(sourceKind):
+		return handler.cashDocument(id, kind)
+	case isCommercialKind(sourceKind):
+		return handler.commercialDocument(id, kind)
+	case withPrices && !handler.request.Actor.Can("catalog.prices.read"):
+		return nil, &Error{Status: 403, Code: "PERMISSION_DENIED", Message: "No tienes permiso para consultar documentos con importes."}
+	}
+	return handler.renderedPreview(id, kind)
 }
 
 // commercialDocument muestra en la cola un ticket o precuenta con su contenido impreso. Contiene
@@ -220,6 +257,11 @@ func (handler *service) commercialDocument(id, kind string) (*Document, error) {
 	if !handler.request.Actor.Can("catalog.prices.read") && !handler.request.Actor.Can("payments.read") {
 		return nil, &Error{Status: 403, Code: "PERMISSION_DENIED", Message: "No tienes permiso para consultar documentos con importes."}
 	}
+	return handler.renderedPreview(id, kind)
+}
+
+// renderedPreview devuelve el contenido impreso del último trabajo de un documento ya renderizado.
+func (handler *service) renderedPreview(id, kind string) (*Document, error) {
 	var document Document
 	err := handler.tx.QueryRow(handler.ctx, `SELECT t.created_at,coalesce((SELECT j.content FROM app.kitchen_print_jobs j
         WHERE j.ticket_id=t.id ORDER BY j.created_at DESC LIMIT 1),'') FROM app.kitchen_tickets t WHERE t.id=$1`, id).Scan(&document.CreatedAt, &document.Preview)
@@ -292,14 +334,14 @@ func (handler *service) readJobs(parts []string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		job, err := one[map[string]any](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content' FROM app.kitchen_print_jobs j WHERE id=$1", parts[1])
+		job, err := one[map[string]any](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j WHERE id=$1", parts[1])
 		return map[string]any{"job": job, "attempts": attempts}, err
 	}
 	page, err := handler.page()
 	if err != nil {
 		return nil, err
 	}
-	return many[map[string]any](handler.ctx, handler.tx, `SELECT (to_jsonb(j)-'content')||jsonb_build_object('printer_name',p.name)
+	return many[map[string]any](handler.ctx, handler.tx, `SELECT (to_jsonb(j)-'content'-'layout')||jsonb_build_object('printer_name',p.name)
         FROM app.kitchen_print_jobs j JOIN app.kitchen_printers p ON p.id=j.printer_id
         WHERE ($1='' OR j.state=$1) ORDER BY j.created_at DESC,j.id DESC LIMIT 100 OFFSET $2`, handler.request.Query.Get("state"), (page-1)*100)
 }

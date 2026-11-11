@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -21,9 +22,15 @@ const (
 	KindCashDrawer  = "cash_drawer"
 )
 
-// isCommercialKind indica un documento ya renderizado que se imprime y reimprime tal cual.
+// isCommercialKind indica un documento ya renderizado que se imprime y reimprime tal cual. Desde la
+// etapa 9B incluye las muestras del diseñador y los históricos impresos con la plantilla vigente.
 func isCommercialKind(kind string) bool {
-	return kind == "receipt" || kind == "precheck" || kind == KindCashReport || kind == KindCashVoucher
+	return kind == "receipt" || kind == "precheck" || kind == KindCashReport || kind == KindCashVoucher || isDesignerKind(kind)
+}
+
+// isDesignerKind indica una muestra del diseñador o un histórico impreso con la plantilla vigente.
+func isDesignerKind(kind string) bool {
+	return kind == documents.TicketKindSample || kind == documents.TicketKindRerender
 }
 
 // isCashKind indica un ticket que pertenece a la administración de caja: sus copias y su
@@ -33,16 +40,22 @@ func isCashKind(kind string) bool {
 }
 
 // renderedKinds es la lista SQL de los tipos que no son comandas: no aparecen en su listado.
-const renderedKinds = "'receipt','precheck','cash_report','cash_voucher','cash_drawer'"
+const renderedKinds = "'receipt','precheck','cash_report','cash_voucher','cash_drawer','document_sample','document_rerender'"
 
+// CommercialPrint es un documento comercial o de caja por encolar. Layout es su IR (etapa 9B): el
+// contenido del trabajo es su texto y, si lleva atributos o imágenes, el trabajo guarda la IR. Sin
+// Layout se encola Content como texto plano.
 type CommercialPrint struct {
-	Kind        string
-	Document    any
-	Content     string
-	PrinterID   string
-	OperationID string
-	ActorID     string
-	DeviceID    string
+	Kind     string
+	Document any
+	Content  string
+	Layout   *documents.Layout
+	// TemplateVersionID es la versión de plantilla con la que se renderizó (etapa 9B).
+	TemplateVersionID *string
+	PrinterID         string
+	OperationID       string
+	ActorID           string
+	DeviceID          string
 }
 
 // sanitizeContent elimina controles de usuario: solo el controlador del transporte genera comandos.
@@ -57,7 +70,7 @@ func sanitizeContent(content string) string {
 // EnqueueCommercial guarda el documento y su trabajo de impresión en la transacción del pago. Un
 // fallo posterior de la impresora nunca revierte el pago: el trabajo queda en la cola con su estado.
 func EnqueueCommercial(ctx context.Context, tx pgx.Tx, input CommercialPrint) (*PrintJob, string, error) {
-	if !isCommercialKind(input.Kind) {
+	if !isCommercialKind(input.Kind) || isDesignerKind(input.Kind) {
 		return nil, "", invalid("Tipo de documento comercial no válido.")
 	}
 	printer, err := one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", input.PrinterID)
@@ -65,16 +78,66 @@ func EnqueueCommercial(ctx context.Context, tx pgx.Tx, input CommercialPrint) (*
 		return nil, "", err
 	}
 	ticketID := events.NewID()
-	if _, err := tx.Exec(ctx, "INSERT INTO app.kitchen_tickets(id,kind,station_ids,document) VALUES ($1,$2,'{}',$3)",
-		ticketID, input.Kind, encoded(input.Document)); err != nil {
+	if _, err := tx.Exec(ctx, "INSERT INTO app.kitchen_tickets(id,kind,station_ids,document,template_version_id) VALUES ($1,$2,'{}',$3,$4)",
+		ticketID, input.Kind, encoded(input.Document), input.TemplateVersionID); err != nil {
 		return nil, "", err
 	}
 	handler := service{ctx: ctx, tx: tx, operationID: input.OperationID, request: Request{Actor: Actor{UserID: input.ActorID, DeviceID: input.DeviceID}}}
-	job, err := handler.enqueueContent(ticketID, *printer, nil, sanitizeContent(input.Content))
+	var job *PrintJob
+	if input.Layout != nil {
+		job, err = handler.enqueueLayout(ticketID, *printer, nil, input.Layout)
+	} else {
+		job, err = handler.enqueueContent(ticketID, *printer, nil, sanitizeContent(input.Content))
+	}
 	if err != nil {
 		return nil, "", err
 	}
 	return job, ticketID, handler.history("print."+input.Kind+"_requested", &job.ID, nil, job)
+}
+
+// RenderedPrint es una muestra del diseñador o un histórico impreso con la plantilla vigente (etapa
+// 9B). Printer, si existe, es la fotografía de la impresora del documento original y prevalece
+// sobre PrinterID (la impresora vigente elegida para una muestra).
+type RenderedPrint struct {
+	Kind     string
+	Document any
+	Layout   *documents.Layout
+	// TemplateVersionID es la versión vigente usada (nil en una muestra, cuyo layout no se guardó).
+	TemplateVersionID *string
+	PrinterID         string
+	Printer           *Printer
+	History           string
+	OperationID       string
+	ActorID           string
+	DeviceID          string
+}
+
+// EnqueueRendered guarda el ticket y su trabajo en la cola durable de siempre, con el mismo lease,
+// control de duplicados y resultados inciertos. Nunca crea ventas, pagos, movimientos ni documentos
+// comerciales o de caja: solo el ticket del tipo indicado y su trabajo.
+func EnqueueRendered(ctx context.Context, tx pgx.Tx, input RenderedPrint) (*PrintJob, string, error) {
+	if !isDesignerKind(input.Kind) || input.Layout == nil {
+		return nil, "", invalid("Tipo de documento renderizado no válido.")
+	}
+	printer := input.Printer
+	if printer == nil {
+		found, err := one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", input.PrinterID)
+		if err != nil {
+			return nil, "", err
+		}
+		printer = found
+	}
+	ticketID := events.NewID()
+	if _, err := tx.Exec(ctx, "INSERT INTO app.kitchen_tickets(id,kind,station_ids,document,template_version_id) VALUES ($1,$2,'{}',$3,$4)",
+		ticketID, input.Kind, encoded(input.Document), input.TemplateVersionID); err != nil {
+		return nil, "", err
+	}
+	handler := service{ctx: ctx, tx: tx, operationID: input.OperationID, request: Request{Actor: Actor{UserID: input.ActorID, DeviceID: input.DeviceID}}}
+	job, err := handler.enqueueLayout(ticketID, *printer, nil, input.Layout)
+	if err != nil {
+		return nil, "", err
+	}
+	return job, ticketID, handler.history(input.History, &job.ID, nil, job)
 }
 
 // ReprintCommercial solicita otra copia idéntica de un documento comercial. Como en las comandas,
@@ -104,7 +167,8 @@ func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, ac
 		return nil, &Error{Status: 409, Code: "PRINT_COPY_PENDING", Message: "Ya existe una copia pendiente o sin resolver. Revisa ese trabajo antes de solicitar otra."}
 	}
 	handler := service{ctx: ctx, tx: tx, operationID: operationID, request: Request{Actor: Actor{UserID: actorID, DeviceID: deviceID}}}
-	job, err := handler.enqueueContent(ticketID, original.PrinterSnapshot, &original.ID, original.Content)
+	// La copia conserva el contenido y, si lo tiene, el layout con atributos del original.
+	job, err := handler.enqueueJob(ticketID, original.PrinterSnapshot, &original.ID, original.Content, original.Layout)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -16,6 +17,10 @@ type Worker struct {
 	Pool      *pgxpool.Pool
 	Transport Transport
 	Logger    *slog.Logger
+	// Rasters carga los bits del logotipo de los documentos que lo llevan (etapa 9B; la tabla y su
+	// implementación son de la fase B). Sin valor, la imagen se omite con aviso y el documento se
+	// imprime igual.
+	Rasters documents.RasterSource
 }
 
 func (worker *Worker) Run(ctx context.Context) {
@@ -132,7 +137,7 @@ func (worker *Worker) claim(ctx context.Context) (*ownedJob, error) {
 	// después, sin nadie que lo atienda, es un riesgo físico. Se resuelve desde la cola o se vuelve
 	// a abrir manualmente desde Caja, con su permiso y motivo.
 	candidates, err := many[PrintJob](ctx, tx, `SELECT to_jsonb(j)||jsonb_build_object(
-		'text_size',t.document->'settings'->>'text_size',
+		'text_size',coalesce(t.document->>'text_size',t.document->'settings'->>'text_size'),
 		'ticket_kind',t.kind,
 		'drawer_pulse',CASE WHEN t.kind='cash_drawer' THEN t.document->'drawer_pulse' END)
 		FROM app.kitchen_print_jobs j JOIN app.kitchen_tickets t ON t.id=j.ticket_id
@@ -190,6 +195,25 @@ func (worker *Worker) claim(ctx context.Context) (*ownedJob, error) {
 	return nil, nil
 }
 
+// loadRasters carga los bits de las imágenes de un documento con atributos. Una imagen que no se
+// puede cargar se omite: el transporte imprime el resto del documento y lo avisa.
+func (worker *Worker) loadRasters(ctx context.Context, layout *documents.Layout) map[string]*documents.Raster {
+	rasters := map[string]*documents.Raster{}
+	if layout == nil || worker.Rasters == nil {
+		return rasters
+	}
+	for _, line := range layout.Lines {
+		if line.Image == nil || rasters[line.Image.RasterID] != nil {
+			continue
+		}
+		raster, err := worker.Rasters.Raster(ctx, line.Image.RasterID)
+		if err == nil && raster != nil {
+			rasters[line.Image.RasterID] = raster
+		}
+	}
+	return rasters
+}
+
 func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 	owned, err := worker.claim(ctx)
 	if err != nil || owned == nil {
@@ -211,6 +235,7 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 		outcome = Outcome{State: "error", Message: "No se pudo validar el destino; no se envió el documento."}
 	}
 	if checkError == nil && active {
+		owned.Job.Rasters = worker.loadRasters(attemptContext, owned.Job.Layout)
 		outcome = transport.Submit(attemptContext, owned.Job)
 	}
 	cancel()

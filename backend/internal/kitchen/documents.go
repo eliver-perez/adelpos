@@ -6,6 +6,7 @@ import (
 
 	"github.com/shopspring/decimal"
 
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -87,6 +88,18 @@ func (handler *service) persistDocuments(context TicketContext, sections map[str
 	if err != nil {
 		return err
 	}
+	// Etapa 9B: cada comanda guarda la versión de la plantilla activa de su tipo y una copia de la
+	// identidad del establecimiento; su reimpresión usa esas mismas copias. El enrutamiento, la
+	// agrupación y la cola no dependen de la plantilla.
+	version, err := documents.ActiveVersion(handler.ctx, handler.tx, documentKind(kind))
+	if err != nil {
+		return err
+	}
+	identity, err := documents.LoadIdentity(handler.ctx, handler.tx)
+	if err != nil {
+		return err
+	}
+	textSize := documents.EffectiveTextSize(version.Template, settings.TextSize)
 	groups := map[string][]Section{}
 	stations := make([]Station, 0, len(sections))
 	for _, section := range sections {
@@ -117,13 +130,16 @@ func (handler *service) persistDocuments(context TicketContext, sections map[str
 		groups[key] = append(groups[key], section)
 	}
 	for _, group := range groups {
-		document := Document{ID: events.NewID(), Kind: kind, CreatedAt: time.Now().UTC(), Context: context, Settings: *settings, Sections: group}
+		versionID := version.ID
+		copied := identity
+		document := Document{ID: events.NewID(), Kind: kind, CreatedAt: time.Now().UTC(), Context: context, Settings: *settings, Sections: group,
+			TemplateVersionID: &versionID, Identity: &copied, TextSize: textSize}
 		ids := []string{}
 		for _, section := range group {
 			ids = append(ids, section.Station.ID)
 		}
-		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_tickets(id,source_event_id,release_id,kind,station_ids,document)
-            VALUES ($1,$2,$3,$4,$5,$6)`, document.ID, eventID, releaseID, kind, ids, encoded(document))
+		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_tickets(id,source_event_id,release_id,kind,station_ids,document,
+            template_version_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`, document.ID, eventID, releaseID, kind, ids, encoded(document), versionID)
 		if err != nil {
 			return err
 		}
@@ -155,13 +171,36 @@ func clearInstructionPrices(instruction *Instructions) {
 	}
 }
 
+// enqueue renderiza una comanda guardada al ancho de la impresora destino, con la versión de
+// plantilla que guardó al emitirse, y la encola.
 func (handler *service) enqueue(document Document, printer Printer, originalID *string) (*PrintJob, error) {
-	return handler.enqueueContent(document.ID, printer, originalID, RenderText(document, printer.PaperWidth))
+	layout, err := handler.renderStored(document, printer.PaperWidth)
+	if err != nil {
+		return nil, err
+	}
+	return handler.enqueueLayout(document.ID, printer, originalID, layout)
 }
 
-// enqueueContent guarda un trabajo con su contenido ya renderizado. Comandas y documentos
-// comerciales comparten así la misma cola durable, el lease y la protección contra duplicados.
+// enqueueLayout encola un documento renderizado: el contenido es siempre su texto (Text) y, solo si
+// lleva atributos o imágenes, el trabajo guarda además la IR para el transporte. Los documentos de
+// texto plano (todas las plantillas predeterminadas) producen trabajos idénticos a los anteriores.
+func (handler *service) enqueueLayout(ticketID string, printer Printer, originalID *string, layout *documents.Layout) (*PrintJob, error) {
+	var stored *documents.Layout
+	if !layout.Plain() {
+		stored = layout.ForQueue()
+	}
+	return handler.enqueueJob(ticketID, printer, originalID, layout.Text(), stored)
+}
+
+// enqueueContent guarda un trabajo de texto plano ya renderizado.
 func (handler *service) enqueueContent(ticketID string, printer Printer, originalID *string, content string) (*PrintJob, error) {
+	return handler.enqueueJob(ticketID, printer, originalID, content, nil)
+}
+
+// enqueueJob guarda un trabajo con su contenido ya renderizado y, si lo tiene, su layout con
+// atributos. Comandas y documentos comerciales comparten así la misma cola durable, el lease y la
+// protección contra duplicados.
+func (handler *service) enqueueJob(ticketID string, printer Printer, originalID *string, content string, layout *documents.Layout) (*PrintJob, error) {
 	state := "pending"
 	message := ""
 	if !printer.Active || printer.Transport == "agent" {
@@ -173,15 +212,19 @@ func (handler *service) enqueueContent(ticketID string, printer Printer, origina
 	if handler.operationID != "" {
 		operationID = &handler.operationID
 	}
+	var storedLayout []byte
+	if layout != nil {
+		storedLayout = encoded(layout)
+	}
 	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_print_jobs(id,ticket_id,printer_id,operation_id,original_job_id,
-        printer_snapshot,content,state,last_error) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, jobID, ticketID, printer.ID,
-		operationID, originalID, encoded(printer), content, state, message)
+        printer_snapshot,content,state,last_error,layout) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, jobID, ticketID, printer.ID,
+		operationID, originalID, encoded(printer), content, state, message, storedLayout)
 	if err != nil {
 		return nil, err
 	}
 	if err := events.Append(handler.ctx, handler.tx, "printing.queued", "printing", &jobID, nil); err != nil {
 		return nil, err
 	}
-	job, err := one[PrintJob](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content' FROM app.kitchen_print_jobs j WHERE id=$1", jobID)
+	job, err := one[PrintJob](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j WHERE id=$1", jobID)
 	return job, err
 }

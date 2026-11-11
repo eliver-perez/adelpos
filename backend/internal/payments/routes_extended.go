@@ -14,6 +14,9 @@ func extendedRoute(method, action string) *route {
 		return &route{"payments.tickets.print", false, (*service).printPrecheck}
 	case "documents/reprint":
 		return &route{"payments.tickets.reprint", false, (*service).reprintDocument}
+	case "documents/rerender":
+		// Etapa 9B: impresión con la plantilla vigente; exige además documents.history.render_current.
+		return &route{"payments.tickets.reprint", false, (*service).rerenderDocument}
 	case "deliver":
 		return &route{"takeaway.deliver", false, (*service).deliver}
 	case "discounts/preview":
