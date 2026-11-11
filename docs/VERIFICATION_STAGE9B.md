@@ -179,4 +179,33 @@ No se afirma ninguna de estas; quedan para cuando el hardware y el entorno esté
 
 ## Regresión final de la fase D
 
-PENDIENTE: la completa el coordinador con la salida real
+Ejecutada el 11 de noviembre de 2026 sobre copias exactas de la rama (`git archive`, sin `.git`, `.local` ni cachés), con
+un clúster PostgreSQL temporal propio (puerto 55499, solo loopback) y Go temporal en 8183; nada contra la instalación
+real. Primero sobre `31a0ea1` (código y documentación de la fase D) y después sobre `40c8d17`, que solo corrige la
+especificación Playwright del diseñador (resolver la copia exacta antes de imprimir con la plantilla vigente, por el
+bloqueo mutuo de copias de la revisión): Vitest y Playwright se repitieron sobre `40c8d17`; lo demás no cambia entre ambos
+commits.
+
+| Suite                    | Resultado                                                                                                                                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato                  | Prettier (sin `docs/etapas/`), gofmt y `cargo fmt --check` limpios                                                                                                                                                         |
+| Metadatos                | `sync-metadata.mjs --check`: «Metadatos coherentes» (0.9.1, esquema 19)                                                                                                                                                    |
+| `go vet`                 | `./...` y `-tags=integration ./...` sin hallazgos                                                                                                                                                                          |
+| Go unitarias (`-race`)   | 22 paquetes `ok`, entre ellos `documents`, `designer`, `identity`, `logoraster`, `brand`, `kitchen`, `payments` y `reports`                                                                                                |
+| Integración PostgreSQL   | `database` 5.7 s, `administration` 53.6 s, `catalog` 7.0 s, `operations` 232.3 s, `payments` 2.4 s, `reports` 90.8 s, `reports/operational` 40.1 s, `designer` 17.4 s, `identity` 18.0 s: todas `ok`                       |
+| TypeScript estricto      | `tsc --noEmit` sin errores                                                                                                                                                                                                 |
+| Vitest (`npm test`)      | 62 archivos, 536 pruebas aprobadas                                                                                                                                                                                         |
+| Compilación del frontend | `npm run build` correcto                                                                                                                                                                                                   |
+| Rust/Tauri               | `cargo test --locked --offline`: 33 aprobadas, 1 ignorada (Keychain real)                                                                                                                                                  |
+| Playwright               | Chromium 12/12 (4.7 min) y WebKit 12/12 (4.7 min), incluidas `workflow-stage9b-designer.spec.ts` y `workflow-stage9b-identity.spec.ts` y las anteriores (operación, cocina, cobros, caja, inventarios, compras y reportes) |
+| Paquete de escritorio    | `.app` 0.9.1 compilado en la copia aislada (`tauri build --bundles app`, 9.94 MiB, Mach-O arm64); no se reemplazó ni se abrió el de la instalación                                                                         |
+
+La primera corrida de la regresión dio dos incidencias, ninguna de producto: Vitest se invocó sin el filtro `src` del
+proyecto y recogió las especificaciones de Playwright (se repitió con `npm test`), y la especificación del diseñador no
+resolvía la copia exacta antes de la impresión con la plantilla vigente, que la corrección del bloqueo mutuo rechaza a
+propósito (la falla de la especificación de identidad fue en cascada: al fallar una prueba, Playwright reinicia el proceso
+y pierde la terminal preparada). Corregida en `40c8d17`.
+
+No verificado (pruebas físicas pendientes, §32): papel de tickets, precuentas, comandas, cortes y del logotipo; cajón por
+red y por USB/CUPS; pantalla táctil física; dos terminales reales; ventana nativa (WKWebView) y diálogo nativo de
+guardado. Ninguna se da por hecha con los adaptadores simulados.
