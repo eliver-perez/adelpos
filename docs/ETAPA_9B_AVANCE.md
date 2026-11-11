@@ -349,3 +349,66 @@ y conectada con la fase A (commit `9a4884d`). Nada se ejecutó contra la instala
   archivos).
 - Playwright: `e2e/documents-identity.spec.ts` escrita (Chromium y WebKit, puertos 8185/1423), **no
   ejecutada**: `pages/documents/DocumentsPage.tsx` de la fase C aún no existe en el árbol.
+
+### Cierre de la fase B
+
+Sobre una copia exacta del commit `5fe33a2` (`git archive`, clúster temporal 55499): formato (Prettier sin
+`docs/etapas/`, gofmt y `cargo fmt --check`) limpio; `go vet` con y sin `-tags=integration` sin hallazgos;
+`go test -race` aprobado en `identity`, `logoraster`, `brand`, `documents`, `designer`, `kitchen`, `reports`,
+`administration` y `payments`; integración `identity` (15.9 s), `designer` (17.5 s), `database` (6.0 s), `reports`
+(91.8 s), `reports/operational` (40.2 s), `administration` (54.2 s) y `operations` (226.3 s) `ok`; `tsc --noEmit` sin
+errores; Vitest de `src/services` (9 archivos, 105 pruebas), del panel de identidad y de `useRealtime` (2 archivos, 15
+pruebas) y `cargo test` (33 aprobadas, 1 ignorada) aprobados. La prueba de navegador de la identidad se ejecuta con la
+fase C.
+
+## Fase C · Editor visual de documentos
+
+Pantalla **Documentos** (`documents.templates.read`) con las pestañas «Plantillas» e «Identidad del
+establecimiento» (monta `IdentityPanel` de la fase B2). Sin cambios de backend, migraciones ni rutas.
+
+- **Plantillas por tipo**: los diez tipos agrupados (Venta, Cocina, Caja); por tipo, la activa primero,
+  la predeterminada marcada «Predeterminada · solo lectura» y, con `documents.templates.manage`,
+  editar, duplicar, renombrar, activar (confirmación), historial, nueva y «Restaurar predeterminada»
+  (confirmación: activa la del sistema y conserva las demás).
+- **Editor en tres áreas** (`pages/documents/designer/`): elementos compatibles del catálogo de Go
+  agrupados (con los atajos de «Campo de datos»), agregar tocando (después del bloque elegido) o
+  arrastrando; vista previa con la IR exacta de Go en una tira de papel con el ancho real (30/42
+  columnas), 58/80 mm, tamaños dobles, negrita y logotipo, marca «Vista previa con datos de
+  muestra», documento real con `documents.preview.real`, avisos y bloques vacíos con motivo, tocar
+  una línea elige su bloque; estructura con asa de arrastre, Subir/Bajar, teclado (Alt + flecha),
+  quitar con deshacer y aviso fiscal no eliminable; propiedades táctiles (segmentados, interruptores,
+  pasos, textos con teclado virtual, lista de datos del campo) y notas de compatibilidad por
+  impresora. Antirrebote de 250 ms y una sola petición en vuelo (la última gana).
+- **Guardar y versiones**: indicador de cambios sin guardar, protección al salir (editor y
+  navegación principal), nota opcional, `409 REVISION_CONFLICT` con borrador conservado y opciones
+  explícitas, aviso por SSE si otra persona guarda mientras se edita, historial con vista previa de
+  solo lectura y «Restaurar esta versión», 422 con el bloque señalado.
+- **Muestra**: impresora con ancho y compatibilidad, confirmación, estado de la cola con los
+  mensajes de la 7.1 y remisión a Cocina → Cola de impresión si queda incierta o en intervención.
+- **Imprimir con la plantilla vigente** junto a «Reimprimir» en documentos de una cuenta, documentos
+  de caja y la cola de cocina (comandas y avisos), con su permiso y una confirmación que explica la
+  diferencia con la copia idéntica.
+- **Diseño adaptable**: consultas de contenedor; tres columnas desde 960 px de ancho útil, cuatro
+  desde 1400 px, pestañas por debajo; en solo lectura la vista previa ocupa la columna de elementos.
+  Sin desbordamiento a 1280 × 720 ni 1920 × 1080 en ambos temas (Playwright).
+
+### Limitaciones de la fase C
+
+- Los segmentos de línea del papel (tocar una línea para elegir su bloque) miden menos de 44 px: son una vía adicional;
+  las filas de la estructura sí cumplen los 44 px.
+- Arrastrar desde el panel de elementos a la estructura solo funciona cuando ambas áreas se ven a la vez (no en el modo de
+  pestañas); en pantalla táctil el arrastre empieza al mover en horizontal, porque el movimiento vertical desplaza el
+  panel. Agregar tocando y «Subir»/«Bajar» funcionan siempre.
+- La protección de cambios sin guardar cubre la navegación de la aplicación y `beforeunload`, no el cierre de la ventana
+  nativa (Tauri no lo intercepta hoy).
+- En Playwright, la reimpresión exacta se compara por la API (contenido del ticket antes y después) y «Imprimir con la
+  plantilla vigente» se recorre desde los documentos de la cuenta; en Caja y en la cola de cocina ese botón solo tiene
+  pruebas Vitest.
+- No verificado: ventana nativa WKWebView, pantalla táctil física y papel.
+
+### Pruebas de la fase C
+
+En la copia aislada del agente (puertos 8186/1424): Vitest 60 archivos / 529 pruebas (39 nuevas de la fase C en
+`pages/documents/designer`, `templates` y `rerender.test.tsx`), `tsc --noEmit` y `npm run build`
+aprobados; Playwright Chromium y WebKit: `documents-designer.spec.ts` (nueva),
+`documents-identity.spec.ts` (B2), `restaurant.spec.ts` y `stock-consumption.spec.ts` aprobadas.

@@ -372,3 +372,21 @@ export function rerenderCashDocument(operationID: string, documentID: string) {
     message?: string;
   }>('payments_rerender_cash_document', { id: documentID, body: { operation_id: operationID } });
 }
+
+// Permisos del diseñador (registrados en Go; la interfaz solo decide qué botones mostrar).
+export const documentPermissions = {
+  read: 'documents.templates.read',
+  manage: 'documents.templates.manage',
+  previewReal: 'documents.preview.real',
+  samples: 'documents.samples.print',
+  identity: 'documents.identity.manage',
+  renderCurrent: 'documents.history.render_current',
+} as const;
+
+// Evento de la aplicación que publica useRealtime al recibir documents.templates.changed; detail
+// lleva los identificadores de las plantillas que cambiaron.
+export const templatesChangeEvent = 'adel-document-templates-change';
+
+export interface TemplatesChange {
+  templates: string[];
+}

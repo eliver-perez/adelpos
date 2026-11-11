@@ -6,10 +6,15 @@ import { useLiveResource } from '../../hooks/useLiveResource';
 import { jobLabels, ticketKindLabels } from '../../services/kitchen';
 import type { ExecuteKitchen, Printer, PrintJob, TicketDocument } from '../../services/kitchen';
 import { serverDateTime } from '../../services/restaurant';
+import { renderCurrentLabel, renderCurrentPermission } from '../documents/rerender';
+import { RerenderJob } from './RerenderJob';
+
+type QueueAction = 'resolve' | 'retry' | 'reprint' | 'rerender';
 
 // Confirmación de cada decisión sobre la cola: «enviado a la cola», nunca «impreso».
-const queueActionMessages: Record<'resolve' | 'retry' | 'reprint', string> = {
+const queueActionMessages: Record<'resolve' | 'retry' | 'reprint' | 'rerender', string> = {
   reprint: 'Copia adicional autorizada y enviada a la cola de impresión.',
+  rerender: 'Comanda con la plantilla vigente enviada a la cola de impresión.',
   retry: 'Reintento autorizado: el trabajo vuelve a la cola de impresión.',
   resolve: 'Decisión sobre el trabajo de impresión registrada.',
 };
@@ -28,7 +33,7 @@ export function PrintQueue({
   const [state, setState] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<PrintJob | null>(null);
-  const [action, setAction] = useState<'resolve' | 'retry' | 'reprint'>('resolve');
+  const [action, setAction] = useState<QueueAction>('resolve');
   const resource = useLiveResource<PrintJob[]>('kitchen_jobs', {
     query: { state, page: String(page) },
   });
@@ -104,6 +109,21 @@ export function PrintQueue({
                     Solicitar otra copia
                   </button>
                 )}
+              {/* Etapa 9B: otra representación con la plantilla activa, distinta de la copia. */}
+              {(job.state === 'submitted' || job.state === 'cancelled') &&
+                can('kitchen.reprint') &&
+                can(renderCurrentPermission) && (
+                  <button
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => {
+                      setSelected(job);
+                      setAction('rerender');
+                    }}
+                  >
+                    {renderCurrentLabel}
+                  </button>
+                )}
             </div>
           </article>
         ))}
@@ -152,7 +172,7 @@ function JobEditor({
   onClose,
 }: {
   job: PrintJob;
-  action: 'resolve' | 'retry' | 'reprint';
+  action: QueueAction;
   can: (key: string) => boolean;
   execute: ExecuteKitchen;
   busy: boolean;
@@ -181,20 +201,24 @@ function JobEditor({
   const [printerID, setPrinterID] = useState('');
   const stale = !!detail.data && detail.data.job.revision !== job.revision;
   const permitted =
-    action === 'reprint'
-      ? can('kitchen.reprint')
-      : action === 'retry'
-        ? can('kitchen.queue.retry')
-        : can('kitchen.queue.resolve');
+    action === 'rerender'
+      ? false
+      : action === 'reprint'
+        ? can('kitchen.reprint')
+        : action === 'retry'
+          ? can('kitchen.queue.retry')
+          : can('kitchen.queue.resolve');
   return (
     <section className="panel form-stack">
       <div className="section-heading">
         <h2>
-          {action === 'reprint'
-            ? 'Copia adicional'
-            : action === 'retry'
-              ? 'Reintento autorizado'
-              : 'Revisión del trabajo'}
+          {action === 'rerender'
+            ? renderCurrentLabel
+            : action === 'reprint'
+              ? 'Copia adicional'
+              : action === 'retry'
+                ? 'Reintento autorizado'
+                : 'Revisión del trabajo'}
         </h2>
         <button className="secondary-button" onClick={onClose}>
           Cerrar revisión
@@ -210,6 +234,17 @@ function JobEditor({
           El destino pudo haber recibido el documento. Revisa la cola y el papel antes de autorizar
           otra copia.
         </Notice>
+      )}
+      {action === 'rerender' && can('kitchen.reprint') && can(renderCurrentPermission) && (
+        <RerenderJob
+          job={job}
+          document={document.data}
+          printers={printers.data ?? []}
+          canRedirect={can('kitchen.printers.manage')}
+          execute={execute}
+          busy={busy || stale}
+          onClose={onClose}
+        />
       )}
       {permitted && (
         <Form

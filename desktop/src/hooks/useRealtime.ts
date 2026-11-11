@@ -5,6 +5,8 @@ import type { CashChange } from './useCashEvents';
 import { inventoryChangeEvent } from './useInventoryEvents';
 import type { InventoryChange } from './useInventoryEvents';
 import { identityChangeEvent } from '../services/documentIdentity';
+import { templatesChangeEvent } from '../services/documents';
+import type { TemplatesChange } from '../services/documents';
 
 interface Change {
   id: string;
@@ -63,6 +65,10 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       // Etapa 9B: la identidad del establecimiento (logotipo y textos) vuelve a consultarse solo
       // con su propio evento, porque su lectura incluye las imágenes.
       let identityChanged = !!message.reset;
+      // Etapa 9B (fase C): el editor de plantillas avisa si otra persona guardó la plantilla que se
+      // edita; el evento solo lleva el identificador de la plantilla.
+      const templates: TemplatesChange = { templates: [] };
+      let templatesChanged = !!message.reset;
       for (const event of message.events ?? []) {
         if (event.version !== 1) {
           changed = true;
@@ -79,6 +85,10 @@ export function useRealtime(identityKey: string, enabled: boolean) {
         if (event.scope === 'documents' && event.kind === 'documents.identity.changed') {
           identityChanged = true;
         }
+        if (event.scope === 'documents' && event.kind === 'documents.templates.changed') {
+          templatesChanged = true;
+          if (event.aggregate_id) templates.templates.push(event.aggregate_id);
+        }
         if (event.scope === 'inventory') {
           inventoryChanged = true;
           inventory.kinds.push(event.kind);
@@ -91,6 +101,9 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       if (cashChanged) window.dispatchEvent(new CustomEvent(cashChangeEvent, { detail: cash }));
       if (identityChanged) {
         window.dispatchEvent(new CustomEvent(identityChangeEvent));
+      }
+      if (templatesChanged) {
+        window.dispatchEvent(new CustomEvent(templatesChangeEvent, { detail: templates }));
       }
       if (inventoryChanged) {
         window.dispatchEvent(new CustomEvent(inventoryChangeEvent, { detail: inventory }));

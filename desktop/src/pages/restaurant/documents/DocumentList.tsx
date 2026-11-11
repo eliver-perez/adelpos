@@ -1,3 +1,4 @@
+import { useConfirmDialog } from '../../../components/ConfirmDialog';
 import { IconLabel } from '../../../components/Icon';
 import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
 import { notifySuccess } from '../../../services/notify';
@@ -10,6 +11,11 @@ import {
 import type { DocumentRecord, PaymentMethod, ReprintResult } from '../../../services/payments';
 import { countLabel, pluralWord } from '../../../services/plural';
 import { serverDateTime } from '../../../services/restaurant';
+import {
+  renderCurrentConfirmation,
+  renderCurrentLabel,
+  renderCurrentPermission,
+} from '../../documents/rerender';
 import { UncertainOperation } from '../checkout/UncertainOperation';
 import { notifyActionError } from '../checkout/actionErrors';
 
@@ -33,15 +39,21 @@ export function DocumentList({
   can: (permission: string) => boolean;
   methods?: PaymentMethod[];
 }) {
-  const mutation = useRestaurantMutation((_operation, value) => {
+  const mutation = useRestaurantMutation((operation, value) => {
     const result = value as ReprintResult;
+    const state = documentJobLabels[result.status] ?? 'en la cola de impresión';
+    // Etapa 9B: la impresión con la plantilla vigente es un documento nuevo, no una copia.
     notifySuccess(
-      `Copia solicitada: ${documentJobLabels[result.status] ?? 'en la cola de impresión'}.`,
+      operation === 'payments_rerender'
+        ? `Documento con la plantilla vigente solicitado: ${state}.`
+        : `Copia solicitada: ${state}.`,
     );
     window.dispatchEvent(new CustomEvent('adel-server-change'));
   }, documentsPendingKey(accountID));
   const locked = mutation.busy || !!mutation.pending;
   const canReprint = can('payments.tickets.reprint');
+  const canRenderCurrent = canReprint && can(renderCurrentPermission);
+  const { confirm, dialog } = useConfirmDialog();
 
   async function reprint(ticketID: string) {
     if (mutation.isPending()) {
@@ -58,6 +70,25 @@ export function DocumentList({
     }
   }
 
+  // Etapa 9B: otra representación del mismo documento con la plantilla activa, confirmada antes.
+  async function renderCurrent(ticketID: string, kind: string) {
+    if (mutation.isPending()) {
+      return;
+    }
+    const subject = kind === 'precheck' ? 'la precuenta' : 'el ticket';
+    if (!(await confirm(renderCurrentConfirmation(subject)))) {
+      return;
+    }
+    try {
+      await mutation.execute('payments_rerender', {
+        id: accountID,
+        body: { ticket_id: ticketID },
+      });
+    } catch (problem) {
+      notifyActionError(problem, 'No se pudo imprimir con la plantilla vigente.');
+    }
+  }
+
   async function retry() {
     const problem = await mutation.retry();
     if (problem) {
@@ -71,6 +102,7 @@ export function DocumentList({
   return (
     <section className="document-list" aria-label="Documentos de la cuenta">
       <h3 className="bill-section-title">Documentos</h3>
+      {dialog}
       {mutation.pending && mutation.uncertain && (
         <UncertainOperation
           request={mutation.pending}
@@ -117,6 +149,16 @@ export function DocumentList({
                       Reimprimir {documentKindLabels[document.kind]?.toLowerCase() ?? 'documento'}
                     </IconLabel>
                   </button>
+                  {canRenderCurrent && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={locked}
+                      onClick={() => void renderCurrent(document.ticket_id, document.kind)}
+                    >
+                      {renderCurrentLabel}
+                    </button>
+                  )}
                 </div>
               )}
             </li>

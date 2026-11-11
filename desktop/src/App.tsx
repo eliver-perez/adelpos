@@ -24,6 +24,9 @@ import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
 import { InventoryPage } from './pages/inventory/InventoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
+import { DocumentsPage } from './pages/documents/DocumentsPage';
+import { useConfirmDialog } from './components/ConfirmDialog';
+import { leaveWarning } from './hooks/useLeaveGuard';
 import { PendingOperationsProvider } from './hooks/pendingOperations';
 import { RegistersPage } from './pages/RegistersPage';
 import { RolesPage } from './pages/RolesPage';
@@ -53,6 +56,7 @@ function ApplicationContent() {
   const [screen, setScreen] = useState('status');
   const [technical, setTechnical] = useState(false);
   const initializedUser = useRef<string | null>(null);
+  const { confirm, dialog: leaveDialog } = useConfirmDialog();
   const identity = session.identity;
   const realtimeStatus = useRealtime(
     identity?.user.id ?? '',
@@ -162,7 +166,39 @@ function ApplicationContent() {
     return <LoginPage message={session.message} refresh={session.refresh} />;
   }
 
+  // Navegación pedida por la persona: si una pantalla tiene cambios sin guardar (editor de
+  // plantillas, etapa 9B), se confirma antes de salir de ella.
+  async function confirmLeave() {
+    const warning = leaveWarning();
+    if (!warning) {
+      return true;
+    }
+    return confirm({
+      title: 'Salir sin guardar',
+      message: <p>{warning} Si sales ahora, se descartan.</p>,
+      confirmLabel: 'Salir sin guardar',
+      cancelLabel: 'Seguir editando',
+      tone: 'danger',
+    });
+  }
+
+  // Sin cambios pendientes la navegación es inmediata; con ellos espera la confirmación.
+  function requestScreen(next: string) {
+    if (next === screen || !leaveWarning()) {
+      setScreen(next);
+      return;
+    }
+    void confirmLeave().then((confirmed) => {
+      if (confirmed) {
+        setScreen(next);
+      }
+    });
+  }
+
   async function logout() {
+    if (leaveWarning() && !(await confirmLeave())) {
+      return;
+    }
     try {
       await session.logout();
     } catch (error) {
@@ -208,6 +244,14 @@ function ApplicationContent() {
             onOpenSettings={() => setScreen('settings')}
           />
         );
+      case 'documents':
+        return (
+          <DocumentsPage
+            permissions={identity.user.permissions}
+            timezone={identity.establishment.timezone}
+            onOpenSettings={() => requestScreen('settings')}
+          />
+        );
       case 'reports':
         return (
           <ReportsPage
@@ -245,7 +289,7 @@ function ApplicationContent() {
             <button
               key={entry.id}
               className={screen === entry.id ? 'nav-selected' : ''}
-              onClick={() => setScreen(entry.id)}
+              onClick={() => requestScreen(entry.id)}
               aria-current={screen === entry.id ? 'page' : undefined}
             >
               {entry.label}
@@ -255,7 +299,7 @@ function ApplicationContent() {
         <div className="sidebar-user">
           <strong>{identity.user.display_name}</strong>
           <p className="muted text-xs">{identity.user.role_name}</p>
-          <button onClick={() => setScreen('password')} className="secondary-button mt-4">
+          <button onClick={() => requestScreen('password')} className="secondary-button mt-4">
             Cambiar contraseña
           </button>
           <button className="secondary-button mt-2" onClick={() => void logout()}>
@@ -285,7 +329,7 @@ function ApplicationContent() {
           <select
             aria-label="Pantalla"
             value={screen}
-            onChange={(event) => setScreen(event.target.value)}
+            onChange={(event) => requestScreen(event.target.value)}
           >
             {available.map((entry) => (
               <option key={entry.id} value={entry.id}>
@@ -305,7 +349,7 @@ function ApplicationContent() {
                 <strong>Recomendamos cambiar tu contraseña inicial.</strong>
                 <p>Puedes seguir utilizando el sistema y cambiarla cuando lo decidas.</p>
               </div>
-              <button className="secondary-button" onClick={() => setScreen('password')}>
+              <button className="secondary-button" onClick={() => requestScreen('password')}>
                 Cambiar contraseña
               </button>
             </div>
@@ -329,6 +373,7 @@ function ApplicationContent() {
         </main>
       </div>
       <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
+      {leaveDialog}
     </div>
   );
 }
