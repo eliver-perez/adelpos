@@ -32,6 +32,45 @@ type cashFlows struct {
 	operationsOutUSD decimal.Decimal
 }
 
+// CashFlowTotals son los mismos componentes que cashFlows, exportados para los consumidores de solo
+// lectura (los reportes de la etapa 9A): los suman en su propia transacción con las expresiones
+// ExpectedPaymentsMXNSQL y ExpectedPaymentsUSDSQL sobre cash_movements en efectivo y con las
+// operaciones de efectivo sin regularizaciones, igual que readCashFlows, y obtienen el esperado con
+// ExpectedCash, que es este mismo cálculo (nunca una copia de la fórmula).
+type CashFlowTotals struct {
+	FloatMXN         decimal.Decimal
+	FloatUSD         decimal.Decimal
+	PaymentsMXN      decimal.Decimal
+	PaymentsUSD      decimal.Decimal
+	OperationsInMXN  decimal.Decimal
+	OperationsOutMXN decimal.Decimal
+	OperationsInUSD  decimal.Decimal
+	OperationsOutUSD decimal.Decimal
+}
+
+// Expresiones por renglón de app.cash_movements (con is_cash) que suma el esperado: un movimiento
+// anterior a la 0007, sin columnas por moneda, fue solo en pesos y su efecto es su neto.
+const (
+	ExpectedPaymentsMXNSQL = "CASE WHEN mxn_in IS NULL THEN net_amount ELSE mxn_in-mxn_out END"
+	ExpectedPaymentsUSDSQL = "coalesce(usd_in,0)-coalesce(usd_out,0)"
+)
+
+// ExpectedCash devuelve el efectivo esperado por moneda con el cálculo único del turno.
+func ExpectedCash(totals CashFlowTotals) (decimal.Decimal, decimal.Decimal) {
+	flows := cashFlows{
+		floatMXN:         totals.FloatMXN,
+		floatUSD:         totals.FloatUSD,
+		paymentsMXN:      totals.PaymentsMXN,
+		paymentsUSD:      totals.PaymentsUSD,
+		operationsInMXN:  totals.OperationsInMXN,
+		operationsOutMXN: totals.OperationsOutMXN,
+		operationsInUSD:  totals.OperationsInUSD,
+		operationsOutUSD: totals.OperationsOutUSD,
+	}
+	expected := flows.expectation(nil)
+	return expected.mxn, expected.usd
+}
+
 // cashExpectation es el efectivo físico esperado por moneda y el tipo de cambio del turno.
 type cashExpectation struct {
 	mxn  decimal.Decimal
@@ -131,8 +170,8 @@ func (handler *service) readCashFlows(shift *Shift) (cashFlows, error) {
 	}
 	var paymentsMXN, paymentsUSD string
 	err := handler.tx.QueryRow(handler.ctx, `SELECT
-        coalesce(sum(CASE WHEN mxn_in IS NULL THEN net_amount ELSE mxn_in-mxn_out END),0)::text,
-        coalesce(sum(coalesce(usd_in,0)-coalesce(usd_out,0)),0)::text
+        coalesce(sum(`+ExpectedPaymentsMXNSQL+`),0)::text,
+        coalesce(sum(`+ExpectedPaymentsUSDSQL+`),0)::text
         FROM app.cash_movements WHERE shift_id=$1 AND is_cash`, shift.ID).Scan(&paymentsMXN, &paymentsUSD)
 	if err != nil {
 		return flows, err

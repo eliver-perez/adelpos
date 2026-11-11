@@ -819,6 +819,12 @@ fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "state",
             "group_by",
             "scope",
+            // Fase B2: almacén, insumo, proveedor, modalidad de compra y moneda de caja.
+            "warehouse_id",
+            "item_id",
+            "supplier_id",
+            "modality",
+            "currency",
         ]
     } else if operation.starts_with("inventory_") {
         // Inventario (etapa 8): búsqueda, filtros de listados y paginación.
@@ -1332,6 +1338,11 @@ mod tests {
             "reason_id",
             "group_by",
             "search",
+            "warehouse_id",
+            "item_id",
+            "supplier_id",
+            "modality",
+            "currency",
         ] {
             query.insert(key.to_string(), "valor".to_string());
         }

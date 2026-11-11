@@ -99,6 +99,12 @@ func subtypeLabel(kind, code string) string {
 	return ""
 }
 
+// CashOperationTypeLabel expone subtypeLabel a los reportes de caja (etapa 9A), para que nombren el
+// tipo de ingreso o de retiro con la misma lista cerrada que Caja.
+func CashOperationTypeLabel(kind, code string) string {
+	return subtypeLabel(kind, code)
+}
+
 // CashOperation es una operación de efectivo del turno tal como la consulta la interfaz. Los
 // importes son físicos en su moneda; EquivalentMXN solo informa la equivalencia en pesos con el
 // tipo de cambio guardado en la operación.
