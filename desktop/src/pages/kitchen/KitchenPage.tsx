@@ -28,7 +28,11 @@ export function KitchenPage({
   // conserva el mismo operation_id para recuperar el resultado.
   const mutation = useRestaurantMutation((operation) => {
     window.dispatchEvent(new CustomEvent('adel-server-change'));
-    if (['kitchen_reprint', 'kitchen_retry_job', 'kitchen_resolve_job'].includes(operation))
+    if (
+      ['kitchen_reprint', 'kitchen_rerender', 'kitchen_retry_job', 'kitchen_resolve_job'].includes(
+        operation,
+      )
+    )
       setQueueVersion((version) => version + 1);
   }, 'kitchen');
   // Toda escritura de cocina pasa por aquí: un rechazo de Go se muestra como aviso persistente

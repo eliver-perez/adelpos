@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { APIError } from '../../services/api';
@@ -11,6 +12,11 @@ import type {
 } from '../../services/cash';
 import { permissionName } from '../../services/payments';
 import { countLabel } from '../../services/plural';
+import {
+  renderCurrentConfirmation,
+  renderCurrentLabel,
+  renderCurrentPermission,
+} from '../documents/rerender';
 import { notifyPrintOutcome } from './CashNotices';
 import { PendingCashOperation } from './PendingCashOperation';
 import { useCashMutation } from './useCashMutation';
@@ -44,9 +50,13 @@ export function documentOptions(
   const print = !document && can('cash.reports.print');
   const reprintAllowed = can('cash.reports.reprint');
   const expectedBlocked = !!document?.includes_expected && !can('cash.expected.read');
+  const reprint = !!document && reprintAllowed && !expectedBlocked;
   return {
     print,
-    reprint: !!document && reprintAllowed && !expectedBlocked,
+    reprint,
+    // Etapa 9B: otra representación con la plantilla activa, con el mismo permiso de reimprimir
+    // más documents.history.render_current (Go valida además el turno y el esperado).
+    renderCurrent: reprint && can(renderCurrentPermission),
     expectedBlocked: !!document && reprintAllowed && expectedBlocked,
   };
 }
@@ -91,6 +101,7 @@ export function CashDocumentActions({
   );
   const document = documentFor(documents.data?.documents ?? [], source);
   const options = documentOptions(can, document);
+  const { confirm, dialog } = useConfirmDialog();
 
   async function togglePreview() {
     if (preview) {
@@ -139,8 +150,27 @@ export function CashDocumentActions({
     }
   }
 
+  async function renderCurrent() {
+    if (!document || mutation.isPending()) {
+      return;
+    }
+    if (!(await confirm(renderCurrentConfirmation('el documento de caja')))) {
+      return;
+    }
+    try {
+      await mutation.execute<PrintOutcome>('payments_rerender_cash_document', {
+        id: document.id,
+        body: {},
+      });
+      void documents.reload();
+    } catch (problem) {
+      mutation.reportFailure(problem, 'No se pudo imprimir con la plantilla vigente.');
+    }
+  }
+
   return (
     <div className="cash-document" aria-label="Documento de caja">
+      {dialog}
       {document && <p className="muted text-xs">{documentSummary(document)}</p>}
       <div className="button-row">
         <button
@@ -170,6 +200,16 @@ export function CashDocumentActions({
             onClick={() => void reprint()}
           >
             <IconLabel icon="printer">Reimprimir</IconLabel>
+          </button>
+        )}
+        {options.renderCurrent && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={mutation.locked}
+            onClick={() => void renderCurrent()}
+          >
+            {renderCurrentLabel}
           </button>
         )}
       </div>

@@ -25,6 +25,9 @@ export const screens: ScreenEntry[] = [
   { id: 'inventory', label: 'Inventarios', permission: 'inventory.read' },
   // Etapa 9A: reportes, resumen ejecutivo y exportaciones (Go admite la pantalla como inicio).
   { id: 'reports', label: 'Reportes', permission: 'reports.read' },
+  // Etapa 9B: plantillas de documentos con su editor visual e identidad del establecimiento. Go no
+  // la admite todavía como pantalla de inicio.
+  { id: 'documents', label: 'Documentos', permission: 'documents.templates.read', home: false },
   { id: 'status', label: 'Estado del sistema', permission: '' },
   { id: 'users', label: 'Usuarios', permission: 'users.read' },
   { id: 'roles', label: 'Roles', permission: 'roles.read' },
