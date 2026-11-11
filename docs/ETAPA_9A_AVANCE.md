@@ -623,3 +623,15 @@ reportes sin ningún turno; permisos de cada reporte por API directa (y columnas
 `cash.expected.read`); totales del detalle = resumidos y paginación sin alterar totales; IVA reconocido =
 desglose de las cuentas; transacción de solo lectura (una escritura falla con 25006), sin locks consultivos,
 `REPORTS_BUSY` y `REPORT_TIMEOUT`; relleno de la 0017 (base en esquema 14 y equivalencia con Go por fuente).
+
+### Verificación conjunta de las fases A y B1
+
+Sobre una copia exacta del commit `a2a472c` (fase A y la parte B1 de la fase B): Prettier, gofmt, `cargo fmt`,
+`sync-metadata`, `go vet` (con y sin `integration`) y Go unitarias con `-race` aprobados; integración PostgreSQL
+`database`, `administration`, `catalog`, `operations` (219.0 s), `payments`, `kitchen`, `inventory` y `reports` `ok`;
+Vitest 51 archivos y 434 pruebas; `tsc` y build sin errores; `cargo test` 21 aprobadas y 1 ignorada; Playwright WebKit 8
+de 8. En Chromium, `restaurant.spec.ts` agotó el límite de 60 s por prueba (dura unos 55 s en un equipo libre y el equipo
+estaba cargado por tres agentes en paralelo) y las especificaciones siguientes fallaron en cascada porque la base ya
+estaba configurada; el límite pasa a 120 s (`desktop/playwright.config.ts`) y Chromium se repite en la regresión final.
+La verificación de la fase A sola no era significativa para la interfaz: dos pruebas de la fase A ya esperaban la «Hora
+de inicio del día» de B1 (Go, integración y Rust sí aprobaron sobre `5a96f64`).

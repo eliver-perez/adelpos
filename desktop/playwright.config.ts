@@ -8,7 +8,9 @@ export default defineConfig({
   testDir: './e2e',
   outputDir: `../.local/browser-artifacts/${process.env.ADEL_BROWSER_ENGINE ?? 'manual'}`,
   workers: 1,
-  timeout: 60000,
+  // `restaurant.spec.ts` dura unos 55 s en un equipo libre: el margen evita que la carga de otros procesos la
+  // corte y deje la base configurada para las especificaciones siguientes.
+  timeout: 120000,
   use: {
     baseURL: `http://127.0.0.1:${previewPort}`,
     viewport: { width: 1280, height: 720 },
