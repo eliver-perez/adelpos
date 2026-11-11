@@ -126,7 +126,8 @@ confirmación del propietario, como manda §21):
   de esta fase la exclusión no funcionó y Prettier reformateó las especificaciones: las versionadas se restauraron de
   `HEAD` y en `ETAPA_9B.md` (sin versionar) se revirtieron sus dos cambios (la tabla de fases y una línea en blanco);
   aplicar Prettier al archivo restaurado reproduce exactamente la versión reformateada, de modo que no hubo otros
-  cambios.
+  cambios. Al cerrar la etapa, por indicación del propietario, `docs/etapas/` se agregó a `.prettierignore` y las
+  especificaciones quedaron versionadas.
 
 ## Fase A · Plantillas por bloques, renderizador único e impresión real
 
@@ -506,7 +507,7 @@ extiende a esta (§30 de la especificación). Hasta entonces la instalación sig
 **Advertencia.** Desde la rama `etapa-9b`, `./scripts/dev.sh migrate`, `server-start` y `build-macos` **tocan la
 instalación real**: `migrate` aplica 0018 y 0019 a `adel_pos`; `server-start` compila el binario 0.9.1, que declara
 incompatible el esquema 17 (readiness distinta de 200) si se inicia sin migrar; `build-macos` sustituye el `.app` 0.9.0.
-No ejecutar ninguno sin la autorización. Tampoco ejecutar `./scripts/dev.sh format` (reescribe `docs/etapas/`).
+No ejecutar ninguno sin la autorización. (`./scripts/dev.sh format` ya es seguro: `docs/etapas/` está en `.prettierignore`.)
 
 Requisitos previos: regresión final de la fase D aprobada; árbol confirmado en `etapa-9b` (anotar el commit); ningún
 trabajo real en curso en el restaurante (sin cobros, cortes ni arqueo abiertos durante la ventana, y la cola de impresión

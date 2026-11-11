@@ -73,8 +73,8 @@ Chromium 12/12 y WebKit 12/12, y el `.app` 0.9.1 compilado en la copia aislada. 
 `test-integration` y `test-browser` usan bases desechables en el clúster del proyecto (55432); para aislamiento total,
 seguir `CLAUDE.md` §6. Las pruebas de integración de la 9B viven en `internal/designer`, `internal/identity` (ambos en
 `scripts/database.py`), `internal/database` e `internal/operations` (encadenadas a `TestRestaurantAcceptance`); las
-unitarias, en `internal/documents`, `logoraster`, `brand`, `kitchen`, `payments` y `reports`. **No ejecutar
-`./scripts/dev.sh format` tal cual**: reformatea las especificaciones del propietario de `docs/etapas/` (ver `CLAUDE.md`
-§6); `format-check` las reporta mientras sigan sin formato Prettier. Las especificaciones Playwright comparten la base de
+unitarias, en `internal/documents`, `logoraster`, `brand`, `kitchen`, `payments` y `reports`. Desde la etapa 9B,
+`docs/etapas/` está en `.prettierignore`: `./scripts/dev.sh format` y `format-check` ya no tocan ni reportan las
+especificaciones del propietario (ver `CLAUDE.md` §6). Las especificaciones Playwright comparten la base de
 cada motor y corren en orden alfabético: una nueva debe ordenarse después de las existentes, y no conviene filtrarlas con
 `documents-` (el filtro no distingue mayúsculas y la ruta temporal contiene «Documents-ADEL-POS»).
