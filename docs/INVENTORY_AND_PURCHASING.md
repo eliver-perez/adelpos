@@ -12,7 +12,8 @@ evidencia de verificación, en [VERIFICATION_STAGE8.md](VERIFICATION_STAGE8.md).
 segundo teléfono, celular y página web a los proveedores, el proveedor especial único «Compras de mostrador» con el
 comercio concreto en cada recepción directa, y la interfaz agrega el código interno sugerido de insumos (con comprobación
 en Go), la administración completa de categorías con alta rápida desde el insumo y la navegación de Inventarios en cinco
-grupos. **La 0016 no se ha aplicado a la instalación real**: requiere autorización expresa del propietario. Las secciones
+grupos. **La 0016 se aplicó a la instalación real el 10 de noviembre de 2026**, junto con la 0015 y la 0017, con
+autorización del propietario, respaldo y ensayo de restauración. Las secciones
 de abajo marcan lo que cambió con «(9A)». En la fase B de la 9A, el cálculo del día operativo pasó al paquete neutral
 `internal/businessday` sin cambiar su comportamiento y su hora de corte (la «Hora de inicio del día») se edita solo en
 Configuración general; los reportes de inventarios, costos y márgenes, compras y proveedores están en
@@ -1136,8 +1137,8 @@ terminales.
 
 Reunidas de todas las fases del avance (las que se resolvieron en una fase posterior no se repiten):
 
-- **Instalación real**: 0010–0014 se aplicaron el 10 de noviembre de 2026 con autorización del propietario; la 0016 de la
-  etapa 9A todavía no.
+- **Instalación real**: 0010–0014 y, después, la 0016 de la etapa 9A se aplicaron el 10 de noviembre de 2026 con
+  autorización del propietario; «Compras de mostrador» quedó único y activo, sin recepciones.
 - **Sin verificar en hardware**: ventana nativa (WKWebView), pantalla táctil física y teclado virtual en Inventarios; ninguna
   comanda con indicaciones con efecto se imprimió en papel.
 - **Volumen y concurrencia**: las mediciones son de este equipo, sin varias terminales reales; las alertas (también las de
@@ -1164,7 +1165,7 @@ Reunidas de todas las fases del avance (las que se resolvieron en una fase poste
   se incluiría en esa aplicación; la cuenta de una cancelación para llevar con nombre del cliente se muestra como «Cuenta #N
   · Nombre»; la frecuencia mensual al final de mes sigue la normalización de fechas de Go (31 de marzo − 1 mes = 3 de
   marzo).
-- **Etapa 9A**: la 0016 no está aplicada en la instalación real. La comprobación del código interno es informativa: dos
+- **Etapa 9A**: la comprobación del código interno es informativa: dos
   terminales que den de alta a la vez el mismo código reciben la misma sugerencia y la segunda obtiene `DUPLICATE_CODE` al
   guardar. La sugerencia de insumos sigue el nombre solo en el alta y deja de seguirlo en cuanto se teclea en el código
   (como en productos). La sugerencia de presentaciones de producto solo conoce los códigos de productos y de las

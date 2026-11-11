@@ -196,3 +196,28 @@ real el 10 de noviembre de 2026 con autorización del propietario, con el proced
 No modifican registros existentes, conceden los 24 permisos de inventario solo al administrador y dejan «Control de
 inventario» desactivado: la venta es idéntica a la 0.7.1 hasta activarlo. Resultado: `applied:5` y `applied:0`,
 readiness 200 y servidor y `.app` 0.8.0.
+
+## Reportes, indicadores y exportaciones · etapa 9A
+
+Versión 0.9.0/esquema 17. Las migraciones `0015_catalog_price_and_precheck.sql`, `0016_inventory_suppliers_counter.sql`
+y `0017_reports.sql` se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización previa del
+propietario, con el procedimiento de [docs/ETAPA_9A_AVANCE.md](docs/ETAPA_9A_AVANCE.md) («Procedimiento para aplicar
+0015–0017 a la instalación real»):
+
+1. `backup`.
+2. `python3 scripts/restore-check.py backups/NOMBRE.dump`.
+3. Comprobación previa de solo lectura.
+4. `server-stop`.
+5. `migrate` (`applied:3`, y `applied:0` al repetirla).
+6. `server-start`.
+7. Comprobaciones de solo lectura.
+8. `build-macos` y `open-app`.
+
+No modifican filas existentes: la opción «El precio puede bajar al cambiar complementos» queda desactivada en todos los
+productos, las precuentas anteriores quedan sin revisión, se crea el proveedor «Compras de mostrador» sin compras, el
+relleno inicial reconoce las cuentas ya cerradas y los 10 permisos `reports.*` se conceden solo al administrador. La
+«Hora de inicio del día» y «Control de inventario» no cambian. Resultado: respaldo
+`backups/adel_pos-20261111T050739Z-c64463.dump` con restauración verificada (126 tablas idénticas), `applied:3` y
+`applied:0`, readiness 200, `/api/v1/version` 0.9.0 y esquema 17, 127 tablas en `app`, conteos de datos existentes sin
+cambio, relleno de las 2 cuentas cerradas (9 renglones, $695.00) y servidor y `.app` 0.9.0. El recorrido en la ventana
+nativa no se verificó.

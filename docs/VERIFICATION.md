@@ -17,8 +17,11 @@ pendientes de catálogo e inventarios, reportes, indicadores y exportaciones). E
   0.9.0 y el esquema 17 se fijaron en la fase D, con `sync-metadata --check`, `go vet`, `go test`, `tsc` y `cargo test`
   aprobados sobre el árbol con la versión nueva.
 - **Regresión final (fase D)**: **aprobada** sobre `74e23c9` (ver «Regresión final»).
-- **Instalación real**: sigue en **0.8.0 y esquema 14**. Las migraciones 0015–0017 **no se han aplicado**: requieren
-  autorización expresa del propietario, con respaldo y ensayo de restauración.
+- **Instalación real**: en **0.9.0 y esquema 17**. Las migraciones 0015–0017 se aplicaron el 10 de noviembre de 2026
+  con autorización previa del propietario, tras respaldo (`backups/adel_pos-20261111T050739Z-c64463.dump`) y ensayo de
+  restauración (126 tablas con conteos idénticos): `migrate` `applied:3` y repetición `applied:0`, readiness 200 con
+  esquema compatible, `/api/v1/version` 0.9.0 y esquema 17, conteos de datos existentes sin cambio y `.app` 0.9.0
+  instalado y abierto. Registro en [ETAPA_9A_AVANCE.md](ETAPA_9A_AVANCE.md), «Instalación real».
 - **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) ni enviaron trabajos
   a CUPS, a una impresora, a un cajón o a una conexión TCP.
 
@@ -45,7 +48,8 @@ pendientes de catálogo e inventarios, reportes, indicadores y exportaciones). E
   táctil física y teclado virtual en Reportes, en la captura y en Inventarios.
 - Papel: ninguna precuenta ni comanda de la 9A se imprimió.
 - Volumen real, muchas terminales a la vez, LAN con otra máquina, Keychain real y Windows.
-- Respaldo, ensayo de restauración y migración de la instalación real con 0015–0017.
+- Recorrido en la ventana nativa de la instalación real después de aplicar 0015–0017 (la migración, el respaldo y el
+  ensayo de restauración sí se ejecutaron; ver «Estado»).
 
 ## Regresión final (fase D)
 

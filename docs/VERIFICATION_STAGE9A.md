@@ -17,8 +17,10 @@ y esquema 14 (las migraciones nuevas ya estaban embebidas); la versión 0.9.0 y 
 las comprobaciones de «Versión 0.9.0» de abajo. La regresión final de la fase D **aprobó** sobre `74e23c9` (detalle en
 [VERIFICATION.md](VERIFICATION.md), «Regresión final»).
 
-**Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432): las migraciones
-0015–0017 no se han aplicado a la instalación real. No se leyeron secretos y ninguna prueba envió trabajos a CUPS, a una
+**Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432). Las migraciones
+0015–0017 se aplicaron a la instalación real después, el 10 de noviembre de 2026, con autorización previa del
+propietario, respaldo y ensayo de restauración (registro en [ETAPA_9A_AVANCE.md](ETAPA_9A_AVANCE.md), «Instalación
+real»). No se leyeron secretos y ninguna prueba envió trabajos a CUPS, a una
 impresora, a un cajón ni a una conexión TCP.
 
 ## Entorno aislado
@@ -126,8 +128,9 @@ PDF y 7.7 s en Excel (con `-race`). Mediciones de un solo equipo (Apple M1 Max),
 
 ## No ejecutado o no verificado
 
-- **Instalación real**: 0015–0017 no se aplicaron; no se ensayaron todavía el respaldo, la restauración ni la migración
-  de la base real con estas migraciones (solo las pruebas de actualización desde el esquema 14 sobre bases simuladas).
+- **Instalación real**: 0015–0017 se aplicaron el 10 de noviembre de 2026 con respaldo, restauración verificada (126
+  tablas idénticas) y comprobaciones de solo lectura antes y después (ver [ETAPA_9A_AVANCE.md](ETAPA_9A_AVANCE.md),
+  «Instalación real»); el recorrido en la ventana nativa de la instalación real no se verificó.
 - **Ventana nativa Tauri (WKWebView)**, **diálogo nativo real de guardado** y escritura en disco desde la ventana,
   **pantalla táctil física** y **teclado virtual** en Reportes, en la captura con el precio que baja y en Inventarios:
   solo Vitest (jsdom), Playwright con el puente simulado y las pruebas Rust de la escritura atómica con un destino
