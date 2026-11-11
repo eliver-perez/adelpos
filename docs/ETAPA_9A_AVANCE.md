@@ -635,3 +635,234 @@ estaba cargado por tres agentes en paralelo) y las especificaciones siguientes f
 estaba configurada; el límite pasa a 120 s (`desktop/playwright.config.ts`) y Chromium se repite en la regresión final.
 La verificación de la fase A sola no era significativa para la interfaz: dos pruebas de la fase A ya esperaban la «Hora
 de inicio del día» de B1 (Go, integración y Rust sí aprobaron sobre `5a96f64`).
+
+## Fase B · B2 · Reportes de caja, inventarios, costos y márgenes, compras, proveedores y empleados
+
+Sobre la infraestructura de la fase B1 (registro cerrado, resultado único, transacción `REPEATABLE READ READ ONLY`
+con semáforo propio, día comercial, permisos `reports.*`). **Sin migración nueva**: no hizo falta la 0018 (ver
+«Mediciones»). 45 reportes nuevos y 6 secciones del resumen ejecutivo, en `backend/internal/reports`
+(`cash.go`, `cash_day.go`, `cash_details.go`, `inventory.go`, `inventory_movements.go`,
+`inventory_consumption.go`, `costs.go`, `purchases.go`, `employees.go`, `dashboard_operational.go`,
+`filters_operational.go`); aceptación propia en `backend/internal/reports/operational` (paquete solo de pruebas,
+agregado a la tupla de `scripts/database.py`). Lista completa con columnas y permisos en
+`docs9aB2/api_contracts.md`.
+
+### Caja (`reports.cash.read`; 7 reportes y 2 secciones del dashboard)
+
+- **Por turno** (`cash.shifts`, `cash.by_register`, `cash.sales_collections_by_shift`): turnos cuya fecha
+  comercial (fecha de apertura en la zona, como el historial de Caja) cae en el periodo, con fondos, cobros
+  (ventas cobradas, propinas, devoluciones, neto y neto en efectivo, como el corte), ingresos, retiros, gastos y
+  correcciones por moneda sin regularizaciones, cortes parciales, lo contado al cerrar y, con
+  `cash.expected.read`, esperado, efectivo físico por moneda, diferencias, sobrantes y faltantes por moneda, su
+  equivalencia con el tipo de cambio histórico del turno y el resultado. Ventas y cobros por turno: venta =
+  reconocimientos cuyo cierre ocurrió en el turno (columnas con `reports.sales.read`), cobro = pagos del turno;
+  nunca se suman entre sí.
+- **Por día** (`cash.by_day`): cada registro en el día comercial en que ocurrió (hora de inicio del día):
+  aperturas y fondos, cobros, operaciones de efectivo, cortes, cierres y lo contado; con permiso, efectivo físico,
+  flujo neto de efectivo y esperado y diferencias de los turnos que se cerraron ese día. Un turno permanente
+  reparte sus movimientos entre los días; en la vista por turno aparece en la fecha de su apertura con todo.
+- **Detalle**: `cash.operations` (entradas y salidas por moneda; las regularizaciones aparte, con signo, porque no
+  cuentan en el esperado), `cash.cuts` (lo guardado en cada corte desde el anterior; el bloque `sensitive` solo
+  con permiso) y `cash.by_user` (aperturas, cierres, cortes, operaciones registradas y autorizaciones).
+- **Esperado**: el de un turno abierto es `payments.ExpectedCash` (función pura exportada que aplica
+  `cashFlows.expectation`, el cálculo único) sobre componentes sumados con las mismas expresiones SQL que
+  `readCashFlows` (`payments.ExpectedPaymentsMXNSQL` / `USDSQL`, que ahora usa también Caja); el de un turno
+  cerrado, el que guardó su cierre. La prueba lo compara con `GET payments/shifts/{id}/summary` (pesos y dólares)
+  antes y después de más actividad. **No se replica `readAdjustmentTotals`**: los descuentos no se atribuyen a
+  turnos ni cajas en ningún reporte de caja (están en Descuentos con la fecha del reconocimiento).
+- **Paridad exacta con Caja**: sin `cash.expected.read` no se calculan ni se envían el esperado, el efectivo
+  físico por moneda, las diferencias, sobrantes, faltantes, su equivalencia ni el resultado (el SQL ni siquiera
+  los selecciona); sí lo que Caja muestra (fondo, cobros por método, operaciones por moneda, lo contado). **Turnos
+  en arqueo**: excluidos de todo agregado de caja, cobros y empleados para todos (también en la vista por día y en
+  el dashboard), con el aviso `SHIFT_CLOSING`; en la lista de turnos aparecen sin ningún importe.
+- **Alcance de Caja** (§12 «No permitir que un reporte consolidado revele datos que el usuario no podría
+  consultar en Caja»): solo se incluyen los turnos que el usuario puede consultar en Caja (`cash.shifts.read`;
+  otra caja con `cash.shifts.read_all`; cerrados con `cash.history.read` o si él los cerró), con el aviso
+  `CASH_SCOPE` cuando el alcance está limitado.
+
+### Inventarios (`reports.inventory.read` y los permisos de la etapa 8; 18 reportes y 2 secciones)
+
+- Existencias actuales (total por insumo con niveles y situación), por almacén (niveles del almacén o del
+  insumo), negativos y bajo mínimo (`inventory.stock.read`); kardex con existencia después de cada movimiento y
+  cifras de existencia inicial, entradas, salidas y final al filtrar un insumo; entradas y salidas por insumo y
+  tipo; transferencias; ajustes de discrepancia con motivo, estado y autorización; mermas (merma operativa con su
+  motivo y cancelaciones «Preparado / merma» con el consumo conservado de la unidad, más las cuentas de
+  cancelaciones «No preparado» y por clasificar; una devolución de dinero nunca es merma) y consumos por
+  ingrediente, por día, por producto e ingrediente y asociado a cocina por almacén y modalidad
+  (`inventory.movements.read`); conteos y diferencias de conteo (`inventory.stock.read`, porque el teórico revela
+  existencias); valuación (`inventory.valuation.read`; el valor por insumo exige además `inventory.costs.read` y el
+  valor total solo la valuación, como en la etapa 8) y costos promedio (`inventory.costs.read`).
+- Sin `inventory.costs.read` no viajan costos unitarios, valores, bases de costo, «costo pendiente» ni los ajustes
+  de costo del kardex; la valuación después de cada movimiento exige costos y valuación.
+- Consumo: el neto de `consumption` + `consumption_reversal` de las unidades, fechado con la liberación canónica;
+  las unidades se cuentan distintas (una unidad enviada a varias estaciones consume y cuenta una vez; el resumen
+  da el total de unidades distintas aunque aparezcan en dos almacenes). Aviso `CONSUMPTION_PENDING` con
+  solicitudes pendientes o con error en el periodo.
+
+### Costos y márgenes (`reports.sales.read` + `inventory.costs.read`; 9 reportes y una sección)
+
+- Margen estimado por producto, categoría y día (`costs.margin_by_*`) con el costo real de los consumos de las
+  unidades reconocidas en el periodo (renglón × costo neto de su unidad; una unidad retirada en una reliquidación
+  resta su costo), estado del costo por unidad: «Sin costo» (sin consumo registrado, sin receta, solicitud
+  pendiente o con error), «Estimado» (algún consumo con costo pendiente o valuado con el último costo válido o el
+  de referencia, o con configuración incompleta) y firme; margen = venta sin IVA de las unidades con costo − su
+  costo; % de la venta (sin IVA) con costo firme; cifras del periodo con los ajustes de costo (concepto aparte) y
+  los descuentos y cargos generales de cuenta (no pertenecen a un producto). Nota «no es utilidad contable».
+- `costs.cost_status`: unidades sin costo o estimadas por producto con **qué dato falta**.
+- Costo teórico por producto (contra el precio vigente sin IVA, margen teórico) y por receta con el motor de la
+  etapa 8 (`inventory.TheoreticalCosts`, exportado de `recipe_costs.go`, solo SELECT); consumo valuado por
+  categoría de insumo; costo de mermas; ajustes de costo del periodo. La valuación de existencias está en
+  `inventory.valuation`.
+
+### Compras y proveedores (`reports.purchases.read`; 8 reportes y una sección)
+
+- **Compras recibidas por periodo** (`purchases.received`, obligatorio): fecha, folio de la recepción y de la
+  orden, modalidad (orden, directa, **mostrador** por `inventory_suppliers.kind='counter'` con el comercio),
+  proveedor, almacén, insumo, cantidad y unidad capturada y base, precio unitario sin IVA, descuento, importe sin
+  IVA, tasa e IVA, importe y quién recibió; filtros proveedor, insumo, categoría de insumo, almacén, modalidad y
+  estado de la orden; cifras de recepciones, total, **pagado desde caja** (ya incluido, nunca otra compra) y
+  devoluciones del periodo (aparte). Valor de inventario y costo por unidad base solo con `inventory.costs.read`.
+- Compras ordenadas (con lo recibido y lo pendiente por renglón), pendiente de recepción (situación actual, con
+  importe proporcional de referencia), compras por proveedor (recibido, ordenado, devoluciones y pagado desde
+  caja, sin sumarlos entre sí) y por insumo, devoluciones a proveedor a su valor asociado, compras pagadas desde
+  caja (los datos del gasto exigen los permisos de consulta de Caja) y proveedores (contacto, compras del periodo,
+  última recepción y órdenes abiertas).
+
+### Empleados (`reports.employees.read`; 3 reportes)
+
+- Solo relaciones registradas: confirmó (las unidades que nacieron con su confirmación), canceló, responsable de
+  la cuenta al cerrar (la venta se atribuye solo a él: nunca dos veces), cobró (sin turnos en arqueo), aplicó
+  descuentos y cortesías, autorizó como supervisor, devolvió y registró movimientos de caja. Sin «capturó» (no
+  se conserva) ni estadísticas de productividad. Ningún reporte de empleados incluye costos ni esperado.
+
+### Permisos y puente
+
+- Sin permisos nuevos: los de la 0017 y los de origen (`cash.expected.read`, `cash.shifts.read*`,
+  `cash.history.read`, `cash.movements.read`, `inventory.stock.read`, `inventory.movements.read`,
+  `inventory.costs.read`, `inventory.valuation.read`).
+- Fuentes de filtros nuevas: `warehouses`, `inventory_items`, `inventory_categories`, `suppliers`. Claves nuevas
+  en la lista blanca `reports_*` de `api.rs`: `warehouse_id`, `item_id`, `supplier_id`, `modality`, `currency`.
+
+### Decisiones menores
+
+1. Alcance de Caja en los reportes de caja (otras cajas con `cash.shifts.read_all`, cerrados con
+   `cash.history.read` o el propio cierre), por §12 «Exportación».
+2. Vista por turno = fecha comercial del turno en el periodo (como el historial de Caja) con los importes de todo
+   el turno; la vista por día no depende de los turnos.
+3. Lo contado al cerrar se muestra sin `cash.expected.read` (Caja también lo muestra); sin la diferencia no permite
+   reconstruir el esperado.
+4. Venta por turno en Caja con columnas de venta exigiendo `reports.sales.read`; el cobro, solo
+   `reports.cash.read` (Caja muestra los totales por método).
+5. Inventarios: kardex, entradas, salidas, transferencias, ajustes, mermas y consumos exigen
+   `inventory.movements.read` (como la consulta de movimientos de la etapa 8); existencias, negativos, bajo mínimo
+   y conteos `inventory.stock.read`.
+6. Costos unitarios por unidad base como cantidad decimal con 4 decimales (como la etapa 8), no como importe de
+   dos decimales.
+7. Configuración incompleta del consumo (diagnósticos del trabajador) ⇒ «Estimado»; procesada sin movimientos ⇒
+   «Sin costo» (sin receta).
+8. Costo de una unidad reconocida = renglón × costo neto actual de la unidad (consumos − reversiones): una unidad
+   cancelada después de vender y clasificada «No preparado» queda en cero; «Preparado / merma» conserva su costo,
+   que pasa a mermas cuando la reliquidación la retira.
+9. Compras ordenadas sin borradores; las canceladas solo con su filtro. Importe pendiente proporcional al renglón
+   de la orden, rotulado como referencia.
+10. Unidades confirmadas = las creadas en la misma transacción que la confirmación (`created_at` igual); las
+    agregadas después por una modificación no cuentan para quien confirmó.
+11. El paquete de aceptación vive aparte (`internal/reports/operational`) para tener su propia base: los
+    escenarios de B2 (turnos de varios días, arqueos, inventario activado) no alteran los totales exactos de la
+    aceptación de B1. Las fechas de días anteriores se simulan actualizando `created_at` de turnos, pagos,
+    movimientos y operaciones de caja en la base temporal (no tienen disparadores de solo inserción).
+
+### Limitaciones
+
+- Valuación por almacén no existe (un costo por insumo, como la etapa 8): las existencias por almacén solo dan
+  cantidades.
+- El costo teórico es el de hoy (sin historial) y no incluye complementos elegidos ni componentes de combo
+  (limitación de la etapa 8).
+- El esperado de un turno cerrado antes de la etapa 7 (sin cierre registrado) no existe.
+- Las vistas por día y por turno usan calendarios distintos (hora de inicio vs fecha de apertura): se rotulan.
+- El kardex de un año completo con el volumen medido excede el máximo de 100 000 renglones en memoria
+  (`REPORT_TOO_LARGE`): se consulta por mes o con filtros.
+
+### Mediciones
+
+Medición opt-in `TestOperationalVolume` (`ADEL_REPORTS_MEASURE=1`, después de la aceptación en la misma base;
+Apple M1 Max, clúster temporal 55499, `-race`): sobre los datos de la aceptación se generaron en 26.8 s 120 000
+unidades vendidas y reconocidas en un año (100 000 con su solicitud de consumo procesada y su estado de consumo,
+20 000 «Sin costo»), 200 000 movimientos de consumo y 60 000 cobros con su movimiento de caja. Tiempos de
+`reports.Run` completo (consulta en la transacción de solo lectura, totales, orden y página), 12 ejecuciones
+cada uno (p95 = la más lenta de las 12):
+
+| Reporte (365 días con el volumen)                                   | Renglones | Media    | p95      |
+| ------------------------------------------------------------------- | --------- | -------- | -------- |
+| `cash.shifts`                                                       | 2         | 92 ms    | 97 ms    |
+| `cash.by_day`                                                       | 364       | 77 ms    | 83 ms    |
+| `cash.sales_collections_by_shift`                                   | 2         | 88 ms    | 92 ms    |
+| `inventory.consumption_by_item`                                     | 3         | 489 ms   | 554 ms   |
+| `inventory.consumption_by_day`                                      | 364       | 252 ms   | 278 ms   |
+| `inventory.consumption_by_product`                                  | 3         | 778 ms   | 1 065 ms |
+| `inventory.consumption_by_kitchen`                                  | 1         | 526 ms   | 575 ms   |
+| `costs.margin_by_product`                                           | 3         | 815 ms   | 1 002 ms |
+| `costs.margin_by_category`                                          | 1         | 838 ms   | 911 ms   |
+| `costs.margin_by_period`                                            | 364       | 812 ms   | 916 ms   |
+| `costs.cost_status`                                                 | 6         | 777 ms   | 870 ms   |
+| `purchases.received`                                                | 3         | 4 ms     | 18 ms    |
+| `purchases.by_supplier`                                             | 2         | 1 ms     | 3 ms     |
+| `employees.activity`                                                | 2         | 86 ms    | 96 ms    |
+| `employees.responsible_sales`                                       | 3         | 278 ms   | 285 ms   |
+| `inventory.kardex` (un mes, un insumo)                              | 3 020     | 119 ms   | 138 ms   |
+| `costs.margin_by_product` (hoy)                                     | 3         | 13 ms    | 16 ms    |
+| `inventory.consumption_by_item` (hoy)                               | 3         | 3 ms     | 3 ms     |
+| `cash.by_day` (hoy)                                                 | 1         | 2 ms     | 7 ms     |
+| Dashboard (365 días contra los 365 anteriores, todas las secciones) | —         | 1 049 ms | 1 173 ms |
+
+**Cobro concurrente**: con el reporte de margen de un año en curso (933 ms) y su transacción de solo lectura aún
+abierta, la consulta del saldo y el pago por la API tardaron 95 ms (el mismo cobro sin reporte: 54 ms); la prueba
+exige que el cobro termine con la transacción del reporte abierta y en menos de 3 s. `EXPLAIN (ANALYZE, BUFFERS)`:
+con un año que es todo el volumen, la base del margen (renglones del libro y sus consumos) es un hash join con
+recorrido completo de ambas tablas (84 ms) y el consumo por día un recorrido de los 200 000 movimientos con
+ordenamiento (160 ms); las consultas de un día usan `sales_recognitions_recognized_idx`,
+`inventory_movements_occurred_idx`, `inventory_movements_unit_idx` e `inventory_consumption_requests_unit_idx`
+(margen de un día: 13 ms). Ningún reporte se acerca al límite de 30 s, por lo que **no se agregó la 0018**.
+Medición de un solo equipo, sin varias terminales.
+
+### Pruebas ejecutadas (copia aislada `repo9aB2`, clúster temporal 55499)
+
+Salida resumida real (logs en `docs9aB2/*.log`):
+
+- `gofmt -l` sin archivos; `go vet ./...` y `go vet -tags=integration ./...`: sin hallazgos.
+- `go test -race -count=1 ./...`: todos `ok` (incluidos `internal/payments` con
+  `TestExpectedCashIsTheShiftExpectation`, `internal/inventory` e `internal/reports` con
+  `TestReportRegistryIsClosedAndConsistent` sobre los 45 reportes nuevos).
+- Integración `-race` (una base temporal por paquete): `internal/database` ok 5.3 s, `internal/administration`
+  ok 55.6 s, `internal/catalog` ok 7.4 s, `internal/payments` ok 1.3 s, `internal/operations` ok 221.7 s
+  (aceptación encadenada), `internal/reports` ok 91.8 s (aceptación de B1 —que consulta todos los reportes
+  registrados sin turno y los permisos de cada uno por API directa— y las exportaciones de C1 en el árbol, que
+  revisan 25 reportes con columnas protegidas en PDF y Excel), `internal/reports/operational` ok 145.9 s con la
+  medición (`TestOperationalReports` con 14 subpruebas y `TestOperationalVolume`).
+- `npx tsc --noEmit`: sin errores. `rustfmt --check src/api.rs`: sin cambios. `cargo test --locked --offline`:
+  29 aprobadas, 1 ignorada (Keychain real).
+- No se ejecutaron Vitest, `npm run build` ni Playwright (sin cambios de interfaz en esta parte).
+
+Lo que cubre `TestOperationalReports`: turno permanente de tres días comerciales (vista por turno en la fecha de
+apertura y vista por día con aperturas, cobros, ingresos, retiros, gastos y corte parcial en su día); esperado del
+reporte igual al de Caja en pesos y dólares (fondo distintivo, cobro con cambio, cobro en dólares, operaciones) y
+otra vez antes del cierre; ventas y cobros por turno iguales a los cobros por turno; turno en arqueo sin importes
+en la lista y excluido del historial por caja, la vista por día, los cobros, el dashboard y empleados (con aviso);
+cierre con sobrante (contado 230, esperado 225) y cortes con su esperado; esperado, efectivo físico, diferencias,
+resultado y sus valores (`482.34`, `225.00`, `-2.50`, `15.50`) ausentes de todo el JSON de los reportes de caja,
+del catálogo y del dashboard para quien no tiene `cash.expected.read`, que sí recibe lo contado y el fondo;
+alcance de Caja (`CASH_SCOPE`) y reportes denegados por API directa sin su permiso; diferencias por moneda con el
+tipo de cambio histórico (−2.50 MXN, +1 USD, equivalente 15.50 a 18.00); márgenes con unidades «Sin costo»
+(vendidas antes de activar el inventario, sin receta y con consumo pendiente, con `CONSUMPTION_PENDING`),
+«Estimado» (lata con existencia en cero) y firme, margen = venta sin IVA con costo − costo, y paso a firme al
+procesar el consumo; costo teórico igual al de `GET inventory/recipes/{id}`; existencias negativas y bajo mínimo,
+existencias por almacén tras transferir y contar, kardex con existencia inicial y final, mermas clasificadas
+(rotura y «Preparado / merma»), conteo con diferencia −10, consumo sin contar una unidad dos veces; sin
+`inventory.costs.read` ningún costo, valor ni ajuste de costo, sin `inventory.valuation.read` la valuación
+denegada y con ella solo el valor total; compras recibidas (orden parcial, directa y mostrador) con el gasto
+vinculado sin duplicar (total 321.44 = recepciones; pagado desde caja 97.44), ordenado contra recibido y
+pendiente, por proveedor, devoluciones aparte y ajuste de costo de la recepción que cubrió el déficit; empleados:
+venta por responsable = venta del periodo, cobrado por usuario = cobros por usuario, confirmaciones y unidades
+confirmadas; dashboard con sus seis secciones y margen nulo sin datos suficientes, sin margen ni costos para quien
+no tiene `inventory.costs.read`; y en **todos** los reportes registrados, la suma del detalle = el total y el total
+de una página = el del conjunto.
