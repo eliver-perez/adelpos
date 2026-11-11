@@ -1,8 +1,10 @@
-# API v1 · Etapa 8
+# API v1 · Etapa 9A
 
 Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 
 Etapa 8 (inventarios, recetas, almacenes, compras y costos; guía en [INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md)): sus contratos están al final, en el orden de sus migraciones: «Inventario · fase A: núcleo (esquema 10)», «Inventario · fase B: recetas y consumo (esquema 11)», «Catálogo · indicaciones rápidas con efecto (esquema 12)», «Inventario · fase C: compras (esquema 13)» e «Inventario · fase D: control de inventario (esquema 14)». Las reglas comunes de inventario (permisos, lock, `operation_id`, cantidades y visibilidad de costos) se describen en la fase A y rigen las demás. Las correcciones de la revisión independiente (fase F del avance: valuación por insumo, elaboraciones y reversiones con existencia negativa, `COST_REQUIRED` y campos ocultos sin `inventory.stock.read`) están integradas en la sección de cada ruta.
+
+Etapa 9A (ajustes pendientes de catálogo e inventarios, reportes, indicadores y exportaciones; guía en [REPORTS.md](docs/REPORTS.md)): sus contratos están al final, en el orden de sus partes: «Etapa 9A · precio de complementos y vigencia de la precuenta (parte A1, esquema 15)», «Etapa 9A · proveedores, compras de mostrador, código sugerido, categorías y navegación de Inventarios (parte A2, esquema 16)», «Etapa 9A · reportes, día comercial y reconocimiento de ventas (parte B1, esquema 17)», «Etapa 9A · reportes de caja, inventarios, costos y márgenes, compras, proveedores y empleados (parte B2, sin migración nueva)», «Etapa 9A · exportación PDF y Excel y operación del puente (parte C1, sin migración nueva)» y «Etapa 9A · interfaz de Reportes (parte C2, sin cambios de contrato)». Las reglas comunes de los reportes (ejecución en una transacción de solo lectura, resultado único, permisos, formato de valores y errores) se describen en la parte B1 y rigen las partes B2, C1 y C2.
 
 HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
@@ -16,7 +18,7 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
 | GET        | `/health/live`            | Público; proceso activo.                                                                              |
 | GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                                                 |
-| GET        | `/version`                | Público; producto, versión, API y versión del esquema (14 en la 0.8.0).                               |
+| GET        | `/version`                | Público; producto, versión, API y versión del esquema (17 en la 0.9.0).                               |
 | GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                                              |
 | GET        | `/setup/status`           | Público; solo configured booleano.                                                                    |
 | POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                                                |
@@ -56,7 +58,7 @@ Setup/settings: `name`, `timezone` IANA (Go exige una zona existente con `time.L
 
 Usuarios: `username`, `display_name`, `role_id`, `active`; POST añade password de 8 a 256 caracteres. PATCH no restablece contraseñas. Rol: `name`, `permissions` (claves del registro). Excepciones: `{ "overrides": { "users.read": "allow", "registers.read": "deny", "audit.read": "inherit" } }`. Heredar elimina la excepción; las demás claves enviadas se actualizan.
 
-Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled. Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Desde la etapa 6.1 `preview` ya no es una pantalla: un valor guardado o enviado como `preview` se interpreta como `catalog` (la vista previa vive en Catálogo). Desde la etapa 7 (fase B) `cash` («Caja») es una pantalla de inicio válida con `cash.shifts.read`. Desde la etapa 8 (fase A) `inventory` («Inventarios») también lo es, con `inventory.read`. Contraseña propia: `current_password`, `new_password`.
+Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled. Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Desde la etapa 6.1 `preview` ya no es una pantalla: un valor guardado o enviado como `preview` se interpreta como `catalog` (la vista previa vive en Catálogo). Desde la etapa 7 (fase B) `cash` («Caja») es una pantalla de inicio válida con `cash.shifts.read`. Desde la etapa 8 (fase A) `inventory` («Inventarios») también lo es, con `inventory.read`, y desde la etapa 9A (parte B1) `reports` («Reportes»), con `reports.read`. Contraseña propia: `current_password`, `new_password`.
 
 Login devuelve session_token al cliente nativo. Setup/enrolamiento devuelven device_id y device_token al cliente nativo. Rust los guarda en Keychain y elimina campos secretos antes de responder al WebView. El UUID público de sesión no autentica peticiones. Caducidad de sesión: doce horas; nuevo acceso reemplaza la anterior. El evento lógico de reemplazo se informa con SESSION_REPLACED en la siguiente consulta, no mediante un WebSocket activo.
 
@@ -82,7 +84,7 @@ Auditoría de rechazos (etapa 7.1): además de la denegación de permisos (`acce
 
 400: validación; 401: dispositivo/sesión/credenciales inválidos; 403: permiso o aprovisionamiento rechazado (la operación completa se revierte y solo se audita la denegación); 404: inexistente; 409: duplicado o caja en uso; 413: cuerpo mayor del límite (64 KiB general; 2 MiB catálogo, restaurante, cocina e inventario); 429: límite de intentos; 503: indisponibilidad. Los diagnósticos conservan los códigos de la etapa 1. Códigos de sesión: SESSION_REQUIRED, SESSION_INVALID, SESSION_EXPIRED, SESSION_REVOKED, SESSION_REPLACED; terminal: DEVICE_REQUIRED y DEVICE_REVOKED. No exponer detalles PostgreSQL.
 
-JSON UTF-8, Cache-Control no-store, X-Content-Type-Options nosniff y request ID generado por Go. CORS exacto conserva consultas técnicas GET; la operación autenticada de escritorio usa HTTP nativo, sin ampliar CORS ni CSP. Ninguna credencial se transporta por query string. Timeouts administrativos de diez segundos en Go y doce en el cliente; respuesta nativa limitada a 2 MiB.
+JSON UTF-8, Cache-Control no-store, X-Content-Type-Options nosniff y request ID generado por Go. CORS exacto conserva consultas técnicas GET; la operación autenticada de escritorio usa HTTP nativo, sin ampliar CORS ni CSP. Ninguna credencial se transporta por query string. Timeouts administrativos de diez segundos en Go y doce en el cliente; respuesta nativa limitada a 2 MiB. Desde la etapa 9A, `reports/*` tiene 40 s en Go y 45 s en el puente, y `reports/export/*` 110 s en Go y 120 s en la operación `export_report`, que admite archivos de hasta 32 MiB (ver las secciones «Etapa 9A»).
 
 ## Versionado y proyectos futuros
 
@@ -1150,12 +1152,10 @@ Desglose del producto (`ProductBreakdown`, también en cada componente de combo 
 
 ## Etapa 9A · proveedores, compras de mostrador, código sugerido, categorías y navegación de Inventarios (parte A2, esquema 16)
 
-### Inventario · etapa 9A (fase A, A2): proveedores, compras de mostrador y código sugerido
-
 Migración `0016_inventory_suppliers_counter.sql`. Todas las rutas siguen bajo `/api/v1/inventory`, exigen `inventory.read`
 además de su permiso y conservan idempotencia (`operation_id`), revisión, auditoría y eventos de la etapa 8.
 
-#### Proveedores (`suppliers`)
+### Proveedores (`suppliers`)
 
 `Supplier` (listado, detalle, alta y edición) agrega:
 
@@ -1188,14 +1188,14 @@ además de su permiso y conservan idempotencia (`operation_id`), revisión, audi
 { "id": "…", "trade_name": "Compras de mostrador", "kind": "counter", "active": true }
 ```
 
-#### Órdenes de compra y sugerencias
+### Órdenes de compra y sugerencias
 
 - `POST purchase-orders`, `PATCH purchase-orders/{id}` (cambiar el proveedor de un borrador) y
   `POST purchase-suggestions/draft-order` con el proveedor de mostrador → 409 `COUNTER_SUPPLIER` («… solo se usa en
   recepciones directas: elige un proveedor formal para la orden de compra.»). Sin escrituras.
 - Las sugerencias solo consideran proveedores formales (`sp.kind='formal'`).
 
-#### Recepciones (`receipts`)
+### Recepciones (`receipts`)
 
 - `POST receipts` directa (sin orden; `inventory.purchases.receive` + `inventory.purchases.create`) admite el proveedor de
   mostrador y el campo opcional `counter_store` (comercio concreto, una línea, hasta 100 caracteres, recortado). Con un
@@ -1219,7 +1219,7 @@ Ejemplo de cuerpo:
 }
 ```
 
-#### Código interno de insumos (`item-codes`, nueva)
+### Código interno de insumos (`item-codes`, nueva)
 
 `GET inventory/item-codes?code=<código>[&item_id=<insumo que se edita>]` (`inventory.read`; puente `inventory_item_code`,
 parámetros `code` e `item_id` en la lista blanca de `api.rs`). Solo lectura; Go sigue respondiendo `DUPLICATE_CODE` al
@@ -1240,7 +1240,7 @@ guardar.
 - `taken_by`: nombre del insumo que lo usa, o `null`.
 - 400: `code` vacío o de más de 40 caracteres o con saltos de línea, `item_id` inválido o parámetros ajenos.
 
-#### Puente nativo (`desktop/src-tauri/src/api.rs`)
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
 
 - Operación nueva `inventory_item_code` → `GET inventory/item-codes`.
 - Parámetros de consulta nuevos para `inventory_*`: `code` y `supplier_kind` (`kind` ya existía).
@@ -1248,7 +1248,7 @@ guardar.
   `ReceiptSummary.counter_store`, `DirectReceiptInput.counter_store`, `SupplierQuery.kind`, `ReceiptQuery.supplier_kind`
   (`services/inventoryPurchasing.ts`) e `ItemCodeCheck` / `checkInventoryItemCode` (`services/inventory.ts`).
 
-#### Esquema (para reportes)
+### Esquema (para reportes)
 
 - `app.inventory_suppliers.kind text NOT NULL DEFAULT 'formal'` (`formal|counter`), índice único parcial
   `inventory_suppliers_counter_key` (un solo `counter`), `phone_secondary`, `mobile_phone`, `website` (`text NOT NULL
@@ -1446,7 +1446,7 @@ Tipos TypeScript: `desktop/src/services/reports.ts`.
 `reports.inventory.read`, `reports.purchases.read`, `reports.employees.read`, `reports.export.pdf`,
 `reports.export.excel`. Pantalla de inicio `reports` (`reports.read`) en `administration/preferences.go`.
 
-## Etapa 9A · reportes de caja, inventarios, costos y márgenes, compras, proveedores y empleados (parte B2)
+## Etapa 9A · reportes de caja, inventarios, costos y márgenes, compras, proveedores y empleados (parte B2, sin migración nueva)
 
 Todos los reportes de la fase B2 usan el contrato de la fase B1, sin rutas nuevas: `GET reports/catalog`,
 `GET reports/run/{id}` (resultado único `report`, `meta`, `columns`, `rows`, `totals`, `summary`, `page`, `sort`),
@@ -1623,9 +1623,9 @@ con costo en el periodo). Los turnos en arqueo se excluyen de `cash` para todos.
   `SourceKindLabel`, `AdjustmentReasonLabel`, `AdjustmentStateLabel`, `CountStateLabel`, `CountScopeLabel`,
   `PurchaseOrderStateLabel` y `inventory.MovementKinds`.
 
-## Etapa 9A · exportación PDF y Excel y operación del puente (parte C1)
+## Etapa 9A · exportación PDF y Excel y operación del puente (parte C1, sin migración nueva)
 
-#### Exportación de reportes a PDF y Excel (parte C1)
+### `GET reports/export/{id}` (exportación a PDF y Excel)
 
 `GET /api/v1/reports/export/{id}?format=pdf|xlsx&…`
 
@@ -1677,7 +1677,7 @@ comerciales y horas del restaurante como fechas de Excel. Ningún valor es fórm
 `-`, `@`, tabulador, retorno o salto (o `＝ ＋ － ＠`) lleva un apóstrofo inicial visible. Sin hipervínculos, nombres
 definidos, vínculos externos, macros ni imágenes.
 
-#### Puente nativo: operación cerrada `export_report` (`desktop/src-tauri/src/export.rs`)
+### Puente nativo: operación cerrada `export_report` (`desktop/src-tauri/src/export.rs`)
 
 `invoke('export_report', { report, format, query })` → `HTTPResult { status, body }`:
 
@@ -1700,7 +1700,7 @@ definidos, vínculos externos, macros ni imágenes.
 - Registro: `build.rs`, `permissions/diagnostics.toml` (`allow-diagnostics` incluye `export_report`), `main.rs`
   (`.plugin(tauri_plugin_dialog::init())` e `invoke_handler`). `capabilities/main.json` sin cambios.
 
-#### Frontend: `desktop/src/services/reportExport.ts`
+### Frontend: `desktop/src/services/reportExport.ts`
 
 ```ts
 type ExportFormat = 'pdf' | 'xlsx';
@@ -1714,7 +1714,7 @@ Recibe la misma `ReportQuery` de la pantalla (quita la paginación). Errores: `A
 (y `session-invalid` en 401 `SESSION_*`/`DEVICE_*`, como `api()`); un rechazo local del puente es
 `APIError('EXPORT_FAILED', <mensaje de Rust>)`.
 
-#### Playwright: `desktop/e2e/native-driver.ts`
+### Playwright: `desktop/e2e/native-driver.ts`
 
 `installDriver(page)` devuelve `{ request, nextSaveDialog(choice: 'save' | 'cancel'), exports }`. La rama
 `export_report` lee la lista cerrada de `export.rs` y la lista blanca de `api.rs`, pide el archivo a Go desde Node,
@@ -1722,9 +1722,7 @@ valida tipo, firma y nombre como Rust y aplica la siguiente respuesta del diálo
 Los archivos guardados quedan en `exports` (`{report, format, fileName, contentType, bytes: Buffer}`) en Node; el
 navegador recibe solo el resultado. Los rechazos del puente llegan al WebView como texto, igual que con Tauri.
 
-## Etapa 9A · interfaz de Reportes (parte C2)
-
-### Etapa 9A · parte C2 (interfaz de Reportes): sin cambios de contrato
+## Etapa 9A · interfaz de Reportes (parte C2, sin cambios de contrato)
 
 La parte C2 no agrega ni modifica rutas, operaciones del puente, permisos ni formas JSON. Consume:
 
