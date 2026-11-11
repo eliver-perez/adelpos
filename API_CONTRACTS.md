@@ -1622,3 +1622,102 @@ con costo en el periodo). Los turnos en arqueo se excluyen de `cash` para todos.
   `recipe_costs.go`, sin permisos ni locks) y los nombres visibles `inventory.MovementKindLabel`, `CostBasisLabel`,
   `SourceKindLabel`, `AdjustmentReasonLabel`, `AdjustmentStateLabel`, `CountStateLabel`, `CountScopeLabel`,
   `PurchaseOrderStateLabel` y `inventory.MovementKinds`.
+
+## Etapa 9A · exportación PDF y Excel y operación del puente (parte C1)
+
+#### Exportación de reportes a PDF y Excel (parte C1)
+
+`GET /api/v1/reports/export/{id}?format=pdf|xlsx&…`
+
+- `{id}`: un reporte del registro cerrado (los mismos que `reports/run/{id}`; el dashboard no se exporta).
+- Parámetros: los mismos de `reports/run/{id}` (periodo, `compare`, `sort`, `direction` y los filtros que declara el
+  reporte; cualquier otro se rechaza), **sin** `page` ni `page_size` (400: el archivo incluye todos los renglones del
+  conjunto filtrado), más `format` (obligatorio, `pdf` o `xlsx`) y `paper` (`letter` por omisión o `a4`; solo con
+  `format=pdf`, si no 400).
+- Permisos (validados en la transacción de autenticación; un 403 se audita como `access.denied`): `reports.read`, los
+  del reporte y `reports.export.pdf` (PDF) o `reports.export.excel` (Excel). Las columnas y cifras con permiso propio
+  (efectivo físico y esperado con `cash.expected.read`, costos con `inventory.costs.read`, valuación…) no existen en
+  el archivo de quien no tiene ese permiso: es el mismo `Result` de la pantalla.
+- Respuesta 200: binaria, `Content-Type` exacto (`application/pdf` o
+  `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`), `Content-Disposition: attachment;
+filename=<reporte>_<primer-día>[_<último-día>].<ext>` (ASCII, sin acentos, ≤ 100 caracteres; un reporte sin periodo
+  lleva la fecha comercial de generación; p. ej. `ventas-por-dia_2026-11-01_2026-11-30.pdf`), `Content-Length`,
+  `Cache-Control: no-store` y `X-Content-Type-Options: nosniff`. El archivo se genera en la misma petición: no se
+  guarda en el servidor ni hay identificador de descarga.
+- Errores (JSON `{"error":{code,message,request_id}}`): 400 `VALIDATION_ERROR` (formato, papel, paginación,
+  parámetro no admitido, periodo inválido, orden no permitido), 403 `PERMISSION_DENIED`, 404 `NOT_FOUND`, 422
+  `EXPORT_TOO_LARGE` (más de **50 000** renglones: «El reporte tiene 50,001 renglones y la exportación admite hasta
+  50,000. Reduce el periodo o agrega filtros.», sin generar nada), 422 `REPORT_TOO_LARGE` (más de 100 000 renglones,
+  como la pantalla), 422 `EXPORT_FILE_TOO_LARGE` (archivo > 32 MiB), 503 `REPORTS_BUSY`, 503 `REPORT_TIMEOUT`.
+- Ejecución: la consulta corre en la transacción `REPEATABLE READ READ ONLY` del ejecutor de reportes (misma
+  fotografía para encabezado, detalle y totales; el nombre del establecimiento se lee en ella) y la exportación
+  conserva su lugar del semáforo (2) mientras genera el archivo. Tiempo de respuesta propio de 110 s (la ruta amplía su
+  plazo de escritura sobre el `WriteTimeout` de 15 s del servidor; `reports/*` también, a 45 s).
+- Auditoría: `report.exported` (entidad `report`, sin `entity_id`) en una transacción corta aparte, después de generar
+  el archivo y antes de enviarlo (si no se puede auditar, no se entrega): `{report, format, paper?, orientation?,
+period: {kind, first_day, last_day}, comparison, filters: {clave: valor tal como se envió}, sort: {key, direction},
+rows, bytes}`. Sin nombres de filtros, importes ni contenido. Un 422/400 no se audita como exportación.
+
+Contenido del PDF: encabezado con establecimiento, reporte, descripción, periodo (etiqueta de Go), comparación,
+filtros aplicados, fecha usada, hora de inicio del día y zona, orden, renglones y fecha de generación (hora del
+restaurante); cifras resumidas y avisos; tabla con encabezados repetidos en cada página, renglones alternados, totales
+de Go y notas; pie «AD-EL POS · Generado el …» y «Página n de m». Carta (o A4) vertical si cabe con 8 pt; si no,
+horizontal con letra de 8 a 5.5 pt. Importes con `moneytext` (`$1,234.56`, `US$20.05`), porcentajes `12.50 %`,
+fechas `dd/mm/aaaa` e instantes `dd/mm/aaaa hh:mm` en la zona del restaurante. Las columnas de importes, cantidades,
+fechas y códigos nunca se parten; solo el texto se ajusta en varias líneas.
+
+Contenido del XLSX: hoja «Datos» (encabezado con estilo propio, congelado en A2, una columna por columna visible del
+reporte, anchos según el contenido; renglón final «Total» con los totales de Go como números) y hoja «Filtros»
+(Concepto | Valor: establecimiento, reporte, descripción, periodo con primer y último día como fechas, comparación,
+fecha usada, hora de inicio, zona, orden, renglones, generado, filtros aplicados, resumen, avisos, notas y, si
+aplica, «Precisión»). Importes, cantidades y porcentajes (como fracción con formato `0.00%`) son números exactos
+(ida y vuelta comprobada, ≤ 15 dígitos significativos; si no, texto alineado a la derecha con nota en «Filtros»);
+pesos `"$"#,##0.00` y dólares `"US$"#,##0.00` en columnas separadas; códigos y textos con formato `@`; fechas
+comerciales y horas del restaurante como fechas de Excel. Ningún valor es fórmula; un texto que empieza por `=`, `+`,
+`-`, `@`, tabulador, retorno o salto (o `＝ ＋ － ＠`) lleva un apóstrofo inicial visible. Sin hipervínculos, nombres
+definidos, vínculos externos, macros ni imágenes.
+
+#### Puente nativo: operación cerrada `export_report` (`desktop/src-tauri/src/export.rs`)
+
+`invoke('export_report', { report, format, query })` → `HTTPResult { status, body }`:
+
+- `report`: uno de `EXPORTABLE_REPORTS` (lista cerrada = registro de Go; la prueba Go
+  `TestExportBridgeListsEveryReport` exige que coincidan exactamente). `format`: `pdf` | `xlsx`. `query`: claves de la
+  lista blanca `reports_*` de `api.rs` (`allowed_query_keys("reports_run")`) excepto `page`, `page_size`, `search` y
+  `format`, más `paper` (`letter`|`a4`, solo PDF); valores de ≤ 120 caracteres sin controles. Lo demás se rechaza con
+  un error de texto antes de llamar a Go.
+- Credenciales como `api_request` (dispositivo y sesión del llavero; un 401 `SESSION_*`/`DEVICE_*` las descarta igual),
+  120 s de espera y tope de 32 MiB (2 MiB para un error JSON). Una exportación a la vez («Ya hay una exportación en
+  curso.»).
+- Go responde ≠ 200 → `{ status, body }` con el JSON de error de Go (sin tokens).
+- 200 → valida `Content-Type` exacto y firma (`%PDF-` / `PK\x03\x04`) **antes** del diálogo; nombre de
+  `Content-Disposition` saneado (`[A-Za-z0-9._ -]`, sin carpeta ni punto inicial, extensión forzada, ≤ 100 caracteres,
+  «reporte.<ext>» si no hay). Diálogo nativo «Guardar como» (`tauri-plugin-dialog`, ventana principal como padre, filtro
+  del formato); escritura atómica (temporal oculto en la misma carpeta, `sync_all`, renombrado; el temporal se borra si
+  algo falla). Si Rust tiene que agregar la extensión y ese archivo ya existe, no lo sustituye sin preguntar (error).
+- `body` en 200: `{ "result": "saved", "file_name": "ventas-por-dia_2026-11-10.pdf", "size": 12345 }` o
+  `{ "result": "cancelled" }`. Nunca bytes, ruta completa ni tokens.
+- Registro: `build.rs`, `permissions/diagnostics.toml` (`allow-diagnostics` incluye `export_report`), `main.rs`
+  (`.plugin(tauri_plugin_dialog::init())` e `invoke_handler`). `capabilities/main.json` sin cambios.
+
+#### Frontend: `desktop/src/services/reportExport.ts`
+
+```ts
+type ExportFormat = 'pdf' | 'xlsx';
+type ExportPaper = 'letter' | 'a4';
+interface ExportOutcome { result: 'saved' | 'cancelled'; file_name?: string; size?: number }
+exportReport(report: string, format: ExportFormat, query?: ReportQuery, options?: { paper?: ExportPaper }): Promise<ExportOutcome>
+exportQuery(query, format, paper?) // la consulta de la pantalla sin page/page_size ni valores vacíos (+ paper en PDF)
+```
+
+Recibe la misma `ReportQuery` de la pantalla (quita la paginación). Errores: `APIError` con el código y mensaje de Go
+(y `session-invalid` en 401 `SESSION_*`/`DEVICE_*`, como `api()`); un rechazo local del puente es
+`APIError('EXPORT_FAILED', <mensaje de Rust>)`.
+
+#### Playwright: `desktop/e2e/native-driver.ts`
+
+`installDriver(page)` devuelve `{ request, nextSaveDialog(choice: 'save' | 'cancel'), exports }`. La rama
+`export_report` lee la lista cerrada de `export.rs` y la lista blanca de `api.rs`, pide el archivo a Go desde Node,
+valida tipo, firma y nombre como Rust y aplica la siguiente respuesta del diálogo de la cola (sin respuesta: guardar).
+Los archivos guardados quedan en `exports` (`{report, format, fileName, contentType, bytes: Buffer}`) en Node; el
+navegador recibe solo el resultado. Los rechazos del puente llegan al WebView como texto, igual que con Tauri.

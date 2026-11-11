@@ -12,6 +12,44 @@ const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183'
 // rechazar la base. Una base configurada por otro proceso se sigue rechazando.
 const preparedTerminals = new Map<string, { deviceID: string; deviceToken: string }>();
 
+// Exportación de reportes (etapa 9A, parte C1): simulación de la operación cerrada export_report de
+// src-tauri/src/export.rs. Usa la misma lista cerrada de reportes (leída de export.rs) y la misma
+// lista blanca de parámetros que Rust (la de reports_* en api.rs, sin paginación ni búsqueda, más
+// paper para el PDF); pide el archivo a Go desde Node con las credenciales que solo conoce Node,
+// valida el tipo exacto y la firma como Rust y simula el diálogo «Guardar como». Los bytes se quedan
+// en Node (exports): el navegador recibe solo {result, file_name, size}, como con Rust.
+const exportFormats: Record<string, { contentType: string; signature: Buffer; extension: string }> =
+  {
+    pdf: { contentType: 'application/pdf', signature: Buffer.from('%PDF-'), extension: '.pdf' },
+    xlsx: {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      signature: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      extension: '.xlsx',
+    },
+  };
+
+export interface SimulatedExport {
+  report: string;
+  format: string;
+  fileName: string;
+  contentType: string;
+  bytes: Buffer;
+}
+
+// Port de sanitize_file_name de export.rs: nombre base ASCII, sin punto inicial, extensión forzada
+// y hasta 100 caracteres.
+function sanitizeFileName(name: string, extension: string) {
+  const base = name.split(/[/\\]/).pop() ?? '';
+  let cleaned = base.replace(/[^A-Za-z0-9._ -]/g, '_');
+  if (cleaned.toLowerCase().endsWith(extension)) {
+    cleaned = cleaned.slice(0, cleaned.length - extension.length);
+  }
+  let stem = cleaned.replace(/^[. ]+|[. ]+$/g, '');
+  if (/^[_-]*$/.test(stem)) stem = 'reporte';
+  stem = stem.slice(0, 100 - extension.length).replace(/[. ]+$/, '');
+  return `${stem}${extension}`;
+}
+
 export async function installDriver(page: Page) {
   let fullscreen = true;
   let streamGeneration = 0;
@@ -43,6 +81,84 @@ export async function installDriver(page: Page) {
     const [, operation, method, route] = match;
     if (!operation || !method || !route) continue;
     routes.set(operation, { method, path: route });
+  }
+  const exportSource = readFileSync(new URL('../src-tauri/src/export.rs', import.meta.url), 'utf8');
+  const exportableStart = exportSource.indexOf('const EXPORTABLE_REPORTS');
+  const exportable = new Set(
+    [
+      ...exportSource
+        .slice(exportableStart, exportSource.indexOf('];', exportableStart))
+        .matchAll(/"([a-z_.]+)"/g),
+    ].map((match) => match[1]),
+  );
+  // La lista blanca de reports_* dentro de allowed_query_keys (api_request también menciona el
+  // prefijo para su tiempo de espera, antes de esa función).
+  const reportKeysStart = rust.indexOf(
+    'operation.starts_with("reports_")',
+    rust.indexOf('fn allowed_query_keys'),
+  );
+  const reportQueryKeys = new Set(
+    [...rust.slice(reportKeysStart, rust.indexOf(']', reportKeysStart)).matchAll(/"([a-z_]+)"/g)]
+      .map((match) => match[1])
+      .filter((key) => key !== 'reports_'),
+  );
+  // Cola de respuestas del diálogo «Guardar como» que controla la prueba; sin respuesta, guarda.
+  const saveDialogChoices: ('save' | 'cancel')[] = [];
+  const exports: SimulatedExport[] = [];
+  async function exportReport(args: Record<string, unknown>) {
+    const report = String(args.report);
+    const format = String(args.format);
+    const kind = exportFormats[format];
+    if (!kind || !exportable.has(report))
+      throw new Error('El reporte no se puede exportar desde el puente nativo.');
+    const query = (args.query ?? {}) as Record<string, string>;
+    for (const [key, value] of Object.entries(query)) {
+      const accepted =
+        key === 'paper'
+          ? format === 'pdf' && (value === 'letter' || value === 'a4')
+          : !['page', 'page_size', 'search', 'format'].includes(key) && reportQueryKeys.has(key);
+      if (!accepted || value.length > 120 || /[\u0000-\u001f\u007f]/.test(value))
+        throw new Error('Parámetros de exportación no autorizados.');
+    }
+    const response = await fetch(
+      `${serverURL}/api/v1/reports/export/${report}?${new URLSearchParams({ ...query, format })}`,
+      {
+        headers: {
+          'X-Device-ID': deviceID,
+          'X-Device-Token': deviceToken,
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      },
+    );
+    if (response.status !== 200) {
+      const body = await response.json();
+      const code = String(body?.error?.code ?? '');
+      if (response.status === 401 && (code.startsWith('SESSION_') || code.startsWith('DEVICE_')))
+        sessionToken = '';
+      delete body.device_token;
+      delete body.session_token;
+      return { status: response.status, body };
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const contentType = (response.headers.get('content-type') ?? '').trim().toLowerCase();
+    if (contentType !== kind.contentType)
+      throw new Error('El servidor no respondió con el tipo de archivo esperado.');
+    if (
+      bytes.length > 32 * 1024 * 1024 ||
+      !bytes.subarray(0, kind.signature.length).equals(kind.signature)
+    )
+      throw new Error('El archivo recibido no es válido.');
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const suggested = /filename="?([^";]*)"?/i.exec(disposition)?.[1] ?? '';
+    const fileName = sanitizeFileName(suggested, kind.extension);
+    if ((saveDialogChoices.shift() ?? 'save') === 'cancel') {
+      return { status: 200, body: { result: 'cancelled' } };
+    }
+    exports.push({ report, format, fileName, contentType, bytes });
+    return { status: 200, body: { result: 'saved', file_name: fileName, size: bytes.length } };
+  }
+  function nextSaveDialog(choice: 'save' | 'cancel') {
+    saveDialogChoices.push(choice);
   }
   async function request(method: string, route: string, body?: unknown) {
     const response = await fetch(`${serverURL}/api/v1/${route}`, {
@@ -267,6 +383,14 @@ export async function installDriver(page: Page) {
           ready: await request('GET', 'health/ready'),
           version: await request('GET', 'version'),
         };
+      if (command === 'export_report') {
+        // Como en Tauri, un rechazo del puente llega al WebView como texto (no como Error).
+        try {
+          return await exportReport(args);
+        } catch (error) {
+          return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
+        }
+      }
       if (command !== 'api_request') throw new Error('Comando de prueba no autorizado');
       const operation = String(args.operation);
       const entry = routes.get(operation);
@@ -290,7 +414,12 @@ export async function installDriver(page: Page) {
         const body = { ...args };
         if (body.channel && typeof body.channel === 'object' && 'id' in body.channel)
           body.channel = body.channel.id;
-        return bridge.__nativeTestBridge(command, body);
+        return bridge.__nativeTestBridge(command, body).then((result) => {
+          if (result && typeof result === 'object' && '__bridgeRejection' in result) {
+            throw (result as { __bridgeRejection: string }).__bridgeRejection;
+          }
+          return result;
+        });
       },
       transformCallback: (callback: (message: unknown) => void) => {
         callbacks.set(++nextCallback, callback);
@@ -300,5 +429,5 @@ export async function installDriver(page: Page) {
       runCallback: (id: number, message: unknown) => callbacks.get(id)?.(message),
     };
   });
-  return { request };
+  return { request, nextSaveDialog, exports };
 }

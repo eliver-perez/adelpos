@@ -2,6 +2,7 @@
 
 mod api;
 mod connection;
+mod export;
 mod realtime;
 mod vault;
 mod window_check;
@@ -128,6 +129,9 @@ fn client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
 
 fn main() {
     tauri::Builder::default()
+        // Diálogo nativo «Guardar como» de la exportación de reportes: solo lo usa Rust (export.rs);
+        // la ventana no tiene permisos dialog:* en capabilities.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
             let client = config.as_ref().map_err(Clone::clone).and_then(client);
@@ -171,6 +175,7 @@ fn main() {
             server_snapshot,
             api::authentication_state,
             api::api_request,
+            export::export_report,
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio");

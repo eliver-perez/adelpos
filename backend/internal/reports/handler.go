@@ -12,6 +12,8 @@ import (
 // Rutas del módulo (todas GET y con reports.read):
 //   - reports/catalog: reportes y filtros visibles para el usuario;
 //   - reports/run/{id}: ejecuta un reporte del registro cerrado;
+//   - reports/export/{id}?format=pdf|xlsx: el mismo reporte como archivo (export.go), con
+//     reports.export.pdf o reports.export.excel;
 //   - reports/dashboard: indicadores del resumen ejecutivo, cada uno con su permiso;
 //   - reports/filters/{source}: opciones de un filtro (cajas, turnos, usuarios, áreas, mesas,
 //     productos, categorías, métodos de pago, listas de precios, motivos y orígenes).
@@ -91,6 +93,10 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request) (*Plan, error) {
 			})
 			return result, err
 		}}, nil
+	case len(parts) == 2 && parts[0] == "export":
+		// Exportación a PDF o Excel (fase C1, export.go): misma validación que run más el formato y
+		// su permiso; el archivo se genera después, en el Runner.
+		return prepareExport(request.Actor, parts[1], request.Query)
 	case len(parts) == 1 && parts[0] == "dashboard":
 		raw, err := parseDashboardParams(request.Query)
 		if err != nil {

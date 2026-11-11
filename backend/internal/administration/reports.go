@@ -3,6 +3,9 @@ package administration
 import (
 	"context"
 	"errors"
+	"mime"
+	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,6 +21,17 @@ import (
 // reportTimeout es el tiempo de respuesta HTTP de reports/* (las demás rutas tienen 10 s): cubre el
 // statement_timeout de 30 s de la consulta más la autenticación.
 const reportTimeout = 40 * time.Second
+
+// exportTimeout es el tiempo de respuesta de reports/export/* (fase C1): la consulta (hasta 30 s) más
+// la generación del archivo de hasta 50 000 renglones. El puente nativo espera 120 s.
+const exportTimeout = 110 * time.Second
+
+// reportPlan conserva quién pidió el reporte para auditar la exportación después de generar el
+// archivo, fuera de la transacción de autenticación.
+type reportPlan struct {
+	plan      *reports.Plan
+	principal Principal
+}
 
 // reportRunner devuelve el ejecutor de reportes del servicio (se crea al primer uso sobre el pool).
 func (service *Service) reportRunner() *reports.Runner {
@@ -38,21 +52,57 @@ func handleReports(ctx context.Context, tx pgx.Tx, request Request, principal Pr
 	if err != nil {
 		return nil, reportFault(err)
 	}
-	return plan, nil
+	return &reportPlan{plan: plan, principal: principal}, nil
 }
 
 // completeDeferred ejecuta, ya confirmada la transacción de autenticación, la consulta diferida de un
-// reporte. Cualquier otro resultado se devuelve tal cual.
+// reporte. Cualquier otro resultado se devuelve tal cual. Un archivo exportado se audita antes de
+// entregarlo: si la auditoría no se puede registrar, el archivo no se entrega.
 func (service *Service) completeDeferred(ctx context.Context, result any) (any, error) {
-	plan, ok := result.(*reports.Plan)
+	pending, ok := result.(*reportPlan)
 	if !ok {
 		return result, nil
 	}
-	value, err := plan.Execute(ctx, service.reportRunner())
+	value, err := pending.plan.Execute(ctx, service.reportRunner())
 	if err != nil {
 		return nil, reportFault(err)
 	}
+	if file, ok := value.(*reports.File); ok {
+		if err := service.auditExport(ctx, pending.principal, file); err != nil {
+			return nil, err
+		}
+	}
 	return value, nil
+}
+
+// auditExport registra report.exported en una transacción corta aparte, sin locks operativos: el
+// reporte, el formato, el periodo, los filtros y el número de renglones; nunca el contenido.
+func (service *Service) auditExport(ctx context.Context, principal Principal, file *reports.File) error {
+	tx, err := service.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background())
+	if err := audit(ctx, tx, principal, "report.exported", "report", nil, nil, file.Audit, true); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// writeExport envía un archivo exportado como respuesta binaria con su tipo exacto y el nombre
+// sugerido. Devuelve false si el resultado no es un archivo.
+func writeExport(writer http.ResponseWriter, result any) bool {
+	file, ok := result.(*reports.File)
+	if !ok {
+		return false
+	}
+	header := writer.Header()
+	header.Set("Content-Type", file.ContentType)
+	header.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": file.FileName}))
+	header.Set("Content-Length", strconv.Itoa(len(file.Content)))
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(file.Content)
+	return true
 }
 
 func reportFault(err error) error {

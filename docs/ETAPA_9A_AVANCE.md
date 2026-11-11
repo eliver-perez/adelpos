@@ -866,3 +866,95 @@ venta por responsable = venta del periodo, cobrado por usuario = cobros por usua
 confirmadas; dashboard con sus seis secciones y margen nulo sin datos suficientes, sin margen ni costos para quien
 no tiene `inventory.costs.read`; y en **todos** los reportes registrados, la suma del detalle = el total y el total
 de una página = el del conjunto.
+
+## Fase C · C1 · Exportación PDF y Excel en Go y operación cerrada del puente
+
+Sin migraciones. Dependencias nuevas (descarga única con red, después sin red): excelize 2.11.0, go-pdf/fpdf 0.12.0 y
+x/image 0.47.0 (fuentes Go) en Go; tauri-plugin-dialog 2.8.3 en Rust (detalle en DEPENDENCIES).
+
+### Exportación en Go (`backend/internal/reports/export*.go`)
+
+- Ruta `GET reports/export/{id}?format=pdf|xlsx&…` con los mismos parámetros que `reports/run` salvo la paginación,
+  más `paper=letter|a4` para el PDF. Permisos del reporte **y** `reports.export.pdf` o `reports.export.excel`, en la
+  transacción de autenticación (403 auditado como `access.denied`).
+- **Misma consulta y mismo resultado que la pantalla**: `Prepare` + `Execute` del motor de B1 en la transacción de solo
+  lectura (el nombre del establecimiento se lee en la misma fotografía); el archivo usa `Result.Columns`,
+  `Result.AllRows`, `Result.Totals`, `Result.Summary` y `Result.Meta`. Nada se recalcula: las columnas y cifras
+  protegidas no existen en el `Result` de quien no tiene su permiso y, por tanto, tampoco en el archivo.
+- La exportación toma un lugar del semáforo de reportes y lo conserva hasta terminar el archivo (con 2 lugares, nunca
+  hay más de dos consultas o archivos a la vez). Límites: 50 000 renglones (422 `EXPORT_TOO_LARGE` con el número de
+  renglones, sin generar) y 32 MiB (422 `EXPORT_FILE_TOO_LARGE`); tiempo propio de 110 s; la generación se interrumpe
+  si la petición se cancela.
+- Respuesta binaria con `Content-Type` exacto, `Content-Disposition: attachment; filename=…` (reporte y periodo en
+  ASCII, p. ej. `ventas-por-dia_2026-11-01_2026-11-30.pdf`) y `Content-Length`. El archivo no se guarda en el
+  servidor: no hay identificador de descarga.
+- Auditoría `report.exported` en una transacción corta aparte, después de generar el archivo y antes de enviarlo
+  (reporte, formato, papel, orientación, periodo, comparación, filtros con sus valores tal como se enviaron, orden,
+  renglones y bytes; sin nombres de personas, importes ni contenido).
+- **PDF** (fpdf + Go Regular/Bold UTF-8): primera página con establecimiento, reporte, descripción, periodo,
+  comparación, filtros, fecha usada, hora de inicio del día y zona, orden, renglones y fecha de generación; cifras
+  resumidas y avisos; tabla con encabezados repetidos en cada página, renglones alternados, totales de Go y notas;
+  encabezado breve en las páginas siguientes y pie «Página n de m». Carta (o A4) vertical si la tabla cabe con 8 pt; si
+  no, horizontal con la letra necesaria (8 a 5.5 pt). Importes, cantidades, fechas y códigos nunca se parten (ancho
+  del valor más largo); el texto se ajusta en varias líneas (ancho preferido: percentil 90, hasta 70 mm). Importes con
+  `moneytext`, cada moneda en su columna.
+- **XLSX** (excelize por flujo): hoja «Datos» con encabezado distinguible y congelado, anchos según el contenido,
+  números exactos con formato por columna (pesos y dólares separados), porcentajes como fracción, fechas comerciales y
+  horas del restaurante como fechas, códigos y textos con formato «@», totales de Go como números; hoja «Filtros» con
+  los metadatos. Sin fórmulas, hipervínculos, nombres definidos, vínculos externos, macros ni imágenes; un texto que
+  empieza por `= + - @`, tabulador, retorno o salto (o sus formas de ancho completo) lleva un apóstrofo inicial.
+- `administration`: `reports.go` conserva quién pidió el reporte para auditar la exportación y envía el archivo
+  binario; `http.go` da 110 s a `reports/export/*` y **amplía el plazo de escritura** de las rutas largas.
+
+### Puente (`desktop/src-tauri/src/export.rs`)
+
+Operación cerrada `export_report(report, format, query)`: lista cerrada de 92 reportes (igual al registro de Go,
+comprobado por una prueba Go que lee `export.rs`), parámetros de la lista blanca `reports_*` de `api.rs` sin
+paginación ni búsqueda (más `paper` en PDF), credenciales e invalidación como `api_request`, 120 s y 32 MiB, una
+exportación a la vez, validación de `Content-Type` y firma antes del diálogo, nombre saneado con extensión forzada,
+diálogo nativo `tauri-plugin-dialog` solo desde Rust (sin `dialog:*` en `capabilities`), escritura atómica (temporal
+en la misma carpeta y renombrado). React recibe solo `{result: saved|cancelled, file_name, size}`. Registro en
+`build.rs`, `permissions/diagnostics.toml` y `main.rs`; en `api.rs` solo se hicieron `pub(crate)`
+`allowed_query_keys`, `sanitize_response` e `invalidates_credentials`. Servicio `desktop/src/services/reportExport.ts`
+(C2 lo usa en `components/reports/ExportButtons.tsx`).
+
+### Playwright
+
+`native-driver.ts` simula `export_report` (misma lista cerrada leída de `export.rs`, misma lista blanca leída de
+`api.rs`, `fetch` desde Node con las credenciales de Node, validación de tipo, firma y nombre como Rust, cola
+`nextSaveDialog('save' | 'cancel')`; los bytes quedan en `exports` en Node y los rechazos llegan como texto, como con
+Tauri). Especificación nueva `e2e/workflow-reports-export-9a.spec.ts` (después de las existentes; solo lee): exportar
+PDF guardado, Excel cancelado y Excel guardado desde los botones de C2, y rechazos de la operación cerrada.
+
+### Decisiones menores
+
+1. El archivo incluye **todas** las columnas que el usuario puede ver (también las «opcionales» que la pantalla oculta
+   de inicio), en el orden del registro: el PDF y el Excel tienen las mismas columnas.
+2. `page` y `page_size` se rechazan en la exportación (400) en lugar de ignorarse; `paper` solo en PDF.
+3. Orientación automática (sin parámetro): vertical si cabe con 8 pt; A4 solo si se pide.
+4. Porcentajes en Excel como fracción exacta (12.50 → 0.125 con formato `0.00%`).
+5. Un importe con más de 15 dígitos significativos se escribe como texto exacto (Excel lo truncaría) y la hoja
+   «Filtros» lo indica.
+6. Los nombres de archivo son ASCII (sin acentos) para que el nombre sugerido sea idéntico en Go, Rust y macOS.
+7. Si Rust tiene que agregar la extensión al nombre elegido y ese archivo existe, no lo sustituye (el panel no lo
+   confirmó): pide volver a exportar con otro nombre.
+8. La auditoría guarda los valores de los filtros tal como se enviaron (identificadores o claves), no sus nombres.
+9. Un texto muy largo de una celda del PDF se recorta con «…» solo si excede una página entera (el Excel lo conserva
+   completo).
+
+### Hallazgo corregido (fuera de C1, mínimo)
+
+El servidor HTTP tiene `WriteTimeout` de 15 s (`cmd/ad-el-pos-server/main.go`): un reporte de B1 que tardara más de
+15 s (su plazo es 40 s) se habría cortado al escribir la respuesta. `http.go` ahora amplía el plazo de escritura de
+`reports/*` a 45 s y de `reports/export/*` a 115 s con `http.ResponseController` (como ya hace SSE).
+
+### Limitaciones
+
+- El diálogo nativo y la escritura en disco desde la ventana Tauri real no se ejecutaron (no hay ventana en este
+  entorno): la escritura atómica se probó como función pura con un destino simulado y el flujo completo con la
+  simulación de Playwright.
+- Las fuentes Go no tienen ideogramas CJK ni emojis (en el PDF se ven como un recuadro; el Excel los conserva).
+- Los filtros nuevos de B2 se exportan cuando se agreguen a la lista blanca `reports_*` de `api.rs` (la exportación
+  reutiliza esa lista); un reporte nuevo debe agregarse a `EXPORTABLE_REPORTS` (la prueba Go lo exige).
+- La prueba de integración de exportaciones borra y vuelve a crear el esquema de su base temporal al empezar y al
+  terminar (como las pruebas de `internal/database`), para no alterar las demás pruebas del paquete.

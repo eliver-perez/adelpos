@@ -757,7 +757,7 @@ pub async fn api_request(
 
 // Lista blanca de parámetros de consulta por operación: cualquier otro parámetro se rechaza antes
 // de llegar a Go.
-fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
+pub(crate) fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
     if operation == "audit" {
         &[
             "page",
@@ -872,7 +872,7 @@ fn query_allowed(operation: &str, query: &BTreeMap<String, String>) -> bool {
     query.keys().all(|key| allowed.contains(&key.as_str()))
 }
 
-fn sanitize_response(result: &mut Value) {
+pub(crate) fn sanitize_response(result: &mut Value) {
     // Los secretos duraderos nunca cruzan al WebView ni forman parte del estado React.
     if let Some(object) = result.as_object_mut() {
         object.remove("session_token");
@@ -880,7 +880,7 @@ fn sanitize_response(result: &mut Value) {
     }
 }
 
-fn invalidates_credentials(status: u16, result: &Value) -> bool {
+pub(crate) fn invalidates_credentials(status: u16, result: &Value) -> bool {
     let code = result
         .pointer("/error/code")
         .and_then(Value::as_str)
