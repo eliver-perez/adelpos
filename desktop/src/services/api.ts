@@ -306,7 +306,26 @@ export type Operation =
   | 'inventory_save_stock_level'
   | 'inventory_alerts'
   | 'inventory_purchase_suggestions'
-  | 'inventory_draft_order_from_suggestions';
+  | 'inventory_draft_order_from_suggestions'
+  // Etapa 9B (fase A): diseñador de documentos e impresión con la plantilla vigente
+  // (services/documents.ts).
+  | 'documents_catalog'
+  | 'documents_templates'
+  | 'documents_create_template'
+  | 'documents_template'
+  | 'documents_save_template'
+  | 'documents_rename_template'
+  | 'documents_activate_template'
+  | 'documents_template_versions'
+  | 'documents_version'
+  | 'documents_restore_default'
+  | 'documents_preview'
+  | 'documents_recent'
+  | 'documents_print_sample'
+  | 'documents_printers'
+  | 'kitchen_rerender'
+  | 'payments_rerender'
+  | 'payments_rerender_cash_document';
 
 export class APIError extends Error {
   constructor(

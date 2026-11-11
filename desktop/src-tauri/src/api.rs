@@ -62,6 +62,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "kitchen_save_states" => Some((Method::POST, "kitchen/states")),
         "kitchen_test_print" => Some((Method::POST, "kitchen/test-print")),
         "kitchen_reprint" => Some((Method::POST, "kitchen/reprint")),
+        // Etapa 9B: imprimir una comanda histórica con la plantilla vigente (acción distinta de la
+        // reimpresión exacta, con su propio permiso).
+        "kitchen_rerender" => Some((Method::POST, "kitchen/print-jobs/rerender")),
 
         "setup_status" => Some((Method::GET, "setup/status")),
         "setup" => Some((Method::POST, "setup")),
@@ -204,6 +207,16 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "inventory_draft_order_from_suggestions" => {
             Some((Method::POST, "inventory/purchase-suggestions/draft-order"))
         }
+        // Etapa 9B (fase A): diseñador de documentos. Plantillas por bloques, vista previa con la IR
+        // de Go, documentos recientes, muestras impresas y compatibilidad de impresoras.
+        "documents_catalog" => Some((Method::GET, "documents/catalog")),
+        "documents_templates" => Some((Method::GET, "documents/templates")),
+        "documents_create_template" => Some((Method::POST, "documents/templates")),
+        "documents_restore_default" => Some((Method::POST, "documents/restore-default")),
+        "documents_preview" => Some((Method::POST, "documents/preview")),
+        "documents_recent" => Some((Method::GET, "documents/recent")),
+        "documents_print_sample" => Some((Method::POST, "documents/samples")),
+        "documents_printers" => Some((Method::GET, "documents/printers")),
         _ => None,
     };
     if let Some((method, path)) = fixed {
@@ -503,6 +516,31 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             Method::POST,
             format!("payments/accounts/{identifier}/documents/reprint"),
         ),
+        // Etapa 9B: ticket, precuenta o documento de caja histórico con la plantilla vigente.
+        "payments_rerender" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/documents/rerender"),
+        ),
+        "payments_rerender_cash_document" => (
+            Method::POST,
+            format!("payments/cash-documents/{identifier}/rerender"),
+        ),
+        // Etapa 9B (fase A): una plantilla, sus acciones y sus versiones (un identificador por ruta).
+        "documents_template" => (Method::GET, format!("documents/templates/{identifier}")),
+        "documents_save_template" => (Method::PUT, format!("documents/templates/{identifier}")),
+        "documents_rename_template" => (
+            Method::POST,
+            format!("documents/templates/{identifier}/rename"),
+        ),
+        "documents_activate_template" => (
+            Method::POST,
+            format!("documents/templates/{identifier}/activate"),
+        ),
+        "documents_template_versions" => (
+            Method::GET,
+            format!("documents/templates/{identifier}/versions"),
+        ),
+        "documents_version" => (Method::GET, format!("documents/versions/{identifier}")),
         "update_user" => (Method::PATCH, format!("users/{identifier}")),
         "user_permissions" => (Method::GET, format!("users/{identifier}/permissions")),
         "save_user_permissions" => (Method::PUT, format!("users/{identifier}/permissions")),
@@ -768,6 +806,9 @@ pub(crate) fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "from",
             "until",
         ]
+    } else if operation.starts_with("documents_") {
+        // Diseñador de documentos (etapa 9B): solo el tipo de documento en las listas.
+        &["kind"]
     } else if operation.starts_with("kitchen_") {
         &["page", "station_id", "state", "account_id"]
     } else if operation == "payments_shifts" {
@@ -1354,6 +1395,91 @@ mod tests {
         let mut foreign = BTreeMap::new();
         foreign.insert("period".to_string(), "today".to_string());
         assert!(!query_allowed("payments_shifts", &foreign));
+    }
+
+    #[test]
+    fn document_designer_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000009";
+        for (operation, method, path) in [
+            ("documents_catalog", Method::GET, "documents/catalog"),
+            ("documents_templates", Method::GET, "documents/templates"),
+            (
+                "documents_create_template",
+                Method::POST,
+                "documents/templates",
+            ),
+            (
+                "documents_restore_default",
+                Method::POST,
+                "documents/restore-default",
+            ),
+            ("documents_preview", Method::POST, "documents/preview"),
+            ("documents_recent", Method::GET, "documents/recent"),
+            ("documents_print_sample", Method::POST, "documents/samples"),
+            ("documents_printers", Method::GET, "documents/printers"),
+            (
+                "kitchen_rerender",
+                Method::POST,
+                "kitchen/print-jobs/rerender",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        for (operation, method, path) in [
+            (
+                "documents_template",
+                Method::GET,
+                format!("documents/templates/{identifier}"),
+            ),
+            (
+                "documents_save_template",
+                Method::PUT,
+                format!("documents/templates/{identifier}"),
+            ),
+            (
+                "documents_rename_template",
+                Method::POST,
+                format!("documents/templates/{identifier}/rename"),
+            ),
+            (
+                "documents_activate_template",
+                Method::POST,
+                format!("documents/templates/{identifier}/activate"),
+            ),
+            (
+                "documents_template_versions",
+                Method::GET,
+                format!("documents/templates/{identifier}/versions"),
+            ),
+            (
+                "documents_version",
+                Method::GET,
+                format!("documents/versions/{identifier}"),
+            ),
+            (
+                "payments_rerender",
+                Method::POST,
+                format!("payments/accounts/{identifier}/documents/rerender"),
+            ),
+            (
+                "payments_rerender_cash_document",
+                Method::POST,
+                format!("payments/cash-documents/{identifier}/rerender"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            assert!(route(operation, Some("../templates")).is_err());
+            assert!(route(operation, None).is_err());
+        }
+        assert!(route("documents_delete_template", Some(identifier)).is_err());
+        let mut kind = BTreeMap::new();
+        kind.insert("kind".to_string(), "receipt".to_string());
+        assert!(query_allowed("documents_templates", &kind));
+        assert!(query_allowed("documents_recent", &kind));
+        let mut rejected = BTreeMap::new();
+        rejected.insert("layout".to_string(), "{}".to_string());
+        assert!(!query_allowed("documents_templates", &rejected));
+        assert!(!query_allowed("documents_recent", &rejected));
     }
 
     #[test]

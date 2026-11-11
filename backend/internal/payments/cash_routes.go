@@ -91,6 +91,9 @@ func cashDocumentRoute(method, resource, action string) *route {
 		return &route{permissionReportsPrint, false, (*service).printOperationDocument}
 	case resource == "cash-documents" && action == "reprint" && method == "POST":
 		return &route{permissionReportsReprint, false, (*service).reprintCashDocument}
+	case resource == "cash-documents" && action == "rerender" && method == "POST":
+		// Etapa 9B: impresión con la plantilla vigente; exige además documents.history.render_current.
+		return &route{permissionReportsReprint, false, (*service).rerenderCashDocument}
 	}
 	return nil
 }

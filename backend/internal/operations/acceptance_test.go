@@ -222,6 +222,8 @@ func TestRestaurantAcceptance(t *testing.T) {
 	testQuickNoteEffects(t, fixture)
 	// Etapa 9A, parte A1: precio de complementos configurable y vigencia de la precuenta (§3.1, §33).
 	testStage9A(t, fixture)
+	// Etapa 9B, fase A: plantillas en la impresión real, reimpresión exacta y plantilla vigente.
+	testStage9BDocuments(t, fixture)
 }
 
 func mustJSON(value any) []byte {

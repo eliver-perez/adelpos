@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -88,11 +89,12 @@ func (handler *service) jobAction(id, action string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	saved, err := one[PrintJob](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content' FROM app.kitchen_print_jobs j WHERE id=$1", id)
+	saved, err := one[PrintJob](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j WHERE id=$1", id)
 	if err != nil {
 		return nil, err
 	}
 	job.Content = ""
+	job.Layout = nil
 	return saved, handler.history("print."+action, &id, job, saved)
 }
 
@@ -128,6 +130,17 @@ func (handler *service) reprint() (any, error) {
 	if isCashKind(kind) {
 		return nil, invalid("Los documentos y comandos de caja se reimprimen o repiten desde Caja, con sus permisos.")
 	}
+	// Un documento de caja impreso con la plantilla vigente sigue las reglas de caja: no se copia
+	// desde la cola (podría contener el efectivo esperado).
+	if kind == documents.TicketKindRerender {
+		sourceKind, err := handler.rerenderSourceKind(original.TicketID)
+		if err != nil {
+			return nil, err
+		}
+		if isCashKind(sourceKind) {
+			return nil, invalid("Los documentos de caja se reimprimen desde Caja, con sus permisos.")
+		}
+	}
 	if original.State != "submitted" && original.State != "cancelled" {
 		return nil, invalid("Resuelve primero el trabajo pendiente o incierto para no generar copias descontroladas.")
 	}
@@ -162,7 +175,7 @@ func (handler *service) reprint() (any, error) {
 	// comercial conserva su contenido ya renderizado en lugar de interpretarse como comanda.
 	var job *PrintJob
 	if isCommercialKind(kind) {
-		job, err = handler.enqueueContent(original.TicketID, printer, &rootID, original.Content)
+		job, err = handler.enqueueJob(original.TicketID, printer, &rootID, original.Content, original.Layout)
 	} else {
 		job, err = handler.enqueue(*document, printer, &rootID)
 	}
@@ -170,6 +183,7 @@ func (handler *service) reprint() (any, error) {
 		return nil, err
 	}
 	original.Content = ""
+	original.Layout = nil
 	return job, handler.history("print.reprinted", &job.ID, original, map[string]any{"job": job, "reason": input.Reason})
 }
 

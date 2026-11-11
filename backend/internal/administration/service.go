@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/reports"
 )
@@ -23,6 +24,10 @@ type Service struct {
 	// Queues consulta las colas CUPS para el cajón (etapa 7.1). Sin valor, payments usa las
 	// consultas de solo lectura del equipo; las pruebas de aceptación inyectan una simulada.
 	Queues kitchen.QueueInspector
+	// Rasters entrega los bits y la vista previa del logotipo para las líneas de imagen de la vista
+	// previa del diseñador (etapa 9B; la implementación es de la fase B). Sin valor, la vista previa
+	// no lleva la imagen.
+	Rasters documents.RasterSource
 	// Reports ejecuta las consultas de reportes (etapa 9A) en su transacción de solo lectura con un
 	// semáforo propio. Sin valor se crea al primer uso; las pruebas pueden inyectar uno.
 	Reports     *reports.Runner

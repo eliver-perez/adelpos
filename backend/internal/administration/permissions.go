@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
@@ -55,6 +56,10 @@ func init() {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}
 	for _, permission := range reports.Permissions {
+		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
+	}
+	// Etapa 9B: diseñador de documentos e identidad documental (migración 0018).
+	for _, permission := range documents.Permissions {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}
 }

@@ -57,7 +57,8 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err := request.Actor.Require(permission); err != nil {
 		return nil, err
 	}
-	if len(parts) > 1 {
+	// kitchen/print-jobs/rerender (etapa 9B) es una acción con nombre fijo, sin identificador.
+	if len(parts) > 1 && !isRerenderRoute(parts) {
 		if err := validID(parts[1]); err != nil {
 			return nil, err
 		}
@@ -115,7 +116,7 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		return nil, err
 	}
 	scope := "configuration"
-	if parts[0] == "jobs" || parts[0] == "reprint" || parts[0] == "test-print" {
+	if parts[0] == "jobs" || parts[0] == "reprint" || parts[0] == "test-print" || parts[0] == "print-jobs" {
 		scope = "printing"
 	}
 	if parts[0] == "states" || parts[0] == "releases" {
@@ -125,6 +126,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		return nil, err
 	}
 	return result, nil
+}
+
+// isRerenderRoute identifica kitchen/print-jobs/rerender.
+func isRerenderRoute(parts []string) bool {
+	return len(parts) == 2 && parts[0] == "print-jobs" && parts[1] == "rerender"
 }
 
 func routePermission(method string, parts []string) string {
@@ -158,6 +164,9 @@ func routePermission(method string, parts []string) string {
 			"states": "kitchen.states.manage", "access": "kitchen.stations.manage", "timing": "kitchen.timing.manage",
 			"test-print": "kitchen.printers.test", "reprint": "kitchen.reprint",
 		}[resource]
+	}
+	if isRerenderRoute(parts) && method == "POST" {
+		return "kitchen.reprint"
 	}
 	if len(parts) == 2 && method == "PATCH" {
 		return map[string]string{"stations": "kitchen.stations.manage", "printers": "kitchen.printers.manage", "routes": "kitchen.routing.manage"}[resource]
@@ -211,6 +220,8 @@ func (handler *service) write(parts []string) (any, error) {
 		return handler.testPrint()
 	case "reprint":
 		return handler.reprint()
+	case "print-jobs":
+		return handler.rerender()
 	case "tickets":
 		return handler.ackTicket(parts[1])
 	}

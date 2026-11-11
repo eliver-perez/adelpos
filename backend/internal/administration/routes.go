@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/designer"
 	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
@@ -120,6 +121,11 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		}
 		return result, err
 	}
+	// Diseñador de documentos (etapa 9B, fase A): plantillas, versiones, vista previa, muestras e
+	// impresoras compatibles. La identidad documental (documents/identity*) es de la fase B.
+	if strings.HasPrefix(route, "documents/") && !strings.HasPrefix(route, "documents/identity") {
+		return handleDesigner(ctx, tx, request, principal, route, service)
+	}
 	// Reportes (etapa 9A): permisos y forma en esta transacción; la consulta, después (reports.go).
 	if strings.HasPrefix(route, "reports/") {
 		return handleReports(ctx, tx, request, principal, route)
@@ -165,6 +171,33 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return result, err
 	}
 	return nil, &Fault{Status: 404, Code: "NOT_FOUND", Message: "Ruta no disponible."}
+}
+
+// handleDesigner delega documents/* en el diseñador con la misma transacción, el actor y la
+// auditoría, y traduce los errores del diseñador y de los módulos de origen (cocina y cobros) que
+// aplica la vista previa con un documento real.
+func handleDesigner(ctx context.Context, tx pgx.Tx, request Request, principal Principal, route string, service *Service) (any, error) {
+	result, err := designer.Handle(ctx, tx, designer.Request{
+		Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
+		Actor:   designer.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+		Queues:  service.Queues,
+		Rasters: service.Rasters,
+	}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
+		return audit(ctx, tx, principal, action, entity, id, before, after, true)
+	})
+	var problem *designer.Error
+	if errors.As(err, &problem) {
+		return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message, Details: problem.Details}
+	}
+	var kitchenProblem *kitchen.Error
+	if errors.As(err, &kitchenProblem) {
+		return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message}
+	}
+	var paymentProblem *payments.Error
+	if errors.As(err, &paymentProblem) {
+		return nil, paymentFault(paymentProblem)
+	}
+	return result, err
 }
 
 // paymentFault traduce un error financiero a su respuesta pública. Si el rechazo pide su propia

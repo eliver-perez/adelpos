@@ -31,6 +31,9 @@ type Transport interface {
 // de CUPS sin ejecutar nada.
 type HostTransport struct {
 	commands commandRunner
+	// textCUPS sustituye en las pruebas el camino de texto de CUPS (el de antes de la 9B), que
+	// ejecuta lpstat, lpoptions y lp directamente; nil usa submitCUPS.
+	textCUPS func(context.Context, PrintJob) Outcome
 }
 
 func (transport HostTransport) runner() commandRunner {
@@ -74,6 +77,11 @@ func (transport HostTransport) Submit(ctx context.Context, job PrintJob) Outcome
 	}
 	if job.DrawerPulse != nil {
 		return submitDrawerPulse(ctx, job, transport.runner())
+	}
+	// Etapa 9B: un documento con negrita, tamaños o logotipo viaja con sus atributos; un documento
+	// plano (todas las plantillas predeterminadas) sigue exactamente el camino anterior.
+	if job.Layout != nil && !job.Layout.Plain() {
+		return transport.submitFormatted(ctx, job)
 	}
 	switch job.PrinterSnapshot.Transport {
 	case "cups":
@@ -126,6 +134,25 @@ func submitCUPS(ctx context.Context, job PrintJob) Outcome {
 	if err := file.Close(); err != nil {
 		return Outcome{State: "error", Message: "No se pudo finalizar el documento local."}
 	}
+	command := exec.CommandContext(ctx, "/usr/bin/lp", cupsTextArguments(job, file.Name())...)
+	command.Env = append(os.Environ(), "LC_ALL=C", "CHARSET=utf-8")
+	// Una vez iniciado lp, un timeout o error genérico puede ocultar aceptación del spooler.
+	output, err := command.CombinedOutput()
+	reference := cupsJobReference(printer.Destination, output)
+	if err == nil && reference != "" {
+		return Outcome{State: "submitted", Reference: reference, Accepted: true, Message: "Aceptado por CUPS; no confirma salida física de papel."}
+	}
+	if _, notStarted := err.(*exec.Error); notStarted {
+		return Outcome{State: "error", Message: "No se pudo ejecutar el transporte CUPS; no se envió el documento."}
+	}
+	return Outcome{State: "uncertain", Message: "CUPS no devolvió un resultado inequívoco. Revisar su cola antes de autorizar otra copia."}
+}
+
+// cupsTextArguments son los argumentos separados de lp para un documento de texto: cola, copias,
+// título técnico, texto plano sin portada a una cara, densidad (cpi 12, o 6 con el texto grande de
+// Cocina), papel calculado por líneas, márgenes en cero y la opción de corte del controlador.
+func cupsTextArguments(job PrintJob, filename string) []string {
+	printer := job.PrinterSnapshot
 	arguments := []string{"-d", printer.Destination, "-n", strconv.Itoa(printer.Copies), "-t", "ADEL-" + job.ID,
 		"-o", "document-format=text/plain", "-o", "job-sheets=none", "-o", "sides=one-sided"}
 	cpi := 12
@@ -140,19 +167,7 @@ func submitCUPS(ctx context.Context, job PrintJob) Outcome {
 	if printer.Cut {
 		arguments = append(arguments, "-o", printer.CutterOption)
 	}
-	arguments = append(arguments, file.Name())
-	command := exec.CommandContext(ctx, "/usr/bin/lp", arguments...)
-	command.Env = append(os.Environ(), "LC_ALL=C", "CHARSET=utf-8")
-	// Una vez iniciado lp, un timeout o error genérico puede ocultar aceptación del spooler.
-	output, err := command.CombinedOutput()
-	reference := cupsJobReference(printer.Destination, output)
-	if err == nil && reference != "" {
-		return Outcome{State: "submitted", Reference: reference, Accepted: true, Message: "Aceptado por CUPS; no confirma salida física de papel."}
-	}
-	if _, notStarted := err.(*exec.Error); notStarted {
-		return Outcome{State: "error", Message: "No se pudo ejecutar el transporte CUPS; no se envió el documento."}
-	}
-	return Outcome{State: "uncertain", Message: "CUPS no devolvió un resultado inequívoco. Revisar su cola antes de autorizar otra copia."}
+	return append(arguments, filename)
 }
 
 // cupsJobReference extrae de la respuesta de lp el identificador del trabajo («cola-123»). La
@@ -190,6 +205,11 @@ func ESCPosBytes(content string, printer Printer, textSize ...string) []byte {
 }
 
 func submitESCPos(ctx context.Context, job PrintJob) Outcome {
+	return writeESCPos(ctx, job, ESCPosBytes(job.Content, job.PrinterSnapshot, job.TextSize))
+}
+
+// writeESCPos entrega los bytes de un documento por una conexión ESC/POS directa, una vez por copia.
+func writeESCPos(ctx context.Context, job PrintJob, data []byte) Outcome {
 	printer := job.PrinterSnapshot
 	dialer := net.Dialer{Timeout: 4 * time.Second}
 	connection, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(printer.Destination, strconv.Itoa(printer.Port)))
@@ -198,7 +218,6 @@ func submitESCPos(ctx context.Context, job PrintJob) Outcome {
 	}
 	defer connection.Close()
 	_ = connection.SetWriteDeadline(time.Now().Add(8 * time.Second))
-	data := ESCPosBytes(job.Content, printer, job.TextSize)
 	for copyNumber := 0; copyNumber < printer.Copies; copyNumber++ {
 		written, err := connection.Write(data)
 		if err != nil || written != len(data) {
