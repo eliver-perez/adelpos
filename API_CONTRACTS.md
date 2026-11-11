@@ -1721,3 +1721,24 @@ Recibe la misma `ReportQuery` de la pantalla (quita la paginación). Errores: `A
 valida tipo, firma y nombre como Rust y aplica la siguiente respuesta del diálogo de la cola (sin respuesta: guardar).
 Los archivos guardados quedan en `exports` (`{report, format, fileName, contentType, bytes: Buffer}`) en Node; el
 navegador recibe solo el resultado. Los rechazos del puente llegan al WebView como texto, igual que con Tauri.
+
+## Etapa 9A · interfaz de Reportes (parte C2)
+
+### Etapa 9A · parte C2 (interfaz de Reportes): sin cambios de contrato
+
+La parte C2 no agrega ni modifica rutas, operaciones del puente, permisos ni formas JSON. Consume:
+
+- `GET reports/catalog` (`reports_catalog`): navegación, filtros y columnas; `dashboard`, `periods`, `timezone`,
+  `day_start`; `export.pdf` / `export.excel` (los botones exigen además `reports.export.pdf` /
+  `reports.export.excel` en la sesión).
+- `GET reports/run/{id}` (`reports_run`): `period` + `date` | `week=AAAA-Wss` | `month=AAAA-MM` | `year` |
+  `from`/`until`; `compare=previous|none` solo si `comparison: true`; `page`, `page_size=50`; `sort`/`direction`
+  al ordenar; los filtros que declara el reporte (solo con valor).
+- `GET reports/dashboard` (`reports_dashboard`): los mismos parámetros de periodo y siempre `compare`.
+- `GET reports/filters/{source}` (`reports_filters`): una vez por fuente; `search` solo en `products` e
+  `inventory_items`.
+- Operación cerrada `export_report` (parte C1) mediante `exportReport(id, 'pdf'|'xlsx', consulta)` de
+  `services/reportExport.ts`, con la misma consulta de la pantalla (sin paginación).
+
+Pantalla de inicio `reports` (`reports.read`) registrada en `PreferencesPage.tsx`, ya admitida por Go desde B1
+(`administration/preferences.go`).

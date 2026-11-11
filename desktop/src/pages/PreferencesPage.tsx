@@ -23,6 +23,8 @@ export const screens: ScreenEntry[] = [
   { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
   // Etapa 8: inventarios (insumos, almacenes, existencias, movimientos y su configuración).
   { id: 'inventory', label: 'Inventarios', permission: 'inventory.read' },
+  // Etapa 9A: reportes, resumen ejecutivo y exportaciones (Go admite la pantalla como inicio).
+  { id: 'reports', label: 'Reportes', permission: 'reports.read' },
   { id: 'status', label: 'Estado del sistema', permission: '' },
   { id: 'users', label: 'Usuarios', permission: 'users.read' },
   { id: 'roles', label: 'Roles', permission: 'roles.read' },
