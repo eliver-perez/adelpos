@@ -815,6 +815,100 @@ func TestStageThreeAcceptance(t *testing.T) {
 			t.Fatalf("El cambio de tasa no quedó auditado con el guardado: %d %v", audited, err)
 		}
 	})
+	run("precio que puede bajar al cambiar complementos: protegido, auditado y cotizado", func(t *testing.T) {
+		// Etapa 9A, §3.1. Ningún producto existente tiene la opción activada.
+		var enabled int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM app.catalog_products WHERE price_can_decrease").Scan(&enabled); err != nil || enabled != 0 {
+			t.Fatalf("La opción debe iniciar desactivada en todos los productos: %d %v", enabled, err)
+		}
+		// Producto propio con las guarniciones del filete (el filete de las pruebas anteriores quedó
+		// archivado). Creado sin indicar la opción, queda desactivada. Las opciones se buscan por
+		// nombre: editar el grupo cambió su orden.
+		sides := map[string]string{}
+		for _, option := range group.Options {
+			sides[option.Name] = option.ID
+		}
+		current := catalog.Product{
+			Metadata:   catalog.Metadata{Name: "Filete flexible", Active: true},
+			CategoryID: category.ID,
+			Kind:       "product",
+			Code:       "FILETE-FLEX",
+			BasePrice:  "150",
+			Groups: []catalog.ProductGroup{{
+				GroupID:  group.ID,
+				Included: []catalog.IncludedOption{{OptionID: sides["Arroz"], Quantity: "1"}, {OptionID: sides["Ensalada"], Quantity: "1"}},
+			}},
+		}
+		_ = json.Unmarshal(call("POST", "catalog/products", current, 200), &current)
+		if current.PriceCanDecrease {
+			t.Fatal("Un producto nuevo sin la opción debe quedar desactivado")
+		}
+		cheaper := catalog.PreviewRequest{Lines: []catalog.LineRequest{{
+			ProductID: current.ID,
+			Quantity:  1,
+			Customization: catalog.Customization{Groups: []catalog.GroupSelection{{
+				GroupID: group.ID,
+				Options: []catalog.IncludedOption{{OptionID: sides["Ensalada"], Quantity: "1"}, {OptionID: sides["Frijoles"], Quantity: "1"}},
+			}}},
+		}}}
+		raw := call("POST", "catalog/preview", cheaper, 200)
+		var quote catalog.Quote
+		_ = json.Unmarshal(raw, &quote)
+		if quote.Total != "150.00" || bytes.Contains(raw, []byte("complement_adjustment")) || bytes.Contains(raw, []byte("price_can_decrease")) {
+			t.Fatalf("Sin la opción la sustitución no baja ni agrega campos: %s", raw)
+		}
+		// Activarla exige catalog.prices.manage, como el precio: sin él se rechaza sin cambios.
+		var userID string
+		if err := pool.QueryRow(ctx, "SELECT id FROM app.users WHERE username='admin'").Scan(&userID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, "INSERT INTO app.user_permissions(user_id,permission_key,effect) VALUES ($1,'catalog.prices.manage','deny')", userID); err != nil {
+			t.Fatal(err)
+		}
+		flexible := current
+		flexible.PriceCanDecrease = true
+		call("PATCH", "catalog/products/"+current.ID, flexible, 403)
+		var stored bool
+		if err := pool.QueryRow(ctx, "SELECT price_can_decrease FROM app.catalog_products WHERE id=$1", current.ID).Scan(&stored); err != nil || stored {
+			t.Fatalf("Un rechazo por permiso cambió la opción: %v %v", stored, err)
+		}
+		if _, err := pool.Exec(ctx, "DELETE FROM app.user_permissions WHERE user_id=$1 AND permission_key='catalog.prices.manage'", userID); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.Unmarshal(call("PATCH", "catalog/products/"+current.ID, flexible, 200), &current)
+		if !current.PriceCanDecrease {
+			t.Fatal("La opción no se guardó")
+		}
+		var audited int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM app.audit_events WHERE action='catalog.products.updated' AND entity_id=$1
+            AND before_state->>'price_can_decrease'='false' AND after_state->>'price_can_decrease'='true'`, current.ID).Scan(&audited); err != nil || audited != 1 {
+			t.Fatalf("El cambio de la opción no quedó auditado con el guardado: %d %v", audited, err)
+		}
+		// Con la opción, el ejemplo del propietario: $150 con $35 incluidos y $25 elegidos → $140.
+		raw = call("POST", "catalog/preview", cheaper, 200)
+		quote = catalog.Quote{}
+		_ = json.Unmarshal(raw, &quote)
+		line := quote.Lines[0]
+		if quote.Total != "140.00" || line.Groups[0].Difference != "-10.00" || line.ComplementAdjustment != "-10.00" || !line.PriceCanDecrease {
+			t.Fatalf("Cotización con la opción: %s", raw)
+		}
+		// Un duplicado conserva la opción.
+		var copied catalog.Product
+		_ = json.Unmarshal(call("POST", "catalog/products/"+current.ID+"/duplicate", map[string]any{
+			"name": "Filete flexible copia", "code": "FILETE-FLEX-C", "revision": current.Revision,
+		}, 200), &copied)
+		if !copied.PriceCanDecrease {
+			t.Fatal("El duplicado perdió la opción")
+		}
+		// Desactivarla devuelve el piso de siempre.
+		current.PriceCanDecrease = false
+		_ = json.Unmarshal(call("PATCH", "catalog/products/"+current.ID, current, 200), &current)
+		quote = catalog.Quote{}
+		_ = json.Unmarshal(call("POST", "catalog/preview", cheaper, 200), &quote)
+		if current.PriceCanDecrease || quote.Total != "150.00" {
+			t.Fatalf("Al desactivarla vuelve el piso: %v %s", current.PriceCanDecrease, quote.Total)
+		}
+	})
 	run("captura táctil: categorías disponibles y búsqueda por nombre o código", func(t *testing.T) {
 		// Etapa 6.1 fase D: los lookups indican qué categorías están disponibles ahora (activas y
 		// dentro de su horario, con el reloj de Go) y el listado de productos busca también por

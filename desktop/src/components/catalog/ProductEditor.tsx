@@ -1,7 +1,9 @@
+import { useId } from 'react';
 import type { Lookups, Product, ProductTaxRate } from '../../services/catalog';
 import { productSiblings } from '../../services/catalogPositions';
 import { PositionField } from '../PositionField';
 import { SegmentedControl } from '../SegmentedControl';
+import { ToggleButton } from '../ToggleButton';
 import { Check, DecimalField, ReferenceField, ScheduleEditor, TextField } from './EditorFields';
 import { ImageEditor } from './ImageEditor';
 import { VariantEditor, IngredientRulesEditor, ProductGroupsEditor } from './ProductDetailsEditors';
@@ -67,6 +69,47 @@ export function ProductTaxField({
   );
 }
 
+// Explicación del interruptor según su estado: qué ocurre al sustituir o quitar complementos.
+function priceDecreaseHint(value: boolean, editable: boolean) {
+  if (!editable) {
+    return 'Para cambiar esta opción se necesita el permiso de precios («Modificar precios y valores comerciales»).';
+  }
+  if (value) {
+    return 'Activada: sustituir por un complemento más barato o quitarlo baja el precio, sin bajar del valor de los complementos que quedan. Los extras y los ingredientes adicionales se cobran completos.';
+  }
+  return 'Desactivada: sustituir por un complemento más barato o quitarlo nunca baja el precio base.';
+}
+
+// «El precio puede bajar al cambiar complementos» (etapa 9A, §3.1): interruptor comercial del
+// producto, junto al precio y la tasa de IVA. Go calcula el efecto, exige el permiso de precios y
+// audita el cambio con el guardado; solo afecta a lo que se confirme después.
+export function PriceDecreaseField({
+  value,
+  onChange,
+  editable,
+}: {
+  value: boolean;
+  onChange: (value: boolean) => void;
+  editable: boolean;
+}) {
+  const hintID = useId();
+  return (
+    <div className="field product-price-decrease-field">
+      <span>Precio con complementos</span>
+      <ToggleButton
+        label="El precio puede bajar al cambiar complementos"
+        pressed={value}
+        onChange={onChange}
+        disabled={!editable}
+        describedBy={hintID}
+      />
+      <small className="muted" id={hintID}>
+        {priceDecreaseHint(value, editable)} Solo afecta a los pedidos que se confirmen después.
+      </small>
+    </div>
+  );
+}
+
 export function ProductEditor({
   value,
   onChange,
@@ -115,6 +158,11 @@ export function ProductEditor({
         <ProductTaxField
           value={value.tax_rate}
           onChange={(tax_rate) => onChange({ ...value, tax_rate })}
+          editable={can('catalog.prices.manage')}
+        />
+        <PriceDecreaseField
+          value={value.price_can_decrease ?? false}
+          onChange={(price_can_decrease) => onChange({ ...value, price_can_decrease })}
           editable={can('catalog.prices.manage')}
         />
         <PositionField

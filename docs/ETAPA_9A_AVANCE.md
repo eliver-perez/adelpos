@@ -154,3 +154,131 @@ Ganan las decisiones de §0-B (cierre como fecha de la venta y semana ISO).
    recepción.
 7. En Excel, el texto que podría tomarse como fórmula se escribe con un apóstrofo inicial, y el archivo no contiene
    fórmulas.
+
+## Fase A · parte A1: precio de complementos configurable y ajustes de §33
+
+Migración `0015_catalog_price_and_precheck.sql` (transaccional, sin datos, no toca 0001–0014 ni filas
+existentes): `catalog_products.price_can_decrease boolean NOT NULL DEFAULT false` y
+`payment_documents.account_revision` / `adjustment_count` (`integer`, NULL en históricos) con el CHECK
+con nombre `payment_documents_precheck_version_check` (solo una precuenta los lleva, siempre juntos,
+revisión > 0 y ajustes ≥ 0; NULL-seguro). Sin permisos, rutas ni locks nuevos.
+
+### §3.1 «El precio puede bajar al cambiar complementos»
+
+- **Go** (`catalog/`): `Product.PriceCanDecrease` (persistido en `saveProduct`, leído por `to_jsonb`,
+  copiado al duplicar, congelado en `pricing_snapshot`); cambiarlo exige `catalog.prices.manage`
+  (`product_permissions.go`) y se audita con el guardado. Motor: con la opción desactivada el camino es
+  el de siempre (prueba de no regresión que compara el JSON de diez cotizaciones con huellas SHA-256
+  calculadas con el código anterior, `da182ee`). Con la opción: diferencia con signo por grupo (valor:
+  solicitado − incluido, incluido quitar sin reemplazo; cantidad: tramos − valor de referencia de las
+  porciones incluidas retiradas; sin valores de referencia no cambia), núcleo
+  `min(núcleo con piso, max(base + Σ diferencias con signo [+ reducciones de componentes], valor de lo
+que permanece, 0))`, y después extras explícitos, ingredientes y cargos de componentes.
+  `ProductBreakdown` agrega `price_can_decrease` y `complement_adjustment` con `omitempty` (la
+  reducción efectiva, ≤ 0, ya incluida en `group_extras` y `unit_price`). Promociones: base sin extras
+  `max(0, base + complement_adjustment) × unidades`. Cocina: las partes nunca llevan importes del
+  producto y la diferencia del grupo ya se vaciaba; se añadió comentario y prueba
+  (`kitchen/preparation_data.go`, `preparation_data_test.go`).
+- **Interfaz**: interruptor «El precio puede bajar al cambiar complementos» junto a precio y tasa de IVA
+  (`ProductEditor.tsx`, `ToggleButton`, explicación ligada con `aria-describedby`, desactivado sin
+  `catalog.prices.manage`); `price_can_decrease: false` en el producto nuevo (`catalogState.ts`).
+  Captura: el grupo muestra «−$10.00» / «+$5.00» / «Sin cambio» con `formatSignedMoney` sobre lo que
+  entrega Go (`CustomizationBlocks.tsx`, `nonZeroAmount` en `captureRules.ts`). Desglose
+  (`QuoteBreakdown.tsx`): «Diferencia» (ya no «Diferencia positiva») con signo y, con la opción, la
+  reducción aplicada.
+
+### §33a «Poner fuera de servicio»
+
+`TablePanel.tsx` + `styles.css`: el botón va en su propia fila de las acciones secundarias, a todo el
+ancho del pie del panel (`.table-service-action`, `flex-wrap` solo en `.table-panel-footer`), en
+cualquier tamaño de ventana. Sin cambio de reglas ni de texto. Playwright: una línea a 1280 × 720 y
+1920 × 1080 en claro y oscuro (con el estilo anterior, tres líneas: control negativo ejecutado).
+
+### §33b Vigencia de la precuenta
+
+`payments/documents.go` guarda en la precuenta la revisión de la cuenta (`Finance.Revision`, leída bajo
+el lock exclusivo) y el número de ajustes (`adjustmentCountSQL`, la misma expresión que la vigencia).
+`payments/standing.go`: columna `precheck_current` en `AccountStandingSQL`, predicado único (precuenta
+con la revisión y el número de ajustes actuales; filas NULL con la regla por marcas de tiempo).
+`operations/tables.go` la usa para `awaiting_payment`. Los ajustes **no** cambian la revisión de la
+cuenta.
+
+### Decisiones menores
+
+1. `complement_adjustment` es la reducción respecto de la regla con piso (≤ 0, «0.00» si no bajó), no
+   la suma con signo de las diferencias; así la fórmula de promociones del diseño
+   (`(BasePrice + complement_adjustment) × qty`) nunca acredita lo ya descontado ni cambia el trato de
+   las diferencias positivas.
+2. Además de los límites del diseño, el núcleo nunca supera el de la regla con piso: en un producto
+   cuya base es menor que el valor de sus complementos incluidos, el límite del «valor que permanece»
+   habría subido el precio al activar la opción. La opción solo permite bajar.
+3. Con la opción, `group_extras` lleva el efecto neto de los complementos (puede ser negativo) para
+   conservar `unit_price = base + ingredientes + complementos + componentes`.
+4. Combos: el componente se calcula con su opción solo si el combo también la tiene (el desglose del
+   componente lleva entonces `price_can_decrease`); su reducción no rebaja su cargo (sustitución,
+   tramos y extras siguen completos) y se aplica en el núcleo del combo, cuyo límite incluye el valor de
+   los complementos que permanecen en sus componentes.
+5. Precio en ediciones: como con un cambio de precio, una modificación que vuelve a cotizar una
+   partida usa la opción vigente; cambiar solo observaciones conserva los importes.
+6. Precuenta: solo las precuentas guardan revisión y ajustes (los tickets quedan en NULL). Se usa la
+   revisión con que se armó el documento (`Finance.Revision`), leída con el lock exclusivo ya tomado.
+7. §33a: fila propia (no rótulo corto), para no cambiar el texto ni su nombre accesible.
+
+### Pruebas (ejecutadas en `scratchpad/repo9aA1`, última sincronización con el árbol de las tres partes)
+
+- Go: `go vet ./...` y `go vet -tags=integration ./...` sin hallazgos; `go test -race -count=1 ./...`
+  todo `ok`. Nuevas: `catalog/price_decrease_test.go` (piso intacto sin la opción, JSON idéntico al
+  anterior en diez escenarios con huellas calculadas sobre `da182ee`, diferencia positiva y negativa,
+  ejemplo $150/$35/$25 → $140, quitar sin reemplazo, límite de cero, límite por valor que permanece,
+  la opción nunca sube, extras e ingredientes no descontados, modo cantidad con y sin valores de
+  referencia, presentación, listas, combo con y sin la opción en combo y componente, 2×1, porcentaje
+  con y sin extras y precio especial sin doble descuento, base de promoción nunca negativa, permiso) y
+  `kitchen/preparation_data_test.go`. La huella heredada de
+  `operations/quick_notes_fingerprint_test.go` sigue igual.
+- Integración PostgreSQL (clúster 55499, ejecución final): `internal/catalog` ok (9.4 s),
+  `internal/database` ok (5.8 s, con `TestStage9ACatalogAndPrecheckUpgrade`), `internal/payments` ok;
+  `internal/operations` (226.6 s): pasan las siete subpruebas 9A (`9A_31_*` y `9A_33_*`) y todo lo
+  anterior salvo `inventory_settings_feature_and_events` (`inventory_ledger_test.go:427`: «La hora de
+  inicio del día se cambia en Configuración general.»), cambio en curso de otra parte (hora de inicio
+  del día), ajeno a A1. Una ejecución completa previa (`collect.go` de `HEAD` en la copia, antes de
+  ese cambio) aprobó todo `internal/operations` (222.6 s).
+  - `operations/stage9a_test.go`: cotización y confirmación con la opción, IVA 8 % sobre el importe
+    reducido (129.63 + 10.37), historial (cambiar la opción no altera la partida; observaciones
+    conservan importes; partida nueva sin la opción a $150), promoción 10 % sobre $140 y descuento
+    manual posterior (−14.00 y −12.60, unidad 140/14/126, IVA 105.00 + 8.40), precuenta con revisión y
+    ajustes, cargo y cancelación la invalidan sin cambiar la revisión, **dos carreras controladas**
+    (borrador y cargo que inician su transacción antes que la impresión, detenidos al autenticarse por
+    un bloqueo de la fila de su terminal y luego en espera del lock 7820148305 detrás de la impresión;
+    la prueba verifica que la regla anterior por marcas de tiempo los habría mostrado vigentes),
+    precuentas históricas con la regla anterior. Control negativo ejecutado: con el predicado anterior
+    en `tables.go` las dos carreras fallan («awaiting_payment»).
+  - `catalog/acceptance_test.go`: opción desactivada por omisión, 403 sin `catalog.prices.manage` sin
+    cambios, guardado auditado, cotización $140, duplicado la conserva, desactivarla vuelve a $150.
+  - `database/stage9a_catalog_precheck_upgrade_test.go`: esquema 14 con productos, combo, precuenta y
+    ticket → la 0015 no altera nada (comparación de `to_jsonb` sin las columnas nuevas), opción `false`
+    `NOT NULL`, documentos históricos en NULL, CHECK con nombre probado con una copia temporal.
+- Vitest: 50 archivos, 430 pruebas ok (nuevas: `pages/catalog/priceDecrease.test.tsx` y una prueba en
+  `capture/quickNotesCapture.test.tsx`). `tsc --noEmit` sin errores; `npm run build` ok;
+  `cargo test --locked --offline` 20 ok, 1 ignorada (sin cambios en Rust).
+- Playwright (puertos 8184/1424), recorrido completo: Chromium 8/8 y WebKit 8/8, con el nuevo
+  `e2e/table-price-decrease.spec.ts`: producto con la opción, quitar el arroz (−$20.00, $130.00) y
+  sustituirlo por frijoles (−$10.00, $140.00), partida a $140.00; «Poner fuera de servicio» en una línea
+  a 1280 × 720 y 1920 × 1080 en claro y oscuro y la regla intacta (fuera de servicio y habilitar).
+  Control negativo: sin la clase nueva, el texto ocupa 3 líneas a 1280 × 720. Una corrida anterior
+  (interrumpida) tuvo en WebKit un error de página «The provided value is non-finite» en
+  `restaurant.spec.ts` que no se reprodujo en las dos corridas siguientes.
+
+### Limitaciones
+
+- Si el límite actúa (producto cuya base es menor que el valor de sus complementos incluidos), la
+  diferencia del grupo que ve el mesero puede ser mayor que la reducción real del producto; el precio
+  del botón y el desglose («El precio bajó …») muestran el efecto real.
+- No verificado en la ventana nativa (WKWebView) ni en pantalla táctil física.
+
+### Para fusionar (archivos que A1 no edita)
+
+- `CLAUDE.md` §4 y la lista de especificaciones de Playwright: agregar `e2e/table-price-decrease.spec.ts`.
+- `API_CONTRACTS.md`: ver `api_contracts.md` de esta carpeta. Sin dependencias nuevas.
+- Edición mínima fuera del área estricta: una línea en `backend/internal/operations/acceptance_test.go`
+  (llamada a `testStage9A` al final de `TestRestaurantAcceptance`) y dos bloques en
+  `desktop/src/styles.css` (campo del interruptor y fila propia de «Poner fuera de servicio»).

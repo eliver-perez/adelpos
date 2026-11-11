@@ -352,8 +352,24 @@ func (handler *service) enqueueDocument(finance *Finance, kind string, payment *
 	if payment != nil {
 		paymentID = &payment.ID
 	}
-	if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.payment_documents(ticket_id,account_id,payment_id,kind,actor_id,device_id)
-        VALUES ($1,$2,$3,$4,$5,$6)`, ticketID, finance.AccountID, paymentID, kind, handler.request.Actor.UserID, handler.request.Actor.DeviceID); err != nil {
+	// Etapa 9A (§33): la precuenta guarda la revisión de la cuenta con la que se armó el documento y
+	// el número de ajustes, ambos leídos bajo el lock exclusivo de cobros que esta transacción ya
+	// tiene; es vigente mientras la cuenta conserve los dos (AccountStandingSQL). Un cambio que espera
+	// el lock mientras se imprime incrementa la revisión después y la deja obsoleta, sin comparar
+	// instantes de inicio de transacción. Los tickets de pago no guardan estos datos.
+	var accountRevision, adjustments *int
+	if kind == "precheck" {
+		count, err := adjustmentCount(handler.ctx, handler.tx, finance.AccountID)
+		if err != nil {
+			return nil, err
+		}
+		revision := finance.Revision
+		accountRevision, adjustments = &revision, &count
+	}
+	if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.payment_documents
+        (ticket_id,account_id,payment_id,kind,actor_id,device_id,account_revision,adjustment_count)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, ticketID, finance.AccountID, paymentID, kind, handler.request.Actor.UserID,
+		handler.request.Actor.DeviceID, accountRevision, adjustments); err != nil {
 		return nil, err
 	}
 	return map[string]any{"requested": true, "status": job.State, "job_id": job.ID, "ticket_id": ticketID, "message": job.LastError}, nil

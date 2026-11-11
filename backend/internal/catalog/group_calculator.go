@@ -4,39 +4,60 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func (engine *calculator) groups(product Product, customization Customization, result *ProductBreakdown) (decimal.Decimal, error) {
+// groupTotals resume los grupos de un producto para su precio unitario. Cada importe es la suma de
+// los valores ya redondeados por grupo.
+type groupTotals struct {
+	// differences suma las diferencias de cada grupo tal como quedan en su desglose: nunca
+	// negativas con la regla con piso; con signo cuando se aplica la opción de bajar el precio.
+	differences decimal.Decimal
+	// floorDifferences suma las diferencias con la regla con piso (la de siempre), también cuando
+	// se aplica la opción: es el precio de referencia que la opción solo puede bajar.
+	floorDifferences decimal.Decimal
+	// extras suma los extras explícitos, que nunca se descuentan.
+	extras decimal.Decimal
+}
+
+func (engine *calculator) groups(product Product, customization Customization, result *ProductBreakdown, decrease bool) (groupTotals, error) {
+	totals := groupTotals{differences: decimal.Zero, floorDifferences: decimal.Zero, extras: decimal.Zero}
 	selections := map[string][]IncludedOption{}
 	for _, selection := range customization.Groups {
 		if _, exists := selections[selection.GroupID]; exists {
-			return decimal.Zero, invalid("Un grupo de personalización está repetido.")
+			return totals, invalid("Un grupo de personalización está repetido.")
 		}
 		selections[selection.GroupID] = selection.Options
 	}
-	total := decimal.Zero
 	for _, binding := range product.Groups {
 		group, exists := engine.snapshot.Groups[binding.GroupID]
 		if !exists || !group.Active {
-			return decimal.Zero, unavailable("Un grupo de personalización está inactivo o no existe.")
+			return totals, unavailable("Un grupo de personalización está inactivo o no existe.")
 		}
 		selection, explicit := selections[binding.GroupID]
 		if !explicit {
 			selection = binding.Included
 		}
 		delete(selections, binding.GroupID)
-		breakdown, err := engine.group(group, binding, selection)
+		breakdown, floorDifference, err := engine.group(group, binding, selection, decrease)
 		if err != nil {
-			return decimal.Zero, err
+			return totals, err
 		}
-		total = total.Add(amount(breakdown.Difference)).Add(amount(breakdown.Extras))
+		totals.differences = totals.differences.Add(amount(breakdown.Difference))
+		totals.floorDifferences = totals.floorDifferences.Add(floorDifference)
+		totals.extras = totals.extras.Add(amount(breakdown.Extras))
 		result.Groups = append(result.Groups, *breakdown)
 	}
 	if len(selections) > 0 {
-		return decimal.Zero, invalid("El grupo seleccionado no pertenece al producto.")
+		return totals, invalid("El grupo seleccionado no pertenece al producto.")
 	}
-	return total, nil
+	return totals, nil
 }
 
-func (engine *calculator) group(group OptionGroup, binding ProductGroup, selections []IncludedOption) (*GroupBreakdown, error) {
+// group calcula un grupo y devuelve su desglose y su diferencia con la regla con piso. Con
+// decrease (opción «El precio puede bajar al cambiar complementos», §3.1) la diferencia del
+// desglose lleva signo: en modo valor es valor solicitado − valor incluido (quitar sin reemplazo
+// también resta); en modo cantidad son los tramos de las porciones adicionales menos el valor de
+// referencia de las porciones incluidas que se retiraron (sin valores de referencia no cambia).
+// Sin la opción, la diferencia del desglose es la de siempre y coincide con la del piso.
+func (engine *calculator) group(group OptionGroup, binding ProductGroup, selections []IncludedOption, decrease bool) (*GroupBreakdown, decimal.Decimal, error) {
 	original := map[string]decimal.Decimal{}
 	for _, included := range binding.Included {
 		original[included.OptionID] = amount(included.Quantity)
@@ -44,11 +65,11 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 	requested := map[string]decimal.Decimal{}
 	for _, selection := range selections {
 		if _, exists := requested[selection.OptionID]; exists {
-			return nil, invalid("Una opción está solicitada dos veces.")
+			return nil, decimal.Zero, invalid("Una opción está solicitada dos veces.")
 		}
 		quantity, err := parseQuantity(selection.Quantity)
 		if err != nil {
-			return nil, err
+			return nil, decimal.Zero, err
 		}
 		requested[selection.OptionID] = quantity
 	}
@@ -60,27 +81,31 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 		Options:  []OptionBreakdown{},
 	}
 	originalValue, requestedValue, extras, tierCharges, quantityTotal := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
+	// removedValue es el valor de referencia de las porciones incluidas que se retiraron; solo lo usa
+	// el modo cantidad con la opción de bajar el precio.
+	removedValue := decimal.Zero
 	for _, option := range group.Options {
 		included := original[option.ID]
 		quantity := requested[option.ID]
 		delete(requested, option.ID)
 		if quantity.IsPositive() {
 			if err := engine.selectedOptionAvailable(option); err != nil {
-				return nil, err
+				return nil, decimal.Zero, err
 			}
 		}
 		if option.MaxQuantity != nil && quantity.GreaterThan(amount(*option.MaxQuantity)) {
-			return nil, invalid("La cantidad supera el máximo configurado para la opción.")
+			return nil, decimal.Zero, invalid("La cantidad supera el máximo configurado para la opción.")
 		}
 		originalValue = originalValue.Add(included.Mul(amount(option.ReferenceValue)))
 		requestedValue = requestedValue.Add(quantity.Mul(amount(option.ReferenceValue)))
 		quantityTotal = quantityTotal.Add(quantity)
 		additional := positiveDifference(quantity, included)
 		extras = extras.Add(additional.Mul(amount(option.ExtraPrice)))
+		removedValue = removedValue.Add(positiveDifference(included, quantity).Mul(amount(option.ReferenceValue)))
 		if group.PricingMode == "quantity" && additional.IsPositive() {
 			charge, err := tieredCharge(option.Tiers, additional)
 			if err != nil {
-				return nil, err
+				return nil, decimal.Zero, err
 			}
 			tierCharges = tierCharges.Add(charge)
 		}
@@ -94,7 +119,7 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 		})
 	}
 	if len(requested) > 0 {
-		return nil, invalid("Una opción solicitada no pertenece al grupo.")
+		return nil, decimal.Zero, invalid("Una opción solicitada no pertenece al grupo.")
 	}
 	minimum, maximum := group.MinQuantity, group.MaxQuantity
 	if binding.MinQuantity != nil {
@@ -104,16 +129,24 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 		maximum = binding.MaxQuantity
 	}
 	if quantityTotal.LessThan(amount(minimum)) || (maximum != nil && quantityTotal.GreaterThan(amount(*maximum))) {
-		return nil, invalid("La selección no respeta los límites del grupo " + group.Name + ".")
+		return nil, decimal.Zero, invalid("La selección no respeta los límites del grupo " + group.Name + ".")
 	}
 	difference := positiveDifference(requestedValue, originalValue)
 	if group.PricingMode == "quantity" {
 		difference = tierCharges
 	}
-	// La equivalencia se redondea por grupo. Retirar opciones nunca reduce el precio base.
+	// La equivalencia se redondea por grupo. Con la regla con piso, retirar opciones nunca reduce el
+	// precio base.
+	floorDifference := amount(money(difference))
+	if decrease {
+		difference = requestedValue.Sub(originalValue)
+		if group.PricingMode == "quantity" {
+			difference = tierCharges.Sub(removedValue)
+		}
+	}
 	result.OriginalValue, result.RequestedValue = money(originalValue), money(requestedValue)
 	result.Difference, result.Extras = money(difference), money(extras)
-	return result, nil
+	return result, floorDifference, nil
 }
 
 func (engine *calculator) selectedOptionAvailable(option GroupOption) error {

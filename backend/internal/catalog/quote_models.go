@@ -116,21 +116,29 @@ type ComponentBreakdown struct {
 }
 
 type ProductBreakdown struct {
-	ProductID        string                `json:"product_id"`
-	Revision         int                   `json:"revision"`
-	CategoryID       string                `json:"category_id"`
-	VariantID        *string               `json:"variant_id"`
-	Name             string                `json:"name"`
-	BasePrice        string                `json:"base_price"`
-	PriceOrigin      string                `json:"price_origin"`
-	IngredientExtras string                `json:"ingredient_extras"`
-	GroupExtras      string                `json:"group_extras"`
-	ComponentExtras  string                `json:"component_extras"`
-	UnitPrice        string                `json:"unit_price"`
-	Ingredients      []IngredientBreakdown `json:"ingredients"`
-	Groups           []GroupBreakdown      `json:"groups"`
-	Components       []ComponentBreakdown  `json:"components"`
-	Notes            string                `json:"notes"`
+	ProductID        string  `json:"product_id"`
+	Revision         int     `json:"revision"`
+	CategoryID       string  `json:"category_id"`
+	VariantID        *string `json:"variant_id"`
+	Name             string  `json:"name"`
+	BasePrice        string  `json:"base_price"`
+	PriceOrigin      string  `json:"price_origin"`
+	IngredientExtras string  `json:"ingredient_extras"`
+	GroupExtras      string  `json:"group_extras"`
+	ComponentExtras  string  `json:"component_extras"`
+	UnitPrice        string  `json:"unit_price"`
+	// PriceCanDecrease y ComplementAdjustment (etapa 9A, §3.1) solo aparecen cuando la opción «El
+	// precio puede bajar al cambiar complementos» se aplicó a este cálculo (el producto la tiene y,
+	// en un componente, también el combo). Sin la opción se omiten, así que las cotizaciones, los
+	// borradores y las huellas anteriores se serializan exactamente igual que antes.
+	// ComplementAdjustment es la reducción efectiva respecto de la regla con piso: una cadena con
+	// signo («-10.00», o «0.00» si no bajó) ya incluida en GroupExtras y en UnitPrice.
+	PriceCanDecrease     bool                  `json:"price_can_decrease,omitempty"`
+	ComplementAdjustment string                `json:"complement_adjustment,omitempty"`
+	Ingredients          []IngredientBreakdown `json:"ingredients"`
+	Groups               []GroupBreakdown      `json:"groups"`
+	Components           []ComponentBreakdown  `json:"components"`
+	Notes                string                `json:"notes"`
 	// QuickNotes se omite sin indicaciones, así que las cotizaciones y huellas anteriores no
 	// cambian.
 	QuickNotes []QuickNoteBreakdown `json:"quick_notes,omitempty"`

@@ -199,9 +199,11 @@ export function TablePanel({
         <IconLabel icon="unlock">Habilitar</IconLabel>
       </button>
     ) : !occupied && accounts !== null ? (
+      // Etapa 9A (§33): el texto largo va en su propia fila de las acciones secundarias, a todo el
+      // ancho del panel, para que quepa en una línea en cualquier tamaño de ventana.
       <button
         type="button"
-        className="secondary-button"
+        className="secondary-button table-service-action"
         disabled={blocked}
         onClick={() => onService(true)}
       >

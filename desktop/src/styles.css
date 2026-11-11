@@ -2883,6 +2883,16 @@ summary {
 .product-tax-field .segmented-control button {
   flex: 1 1 120px;
 }
+/* Etapa 9A: interruptor «El precio puede bajar al cambiar complementos» en su propia fila, como la
+   tasa de IVA; el botón conserva su ancho natural y su rótulo puede pasar a dos líneas. */
+.product-price-decrease-field {
+  grid-column: 1 / -1;
+}
+.product-price-decrease-field .toggle-button {
+  align-self: flex-start;
+  max-width: 100%;
+  text-align: left;
+}
 
 /* Segunda línea de una cifra del cobro: el cambio en la otra moneda. */
 .checkout-figure-detail {
@@ -3634,6 +3644,16 @@ summary {
   min-height: 44px;
   padding: 0 6px;
   font-size: 12px;
+}
+/* Etapa 9A (§33): en el panel de la mesa, «Poner fuera de servicio» pasa a su propia fila a todo el
+   ancho de las acciones secundarias, así su texto cabe en una línea con cualquier ancho del panel
+   (a 1280 × 720 ocupaba tres líneas en un tercio de la fila). Las demás acciones, de base cero,
+   siguen compartiendo su fila. */
+.table-panel-footer .capture-secondary-actions {
+  flex-wrap: wrap;
+}
+.capture-secondary-actions > .table-service-action {
+  flex: 1 0 100%;
 }
 /* Pie angosto (cuenta de 1280 px o menos): el icono va sobre el texto para que las cuatro acciones
    secundarias quepan en una fila y las principales conserven su texto en una línea, sin cambiar

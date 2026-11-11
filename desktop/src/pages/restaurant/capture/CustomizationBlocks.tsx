@@ -19,7 +19,7 @@ import type {
   ProductGroup,
 } from '../../../services/catalog';
 import { formatMoney, formatSignedMoney } from '../../../services/money';
-import { positiveAmount } from './captureRules';
+import { nonZeroAmount, positiveAmount } from './captureRules';
 import { displayQuantity, fromThousandths, toThousandths, unit } from './quantities';
 
 // Bloques táctiles de la personalización en el panel central. Cada opción es un botón grande con
@@ -106,13 +106,15 @@ function optionPrices(group: OptionGroup, option: GroupOption): string[] {
   return prices;
 }
 
-// Cambio de precio del grupo con lo que devolvió Go: «+$10.00» o «Sin cambio». Mientras Go
-// recalcula, «Calculando…». Si hay equivalencia y extras se muestran los dos importes de Go.
+// Cambio de precio del grupo con lo que devolvió Go: «+$5.00», «−$10.00» o «Sin cambio». La
+// diferencia solo es negativa cuando el producto tiene activada la opción «El precio puede bajar
+// al cambiar complementos» (etapa 9A); Go la calcula con sus límites. Mientras Go recalcula,
+// «Calculando…». Si hay equivalencia y extras se muestran los dos importes de Go.
 function groupDelta(charge: ProductBreakdown['groups'][number] | undefined): string {
   if (!charge) {
     return 'Calculando…';
   }
-  const difference = positiveAmount(charge.difference);
+  const difference = nonZeroAmount(charge.difference);
   const extras = positiveAmount(charge.extras);
   if (difference && extras) {
     return `Equivalencia ${formatSignedMoney(charge.difference)} · Extras ${formatSignedMoney(charge.extras)}`;

@@ -143,6 +143,9 @@ export interface Product extends Metadata {
   kind: string;
   base_price: string;
   tax_rate?: ProductTaxRate | null;
+  // «El precio puede bajar al cambiar complementos» (etapa 9A). Desactivada por omisión; Go la
+  // hace cumplir y exige el permiso de precios para cambiarla.
+  price_can_decrease?: boolean;
   image_id: string | null;
   sort_order: number;
   archived: boolean;
@@ -320,6 +323,11 @@ export interface ProductBreakdown {
   ingredient_extras: string;
   group_extras: string;
   component_extras: string;
+  // Solo cuando Go aplicó la opción «El precio puede bajar al cambiar complementos» (etapa 9A):
+  // la reducción por complementos con signo («-10.00», o «0.00» si no bajó), ya incluida en
+  // group_extras y unit_price. Con la opción, la diferencia de cada grupo también lleva signo.
+  price_can_decrease?: boolean;
+  complement_adjustment?: string;
   notes: string;
   ingredients: {
     ingredient_id: string;

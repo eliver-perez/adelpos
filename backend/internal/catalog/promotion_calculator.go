@@ -57,6 +57,13 @@ func applyPromotions(snapshot Snapshot, quote *Quote, now time.Time, location *t
 				continue
 			}
 			basis := amount(line.BasePrice).Mul(decimal.NewFromInt(int64(line.Quantity)))
+			if line.ComplementAdjustment != "" {
+				// Con la opción «El precio puede bajar al cambiar complementos», la base sin extras es
+				// el precio base ya reducido por los complementos: la promoción nunca vuelve a
+				// acreditar lo que ya se descontó (§3.1). Primero complementos, después promociones.
+				reduced := decimal.Max(decimal.Zero, amount(line.BasePrice).Add(amount(line.ComplementAdjustment)))
+				basis = reduced.Mul(decimal.NewFromInt(int64(line.Quantity)))
+			}
 			if promotion.IncludeExtras {
 				basis = amount(line.Subtotal)
 			}
