@@ -327,7 +327,7 @@ func (handler *service) saveSupplierReturn(receipt *Receipt, warehouse *Warehous
 	return saved, nil
 }
 
-const supplierReturnColumns = `SELECT sr.id,sr.folio,sr.receipt_id,r.folio,s.id,s.trade_name,s.active,w.id,w.name,sr.occurred_at,sr.reason,
+const supplierReturnColumns = `SELECT sr.id,sr.folio,sr.receipt_id,r.folio,s.id,s.trade_name,s.kind,s.active,w.id,w.name,sr.occurred_at,sr.reason,
         actor.display_name,sr.value::text,sr.line_count,sr.unabsorbed::text,sr.created_at,r.supplier_reference
         FROM app.inventory_supplier_returns sr
         JOIN app.inventory_receipts r ON r.id=sr.receipt_id
@@ -340,7 +340,7 @@ func (handler *service) scanSupplierReturn(row interface{ Scan(...any) error }) 
 	summary := &document.SupplierReturnSummary
 	var value, unabsorbed string
 	err := row.Scan(&summary.ID, &summary.Folio, &summary.ReceiptID, &summary.ReceiptFolio, &summary.Supplier.ID,
-		&summary.Supplier.TradeName, &summary.Supplier.Active, &summary.Warehouse.ID, &summary.Warehouse.Name, &summary.OccurredAt,
+		&summary.Supplier.TradeName, &summary.Supplier.Kind, &summary.Supplier.Active, &summary.Warehouse.ID, &summary.Warehouse.Name, &summary.OccurredAt,
 		&summary.Reason, &summary.ActorName, &value, &summary.LineCount, &unabsorbed, &summary.CreatedAt, &summary.ReceiptReference)
 	if err != nil {
 		return nil, err

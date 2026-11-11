@@ -227,6 +227,7 @@ export type Operation =
   | 'inventory_items'
   | 'inventory_create_item'
   | 'inventory_item'
+  | 'inventory_item_code'
   | 'inventory_save_item'
   | 'inventory_create_presentation'
   | 'inventory_save_presentation'

@@ -104,7 +104,7 @@ type PurchaseOrderPage struct {
 	PageSize int                    `json:"page_size"`
 }
 
-const purchaseOrderColumns = `SELECT o.id,o.folio,s.id,s.trade_name,s.active,o.state,to_char(o.order_date,'YYYY-MM-DD'),w.id,w.name,
+const purchaseOrderColumns = `SELECT o.id,o.folio,s.id,s.trade_name,s.kind,s.active,o.state,to_char(o.order_date,'YYYY-MM-DD'),w.id,w.name,
         o.subtotal::text,o.discount::text,o.tax::text,o.total::text,o.line_count,
         (SELECT count(*) FROM app.inventory_receipts r WHERE r.purchase_order_id=o.id),creator.display_name,o.issued_at,o.revision,
         o.created_at,o.updated_at,o.notes,updater.display_name,issuer.display_name,o.cancelled_at,canceller.display_name,
@@ -122,8 +122,8 @@ func scanPurchaseOrder(row interface{ Scan(...any) error }) (*PurchaseOrder, err
 	var order PurchaseOrder
 	var subtotal, discount, tax, total string
 	summary := &order.PurchaseOrderSummary
-	err := row.Scan(&summary.ID, &summary.Folio, &summary.Supplier.ID, &summary.Supplier.TradeName, &summary.Supplier.Active,
-		&summary.State, &summary.OrderDate, &summary.ExpectedWarehouse.ID, &summary.ExpectedWarehouse.Name, &subtotal, &discount,
+	err := row.Scan(&summary.ID, &summary.Folio, &summary.Supplier.ID, &summary.Supplier.TradeName, &summary.Supplier.Kind,
+		&summary.Supplier.Active, &summary.State, &summary.OrderDate, &summary.ExpectedWarehouse.ID, &summary.ExpectedWarehouse.Name, &subtotal, &discount,
 		&tax, &total, &summary.LineCount, &summary.ReceiptCount, &summary.CreatedByName, &summary.IssuedAt, &summary.Revision,
 		&summary.CreatedAt, &summary.UpdatedAt, &order.Notes, &order.UpdatedByName, &order.IssuedByName, &order.CancelledAt,
 		&order.CancelledByName, &order.CancelReason, &order.ClosedAt, &order.ClosedByName, &order.CloseReason)
@@ -368,7 +368,7 @@ func (handler *service) prepareOrder(input purchaseOrderInput) (preparedOrder, e
 	if err != nil {
 		return preparedOrder{}, err
 	}
-	supplier, err := handler.supplierForPurchase(input.SupplierID)
+	supplier, err := handler.supplierForPurchase(input.SupplierID, false)
 	if err != nil {
 		return preparedOrder{}, err
 	}

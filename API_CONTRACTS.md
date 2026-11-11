@@ -1147,3 +1147,112 @@ Desglose del producto (`ProductBreakdown`, también en cada componente de combo 
 - `restaurant/overview` y `restaurant/tables`: `state = awaiting_payment` ⇔ saldo > 0 y
   `precheck_current`. Mismo contrato JSON; cambia solo cuándo una precuenta deja de estar vigente
   (también con una modificación que esperaba el lock mientras se imprimía).
+
+## Etapa 9A · proveedores, compras de mostrador, código sugerido, categorías y navegación de Inventarios (parte A2, esquema 16)
+
+### Inventario · etapa 9A (fase A, A2): proveedores, compras de mostrador y código sugerido
+
+Migración `0016_inventory_suppliers_counter.sql`. Todas las rutas siguen bajo `/api/v1/inventory`, exigen `inventory.read`
+además de su permiso y conservan idempotencia (`operation_id`), revisión, auditoría y eventos de la etapa 8.
+
+#### Proveedores (`suppliers`)
+
+`Supplier` (listado, detalle, alta y edición) agrega:
+
+```json
+{
+  "phone_secondary": "(33) 3615-0000 ext. 12",
+  "mobile_phone": "+52 1 33 1234 5678",
+  "website": "https://www.proveedor.com.mx/catalogo",
+  "kind": "formal"
+}
+```
+
+- `kind`: `formal` (todos los existentes y los que se crean) o `counter` («Compras de mostrador», único).
+- Cuerpo de `POST suppliers` y `PATCH suppliers/{id}` (`inventory.suppliers.manage`): admite `phone_secondary`,
+  `mobile_phone` y `website` opcionales (ausentes = `""`). `kind` **no** se acepta (400 por campo desconocido). El `PATCH`
+  sigue guardando todos los datos: un cuerpo sin los campos nuevos los deja vacíos.
+- Validación (400 `INVENTORY_VALIDATION`, solo en los campos nuevos): teléfonos de una línea, hasta 40 caracteres, con
+  dígitos, espacios, `+ ( ) . - /`, entre 7 y 20 dígitos sin contar una extensión final opcional (`ext. 12`, `ext 12`,
+  `x 12`); página web de hasta 200 caracteres, sin espacios, dominio con TLD de letras, puerto y ruta opcionales, con o sin
+  `http://`/`https://` (otros esquemas, `localhost` o IP se rechazan).
+- Proveedor de mostrador: `PATCH` con `rfc` o `legal_name` no vacíos → 400; se puede renombrar, describir y desactivar.
+- `GET suppliers`: nuevo filtro `kind=formal|counter` (otro valor → 400); la búsqueda incluye `phone_secondary`,
+  `mobile_phone` y `website`; el orden es `active DESC, kind='counter' DESC, nombre`.
+- `PUT suppliers/{id}/items` con el proveedor de mostrador → 409 `COUNTER_SUPPLIER` (no surte insumos: ni preferido ni
+  último precio).
+
+`SupplierReference` (en órdenes, recepciones, devoluciones y sugerencias) agrega `kind`:
+
+```json
+{ "id": "…", "trade_name": "Compras de mostrador", "kind": "counter", "active": true }
+```
+
+#### Órdenes de compra y sugerencias
+
+- `POST purchase-orders`, `PATCH purchase-orders/{id}` (cambiar el proveedor de un borrador) y
+  `POST purchase-suggestions/draft-order` con el proveedor de mostrador → 409 `COUNTER_SUPPLIER` («… solo se usa en
+  recepciones directas: elige un proveedor formal para la orden de compra.»). Sin escrituras.
+- Las sugerencias solo consideran proveedores formales (`sp.kind='formal'`).
+
+#### Recepciones (`receipts`)
+
+- `POST receipts` directa (sin orden; `inventory.purchases.receive` + `inventory.purchases.create`) admite el proveedor de
+  mostrador y el campo opcional `counter_store` (comercio concreto, una línea, hasta 100 caracteres, recortado). Con un
+  proveedor formal (o en la recepción de una orden) un `counter_store` no vacío → 400. Proveedor de mostrador desactivado →
+  409 `SUPPLIER_INACTIVE`.
+- Una recepción del proveedor de mostrador **no** actualiza `inventory_supplier_items` (sin último precio).
+- `ReceiptSummary`/`Receipt` agregan `counter_store` (`""` en las demás y en las históricas) y `supplier.kind`.
+- `GET receipts`: nuevo filtro `supplier_kind=formal|counter` (otro valor → 400); la búsqueda incluye `counter_store`.
+- Auditoría `inventory.receipt_recorded`: `after` agrega `supplier_kind` y `counter_store`. Motivo del movimiento:
+  `Recepción N · Compras de mostrador (Central de abastos)`.
+
+Ejemplo de cuerpo:
+
+```json
+{
+  "operation_id": "…",
+  "supplier_id": "<id del proveedor de mostrador>",
+  "counter_store": "Central de abastos, bodega 12",
+  "supplier_reference": "Nota 55",
+  "lines": [{ "item_id": "…", "unit_id": "…", "quantity": "3", "unit_price": "40", "tax_rate": 0 }]
+}
+```
+
+#### Código interno de insumos (`item-codes`, nueva)
+
+`GET inventory/item-codes?code=<código>[&item_id=<insumo que se edita>]` (`inventory.read`; puente `inventory_item_code`,
+parámetros `code` e `item_id` en la lista blanca de `api.rs`). Solo lectura; Go sigue respondiendo `DUPLICATE_CODE` al
+guardar.
+
+```json
+{
+  "code": "harina-de-trigo",
+  "available": false,
+  "suggestion": "harina-de-trigo-2",
+  "taken_by": "Harina de trigo"
+}
+```
+
+- `available`: ningún otro insumo usa el código sin distinguir mayúsculas (se excluye `item_id`).
+- `suggestion`: el mismo código si está libre, o el primero libre `base-2`, `base-3`… recortando la base para no pasar de
+  40 caracteres y sin guiones al final (misma regla que `suggestProductCode` de `desktop/src/services/productCode.ts`).
+- `taken_by`: nombre del insumo que lo usa, o `null`.
+- 400: `code` vacío o de más de 40 caracteres o con saltos de línea, `item_id` inválido o parámetros ajenos.
+
+#### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+- Operación nueva `inventory_item_code` → `GET inventory/item-codes`.
+- Parámetros de consulta nuevos para `inventory_*`: `code` y `supplier_kind` (`kind` ya existía).
+- Tipos TypeScript: `SupplierKind`, `Supplier.phone_secondary|mobile_phone|website|kind`, `SupplierReference.kind`,
+  `ReceiptSummary.counter_store`, `DirectReceiptInput.counter_store`, `SupplierQuery.kind`, `ReceiptQuery.supplier_kind`
+  (`services/inventoryPurchasing.ts`) e `ItemCodeCheck` / `checkInventoryItemCode` (`services/inventory.ts`).
+
+#### Esquema (para reportes)
+
+- `app.inventory_suppliers.kind text NOT NULL DEFAULT 'formal'` (`formal|counter`), índice único parcial
+  `inventory_suppliers_counter_key` (un solo `counter`), `phone_secondary`, `mobile_phone`, `website` (`text NOT NULL
+DEFAULT ''`).
+- `app.inventory_receipts.counter_store text NOT NULL DEFAULT ''`.
+- Modalidad de una recepción para el reporte de compras: `orden` (`purchase_order_id IS NOT NULL`), `directa` (sin orden y
+  proveedor `formal`) o `mostrador` (proveedor `counter`, siempre sin orden).

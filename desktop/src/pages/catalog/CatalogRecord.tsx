@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { CatalogImage } from '../../components/catalog/EditorFields';
 import { Field } from '../../components/Forms';
 import { api } from '../../services/api';
-import { formatMoney } from '../../services/money';
 import type { CatalogDocument, Category, Product, Resource } from '../../services/catalog';
+import { formatMoney } from '../../services/money';
+import { followsSuggestion, suggestProductCode } from '../../services/productCode';
 
 export function CatalogRecord({
   record,
@@ -15,6 +16,7 @@ export function CatalogRecord({
   onViewProducts,
   onMoveUp,
   runAction,
+  existingCodes = [],
 }: {
   record: CatalogDocument;
   resource: Resource;
@@ -26,6 +28,8 @@ export function CatalogRecord({
   onMoveUp?: () => void;
   // Ejecuta la acción, confirma el resultado con un aviso y devuelve si Go la aceptó.
   runAction: (action: () => Promise<unknown>, success?: string) => Promise<boolean>;
+  // Códigos de producto conocidos, para sugerir el de la copia (etapa 9A).
+  existingCodes?: string[];
 }) {
   const product =
     resource === 'products' ? (record as Product & { availability_reason?: string }) : null;
@@ -148,6 +152,7 @@ export function CatalogRecord({
       {product && duplicating && (
         <DuplicateProductForm
           product={product}
+          existingCodes={existingCodes}
           onCancel={() => setDuplicating(false)}
           onDuplicate={async (name, code) => {
             const duplicated = await runAction(
@@ -170,18 +175,31 @@ export function CatalogRecord({
 }
 
 // Datos de la copia capturados dentro de la tarjeta. Sustituye a window.prompt, que el WebView
-// nativo no muestra (el botón «Duplicar» no hacía nada).
+// nativo no muestra (el botón «Duplicar» no hacía nada). El código interno se sugiere a partir del
+// nombre de la copia con la regla de la etapa 6.1 (etapa 9A) y sigue al nombre mientras no se edite;
+// Go valida que sea único entre productos y presentaciones.
 function DuplicateProductForm({
   product,
+  existingCodes,
   onCancel,
   onDuplicate,
 }: {
   product: Product;
+  existingCodes: string[];
   onCancel: () => void;
   onDuplicate: (name: string, code: string) => Promise<void>;
 }) {
+  const suggest = (value: string) => suggestProductCode(value, existingCodes);
   const [name, setName] = useState(`${product.name} (copia)`);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(() => suggest(`${product.name} (copia)`));
+
+  function changeName(value: string) {
+    if (followsSuggestion(code, suggest(name))) {
+      setCode(suggest(value));
+    }
+    setName(value);
+  }
+
   return (
     <form
       className="duplicate-form"
@@ -196,10 +214,13 @@ function DuplicateProductForm({
           value={name}
           required
           maxLength={100}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => changeName(event.target.value)}
         />
       </Field>
-      <Field label="Código interno de la copia">
+      <Field
+        label="Código interno de la copia"
+        hint="Se sugiere a partir del nombre mientras no lo edites."
+      >
         <input
           value={code}
           required

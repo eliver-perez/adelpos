@@ -375,6 +375,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
                       can={can}
                       onOpen={(id) => void openEditor(id)}
                       runAction={runAction}
+                      existingCodes={lookup.data?.products.map((entry) => entry.code) ?? []}
                       onViewProducts={() => {
                         setCategory(record.id);
                         setTab('products');

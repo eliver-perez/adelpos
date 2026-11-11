@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { notice } from './notices';
+import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
 
 // Etapa 8, fase C (interfaz de compras): recorrido de proveedores, órdenes de compra, recepciones
 // y vínculo con gastos de caja con el mismo transporte de prueba que las demás especificaciones
@@ -60,12 +61,9 @@ async function checkLayout(page: Page, testInfo: TestInfo, name: string, capture
   });
 }
 
+// Abre una sección de Inventarios por su grupo y su nombre (navegación agrupada de la etapa 9A).
 async function openTab(page: Page, name: string) {
-  await page.getByRole('tab', { name, exact: true }).click();
-  await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await openInventorySection(page, name);
 }
 
 async function confirm(page: Page, button: string, text?: string | RegExp) {
@@ -180,23 +178,8 @@ test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción direc
   const prepared = await preparePreconditions(driver);
   await inventory.click();
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
-  await expect(
-    page.getByRole('tablist', { name: 'Secciones de inventario' }).getByRole('tab'),
-  ).toHaveText([
-    'Resumen',
-    'Insumos',
-    'Recetas',
-    'Almacenes',
-    'Existencias',
-    'Movimientos',
-    'Transferencias',
-    'Ajustes y mermas',
-    'Conteos',
-    'Compras',
-    'Recepciones',
-    'Proveedores',
-    'Configuración',
-  ]);
+  // Etapa 9A: cinco grupos en la primera fila (las secciones van en la segunda).
+  await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);
   await expect(page.locator('input[type="number"]')).toHaveCount(0);
 
   // 1. Proveedor con RFC y el insumo que surte (presentación habitual, código y preferido).
@@ -206,7 +189,7 @@ test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción direc
   await page.getByLabel(/^Razón social/).fill('Distribuidora E2E C, S.A. de C.V.');
   await page.getByLabel(/^RFC/).fill('dne010203ab1');
   await page.getByLabel(/^Contacto/).fill('Laura Pérez');
-  await page.getByLabel(/^Teléfono/).fill('868 555 0101');
+  await page.getByLabel('Teléfono', { exact: true }).fill('868 555 0101');
   await expect(page.locator('input[type="number"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Crear proveedor', exact: true }).click();
   await expect(
@@ -244,7 +227,7 @@ test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción direc
   await checkLayout(page, testInfo, 'proveedores', true);
 
   // 2. Orden de 20 cajas a $250 con $50 de descuento e IVA 16 %: Go calcula los totales.
-  await openTab(page, 'Compras');
+  await openTab(page, 'Órdenes de compra');
   await page.getByRole('button', { name: 'Nueva orden de compra', exact: true }).click();
   await chooseSupplier(page);
   const orderLine = page.getByRole('group', { name: 'Renglón 1' });

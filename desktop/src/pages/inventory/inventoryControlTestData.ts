@@ -423,7 +423,12 @@ export function suggestion(extra: Partial<PurchaseSuggestion> = {}): PurchaseSug
     need_quantity: '47.5',
     below_minimum: false,
     purchasing_visible: true,
-    supplier: { id: controlIDs.supplier, trade_name: 'Molinos del Norte', active: true },
+    supplier: {
+      id: controlIDs.supplier,
+      trade_name: 'Molinos del Norte',
+      kind: 'formal',
+      active: true,
+    },
     supplier_code: 'H-25',
     presentation: { id: ids.sack, name: 'Costal 25 kg', base_quantity: '25', active: true },
     unit: null,

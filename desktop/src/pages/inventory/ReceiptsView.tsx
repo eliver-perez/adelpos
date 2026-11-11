@@ -25,6 +25,7 @@ import {
 import type { PurchasingNavigation } from './purchasingNavigation';
 import { ReceiptDetail } from './ReceiptDetail';
 import { DirectReceiptForm, OrderReceiptForm } from './ReceiptForms';
+import type { DirectReceiptMode } from './ReceiptForms';
 
 const pageSize = 25;
 
@@ -45,7 +46,10 @@ function receiptQuery(filter: ReceiptFilter) {
   if (filter.search.trim() !== '') {
     query.search = filter.search.trim();
   }
-  if (filter.direct !== '') {
+  // «Compras de mostrador» filtra por la modalidad del proveedor; las demás opciones, por el origen.
+  if (filter.direct === 'counter') {
+    query.supplier_kind = 'counter';
+  } else if (filter.direct !== '') {
     query.direct = filter.direct;
   }
   if (filter.warehouse !== '') {
@@ -76,7 +80,7 @@ function ReceiptFilters({
           type="search"
           maxLength={100}
           value={filter.search}
-          placeholder="Folio, referencia del proveedor o proveedor"
+          placeholder="Folio, referencia, comercio o proveedor"
           onChange={(event) => onChange({ ...filter, search: event.target.value, page: 1 })}
         />
       </Field>
@@ -88,6 +92,7 @@ function ReceiptFilters({
           <option value="">Todas</option>
           <option value="false">De una orden de compra</option>
           <option value="true">Directas</option>
+          <option value="counter">Compras de mostrador</option>
         </select>
       </Field>
       <Field label="Almacén">
@@ -184,7 +189,16 @@ function ReceiptsTable({
                 )}
               </td>
               <td>{serverDateTime(receipt.occurred_at, timezone)}</td>
-              <td>{receipt.supplier.trade_name}</td>
+              <td className="inventory-cell-name">
+                {receipt.supplier.trade_name}
+                {receipt.supplier.kind === 'counter' && (
+                  <span className="muted text-xs inventory-cell-detail">
+                    {receipt.counter_store
+                      ? `Mostrador · ${receipt.counter_store}`
+                      : 'Compra de mostrador'}
+                  </span>
+                )}
+              </td>
               <td>
                 {receipt.direct ? 'Directa' : orderFolio(receipt.purchase_order_folio)}
                 {receipt.excess && (
@@ -373,7 +387,7 @@ function OrderReceiptLoader({
 type ReceiptsMode =
   | { kind: 'list' }
   | { kind: 'receipt'; receiptID: string; warnings: InventoryWarning[] }
-  | { kind: 'direct' }
+  | { kind: 'direct'; supplierMode: DirectReceiptMode }
   | { kind: 'choose' }
   | { kind: 'receive'; orderID: string };
 
@@ -443,6 +457,7 @@ export function ReceiptsView({
         execute={execute}
         busy={busy}
         timezone={timezone}
+        initialMode={mode.supplierMode}
         onRecorded={recorded}
         onClose={back}
       />
@@ -489,8 +504,17 @@ export function ReceiptsView({
           {direct && (
             <button
               type="button"
+              className="secondary-button"
+              onClick={() => setMode({ kind: 'direct', supplierMode: 'counter' })}
+            >
+              <IconLabel icon="plus">Compra de mostrador</IconLabel>
+            </button>
+          )}
+          {direct && (
+            <button
+              type="button"
               className="primary-button"
-              onClick={() => setMode({ kind: 'direct' })}
+              onClick={() => setMode({ kind: 'direct', supplierMode: 'formal' })}
             >
               <IconLabel icon="plus">Recepción directa</IconLabel>
             </button>

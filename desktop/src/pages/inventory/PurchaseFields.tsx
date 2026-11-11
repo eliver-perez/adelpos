@@ -12,6 +12,7 @@ import type {
   Supplier,
   SupplierDetail,
   SupplierItem,
+  SupplierKind,
   SupplierReference,
 } from '../../services/inventoryPurchasing';
 import { formatDeduction, formatMoney } from '../../services/money';
@@ -31,8 +32,10 @@ import {
 } from './purchasingFormat';
 import type { PurchaseLineDraft } from './purchasingFormat';
 
-// Selector de proveedor con búsqueda por nombre comercial, razón social, RFC, contacto, teléfono
-// o correo. Consulta a Go hasta 50 coincidencias; el elegido se conserva aunque deje de aparecer.
+// Selector de proveedor con búsqueda por nombre comercial, razón social, RFC, contacto, teléfonos,
+// página web o correo. Consulta a Go hasta 50 coincidencias; el elegido se conserva aunque deje de
+// aparecer. kind limita la modalidad: las órdenes de compra y las sugerencias solo ofrecen
+// proveedores formales («Compras de mostrador» es solo para recepciones directas).
 export function SupplierPicker({
   label,
   value,
@@ -40,6 +43,7 @@ export function SupplierPicker({
   activeOnly = true,
   emptyLabel = 'Elige un proveedor',
   required = false,
+  kind,
 }: {
   label: string;
   value: SupplierReference | null;
@@ -47,6 +51,7 @@ export function SupplierPicker({
   activeOnly?: boolean;
   emptyLabel?: string;
   required?: boolean;
+  kind?: SupplierKind;
 }) {
   const [search, setSearch] = useState('');
   const query: Record<string, string> = { page_size: '50' };
@@ -56,6 +61,9 @@ export function SupplierPicker({
   if (activeOnly) {
     query.active = 'true';
   }
+  if (kind) {
+    query.kind = kind;
+  }
   const results = useResource<Page<Supplier>>('inventory_suppliers', {
     query,
     reloadEvent: inventoryChangeEvent,
@@ -63,6 +71,7 @@ export function SupplierPicker({
   const found: SupplierReference[] = (results.data?.items ?? []).map((supplier) => ({
     id: supplier.id,
     trade_name: supplier.trade_name,
+    kind: supplier.kind,
     active: supplier.active,
   }));
   const options =
@@ -92,6 +101,7 @@ export function SupplierPicker({
           {options.map((supplier) => (
             <option key={supplier.id} value={supplier.id}>
               {supplier.trade_name}
+              {supplier.kind === 'counter' ? ' · compra de mostrador' : ''}
               {supplier.active ? '' : ' (inactivo)'}
             </option>
           ))}

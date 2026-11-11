@@ -1,4 +1,5 @@
 import type { Lookups, Product } from '../../services/catalog';
+import { followsSuggestion, suggestVariantCode } from '../../services/productCode';
 import {
   Check,
   DecimalField,
@@ -16,7 +17,19 @@ interface ProductDetailsProps {
   can: (permission: string) => boolean;
 }
 
-export function VariantEditor({ value, onChange, can }: ProductDetailsProps) {
+// Código sugerido de una presentación nueva (etapa 9A): el código del producto y el nombre de la
+// presentación, libre frente a los productos conocidos y a las demás presentaciones del producto.
+// Sigue al nombre mientras no se edite; las presentaciones guardadas nunca cambian de código.
+function variantCodeFor(value: Product, lookups: Lookups, index: number, name: string) {
+  const known = [
+    ...lookups.products.map((entry) => entry.code),
+    value.code,
+    ...value.variants.filter((_, position) => position !== index).map((entry) => entry.code),
+  ];
+  return suggestVariantCode(value.code, name, known);
+}
+
+export function VariantEditor({ value, onChange, lookups, can }: ProductDetailsProps) {
   return (
     <RepeatSection
       title="Presentaciones opcionales"
@@ -49,15 +62,26 @@ export function VariantEditor({ value, onChange, can }: ProductDetailsProps) {
               onChange={(name) =>
                 onChange({
                   ...value,
-                  variants: value.variants.map((item, position) =>
-                    position === index ? { ...item, name } : item,
-                  ),
+                  variants: value.variants.map((item, position) => {
+                    if (position !== index) {
+                      return item;
+                    }
+                    const previous = variantCodeFor(value, lookups, index, item.name);
+                    const follows = item.id === '' && followsSuggestion(item.code, previous);
+                    const code = follows ? variantCodeFor(value, lookups, index, name) : item.code;
+                    return { ...item, name, code };
+                  }),
                 })
               }
             />
             <TextField
               label="Código de presentación"
               required
+              hint={
+                variant.id === ''
+                  ? 'Se sugiere a partir del producto y del nombre mientras no lo edites.'
+                  : undefined
+              }
               value={variant.code}
               onChange={(code) =>
                 onChange({

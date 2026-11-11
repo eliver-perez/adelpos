@@ -78,6 +78,9 @@ func resolve(method string, parts []string) *route {
 			return read((*service).listItems)
 		case "items POST":
 			return write((*service).createItem, permissionItemsManage)
+		case "item-codes GET":
+			// Etapa 9A: comprobación y sugerencia del código interno (item_codes.go).
+			return read((*service).checkItemCode)
 		case "warehouses GET":
 			return read((*service).listWarehouses)
 		case "warehouses POST":

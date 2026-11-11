@@ -135,6 +135,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "inventory_create_category" => Some((Method::POST, "inventory/categories")),
         "inventory_items" => Some((Method::GET, "inventory/items")),
         "inventory_create_item" => Some((Method::POST, "inventory/items")),
+        // Etapa 9A: comprobación y sugerencia del código interno de un insumo.
+        "inventory_item_code" => Some((Method::GET, "inventory/item-codes")),
         "inventory_warehouses" => Some((Method::GET, "inventory/warehouses")),
         "inventory_create_warehouse" => Some((Method::POST, "inventory/warehouses")),
         "inventory_station_warehouses" => Some((Method::GET, "inventory/station-warehouses")),
@@ -774,6 +776,9 @@ fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "type",
             "severity",
             "reason",
+            // Etapa 9A: código interno que se comprueba y modalidad del proveedor de una recepción.
+            "code",
+            "supplier_kind",
         ]
     } else {
         &[]
@@ -1213,6 +1218,7 @@ mod tests {
             ),
             ("inventory_items", Method::GET, "inventory/items"),
             ("inventory_create_item", Method::POST, "inventory/items"),
+            ("inventory_item_code", Method::GET, "inventory/item-codes"),
             ("inventory_warehouses", Method::GET, "inventory/warehouses"),
             (
                 "inventory_create_warehouse",
@@ -1504,7 +1510,15 @@ mod tests {
         query.insert("supplier_id".to_string(), "x".to_string());
         query.insert("purchase_order_id".to_string(), "x".to_string());
         query.insert("direct".to_string(), "true".to_string());
+        // Etapa 9A: modalidad del proveedor (compras de mostrador).
+        query.insert("supplier_kind".to_string(), "counter".to_string());
         assert!(query_allowed("inventory_receipts", &query));
+        // Etapa 9A: comprobación del código interno de un insumo, sin parámetros ajenos.
+        let mut code = BTreeMap::new();
+        code.insert("code".to_string(), "harina".to_string());
+        code.insert("item_id".to_string(), "x".to_string());
+        assert!(query_allowed("inventory_item_code", &code));
+        assert!(!query_allowed("catalog_products", &code));
         let mut expenses = BTreeMap::new();
         expenses.insert("min_amount".to_string(), "850".to_string());
         expenses.insert("max_amount".to_string(), "850".to_string());

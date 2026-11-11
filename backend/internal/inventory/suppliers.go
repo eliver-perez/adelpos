@@ -17,12 +17,63 @@ import (
 //     proveedor desactivado no se usa en órdenes nuevas ni en recepciones directas;
 //   - insumos que surte: código del proveedor, presentación habitual, preferido (uno por insumo:
 //     marcar otro lo quita del anterior) y último precio recibido, que actualizan las recepciones;
-//   - revisión optimista, auditoría con antes y después y evento inventory.purchases.changed.
+//   - revisión optimista, auditoría con antes y después y evento inventory.purchases.changed;
+//   - etapa 9A (§3.3): segundo teléfono, teléfono celular y página web opcionales, validados solo en
+//     estos campos nuevos para que los proveedores existentes se sigan guardando sin cambios;
+//   - etapa 9A (§3.2): modalidad formal o «Compras de mostrador» (counter). El proveedor de mostrador
+//     es único (lo siembra la 0016; no se crea otro ni cambia la modalidad de nadie), no lleva RFC ni
+//     razón social, no surte insumos (ni preferido ni último precio) y solo se usa en recepciones
+//     directas, con el comercio concreto como referencia opcional de cada recepción.
+
+// Modalidades de proveedor (inventory_suppliers.kind).
+const (
+	SupplierKindFormal  = "formal"
+	SupplierKindCounter = "counter"
+)
 
 var (
 	rfcPattern   = regexp.MustCompile(`^[A-ZÑ&]{3,4}[0-9]{6}[A-Z0-9]{3}$`)
 	emailPattern = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+	// phonePattern admite dígitos, espacios, +, paréntesis, punto, guion y diagonal, con una extensión
+	// opcional al final («ext. 12», «ext 12», «x 12»).
+	phonePattern   = regexp.MustCompile(`^[0-9+() ./-]+?( ?(?:ext\.?|x) ?[0-9]{1,6})?$`)
+	phoneDigits    = regexp.MustCompile(`[0-9]`)
+	phoneExtension = regexp.MustCompile(` ?(?:ext\.?|x) ?[0-9]{1,6}$`)
+	websitePattern = regexp.MustCompile(`^(?i)(https?://)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(:[0-9]{1,5})?(/\S*)?$`)
 )
+
+// validatePhone valida un teléfono opcional nuevo (segundo teléfono o celular): una línea de hasta
+// 40 caracteres con caracteres de teléfono y entre 7 y 20 dígitos sin contar la extensión. Vacío
+// equivale a sin teléfono.
+func validatePhone(value, subject string) (string, error) {
+	trimmed, err := purchaseText(value, subject, 40, true)
+	if err != nil || trimmed == "" {
+		return trimmed, err
+	}
+	lower := strings.ToLower(trimmed)
+	digits := len(phoneDigits.FindAllString(phoneExtension.ReplaceAllString(lower, ""), -1))
+	if !phonePattern.MatchString(lower) || digits < 7 || digits > 20 {
+		return "", invalid(subject + " no tiene un formato válido: usa de 7 a 20 dígitos con espacios, +, paréntesis o guiones " +
+			"(por ejemplo 55 1234 5678 o (33) 3615-0000 ext. 12).")
+	}
+	return trimmed, nil
+}
+
+// validateWebsite valida la página web opcional: un dominio con una ruta opcional, con o sin
+// http:// o https:// (ningún otro esquema), sin espacios y de hasta 200 caracteres. Se guarda tal
+// como se escribió (recortada); la interfaz la muestra como texto, nunca como enlace.
+func validateWebsite(value string) (string, error) {
+	trimmed, err := purchaseText(value, "La página web", 200, true)
+	if err != nil || trimmed == "" {
+		return trimmed, err
+	}
+	// El patrón solo admite http:// o https:// como esquema: javascript:, mailto: o ftp:// no coinciden.
+	if !websitePattern.MatchString(trimmed) {
+		return "", invalid("La página web no tiene un formato válido: escribe un dominio como restaurante.mx o " +
+			"https://www.proveedor.com.mx/catalogo, sin espacios.")
+	}
+	return trimmed, nil
+}
 
 // normalizeRFC recorta y pasa a mayúsculas un RFC opcional; vacío equivale a sin RFC. Valida el
 // formato y que la fecha AAMMDD exista.
@@ -47,15 +98,20 @@ func normalizeRFC(value *string) (*string, error) {
 
 // Supplier es un proveedor tal como lo entrega la API.
 type Supplier struct {
-	ID            string     `json:"id"`
-	TradeName     string     `json:"trade_name"`
-	LegalName     string     `json:"legal_name"`
-	RFC           *string    `json:"rfc"`
-	Phone         string     `json:"phone"`
-	Email         string     `json:"email"`
-	Address       string     `json:"address"`
-	Contact       string     `json:"contact"`
-	Notes         string     `json:"notes"`
+	ID             string  `json:"id"`
+	TradeName      string  `json:"trade_name"`
+	LegalName      string  `json:"legal_name"`
+	RFC            *string `json:"rfc"`
+	Phone          string  `json:"phone"`
+	PhoneSecondary string  `json:"phone_secondary"`
+	MobilePhone    string  `json:"mobile_phone"`
+	Website        string  `json:"website"`
+	Email          string  `json:"email"`
+	Address        string  `json:"address"`
+	Contact        string  `json:"contact"`
+	Notes          string  `json:"notes"`
+	// Kind es «formal» o «counter» (Compras de mostrador).
+	Kind          string     `json:"kind"`
 	Active        bool       `json:"active"`
 	ItemCount     int        `json:"item_count"`
 	HasPurchases  bool       `json:"has_purchases"`
@@ -108,7 +164,8 @@ type SupplierPage struct {
 	PageSize int         `json:"page_size"`
 }
 
-const supplierColumns = `SELECT s.id,s.trade_name,s.legal_name,s.rfc,s.phone,s.email,s.address,s.contact,s.notes,s.active,
+const supplierColumns = `SELECT s.id,s.trade_name,s.legal_name,s.rfc,s.phone,s.phone_secondary,s.mobile_phone,s.website,s.email,
+        s.address,s.contact,s.notes,s.kind,s.active,
         (SELECT count(*) FROM app.inventory_supplier_items si WHERE si.supplier_id=s.id),
         EXISTS(SELECT FROM app.inventory_purchase_orders o WHERE o.supplier_id=s.id)
             OR EXISTS(SELECT FROM app.inventory_receipts r WHERE r.supplier_id=s.id),
@@ -118,8 +175,9 @@ const supplierColumns = `SELECT s.id,s.trade_name,s.legal_name,s.rfc,s.phone,s.e
 
 func scanSupplier(row interface{ Scan(...any) error }) (*Supplier, error) {
 	var supplier Supplier
-	err := row.Scan(&supplier.ID, &supplier.TradeName, &supplier.LegalName, &supplier.RFC, &supplier.Phone, &supplier.Email,
-		&supplier.Address, &supplier.Contact, &supplier.Notes, &supplier.Active, &supplier.ItemCount, &supplier.HasPurchases,
+	err := row.Scan(&supplier.ID, &supplier.TradeName, &supplier.LegalName, &supplier.RFC, &supplier.Phone, &supplier.PhoneSecondary,
+		&supplier.MobilePhone, &supplier.Website, &supplier.Email, &supplier.Address, &supplier.Contact, &supplier.Notes,
+		&supplier.Kind, &supplier.Active, &supplier.ItemCount, &supplier.HasPurchases,
 		&supplier.LastReceiptAt, &supplier.Revision, &supplier.CreatedAt, &supplier.UpdatedAt, &supplier.UpdatedByName)
 	if err != nil {
 		return nil, err
@@ -136,10 +194,12 @@ func (handler *service) readSupplier(id string) (*Supplier, error) {
 }
 
 // listSuppliers lista proveedores con búsqueda (nombre comercial, razón social, RFC, contacto,
-// teléfono o correo), filtros de estado y de insumo surtido, y paginación.
+// teléfonos, página web o correo), filtros de estado, modalidad (kind formal o counter: las órdenes de
+// compra solo ofrecen formales) y de insumo surtido, y paginación. El proveedor de mostrador va
+// primero entre los activos, para encontrarlo sin buscar.
 func (handler *service) listSuppliers(_ []string) (any, error) {
 	query := handler.request.Query
-	if err := allowQuery(query, "search", "active", "item_id", "page", "page_size"); err != nil {
+	if err := allowQuery(query, "search", "active", "kind", "item_id", "page", "page_size"); err != nil {
 		return nil, err
 	}
 	page, size, err := pagination(query)
@@ -153,7 +213,14 @@ func (handler *service) listSuppliers(_ []string) (any, error) {
 	}
 	if pattern != "" {
 		set.add(`(s.trade_name ILIKE $%[1]d OR s.legal_name ILIKE $%[1]d OR s.rfc ILIKE $%[1]d OR s.contact ILIKE $%[1]d
-            OR s.phone ILIKE $%[1]d OR s.email ILIKE $%[1]d)`, pattern)
+            OR s.phone ILIKE $%[1]d OR s.phone_secondary ILIKE $%[1]d OR s.mobile_phone ILIKE $%[1]d OR s.website ILIKE $%[1]d
+            OR s.email ILIKE $%[1]d)`, pattern)
+	}
+	if kind := query.Get("kind"); kind != "" {
+		if kind != SupplierKindFormal && kind != SupplierKindCounter {
+			return nil, invalid("El filtro de modalidad del proveedor no es válido.")
+		}
+		set.add("s.kind=$%d", kind)
 	}
 	active, err := optionalBool(query, "active", "estado")
 	if err != nil {
@@ -175,7 +242,8 @@ func (handler *service) listSuppliers(_ []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	statement := supplierColumns + set.where() + " ORDER BY s.active DESC, lower(s.trade_name), s.id LIMIT " + set.next(size) +
+	statement := supplierColumns + set.where() + " ORDER BY s.active DESC, s.kind='counter' DESC, lower(s.trade_name), s.id LIMIT " +
+		set.next(size) +
 		" OFFSET " + set.next((page-1)*size)
 	rows, err := handler.tx.Query(handler.ctx, statement, set.arguments...)
 	if err != nil {
@@ -283,10 +351,14 @@ type supplierInput struct {
 	LegalName   string  `json:"legal_name"`
 	RFC         *string `json:"rfc"`
 	Phone       string  `json:"phone"`
-	Email       string  `json:"email"`
-	Address     string  `json:"address"`
-	Contact     string  `json:"contact"`
-	Notes       string  `json:"notes"`
+	// Campos de la etapa 9A: opcionales (ausentes equivalen a vacío).
+	PhoneSecondary string `json:"phone_secondary"`
+	MobilePhone    string `json:"mobile_phone"`
+	Website        string `json:"website"`
+	Email          string `json:"email"`
+	Address        string `json:"address"`
+	Contact        string `json:"contact"`
+	Notes          string `json:"notes"`
 	// Active ausente: activo al crear y sin cambio al editar.
 	Active *bool `json:"active"`
 }
@@ -305,6 +377,15 @@ func validateSupplier(input *supplierInput) (*string, error) {
 		return nil, err
 	}
 	if input.Phone, err = purchaseText(input.Phone, "El teléfono", 40, true); err != nil {
+		return nil, err
+	}
+	if input.PhoneSecondary, err = validatePhone(input.PhoneSecondary, "El segundo teléfono"); err != nil {
+		return nil, err
+	}
+	if input.MobilePhone, err = validatePhone(input.MobilePhone, "El teléfono celular"); err != nil {
+		return nil, err
+	}
+	if input.Website, err = validateWebsite(input.Website); err != nil {
 		return nil, err
 	}
 	if input.Email, err = purchaseText(input.Email, "El correo electrónico", 120, true); err != nil {
@@ -344,11 +425,11 @@ func (handler *service) createSupplier(_ []string) (any, error) {
 	}
 	active := input.Active == nil || *input.Active
 	id := newID()
-	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.inventory_suppliers(id,trade_name,legal_name,rfc,phone,email,address,contact,
-            notes,active,created_by,updated_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$11)`,
-		id, input.TradeName, input.LegalName, rfc, input.Phone, input.Email, input.Address, input.Contact, input.Notes, active,
-		handler.actorReference())
+	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.inventory_suppliers(id,trade_name,legal_name,rfc,phone,phone_secondary,
+            mobile_phone,website,email,address,contact,notes,active,created_by,updated_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,
+		id, input.TradeName, input.LegalName, rfc, input.Phone, input.PhoneSecondary, input.MobilePhone, input.Website, input.Email,
+		input.Address, input.Contact, input.Notes, active, handler.actorReference())
 	if err != nil {
 		return nil, supplierConflict(err)
 	}
@@ -363,7 +444,8 @@ func (handler *service) createSupplier(_ []string) (any, error) {
 }
 
 // updateSupplier guarda todos los datos del proveedor con revisión optimista. Desactivarlo nunca
-// borra nada: sus compras y su historial se conservan.
+// borra nada: sus compras y su historial se conservan. La modalidad no cambia; el proveedor de
+// mostrador se puede renombrar, describir o desactivar, pero nunca recibe RFC ni razón social.
 func (handler *service) updateSupplier(parts []string) (any, error) {
 	var input supplierInput
 	if err := decode(handler.request.Body, &input); err != nil {
@@ -380,15 +462,19 @@ func (handler *service) updateSupplier(parts []string) (any, error) {
 	if previous.Revision != input.Revision {
 		return nil, revisionConflict("El proveedor")
 	}
+	if previous.Kind == SupplierKindCounter && (rfc != nil || input.LegalName != "") {
+		return nil, invalid("«Compras de mostrador» no lleva RFC ni razón social: registra el comercio concreto en cada recepción.")
+	}
 	active := previous.Active
 	if input.Active != nil {
 		active = *input.Active
 	}
-	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.inventory_suppliers SET trade_name=$2,legal_name=$3,rfc=$4,phone=$5,email=$6,
-            address=$7,contact=$8,notes=$9,active=$10,updated_by=$11,revision=revision+1,updated_at=now()
+	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.inventory_suppliers SET trade_name=$2,legal_name=$3,rfc=$4,phone=$5,
+            phone_secondary=$6,mobile_phone=$7,website=$8,email=$9,address=$10,contact=$11,notes=$12,active=$13,updated_by=$14,
+            revision=revision+1,updated_at=now()
         WHERE id=$1`,
-		previous.ID, input.TradeName, input.LegalName, rfc, input.Phone, input.Email, input.Address, input.Contact, input.Notes,
-		active, handler.actorReference())
+		previous.ID, input.TradeName, input.LegalName, rfc, input.Phone, input.PhoneSecondary, input.MobilePhone, input.Website,
+		input.Email, input.Address, input.Contact, input.Notes, active, handler.actorReference())
 	if err != nil {
 		return nil, supplierConflict(err)
 	}
@@ -456,6 +542,10 @@ func (handler *service) saveSupplierItem(parts []string) (any, error) {
 	supplier, err := handler.readSupplier(parts[1])
 	if err != nil {
 		return nil, err
+	}
+	if supplier.Kind == SupplierKindCounter {
+		return nil, conflict("COUNTER_SUPPLIER", "«"+supplier.TradeName+"» no registra insumos surtidos, preferidos ni último precio: "+
+			"es para compras ocasionales.")
 	}
 	item, err := handler.readItem(strings.ToLower(input.ItemID))
 	if err != nil {
@@ -593,8 +683,14 @@ func (handler *service) removeSupplierItem(parts []string) (any, error) {
 
 // recordSupplierPrice guarda el último precio recibido de un insumo del proveedor (sin IVA y antes
 // del descuento, por la presentación o unidad capturada) y crea la relación si no existía. Solo
-// una recepción igual o más reciente que la que fijó el precio anterior lo reemplaza.
-func (handler *service) recordSupplierPrice(supplierID, receiptID string, line preparedPurchaseLine, occurredAt time.Time) error {
+// una recepción igual o más reciente que la que fijó el precio anterior lo reemplaza. Las compras de
+// mostrador no lo registran: sus precios son de comercios distintos y no deben alimentar el último
+// precio, los preferidos ni las sugerencias.
+func (handler *service) recordSupplierPrice(supplier *Supplier, receiptID string, line preparedPurchaseLine, occurredAt time.Time) error {
+	if supplier.Kind == SupplierKindCounter {
+		return nil
+	}
+	supplierID := supplier.ID
 	var presentation, unit *string
 	if line.capture.presentationID != nil {
 		presentation = line.capture.presentationID
@@ -613,8 +709,9 @@ func (handler *service) recordSupplierPrice(supplierID, receiptID string, line p
 }
 
 // supplierForPurchase exige un proveedor existente y activo para una orden nueva o una recepción
-// directa.
-func (handler *service) supplierForPurchase(id string) (*Supplier, error) {
+// directa. allowCounter indica si se admite «Compras de mostrador»: solo la recepción directa lo
+// admite; las órdenes de compra y los borradores desde sugerencias exigen un proveedor formal.
+func (handler *service) supplierForPurchase(id string, allowCounter bool) (*Supplier, error) {
 	if err := validateID(id); err != nil {
 		return nil, invalid("Elige el proveedor.")
 	}
@@ -624,6 +721,10 @@ func (handler *service) supplierForPurchase(id string) (*Supplier, error) {
 	}
 	if !supplier.Active {
 		return nil, conflict("SUPPLIER_INACTIVE", "El proveedor «"+supplier.TradeName+"» está desactivado.")
+	}
+	if supplier.Kind == SupplierKindCounter && !allowCounter {
+		return nil, conflict("COUNTER_SUPPLIER", "«"+supplier.TradeName+"» solo se usa en recepciones directas: elige un proveedor "+
+			"formal para la orden de compra.")
 	}
 	return supplier, nil
 }

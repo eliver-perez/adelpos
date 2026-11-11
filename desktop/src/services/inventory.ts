@@ -423,7 +423,9 @@ export interface InventorySettings {
 export interface InventorySettingsInput {
   revision: number;
   purchase_tax_in_cost: boolean;
-  operating_day_cutoff: string;
+  // Etapa 9A: la «Hora de inicio del día» se cambia en Configuración general; Go solo la acepta
+  // aquí sin cambios, por lo que Parámetros ya no la envía.
+  operating_day_cutoff?: string;
   warn_products_without_recipe: boolean;
   count_frequency: CountFrequency;
   // Obligatorio (1–365) solo con count_frequency 'custom'; null en los demás casos.
@@ -503,6 +505,24 @@ export function listInventoryItems(
 
 export function readInventoryItem(id: string) {
   return api<InventoryItem>('inventory_item', { id });
+}
+
+// Comprobación del código interno de un insumo (etapa 9A): Go indica si está libre sin distinguir
+// mayúsculas (excluido el insumo que se edita) y sugiere el primero libre con -2, -3… El listado es
+// paginado, así que la pantalla no puede saberlo por sí sola; al guardar, Go sigue respondiendo
+// DUPLICATE_CODE si otro insumo lo tomó entretanto.
+export interface ItemCodeCheck {
+  code: string;
+  available: boolean;
+  suggestion: string;
+  // Nombre del insumo que ya usa el código, si lo hay.
+  taken_by: string | null;
+}
+
+export function checkInventoryItemCode(code: string, itemID?: string) {
+  return api<ItemCodeCheck>('inventory_item_code', {
+    query: compactQuery({ code, item_id: itemID }),
+  });
 }
 
 export function listWarehouses() {

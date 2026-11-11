@@ -185,14 +185,14 @@ func (handler *service) supplierOffers(itemIDs []string, supplierID string) (map
 		condition = "si.supplier_id=$2"
 		arguments = append(arguments, supplierID)
 	}
-	rows, err := handler.tx.Query(handler.ctx, `SELECT si.item_id,sp.id,sp.trade_name,sp.active,si.preferred,si.supplier_code,
+	rows, err := handler.tx.Query(handler.ctx, `SELECT si.item_id,sp.id,sp.trade_name,sp.kind,sp.active,si.preferred,si.supplier_code,
             p.id,p.name,p.base_quantity::text,p.active,si.last_unit_price::text,si.last_price_presentation_id,si.last_price_unit_id,
             si.last_price_at,coalesce(lp.name,lu.name)
         FROM app.inventory_supplier_items si JOIN app.inventory_suppliers sp ON sp.id=si.supplier_id
         LEFT JOIN app.inventory_presentations p ON p.id=si.presentation_id
         LEFT JOIN app.inventory_presentations lp ON lp.id=si.last_price_presentation_id
         LEFT JOIN app.inventory_units lu ON lu.id=si.last_price_unit_id
-        WHERE si.item_id = ANY($1::uuid[]) AND `+condition, arguments...)
+        WHERE si.item_id = ANY($1::uuid[]) AND sp.kind='formal' AND `+condition, arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,8 @@ func (handler *service) supplierOffers(itemIDs []string, supplierID string) (map
 		var offer supplierOffer
 		var presentationID, presentationName, presentationBase, lastPrice *string
 		var presentationActive *bool
-		if err := rows.Scan(&itemID, &offer.supplier.ID, &offer.supplier.TradeName, &offer.supplier.Active, &offer.preferred, &offer.code,
+		if err := rows.Scan(&itemID, &offer.supplier.ID, &offer.supplier.TradeName, &offer.supplier.Kind, &offer.supplier.Active,
+			&offer.preferred, &offer.code,
 			&presentationID, &presentationName, &presentationBase, &presentationActive, &lastPrice, &offer.lastByPres, &offer.lastByUnit,
 			&offer.lastAt, &offer.lastLabel); err != nil {
 			return nil, err
@@ -432,7 +433,7 @@ func (handler *service) draftOrderFromSuggestions(_ []string) (any, error) {
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
-	supplier, err := handler.supplierForPurchase(input.SupplierID)
+	supplier, err := handler.supplierForPurchase(input.SupplierID, false)
 	if err != nil {
 		return nil, err
 	}

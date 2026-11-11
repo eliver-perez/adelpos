@@ -23,7 +23,10 @@ import (
 //     negativa, el ajuste de costo va en un movimiento separado) y nunca modifica movimientos
 //     anteriores;
 //   - actualiza el estado de la orden (parcial o recibida) y el último precio del proveedor;
-//   - no crea gastos de caja: el vínculo con un gasto es opcional y explícito (cash_links.go).
+//   - no crea gastos de caja: el vínculo con un gasto es opcional y explícito (cash_links.go);
+//   - etapa 9A (§3.2): la directa admite el proveedor «Compras de mostrador» con el comercio concreto
+//     (counter_store, opcional, una línea de hasta 100 caracteres) como referencia; con cualquier otro
+//     proveedor el comercio se rechaza. Una compra de mostrador no registra último precio.
 
 const maximumReceiptLines = 200
 
@@ -39,6 +42,8 @@ type receiptInput struct {
 	Notes             string             `json:"notes"`
 	AllowExcess       bool               `json:"allow_excess"`
 	Lines             []receiptLineInput `json:"lines"`
+	// CounterStore es el comercio concreto de una compra de mostrador (vacío = sin comercio).
+	CounterStore string `json:"counter_store"`
 }
 
 // receiptLineInput es un renglón recibido. Con orden: order_line_no y quantity (en la presentación o
@@ -87,6 +92,8 @@ type ReceiptSummary struct {
 	InventoryValue        *string   `json:"inventory_value"`
 	InventoryValueDisplay *string   `json:"inventory_value_display"`
 	CreatedAt             time.Time `json:"created_at"`
+	// CounterStore es el comercio de una compra de mostrador ('' en las demás y en las históricas).
+	CounterStore string `json:"counter_store"`
 }
 
 // Receipt es la recepción completa con renglones, devoluciones y vínculos con gastos. Warnings solo
@@ -158,6 +165,10 @@ func (handler *service) recordReceipt(_ []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	store, err := purchaseText(input.CounterStore, "El comercio de la compra de mostrador", 100, true)
+	if err != nil {
+		return nil, err
+	}
 	notes, err := purchaseText(input.Notes, "Las observaciones de la recepción", 2000, false)
 	if err != nil {
 		return nil, err
@@ -178,7 +189,7 @@ func (handler *service) recordReceipt(_ []string) (any, error) {
 		if input.SupplierID == nil || strings.TrimSpace(*input.SupplierID) == "" {
 			return nil, invalid("La recepción directa requiere el proveedor.")
 		}
-		if supplier, err = handler.supplierForPurchase(*input.SupplierID); err != nil {
+		if supplier, err = handler.supplierForPurchase(*input.SupplierID, true); err != nil {
 			return nil, err
 		}
 		if lines, err = handler.prepareDirectReceipt(input.Lines); err != nil {
@@ -195,13 +206,18 @@ func (handler *service) recordReceipt(_ []string) (any, error) {
 			warehouseID = &order.ExpectedWarehouse.ID
 		}
 	}
+	// El comercio solo describe una compra de mostrador (la orden nunca es de mostrador).
+	if store != "" && supplier.Kind != SupplierKindCounter {
+		return nil, invalid("El comercio solo se registra en compras de mostrador; para un proveedor formal usa la referencia " +
+			"(factura o remisión).")
+	}
 	warehouse, err := handler.purchaseWarehouse(warehouseID)
 	if err != nil {
 		return nil, err
 	}
 	return handler.saveReceipt(savedReceipt{
-		supplier: supplier, order: order, warehouse: warehouse, occurredAt: occurredAt, reference: reference, notes: notes,
-		taxInCost: settings.PurchaseTaxInCost, lines: lines,
+		supplier: supplier, order: order, warehouse: warehouse, occurredAt: occurredAt, reference: reference, store: store,
+		notes: notes, taxInCost: settings.PurchaseTaxInCost, lines: lines,
 	})
 }
 
@@ -335,6 +351,7 @@ type savedReceipt struct {
 	warehouse  *Warehouse
 	occurredAt time.Time
 	reference  string
+	store      string
 	notes      string
 	taxInCost  bool
 	lines      []preparedPurchaseLine
@@ -366,16 +383,20 @@ func (handler *service) saveReceipt(data savedReceipt) (any, error) {
 	}
 	var folio int64
 	err := handler.tx.QueryRow(handler.ctx, `INSERT INTO app.inventory_receipts(id,supplier_id,purchase_order_id,warehouse_id,occurred_at,
-            received_by,supplier_reference,tax_in_cost,subtotal,discount,tax,total,inventory_value,line_count,excess,notes,operation_id)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14,$15,$16,$17)
+            received_by,supplier_reference,counter_store,tax_in_cost,subtotal,discount,tax,total,inventory_value,line_count,excess,notes,
+            operation_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15,$16,$17,$18)
         RETURNING folio`,
-		id, data.supplier.ID, orderID, data.warehouse.ID, data.occurredAt, handler.request.Actor.UserID, data.reference, data.taxInCost,
-		money(totals.Subtotal), money(totals.Discount), money(totals.Tax), money(totals.Total), inventoryValue.String(),
+		id, data.supplier.ID, orderID, data.warehouse.ID, data.occurredAt, handler.request.Actor.UserID, data.reference, data.store,
+		data.taxInCost, money(totals.Subtotal), money(totals.Discount), money(totals.Tax), money(totals.Total), inventoryValue.String(),
 		len(data.lines), excess, data.notes, handler.operationReference()).Scan(&folio)
 	if err != nil {
 		return nil, err
 	}
 	reason := "Recepción " + fmt.Sprint(folio) + " · " + data.supplier.TradeName
+	if data.store != "" {
+		reason += " (" + data.store + ")"
+	}
 	warnings := []Warning{}
 	audited := []map[string]any{}
 	for index, line := range data.lines {
@@ -415,7 +436,7 @@ func (handler *service) saveReceipt(data savedReceipt) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := handler.recordSupplierPrice(data.supplier.ID, id, line, data.occurredAt); err != nil {
+		if err := handler.recordSupplierPrice(data.supplier, id, line, data.occurredAt); err != nil {
 			return nil, err
 		}
 		if line.excess.IsPositive() {
@@ -444,8 +465,9 @@ func (handler *service) saveReceipt(data savedReceipt) (any, error) {
 		return nil, err
 	}
 	after := map[string]any{
-		"folio": folio, "supplier_id": data.supplier.ID, "supplier_name": data.supplier.TradeName, "purchase_order_id": orderID,
-		"warehouse_id": data.warehouse.ID, "occurred_at": data.occurredAt, "supplier_reference": data.reference,
+		"folio": folio, "supplier_id": data.supplier.ID, "supplier_name": data.supplier.TradeName, "supplier_kind": data.supplier.Kind,
+		"purchase_order_id": orderID, "warehouse_id": data.warehouse.ID, "occurred_at": data.occurredAt,
+		"supplier_reference": data.reference, "counter_store": data.store,
 		"tax_in_cost": data.taxInCost, "subtotal": money(totals.Subtotal), "discount": money(totals.Discount),
 		"tax": money(totals.Tax), "total": money(totals.Total), "inventory_value": inventoryValue.String(), "lines": audited,
 	}
@@ -498,8 +520,8 @@ func (handler *service) refreshOrderState(orderID string) error {
 	return err
 }
 
-const receiptColumns = `SELECT r.id,r.folio,s.id,s.trade_name,s.active,r.purchase_order_id,o.folio,w.id,w.name,r.occurred_at,
-        receiver.display_name,r.supplier_reference,r.tax_in_cost,r.subtotal::text,r.discount::text,r.tax::text,r.total::text,
+const receiptColumns = `SELECT r.id,r.folio,s.id,s.trade_name,s.kind,s.active,r.purchase_order_id,o.folio,w.id,w.name,r.occurred_at,
+        receiver.display_name,r.supplier_reference,r.counter_store,r.tax_in_cost,r.subtotal::text,r.discount::text,r.tax::text,r.total::text,
         r.inventory_value::text,r.line_count,r.excess,r.notes,r.created_at,
         coalesce((SELECT sum(cl.amount) FROM app.inventory_receipt_cash_links cl
             WHERE cl.receipt_id=r.id AND cl.unlinked_at IS NULL),0)::text,
@@ -517,9 +539,9 @@ func (handler *service) scanReceipt(row interface{ Scan(...any) error }) (*Recei
 	var receipt Receipt
 	summary := &receipt.ReceiptSummary
 	var subtotal, discount, tax, total, value, linked, returned string
-	err := row.Scan(&summary.ID, &summary.Folio, &summary.Supplier.ID, &summary.Supplier.TradeName, &summary.Supplier.Active,
-		&summary.PurchaseOrderID, &summary.PurchaseOrderFolio, &summary.Warehouse.ID, &summary.Warehouse.Name, &summary.OccurredAt,
-		&summary.ReceivedByName, &summary.SupplierReference, &summary.TaxInCost, &subtotal, &discount, &tax, &total, &value,
+	err := row.Scan(&summary.ID, &summary.Folio, &summary.Supplier.ID, &summary.Supplier.TradeName, &summary.Supplier.Kind,
+		&summary.Supplier.Active, &summary.PurchaseOrderID, &summary.PurchaseOrderFolio, &summary.Warehouse.ID, &summary.Warehouse.Name,
+		&summary.OccurredAt, &summary.ReceivedByName, &summary.SupplierReference, &summary.CounterStore, &summary.TaxInCost, &subtotal, &discount, &tax, &total, &value,
 		&summary.LineCount, &summary.Excess, &receipt.Notes, &summary.CreatedAt, &linked, &summary.CashLinkAttention, &returned)
 	if err != nil {
 		return nil, err
@@ -651,12 +673,15 @@ func (handler *service) receiptSummaries(where string, limit int, arguments ...a
 	return summaries, rows.Err()
 }
 
-// listReceipts lista recepciones con búsqueda (folio, referencia del proveedor o proveedor),
-// filtros de proveedor, orden, almacén, tipo (directa o con orden) y días de negocio (AAAA-MM-DD en
-// la zona del establecimiento), y paginación.
+// listReceipts lista recepciones con búsqueda (folio, referencia del proveedor, comercio de mostrador
+// o proveedor), filtros de proveedor, modalidad del proveedor (supplier_kind formal o counter),
+// orden, almacén, tipo (directa o con orden) y días de negocio (AAAA-MM-DD en la zona del
+// establecimiento), y paginación.
 func (handler *service) listReceipts(_ []string) (any, error) {
 	query := handler.request.Query
-	allowed := []string{"search", "supplier_id", "purchase_order_id", "warehouse_id", "direct", "from", "until", "page", "page_size"}
+	allowed := []string{
+		"search", "supplier_id", "supplier_kind", "purchase_order_id", "warehouse_id", "direct", "from", "until", "page", "page_size",
+	}
 	if err := allowQuery(query, allowed...); err != nil {
 		return nil, err
 	}
@@ -672,9 +697,15 @@ func (handler *service) listReceipts(_ []string) (any, error) {
 		}
 		set.arguments = append(set.arguments, search, pattern)
 		count := len(set.arguments)
-		set.clauses = append(set.clauses, fmt.Sprintf(`(r.folio::text=$%d OR r.supplier_reference ILIKE $%d
+		set.clauses = append(set.clauses, fmt.Sprintf(`(r.folio::text=$%d OR r.supplier_reference ILIKE $%d OR r.counter_store ILIKE $%d
             OR EXISTS(SELECT FROM app.inventory_suppliers sp WHERE sp.id=r.supplier_id AND sp.trade_name ILIKE $%d))`,
-			count-1, count, count))
+			count-1, count, count, count))
+	}
+	if kind := query.Get("supplier_kind"); kind != "" {
+		if kind != SupplierKindFormal && kind != SupplierKindCounter {
+			return nil, invalid("El filtro de modalidad del proveedor no es válido.")
+		}
+		set.add("EXISTS(SELECT FROM app.inventory_suppliers sk WHERE sk.id=r.supplier_id AND sk.kind=$%d)", kind)
 	}
 	for key, column := range map[string]string{
 		"supplier_id": "r.supplier_id", "purchase_order_id": "r.purchase_order_id", "warehouse_id": "r.warehouse_id",

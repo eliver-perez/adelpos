@@ -500,6 +500,17 @@ export function inventoryTransport(override: Responder = () => undefined) {
         };
       case 'inventory_purchase_orders':
         return { status: 200, body: { items: [], total: 0, page: 1, page_size: 25 } };
+      // Etapa 9A: código libre salvo que la prueba lo sustituya; listados de compras vacíos.
+      case 'inventory_item_code': {
+        const code = request.query?.code ?? '';
+        return { status: 200, body: { code, available: true, suggestion: code, taken_by: null } };
+      }
+      case 'inventory_receipts':
+      case 'inventory_supplier_returns':
+        return {
+          status: 200,
+          body: { items: [], total: 0, page: 1, page_size: 25, costs_visible: false },
+        };
       case 'inventory_purchase_suggestions':
         return {
           status: 200,

@@ -19,6 +19,8 @@ const pageSize = 25;
 interface SupplierFilter {
   search: string;
   active: string;
+  // Modalidad: '' (todas), formal o counter (Compras de mostrador).
+  kind: string;
   item: InventoryItem | null;
   page: number;
 }
@@ -34,6 +36,9 @@ function supplierQuery(filter: SupplierFilter) {
   if (filter.active !== '') {
     query.active = filter.active;
   }
+  if (filter.kind !== '') {
+    query.kind = filter.kind;
+  }
   if (filter.item) {
     query.item_id = filter.item.id;
   }
@@ -45,6 +50,9 @@ interface SupplierFormState {
   legalName: string;
   rfc: string;
   phone: string;
+  phoneSecondary: string;
+  mobilePhone: string;
+  website: string;
   email: string;
   address: string;
   contact: string;
@@ -58,6 +66,9 @@ function initialForm(supplier: SupplierDetail | null): SupplierFormState {
     legalName: supplier?.legal_name ?? '',
     rfc: supplier?.rfc ?? '',
     phone: supplier?.phone ?? '',
+    phoneSecondary: supplier?.phone_secondary ?? '',
+    mobilePhone: supplier?.mobile_phone ?? '',
+    website: supplier?.website ?? '',
     email: supplier?.email ?? '',
     address: supplier?.address ?? '',
     contact: supplier?.contact ?? '',
@@ -68,15 +79,21 @@ function initialForm(supplier: SupplierDetail | null): SupplierFormState {
 
 // Cuerpo del proveedor para Go con los textos tal como se capturaron. El RFC vacío es «sin RFC»;
 // Go lo valida (formato del SAT y fecha) y lo guarda en mayúsculas. Al crear, «activo» se omite.
+// Segundo teléfono, celular y página web son opcionales; Go valida su formato. «Compras de
+// mostrador» nunca lleva RFC ni razón social.
 export function supplierInput(
   form: SupplierFormState,
   supplier: SupplierDetail | null,
 ): SupplierInput {
+  const counter = supplier?.kind === 'counter';
   const input: SupplierInput = {
     trade_name: form.tradeName,
-    legal_name: form.legalName,
-    rfc: form.rfc.trim() === '' ? null : form.rfc,
+    legal_name: counter ? '' : form.legalName,
+    rfc: counter || form.rfc.trim() === '' ? null : form.rfc,
     phone: form.phone,
+    phone_secondary: form.phoneSecondary,
+    mobile_phone: form.mobilePhone,
+    website: form.website,
     email: form.email,
     address: form.address,
     contact: form.contact,
@@ -103,9 +120,19 @@ function SupplierFilters({
           type="search"
           maxLength={100}
           value={filter.search}
-          placeholder="Nombre, razón social, RFC, contacto, teléfono o correo"
+          placeholder="Nombre, razón social, RFC, contacto, teléfonos, web o correo"
           onChange={(event) => onChange({ ...filter, search: event.target.value, page: 1 })}
         />
+      </Field>
+      <Field label="Modalidad">
+        <select
+          value={filter.kind}
+          onChange={(event) => onChange({ ...filter, kind: event.target.value, page: 1 })}
+        >
+          <option value="">Todas</option>
+          <option value="formal">Proveedores formales</option>
+          <option value="counter">Compras de mostrador</option>
+        </select>
       </Field>
       <Field label="Estado">
         <select
@@ -129,7 +156,7 @@ function SupplierFilters({
 }
 
 function contactSummary(supplier: Supplier) {
-  const parts = [supplier.contact, supplier.phone, supplier.email].filter(
+  const parts = [supplier.contact, supplier.phone, supplier.mobile_phone, supplier.email].filter(
     (part) => part.trim() !== '',
   );
   return parts.length > 0 ? parts.join(' · ') : '—';
@@ -169,6 +196,9 @@ function SuppliersTable({
                 <strong>{supplier.trade_name}</strong>
                 {supplier.legal_name && (
                   <span className="muted text-xs inventory-cell-detail">{supplier.legal_name}</span>
+                )}
+                {supplier.kind === 'counter' && (
+                  <span className="tag inventory-inline-tag">Compras de mostrador</span>
                 )}
               </td>
               <td>{supplier.rfc ?? '—'}</td>
@@ -227,6 +257,7 @@ function SupplierForm({
   const [initial] = useState(() => initialForm(supplier));
   const [form, setForm] = useState(initial);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const counter = supplier?.kind === 'counter';
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -258,6 +289,14 @@ function SupplierForm({
         onSaved(saved);
       }}
     >
+      {counter && (
+        <p className="muted text-sm">
+          Proveedor especial para compras ocasionales en mercados, centrales de abastos,
+          supermercados o comercios sin proveedor registrado. Solo se usa en recepciones directas,
+          no lleva RFC ni razón social y no registra insumos surtidos: el comercio concreto se anota
+          en cada recepción.
+        </p>
+      )}
       <div className="form-grid">
         <Field label="Nombre comercial" hint="Único entre proveedores (sin distinguir mayúsculas).">
           <input
@@ -267,26 +306,30 @@ function SupplierForm({
             onChange={(event) => update('tradeName', event.target.value)}
           />
         </Field>
-        <Field label="Razón social" hint="Opcional.">
-          <input
-            maxLength={200}
-            value={form.legalName}
-            onChange={(event) => update('legalName', event.target.value)}
-          />
-        </Field>
-        <Field
-          label="RFC"
-          hint="Opcional: 12 caracteres (persona moral) o 13 (persona física). El servidor valida el formato y la fecha."
-        >
-          <input
-            maxLength={13}
-            autoComplete="off"
-            autoCapitalize="characters"
-            spellCheck={false}
-            value={form.rfc}
-            onChange={(event) => update('rfc', event.target.value)}
-          />
-        </Field>
+        {!counter && (
+          <Field label="Razón social" hint="Opcional.">
+            <input
+              maxLength={200}
+              value={form.legalName}
+              onChange={(event) => update('legalName', event.target.value)}
+            />
+          </Field>
+        )}
+        {!counter && (
+          <Field
+            label="RFC"
+            hint="Opcional: 12 caracteres (persona moral) o 13 (persona física). El servidor valida el formato y la fecha."
+          >
+            <input
+              maxLength={13}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              value={form.rfc}
+              onChange={(event) => update('rfc', event.target.value)}
+            />
+          </Field>
+        )}
         <Field label="Contacto" hint="Persona con quien se trata.">
           <input
             maxLength={100}
@@ -301,6 +344,41 @@ function SupplierForm({
             autoComplete="off"
             value={form.phone}
             onChange={(event) => update('phone', event.target.value)}
+          />
+        </Field>
+        <Field
+          label="Segundo teléfono"
+          hint="Opcional; de 7 a 20 dígitos, con extensión si la hay."
+        >
+          <input
+            type="tel"
+            maxLength={40}
+            autoComplete="off"
+            value={form.phoneSecondary}
+            onChange={(event) => update('phoneSecondary', event.target.value)}
+          />
+        </Field>
+        <Field label="Teléfono celular" hint="Opcional; de 7 a 20 dígitos.">
+          <input
+            type="tel"
+            maxLength={40}
+            autoComplete="off"
+            value={form.mobilePhone}
+            onChange={(event) => update('mobilePhone', event.target.value)}
+          />
+        </Field>
+        <Field
+          label="Página web"
+          hint="Opcional; por ejemplo proveedor.com.mx. Se muestra como texto."
+        >
+          <input
+            inputMode="url"
+            maxLength={200}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            value={form.website}
+            onChange={(event) => update('website', event.target.value)}
           />
         </Field>
         <Field label="Correo electrónico">
@@ -448,7 +526,7 @@ function SupplierEditorPanel({
           }}
         />
       )}
-      {supplier && (
+      {supplier && supplier.kind !== 'counter' && (
         <SupplierItemsSection
           supplier={supplier}
           editable={editable}
@@ -487,6 +565,7 @@ export function SuppliersView({
   const [filter, setFilter] = useState<SupplierFilter>({
     search: '',
     active: 'true',
+    kind: '',
     item: null,
     page: 1,
   });

@@ -23,6 +23,7 @@ import {
 } from './inventoryPurchasingTestData';
 import { allInventoryPermissions, ids, inventoryTransport, itemPage } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
+import { navigationMap, openInventorySection, sectionTab } from './inventoryNavigationTestUtils';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -112,15 +113,9 @@ function lastQuery(requests: RecordedRequest[], operation: string) {
   return requests.filter((request) => request.operation === operation).at(-1)?.query ?? null;
 }
 
-function tabNames() {
-  return within(screen.getByRole('tablist', { name: 'Secciones de inventario' }))
-    .getAllByRole('tab')
-    .map((tab) => tab.textContent);
-}
-
 async function openTab(name: string, permissions = purchasingPermissions) {
   renderInventory(permissions);
-  fireEvent.click(await screen.findByRole('tab', { name }));
+  await openInventorySection(name);
 }
 
 // Envía con el botón principal cuando ya está habilitado (los almacenes llegan después del
@@ -154,25 +149,29 @@ const overlinkedResponse = {
   },
 };
 
-describe('pestañas de compras', () => {
+describe('secciones de compras', () => {
   it('se muestran con cualquiera de los permisos de compras', async () => {
     useTransport();
     const { unmount } = renderInventory(allInventoryPermissions);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).not.toContain('Compras');
+    const withoutPurchasing = navigationMap();
+    expect(Object.keys(withoutPurchasing)).not.toContain('Compras');
+    expect(withoutPurchasing['Catálogo']).not.toContain('Proveedores');
     unmount();
     renderInventory(['inventory.read', 'inventory.purchases.receive']);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual([
-      'Resumen',
-      'Insumos',
-      'Recetas',
-      'Almacenes',
-      'Ajustes y mermas',
-      'Compras',
-      'Recepciones',
-      'Proveedores',
-    ]);
+    expect(navigationMap()).toEqual({
+      Resumen: [],
+      Catálogo: ['Insumos', 'Recetas', 'Almacenes', 'Proveedores'],
+      Existencias: ['Ajustes y mermas'],
+      Compras: [
+        'Órdenes de compra',
+        'Sugerencias de compra',
+        'Recepciones',
+        'Devoluciones a proveedor',
+      ],
+      Configuración: ['Unidades', 'Categorías'],
+    });
   });
 });
 
@@ -209,7 +208,14 @@ describe('proveedores', () => {
     fireEvent.change(screen.getByLabelText(/^Nombre comercial/), {
       target: { value: 'Abarrotes Rivera' },
     });
-    fireEvent.change(screen.getByLabelText(/^Teléfono/), { target: { value: '868 555 0199' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '868 555 0199' } });
+    // Etapa 9A: celular y página web opcionales; Go valida su formato.
+    fireEvent.change(screen.getByLabelText(/^Teléfono celular/), {
+      target: { value: '868 555 0100' },
+    });
+    fireEvent.change(screen.getByLabelText(/^Página web/), {
+      target: { value: 'abarrotesrivera.mx' },
+    });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Crear proveedor' }));
     });
@@ -219,6 +225,9 @@ describe('proveedores', () => {
       legal_name: '',
       rfc: null,
       phone: '868 555 0199',
+      phone_secondary: '',
+      mobile_phone: '868 555 0100',
+      website: 'abarrotesrivera.mx',
       email: '',
       address: '',
       contact: '',
@@ -323,9 +332,7 @@ describe('proveedores', () => {
     expect(screen.getByText('$6,846.00')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Ver orden' }));
     await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Compras' }).getAttribute('aria-selected')).toBe(
-        'true',
-      ),
+      expect(sectionTab('Órdenes de compra').getAttribute('aria-selected')).toBe('true'),
     );
     await screen.findByRole('region', { name: 'Orden 12 · Distribuidora del Norte' });
     expect(writes(requests, 'inventory_purchase_order').at(-1)?.resourceId).toBe(
@@ -353,7 +360,7 @@ describe('órdenes de compra', () => {
       }
       return undefined;
     });
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(await screen.findByRole('button', { name: 'Nueva orden de compra' }));
     await screen.findByRole('option', { name: 'Distribuidora del Norte' });
     fireEvent.change(screen.getByRole('combobox', { name: /^Proveedor/ }), {
@@ -427,7 +434,7 @@ describe('órdenes de compra', () => {
   it('sin permiso de autorizar no emite, cancela ni cierra', async () => {
     useTransport();
     await openTab(
-      'Compras',
+      'Órdenes de compra',
       purchasingPermissions.filter((permission) => permission !== 'inventory.purchases.authorize'),
     );
     fireEvent.click(
@@ -461,7 +468,7 @@ describe('órdenes de compra', () => {
       }
       return undefined;
     });
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir la orden 12 de Distribuidora del Norte' }),
     );
@@ -499,7 +506,7 @@ describe('órdenes de compra', () => {
           }
         : undefined,
     );
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir la orden 12 de Distribuidora del Norte' }),
     );
@@ -528,7 +535,7 @@ describe('recepciones de una orden', () => {
         ? { status: 200, body: receipt() }
         : undefined,
     );
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir la orden 12 de Distribuidora del Norte' }),
     );
@@ -593,7 +600,7 @@ describe('recepciones de una orden', () => {
       }
       return undefined;
     });
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir la orden 12 de Distribuidora del Norte' }),
     );
@@ -643,7 +650,7 @@ describe('recepciones de una orden', () => {
         }),
       };
     });
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir la orden 12 de Distribuidora del Norte' }),
     );
@@ -685,7 +692,7 @@ describe('recepciones de una orden', () => {
       }
       return { status: 200, body: receipt() };
     });
-    await openTab('Compras');
+    await openTab('Órdenes de compra');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir la orden 12 de Distribuidora del Norte' }),
     );
@@ -1043,15 +1050,15 @@ describe('campos numéricos de compras', () => {
   it('ningún formulario de compras usa type="number"', async () => {
     useTransport();
     renderInventory(purchasingPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Compras' }));
+    await openInventorySection('Órdenes de compra');
     fireEvent.click(await screen.findByRole('button', { name: 'Nueva orden de compra' }));
     await screen.findByRole('group', { name: 'Renglón 1' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('tab', { name: 'Recepciones' }));
+    await openInventorySection('Recepciones');
     fireEvent.click(await screen.findByRole('button', { name: 'Recepción directa' }));
     await screen.findByRole('group', { name: 'Renglón 1' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('tab', { name: 'Proveedores' }));
+    await openInventorySection('Proveedores');
     fireEvent.click(await screen.findByRole('button', { name: 'Nuevo proveedor' }));
     await screen.findByLabelText(/^Nombre comercial/);
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);

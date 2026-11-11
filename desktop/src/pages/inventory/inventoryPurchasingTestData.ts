@@ -9,6 +9,7 @@ import type {
   Supplier,
   SupplierDetail,
   SupplierItem,
+  SupplierReference,
 } from '../../services/inventoryPurchasing';
 import type { ItemReference } from '../../services/inventoryRecipes';
 import { allInventoryPermissions, ids, item, reference } from './inventoryTestData';
@@ -84,9 +85,10 @@ export const sodaReference: ItemReference = {
   unit: reference(ids.piece),
 };
 
-const supplierReference = {
+const supplierReference: SupplierReference = {
   id: purchasingIDs.supplier,
   trade_name: 'Distribuidora del Norte',
+  kind: 'formal',
   active: true,
 };
 
@@ -104,10 +106,14 @@ export function supplierSummary(extra: Partial<Supplier> = {}): Supplier {
     legal_name: 'Distribuidora del Norte, S.A. de C.V.',
     rfc: 'DNO010203AB1',
     phone: '868 555 0101',
+    phone_secondary: '',
+    mobile_phone: '',
+    website: '',
     email: 'ventas@dnorte.mx',
     address: 'Calle 5 #120',
     contact: 'Laura Pérez',
     notes: '',
+    kind: 'formal',
     active: true,
     item_count: 1,
     has_purchases: true,
@@ -364,6 +370,7 @@ export function receipt(extra: Partial<Receipt> = {}): Receipt {
     occurred_at: stamp,
     received_by_name: 'Almacenista',
     supplier_reference: 'F-1001',
+    counter_store: '',
     tax_in_cost: true,
     subtotal: '2970.00',
     discount: '30.00',
