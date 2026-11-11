@@ -16,8 +16,8 @@ registros (en el directorio temporal de la sesión). Hasta la fase C se obtuvier
 19 se fijaron en la fase D. La regresión final de la fase D se registra al final de este documento y en
 [VERIFICATION.md](VERIFICATION.md).
 
-**Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) y **las migraciones 0018
-y 0019 no se han aplicado a la instalación real**: esperan la autorización del propietario. No se leyeron secretos y
+**Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) ; las migraciones 0018
+y 0019 se aplicaron después, con autorización del propietario (ver «Instalación real»). No se leyeron secretos y
 ninguna prueba envió trabajos a CUPS real, a una impresora, a un cajón ni a una conexión TCP fuera de loopback.
 
 ## Entorno aislado
@@ -166,8 +166,6 @@ No se afirma ninguna de estas; quedan para cuando el hardware y el entorno esté
 - **Ventana nativa Tauri (WKWebView)**: pantalla Documentos, editor, carga del logotipo con el selector de archivos
   nativo, protección de cambios sin guardar al cerrar la ventana (no la cubre).
 - **Diálogo nativo real de guardado** de las exportaciones con el encabezado nuevo (solo la simulación de Playwright).
-- **Instalación real**: aplicar 0018 y 0019 con respaldo, ensayo de restauración y comprobaciones (en espera de
-  autorización).
 
 ## Qué no se afirma
 
@@ -209,3 +207,14 @@ y pierde la terminal preparada). Corregida en `40c8d17`.
 No verificado (pruebas físicas pendientes, §32): papel de tickets, precuentas, comandas, cortes y del logotipo; cajón por
 red y por USB/CUPS; pantalla táctil física; dos terminales reales; ventana nativa (WKWebView) y diálogo nativo de
 guardado. Ninguna se da por hecha con los adaptadores simulados.
+
+## Instalación real
+
+0018 y 0019 se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario: respaldo
+`backups/adel_pos-20261111T185713Z-bd1868.dump` con restauración verificada (127 tablas idénticas), servidor detenido
+de forma ordenada, `migrate` `applied:2` y repetición `applied:0`, servidor 0.9.1 con readiness 200 (PostgreSQL
+disponible, esquema compatible) y `/api/v1/version` 0.9.1/19, comprobaciones de solo lectura antes y después (solo
+cambian migraciones, tablas 127 → 132 y permisos 147 → 153; todos los conteos operativos idénticos; plantillas del
+sistema, permisos solo en el administrador e identidad vacía como se esperaba) y `.app` 0.9.1 compilado y abierto.
+Detalle en [ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md), «Instalación real». El recorrido en la ventana nativa sigue
+pendiente de verificación por el propietario.

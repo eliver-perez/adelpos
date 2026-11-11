@@ -18,9 +18,11 @@ de documentos). Evidencia detallada por fase: [VERIFICATION_STAGE9B.md](VERIFICA
   y sus correcciones, y el cambio de nombre de las especificaciones Playwright de la 9B para que corran después de las
   existentes.
 - **Regresión final (fase D)**: ver «Regresión final de la fase D».
-- **Instalación real**: sigue en **0.9.0 y esquema 17**. **Las migraciones 0018 y 0019 no se han aplicado**: esperan la
-  autorización del propietario y el procedimiento controlado (respaldo, ensayo de restauración, migración, repetición
-  `applied:0`, readiness, `build-macos` y `open-app`) registrado en [ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md).
+- **Instalación real**: **0.9.1 y esquema 19**. Las migraciones 0018 y 0019 se aplicaron el 11 de noviembre de 2026 con
+  autorización del propietario: respaldo `backups/adel_pos-20261111T185713Z-bd1868.dump` con restauración verificada
+  (127 tablas idénticas), `migrate` `applied:2` y repetición `applied:0`, readiness 200 con esquema compatible y
+  `/api/v1/version` 0.9.1/19, comprobaciones de solo lectura antes y después, y servidor y `.app` 0.9.1 instalados
+  (registro en [ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md), «Instalación real»).
 - **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) ni enviaron trabajos
   a CUPS real, a una impresora, a un cajón o a una conexión TCP fuera de loopback.
 
@@ -50,7 +52,8 @@ simulados** (transporte controlado de la cola, puerto TCP de loopback y ejecutor
 - **Ventana nativa Tauri (WKWebView)**, selector de archivos nativo para el logotipo, diálogo nativo real de guardado de
   las exportaciones, **pantalla táctil física** y teclado virtual en Documentos.
 - **Dos terminales reales**, volumen real, LAN con otra máquina, Keychain real y Windows.
-- **Instalación real**: 0018 y 0019 sin aplicar (ver «Estado»).
+- **Instalación real**: el recorrido de la 9B en la ventana nativa (Documentos, identidad, editor, muestra en una
+  impresora real) queda como verificación del propietario.
 
 ## Regresión final de la fase D
 

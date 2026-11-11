@@ -9,8 +9,8 @@ menores, las cifras de cada prueba y las mediciones, en [ETAPA_9A_AVANCE.md](ETA
 contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md) (secciones «Etapa 9A» de las partes B1, B2, C1 y
 C2); la evidencia de verificación, en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
 
-**Etapa 9B** (versión 0.9.1, esquema 19; migraciones 0018 y 0019 **no aplicadas** a la instalación real hasta la
-autorización del propietario): lo único que cambia en este módulo es el **encabezado de las exportaciones**, que lleva
+**Etapa 9B** (versión 0.9.1, esquema 19; migraciones 0018 y 0019 aplicadas a la instalación real el 11 de noviembre
+de 2026 con autorización del propietario): lo único que cambia en este módulo es el **encabezado de las exportaciones**, que lleva
 el logotipo del restaurante (o el de AD-EL POS si no hay) con su nombre y sus datos (ver «Exportaciones» y
 [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). Contenido, columnas, totales, orden, consultas, permisos, límites y
 auditoría siguen igual.
