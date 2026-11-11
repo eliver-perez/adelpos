@@ -2,10 +2,11 @@ import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Field, Notice } from '../../components/Forms';
+import { SegmentedControl } from '../../components/SegmentedControl';
 import { inventoryChangeEvent } from '../../hooks/useInventoryEvents';
 import { useResource } from '../../hooks/useResource';
 import { APIError } from '../../services/api';
-import type { InventoryExecute, InventoryUnit, Warehouse } from '../../services/inventory';
+import type { InventoryExecute, InventoryUnit, Page, Warehouse } from '../../services/inventory';
 import { recordReceipt } from '../../services/inventoryPurchasing';
 import type {
   DirectReceiptInput,
@@ -15,6 +16,7 @@ import type {
   PurchaseOrderLine,
   PurchaseTaxRate,
   Receipt,
+  Supplier,
   SupplierReference,
 } from '../../services/inventoryPurchasing';
 import { amountShape, inventoryQuantityShape } from '../../services/numericInput';
@@ -113,6 +115,7 @@ export function directReceiptInput(
   supplier: SupplierReference | null,
   lines: PurchaseLineDraft[],
   header: ReceiptHeader,
+  counterStore = '',
 ): DirectReceiptInput {
   const input: DirectReceiptInput = {
     supplier_id: supplier?.id ?? '',
@@ -121,6 +124,10 @@ export function directReceiptInput(
   };
   if (optionalText(header.reference)) {
     input.supplier_reference = header.reference;
+  }
+  // El comercio solo describe una compra de mostrador (Go lo rechaza con un proveedor formal).
+  if (supplier?.kind === 'counter' && optionalText(counterStore)) {
+    input.counter_store = counterStore;
   }
   if (optionalText(header.notes)) {
     input.notes = header.notes;
@@ -470,22 +477,48 @@ export function OrderReceiptForm({
   );
 }
 
+// Modalidad de una recepción directa: con un proveedor registrado o como compra de mostrador.
+export type DirectReceiptMode = 'formal' | 'counter';
+
+// Proveedor especial «Compras de mostrador» (etapa 9A), si existe y está activo.
+function useCounterSupplier(): SupplierReference | null {
+  const counter = useResource<Page<Supplier>>('inventory_suppliers', {
+    query: { kind: 'counter', active: 'true' },
+    reloadEvent: inventoryChangeEvent,
+  });
+  const found = counter.data?.items.find((supplier) => supplier.kind === 'counter');
+  if (!found) {
+    return null;
+  }
+  return { id: found.id, trade_name: found.trade_name, kind: found.kind, active: found.active };
+}
+
 // Recepción directa, sin orden: flujo rápido de una sola pantalla con proveedor obligatorio y
-// renglones con insumo, presentación o unidad, cantidad, precio, descuento y tasa de IVA.
+// renglones con insumo, presentación o unidad, cantidad, precio, descuento y tasa de IVA. La
+// modalidad «Compras de mostrador» (mercados, centrales de abastos, supermercados) usa el proveedor
+// especial sin elegirlo y registra el comercio concreto como referencia opcional; se puede abrir
+// preseleccionada desde Recepciones.
 export function DirectReceiptForm({
   execute,
   busy,
   timezone,
   onRecorded,
   onClose,
+  initialMode = 'formal',
 }: {
   execute: InventoryExecute;
   busy: boolean;
   timezone: string;
   onRecorded: (receipt: Receipt) => void;
   onClose: () => void;
+  initialMode?: DirectReceiptMode;
 }) {
-  const [supplier, setSupplier] = useState<SupplierReference | null>(null);
+  const counterSupplier = useCounterSupplier();
+  const [mode, setMode] = useState<DirectReceiptMode>(initialMode);
+  const [formalSupplier, setFormalSupplier] = useState<SupplierReference | null>(null);
+  const [counterStore, setCounterStore] = useState('');
+  const counter = mode === 'counter';
+  const supplier = counter ? counterSupplier : formalSupplier;
   const [lines, setLines] = useState<PurchaseLineDraft[]>([emptyPurchaseLine(1)]);
   const [header, setHeader] = useState<ReceiptHeader>({
     warehouseID: '',
@@ -509,9 +542,10 @@ export function DirectReceiptForm({
     event.preventDefault();
     const warehouseName =
       warehouseList.find((warehouse) => warehouse.id === warehouseID)?.name ?? '';
+    const store = counter && counterStore.trim() !== '' ? ` (${counterStore.trim()})` : '';
     const confirmed = await confirm({
-      title: 'Registrar recepción directa',
-      message: `Se registrará una recepción directa de «${supplier?.trade_name ?? ''}» con ${countLabel(lines.length, 'renglón', 'renglones')} en «${warehouseName}». Aumenta existencias y actualiza costos; no registra gastos de caja. Una recepción no se edita ni se borra.`,
+      title: counter ? 'Registrar compra de mostrador' : 'Registrar recepción directa',
+      message: `Se registrará una recepción directa de «${supplier?.trade_name ?? ''}»${store} con ${countLabel(lines.length, 'renglón', 'renglones')} en «${warehouseName}». Aumenta existencias y actualiza costos; no registra gastos de caja. Una recepción no se edita ni se borra.`,
       confirmLabel: 'Registrar recepción',
       cancelLabel: 'Revisar',
     });
@@ -519,7 +553,7 @@ export function DirectReceiptForm({
       return;
     }
     await submission.send(
-      directReceiptInput(supplier, lines, { ...header, warehouseID }),
+      directReceiptInput(supplier, lines, { ...header, warehouseID }, counter ? counterStore : ''),
       onRecorded,
     );
   }
@@ -534,7 +568,49 @@ export function DirectReceiptForm({
       {submission.uncertain && <UncertainReceipt />}
       <form className="form-stack" onSubmit={(event) => void submit(event)}>
         <fieldset className="form-stack" disabled={locked}>
-          <SupplierPicker label="Proveedor" value={supplier} required onChange={setSupplier} />
+          <div className="inventory-subnav">
+            <SegmentedControl
+              label="Modalidad de la compra"
+              value={mode}
+              options={[
+                { value: 'formal', label: 'Proveedor registrado' },
+                {
+                  value: 'counter',
+                  label: 'Compras de mostrador',
+                  disabled: counterSupplier === null,
+                },
+              ]}
+              onChange={setMode}
+            />
+          </div>
+          {counter && counterSupplier === null && (
+            <Notice>
+              «Compras de mostrador» no está disponible: está desactivado en Proveedores.
+            </Notice>
+          )}
+          {!counter && (
+            <SupplierPicker
+              label="Proveedor"
+              value={formalSupplier}
+              required
+              kind="formal"
+              onChange={setFormalSupplier}
+            />
+          )}
+          {counter && (
+            <Field
+              label="Comercio (opcional)"
+              hint="Mercado, central de abastos, supermercado o tienda donde se compró; una línea."
+            >
+              <input
+                maxLength={100}
+                autoComplete="off"
+                value={counterStore}
+                placeholder="Por ejemplo: Central de abastos, bodega 12"
+                onChange={(event) => setCounterStore(event.target.value)}
+              />
+            </Field>
+          )}
           <ReceiptHeaderFields
             header={{ ...header, warehouseID }}
             warehouses={warehouseList}

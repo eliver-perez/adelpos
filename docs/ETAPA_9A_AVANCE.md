@@ -282,3 +282,90 @@ cuenta.
 - Edición mínima fuera del área estricta: una línea en `backend/internal/operations/acceptance_test.go`
   (llamada a `testStage9A` al final de `TestRestaurantAcceptance`) y dos bloques en
   `desktop/src/styles.css` (campo del interruptor y fila propia de «Poner fuera de servicio»).
+
+### Fase A · A2: proveedores, compras de mostrador, código sugerido, categorías y navegación de Inventarios
+
+Migración `0016_inventory_suppliers_counter.sql` (transaccional, sin `CONCURRENTLY`, restricciones con nombre, CHECK
+seguros ante NULL). **No se aplicó a la instalación real.** Guía actualizada: `docs/INVENTORY_AND_PURCHASING.md`
+(secciones marcadas «(9A)»).
+
+#### §3.3 Datos adicionales de proveedores
+
+- `phone_secondary`, `mobile_phone` y `website` (`text NOT NULL DEFAULT ''`, CHECK de largo y sin espacios en los
+  extremos; la web sin espacios). Go valida solo estos campos: teléfonos con 7–20 dígitos, caracteres de teléfono y
+  extensión opcional; web con dominio y ruta opcional, solo `http(s)://` o sin esquema. Los proveedores existentes se
+  siguen guardando (el teléfono principal conserva la validación de la etapa 8).
+- Búsqueda en Go por los teléfonos nuevos y la web; formulario con «Segundo teléfono», «Teléfono celular» y «Página web»
+  (mostrada como texto, nunca como enlace); la lista muestra el celular en el contacto.
+
+#### §3.2 «Compras de mostrador»
+
+- Proveedor especial único (`inventory_suppliers.kind = 'counter'`, índice único parcial
+  `inventory_suppliers_counter_key`, CHECK `inventory_suppliers_counter_check` sin RFC ni razón social). La 0016 lo siembra
+  una vez; si ya existe un proveedor «Compras de mostrador» no se toca ni se convierte y el especial toma el primer nombre
+  libre («… (general)», «… (general 2)»…). No crea compras, recepciones, movimientos, insumos surtidos ni precios.
+- `inventory_receipts.counter_store` (comercio concreto, opcional, ≤ 100). Go lo rechaza con proveedor formal.
+- Reglas en Go: rechazado (409 `COUNTER_SUPPLIER`) en órdenes nuevas, al cambiar el proveedor de un borrador, en el
+  borrador desde sugerencias y en insumos surtidos; nunca preferido; sus recepciones no registran el último precio; la
+  modalidad no se crea ni cambia por la API. `SupplierReference.kind` y `ReceiptSummary.counter_store` distinguen la
+  modalidad en listas y reportes; filtros `suppliers?kind=` y `receipts?supplier_kind=`.
+- Interfaz: botón «Compra de mostrador» en Recepciones (recepción directa con la modalidad preseleccionada, sin elegir
+  proveedor y con «Comercio (opcional)»); la recepción directa ofrece «Proveedor registrado» / «Compras de mostrador»; el
+  selector de proveedor de órdenes, sugerencias y recepción formal solo ofrece formales; etiquetas «Compra de mostrador»
+  y «Mostrador · comercio» en listas y detalle; filtro «Compras de mostrador» en Recepciones; el editor del proveedor de
+  mostrador oculta RFC, razón social e insumos surtidos y explica su uso.
+
+#### §3.4 Código interno sugerido
+
+- `services/productCode.ts` generalizado (`maxLength`, `freeCode`, `suggestVariantCode`, `followsSuggestion`) sin
+  cambiar el comportamiento de productos (60 caracteres).
+- Insumos: el alta sugiere el código desde el nombre (40 caracteres) y pregunta a Go por la ruta nueva
+  `GET inventory/item-codes` (puente `inventory_item_code`), que dice si está libre, quién lo usa y el primero libre con
+  `-2`, `-3`… (misma regla en `inventory/item_codes.go`). La sugerencia sigue al nombre solo mientras el usuario no
+  escribe el código; un código escrito nunca se sobrescribe (la pista avisa si está tomado y cuál está libre). Al editar
+  un insumo no se sugiere; se comprueba excluyendo el propio insumo. `DUPLICATE_CODE` sigue al guardar.
+- Mismo patrón (sin ruta nueva) en la copia de un producto («Código interno de la copia» sugerido desde «nombre (copia)»
+  con los códigos de productos conocidos) y en el código de una presentación nueva de un producto
+  (`<código del producto>-<nombre de la presentación>`). Nunca cambian códigos guardados ni UUID.
+
+#### §3.5 Categorías de insumos
+
+- Configuración → Categorías: búsqueda (en pantalla, sin distinguir mayúsculas ni acentos), número de insumos, estado,
+  «Ver insumos» (Insumos filtrado por la categoría; `InventoryTarget.items.categoryID`), «Activar»/«Desactivar» con
+  confirmación y «Editar» (nombre, posición, estado). Duplicados: Go (`DUPLICATE_NAME`).
+- «+ Nueva categoría» en el selector del editor del insumo (con `inventory.items.manage`): diálogo propio fuera del
+  `<form>` del insumo que crea la categoría, la agrega a la lista local, la selecciona y conserva lo capturado sin crear el
+  insumo; avisa antes si el nombre ya está en la lista.
+
+#### §3.6 Navegación de Inventarios
+
+- Cinco grupos (Resumen · Catálogo · Existencias · Compras · Configuración) y una segunda fila con las secciones del grupo
+  (`pages/inventory/inventorySections.ts`), ambas en una sola línea de columnas iguales. Secciones nuevas: Sugerencias de
+  compra (sacada de Compras), Devoluciones a proveedor (lista nueva con `GET supplier-returns`), Unidades y Categorías
+  (sacadas de los acordeones de Insumos); «Compras» pasa a «Órdenes de compra» y «Configuración» a «Parámetros». Permisos
+  por sección iguales a la etapa 8; un grupo sin secciones no aparece; la segunda fila se omite solo en Resumen. Cada
+  grupo recuerda su última sección mientras la pantalla está montada. `InventoryTarget` se conserva (y `purchases` con
+  `subsection: 'suggestions'` abre Sugerencias). El menú principal no cambió.
+
+#### Decisiones menores
+
+1. Nombre reservado del proveedor especial: «Compras de mostrador»; con conflicto, «Compras de mostrador (general)» o
+   «(general N)». Se puede renombrar y desactivar; desactivado, la modalidad queda deshabilitada en la recepción directa.
+2. Las compras de mostrador no registran último precio ni insumos surtidos (no contaminan preferidos ni sugerencias).
+3. `counter_store` con proveedor formal se rechaza (400) en lugar de ignorarse.
+4. Las sugerencias de compra conservan la visibilidad de la etapa 8 (permisos de compras), aunque Go las lee con
+   `inventory.read`.
+5. La regla de sufijos del código existe en TypeScript (productos y presentaciones, con la lista conocida) y en Go
+   (insumos, con todos los códigos); ambas con los mismos casos de prueba.
+6. `PATCH suppliers/{id}` sigue guardando todos los datos: un cuerpo sin los campos nuevos los deja vacíos (como el resto
+   de campos de la etapa 8).
+7. Etiquetas de sección: «Órdenes de compra», «Sugerencias de compra», «Devoluciones a proveedor», «Unidades»,
+   «Categorías», «Parámetros»; el grupo y la sección «Existencias» comparten nombre (la sección es la primera del grupo).
+
+#### Limitaciones
+
+- La comprobación del código es informativa (dos altas simultáneas con el mismo código: la segunda recibe
+  `DUPLICATE_CODE`). La sugerencia de presentaciones solo conoce los códigos de productos y del mismo producto.
+- La sección recordada por grupo se pierde al salir de Inventarios.
+- La página web del proveedor no se abre desde la aplicación (texto).
+- Sin verificar en la ventana nativa (WKWebView) ni en pantalla táctil física.

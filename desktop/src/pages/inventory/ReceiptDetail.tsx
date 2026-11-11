@@ -34,8 +34,19 @@ function ReceiptFacts({
     <dl className="inventory-facts">
       <div>
         <dt>Proveedor</dt>
-        <dd>{receipt.supplier.trade_name}</dd>
+        <dd>
+          {receipt.supplier.trade_name}
+          {receipt.supplier.kind === 'counter' && (
+            <span className="tag inventory-inline-tag">Compra de mostrador</span>
+          )}
+        </dd>
       </div>
+      {receipt.supplier.kind === 'counter' && (
+        <div>
+          <dt>Comercio</dt>
+          <dd>{receipt.counter_store || '—'}</dd>
+        </div>
+      )}
       <div>
         <dt>Fecha</dt>
         <dd>{serverDateTime(receipt.occurred_at, timezone)}</dd>

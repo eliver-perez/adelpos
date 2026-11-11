@@ -21,6 +21,7 @@ import {
 } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
 import { conflictMessage } from './useInventoryMutation';
+import { openInventorySection, sectionTab } from './inventoryNavigationTestUtils';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -83,7 +84,7 @@ describe('existencias', () => {
   it('resalta la existencia negativa sin bloquear y muestra costos y valuación con permiso', async () => {
     useTransport();
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Existencias' }));
+    await openInventorySection('Existencias');
     const negative = (await screen.findByText('Tomate')).closest('tr')!;
     expect(negative.className).toContain('inventory-row-negative');
     expect(within(negative).getByText('Existencia negativa')).toBeTruthy();
@@ -106,7 +107,7 @@ describe('existencias', () => {
         : undefined,
     );
     renderInventory(['inventory.read', 'inventory.stock.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Existencias' }));
+    await openInventorySection('Existencias');
     await screen.findByText('Tomate');
     expect(screen.queryByRole('columnheader', { name: 'Costo promedio' })).toBeNull();
     expect(screen.queryByRole('columnheader', { name: 'Valor del insumo' })).toBeNull();
@@ -128,7 +129,7 @@ describe('existencias', () => {
   it('se recarga con los eventos de inventario y no con los de otras áreas', async () => {
     const requests = useTransport();
     renderInventory(['inventory.read', 'inventory.stock.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Existencias' }));
+    await openInventorySection('Existencias');
     await screen.findByText('Tomate');
     const count = () =>
       requests.filter((request) => request.operation === 'inventory_stock').length;
@@ -186,7 +187,7 @@ describe('existencia inicial', () => {
       return undefined;
     });
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Existencias' }));
+    await openInventorySection('Existencias');
     fireEvent.click(await screen.findByRole('button', { name: 'Existencia inicial' }));
     await screen.findByRole('heading', { name: 'Existencia inicial' });
     fireEvent.change(screen.getByLabelText(/^Motivo u observación/), {
@@ -284,7 +285,7 @@ describe('movimientos', () => {
         : undefined,
     );
     renderInventory(['inventory.read', 'inventory.movements.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Movimientos' }));
+    await openInventorySection('Movimientos');
     const row = (await screen.findByText('+12.5 kg')).closest('tr')!;
     expect(within(row).getAllByText('Existencia inicial').length).toBeGreaterThan(0);
     expect(within(row).getByText('Administrador')).toBeTruthy();
@@ -326,7 +327,7 @@ describe('movimientos', () => {
   it('muestra valor, costo y base de costo con permiso de costos', async () => {
     useTransport();
     renderInventory(['inventory.read', 'inventory.movements.read', 'inventory.costs.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Movimientos' }));
+    await openInventorySection('Movimientos');
     const row = (await screen.findByText('+12.5 kg')).closest('tr')!;
     expect(screen.getByRole('columnheader', { name: 'Valor' })).toBeTruthy();
     expect(within(row).getByText('+$225.00')).toBeTruthy();
@@ -363,11 +364,11 @@ describe('configuración', () => {
       return undefined;
     });
     renderInventory(['inventory.read', 'inventory.settings.manage']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Configuración' }));
-    const cutoff = (await screen.findByLabelText(/^Hora de corte/)) as HTMLInputElement;
+    await openInventorySection('Parámetros');
+    // Etapa 9A: la hora de inicio del día se muestra en solo lectura (se cambia en Configuración).
+    const cutoff = (await screen.findByLabelText(/^Hora de inicio del día/)) as HTMLInputElement;
     expect(cutoff.value).toBe('05:00');
-    fireEvent.change(cutoff, { target: { value: '0600' } });
-    expect(cutoff.value).toBe('06:00');
+    expect(cutoff.readOnly).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Cada cierto número de días' }));
     fireEvent.change(screen.getByLabelText(/^Cada cuántos días/), { target: { value: '15' } });
     await act(async () => {
@@ -377,7 +378,6 @@ describe('configuración', () => {
     expect(save?.body).toEqual({
       revision: 1,
       purchase_tax_in_cost: true,
-      operating_day_cutoff: '06:00',
       warn_products_without_recipe: true,
       count_frequency: 'custom',
       count_interval_days: 15,
@@ -385,7 +385,9 @@ describe('configuración', () => {
     });
     await screen.findByText(/Se cargaron los datos vigentes: revísalos y vuelve a guardar\./);
     await waitFor(() =>
-      expect((screen.getByLabelText(/^Hora de corte/) as HTMLInputElement).value).toBe('04:30'),
+      expect((screen.getByLabelText(/^Hora de inicio del día/) as HTMLInputElement).value).toBe(
+        '04:30',
+      ),
     );
     expect(screen.getByRole('button', { name: 'Semanal' }).getAttribute('aria-pressed')).toBe(
       'true',
@@ -395,24 +397,25 @@ describe('configuración', () => {
 });
 
 describe('campos numéricos', () => {
-  it('ninguna pestaña usa type="number"', async () => {
+  it('ninguna sección usa type="number"', async () => {
     useTransport();
     renderInventory(allInventoryPermissions);
     for (const tab of [
-      'Resumen',
       'Insumos',
       'Almacenes',
       'Existencias',
       'Movimientos',
-      'Configuración',
+      'Unidades',
+      'Categorías',
+      'Parámetros',
     ]) {
-      fireEvent.click(await screen.findByRole('tab', { name: tab }));
-      await waitFor(() =>
-        expect(screen.getByRole('tab', { name: tab }).getAttribute('aria-selected')).toBe('true'),
-      );
+      await openInventorySection(tab);
+      await waitFor(() => expect(sectionTab(tab).getAttribute('aria-selected')).toBe('true'));
       expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
     }
-    fireEvent.click(screen.getByRole('tab', { name: 'Existencias' }));
+    await openInventorySection('Resumen');
+    expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
+    await openInventorySection('Existencias');
     fireEvent.click(await screen.findByRole('button', { name: 'Existencia inicial' }));
     await screen.findByRole('heading', { name: 'Existencia inicial' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);

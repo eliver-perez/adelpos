@@ -15,6 +15,7 @@ import {
   requestPage,
   unitTrace,
 } from './inventoryRecipesTestData';
+import { openInventorySection } from './inventoryNavigationTestUtils';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -80,7 +81,7 @@ describe('cancelaciones por clasificar', () => {
       return cancellationResponder([pendingCancellation()])(request);
     });
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ajustes y mermas' }));
+    await openInventorySection('Ajustes y mermas');
     const card = await screen.findByRole('article', {
       name: 'Cancelación de Hamburguesa de prueba',
     });
@@ -110,7 +111,7 @@ describe('cancelaciones por clasificar', () => {
   it('los botones dependen del permiso que Go exige', async () => {
     useTransport(cancellationResponder([pendingCancellation({ can_classify: false })]));
     renderInventory(['inventory.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ajustes y mermas' }));
+    await openInventorySection('Ajustes y mermas');
     const card = await screen.findByRole('article', {
       name: 'Cancelación de Hamburguesa de prueba',
     });
@@ -140,7 +141,7 @@ describe('cancelaciones por clasificar', () => {
       return cancellationResponder([expired])(request);
     });
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ajustes y mermas' }));
+    await openInventorySection('Ajustes y mermas');
     const card = await screen.findByRole('article', {
       name: 'Cancelación de Hamburguesa de prueba',
     });
@@ -180,7 +181,7 @@ describe('cancelaciones por clasificar', () => {
       return cancellationResponder([], [automatic])(request);
     });
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ajustes y mermas' }));
+    await openInventorySection('Ajustes y mermas');
     await screen.findByText('No hay cancelaciones por clasificar.');
     const history = screen.getByRole('region', { name: 'Historial de clasificaciones' });
     const row = (await within(history).findByText('Filete de prueba')).closest('tr')!;
@@ -233,7 +234,7 @@ describe('diagnóstico del consumo en Movimientos', () => {
       return undefined;
     });
     renderInventory(['inventory.read', 'inventory.movements.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Movimientos' }));
+    await openInventorySection('Movimientos');
     // Con solicitudes fallidas el acordeón se abre solo.
     const trigger = await screen.findByRole('button', { name: /Solicitudes de consumo/ });
     await waitFor(() => expect(trigger.getAttribute('aria-expanded')).toBe('true'));
@@ -287,7 +288,7 @@ describe('diagnóstico del consumo en Movimientos', () => {
       return undefined;
     });
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Movimientos' }));
+    await openInventorySection('Movimientos');
     const button = await screen.findByRole('button', {
       name: 'Ver consumo de la partida del movimiento de Carne molida',
     });
@@ -345,7 +346,7 @@ describe('controles numéricos', () => {
   it('Ajustes y mermas no usa type="number"', async () => {
     useTransport(cancellationResponder([pendingCancellation()]));
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ajustes y mermas' }));
+    await openInventorySection('Ajustes y mermas');
     await screen.findByRole('article', { name: 'Cancelación de Hamburguesa de prueba' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
   });

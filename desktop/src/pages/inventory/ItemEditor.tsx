@@ -3,21 +3,62 @@ import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Field, Form, Notice } from '../../components/Forms';
 import { inventoryChangeEvent } from '../../hooks/useInventoryEvents';
 import { useResource } from '../../hooks/useResource';
-import { createInventoryItem, saveInventoryItem } from '../../services/inventory';
+import {
+  checkInventoryItemCode,
+  createInventoryItem,
+  saveInventoryItem,
+} from '../../services/inventory';
 import type {
   InventoryCategory,
   InventoryExecute,
   InventoryItem,
   InventoryUnit,
+  ItemCodeCheck,
   ItemInput,
   ItemKind,
 } from '../../services/inventory';
 import { formatMoney } from '../../services/money';
 import { inventoryCostShape, inventoryQuantityShape } from '../../services/numericInput';
+import { codeFromName, inventoryItemCodeLength } from '../../services/productCode';
 import { ActiveToggle, DecimalTextField } from './InventoryFields';
 import { inventoryPermissionName } from './inventoryFormat';
 import { PresentationsEditor } from './PresentationsEditor';
+import { QuickCategoryDialog } from './QuickCategoryDialog';
 import { StockLevelsEditor } from './StockLevelsEditor';
+
+// Valor de la opción «+ Nueva categoría» del selector (no es un identificador).
+const newCategoryOption = '__new_category__';
+
+// Espera antes de preguntar a Go por un código, para no consultar en cada tecla.
+const codeCheckDelay = 300;
+
+// Disponibilidad del código interno según Go (etapa 9A, §3.4). Devuelve el resultado vigente del
+// código indicado o null mientras no hay respuesta; los errores se ignoran porque Go vuelve a
+// validar al guardar (DUPLICATE_CODE).
+function useItemCodeCheck(code: string, itemID: string | null, enabled: boolean) {
+  const [result, setResult] = useState<ItemCodeCheck | null>(null);
+  const trimmed = code.trim();
+  useEffect(() => {
+    if (!enabled || trimmed === '' || trimmed.length > inventoryItemCodeLength) {
+      return;
+    }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      checkInventoryItemCode(trimmed, itemID ?? undefined)
+        .then((check) => {
+          if (current) {
+            setResult(check);
+          }
+        })
+        .catch(() => undefined);
+    }, codeCheckDelay);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [trimmed, itemID, enabled]);
+  return result && result.code === trimmed ? result : null;
+}
 
 interface ItemFormState {
   code: string;
@@ -153,22 +194,75 @@ function ItemForm({
 }) {
   const [initial] = useState(() => initialForm(item));
   const [form, setForm] = useState(initial);
+  // Categorías creadas desde este editor que la lista aún no trae (llegan también por SSE).
+  const [created, setCreated] = useState<InventoryCategory[]>([]);
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  // En el alta, el código interno se sugiere a partir del nombre hasta que el usuario lo edita a
+  // mano (etapa 9A, misma regla que productos). Al editar un insumo nunca cambia solo.
+  const [codeEdited, setCodeEdited] = useState(false);
+  const suggesting = item === null && !codeEdited;
   const editable = can('inventory.items.manage');
   const costEditable = costsVisible && can('inventory.costs.manage');
   const baseUnit = units.find((unit) => unit.id === form.baseUnitID) ?? null;
   const unitLocked = item !== null && (item.has_movements || item.presentations.length > 0);
   const unitChanged = item !== null && item.base_unit.id !== form.baseUnitID;
-  const offeredCategories = categories.filter(
+  const knownCategories = [
+    ...categories,
+    ...created.filter((extra) => !categories.some((category) => category.id === extra.id)),
+  ];
+  const offeredCategories = knownCategories.filter(
     (category) => category.active || category.id === form.categoryID,
   );
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  // Go comprueba el código cuando se sugiere o cuando cambia respecto del guardado.
+  const codeChanged = item === null || form.code.trim() !== item.code;
+  const codeCheck = useItemCodeCheck(form.code, item?.id ?? null, editable && codeChanged);
 
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
 
+  // Si el código sugerido ya existe, se usa el libre que propone Go (-2, -3…), siempre que el
+  // usuario no lo haya editado entretanto.
+  useEffect(() => {
+    if (!suggesting || !codeCheck || codeCheck.available) {
+      return;
+    }
+    setForm((current) =>
+      current.code === codeCheck.code ? { ...current, code: codeCheck.suggestion } : current,
+    );
+  }, [suggesting, codeCheck]);
+
   function update<K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function changeName(name: string) {
+    if (suggesting) {
+      setForm((current) => ({
+        ...current,
+        name,
+        code: codeFromName(name, inventoryItemCodeLength),
+      }));
+      return;
+    }
+    update('name', name);
+  }
+
+  function changeCategory(value: string) {
+    if (value === newCategoryOption) {
+      setCreatingCategory(true);
+      return;
+    }
+    update('categoryID', value);
+  }
+
+  let codeHint: string | undefined;
+  if (codeCheck && !codeCheck.available && !suggesting) {
+    const holder = codeCheck.taken_by ? ` lo usa «${codeCheck.taken_by}»` : ' ya existe';
+    codeHint = `Ese código${holder}. Libre: ${codeCheck.suggestion}.`;
+  } else if (suggesting) {
+    codeHint = 'Se sugiere a partir del nombre mientras no lo edites.';
   }
 
   const unitHint = baseUnit ? `En ${baseUnit.name.toLowerCase()} (${baseUnit.code}).` : undefined;
@@ -184,143 +278,165 @@ function ItemForm({
   }
 
   return (
-    <Form
-      label={item ? 'Guardar insumo' : 'Crear insumo'}
-      successMessage={
-        item ? 'Insumo guardado.' : 'Insumo creado. Ya puedes agregar sus presentaciones.'
-      }
-      disabled={busy || !editable}
-      onSave={async () => {
-        const input = itemInput(form, item, costEditable);
-        const saved = item
-          ? await saveInventoryItem(execute, item.id, input)
-          : await createInventoryItem(execute, input);
-        onDirtyChange(false);
-        onSaved(saved);
-      }}
-    >
-      <div className="form-grid">
-        <Field label="Nombre del insumo">
-          <input
-            required
-            maxLength={100}
-            value={form.name}
-            onChange={(event) => update('name', event.target.value)}
-          />
-        </Field>
-        <Field label="Código interno">
-          <input
-            required
-            maxLength={40}
-            autoComplete="off"
-            value={form.code}
-            onChange={(event) => update('code', event.target.value)}
-          />
-        </Field>
-        <Field label="Código de barras" hint="Opcional; único entre insumos y presentaciones.">
-          <input
-            maxLength={64}
-            autoComplete="off"
-            value={form.barcode}
-            onChange={(event) => update('barcode', event.target.value)}
-          />
-        </Field>
-        <Field label="Categoría">
-          <select
-            value={form.categoryID}
-            onChange={(event) => update('categoryID', event.target.value)}
-          >
-            <option value="">Sin categoría</option>
-            {offeredCategories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-                {category.active ? '' : ' (inactiva)'}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field
-          label="Unidad base"
-          hint={unitLockHint ?? 'Las existencias, costos y recetas se expresan en esta unidad.'}
-        >
-          <BaseUnitSelect
-            units={units}
-            value={form.baseUnitID}
-            onChange={(value) => update('baseUnitID', value)}
-            locked={unitLocked}
-          />
-        </Field>
-        <Field
-          label="Tipo de insumo"
-          hint="Una preparación almacenable aumenta con cada elaboración registrada en Recetas."
-        >
-          <select
-            value={form.kind}
-            onChange={(event) => update('kind', event.target.value as ItemKind)}
-          >
-            <option value="purchased">Comprado</option>
-            <option value="prepared">Preparación almacenable</option>
-          </select>
-        </Field>
-        {costEditable && (
-          <DecimalTextField
-            label="Costo de referencia"
-            value={form.referenceCost}
-            onChange={(value) => update('referenceCost', value)}
-            shape={inventoryCostShape}
-            hint={costHint ? `${costHint} Vacío: sin costo de referencia.` : undefined}
-          />
-        )}
-        {costsVisible && !costEditable && (
-          <Field
-            label="Costo de referencia"
-            hint={`Cambiarlo requiere el permiso «${inventoryPermissionName('inventory.costs.manage')}».`}
-          >
+    <>
+      <Form
+        label={item ? 'Guardar insumo' : 'Crear insumo'}
+        successMessage={
+          item ? 'Insumo guardado.' : 'Insumo creado. Ya puedes agregar sus presentaciones.'
+        }
+        disabled={busy || !editable}
+        onSave={async () => {
+          const input = itemInput(form, item, costEditable);
+          const saved = item
+            ? await saveInventoryItem(execute, item.id, input)
+            : await createInventoryItem(execute, input);
+          onDirtyChange(false);
+          onSaved(saved);
+        }}
+      >
+        <div className="form-grid">
+          <Field label="Nombre del insumo">
             <input
-              readOnly
-              value={item?.reference_cost_display ? formatMoney(item.reference_cost_display) : '—'}
+              required
+              maxLength={100}
+              value={form.name}
+              onChange={(event) => changeName(event.target.value)}
             />
           </Field>
+          <Field label="Código interno" hint={codeHint}>
+            <input
+              required
+              maxLength={inventoryItemCodeLength}
+              autoComplete="off"
+              value={form.code}
+              aria-invalid={codeCheck && !codeCheck.available && !suggesting ? true : undefined}
+              onChange={(event) => {
+                setCodeEdited(true);
+                update('code', event.target.value);
+              }}
+            />
+          </Field>
+          <Field label="Código de barras" hint="Opcional; único entre insumos y presentaciones.">
+            <input
+              maxLength={64}
+              autoComplete="off"
+              value={form.barcode}
+              onChange={(event) => update('barcode', event.target.value)}
+            />
+          </Field>
+          <Field label="Categoría">
+            <select
+              value={form.categoryID}
+              onChange={(event) => changeCategory(event.target.value)}
+            >
+              <option value="">Sin categoría</option>
+              {offeredCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                  {category.active ? '' : ' (inactiva)'}
+                </option>
+              ))}
+              {editable && <option value={newCategoryOption}>+ Nueva categoría</option>}
+            </select>
+          </Field>
+          <Field
+            label="Unidad base"
+            hint={unitLockHint ?? 'Las existencias, costos y recetas se expresan en esta unidad.'}
+          >
+            <BaseUnitSelect
+              units={units}
+              value={form.baseUnitID}
+              onChange={(value) => update('baseUnitID', value)}
+              locked={unitLocked}
+            />
+          </Field>
+          <Field
+            label="Tipo de insumo"
+            hint="Una preparación almacenable aumenta con cada elaboración registrada en Recetas."
+          >
+            <select
+              value={form.kind}
+              onChange={(event) => update('kind', event.target.value as ItemKind)}
+            >
+              <option value="purchased">Comprado</option>
+              <option value="prepared">Preparación almacenable</option>
+            </select>
+          </Field>
+          {costEditable && (
+            <DecimalTextField
+              label="Costo de referencia"
+              value={form.referenceCost}
+              onChange={(value) => update('referenceCost', value)}
+              shape={inventoryCostShape}
+              hint={costHint ? `${costHint} Vacío: sin costo de referencia.` : undefined}
+            />
+          )}
+          {costsVisible && !costEditable && (
+            <Field
+              label="Costo de referencia"
+              hint={`Cambiarlo requiere el permiso «${inventoryPermissionName('inventory.costs.manage')}».`}
+            >
+              <input
+                readOnly
+                value={
+                  item?.reference_cost_display ? formatMoney(item.reference_cost_display) : '—'
+                }
+              />
+            </Field>
+          )}
+          <DecimalTextField
+            label="Existencia mínima"
+            value={form.minStock}
+            onChange={(value) => update('minStock', value)}
+            shape={inventoryQuantityShape}
+            hint={unitHint ? `${unitHint} Vacío: sin alerta.` : 'Vacío: sin alerta.'}
+          />
+          <DecimalTextField
+            label="Punto de reabastecimiento"
+            value={form.reorderPoint}
+            onChange={(value) => update('reorderPoint', value)}
+            shape={inventoryQuantityShape}
+            hint={unitHint ? `${unitHint} Vacío: sin alerta.` : 'Vacío: sin alerta.'}
+          />
+        </div>
+        <Field label="Descripción">
+          <textarea
+            maxLength={2000}
+            value={form.description}
+            onChange={(event) => update('description', event.target.value)}
+          />
+        </Field>
+        <div className="button-row">
+          <ActiveToggle
+            label="Insumo activo"
+            pressed={form.active}
+            onChange={(value) => update('active', value)}
+            confirmDeactivation={item?.active ?? false}
+            title="Desactivar insumo"
+            message={`Al guardar, «${item?.name ?? ''}» dejará de ofrecerse para nuevas capturas. Conserva sus existencias, presentaciones y movimientos.`}
+          />
+          {item?.kind === 'prepared' && <span className="tag">{item.kind_label}</span>}
+        </div>
+        {!form.active && item?.active && (
+          <p className="muted text-xs">
+            Desactivar un insumo solo deja de ofrecerlo: conserva sus existencias y movimientos.
+          </p>
         )}
-        <DecimalTextField
-          label="Existencia mínima"
-          value={form.minStock}
-          onChange={(value) => update('minStock', value)}
-          shape={inventoryQuantityShape}
-          hint={unitHint ? `${unitHint} Vacío: sin alerta.` : 'Vacío: sin alerta.'}
+      </Form>
+      {creatingCategory && (
+        <QuickCategoryDialog
+          categories={knownCategories}
+          execute={execute}
+          busy={busy}
+          onCancel={() => setCreatingCategory(false)}
+          onCreated={(category) => {
+            setCreated((current) => [...current, category]);
+            update('categoryID', category.id);
+            setCreatingCategory(false);
+          }}
         />
-        <DecimalTextField
-          label="Punto de reabastecimiento"
-          value={form.reorderPoint}
-          onChange={(value) => update('reorderPoint', value)}
-          shape={inventoryQuantityShape}
-          hint={unitHint ? `${unitHint} Vacío: sin alerta.` : 'Vacío: sin alerta.'}
-        />
-      </div>
-      <Field label="Descripción">
-        <textarea
-          maxLength={2000}
-          value={form.description}
-          onChange={(event) => update('description', event.target.value)}
-        />
-      </Field>
-      <div className="button-row">
-        <ActiveToggle
-          label="Insumo activo"
-          pressed={form.active}
-          onChange={(value) => update('active', value)}
-          confirmDeactivation={item?.active ?? false}
-          title="Desactivar insumo"
-          message={`Al guardar, «${item?.name ?? ''}» dejará de ofrecerse para nuevas capturas. Conserva sus existencias, presentaciones y movimientos.`}
-        />
-        {item?.kind === 'prepared' && <span className="tag">{item.kind_label}</span>}
-      </div>
-      {!form.active && item?.active && (
-        <p className="muted text-xs">
-          Desactivar un insumo solo deja de ofrecerlo: conserva sus existencias y movimientos.
-        </p>
       )}
-    </Form>
+    </>
   );
 }
 

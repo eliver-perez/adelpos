@@ -5355,3 +5355,53 @@ th.inventory-number {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Etapa 9A (§3.6): navegación de Inventarios en dos niveles. La primera fila tiene los cinco grupos
+   en columnas iguales y la segunda las secciones del grupo, también en una sola fila de columnas
+   iguales (a lo más cinco): nunca quedan filas irregulares. En ventanas angostas las etiquetas se
+   parten en dos líneas dentro de su columna en lugar de desbordar la página. */
+.inventory-navigation {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.inventory-page .inventory-navigation .inventory-groups {
+  grid-template-columns: none;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  margin-bottom: 0;
+}
+.inventory-page .inventory-navigation .inventory-groups button {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: normal;
+}
+.inventory-sections {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.inventory-sections button {
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+  color: var(--muted);
+}
+.inventory-sections .tab-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  font-weight: 650;
+}
+.inventory-page .inventory-navigation {
+  margin-bottom: 16px;
+}

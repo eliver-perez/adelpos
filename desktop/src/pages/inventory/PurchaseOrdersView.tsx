@@ -4,7 +4,6 @@ import { OptionalDateField } from '../../components/catalog/DateField';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Field, Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
-import { SegmentedControl } from '../../components/SegmentedControl';
 import { inventoryChangeEvent } from '../../hooks/useInventoryEvents';
 import { useResource } from '../../hooks/useResource';
 import type {
@@ -52,13 +51,10 @@ import {
 } from './purchasingFormat';
 import type { PurchaseLineDraft } from './purchasingFormat';
 import type { PurchasingNavigation } from './purchasingNavigation';
-import { PurchaseSuggestionsView } from './PurchaseSuggestionsView';
 import { ReceiptDetail } from './ReceiptDetail';
 import { OrderReceiptForm } from './ReceiptForms';
 
 const pageSize = 25;
-
-export type PurchasesSubsection = 'orders' | 'suggestions';
 
 interface OrderFilter {
   search: string;
@@ -184,6 +180,7 @@ function OrderFilters({
         label="Proveedor"
         value={filter.supplier}
         activeOnly={false}
+        kind="formal"
         emptyLabel="Todos los proveedores"
         onChange={(supplier) => onChange({ ...filter, supplier, page: 1 })}
       />
@@ -353,6 +350,7 @@ function PurchaseOrderEditor({
           label="Proveedor"
           value={form.supplier}
           required
+          kind="formal"
           onChange={(supplier) => update('supplier', supplier)}
         />
         <div className="form-grid">
@@ -619,18 +617,17 @@ function PurchaseOrderPanel({
   );
 }
 
-// Pestaña «Compras»: órdenes de compra con filtros por estado, proveedor y fechas y paginación
-// (y, en su propio apartado, las sugerencias de compra de la fase D);
-// alta y edición del borrador (inventory.purchases.create); emisión, cancelación y cierre
-// administrativo (inventory.purchases.authorize); y recepción de lo pendiente
-// (inventory.purchases.receive). Go valida permisos, estados y montos en cada escritura.
+// Sección «Órdenes de compra» (grupo Compras): órdenes con filtros por estado, proveedor y fechas
+// y paginación; alta y edición del borrador (inventory.purchases.create); emisión, cancelación y
+// cierre administrativo (inventory.purchases.authorize); y recepción de lo pendiente
+// (inventory.purchases.receive). Go valida permisos, estados y montos en cada escritura. Desde la
+// etapa 9A las sugerencias de compra son una sección propia del grupo (PurchaseSuggestionsView).
 export function PurchaseOrdersView({
   can,
   execute,
   busy,
   timezone,
   initialOrderID,
-  initialSubsection = 'orders',
   navigation,
 }: {
   can: (permission: string) => boolean;
@@ -638,11 +635,8 @@ export function PurchaseOrdersView({
   busy: boolean;
   timezone: string;
   initialOrderID: string | null;
-  // Apartado con el que se abre la pestaña (el resumen lleva a las sugerencias de compra).
-  initialSubsection?: PurchasesSubsection;
   navigation: PurchasingNavigation;
 }) {
-  const [subsection, setSubsection] = useState<PurchasesSubsection>(initialSubsection);
   const [filter, setFilter] = useState<OrderFilter>({
     search: '',
     state: '',
@@ -655,7 +649,6 @@ export function PurchaseOrdersView({
   const [open, setOpen] = useState<string | null>(initialOrderID);
   const list = useResource<Page<PurchaseOrderSummary>>('inventory_purchase_orders', {
     query: orderQuery(filter),
-    enabled: subsection === 'orders',
     reloadEvent: inventoryChangeEvent,
   });
   const creatable = can('inventory.purchases.create');
@@ -675,41 +668,8 @@ export function PurchaseOrdersView({
     );
   }
 
-  const subnav = (
-    <div className="inventory-subnav">
-      <SegmentedControl
-        label="Apartados de compras"
-        value={subsection}
-        options={[
-          { value: 'orders', label: 'Órdenes de compra' },
-          { value: 'suggestions', label: 'Sugerencias de compra' },
-        ]}
-        onChange={setSubsection}
-      />
-    </div>
-  );
-
-  if (subsection === 'suggestions') {
-    return (
-      <div className="form-stack">
-        {subnav}
-        <PurchaseSuggestionsView
-          can={can}
-          execute={execute}
-          busy={busy}
-          timezone={timezone}
-          onOpenOrder={(orderID) => {
-            setSubsection('orders');
-            setOpen(orderID);
-          }}
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="form-stack">
-      {subnav}
       <div className="section-heading">
         <p className="muted text-sm">
           Órdenes de compra a proveedores: borrador, emisión y recepción total o parcial. Una orden

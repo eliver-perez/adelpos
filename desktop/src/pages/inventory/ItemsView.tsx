@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Accordion } from '../../components/Accordion';
 import { Field, Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { inventoryChangeEvent } from '../../hooks/useInventoryEvents';
@@ -13,11 +12,9 @@ import type {
 } from '../../services/inventory';
 import { formatMoney } from '../../services/money';
 import { countLabel } from '../../services/plural';
-import { CategoriesAdmin } from './CategoriesAdmin';
 import { Pagination } from './InventoryFields';
 import { formatQuantity } from './inventoryFormat';
 import { ItemEditorPanel } from './ItemEditor';
-import { UnitsAdmin } from './UnitsAdmin';
 
 const pageSize = 25;
 
@@ -211,23 +208,27 @@ function ItemsTable({
   );
 }
 
-// Pestaña «Insumos»: listado con búsqueda, filtros y paginación; alta y edición en un panel con
-// sus presentaciones; y, en acordeones, las categorías de insumos y las unidades de medida.
+// Sección «Insumos»: listado con búsqueda, filtros y paginación; alta y edición en un panel con
+// sus presentaciones. Desde la etapa 9A las categorías y las unidades se administran en el grupo
+// Configuración, que abre esta sección filtrada por una categoría («Ver insumos»).
 export function ItemsView({
   can,
   execute,
   busy,
   initialItemID = null,
+  initialCategoryID = '',
 }: {
   can: (permission: string) => boolean;
   execute: InventoryExecute;
   busy: boolean;
   // Insumo que se abre al llegar desde una alerta del resumen.
   initialItemID?: string | null;
+  // Categoría con la que se filtra el listado al llegar desde Categorías.
+  initialCategoryID?: string;
 }) {
   const [filter, setFilter] = useState<ItemFilter>({
     search: '',
-    category: '',
+    category: initialCategoryID,
     active: '',
     kind: '',
     page: 1,
@@ -263,8 +264,6 @@ export function ItemsView({
     );
   }
 
-  const activeCategories = categoryList.filter((category) => category.active).length;
-  const customUnits = unitList.filter((unit) => !unit.system).length;
   return (
     <div className="form-stack">
       <div className="section-heading">
@@ -299,31 +298,6 @@ export function ItemsView({
           />
         </section>
       )}
-      <Accordion
-        title="Categorías de insumos"
-        summary={
-          categories.data
-            ? `${countLabel(activeCategories, 'activa', 'activas')} de ${categoryList.length}`
-            : 'Consultando categorías…'
-        }
-      >
-        <CategoriesAdmin
-          categories={categoryList}
-          editable={editable}
-          execute={execute}
-          busy={busy}
-        />
-      </Accordion>
-      <Accordion
-        title="Unidades de medida"
-        summary={
-          units.data
-            ? `${countLabel(unitList.length - customUnits, 'del sistema', 'del sistema')} · ${countLabel(customUnits, 'propia', 'propias')}`
-            : 'Consultando unidades…'
-        }
-      >
-        <UnitsAdmin units={unitList} editable={editable} execute={execute} busy={busy} />
-      </Accordion>
     </div>
   );
 }

@@ -53,9 +53,14 @@ export type PurchasingErrorCode =
   | 'CASH_LINK_EXISTS'
   | 'CASH_LINK_INACTIVE';
 
+// Modalidad del proveedor (etapa 9A): formal o el proveedor especial «Compras de mostrador», único,
+// sin RFC ni razón social, que solo se usa en recepciones directas.
+export type SupplierKind = 'formal' | 'counter';
+
 export interface SupplierReference {
   id: string;
   trade_name: string;
+  kind: SupplierKind;
   active: boolean;
 }
 
@@ -75,10 +80,15 @@ export interface Supplier {
   // RFC en mayúsculas o null; no es único.
   rfc: string | null;
   phone: string;
+  // Etapa 9A: segundo teléfono, celular y página web opcionales ('' = sin dato), validados en Go.
+  phone_secondary: string;
+  mobile_phone: string;
+  website: string;
   email: string;
   address: string;
   contact: string;
   notes: string;
+  kind: SupplierKind;
   active: boolean;
   item_count: number;
   // Con compras registradas: nunca se borra, solo se desactiva.
@@ -124,6 +134,8 @@ export interface SupplierDetail extends Supplier {
 export interface SupplierQuery {
   search?: string;
   active?: 'true' | 'false';
+  // Las órdenes de compra solo ofrecen proveedores formales.
+  kind?: SupplierKind;
   item_id?: string;
   page?: string;
   page_size?: string;
@@ -135,6 +147,9 @@ export interface SupplierInput {
   legal_name?: string;
   rfc?: string | null;
   phone?: string;
+  phone_secondary?: string;
+  mobile_phone?: string;
+  website?: string;
   email?: string;
   address?: string;
   contact?: string;
@@ -284,6 +299,8 @@ export interface ReceiptSummary {
   occurred_at: string;
   received_by_name: string;
   supplier_reference: string;
+  // Comercio de una compra de mostrador ('' en las demás y en las históricas).
+  counter_store: string;
   // Copiado de la configuración al recibir: el valor de inventario es el total con IVA o el subtotal.
   tax_in_cost: boolean;
   subtotal: string;
@@ -335,6 +352,8 @@ export interface Receipt extends ReceiptSummary {
 export interface ReceiptQuery {
   search?: string;
   supplier_id?: string;
+  // Modalidad del proveedor: formal o compras de mostrador.
+  supplier_kind?: SupplierKind;
   purchase_order_id?: string;
   warehouse_id?: string;
   direct?: 'true' | 'false';
@@ -370,11 +389,14 @@ export interface OrderReceiptInput {
 }
 
 // Recepción directa (sin orden): exige además inventory.purchases.create y un proveedor activo.
+// Con «Compras de mostrador», counter_store registra el comercio concreto (opcional; Go lo rechaza
+// con un proveedor formal).
 export interface DirectReceiptInput {
   supplier_id: string;
   warehouse_id?: string | null;
   occurred_at?: string;
   supplier_reference?: string;
+  counter_store?: string;
   notes?: string;
   lines: PurchaseLineInput[];
 }

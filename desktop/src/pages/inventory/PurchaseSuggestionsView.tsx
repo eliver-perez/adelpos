@@ -293,6 +293,7 @@ function SuggestionGroupPanel({
               label="Proveedor del borrador"
               value={supplier}
               required
+              kind="formal"
               onChange={setSupplier}
             />
           )}

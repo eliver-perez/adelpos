@@ -104,6 +104,8 @@ func testInventoryPurchasing(t *testing.T, base *inventoryFixture) {
 	t.Run("inventory_c_supplier_deactivation_events_and_audit", func(t *testing.T) {
 		testSupplierDeactivationAndAudit(t, fixture)
 	})
+	// Etapa 9A (0016): datos adicionales de proveedores, «Compras de mostrador» y código sugerido.
+	testInventoryStage9A(t, fixture)
 }
 
 func (fixture *purchasingFixture) setup(t *testing.T) {
@@ -201,7 +203,8 @@ func testPurchasingSuppliers(t *testing.T, fixture *purchasingFixture) {
 		t.Fatal("Un comprador sin inventory.suppliers.manage dio de alta un proveedor")
 	}
 	fixture.call(t, fixture.reader, "GET", "inventory/suppliers", nil, 403)
-	if fixture.count(t, "SELECT count(*) FROM app.inventory_suppliers") != 0 {
+	// Solo existe el proveedor especial «Compras de mostrador» que siembra la 0016 (etapa 9A).
+	if fixture.count(t, "SELECT count(*) FROM app.inventory_suppliers WHERE kind='formal'") != 0 {
 		t.Fatal("Un rechazo dejó un proveedor registrado")
 	}
 	main := decodeResponse[inventory.SupplierDetail](t, fixture.write(t, fixture.supplierClerk, "POST", "inventory/suppliers", body, 200))

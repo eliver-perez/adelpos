@@ -32,6 +32,12 @@ import {
   tomato,
 } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
+import {
+  groupTabNames,
+  navigationMap,
+  openInventorySection,
+  sectionTab,
+} from './inventoryNavigationTestUtils';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -67,15 +73,9 @@ function lastQuery(requests: RecordedRequest[], operation: string) {
   return requests.filter((request) => request.operation === operation).at(-1)?.query ?? null;
 }
 
-function tabNames() {
-  return within(screen.getByRole('tablist', { name: 'Secciones de inventario' }))
-    .getAllByRole('tab')
-    .map((tab) => tab.textContent);
-}
-
 async function openTab(name: string, permissions: string[]) {
   renderInventory(permissions);
-  fireEvent.click(await screen.findByRole('tab', { name }));
+  await openInventorySection(name);
 }
 
 // Envía con el botón principal del formulario cuando ya está habilitado.
@@ -105,50 +105,80 @@ async function chooseLineItem(line: HTMLElement, itemID: string, label: string) 
   });
 }
 
-const allTabs = [
-  'Resumen',
-  'Insumos',
-  'Recetas',
-  'Almacenes',
-  'Existencias',
-  'Movimientos',
-  'Transferencias',
-  'Ajustes y mermas',
-  'Conteos',
-  'Compras',
-  'Recepciones',
-  'Proveedores',
-  'Configuración',
-];
+// Navegación completa con todos los permisos (etapa 9A): cinco grupos con sus secciones.
+const fullNavigation = {
+  Resumen: [],
+  Catálogo: ['Insumos', 'Recetas', 'Almacenes', 'Proveedores'],
+  Existencias: ['Existencias', 'Movimientos', 'Transferencias', 'Ajustes y mermas', 'Conteos'],
+  Compras: [
+    'Órdenes de compra',
+    'Sugerencias de compra',
+    'Recepciones',
+    'Devoluciones a proveedor',
+  ],
+  Configuración: ['Unidades', 'Categorías', 'Parámetros'],
+};
 
-describe('pestañas de Inventarios', () => {
-  it('siguen el orden de la especificación y se muestran por permiso', async () => {
+describe('navegación de Inventarios por grupos', () => {
+  it('agrupa las secciones en el orden de la especificación y las muestra por permiso', async () => {
     useTransport();
     const { unmount } = renderInventory(controlPermissions);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual(allTabs);
+    expect(groupTabNames()).toEqual([
+      'Resumen',
+      'Catálogo',
+      'Existencias',
+      'Compras',
+      'Configuración',
+    ]);
+    expect(navigationMap()).toEqual(fullNavigation);
     unmount();
     const second = renderInventory(['inventory.read', 'inventory.counts.approve']);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual([
-      'Resumen',
-      'Insumos',
-      'Recetas',
-      'Almacenes',
-      'Ajustes y mermas',
-      'Conteos',
-    ]);
+    expect(navigationMap()).toEqual({
+      Resumen: [],
+      Catálogo: ['Insumos', 'Recetas', 'Almacenes'],
+      Existencias: ['Ajustes y mermas', 'Conteos'],
+      Configuración: ['Unidades', 'Categorías'],
+    });
     second.unmount();
     renderInventory(['inventory.read', 'inventory.transfers.record']);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual([
-      'Resumen',
-      'Insumos',
-      'Recetas',
-      'Almacenes',
-      'Transferencias',
-      'Ajustes y mermas',
-    ]);
+    expect(navigationMap()).toEqual({
+      Resumen: [],
+      Catálogo: ['Insumos', 'Recetas', 'Almacenes'],
+      Existencias: ['Transferencias', 'Ajustes y mermas'],
+      Configuración: ['Unidades', 'Categorías'],
+    });
+  });
+
+  it('cada grupo recuerda su última sección y los destinos internos cambian de grupo', async () => {
+    useTransport((request) =>
+      request.operation === 'inventory_receipts'
+        ? {
+            status: 200,
+            body: { items: [], total: 0, page: 1, page_size: 25, costs_visible: false },
+          }
+        : undefined,
+    );
+    renderInventory(controlPermissions);
+    await openInventorySection('Conteos');
+    expect(sectionTab('Conteos').getAttribute('aria-selected')).toBe('true');
+    await openInventorySection('Recepciones');
+    const groups = screen.getByRole('tablist', { name: 'Secciones de inventario' });
+    expect(within(groups).getByRole('tab', { name: 'Compras' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+    // Al volver a Existencias se abre Conteos, la última sección usada del grupo.
+    await act(async () => {
+      fireEvent.click(within(groups).getByRole('tab', { name: 'Existencias' }));
+    });
+    expect(sectionTab('Conteos').getAttribute('aria-selected')).toBe('true');
+    // Resumen no tiene segunda fila.
+    await act(async () => {
+      fireEvent.click(within(groups).getByRole('tab', { name: 'Resumen' }));
+    });
+    expect(screen.queryByRole('tablist', { name: 'Apartados de Resumen' })).toBeNull();
   });
 });
 
@@ -359,11 +389,7 @@ describe('ajustes y mermas', () => {
     await confirmDialog('Registrar ajuste');
     await screen.findByText(/El insumo Tomate no tiene costo/);
     fireEvent.click(screen.getByRole('button', { name: 'Ir a Insumos' }));
-    await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Insumos' }).getAttribute('aria-selected')).toBe(
-        'true',
-      ),
-    );
+    await waitFor(() => expect(sectionTab('Insumos').getAttribute('aria-selected')).toBe('true'));
   });
 });
 
@@ -587,7 +613,7 @@ describe('conteos físicos', () => {
     // Desde la alerta del resumen se abre el conteo enviado.
     fireEvent.click(await screen.findByRole('button', { name: 'Abrir conteo: Conteo 7' }));
     const panel = await screen.findByRole('region', { name: 'Conteo 7 · Almacén general' });
-    expect(screen.getByRole('tab', { name: 'Conteos' }).getAttribute('aria-selected')).toBe('true');
+    expect(sectionTab('Conteos').getAttribute('aria-selected')).toBe('true');
     // Diferencias calculadas por Go con el teórico a la hora del renglón.
     const tomatoRow = within(panel).getByRole('listitem', { name: 'Renglón de Tomate' });
     expect(within(tomatoRow).getByText('Teórico a esa hora')).toBeTruthy();
@@ -667,7 +693,7 @@ describe('conteos físicos', () => {
     await waitFor(() =>
       expect(writes(requests, 'inventory_item').at(-1)?.resourceId).toBe(ids.tomato),
     );
-    expect(screen.getByRole('tab', { name: 'Insumos' }).getAttribute('aria-selected')).toBe('true');
+    expect(sectionTab('Insumos').getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -788,7 +814,7 @@ describe('alertas del resumen', () => {
       }),
     );
     // El producto sin receta abre Recetas con la búsqueda del producto.
-    fireEvent.click(screen.getByRole('tab', { name: 'Resumen' }));
+    await openInventorySection('Resumen');
     const again = await screen.findByRole('region', { name: 'Alertas de inventario' });
     fireEvent.click(await within(again).findByRole('button', { name: /^Producto sin receta/ }));
     fireEvent.click(within(again).getByRole('button', { name: 'Ver recetas: Agua fresca' }));
@@ -798,7 +824,7 @@ describe('alertas del resumen', () => {
       }),
     );
     // El insumo sin proveedor abre su ficha.
-    fireEvent.click(screen.getByRole('tab', { name: 'Resumen' }));
+    await openInventorySection('Resumen');
     const third = await screen.findByRole('region', { name: 'Alertas de inventario' });
     fireEvent.click(await within(third).findByRole('button', { name: /^Insumo sin proveedor/ }));
     fireEvent.click(within(third).getByRole('button', { name: 'Abrir insumo: Harina' }));
@@ -839,8 +865,7 @@ describe('sugerencias de compra', () => {
       }
       return undefined;
     });
-    await openTab('Compras', controlPermissions);
-    fireEvent.click(await screen.findByRole('button', { name: 'Sugerencias de compra' }));
+    await openTab('Sugerencias de compra', controlPermissions);
     const group = await screen.findByRole('region', { name: 'Sugerencias: Molinos del Norte' });
     const row = within(group).getByText('Harina').closest('tr')!;
     expect(within(row).getByText('2 · Costal 25 kg')).toBeTruthy();
@@ -893,8 +918,7 @@ describe('sugerencias de compra', () => {
           }
         : undefined,
     );
-    await openTab('Compras', ['inventory.read', 'inventory.purchases.receive']);
-    fireEvent.click(await screen.findByRole('button', { name: 'Sugerencias de compra' }));
+    await openTab('Sugerencias de compra', ['inventory.read', 'inventory.purchases.receive']);
     const group = await screen.findByRole('region', { name: 'Sugerencias: Molinos del Norte' });
     const row = within(group).getByText('Harina').closest('tr')!;
     expect(within(row).getAllByText('—').length).toBeGreaterThanOrEqual(2);
@@ -955,21 +979,21 @@ describe('controles numéricos de la fase D', () => {
       return undefined;
     });
     renderInventory(controlPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Ajustes y mermas' }));
+    await openInventorySection('Ajustes y mermas');
     fireEvent.click(await screen.findByRole('button', { name: 'Registrar ajuste' }));
     await screen.findByRole('group', { name: 'Renglón 1' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('tab', { name: 'Transferencias' }));
+    await openInventorySection('Transferencias');
     fireEvent.click(await screen.findByRole('button', { name: 'Nueva transferencia' }));
     await screen.findByRole('group', { name: 'Renglón 1' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('tab', { name: 'Conteos' }));
+    await openInventorySection('Conteos');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Abrir el conteo 7 de Almacén general' }),
     );
     await screen.findByRole('textbox', { name: 'Cantidad contada de Harina' });
     expect(document.querySelectorAll('input[type="number"]')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('tab', { name: 'Insumos' }));
+    await openInventorySection('Insumos');
     fireEvent.click(await screen.findByRole('button', { name: 'Editar el insumo Harina' }));
     const levels = await screen.findByRole('region', { name: 'Niveles por almacén' });
     fireEvent.click(

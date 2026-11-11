@@ -4,6 +4,7 @@ import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { notice } from './notices';
 import { sendTakeawayToKitchen } from './payments-flow';
+import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
 
 // Etapa 8, fase B: recorrido del consumo de inventario con el mismo transporte de prueba que las
 // demás especificaciones (Go temporal y base adel_pos_test_*). Crea un insumo con existencia
@@ -62,12 +63,9 @@ async function openInventory(page: Page) {
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
 }
 
+// Abre una sección de Inventarios por su grupo y su nombre (navegación agrupada de la etapa 9A).
 async function openTab(page: Page, name: string) {
-  await page.getByRole('tab', { name, exact: true }).click();
-  await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await openInventorySection(page, name);
 }
 
 // Precondiciones por la API (no son parte de lo que se prueba): el filete necesita una ruta de
@@ -139,29 +137,14 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   ).toBeVisible();
   const pendingStatus = await preparePreconditions(driver);
   await openInventory(page);
-  await expect(
-    page.getByRole('tablist', { name: 'Secciones de inventario' }).getByRole('tab'),
-  ).toHaveText([
-    'Resumen',
-    'Insumos',
-    'Recetas',
-    'Almacenes',
-    'Existencias',
-    'Movimientos',
-    'Transferencias',
-    'Ajustes y mermas',
-    'Conteos',
-    'Compras',
-    'Recepciones',
-    'Proveedores',
-    'Configuración',
-  ]);
+  // Etapa 9A: cinco grupos en la primera fila (las secciones van en la segunda).
+  await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);
 
   // Insumo en kilogramos con costo de referencia y existencia inicial de 5 kg a $180.
   await openTab(page, 'Insumos');
   await page.getByRole('button', { name: 'Nuevo insumo', exact: true }).click();
   await page.getByLabel('Nombre del insumo', { exact: true }).fill('Carne de prueba E2E');
-  await page.getByLabel('Código interno', { exact: true }).fill('CAR-E2E');
+  await page.getByLabel(/^Código interno/).fill('CAR-E2E');
   await page
     .getByRole('combobox', { name: /^Unidad base/ })
     .selectOption({ label: 'Kilogramo (kg)' });

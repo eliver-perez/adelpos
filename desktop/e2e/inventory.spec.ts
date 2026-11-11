@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { notice } from './notices';
+import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
 
 // Etapa 8, fase A: recorrido corto de Inventarios con el mismo transporte de prueba que
 // restaurant.spec.ts (Go temporal y base adel_pos_test_*). Crea un insumo con una presentación,
@@ -40,12 +41,9 @@ async function checkLayout(page: Page, testInfo: TestInfo, name: string, capture
   });
 }
 
+// Abre una sección de Inventarios por su grupo y su nombre (navegación agrupada de la etapa 9A).
 async function openTab(page: Page, name: string) {
-  await page.getByRole('tab', { name, exact: true }).click();
-  await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await openInventorySection(page, name);
 }
 
 test('inventarios: insumo con presentación, existencia inicial, existencias y movimientos', async ({
@@ -64,23 +62,8 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
     .getByRole('button', { name: 'Inventarios', exact: true })
     .click();
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
-  await expect(
-    page.getByRole('tablist', { name: 'Secciones de inventario' }).getByRole('tab'),
-  ).toHaveText([
-    'Resumen',
-    'Insumos',
-    'Recetas',
-    'Almacenes',
-    'Existencias',
-    'Movimientos',
-    'Transferencias',
-    'Ajustes y mermas',
-    'Conteos',
-    'Compras',
-    'Recepciones',
-    'Proveedores',
-    'Configuración',
-  ]);
+  // Etapa 9A: cinco grupos en la primera fila (las secciones van en la segunda).
+  await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);
 
   // Resumen: la función sembrada por la 0010 está desactivada y se administra en Configuración.
   const feature = page.getByRole('region', { name: 'Control de inventario' });
@@ -95,7 +78,7 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
   await openTab(page, 'Insumos');
   await page.getByRole('button', { name: 'Nuevo insumo', exact: true }).click();
   await page.getByLabel('Nombre del insumo', { exact: true }).fill('Harina de prueba');
-  await page.getByLabel('Código interno', { exact: true }).fill('HAR-E2E');
+  await page.getByLabel(/^Código interno/).fill('HAR-E2E');
   await page
     .getByRole('combobox', { name: /^Unidad base/ })
     .selectOption({ label: 'Kilogramo (kg)' });
@@ -183,8 +166,8 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
     'Predeterminado',
   );
   await checkLayout(page, testInfo, 'almacenes', true);
-  await openTab(page, 'Configuración');
-  await expect(page.getByLabel(/^Hora de corte/)).toHaveValue('05:00');
+  await openTab(page, 'Parámetros');
+  await expect(page.getByLabel(/^Hora de inicio del día/)).toHaveValue('05:00');
   await checkLayout(page, testInfo, 'configuracion', true);
 
   // Go confirma lo que mostró la pantalla: 50 kg en el almacén general y un movimiento inicial.

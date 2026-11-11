@@ -100,9 +100,11 @@ func resolvePurchasing(method string, parts []string) *route {
 }
 
 // SupplierReference es el proveedor resumido que acompaña a órdenes, recepciones y devoluciones.
+// Kind distingue un proveedor formal de «Compras de mostrador» (etapa 9A) en listas y reportes.
 type SupplierReference struct {
 	ID        string `json:"id"`
 	TradeName string `json:"trade_name"`
+	Kind      string `json:"kind"`
 	Active    bool   `json:"active"`
 }
 

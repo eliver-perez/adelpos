@@ -20,6 +20,7 @@ import {
   storedRiceRecipe,
   targetPage,
 } from './inventoryRecipesTestData';
+import { openInventorySection } from './inventoryNavigationTestUtils';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -91,7 +92,7 @@ function lastQuery(requests: RecordedRequest[], operation: string) {
 
 async function openRecipes(permissions = allInventoryPermissions) {
   renderInventory(permissions);
-  fireEvent.click(await screen.findByRole('tab', { name: 'Recetas' }));
+  await openInventorySection('Recetas');
 }
 
 function optionLabels(select: HTMLElement) {
@@ -555,13 +556,13 @@ describe('elaboraciones', () => {
   it('sin permiso de elaborar solo se consultan (con movimientos) o no aparece el apartado', async () => {
     useTransport();
     const { unmount } = renderInventory(['inventory.read', 'inventory.movements.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Recetas' }));
+    await openInventorySection('Recetas');
     fireEvent.click(screen.getByRole('button', { name: 'Elaboraciones' }));
     await screen.findByText(/Registrar elaboraciones requiere el permiso/);
     expect(screen.queryByRole('button', { name: 'Registrar elaboración' })).toBeNull();
     unmount();
     renderInventory(['inventory.read']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Recetas' }));
+    await openInventorySection('Recetas');
     expect(screen.queryByRole('button', { name: 'Elaboraciones' })).toBeNull();
   });
 });

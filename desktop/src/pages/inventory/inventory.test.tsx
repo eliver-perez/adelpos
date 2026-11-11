@@ -19,6 +19,16 @@ import {
   tomato,
 } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
+import { navigationMap, openInventorySection } from './inventoryNavigationTestUtils';
+
+// Solo con inventory.read: el resumen, el catálogo sin proveedores, los ajustes y la configuración
+// sin parámetros (etapa 9A, navegación agrupada).
+const readOnlyNavigation = {
+  Resumen: [],
+  Catálogo: ['Insumos', 'Recetas', 'Almacenes'],
+  Existencias: ['Ajustes y mermas'],
+  Configuración: ['Unidades', 'Categorías'],
+};
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -48,12 +58,6 @@ function renderInventory(permissions: string[], onOpenSettings = vi.fn()) {
 
 function writes(requests: RecordedRequest[], operation: string) {
   return requests.filter((request) => request.operation === operation);
-}
-
-function tabNames() {
-  return within(screen.getByRole('tablist', { name: 'Secciones de inventario' }))
-    .getAllByRole('tab')
-    .map((tab) => tab.textContent);
 }
 
 describe('navegación de Inventarios', () => {
@@ -126,7 +130,7 @@ describe('navegación de Inventarios', () => {
     fireEvent.click(within(navigation).getByRole('button', { name: 'Inventarios' }));
     await screen.findByRole('heading', { name: 'Inventarios' });
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual(['Resumen', 'Insumos', 'Recetas', 'Almacenes', 'Ajustes y mermas']);
+    expect(navigationMap()).toEqual(readOnlyNavigation);
     unmount();
     permissions = ['inventory.stock.read'];
     render(<App />);
@@ -136,26 +140,21 @@ describe('navegación de Inventarios', () => {
 });
 
 describe('pestañas y resumen', () => {
-  it('muestra solo las pestañas que permiten los permisos', async () => {
+  it('muestra solo los grupos y secciones que permiten los permisos', async () => {
     useTransport();
     const { unmount } = renderInventory(['inventory.read']);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual(['Resumen', 'Insumos', 'Recetas', 'Almacenes', 'Ajustes y mermas']);
+    expect(navigationMap()).toEqual(readOnlyNavigation);
     unmount();
     renderInventory(allInventoryPermissions);
     await screen.findByText('Control de inventario');
-    expect(tabNames()).toEqual([
-      'Resumen',
-      'Insumos',
-      'Recetas',
-      'Almacenes',
-      'Existencias',
-      'Movimientos',
+    expect(navigationMap()).toEqual({
+      Resumen: [],
+      Catálogo: ['Insumos', 'Recetas', 'Almacenes'],
       // Transferencias se consulta también con inventory.movements.read (fase D).
-      'Transferencias',
-      'Ajustes y mermas',
-      'Configuración',
-    ]);
+      Existencias: ['Existencias', 'Movimientos', 'Transferencias', 'Ajustes y mermas'],
+      Configuración: ['Unidades', 'Categorías', 'Parámetros'],
+    });
   });
 
   it('el resumen explica la activación y lleva a la administración de funciones', async () => {
@@ -248,13 +247,13 @@ describe('insumos', () => {
       return undefined;
     });
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Insumos' }));
+    await openInventorySection('Insumos');
     await screen.findByText('Harina');
     expect(screen.getByRole('columnheader', { name: 'Costo de referencia' })).toBeTruthy();
     expect(screen.getByText('$18.00 / kg')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo insumo' }));
     fireEvent.change(screen.getByLabelText('Nombre del insumo'), { target: { value: 'Queso' } });
-    fireEvent.change(screen.getByLabelText('Código interno'), { target: { value: 'QUE-01' } });
+    fireEvent.change(screen.getByLabelText(/^Código interno/), { target: { value: 'QUE-01' } });
     fireEvent.change(screen.getByLabelText(/^Categoría/), { target: { value: ids.groceries } });
     fireEvent.change(screen.getByLabelText(/^Unidad base/), { target: { value: ids.gram } });
     fireEvent.change(screen.getByLabelText(/^Costo de referencia/), {
@@ -334,7 +333,7 @@ describe('insumos', () => {
     // Puede administrar costos pero no consultarlos: Go no entrega el costo y la pantalla no lo
     // muestra ni lo reemplaza.
     renderInventory(['inventory.read', 'inventory.items.manage', 'inventory.costs.manage']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Insumos' }));
+    await openInventorySection('Insumos');
     await screen.findByText('Harina');
     expect(screen.queryByRole('columnheader', { name: 'Costo de referencia' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Editar el insumo Harina' }));
@@ -355,7 +354,7 @@ describe('insumos', () => {
   it('confirma antes de desactivar un insumo y pregunta al salir con cambios', async () => {
     useTransport();
     renderInventory(allInventoryPermissions);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Insumos' }));
+    await openInventorySection('Insumos');
     fireEvent.click(await screen.findByRole('button', { name: 'Editar el insumo Harina' }));
     const toggle = await screen.findByRole('button', { name: 'Insumo activo' });
     fireEvent.click(toggle);
@@ -390,7 +389,7 @@ describe('almacenes', () => {
       return undefined;
     });
     renderInventory(['inventory.read', 'inventory.warehouses.manage']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Almacenes' }));
+    await openInventorySection('Almacenes');
     await screen.findByText('Predeterminado');
     fireEvent.click(screen.getByRole('button', { name: 'Editar el almacén Almacén general' }));
     expect(
@@ -419,7 +418,7 @@ describe('almacenes', () => {
   it('desactivar un almacén pide confirmación de peligro', async () => {
     const requests = useTransport();
     renderInventory(['inventory.read', 'inventory.warehouses.manage']);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Almacenes' }));
+    await openInventorySection('Almacenes');
     fireEvent.click(await screen.findByRole('button', { name: 'Editar el almacén Barra' }));
     fireEvent.click(screen.getByRole('button', { name: 'Almacén activo' }));
     const dialog = await screen.findByRole('alertdialog');

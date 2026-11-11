@@ -97,7 +97,10 @@ func checkStage8PhaseC(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 		"inventory.suppliers.manage", "inventory.purchases.create", "inventory.purchases.authorize", "inventory.purchases.receive",
 		"inventory.supplier_returns.record", "inventory.purchases.link_cash",
 	}
-	err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.inventory_suppliers)+(SELECT count(*) FROM app.inventory_supplier_items)
+	// La 0016 (etapa 9A) siembra un solo proveedor especial «Compras de mostrador» (kind counter),
+	// que no es una compra: la 0013 sigue sin sembrar proveedores.
+	err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.inventory_suppliers WHERE kind<>'counter')
+            +(SELECT count(*) FROM app.inventory_supplier_items)
             +(SELECT count(*) FROM app.inventory_purchase_orders)+(SELECT count(*) FROM app.inventory_purchase_order_lines)
             +(SELECT count(*) FROM app.inventory_receipts)+(SELECT count(*) FROM app.inventory_receipt_lines)
             +(SELECT count(*) FROM app.inventory_supplier_returns)+(SELECT count(*) FROM app.inventory_supplier_return_lines)

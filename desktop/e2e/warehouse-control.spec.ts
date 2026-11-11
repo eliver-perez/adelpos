@@ -3,6 +3,14 @@ import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { notice } from './notices';
+import {
+  allInventorySections,
+  checkInventoryNavigation,
+  expectInventorySection,
+  groupTablist,
+  inventoryGroups,
+  openInventorySection,
+} from './inventory-navigation';
 
 // Etapa 8, fase D (interfaz de control de inventario): recorrido de transferencias, mermas,
 // conteos físicos y alertas con el mismo transporte de prueba que las demás especificaciones (Go
@@ -20,22 +28,6 @@ const itemName = 'Harina E2E D';
 const itemCode = 'HAR-E2E-D';
 const itemLabel = `${itemName} · ${itemCode}`;
 const barName = 'Barra E2E D';
-
-const allTabs = [
-  'Resumen',
-  'Insumos',
-  'Recetas',
-  'Almacenes',
-  'Existencias',
-  'Movimientos',
-  'Transferencias',
-  'Ajustes y mermas',
-  'Conteos',
-  'Compras',
-  'Recepciones',
-  'Proveedores',
-  'Configuración',
-];
 
 async function setTheme(page: Page, theme: string) {
   await page.evaluate((value) => {
@@ -85,31 +77,33 @@ async function checkLayout(page: Page, testInfo: TestInfo, name: string, capture
   await setTheme(page, 'light');
 }
 
-// La barra de pestañas cabe a 1280 × 720 sin desplazarse a lo ancho, en filas completas.
+// La navegación agrupada (etapa 9A) cabe a 1280 × 720 y a 1920 × 1080 sin desplazarse a lo ancho:
+// cada fila (grupos y secciones de cada grupo) en una sola línea de columnas iguales, con pestañas
+// de al menos 44 px, en ambos temas; a 1280 × 720 se captura cada grupo.
 async function checkTabBar(page: Page, testInfo: TestInfo) {
-  await page.setViewportSize({ width: 1280, height: 720 });
-  const tablist = page.getByRole('tablist', { name: 'Secciones de inventario' });
-  const overflow = await tablist.evaluate((element) => element.scrollWidth - element.clientWidth);
-  expect(overflow, 'la barra de pestañas se desborda').toBeLessThanOrEqual(0);
-  for (const tab of await tablist.getByRole('tab').all()) {
-    const box = await tab.boundingBox();
-    expect(box?.height ?? 0, 'pestaña de al menos 44 px').toBeGreaterThanOrEqual(44);
-  }
-  for (const theme of ['light', 'dark']) {
-    await setTheme(page, theme);
-    await expect(page.locator('[data-sonner-toast]')).toHaveCount(0, { timeout: 9000 });
-    await keepTheme(page, theme);
-    await tablist.screenshot({ path: testInfo.outputPath(`d2-pestanas-${theme}-1280x720.png`) });
+  for (const size of [
+    { width: 1920, height: 1080 },
+    { width: 1280, height: 720 },
+  ]) {
+    for (const theme of ['light', 'dark']) {
+      await setTheme(page, theme);
+      await checkInventoryNavigation(page, size, async (name) => {
+        if (size.width !== 1280) {
+          return;
+        }
+        await keepTheme(page, theme);
+        await page.getByRole('navigation', { name: 'Inventarios' }).screenshot({
+          path: testInfo.outputPath(`9a-${name}-${theme}-1280x720.png`),
+        });
+      });
+    }
   }
   await setTheme(page, 'light');
 }
 
+// Abre una sección de Inventarios por su grupo y su nombre (navegación agrupada de la etapa 9A).
 async function openTab(page: Page, name: string) {
-  await page.getByRole('tab', { name, exact: true }).click();
-  await expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await openInventorySection(page, name);
 }
 
 async function confirm(page: Page, button: string, text?: string | RegExp) {
@@ -196,10 +190,8 @@ test('control de inventario: transferencia, merma, conteo aplicado y alerta en e
   await preparePreconditions(driver);
   await inventory.click();
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
-  // Las trece pestañas en el orden de la especificación (§25).
-  await expect(
-    page.getByRole('tablist', { name: 'Secciones de inventario' }).getByRole('tab'),
-  ).toHaveText(allTabs);
+  // Los cinco grupos con sus secciones en el orden de la especificación (§3.6 de la etapa 9A).
+  await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);
   await checkTabBar(page, testInfo);
 
   // 1. Transferencia de 5 kg del almacén general a la barra: Go registra salida y entrada.
@@ -331,15 +323,12 @@ test('control de inventario: transferencia, merma, conteo aplicado y alerta en e
   await checkLayout(page, testInfo, 'resumen-alertas', true);
   // La alerta lleva a Existencias con el insumo buscado.
   await belowMinimum.getByRole('button', { name: `Ver existencias: ${itemName}` }).click();
-  await expect(page.getByRole('tab', { name: 'Existencias', exact: true })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await expectInventorySection(page, 'Existencias');
   await expect(page.getByLabel('Buscar insumo', { exact: true })).toHaveValue(itemCode);
   await expect(page.getByRole('row').filter({ hasText: itemName })).toContainText('18.5 kg');
 
-  // 5. Ninguna pestaña se desborda a lo ancho a 1280 × 720 ni a 1920 × 1080.
-  for (const tab of allTabs) {
+  // 5. Ninguna sección se desborda a lo ancho a 1280 × 720 ni a 1920 × 1080.
+  for (const tab of allInventorySections) {
     await openTab(page, tab);
     await page.waitForTimeout(200);
     await checkLayout(page, testInfo, `pestana-${tab}`, false);
