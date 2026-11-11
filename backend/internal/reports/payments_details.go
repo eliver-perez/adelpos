@@ -4,7 +4,9 @@ import "context"
 
 // Detalle de cobros, pagos mixtos y parciales, devoluciones, correcciones, propinas y efectivo por
 // moneda. Las columnas de efectivo físico (lo recibido y el cambio) exigen cash.expected.read, como
-// en Caja: sumadas por turno permitirían deducir el esperado.
+// en Caja: sumadas por turno permitirían deducir el esperado. Todos se limitan, como payments.go, a
+// los turnos que el usuario puede consultar en Caja (paymentScope). Los pesos físicos de un
+// movimiento anterior a la 0007 siguen la regla de Caja (physicalMXNInSQL y physicalMXNOutSQL).
 
 var tipGrouping = []Option{
 	{Value: "method", Label: "Por método"},
@@ -91,7 +93,7 @@ func registerPaymentDetails() {
 			moneyColumn("collected", "Importe cobrado"), moneyColumn("tips", "Propinas"), textColumn("classification", "Clasificación")},
 		DefaultSort: Sort{Key: "first_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			list := conditions{"s.state <> 'closing'", inPeriod("p.created_at")}
+			list := append(paymentScope(), inPeriod("p.created_at"))
 			list.when(query, "register_id", "p.register_id = @register_id::uuid")
 			list.when(query, "user_id", "p.actor_id = @user_id::uuid")
 			dataset, err := paymentDataset(ctx, query, `WITH account_payments AS (
@@ -123,7 +125,7 @@ func registerPaymentDetails() {
 			optional(textColumn("original_method", "Método del pago original")), optional(dateTimeColumn("original_at", "Fecha del pago original"))},
 		DefaultSort: Sort{Key: "created_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			list := conditions{"s.state <> 'closing'", "r.kind = 'refund'", inPeriod("r.created_at")}
+			list := append(paymentScope(), "r.kind = 'refund'", inPeriod("r.created_at"))
 			list.when(query, "method_id", "r.method_id = @method_id::uuid")
 			list.when(query, "register_id", "r.register_id = @register_id::uuid")
 			list.when(query, "user_id", "r.actor_id = @user_id::uuid")
@@ -151,7 +153,7 @@ func registerPaymentDetails() {
 			textColumn("corrected_by", "Corrigió"), textColumn("authorized_by", "Autorizó")},
 		DefaultSort: Sort{Key: "created_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			list := conditions{"s.state <> 'closing'", "r.kind = 'correction'", inPeriod("r.created_at")}
+			list := append(paymentScope(), "r.kind = 'correction'", inPeriod("r.created_at"))
 			list.when(query, "register_id", "r.register_id = @register_id::uuid")
 			list.when(query, "user_id", "r.actor_id = @user_id::uuid")
 			return paymentDataset(ctx, query, `SELECT r.created_at,a.folio::text AS folio,r.method_name AS original_method,
@@ -207,13 +209,12 @@ func registerPaymentDetails() {
 			if grouping == "shift" {
 				label, group, order = shiftLabelSQL, "s.id,register.name,s.business_date,s.opened_at,opener.display_name", "s.opened_at"
 			}
-			list := conditions{"c.is_cash", "s.state <> 'closing'", inPeriod("c.created_at")}
+			list := append(paymentScope(), "c.is_cash", inPeriod("c.created_at"))
 			list.when(query, "register_id", "c.register_id = @register_id::uuid")
 			list.when(query, "shift_id", "c.shift_id = @shift_id::uuid")
 			list.when(query, "user_id", "c.actor_id = @user_id::uuid")
 			return paymentDataset(ctx, query, `SELECT `+label+` AS group_label,
-                    coalesce(sum(coalesce(c.mxn_in,greatest(c.net_amount,0))),0) AS mxn_in,
-                    coalesce(sum(coalesce(c.mxn_out,greatest(-c.net_amount,0))),0) AS mxn_out,
+                    coalesce(sum(`+physicalMXNInSQL+`),0) AS mxn_in,coalesce(sum(`+physicalMXNOutSQL+`),0) AS mxn_out,
                     coalesce(sum(c.usd_in),0) AS usd_in,coalesce(sum(c.usd_out),0) AS usd_out,
                     coalesce(sum(round(c.usd_in*c.usd_rate,2)) FILTER (WHERE c.usd_in > 0),0) AS usd_in_equivalent,
                     coalesce(CASE WHEN min(c.usd_rate) = max(c.usd_rate) THEN to_char(min(c.usd_rate),'FM999990.00')

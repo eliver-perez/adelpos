@@ -3,6 +3,9 @@
 package operational_test
 
 import (
+	"archive/zip"
+	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -148,6 +151,13 @@ func TestOperationalReports(t *testing.T) {
 	blindAccount := fx.account(t, "Caja dos", line(fx.soda, 1))
 	fx.pay(t, cashier, blindAccount.Account.ID, map[string]any{"method_id": cash, "mode": "total", "received": "25"})
 	fx.write(t, cashier, "POST", "payments/shifts/"+closingShift.ID+"/closing", map[string]any{}, 200)
+	// Supervisores de cobros que consultan en Caja solo los turnos de su caja (sin todas las cajas) y,
+	// salvo el último, sin el historial de turnos cerrados.
+	scopePermissions := []string{reports.PermissionRead, reports.PermissionPayments, reports.PermissionEmployees,
+		reports.PermissionCashExpected, reports.PermissionExportExcel, "cash.shifts.read"}
+	supervisorOne := fx.staff(t, "supervisor_caja_uno", fx.registerID, scopePermissions...)
+	supervisorTwo := fx.staff(t, "supervisor_caja_dos", register, scopePermissions...)
+	historian := fx.staff(t, "supervisor_historial", register, append(append([]string{}, scopePermissions...), "cash.history.read")...)
 
 	t.Run("turno en arqueo excluido de todo agregado para todos", func(t *testing.T) {
 		shifts := fx.report(t, fx.admin, "cash.shifts", threeDays)
@@ -170,8 +180,23 @@ func TestOperationalReports(t *testing.T) {
 			t.Fatalf("La vista por día incluyó el turno en arqueo: %+v", day)
 		}
 		methods := fx.report(t, fx.admin, "payments.by_method", "")
-		if !equal(t, methods.Totals["net"], "170") {
+		if !equal(t, methods.Totals["net"], "170") || !methods.warning("SHIFT_CLOSING") {
 			t.Fatalf("Cobros sin el turno en arqueo: %+v", methods.Totals)
+		}
+		// Ventas por turno: las cifras resumidas excluyen el turno en arqueo igual que los renglones.
+		salesByShift := fx.report(t, fx.admin, "sales.by_shift", "")
+		if !salesByShift.warning("SHIFT_CLOSING") || !equal(t, salesByShift.figure("net"), text(salesByShift.Totals["net"])) ||
+			text(salesByShift.figure("quantity")) != text(salesByShift.Totals["quantity"]) ||
+			text(salesByShift.figure("accounts")) != text(salesByShift.Totals["accounts"]) {
+			t.Fatalf("Cifras de ventas por turno con el turno en arqueo: %+v %+v", salesByShift.Summary, salesByShift.Totals)
+		}
+		// El aviso de turnos en arqueo de los cobros solo cuenta los del alcance de Caja del usuario.
+		if scoped := fx.report(t, supervisorOne, "payments.by_method", ""); scoped.warning("SHIFT_CLOSING") || !scoped.warning("CASH_SCOPE") ||
+			!equal(t, scoped.Totals["net"], "170") {
+			t.Fatalf("Alcance de la caja 1 con el turno en arqueo de otra caja: %s", scoped.raw)
+		}
+		if own := fx.report(t, supervisorTwo, "payments.by_method", ""); !own.warning("SHIFT_CLOSING") || len(own.Rows) != 0 {
+			t.Fatalf("Alcance de la caja 2 con su turno en arqueo: %s", own.raw)
 		}
 		dashboard := fx.get(t, fx.admin, "reports/dashboard", 200)
 		if !strings.Contains(string(dashboard), `"closing_shifts","label":"Turnos en arqueo","type":"integer","value":1`) {
@@ -214,6 +239,115 @@ func TestOperationalReports(t *testing.T) {
 		if !equal(t, final["expected_mxn"], "225") || !equal(t, final["difference_mxn"], "5") || !equal(t, final["sales"], "25") ||
 			!equal(t, partial["expected_mxn"], "482.34") {
 			t.Fatalf("Cortes: %+v %+v", final, partial)
+		}
+	})
+
+	t.Run("cobros con el alcance de Caja aunque se llame a la API", func(t *testing.T) {
+		if all := fx.report(t, fx.admin, "payments.by_method", ""); !equal(t, all.Totals["net"], "195") || all.warning("CASH_SCOPE") {
+			t.Fatalf("El administrador ve los cobros de ambas cajas: %s", all.raw)
+		}
+		// Supervisor de la caja 1 sin consultar todas las cajas: no ve la caja 2 ni su turno cerrado.
+		one := fx.report(t, supervisorOne, "payments.by_method", "")
+		if !equal(t, one.Totals["net"], "170") || !one.warning("CASH_SCOPE") {
+			t.Fatalf("Cobros de la caja 1: %s", one.raw)
+		}
+		for _, id := range []string{"payments.by_method", "payments.list", "payments.by_shift", "payments.by_register", "payments.tips",
+			"payments.currency"} {
+			for _, query := range []string{"shift_id=" + closingShift.ID, threeDays + "&shift_id=" + closingShift.ID, threeDays} {
+				result := fx.report(t, supervisorOne, id, query)
+				if strings.Contains(string(result.raw), "Caja 2") || strings.Contains(string(result.raw), "cajero_dos") {
+					t.Fatalf("%s (%s) reveló la caja 2: %s", id, query, result.raw)
+				}
+				if strings.Contains(query, "shift_id") && len(result.Rows) != 0 {
+					t.Fatalf("%s con el turno cerrado de otra caja: %s", id, result.raw)
+				}
+			}
+		}
+		// Ni en las exportaciones ni en las opciones de filtros ni en el resumen ejecutivo.
+		for _, query := range []string{"shift_id=" + closingShift.ID, threeDays} {
+			workbook := fx.get(t, supervisorOne, "reports/export/payments.list?format=xlsx&"+query, 200)
+			if content := workbookText(t, workbook); strings.Contains(content, "Caja 2") || strings.Contains(content, "cajero_dos") {
+				t.Fatalf("La exportación (%s) reveló la caja 2", query)
+			}
+		}
+		shifts := string(fx.get(t, supervisorOne, "reports/filters/shifts", 200))
+		if strings.Contains(shifts, closingShift.ID) || !strings.Contains(shifts, shift.ID) {
+			t.Fatalf("Opciones de turnos de la caja 1: %s", shifts)
+		}
+		dashboard := decode[reports.Dashboard](t, fx.get(t, supervisorOne, "reports/dashboard", 200))
+		collected, warned := "", false
+		for _, section := range dashboard.Sections {
+			for _, indicator := range section.Indicators {
+				if section.ID == "payments" && indicator.Key == "collected" {
+					collected = text(indicator.Value)
+				}
+			}
+		}
+		for _, warning := range dashboard.Warnings {
+			warned = warned || warning.Code == "CASH_SCOPE"
+		}
+		if collected != "170.00" || !warned {
+			t.Fatalf("Cobros del resumen ejecutivo de la caja 1: %q %+v", collected, dashboard.Warnings)
+		}
+		// Supervisor de la caja 2 sin historial: su turno cerrado (por otro) no aparece; con historial, sí.
+		if own := fx.report(t, supervisorTwo, "payments.list", threeDays); len(own.Rows) != 0 || !own.warning("CASH_SCOPE") {
+			t.Fatalf("Sin historial no se ven los cobros de un turno cerrado: %s", own.raw)
+		}
+		if strings.Contains(string(fx.get(t, supervisorTwo, "reports/filters/shifts", 200)), closingShift.ID) {
+			t.Fatal("Sin historial el turno cerrado no aparece en las opciones de turnos")
+		}
+		// Actividad por empleado: los cobros y la caja con el mismo alcance; la venta no se limita.
+		adminActivity := find(t, fx.report(t, fx.admin, "employees.activity", threeDays), "user", "Administrador")
+		cashierAll := find(t, fx.report(t, fx.admin, "employees.activity", threeDays), "user", "Prueba cajero_dos")
+		if !equal(t, cashierAll["collected"], "25") || text(cashierAll["payments"]) != "1" {
+			t.Fatalf("El administrador ve los cobros del cajero de la caja 2: %+v", cashierAll)
+		}
+		for _, member := range []terminal{supervisorOne, supervisorTwo} {
+			activity := fx.report(t, member, "employees.activity", threeDays)
+			if strings.Contains(string(activity.raw), "cajero_dos") || !activity.warning("CASH_SCOPE") {
+				t.Fatalf("Sin todas las cajas o sin historial no se ven los cobros del turno cerrado de la caja 2: %s", activity.raw)
+			}
+			if member == supervisorOne {
+				row := find(t, activity, "user", "Administrador")
+				for _, key := range []string{"payments", "collected", "cash_operations", "accounts", "sales", "confirmations"} {
+					if text(row[key]) != text(adminActivity[key]) {
+						t.Fatalf("Actividad del administrador en la caja 1 (%s): %+v frente a %+v", key, row, adminActivity)
+					}
+				}
+			}
+		}
+		if row := find(t, fx.report(t, historian, "employees.activity", threeDays), "user", "Prueba cajero_dos"); !equal(t, row["collected"], "25") {
+			t.Fatalf("Con historial se ven los cobros del turno cerrado de su caja: %+v", row)
+		}
+		closed := fx.report(t, historian, "payments.by_method", "shift_id="+closingShift.ID)
+		if !equal(t, closed.Totals["net"], "25") || !strings.Contains(string(fx.get(t, historian, "reports/filters/shifts", 200)), closingShift.ID) {
+			t.Fatalf("Con historial se ve el turno cerrado de su caja: %s", closed.raw)
+		}
+	})
+
+	t.Run("pesos físicos de un cobro anterior a la 6.1 con la regla de Caja", func(t *testing.T) {
+		// Un cobro en efectivo anterior a la 0007 no tiene columnas por moneda: entró lo recibido (150)
+		// y salió el cambio (30).
+		fx.exec(t, `UPDATE app.cash_movements SET mxn_in=NULL,mxn_out=NULL,usd_in=NULL,usd_out=NULL,usd_rate=NULL WHERE payment_id=$1`,
+			paymentID)
+		summary := decode[payments.ShiftSummaryView](t, fx.get(t, fx.admin, "payments/shifts/"+shift.ID+"/summary", 200))
+		if summary.Physical == nil {
+			t.Fatal("El resumen de Caja debía traer el efectivo físico")
+		}
+		currency := fx.report(t, fx.admin, "payments.currency", threeDays+"&group_by=shift")
+		var row map[string]any
+		for _, candidate := range currency.Rows {
+			if strings.HasPrefix(text(candidate["group_label"]), "Caja 1") {
+				row = candidate
+			}
+		}
+		if row == nil || !equal(t, row["mxn_in"], summary.Physical.MXNIn) || !equal(t, row["mxn_out"], summary.Physical.MXNOut) ||
+			!equal(t, row["usd_in"], summary.Physical.USDIn) {
+			t.Fatalf("Efectivo por moneda frente a Caja %+v: %+v", summary.Physical, currency.Rows)
+		}
+		cashRow := find(t, fx.report(t, fx.admin, "cash.shifts", threeDays), "register", "Caja 1")
+		if !equal(t, row["mxn_in"], text(cashRow["mxn_in"])) || !equal(t, row["mxn_out"], text(cashRow["mxn_out"])) {
+			t.Fatalf("Efectivo por moneda frente a la caja por turno: %+v %+v", row, cashRow)
 		}
 	})
 
@@ -506,6 +640,31 @@ func TestOperationalReports(t *testing.T) {
 			!equal(t, received.figure("cash_linked"), "97.44") || !equal(t, received.figure("returned_value"), "29") {
 			t.Fatalf("Compras recibidas: %+v %+v", received.Totals, received.Summary)
 		}
+		// Las devoluciones y lo pagado desde caja de las cifras respetan los filtros: la devolución es de
+		// latas de la orden de Distribuidora Norte y el gasto vinculado, de la compra de mostrador.
+		for query, expected := range map[string][2]string{
+			"modality=counter":                            {"0", "97.44"},
+			"modality=order":                              {"29", "0"},
+			"supplier_id=" + supplierID:                   {"29", "0"},
+			"state=partially_received":                    {"29", "0"},
+			"state=received":                              {"0", "0"},
+			"item_id=" + inv.items["PAN"]:                 {"0", "0"},
+			"item_id=" + inv.items["LATA"]:                {"29", "97.44"},
+			"warehouse_id=" + inv.barra:                   {"0", "0"},
+			"warehouse_id=" + inv.general:                 {"29", "97.44"},
+			"supplier_id=" + counterID:                    {"0", "97.44"},
+			"modality=direct&item_id=" + inv.items["PAN"]: {"0", "0"},
+		} {
+			filtered := fx.report(t, fx.admin, "purchases.received", query)
+			if !equal(t, filtered.figure("returned_value"), expected[0]) || !equal(t, filtered.figure("cash_linked"), expected[1]) {
+				t.Fatalf("Cifras de compras con %s: %+v", query, filtered.Summary)
+			}
+			// Un vínculo no se reparte por insumo: con filtro de insumo se rotula como de las recepciones completas.
+			complete := strings.Contains(string(filtered.raw), "Pagado desde caja (recepciones completas)")
+			if complete != strings.Contains(query, "item_id") {
+				t.Fatalf("Rótulo de lo pagado desde caja con %s: %s", query, filtered.raw)
+			}
+		}
 		if total := fx.scalar(t, "SELECT sum(total)::text FROM app.inventory_receipts"); !equal(t, received.Totals["total"], total) {
 			t.Fatalf("Cada recepción se suma una sola vez: %s", total)
 		}
@@ -688,6 +847,29 @@ type inventoryFixture struct {
 // setupInventory da de alta (con el inventario aún desactivado) pan, carne y latas con existencia
 // inicial en el almacén general, el almacén «Barra» y las recetas de la hamburguesa (1 pan + 150 g
 // de carne = $33) y del refresco (1 lata = $12). La ensalada no tiene receta.
+// workbookText concatena las partes descomprimidas de un libro de Excel exportado.
+func workbookText(t *testing.T, content []byte) string {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var builder strings.Builder
+	for _, entry := range archive.File {
+		reader, err := entry.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		builder.Write(data)
+	}
+	return builder.String()
+}
+
 func setupInventory(t *testing.T, fx *fixture) inventoryFixture {
 	t.Helper()
 	result := inventoryFixture{units: map[string]string{}, items: map[string]string{}}

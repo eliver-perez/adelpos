@@ -10,10 +10,14 @@ import (
 //   - canceló partidas: autor del evento item.cancelled;
 //   - responsable de la cuenta: el responsable copiado al reconocer la venta (al cerrar la cuenta);
 //     la venta se atribuye solo a él, de modo que nunca se cuenta dos veces;
-//   - cobró, devolvió y corrigió: quien registró el pago o la devolución (sin turnos en arqueo);
+//   - cobró, devolvió y corrigió: quien registró el pago o la devolución (sin turnos en arqueo y, como
+//     los reportes de cobros y de caja, solo de los turnos que el usuario puede consultar en Caja);
 //   - aplicó descuentos o cortesías y autorizó como supervisor: los ajustes vigentes y las
 //     autorizaciones puntuales;
-//   - movimientos de caja: quien registró la operación de efectivo (sin turnos en arqueo).
+//   - movimientos de caja: quien registró la operación de efectivo (sin turnos en arqueo y con el
+//     mismo alcance de Caja).
+// Las cifras de venta (reconocimientos), confirmaciones, cancelaciones, descuentos y autorizaciones
+// no dependen de los turnos y no se limitan al alcance de Caja.
 // No existe «capturó»: el borrador (y su autor) se borra al confirmar. No se calculan estadísticas
 // de productividad que no estén registradas (tiempos, rankings). Cobro y venta son conceptos
 // distintos: no se suman.
@@ -33,7 +37,7 @@ func init() {
 			optional(described(countColumn("cancelled_units", "Unidades canceladas"), "Unidades que el usuario canceló o retiró al modificar una partida.")),
 			described(countColumn("accounts", "Cuentas cerradas como responsable"), "Cuentas cerradas en el periodo con el usuario como responsable."),
 			described(moneyColumn("sales", "Venta como responsable"), "Venta neta de esas cuentas; cada venta se atribuye solo a su responsable."),
-			described(countColumn("payments", "Cobros"), "Pagos que registró (sin turnos en arqueo)."),
+			described(countColumn("payments", "Cobros"), "Pagos que registró (sin turnos en arqueo; solo de los turnos que puedes consultar en Caja)."),
 			described(moneyColumn("collected", "Cobrado neto"), "Lo que cobró menos lo que devolvió o corrigió; no es venta."),
 			optional(described(moneyColumn("tips", "Propinas netas"), "Propinas de sus cobros menos las devueltas.")),
 			described(countColumn("discounts", "Descuentos aplicados"), "Descuentos vigentes que aplicó."),
@@ -42,7 +46,8 @@ func init() {
 			described(countColumn("authorizations", "Autorizaciones como supervisor"), "Descuentos, cortesías, devoluciones, correcciones y anulaciones que autorizó."),
 			described(countColumn("refunds", "Devoluciones"), "Devoluciones de dinero que registró."),
 			moneyColumn("refunded", "Importe devuelto"),
-			described(countColumn("cash_operations", "Movimientos de caja"), "Ingresos, retiros, gastos y correcciones de efectivo que registró.")},
+			described(countColumn("cash_operations", "Movimientos de caja"),
+				"Ingresos, retiros, gastos y correcciones de efectivo que registró (solo de los turnos que puedes consultar en Caja).")},
 		DefaultSort: Sort{Key: "user"},
 		Query:       employeeActivityQuery,
 	})
@@ -131,7 +136,7 @@ func employeeActivityQuery(ctx context.Context, query *Query) (*Dataset, error) 
             SELECT m.actor_id AS user_id,count(*) FILTER (WHERE m.kind='payment')::bigint AS payments,coalesce(sum(m.amount),0) AS collected,
                 coalesce(sum(m.tip),0) AS tips,count(*) FILTER (WHERE m.kind='refund')::bigint AS refunds,
                 coalesce(-sum(m.amount) FILTER (WHERE m.kind='refund'),0) AS refunded
-            FROM movements m JOIN app.cash_shifts s ON s.id=m.shift_id WHERE s.state <> 'closing' GROUP BY 1
+            FROM movements m JOIN app.cash_shifts s ON s.id=m.shift_id WHERE true`+paymentScope().sql()+` GROUP BY 1
         ),
         discounts AS (
             SELECT a.actor_id AS user_id,count(*) FILTER (WHERE NOT a.courtesy)::bigint AS discounts,
@@ -147,7 +152,7 @@ func employeeActivityQuery(ctx context.Context, query *Query) (*Dataset, error) 
         ),
         cash AS (
             SELECT o.actor_id AS user_id,count(*)::bigint AS cash_operations FROM app.cash_operations o JOIN app.cash_shifts s ON s.id=o.shift_id
-            WHERE s.state <> 'closing' AND `+inPeriod("o.created_at")+` GROUP BY 1
+            WHERE true`+paymentScope().sql()+` AND `+inPeriod("o.created_at")+` GROUP BY 1
         ),
         x AS (
             SELECT user_id FROM confirmed UNION SELECT user_id FROM cancelled UNION SELECT user_id FROM responsible
@@ -165,18 +170,26 @@ func employeeActivityQuery(ctx context.Context, query *Query) (*Dataset, error) 
         LEFT JOIN confirmed ON confirmed.user_id=x.user_id LEFT JOIN cancelled ON cancelled.user_id=x.user_id
         LEFT JOIN responsible ON responsible.user_id=x.user_id LEFT JOIN collected ON collected.user_id=x.user_id
         LEFT JOIN discounts ON discounts.user_id=x.user_id LEFT JOIN authorizations ON authorizations.user_id=x.user_id
-        LEFT JOIN cash ON cash.user_id=x.user_id`+user, query.Args())
+        LEFT JOIN cash ON cash.user_id=x.user_id`+user, cashArgs(query))
 	if err != nil {
 		return nil, err
 	}
 	dataset := &Dataset{Rows: rows, Notes: []string{"La venta se atribuye solo al responsable de la cuenta y el cobro a quien lo registró: " +
 		"son conceptos distintos y no se suman. No existe «capturó» (no se conserva)."}}
-	warning, err := closingShiftsWarning(ctx, query)
+	// Avisos de los cobros y la caja: turnos en arqueo del alcance excluidos y, si el alcance de Caja
+	// es limitado, CASH_SCOPE (la venta y lo demás no se limitan).
+	closing, err := countClosingShifts(ctx, query, `SELECT count(*) FROM app.cash_shifts s WHERE `+closingActivitySQL+
+		` AND `+cashScopeSQL, cashArgs(query))
 	if err != nil {
 		return nil, err
 	}
-	if warning != nil {
-		dataset.Warnings = append(dataset.Warnings, *warning)
+	if closing != nil {
+		dataset.Warnings = append(dataset.Warnings, *closing)
+	}
+	if cashScopeLimited(query.Actor) {
+		dataset.Warnings = append(dataset.Warnings, Warning{Code: "CASH_SCOPE", Message: "Los cobros, las devoluciones y los " +
+			"movimientos de caja solo incluyen los turnos que puedes consultar en Caja (los de otras cajas requieren consultar " +
+			"todas las cajas y los cerrados, el historial de turnos). La venta y lo demás no se limitan."})
 	}
 	return dataset, nil
 }

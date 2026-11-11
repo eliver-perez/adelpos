@@ -139,7 +139,7 @@ func assemble(ctx context.Context, tx pgx.Tx, query *Query, definition *Definiti
 			summary = append(summary, figure)
 		}
 	}
-	filters, err := describeFilters(ctx, tx, definition, params)
+	filters, err := describeFilters(ctx, tx, query.Actor, definition, params)
 	if err != nil {
 		return nil, err
 	}

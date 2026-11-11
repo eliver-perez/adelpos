@@ -1740,3 +1740,65 @@ La parte C2 no agrega ni modifica rutas, operaciones del puente, permisos ni for
 
 Pantalla de inicio `reports` (`reports.read`) registrada en `PreferencesPage.tsx`, ya admitida por Go desde B1
 (`administration/preferences.go`).
+
+## Etapa 9A · correcciones de la revisión en reportes (F1)
+
+Sin rutas, permisos ni migraciones nuevas. Cambian el contenido y los permisos efectivos de rutas existentes:
+
+### `GET reports/run/payments.*` y `GET reports/export/payments.*`
+
+- Todos los reportes del grupo `payments` (`payments.by_method`, `by_register`, `by_shift`, `by_user`, `by_day`, `list`,
+  `mixed_partial`, `refunds`, `corrections`, `tips`, `currency`) se limitan, como los `cash.*`, a los turnos que el usuario
+  puede consultar en Caja: `cash.shifts.read` (sin él, ningún cobro); otras cajas que la de la terminal con
+  `cash.shifts.read_all`; turnos cerrados con `cash.history.read` o si él los cerró. Excepción: `payments.pending` (cuentas
+  abiertas, sin turnos), sin cambio.
+- `meta.warnings` incluye `{"code":"CASH_SCOPE","message":"Solo se incluyen los turnos que puedes consultar en Caja (…)"}`
+  si falta cualquiera de esos tres permisos. `SHIFT_CLOSING` ahora cuenta solo los turnos en arqueo dentro del alcance.
+- `meta.warnings` es siempre un arreglo (antes podía omitirse el aviso; el formato JSON no cambia).
+- El valor mostrado de un filtro `shift_id` fuera del alcance (`meta.filters[].display`) es «Registro no encontrado».
+- `payments.currency`: `mxn_in`/`mxn_out` de un movimiento anterior a la 0007 (sin columnas por moneda) =
+  `cash_received` / `cash_received − net_amount`, como Caja (`currencyTotals.add`) y `cash.*`.
+
+### `GET reports/run/employees.activity` (y su exportación)
+
+- `payments`, `collected`, `tips`, `refunds`, `refunded` y `cash_operations` solo cuentan los turnos del alcance de Caja
+  (mismas reglas que `payments.*`); `SHIFT_CLOSING` cuenta los turnos en arqueo del alcance y `CASH_SCOPE` («Los cobros,
+  las devoluciones y los movimientos de caja solo incluyen…») aparece si el alcance es limitado. Las demás columnas (venta
+  como responsable, confirmaciones, cancelaciones, descuentos, autorizaciones) no cambian.
+
+### `GET reports/dashboard`
+
+- Secciones `payments` (cobros), `cash` y `cash_differences` con el mismo alcance de Caja; `warnings` incluye una vez
+  `CASH_SCOPE` cuando alguna de ellas se calculó con alcance limitado.
+
+### `GET reports/filters/{source}`
+
+- 404 `NOT_FOUND` si la fuente no existe (igual que antes); **403 `PERMISSION_DENIED`** (auditado como `access.denied`) si ninguno de
+  los reportes que el usuario puede consultar declara un filtro con esa fuente.
+- `shifts`: solo los turnos del alcance de Caja del usuario.
+
+### `GET reports/run/sales.evolution` (y su exportación)
+
+- Si el periodo anterior tiene más cubetas que el consultado, las sobrantes van al final como renglones
+  `{"bucket":"<etiqueta> (solo en el periodo anterior)","bucket_start":null,"net":null,"previous_start":"AAAA-MM-DD",
+"previous_net":"…","change":null,"change_percent":null}`, con una nota en `meta.notes`. `totals.previous_net`,
+  `totals.change` y `totals.change_percent` usan el periodo anterior completo.
+
+### `GET reports/run/sales.by_shift`
+
+- `summary` (`accounts`, `net`, `tax`, `quantity`, `average_ticket`) excluye los turnos en arqueo como los renglones.
+
+### `GET reports/run/purchases.received` y `purchases.by_item`
+
+- `summary.returned_value` («Devoluciones a proveedor del periodo») aplica los filtros del reporte (proveedor, insumo y
+  categoría por renglón de la devolución, almacén de la devolución, modalidad y estado de la orden de la recepción), con la
+  fecha de la devolución.
+- `summary.cash_linked`: con filtro de insumo o categoría su etiqueta es «Pagado desde caja (recepciones completas)» (el
+  importe vinculado completo de cada recepción incluida, porque un vínculo no se reparte por insumo); sin esos filtros sigue
+  siendo exacto y con la etiqueta «Pagado desde caja».
+
+### Reconocimiento de ventas (`payments.closeIfSettled` → `app.sales_recognitions`)
+
+- Al cerrar una cuenta también se llevan a cero las fuentes de sus unidades **canceladas que hoy le pertenecen** aunque se
+  hayan reconocido en otra cuenta (unidad transferida tras una reapertura y cancelada en la cuenta nueva). Cada unidad se
+  revierte una sola vez (suma global), cierre primero la cuenta que cierre.

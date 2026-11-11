@@ -453,11 +453,16 @@ func TestReportExports(t *testing.T) {
 	t.Run("columnas protegidas fuera del archivo aunque se llame a la API", func(t *testing.T) {
 		// Detalle de cobros sin cash.expected.read: ni lo recibido, ni el cambio, ni los dólares ni el
 		// tipo de cambio (efectivo físico, paridad con Caja).
+		// Con las consultas de Caja (todas las cajas e historial) para que el detalle tenga los cobros.
 		cashier := fixture.staff(t, "cobrosinesperado", reports.PermissionRead, reports.PermissionPayments, reports.PermissionExportPDF,
-			reports.PermissionExportExcel)
+			reports.PermissionExportExcel, "cash.shifts.read", "cash.shifts.read_all", "cash.history.read")
 		forbidden := []string{"Recibido", "Cambio", "Dólares recibidos", "Tipo de cambio"}
 		xlsx := fixture.exportOK(t, cashier, "payments.list", "format=xlsx")
-		assertSameAsScreen(t, "payments.list", fixture.screen(t, cashier, "payments.list", ""), xlsx.body)
+		listed := fixture.screen(t, cashier, "payments.list", "")
+		if listed.Page.TotalRows == 0 {
+			t.Fatal("El detalle de cobros del cajero debía tener renglones")
+		}
+		assertSameAsScreen(t, "payments.list", listed, xlsx.body)
 		content := workbookText(t, xlsx.body)
 		pdf := fixture.exportOK(t, cashier, "payments.list", "format=pdf")
 		text := strings.Join(reports.PDFPagesForTest(t, pdf.body), "\n")
@@ -493,6 +498,11 @@ func TestReportExports(t *testing.T) {
 				continue
 			}
 			key := append([]string{}, base...)
+			// Los reportes de caja y de cobros se limitan a los turnos que el usuario puede consultar en
+			// Caja: con todas las cajas y el historial tienen renglones que comprobar.
+			if definition.Group == "cash" || definition.Group == "payments" {
+				key = append(key, "cash.shifts.read", "cash.shifts.read_all", "cash.history.read")
+			}
 			sort.Strings(key)
 			member, found := users[strings.Join(key, ",")]
 			if !found {

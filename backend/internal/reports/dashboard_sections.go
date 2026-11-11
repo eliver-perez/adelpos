@@ -82,7 +82,7 @@ func paymentsSection(ctx context.Context, query *Query, period *businessday.Peri
 	err := query.Tx.QueryRow(ctx, paymentMovements+`
         SELECT count(*) FILTER (WHERE m.kind='payment'),coalesce(sum(m.amount),0)::text,
             coalesce(-sum(m.amount) FILTER (WHERE m.kind='refund'),0)::text,coalesce(sum(m.tip),0)::text
-        FROM movements m JOIN app.cash_shifts s ON s.id=m.shift_id WHERE s.state <> 'closing'`, query.PeriodArgs(period)).
+        FROM movements m JOIN app.cash_shifts s ON s.id=m.shift_id WHERE true`+paymentScope().sql(), periodCashArgs(query, period)).
 		Scan(&count, &net, &refunds, &tips)
 	if err != nil {
 		return nil, err
@@ -135,7 +135,8 @@ func init() {
 			{Key: "refunds", Label: "Devoluciones", Type: TypeMoneyMXN, ReportID: "payments.refunds"},
 			{Key: "tips", Label: "Propinas", Type: TypeMoneyMXN, ReportID: "payments.tips", Hint: "Separadas de las ventas."},
 		},
-		Compute: paymentsSection,
+		Compute:    paymentsSection,
+		CashScoped: true,
 	})
 	registerDashboard(DashboardSection{
 		ID: "discounts", Title: "Descuentos y cortesías", Permissions: []string{PermissionDiscounts},

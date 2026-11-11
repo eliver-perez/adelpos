@@ -60,13 +60,18 @@ func productNotes(query *Query) []string {
 
 // salesFigures son las cifras resumidas comunes: cuentas cerradas, venta neta, IVA y ticket promedio.
 func salesFigures(ctx context.Context, query *Query) ([]Figure, error) {
+	return salesFiguresWhere(ctx, query, ledgerConditions(query))
+}
+
+// salesFiguresWhere calcula las cifras resumidas sobre los renglones del libro que cumplen list (las
+// mismas condiciones que los renglones del reporte).
+func salesFiguresWhere(ctx context.Context, query *Query, list conditions) ([]Figure, error) {
 	var accounts, quantity int64
 	var net, tax decimal.Decimal
 	var netText, taxText string
 	err := query.Tx.QueryRow(ctx, `SELECT count(DISTINCT r.account_id) FILTER (WHERE r.recognition_kind <> 'resettlement'),
             coalesce(sum(r.net),0)::text,coalesce(sum(r.tax),0)::text,coalesce(sum(r.quantity),0)
-        FROM app.sales_recognitions r WHERE true`+ledgerConditions(query).sql(), query.Args()).Scan(&accounts, &netText, &taxText,
-		&quantity)
+        FROM app.sales_recognitions r WHERE true`+list.sql(), query.Args()).Scan(&accounts, &netText, &taxText, &quantity)
 	if err != nil {
 		return nil, err
 	}
@@ -452,10 +457,12 @@ func salesByShift(ctx context.Context, query *Query) (*Dataset, error) {
 	if err != nil {
 		return nil, err
 	}
-	dataset, err := withFigures(ctx, query, rows)
+	// Las cifras resumidas excluyen los turnos en arqueo igual que los renglones.
+	figures, err := salesFiguresWhere(ctx, query, list)
 	if err != nil {
 		return nil, err
 	}
+	dataset := &Dataset{Rows: rows, Summary: figures, Notes: productNotes(query)}
 	warning, err := closingShiftsWarning(ctx, query)
 	if err != nil {
 		return nil, err

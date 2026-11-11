@@ -16,7 +16,9 @@ import (
 //     reports.export.pdf o reports.export.excel;
 //   - reports/dashboard: indicadores del resumen ejecutivo, cada uno con su permiso;
 //   - reports/filters/{source}: opciones de un filtro (cajas, turnos, usuarios, áreas, mesas,
-//     productos, categorías, métodos de pago, listas de precios, motivos y orígenes).
+//     productos, categorías, métodos de pago, listas de precios, motivos y orígenes), solo si el
+//     usuario puede consultar al menos un reporte que use esa fuente; los turnos, dentro de su
+//     alcance de Caja.
 //
 // Handle se llama dentro de la transacción de autenticación de administration: valida la ruta, los
 // permisos y la forma de los parámetros (una denegación se audita y se confirma como en el resto de
@@ -73,7 +75,7 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request) (*Plan, error) {
 				return nil, invalid("Las opciones de filtros solo admiten search.")
 			}
 		}
-		options, err := filterOptions(ctx, tx, parts[1], request.Query.Get("search"))
+		options, err := filterOptions(ctx, tx, request.Actor, parts[1], request.Query.Get("search"))
 		if err != nil {
 			return nil, err
 		}

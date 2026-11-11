@@ -46,6 +46,13 @@
 //     equivalencia al tipo de cambio de cada cobro; nunca se suman pesos y dólares. Exige
 //     cash.expected.read (paridad con Caja) y excluye los turnos en arqueo.
 //   - Turnos en arqueo (closing): sus cobros se excluyen de todo agregado para todos, con un aviso.
+//   - Alcance de Caja: los reportes de caja y de cobros (también sus avisos, las secciones de caja y
+//     cobros del resumen ejecutivo, las opciones del filtro de turnos y las exportaciones) solo
+//     incluyen los turnos que el usuario puede consultar en Caja (cashScopeSQL: cash.shifts.read;
+//     otras cajas con cash.shifts.read_all; cerrados con cash.history.read o si él los cerró), con
+//     el aviso CASH_SCOPE si el alcance es limitado.
+//   - Evolución: el periodo y el anterior se alinean por posición; las cubetas sobrantes del anterior
+//     van al final con solo su valor anterior, y los totales comparan los dos periodos completos.
 //   - Descuento por motivo: nombre histórico guardado (reason_name); sin motivo del catálogo,
 //     «Sin motivo del catálogo». Los descuentos se fechan con el reconocimiento de su venta.
 //   - Combos: el combo es la unidad vendida; sus componentes solo se reportan como cantidades
@@ -70,7 +77,10 @@
 //     con alias SQL iguales a las claves de las columnas (columnas auxiliares no declaradas se
 //     descartan antes de responder). Devolver todos los renglones del conjunto filtrado: el motor
 //     ordena, pagina y suma en Go las columnas con Total «sum»; Totals completa las «custom».
-//  4. Avisos y notas en Dataset.Warnings/Notes; nunca importes protegidos en ellos.
+//  4. Avisos y notas en Dataset.Warnings/Notes; nunca importes protegidos en ellos. Las cifras
+//     resumidas (Dataset.Summary) usan las mismas condiciones que los renglones (filtros, turnos en
+//     arqueo, alcance de Caja) o se rotulan con lo que abarcan. Un reporte sobre turnos o cobros
+//     agrega cashScopeSQL (alias s) con cashArgs(query).
 //  5. Indicadores del resumen ejecutivo: registerDashboard(DashboardSection{...}) con su permiso y
 //     Compute(periodo); cada indicador apunta a su reporte detallado (ReportID).
 //  6. Exportaciones (C1): llamar a Run(ctx, runner, actor, id, parámetros) con el mismo actor y los
@@ -80,5 +90,7 @@
 //  7. Pruebas: reports_test.go valida el registro; las de integración (reports_integration_test.go)
 //     comprueban totales contra los registros, permisos por API directa y paginación. El puente
 //     nativo ya admite cualquier id del registro (reports_run) y los parámetros de su lista blanca:
-//     un filtro nuevo debe agregarse a allowed_query_keys en desktop/src-tauri/src/api.rs.
+//     un filtro nuevo debe agregarse a allowed_query_keys en desktop/src-tauri/src/api.rs. Las
+//     opciones de una fuente (reports/filters/{source}) solo se entregan a quien puede consultar un
+//     reporte que la use.
 package reports

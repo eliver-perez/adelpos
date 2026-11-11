@@ -15,9 +15,11 @@ import (
 // Para cada fuente de la cuenta (recognition_targets.go) inserta la diferencia entre su objetivo y
 // la suma de lo ya reconocido de esa fuente en cualquier cuenta: el primer cierre reconoce todo; una
 // reliquidación después de una reapertura reconoce solo los cambios; si nada cambió no escribe nada.
-// Una fuente reconocida antes en esta cuenta que ya no forma parte de ella (unidad cancelada,
-// descuento cancelado) se lleva a cero, salvo una unidad que sigue activa en otra cuenta: esa la
-// reconocerá la cuenta donde está ahora, de modo que cada unidad se cuenta una sola vez.
+// Una fuente que ya no forma parte de la cuenta (unidad cancelada, descuento cancelado) se lleva a
+// cero si se reconoció antes en esta cuenta o si su unidad pertenece hoy a esta cuenta aunque se
+// haya reconocido en otra (unidad transferida después de una reapertura y cancelada aquí), salvo una
+// unidad que sigue activa en otra cuenta: esa la reconocerá la cuenta donde está ahora. Como la suma
+// es global, cada unidad se cuenta (y se revierte) una sola vez, cierre primero la cuenta que cierre.
 //
 // Turno y caja: los del pago registrado en la misma operación; sin pago (cortesía o entrega), el
 // turno activo de la caja de la terminal que cerró, si existe. Actor y terminal: los de la petición.
@@ -40,7 +42,7 @@ type recognitionContext struct {
 }
 
 // recognizedSource es lo ya reconocido de una fuente (suma de sus diferencias) con los datos de su
-// último renglón y el estado actual de su unidad.
+// último renglón y el estado actual de su unidad (cuenta y estado; nil en un ajuste de cuenta).
 type recognizedSource struct {
 	Line              recognitionLine
 	UnitAccountID     *string
@@ -96,7 +98,8 @@ func recognitionDeltas(accountID string, targets []recognitionLine, recognized m
 		}
 	}
 	for key, source := range recognized {
-		if seen[key] || !source.RecognizedInThere {
+		belongsHere := source.RecognizedInThere || (source.UnitAccountID != nil && *source.UnitAccountID == accountID)
+		if seen[key] || !belongsHere {
 			continue
 		}
 		// Una unidad activa en otra cuenta pertenece ahora a esa cuenta: no se resta aquí.
@@ -280,9 +283,10 @@ func attributeTargets(attributes *recognitionAttributes) []any {
 		&attributes.AdjustmentAuthorizedBy, &attributes.AdjustmentCreatedAt}
 }
 
-// readRecognizedSources suma lo ya reconocido de las fuentes de la cuenta: las de sus objetivos y
-// las que se reconocieron antes en ella. La suma es global (en cualquier cuenta), porque una unidad
-// pudo reconocerse en la cuenta donde estaba antes de transferirse.
+// readRecognizedSources suma lo ya reconocido de las fuentes de la cuenta: las de sus objetivos, las
+// que se reconocieron antes en ella y las de sus unidades canceladas (que pudieron reconocerse en la
+// cuenta donde estaban antes de transferirse). La suma es global (en cualquier cuenta), porque una
+// unidad pudo reconocerse en la cuenta donde estaba antes de transferirse.
 func (handler *service) readRecognizedSources(accountID string, targets []recognitionLine) (map[recognitionKey]recognizedSource, error) {
 	unitIDs := []string{}
 	adjustmentIDs := []string{}
@@ -294,12 +298,16 @@ func (handler *service) readRecognizedSources(accountID string, targets []recogn
 			adjustmentIDs = append(adjustmentIDs, target.Key.AdjustmentID)
 		}
 	}
-	// Cada rama usa su índice (cuenta, unidad o ajuste): el cierre nunca recorre el libro completo.
+	// Cada rama usa su índice (cuenta, unidad, unidades de la cuenta o ajuste): el cierre nunca recorre
+	// el libro completo.
 	rows, err := handler.tx.Query(handler.ctx, `WITH sources AS (
             SELECT DISTINCT source_kind,unit_id,adjustment_id,tax_rate FROM (
                 SELECT source_kind,unit_id,adjustment_id,tax_rate FROM app.sales_recognitions WHERE account_id=$1
                 UNION ALL
                 SELECT source_kind,unit_id,adjustment_id,tax_rate FROM app.sales_recognitions WHERE unit_id=ANY($2::uuid[])
+                UNION ALL
+                SELECT r.source_kind,r.unit_id,r.adjustment_id,r.tax_rate FROM app.restaurant_item_units u
+                JOIN app.sales_recognitions r ON r.unit_id=u.id WHERE u.account_id=$1 AND u.state='cancelled'
                 UNION ALL
                 SELECT source_kind,unit_id,adjustment_id,tax_rate FROM app.sales_recognitions WHERE adjustment_id=ANY($3::uuid[])
             ) keys

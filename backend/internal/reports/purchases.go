@@ -211,7 +211,25 @@ func init() {
 	})
 }
 
-// purchaseFigures resume recepciones, total, lo pagado desde caja y las devoluciones del periodo.
+// returnLineConditions son, sobre los renglones l de devoluciones sr (con su recepción r, el
+// proveedor supplier de la recepción, el insumo i y la orden o de la recepción), los mismos filtros
+// que receiptConditions aplica a las compras, con la fecha de la devolución.
+func returnLineConditions(query *Query) conditions {
+	list := conditions{inPeriod("sr.occurred_at")}
+	list.when(query, "supplier_id", "sr.supplier_id = @supplier_id::uuid")
+	list.when(query, "item_id", "l.item_id = @item_id::uuid")
+	list.when(query, "category_id", "i.category_id = @category_id::uuid")
+	list.when(query, "warehouse_id", "sr.warehouse_id = @warehouse_id::uuid")
+	list.when(query, "modality", modalitySQL+" = @modality")
+	list.when(query, "state", "o.state = @state")
+	return list
+}
+
+// purchaseFigures resume recepciones, total, lo pagado desde caja y las devoluciones del periodo con
+// los filtros del reporte. Las devoluciones se filtran por renglón (insumo y categoría exactos). Un
+// vínculo con un gasto de caja es de la recepción completa y no se reparte por insumo: con filtro de
+// insumo o categoría, «pagado desde caja» es el importe vinculado completo de las recepciones
+// incluidas y se rotula así.
 func purchaseFigures(ctx context.Context, query *Query, list conditions) ([]Figure, error) {
 	var receipts int64
 	var total, linked, returned string
@@ -222,18 +240,31 @@ func purchaseFigures(ctx context.Context, query *Query, list conditions) ([]Figu
         SELECT (SELECT count(*) FROM receipts),(SELECT coalesce(sum(total),0) FROM lines)::text,
             (SELECT coalesce(sum(cl.amount),0) FROM app.inventory_receipt_cash_links cl JOIN receipts x ON x.receipt_id=cl.receipt_id
                 WHERE cl.unlinked_at IS NULL)::text,
-            (SELECT coalesce(sum(sr.value),0) FROM app.inventory_supplier_returns sr WHERE `+inPeriod("sr.occurred_at")+`)::text`,
+            (SELECT round(coalesce(sum(l.value),0),2) FROM app.inventory_supplier_return_lines l
+                JOIN app.inventory_supplier_returns sr ON sr.id=l.return_id
+                JOIN app.inventory_receipts r ON r.id=sr.receipt_id
+                JOIN app.inventory_suppliers supplier ON supplier.id=r.supplier_id
+                JOIN app.inventory_items i ON i.id=l.item_id
+                LEFT JOIN app.inventory_purchase_orders o ON o.id=r.purchase_order_id
+                WHERE true`+returnLineConditions(query).sql()+`)::text`,
 		query.Args()).Scan(&receipts, &total, &linked, &returned)
 	if err != nil {
 		return nil, err
 	}
+	linkedLabel := "Pagado desde caja"
+	linkedHint := "Parte de estas compras vinculada con gastos de caja: ya está en el total, no es otra compra."
+	if query.Has("item_id") || query.Has("category_id") {
+		linkedLabel = "Pagado desde caja (recepciones completas)"
+		linkedHint = "Importe vinculado completo de cada recepción incluida: un vínculo con un gasto de caja no se reparte por " +
+			"insumo ni categoría. No es otra compra."
+	}
 	return []Figure{
 		{Key: "receipts", Label: "Recepciones", Type: TypeInteger, Value: receipts},
 		{Key: "total", Label: "Total recibido", Type: TypeMoneyMXN, Value: decimal.RequireFromString(total)},
-		{Key: "cash_linked", Label: "Pagado desde caja", Type: TypeMoneyMXN, Value: decimal.RequireFromString(linked),
-			Hint: "Parte de estas compras vinculada con gastos de caja: ya está en el total, no es otra compra."},
+		{Key: "cash_linked", Label: linkedLabel, Type: TypeMoneyMXN, Value: decimal.RequireFromString(linked), Hint: linkedHint},
 		{Key: "returned_value", Label: "Devoluciones a proveedor del periodo", Type: TypeMoneyMXN,
-			Value: decimal.RequireFromString(returned), Hint: "Aparte de las compras, a costo original; no se restan."},
+			Value: decimal.RequireFromString(returned),
+			Hint:  "Con los mismos filtros, por la fecha de la devolución; aparte de las compras, a costo original; no se restan."},
 	}, nil
 }
 

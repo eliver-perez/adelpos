@@ -81,12 +81,14 @@ func filterChoice(key, label, defaultValue string, options ...Option) Filter {
 var filterSources = map[string]string{
 	"registers": `SELECT id::text AS value,name AS label,CASE WHEN active THEN '' ELSE 'Inactiva' END AS detail
         FROM app.registers ORDER BY name`,
+	// Solo los turnos que el usuario puede consultar en Caja, como los reportes que usan este filtro.
 	"shifts": `SELECT s.id::text AS value,
             r.name||' · '||to_char(coalesce(s.business_date,(s.opened_at AT TIME ZONE coalesce(e.timezone,'UTC'))::date),'DD/MM/YYYY')
                 ||' · '||u.display_name AS label,
             CASE s.state WHEN 'open' THEN 'Abierto' WHEN 'closing' THEN 'En arqueo' ELSE 'Cerrado' END AS detail
         FROM app.cash_shifts s JOIN app.registers r ON r.id=s.register_id JOIN app.users u ON u.id=s.opened_by
         LEFT JOIN app.establishment e ON true
+        WHERE ` + cashScopeSQL + `
         ORDER BY s.opened_at DESC LIMIT 200`,
 	"users": `SELECT id::text AS value,display_name AS label,CASE WHEN active THEN '' ELSE 'Inactivo' END AS detail
         FROM app.users WHERE NOT support ORDER BY display_name`,
@@ -112,18 +114,37 @@ var filterSources = map[string]string{
         WHERE mode='takeaway' ORDER BY origin LIMIT 100`,
 }
 
+// filterAllowed indica si alguno de los reportes que el actor puede consultar usa la fuente.
+func filterAllowed(actor Actor, source string) bool {
+	for _, definition := range Definitions() {
+		if !definition.Allowed(actor) {
+			continue
+		}
+		for _, filter := range definition.Filters {
+			if filter.Source == source {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // filterOptions devuelve las opciones de una fuente de filtros. Solo nombres y estados, nunca
-// importes. search (opcional) busca productos por nombre o código.
-func filterOptions(ctx context.Context, tx pgx.Tx, source, search string) ([]Option, error) {
+// importes, y solo si el actor puede consultar al menos un reporte que use la fuente (si no, 403).
+// search (opcional) busca productos por nombre o código.
+func filterOptions(ctx context.Context, tx pgx.Tx, actor Actor, source, search string) ([]Option, error) {
 	query, found := filterSources[source]
 	if !found {
 		return nil, notFound("El filtro no existe.")
+	}
+	if !filterAllowed(actor, source) {
+		return nil, denied()
 	}
 	search = strings.TrimSpace(search)
 	if len([]rune(search)) > 80 {
 		return nil, invalid("La búsqueda admite hasta 80 caracteres.")
 	}
-	rows, err := tx.Query(ctx, query, pgx.NamedArgs{"search": search})
+	rows, err := tx.Query(ctx, query, withCashScope(actor, pgx.NamedArgs{"search": search}))
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +166,7 @@ var filterNames = map[string]string{
 	"shifts": `SELECT r.name||' · '||to_char(coalesce(s.business_date,(s.opened_at AT TIME ZONE coalesce(e.timezone,'UTC'))::date),
             'DD/MM/YYYY')||' · '||u.display_name
         FROM app.cash_shifts s JOIN app.registers r ON r.id=s.register_id JOIN app.users u ON u.id=s.opened_by
-        LEFT JOIN app.establishment e ON true WHERE s.id=@value::uuid`,
+        LEFT JOIN app.establishment e ON true WHERE s.id=@value::uuid AND ` + cashScopeSQL,
 	"users":            `SELECT display_name FROM app.users WHERE id=@value::uuid`,
 	"areas":            `SELECT name FROM app.restaurant_areas WHERE id=@value::uuid`,
 	"tables":           `SELECT t.name||' · '||a.name FROM app.restaurant_tables t JOIN app.restaurant_areas a ON a.id=t.area_id WHERE t.id=@value::uuid`,
@@ -156,8 +177,9 @@ var filterNames = map[string]string{
 	"discount_reasons": `SELECT name FROM app.discount_reasons WHERE id=@value::uuid`,
 }
 
-// describeFilters arma la lista legible de filtros aplicados (pantalla y exportaciones).
-func describeFilters(ctx context.Context, tx pgx.Tx, definition *Definition, params *Params) ([]AppliedFilter, error) {
+// describeFilters arma la lista legible de filtros aplicados (pantalla y exportaciones). El nombre
+// de un turno fuera del alcance de Caja del actor no se revela («Registro no encontrado»).
+func describeFilters(ctx context.Context, tx pgx.Tx, actor Actor, definition *Definition, params *Params) ([]AppliedFilter, error) {
 	applied := []AppliedFilter{}
 	for _, filter := range definition.Filters {
 		value := params.Values[filter.Key]
@@ -178,7 +200,7 @@ func describeFilters(ctx context.Context, tx pgx.Tx, definition *Definition, par
 			display = "Registro no encontrado"
 			if query, found := filterNames[filter.Source]; found {
 				var name string
-				err := tx.QueryRow(ctx, query, pgx.NamedArgs{"value": value}).Scan(&name)
+				err := tx.QueryRow(ctx, query, withCashScope(actor, pgx.NamedArgs{"value": value})).Scan(&name)
 				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 					return nil, err
 				}
