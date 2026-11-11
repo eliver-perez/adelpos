@@ -28,14 +28,34 @@ const Slots = 2
 type Runner struct {
 	pool  *pgxpool.Pool
 	slots chan struct{}
+	// logo es la fuente del logotipo del restaurante para el encabezado de las exportaciones
+	// (export_identity.go).
+	logo LogoSource
 }
 
-// NewRunner crea un ejecutor con size conexiones simultáneas.
+// NewRunner crea un ejecutor con size conexiones simultáneas y sin logotipo del restaurante.
 func NewRunner(pool *pgxpool.Pool, size int) *Runner {
 	if size < 1 {
 		size = 1
 	}
-	return &Runner{pool: pool, slots: make(chan struct{}, size)}
+	return &Runner{pool: pool, slots: make(chan struct{}, size), logo: NoRestaurantLogo}
+}
+
+// UseLogoSource fija la fuente del logotipo del restaurante (nil vuelve a NoRestaurantLogo) y
+// devuelve el mismo ejecutor. Se llama al crearlo, antes de atender peticiones.
+func (runner *Runner) UseLogoSource(source LogoSource) *Runner {
+	if source == nil {
+		source = NoRestaurantLogo
+	}
+	runner.logo = source
+	return runner
+}
+
+func (runner *Runner) logoSource() LogoSource {
+	if runner.logo == nil {
+		return NoRestaurantLogo
+	}
+	return runner.logo
 }
 
 // Acquire toma un lugar del semáforo sin esperar. ok es false si están todos ocupados; release

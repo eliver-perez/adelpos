@@ -30,6 +30,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if strings.HasPrefix(request.URL.Path, "/api/v1/catalog/") || strings.HasPrefix(request.URL.Path, "/api/v1/restaurant/") || strings.HasPrefix(request.URL.Path, "/api/v1/kitchen/") {
 		limit = 2 * 1024 * 1024
 	}
+	// El logotipo del restaurante (etapa 9B) llega en base64: hasta 1 MiB de archivo.
+	if request.URL.Path == "/api/v1/documents/identity/logo" {
+		limit = 2 * 1024 * 1024
+	}
 	// La existencia inicial admite hasta 500 renglones por operación (etapa 8).
 	if strings.HasPrefix(request.URL.Path, "/api/v1/inventory/") {
 		limit = 2 * 1024 * 1024

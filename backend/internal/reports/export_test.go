@@ -6,6 +6,7 @@ import (
 	"compress/zlib"
 	"context"
 	"errors"
+	"image"
 	"io"
 	"net/url"
 	"os"
@@ -131,7 +132,10 @@ func exportTestDocument(t *testing.T, definition *Definition, rows []Row, permis
 	}
 	result.Meta.Filters = []AppliedFilter{{Key: "product_id", Label: "Producto", Value: "0f8e3c2a-0000-4000-8000-000000000001",
 		Display: "Hamburguesa «doble»"}}
-	return &exportDocument{Establishment: "Restaurante El Peñón", Result: result, Location: location, Paper: PaperLetter}
+	// Como en runExport, el encabezado lleva el logotipo de AD-EL POS cuando el restaurante no tiene
+	// uno propio.
+	return &exportDocument{Establishment: "Restaurante El Peñón", Result: result, Location: location, Paper: PaperLetter,
+		Logo: testBrandLogo(t)}
 }
 
 // pdfPages extrae el texto de cada página: descomprime los flujos de contenido y decodifica las
@@ -408,8 +412,12 @@ func numberFormat(t *testing.T, file *excelize.File, sheet, cell string) (int, s
 	return style.NumFmt, custom
 }
 
+// headerParts son las únicas partes de imagen permitidas desde la etapa 9B: el logotipo del
+// encabezado de la hoja «Filtros» (un dibujo con su relación y una imagen PNG o JPEG).
+var headerParts = regexp.MustCompile(`^xl/(media/image1\.(png|jpeg)|drawings/drawing1\.xml|drawings/_rels/drawing1\.xml\.rels)$`)
+
 // assertSafeWorkbook descomprime el libro y comprueba que no hay fórmulas, hipervínculos, nombres
-// definidos, vínculos externos ni macros.
+// definidos, vínculos externos ni macros, y que la única imagen es la del encabezado.
 func assertSafeWorkbook(t *testing.T, content []byte) {
 	t.Helper()
 	archive, err := zip.NewReader(bytes.NewReader(content), int64(len(content)))
@@ -418,9 +426,11 @@ func assertSafeWorkbook(t *testing.T, content []byte) {
 	}
 	for _, entry := range archive.File {
 		name := strings.ToLower(entry.Name)
-		if strings.Contains(name, "externallink") || strings.Contains(name, "vbaproject") || strings.HasSuffix(name, ".bin") ||
-			strings.Contains(name, "media/") || strings.Contains(name, "drawings/") {
+		if strings.Contains(name, "externallink") || strings.Contains(name, "vbaproject") || strings.HasSuffix(name, ".bin") {
 			t.Fatalf("El libro contiene una parte no permitida: %s", entry.Name)
+		}
+		if (strings.Contains(name, "media/") || strings.Contains(name, "drawings/")) && !headerParts.MatchString(name) {
+			t.Fatalf("El libro contiene una imagen o un dibujo distinto del logotipo del encabezado: %s", entry.Name)
 		}
 		reader, err := entry.Open()
 		if err != nil {
@@ -430,6 +440,13 @@ func assertSafeWorkbook(t *testing.T, content []byte) {
 		_ = reader.Close()
 		if err != nil {
 			t.Fatal(err)
+		}
+		if strings.HasPrefix(name, "xl/media/") {
+			// Los bytes de la imagen no son XML: basta con que sea un PNG o JPEG legible.
+			if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil {
+				t.Fatalf("%s no es una imagen válida: %v", entry.Name, err)
+			}
+			continue
 		}
 		text := string(data)
 		if regexp.MustCompile(`<f[ >]|<f/>`).MatchString(text) {

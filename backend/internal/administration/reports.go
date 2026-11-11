@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/identity"
 	"local/ad-el-pos/server/internal/reports"
 )
 
@@ -37,7 +38,8 @@ type reportPlan struct {
 func (service *Service) reportRunner() *reports.Runner {
 	service.reportsOnce.Do(func() {
 		if service.Reports == nil {
-			service.Reports = reports.NewRunner(service.Pool, reports.Slots)
+			// Etapa 9B: el encabezado de las exportaciones usa el logotipo del restaurante.
+			service.Reports = reports.NewRunner(service.Pool, reports.Slots).UseLogoSource(identity.ReportLogo)
 		}
 	})
 	return service.Reports

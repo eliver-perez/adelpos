@@ -7,7 +7,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 	"github.com/xuri/excelize/v2"
@@ -583,6 +588,10 @@ func TestReportExports(t *testing.T) {
 		}
 	})
 
+	t.Run("encabezado con el logotipo del restaurante o el de AD-EL POS", func(t *testing.T) {
+		assertHeaderIdentity(t, fixture, exportCount)
+	})
+
 	t.Run("archivo grande y límite de 50 000 renglones", func(t *testing.T) {
 		insert := func(count int, seed string) {
 			t.Helper()
@@ -658,4 +667,119 @@ func TestReportExports(t *testing.T) {
 func (fixture *reportsFixture) adminID(t *testing.T) string {
 	t.Helper()
 	return fixture.scalar(t, "SELECT id::text FROM app.users WHERE username='admin'")
+}
+
+// Encabezado de identidad por la API real (etapa 9B): dirección, teléfono y correo de
+// app.establishment; sin logotipo del restaurante (fuente por omisión) la marca de AD-EL POS; con la
+// fuente que conectará la fase B2, el logotipo del restaurante leído dentro de la transacción
+// REPEATABLE READ READ ONLY del reporte, sin locks consultivos; el contenido del libro igual a la
+// pantalla, una auditoría por archivo y un error de la fuente que hace fallar la exportación sin
+// auditarla.
+func assertHeaderIdentity(t *testing.T, fixture *reportsFixture, exportCount func() int) {
+	t.Helper()
+	const address, phone, email = "Av. Reforma 10, Centro", "81 5555 0000", "contacto@reportes.mx"
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.establishment SET address=$1, phone=$2, email=$3",
+		address, phone, email); err != nil {
+		t.Fatal(err)
+	}
+	defaultRunner := reports.NewRunner(fixture.pool, reports.Slots)
+	t.Cleanup(func() {
+		fixture.service.Reports = defaultRunner
+		if _, err := fixture.pool.Exec(context.Background(), "UPDATE app.establishment SET address='', phone='', email=''"); err != nil {
+			t.Error(err)
+		}
+	})
+	fixture.service.Reports = defaultRunner
+	before := exportCount()
+	result := fixture.screen(t, fixture.admin, "sales.by_product", "")
+	pdf := fixture.exportOK(t, fixture.admin, "sales.by_product", "format=pdf")
+	if sizes := reports.PDFImageSizesForTest(pdf.body); !slices.Equal(sizes, [][2]int{{504, 168}}) {
+		t.Fatalf("Sin logotipo del restaurante el PDF lleva la marca de AD-EL POS: %v", sizes)
+	}
+	first := reports.PDFPagesForTest(t, pdf.body)[0]
+	for _, expected := range []string{"Restaurante de reportes", address, "Tel. " + phone + " · " + email} {
+		if !strings.Contains(first, expected) {
+			t.Fatalf("El encabezado del PDF no contiene «%s»", expected)
+		}
+	}
+	xlsx := fixture.exportOK(t, fixture.admin, "sales.by_product", "format=xlsx")
+	assertSameAsScreen(t, "sales.by_product", result, xlsx.body)
+	file := workbook(t, xlsx.body)
+	pictures, err := file.GetPictures("Filtros", "A1")
+	if err != nil || len(pictures) != 1 || !bytes.Equal(pictures[0].File, reports.BrandHeaderLogoForTest(t)) {
+		t.Fatalf("La hoja de filtros debe llevar la marca en A1: %d %v", len(pictures), err)
+	}
+	info := map[string]string{}
+	for _, row := range sheetRows(t, file, "Filtros", false) {
+		if len(row) > 1 {
+			info[row[0]] = row[1]
+		}
+	}
+	if info["Establecimiento"] != "Restaurante de reportes" || info["Dirección"] != address || info["Teléfono"] != phone ||
+		info["Correo electrónico"] != email {
+		t.Fatalf("Identidad en la hoja de filtros: %+v", info)
+	}
+	content := workbookText(t, xlsx.body)
+	if strings.Contains(content, "<f>") || strings.Contains(content, "hyperlink") || strings.Contains(content, `TargetMode="External"`) {
+		t.Fatal("El encabezado no debe agregar fórmulas, hipervínculos ni vínculos externos")
+	}
+
+	// La fuente del logotipo del restaurante (lo que conectará B2) corre dentro de la transacción
+	// de solo lectura del reporte y sin locks consultivos.
+	logo := restaurantLogoPNG(t)
+	var readOnly, isolation string
+	advisory := -1
+	fixture.service.Reports = reports.NewRunner(fixture.pool, reports.Slots).UseLogoSource(
+		func(ctx context.Context, tx pgx.Tx) ([]byte, error) {
+			err := tx.QueryRow(ctx, `SELECT current_setting('transaction_read_only'), current_setting('transaction_isolation'),
+                (SELECT count(*)::int FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid())`).
+				Scan(&readOnly, &isolation, &advisory)
+			return logo, err
+		})
+	pdf = fixture.exportOK(t, fixture.admin, "sales.by_product", "format=pdf")
+	if sizes := reports.PDFImageSizesForTest(pdf.body); !slices.Equal(sizes, [][2]int{{90, 30}}) {
+		t.Fatalf("El PDF debe llevar el logotipo del restaurante: %v", sizes)
+	}
+	if readOnly != "on" || isolation != "repeatable read" || advisory != 0 {
+		t.Fatalf("La identidad se lee en la transacción del reporte: read_only=%s isolation=%s advisory=%d", readOnly, isolation, advisory)
+	}
+	xlsx = fixture.exportOK(t, fixture.admin, "sales.by_product", "format=xlsx")
+	assertSameAsScreen(t, "sales.by_product", result, xlsx.body)
+	pictures, err = workbook(t, xlsx.body).GetPictures("Filtros", "A1")
+	if err != nil || len(pictures) != 1 || !bytes.Equal(pictures[0].File, reports.HeaderLogoForTest(t, logo)) {
+		t.Fatalf("La hoja de filtros debe llevar el logotipo del restaurante: %d %v", len(pictures), err)
+	}
+	if exportCount() != before+4 {
+		t.Fatalf("Cada archivo se audita una vez: %d", exportCount()-before)
+	}
+
+	// Un error de la fuente hace fallar la exportación como cualquier error de base de datos y no
+	// se audita.
+	fixture.service.Reports = reports.NewRunner(fixture.pool, reports.Slots).UseLogoSource(
+		func(context.Context, pgx.Tx) ([]byte, error) {
+			return nil, errors.New("tabla de identidad no disponible")
+		})
+	if response := fixture.export(t, fixture.admin, "sales.by_product", "format=pdf"); response.status == 200 ||
+		bytes.HasPrefix(response.body, []byte("%PDF-")) {
+		t.Fatalf("Un error de la fuente del logotipo debe impedir la exportación: %d", response.status)
+	}
+	if exportCount() != before+4 {
+		t.Fatal("Una exportación fallida no se audita")
+	}
+}
+
+// restaurantLogoPNG es un logotipo de 90 × 30 con fondo transparente.
+func restaurantLogoPNG(t *testing.T) []byte {
+	t.Helper()
+	picture := image.NewNRGBA(image.Rect(0, 0, 90, 30))
+	for y := 5; y < 25; y++ {
+		for x := 5; x < 85; x++ {
+			picture.Set(x, y, color.NRGBA{R: 10, G: 120, B: 60, A: 255})
+		}
+	}
+	var buffer bytes.Buffer
+	if err := png.Encode(&buffer, picture); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }

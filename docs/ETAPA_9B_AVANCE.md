@@ -208,3 +208,144 @@ Ejecutadas por el agente de la fase en su copia aislada (clúster temporal 55499
   1 000 comprobantes y cortes; bytes ESC/POS y argumentos de `lp` sin cambios en el camino plano.
 - `cargo test --locked --offline`: 32 aprobadas y 1 ignorada (la de hardware), incluida la de la lista cerrada de
   `documents_*`; Vitest de `services/documents.test.ts` y `api.test.ts` (7 pruebas).
+
+Cierre de la fase sobre una copia exacta del commit `9a4884d` (`git archive`, clúster temporal 55499): formato
+(Prettier sin `docs/etapas/`, gofmt y `cargo fmt --check`) limpio; `go vet` con y sin `-tags=integration` sin
+hallazgos; `go test -race` aprobado en `documents`, `designer`, `kitchen`, `payments`, `administration` y `database`;
+integración `designer` (17.2 s), `database` (5.8 s), `administration` (54.6 s), `payments` (2.1 s) y `operations`
+(230.9 s) `ok`; `tsc --noEmit` sin errores; Vitest de `src/services` (7 archivos, 90 pruebas) y `cargo test` (32
+aprobadas, 1 ignorada) aprobados.
+
+## Fase B · Identidad del establecimiento y logotipo
+
+### Parte B1: conversión del logotipo y encabezado de los reportes
+
+Piezas puras, sin base de datos ni HTTP, hechas en paralelo con la fase A:
+
+- **`internal/logoraster`**: `Validate` (solo PNG o JPEG por firma y por `image.DecodeConfig`, ≤ 1 MiB, de 1 × 1 a
+  2048 × 2048, dimensiones comprobadas **antes** de decodificar y decodificación completa después; rechaza SVG, GIF,
+  WebP, vacíos, truncados y extensiones engañosas, con mensajes en español), `Convert` (58 mm = 384 puntos y 80 mm = 576,
+  ancho relativo 25–100 %, alineación por relleno blanco hasta el ancho imprimible, transparencia a blanco, luminancia
+  BT.601, escalado Catmull-Rom de `golang.org/x/image/draw` —ya estaba en el módulo; sin dependencias nuevas—, umbral
+  1–255 o difuminado Floyd–Steinberg entero, altura máxima de 320 puntos ≈ 40 mm, determinista) y `Raster` inmutable
+  (bits por fila, MSB primero, 1 = negro; `PNG()` de vista previa de 1 bit y `ESCPos()` con `GS v 0` en franjas de 128
+  filas para impresoras con poca memoria de imagen).
+- **`internal/brand`**: copia embebida byte a byte de `assets/brand/adel-pos-tema-claro.png` (la original no se tocó);
+  una prueba compara bytes y SHA-256 con el archivo del repositorio.
+- **Reportes PDF y Excel de la 9A**: la primera página del PDF lleva el logotipo (≤ 50 × 14 mm) con el nombre, la
+  dirección y «Tel. … · correo» del establecimiento (solo los datos que existan); la hoja «Filtros» del Excel inserta el
+  logotipo en A1 (anclado, sin hipervínculo), el nombre en B1 y «Dirección», «Teléfono» y «Correo electrónico» tras
+  «Establecimiento». Sin logotipo del restaurante se usa el de AD-EL POS con el nombre del establecimiento. La imagen se
+  vuelve a validar y a codificar sin metadatos (≤ 600 × 168 px). Comparado con el commit de la 9A: las cadenas del PDF y
+  la hoja «Datos» del Excel son idénticas; contenido, columnas, totales, orden, consultas, límites y auditoría no
+  cambian; la primera página crece ≈ 14.5 mm (un reporte que llenaba sus páginas puede ocupar una más) y cada archivo
+  pesa ≈ 28–29 KB más.
+- Pruebas (copia aislada, clúster 55499): `go vet` con y sin `-tags=integration` sin hallazgos; `go test -race` `ok` en
+  `logoraster`, `brand` y `reports`; integración `internal/reports` `ok` (93 s, con el subtest nuevo del encabezado) e
+  `internal/reports/operational` `ok` (40 s).
+
+### Parte B2: identidad del establecimiento y logotipo
+
+Segunda parte de la fase B, sobre los paquetes puros de B1 (`internal/logoraster`, `internal/brand`)
+y conectada con la fase A (commit `9a4884d`). Nada se ejecutó contra la instalación real: copias aisladas del repositorio y el clúster temporal 55499.
+
+#### Qué quedó
+
+- **Migración `0019_document_identity.sql`** (transaccional, restricciones con nombre, sin datos
+  ficticios): `app.document_identity` (fila única: información adicional, texto de encabezado y de
+  pie de ≤ 300 caracteres y ≤ 8 renglones sin controles; logotipo vigente; presentación —ancho
+  25–100 %, alineación, método `threshold|dither`, umbral 1–255—; conversiones vigentes de 58 y 80 mm
+  con llaves compuestas al logotipo vigente y «las tres o ninguna»; `revision`, `updated_by`,
+  `updated_at`; disparador contra DELETE y TRUNCATE), `app.document_logos` (original inmutable en
+  `bytea`, tipo, dimensiones, tamaño y SHA-256 comprobado contra los bytes, único; quién y cuándo) y
+  `app.document_logo_rasters` (conversiones inmutables por logotipo, ancho de papel, presentación y
+  versión del convertidor, con ancho y alto en puntos y bits de tamaño exacto). Disparadores de
+  inmutabilidad en originales y conversiones. Sin permisos nuevos (`documents.identity.manage` es de
+  la 0018).
+- **Paquete `backend/internal/identity`**: lectura combinada con `app.establishment` (sin duplicar
+  nombre, dirección, teléfono ni correo), `PUT` con revisión, carga/reemplazo/retiro del logotipo con
+  `logoraster` (validación de B1, conversión a 384 y 576 puntos guardada al cargar o al cambiar la
+  presentación, reutilizada si la combinación existe; el mismo archivo se guarda una sola vez), vista
+  previa como `data_uri` (original y papel), vista previa de otra presentación sin guardar,
+  idempotencia por `operation_id` con el lock de fila de la identidad tomado antes de buscar el
+  resultado, auditoría sin bytes ni base64 y evento SSE `documents.identity.changed` en el ámbito
+  `documents`, todo en la misma transacción. Permisos en Go antes de leer el cuerpo: leer con
+  `documents.templates.read` o `settings.read`; escribir y previsualizar otra presentación con
+  `documents.identity.manage`.
+- **Conexiones**: `documents.LoadIdentity` completa la copia de la identidad de cada documento
+  (información adicional, encabezado, pie y las dos conversiones vigentes); `identity.Rasters`
+  implementa `documents.RasterSource` y `DataURI` (vista previa del diseñador) y queda asignada en
+  `kitchen.Worker` y `administration.Service` (`main.go`; en las pruebas, `service.documentRasters()`
+  usa el pool); `documents/printers` dice en el motivo de compatibilidad del logotipo cuándo no hay
+  logotipo cargado; los reportes PDF y Excel usan `identity.ReportLogo` (`UseLogoSource`) con el
+  respaldo de AD-EL POS sin logotipo; `documents/identity*` se delega antes del prefijo del
+  diseñador; la ruta de carga admite 2 MiB.
+- **Puente e interfaz**: cinco operaciones cerradas en `api.rs` (con prueba Rust) y en `api.ts`;
+  `services/documentIdentity.ts`; `pages/documents/IdentityPanel.tsx` (firma acordada con C) con
+  `pages/documents/identity/` (datos del establecimiento de solo lectura con «Editar en
+  Configuración general», textos con contador, logotipo con `<input type="file">` PNG/JPEG en
+  base64, reemplazo, retiro con `ConfirmDialog`, original y papel de 58/80 mm, presentación con
+  pasos y segmentados —nunca `type="number"`—, vista previa sin guardar con antirrebote y una sola
+  petición en vuelo, conflicto de revisión sin perder lo escrito, reintento de un resultado incierto
+  con el mismo `operation_id`, solo lectura sin `documents.identity.manage`, avisos con `notify.ts`,
+  tokens de tema y papel blanco en ambos temas); `useRealtime` publica
+  `adel-documents-identity-change` solo con `documents.identity.changed` (la lectura lleva imágenes).
+
+#### Decisiones
+
+- Las conversiones vigentes se guardan como referencias en la identidad (`logo_raster_58_id`,
+  `logo_raster_80_id`): la copia de cada documento es un SELECT simple y nunca se convierte al
+  imprimir. Las conversiones y originales nunca se borran: un documento emitido antes de reemplazar o
+  retirar el logotipo se reimprime con los mismos bits.
+- Con difuminado el umbral no interviene: la conversión se identifica con 128 (punto de decisión fijo)
+  y se reutiliza aunque cambie el umbral guardado en la presentación.
+- `converter_version` (1) forma parte de la llave de una conversión, por si el algoritmo de
+  `logoraster` cambia.
+- Las escrituras responden la identidad sin imágenes (así se guarda en `restaurant_operations`); la
+  pantalla vuelve a consultar `GET`. Guardar sin cambios no crea revisión, auditoría ni evento.
+- Se agregó `POST documents/identity/logo/preview` (no estaba en el diseño): ver otra presentación sin
+  guardarla es necesario para ajustar el umbral con el dedo; no escribe nada.
+- Textos: además de quitar controles e invisibles, se recortan espacios finales y renglones vacíos al
+  inicio y al final antes de aplicar los límites.
+
+#### Limitaciones
+
+- **Papel**: el logotipo impreso es una prueba física pendiente del propietario (solo se comprobó con
+  el transporte de prueba de loopback y el ejecutor simulado de CUPS).
+- Un `GET documents/identity` con un original de 1 MiB pesa ≈ 1,4 MB (cabe en los 2 MiB del puente);
+  el panel solo lo vuelve a pedir con su propio evento SSE o tras una escritura propia.
+- Quien tiene `documents.identity.manage` sin permiso de lectura recibe la identidad en la respuesta de
+  sus escrituras (no es un dato protegido).
+- `config/product.json` sigue con `schema_version` 17 hasta la fase D (versión y esquema finales).
+- La especificación Playwright `documents-identity.spec.ts` se escribió en esta parte, pero necesita la pantalla
+  «Documentos» de la fase C: se ejecuta y se confirma con la fase C.
+
+#### Pruebas ejecutadas (11/11/2026, copia `$SCR/repo9bB2` sincronizada tras `9a4884d`; clúster 55499)
+
+- `gofmt -l backend`: sin archivos. `go vet ./...` y `go vet -tags=integration ./...`: sin hallazgos.
+- `go test -race -count=1`: `ok` identity, logoraster, brand, documents, designer, kitchen (incluida
+  `TestRealLogoThroughCUPSQueues`: logotipo real por CUPS raw con `GS v 0` y por CUPS sin raw con el
+  texto, aviso y `submitted`; sin logotipo el bloque no imprime nada), administration, reports y
+  payments.
+- Integración (`iter_snap.sh`): `./internal/identity` ok 16 s (`TestDocumentIdentity`, 14 subpruebas:
+  lectura combinada, textos con revisión/idempotencia/conflicto, PNG y JPEG con conversiones 58/80 y
+  vistas previas, rechazos de SVG, GIF, PNG truncado, > 1 MiB, 2049 px, vacío y base64 inválido,
+  reemplazo conservando el anterior, reutilización de conversiones, fuente de reportes en
+  transacción de solo lectura sin locks, retiro, inmutabilidad, dos administradores a la vez y mismo
+  `operation_id` concurrente, permisos y `access.denied` por HTTP, carga > 64 KiB por HTTP con
+  auditoría sin bytes, evento SSE solo para `documents.templates.read`, PDF/Excel con logotipo del
+  restaurante y respaldo de AD-EL POS, y conexión con el renderizador: copia de la identidad,
+  vista previa del diseñador con `data_uri` a 58 y 80 mm, aviso de impresoras sin logotipo, muestra
+  por ESC/POS a un puerto de loopback con `GS v 0` y los bits guardados, y copias idénticas tras
+  reemplazar y retirar el logotipo); `./internal/designer` ok 18 s; `./internal/database` ok 6 s;
+  `./internal/reports` ok 95 s; `./internal/administration` ok 56 s; `./internal/operations` ok
+  226 s (incluye `testStage9BLogo`: comanda real con logotipo, IR con la conversión de 80 mm, bits
+  cargados por el trabajador con `GS v 0`, reimpresión idéntica tras reemplazar y retirar, comanda
+  sin logotipo sin línea de imagen).
+- `cargo test --locked --offline`: 33 ok, 1 ignorada (Keychain real), incluida
+  `document_identity_routes_are_closed_and_keep_write_methods`.
+- `npx tsc --noEmit`: sin errores. `npm run build`: ok. Vitest: `identityPanel.test.tsx` 11 ok,
+  `useRealtime.test.tsx` 4 ok (nueva: evento de identidad), `src/services` ok (105 pruebas en 9
+  archivos).
+- Playwright: `e2e/documents-identity.spec.ts` escrita (Chromium y WebKit, puertos 8185/1423), **no
+  ejecutada**: `pages/documents/DocumentsPage.tsx` de la fase C aún no existe en el árbol.

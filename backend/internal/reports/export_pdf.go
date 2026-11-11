@@ -16,9 +16,11 @@ import (
 // PDF de un reporte (§17) con codeberg.org/go-pdf/fpdf y las fuentes Go (Go Regular y Go Bold,
 // golang.org/x/image/font/gofont) incrustadas como UTF-8: el texto con acentos, «ñ», «¿¡» y «€» se
 // puede copiar y buscar. Estructura:
-//   - primera página: establecimiento, nombre y descripción del reporte, periodo, comparación,
-//     filtros aplicados, fecha usada, hora de inicio del día, orden, renglones y fecha de
-//     generación; después las cifras resumidas y los avisos;
+//   - primera página: encabezado de identidad (logotipo del restaurante o, si no tiene, el de
+//     AD-EL POS, con el nombre, la dirección, el teléfono y el correo del establecimiento;
+//     export_pdf_identity.go), nombre y descripción del reporte, periodo, comparación, filtros
+//     aplicados, fecha usada, hora de inicio del día, orden, renglones y fecha de generación;
+//     después las cifras resumidas y los avisos;
 //   - páginas siguientes: un encabezado breve (reporte, establecimiento y periodo);
 //   - tabla con los encabezados de columna repetidos en cada página, renglones alternados, totales
 //     de Go al final y las notas del reporte;
@@ -329,11 +331,7 @@ func (writer *pdfWriter) firstPageHeader() {
 	result := document.Result
 	meta := result.Meta
 	pdf.SetXY(writer.left, pdfMargin)
-	if document.Establishment != "" {
-		pdf.SetFont(pdfFamily, "B", 10)
-		writer.color(pdfMuted)
-		pdf.MultiCell(writer.width, 5, cleanText(document.Establishment), "", "L", false)
-	}
+	writer.identityHeader()
 	pdf.SetFont(pdfFamily, "B", 15)
 	writer.color(pdfInk)
 	pdf.MultiCell(writer.width, 7, cleanText(meta.Title), "", "L", false)

@@ -65,6 +65,12 @@ export type Operation =
   | 'reports_run'
   | 'reports_dashboard'
   | 'reports_filters'
+  // Etapa 9B (fase B2): identidad del establecimiento y logotipo (services/documentIdentity.ts).
+  | 'documents_identity'
+  | 'documents_save_identity'
+  | 'documents_upload_identity_logo'
+  | 'documents_remove_identity_logo'
+  | 'documents_preview_identity_logo'
   | 'registers'
   | 'create_register'
   | 'update_register'
