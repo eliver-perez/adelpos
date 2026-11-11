@@ -54,7 +54,12 @@ simulados** (transporte controlado de la cola, puerto TCP de loopback y ejecutor
 
 ## Regresión final de la fase D
 
-PENDIENTE: la completa el coordinador con la salida real
+Aprobada el 11 de noviembre de 2026 sobre copias exactas de `31a0ea1` y `40c8d17` (clúster temporal 55499): formato,
+metadatos, `go vet`, 22 paquetes Go con `-race`, integración PostgreSQL de los nueve paquetes (`database`,
+`administration`, `catalog`, `operations`, `payments`, `reports`, `reports/operational`, `designer` e `identity`),
+`tsc --noEmit`, Vitest (62 archivos, 536 pruebas), `npm run build`, `cargo test` (33 aprobadas, 1 ignorada), Playwright
+Chromium 12/12 y WebKit 12/12, y el `.app` 0.9.1 compilado en la copia aislada. Detalle en
+[VERIFICATION_STAGE9B.md](VERIFICATION_STAGE9B.md) y en el avance. Las pruebas físicas siguen pendientes.
 
 ## Repetir las comprobaciones
 
