@@ -3,6 +3,7 @@
 package operations_test
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
@@ -94,13 +95,25 @@ func testSupplierContactFields(t *testing.T, fixture *purchasingFixture) {
 			t.Fatalf("Búsqueda %q: %+v", search, page.Items)
 		}
 	}
-	// Borrar los datos nuevos al editar (vacíos son «sin dato») y conservar el resto.
-	edited := decodeResponse[inventory.SupplierDetail](t, fixture.write(t, fixture.supplierClerk, "PATCH", "inventory/suppliers/"+created.ID,
+	// Revisión independiente de la 9A: un cliente anterior a la 9A edita sin enviar los datos nuevos
+	// y se conservan (no se borran).
+	kept := decodeResponse[inventory.SupplierDetail](t, fixture.write(t, fixture.supplierClerk, "PATCH", "inventory/suppliers/"+created.ID,
 		map[string]any{"revision": created.Revision, "trade_name": created.TradeName, "phone": created.Phone, "contact": created.Contact,
-			"website": "verdurasruiz.example.mx"}, 200))
-	if edited.PhoneSecondary != "" || edited.MobilePhone != "" || edited.Website != "verdurasruiz.example.mx" || edited.Revision != 2 {
+			"notes": "Editado sin los campos nuevos"}, 200))
+	if kept.PhoneSecondary != created.PhoneSecondary || kept.MobilePhone != created.MobilePhone || kept.Website != created.Website ||
+		kept.Notes != "Editado sin los campos nuevos" || kept.Revision != 2 {
+		t.Fatalf("Una edición sin los campos nuevos los borró: %+v", kept.Supplier)
+	}
+	// Enviados vacíos sí los borran («sin dato»); el resto se conserva.
+	edited := decodeResponse[inventory.SupplierDetail](t, fixture.write(t, fixture.supplierClerk, "PATCH", "inventory/suppliers/"+created.ID,
+		map[string]any{"revision": kept.Revision, "trade_name": created.TradeName, "phone": created.Phone, "contact": created.Contact,
+			"phone_secondary": "", "mobile_phone": "", "website": "verdurasruiz.example.mx"}, 200))
+	if edited.PhoneSecondary != "" || edited.MobilePhone != "" || edited.Website != "verdurasruiz.example.mx" || edited.Revision != 3 {
 		t.Fatalf("Edición de los datos adicionales: %+v", edited.Supplier)
 	}
+	fixture.write(t, fixture.supplierClerk, "PATCH", "inventory/suppliers/"+created.ID, map[string]any{
+		"revision": edited.Revision, "trade_name": created.TradeName, "website": "javascript:alert(1)",
+	}, 400)
 	// Un proveedor de la etapa 8 (sin los campos nuevos en el cuerpo) se sigue guardando.
 	second := fixture.suppliers["second"]
 	current := decodeResponse[inventory.SupplierDetail](t, fixture.call(t, fixture.buyer, "GET", "inventory/suppliers/"+second.ID, nil, 200))
@@ -298,6 +311,31 @@ func testItemCodeCheck(t *testing.T, fixture *purchasingFixture) {
 	// Los comodines de LIKE no se interpretan.
 	if wildcard := check("code=c%25"); !wildcard.Available || wildcard.Suggestion != "c%" {
 		t.Fatalf("Comodín: %+v", wildcard)
+	}
+	// Revisión independiente de la 9A: la sugerencia usa la misma clave que el índice único
+	// (lower() de PostgreSQL), también con «Ñ» y acentos, y nunca sugiere un código ocupado: el
+	// código sugerido se puede guardar (el índice único no distingue insumos inactivos, así que se
+	// crean inactivos para no alterar las fases siguientes).
+	pano := fixture.createItem(t, map[string]any{
+		"code": "PAÑO-9A", "name": "Paño de cocina 9A", "base_unit_id": fixture.units["g"].ID, "kind": "purchased", "active": false,
+	})
+	occupied := check("code=" + url.QueryEscape("PAÑO-9A"))
+	if occupied.Available || occupied.Suggestion != "PAÑO-9A-2" || text(occupied.TakenBy) != pano.Name {
+		t.Fatalf("Código con «Ñ» ocupado: %+v", occupied)
+	}
+	var sameKey bool
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT lower('PAÑO-9A')=lower('paño-9a')").Scan(&sameKey); err != nil {
+		t.Fatal(err)
+	}
+	for _, code := range []string{"PAÑO-9A", "paño-9a", "CAFÉ-9A"} {
+		suggested := check("code=" + url.QueryEscape(code))
+		if code == "paño-9a" && suggested.Available == sameKey {
+			t.Fatalf("«paño-9a» debía estar libre solo si su clave difiere de la de «PAÑO-9A»: %+v", suggested)
+		}
+		fixture.createItem(t, map[string]any{
+			"code": suggested.Suggestion, "name": "Insumo " + suggested.Suggestion, "base_unit_id": fixture.units["g"].ID,
+			"kind": "purchased", "active": false,
+		})
 	}
 	// Go sigue siendo la autoridad al guardar.
 	if errorCode(t, fixture.adminWrite(t, "POST", "inventory/items", map[string]any{

@@ -9,16 +9,17 @@ type componentTotals struct {
 	// charges suma los cargos de los componentes (sustitución, tramos y personalización con la
 	// regla con piso); nunca se descuentan.
 	charges decimal.Decimal
-	// adjustments suma las reducciones por complementos de los componentes (cero o negativas), que
-	// solo existen cuando el combo también tiene la opción de bajar el precio (§3.1).
-	adjustments decimal.Decimal
+	// reductions son las reducciones por complementos de los componentes que también aplican la
+	// opción de bajar el precio (solo existen cuando el combo la tiene, §3.1), sin acotar: el precio
+	// suelto del componente no interviene porque el combo lo cubre.
+	reductions []componentReduction
 }
 
 // components calcula los componentes de un combo. decrease indica si el combo aplica la opción «El
 // precio puede bajar al cambiar complementos»; sin ella, ningún componente baja el precio aunque
 // tenga la opción. Las sustituciones de ranura no son complementos y no cambian.
 func (engine *calculator) components(product Product, customization Customization, result *ProductBreakdown, depth int, decrease bool) (componentTotals, error) {
-	totals := componentTotals{charges: decimal.Zero, adjustments: decimal.Zero}
+	totals := componentTotals{charges: decimal.Zero}
 	selections := map[string]ComponentSelection{}
 	for _, selection := range customization.Components {
 		if _, exists := selections[selection.SlotID]; exists {
@@ -51,7 +52,7 @@ func (engine *calculator) components(product Product, customization Customizatio
 			Charge:   "0.00",
 		}
 		if selected.Quantity > 0 {
-			child, err := engine.product(selected.ProductID, selected.VariantID, selected.Customization, depth+1, decrease)
+			child, reduction, err := engine.product(selected.ProductID, selected.VariantID, selected.Customization, depth+1, decrease)
 			if err != nil {
 				return totals, err
 			}
@@ -66,14 +67,18 @@ func (engine *calculator) components(product Product, customization Customizatio
 				charge = charge.Add(tierCharge)
 			}
 			// El combo cubre el producto; solamente se suman sus personalizaciones, una vez por unidad.
+			// El precio de un componente siempre sigue la regla con piso, así que su cargo nunca se
+			// rebaja.
 			units := decimal.NewFromInt(int64(selected.Quantity))
 			customizationCharge := amount(child.UnitPrice).Sub(amount(child.BasePrice)).Mul(units)
-			if child.ComplementAdjustment != "" {
-				// La reducción por complementos del componente no rebaja su cargo: se suma aparte y se
-				// aplica en el núcleo del combo, con sus límites. El cargo conserva la regla con piso.
-				childAdjustment := amount(child.ComplementAdjustment).Mul(units)
-				customizationCharge = customizationCharge.Sub(childAdjustment)
-				totals.adjustments = totals.adjustments.Add(childAdjustment)
+			if reduction != nil {
+				// Su reducción por complementos se suma aparte y se aplica en el núcleo del combo, con
+				// los límites una sola vez.
+				totals.reductions = append(totals.reductions, componentReduction{
+					index: len(result.Components),
+					units: units,
+					tree:  reduction,
+				})
 			}
 			charge = charge.Add(customizationCharge).Round(2)
 			component.Product, component.Charge = child, money(charge)

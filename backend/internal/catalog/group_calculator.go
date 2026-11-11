@@ -15,6 +15,9 @@ type groupTotals struct {
 	floorDifferences decimal.Decimal
 	// extras suma los extras explícitos, que nunca se descuentan.
 	extras decimal.Decimal
+	// reductions guarda, por grupo y en el orden del desglose, lo que la opción de bajar el precio
+	// permite bajar respecto de la regla con piso (cero o negativo); solo existe con la opción.
+	reductions []decimal.Decimal
 }
 
 func (engine *calculator) groups(product Product, customization Customization, result *ProductBreakdown, decrease bool) (groupTotals, error) {
@@ -43,6 +46,11 @@ func (engine *calculator) groups(product Product, customization Customization, r
 		totals.differences = totals.differences.Add(amount(breakdown.Difference))
 		totals.floorDifferences = totals.floorDifferences.Add(floorDifference)
 		totals.extras = totals.extras.Add(amount(breakdown.Extras))
+		if decrease {
+			// Con los dos importes ya redondeados: diferencia con signo = piso + reducción, exacto.
+			reduction := decimal.Min(amount(breakdown.Difference).Sub(floorDifference), decimal.Zero)
+			totals.reductions = append(totals.reductions, reduction)
+		}
 		result.Groups = append(result.Groups, *breakdown)
 	}
 	if len(selections) > 0 {
@@ -54,9 +62,11 @@ func (engine *calculator) groups(product Product, customization Customization, r
 // group calcula un grupo y devuelve su desglose y su diferencia con la regla con piso. Con
 // decrease (opción «El precio puede bajar al cambiar complementos», §3.1) la diferencia del
 // desglose lleva signo: en modo valor es valor solicitado − valor incluido (quitar sin reemplazo
-// también resta); en modo cantidad son los tramos de las porciones adicionales menos el valor de
-// referencia de las porciones incluidas que se retiraron (sin valores de referencia no cambia).
-// Sin la opción, la diferencia del desglose es la de siempre y coincide con la del piso.
+// también resta); en modo cantidad son los tramos de las porciones adicionales más la diferencia
+// de valor solo si es negativa, min(0, valor solicitado − valor incluido): §0-B solo permite bajar
+// por diferencias negativas de valor, así que sustituir por un complemento más caro nunca baja el
+// precio (sin valores de referencia no cambia). Sin la opción, la diferencia del desglose es la de
+// siempre y coincide con la del piso.
 func (engine *calculator) group(group OptionGroup, binding ProductGroup, selections []IncludedOption, decrease bool) (*GroupBreakdown, decimal.Decimal, error) {
 	original := map[string]decimal.Decimal{}
 	for _, included := range binding.Included {
@@ -81,9 +91,6 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 		Options:  []OptionBreakdown{},
 	}
 	originalValue, requestedValue, extras, tierCharges, quantityTotal := decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero, decimal.Zero
-	// removedValue es el valor de referencia de las porciones incluidas que se retiraron; solo lo usa
-	// el modo cantidad con la opción de bajar el precio.
-	removedValue := decimal.Zero
 	for _, option := range group.Options {
 		included := original[option.ID]
 		quantity := requested[option.ID]
@@ -101,7 +108,6 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 		quantityTotal = quantityTotal.Add(quantity)
 		additional := positiveDifference(quantity, included)
 		extras = extras.Add(additional.Mul(amount(option.ExtraPrice)))
-		removedValue = removedValue.Add(positiveDifference(included, quantity).Mul(amount(option.ReferenceValue)))
 		if group.PricingMode == "quantity" && additional.IsPositive() {
 			charge, err := tieredCharge(option.Tiers, additional)
 			if err != nil {
@@ -141,7 +147,7 @@ func (engine *calculator) group(group OptionGroup, binding ProductGroup, selecti
 	if decrease {
 		difference = requestedValue.Sub(originalValue)
 		if group.PricingMode == "quantity" {
-			difference = tierCharges.Sub(removedValue)
+			difference = tierCharges.Add(decimal.Min(difference, decimal.Zero))
 		}
 	}
 	result.OriginalValue, result.RequestedValue = money(originalValue), money(requestedValue)

@@ -187,7 +187,8 @@ func TestPriceDecreaseDisabledKeepsLegacyQuotes(t *testing.T) {
 	for _, scenario := range legacyScenarios() {
 		quote := calculate(t, scenario.snapshot, scenario.request)
 		encoded, _ := json.Marshal(quote)
-		if strings.Contains(string(encoded), "price_can_decrease") || strings.Contains(string(encoded), "complement_adjustment") {
+		if strings.Contains(string(encoded), "price_can_decrease") || strings.Contains(string(encoded), "complement_adjustment") ||
+			strings.Contains(string(encoded), "applied_difference") {
 			t.Fatalf("%s: la cotización sin la opción serializa los campos nuevos: %s", scenario.name, encoded)
 		}
 		if want := legacyQuoteDigests[scenario.name]; quoteDigest(t, quote) != want {
@@ -317,10 +318,11 @@ func TestPriceDecreaseKeepsIndependentCharges(t *testing.T) {
 	}
 }
 
-// Modo cantidad: tramos de las porciones adicionales menos el valor de referencia de las incluidas
-// que se retiraron; sin valores de referencia no cambia nada.
+// Modo cantidad: tramos de las porciones adicionales más la diferencia de valor solo si es
+// negativa (§0-B: solo bajan las diferencias negativas de valor); sin valores de referencia no
+// cambia nada.
 func TestPriceDecreaseQuantityMode(t *testing.T) {
-	selection := sidesSelection(option("salad", "1"), option("fries", "1"))
+	selection := sidesSelection(option("rice", "1"), option("beans", "1"))
 	snapshot, request := quantitySnapshot("")
 	request.Lines[0].Customization.Groups = selection
 	if quote := calculate(t, snapshot, request); quote.Total != "165.00" {
@@ -328,8 +330,8 @@ func TestPriceDecreaseQuantityMode(t *testing.T) {
 	}
 	snapshot = withDecrease(snapshot, "plate")
 	quote := calculate(t, snapshot, request)
-	// Tramo de papas $15 − arroz retirado $20 = −$5.
-	if quote.Total != "145.00" || quote.Lines[0].Groups[0].Difference != "-5.00" {
+	// Tramo de frijoles $15 + (valor $30 − incluido $35) = $10.
+	if quote.Total != "160.00" || quote.Lines[0].Groups[0].Difference != "10.00" || quote.Lines[0].ComplementAdjustment != "-5.00" {
 		t.Fatalf("Modo cantidad con la opción: %s %s", quote.Total, quote.Lines[0].Groups[0].Difference)
 	}
 	snapshot, request = quantitySnapshot("0")
@@ -457,9 +459,9 @@ func TestPriceDecreasePromotionsWithoutDoubleDiscount(t *testing.T) {
 			t.Fatalf("%s: la promoción supera el subtotal", test.kind)
 		}
 	}
-	// Una reducción mayor que la base (base de $20, se retiran $35 incluidos y la porción adicional
-	// cuesta $200 por tramo) deja la base de la promoción en cero, nunca negativa: núcleo $185 =
-	// 20 + 200 − 35, con base reducida 185 − 200 < 0.
+	// Una reducción mayor que la base (base de $20, frijoles de $10 en lugar de los $35 incluidos y
+	// la porción adicional a $200 por tramo) deja la base de la promoción en cero, nunca negativa:
+	// núcleo $195 = 20 + 200 − 25, con base reducida 20 − 25 < 0.
 	snapshot, request := quantitySnapshot("")
 	group := snapshot.Groups["sides"]
 	for index := range group.Options {
@@ -477,9 +479,9 @@ func TestPriceDecreasePromotionsWithoutDoubleDiscount(t *testing.T) {
 		MinimumQuantity: 1,
 		CategoryIDs:     []string{"food"},
 	}}
-	request.Lines[0].Customization.Groups = sidesSelection(option("fries", "1"))
+	request.Lines[0].Customization.Groups = sidesSelection(option("beans", "1"))
 	quote := calculate(t, snapshot, request)
-	if quote.Discount != "0.00" || quote.Total != "185.00" {
+	if quote.Discount != "0.00" || quote.Total != "195.00" || quote.Lines[0].ComplementAdjustment != "-25.00" {
 		t.Fatalf("La base de la promoción quedó negativa: %+v", quote)
 	}
 }
@@ -499,5 +501,199 @@ func TestPriceDecreaseRequiresPricePermission(t *testing.T) {
 	withPrices := Actor{Permissions: []string{"catalog.products.manage", "catalog.prices.manage"}}
 	if err := validateProductPermissions(&changed, &previous, withPrices); err != nil {
 		t.Fatalf("Con el permiso de precios la opción se puede cambiar: %v", err)
+	}
+}
+
+// Revisión independiente de la 9A: en un combo con la opción, la reducción de complementos de cada
+// componente se acumula con signo sin acotarla al precio suelto del componente (el combo lo cubre)
+// y los límites se aplican una sola vez, en el núcleo del combo. Combo de $160 con el filete sin la
+// ensalada ($15): siempre $147.50 (= 160 − 15 + 2.50 de sustitución), cueste lo que cueste el
+// filete suelto.
+func TestPriceDecreaseComboIgnoresComponentPrice(t *testing.T) {
+	withoutSalad := func(snapshot Snapshot, childBase string, options ...IncludedOption) PreviewRequest {
+		plate := snapshot.Products["plate"]
+		plate.BasePrice = childBase
+		snapshot.Products["plate"] = plate
+		return PreviewRequest{Lines: []LineRequest{{ProductID: "combo", Quantity: 1, Customization: Customization{
+			Components: []ComponentSelection{{SlotID: "main", ProductID: "plate", Quantity: 1,
+				Customization: Customization{Groups: sidesSelection(options...)}}},
+		}}}}
+	}
+	for _, childBase := range []string{"0", "5", "30", "150"} {
+		snapshot := withDecrease(withDecrease(comboSnapshot(), "combo"), "plate")
+		quote := calculate(t, snapshot, withoutSalad(snapshot, childBase, option("rice", "1")))
+		line := quote.Lines[0]
+		component := line.Components[0]
+		if quote.Total != "147.50" || line.ComplementAdjustment != "-15.00" || component.Charge != "2.50" {
+			t.Fatalf("Filete suelto de $%s: total %s, ajuste %s, cargo %s", childBase, quote.Total, line.ComplementAdjustment, component.Charge)
+		}
+		// El componente registra la reducción que aportó al combo, y su propio precio sigue la regla
+		// con piso: la reducción no se aplica dos veces ni en su cargo.
+		if component.Product.ComplementAdjustment != "-15.00" || component.Product.UnitPrice != money(amount(childBase)) {
+			t.Fatalf("Filete suelto de $%s: desglose del componente %+v", childBase, component.Product)
+		}
+		if line.UnitPrice != "147.50" || line.GroupExtras != "-15.00" || line.ComponentExtras != "2.50" {
+			t.Fatalf("Filete suelto de $%s: desglose del combo %+v", childBase, line.ProductBreakdown)
+		}
+	}
+	// Los límites actúan una sola vez, en el núcleo del combo. Combo de $20 sin guarniciones: el
+	// núcleo queda en cero (nunca negativo) y el cargo de sustitución se suma completo.
+	snapshot := withDecrease(withDecrease(comboSnapshot(), "combo"), "plate")
+	combo := snapshot.Products["combo"]
+	combo.BasePrice = "20"
+	snapshot.Products["combo"] = combo
+	if quote := calculate(t, snapshot, withoutSalad(snapshot, "0")); quote.Total != "2.50" || quote.Lines[0].ComplementAdjustment != "-20.00" {
+		t.Fatalf("El combo bajó de cero: %s %s", quote.Total, quote.Lines[0].ComplementAdjustment)
+	}
+	// Combo de $30 con el arroz ($20): no baja del valor de lo que permanece.
+	combo.BasePrice = "30"
+	snapshot.Products["combo"] = combo
+	if quote := calculate(t, snapshot, withoutSalad(snapshot, "5", option("rice", "1"))); quote.Total != "22.50" || quote.Lines[0].ComplementAdjustment != "-10.00" {
+		t.Fatalf("El combo bajó del valor de sus complementos: %s %s", quote.Total, quote.Lines[0].ComplementAdjustment)
+	}
+	// Nunca más que la regla con piso: papas en lugar de la ensalada se cobran en el componente.
+	combo.BasePrice = "160"
+	snapshot.Products["combo"] = combo
+	quote := calculate(t, snapshot, withoutSalad(snapshot, "0", option("rice", "1"), option("fries", "1")))
+	if quote.Total != "172.50" || quote.Lines[0].ComplementAdjustment != "0.00" || quote.Lines[0].Components[0].Charge != "12.50" {
+		t.Fatalf("La opción subió el precio del combo: %s %+v", quote.Total, quote.Lines[0].ProductBreakdown)
+	}
+}
+
+// Revisión independiente de la 9A: en modo cantidad la opción solo baja por diferencias negativas
+// de valor. Sustituir la ensalada ($15) por papas ($25) cuesta el tramo de las papas ($15), igual
+// que sin la opción: el valor sube, así que no hay reducción.
+func TestPriceDecreaseQuantityModeOnlyNegativeValue(t *testing.T) {
+	tests := []struct {
+		name       string
+		options    []IncludedOption
+		total      string
+		difference string
+		adjustment string
+	}{
+		{name: "ensalada por papas", options: []IncludedOption{option("rice", "1"), option("fries", "1")}, total: "165.00", difference: "15.00", adjustment: "0.00"},
+		{name: "arroz por papas", options: []IncludedOption{option("salad", "1"), option("fries", "1")}, total: "165.00", difference: "15.00", adjustment: "0.00"},
+		// Tramo de frijoles $15 − ($35 − $30) = $10.
+		{name: "ensalada por frijoles", options: []IncludedOption{option("rice", "1"), option("beans", "1")}, total: "160.00", difference: "10.00", adjustment: "-5.00"},
+		{name: "quitar la ensalada", options: []IncludedOption{option("rice", "1")}, total: "135.00", difference: "-15.00", adjustment: "-15.00"},
+		{name: "sin cambio", options: []IncludedOption{option("rice", "1"), option("salad", "1")}, total: "150.00", difference: "0.00", adjustment: "0.00"},
+	}
+	for _, test := range tests {
+		snapshot, request := quantitySnapshot("")
+		request.Lines[0].Customization.Groups = sidesSelection(test.options...)
+		floor := calculate(t, snapshot, request)
+		snapshot = withDecrease(snapshot, "plate")
+		quote := calculate(t, snapshot, request)
+		line := quote.Lines[0]
+		if quote.Total != test.total || line.Groups[0].Difference != test.difference || line.ComplementAdjustment != test.adjustment {
+			t.Fatalf("%s: total %s, diferencia %s, ajuste %s", test.name, quote.Total, line.Groups[0].Difference, line.ComplementAdjustment)
+		}
+		if amount(quote.Total).GreaterThan(amount(floor.Total)) {
+			t.Fatalf("%s: la opción subió el precio (%s > %s)", test.name, quote.Total, floor.Total)
+		}
+	}
+}
+
+// withSecondGroup agrega al filete un segundo grupo, «Bebidas» (copia de las guarniciones), con el
+// arroz ($20) incluido: el filete incluye entonces $55 en complementos.
+func withSecondGroup(snapshot Snapshot) Snapshot {
+	drinks := snapshot.Groups["sides"]
+	drinks.ID, drinks.Name = "drinks", "Bebidas"
+	drinks.Options = append([]GroupOption{}, drinks.Options...)
+	snapshot.Groups["drinks"] = drinks
+	plate := snapshot.Products["plate"]
+	plate.Groups = append(append([]ProductGroup{}, plate.Groups...), ProductGroup{
+		GroupID:  "drinks",
+		Included: []IncludedOption{option("rice", "1")},
+	})
+	snapshot.Products["plate"] = plate
+	return snapshot
+}
+
+// Revisión independiente de la 9A: lo que la captura muestra por grupo es el efecto real que
+// aplicó Go (applied_difference), no una diferencia que el límite ya no aplicó completa.
+func TestPriceDecreaseAppliedDifference(t *testing.T) {
+	// Base $20 con $35 incluidos: quitar todo es −$35 de equivalencia, pero el precio solo baja
+	// $20 (queda en cero).
+	snapshot, request := referenceSnapshot()
+	plate := snapshot.Products["plate"]
+	plate.BasePrice = "20"
+	snapshot.Products["plate"] = plate
+	snapshot = withDecrease(snapshot, "plate")
+	request.Lines[0].Customization.Groups = sidesSelection()
+	line := calculate(t, snapshot, request).Lines[0]
+	if line.Groups[0].Difference != "-35.00" || line.Groups[0].AppliedDifference != "-20.00" || line.ComplementAdjustment != "-20.00" {
+		t.Fatalf("Efecto del grupo con el límite: %+v", line.Groups[0])
+	}
+	// Sin límite el efecto coincide con la diferencia; una diferencia positiva siempre se cobra.
+	snapshot, request = referenceSnapshot()
+	snapshot = withDecrease(snapshot, "plate")
+	for selection, want := range map[string][]IncludedOption{
+		"-10.00": {option("salad", "1"), option("beans", "1")},
+		"5.00":   {option("fries", "1"), option("salad", "1")},
+		"0.00":   {option("rice", "1"), option("salad", "1")},
+	} {
+		request.Lines[0].Customization.Groups = sidesSelection(want...)
+		group := calculate(t, snapshot, request).Lines[0].Groups[0]
+		if group.AppliedDifference != selection || group.Difference != selection {
+			t.Fatalf("Efecto sin límite %s: %+v", selection, group)
+		}
+	}
+	// Dos grupos (base $30, $55 incluidos, se quita todo): la reducción efectiva de $30 se reparte
+	// en el orden del desglose sin pasar de lo que permite cada grupo, y suma exactamente el ajuste.
+	snapshot, request = referenceSnapshot()
+	snapshot = withSecondGroup(snapshot)
+	plate = snapshot.Products["plate"]
+	plate.BasePrice = "30"
+	snapshot.Products["plate"] = plate
+	snapshot = withDecrease(snapshot, "plate")
+	request.Lines[0].Customization.Groups = []GroupSelection{{GroupID: "sides"}, {GroupID: "drinks"}}
+	quote := calculate(t, snapshot, request)
+	line = quote.Lines[0]
+	if quote.Total != "0.00" || line.ComplementAdjustment != "-30.00" || line.Groups[0].AppliedDifference != "-30.00" ||
+		line.Groups[1].AppliedDifference != "0.00" || line.Groups[1].Difference != "-20.00" {
+		t.Fatalf("Reparto entre grupos: %s %+v", quote.Total, line.Groups)
+	}
+}
+
+// En un combo, el efecto se reparte hasta los grupos de cada componente, por unidad del
+// componente, y nunca muestra más de lo que bajó el combo.
+func TestPriceDecreaseComboAppliedDifference(t *testing.T) {
+	twoPlates := func(comboBase string) (Snapshot, PreviewRequest) {
+		snapshot := withDecrease(withDecrease(comboSnapshot(), "combo"), "plate")
+		combo := snapshot.Products["combo"]
+		combo.BasePrice = comboBase
+		slot := combo.Slots[0]
+		slot.MinQuantity, slot.MaxQuantity, slot.IncludedQuantity, slot.DefaultQuantity = 2, 2, 2, 2
+		combo.Slots = []ComboSlot{slot}
+		snapshot.Products["combo"] = combo
+		return snapshot, PreviewRequest{Lines: []LineRequest{{ProductID: "combo", Quantity: 1, Customization: Customization{
+			Components: []ComponentSelection{{SlotID: "main", ProductID: "plate", Quantity: 2,
+				Customization: Customization{Groups: sidesSelection(option("rice", "1"))}}},
+		}}}}
+	}
+	// Combo de $50 con dos filetes sin ensalada (−$15 cada uno): el núcleo no baja de los $40 de
+	// arroz que permanecen, así que el combo baja $10 y cada filete muestra −$5.
+	snapshot, request := twoPlates("50")
+	quote := calculate(t, snapshot, request)
+	line := quote.Lines[0]
+	child := line.Components[0].Product
+	if quote.Total != "45.00" || line.ComplementAdjustment != "-10.00" || child.ComplementAdjustment != "-5.00" ||
+		child.Groups[0].AppliedDifference != "-5.00" || child.Groups[0].Difference != "-15.00" || line.Components[0].Charge != "5.00" {
+		t.Fatalf("Reparto en el combo: %s %+v %+v", quote.Total, line.ProductBreakdown, child)
+	}
+	// Sin límite, cada filete muestra su reducción completa.
+	snapshot, request = twoPlates("160")
+	child = calculate(t, snapshot, request).Lines[0].Components[0].Product
+	if child.ComplementAdjustment != "-15.00" || child.Groups[0].AppliedDifference != "-15.00" {
+		t.Fatalf("Reparto sin límite: %+v", child)
+	}
+	// Una parte que no se divide exacta en centavos se trunca hacia cero por unidad: el combo baja
+	// $5.01 y cada filete muestra −$2.50 (nunca más de lo aplicado).
+	snapshot, request = twoPlates("45.01")
+	line = calculate(t, snapshot, request).Lines[0]
+	child = line.Components[0].Product
+	if line.ComplementAdjustment != "-5.01" || child.ComplementAdjustment != "-2.50" || child.Groups[0].AppliedDifference != "-2.50" {
+		t.Fatalf("Reparto con residuo: %+v %+v", line.ProductBreakdown, child)
 	}
 }

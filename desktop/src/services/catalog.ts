@@ -324,8 +324,10 @@ export interface ProductBreakdown {
   group_extras: string;
   component_extras: string;
   // Solo cuando Go aplicó la opción «El precio puede bajar al cambiar complementos» (etapa 9A):
-  // la reducción por complementos con signo («-10.00», o «0.00» si no bajó), ya incluida en
-  // group_extras y unit_price. Con la opción, la diferencia de cada grupo también lleva signo.
+  // la reducción efectiva por complementos con signo («-10.00», o «0.00» si no bajó). En la partida
+  // ya está incluida en group_extras y unit_price; en el producto de un componente de combo es lo
+  // que ese componente bajó el precio del combo (por unidad) y no se incluye en su propio precio.
+  // Con la opción, la diferencia de cada grupo también lleva signo.
   price_can_decrease?: boolean;
   complement_adjustment?: string;
   notes: string;
@@ -343,6 +345,9 @@ export interface ProductBreakdown {
     original_value: string;
     requested_value: string;
     difference: string;
+    // Solo con la opción: efecto real del grupo en el precio que calculó Go (con los límites puede
+    // ser menor que la diferencia).
+    applied_difference?: string;
     extras: string;
     options: { option_id: string; name: string; included: string; requested: string }[];
   }[];

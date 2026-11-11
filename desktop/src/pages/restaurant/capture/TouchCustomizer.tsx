@@ -24,6 +24,21 @@ import { GroupBlock, IngredientBlock, VariantBlock } from './CustomizationBlocks
 import { KitchenNotes } from './KitchenNotes';
 import { applicableQuickNotes, reconcileQuickNotes } from './quickNoteRules';
 
+// Resumen del efecto real de los complementos en el precio cuando Go aplicó la opción «El precio
+// puede bajar al cambiar complementos» (etapa 9A): la reducción efectiva que calculó Go, ya con
+// sus límites (`complement_adjustment`), no la suma de las diferencias de los grupos. En un
+// componente de combo, la reducción se aplica en el precio del combo. Solo se inspecciona el signo
+// del texto; no hay aritmética.
+function complementSummary(adjustment: string | undefined, inCombo: boolean) {
+  const subject = inCombo
+    ? 'Ajuste por complementos en el precio del combo'
+    : 'Ajuste por complementos';
+  if (adjustment?.startsWith('-')) {
+    return `${subject}: ${formatSignedMoney(adjustment)}`;
+  }
+  return `${subject}: sin cambio`;
+}
+
 // Presentación táctil de la personalización. Reutiliza la configuración que entrega Go
 // (`catalog_configuration`) y las mismas reglas de selección que ProductCustomizer; solo cambia
 // la presentación: bloques con botones grandes en lugar de campos de formulario. Cada nivel (el
@@ -100,6 +115,11 @@ export function TouchCustomizer({
           />
         );
       })}
+      {breakdown?.price_can_decrease && (
+        <p className="muted text-sm capture-complement-effect">
+          {complementSummary(breakdown.complement_adjustment, depth > 0)}
+        </p>
+      )}
       <IngredientBlock
         product={product}
         value={value}

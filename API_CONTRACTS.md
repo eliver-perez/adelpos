@@ -1802,3 +1802,79 @@ Sin rutas, permisos ni migraciones nuevas. Cambian el contenido y los permisos e
 - Al cerrar una cuenta también se llevan a cero las fuentes de sus unidades **canceladas que hoy le pertenecen** aunque se
   hayan reconocido en otra cuenta (unidad transferida tras una reapertura y cancelada en la cuenta nueva). Cada unidad se
   revierte una sola vez (suma global), cierre primero la cuenta que cierre.
+
+## Etapa 9A · correcciones de la revisión en precios, captura, inventario y puente (F2)
+
+Sección afectada de `API_CONTRACTS.md`: «Cotizaciones (`catalog/preview`, `restaurant/accounts/{id}/draft-preview`,
+`…/preview`, `…/edit-preview`)» (desglose `ProductBreakdown`, también en cada componente de combo y en `quote_line` de
+`restaurant_item_versions`). Ninguna ruta, permiso ni migración nueva. Con la opción desactivada **nada cambia**: los
+campos nuevos se omiten y la prueba de huellas SHA-256 anteriores a la 9A sigue aprobada byte a byte.
+
+### Campo nuevo `groups[].applied_difference` (solo con la opción aplicada)
+
+```json
+{
+  "base_price": "20.00",
+  "group_extras": "-20.00",
+  "unit_price": "0.00",
+  "price_can_decrease": true,
+  "complement_adjustment": "-20.00",
+  "groups": [
+    {
+      "mode": "value",
+      "original_value": "35.00",
+      "requested_value": "0.00",
+      "difference": "-35.00",
+      "applied_difference": "-20.00",
+      "extras": "0.00"
+    }
+  ]
+}
+```
+
+- `applied_difference` (cadena con signo, `omitempty`): efecto **real** del grupo en el precio por unidad = diferencia
+  con la regla con piso + la parte de la reducción efectiva que se le asignó. La reducción efectiva
+  (`complement_adjustment`) se reparte entre los grupos y después entre los componentes, en el orden del desglose y sin
+  pasar de lo que permite cada uno; la suma de los efectos es exactamente el ajuste (salvo el caso de centavos de abajo).
+  Con los límites del precio puede ser menor que `difference` en valor absoluto; nunca promete más de lo aplicado. Una
+  diferencia positiva siempre aparece completa.
+- `difference` no cambia de significado en modo valor (solicitado − incluido, con signo con la opción).
+
+### Cambio de regla en modo cantidad (`groups[].difference` con la opción)
+
+- Antes: tramos − valor de referencia de las porciones incluidas retiradas.
+- Ahora: **tramos + min(0, valor solicitado − valor incluido)**. Solo bajan las diferencias negativas de valor (§0-B):
+  sustituir por un complemento más caro nunca baja el precio (ensalada $15 → papas $25 con tramo de $15: $165, igual que
+  sin la opción; antes daba $150). Sin valores de referencia no cambia nada.
+
+### Combos (`complement_adjustment` y `unit_price` de un componente)
+
+- La reducción de complementos de cada componente (cuando el combo y el componente tienen la opción) se acumula con
+  signo **sin acotarla al precio suelto del componente**; los límites (no bajar de cero, ni del valor de los complementos
+  que permanecen, ni subir sobre la regla con piso) se aplican **una sola vez, en el núcleo del combo**. El resultado ya
+  no depende del precio suelto del componente (combo de $160 con el filete sin ensalada: $147.50 con el filete suelto a
+  $0, $5, $30 o $150; antes $162.50, $162.50, $152.50 y $147.50).
+- En el producto de un componente, `complement_adjustment` es ahora la parte que ese componente aportó al precio del
+  combo, **por unidad del componente**, y **no** se incluye en su `group_extras` ni en su `unit_price`, que siguen la
+  regla con piso (el combo lo cubre; solo su cargo se cobra). En la partida (la raíz) sigue incluida en `group_extras` y
+  `unit_price` (`unit_price = base_price + ingredient_extras + group_extras + component_extras`).
+- `components[].charge` no cambia (nunca negativo; regla con piso).
+- Si la parte de un componente con varias unidades no se divide exacta en centavos, la parte por unidad se trunca hacia
+  cero (lo mostrado nunca supera lo aplicado; ejemplo: el combo baja $5.01 con dos filetes y cada uno muestra −$2.50).
+
+### Inventario (sin cambio de forma)
+
+- `GET inventory/item-codes`: la respuesta es la misma (`code`, `available`, `suggestion`, `taken_by`). `suggestion`
+  ahora compara con la clave del índice único (`lower()` de PostgreSQL con la configuración regional de la base, C en
+  el proyecto): con «Ñ» o acentos ya no sugiere un código ocupado.
+- `POST/PATCH inventory/suppliers…`: `phone_secondary`, `mobile_phone` y `website` son opcionales en el cuerpo.
+  **Ausentes** al editar se conservan (antes se borraban: un cliente anterior a la 9A los borraba al guardar); al crear,
+  ausentes equivalen a vacío. Presentes se validan como antes y `""` los borra. La respuesta no cambia.
+
+### Puente (`export_report`, sin cambio de contrato con React)
+
+- Sigue devolviendo solo `{result: saved|cancelled, file_name, size}` o el rechazo de Go `{status, body}`.
+- Si la ruta elegida no tiene la extensión del formato y, con ella, el archivo ya existe, el diálogo nativo se vuelve a
+  abrir en la misma carpeta con el nombre completo (hasta 4 aperturas por exportación; después, el error de siempre).
+- El temporal de la escritura atómica es `.adel-export-<pid>-<ns>-<seq>.part` (menos de 80 bytes, independiente del
+  nombre elegido).

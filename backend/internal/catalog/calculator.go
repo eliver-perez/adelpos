@@ -46,7 +46,7 @@ func Calculate(snapshot Snapshot, request PreviewRequest, now time.Time, locatio
 			return nil, invalid("Las cantidades deben ser enteras positivas; el límite de previsualización es 1000 unidades.")
 		}
 		// En la raíz nada restringe la opción de bajar el precio: decide la del propio producto.
-		breakdown, err := engine.product(line.ProductID, line.VariantID, line.Customization, 0, true)
+		breakdown, _, err := engine.product(line.ProductID, line.VariantID, line.Customization, 0, true)
 		if err != nil {
 			return nil, err
 		}
@@ -113,23 +113,25 @@ func effectivePrice(
 
 // product calcula el desglose de un producto. allowDecrease indica si el contexto admite la opción
 // «El precio puede bajar al cambiar complementos» (§3.1): siempre en la raíz; en el componente de
-// un combo, solo si el combo también la aplica.
-func (engine *calculator) product(id string, variantID *string, customization Customization, depth int, allowDecrease bool) (*ProductBreakdown, error) {
+// un combo, solo si el combo también la aplica. Con la opción devuelve además lo que sus
+// complementos permiten bajar (sin límites); solo la raíz (depth 0), que es la partida que se
+// cobra, aplica los límites y reparte la reducción efectiva.
+func (engine *calculator) product(id string, variantID *string, customization Customization, depth int, allowDecrease bool) (*ProductBreakdown, *reductionTree, error) {
 	engine.remaining--
 	if engine.remaining < 0 {
-		return nil, invalid("La configuración expande demasiados componentes para una previsualización.")
+		return nil, nil, invalid("La configuración expande demasiados componentes para una previsualización.")
 	}
 	snapshot, now, location, override := engine.snapshot, engine.now, engine.location, engine.override
 	if depth > 8 || len(customization.Notes) > 500 {
-		return nil, invalid("La personalización supera ocho niveles o las observaciones exceden 500 caracteres.")
+		return nil, nil, invalid("La personalización supera ocho niveles o las observaciones exceden 500 caracteres.")
 	}
 	product, exists := snapshot.Products[id]
 	if !exists {
-		return nil, invalid("El producto seleccionado no existe.")
+		return nil, nil, invalid("El producto seleccionado no existe.")
 	}
 	category, exists := snapshot.Categories[product.CategoryID]
 	if !exists {
-		return nil, invalid("La categoría del producto no existe.")
+		return nil, nil, invalid("La categoría del producto no existe.")
 	}
 	if reason := productAvailabilityReason(
 
@@ -139,7 +141,7 @@ func (engine *calculator) product(id string, variantID *string, customization Cu
 		location,
 		override,
 	); reason != "" {
-		return nil, unavailable(product.Name + ": " + reason)
+		return nil, nil, unavailable(product.Name + ": " + reason)
 	}
 	base, origin, err := effectivePrice(
 
@@ -151,7 +153,7 @@ func (engine *calculator) product(id string, variantID *string, customization Cu
 		override,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	result := &ProductBreakdown{
 		ProductID:   id,
@@ -168,75 +170,45 @@ func (engine *calculator) product(id string, variantID *string, customization Cu
 	}
 	ingredientExtras, err := calculateIngredients(snapshot, product, customization, result)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Las indicaciones rápidas elegidas se validan contra los ingredientes ya calculados y se
 	// congelan en el desglose; no generan cargos propios (etapa 8).
 	quickNotes, err := resolveQuickNotes(snapshot.QuickNotes, product, customization.QuickNotes, result.Ingredients)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	result.QuickNotes = quickNotes
 	decrease := product.PriceCanDecrease && allowDecrease
 	groups, err := engine.groups(product, customization, result, decrease)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	components, err := engine.components(product, customization, result, depth, decrease)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Sin la opción, el camino es el de siempre: base + ingredientes + Σ(diferencia + extras de cada
 	// grupo) + cargos de componentes.
 	groupExtras := groups.differences.Add(groups.extras)
+	var reduction *reductionTree
 	if decrease {
-		adjustment := complementAdjustment(base, groups, components, result)
-		groupExtras = groups.floorDifferences.Add(adjustment).Add(groups.extras)
+		// El precio parte de la regla con piso; la reducción se aplica solo en la raíz.
+		groupExtras = groups.floorDifferences.Add(groups.extras)
+		reduction = newReductionTree(groups, components)
 		result.PriceCanDecrease = true
-		result.ComplementAdjustment = money(adjustment)
+		if depth == 0 {
+			floorCore := base.Add(groups.floorDifferences)
+			adjustment := limitedAdjustment(floorCore, reduction.total, remainingComplementValue(result))
+			groupExtras = groupExtras.Add(adjustment)
+			allocateReduction(result, reduction, adjustment)
+		}
 	}
 	result.IngredientExtras = money(ingredientExtras)
 	result.GroupExtras = money(groupExtras)
 	result.ComponentExtras = money(components.charges)
 	result.UnitPrice = money(base.Add(ingredientExtras).Add(groupExtras).Add(components.charges))
-	return result, nil
-}
-
-// complementAdjustment aplica la opción «El precio puede bajar al cambiar complementos» (§3.1) y
-// devuelve la reducción respecto de la regla con piso: cero o negativa, nunca positiva. El núcleo
-// del precio es base + diferencias con signo de los grupos + reducciones de los componentes (en un
-// combo que también tiene la opción), y nunca queda:
-//   - por debajo de cero;
-//   - por debajo del valor de referencia de los complementos que permanecen seleccionados (los
-//     propios y, en un combo, los de sus componentes);
-//   - por encima del núcleo con la regla con piso: la opción solo permite bajar el precio.
-//
-// Los extras explícitos, los ingredientes adicionales y los cargos de los componentes se suman
-// después del núcleo, así que estos cargos independientes nunca se descuentan.
-func complementAdjustment(base decimal.Decimal, groups groupTotals, components componentTotals, result *ProductBreakdown) decimal.Decimal {
-	floorCore := base.Add(groups.floorDifferences)
-	signedCore := base.Add(groups.differences).Add(components.adjustments)
-	core := decimal.Max(signedCore, remainingComplementValue(result), decimal.Zero)
-	core = decimal.Min(core, floorCore)
-	return core.Sub(floorCore)
-}
-
-// remainingComplementValue es el valor de referencia de los complementos que permanecen
-// seleccionados en un desglose: el valor solicitado de sus grupos y, en un combo, el de sus
-// componentes por cada unidad.
-func remainingComplementValue(breakdown *ProductBreakdown) decimal.Decimal {
-	total := decimal.Zero
-	for _, group := range breakdown.Groups {
-		total = total.Add(amount(group.RequestedValue))
-	}
-	for _, component := range breakdown.Components {
-		if component.Product == nil {
-			continue
-		}
-		units := decimal.NewFromInt(int64(component.Quantity))
-		total = total.Add(remainingComplementValue(component.Product).Mul(units))
-	}
-	return total
+	return result, reduction, nil
 }
 
 func calculateIngredients(snapshot Snapshot, product Product, customization Customization, result *ProductBreakdown) (decimal.Decimal, error) {

@@ -1173,3 +1173,68 @@ en el puente (no se ejecutó `cargo test`).
 Tras el complemento de Empleados (copia sincronizada de nuevo): `go vet` y `go vet -tags=integration` sin hallazgos;
 `go test -race` de `./internal/reports/...` y `./internal/payments` ok; integración `./internal/reports` ok (91 s) y
 `./internal/reports/operational` ok (40 s).
+
+### Correcciones de la revisión independiente · F2 (catálogo, captura, inventario y puente)
+
+Sin migraciones, rutas, permisos ni dependencias nuevas. Cada hallazgo tiene una prueba que falla con el código de
+`793c099` y pasa con la corrección (salidas «antes» en `$SCR/docs9aF2/before_go.log` y `before_operations.log`).
+
+1. **(Medio) Combos con la opción** — confirmado (combo de $160 con el filete sin ensalada costaba $162.50 con el filete
+   suelto a $0 o $5, $152.50 a $30 y $147.50 a $150). Ahora cada producto calcula su precio con la regla con piso y,
+   aparte, un árbol de reducciones sin límites (`catalog/complement_reduction.go`); solo la partida (la raíz) aplica
+   los límites, una vez (`limitedAdjustment`: no bajo cero, no bajo el valor de los complementos que permanecen —propios
+   y de los componentes—, no sobre la regla con piso). En un componente, el precio sigue la regla con piso (el combo lo
+   cubre) y su `complement_adjustment` es la parte que aportó al combo, por unidad. Pruebas
+   `TestPriceDecreaseComboIgnoresComponentPrice` (filete suelto a $0, $5, $30 y $150 → siempre $147.50; combo de $20 →
+   $2.50; combo de $30 con el arroz → $22.50; mejora de guarnición → sin ajuste) y `TestPriceDecreaseComboAppliedDifference`.
+2. **(Medio) Modo cantidad** — confirmado (ensalada $15 → papas $25 con tramo de $15 costaba $150 con la opción frente
+   a $165 sin ella). La diferencia con la opción es `tramos + min(0, valor solicitado − valor incluido)`
+   (`group_calculator.go`): solo bajan las diferencias negativas de valor. Prueba
+   `TestPriceDecreaseQuantityModeOnlyNegativeValue`; se ajustaron `TestPriceDecreaseQuantityMode` (arroz → papas ya no
+   baja: $165; arroz → frijoles: $160) y el último caso de `TestPriceDecreasePromotionsWithoutDoubleDiscount` (que
+   dependía de la regla anterior; conserva su intención: base de promoción en cero, nunca negativa).
+3. **(Bajo) Interfaz de precios** — confirmado (filete de $20 sin guarniciones: el grupo mostraba −$35.00 y el precio
+   bajaba $20). Go entrega por grupo `applied_difference` (efecto real, repartido en el orden del desglose hasta los
+   grupos de cada componente, `allocateReduction`). La captura muestra ese efecto en el encabezado del grupo
+   (`CustomizationBlocks.tsx`) y un resumen «Ajuste por complementos: −$20.00» / «… en el precio del combo …» con el
+   `complement_adjustment` efectivo (`TouchCustomizer.tsx`); el desglose agrega «Efecto en el precio» junto a
+   «Diferencia» y, en un componente, atribuye la reducción al combo (`QuoteBreakdown.tsx`; rótulo de modo cantidad
+   «Tramos y diferencia de valor»). Prueba Vitest `capture/priceEffect.test.tsx` (5 de 6 fallan con la interfaz
+   anterior) y Go `TestPriceDecreaseAppliedDifference`.
+4. **(Bajo) Puente** — confirmado (un nombre de 254 bytes fallaba porque el temporal `.{nombre}.part-…` pasaba de 255
+   bytes; con la extensión agregada y el archivo existente, la exportación fallaba). Temporal
+   `.adel-export-<pid>-<ns>-<seq>.part` (`temporary_name`, < 80 bytes) y `resolve_destination`, que pide volver a abrir el
+   diálogo en la misma carpeta con el nombre completo (`set_directory`), hasta 4 aperturas. Pruebas Rust
+   `temporary_names_are_short_and_independent_of_the_destination` y
+   `an_existing_name_with_forced_extension_reopens_the_dialog`.
+5. **(Bajo) Inventario** — confirmados. `item_codes.go`: las claves de los candidatos se calculan con `lower()` de
+   PostgreSQL (`indexKeys` sobre la base y sus 4 recortes), igual que el índice único; con la configuración regional C,
+   «PAÑO-9A» ocupado ya no se sugiere a sí mismo (antes `strings.ToLower` daba otra clave). `suppliers.go`: segundo
+   teléfono, celular y página web son `*string`; ausentes al editar se conservan, `""` los borra. Pruebas unitarias
+   `TestSuggestFreeCode` (casos con «Ñ» y «É» con un `lower` de configuración C) y
+   `TestSupplierContactFieldsAreOptional`; integración en `operations/inventory_stage9a_test.go` (`testItemCodeCheck`:
+   el código sugerido se puede guardar; `testSupplierContactFields`: una edición sin los campos los conserva).
+
+**Decisiones menores.** Reparto de la reducción efectiva: primero los grupos propios y después los componentes, en el
+orden del desglose (codicioso); en un componente con varias unidades, una parte que no se divide exacta en centavos se
+trunca hacia cero por unidad (lo mostrado nunca supera lo aplicado; los centavos restantes no se muestran en ningún
+grupo). El precio de un componente de combo con la opción deja de incluir su reducción (antes la incluía acotada a su
+precio suelto); solo es presentación, porque el combo cobra la base del combo más los cargos. Si los 9 998 sufijos de un
+código estuvieran ocupados, `suggestion` sigue devolviendo la base (no hay código libre; la interfaz lo pondría en el
+campo y Go respondería `DUPLICATE_CODE` al guardar). El diálogo se vuelve a abrir como mucho 4 veces por exportación.
+
+**Documentación por actualizar (no editada por F2):** `docs/CATALOG.md` §«Precio que puede bajar…» (regla del modo
+cantidad, combos sin acotar al precio suelto, `applied_difference`, captura con el efecto real y resumen),
+`API_CONTRACTS.md` (ver `api_contracts.md` de este directorio), `docs/INVENTORY_AND_PURCHASING.md` (≈ línea 700: «un
+cuerpo sin los campos nuevos los deja vacíos» pasa a «los conserva; `""` los borra»; ≈ línea 156: la sugerencia compara
+con la clave del índice, `lower()` de PostgreSQL) y la limitación de `CLAUDE.md` §19 «con el límite del
+valor que permanece, la diferencia del grupo que ve el mesero puede ser mayor que la reducción real del producto», que
+queda resuelta.
+
+**Suites ejecutadas (copia `$SCR/repo9aF2`, clúster temporal 55499; salidas en `$SCR/docs9aF2/`):** `go vet ./...` y
+`go vet -tags=integration ./...` sin hallazgos; `go test -race -count=1 ./...` con los 17 paquetes con pruebas en `ok`;
+integración `./internal/catalog` `ok` (7.5 s), `./internal/database` `ok` (5.6 s) y `./internal/operations` `ok`
+(223.6 s); Vitest 54 archivos y 473 pruebas aprobadas; `tsc --noEmit` sin errores; `npm run build` correcto (solo el aviso
+de tamaño de bloque de siempre); `cargo test --locked --offline` 31 aprobadas y 1 ignorada (Keychain real); Playwright
+`table-price-decrease.spec.ts` y `workflow-reports-export-9a.spec.ts` en Chromium y WebKit (Go 8186, vista previa 1426):
+2 + 2 aprobadas.
