@@ -384,6 +384,19 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
     },
   );
   expect(reprint.status, JSON.stringify(reprint)).toBeTruthy();
+  // La copia exacta también queda en intervención (destino controlado sin hardware). La reimpresión y
+  // la impresión con la plantilla vigente se bloquean entre sí mientras haya una copia sin resolver,
+  // así que se cancela administrativamente antes de pedir la otra acción (como en la cola real).
+  const copy = await settledJob(driver, reprint.job_id as string);
+  if (copy.state !== 'cancelled' && copy.state !== 'submitted') {
+    await call(driver, 'POST', `kitchen/jobs/${copy.id}/resolve`, {
+      operation_id: randomUUID(),
+      revision: copy.revision,
+      decision: 'cancel',
+      reason: 'Destino de aceptación sin hardware físico',
+      printer_id: null,
+    });
+  }
   const reprinted = await call(driver, 'GET', `kitchen/tickets/${sale.ticketID}`);
   expect(reprinted.preview).toBe(sale.original);
   expect(reprinted.preview).not.toContain(fixedText);
