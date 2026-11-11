@@ -9,6 +9,8 @@ import { notifyError, notifySuccess } from '../services/notify';
 import type { EstablishmentFeature } from '../services/features';
 import type { Settings } from '../services/models';
 import { filterTimezones, timezoneLabel, timezoneOptions } from '../services/timezones';
+import { formatDayStartDigits, saveBusinessDay } from '../services/reports';
+import type { BusinessDaySettings } from '../services/reports';
 
 export const initialSettings: Settings = {
   name: '',
@@ -260,6 +262,85 @@ export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
   );
 }
 
+function BusinessDayForm({
+  settings,
+  editable,
+  onSaved,
+}: {
+  settings: BusinessDaySettings;
+  editable: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const [dayStart, setDayStart] = useState(settings.operating_day_cutoff);
+  return (
+    <Form
+      label="Guardar hora de inicio"
+      disabled={!editable}
+      successMessage="Hora de inicio del día guardada."
+      onSave={async () => {
+        try {
+          await saveBusinessDay({ operating_day_cutoff: dayStart, revision: settings.revision });
+        } finally {
+          // Con conflicto de revisión se carga la versión vigente para revisarla.
+          await onSaved();
+        }
+      }}
+    >
+      <div className="form-grid">
+        <Field
+          label="Hora de inicio del día"
+          hint="HH:MM en la zona horaria del establecimiento (de 00:00 a 23:59)."
+        >
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            required
+            maxLength={5}
+            pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
+            placeholder="05:00"
+            value={dayStart}
+            onChange={(event) => {
+              const formatted = formatDayStartDigits(event.target.value);
+              if (formatted !== null) {
+                setDayStart(formatted);
+              }
+            }}
+          />
+        </Field>
+      </div>
+    </Form>
+  );
+}
+
+// «Hora de inicio del día» (etapa 9A): una sola configuración para reportes e inventario. Se
+// edita aquí con settings.manage; Inventarios → Parámetros la muestra en solo lectura.
+export function BusinessDaySection({ can }: { can: (key: string) => boolean }) {
+  const resource = useResource<BusinessDaySettings>('settings_business_day');
+  return (
+    <section className="surface panel form-stack" aria-labelledby="business-day-title">
+      <div>
+        <h2 id="business-day-title">Hora de inicio del día</h2>
+        <p className="muted text-sm">
+          Define cuándo empieza el día comercial para los reportes, el día operativo del inventario
+          y las cancelaciones por clasificar. Con 00:00 el día es la fecha del calendario. Por
+          ejemplo, con 05:00 una venta de la 01:30 pertenece al día anterior. Cambiarla no modifica
+          los registros: solo cambia cómo se agrupan los días en las consultas.
+        </p>
+      </div>
+      <Notice>{resource.error}</Notice>
+      {resource.data && (
+        <BusinessDayForm
+          key={resource.data.revision}
+          settings={resource.data}
+          editable={can('settings.manage')}
+          onSaved={resource.reload}
+        />
+      )}
+    </section>
+  );
+}
+
 export function SettingsPage({
   can,
   onSaved,
@@ -282,6 +363,7 @@ export function SettingsPage({
           onSaved={onSaved}
         />
       )}
+      <BusinessDaySection can={can} />
       <FeaturesSection can={can} />
     </>
   );

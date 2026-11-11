@@ -369,3 +369,257 @@ seguros ante NULL). **No se aplicó a la instalación real.** Guía actualizada:
 - La sección recordada por grupo se pierde al salir de Inventarios.
 - La página web del proveedor no se abre desde la aplicación (texto).
 - Sin verificar en la ventana nativa (WKWebView) ni en pantalla táctil física.
+
+## Fase B · B1 · Infraestructura de reportes, día comercial, reconocimiento de ventas y reportes de ventas, productos, pagos y descuentos
+
+Migración `0017_reports.sql` (sin aplicar a la instalación real). Paquetes nuevos `internal/reports` y
+`internal/businessday`; reconocimiento de ventas en `internal/payments` (`recognition*.go`).
+
+### Infraestructura
+
+- **Rutas** `reports/catalog`, `reports/run/{id}`, `reports/dashboard` y `reports/filters/{source}` (todas GET,
+  `reports.read`), con su rama propia en `administration/routes.go`. La autenticación, los permisos y la forma de
+  los parámetros se validan en la transacción corta habitual (las denegaciones se auditan) y se confirman; la
+  consulta corre después en otra transacción **`REPEATABLE READ READ ONLY`** con `statement_timeout` 30 s,
+  `lock_timeout` 2 s e `idle_in_transaction_session_timeout` 45 s, sobre un **semáforo propio de 2 conexiones**
+  (lleno: `503 REPORTS_BUSY`, «Hay otros reportes en curso…», sin esperar). Sin locks consultivos ni handlers de
+  otros módulos (solo SQL propio, `payments.AccountStandingSQL` y `businessday`). Tiempo de respuesta HTTP de
+  `reports/*`: 40 s (`http.go`); el puente usa 45 s.
+- **Registro cerrado** de reportes (`Definition`: id estable, grupo, título, permisos, periodo, comparación,
+  fecha usada, filtros admitidos, columnas tipadas, orden y función de consulta). Ninguna ruta acepta SQL; un
+  parámetro no declarado por el reporte se rechaza.
+- **Modelo de resultado único** (`reports.Result`) para pantalla y exportaciones: metadatos (título, periodo
+  resuelto con sus instantes, comparación, filtros legibles, fecha de generación = `now()` de la fotografía, zona,
+  hora de inicio, fecha usada, avisos, notas), columnas con tipo (texto, código, entero, cantidad, MXN, USD,
+  porcentaje, fecha, fecha y hora) y visibilidad, página del detalle, **totales calculados en Go sobre todo el
+  conjunto filtrado** y cifras resumidas. Las columnas con permiso propio (efectivo físico) no se envían, no se
+  totalizan y no se pueden usar para ordenar sin ese permiso. Valores tipados en Go; dinero como cadena.
+- **Puente**: `reports_catalog`, `reports_run`, `reports_dashboard`, `reports_filters`,
+  `settings_business_day`, `save_settings_business_day` en `api.rs` (la clave del reporte se valida en Rust:
+  minúsculas, `.` y `_`), lista blanca de parámetros `reports_*` y prueba Rust. Tipos en
+  `desktop/src/services/reports.ts`.
+
+### Día comercial y periodos
+
+- `internal/businessday`: el cálculo del día operativo de la etapa 8 se movió a un paquete neutral (`DayOf`,
+  `CutoffInstant`, `Config.Bounds`, `Load`); inventario lo usa sin cambiar su comportamiento (sus pruebas de
+  día operativo, incluidos los cambios de horario, siguen pasando sin cambios).
+- Periodos en Go: hoy, ayer, semana actual (ISO), mes actual, año actual, día, **semana ISO 8601** (`AAAA-Wss`,
+  con su rango; semana 53 y cambio de año), mes, año y rango (≤ 400 días), con el periodo anterior equivalente
+  (día, semana ISO, mes o año anterior; en un rango, los mismos días inmediatamente antes). Instantes
+  `[desde, hasta)` con zona y hora de inicio; agrupación en SQL con `((ts AT TIME ZONE zona) - inicio)::date`
+  (difiere de Go solo en la hora repetida de un atraso de horario junto a la hora de inicio).
+- **«Hora de inicio del día»**: un solo valor (`inventory_settings.operating_day_cutoff`), editable **solo** en
+  Configuración general (`PUT settings/business-day`, `settings.manage`, con revisión optimista, auditoría
+  `settings.business_day_changed` y evento), con explicación y ejemplo en pantalla («con 05:00 una venta de la
+  01:30 pertenece al día anterior»). Inventarios → Parámetros la muestra en solo lectura y su `PUT` la rechaza
+  si cambia. Cambiarla no reescribe registros.
+
+### Reconocimiento de ventas (0017)
+
+- Libro inmutable **`app.sales_recognitions`** (disparadores de solo inserción), escrito por
+  `payments.closeIfSettled` en la misma transacción del cierre (cobro, ajuste o entrega). Fuentes: `unit`
+  (unidad activa: cantidad 1, bruto, promoción, neto), `allocation` (descuento o cortesía por partida asignado a
+  la unidad) y `adjustment` (cargo general con su tasa; descuento o cortesía general repartido entre tasas en
+  proporción, con `allocate`, y el último registrado recibe lo que falta en cada tasa). Clave de la fuente:
+  (clase, unidad, ajuste, tasa).
+- Primer cierre = todo; **reliquidación** tras una reapertura = solo diferencias (una unidad cancelada después
+  de reabrir resta en el día del nuevo cierre); nada si no cambió. La suma es global por fuente: una unidad
+  transferida se reconoce una sola vez, en la cuenta donde estaba al cerrarse.
+- IVA por renglón con la regla de `finance.go`: provisional por renglón y residuo de centavos de cada cuenta y
+  tasa repartido uno a uno entre los renglones de mayor neto; la suma por cuenta y tasa es exactamente el
+  desglose de la cuenta.
+- Datos históricos copiados: folio, modalidad, origen, mesa y área de la cuenta al cerrar, responsable, turno y
+  caja de la operación que cerró (pago de la operación; sin pago, el turno activo de la caja de la terminal),
+  actor, terminal, operación, producto (nombre, código, tipo), variante, categoría, lista de precios, motivo
+  histórico, concepto, quién aplicó y autorizó.
+- **Relleno inicial** en la 0017 para las cuentas hoy cerradas: fecha = primer `payments.account_closed` de la
+  auditoría (o `closed_at`), turno y caja del pago de ese cierre (sin pago, sin turno), importes y nombres del
+  estado actual. **Limitaciones**: el historial de reaperturas anterior a la 9A no se reconstruye (una cuenta
+  reabierta y vuelta a cerrar queda con sus importes actuales en la fecha de su primer cierre); las cuentas
+  reabiertas que hoy siguen abiertas no se rellenan (aparecen en «En curso» como reabiertas y se reconocerán al
+  cerrarse); la mesa y el área son las actuales. El bloque está delimitado en la migración y la prueba de
+  integración lo ejecuta sobre cuentas cerradas por la API y lo compara con lo que escribió Go (iguales por
+  fuente).
+
+### Reportes (43) y dashboard
+
+Ventas (resumen por tasa de IVA, día, semana ISO, mes, hora, producto, variante, modalidad, salón por área y
+mesa, para llevar por origen, lista de precios, turno, cuentas cerradas, evolución con el anterior, «En curso»
+con pagadas sin entregar y reabiertas), categorías, productos (más y menos vendidos —incluye activos sin
+ventas—, combos, componentes preparados sin importe, complementos, cancelados con su fecha y motivo, con
+descuentos, tendencia), cocina (demanda por producto y por hora con la fecha de liberación, preparación por
+estación), pagos (por método, caja, turno, usuario y día; detalle; mixtos y parciales derivados; devoluciones
+en su día; correcciones; propinas; efectivo por moneda; importes pendientes) y descuentos (por día con % sobre
+ventas, por motivo histórico, usuario y producto; detalle, generales, cortesías y autorizaciones de
+supervisor). Lista completa con permisos en `docs9aB1/api_contracts.md`. Dashboard con secciones de ventas,
+cobros y descuentos, cada una con su permiso, comparación con el periodo anterior equivalente y la serie diaria
+de venta neta.
+
+### Permisos (0017, Go y `app.permissions`, solo al administrador)
+
+`reports.read`, `reports.sales.read`, `reports.payments.read`, `reports.discounts.read`, `reports.cash.read`,
+`reports.inventory.read`, `reports.purchases.read`, `reports.employees.read`, `reports.export.pdf`,
+`reports.export.excel`. Pantalla de inicio `reports` en `preferences.go`. El efectivo físico por moneda (y las
+columnas «Recibido», «Cambio», «Dólares recibidos» y «Tipo de cambio» del detalle de cobros) exige además
+`cash.expected.read`, igual que en Caja; los cobros de turnos en arqueo se excluyen de todo agregado para todos
+(con un aviso que solo dice cuántos turnos).
+
+### Índices de fecha (0017)
+
+`sales_recognitions(recognized_at, sequence)`, `(account_id, sequence)`, `(unit_id)`, `(adjustment_id)`,
+`(shift_id, recognized_at)`; `payments(created_at)`, `payment_refunds(created_at)`,
+`account_adjustments(created_at)`, `cash_movements(created_at)`, `cash_operations(created_at)`,
+`kitchen_unit_releases(released_at)`, `kitchen_tasks(released_at)`, `restaurant_item_units(cancelled_at)`
+parcial, `inventory_supplier_returns(occurred_at)`, `payment_authorizations(created_at)` y
+`audit_events(entity_id, occurred_at)` parcial para `payments.account_closed`. Medición: ver «Mediciones».
+
+### Definiciones de métricas (§6), tal como quedaron
+
+- Venta (reconocimiento): la venta cuenta cuando la cuenta se cierra liquidada, en el día del
+  cierre (libro app.sales_recognitions, escrito por payments.closeIfSettled en la misma
+  transacción). Una reliquidación tras una reapertura reconoce solo las diferencias en su día;
+  una devolución nunca resta de la venta.
+- Importe bruto: precio de las unidades antes de promociones (IVA incluido).
+- Promociones: descuento de las promociones del catálogo (restaurant_item_units.discount).
+- Descuentos: descuentos manuales vigentes, por partida (asignados a unidades) y generales de
+  cuenta, sin cortesías. Cortesías: importe de las cortesías al 100 %.
+- Cargos: cargos generales de cuenta (con su tasa de IVA).
+- Venta neta = bruto − promociones − descuentos − cortesías + cargos (IVA incluido, sin propinas).
+- IVA: incluido en la venta neta, por cuenta y tasa con la regla de payments/finance.go (base =
+  total / (1 + tasa) redondeada; IVA = total − base); la suma del periodo es la suma de los
+  desgloses por cuenta, nunca un recálculo sobre el agregado. Subtotal sin IVA = neta − IVA.
+- Cuentas cerradas: cuentas con su primer reconocimiento en el periodo (una reliquidación no
+  vuelve a contarlas). Ticket promedio = venta neta / cuentas cerradas.
+- Venta antes de descuentos = bruto − promociones + cargos; % de descuentos sobre ventas =
+  (descuentos + cortesías) / venta antes de descuentos.
+- En curso: cuentas abiertas con total, pagado y saldo de payments.AccountStandingSQL; no son
+  venta. «Pagada sin entregar»: para llevar liquidado sin entrega. «Reabierta»: ya se cerró antes.
+- Cobro: pago registrado con un método, en su fecha (payments.created_at). Cobrado neto = pagos −
+  devoluciones − reversos de corrección; el pago nuevo de una corrección es un pago. Propinas
+  netas = propinas cobradas − propinas devueltas (nunca son venta).
+- Devolución: payment_refunds kind=refund en su propia fecha; Corrección: kind=correction más el
+  pago que la sustituye.
+- Pago mixto: cuenta con pagos de más de un método en el periodo; parcial: más de un pago del
+  mismo método (derivados; no existe marca).
+- Efectivo por moneda: pesos y dólares físicos de cash_movements (recibido y entregado), con la
+  equivalencia al tipo de cambio de cada cobro; nunca se suman pesos y dólares. Exige
+  cash.expected.read (paridad con Caja) y excluye los turnos en arqueo.
+- Turnos en arqueo (closing): sus cobros se excluyen de todo agregado para todos, con un aviso.
+- Descuento por motivo: nombre histórico guardado (reason_name); sin motivo del catálogo,
+  «Sin motivo del catálogo». Los descuentos se fechan con el reconocimiento de su venta.
+- Combos: el combo es la unidad vendida; sus componentes solo se reportan como cantidades
+  preparadas, sin importe.
+- Demanda y cocina: fecha de liberación a cocina (kitchen_unit_releases), indicada en el reporte.
+
+### Cómo agregar un reporte (para B2 y C1)
+
+La misma guía está en el comentario del paquete (`backend/internal/reports/doc.go`).
+
+1. Crear (o ampliar) un archivo del paquete con un init() que llame a register(Definition{...}):
+   ID estable «grupo.nombre» (minúsculas, puntos y guiones bajos), Group de la lista Groups,
+   Title, Description, Permissions (todas se exigen, además de reports.read: p. ej.
+   reports.cash.read), DateBasis (qué fecha usa y con qué hora de inicio), Filters (solo los que
+   aplican: filterRegister(), filterShift(), filterChoice(...)…), Columns tipadas (textColumn,
+   moneyColumn, countColumn, dollarColumn, percentColumn, dateColumn…) y DefaultSort.
+2. Las columnas con datos protegidos llevan requiring(columna, permiso): sin el permiso, la
+   columna, sus valores, sus totales y el orden por ella no existen en la respuesta ni en las
+   exportaciones. Una cifra resumida protegida lleva Figure.Permissions. Lo que permita deducir
+   un dato protegido (p. ej. el esperado de caja) no debe calcularse para quien no lo puede ver.
+3. Query recibe *Query: usar query.Args() (argumentos con nombre @from, @until, @tz, @cutoff y
+   uno por filtro), inPeriod(columna), businessDate(columna) y localHour(columna) para que los
+   límites coincidan con los de Go, conditions.when(...) para los filtros y query.collect(...)
+   con alias SQL iguales a las claves de las columnas (columnas auxiliares no declaradas se
+   descartan antes de responder). Devolver todos los renglones del conjunto filtrado: el motor
+   ordena, pagina y suma en Go las columnas con Total «sum»; Totals completa las «custom».
+4. Avisos y notas en Dataset.Warnings/Notes; nunca importes protegidos en ellos.
+5. Indicadores del resumen ejecutivo: registerDashboard(DashboardSection{...}) con su permiso y
+   Compute(periodo); cada indicador apunta a su reporte detallado (ReportID).
+6. Exportaciones (C1): llamar a Run(ctx, runner, actor, id, parámetros) con el mismo actor y los
+   mismos parámetros que la pantalla y usar Result.AllRows, Result.Columns, Result.Totals y
+   Result.Meta (valores tipados: decimal.Decimal, int64, time.Time, string); tomar un lugar del
+   semáforo con Runner.Acquire si la generación del archivo es larga.
+7. Pruebas: reports_test.go valida el registro; las de integración (reports_integration_test.go)
+   comprueban totales contra los registros, permisos por API directa y paginación. El puente
+   nativo ya admite cualquier id del registro (reports_run) y los parámetros de su lista blanca:
+   un filtro nuevo debe agregarse a allowed_query_keys en desktop/src-tauri/src/api.rs.
+
+### Decisiones menores
+
+1. Fuente `allocation` además de `unit` y `adjustment`: el descuento por partida se reconoce por unidad y por
+   ajuste para conservar su motivo histórico y su producto sin repartir descuentos generales.
+2. Las propinas no se reconocen como venta (se reportan desde cobros, en su fecha).
+3. Turno de una venta cerrada sin pago (cortesía o entrega): el turno activo de la caja de la terminal que cerró
+   (en el relleno: sin turno).
+4. «Ventas por turno» excluye también los turnos en arqueo (como cobros); los reportes de ventas no ofrecen filtro
+   de turno (solo `sales.by_shift`), para no aislar la venta de un turno en arqueo.
+5. Efectivo por moneda y columnas de efectivo físico con `cash.expected.read` (paridad con Caja: sumadas por
+   turno permitirían deducir el esperado).
+6. Catálogo y opciones de filtros se resuelven en la transacción de autenticación (lecturas pequeñas sin locks);
+   solo los reportes y el dashboard usan el semáforo.
+7. Con filtro de producto o categoría, los descuentos generales y cargos de cuenta no se incluyen (no
+   pertenecen a un producto); los reportes por producto muestran esos ajustes como cifras de conciliación.
+8. «Menos vendidos» agrega con cero los productos activos sin ventas del periodo (solo sin filtros de
+   modalidad, área, mesa, origen o lista).
+9. El periodo «actual» (hoy, semana, mes, año) se compara con el anterior completo; `in_progress` lo indica.
+
+### Mediciones
+
+Medición opt-in `TestReportsVolumeMeasurement` (`ADEL_REPORTS_MEASURE=1`, Apple M1 Max, clúster temporal 55499,
+base aislada): sobre los datos de la aceptación se generaron 200 000 renglones de reconocimiento repartidos en
+un año (cada uno con su unidad) y 100 000 cobros (12.7 s). Tiempos de `reports.Run` completo (consulta en la
+transacción de solo lectura, totales, orden y página) para el año actual:
+
+| Reporte                                   | Renglones | Tiempo |
+| ----------------------------------------- | --------- | ------ |
+| `sales.by_day`                            | 365       | 245 ms |
+| `sales.by_product`                        | 5         | 323 ms |
+| `sales.by_month`                          | 11        | 281 ms |
+| `payments.by_method`                      | 2         | 107 ms |
+| `payments.by_day`                         | 315       | 27 ms  |
+| `discounts.summary`                       | 365       | 127 ms |
+| `sales.evolution` (con el año anterior)   | 365       | 116 ms |
+| Dashboard (año actual contra el anterior) | —         | 236 ms |
+
+`EXPLAIN (ANALYZE, BUFFERS)`: las consultas de un día usan `sales_recognitions_recognized_idx` (0.6 ms) y el
+índice de pagos por fecha (0.2 ms); las de un año recorren la tabla completa porque el año es todo el
+volumen (ventas por día 145 ms, por producto 241 ms, cobros por método 26 ms); la consulta de diferencias
+que ejecuta cada cierre usa `sales_recognitions_account_idx` y `sales_recognitions_unit_idx` (0.14 ms con
+200 000 renglones). La aceptación comprueba además que un cobro se registra mientras un reporte mantiene
+abierta su transacción de solo lectura (no espera) y que ese reporte no ve el cobro (fotografía).
+El cobro concurrente con un reporte de un año con volumen se mide en la fase D.
+
+### Pruebas ejecutadas (copia aislada `repo9aB1`, clúster temporal 55499)
+
+Salida resumida real (logs en `docs9aB1/*.log`):
+
+- `go vet ./...` y `go vet -tags=integration ./...`: sin hallazgos.
+- `go test -race -count=1 ./...`: todos `ok` (incluidos `internal/businessday`, `internal/reports`,
+  `internal/payments` con `recognition_targets_test.go`, `internal/inventory` con sus pruebas de día operativo
+  sin cambios y `internal/administration` con la pantalla `reports`).
+- Integración `-race` (una base temporal por paquete): `internal/database` ok 5.8 s (incluye
+  `TestStage9AReportsUpgradeBackfillsClosedAccounts` desde el esquema 14), `internal/administration` ok 58.7 s,
+  `internal/catalog` ok 7.1 s, `internal/operations` ok 220.9 s (aceptación encadenada completa, con la prueba
+  de parámetros de inventario adaptada), `internal/payments` ok 1.5 s, `internal/reports` ok 25.2 s
+  (`TestReportsAcceptance` con 15 subpruebas y `TestReportRunnerIsReadOnlyAndBounded`). `./internal/reports` se
+  agregó a la tupla de `scripts/database.py`.
+- `npx tsc --noEmit`: sin errores. `npx vitest run src`: 51 archivos, 434 pruebas aprobadas (incluye
+  `pages/businessDay.test.tsx`). `npm run build`: compilado.
+- `cargo test --locked --offline`: 21 aprobadas, 1 ignorada (Keychain real), incluida
+  `report_routes_are_closed_read_only_and_keyed`.
+- Playwright completo (sin `SPEC`, puertos 8188/1428): Chromium 8/8 y WebKit 8/8 aprobados; tras el último
+  cambio de la consulta de diferencias se repitió `restaurant.spec.ts`: Chromium 1/1 y WebKit 1/1.
+- Medición de volumen: ver «Mediciones».
+
+Lo que cubren las pruebas de reportes: día comercial con 00:00 y 05:00 y una venta de la 01:30 (unitaria y por
+API cambiando la hora, sin reescribir registros), semana ISO 53 y cambio de año, zona horaria y cambios de
+horario; venta contada al cerrar en su día y cuentas abiertas en «En curso»; devolución en su propio día sin
+alterar la venta del día original y cuenta reabierta con saldo 0 («Reabierta»); reliquidación que reconoce
+solo diferencias; cortesía al 100 % = venta 0 con su importe en cortesías; ventas por periodo, producto y
+categoría; combos sin duplicar componentes; cuentas divididas y combinadas sin doble conteo; pagos parciales,
+mixtos y correcciones; propinas separadas; dólares físicos y cambio por moneda con el tipo de cambio histórico;
+descuentos con motivo histórico (renombrar el motivo no cambia el reporte) y «Sin motivo del catálogo»;
+reportes sin ningún turno; permisos de cada reporte por API directa (y columnas protegidas sin
+`cash.expected.read`); totales del detalle = resumidos y paginación sin alterar totales; IVA reconocido =
+desglose de las cuentas; transacción de solo lectura (una escritura falla con 25006), sin locks consultivos,
+`REPORTS_BUSY` y `REPORT_TIMEOUT`; relleno de la 0017 (base en esquema 14 y equivalencia con Go por fuente).

@@ -58,6 +58,13 @@ export type Operation =
   | 'save_settings'
   | 'settings_features'
   | 'save_settings_feature'
+  // Etapa 9A: «Hora de inicio del día» y reportes (services/reports.ts).
+  | 'settings_business_day'
+  | 'save_settings_business_day'
+  | 'reports_catalog'
+  | 'reports_run'
+  | 'reports_dashboard'
+  | 'reports_filters'
   | 'registers'
   | 'create_register'
   | 'update_register'

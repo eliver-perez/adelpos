@@ -10,7 +10,9 @@ import (
 //   - purchase_tax_in_cost: recepciones (fase C), que copian el valor al registrarse, por lo que
 //     cambiarlo solo afecta recepciones futuras;
 //   - operating_day_cutoff: día operativo de las cancelaciones sin clasificar (fase B), en la zona
-//     horaria del establecimiento;
+//     horaria del establecimiento. Desde la etapa 9A es la «Hora de inicio del día» de todo el sistema
+//     y se cambia solo en la configuración general (PUT settings/business-day, settings.manage); aquí
+//     se lee y se muestra en solo lectura;
 //   - warn_products_without_recipe y la frecuencia de conteo: alertas (fase D).
 
 var countFrequencyLabels = map[string]string{
@@ -54,13 +56,14 @@ func (handler *service) readSettings(_ []string) (any, error) {
 }
 
 type settingsInput struct {
-	OperationID               string `json:"operation_id"`
-	Revision                  int    `json:"revision"`
-	PurchaseTaxInCost         bool   `json:"purchase_tax_in_cost"`
-	OperatingDayCutoff        string `json:"operating_day_cutoff"`
-	WarnProductsWithoutRecipe bool   `json:"warn_products_without_recipe"`
-	CountFrequency            string `json:"count_frequency"`
-	CountIntervalDays         *int   `json:"count_interval_days"`
+	OperationID       string `json:"operation_id"`
+	Revision          int    `json:"revision"`
+	PurchaseTaxInCost bool   `json:"purchase_tax_in_cost"`
+	// OperatingDayCutoff es opcional y solo se admite sin cambios (etapa 9A, ver arriba).
+	OperatingDayCutoff        *string `json:"operating_day_cutoff"`
+	WarnProductsWithoutRecipe bool    `json:"warn_products_without_recipe"`
+	CountFrequency            string  `json:"count_frequency"`
+	CountIntervalDays         *int    `json:"count_interval_days"`
 }
 
 // saveSettings guarda los parámetros con revisión optimista, auditoría (antes y después) y evento.
@@ -69,7 +72,7 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
-	if !cutoffPattern.MatchString(input.OperatingDayCutoff) {
+	if input.OperatingDayCutoff != nil && !cutoffPattern.MatchString(*input.OperatingDayCutoff) {
 		return nil, invalid("La hora de corte debe tener el formato HH:MM (de 00:00 a 23:59).")
 	}
 	if _, known := countFrequencyLabels[input.CountFrequency]; !known {
@@ -92,10 +95,13 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 	if previous.Revision != input.Revision {
 		return nil, revisionConflict("La configuración de inventario")
 	}
-	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.inventory_settings SET purchase_tax_in_cost=$1,operating_day_cutoff=$2::time,
-            warn_products_without_recipe=$3,count_frequency=$4,count_interval_days=$5,updated_by=$6,revision=revision+1,
+	if input.OperatingDayCutoff != nil && *input.OperatingDayCutoff != previous.OperatingDayCutoff {
+		return nil, invalid("La hora de inicio del día se cambia en Configuración general.")
+	}
+	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.inventory_settings SET purchase_tax_in_cost=$1,
+            warn_products_without_recipe=$2,count_frequency=$3,count_interval_days=$4,updated_by=$5,revision=revision+1,
             updated_at=now()`,
-		input.PurchaseTaxInCost, input.OperatingDayCutoff, input.WarnProductsWithoutRecipe, input.CountFrequency,
+		input.PurchaseTaxInCost, input.WarnProductsWithoutRecipe, input.CountFrequency,
 		input.CountIntervalDays, handler.actorReference())
 	if err != nil {
 		return nil, err

@@ -10,20 +10,6 @@ import { acceptIntegerText } from '../../services/numericInput';
 import { serverDateTime } from '../../services/restaurant';
 
 const frequencies = Object.keys(countFrequencyLabels) as CountFrequency[];
-const cutoffPattern = '([01][0-9]|2[0-3]):[0-5][0-9]';
-
-// Reconstruye HH:MM a partir de los dígitos tecleados (como el campo de fechas dd/mm/aaaa).
-export function formatCutoffDigits(text: string): string | null {
-  if (!/^[0-9:]*$/.test(text)) {
-    return null;
-  }
-  const digits = text.replaceAll(':', '').slice(0, 4);
-  if (digits.length <= 2) {
-    return digits;
-  }
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
-}
-
 function SettingsForm({
   settings,
   execute,
@@ -36,7 +22,6 @@ function SettingsForm({
   timezone: string;
 }) {
   const [taxInCost, setTaxInCost] = useState(settings.purchase_tax_in_cost);
-  const [cutoff, setCutoff] = useState(settings.operating_day_cutoff);
   const [warnWithoutRecipe, setWarnWithoutRecipe] = useState(settings.warn_products_without_recipe);
   const [frequency, setFrequency] = useState<CountFrequency>(settings.count_frequency);
   const [interval, setIntervalDays] = useState(
@@ -51,7 +36,6 @@ function SettingsForm({
         await saveInventorySettings(execute, {
           revision: settings.revision,
           purchase_tax_in_cost: taxInCost,
-          operating_day_cutoff: cutoff,
           warn_products_without_recipe: warnWithoutRecipe,
           count_frequency: frequency,
           count_interval_days: frequency === 'custom' ? Number(interval) : null,
@@ -72,26 +56,13 @@ function SettingsForm({
         </p>
       </div>
       <div className="form-grid">
+        {/* Etapa 9A: una sola «Hora de inicio del día» para inventario y reportes, editable solo en
+            Configuración general (permiso settings.manage). Aquí se muestra en solo lectura. */}
         <Field
-          label="Hora de corte del día operativo"
-          hint="HH:MM en la zona del establecimiento. Lo registrado antes de esta hora cuenta para el día operativo anterior; no depende de los turnos de caja."
+          label="Hora de inicio del día"
+          hint="Se cambia en Configuración general. Lo registrado antes de esta hora cuenta para el día anterior (con 05:00, la 01:30 pertenece al día anterior); no depende de los turnos de caja."
         >
-          <input
-            type="text"
-            inputMode="numeric"
-            autoComplete="off"
-            required
-            maxLength={5}
-            pattern={cutoffPattern}
-            placeholder="05:00"
-            value={cutoff}
-            onChange={(event) => {
-              const formatted = formatCutoffDigits(event.target.value);
-              if (formatted !== null) {
-                setCutoff(formatted);
-              }
-            }}
-          />
+          <input type="text" readOnly value={settings.operating_day_cutoff} />
         </Field>
       </div>
       <div className="inventory-setting">

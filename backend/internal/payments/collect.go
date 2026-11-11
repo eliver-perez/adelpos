@@ -652,6 +652,11 @@ func (handler *service) closeIfSettled(accountID string) (bool, error) {
 	if tag.RowsAffected() == 0 {
 		return false, nil
 	}
+	// Etapa 9A: la venta cuenta al cerrarse la cuenta. El reconocimiento se escribe en esta misma
+	// transacción (recognition.go); si el cierre se revierte, también se revierte.
+	if err := handler.recognizeSales(accountID); err != nil {
+		return false, err
+	}
 	if err := events.Append(handler.ctx, handler.tx, "restaurant.account.closed", handler.scope(finance), &accountID, nil); err != nil {
 		return false, err
 	}

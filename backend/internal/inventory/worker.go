@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 
+	"local/ad-el-pos/server/internal/businessday"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -397,22 +398,13 @@ func processCancel(ctx context.Context, tx pgx.Tx, request *consumptionRequest) 
 }
 
 // operatingDayFor calcula el día operativo de un instante con la zona horaria y la hora de corte
-// vigentes.
+// vigentes (businessday.Load: sin establecimiento o sin parámetros, UTC con corte a las 05:00).
 func operatingDayFor(ctx context.Context, tx pgx.Tx, instant time.Time) (OperatingDay, error) {
-	var timezone string
-	var hour, minute int
-	err := tx.QueryRow(ctx, `SELECT e.timezone,extract(hour FROM s.operating_day_cutoff)::int,extract(minute FROM s.operating_day_cutoff)::int
-        FROM app.inventory_settings s CROSS JOIN app.establishment e`).Scan(&timezone, &hour, &minute)
-	if isNoRows(err) {
-		timezone, hour, minute = "UTC", 5, 0
-	} else if err != nil {
+	config, err := businessday.Load(ctx, tx)
+	if err != nil {
 		return OperatingDay{}, err
 	}
-	location, err := time.LoadLocation(timezone)
-	if err != nil {
-		location = time.UTC
-	}
-	return operatingDayOf(instant, location, hour, minute), nil
+	return config.DayOf(instant), nil
 }
 
 // resolveRequest carga la versión, su catálogo congelado, el enrutamiento de cocina de la unidad

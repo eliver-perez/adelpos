@@ -3,7 +3,11 @@ use reqwest::Method;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::time::Duration;
 use tauri::State;
+
+// Tiempo de respuesta de las consultas de reportes (Go responde en hasta 40 s).
+const REPORT_TIMEOUT_SECONDS: u64 = 45;
 
 pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
     let value = id.ok_or("Falta el identificador del registro.")?;
@@ -13,6 +17,23 @@ pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
             .any(|character| !character.is_ascii_hexdigit() && character != '-')
     {
         return Err("El identificador del registro no es válido.".into());
+    }
+    Ok(value)
+}
+
+// report_key valida la clave de un reporte o de una fuente de filtros: minúsculas, puntos y guiones
+// bajos, sin barras ni caracteres que permitan salir de la ruta.
+pub(crate) fn report_key(id: Option<&str>) -> Result<&str, String> {
+    let value = id.ok_or("Falta el identificador del reporte.")?;
+    let valid = !value.is_empty()
+        && value.len() <= 64
+        && value.starts_with(|character: char| character.is_ascii_lowercase())
+        && value.chars().all(|character| {
+            character.is_ascii_lowercase() || character == '.' || character == '_'
+        })
+        && !value.contains("..");
+    if !valid {
+        return Err("El identificador del reporte no es válido.".into());
     }
     Ok(value)
 }
@@ -59,6 +80,12 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "save_settings" => Some((Method::PUT, "settings")),
         "settings_features" => Some((Method::GET, "settings/features")),
         "save_settings_feature" => Some((Method::PUT, "settings/features")),
+        // Etapa 9A: «Hora de inicio del día» (una sola configuración, settings.manage).
+        "settings_business_day" => Some((Method::GET, "settings/business-day")),
+        "save_settings_business_day" => Some((Method::PUT, "settings/business-day")),
+        // Etapa 9A: reportes (todas de solo lectura).
+        "reports_catalog" => Some((Method::GET, "reports/catalog")),
+        "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
         "registers" => Some((Method::GET, "registers")),
         "create_register" => Some((Method::POST, "registers")),
         "devices" => Some((Method::GET, "devices")),
@@ -181,6 +208,17 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
     };
     if let Some((method, path)) = fixed {
         return Ok((method, path.to_string()));
+    }
+    // Los reportes y las fuentes de filtros se identifican con una clave estable del registro
+    // cerrado de Go (por ejemplo «sales.by_day»), no con un UUID.
+    if operation == "reports_run" || operation == "reports_filters" {
+        let identifier = report_key(id)?;
+        let (method, path) = match operation {
+            "reports_run" => (Method::GET, format!("reports/run/{identifier}")),
+            "reports_filters" => (Method::GET, format!("reports/filters/{identifier}")),
+            _ => return Err("Operación no autorizada por el puente nativo.".into()),
+        };
+        return Ok((method, path));
     }
     let identifier = resource_id(id)?;
     let (method, path) = match operation {
@@ -656,6 +694,10 @@ pub async fn api_request(
         }
         request = request.query(&query);
     }
+    // Los reportes tienen su propio tiempo de respuesta en Go (40 s): el puente espera un poco más.
+    if operation.starts_with("reports_") {
+        request = request.timeout(Duration::from_secs(REPORT_TIMEOUT_SECONDS));
+    }
     if let Some(body) = body {
         request = request.json(&body);
     }
@@ -743,6 +785,40 @@ fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "kind",
             "archived",
             "price_list_id",
+        ]
+    } else if operation.starts_with("reports_") {
+        // Reportes (etapa 9A): periodo, comparación, página, orden, búsqueda de opciones y los
+        // filtros que declara cada reporte (Go rechaza los que el reporte no admite).
+        &[
+            "period",
+            "date",
+            "week",
+            "month",
+            "year",
+            "from",
+            "until",
+            "compare",
+            "page",
+            "page_size",
+            "sort",
+            "direction",
+            "search",
+            "mode",
+            "area_id",
+            "table_id",
+            "category_id",
+            "product_id",
+            "price_list_id",
+            "origin",
+            "register_id",
+            "shift_id",
+            "method_id",
+            "user_id",
+            "reason_id",
+            "kind",
+            "state",
+            "group_by",
+            "scope",
         ]
     } else if operation.starts_with("inventory_") {
         // Inventario (etapa 8): búsqueda, filtros de listados y paginación.
@@ -1199,6 +1275,74 @@ mod tests {
         // No hay borrado de motivos ni de indicaciones: se desactivan.
         assert!(route("payments_delete_discount_reason", Some(identifier)).is_err());
         assert!(route("catalog_delete_quick_note", Some(identifier)).is_err());
+    }
+
+    #[test]
+    fn report_routes_are_closed_read_only_and_keyed() {
+        for (operation, method, path) in [
+            ("reports_catalog", Method::GET, "reports/catalog"),
+            ("reports_dashboard", Method::GET, "reports/dashboard"),
+            (
+                "settings_business_day",
+                Method::GET,
+                "settings/business-day",
+            ),
+            (
+                "save_settings_business_day",
+                Method::PUT,
+                "settings/business-day",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+        }
+        assert_eq!(
+            route("reports_run", Some("sales.by_day")).unwrap(),
+            (Method::GET, "reports/run/sales.by_day".to_string())
+        );
+        assert_eq!(
+            route("reports_filters", Some("payment_methods")).unwrap(),
+            (Method::GET, "reports/filters/payment_methods".to_string())
+        );
+        for invalid in [
+            "../settings",
+            "sales/by_day",
+            "Sales.by_day",
+            "sales..by_day",
+            "",
+            ".sales",
+            "sales.by-day",
+            "sales.by_day?x=1",
+        ] {
+            assert!(route("reports_run", Some(invalid)).is_err());
+            assert!(route("reports_filters", Some(invalid)).is_err());
+        }
+        assert!(route("reports_run", None).is_err());
+        assert!(route("reports_export", Some("sales.by_day")).is_err());
+        assert!(route("reports_run", Some(&"a".repeat(65))).is_err());
+        let mut query = BTreeMap::new();
+        for key in [
+            "period",
+            "week",
+            "compare",
+            "page",
+            "page_size",
+            "sort",
+            "direction",
+            "category_id",
+            "reason_id",
+            "group_by",
+            "search",
+        ] {
+            query.insert(key.to_string(), "valor".to_string());
+        }
+        assert!(query_allowed("reports_run", &query));
+        assert!(query_allowed("reports_dashboard", &query));
+        let mut rejected = BTreeMap::new();
+        rejected.insert("sql".to_string(), "SELECT 1".to_string());
+        assert!(!query_allowed("reports_run", &rejected));
+        let mut foreign = BTreeMap::new();
+        foreign.insert("period".to_string(), "today".to_string());
+        assert!(!query_allowed("payments_shifts", &foreign));
     }
 
     #[test]

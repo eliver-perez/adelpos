@@ -8,6 +8,7 @@ import (
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/operations"
 	"local/ad-el-pos/server/internal/payments"
+	"local/ad-el-pos/server/internal/reports"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -51,6 +52,9 @@ func init() {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}
 	for _, permission := range inventory.Permissions {
+		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
+	}
+	for _, permission := range reports.Permissions {
 		Permissions = append(Permissions, Permission{Key: permission.Key, Description: permission.Description})
 	}
 }
