@@ -43,7 +43,13 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		writeFault(writer, request, &Fault{Status: 400, Code: "INVALID_JSON", Message: "La solicitud no contiene JSON válido."})
 		return
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), 10*time.Second)
+	// Los reportes (etapa 9A) tienen su propio tiempo de respuesta: la consulta puede durar hasta el
+	// statement_timeout de su transacción de solo lectura.
+	timeout := 10 * time.Second
+	if strings.HasPrefix(request.URL.Path, "/api/v1/reports/") {
+		timeout = reportTimeout
+	}
+	ctx, cancel := context.WithTimeout(request.Context(), timeout)
 	defer cancel()
 	result, err := service.Execute(ctx, Request{
 		Method:            request.Method,
@@ -56,6 +62,9 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		ProvisioningToken: request.Header.Get("X-Provisioning-Token"),
 		Local:             local,
 	})
+	if err == nil {
+		result, err = service.completeDeferred(ctx, result)
+	}
 	if err != nil {
 		writeFault(writer, request, publicFault(err))
 		return

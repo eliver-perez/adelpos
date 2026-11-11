@@ -1256,3 +1256,192 @@ DEFAULT ''`).
 - `app.inventory_receipts.counter_store text NOT NULL DEFAULT ''`.
 - Modalidad de una recepción para el reporte de compras: `orden` (`purchase_order_id IS NOT NULL`), `directa` (sin orden y
   proveedor `formal`) o `mostrador` (proveedor `counter`, siempre sin orden).
+
+## Etapa 9A · reportes, día comercial y reconocimiento de ventas (parte B1, esquema 17)
+
+Todas las rutas bajo `/api/v1`, autenticadas como el resto (dispositivo + sesión + permisos leídos en cada
+petición). Ninguna ruta de reportes acepta SQL: los reportes salen de un registro cerrado en Go
+(`backend/internal/reports`).
+
+### Ejecución de `reports/*`
+
+- La autenticación, los permisos y la validación de forma de los parámetros ocurren en la transacción corta
+  habitual de `administration`, que se confirma (una denegación se audita con `access.denied` como en toda la
+  API). La consulta corre **después**, en otra transacción `REPEATABLE READ READ ONLY` con
+  `statement_timeout=30s`, `lock_timeout=2s` e `idle_in_transaction_session_timeout=45s`, sobre un semáforo
+  propio de **2 conexiones** del pool compartido. Sin locks consultivos ni handlers de otros módulos.
+- Tiempo de respuesta HTTP de `reports/*`: **40 s** (las demás rutas, 10 s). El puente nativo usa 45 s para
+  las operaciones `reports_*`.
+- Errores propios (todos con `{"error":{"code","message","request_id"}}` y mensaje en español):
+  - `503 REPORTS_BUSY` «Hay otros reportes en curso. Espera unos segundos y vuelve a intentarlo.» (semáforo
+    lleno; no espera);
+  - `503 REPORT_TIMEOUT` (la consulta excedió su tiempo);
+  - `422 REPORT_TOO_LARGE` (más de 100 000 renglones en el conjunto filtrado);
+  - `400 VALIDATION_ERROR` (parámetro no admitido por el reporte, periodo inválido, orden por una columna no
+    ordenable o protegida, filtro con valor inválido);
+  - `403 PERMISSION_DENIED`, `404 NOT_FOUND` (reporte, ruta o fuente de filtros inexistente).
+
+### `GET reports/catalog` (`reports.read`, sin parámetros)
+
+```json
+{
+  "groups": [
+    {"id": "sales", "title": "Ventas", "reports": [
+      {"id": "sales.by_day", "title": "Ventas por día", "description": "…", "date_basis": "Fecha de cierre…",
+       "period": "required", "comparison": false,
+       "filters": [{"key": "mode", "label": "Modalidad", "type": "choice", "options": [{"value": "dine_in", "label": "Salón"}]},
+                   {"key": "category_id", "label": "Categoría", "type": "id", "source": "categories"}],
+       "columns": [{"key": "day", "label": "Día", "type": "date", "visibility": "default", "total": "none", "sortable": true}],
+       "default_sort": {"key": "day", "direction": "asc"},
+       "export": {"pdf": false, "excel": false}}]}],
+  "periods": [{"value": "today", "label": "Hoy"}, …],
+  "dashboard": true, "timezone": "America/Monterrey", "day_start": "05:00"
+}
+```
+
+Solo incluye los grupos con reportes que el usuario puede consultar y, en cada reporte, solo las columnas que
+puede ver. `export.*` refleja `reports.export.pdf` / `reports.export.excel` (las exportaciones son de la fase C).
+
+### `GET reports/run/{id}` (`reports.read` + los permisos del reporte)
+
+Parámetros (cualquier otro → 400):
+
+| Parámetro           | Valores                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `period`            | `today` (por omisión), `yesterday`, `current_week`, `current_month`, `current_year`, `day` (+`date=AAAA-MM-DD`), `iso_week` (+`week=AAAA-Wss`), `month` (+`month=AAAA-MM`), `year` (+`year=AAAA`), `range` (+`from`, `until`, AAAA-MM-DD incluidos, ≤ 400 días). No se admite en reportes de situación actual (`period: "none"`). |
+| `compare`           | `previous` (periodo anterior equivalente; solo si `comparison: true`) o `none`                                                                                                                                                                                                                                                    |
+| `page`, `page_size` | desde 1; `page_size` 1–200 (50 por omisión)                                                                                                                                                                                                                                                                                       |
+| `sort`, `direction` | clave de una columna `sortable` visible; `asc`/`desc`                                                                                                                                                                                                                                                                             |
+| filtros             | los que declara el reporte: `mode`, `area_id`, `table_id`, `category_id`, `product_id`, `price_list_id`, `origin`, `register_id`, `shift_id`, `method_id`, `user_id`, `reason_id` (UUID o `none` = «Sin motivo del catálogo»), `kind`, `state`, `group_by`, `scope`                                                               |
+
+Respuesta (modelo único; las exportaciones usan el mismo resultado):
+
+```json
+{
+  "report": {
+    "id": "sales.by_day",
+    "group": "sales",
+    "title": "Ventas por día",
+    "description": "…"
+  },
+  "meta": {
+    "title": "Ventas por día",
+    "period": {
+      "kind": "current_week",
+      "label": "Semana 46 de 2026 (del 9 al 15 de noviembre de 2026)",
+      "first_day": "2026-11-09",
+      "last_day": "2026-11-15",
+      "from": "2026-11-09T11:00:00Z",
+      "until": "2026-11-16T11:00:00Z",
+      "days": 7,
+      "iso_year": 2026,
+      "iso_week": 46,
+      "in_progress": true
+    },
+    "comparison": null,
+    "filters": [
+      { "key": "category_id", "label": "Categoría", "value": "…uuid…", "display": "Bebidas" }
+    ],
+    "generated_at": "2026-11-10T18:00:00Z",
+    "timezone": "America/Monterrey",
+    "day_start": "05:00",
+    "date_basis": "Fecha de cierre de la cuenta (reconocimiento de la venta), con la hora de inicio del día.",
+    "warnings": [{ "code": "SHIFT_CLOSING", "message": "Turnos en arqueo excluidos: 1. …" }],
+    "notes": ["…"]
+  },
+  "columns": [
+    {
+      "key": "net",
+      "label": "Venta neta",
+      "type": "money_mxn",
+      "visibility": "default",
+      "total": "sum",
+      "sortable": true,
+      "description": "…"
+    }
+  ],
+  "rows": [{ "day": "2026-11-10", "accounts": 12, "net": "4520.00", "average_ticket": "376.67" }],
+  "totals": { "day": null, "accounts": 12, "net": "4520.00", "average_ticket": "376.67" },
+  "summary": [{ "key": "accounts", "label": "Cuentas cerradas", "type": "integer", "value": 12 }],
+  "page": { "page": 1, "page_size": 50, "total_rows": 7, "total_pages": 1 },
+  "sort": { "key": "day", "direction": "asc" }
+}
+```
+
+Formato de valores por tipo de columna: `money_mxn`, `money_usd`, `percent` → cadena con dos decimales;
+`quantity` → cadena decimal exacta; `integer` → número; `date` → `AAAA-MM-DD` (día comercial); `datetime` →
+RFC 3339 en UTC (mostrar en `meta.timezone`); `text`/`code` → cadena; ausente → `null`. Los **totales** se
+calculan en Go sobre **todo** el conjunto filtrado (no la página). Las columnas protegidas por permiso (por
+ejemplo, el efectivo físico de `payments.list` sin `cash.expected.read`) no aparecen en `columns`, `rows`,
+`totals` ni `summary`, y no se puede ordenar por ellas.
+
+#### Reportes registrados (fase B1)
+
+| Grupo              | id                                                                                                                                                                                                                                                                                                                                                                                 | Permisos                                       | Fecha                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------- |
+| Ventas             | `sales.summary` (por tasa de IVA), `sales.by_day`, `sales.by_week` (ISO), `sales.by_month`, `sales.by_hour`, `sales.by_product`, `sales.by_variant`, `sales.by_mode`, `sales.dine_in` (área y mesa), `sales.takeaway` (origen), `sales.by_price_list`, `sales.by_shift`, `sales.accounts` (cierres), `sales.evolution` (con anterior), `sales.in_progress` (En curso, sin periodo) | `reports.sales.read`                           | cierre de la cuenta (reconocimiento)          |
+| Categorías         | `sales.by_category`                                                                                                                                                                                                                                                                                                                                                                | `reports.sales.read`                           | cierre                                        |
+| Productos          | `products.top`, `products.bottom` (incluye activos sin ventas), `products.combos`, `products.combo_components` (sin importe), `products.complements`, `products.cancelled` (fecha de cancelación), `products.discounted`, `products.trends` (con anterior)                                                                                                                         | `reports.sales.read`                           | cierre (cancelados: cancelación)              |
+| Cocina y operación | `kitchen.demand_by_product`, `kitchen.demand_by_hour`, `kitchen.stations`                                                                                                                                                                                                                                                                                                          | `reports.sales.read`                           | liberación a cocina                           |
+| Pagos              | `payments.by_method`, `payments.by_register`, `payments.by_shift`, `payments.by_user`, `payments.by_day`, `payments.list`, `payments.mixed_partial`, `payments.refunds`, `payments.corrections`, `payments.tips`, `payments.pending` (sin periodo)                                                                                                                                 | `reports.payments.read`                        | registro del cobro / devolución               |
+| Pagos              | `payments.currency` (pesos y dólares físicos)                                                                                                                                                                                                                                                                                                                                      | `reports.payments.read` + `cash.expected.read` | movimiento de efectivo                        |
+| Descuentos         | `discounts.summary`, `discounts.by_reason`, `discounts.by_user`, `discounts.by_product`, `discounts.list`, `discounts.general`, `discounts.courtesies`, `discounts.authorizations`                                                                                                                                                                                                 | `reports.discounts.read`                       | cierre de la venta (autorizaciones: su fecha) |
+
+### `GET reports/dashboard` (`reports.read`)
+
+Parámetros: los de periodo y `compare` (por omisión `previous`). Cada sección solo se calcula y envía con su
+permiso (`sales` con `reports.sales.read`, `payments` con `reports.payments.read`, `discounts` con
+`reports.discounts.read`); `report_id` solo aparece si el usuario puede abrir ese reporte.
+
+```json
+{
+  "period": {…}, "comparison": {…}, "generated_at": "…", "timezone": "…", "day_start": "05:00",
+  "sections": [{"id": "sales", "title": "Ventas", "indicators": [
+    {"key": "net_sales", "label": "Ventas netas", "type": "money_mxn", "value": "4520.00", "previous": "3980.00",
+     "change": "540.00", "change_percent": "13.57", "report_id": "sales.by_day", "hint": "…"}]}],
+  "series": [{"key": "net_sales_by_day", "label": "Venta neta por día", "type": "money_mxn", "report_id": "sales.by_day",
+              "points": [{"date": "2026-11-09", "value": "3980.00"}]}],
+  "warnings": []
+}
+```
+
+Indicadores: ventas `sales`, `net_sales`, `accounts`, `average_ticket`, `units`, `open_accounts` y
+`open_balance` (situación actual, sin valor anterior); cobros `collected`, `payments`, `refunds`, `tips`;
+descuentos `discounts`, `courtesies`, `discount_percent`. `change_percent` es `null` si el anterior es cero.
+El dashboard no se recalcula con SSE (la pantalla lo pide o usa un temporizador).
+
+### `GET reports/filters/{source}` (`reports.read`)
+
+`source`: `registers`, `shifts` (200 más recientes), `users` (sin `sa`), `areas`, `tables`, `products` (con
+`search`, hasta 100), `categories`, `payment_methods`, `price_lists`, `discount_reasons` (primero
+`{"value":"none","label":"Sin motivo del catálogo"}`), `origins`. Respuesta
+`{"source": "…", "options": [{"value", "label", "detail"}]}`. Solo nombres y estados, nunca importes.
+
+### `GET|PUT settings/business-day` («Hora de inicio del día»)
+
+- `GET` (`settings.read`): `{"operating_day_cutoff": "05:00", "timezone": "America/Monterrey", "revision": 3,
+"updated_at": "…", "updated_by_name": "…"}`.
+- `PUT` (`settings.manage`): `{"operating_day_cutoff": "HH:MM", "revision": n}` → la configuración guardada;
+  `400` formato, `409 REVISION_CONFLICT`; auditoría `settings.business_day_changed` (antes/después) y evento
+  `inventory.settings.changed`. Es la misma fila y revisión que `inventory/settings`.
+- `PUT inventory/settings`: `operating_day_cutoff` pasa a ser **opcional** y solo se acepta sin cambios
+  (diferente → `400` «La hora de inicio del día se cambia en Configuración general.»). `GET inventory/settings`
+  sigue devolviéndola.
+
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+Operaciones nuevas: `reports_catalog` (GET `reports/catalog`), `reports_dashboard` (GET `reports/dashboard`),
+`reports_run` (GET `reports/run/{id}`), `reports_filters` (GET `reports/filters/{source}`),
+`settings_business_day` (GET) y `save_settings_business_day` (PUT `settings/business-day`). `reports_run` y
+`reports_filters` reciben como identificador la clave del registro (minúsculas, `.` y `_`, ≤ 64, sin `..` ni
+barras), no un UUID. Lista blanca de parámetros de `reports_*`: `period date week month year from until compare
+page page_size sort direction search mode area_id table_id category_id product_id price_list_id origin
+register_id shift_id method_id user_id reason_id kind state group_by scope`. Tiempo de espera 45 s.
+
+Tipos TypeScript: `desktop/src/services/reports.ts`.
+
+### Permisos nuevos (0017, solo al administrador)
+
+`reports.read`, `reports.sales.read`, `reports.payments.read`, `reports.discounts.read`, `reports.cash.read`,
+`reports.inventory.read`, `reports.purchases.read`, `reports.employees.read`, `reports.export.pdf`,
+`reports.export.excel`. Pantalla de inicio `reports` (`reports.read`) en `administration/preferences.go`.

@@ -424,17 +424,20 @@ func testInventoryCostVisibility(t *testing.T, fixture *inventoryFixture) {
 func testInventorySettingsAndFeature(t *testing.T, fixture *inventoryFixture) {
 	cursor := eventCursor(t, fixture.restaurantFixture)
 	settings := decodeResponse[inventory.Settings](t, fixture.adminCall(t, "GET", "inventory/settings", nil, 200))
+	// Etapa 9A: la hora de corte («Hora de inicio del día») se cambia en settings/business-day; aquí
+	// solo se acepta sin cambios (o se omite).
 	saved := decodeResponse[inventory.Settings](t, fixture.adminWrite(t, "PUT", "inventory/settings", map[string]any{
-		"revision": settings.Revision, "purchase_tax_in_cost": false, "operating_day_cutoff": "04:30",
+		"revision": settings.Revision, "purchase_tax_in_cost": false, "operating_day_cutoff": settings.OperatingDayCutoff,
 		"warn_products_without_recipe": true, "count_frequency": "custom", "count_interval_days": 7,
 	}, 200))
-	if saved.PurchaseTaxInCost || saved.OperatingDayCutoff != "04:30" || saved.CountIntervalDays == nil || *saved.CountIntervalDays != 7 ||
+	if saved.PurchaseTaxInCost || saved.OperatingDayCutoff != "05:00" || saved.CountIntervalDays == nil || *saved.CountIntervalDays != 7 ||
 		saved.Revision != settings.Revision+1 || saved.UpdatedByName == nil {
 		t.Fatalf("Configuración guardada: %+v", saved)
 	}
 	for _, body := range []map[string]any{
 		{"revision": saved.Revision, "purchase_tax_in_cost": true, "operating_day_cutoff": "05:00", "warn_products_without_recipe": true, "count_frequency": "custom"},
 		{"revision": saved.Revision, "purchase_tax_in_cost": true, "operating_day_cutoff": "25:00", "warn_products_without_recipe": true, "count_frequency": "none"},
+		{"revision": saved.Revision, "purchase_tax_in_cost": true, "operating_day_cutoff": "04:30", "warn_products_without_recipe": true, "count_frequency": "none"},
 		{"revision": saved.Revision, "purchase_tax_in_cost": true, "operating_day_cutoff": "05:00", "warn_products_without_recipe": true, "count_frequency": "weekly", "count_interval_days": 3},
 	} {
 		fixture.adminWrite(t, "PUT", "inventory/settings", body, 400)

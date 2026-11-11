@@ -120,9 +120,17 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		}
 		return result, err
 	}
+	// Reportes (etapa 9A): permisos y forma en esta transacción; la consulta, después (reports.go).
+	if strings.HasPrefix(route, "reports/") {
+		return handleReports(ctx, tx, request, principal, route)
+	}
 	// Las funciones del establecimiento se identifican por código, no por UUID.
 	if route == "settings/features" {
 		return establishmentFeatures(ctx, tx, request, principal)
+	}
+	// «Hora de inicio del día» (etapa 9A): un solo valor, editable solo aquí.
+	if route == "settings/business-day" {
+		return businessDaySettings(ctx, tx, request, principal)
 	}
 	parts := strings.Split(route, "/")
 	if len(parts) > 1 && parts[1] != "invitations" && !identifierPattern.MatchString(parts[1]) {

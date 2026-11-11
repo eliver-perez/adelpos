@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/reports"
 )
 
 type Service struct {
@@ -21,7 +22,11 @@ type Service struct {
 	ProvisioningFile string
 	// Queues consulta las colas CUPS para el cajón (etapa 7.1). Sin valor, payments usa las
 	// consultas de solo lectura del equipo; las pruebas de aceptación inyectan una simulada.
-	Queues      kitchen.QueueInspector
+	Queues kitchen.QueueInspector
+	// Reports ejecuta las consultas de reportes (etapa 9A) en su transacción de solo lectura con un
+	// semáforo propio. Sin valor se crea al primer uso; las pruebas pueden inyectar uno.
+	Reports     *reports.Runner
+	reportsOnce sync.Once
 	streamMutex sync.Mutex
 	streams     map[string]int
 }

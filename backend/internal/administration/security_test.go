@@ -36,6 +36,14 @@ func TestHomeScreenFallsBackWhenPermissionIsMissing(t *testing.T) {
 	if allowedHome("inventory", []string{"inventory.stock.read"}) != "status" {
 		t.Fatal("Sin inventory.read la pantalla de inventarios debe volver a Estado del sistema")
 	}
+	// Etapa 9A: «Reportes» se admite como inicio con reports.read; un permiso de grupo sin el del
+	// módulo no basta.
+	if allowedHome("reports", []string{"reports.read"}) != "reports" {
+		t.Fatal("La pantalla de reportes debe admitirse como inicio con reports.read")
+	}
+	if allowedHome("reports", []string{"reports.sales.read"}) != "status" {
+		t.Fatal("Sin reports.read la pantalla de reportes debe volver a Estado del sistema")
+	}
 }
 
 func TestLegacyPreviewHomeOpensCatalog(t *testing.T) {
