@@ -294,8 +294,15 @@ func normalizeField(kind Kind, blockID string, options *FieldOptions) error {
 
 func validateKitchenItems(blockID string, options *KitchenItemsOptions) error {
 	tristate := []string{Inherit, OptionYes, OptionNo}
-	if !slices.Contains(tristate, options.ShowNotes) || !slices.Contains(tristate, options.ShowPrices) {
-		return invalidTemplate(blockID, "Las observaciones e importes se imprimen según Cocina, siempre o nunca.")
+	if !slices.Contains(tristate, options.ShowNotes) {
+		return invalidTemplate(blockID, "Las observaciones se imprimen según Cocina, siempre o nunca.")
+	}
+	// Los importes solo se imprimen según Cocina o se ocultan: la comanda guarda los precios solo si
+	// Cocina los muestra («Incluir importes comerciales en comandas»), de modo que «siempre» no
+	// podría cumplirse en papel.
+	if !slices.Contains([]string{Inherit, OptionNo}, options.ShowPrices) {
+		return invalidTemplate(blockID, "Los importes se imprimen según la configuración de Cocina o se ocultan. "+
+			"Para imprimirlos, activa «Incluir importes comerciales en comandas» en Cocina.")
 	}
 	if !slices.Contains([]string{Inherit, QuantityPrefix, QuantityMulti}, options.QuantityStyle) {
 		return invalidTemplate(blockID, "El estilo de cantidad debe ser el de Cocina, «2 x» o «× 2».")

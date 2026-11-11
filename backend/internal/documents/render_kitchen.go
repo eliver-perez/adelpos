@@ -46,7 +46,9 @@ func resolveTristate(value string, inherited bool) bool {
 // partes, antes/ahora, observaciones, importe, motivo, referencia y espacio entre partidas.
 func renderKitchenItems(options *KitchenItemsOptions, data *KitchenData, w *writer) {
 	showNotes := resolveTristate(options.ShowNotes, data.Settings.ShowNotes)
-	showPrices := resolveTristate(options.ShowPrices, data.Settings.ShowPrices)
+	// Los importes solo existen si Cocina los muestra (la comanda no guarda precios en otro caso);
+	// la plantilla puede ocultarlos, nunca forzarlos.
+	showPrices := options.ShowPrices != OptionNo && data.Settings.ShowPrices
 	quantityStyle := options.QuantityStyle
 	if quantityStyle == Inherit {
 		quantityStyle = data.Settings.QuantityStyle

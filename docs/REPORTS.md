@@ -9,6 +9,12 @@ menores, las cifras de cada prueba y las mediciones, en [ETAPA_9A_AVANCE.md](ETA
 contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md) (secciones «Etapa 9A» de las partes B1, B2, C1 y
 C2); la evidencia de verificación, en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
 
+**Etapa 9B** (versión 0.9.1, esquema 19; migraciones 0018 y 0019 **no aplicadas** a la instalación real hasta la
+autorización del propietario): lo único que cambia en este módulo es el **encabezado de las exportaciones**, que lleva
+el logotipo del restaurante (o el de AD-EL POS si no hay) con su nombre y sus datos (ver «Exportaciones» y
+[DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). Contenido, columnas, totales, orden, consultas, permisos, límites y
+auditoría siguen igual.
+
 ## Contenido
 
 - [Principios](#principios)
@@ -631,6 +637,12 @@ autenticación (403 auditado como `access.denied`). El resumen ejecutivo no se e
 
 `codeberg.org/go-pdf/fpdf` con las fuentes Go Regular y Bold (UTF-8 incrustadas; el texto se puede copiar y buscar):
 
+- Desde la etapa 9B, la primera página empieza con el **encabezado de identidad**: el logotipo del restaurante (a lo más
+  50 × 14 mm, con su proporción) y, a su derecha, el nombre (negrita 11 pt), la dirección y «Tel. … · correo» (8 pt) del
+  establecimiento, solo los datos que existan en Configuración general, y una línea divisoria. Sin logotipo del
+  restaurante (o con uno guardado que ya no pasa la validación) se usa el de AD-EL POS con el nombre del establecimiento.
+  La imagen se incrusta una sola vez por documento (PNG RGB o JPEG de a lo más 600 × 168 px, codificado otra vez sin
+  metadatos). La primera página crece ≈ 14.5 mm, así que un reporte que llenaba sus páginas puede ocupar una más.
 - Primera página con establecimiento, reporte, descripción, periodo, comparación, filtros, fecha usada, hora de inicio
   del día y zona, orden, renglones y fecha de generación; cifras resumidas y avisos.
 - Tabla con encabezados repetidos en cada página, renglones alternados, totales de Go y notas; encabezado breve en las
@@ -649,12 +661,17 @@ autenticación (403 auditado como `access.denied`). El resumen ejecutivo no se e
   con formato `0.00%`), fechas comerciales y horas del restaurante como fechas de Excel, códigos y textos con formato «@»
   y un renglón «Total» con los totales de Go como números.
 - Hoja «Filtros» con los metadatos (establecimiento, reporte, periodo, comparación, fecha usada, hora de inicio, zona,
-  orden, renglones, generación, filtros, resumen, avisos y notas).
+  orden, renglones, generación, filtros, resumen, avisos y notas). Desde la etapa 9B: renglón 1 con el logotipo en A1
+  (anclado con `oneCellAnchor`, a lo más 200 × 56 px, sin hipervínculo, con texto alternativo «Logotipo del restaurante» o
+  «Logotipo de AD-EL POS») y el nombre del establecimiento en B1; renglón 2 vacío; la tabla «Concepto | Valor» empieza en
+  el renglón 3 con «Establecimiento» y, solo si existen, «Dirección», «Teléfono» y «Correo electrónico» antes de
+  «Reporte». La hoja «Datos» es idéntica byte a byte a la de la 9A.
 - Un importe con más de 15 dígitos significativos se escribe como texto exacto (Excel lo truncaría) y la hoja «Filtros»
   lo indica.
 - **Escape de fórmulas**: ningún valor es fórmula; un texto que empieza por `=`, `+`, `-`, `@`, tabulador, retorno o
   salto de línea (o sus formas de ancho completo `＝ ＋ － ＠`) lleva un apóstrofo inicial visible. Sin hipervínculos,
-  nombres definidos, vínculos externos, macros ni imágenes.
+  nombres definidos, vínculos externos ni macros; la única imagen es el logotipo del encabezado de la hoja «Filtros»
+  (etapa 9B).
 
 ### Auditoría
 
@@ -741,6 +758,14 @@ Detalle de lo ejecutado en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
   permiso con guardado, cancelación y error, elección de gráficos y ningún `type="number"`),
   `services/reportExport.test.ts` y `pages/businessDay.test.tsx` (la hora de inicio en Configuración general y las
   operaciones del puente).
+- **Etapa 9B (encabezado)**: unitarias de `reports/export_identity_test.go` (`TestPrepareExportLogo`,
+  `TestHeaderLogoChoice`, `TestContactLine`, `TestPDFHeaderWithRestaurantLogo`, `TestPDFHeaderFallsBackToBrandLogo`,
+  `TestXLSXHeaderWithRestaurantLogo`, `TestXLSXHeaderFallsBackToBrandLogo` y `TestXLSXHeaderEscapesFormulaText`; un
+  `tEXt` del original desaparece) y `brand` (marca embebida igual al original); integración: subtest «encabezado con el
+  logotipo del restaurante o el de AD-EL POS» de `TestReportExports` (fuente del logotipo en la transacción de solo
+  lectura, sin locks consultivos) y `identity` (PDF y Excel con el logotipo del restaurante y con el respaldo). Comparado
+  con el código de la 9A: las cadenas del PDF y la hoja «Datos» del Excel son idénticas. `assertSafeWorkbook` admite
+  exactamente el dibujo y la imagen del encabezado.
 - **Rust**: `report_routes_are_closed_read_only_and_keyed` (`api.rs`) y las pruebas de `export.rs` (lista cerrada,
   parámetros en lista blanca, tipo y firma antes del diálogo, nombres saneados, escritura atómica, cancelación sin
   escribir, una exportación a la vez y ventana sin permisos de diálogo ni de archivos).
@@ -810,6 +835,9 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
   elegidos ni componentes de combo (limitación de la etapa 8); el esperado de un turno cerrado antes de la etapa 7 (sin
   cierre registrado) no existe.
 - **PDF**: las fuentes Go no tienen ideogramas CJK ni emojis (se ven como un recuadro; el Excel los conserva).
+- **Encabezado (etapa 9B)**: un logotipo del restaurante más pequeño que el recuadro se amplía al mostrarse y puede verse
+  borroso; un JPEG CMYK usa la conversión simple de Go; cada archivo pesa ≈ 28–29 KB más con la marca de AD-EL POS (fijo
+  por archivo). Los PDF con el encabezado no se imprimieron.
 - **Interfaz**: un periodo que no cabe en una página (un año por día, 365 renglones) no dibuja tendencia (se sugiere el
   reporte por semana o por mes); las barras de categorías muestran los primeros 10 renglones de la página; las opciones de
   filtros se consultan una vez por fuente mientras la pantalla está abierta; la interfaz no ofrece elegir papel A4 (Go lo

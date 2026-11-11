@@ -123,15 +123,15 @@ func TestKitchenItemOptionsAndLargeText(t *testing.T) {
 	if strings.Contains(inherit.Text(), "Importe:") || !strings.Contains(inherit.Text(), "NOTA: Observación de muestra") {
 		t.Fatalf("La lista no heredó la configuración de Cocina:\n%s", inherit.Text())
 	}
-	custom := renderSample(t, KindKitchenOrder, `{"blocks":[{"id":"lista","type":"kitchen_items","options":{"show_prices":"yes","show_notes":"no",
+	custom := renderSample(t, KindKitchenOrder, `{"blocks":[{"id":"lista","type":"kitchen_items","options":{"show_prices":"no","show_notes":"no",
 		"quantity_style":"multiplier","line_spacing":"0","show_item_reference":false,"show_station_headings":false,"station_divider":false}}]}`, RenderOptions{PaperWidth: 80})
 	text := custom.Text()
-	for _, absent := range []string{"NOTA:", "Partida:", "ESTACIÓN", "------"} {
+	for _, absent := range []string{"NOTA:", "Partida:", "ESTACIÓN", "------", "Importe:"} {
 		if strings.Contains(text, absent) {
 			t.Fatalf("La lista personalizada imprimió %q:\n%s", absent, text)
 		}
 	}
-	if !strings.Contains(text, "Platillo de muestra × 2") || !strings.Contains(text, "Importe: $250.00") {
+	if !strings.Contains(text, "Platillo de muestra × 2") {
 		t.Fatalf("La lista personalizada no aplicó sus opciones:\n%s", text)
 	}
 	large := renderSample(t, KindKitchenOrder, `{"options":{"text_size":"large"},"blocks":[{"id":"titulo","type":"document_title","size":"double_width","bold":true}]}`, RenderOptions{PaperWidth: 58})

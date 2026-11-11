@@ -290,6 +290,7 @@ func TestDocumentDesignerAcceptance(t *testing.T) {
 	t.Run("conflicto entre dos administradores", func(t *testing.T) { testConcurrentAdministrators(t, value) })
 	t.Run("validación permisos e idempotencia", func(t *testing.T) { testValidationPermissionsAndIdempotency(t, value) })
 	t.Run("vista previa con datos de muestra", func(t *testing.T) { testSamplePreview(t, value) })
+	t.Run("importes de la lista de cocina según Cocina", func(t *testing.T) { testKitchenPricesFollowKitchen(t, value) })
 	t.Run("muestras sin ventas ni pagos y resultado de la cola", func(t *testing.T) { testSamplePrinting(t, value) })
 }
 
@@ -602,22 +603,53 @@ func testSamplePreview(t *testing.T, value *fixture) {
 func testSamplePrinting(t *testing.T, value *fixture) {
 	printer := decodeAs[kitchen.Printer](t, value.mutate(t, value.admin, "POST", "kitchen/printers", map[string]any{
 		"name": "Muestras USB", "transport": "cups", "destination": "ADEL_TEST_USB", "active": true, "paper_width": 58, "copies": 1,
+		"accepts_escpos": true,
 	}, 200))
 	ipp := decodeAs[kitchen.Printer](t, value.mutate(t, value.admin, "POST", "kitchen/printers", map[string]any{
 		"name": "Muestras IPP", "transport": "cups", "destination": "ADEL_TEST_IPP", "active": true, "paper_width": 80, "copies": 1,
+		"accepts_escpos": true,
 	}, 200))
+	// Una cola raw de una impresora sin la marca ESC/POS (por omisión) no recibe formato ni logotipo.
+	unmarked := decodeAs[kitchen.Printer](t, value.mutate(t, value.admin, "POST", "kitchen/printers", map[string]any{
+		"name": "Muestras USB sin marca", "transport": "cups", "destination": "ADEL_TEST_USB", "active": true, "paper_width": 80, "copies": 1,
+	}, 200))
+	if !printer.AcceptsESCPos || unmarked.AcceptsESCPos {
+		t.Fatalf("La marca ESC/POS no se guardó como se pidió: %+v %+v", printer, unmarked)
+	}
 	compatibility := decodeAs[[]struct {
 		ID     string `json:"id"`
 		Format struct {
 			Status string `json:"status"`
+			Code   string `json:"code"`
 		} `json:"format"`
 	}](t, value.call(t, value.admin, "GET", "documents/printers", nil, 200))
 	statuses := map[string]string{}
 	for _, item := range compatibility {
-		statuses[item.ID] = item.Format.Status
+		statuses[item.ID] = item.Format.Status + "/" + item.Format.Code
 	}
-	if statuses[printer.ID] != "supported" || statuses[ipp.ID] != "unsupported" {
+	if statuses[printer.ID] != "supported/queue_raw" || statuses[ipp.ID] != "unsupported/queue_not_raw" ||
+		statuses[unmarked.ID] != "unsupported/escpos_disabled" {
 		t.Fatalf("Compatibilidad de impresoras incorrecta: %+v", statuses)
+	}
+	// La marca se cambia con PATCH, se consulta con GET kitchen/printers y solo existe en CUPS.
+	marked := unmarked
+	marked.AcceptsESCPos = true
+	marked.Active = false
+	saved := decodeAs[kitchen.Printer](t, value.mutate(t, value.admin, "PATCH", "kitchen/printers/"+unmarked.ID, printerBody(marked), 200))
+	listedPrinters := decodeAs[[]kitchen.Printer](t, value.call(t, value.admin, "GET", "kitchen/printers", nil, 200))
+	found := false
+	for _, item := range listedPrinters {
+		found = found || (item.ID == saved.ID && item.AcceptsESCPos && !item.Active)
+	}
+	if !found {
+		t.Fatalf("La marca ESC/POS no se guardó con PATCH: %+v", listedPrinters)
+	}
+	network := saved
+	network.Transport = "escpos_tcp"
+	network.Destination = "192.168.1.60"
+	rejected := errorOf(t, value.mutate(t, value.admin, "PATCH", "kitchen/printers/"+saved.ID, printerBody(network), 400))
+	if !strings.Contains(rejected.Message, "solo se configura en colas CUPS") {
+		t.Fatalf("La marca ESC/POS se aceptó en ESC/POS por red: %+v", rejected)
 	}
 	counts := func() string {
 		return fmt.Sprint(
@@ -686,4 +718,70 @@ func testSamplePrinting(t *testing.T, value *fixture) {
 	if counts() != before {
 		t.Fatal("Imprimir la muestra registró ventas, pagos o movimientos")
 	}
+}
+
+// «Importes» de la lista de cocina (revisión de la 9B, hallazgo medio 3): «Sí» se rechaza con 422 al
+// guardar y en la vista previa, el catálogo no lo ofrece y la vista previa con datos de muestra
+// aplica la configuración vigente de Cocina como una comanda real.
+func testKitchenPricesFollowKitchen(t *testing.T, value *fixture) {
+	yes := json.RawMessage(`{"blocks":[{"id":"lista","type":"kitchen_items","options":{"show_prices":"yes"}}]}`)
+	preview := func(layout json.RawMessage, status int) []byte {
+		return value.call(t, value.admin, "POST", "documents/preview", map[string]any{
+			"kind": "kitchen_order", "layout": layout, "paper_width": 80, "source": map[string]any{"sample": true},
+		}, status)
+	}
+	if rejected := errorOf(t, preview(yes, 422)); rejected.Code != "TEMPLATE_INVALID" || rejected.Details["block_id"] != "lista" ||
+		!strings.Contains(rejected.Message, "«Incluir importes comerciales en comandas»") {
+		t.Fatalf("«Importes: Sí» no se rechazó en la vista previa: %+v", rejected)
+	}
+	created := decodeAs[templateDetail](t, value.mutate(t, value.admin, "POST", "documents/templates", map[string]any{
+		"kind": "kitchen_order", "name": "Comanda con importes",
+	}, 200))
+	saved := errorOf(t, value.mutate(t, value.admin, "PUT", "documents/templates/"+created.ID, map[string]any{
+		"revision": created.Revision, "layout": yes,
+	}, 422))
+	if saved.Code != "TEMPLATE_INVALID" || saved.Details["block_id"] != "lista" {
+		t.Fatalf("«Importes: Sí» no se rechazó al guardar: %+v", saved)
+	}
+	catalog := string(value.call(t, value.admin, "GET", "documents/catalog", nil, 200))
+	if !strings.Contains(catalog, `"key":"show_prices","label":"Importes","type":"enum","values":[{"value":"inherit"`) ||
+		!strings.Contains(catalog, `{"value":"no","label":"Ocultar"}]`) || !strings.Contains(catalog, "activa «Incluir importes comerciales en comandas» en Cocina") {
+		t.Fatal("El catálogo debe ofrecer «Importes» solo con «Según Cocina» u «Ocultar» y explicar cómo imprimirlos")
+	}
+	inherit := json.RawMessage(`{"blocks":[{"id":"lista","type":"kitchen_items"}]}`)
+	// Cocina con «Mostrar precios» apagado (por omisión): ni la vista previa ni la comanda los llevan.
+	if text := decodeAs[previewResponse](t, preview(inherit, 200)).Text; strings.Contains(text, "Importe:") {
+		t.Fatalf("La vista previa mostró importes con «Mostrar precios» apagado:\n%s", text)
+	}
+	settings := decodeAs[kitchen.Settings](t, value.call(t, value.admin, "GET", "kitchen/settings", nil, 200))
+	settings.ShowPrices = true
+	settings.ShowNotes = false
+	updated := decodeAs[kitchen.Settings](t, value.mutate(t, value.admin, "PUT", "kitchen/settings", settingsBody(settings), 200))
+	text := decodeAs[previewResponse](t, preview(inherit, 200)).Text
+	if !strings.Contains(text, "Importe: $250.00") || strings.Contains(text, "NOTA:") {
+		t.Fatalf("La vista previa no siguió la configuración de Cocina:\n%s", text)
+	}
+	hidden := json.RawMessage(`{"blocks":[{"id":"lista","type":"kitchen_items","options":{"show_prices":"no"}}]}`)
+	if text := decodeAs[previewResponse](t, preview(hidden, 200)).Text; strings.Contains(text, "Importe:") {
+		t.Fatalf("«Ocultar» imprimió importes:\n%s", text)
+	}
+	updated.ShowPrices = false
+	updated.ShowNotes = true
+	value.mutate(t, value.admin, "PUT", "kitchen/settings", settingsBody(updated), 200)
+}
+
+// settingsBody es el cuerpo de PUT kitchen/settings con la configuración indicada.
+func settingsBody(settings kitchen.Settings) map[string]any {
+	var body map[string]any
+	encoded, _ := json.Marshal(settings)
+	_ = json.Unmarshal(encoded, &body)
+	return body
+}
+
+// printerBody es el cuerpo de POST o PATCH kitchen/printers con la impresora indicada.
+func printerBody(printer kitchen.Printer) map[string]any {
+	var body map[string]any
+	encoded, _ := json.Marshal(printer)
+	_ = json.Unmarshal(encoded, &body)
+	return body
 }

@@ -187,8 +187,9 @@ export function BlockProperties({
       )}
       {(properties.has('size') || properties.has('bold') || block.type === 'logo') && (
         <p className="designer-printer-note text-xs">
-          Tamaños, negrita y logotipo requieren una impresora ESC/POS por red o una cola CUPS que
-          admita datos raw; en otra cola se imprime el mismo texto sin ese formato.
+          Tamaños, negrita y logotipo requieren una impresora ESC/POS por red o una impresora CUPS
+          marcada «Esta impresora entiende ESC/POS (formato y logotipo)» cuya cola admita datos raw;
+          en las demás se imprime el mismo texto sin ese formato.
         </p>
       )}
       {(properties.has('spacing_before') || properties.has('spacing_after')) && (

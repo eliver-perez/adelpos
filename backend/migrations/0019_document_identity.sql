@@ -59,8 +59,9 @@ CREATE TABLE app.document_logo_rasters (
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT document_logo_rasters_presentation_key
         UNIQUE (logo_id, paper_width, width_percent, align, method, threshold, converter_version),
-    -- Destino de las llaves compuestas de la identidad: la conversión vigente es del logotipo vigente.
-    CONSTRAINT document_logo_rasters_logo_key UNIQUE (id, logo_id)
+    -- Destino de las llaves compuestas de la identidad: la conversión vigente es del logotipo vigente
+    -- y de su ancho de papel.
+    CONSTRAINT document_logo_rasters_logo_key UNIQUE (id, logo_id, paper_width)
 );
 
 CREATE FUNCTION app.document_logos_reject_mutation() RETURNS trigger
@@ -90,8 +91,9 @@ CREATE TRIGGER document_logo_rasters_no_truncate
 -- los documentos y se conservan al retirarlo. logo_raster_58_id y logo_raster_80_id son las
 -- conversiones vigentes del logotipo con esa presentación, que Go genera (o reutiliza) en la misma
 -- transacción que cambia el logotipo o la presentación: o existen las tres referencias o ninguna, y
--- cada conversión pertenece al logotipo vigente (llave compuesta). Los documentos copian estos
--- identificadores al emitirse.
+-- cada conversión pertenece al logotipo vigente y a su ancho de papel (llave compuesta con las
+-- columnas constantes logo_raster_58_paper y logo_raster_80_paper, que Go nunca escribe). Los
+-- documentos copian estos identificadores al emitirse.
 CREATE TABLE app.document_identity (
     singleton boolean NOT NULL DEFAULT true CONSTRAINT document_identity_pkey PRIMARY KEY
         CONSTRAINT document_identity_singleton_check CHECK (singleton),
@@ -121,6 +123,10 @@ CREATE TABLE app.document_identity (
         CHECK (logo_threshold BETWEEN 1 AND 255),
     logo_raster_58_id uuid,
     logo_raster_80_id uuid,
+    logo_raster_58_paper integer NOT NULL DEFAULT 58
+        CONSTRAINT document_identity_logo_raster_58_paper_check CHECK (logo_raster_58_paper = 58),
+    logo_raster_80_paper integer NOT NULL DEFAULT 80
+        CONSTRAINT document_identity_logo_raster_80_paper_check CHECK (logo_raster_80_paper = 80),
     revision integer NOT NULL DEFAULT 1 CONSTRAINT document_identity_revision_check CHECK (revision > 0),
     updated_by uuid CONSTRAINT document_identity_updated_by_fkey REFERENCES app.users(id),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -128,10 +134,10 @@ CREATE TABLE app.document_identity (
         (logo_id IS NULL AND logo_raster_58_id IS NULL AND logo_raster_80_id IS NULL)
         OR (logo_id IS NOT NULL AND logo_raster_58_id IS NOT NULL AND logo_raster_80_id IS NOT NULL)
     ),
-    CONSTRAINT document_identity_logo_raster_58_fkey FOREIGN KEY (logo_raster_58_id, logo_id)
-        REFERENCES app.document_logo_rasters (id, logo_id),
-    CONSTRAINT document_identity_logo_raster_80_fkey FOREIGN KEY (logo_raster_80_id, logo_id)
-        REFERENCES app.document_logo_rasters (id, logo_id)
+    CONSTRAINT document_identity_logo_raster_58_fkey FOREIGN KEY (logo_raster_58_id, logo_id, logo_raster_58_paper)
+        REFERENCES app.document_logo_rasters (id, logo_id, paper_width),
+    CONSTRAINT document_identity_logo_raster_80_fkey FOREIGN KEY (logo_raster_80_id, logo_id, logo_raster_80_paper)
+        REFERENCES app.document_logo_rasters (id, logo_id, paper_width)
 );
 
 -- La fila única no se borra: sin ella los documentos perderían su información adicional, su

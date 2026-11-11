@@ -14,12 +14,65 @@ import (
 // ticket original, la versión usada y el texto. Nunca crea ventas, pagos, documentos comerciales
 // ni de caja, ni cambia el original.
 
-// rerenderUnresolved son los estados de un trabajo que aún puede producir papel.
-const rerenderUnresolved = "('pending','processing','uncertain','error','intervention')"
+// unresolvedStates son los estados de un trabajo que aún puede producir papel.
+const unresolvedStates = "('pending','processing','uncertain','error','intervention')"
+
+// copyPending es el rechazo común de la reimpresión exacta y de la impresión con la plantilla
+// vigente mientras el documento tenga otra copia sin resolver de cualquiera de las dos familias.
+func copyPending() error {
+	return &Error{Status: 409, Code: "PRINT_COPY_PENDING", Message: "Ya existe una copia de este documento pendiente o sin resolver " +
+		"(reimpresión o impresión con la plantilla vigente). Revisa ese trabajo antes de solicitar otra."}
+}
+
+// sourceTicketOf devuelve el documento de origen de un ticket: el propio ticket o, si es una
+// impresión con la plantilla vigente, el original que guarda su documento.
+func sourceTicketOf(ctx context.Context, tx pgx.Tx, ticketID string) (string, error) {
+	var kind, source string
+	err := tx.QueryRow(ctx, "SELECT kind,coalesce(document->>'source_ticket_id','') FROM app.kitchen_tickets WHERE id=$1",
+		ticketID).Scan(&kind, &source)
+	if err != nil {
+		return "", err
+	}
+	if kind == documents.TicketKindRerender && source != "" {
+		return source, nil
+	}
+	return ticketID, nil
+}
+
+// documentCopiesUnresolved indica si un documento de origen tiene algún trabajo que aún puede
+// producir papel en cualquiera de sus dos familias: los de su propio ticket (el original y sus
+// copias exactas) y los de cada impresión con la plantilla vigente (su trabajo y las copias de ese
+// trabajo desde la cola). Una sola consulta para que la reimpresión exacta y la impresión con la
+// plantilla vigente se bloqueen entre sí: nunca hay dos hojas sin resolver del mismo documento.
+func documentCopiesUnresolved(ctx context.Context, tx pgx.Tx, sourceTicketID string) (bool, error) {
+	var unresolved bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.kitchen_print_jobs j JOIN app.kitchen_tickets t ON t.id=j.ticket_id
+        WHERE (t.id=$1 OR (t.kind='document_rerender' AND t.document->>'source_ticket_id'=$2))
+        AND j.state IN `+unresolvedStates+`)`, sourceTicketID, sourceTicketID).Scan(&unresolved)
+	return unresolved, err
+}
+
+// requireNoPendingCopy rechaza una copia nueva (exacta o con la plantilla vigente) de un documento
+// mientras exista otra sin resolver de cualquiera de sus dos familias.
+func requireNoPendingCopy(ctx context.Context, tx pgx.Tx, ticketID string) error {
+	source, err := sourceTicketOf(ctx, tx, ticketID)
+	if err != nil {
+		return err
+	}
+	unresolved, err := documentCopiesUnresolved(ctx, tx, source)
+	if err != nil {
+		return err
+	}
+	if unresolved {
+		return copyPending()
+	}
+	return nil
+}
 
 // RerenderTarget valida que un ticket admite imprimirse con la plantilla vigente y devuelve la
 // fotografía de la impresora de su trabajo original. Como en las reimpresiones, se rechaza mientras
-// el original o una impresión anterior con la plantilla vigente sigan sin resolver.
+// el original siga sin resolver (400) o exista otra copia sin resolver del documento, exacta o con
+// la plantilla vigente (409 PRINT_COPY_PENDING).
 func RerenderTarget(ctx context.Context, tx pgx.Tx, sourceTicketID string) (*Printer, error) {
 	original, err := one[PrintJob](ctx, tx, `SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j
         WHERE ticket_id=$1 AND original_job_id IS NULL ORDER BY created_at LIMIT 1`, sourceTicketID)
@@ -29,14 +82,8 @@ func RerenderTarget(ctx context.Context, tx pgx.Tx, sourceTicketID string) (*Pri
 	if original.State != "submitted" && original.State != "cancelled" {
 		return nil, invalid("Resuelve primero el trabajo pendiente o incierto del documento original antes de imprimirlo con la plantilla vigente.")
 	}
-	var unresolved bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.kitchen_print_jobs j JOIN app.kitchen_tickets t ON t.id=j.ticket_id
-        WHERE t.kind='document_rerender' AND t.document->>'source_ticket_id'=$1 AND j.state IN `+rerenderUnresolved+`)`,
-		sourceTicketID).Scan(&unresolved); err != nil {
+	if err := requireNoPendingCopy(ctx, tx, sourceTicketID); err != nil {
 		return nil, err
-	}
-	if unresolved {
-		return nil, &Error{Status: 409, Code: "PRINT_COPY_PENDING", Message: "Ya existe una impresión con la plantilla vigente pendiente o sin resolver. Revisa ese trabajo antes de solicitar otra."}
 	}
 	printer := original.PrinterSnapshot
 	return &printer, nil

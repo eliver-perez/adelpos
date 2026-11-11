@@ -1,6 +1,6 @@
-# AD-EL POS · Etapa 9A
+# AD-EL POS · Etapa 9B
 
-Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Administra la caja: apertura con fondo, ingresos, retiros y gastos autorizados, cortes parciales, arqueo y cierre ciego con diferencias por moneda, comprobantes y cortes impresos, cajón de dinero y tope de caja. Registra inventario (etapa 8): insumos con unidades y presentaciones, almacenes, existencias y un libro de movimientos inmutable con costo promedio; recetas versionadas, subrecetas y porciones habituales; consumo teórico al liberar a cocina como función activable; mermas, ajustes, transferencias y conteos físicos; proveedores, órdenes de compra, recepciones y devoluciones a proveedor con vínculo opcional a gastos de caja; alertas y sugerencias de compra. Consulta reportes (etapa 9A): un resumen ejecutivo y 92 reportes de ventas, productos, categorías, cocina, cobros, descuentos, caja, inventarios, compras, proveedores, costos y márgenes y empleados, calculados en Go con la «Hora de inicio del día» y la semana ISO, y exportables a PDF y Excel con los mismos permisos. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible.
+Aplicación de escritorio para restaurantes: monolito modular Go, PostgreSQL y React/TypeScript/Tailwind dentro de Tauri 2. Conserva configuración del establecimiento, usuarios, roles, permisos, sesiones, terminales, cajas físicas y auditoría. Añade catálogo, ingredientes, personalizaciones, combos, listas y promociones con un motor decimal exacto en Go. Incluye áreas, mesas, cuentas, pedidos persistidos y operación para llevar. Integra cocina, estaciones, rutas, comandas, cola durable de impresión y eventos autenticados. Registra cobros totales, parciales, mixtos y por productos con efectivo y cambio, descuentos, cortesías, cargos generales, propinas, IVA incluido, devoluciones, correcciones, turno mínimo de caja, precuentas, tickets y entrega de pedidos para llevar. Administra la caja: apertura con fondo, ingresos, retiros y gastos autorizados, cortes parciales, arqueo y cierre ciego con diferencias por moneda, comprobantes y cortes impresos, cajón de dinero y tope de caja. Registra inventario (etapa 8): insumos con unidades y presentaciones, almacenes, existencias y un libro de movimientos inmutable con costo promedio; recetas versionadas, subrecetas y porciones habituales; consumo teórico al liberar a cocina como función activable; mermas, ajustes, transferencias y conteos físicos; proveedores, órdenes de compra, recepciones y devoluciones a proveedor con vínculo opcional a gastos de caja; alertas y sugerencias de compra. Consulta reportes (etapa 9A): un resumen ejecutivo y 92 reportes de ventas, productos, categorías, cocina, cobros, descuentos, caja, inventarios, compras, proveedores, costos y márgenes y empleados, calculados en Go con la «Hora de inicio del día» y la semana ISO, y exportables a PDF y Excel con los mismos permisos. Diseña sus documentos impresos (etapa 9B): identidad del establecimiento con el logotipo del restaurante para documentos y reportes, y un editor visual por bloques de tickets, precuentas, comandas, avisos de cocina, comprobantes de caja y cortes, con vista previa exacta a 58 y 80 mm, versiones, muestras y reimpresión idéntica al original. Inicia en pantalla completa nativa con salida y regreso visibles; las pantallas aprovechan la resolución disponible.
 
 ## Inicio en este Mac
 
@@ -13,7 +13,7 @@ cd "/Users/eliver/Documents/ADEL POS/ad-el-pos"
 ./scripts/dev.sh open-app
 ```
 
-**Instalación existente de este Mac:** las migraciones 0015–0017 de la etapa 9A se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración, con el procedimiento de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md); el servidor y el `.app` 0.9.0 (esquema 17) están instalados. Las 0010–0014 de la etapa 8 se aplicaron antes, ese mismo día. Toda migración futura (desde la 0018) requiere la misma autorización y procedimiento.
+**Instalación existente de este Mac:** las migraciones `0018_document_templates.sql` y `0019_document_identity.sql` de la etapa 9B (versión 0.9.1, esquema 19) **todavía no se han aplicado**: esperan la autorización del propietario. Hasta entonces, `migrate`, `server-start` y `build-macos` desde la rama `etapa-9b` tocarían la instalación real (el servidor 0.9.1 declararía incompatible el esquema 17). Las migraciones 0015–0017 de la etapa 9A se aplicaron a la instalación real el 10 de noviembre de 2026 con autorización del propietario, tras respaldo y ensayo de restauración, con el procedimiento de [DEVELOPMENT_MACOS.md](DEVELOPMENT_MACOS.md); el servidor y el `.app` 0.9.0 (esquema 17) están instalados. Las 0010–0014 de la etapa 8 se aplicaron antes, ese mismo día. Toda migración nueva (las 0018 y 0019 incluidas) requiere la misma autorización y procedimiento.
 
 Para desarrollo con recarga: `./scripts/dev.sh desktop`. Para construir el `.app`: `./scripts/dev.sh build-macos`. La compilación está en `desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app`.
 
@@ -81,6 +81,19 @@ En **Reportes** (visible con el permiso de consultar reportes; etapa 9A) se cons
 
 Consulta [docs/REPORTS.md](docs/REPORTS.md).
 
+## Documentos e identidad del establecimiento
+
+En **Documentos** (visible con el permiso de consultar plantillas; etapa 9B):
+
+- **Identidad del establecimiento**: información adicional (RFC, razón social…), texto de encabezado y de pie, y el **logotipo del restaurante** (PNG o JPEG de hasta 1 MiB), con su vista previa tal como saldrá en papel de 58 y 80 mm, ancho, alineación y método de conversión (umbral o difuminado). Nombre, dirección, teléfono y correo siguen en Configuración general. El logotipo se usa en los documentos y en el encabezado de los reportes PDF y Excel; la aplicación conserva la marca de AD-EL POS.
+- **Plantillas**: para cada uno de los diez documentos, la «Predeterminada» (idéntica a los formatos anteriores y de solo lectura) y las propias, que se crean, duplican, renombran, activan y restauran. Instalar la 9B no cambia ningún papel hasta activar una plantilla propia.
+- **Editor visual** en tres áreas: elementos compatibles con el documento, vista previa con exactamente las líneas que se imprimirán (58 u 80 mm, datos de muestra o un documento real) y estructura y propiedades del bloque elegido (orden, alineación, tamaño, negrita, mayúsculas, visibilidad y espaciado). Nunca se escribe HTML, código ni comandos de impresora. Cada guardado crea una versión; dos personas que editan la misma plantilla no se sobrescriben.
+- **Muestras** marcadas «MUESTRA · NO ES UN DOCUMENTO VÁLIDO», sin ventas, pagos ni movimientos, por la cola de impresión de siempre.
+- **Reimprimir** saca una copia idéntica al original aunque la plantilla haya cambiado; **Imprimir con la plantilla vigente** es otra acción, con su permiso, que imprime los mismos datos con la plantilla activa hoy.
+- Negrita, tamaños y logotipo solo salen por ESC/POS en red o por una impresora CUPS marcada «Esta impresora entiende ESC/POS (formato y logotipo)» cuya cola admita datos raw; en las demás se imprime el texto, con aviso. El resultado en papel es una prueba física pendiente.
+
+Consulta [docs/DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md).
+
 ## Cocina e impresión
 
 En **Cocina y preparación** configura impresoras, estaciones y rutas por categoría/producto. Admite varios destinos por producto, varias estaciones en una impresora y documentos independientes o unificados con secciones. Los productos nuevos generan comandas normales; las ediciones y cancelaciones producen avisos históricos. La reimpresión conserva la presentación original.
@@ -95,7 +108,7 @@ En **Catálogo** administra categorías, productos independientes, presentacione
 
 En **Probar personalización** retira o sustituye todos los complementos, cambia cantidades, ingredientes, componentes y observaciones. Go valida y devuelve el desglose exacto; no se crea una venta. Las listas conservan la identidad del producto y las promociones explican su aplicación o exclusión. Los PNG originales locales cambian con el tema.
 
-Desde la etapa 9A cada producto puede activar **«El precio puede bajar al cambiar complementos»** (desactivada por omisión): sin ella, quitar o cambiar un complemento nunca baja el precio. Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas, $150 → $140 con la opción al cambiar arroz por frijoles, y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql`, la etapa 7 `0008_cash_shifts_and_reconciliation.sql`, la etapa 7.1 `0009_operation_tables_cash_and_reasons.sql` la etapa 8 `0010_inventory_core.sql` a `0014_inventory_control.sql` (aplicadas en la instalación real) y la etapa 9A `0015_catalog_price_and_precheck.sql`, `0016_inventory_suppliers_counter.sql` y `0017_reports.sql` (también aplicadas en la instalación real). Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
+Desde la etapa 9A cada producto puede activar **«El precio puede bajar al cambiar complementos»** (desactivada por omisión): sin ella, quitar o cambiar un complemento nunca baja el precio. Consulta [docs/CATALOG.md](docs/CATALOG.md) para reglas y ejemplos reproducibles: filete $150 → $155 al cambiar arroz por papas, $150 → $140 con la opción al cambiar arroz por frijoles, y combo con papas $90 / $100 / $140. La migración de catálogo es `0003_catalog_and_pricing.sql`; la etapa 4 añade `0004_restaurant_operations.sql`, la etapa 5 `0005_kitchen_and_printing.sql`, la etapa 6 `0006_payments_and_refunds.sql`, la etapa 6.1 `0007_features_product_tax_and_usd_cash.sql`, la etapa 7 `0008_cash_shifts_and_reconciliation.sql`, la etapa 7.1 `0009_operation_tables_cash_and_reasons.sql` la etapa 8 `0010_inventory_core.sql` a `0014_inventory_control.sql` (aplicadas en la instalación real) la etapa 9A `0015_catalog_price_and_precheck.sql`, `0016_inventory_suppliers_counter.sql` y `0017_reports.sql` (también aplicadas en la instalación real) y la etapa 9B `0018_document_templates.sql` y `0019_document_identity.sql` (pendientes de aplicar en la instalación real). Las migraciones anteriores se conservan. Antes de migrar una instalación existente, generar respaldo con `./scripts/dev.sh backup` y ensayar su restauración en una base temporal.
 
 ## Credencial reservada de soporte
 
@@ -124,9 +137,14 @@ ad-el-pos/
 │   ├── internal/inventory/     # Insumos, almacenes, existencias, costos, recetas, consumo, compras, ajustes y conteos
 │   ├── internal/reports/       # Reportes, resumen ejecutivo y exportación PDF/Excel (solo lectura)
 │   ├── internal/businessday/   # Día comercial y periodos con semana ISO
+│   ├── internal/documents/     # Plantillas por bloques, validación, renderizador único e IR (etapa 9B)
+│   ├── internal/designer/      # Rutas del diseñador de documentos
+│   ├── internal/identity/      # Identidad documental y logotipo del restaurante
+│   ├── internal/logoraster/    # Conversión monocromática del logotipo para impresoras térmicas
+│   ├── internal/brand/         # Copia embebida de la marca de AD-EL POS (reportes)
 │   ├── internal/httpapi/       # HTTP, diagnósticos, CORS y errores
 │   ├── internal/localsetup/    # Certificados locales
-│   └── migrations/             # 0001 a 0017; inmutables después de aplicarse
+│   └── migrations/             # 0001 a 0019; inmutables después de aplicarse
 ├── desktop/src/
 │   ├── components/             # Formularios, permisos y presentación reutilizables
 │   ├── hooks/                  # Sesión, recursos y conectividad
@@ -164,6 +182,7 @@ Las pruebas de integración crean y eliminan únicamente bases aleatorias `adel_
 - [docs/CASH_SHIFTS_AND_RECONCILIATION.md](docs/CASH_SHIFTS_AND_RECONCILIATION.md): caja, arqueos, cierre ciego, cortes, documentos, cajón y tope.
 - [docs/INVENTORY_AND_PURCHASING.md](docs/INVENTORY_AND_PURCHASING.md): inventarios, recetas, consumo, costos, compras, ajustes y conteos.
 - [docs/REPORTS.md](docs/REPORTS.md): reportes, métricas, fechas comerciales, permisos y exportaciones.
+- [docs/DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md): identidad del establecimiento, logotipo, plantillas, editor visual, versiones e impresión de documentos.
 - [docs/CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md): reglas permanentes de legibilidad.
 - [NEXT_STEPS_FOR_SOL.md](NEXT_STEPS_FOR_SOL.md): continuidad y decisiones pendientes.
 

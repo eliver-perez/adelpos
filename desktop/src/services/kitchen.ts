@@ -11,6 +11,9 @@ export interface Printer {
   supports_cut: boolean;
   cut: boolean;
   cutter_option: string;
+  // Solo en CUPS: la impresora entiende ESC/POS y recibe formato y logotipo si su cola admite datos
+  // raw (etapa 9B). Desactivada por omisión; ESC/POS por red ya los recibe.
+  accepts_escpos: boolean;
   active: boolean;
   fallback_id: string | null;
   revision: number;

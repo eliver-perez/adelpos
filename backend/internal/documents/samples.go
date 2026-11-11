@@ -66,6 +66,26 @@ func sampleKitchen(kind Kind, identity Identity) *KitchenData {
 	}
 }
 
+// UseSettings aplica a los datos de muestra de cocina la configuración vigente de Cocina con la
+// misma regla que una comanda real: las opciones «Según la configuración de Cocina» de la plantilla
+// la consultan y, si Cocina no muestra precios, la comanda no guarda importes (kitchen/documents.go),
+// así que la muestra tampoco los lleva. Así la vista previa y la muestra impresa anticipan el papel.
+func (data *KitchenData) UseSettings(settings KitchenSettings) {
+	data.Settings = settings
+	if settings.ShowPrices {
+		return
+	}
+	for sectionIndex := range data.Sections {
+		items := data.Sections[sectionIndex].Items
+		for itemIndex := range items {
+			items[itemIndex].Price = ""
+			if items[itemIndex].Before != nil {
+				items[itemIndex].Before.Price = ""
+			}
+		}
+	}
+}
+
 func sampleCommercial(kind Kind, identity Identity) *CommercialData {
 	data := &CommercialData{
 		Kind: kind, Folio: 123, AccountName: "Cuenta de muestra", Context: "Mesa de muestra", LocalTime: "01/01/2026 13:00",

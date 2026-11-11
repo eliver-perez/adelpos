@@ -73,11 +73,14 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
   const identity = editor.identity;
   const fields = editor.fields;
   const readOnly = !canManage;
-  const busy = editor.busy !== null;
+  // Con una escritura en curso o sin confirmar, los textos, la presentación y el logotipo quedan
+  // fijos hasta conocer su resultado (el reintento envía exactamente lo que se ve).
+  const locked = editor.locked;
   return (
     <div className="form-stack min-w-0" aria-label="Identidad del establecimiento">
       <IdentityIntro readOnly={readOnly} />
       <IdentityStatus editor={editor} />
+      <ReloadStatus editor={editor} />
       {identity.warnings.length > 0 && <Notice>{identity.warnings.join(' ')}</Notice>}
       <EstablishmentSummary
         establishment={identity.establishment}
@@ -88,7 +91,7 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
           <IdentityTexts
             fields={fields}
             limits={identity.limits}
-            readOnly={readOnly || busy}
+            readOnly={readOnly || locked}
             onChange={editor.change}
           />
         </div>
@@ -97,7 +100,7 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
             logo={identity.logo}
             limits={identity.limits}
             readOnly={readOnly}
-            busy={busy}
+            busy={locked}
             onUpload={(file) => void editor.upload(file)}
             onRemove={() => void confirmRemove()}
           />
@@ -107,14 +110,15 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
               <p className="muted text-sm">
                 Vista previa de los puntos que se envían a la impresora. El resultado en papel es
                 una prueba física pendiente: compruébalo con tus impresoras. El logotipo solo se
-                imprime por ESC/POS en red o por colas CUPS que admitan datos raw; en las demás se
-                omite con un aviso y el documento se imprime igual.
+                imprime por ESC/POS en red o en impresoras CUPS marcadas «Esta impresora entiende
+                ESC/POS (formato y logotipo)» cuya cola admita datos raw; en las demás se omite con
+                un aviso y el documento se imprime igual.
               </p>
             </div>
             <PresentationControls
               presentation={fields.presentation}
               limits={identity.limits}
-              readOnly={readOnly || busy}
+              readOnly={readOnly || locked}
               onChange={editor.changePresentation}
             />
             <PaperPreview
@@ -190,7 +194,8 @@ function IdentityStatus({ editor }: { editor: IdentityEditor }) {
       <div className="notice" role="alert">
         <p>
           <strong>No se confirmó si se pudo {actionNames[editor.pending.action]}.</strong> Al
-          reintentar se usa el mismo identificador de operación: si ya se aplicó, no se repite.
+          reintentar se usa el mismo identificador de operación: si ya se aplicó, no se repite. Los
+          textos, la presentación y el logotipo no se pueden cambiar hasta confirmar el resultado.
         </p>
         <div className="button-row mt-3">
           <button
@@ -216,6 +221,31 @@ function IdentityStatus({ editor }: { editor: IdentityEditor }) {
   return null;
 }
 
+// Error al volver a consultar la identidad cuando ya hay una cargada: se sigue mostrando lo último
+// que respondió el servidor (también la respuesta de una escritura propia) y se puede reintentar.
+function ReloadStatus({ editor }: { editor: IdentityEditor }) {
+  if (!editor.loadError) {
+    return null;
+  }
+  return (
+    <div className="notice" role="status">
+      <p>
+        <strong>No se pudo volver a consultar la identidad del establecimiento.</strong>{' '}
+        {editor.loadError}
+      </p>
+      <p className="muted text-sm">
+        Se muestra lo último que respondió el servidor; las vistas previas pueden faltar hasta
+        volver a cargar.
+      </p>
+      <div className="button-row mt-3">
+        <button type="button" className="secondary-button" onClick={() => void editor.reload()}>
+          <IconLabel icon="refresh">Volver a cargar la identidad</IconLabel>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IdentityActions({ editor }: { editor: IdentityEditor }) {
   const saving = editor.busy === 'save';
   return (
@@ -223,7 +253,7 @@ function IdentityActions({ editor }: { editor: IdentityEditor }) {
       <button
         type="button"
         className="primary-button"
-        disabled={!editor.dirty || editor.busy !== null || editor.conflict !== null}
+        disabled={!editor.dirty || editor.locked || editor.conflict !== null}
         onClick={() => void editor.save()}
       >
         <IconLabel icon="check">{saving ? 'Guardando…' : 'Guardar cambios'}</IconLabel>
@@ -231,7 +261,7 @@ function IdentityActions({ editor }: { editor: IdentityEditor }) {
       <button
         type="button"
         className="secondary-button"
-        disabled={!editor.dirty || editor.busy !== null}
+        disabled={!editor.dirty || editor.locked}
         onClick={editor.discardDraft}
       >
         Descartar cambios

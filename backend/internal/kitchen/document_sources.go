@@ -70,6 +70,24 @@ func RecentDocuments(ctx context.Context, tx pgx.Tx, actor Actor, ticketKind str
 	return result, rows.Err()
 }
 
+// SampleSettings devuelve la configuración vigente de Cocina con la forma que copia cada comanda:
+// la vista previa con datos de muestra y la muestra impresa la aplican con la misma regla que una
+// comanda real (documents.KitchenData.UseSettings), para que anticipen el papel.
+func SampleSettings(ctx context.Context, tx pgx.Tx) (documents.KitchenSettings, error) {
+	settings, err := one[Settings](ctx, tx, "SELECT to_jsonb(s) FROM app.kitchen_settings s")
+	if err != nil {
+		return documents.KitchenSettings{}, err
+	}
+	return documents.KitchenSettings{
+		ShowPrices:        settings.ShowPrices,
+		ShowNotes:         settings.ShowNotes,
+		ShowEstablishment: settings.ShowEstablishment,
+		TextSize:          settings.TextSize,
+		LineSpacing:       settings.LineSpacing,
+		QuantityStyle:     settings.QuantityStyle,
+	}, nil
+}
+
 // ActivePrinters devuelve las impresoras activas para elegir dónde imprimir una muestra.
 func ActivePrinters(ctx context.Context, tx pgx.Tx) ([]Printer, error) {
 	return many[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE active ORDER BY name")

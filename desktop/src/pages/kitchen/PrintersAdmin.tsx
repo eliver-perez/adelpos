@@ -22,6 +22,7 @@ const emptyPrinter = (): Printer => ({
   supports_cut: false,
   cut: false,
   cutter_option: '',
+  accepts_escpos: false,
   active: true,
   fallback_id: null,
   revision: 0,
@@ -155,6 +156,8 @@ export function PrintersAdmin({
                     transport: event.target.value as Printer['transport'],
                     destination: '',
                     cutter_option: '',
+                    // La marca ESC/POS solo existe en CUPS: Go la rechaza en los demás transportes.
+                    accepts_escpos: false,
                   })
                 }
               >
@@ -175,6 +178,24 @@ export function PrintersAdmin({
               value={value.destination}
               onChange={(destination) => setValue({ ...value, destination })}
             />
+            {value.transport === 'cups' && (
+              <>
+                <Check
+                  label="Esta impresora entiende ESC/POS (formato y logotipo)"
+                  value={value.accepts_escpos}
+                  onChange={(accepts_escpos) => setValue({ ...value, accepts_escpos })}
+                />
+                <p className="muted text-sm">
+                  Actívala solo si la impresora es térmica y entiende comandos ESC/POS. Así, los
+                  documentos con negrita, tamaños o logotipo se le envían con formato cuando su cola
+                  admite datos raw. Desactivada, o con una cola sin datos raw, la impresora recibe
+                  solo el texto, sin formato ni logotipo, y el documento se imprime igual. Una
+                  impresora de oficina o una que solo imprime con su controlador debe quedar
+                  desactivada: con comandos ESC/POS imprimiría hojas en blanco o caracteres
+                  extraños.
+                </p>
+              </>
+            )}
             {value.transport === 'escpos_tcp' && (
               <>
                 <IntegerField
@@ -186,7 +207,8 @@ export function PrintersAdmin({
                 />
                 <p className="muted text-sm">
                   El controlador utiliza CP850 para acentos españoles. Los caracteres fuera de esa
-                  codificación se sustituyen por ?.
+                  codificación se sustituyen por ?. Por red la impresora recibe comandos ESC/POS:
+                  los documentos con negrita, tamaños o logotipo se imprimen con su formato.
                 </p>
               </>
             )}

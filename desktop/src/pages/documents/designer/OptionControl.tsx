@@ -112,21 +112,30 @@ function TextOption({
   );
 }
 
-export function OptionControl({
-  spec,
-  block,
-  kind,
-  catalog,
-  disabled,
-  onChange,
-}: {
+interface OptionControlProps {
   spec: OptionSpec;
   block: TemplateBlock;
   kind: CatalogKind;
   catalog: DocumentCatalog;
   disabled: boolean;
   onChange: (key: string, value: unknown) => void;
-}) {
+}
+
+// Control de una opción con la explicación de Go debajo, si la tiene (por ejemplo, cómo se
+// imprimen los importes de la lista de cocina).
+export function OptionControl(props: OptionControlProps) {
+  if (!props.spec.help) {
+    return <OptionInput {...props} />;
+  }
+  return (
+    <div className="grid gap-2">
+      <OptionInput {...props} />
+      <p className="muted text-xs">{props.spec.help}</p>
+    </div>
+  );
+}
+
+function OptionInput({ spec, block, kind, catalog, disabled, onChange }: OptionControlProps) {
   const value = block.options[spec.key] ?? spec.default;
   switch (spec.type) {
     case 'boolean':

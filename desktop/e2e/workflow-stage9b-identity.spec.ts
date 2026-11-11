@@ -4,6 +4,9 @@ import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { notice } from './notices';
 
+// El nombre «workflow-stage9b-…» la ordena después de las especificaciones existentes: todas comparten
+// la base de cada motor y varias esperan folios y configuraciones de una instalación recién creada.
+//
 // Etapa 9B, fase B2: pestaña «Identidad del establecimiento» de la pantalla Documentos. Sube un
 // PNG de prueba (generado aquí, sin archivos externos), comprueba la vista previa del original y de
 // cómo saldrá en papel de 58 y 80 mm (Go convierte y guarda las conversiones), cambia la

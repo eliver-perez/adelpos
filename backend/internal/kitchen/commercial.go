@@ -141,7 +141,8 @@ func EnqueueRendered(ctx context.Context, tx pgx.Tx, input RenderedPrint) (*Prin
 }
 
 // ReprintCommercial solicita otra copia idéntica de un documento comercial. Como en las comandas,
-// se rechaza mientras exista otra copia pendiente o sin resolver de la misma familia.
+// se rechaza mientras exista otra copia pendiente o sin resolver del documento, exacta o con la
+// plantilla vigente.
 func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, actorID, deviceID string) (*PrintJob, error) {
 	var kind string
 	if err := tx.QueryRow(ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", ticketID).Scan(&kind); err != nil {
@@ -158,13 +159,10 @@ func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, ac
 	if original.State != "submitted" && original.State != "cancelled" {
 		return nil, invalid("Resuelve primero el trabajo pendiente o incierto para no generar copias descontroladas.")
 	}
-	var unresolved bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.kitchen_print_jobs
-        WHERE original_job_id=$1 AND state IN ('pending','processing','uncertain','error','intervention'))`, original.ID).Scan(&unresolved); err != nil {
+	// Ni otra copia exacta ni una impresión con la plantilla vigente del mismo documento pueden
+	// seguir sin resolver.
+	if err := requireNoPendingCopy(ctx, tx, ticketID); err != nil {
 		return nil, err
-	}
-	if unresolved {
-		return nil, &Error{Status: 409, Code: "PRINT_COPY_PENDING", Message: "Ya existe una copia pendiente o sin resolver. Revisa ese trabajo antes de solicitar otra."}
 	}
 	handler := service{ctx: ctx, tx: tx, operationID: operationID, request: Request{Actor: Actor{UserID: actorID, DeviceID: deviceID}}}
 	// La copia conserva el contenido y, si lo tiene, el layout con atributos del original.

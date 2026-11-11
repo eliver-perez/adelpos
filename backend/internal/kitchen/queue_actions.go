@@ -148,13 +148,10 @@ func (handler *service) reprint() (any, error) {
 	if original.OriginalJobID != nil {
 		rootID = *original.OriginalJobID
 	}
-	var unresolved bool
-	if err := handler.tx.QueryRow(handler.ctx, `SELECT EXISTS(SELECT FROM app.kitchen_print_jobs
-		WHERE original_job_id=$1 AND state IN ('pending','processing','uncertain','error','intervention'))`, rootID).Scan(&unresolved); err != nil {
+	// Una sola copia sin resolver por documento: ni otra copia exacta ni una impresión con la
+	// plantilla vigente (ni sus copias) pueden seguir pendientes.
+	if err := requireNoPendingCopy(handler.ctx, handler.tx, original.TicketID); err != nil {
 		return nil, err
-	}
-	if unresolved {
-		return nil, &Error{Status: 409, Code: "PRINT_COPY_PENDING", Message: "Ya existe una copia pendiente o sin resolver. Revisa ese trabajo antes de solicitar otra."}
 	}
 	document, err := one[Document](handler.ctx, handler.tx, "SELECT document FROM app.kitchen_tickets WHERE id=$1", original.TicketID)
 	if err != nil {

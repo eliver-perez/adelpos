@@ -4,6 +4,9 @@ import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { notice } from './notices';
 
+// El nombre «workflow-stage9b-…» la ordena después de las especificaciones existentes: todas comparten
+// la base de cada motor y varias esperan folios y configuraciones de una instalación recién creada.
+//
 // Etapa 9B, fase C: editor visual de documentos contra Go y PostgreSQL reales. Antes de editar se
 // cobra un ticket (por la API) que queda en la cola con el destino controlado «agent». Después, en
 // la interfaz: abrir Documentos, duplicar el ticket predeterminado, agregar un texto fijo, cambiar

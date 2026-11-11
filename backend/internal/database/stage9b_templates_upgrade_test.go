@@ -187,6 +187,21 @@ func checkStage9BExistingDocuments(ctx context.Context, t *testing.T, pool *pgxp
         ('00000000-0000-4000-8000-000000000071','documents.templates.changed','documents')`); err != nil {
 		t.Fatalf("El ámbito SSE documents no se admite: %v", err)
 	}
+	// La impresora existente queda sin la marca «Esta impresora entiende ESC/POS»; la marca solo se
+	// admite en CUPS (revisión de la 9B).
+	var acceptsESCPos bool
+	if err := pool.QueryRow(ctx, "SELECT accepts_escpos FROM app.kitchen_printers WHERE id='00000000-0000-4000-8000-000000000031'").
+		Scan(&acceptsESCPos); err != nil || acceptsESCPos {
+		t.Fatalf("La impresora existente debía quedar sin la marca ESC/POS: %v %v", acceptsESCPos, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE app.kitchen_printers SET accepts_escpos=true WHERE id='00000000-0000-4000-8000-000000000031'"); err != nil {
+		t.Fatalf("Una impresora CUPS admite la marca ESC/POS: %v", err)
+	}
+	_, err := pool.Exec(ctx, `UPDATE app.kitchen_printers SET transport='escpos_tcp',destination='192.168.1.10'
+        WHERE id='00000000-0000-4000-8000-000000000031'`)
+	if err == nil || !strings.Contains(err.Error(), "kitchen_printers_accepts_escpos_check") {
+		t.Fatalf("Se aceptó la marca ESC/POS en una impresora que no es CUPS: %v", err)
+	}
 }
 
 // Los seis permisos del diseñador existen con la descripción de Go y solo los recibe el administrador.

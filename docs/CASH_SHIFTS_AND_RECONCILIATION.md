@@ -1,6 +1,6 @@
 # Administración de caja, arqueos y cortes · Etapa 7
 
-Estado: **etapa 7 completa (fases 0 y A–D)**, con los ajustes de la **fase C de la etapa 7.1** descritos en «Etapa 7.1 · fase C»; **versión 0.9.0, esquema 17** (la migración 0009 se aplicó a la instalación real el 9 de noviembre de 2026 y las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A el 10 de noviembre de 2026. Ni la etapa 8 ni la 9A modifican las reglas de la caja: ver «Compras y gastos de caja · etapa 8» y «Reportes de caja · etapa 9A»). Etapa 7: migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. La 0008 se aplicó a la instalación real el 9 de noviembre de 2026 con autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
+Estado: **etapa 7 completa (fases 0 y A–D)**, con los ajustes de la **fase C de la etapa 7.1** descritos en «Etapa 7.1 · fase C»; **versión 0.9.1, esquema 19** (la migración 0009 se aplicó a la instalación real el 9 de noviembre de 2026 y las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B **no se han aplicado** a la instalación real, en espera de la autorización del propietario. Ni la etapa 8, ni la 9A, ni la 9B modifican las reglas de la caja: ver «Compras y gastos de caja · etapa 8», «Reportes de caja · etapa 9A» y «Plantillas de los documentos de caja · etapa 9B»). Etapa 7: migración 0008, modelo y backend con pruebas de integración; interfaz de administración de caja; impresión de comprobantes y cortes, cajón de dinero, tope de caja y eventos SSE del ámbito `cash`; regresiones completas. La 0008 se aplicó a la instalación real el 9 de noviembre de 2026 con autorización del propietario. Solo se describe lo implementado y probado; las decisiones del propietario están en [etapas/ETAPA_7.md](etapas/ETAPA_7.md) §0-B y el avance en [ETAPA_7_AVANCE.md](ETAPA_7_AVANCE.md). Contratos HTTP: [API_CONTRACTS.md](../API_CONTRACTS.md) (sección «Caja, arqueos y cortes»).
 
 ## Autoridad y estructura
 
@@ -218,12 +218,45 @@ La etapa 9A agrega reportes de caja en el módulo Reportes (`reports.cash.read`;
 - **Calendarios**: la vista por turno usa la fecha comercial del turno (fecha de apertura, como el historial de Caja) con todos sus importes; la vista por día reparte cada registro en el día comercial en que ocurrió, con la «Hora de inicio del día». Ventas y cobros por turno se muestran por separado: la venta es la de las cuentas cerradas en el turno y el cobro, el de sus pagos.
 - **Descuentos**: los reportes de caja no atribuyen descuentos a turnos ni cajas (están en el grupo Descuentos, con la fecha de su venta) y no replican el cálculo del resumen del turno de Caja (ver «Limitaciones reales»).
 
+## Plantillas de los documentos de caja · etapa 9B
+
+La 9B no cambia ningún cálculo, permiso ni estado de la caja: los comprobantes y cortes se arman con los mismos datos y
+solo cambia cómo se convierten en líneas. Guía en [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md).
+
+- **Renderizado**: `renderCashDocument` dejó de ser una plantilla en código; `payments/cash_document_data.go` convierte el
+  corte (snapshot inmutable) o la operación a los datos de caja de `internal/documents` y los renderiza con la versión
+  activa del tipo (`cash_income`, `cash_withdrawal`, `cash_expense`, `cash_partial_cut` o `cash_final_cut`). La versión 1
+  del sistema produce exactamente el mismo texto que antes (más de 1 000 comprobantes y cortes comparados byte a byte, a
+  58 y 80 mm). Vista previa e impresión siguen usando la misma plantilla y los mismos permisos.
+- **Datos guardados desde la 9B**: además del texto, el título y las referencias, el ticket guarda los **datos
+  estructurados** del documento (`document.data`), **sin el esperado ni las diferencias si no se incluyeron**, y la versión
+  de plantilla usada. Los documentos anteriores a la 9B solo guardan su texto.
+- **Esperado y diferencias**: son un bloque protegido que solo existe en el corte parcial y en el definitivo (Go rechaza
+  agregarlo a otro tipo). Se renderizan solo si quien imprime tiene `cash.expected.read` y el turno no está en arqueo; si
+  no, imprimen «Esperado y diferencias: no incluidos.», como antes. Durante un arqueo no se renderizan para nadie.
+- **Reimpresión exacta** (`POST payments/cash-documents/{id}/reprint`): como antes, copia el contenido (y, si lo hay, el
+  layout) del trabajo original, con las mismas reglas del esperado.
+- **Imprimir con la plantilla vigente** (`POST payments/cash-documents/{id}/rerender`, `cash.reports.reprint` +
+  `documents.history.render_current`; si el original incluía el esperado, también `cash.expected.read` y fuera del arqueo,
+  `409 SHIFT_CLOSING`): vuelve a renderizar los **datos guardados** al emitir —no el estado actual de la operación— con la
+  plantilla activa y la identidad vigente, en un ticket `document_rerender`. **Nunca** crea un `cash_documents` ni cambia
+  el turno o el cierre. Auditoría `cash.document_rerendered` y evento `cash.document.rerendered`. Un documento anterior a
+  la 9B responde `409 DOCUMENT_DATA_UNAVAILABLE` (solo admite la reimpresión exacta). La reimpresión y esta acción se
+  bloquean entre sí mientras haya una copia sin resolver (`PRINT_COPY_PENDING`).
+- **Vista previa con un documento real** en el diseñador (`documents.preview.real`, `cash.shifts.read` con el alcance de
+  Caja y, en comprobantes, `cash.movements.read`): usa los datos guardados desde la 9B; un documento anterior se
+  previsualiza con el corte o la operación actuales, con aviso.
+- **Aviso fiscal**: «Documento interno de caja. No es un comprobante fiscal (CFDI).» es obligatorio en los cinco tipos.
+- **Pruebas**: equivalencia en `payments/legacy_documents_test.go` y `documents_equivalence_test.go`; integración en
+  `operations/documents_stage9b_test.go` (datos estructurados guardados, reimpresión exacta y plantilla vigente, esperado
+  ausente sin permiso y durante el arqueo, documento anterior solo con reimpresión exacta). Sin papel ni cajón físico.
+
 ## Limitaciones reales
 
 - **Descuentos en el resumen del turno (defecto latente, hallazgo de la Fase 0 de la etapa 9A, sin corregir)**: `readAdjustmentTotals` (`cash_reports.go`) suma los descuentos y cortesías vigentes aplicados desde terminales asociadas **hoy** a la caja y registrados desde la apertura del turno **sin cota superior**: el resumen en vivo de un turno cerrado (`GET payments/shifts/{id}/summary`) puede sumar descuentos posteriores a su cierre, y una terminal que cambió de caja atribuye los suyos a la caja actual. No afecta el esperado ni las diferencias. Los reportes de la 9A no lo replican; corregirlo en Caja requiere solicitud del propietario.
 - Un pendiente incierto de un turno que después se cierra queda guardado con la clave de ese turno y ya no se muestra en Caja; su reintento sería rechazado (`SHIFT_CLOSED`) y no se duplica, pero no hay una lista global de pendientes.
 - La captura del arqueo guarda el borrador automáticamente 0.9 s después del último cambio: lo tecleado en ese intervalo se pierde si se cierra el proceso.
-- Impresión y cajón sin hardware verificado: solo adaptador controlado de la cola (ni papel, ni corte, ni pulso físico). El pulso por CUPS en modo raw (etapa 7.1) solo se probó con el adaptador controlado y con un ejecutor simulado de `lp`; la prueba física queda pendiente hasta que el propietario tenga una impresora USB con cajón. La plantilla es texto de 42 o 30 columnas; el diseñador de documentos es de la etapa 9.
+- Impresión y cajón sin hardware verificado: solo adaptador controlado de la cola (ni papel, ni corte, ni pulso físico). El pulso por CUPS en modo raw (etapa 7.1) solo se probó con el adaptador controlado y con un ejecutor simulado de `lp`; la prueba física queda pendiente hasta que el propietario tenga una impresora USB con cajón. La plantilla es texto de 42 o 30 columnas; el diseñador de documentos es de la etapa 9 (desde la 9B, plantillas de bloques; ver «Plantillas de los documentos de caja · etapa 9B»).
 - Los usuarios sin `events.read` se actualizan por sondeo; no se probaron dos terminales nativas simultáneas.
 - Un usuario con permiso de autorizar salidas, pero sin `cash.expected.read`, podría inferir por tanteo si un importe excede el disponible: los rechazos no revelan cifras. Desde la etapa 7.1 cada intento queda auditado y un administrador con `cash.expected.read` lo consulta en Caja → Movimientos («Intentos rechazados»): el tanteo se detecta después, no se impide.
 - Las filas individuales de movimientos y operaciones se muestran a quien tiene su permiso de consulta aunque no tenga `cash.expected.read`; los totales que equivalen al esperado se omiten.
