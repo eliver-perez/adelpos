@@ -108,19 +108,22 @@ function optionPrices(group: OptionGroup, option: GroupOption): string[] {
 
 // Cambio de precio del grupo con lo que devolvió Go: «+$5.00», «−$10.00» o «Sin cambio». La
 // diferencia solo es negativa cuando el producto tiene activada la opción «El precio puede bajar
-// al cambiar complementos» (etapa 9A); Go la calcula con sus límites. Mientras Go recalcula,
+// al cambiar complementos» (etapa 9A); con ella se muestra el efecto real que aplicó Go
+// (`applied_difference`), que con los límites del precio puede ser menor que la diferencia de
+// valor: el grupo nunca promete más de lo que bajó el precio. Mientras Go recalcula,
 // «Calculando…». Si hay equivalencia y extras se muestran los dos importes de Go.
 function groupDelta(charge: ProductBreakdown['groups'][number] | undefined): string {
   if (!charge) {
     return 'Calculando…';
   }
-  const difference = nonZeroAmount(charge.difference);
+  const equivalence = charge.applied_difference ?? charge.difference;
+  const difference = nonZeroAmount(equivalence);
   const extras = positiveAmount(charge.extras);
   if (difference && extras) {
-    return `Equivalencia ${formatSignedMoney(charge.difference)} · Extras ${formatSignedMoney(charge.extras)}`;
+    return `Equivalencia ${formatSignedMoney(equivalence)} · Extras ${formatSignedMoney(charge.extras)}`;
   }
   if (difference) {
-    return formatSignedMoney(charge.difference);
+    return formatSignedMoney(equivalence);
   }
   if (extras) {
     return formatSignedMoney(charge.extras);

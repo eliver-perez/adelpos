@@ -10,6 +10,12 @@ import (
 // listado de insumos es paginado y la pantalla no conoce todos los códigos. Go es la autoridad:
 // esta consulta solo informa y sugiere; al guardar, el índice único lower(code) sigue respondiendo
 // DUPLICATE_CODE. Nunca cambia el código de un insumo existente.
+//
+// Los códigos se comparan con la misma normalización que el índice único: lower() de PostgreSQL
+// con la configuración regional de la base (C en las instalaciones del proyecto, que solo pasa a
+// minúsculas las letras ASCII: «PAÑO» y «paño» son códigos distintos para el índice). Go nunca
+// usa strings.ToLower para esto, porque con «Ñ» o vocales acentuadas daría otra clave y podría
+// sugerir un código ocupado.
 
 // maximumItemCode es el largo máximo del código interno de un insumo (CHECK de la 0010).
 const maximumItemCode = 40
@@ -40,20 +46,52 @@ func trimCode(code string, maximum int) string {
 	return strings.TrimRight(string(runes), "-")
 }
 
+// codeStems son los textos cuya clave del índice necesita la sugerencia: la base y la base
+// recortada para cada largo de sufijo (de «-2» a «-9999»).
+func codeStems(base string, maximum int) []string {
+	stems := []string{base}
+	for length := 2; length <= len("-"+itoa(maximumCodeSuffix)); length++ {
+		stems = append(stems, trimCode(base, maximum-length))
+	}
+	return stems
+}
+
 // suggestFreeCode propone un código libre a partir de base: base si no está tomado o base con el
-// primer sufijo -N libre. taken contiene los códigos existentes en minúsculas. Es una función pura.
-func suggestFreeCode(base string, taken map[string]bool, maximum int) string {
-	if !taken[strings.ToLower(base)] {
+// primer sufijo -N libre. taken contiene las claves del índice único de los códigos existentes y
+// lower da la clave de un texto con la misma normalización (en el servidor, lower() de
+// PostgreSQL). El sufijo «-N» solo tiene guion y dígitos, que lower() nunca cambia, así que la
+// clave de un candidato es la de su base recortada más el sufijo. Es una función pura. Solo si los
+// 9 998 sufijos estuvieran ocupados devuelve la base (no hay código libre que sugerir).
+func suggestFreeCode(base string, lower func(string) string, taken map[string]bool, maximum int) string {
+	if !taken[lower(base)] {
 		return base
 	}
 	for attempt := 2; attempt <= maximumCodeSuffix; attempt++ {
 		suffix := "-" + itoa(attempt)
-		candidate := trimCode(base, maximum-len(suffix)) + suffix
-		if !taken[strings.ToLower(candidate)] {
-			return candidate
+		stem := trimCode(base, maximum-len(suffix))
+		if !taken[lower(stem)+suffix] {
+			return stem + suffix
 		}
 	}
 	return base
+}
+
+// indexKeys calcula con PostgreSQL la clave del índice único (lower) de cada texto.
+func (handler *service) indexKeys(texts []string) (map[string]string, error) {
+	rows, err := handler.tx.Query(handler.ctx, `SELECT stem,lower(stem) FROM unnest($1::text[]) AS stem`, texts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := map[string]string{}
+	for rows.Next() {
+		var text, key string
+		if err := rows.Scan(&text, &key); err != nil {
+			return nil, err
+		}
+		keys[text] = key
+	}
+	return keys, rows.Err()
 }
 
 // checkItemCode atiende GET inventory/item-codes?code=…[&item_id=…]: indica si el código está libre
@@ -105,6 +143,13 @@ func (handler *service) checkItemCode(_ []string) (any, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	result.Suggestion = suggestFreeCode(code, taken, maximumItemCode)
+	keys, err := handler.indexKeys(codeStems(code, maximumItemCode))
+	if err != nil {
+		return nil, err
+	}
+	lower := func(text string) string {
+		return keys[text]
+	}
+	result.Suggestion = suggestFreeCode(code, lower, taken, maximumItemCode)
 	return result, nil
 }

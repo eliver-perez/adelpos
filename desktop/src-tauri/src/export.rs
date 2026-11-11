@@ -296,6 +296,14 @@ fn with_extension(path: PathBuf, format: ExportFormat) -> (PathBuf, bool) {
     (PathBuf::from(text), true)
 }
 
+// temporary_name forma el nombre del temporal: corto (menos de 80 bytes, muy por debajo del
+// límite de 255 bytes por nombre de macOS) e independiente del nombre elegido, para que un nombre
+// largo nunca impida crear el temporal. Oculto (punto inicial) y único por proceso, instante y
+// secuencia.
+pub(crate) fn temporary_name(process: u32, nanos: u128, sequence: u64) -> String {
+    format!(".adel-export-{process:x}-{nanos:x}-{sequence:x}.part")
+}
+
 // write_atomically escribe en un temporal de la misma carpeta, lo sincroniza y lo renombra al
 // destino (el panel de macOS ya confirmó la sustitución si existía). Si algo falla, borra el
 // temporal y el destino queda como estaba.
@@ -304,20 +312,18 @@ pub(crate) fn write_atomically(destination: &Path, bytes: &[u8]) -> Result<u64, 
         .parent()
         .filter(|folder| folder.is_dir())
         .ok_or("La carpeta elegida no existe.")?;
-    let name = destination
+    destination
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or("El nombre del archivo no es válido.")?;
-    let unique = format!(
-        "{}-{}-{}",
+    let temporary = folder.join(temporary_name(
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|value| value.as_nanos())
             .unwrap_or(0),
-        TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    );
-    let temporary = folder.join(format!(".{name}.part-{unique}"));
+        TEMPORARY_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+    ));
     let written = (|| -> std::io::Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
@@ -335,9 +341,55 @@ pub(crate) fn write_atomically(destination: &Path, bytes: &[u8]) -> Result<u64, 
     Ok(bytes.len() as u64)
 }
 
-// SaveTarget separa el diálogo nativo para poder probar la escritura sin ventana.
+// SaveTarget separa el diálogo nativo para poder probar la escritura sin ventana. directory es
+// la carpeta en la que se vuelve a abrir el diálogo (ninguna la primera vez).
 pub(crate) trait SaveTarget {
-    fn choose(&self, suggested: &str, format: ExportFormat) -> Result<Option<PathBuf>, String>;
+    fn choose(
+        &self,
+        suggested: &str,
+        directory: Option<&Path>,
+        format: ExportFormat,
+    ) -> Result<Option<PathBuf>, String>;
+}
+
+// Decisión sobre la ruta que devolvió el diálogo.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Destination {
+    // Escribir en esta ruta (ya con la extensión del formato).
+    Write(PathBuf),
+    // Volver a abrir el diálogo en la carpeta con el nombre completo sugerido.
+    AskAgain { name: String, folder: PathBuf },
+}
+
+// MAX_DIALOG_ATTEMPTS acota cuántas veces se abre el diálogo en una misma exportación (la primera y
+// las que se vuelven a abrir porque el nombre con extensión ya existía).
+const MAX_DIALOG_ATTEMPTS: usize = 4;
+
+// resolve_destination fuerza la extensión del formato en la ruta elegida. El panel solo confirmó
+// sustituir el nombre que mostró: si con la extensión agregada por Rust el archivo ya existe, no
+// se reemplaza sin preguntar; se vuelve a abrir el diálogo con el nombre completo, de modo que el
+// propio panel pida confirmar la sustitución o se elija otro nombre.
+pub(crate) fn resolve_destination(
+    chosen: PathBuf,
+    format: ExportFormat,
+) -> Result<Destination, String> {
+    if !chosen.is_absolute() {
+        return Err("La ruta elegida no es válida.".into());
+    }
+    let (destination, changed) = with_extension(chosen, format);
+    if changed && destination.exists() {
+        let name = destination
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or("El nombre del archivo no es válido.")?
+            .to_string();
+        let folder = destination
+            .parent()
+            .ok_or("La ruta elegida no es válida.")?
+            .to_path_buf();
+        return Ok(Destination::AskAgain { name, folder });
+    }
+    Ok(Destination::Write(destination))
 }
 
 // save_with pide el destino y escribe el archivo; devuelve solo lo que React puede ver.
@@ -347,20 +399,31 @@ pub(crate) fn save_with(
     format: ExportFormat,
     bytes: &[u8],
 ) -> Result<Value, String> {
-    let Some(chosen) = target.choose(suggested, format)? else {
-        return Ok(json!({"result": "cancelled"}));
+    let mut name = suggested.to_string();
+    let mut folder: Option<PathBuf> = None;
+    let mut attempt = 0;
+    let destination = loop {
+        attempt += 1;
+        let Some(chosen) = target.choose(&name, folder.as_deref(), format)? else {
+            return Ok(json!({"result": "cancelled"}));
+        };
+        match resolve_destination(chosen, format)? {
+            Destination::Write(destination) => break destination,
+            Destination::AskAgain {
+                name: complete,
+                folder: chosen_folder,
+            } => {
+                if attempt >= MAX_DIALOG_ATTEMPTS {
+                    return Err(
+                        "Ya existe un archivo con ese nombre. Vuelve a exportar y elige otro nombre."
+                            .into(),
+                    );
+                }
+                name = complete;
+                folder = Some(chosen_folder);
+            }
+        }
     };
-    if !chosen.is_absolute() {
-        return Err("La ruta elegida no es válida.".into());
-    }
-    let (destination, changed) = with_extension(chosen, format);
-    // El panel solo confirmó sustituir el nombre que mostró: con la extensión agregada por Rust no
-    // se reemplaza un archivo existente sin preguntar.
-    if changed && destination.exists() {
-        return Err(
-            "Ya existe un archivo con ese nombre. Vuelve a exportar y elige otro nombre.".into(),
-        );
-    }
     let size = write_atomically(&destination, bytes)?;
     let file_name = destination
         .file_name()
@@ -378,8 +441,13 @@ struct DialogTarget {
 }
 
 impl SaveTarget for DialogTarget {
-    fn choose(&self, suggested: &str, format: ExportFormat) -> Result<Option<PathBuf>, String> {
-        let chosen = self
+    fn choose(
+        &self,
+        suggested: &str,
+        directory: Option<&Path>,
+        format: ExportFormat,
+    ) -> Result<Option<PathBuf>, String> {
+        let mut dialog = self
             .app
             .dialog()
             .file()
@@ -387,8 +455,11 @@ impl SaveTarget for DialogTarget {
             .set_title("Guardar reporte")
             .set_file_name(suggested)
             .add_filter(format.filter_name(), &[format.code()])
-            .set_can_create_directories(true)
-            .blocking_save_file();
+            .set_can_create_directories(true);
+        if let Some(directory) = directory {
+            dialog = dialog.set_directory(directory);
+        }
+        let chosen = dialog.blocking_save_file();
         match chosen {
             None => Ok(None),
             Some(path) => path
@@ -637,15 +708,45 @@ mod tests {
         assert!(long.ends_with(".pdf"));
     }
 
+    // FakeTarget devuelve, en orden, las rutas que «elegiría» la persona en cada apertura del
+    // diálogo (None es cancelar) y registra el nombre sugerido y la carpeta de cada apertura.
     struct FakeTarget {
-        chosen: Option<PathBuf>,
-        asked: RefCell<Vec<String>>,
+        choices: RefCell<Vec<Option<PathBuf>>>,
+        asked: RefCell<Vec<(String, Option<PathBuf>)>>,
+    }
+
+    impl FakeTarget {
+        fn new(choices: Vec<Option<PathBuf>>) -> Self {
+            Self {
+                choices: RefCell::new(choices),
+                asked: RefCell::new(vec![]),
+            }
+        }
+
+        fn suggested(&self) -> Vec<String> {
+            self.asked
+                .borrow()
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect()
+        }
     }
 
     impl SaveTarget for FakeTarget {
-        fn choose(&self, suggested: &str, _: ExportFormat) -> Result<Option<PathBuf>, String> {
-            self.asked.borrow_mut().push(suggested.to_string());
-            Ok(self.chosen.clone())
+        fn choose(
+            &self,
+            suggested: &str,
+            directory: Option<&Path>,
+            _: ExportFormat,
+        ) -> Result<Option<PathBuf>, String> {
+            self.asked
+                .borrow_mut()
+                .push((suggested.to_string(), directory.map(Path::to_path_buf)));
+            let mut choices = self.choices.borrow_mut();
+            if choices.is_empty() {
+                return Ok(None);
+            }
+            Ok(choices.remove(0))
         }
     }
 
@@ -664,76 +765,140 @@ mod tests {
             .unwrap()
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.file_name().to_string_lossy().to_string())
-            .filter(|name| name.contains(".part-"))
+            .filter(|name| name.starts_with(".adel-export-"))
             .collect()
     }
 
     #[test]
     fn saving_is_atomic_and_returns_only_name_and_size() {
         let folder = temporary_folder("save");
-        let target = FakeTarget {
-            chosen: Some(folder.join("ventas.pdf")),
-            asked: RefCell::new(vec![]),
-        };
+        let target = FakeTarget::new(vec![Some(folder.join("ventas.pdf"))]);
         let bytes = b"%PDF-1.3 contenido";
         let result = save_with(&target, "ventas.pdf", ExportFormat::Pdf, bytes).unwrap();
         assert_eq!(
             result,
             json!({"result": "saved", "file_name": "ventas.pdf", "size": bytes.len()})
         );
-        assert_eq!(target.asked.borrow().as_slice(), ["ventas.pdf"]);
+        assert_eq!(
+            target.asked.borrow().as_slice(),
+            [("ventas.pdf".to_string(), None)]
+        );
         assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), bytes);
         assert!(!result.to_string().contains(folder.to_str().unwrap()));
         // Sustituir un archivo confirmado por el panel reemplaza su contenido completo.
+        let target = FakeTarget::new(vec![Some(folder.join("ventas.pdf"))]);
         save_with(&target, "ventas.pdf", ExportFormat::Pdf, b"%PDF-nuevo").unwrap();
         assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), b"%PDF-nuevo");
         assert!(leftovers(&folder).is_empty());
-        // La extensión se fuerza; si con ella el archivo ya existe, no se sustituye sin preguntar.
-        let target = FakeTarget {
-            chosen: Some(folder.join("ventas")),
-            asked: RefCell::new(vec![]),
-        };
-        assert!(save_with(&target, "ventas.pdf", ExportFormat::Pdf, b"%PDF-otro").is_err());
-        assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), b"%PDF-nuevo");
-        let target = FakeTarget {
-            chosen: Some(folder.join("libro")),
-            asked: RefCell::new(vec![]),
-        };
+        // La extensión se fuerza cuando falta y el archivo no existe.
+        let target = FakeTarget::new(vec![Some(folder.join("libro"))]);
         let result = save_with(&target, "libro.xlsx", ExportFormat::Xlsx, b"PK\x03\x04").unwrap();
         assert_eq!(result["file_name"], "libro.xlsx");
         assert!(folder.join("libro.xlsx").exists());
         fs::remove_dir_all(&folder).unwrap();
     }
 
+    // Revisión independiente de la 9A: el temporal es corto e independiente del nombre elegido.
+    #[test]
+    fn temporary_names_are_short_and_independent_of_the_destination() {
+        let longest = temporary_name(u32::MAX, u128::MAX, u64::MAX);
+        assert!(longest.len() < 80, "{longest}");
+        assert!(longest.starts_with(".adel-export-") && longest.ends_with(".part"));
+        assert_ne!(temporary_name(1, 2, 3), temporary_name(1, 2, 4));
+        // Un nombre de 254 bytes (cerca del límite de 255 de macOS) se guarda sin dejar temporales.
+        let folder = temporary_folder("long");
+        let name = format!("{}.pdf", "a".repeat(250));
+        let target = FakeTarget::new(vec![Some(folder.join(&name))]);
+        let result = save_with(&target, "x.pdf", ExportFormat::Pdf, b"%PDF-largo").unwrap();
+        assert_eq!(result["file_name"], name.as_str());
+        assert_eq!(fs::read(folder.join(&name)).unwrap(), b"%PDF-largo");
+        assert!(leftovers(&folder).is_empty());
+        // También con letras de varios bytes: 120 «ñ» son 240 bytes más la extensión.
+        let name = format!("{}.pdf", "ñ".repeat(120));
+        let target = FakeTarget::new(vec![Some(folder.join(&name))]);
+        assert!(save_with(&target, "x.pdf", ExportFormat::Pdf, b"%PDF-").is_ok());
+        assert!(leftovers(&folder).is_empty());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
+    // Revisión independiente de la 9A: si con la extensión agregada el archivo ya existe, el
+    // diálogo se vuelve a abrir en la misma carpeta con el nombre completo, en lugar de fallar.
+    #[test]
+    fn an_existing_name_with_forced_extension_reopens_the_dialog() {
+        let folder = temporary_folder("again");
+        fs::write(folder.join("ventas.pdf"), b"%PDF-viejo").unwrap();
+        assert_eq!(
+            resolve_destination(folder.join("ventas"), ExportFormat::Pdf).unwrap(),
+            Destination::AskAgain {
+                name: "ventas.pdf".into(),
+                folder: folder.clone()
+            }
+        );
+        assert_eq!(
+            resolve_destination(folder.join("otro"), ExportFormat::Pdf).unwrap(),
+            Destination::Write(folder.join("otro.pdf"))
+        );
+        assert_eq!(
+            resolve_destination(folder.join("ventas.PDF"), ExportFormat::Pdf).unwrap(),
+            Destination::Write(folder.join("ventas.PDF"))
+        );
+        assert!(resolve_destination(PathBuf::from("ventas"), ExportFormat::Pdf).is_err());
+        // Segunda apertura con «ventas.pdf» en la carpeta elegida: el panel confirmó sustituirlo.
+        let target = FakeTarget::new(vec![
+            Some(folder.join("ventas")),
+            Some(folder.join("ventas.pdf")),
+        ]);
+        let result = save_with(&target, "reporte.pdf", ExportFormat::Pdf, b"%PDF-nuevo").unwrap();
+        assert_eq!(result["file_name"], "ventas.pdf");
+        assert_eq!(
+            target.asked.borrow().as_slice(),
+            [
+                ("reporte.pdf".to_string(), None),
+                ("ventas.pdf".to_string(), Some(folder.clone()))
+            ]
+        );
+        assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), b"%PDF-nuevo");
+        // Cancelar la segunda apertura no escribe nada.
+        let target = FakeTarget::new(vec![Some(folder.join("ventas")), None]);
+        assert_eq!(
+            save_with(&target, "reporte.pdf", ExportFormat::Pdf, b"%PDF-otro").unwrap(),
+            json!({"result": "cancelled"})
+        );
+        assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), b"%PDF-nuevo");
+        // Elegir otro nombre en la segunda apertura guarda ese archivo.
+        let target = FakeTarget::new(vec![
+            Some(folder.join("ventas")),
+            Some(folder.join("abril")),
+        ]);
+        let result = save_with(&target, "reporte.pdf", ExportFormat::Pdf, b"%PDF-abril").unwrap();
+        assert_eq!(result["file_name"], "abril.pdf");
+        assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), b"%PDF-nuevo");
+        // Insistir sin extensión tiene un tope de aperturas y nunca sustituye sin preguntar.
+        let target = FakeTarget::new(vec![Some(folder.join("ventas")); MAX_DIALOG_ATTEMPTS + 2]);
+        assert!(save_with(&target, "reporte.pdf", ExportFormat::Pdf, b"%PDF-no").is_err());
+        assert_eq!(target.suggested().len(), MAX_DIALOG_ATTEMPTS);
+        assert_eq!(fs::read(folder.join("ventas.pdf")).unwrap(), b"%PDF-nuevo");
+        assert!(leftovers(&folder).is_empty());
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
     #[test]
     fn cancelling_writes_nothing_and_failures_leave_no_temporary_file() {
         let folder = temporary_folder("cancel");
-        let target = FakeTarget {
-            chosen: None,
-            asked: RefCell::new(vec![]),
-        };
+        let target = FakeTarget::new(vec![None]);
         assert_eq!(
             save_with(&target, "ventas.pdf", ExportFormat::Pdf, b"%PDF-").unwrap(),
             json!({"result": "cancelled"})
         );
         assert_eq!(fs::read_dir(&folder).unwrap().count(), 0);
         // Carpeta inexistente o ruta relativa: error claro, sin archivos.
-        let missing = FakeTarget {
-            chosen: Some(folder.join("no-existe").join("ventas.pdf")),
-            asked: RefCell::new(vec![]),
-        };
+        let missing = FakeTarget::new(vec![Some(folder.join("no-existe").join("ventas.pdf"))]);
         assert!(save_with(&missing, "ventas.pdf", ExportFormat::Pdf, b"%PDF-").is_err());
-        let relative = FakeTarget {
-            chosen: Some(PathBuf::from("ventas.pdf")),
-            asked: RefCell::new(vec![]),
-        };
+        let relative = FakeTarget::new(vec![Some(PathBuf::from("ventas.pdf"))]);
         assert!(save_with(&relative, "ventas.pdf", ExportFormat::Pdf, b"%PDF-").is_err());
         // El destino es una carpeta: el renombrado falla y el temporal se borra.
         fs::create_dir(folder.join("ocupado.pdf")).unwrap();
-        let occupied = FakeTarget {
-            chosen: Some(folder.join("ocupado.pdf")),
-            asked: RefCell::new(vec![]),
-        };
+        let occupied = FakeTarget::new(vec![Some(folder.join("ocupado.pdf"))]);
         assert!(save_with(&occupied, "ocupado.pdf", ExportFormat::Pdf, b"%PDF-").is_err());
         assert!(leftovers(&folder).is_empty());
         fs::remove_dir_all(&folder).unwrap();

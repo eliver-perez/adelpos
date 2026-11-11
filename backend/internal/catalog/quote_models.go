@@ -87,15 +87,21 @@ type OptionBreakdown struct {
 }
 
 type GroupBreakdown struct {
-	GroupID        string            `json:"group_id"`
-	Revision       int               `json:"revision"`
-	Name           string            `json:"name"`
-	Mode           string            `json:"mode"`
-	OriginalValue  string            `json:"original_value"`
-	RequestedValue string            `json:"requested_value"`
-	Difference     string            `json:"difference"`
-	Extras         string            `json:"extras"`
-	Options        []OptionBreakdown `json:"options"`
+	GroupID        string `json:"group_id"`
+	Revision       int    `json:"revision"`
+	Name           string `json:"name"`
+	Mode           string `json:"mode"`
+	OriginalValue  string `json:"original_value"`
+	RequestedValue string `json:"requested_value"`
+	Difference     string `json:"difference"`
+	// AppliedDifference (etapa 9A, §3.1) solo aparece cuando se aplicó la opción «El precio puede
+	// bajar al cambiar complementos»: es el efecto real del grupo en el precio por unidad (la
+	// diferencia con la regla con piso más la parte de la reducción que de verdad se aplicó). Con
+	// los límites puede ser menor que Difference en valor absoluto; nunca promete más de lo
+	// aplicado. Sin la opción se omite.
+	AppliedDifference string            `json:"applied_difference,omitempty"`
+	Extras            string            `json:"extras"`
+	Options           []OptionBreakdown `json:"options"`
 }
 
 // QuickNoteBreakdown es una indicación rápida resuelta por Go al cotizar: congela su texto, su
@@ -132,7 +138,11 @@ type ProductBreakdown struct {
 	// en un componente, también el combo). Sin la opción se omiten, así que las cotizaciones, los
 	// borradores y las huellas anteriores se serializan exactamente igual que antes.
 	// ComplementAdjustment es la reducción efectiva respecto de la regla con piso: una cadena con
-	// signo («-10.00», o «0.00» si no bajó) ya incluida en GroupExtras y en UnitPrice.
+	// signo («-10.00», o «0.00» si no bajó). En la partida ya está incluida en GroupExtras y en
+	// UnitPrice. En el producto de un componente de combo es la parte que ese componente aportó
+	// al precio del combo, por unidad del componente, y no se incluye en su propio precio (que
+	// sigue la regla con piso, porque el combo lo cubre): los límites se aplican una sola vez, en
+	// el núcleo del combo.
 	PriceCanDecrease     bool                  `json:"price_can_decrease,omitempty"`
 	ComplementAdjustment string                `json:"complement_adjustment,omitempty"`
 	Ingredients          []IngredientBreakdown `json:"ingredients"`

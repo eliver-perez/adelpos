@@ -697,8 +697,8 @@ Proveedor y último precio, solo con algún permiso de compras.
   solo a ellos para no invalidar proveedores existentes: teléfonos de una línea con dígitos, espacios, `+`, paréntesis,
   punto, guion o diagonal, de 7 a 20 dígitos y extensión opcional («ext. 12»); página web con dominio y ruta opcional, con o
   sin `http://`/`https://` (ningún otro esquema), sin espacios y de hasta 200 caracteres. La pantalla la muestra como texto,
-  nunca como enlace. La búsqueda incluye los teléfonos nuevos y la página web. Un `PATCH` guarda todos los datos (como en la
-  etapa 8): un cuerpo sin los campos nuevos los deja vacíos.
+  nunca como enlace. La búsqueda incluye los teléfonos nuevos y la página web. Un `PATCH` sin los campos nuevos los conserva (no
+  los borra un cliente anterior); enviarlos vacíos (`""`) los borra.
 - **«Compras de mostrador» (9A)**: proveedor especial (`kind = 'counter'`) para mercados, centrales de abastos,
   supermercados y comercios ocasionales. Lo siembra la 0016 una sola vez (índice único parcial: no puede haber otro); si la
   instalación ya tenía un proveedor con ese nombre, no se toca ni se convierte y el especial toma «Compras de mostrador

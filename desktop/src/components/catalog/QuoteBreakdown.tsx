@@ -10,24 +10,37 @@ function addition(value: string) {
 
 // Rótulo de la diferencia de un grupo. En modo valor es la equivalencia (con la opción «El precio
 // puede bajar al cambiar complementos» puede ser negativa); en modo cantidad, el cargo por tramos o,
-// con la opción, los tramos menos el valor de las porciones incluidas que se retiraron.
+// con la opción, los tramos más la diferencia de valor cuando es negativa.
 function differenceLabel(mode: string, priceCanDecrease: boolean | undefined) {
   if (mode === 'value') {
     return 'Diferencia';
   }
-  return priceCanDecrease ? 'Tramos menos porciones retiradas' : 'Cargo por tramos';
+  return priceCanDecrease ? 'Tramos y diferencia de valor' : 'Cargo por tramos';
 }
 
-// Efecto de la opción en el producto, con el ajuste que calculó Go (cero o negativo). Solo se
-// inspecciona el signo del texto; no hay aritmética.
-function complementEffect(adjustment: string | undefined) {
-  if (adjustment?.startsWith('-')) {
-    return `el precio bajó ${formatSignedMoney(adjustment)} por los complementos elegidos (incluido en «Complementos»).`;
+// Efecto de la opción en el producto, con la reducción efectiva que calculó Go (cero o negativa,
+// ya con sus límites). En la partida está incluida en «Complementos»; en un componente de combo
+// se aplica en el precio del combo, por unidad del componente, y no en el suyo. Solo se inspecciona
+// el signo del texto; no hay aritmética.
+function complementEffect(adjustment: string | undefined, inCombo: boolean) {
+  if (!adjustment?.startsWith('-')) {
+    return 'sin reducción con los complementos elegidos.';
   }
-  return 'sin reducción con los complementos elegidos.';
+  if (inCombo) {
+    return `los complementos elegidos bajan ${formatSignedMoney(adjustment)} el precio del combo por cada unidad de este componente (no se incluye en su precio).`;
+  }
+  return `el precio bajó ${formatSignedMoney(adjustment)} por los complementos elegidos (incluido en «Complementos»).`;
 }
 
-export function ProductDetails({ value }: { value: ProductBreakdown }) {
+// Desglose de un producto. inCombo indica que es el producto de un componente de combo: su precio
+// sigue la regla con piso y su reducción por complementos se aplica en el combo.
+export function ProductDetails({
+  value,
+  inCombo = false,
+}: {
+  value: ProductBreakdown;
+  inCombo?: boolean;
+}) {
   return (
     <div className="quote-product-details">
       <p className="muted text-xs">
@@ -48,7 +61,7 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
       {value.price_can_decrease && (
         <p className="muted text-xs">
           El precio puede bajar al cambiar complementos:{' '}
-          {complementEffect(value.complement_adjustment)}
+          {complementEffect(value.complement_adjustment, inCombo)}
         </p>
       )}
       {value.groups.map((group) => (
@@ -60,6 +73,12 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
             <dd>{formatMoney(group.requested_value)}</dd>
             <dt>{differenceLabel(group.mode, value.price_can_decrease)}</dt>
             <dd>{formatSignedMoney(group.difference)}</dd>
+            {group.applied_difference !== undefined && (
+              <>
+                <dt>{inCombo ? 'Efecto en el precio del combo' : 'Efecto en el precio'}</dt>
+                <dd>{formatSignedMoney(group.applied_difference)}</dd>
+              </>
+            )}
             <dt>Extras explícitos separados</dt>
             <dd>{formatMoney(group.extras)}</dd>
           </dl>
@@ -84,7 +103,7 @@ export function ProductDetails({ value }: { value: ProductBreakdown }) {
           title={`${component.name} × ${component.quantity}`}
           summary={`Cargo del componente: ${formatMoney(component.charge)}`}
         >
-          {component.product && <ProductDetails value={component.product} />}
+          {component.product && <ProductDetails value={component.product} inCombo />}
         </Accordion>
       ))}
       {value.notes && <p className="muted text-sm">Preparación: {value.notes}</p>}

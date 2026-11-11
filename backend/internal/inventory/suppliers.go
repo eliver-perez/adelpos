@@ -351,14 +351,16 @@ type supplierInput struct {
 	LegalName   string  `json:"legal_name"`
 	RFC         *string `json:"rfc"`
 	Phone       string  `json:"phone"`
-	// Campos de la etapa 9A: opcionales (ausentes equivalen a vacío).
-	PhoneSecondary string `json:"phone_secondary"`
-	MobilePhone    string `json:"mobile_phone"`
-	Website        string `json:"website"`
-	Email          string `json:"email"`
-	Address        string `json:"address"`
-	Contact        string `json:"contact"`
-	Notes          string `json:"notes"`
+	// Campos de la etapa 9A, opcionales. Ausentes del cuerpo (nil): al crear equivalen a vacío y
+	// al editar se conservan, para que un cliente anterior a la 9A, que no los envía, no los borre.
+	// Presentes se validan; la cadena vacía los borra.
+	PhoneSecondary *string `json:"phone_secondary"`
+	MobilePhone    *string `json:"mobile_phone"`
+	Website        *string `json:"website"`
+	Email          string  `json:"email"`
+	Address        string  `json:"address"`
+	Contact        string  `json:"contact"`
+	Notes          string  `json:"notes"`
 	// Active ausente: activo al crear y sin cambio al editar.
 	Active *bool `json:"active"`
 }
@@ -379,13 +381,17 @@ func validateSupplier(input *supplierInput) (*string, error) {
 	if input.Phone, err = purchaseText(input.Phone, "El teléfono", 40, true); err != nil {
 		return nil, err
 	}
-	if input.PhoneSecondary, err = validatePhone(input.PhoneSecondary, "El segundo teléfono"); err != nil {
+	if input.PhoneSecondary, err = validateOptionalContact(input.PhoneSecondary, func(value string) (string, error) {
+		return validatePhone(value, "El segundo teléfono")
+	}); err != nil {
 		return nil, err
 	}
-	if input.MobilePhone, err = validatePhone(input.MobilePhone, "El teléfono celular"); err != nil {
+	if input.MobilePhone, err = validateOptionalContact(input.MobilePhone, func(value string) (string, error) {
+		return validatePhone(value, "El teléfono celular")
+	}); err != nil {
 		return nil, err
 	}
-	if input.Website, err = validateWebsite(input.Website); err != nil {
+	if input.Website, err = validateOptionalContact(input.Website, validateWebsite); err != nil {
 		return nil, err
 	}
 	if input.Email, err = purchaseText(input.Email, "El correo electrónico", 120, true); err != nil {
@@ -404,6 +410,28 @@ func validateSupplier(input *supplierInput) (*string, error) {
 		return nil, err
 	}
 	return rfc, nil
+}
+
+// validateOptionalContact valida un dato de contacto de la etapa 9A que puede faltar en el cuerpo:
+// ausente (nil) sigue ausente; presente se valida y se devuelve recortado.
+func validateOptionalContact(value *string, validate func(string) (string, error)) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	validated, err := validate(*value)
+	if err != nil {
+		return nil, err
+	}
+	return &validated, nil
+}
+
+// contactOr es el dato de contacto que se guarda: el del cuerpo si llegó o, si no, current (vacío
+// al crear; el guardado al editar).
+func contactOr(value *string, current string) string {
+	if value == nil {
+		return current
+	}
+	return *value
 }
 
 func supplierConflict(err error) error {
@@ -428,8 +456,8 @@ func (handler *service) createSupplier(_ []string) (any, error) {
 	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.inventory_suppliers(id,trade_name,legal_name,rfc,phone,phone_secondary,
             mobile_phone,website,email,address,contact,notes,active,created_by,updated_by)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14)`,
-		id, input.TradeName, input.LegalName, rfc, input.Phone, input.PhoneSecondary, input.MobilePhone, input.Website, input.Email,
-		input.Address, input.Contact, input.Notes, active, handler.actorReference())
+		id, input.TradeName, input.LegalName, rfc, input.Phone, contactOr(input.PhoneSecondary, ""), contactOr(input.MobilePhone, ""),
+		contactOr(input.Website, ""), input.Email, input.Address, input.Contact, input.Notes, active, handler.actorReference())
 	if err != nil {
 		return nil, supplierConflict(err)
 	}
@@ -443,7 +471,8 @@ func (handler *service) createSupplier(_ []string) (any, error) {
 	return saved, handler.audit(handler.ctx, handler.tx, "inventory.supplier_created", "inventory_supplier", &id, nil, saved.Supplier)
 }
 
-// updateSupplier guarda todos los datos del proveedor con revisión optimista. Desactivarlo nunca
+// updateSupplier guarda todos los datos del proveedor con revisión optimista (el segundo
+// teléfono, el celular y la página web ausentes del cuerpo se conservan). Desactivarlo nunca
 // borra nada: sus compras y su historial se conservan. La modalidad no cambia; el proveedor de
 // mostrador se puede renombrar, describir o desactivar, pero nunca recibe RFC ni razón social.
 func (handler *service) updateSupplier(parts []string) (any, error) {
@@ -473,8 +502,9 @@ func (handler *service) updateSupplier(parts []string) (any, error) {
             phone_secondary=$6,mobile_phone=$7,website=$8,email=$9,address=$10,contact=$11,notes=$12,active=$13,updated_by=$14,
             revision=revision+1,updated_at=now()
         WHERE id=$1`,
-		previous.ID, input.TradeName, input.LegalName, rfc, input.Phone, input.PhoneSecondary, input.MobilePhone, input.Website,
-		input.Email, input.Address, input.Contact, input.Notes, active, handler.actorReference())
+		previous.ID, input.TradeName, input.LegalName, rfc, input.Phone, contactOr(input.PhoneSecondary, previous.PhoneSecondary),
+		contactOr(input.MobilePhone, previous.MobilePhone), contactOr(input.Website, previous.Website), input.Email, input.Address,
+		input.Contact, input.Notes, active, handler.actorReference())
 	if err != nil {
 		return nil, supplierConflict(err)
 	}
