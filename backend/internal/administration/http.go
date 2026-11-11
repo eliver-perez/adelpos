@@ -49,6 +49,15 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if strings.HasPrefix(request.URL.Path, "/api/v1/reports/") {
 		timeout = reportTimeout
 	}
+	// Las exportaciones (fase C1) además generan el archivo con todos los renglones del reporte.
+	if strings.HasPrefix(request.URL.Path, "/api/v1/reports/export/") {
+		timeout = exportTimeout
+	}
+	// El servidor HTTP corta toda respuesta a los 15 s (WriteTimeout): una ruta con más tiempo amplía
+	// su propio plazo de escritura. Sin soporte (pruebas con httptest) no hace falta.
+	if timeout > 10*time.Second {
+		_ = http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(timeout + 5*time.Second))
+	}
 	ctx, cancel := context.WithTimeout(request.Context(), timeout)
 	defer cancel()
 	result, err := service.Execute(ctx, Request{
@@ -67,6 +76,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	if err != nil {
 		writeFault(writer, request, publicFault(err))
+		return
+	}
+	// Un reporte exportado se envía como archivo binario, no como JSON.
+	if writeExport(writer, result) {
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")

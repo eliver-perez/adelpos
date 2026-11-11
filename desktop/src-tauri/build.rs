@@ -9,6 +9,7 @@ fn main() {
             "window_set_fullscreen",
             "events_start",
             "events_stop",
+            "export_report",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }
