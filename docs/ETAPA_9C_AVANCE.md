@@ -623,3 +623,13 @@ trabajo en curso de B y D1.
 - Sin pantalla táctil física ni teclado virtual sobre la paleta.
 
 La fase C se confirmó antes que la B (que seguía en curso) con sus archivos propios; en `PreferencesPage.tsx` y `styles.css`, compartidos con la B, solo entró su parte. Se probó sobre la fase A más sus archivos (sin la parte D1 ni la B), y la integración conjunta se comprueba al cerrar la fase B y en la regresión final.
+
+### Cierre de la fase C
+
+Sobre una copia exacta de `1feaa59` (fases A y C y parte D1 juntas, sin la B): Prettier, gofmt y `cargo fmt --check`
+limpios; `go vet` con y sin `-tags=integration` sin hallazgos; `tsc --noEmit` sin errores; `npm test` (65 archivos, 602
+pruebas) y `npm run build` correctos; `cargo test` 40 aprobadas y 1 ignorada; Playwright WebKit 14/14 (5.2 min). En
+Chromium falló la especificación del diseñador de la 9B al cerrar los avisos antes de sus capturas (un aviso de éxito se
+cerró solo durante el clic y el clic se reintentó hasta agotar el tiempo); las tres especificaciones siguientes fallaron en
+cascada porque Playwright reinicia el proceso y pierde la terminal preparada. Se corrigió el ayudante de la prueba (el clic
+tolera que el aviso desaparezca y el bucle tiene tope) y se repitió Chromium (ver abajo).

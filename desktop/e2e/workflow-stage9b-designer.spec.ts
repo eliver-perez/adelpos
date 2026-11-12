@@ -43,10 +43,16 @@ async function setTheme(page: Page, theme: string) {
 async function checkLayout(page: Page, testInfo: TestInfo, name: string) {
   // Los avisos ya comprobados se cierran para que no tapen el editor en las capturas.
   const close = page.locator('[data-sonner-toaster]').getByRole('button', { name: 'Cerrar aviso' });
-  while ((await close.count()) > 0) {
-    await close.first().click();
+  // Un aviso de éxito se cierra solo a los 4 s y Sonner reacomoda la pila: si desaparece durante el
+  // clic, el clic se descarta y se vuelve a contar (con un tope para que el bucle siempre termine).
+  for (let attempt = 0; attempt < 20 && (await close.count()) > 0; attempt++) {
+    await close
+      .first()
+      .click({ timeout: 2000 })
+      .catch(() => undefined);
     await page.waitForTimeout(250);
   }
+  await expect(close).toHaveCount(0, { timeout: 6000 });
   for (const size of [
     { width: 1280, height: 720 },
     { width: 1920, height: 1080 },
