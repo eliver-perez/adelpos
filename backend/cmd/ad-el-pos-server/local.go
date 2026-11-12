@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/term"
 	"local/ad-el-pos/server/internal/administration"
+	"local/ad-el-pos/server/internal/fileacl"
 )
 
 func prepareSetup(filename string) error {
@@ -30,32 +31,37 @@ func prepareSetup(filename string) error {
 	if _, err := file.WriteString(administration.NewToken() + "\n"); err != nil {
 		return err
 	}
+	// En Windows el 0600 no protege: ACL privada (etapa 9E). En macOS no hace nada.
+	if err := fileacl.Protect(destination); err != nil {
+		return err
+	}
 	fmt.Println("Aprovisionamiento preparado. El secreto permanece en el archivo privado local.")
 	return nil
 }
 
 func provisionSupport(ctx context.Context, service *administration.Service, reset bool) error {
-	terminal, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil || !term.IsTerminal(int(terminal.Fd())) {
+	// La terminal es /dev/tty en macOS y la consola (CONIN$ y CONOUT$) en Windows (terminal_*.go).
+	input, terminal, err := openInteractiveTerminal()
+	if err != nil || !term.IsTerminal(int(input.Fd())) {
 		return errors.New("el aprovisionamiento de sa requiere una terminal local interactiva")
 	}
-	defer terminal.Close()
+	defer closeInteractiveTerminal(input, terminal)
 	if reset {
 		fmt.Fprint(terminal, "Para autorizar el restablecimiento local escribe RESET sa: ")
-		confirmation, err := bufio.NewReader(terminal).ReadString('\n')
+		confirmation, err := bufio.NewReader(input).ReadString('\n')
 		if err != nil || strings.TrimSpace(confirmation) != "RESET sa" {
 			return errors.New("restablecimiento cancelado")
 		}
 	}
 	fmt.Fprint(terminal, "Contraseña privada de sa (mínimo 12 caracteres): ")
-	password, err := term.ReadPassword(int(terminal.Fd()))
+	password, err := term.ReadPassword(int(input.Fd()))
 	fmt.Fprintln(terminal)
 	if err != nil {
 		return errors.New("no se pudo leer la contraseña local")
 	}
 	defer clear(password)
 	fmt.Fprint(terminal, "Repite la contraseña: ")
-	confirmation, err := term.ReadPassword(int(terminal.Fd()))
+	confirmation, err := term.ReadPassword(int(input.Fd()))
 	fmt.Fprintln(terminal)
 	defer clear(confirmation)
 	if err != nil || string(password) != string(confirmation) {
@@ -80,6 +86,9 @@ func createLocalEnrollment(ctx context.Context, service *administration.Service,
 	}
 	defer file.Close()
 	if err := file.Chmod(0600); err != nil {
+		return err
+	}
+	if err := fileacl.Protect(destination); err != nil {
 		return err
 	}
 	if _, err := file.WriteString(code + "\n"); err != nil {
