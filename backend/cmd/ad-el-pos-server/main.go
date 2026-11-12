@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
@@ -46,6 +47,14 @@ func run(logger *slog.Logger) error {
 	lanIP := flags.String("lan-ip", "", "IP privada opcional para el certificado TLS local")
 	pid := flags.Int("pid", 0, "PID del servidor que «stop» debe detener (solo Windows)")
 	logFile := flags.String("log-file", "", "archivo de bitácora JSON en lugar de la salida estándar")
+	// Instalación de Windows (etapa 9E): carpeta de datos, binarios de PostgreSQL incluidos, vigilancia de
+	// la aplicación que lanzó el servidor y respaldo que se restaura. Fuera de Windows no se usan.
+	host := hostOptions{}
+	flags.StringVar(&host.dataDir, "data-dir", "", "carpeta de datos de la instalación de Windows")
+	flags.StringVar(&host.pgBin, "pg-bin", "", "carpeta de los binarios de PostgreSQL incluidos")
+	flags.BoolVar(&host.watchStdin, "watch-stdin", false, "detenerse cuando se cierre la entrada estándar")
+	flags.StringVar(&host.file, "file", "", "respaldo que se comprueba o restaura")
+	flags.BoolVar(&host.pause, "pause", false, "esperar Entrar antes de cerrar la ventana")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -68,6 +77,14 @@ func run(logger *slog.Logger) error {
 	// Etapa 9E: en Windows no hay SIGTERM; «stop» activa el evento de parada del servidor indicado.
 	if command == "stop" {
 		return stopProcess(*pid)
+	}
+	// Etapa 9E: comandos de la instalación de Windows (host, backup, restore-check, restore).
+	if hostCommands[command] {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		ctx, stopWatch := withPlatformStop(ctx)
+		defer stopWatch()
+		return runHostCommand(ctx, logger, command, host, *logFile != "")
 	}
 	allowedCommands := map[string]bool{
 		"serve": true, "migrate": true, "check-config": true,
@@ -104,14 +121,7 @@ func run(logger *slog.Logger) error {
 		return errors.New("no se pudo crear el pool PostgreSQL")
 	}
 	defer pool.Close()
-	application := &administration.Service{
-		Pool:             pool,
-		ProvisioningFile: filepath.Join(filepath.Dir(*filename), "provisioning-token"),
-		// Consultas de solo lectura de las colas CUPS del equipo para el cajón (etapa 7.1).
-		Queues: kitchen.HostQueueInspector{},
-		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
-		Rasters: identity.NewRasters(pool),
-	}
+	application := newApplication(pool, *filename)
 	if command == "provision-sa" || command == "reset-sa" {
 		return provisionSupport(ctx, application, command == "reset-sa")
 	}
@@ -128,6 +138,25 @@ func run(logger *slog.Logger) error {
 		logger.Info("migrations_completed", "applied", count)
 		return nil
 	}
+	return serveHTTP(ctx, logger, cfg, pool, application)
+}
+
+// newApplication arma el servicio de administración que comparten serve y el modo host de Windows. El
+// token de aprovisionamiento vive junto al archivo de configuración.
+func newApplication(pool *pgxpool.Pool, configFile string) *administration.Service {
+	return &administration.Service{
+		Pool:             pool,
+		ProvisioningFile: filepath.Join(filepath.Dir(configFile), "provisioning-token"),
+		// Consultas de solo lectura de las colas CUPS del equipo para el cajón (etapa 7.1).
+		Queues: kitchen.HostQueueInspector{},
+		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
+		Rasters: identity.NewRasters(pool),
+	}
+}
+
+// serveHTTP sirve la API con los trabajadores de impresión e inventario hasta que se cancela el contexto
+// (SIGTERM en macOS; evento de parada o cierre de la aplicación en Windows) y cierra en orden.
+func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool *pgxpool.Pool, application *administration.Service) error {
 	probe := func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}

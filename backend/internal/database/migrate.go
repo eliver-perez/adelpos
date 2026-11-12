@@ -85,6 +85,28 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
+// MigrationStatus informa cuántas migraciones embebidas ya están aplicadas y cuántas faltan (etapa 9E:
+// la instalación de Windows respalda la base antes de aplicar una migración sobre datos existentes).
+// Una base sin registro de migraciones informa cero aplicadas.
+func MigrationStatus(ctx context.Context, pool *pgxpool.Pool) (applied int, pending int, err error) {
+	expected, err := ReadMigrations(migrations.Files)
+	if err != nil {
+		return 0, 0, err
+	}
+	var exists bool
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('public.schema_migrations') IS NOT NULL").Scan(&exists); err != nil {
+		return 0, 0, errors.New("no se pudo consultar el registro de migraciones")
+	}
+	if !exists {
+		return 0, len(expected), nil
+	}
+	applied, err = appliedCount(ctx, pool, expected)
+	if err != nil {
+		return 0, 0, err
+	}
+	return applied, len(expected) - applied, nil
+}
+
 func Migrate(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	return Apply(ctx, pool, migrations.Files)
 }
