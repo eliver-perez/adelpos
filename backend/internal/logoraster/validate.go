@@ -36,6 +36,8 @@ const (
 var (
 	pngSignature  = []byte("\x89PNG\r\n\x1a\n")
 	jpegSignature = []byte{0xFF, 0xD8, 0xFF}
+	// jpegSOI es el marcador de inicio de imagen con el que el decodificador de Go reconoce un JPEG.
+	jpegSOI = []byte{0xFF, 0xD8}
 )
 
 // Error es un rechazo de validación o de opciones con un mensaje en español listo para mostrarse.
@@ -178,16 +180,18 @@ func jpegMarkersProblem(content []byte) error {
 // CheckJPEGMarkers recorre los marcadores de un JPEG como lo hace el decodificador (sin decodificar
 // nada ni reservar memoria) y devuelve ErrJPEGTooManyScans si tiene más de MaxJPEGScans barridos o
 // ErrJPEGTooManySegments si tiene más de MaxJPEGSegments segmentos. Debe llamarse antes de
-// decodificar (también antes de image.DecodeConfig). Un contenido que no empieza con la firma JPEG
-// no se recorre, y un archivo mal formado o truncado no se rechaza aquí: lo detecta la
-// decodificación.
+// decodificar (también antes de image.DecodeConfig). Se recorre todo contenido que empieza con SOI
+// (FF D8), no solo con la firma completa FF D8 FF: el decodificador de Go acepta bytes sueltos
+// entre marcadores (p. ej. FF D8 00 FF DB …), de modo que exigir la firma completa dejaría pasar un
+// JPEG que sí decodifica (revisión de la etapa 9C). Un archivo mal formado o truncado no se rechaza
+// aquí: lo detecta la decodificación.
 func CheckJPEGMarkers(content []byte) error {
-	if !bytes.HasPrefix(content, jpegSignature) {
+	if !bytes.HasPrefix(content, jpegSOI) {
 		return nil
 	}
 	scans := 0
 	segments := 0
-	index := len(jpegSignature) - 1
+	index := len(jpegSOI)
 	for {
 		marker, next, found := nextJPEGMarker(content, index)
 		if !found || marker == jpegMarkerEOI {

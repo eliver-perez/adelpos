@@ -108,6 +108,11 @@ func TestCheckJPEGMarkersReturnsNeutralErrors(t *testing.T) {
 	if !errors.Is(scans, ErrJPEGTooManyScans) {
 		t.Fatalf("Se esperaba ErrJPEGTooManyScans: %v", scans)
 	}
+	// Revisión de la etapa 9C: un byte suelto después de SOI (FF D8 00 …) no evita el recorrido.
+	stray := CheckJPEGMarkers(progressiveJPEG(MaxJPEGScans, []byte{0x00}))
+	if !errors.Is(stray, ErrJPEGTooManyScans) {
+		t.Fatalf("Un byte suelto tras SOI no debe evitar el límite de barridos: %v", stray)
+	}
 	segments := CheckJPEGMarkers(progressiveJPEG(5, bytes.Repeat(comment([]byte("x")), MaxJPEGSegments)))
 	if !errors.Is(segments, ErrJPEGTooManySegments) {
 		t.Fatalf("Se esperaba ErrJPEGTooManySegments: %v", segments)
