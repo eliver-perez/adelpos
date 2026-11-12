@@ -216,15 +216,15 @@ describe('acceso y recuperación de la interfaz', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    const status = screen.getByRole('status', { name: 'Servidor: Fuera de línea' });
-    expect(status.textContent).toBe('Fuera de línea');
+    const status = screen.getByRole('status', { name: 'Servidor: Sin conexión' });
+    expect(status.textContent).toBe('Sin conexión');
     expect(screen.getByRole('button', { name: 'Personal' })).toBeTruthy();
     offline = false;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
     expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
-    expect(screen.queryByRole('status', { name: 'Servidor: Fuera de línea' })).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Servidor: Sin conexión' })).toBeNull();
   });
 
   it('notifica el reemplazo de sesión y vuelve al acceso', async () => {

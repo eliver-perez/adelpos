@@ -140,7 +140,7 @@ function ApplicationContent() {
   }, []);
 
   // La pérdida de conexión con una sesión abierta se avisa con un mensaje persistente que se
-  // retira solo cuando el servidor vuelve a responder (la barra también indica «Fuera de línea»).
+  // retira solo cuando el servidor vuelve a responder (la barra también indica «Sin conexión»).
   const connectionError = session.connectionError;
   useEffect(() => {
     if (!authenticated || !connectionError) {

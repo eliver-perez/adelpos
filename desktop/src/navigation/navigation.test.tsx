@@ -160,6 +160,16 @@ function barButtons() {
     .map((button) => button.getAttribute('aria-label') ?? button.textContent);
 }
 
+// Controles del lado derecho de la barra (etapa 9D, §2), en su orden: Caja, servidor, usuario y
+// pantalla completa.
+function endControls() {
+  const end = document.querySelector('.app-topbar .topbar-end');
+  expect(end).not.toBeNull();
+  return Array.from(end!.querySelectorAll('button, [role="status"]')).map(
+    (control) => control.getAttribute('aria-label') ?? control.textContent,
+  );
+}
+
 describe('registro de secciones', () => {
   it('cada sección tiene un identificador único y su mosaico padre existe', () => {
     const ids = sections.map((entry) => entry.id);
@@ -255,12 +265,15 @@ describe('barra superior por permisos', () => {
   it('el administrador ve todas las secciones, Administración, el servidor, su menú y la pantalla completa', async () => {
     renderBar(administrator, { highlight: 'restaurant' });
     await screen.findByRole('button', { name: 'Caja · Turno abierto' });
-    expect(barButtons()).toEqual([
-      'Mesas',
-      'Para llevar',
-      'Cocina',
+    // Etapa 9D (§2): a la izquierda las cuatro secciones seguidas; Caja pasa a la derecha, antes
+    // del servidor, el usuario y la pantalla completa.
+    expect(barButtons()).toEqual(['Mesas', 'Para llevar', 'Cocina', 'Administración']);
+    await screen.findByRole('button', { name: 'Salir de pantalla completa' });
+    expect(endControls()).toEqual([
       'Caja · Turno abierto',
-      'Administración',
+      'Servidor: En línea',
+      'Menú del usuario · Ana · Cajera',
+      'Salir de pantalla completa',
     ]);
     expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Menú del usuario · Ana · Cajera' })).toBeTruthy();
@@ -272,7 +285,8 @@ describe('barra superior por permisos', () => {
   it('el cajero ve Mesas, Para llevar y Caja, sin Cocina ni Administración', async () => {
     renderBar(cashier);
     await screen.findByRole('button', { name: 'Caja · Turno abierto' });
-    expect(barButtons()).toEqual(['Mesas', 'Para llevar', 'Caja · Turno abierto']);
+    expect(barButtons()).toEqual(['Mesas', 'Para llevar']);
+    expect(endControls()[0]).toBe('Caja · Turno abierto');
     expect(screen.queryByRole('button', { name: 'Administración' })).toBeNull();
   });
 
@@ -304,7 +318,10 @@ describe('barra superior por permisos', () => {
 
   it('con Caja sin el turno visible, el botón lleva directamente a la pantalla Caja', () => {
     const onNavigate = renderBar(['cash.shifts.read']);
-    fireEvent.click(screen.getByRole('button', { name: 'Caja' }));
+    const cash = screen.getByRole('button', { name: 'Caja' });
+    // También a la derecha de la barra, fuera del grupo de secciones.
+    expect(cash.closest('.topbar-end')).not.toBeNull();
+    fireEvent.click(cash);
     expect(onNavigate).toHaveBeenCalledWith('cash');
   });
 
@@ -335,10 +352,24 @@ describe('indicador de Caja en la barra', () => {
     return value;
   }
 
-  it('verde con el turno abierto, ámbar en arqueo y gris sin turno', async () => {
+  it('azul con el turno abierto, ámbar en arqueo y gris sin turno', async () => {
     expect(await stateOf(shiftOf(), 'Turno abierto')).toBe('open');
     expect(await stateOf(closingShift(), 'En arqueo')).toBe('closing');
     expect(await stateOf(null, 'Sin turno')).toBe('none');
+  });
+
+  it('va en dos renglones: «Caja» y debajo el estado del turno con su indicador (9D, §2)', async () => {
+    renderBar(cashier);
+    const button = await screen.findByRole('button', { name: 'Caja · Turno abierto' });
+    const lines = button.querySelector('.cash-shortcut-lines')!;
+    expect(lines).not.toBeNull();
+    expect(lines.children).toHaveLength(2);
+    expect(lines.children[0]!.textContent).toBe('Caja');
+    const status = lines.children[1]!;
+    expect(status.className).toBe('cash-shortcut-status');
+    expect(status.querySelector('.cash-shortcut-indicator')).not.toBeNull();
+    expect(status.textContent).toBe('Turno abierto');
+    expect(button.className).toContain('cash-shortcut-open');
   });
 
   it('conserva el menú rápido de la 7.1 con «Abrir turno» e «Ir a Caja»', async () => {
@@ -377,8 +408,8 @@ describe('estado del servidor', () => {
     );
     cleanup();
     render(<ServerStatus state="offline" />);
-    const offline = screen.getByRole('status', { name: 'Servidor: Fuera de línea' });
-    expect(offline.textContent).toBe('Fuera de línea');
+    const offline = screen.getByRole('status', { name: 'Servidor: Sin conexión' });
+    expect(offline.textContent).toBe('Sin conexión');
     expect(offline.getAttribute('title')).toContain('Se reintenta automáticamente');
   });
 });

@@ -3,7 +3,7 @@ import { realtimeLabels } from '../hooks/useRealtime';
 // Estado del servidor en la barra superior (etapa 9C, §1.1): sustituye a «Sesión verificada · En
 // tiempo real». Se deriva de las dos fuentes reales de la aplicación:
 // - useSession: la consulta de la sesión cada 5 s; si falla, la terminal no alcanza al servidor
-//   (fuera de línea).
+//   (sin conexión).
 // - useRealtime: el canal de eventos (solo con events.read). Conectado es «en línea»; recuperando,
 //   interrumpido o no disponible es «reconectando» (la terminal sigue al día por sondeo).
 // Sin events.read no hay canal: con la sesión verificada el estado es «en línea».
@@ -31,7 +31,8 @@ export function serverState(
 export const serverStateLabels: Record<ServerState, string> = {
   online: 'En línea',
   reconnecting: 'Reconectando',
-  offline: 'Fuera de línea',
+  // Etapa 9D (decisión 9): «Sin conexión», el texto de la paleta del propietario (en rojo).
+  offline: 'Sin conexión',
 };
 
 // Descripción accesible y del aviso: qué significa cada estado para quien usa la terminal.

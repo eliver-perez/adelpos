@@ -1,10 +1,11 @@
 import { expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
-// Navegación de la etapa 9C para los recorridos: barra superior fija (Mesas, Para llevar, Cocina,
-// Caja y Administración), mosaicos de Administración con Personal y Sistema como segunda pantalla
-// de mosaicos, y la barra reducida de la captura. Todos los recorridos llegan a cada pantalla por
-// aquí para no depender de un menú lateral.
+// Navegación de la etapa 9C para los recorridos: barra superior fija (Mesas, Para llevar, Cocina y
+// Administración a la izquierda; desde la etapa 9D, Caja a la derecha junto al servidor y el
+// usuario), mosaicos de Administración con Personal y Sistema como segunda pantalla de mosaicos, y
+// la barra reducida de la captura. Todos los recorridos llegan a cada pantalla por aquí para no
+// depender de un menú lateral.
 
 export type BarSection = 'Mesas' | 'Para llevar' | 'Cocina';
 
@@ -50,9 +51,16 @@ export function captureBar(page: Page): Locator {
   return page.locator('.capture-topbar');
 }
 
-// Botón Caja de la barra superior (su nombre accesible incluye el estado del turno).
+// Barra superior completa: secciones a la izquierda y Caja, servidor, usuario y pantalla completa a
+// la derecha (etapa 9D, §2).
+export function appBar(page: Page): Locator {
+  return page.locator('.app-topbar');
+}
+
+// Botón Caja de la barra superior (su nombre accesible incluye el estado del turno). Desde la etapa
+// 9D está a la derecha, fuera del grupo de secciones.
 export function cashButton(page: Page): Locator {
-  return topBar(page).getByRole('button', { name: /^Caja/ });
+  return appBar(page).getByRole('button', { name: /^Caja/ });
 }
 
 // Sale de la captura con «‹ Mesas» (o «‹ Para llevar»/«‹ Cuentas») si la barra reducida está a la
@@ -73,7 +81,7 @@ export async function openSection(page: Page, section: BarSection) {
 // «Caja» abre el menú rápido de la 7.1; «Ir a Caja» abre la pantalla. Funciona también desde la
 // barra reducida de la captura (sin salir de ella), como en la operación real.
 export async function openCash(page: Page) {
-  const bar = (await captureBar(page).isVisible()) ? captureBar(page) : topBar(page);
+  const bar = (await captureBar(page).isVisible()) ? captureBar(page) : appBar(page);
   await bar.getByRole('button', { name: /^Caja · / }).click();
   await page
     .getByRole('group', { name: 'Menú rápido de caja' })
