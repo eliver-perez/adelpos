@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TableMap,
+  canvasStyle,
   fitTables,
   maximumMapScale,
   minimumTableSide,
@@ -281,6 +282,28 @@ describe('escala automática del mapa (§3.2)', () => {
     expect(fit.scale).toBe(maximumMapScale);
     expect(fit.offsetX).toBeCloseTo((1000 - 240) / 2, 5);
     expect(fit.offsetY).toBeCloseTo((800 - 200) / 2, 5);
+  });
+
+  it('el lienzo que cabe se pide 1 px menor para no oscilar con barras que ocupan espacio (9E)', () => {
+    // Windows al 125 %: el espacio mide fracciones y se informa redondeado; un lienzo de la medida exacta
+    // podía pasarse, mostrar la barra, encoger el espacio y repetir sin fin.
+    const viewport = { width: 1107, height: 542 };
+    const fits = fitTables([{ x: 0, y: 0, width: 120, height: 100 }], viewport)!;
+    expect(fits.overflow).toBe(false);
+    expect(canvasStyle(fits, viewport)).toEqual({ width: '1106px', height: '541px' });
+    // Si no cabe, el lienzo conserva la medida del contenido en la dimensión que se desborda.
+    const many = Array.from({ length: 40 }, (_, index) => ({
+      x: index * 70,
+      y: 0,
+      width: 64,
+      height: 64,
+    }));
+    const wide = fitTables(many, viewport)!;
+    expect(wide.overflow).toBe(true);
+    expect(canvasStyle(wide, viewport)).toEqual({
+      width: `${wide.width}px`,
+      height: `${wide.height - 1}px`,
+    });
   });
 
   it('sin mesas o sin espacio medido no hay escala (el lienzo proporcional de siempre)', () => {
