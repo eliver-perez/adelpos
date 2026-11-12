@@ -1,6 +1,6 @@
 {
   "name": "AD-EL POS",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "technical_id": "ad-el-pos",
   "server_binary": "ad-el-pos-server",
   "database_name": "adel_pos",
