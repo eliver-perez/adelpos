@@ -19,6 +19,7 @@ import type {
   DraftItem,
   OrderQuote,
 } from '../../../services/restaurant';
+import { AccountCancellationRecord } from '../CancelAccount';
 import { TakeawayDelivery } from '../documents/TakeawayDelivery';
 import { ConfirmedLines, DraftLines } from './BillLines';
 import type { QuotedDraftLine } from './BillLines';
@@ -221,8 +222,10 @@ export function CaptureBill({
           </Notice>
         )}
         {account.state === 'closed' && <Notice>{closedDescription(account)}</Notice>}
+        {/* Etapa 9D (§5): una cuenta cancelada muestra su registro (motivo, quién canceló y quién
+            autorizó, unidades e importe que calculó Go). */}
         {account.state === 'voided' && (
-          <Notice>Cuenta anulada sin productos activos. Su historial permanece disponible.</Notice>
+          <AccountCancellationRecord cancellation={bill.cancellation} timezone={bill.timezone} />
         )}
         {account.mode === 'takeaway' && (
           <div className="takeaway-dimensions">

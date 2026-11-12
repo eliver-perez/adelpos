@@ -15,6 +15,21 @@ const actorKinds: Record<string, string> = {
   migration: 'Actualización del sistema',
 };
 
+// Etapa 9D (§5.1): nombre en palabras del restaurante de las operaciones de «Cancelar cuenta» y de
+// su catálogo y umbral. Se muestra sobre el código, que sigue siendo el que se filtra.
+const actionLabels: Record<string, string> = {
+  'restaurant.account.cancelled': 'Cuenta cancelada',
+  'restaurant.account.void': 'Cuenta vacía cancelada con motivo libre',
+  'restaurant.account.discarded': 'Cuenta vacía descartada',
+  'restaurant.account.released': 'Cuenta vacía liberada',
+  'restaurant.supervisor_authorized': 'Autorización de supervisor',
+  'restaurant.cancel_reason_created': 'Motivo de cancelación creado',
+  'restaurant.cancel_reason_updated': 'Motivo de cancelación modificado',
+  'restaurant.cancel_reasons_reordered': 'Motivos de cancelación reordenados',
+  'settings.long_open_hours_changed': 'Umbral de cuenta abierta cambiado',
+  'inventory.cancellation_preclassified': 'Cancelación preclasificada como merma',
+};
+
 export function AuditPage() {
   const [actor, setActor] = useState('');
   const [action, setAction] = useState('');
@@ -110,6 +125,9 @@ export function AuditPage() {
                   </small>
                 </td>
                 <td>
+                  {actionLabels[event.action] && (
+                    <span className="block">{actionLabels[event.action]}</span>
+                  )}
                   <span className="font-mono text-xs">{event.action}</span>
                   <small className="muted block">{event.entity_type}</small>
                 </td>

@@ -27,6 +27,7 @@ import { AccountDetails } from './AccountDetails';
 import { AccountHistory } from './AccountHistory';
 import { AccountKitchen } from './AccountKitchen';
 import { AccountList } from './AccountList';
+import { CancelAccount } from './CancelAccount';
 import { CancelItem } from './CancelItem';
 import { OperationsAdmin } from './OperationsAdmin';
 import { TablePanel } from './TablePanel';
@@ -37,7 +38,7 @@ import { PrecheckPanel } from './documents/PrecheckPanel';
 import type { BillAction } from './capture/CaptureBill';
 import { CaptureScreen, WorkspaceBill, captureLinesLocked } from './capture/CaptureScreen';
 
-const accountActions: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign', 'void'];
+const accountActions: AccountAction[] = ['split', 'transfer', 'merge', 'move', 'assign'];
 
 export function OperationalPage({
   active,
@@ -221,7 +222,7 @@ export function OperationalPage({
     void workspace.quickOpen(mode, table);
   }
 
-  // «Liberar mesa» (etapa 7.1): una cuenta vacía se anula sin motivo después de confirmarlo.
+  // «Liberar mesa» (etapa 7.1): una cuenta vacía se descarta sin motivo después de confirmarlo.
   async function releaseAccount(table: RestaurantTable, account: Account) {
     // Con otras cuentas abiertas la mesa sigue ocupada: solo se libera esta cuenta.
     const others =
@@ -232,8 +233,8 @@ export function OperationalPage({
       title: `¿Liberar ${table.name}?`,
       message:
         others > 0
-          ? `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se anulará; las demás cuentas de la mesa no cambian.`
-          : `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se anulará y la mesa quedará libre.`,
+          ? `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se descartará; las demás cuentas de la mesa no cambian.`
+          : `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se descartará y la mesa quedará libre.`,
       confirmLabel: 'Liberar mesa',
       cancelLabel: 'Conservar la cuenta',
       tone: 'danger',
@@ -471,6 +472,23 @@ export function OperationalPage({
           key={bill.account.id}
           bill={bill}
           onClose={() => workspace.setPanel('capture')}
+        />
+      );
+    }
+    // Etapa 9D (§5): «Cancelar cuenta» desde «Más…». Su reintento incierto usa la misma operación
+    // pendiente del espacio de trabajo (mismo operation_id) y, si Go indica qué hacer primero, abre
+    // la devolución o los descuentos y cargos de la cuenta.
+    if (panel === 'cancelAccount') {
+      return (
+        <CancelAccount
+          key={bill.account.id}
+          bill={bill}
+          can={can}
+          execute={workspace.execute}
+          recovery={mutation}
+          busy={blocked}
+          onOpenPanel={(next) => void workspace.openPanel(next)}
+          onClose={closeAction}
         />
       );
     }

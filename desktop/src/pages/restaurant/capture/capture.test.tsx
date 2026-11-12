@@ -1055,7 +1055,7 @@ describe('captura táctil de pedidos', () => {
       'Transferir productos',
       'Combinar cuentas',
       'Cambiar responsable',
-      'Anular cuenta vacía',
+      'Cancelar cuenta',
     ]) {
       expect(within(menu).getByRole('button', { name: label })).toBeTruthy();
     }

@@ -1,11 +1,15 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TextareaHTMLAttributes } from 'react';
 import { Field, Form, Notice, PageTitle } from '../components/Forms';
+import { IntegerField } from '../components/catalog/EditorFields';
 import { IconLabel } from '../components/Icon';
 import { ToggleButton } from '../components/ToggleButton';
 import { useResource } from '../hooks/useResource';
 import { api, APIError } from '../services/api';
 import { saveFeature } from '../services/features';
+import { countLabel } from '../services/plural';
+import { saveLongOpenHours } from '../services/restaurant';
+import type { LongOpenHoursSettings } from '../services/restaurant';
 import { notifyError, notifySuccess } from '../services/notify';
 import type { EstablishmentFeature } from '../services/features';
 import type { Settings } from '../services/models';
@@ -181,6 +185,80 @@ function SettingsEditor({
   );
 }
 
+function LongOpenHoursForm({
+  settings,
+  editable,
+  onSaved,
+}: {
+  settings: LongOpenHoursSettings;
+  editable: boolean;
+  onSaved: () => Promise<void>;
+}) {
+  const [hours, setHours] = useState(settings.long_open_hours);
+  return (
+    <Form
+      label="Guardar umbral"
+      disabled={!editable}
+      successMessage="Umbral de cuenta abierta guardado."
+      onSave={async () => {
+        try {
+          await saveLongOpenHours({ long_open_hours: hours, revision: settings.revision });
+          // Mesas, Cuentas y Para llevar vuelven a consultar el mapa y las cuentas con el umbral
+          // nuevo.
+          window.dispatchEvent(new CustomEvent('adel-server-change'));
+        } finally {
+          // Con conflicto de revisión se carga la versión vigente para revisarla.
+          await onSaved();
+        }
+      }}
+    >
+      <div className="form-grid">
+        {/* Entrada numérica de la 7.1 (texto con teclado numérico, sin type="number"); Go valida el
+            intervalo y la revisión. */}
+        <IntegerField
+          label="Marcar una cuenta abierta después de (horas)"
+          min={settings.minimum_hours}
+          max={settings.maximum_hours}
+          hint={`De ${settings.minimum_hours} a ${settings.maximum_hours} horas.`}
+          value={hours}
+          onChange={setHours}
+        />
+      </div>
+      <p className="muted text-sm" aria-live="polite">
+        Las cuentas abiertas más de {countLabel(hours, 'hora', 'horas')} se marcan en ámbar en Mesas
+        y en las tarjetas de las cuentas y de Para llevar. Solo es un aviso: no cierra ni bloquea
+        ninguna cuenta.
+      </p>
+    </Form>
+  );
+}
+
+// Umbral de cuenta abierta por mucho tiempo (etapa 9D, §3.4): lo lee cualquier sesión y lo cambia
+// quien activa las funciones del establecimiento. Go calcula la marca de cada cuenta y mesa.
+function LongOpenHoursSection({ editable }: { editable: boolean }) {
+  const resource = useResource<LongOpenHoursSettings>('settings_long_open_hours');
+  return (
+    <div className="feature-threshold form-stack">
+      <div>
+        <h3>Cuenta abierta por mucho tiempo</h3>
+        <p className="muted text-sm">
+          Señala las cuentas que siguen abiertas después de muchas horas, por ejemplo una que se
+          quedó sin cobrar o sin cancelar.
+        </p>
+      </div>
+      <Notice>{resource.error}</Notice>
+      {resource.data && (
+        <LongOpenHoursForm
+          key={resource.data.revision}
+          settings={resource.data}
+          editable={editable}
+          onSaved={resource.reload}
+        />
+      )}
+    </div>
+  );
+}
+
 // Funciones activables: un interruptor por función con su explicación. Go guarda el estado y lo
 // hace cumplir aunque se llame a la API directamente; desactivar nunca borra registros.
 export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
@@ -250,6 +328,7 @@ export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
           </li>
         ))}
       </ul>
+      <LongOpenHoursSection editable={editable} />
       {!editable && (
         <p className="muted text-sm">
           Cambiar las funciones requiere el permiso «Activar o desactivar funciones del

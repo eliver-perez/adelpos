@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { IconLabel } from '../../../components/Icon';
 import type { IconName } from '../../../components/Icon';
 
@@ -9,6 +9,9 @@ export interface MoreAction<T extends string> {
   icon?: IconName;
   // Etapa 9D (§1.5): una acción que no se puede deshacer va con el estilo destructivo rojo.
   tone?: 'danger';
+  // Etapa 9D (§5.1): aclaración breve debajo del texto, por ejemplo qué hacer primero para poder
+  // cancelar la cuenta. No forma parte del nombre del botón: se anuncia como su descripción.
+  hint?: string;
 }
 
 // Menú «Más…» de la cuenta: reúne las acciones menos frecuentes como botones grandes (sustituye
@@ -24,6 +27,7 @@ export function MoreActions<T extends string>({
 }) {
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLDivElement>(null);
+  const menuID = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -64,7 +68,9 @@ export function MoreActions<T extends string>({
             <button
               type="button"
               key={action.id}
-              className={action.tone === 'danger' ? 'danger-button' : 'secondary-button'}
+              className={`${action.tone === 'danger' ? 'danger-button' : 'secondary-button'} ${action.hint ? 'capture-more-hinted' : ''}`}
+              aria-label={action.hint ? action.label : undefined}
+              aria-describedby={action.hint ? `${menuID}-${action.id}` : undefined}
               onClick={() => {
                 setOpen(false);
                 onAction(action.id);
@@ -74,6 +80,11 @@ export function MoreActions<T extends string>({
                 <IconLabel icon={action.icon}>{action.label}</IconLabel>
               ) : (
                 action.label
+              )}
+              {action.hint && (
+                <small id={`${menuID}-${action.id}`} className="capture-more-hint">
+                  {action.hint}
+                </small>
               )}
             </button>
           ))}
