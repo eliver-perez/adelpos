@@ -632,4 +632,5 @@ pruebas) y `npm run build` correctos; `cargo test` 40 aprobadas y 1 ignorada; Pl
 Chromium falló la especificación del diseñador de la 9B al cerrar los avisos antes de sus capturas (un aviso de éxito se
 cerró solo durante el clic y el clic se reintentó hasta agotar el tiempo); las tres especificaciones siguientes fallaron en
 cascada porque Playwright reinicia el proceso y pierde la terminal preparada. Se corrigió el ayudante de la prueba (el clic
-tolera que el aviso desaparezca y el bucle tiene tope) y se repitió Chromium (ver abajo).
+tolera que el aviso desaparezca y el bucle tiene tope) y se repitió Chromium sobre la copia exacta de `a3f6534`: 14/14
+(5.8 min).
