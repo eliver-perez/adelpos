@@ -1,3 +1,4 @@
+import { isWindows } from '../../commands/platform';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { dateTime, Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
@@ -107,13 +108,23 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
           <section className="panel form-stack" aria-labelledby="identity-paper-title">
             <div>
               <h2 id="identity-paper-title">Cómo saldrá en papel</h2>
-              <p className="muted text-sm">
-                Vista previa de los puntos que se envían a la impresora. El resultado en papel es
-                una prueba física pendiente: compruébalo con tus impresoras. El logotipo solo se
-                imprime por ESC/POS en red o en impresoras CUPS marcadas «Esta impresora entiende
-                ESC/POS (formato y logotipo)» cuya cola acepte datos sin convertir («raw»); en las
-                demás se omite con un aviso y el documento se imprime igual.
-              </p>
+              {/* Etapa 9E: en Windows la marca ESC/POS no aplica; en macOS el texto no cambia. */}
+              {isWindows() ? (
+                <p className="muted text-sm">
+                  Vista previa de los puntos que se envían a la impresora. El resultado en papel es
+                  una prueba física pendiente: compruébalo con tus impresoras. El logotipo se
+                  imprime por ESC/POS en red y en las impresoras instaladas en Windows que reciben
+                  los datos sin convertir («raw»).
+                </p>
+              ) : (
+                <p className="muted text-sm">
+                  Vista previa de los puntos que se envían a la impresora. El resultado en papel es
+                  una prueba física pendiente: compruébalo con tus impresoras. El logotipo solo se
+                  imprime por ESC/POS en red o en impresoras CUPS marcadas «Esta impresora entiende
+                  ESC/POS (formato y logotipo)» cuya cola acepte datos sin convertir («raw»); en las
+                  demás se omite con un aviso y el documento se imprime igual.
+                </p>
+              )}
             </div>
             <PresentationControls
               presentation={fields.presentation}

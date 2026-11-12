@@ -45,11 +45,10 @@ func validatePrinter(printer *Printer) error {
 	}
 	switch printer.Transport {
 	case "cups":
-		if !queuePattern.MatchString(printer.Destination) {
-			return invalid("Selecciona el nombre de una cola CUPS del servidor.")
-		}
-		if printer.CutterOption != "" && !cutterPattern.MatchString(printer.CutterOption) {
-			return invalid("La opción de corte CUPS debe corresponder a CutMedia, CutType o Cutter del controlador.")
+		// La cola de impresión del equipo: una cola CUPS o, en Windows, una impresora instalada en
+		// Windows (system_queue_unix.go y system_queue_windows.go).
+		if err := validateSystemQueue(printer); err != nil {
+			return err
 		}
 	case "escpos_tcp":
 		if printer.AcceptsESCPos {
@@ -79,6 +78,18 @@ func validatePrinter(printer *Printer) error {
 		if *printer.FallbackID == printer.ID {
 			return invalid("Una impresora no puede respaldarse a sí misma.")
 		}
+	}
+	return nil
+}
+
+// validateCUPSQueue valida el destino de una impresora en una cola CUPS: el nombre de la cola
+// (nunca una ruta ni argumentos) y la opción de corte que anuncia su controlador.
+func validateCUPSQueue(printer *Printer) error {
+	if !queuePattern.MatchString(printer.Destination) {
+		return invalid("Selecciona el nombre de una cola CUPS del servidor.")
+	}
+	if printer.CutterOption != "" && !cutterPattern.MatchString(printer.CutterOption) {
+		return invalid("La opción de corte CUPS debe corresponder a CutMedia, CutType o Cutter del controlador.")
 	}
 	return nil
 }

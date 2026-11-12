@@ -61,7 +61,10 @@ func TestESCPosEncodingAndTrustedCut(t *testing.T) {
 	if !bytes.HasSuffix(cut, []byte{0x1d, 0x56, 0x00}) {
 		t.Fatal("El controlador no generó el corte autorizado")
 	}
-	if err := validatePrinter(&Printer{Name: "Inyección", Transport: "cups", Destination: "cola; touch /tmp/inyección", PaperWidth: 80, Copies: 1, Port: 9100}); err == nil {
+	// La regla de CUPS, en cualquier sistema (en Windows validatePrinter usa la de las impresoras
+	// instaladas en Windows, que nunca llegan a un programa: system_queue_unix_test.go y
+	// winspool_windows_test.go comprueban cuál aplica cada sistema).
+	if err := validateCUPSQueue(&Printer{Name: "Inyección", Transport: "cups", Destination: "cola; touch /tmp/inyección", PaperWidth: 80, Copies: 1, Port: 9100}); err == nil {
 		t.Fatal("Se aceptó un destino de ejecución arbitraria")
 	}
 	if !queuePattern.MatchString("_192_168_1_80") {

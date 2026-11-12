@@ -144,6 +144,10 @@ func drawerPrinterCompatibility(ctx context.Context, inspector kitchen.QueueInsp
 	case "cups":
 		if !item.Active {
 			item.Reason = "Impresora desactivada; su cola CUPS no se consultó."
+			// En Windows (etapa 9E) la cola del equipo es la de la impresora instalada en Windows.
+			if kitchen.SystemQueueOf(inspector) == kitchen.SystemQueueWindows {
+				item.Reason = "Impresora desactivada; no se consultó en Windows."
+			}
 			return
 		}
 		capability := inspector.InspectQueue(ctx, destination)

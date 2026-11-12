@@ -19,6 +19,7 @@ import { notifyDrawerOutcome } from './CashNotices';
 import { PendingCashOperation } from './PendingCashOperation';
 import { useCashMutation } from './useCashMutation';
 import { Select } from '../../components/Select';
+import { isWindows } from '../../commands/platform';
 
 type Execute = <T>(
   operation: Operation,
@@ -125,23 +126,45 @@ export function DrawerAdmin({ execute }: { execute: Execute }) {
     return <p className="muted">Consultando los cajones…</p>;
   }
   const { printers } = drawers.data;
+  // Etapa 9E: en Windows la impresora del cajón puede ser una instalada en Windows (no CUPS); en
+  // macOS los textos no cambian.
+  const windows = isWindows();
   return (
     <div className="form-stack">
-      <p className="muted text-sm">
-        El cajón se abre con un comando ESC/POS (el lenguaje de las impresoras de tickets) que envía
-        la impresora a la que está conectado: una impresora ESC/POS por red o una cola CUPS (una
-        impresora instalada en el equipo servidor, por ejemplo por USB) que acepte datos sin
-        convertir («raw»). AD-EL POS revisa cada cola sin imprimir nada y explica por qué una no
-        sirve. Con el cajón activado se abre tras cobros y devoluciones en efectivo e ingresos,
-        retiros y gastos; nunca con pagos electrónicos. La pantalla indica que el comando se envió,
-        no que el cajón se abrió.
-      </p>
-      {printers.every((printer) => !printer.compatible) && (
-        <Notice>
-          No hay impresoras compatibles con el cajón: registra una impresora ESC/POS por red o una
-          cola CUPS que acepte datos sin convertir («raw») en Cocina y preparación → Impresoras.
-        </Notice>
+      {windows ? (
+        <p className="muted text-sm">
+          El cajón se abre con un comando ESC/POS (el lenguaje de las impresoras de tickets) que
+          envía la impresora a la que está conectado: una impresora ESC/POS por red o una impresora
+          instalada en Windows en el equipo servidor (por ejemplo por USB) que reciba los datos sin
+          convertir («raw»). AD-EL POS revisa cada impresora sin imprimir nada y explica por qué una
+          no sirve. Con el cajón activado se abre tras cobros y devoluciones en efectivo e ingresos,
+          retiros y gastos; nunca con pagos electrónicos. La pantalla indica que el comando se
+          envió, no que el cajón se abrió.
+        </p>
+      ) : (
+        <p className="muted text-sm">
+          El cajón se abre con un comando ESC/POS (el lenguaje de las impresoras de tickets) que
+          envía la impresora a la que está conectado: una impresora ESC/POS por red o una cola CUPS
+          (una impresora instalada en el equipo servidor, por ejemplo por USB) que acepte datos sin
+          convertir («raw»). AD-EL POS revisa cada cola sin imprimir nada y explica por qué una no
+          sirve. Con el cajón activado se abre tras cobros y devoluciones en efectivo e ingresos,
+          retiros y gastos; nunca con pagos electrónicos. La pantalla indica que el comando se
+          envió, no que el cajón se abrió.
+        </p>
       )}
+      {printers.every((printer) => !printer.compatible) &&
+        (windows ? (
+          <Notice>
+            No hay impresoras compatibles con el cajón: registra una impresora ESC/POS por red o una
+            impresora instalada en Windows que reciba los datos sin convertir («raw») en Cocina y
+            preparación → Impresoras.
+          </Notice>
+        ) : (
+          <Notice>
+            No hay impresoras compatibles con el cajón: registra una impresora ESC/POS por red o una
+            cola CUPS que acepte datos sin convertir («raw») en Cocina y preparación → Impresoras.
+          </Notice>
+        ))}
       <IncompatiblePrinters printers={printers} />
       {drawers.data.drawers.map((drawer) => (
         <DrawerEditor

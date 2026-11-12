@@ -168,16 +168,28 @@ fn client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
         .map_err(|_| "No se pudo preparar la conexión segura.".into())
 }
 
+/// Menú nativo en español (etapa 9C): Rust arma la lista cerrada de opciones y las envía a React por un
+/// Channel; solo «Salir» se atiende aquí (en macOS no detiene Go ni PostgreSQL).
+#[cfg(not(target_os = "windows"))]
+fn with_native_menu(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder.menu(menu::build).on_menu_event(menu::handle_event)
+}
+
+/// Windows (etapa 9E, §3.6): la barra de menú clásica aparecía también en pantalla completa, no es táctil y
+/// repite lo que ofrecen la barra superior, la paleta de comandos (Ctrl+K) y los atajos con Ctrl, que atiende
+/// la capa de React. Se omite: `menu_subscribe` y `menu_set_state` siguen respondiendo sin eventos.
+#[cfg(target_os = "windows")]
+fn with_native_menu(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
+}
+
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Diálogo nativo «Guardar como» de la exportación de reportes: solo lo usa Rust (export.rs);
         // la ventana no tiene permisos dialog:* en capabilities.
         .plugin(tauri_plugin_dialog::init())
-        // Menú nativo en español (etapa 9C): Rust arma la lista cerrada de opciones y las envía a
-        // React por un Channel; solo «Salir» se atiende aquí (no detiene Go ni PostgreSQL).
-        .manage(menu::MenuState::default())
-        .menu(menu::build)
-        .on_menu_event(menu::handle_event)
+        .manage(menu::MenuState::default());
+    with_native_menu(builder)
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
             let client = config.as_ref().map_err(Clone::clone).and_then(client);

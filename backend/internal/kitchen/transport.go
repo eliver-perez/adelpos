@@ -27,15 +27,19 @@ type Transport interface {
 	Submit(context.Context, PrintJob) Outcome
 }
 
-// HostTransport entrega los trabajos con los medios del equipo donde corre Go: CUPS local
-// (lpstat, lpoptions y lp con argumentos separados) o una conexión ESC/POS directa. commands
-// queda vacío en producción; las pruebas unitarias lo sustituyen para verificar los argumentos
-// de CUPS sin ejecutar nada.
+// HostTransport entrega los trabajos con los medios del equipo donde corre Go: la cola de impresión
+// del equipo (CUPS local con lpstat, lpoptions y lp con argumentos separados o, en Windows desde la
+// etapa 9E, la cola de la impresora instalada en Windows en modo RAW) o una conexión ESC/POS
+// directa. commands, textCUPS y spooler quedan vacíos en producción; las pruebas unitarias los
+// sustituyen para verificar los argumentos de CUPS o las llamadas a Windows sin ejecutar nada ni
+// tocar impresoras reales.
 type HostTransport struct {
 	commands commandRunner
 	// textCUPS sustituye en las pruebas el camino de texto de CUPS (el de antes de la 9B), que
 	// ejecuta lpstat, lpoptions y lp directamente; nil usa submitCUPS.
 	textCUPS func(context.Context, PrintJob) Outcome
+	// spooler sustituye en las pruebas el administrador de impresión de Windows (system_queue.go).
+	spooler spoolerAPI
 }
 
 func (transport HostTransport) runner() commandRunner {
@@ -51,7 +55,9 @@ type DiscoveredPrinter struct {
 	Options string `json:"options"`
 }
 
-func DiscoverPrinters(ctx context.Context) ([]DiscoveredPrinter, error) {
+// discoverCUPSPrinters lista las colas CUPS del equipo servidor con lpstat y lpoptions (solo
+// lecturas). DiscoverPrinters la usa fuera de Windows (system_queue_unix.go).
+func discoverCUPSPrinters(ctx context.Context) ([]DiscoveredPrinter, error) {
 	command := exec.CommandContext(ctx, "/usr/bin/lpstat", "-a")
 	command.Env = append(os.Environ(), "LC_ALL=C")
 	output, err := command.Output()
@@ -78,7 +84,7 @@ func (transport HostTransport) Submit(ctx context.Context, job PrintJob) Outcome
 		return Outcome{State: "intervention", Message: "El destino guardado requiere revisión."}
 	}
 	if job.DrawerPulse != nil {
-		return submitDrawerPulse(ctx, job, transport.runner())
+		return transport.submitDrawerPulse(ctx, job)
 	}
 	// Etapa 9B: un documento con negrita, tamaños o logotipo viaja con sus atributos; un documento
 	// plano (todas las plantillas predeterminadas) sigue exactamente el camino anterior.
@@ -87,6 +93,10 @@ func (transport HostTransport) Submit(ctx context.Context, job PrintJob) Outcome
 	}
 	switch job.PrinterSnapshot.Transport {
 	case "cups":
+		// En Windows (etapa 9E) la cola del equipo recibe los mismos bytes ESC/POS que la red.
+		if spooler, windows := transport.windowsSpooler(); windows {
+			return submitWindowsText(ctx, spooler, job)
+		}
 		return submitCUPS(ctx, job)
 	case "escpos_tcp":
 		return submitESCPos(ctx, job)
@@ -254,14 +264,18 @@ func DrawerPulseBytes(pin int) []byte {
 }
 
 // submitDrawerPulse entrega el pulso del cajón con el transporte de su impresora: una conexión
-// ESC/POS directa o una cola CUPS en modo raw (etapa 7.1). Otros transportes (el agente futuro)
-// quedan en intervención sin enviar nada. Ninguna aceptación confirma que el cajón se abrió.
-func submitDrawerPulse(ctx context.Context, job PrintJob, commands commandRunner) Outcome {
+// ESC/POS directa o una cola CUPS en modo raw (etapa 7.1; en Windows, desde la etapa 9E, la cola de
+// la impresora instalada en Windows en modo RAW). Otros transportes (el agente futuro) quedan en
+// intervención sin enviar nada. Ninguna aceptación confirma que el cajón se abrió.
+func (transport HostTransport) submitDrawerPulse(ctx context.Context, job PrintJob) Outcome {
 	switch job.PrinterSnapshot.Transport {
 	case "escpos_tcp":
 		return submitDrawerPulseTCP(ctx, job)
 	case "cups":
-		return submitDrawerPulseCUPS(ctx, job, commands)
+		if spooler, windows := transport.windowsSpooler(); windows {
+			return submitDrawerPulseWindows(ctx, spooler, job)
+		}
+		return submitDrawerPulseCUPS(ctx, job, transport.runner())
 	}
 	return Outcome{State: "intervention", Message: "El transporte de la impresora no entrega el pulso ESC/POS del cajón sin alterar; no se envió el comando."}
 }

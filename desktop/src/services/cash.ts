@@ -2,6 +2,7 @@ import { api } from './api';
 import type { Operation } from './api';
 import type { AuthorizationInput, Shift } from './payments';
 import { formatDenomination } from './money';
+import { isWindows } from '../commands/platform';
 
 // Contratos de la administración de caja de Go (backend/internal/payments/cash_*.go, etapa 7).
 // El dinero viaja como cadena con dos decimales y lo calcula Go: la interfaz nunca suma billetes,
@@ -456,12 +457,25 @@ export function drawerConnectionLabel(printer: DrawerPrinter) {
   if (printer.transport === 'escpos_tcp') {
     return 'ESC/POS por red';
   }
+  if (printer.transport === 'cups' && isWindows()) {
+    // Etapa 9E: en Windows la cola del equipo es la de la impresora instalada en Windows.
+    const connection = printer.connection ? windowsConnectionNames[printer.connection] : '';
+    return connection ? `Impresora de Windows · ${connection}` : 'Impresora de Windows';
+  }
   if (printer.transport === 'cups') {
     const connection = printer.connection ? drawerConnectionNames[printer.connection] : '';
     return connection ? `CUPS · ${connection}` : 'CUPS';
   }
   return 'Agente de impresión';
 }
+
+// Puertos de una impresora instalada en Windows que entregan los datos sin convertir.
+const windowsConnectionNames: Record<string, string> = {
+  usb: 'USB',
+  serial: 'puerto serie',
+  parallel: 'puerto paralelo',
+  socket: 'TCP/IP estándar',
+};
 
 const drawerConnectionNames: Record<string, string> = {
   usb: 'USB',

@@ -193,6 +193,7 @@ pub enum Platform {
 }
 
 impl Platform {
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub fn current() -> Self {
         if cfg!(target_os = "macos") {
             Self::MacOs
@@ -379,6 +380,7 @@ pub struct MenuState {
     generation: AtomicU64,
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 impl MenuState {
     fn replace_items(&self, items: HashMap<&'static str, Vec<MenuItem<Wry>>>) {
         if let Ok(mut current) = self.items.lock() {
@@ -413,6 +415,8 @@ impl MenuState {
     }
 }
 
+// Windows no adjunta el menú nativo (main.rs, etapa 9E): estas piezas solo se usan en macOS.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 fn native_item(handle: &AppHandle, kind: Native) -> tauri::Result<PredefinedMenuItem<Wry>> {
     match kind {
         Native::Undo => PredefinedMenuItem::undo(handle, Some("Deshacer")),
@@ -429,6 +433,7 @@ fn native_item(handle: &AppHandle, kind: Native) -> tauri::Result<PredefinedMenu
 }
 
 /// Arma el menú de la plataforma y guarda las opciones propias para habilitarlas desde React.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn build(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let platform = Platform::current();
     let menu = Menu::new(handle)?;
@@ -468,6 +473,7 @@ pub fn build(handle: &AppHandle) -> tauri::Result<Menu<Wry>> {
 }
 
 /// Eventos del menú: «Salir» cierra la aplicación; las opciones propias se envían a React.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn handle_event(app: &AppHandle, event: MenuEvent) {
     match route(event.id().as_ref()) {
         // Cerrar la ventana no detiene Go ni PostgreSQL: el servidor y las demás terminales

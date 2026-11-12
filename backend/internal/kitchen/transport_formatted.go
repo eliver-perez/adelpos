@@ -12,7 +12,8 @@ import (
 
 // Documentos con atributos o logotipo (etapa 9B). La cola, el lease, los reintentos y las reglas
 // de resultado incierto no cambian: solo cambia cómo el transporte traduce la IR.
-//   - ESC/POS por red: los bytes de documents.EncodeESCPos (GS !, ESC E y GS v 0).
+//   - ESC/POS por red y, en Windows (etapa 9E), la cola de la impresora instalada en Windows en
+//     modo RAW: los bytes de documents.EncodeESCPos (GS !, ESC E y GS v 0).
 //   - CUPS: solo si la impresora está marcada «Esta impresora entiende ESC/POS (formato y logotipo)»
 //     (desactivada por omisión) y además su cola admite datos raw (la detección de solo lectura de
 //     cups_raw.go, consultada antes de enviar), los mismos bytes ESC/POS con lp -o raw. Una cola raw
@@ -42,6 +43,13 @@ func (transport HostTransport) submitFormatted(ctx context.Context, job PrintJob
 		outcome.Message += note
 		return outcome
 	case "cups":
+		// En Windows (etapa 9E) la cola del equipo recibe siempre ESC/POS en modo RAW: la marca
+		// «Esta impresora entiende ESC/POS» no aplica y no hay camino de texto.
+		if spooler, windows := transport.windowsSpooler(); windows {
+			outcome := submitWindowsDocument(ctx, spooler, job, documents.EncodeESCPos(job.Layout, rasters, cut))
+			outcome.Message += note
+			return outcome
+		}
 		// Sin la marca explícita de la impresora no se consulta la cola: se imprime el texto.
 		if !printer.AcceptsESCPos {
 			outcome := transport.submitText(ctx, job)
