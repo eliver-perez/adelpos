@@ -19,6 +19,7 @@ import { CategoryQuickNotes } from './CategoryQuickNotes';
 import { PreviewPage } from './PreviewPage';
 import { catalogOperation, catalogTabs, newCatalogDocument } from './catalogState';
 import { catalogRequestBody } from '../../services/catalogPositions';
+import { Select } from '../../components/Select';
 
 // Recursos que suelen capturarse muchos seguidos y ofrecen «Guardar y crear otra».
 const continuousTabs: (typeof catalogTabs)[number]['id'][] = [
@@ -295,48 +296,50 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
               />
             </Field>
             <Field label="Estado">
-              <select
+              <Select
                 value={active}
-                onChange={(event) => {
-                  setActive(event.target.value);
+                options={[
+                  { value: '', label: 'Todos' },
+                  { value: 'true', label: 'Activos' },
+                  { value: 'false', label: 'Inactivos' },
+                ]}
+                onChange={(next) => {
+                  setActive(next);
                   setPage(1);
                 }}
-              >
-                <option value="">Todos</option>
-                <option value="true">Activos</option>
-                <option value="false">Inactivos</option>
-              </select>
+              />
             </Field>
             {resource === 'products' && (
               <>
                 <Field label="Categoría">
-                  <select
+                  <Select
                     value={category}
-                    onChange={(event) => {
-                      setCategory(event.target.value);
+                    options={[
+                      { value: '', label: 'Todas' },
+                      ...(lookup.data?.categories ?? []).map((item) => ({
+                        value: item.id,
+                        label: item.name,
+                      })),
+                    ]}
+                    onChange={(next) => {
+                      setCategory(next);
                       setPage(1);
                     }}
-                  >
-                    <option value="">Todas</option>
-                    {lookup.data?.categories.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </Field>
                 <Field label="Archivo">
-                  <select
+                  <Select
                     value={archived}
-                    onChange={(event) => {
-                      setArchived(event.target.value);
+                    options={[
+                      { value: 'false', label: 'Sin archivar' },
+                      { value: 'true', label: 'Archivados' },
+                      { value: 'all', label: 'Todos' },
+                    ]}
+                    onChange={(next) => {
+                      setArchived(next);
                       setPage(1);
                     }}
-                  >
-                    <option value="false">Sin archivar</option>
-                    <option value="true">Archivados</option>
-                    <option value="all">Todos</option>
-                  </select>
+                  />
                 </Field>
               </>
             )}

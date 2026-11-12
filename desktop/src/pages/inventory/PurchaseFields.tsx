@@ -31,10 +31,11 @@ import {
   taxRateValue,
 } from './purchasingFormat';
 import type { PurchaseLineDraft } from './purchasingFormat';
+import { Select } from '../../components/Select';
 
 // Selector de proveedor con búsqueda por nombre comercial, razón social, RFC, contacto, teléfonos,
-// página web o correo. Consulta a Go hasta 50 coincidencias; el elegido se conserva aunque deje de
-// aparecer. kind limita la modalidad: las órdenes de compra y las sugerencias solo ofrecen
+// página web o correo, integrada en la lista (etapa 9C). Consulta a Go hasta 50 coincidencias; el
+// elegido se conserva aunque deje de aparecer. kind limita la modalidad: las órdenes de compra y las sugerencias solo ofrecen
 // proveedores formales («Compras de mostrador» es solo para recepciones directas).
 export function SupplierPicker({
   label,
@@ -78,34 +79,26 @@ export function SupplierPicker({
     value && !found.some((supplier) => supplier.id === value.id) ? [value, ...found] : found;
   return (
     <div className="inventory-picker">
-      <Field label={`Buscar ${label.toLowerCase()}`}>
-        <input
-          type="search"
-          maxLength={100}
-          autoComplete="off"
-          value={search}
-          placeholder="Nombre, RFC, contacto o teléfono"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </Field>
       <Field label={label}>
-        <select
+        <Select
           value={value?.id ?? ''}
           required={required}
-          onChange={(event) => {
-            const selected = options.find((supplier) => supplier.id === event.target.value);
-            onChange(selected ?? null);
-          }}
-        >
-          <option value="">{emptyLabel}</option>
-          {options.map((supplier) => (
-            <option key={supplier.id} value={supplier.id}>
-              {supplier.trade_name}
-              {supplier.kind === 'counter' ? ' · compra de mostrador' : ''}
-              {supplier.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          placeholder={emptyLabel}
+          options={[
+            ...(required ? [] : [{ value: '', label: emptyLabel }]),
+            ...options.map((supplier) => ({
+              value: supplier.id,
+              label: `${supplier.trade_name}${
+                supplier.kind === 'counter' ? ' · compra de mostrador' : ''
+              }${supplier.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          searchLabel={`Buscar ${label.toLowerCase()}`}
+          searchPlaceholder="Nombre, RFC, contacto o teléfono"
+          onSearchChange={setSearch}
+          loading={results.loading}
+          onChange={(id) => onChange(options.find((supplier) => supplier.id === id) ?? null)}
+        />
       </Field>
       {results.error && <small className="muted">{results.error}</small>}
     </div>
@@ -143,30 +136,30 @@ export function MeasureSelect({
     ) ?? [];
   return (
     <Field label={label}>
-      <select
+      <Select
         value={value}
         disabled={disabled || !item}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {item ? (
-          <option value="">
-            {item.base_unit.name} ({item.base_unit.code}) · unidad base
-          </option>
-        ) : (
-          <option value="">Elige primero el insumo</option>
-        )}
-        {otherUnits.map((unit) => (
-          <option key={unit.id} value={`unit:${unit.id}`}>
-            {unit.name} ({unit.code})
-          </option>
-        ))}
-        {presentations.map((presentation) => (
-          <option key={presentation.id} value={`presentation:${presentation.id}`}>
-            {presentation.name} ({formatQuantity(presentation.base_quantity, item?.base_unit)})
-            {presentation.active ? '' : ' · inactiva'}
-          </option>
-        ))}
-      </select>
+        options={[
+          {
+            value: '',
+            label: item
+              ? `${item.base_unit.name} (${item.base_unit.code}) · unidad base`
+              : 'Elige primero el insumo',
+          },
+          ...otherUnits.map((unit) => ({
+            value: `unit:${unit.id}`,
+            label: `${unit.name} (${unit.code})`,
+          })),
+          ...presentations.map((presentation) => ({
+            value: `presentation:${presentation.id}`,
+            label: `${presentation.name} (${formatQuantity(
+              presentation.base_quantity,
+              item?.base_unit,
+            )})${presentation.active ? '' : ' · inactiva'}`,
+          })),
+        ]}
+        onChange={onChange}
+      />
     </Field>
   );
 }

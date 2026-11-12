@@ -17,6 +17,7 @@ import {
   type WidthTestResult,
 } from '../../services/kitchen';
 import { notifySuccess } from '../../services/notify';
+import { Select } from '../../components/Select';
 
 const emptyPrinter = (): Printer => ({
   id: '',
@@ -157,23 +158,24 @@ export function PrintersAdmin({
               onChange={(name) => setValue({ ...value, name })}
             />
             <Field label="Transporte de impresión">
-              <select
+              <Select<Printer['transport']>
                 value={value.transport}
-                onChange={(event) =>
+                options={[
+                  { value: 'cups', label: 'Cola CUPS del servidor' },
+                  { value: 'escpos_tcp', label: 'Impresora ESC/POS en red privada' },
+                  { value: 'agent', label: 'Impresora de otra terminal · agente futuro' },
+                ]}
+                onChange={(transport) =>
                   setValue({
                     ...value,
-                    transport: event.target.value as Printer['transport'],
+                    transport,
                     destination: '',
                     cutter_option: '',
                     // La marca ESC/POS solo existe en CUPS: Go la rechaza en los demás transportes.
                     accepts_escpos: false,
                   })
                 }
-              >
-                <option value="cups">Cola CUPS del servidor</option>
-                <option value="escpos_tcp">Impresora ESC/POS en red privada</option>
-                <option value="agent">Impresora de otra terminal · agente futuro</option>
-              </select>
+              />
             </Field>
             <TextField
               label={
@@ -229,17 +231,18 @@ export function PrintersAdmin({
             )}
             <div className="form-grid">
               <Field label="Ancho de papel">
-                <select
-                  value={value.paper_width}
-                  onChange={(event) =>
+                <Select
+                  value={String(value.paper_width)}
+                  options={[
+                    { value: '80', label: '80 mm' },
+                    { value: '58', label: '58 mm' },
+                  ]}
+                  onChange={(width) =>
                     // Cada papel tiene su propia lista de columnas: al cambiarlo vuelven al
                     // predeterminado del papel nuevo (Go rechaza una combinación inválida).
-                    setValue({ ...value, paper_width: Number(event.target.value), columns: null })
+                    setValue({ ...value, paper_width: Number(width), columns: null })
                   }
-                >
-                  <option value="80">80 mm</option>
-                  <option value="58">58 mm</option>
-                </select>
+                />
               </Field>
               <IntegerField
                 label="Copias por trabajo"

@@ -24,6 +24,7 @@ import {
   serverTime,
 } from './movementRows';
 import type { MovementFilters, MovementRow, MovementType } from './movementRows';
+import { Select } from '../../components/Select';
 
 function MovementsTable({
   rows,
@@ -122,19 +123,19 @@ function ShiftChooser({
   }
   return (
     <Field label="Turno">
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {/* Sin turno elegido (la caja no tiene uno activo) se pide elegir; así cualquier turno
-            del historial, incluso el único, puede seleccionarse. */}
-        {value === '' && (
-          <option value="">{shifts.length === 0 ? 'Sin turnos' : 'Elige un turno'}</option>
-        )}
-        {shifts.map((shift) => (
-          <option key={shift.id} value={shift.id}>
-            {businessDate(shift.business_date)} · {serverDateTime(shift.opened_at, timezone)} ·{' '}
-            {shift.opened_by_name} · {shiftStateLabels[shift.state] ?? shift.state}
-          </option>
-        ))}
-      </select>
+      {/* Sin turno elegido (la caja no tiene uno activo) se pide elegir; así cualquier turno del
+          historial, incluso el único, puede seleccionarse. */}
+      <Select
+        value={value}
+        placeholder={shifts.length === 0 ? 'Sin turnos' : 'Elige un turno'}
+        options={shifts.map((shift) => ({
+          value: shift.id,
+          label: `${businessDate(shift.business_date)} · ${serverDateTime(shift.opened_at, timezone)} · ${
+            shift.opened_by_name
+          } · ${shiftStateLabels[shift.state] ?? shift.state}`,
+        }))}
+        onChange={onChange}
+      />
     </Field>
   );
 }
@@ -154,33 +155,28 @@ function Filters({
   return (
     <>
       <Field label="Tipo de movimiento">
-        <select
+        <Select
           value={filters.type}
-          onChange={(event) =>
-            onChange({ ...filters, type: event.target.value as MovementFilters['type'] })
-          }
-        >
-          <option value="">Todos</option>
-          {(Object.keys(movementTypeLabels) as MovementType[]).map((type) => (
-            <option key={type} value={type}>
-              {movementTypeLabels[type]}
-            </option>
-          ))}
-          {rejections && <option value={rejectedFilter}>Intentos rechazados</option>}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...(Object.keys(movementTypeLabels) as MovementType[]).map((type) => ({
+              value: type,
+              label: movementTypeLabels[type],
+            })),
+            ...(rejections ? [{ value: rejectedFilter, label: 'Intentos rechazados' }] : []),
+          ]}
+          onChange={(type) => onChange({ ...filters, type: type as MovementFilters['type'] })}
+        />
       </Field>
       <Field label="Usuario">
-        <select
+        <Select
           value={filters.user}
-          onChange={(event) => onChange({ ...filters, user: event.target.value })}
-        >
-          <option value="">Todos</option>
-          {users.map((user) => (
-            <option key={user} value={user}>
-              {user}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...users.map((user) => ({ value: user, label: user })),
+          ]}
+          onChange={(user) => onChange({ ...filters, user })}
+        />
       </Field>
     </>
   );

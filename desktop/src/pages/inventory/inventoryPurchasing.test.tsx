@@ -24,6 +24,7 @@ import {
 import { allInventoryPermissions, ids, inventoryTransport, itemPage } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
 import { navigationMap, openInventorySection, sectionTab } from './inventoryNavigationTestUtils';
+import { chooseOption, chooseOptionAsync, chooseValue, waitForOption } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -238,13 +239,14 @@ describe('proveedores', () => {
     const supplied = await screen.findByRole('region', { name: 'Insumos que surte' });
     fireEvent.click(within(supplied).getByRole('button', { name: 'Agregar insumo surtido' }));
     const form = screen.getByRole('form', { name: 'Nuevo insumo surtido' });
-    await within(form).findByRole('option', { name: 'Refresco · REF-01' });
-    fireEvent.change(within(form).getByRole('combobox', { name: /^Insumo surtido/ }), {
-      target: { value: purchasingIDs.soda },
-    });
-    fireEvent.change(within(form).getByRole('combobox', { name: /^Presentación habitual/ }), {
-      target: { value: purchasingIDs.box },
-    });
+    await chooseOptionAsync(
+      within(form).getByRole('combobox', { name: /^Insumo surtido/ }),
+      'Refresco · REF-01',
+    );
+    chooseValue(
+      within(form).getByRole('combobox', { name: /^Presentación habitual/ }),
+      purchasingIDs.box,
+    );
     fireEvent.change(within(form).getByLabelText(/^Código del proveedor/), {
       target: { value: 'R-24' },
     });
@@ -362,20 +364,19 @@ describe('órdenes de compra', () => {
     });
     await openTab('Órdenes de compra');
     fireEvent.click(await screen.findByRole('button', { name: 'Nueva orden de compra' }));
-    await screen.findByRole('option', { name: 'Distribuidora del Norte' });
-    fireEvent.change(screen.getByRole('combobox', { name: /^Proveedor/ }), {
-      target: { value: purchasingIDs.supplier },
-    });
+    await chooseOptionAsync(
+      screen.getByRole('combobox', { name: /^Proveedor/ }),
+      'Distribuidora del Norte',
+    );
     const line = screen.getByRole('group', { name: 'Renglón 1' });
-    await within(line).findByRole('option', { name: 'Refresco · REF-01' });
+    const item = within(line).getByRole('combobox', { name: /^Insumo/ });
+    await waitForOption(item, 'Refresco · REF-01');
     // Esperar a que lleguen los insumos del proveedor para proponer su presentación habitual.
     await waitFor(() => expect(writes(requests, 'inventory_supplier').length).toBeGreaterThan(0));
-    fireEvent.change(within(line).getByRole('combobox', { name: /^Insumo/ }), {
-      target: { value: purchasingIDs.soda },
-    });
+    chooseOption(item, 'Refresco · REF-01');
     const measure = within(line).getByRole('combobox', {
       name: /^Unidad o presentación/,
-    }) as HTMLSelectElement;
+    }) as HTMLButtonElement;
     expect(measure.value).toBe(`presentation:${purchasingIDs.box}`);
     expect(
       within(line).getByText(/Último precio de este proveedor: \$250\.00 sin IVA por Caja con 24/),
@@ -742,18 +743,16 @@ describe('recepción directa', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Recepción directa' }));
     const submit = screen.getByRole('button', { name: 'Registrar recepción' }) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
-    await screen.findByRole('option', { name: 'Distribuidora del Norte' });
-    fireEvent.change(screen.getByRole('combobox', { name: /^Proveedor/ }), {
-      target: { value: purchasingIDs.supplier },
-    });
+    await chooseOptionAsync(
+      screen.getByRole('combobox', { name: /^Proveedor/ }),
+      'Distribuidora del Norte',
+    );
     const line = screen.getByRole('group', { name: 'Renglón 1' });
-    await within(line).findByRole('option', { name: 'Refresco · REF-01' });
-    fireEvent.change(within(line).getByRole('combobox', { name: /^Insumo/ }), {
-      target: { value: purchasingIDs.soda },
-    });
-    fireEvent.change(within(line).getByRole('combobox', { name: /^Unidad o presentación/ }), {
-      target: { value: '' },
-    });
+    await chooseOptionAsync(
+      within(line).getByRole('combobox', { name: /^Insumo/ }),
+      'Refresco · REF-01',
+    );
+    chooseValue(within(line).getByRole('combobox', { name: /^Unidad o presentación/ }), '');
     fireEvent.change(within(line).getByLabelText(/^Cantidad/), { target: { value: '24' } });
     fireEvent.change(within(line).getByLabelText(/^Precio unitario sin IVA/), {
       target: { value: '10.5' },

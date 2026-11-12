@@ -90,7 +90,7 @@ export function Form({
       return;
     }
     const first = fields.current.querySelector<HTMLElement>(
-      'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled])',
+      'input:not([type="hidden"]):not([disabled]):not([tabindex="-1"]), [role="combobox"]:not([disabled]), textarea:not([disabled])',
     );
     first?.focus();
   }, [focusRequest, locked]);

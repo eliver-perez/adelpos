@@ -17,6 +17,7 @@ import { countLabel } from '../../services/plural';
 import { InitialBalanceForm } from './InitialBalanceForm';
 import { Pagination } from './InventoryFields';
 import { formatQuantity, stockStateOptions } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -75,57 +76,46 @@ function StockFilters({
         />
       </Field>
       <Field label="Almacén">
-        <select
+        <Select
           value={filter.warehouse}
-          onChange={(event) => onChange({ ...filter, warehouse: event.target.value, page: 1 })}
-        >
-          <option value="">Todos (existencia total)</option>
-          {warehouses.map((warehouse) => (
-            <option key={warehouse.id} value={warehouse.id}>
-              {warehouse.name}
-              {warehouse.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos (existencia total)' },
+            ...warehouses.map((warehouse) => ({
+              value: warehouse.id,
+              label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          onChange={(warehouse) => onChange({ ...filter, warehouse, page: 1 })}
+        />
       </Field>
       <Field label="Categoría">
-        <select
+        <Select
           value={filter.category}
-          onChange={(event) => onChange({ ...filter, category: event.target.value, page: 1 })}
-        >
-          <option value="">Todas</option>
-          <option value="none">Sin categoría</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todas' },
+            { value: 'none', label: 'Sin categoría' },
+            ...categories.map((category) => ({ value: category.id, label: category.name })),
+          ]}
+          onChange={(category) => onChange({ ...filter, category, page: 1 })}
+        />
       </Field>
       <Field label="Existencia">
-        <select
+        <Select<StockState | ''>
           value={filter.state}
-          onChange={(event) =>
-            onChange({ ...filter, state: event.target.value as StockState | '', page: 1 })
-          }
-        >
-          <option value="">Todas</option>
-          {stockStateOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todas' }, ...stockStateOptions]}
+          onChange={(state) => onChange({ ...filter, state, page: 1 })}
+        />
       </Field>
       <Field label="Insumos">
-        <select
+        <Select
           value={filter.active}
-          onChange={(event) => onChange({ ...filter, active: event.target.value, page: 1 })}
-        >
-          <option value="true">Activos</option>
-          <option value="false">Inactivos</option>
-          <option value="">Todos</option>
-        </select>
+          options={[
+            { value: 'true', label: 'Activos' },
+            { value: 'false', label: 'Inactivos' },
+            { value: '', label: 'Todos' },
+          ]}
+          onChange={(active) => onChange({ ...filter, active, page: 1 })}
+        />
       </Field>
     </section>
   );

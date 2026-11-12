@@ -6,6 +6,7 @@ import { openAdministration, openSection, topBar } from './navigation';
 import { notice } from './notices';
 import { sendTakeawayToKitchen } from './payments-flow';
 import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
+import { chooseOption, optionLabels } from './select';
 
 // Etapa 8, fase B: recorrido del consumo de inventario con el mismo transporte de prueba que las
 // demás especificaciones (Go temporal y base adel_pos_test_*). Crea un insumo con existencia
@@ -140,9 +141,7 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   await page.getByRole('button', { name: 'Nuevo insumo', exact: true }).click();
   await page.getByLabel('Nombre del insumo', { exact: true }).fill('Carne de prueba E2E');
   await page.getByLabel(/^Código interno/).fill('CAR-E2E');
-  await page
-    .getByRole('combobox', { name: /^Unidad base/ })
-    .selectOption({ label: 'Kilogramo (kg)' });
+  await chooseOption(page.getByRole('combobox', { name: /^Unidad base/ }), 'Kilogramo (kg)');
   await page.getByLabel(/^Costo de referencia/).fill('180');
   await page.getByRole('button', { name: 'Crear insumo', exact: true }).click();
   await expect(notice(page, 'Insumo creado. Ya puedes agregar sus presentaciones.')).toBeVisible();
@@ -150,10 +149,11 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   await openTab(page, 'Existencias');
   await page.getByRole('button', { name: 'Existencia inicial', exact: true }).click();
   const balance = page.getByRole('group', { name: 'Renglón 1' });
-  await balance.getByLabel('Buscar insumo', { exact: true }).fill('CAR-E2E');
-  await balance
-    .getByRole('combobox', { name: 'Insumo', exact: true })
-    .selectOption({ label: 'Carne de prueba E2E · CAR-E2E' });
+  await chooseOption(
+    balance.getByRole('combobox', { name: 'Insumo', exact: true }),
+    'Carne de prueba E2E · CAR-E2E',
+    { search: 'CAR-E2E' },
+  );
   await balance.getByLabel('Cantidad', { exact: true }).fill('5');
   await balance.getByLabel(/^Costo unitario/).fill('180');
   await page.getByRole('button', { name: 'Registrar existencia inicial', exact: true }).click();
@@ -168,9 +168,10 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   // Recetas: el filete aparece con el filtro de lo pendiente y se le configura la versión 1 con
   // 150 g de carne capturados en gramos (el insumo está en kilogramos).
   await openTab(page, 'Recetas');
-  await page.getByRole('combobox', { name: 'Estado de la receta', exact: true }).selectOption({
-    label: pendingStatus,
-  });
+  await chooseOption(
+    page.getByRole('combobox', { name: 'Estado de la receta', exact: true }),
+    pendingStatus,
+  );
   await page.getByLabel('Buscar producto o complemento', { exact: true }).fill('Filete');
   const steakRow = page.getByRole('row').filter({ hasText: 'Filete de prueba' });
   await expect(steakRow).toContainText(pendingStatus);
@@ -182,14 +183,15 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   await expect(page.getByText(/Al guardarla se crea la versión 1/)).toBeVisible();
   await page.getByRole('button', { name: 'Agregar insumo', exact: true }).click();
   const line = page.getByRole('group', { name: 'Renglón 1' });
-  await line.getByLabel('Buscar insumo', { exact: true }).fill('CAR-E2E');
-  await line
-    .getByRole('combobox', { name: 'Insumo', exact: true })
-    .selectOption({ label: 'Carne de prueba E2E · CAR-E2E' });
+  await chooseOption(
+    line.getByRole('combobox', { name: 'Insumo', exact: true }),
+    'Carne de prueba E2E · CAR-E2E',
+    { search: 'CAR-E2E' },
+  );
   const unit = line.getByRole('combobox', { name: /^Unidad/ });
   // Solo las unidades de masa (la dimensión de la unidad base que entrega Go).
-  await expect(unit.locator('option')).toHaveText(['Gramo (g)', 'Kilogramo (kg)']);
-  await unit.selectOption({ label: 'Gramo (g)' });
+  expect(await optionLabels(unit)).toEqual(['Gramo (g)', 'Kilogramo (kg)']);
+  await chooseOption(unit, 'Gramo (g)');
   await line.getByLabel(/^Cantidad/).fill('150');
   await expect(page.locator('input[type="number"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'Crear receta (versión 1)', exact: true }).click();
@@ -203,9 +205,10 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   ).toContainText('$27.00');
   await checkLayout(page, testInfo, 'recetas-editor', true);
   await page.getByRole('button', { name: 'Volver al listado', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Estado de la receta', exact: true }).selectOption({
-    label: 'Con receta',
-  });
+  await chooseOption(
+    page.getByRole('combobox', { name: 'Estado de la receta', exact: true }),
+    'Con receta',
+  );
   await expect(page.getByRole('row').filter({ hasText: 'Filete de prueba' })).toContainText(
     'Con receta',
   );
@@ -218,13 +221,12 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
     .getByRole('button', { name: 'Editar la porción de Carne extra E2E', exact: true })
     .click();
   const portion = page.getByRole('region', { name: 'Porción de Carne extra E2E' });
-  await portion.getByLabel('Buscar insumo por porción', { exact: true }).fill('CAR-E2E');
-  await portion
-    .getByRole('combobox', { name: 'Insumo por porción', exact: true })
-    .selectOption({ label: 'Carne de prueba E2E · CAR-E2E' });
-  await portion
-    .getByRole('combobox', { name: /^Unidad de la porción/ })
-    .selectOption({ label: 'Gramo (g)' });
+  await chooseOption(
+    portion.getByRole('combobox', { name: 'Insumo por porción', exact: true }),
+    'Carne de prueba E2E · CAR-E2E',
+    { search: 'CAR-E2E' },
+  );
+  await chooseOption(portion.getByRole('combobox', { name: /^Unidad de la porción/ }), 'Gramo (g)');
   await portion.getByLabel(/^Cantidad por porción/).fill('50');
   await portion.getByRole('button', { name: 'Guardar porción', exact: true }).click();
   await expect(notice(page, 'Porción habitual guardada.')).toBeVisible();

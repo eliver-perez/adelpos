@@ -29,7 +29,7 @@ export function ModalPanel({
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     // El foco va al primer campo; si no hay campos, al primer botón (cerrar).
     const field = panel.current?.querySelector<HTMLElement>(
-      'input:not([disabled]), textarea:not([disabled]), select:not([disabled])',
+      'input:not([disabled]):not([tabindex="-1"]), textarea:not([disabled]), [role="combobox"]:not([disabled])',
     );
     const button = panel.current?.querySelector<HTMLElement>('button:not([disabled])');
     (field ?? button)?.focus();

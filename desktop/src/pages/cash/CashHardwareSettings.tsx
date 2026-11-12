@@ -18,6 +18,7 @@ import { permissionName } from '../../services/payments';
 import { notifyDrawerOutcome } from './CashNotices';
 import { PendingCashOperation } from './PendingCashOperation';
 import { useCashMutation } from './useCashMutation';
+import { Select } from '../../components/Select';
 
 type Execute = <T>(
   operation: Operation,
@@ -287,24 +288,21 @@ function DrawerEditor({
         <div className="form-grid">
           <div className="field">
             <label htmlFor={printerID}>Impresora del cajón</label>
-            <select
+            <Select
               id={printerID}
               value={printer}
-              onChange={(event) => setPrinter(event.target.value)}
-            >
-              <option value="">Sin impresora</option>
-              {printers.map((option) => (
-                <option
-                  key={option.id}
-                  value={option.id}
-                  disabled={!option.compatible || !option.active}
-                >
-                  {option.name} · {drawerConnectionLabel(option)}
-                  {!option.active ? ' · desactivada' : ''}
-                  {option.active && !option.compatible ? ' · no compatible' : ''}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: 'Sin impresora' },
+                ...printers.map((option) => ({
+                  value: option.id,
+                  label: `${option.name} · ${drawerConnectionLabel(option)}${
+                    !option.active ? ' · desactivada' : ''
+                  }${option.active && !option.compatible ? ' · no compatible' : ''}`,
+                  disabled: !option.compatible || !option.active,
+                })),
+              ]}
+              onChange={setPrinter}
+            />
             {selected && selected.active && !selected.compatible && (
               <small className="muted">{selected.reason}</small>
             )}

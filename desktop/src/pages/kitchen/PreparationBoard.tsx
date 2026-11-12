@@ -8,6 +8,7 @@ import type { Board, ExecuteKitchen, Release, Task } from '../../services/kitche
 import { notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import { elapsedTime, serverDateTime } from '../../services/restaurant';
+import { Select } from '../../components/Select';
 
 export function PreparationBoard({
   can,
@@ -67,33 +68,31 @@ export function PreparationBoard({
     <div className="form-stack">
       <div className="kitchen-filters">
         <Field label="Estación de preparación">
-          <select
+          <Select
             value={station}
-            onChange={(event) => {
-              setStation(event.target.value);
+            options={[
+              { value: '', label: 'Todas las estaciones autorizadas' },
+              ...(board?.stations ?? []).map((entry) => ({ value: entry.id, label: entry.name })),
+            ]}
+            onChange={(next) => {
+              setStation(next);
               setPage(1);
             }}
-          >
-            <option value="">Todas las estaciones autorizadas</option>
-            {board?.stations.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
         <Field label="Avance de preparación">
-          <select
+          <Select
             value={state}
-            onChange={(event) => {
-              setState(event.target.value);
+            options={[
+              { value: '', label: 'Pendientes y en preparación' },
+              { value: 'ready', label: 'Listos' },
+              { value: 'all', label: 'Todos los estados' },
+            ]}
+            onChange={(next) => {
+              setState(next);
               setPage(1);
             }}
-          >
-            <option value="">Pendientes y en preparación</option>
-            <option value="ready">Listos</option>
-            <option value="all">Todos los estados</option>
-          </select>
+          />
         </Field>
         <button className="secondary-button" onClick={() => void resource.reload()}>
           Actualizar preparación

@@ -14,6 +14,8 @@ import {
 import { OptionalDateField } from './DateField';
 import { ToggleButton } from '../ToggleButton';
 import { dayShortNames, scheduleSummary, weekOrder } from '../../services/scheduleSummary';
+import { Select } from '../Select';
+import type { SelectOption } from '../Select';
 
 export function TextField({
   label,
@@ -165,31 +167,33 @@ export function ReferenceField({
   onChange: (value: string) => void;
   optional?: boolean;
 }) {
-  // Si el valor guardado no está entre las opciones (registro inactivo o excluido), el navegador
-  // mostraría la primera opción de la lista como si estuviera elegida. Se agrega una opción que
-  // describe el valor real para no aparentar una elección que el usuario no hizo.
+  // Si el valor guardado no está entre las opciones (registro inactivo o excluido), se agrega una
+  // opción deshabilitada que describe el valor real para no aparentar una elección que el usuario
+  // no hizo.
   const current = value ?? '';
   const missing = current !== '' && !options.some((option) => option.id === current);
+  const choices: SelectOption[] = [];
+  if (optional) {
+    choices.push({ value: '', label: 'Sin asignar' });
+  }
+  if (missing) {
+    choices.push({ value: current, label: 'Registro no disponible en esta lista', disabled: true });
+  }
+  for (const option of options) {
+    choices.push({
+      value: option.id,
+      label: `${option.name}${option.active === false ? ' · inactivo' : ''}`,
+    });
+  }
   return (
     <Field label={label}>
-      <select
+      <Select
         value={current}
         required={!optional}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">{optional ? 'Sin asignar' : 'Selecciona…'}</option>
-        {missing && (
-          <option value={current} disabled>
-            Registro no disponible en esta lista
-          </option>
-        )}
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-            {option.active === false ? ' · inactivo' : ''}
-          </option>
-        ))}
-      </select>
+        placeholder={optional ? 'Sin asignar' : 'Selecciona…'}
+        options={choices}
+        onChange={onChange}
+      />
     </Field>
   );
 }

@@ -20,6 +20,7 @@ import { inventoryQuantityShape } from '../../services/numericInput';
 import { serverDateTime } from '../../services/restaurant';
 import { DecimalTextField, Pagination } from './InventoryFields';
 import { formatQuantity, inventoryPermissionName } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -269,34 +270,27 @@ function ProductionForm({
         <fieldset className="form-stack" disabled={locked}>
           <div className="form-grid">
             <Field label="Preparación elaborada">
-              <select
+              <Select
                 required
                 value={recipeID}
-                onChange={(event) => setRecipeID(event.target.value)}
-              >
-                <option value="">Elige la preparación</option>
-                {stored.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.name}
-                  </option>
-                ))}
-              </select>
+                placeholder="Elige la preparación"
+                options={stored.map((entry) => ({ value: entry.id, label: entry.name }))}
+                onChange={setRecipeID}
+              />
             </Field>
             <Field
               label="Almacén de la elaboración"
               hint="Donde se consumen los insumos y entra lo producido."
             >
-              <select
+              <Select
                 required
                 value={selectedWarehouse}
-                onChange={(event) => setWarehouseID(event.target.value)}
-              >
-                {available.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name}
-                  </option>
-                ))}
-              </select>
+                options={available.map((warehouse) => ({
+                  value: warehouse.id,
+                  label: warehouse.name,
+                }))}
+                onChange={setWarehouseID}
+              />
             </Field>
             <DecimalTextField
               label="Lotes elaborados"

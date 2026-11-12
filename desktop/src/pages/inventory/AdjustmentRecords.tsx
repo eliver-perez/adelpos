@@ -53,6 +53,7 @@ import { Pagination } from './InventoryFields';
 import { formatQuantity, formatSignedQuantity, inventoryPermissionName } from './inventoryFormat';
 import type { InventoryNavigate } from './inventoryNavigation';
 import { measureName, ReasonAction } from './PurchaseFields';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -128,63 +129,38 @@ function AdjustmentFilters({
         />
       </Field>
       <Field label="Tipo">
-        <select
+        <Select<AdjustmentKind | ''>
           value={filter.kind}
-          onChange={(event) =>
-            onChange({ ...filter, kind: event.target.value as AdjustmentKind | '', page: 1 })
-          }
-        >
-          <option value="">Ajustes y mermas</option>
-          {adjustmentKindOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Ajustes y mermas' }, ...adjustmentKindOptions]}
+          onChange={(kind) => onChange({ ...filter, kind, page: 1 })}
+        />
       </Field>
       <Field label="Estado del ajuste">
-        <select
+        <Select<AdjustmentState | ''>
           value={filter.state}
-          onChange={(event) =>
-            onChange({ ...filter, state: event.target.value as AdjustmentState | '', page: 1 })
-          }
-        >
-          <option value="">Todos</option>
-          {adjustmentStateOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todos' }, ...adjustmentStateOptions]}
+          onChange={(state) => onChange({ ...filter, state, page: 1 })}
+        />
       </Field>
       <Field label="Motivo">
-        <select
+        <Select<AdjustmentReason | ''>
           value={filter.reason}
-          onChange={(event) =>
-            onChange({ ...filter, reason: event.target.value as AdjustmentReason | '', page: 1 })
-          }
-        >
-          <option value="">Todos</option>
-          {reasonOptions('discrepancy').map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todos' }, ...reasonOptions('discrepancy')]}
+          onChange={(reason) => onChange({ ...filter, reason, page: 1 })}
+        />
       </Field>
       <Field label="Almacén">
-        <select
+        <Select
           value={filter.warehouse}
-          onChange={(event) => onChange({ ...filter, warehouse: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          {warehouses.map((warehouse) => (
-            <option key={warehouse.id} value={warehouse.id}>
-              {warehouse.name}
-              {warehouse.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...warehouses.map((warehouse) => ({
+              value: warehouse.id,
+              label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          onChange={(warehouse) => onChange({ ...filter, warehouse, page: 1 })}
+        />
       </Field>
       <OptionalDateField
         label="Registrado desde"

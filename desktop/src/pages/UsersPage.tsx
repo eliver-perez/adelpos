@@ -4,6 +4,7 @@ import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
 import type { Permission, Role, User } from '../services/models';
 import { OtherUserPreferences } from './PreferencesPage';
+import { Select } from '../components/Select';
 
 function UserEditor({
   user,
@@ -58,17 +59,18 @@ function UserEditor({
           />
         </Field>
         <Field label="Rol principal">
-          <select required value={roleID} onChange={(event) => setRoleID(event.target.value)}>
-            <option value="">Selecciona un rol</option>
-            {roles.map((role) => (
-              <option key={role.id} value={role.id}>
-                {role.name}
-              </option>
-            ))}
-            {user && !roles.some((role) => role.id === user.role_id) && (
-              <option value={user.role_id}>{user.role_name}</option>
-            )}
-          </select>
+          <Select
+            required
+            value={roleID}
+            placeholder="Selecciona un rol"
+            options={[
+              ...roles.map((role) => ({ value: role.id, label: role.name })),
+              ...(user && !roles.some((role) => role.id === user.role_id)
+                ? [{ value: user.role_id, label: user.role_name }]
+                : []),
+            ]}
+            onChange={setRoleID}
+          />
         </Field>
         {!user && (
           <Field label="Contraseña inicial">
@@ -95,6 +97,14 @@ function UserEditor({
     </Form>
   );
 }
+
+// Excepción por permiso: la misma lista corta en cada uno de los ≈150 renglones (un solo arreglo
+// compartido; el selector no monta su lista mientras está cerrado).
+const overrideOptions = [
+  { value: 'inherit', label: 'Heredar' },
+  { value: 'allow', label: 'Permitir' },
+  { value: 'deny', label: 'Denegar' },
+];
 
 function UserPermissionEditor({
   user,
@@ -151,17 +161,14 @@ function UserPermissionEditor({
                         <small className="muted block font-mono">{permission.key}</small>
                       </td>
                       <td>
-                        <select
+                        <Select
                           aria-label={`Excepción: ${permission.description}`}
                           value={changes[permission.key] ?? current}
-                          onChange={(event) =>
-                            setChanges({ ...changes, [permission.key]: event.target.value })
+                          options={overrideOptions}
+                          onChange={(effect) =>
+                            setChanges({ ...changes, [permission.key]: effect })
                           }
-                        >
-                          <option value="inherit">Heredar</option>
-                          <option value="allow">Permitir</option>
-                          <option value="deny">Denegar</option>
-                        </select>
+                        />
                       </td>
                       <td>
                         {resource.data?.effective.includes(permission.key)

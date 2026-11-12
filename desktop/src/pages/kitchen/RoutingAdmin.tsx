@@ -3,6 +3,7 @@ import { Field, Form, Notice } from '../../components/Forms';
 import { Check, ReferenceField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { ExecuteKitchen, KitchenRoute, Station } from '../../services/kitchen';
+import { Select } from '../../components/Select';
 
 export function RoutingAdmin({ execute, busy }: { execute: ExecuteKitchen; busy: boolean }) {
   const routes = useLiveResource<KitchenRoute[]>('kitchen_routes');
@@ -88,16 +89,17 @@ export function RoutingAdmin({ execute, busy }: { execute: ExecuteKitchen; busy:
           >
             {!selected.id && (
               <Field label="Asignar ruta a">
-                <select
+                <Select<typeof kind>
                   value={kind}
-                  onChange={(event) => {
-                    setKind(event.target.value as typeof kind);
+                  options={[
+                    { value: 'category', label: 'Categoría' },
+                    { value: 'product', label: 'Producto específico' },
+                  ]}
+                  onChange={(next) => {
+                    setKind(next);
                     setSelected({ ...selected, product_id: null, category_id: null });
                   }}
-                >
-                  <option value="category">Categoría</option>
-                  <option value="product">Producto específico</option>
-                </select>
+                />
               </Field>
             )}
             {!selected.id && (
@@ -119,19 +121,14 @@ export function RoutingAdmin({ execute, busy }: { execute: ExecuteKitchen; busy:
               />
             )}
             <Field label="Necesidad de preparación">
-              <select
+              <Select<KitchenRoute['mode']>
                 value={selected.mode}
-                onChange={(event) =>
-                  setSelected({
-                    ...selected,
-                    mode: event.target.value as KitchenRoute['mode'],
-                    station_ids: [],
-                  })
-                }
-              >
-                <option value="prepare">Enviar a estaciones seleccionadas</option>
-                <option value="none">No requiere preparación</option>
-              </select>
+                options={[
+                  { value: 'prepare', label: 'Enviar a estaciones seleccionadas' },
+                  { value: 'none', label: 'No requiere preparación' },
+                ]}
+                onChange={(mode) => setSelected({ ...selected, mode, station_ids: [] })}
+              />
             </Field>
             {selected.mode === 'prepare' &&
               stations.data?.map((station) => (

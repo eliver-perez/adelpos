@@ -18,6 +18,7 @@ import { mexicoTimezones, timezoneOptions } from '../services/timezones';
 import type { Category, CatalogDocument, Lookups, Product } from '../services/catalog';
 import type { Area, Overview, RestaurantTable } from '../services/restaurant';
 import type { Settings } from '../services/models';
+import { chooseOption, openSelect, optionLabels, selectText } from '../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -93,7 +94,7 @@ describe('alta continua de mesas', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Crear mesa' }));
-    fireEvent.change(screen.getByLabelText('Área de la mesa'), { target: { value: 'terraza' } });
+    chooseOption(screen.getByLabelText('Área de la mesa'), 'Terraza');
     fireEvent.change(screen.getByLabelText('Nombre o número de mesa'), {
       target: { value: 'Mesa 4' },
     });
@@ -108,7 +109,7 @@ describe('alta continua de mesas', () => {
     const name = screen.getByLabelText('Nombre o número de mesa') as HTMLInputElement;
     // «Mesa 5» ya existe en Terraza: se propone la siguiente libre.
     await waitFor(() => expect(name.value).toBe('Mesa 6'));
-    expect((screen.getByLabelText('Área de la mesa') as HTMLSelectElement).value).toBe('terraza');
+    expect((screen.getByLabelText('Área de la mesa') as HTMLButtonElement).value).toBe('terraza');
     expect(screen.getByRole('button', { name: /Nueva mesa/ })).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(name));
     // La acción principal sigue visible en la barra fija del formulario.
@@ -144,9 +145,9 @@ describe('alta continua de mesas', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Crear área' }));
     expect(screen.queryByLabelText('Orden del área')).toBeNull();
-    const position = screen.getByLabelText('Posición del área') as HTMLSelectElement;
+    const position = screen.getByLabelText('Posición del área') as HTMLButtonElement;
     expect(position.value).toBe('terraza');
-    fireEvent.change(position, { target: { value: '' } });
+    chooseOption(position, 'Al inicio');
     fireEvent.change(screen.getByLabelText('Nombre del área'), { target: { value: 'Patio' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar área' }));
     await waitFor(() =>
@@ -302,15 +303,15 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Crear registro' }));
     const name = (await screen.findByLabelText('Nombre')) as HTMLInputElement;
     expect(screen.queryByLabelText('Orden visual')).toBeNull();
-    const position = screen.getByLabelText('Posición de la categoría') as HTMLSelectElement;
+    const position = screen.getByLabelText('Posición de la categoría') as HTMLButtonElement;
     // Orden de Go por sort_order: Desayunos (10) y luego Bebidas (20).
-    expect(Array.from(position.options).map((option) => option.textContent)).toEqual([
+    expect(optionLabels(position)).toEqual([
       'Al inicio',
       'Después de «Desayunos»',
       'Después de «Bebidas»',
     ]);
     expect(position.value).toBe('bebidas');
-    fireEvent.change(position, { target: { value: 'desayunos' } });
+    chooseOption(position, 'Después de «Desayunos»');
     fireEvent.click(screen.getByRole('button', { name: 'Color de la categoría: Sin color' }));
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Paleta de colores' })).getByRole('button', {
@@ -343,8 +344,8 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
     await screen.findByText('Aún no hay registros');
     fireEvent.click(screen.getByRole('button', { name: 'Crear registro' }));
     await screen.findByLabelText('Nombre');
-    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'desayunos' } });
-    const position = screen.getByLabelText('Posición en su categoría') as HTMLSelectElement;
+    chooseOption(screen.getByLabelText('Categoría'), 'Desayunos');
+    const position = screen.getByLabelText('Posición en su categoría') as HTMLButtonElement;
     expect(position.value).toBe('machacado');
     fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Chilaquiles' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar y crear otro' }));
@@ -358,7 +359,7 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
       }),
     );
     await screen.findByText('«Chilaquiles» quedó guardado. Captura el siguiente registro.');
-    expect((screen.getByLabelText('Categoría') as HTMLSelectElement).value).toBe('desayunos');
+    expect((screen.getByLabelText('Categoría') as HTMLButtonElement).value).toBe('desayunos');
     const name = screen.getByLabelText('Nombre') as HTMLInputElement;
     expect(name.value).toBe('');
     await waitFor(() => expect(document.activeElement).toBe(name));
@@ -421,19 +422,23 @@ describe('configuración general', () => {
 
   it('elige la zona con búsqueda, sin escritura libre, y muestra la moneda como dato', () => {
     render(<Fields />);
-    const zone = screen.getByLabelText(/^Zona horaria/) as HTMLSelectElement;
-    expect(zone.tagName).toBe('SELECT');
+    const zone = screen.getByLabelText(/^Zona horaria/) as HTMLButtonElement;
+    expect(zone.getAttribute('role')).toBe('combobox');
     expect(zone.value).toBe('America/Monterrey');
-    expect(zone.options[1]?.value).toBe('America/Mexico_City');
-    fireEvent.change(screen.getByLabelText('Buscar zona horaria'), {
-      target: { value: 'tijuana' },
-    });
-    // La zona guardada sigue visible aunque el filtro no la incluya.
-    expect(Array.from(zone.options).map((option) => option.value)).toEqual([
-      'America/Monterrey',
-      'America/Tijuana',
-    ]);
-    fireEvent.change(zone, { target: { value: 'America/Tijuana' } });
+    expect(optionLabels(zone).slice(0, 2)).toEqual(['America/Monterrey', 'America/Mexico City']);
+    // Búsqueda integrada (sin el campo aparte de antes): México primero, en su propio grupo.
+    const listbox = openSelect(zone);
+    expect(within(listbox).getByRole('group', { name: 'México' })).toBeTruthy();
+    const search = screen.getByRole('searchbox', { name: 'Buscar zona horaria' });
+    fireEvent.change(search, { target: { value: 'tijuana' } });
+    expect(
+      within(listbox)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['America/Tijuana']);
+    // La zona guardada sigue a la vista en el selector aunque la búsqueda no la incluya.
+    expect(selectText(zone)).toBe('America/Monterrey');
+    fireEvent.click(within(listbox).getByRole('option', { name: 'America/Tijuana' }));
     expect(screen.getByText('America/Tijuana', { selector: 'output' })).toBeTruthy();
     expect(screen.queryByRole('textbox', { name: /Moneda/ })).toBeNull();
     expect(screen.getByText('MXN · Peso mexicano')).toBeTruthy();

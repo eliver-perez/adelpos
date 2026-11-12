@@ -24,6 +24,7 @@ import {
   returnFolio,
 } from './purchasingFormat';
 import type { PurchasingNavigation } from './purchasingNavigation';
+import { Select } from '../../components/Select';
 
 // Secciones del panel de un proveedor (fase C): los insumos que surte, con su presentación
 // habitual, código, preferido y último precio que entrega Go, y el historial de compras.
@@ -133,19 +134,21 @@ function SupplierItemForm({
             label="Presentación habitual"
             hint="Se propone al comprar este insumo al proveedor."
           >
-            <select
+            <Select
               value={presentationID}
               disabled={!current}
-              onChange={(event) => setPresentationID(event.target.value)}
-            >
-              <option value="">Sin presentación habitual</option>
-              {presentations.map((presentation) => (
-                <option key={presentation.id} value={presentation.id}>
-                  {presentation.name} (
-                  {formatQuantity(presentation.base_quantity, current?.base_unit)})
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: 'Sin presentación habitual' },
+                ...presentations.map((presentation) => ({
+                  value: presentation.id,
+                  label: `${presentation.name} (${formatQuantity(
+                    presentation.base_quantity,
+                    current?.base_unit,
+                  )})`,
+                })),
+              ]}
+              onChange={setPresentationID}
+            />
           </Field>
           <Field label="Código del proveedor" hint="Opcional; como aparece en su factura o lista.">
             <input

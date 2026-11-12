@@ -53,6 +53,7 @@ import type { PurchaseLineDraft } from './purchasingFormat';
 import type { PurchasingNavigation } from './purchasingNavigation';
 import { ReceiptDetail } from './ReceiptDetail';
 import { OrderReceiptForm } from './ReceiptForms';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -158,23 +159,11 @@ function OrderFilters({
         />
       </Field>
       <Field label="Estado de la orden">
-        <select
+        <Select<PurchaseOrderStateFilter | ''>
           value={filter.state}
-          onChange={(event) =>
-            onChange({
-              ...filter,
-              state: event.target.value as PurchaseOrderStateFilter | '',
-              page: 1,
-            })
-          }
-        >
-          <option value="">Todos</option>
-          {orderStateOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todos' }, ...orderStateOptions]}
+          onChange={(state) => onChange({ ...filter, state, page: 1 })}
+        />
       </Field>
       <SupplierPicker
         label="Proveedor"
@@ -363,18 +352,15 @@ function PurchaseOrderEditor({
             label="Almacén de destino previsto"
             hint="Donde se propondrá recibir la mercancía."
           >
-            <select
+            <Select
               required
               value={selectedWarehouse}
-              onChange={(event) => update('warehouseID', event.target.value)}
-            >
-              {offered.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name}
-                  {warehouse.active ? '' : ' (inactivo)'}
-                </option>
-              ))}
-            </select>
+              options={offered.map((warehouse) => ({
+                value: warehouse.id,
+                label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+              }))}
+              onChange={(warehouseID) => update('warehouseID', warehouseID)}
+            />
           </Field>
         </div>
         <p className="muted text-xs">

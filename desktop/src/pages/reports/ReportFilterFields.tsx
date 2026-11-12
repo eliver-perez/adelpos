@@ -4,6 +4,7 @@ import { Field } from '../../components/Forms';
 import { errorMessage } from '../../services/notify';
 import { fetchFilterOptions } from '../../services/reports';
 import type { FilterOption, ReportFilter } from '../../services/reports';
+import { Select } from '../../components/Select';
 
 // Filtros adicionales de un reporte (§7): solo los que el reporte declara en el catálogo de Go
 // (caja, turno, usuario, área, mesa, producto, categoría, método de pago, motivo, modalidad…). Las
@@ -23,6 +24,13 @@ export function filterStateKey(filter: ReportFilter) {
 }
 
 const allLabel = 'Sin filtro';
+
+function optionChoice(option: FilterOption) {
+  return {
+    value: option.value,
+    label: option.detail ? `${option.label} · ${option.detail}` : option.label,
+  };
+}
 
 function SourceSelect({
   filter,
@@ -59,24 +67,22 @@ function SourceSelect({
   }, [loadOptions, source]);
   return (
     <Field label={filter.label} hint={error || undefined}>
-      <select
+      <Select
         value={value}
         disabled={disabled || options === null}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">{options === null && !error ? 'Cargando opciones…' : allLabel}</option>
-        {(options ?? []).map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.detail ? `${option.label} · ${option.detail}` : option.label}
-          </option>
-        ))}
-      </select>
+        options={[
+          { value: '', label: options === null && !error ? 'Cargando opciones…' : allLabel },
+          ...(options ?? []).map(optionChoice),
+        ]}
+        onChange={onChange}
+      />
     </Field>
   );
 }
 
 // Producto o insumo: Go devuelve hasta 100 coincidencias; la búsqueda se consulta al pulsar
-// «Buscar».
+// «Buscar» (nunca por tecla). Se conserva en la 9C: la búsqueda integrada del selector solo filtra
+// las coincidencias ya recibidas, sin consultar a Go.
 function SearchableFilter({
   filter,
   value,
@@ -140,22 +146,16 @@ function SearchableFilter({
         </button>
       </form>
       <Field label={filter.label} hint={error || undefined}>
-        <select
+        <Select
           value={value}
           disabled={disabled || options === null}
-          onChange={(event) => {
-            const option = list.find((entry) => entry.value === event.target.value) ?? null;
+          options={[{ value: '', label: allLabel }, ...list.map(optionChoice)]}
+          onChange={(next) => {
+            const option = list.find((entry) => entry.value === next) ?? null;
             setSelected(option);
-            onChange(event.target.value);
+            onChange(next);
           }}
-        >
-          <option value="">{allLabel}</option>
-          {list.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.detail ? `${option.label} · ${option.detail}` : option.label}
-            </option>
-          ))}
-        </select>
+        />
       </Field>
     </div>
   );
@@ -229,18 +229,18 @@ export function ReportFilterFields({
         if (filter.type === 'choice') {
           return (
             <Field key={filter.key} label={filter.label}>
-              <select
+              <Select
                 value={value === '' ? (filter.default ?? '') : value}
                 disabled={disabled}
-                onChange={(event) => change(event.target.value)}
-              >
-                {!filter.default && <option value="">{allLabel}</option>}
-                {(filter.options ?? []).map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  ...(filter.default ? [] : [{ value: '', label: allLabel }]),
+                  ...(filter.options ?? []).map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  })),
+                ]}
+                onChange={change}
+              />
             </Field>
           );
         }

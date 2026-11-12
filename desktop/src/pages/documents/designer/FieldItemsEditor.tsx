@@ -1,5 +1,6 @@
 import { Icon } from '../../../components/Icon';
 import type { FieldItem, FieldKeyInfo } from '../../../services/documents';
+import { Select } from '../../../components/Select';
 
 // Datos de un «Campo de datos»: de uno a cuatro datos del tipo de documento, cada uno con su
 // etiqueta (por ejemplo «Mesa:»). Las claves y las etiquetas propuestas vienen del catálogo de Go;
@@ -49,17 +50,12 @@ export function FieldItemsEditor({
         <div className="designer-field-item" key={index}>
           <label className="field">
             <span>Dato {index + 1}</span>
-            <select
+            <Select
               value={item.key}
               disabled={disabled}
-              onChange={(event) => changeKey(index, event.target.value)}
-            >
-              {keys.map((entry) => (
-                <option key={entry.key} value={entry.key}>
-                  {entry.name}
-                </option>
-              ))}
-            </select>
+              options={keys.map((entry) => ({ value: entry.key, label: entry.name }))}
+              onChange={(key) => changeKey(index, key)}
+            />
           </label>
           <label className="field">
             <span>Etiqueta del dato {index + 1}</span>

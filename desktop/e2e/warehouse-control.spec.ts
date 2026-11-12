@@ -12,6 +12,7 @@ import {
   inventoryGroups,
   openInventorySection,
 } from './inventory-navigation';
+import { chooseOption, expectOptionCount } from './select';
 
 // Etapa 8, fase D (interfaz de control de inventario): recorrido de transferencias, mermas,
 // conteos físicos y alertas con el mismo transporte de prueba que las demás especificaciones (Go
@@ -158,10 +159,8 @@ async function preparePreconditions(driver: Driver) {
 }
 
 async function chooseItem(scope: Locator, label = 'Insumo') {
-  await scope.getByLabel(`Buscar ${label.toLowerCase()}`, { exact: true }).fill(itemCode);
   const select = scope.getByRole('combobox', { name: new RegExp(`^${label}`) });
-  await expect(select.locator('option', { hasText: itemName })).toHaveCount(1);
-  await select.selectOption({ label: itemLabel });
+  await chooseOption(select, itemLabel, { search: itemCode });
 }
 
 test('control de inventario: transferencia, merma, conteo aplicado y alerta en el resumen', async ({
@@ -199,10 +198,10 @@ test('control de inventario: transferencia, merma, conteo aplicado y alerta en e
   await openTab(page, 'Transferencias');
   await page.getByRole('button', { name: 'Nueva transferencia', exact: true }).click();
   const destination = page.getByRole('combobox', { name: /^Almacén de destino/ });
-  await expect(destination.locator('option', { hasText: barName })).toHaveCount(1);
+  await expectOptionCount(destination, barName, 1);
   // El destino no ofrece el almacén de origen.
-  await expect(destination.locator('option', { hasText: 'Almacén general' })).toHaveCount(0);
-  await destination.selectOption({ label: barName });
+  await expectOptionCount(destination, 'Almacén general', 0);
+  await chooseOption(destination, barName);
   const transferLine = page.getByRole('group', { name: 'Renglón 1' });
   await chooseItem(transferLine);
   await transferLine.getByLabel(/^Cantidad/).fill('5');
@@ -264,9 +263,7 @@ test('control de inventario: transferencia, merma, conteo aplicado y alerta en e
   // 3. Conteo de la barra: 4.5 kg contados contra 5 kg teóricos a la hora del renglón.
   await openTab(page, 'Conteos');
   await page.getByRole('button', { name: 'Nuevo conteo', exact: true }).click();
-  await page
-    .getByRole('combobox', { name: /^Almacén que se cuenta/ })
-    .selectOption({ label: barName });
+  await chooseOption(page.getByRole('combobox', { name: /^Almacén que se cuenta/ }), barName);
   await page.getByRole('button', { name: 'Selección de insumos', exact: true }).click();
   await chooseItem(page.getByRole('region', { name: 'Nuevo conteo' }));
   await page.getByRole('button', { name: 'Agregar a la selección', exact: true }).click();

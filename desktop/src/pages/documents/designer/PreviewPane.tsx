@@ -10,6 +10,7 @@ import type {
 import { serverDateTime } from '../../../services/restaurant';
 import { PaperStrip } from './PaperStrip';
 import type { PreviewProblem } from './usePreview';
+import { Select } from '../../../components/Select';
 
 // Área central del editor: la tira de papel con la IR de Go, el ancho (58/80 mm con sus columnas
 // predeterminadas o, desde la etapa 9C, el de una impresora activa con sus columnas), el origen de
@@ -101,19 +102,19 @@ export function PreviewPane({
       {(printers ?? []).length > 0 && (
         <label className="field">
           <span>Ver con el ancho de una impresora</span>
-          <select
-            aria-label="Ver con el ancho de una impresora"
+          <Select
             value={printer ? printerID : ''}
-            onChange={(event) => onPrinter(event.target.value)}
-          >
-            <option value="">Ancho predeterminado del papel</option>
-            {(printers ?? []).map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name} · {entry.paper_width} mm · columnas: {entry.columns}
-                {entry.columns === entry.default_columns ? ' (predeterminado)' : ''}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'Ancho predeterminado del papel' },
+              ...(printers ?? []).map((entry) => ({
+                value: entry.id,
+                label: `${entry.name} · ${entry.paper_width} mm · columnas: ${entry.columns}${
+                  entry.columns === entry.default_columns ? ' (predeterminado)' : ''
+                }`,
+              })),
+            ]}
+            onChange={onPrinter}
+          />
           <small className="muted">
             Las columnas de cada impresora se eligen en Cocina → Impresoras.
           </small>
@@ -122,14 +123,17 @@ export function PreviewPane({
       {mode === 'real' && (
         <label className="field">
           <span>Documento reciente</span>
-          <select value={ticketID} onChange={(event) => onTicket(event.target.value)}>
-            <option value="">Elige un documento</option>
-            {(recent.data ?? []).map((document) => (
-              <option key={document.ticket_id} value={document.ticket_id}>
-                {document.label} · {serverDateTime(document.created_at, timezone)}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={ticketID}
+            options={[
+              { value: '', label: 'Elige un documento' },
+              ...(recent.data ?? []).map((document) => ({
+                value: document.ticket_id,
+                label: `${document.label} · ${serverDateTime(document.created_at, timezone)}`,
+              })),
+            ]}
+            onChange={onTicket}
+          />
           {recent.data?.length === 0 && (
             <small className="muted">
               No hay documentos recientes de este tipo que puedas ver.

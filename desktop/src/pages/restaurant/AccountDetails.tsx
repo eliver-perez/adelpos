@@ -8,6 +8,7 @@ import type { Lookups } from '../../services/catalog';
 import { accountCustomName, takeawayOrigins } from '../../services/restaurant';
 import type { Account, AccountInput, Bill } from '../../services/restaurant';
 import type { ExecuteMutation } from './OperationsAdmin';
+import { Select } from '../../components/Select';
 
 function initialInput(account: Account): AccountInput {
   return {
@@ -136,20 +137,21 @@ export function AccountDetails({
               defaultOpen={!!input.scheduled_local}
             >
               <Field label="Programación">
-                <select
+                <Select
                   value={input.schedule_kind}
-                  onChange={(event) =>
+                  options={[
+                    { value: '', label: 'Sin programación' },
+                    { value: 'preparation', label: 'Hora de preparación' },
+                    { value: 'delivery', label: 'Hora prevista de entrega' },
+                  ]}
+                  onChange={(schedule_kind) =>
                     setInput({
                       ...input,
-                      schedule_kind: event.target.value,
-                      scheduled_local: event.target.value ? input.scheduled_local : '',
+                      schedule_kind,
+                      scheduled_local: schedule_kind ? input.scheduled_local : '',
                     })
                   }
-                >
-                  <option value="">Sin programación</option>
-                  <option value="preparation">Hora de preparación</option>
-                  <option value="delivery">Hora prevista de entrega</option>
-                </select>
+                />
               </Field>
               {input.schedule_kind && (
                 <TextField

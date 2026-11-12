@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { openAdministration, openCash, openSection } from './navigation';
 import { expectNoticeClosesUnderPointer, expectNoticeLayout, notice } from './notices';
+import { chooseOption, expectSelectValue } from './select';
 
 // Recorrido de caja de la etapa 7 (fases B y C) contra Go y PostgreSQL reales: apertura por
 // denominaciones, ingreso y retiro autoautorizado, corte parcial con su vista previa, tope de caja
@@ -331,11 +332,10 @@ async function countAndClose(page: Page, testInfo: TestInfo) {
 async function reviewClosedShift(page: Page) {
   const sections = page.getByRole('tablist', { name: 'Secciones de caja' });
   await sections.getByRole('tab', { name: 'Movimientos', exact: true }).click();
-  // El nombre accesible de un <select> dentro de su etiqueta incluye la opción elegida.
+  // Etapa 9C: el selector toma su nombre solo de la etiqueta y guarda el valor en su atributo.
   const chooser = page.getByRole('combobox', { name: /^Turno/ });
-  await expect(chooser).toHaveValue('');
-  const closedOption = chooser.locator('option', { hasText: 'Cerrado' }).first();
-  await chooser.selectOption({ value: (await closedOption.getAttribute('value'))! });
+  await expectSelectValue(chooser, '');
+  await chooseOption(chooser, /Cerrado/);
   const table = page.locator('.cash-page table').first();
   await expect(table).toContainText('Aportación adicional al fondo');
   await expect(table).toContainText('Resguardo');

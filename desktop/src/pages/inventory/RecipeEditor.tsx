@@ -29,6 +29,7 @@ import { DimensionUnitSelect, RecipeItemPicker } from './RecipePickers';
 import { lineDraftFromRecipe, lineInput, RecipeLinesEditor } from './RecipeLinesEditor';
 import type { LineDraft } from './RecipeLinesEditor';
 import { RecipeVersionHistory } from './RecipeVersionHistory';
+import { Select } from '../../components/Select';
 
 // Merma de elaboración: porcentaje de 0 a menos de 100 con hasta cuatro decimales (límite de Go).
 const wasteShape: DecimalShape = { decimals: 4, integerDigits: 2 };
@@ -205,21 +206,22 @@ function AnyUnitSelect({
       label="Unidad del rendimiento"
       hint="Define en qué se mide la preparación (masa, volumen, piezas o porciones); no cambia después."
     >
-      <select required value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Elige la unidad</option>
-        {dimensions.map((dimension) => {
+      <Select
+        required
+        value={value}
+        placeholder="Elige la unidad"
+        options={dimensions.map((dimension) => {
           const members = offered.filter((unit) => unit.dimension === dimension);
-          return (
-            <optgroup key={dimension} label={members[0]?.dimension_label ?? dimension}>
-              {members.map((unit) => (
-                <option key={unit.id} value={unit.id}>
-                  {unit.name} ({unit.code})
-                </option>
-              ))}
-            </optgroup>
-          );
+          return {
+            label: members[0]?.dimension_label ?? dimension,
+            options: members.map((unit) => ({
+              value: unit.id,
+              label: `${unit.name} (${unit.code})`,
+            })),
+          };
         })}
-      </select>
+        onChange={onChange}
+      />
     </Field>
   );
 }

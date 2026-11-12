@@ -20,6 +20,7 @@ import {
 } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
 import { navigationMap, openInventorySection } from './inventoryNavigationTestUtils';
+import { chooseValue } from '../../testing/select';
 
 // Solo con inventory.read: el resumen, el catálogo sin proveedores, los ajustes y la configuración
 // sin parámetros (etapa 9A, navegación agrupada).
@@ -201,7 +202,7 @@ describe('pestañas y resumen', () => {
     // La cifra de negativas abre Existencias filtrada.
     fireEvent.click(within(figures).getByRole('button', { name: /Existencias negativas/ }));
     await screen.findByRole('region', { name: 'Filtros de existencias' });
-    expect((screen.getByLabelText('Existencia') as HTMLSelectElement).value).toBe('negative');
+    expect((screen.getByLabelText('Existencia') as HTMLButtonElement).value).toBe('negative');
   });
 });
 
@@ -257,8 +258,8 @@ describe('insumos', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo insumo' }));
     fireEvent.change(screen.getByLabelText('Nombre del insumo'), { target: { value: 'Queso' } });
     fireEvent.change(screen.getByLabelText(/^Código interno/), { target: { value: 'QUE-01' } });
-    fireEvent.change(screen.getByLabelText(/^Categoría/), { target: { value: ids.groceries } });
-    fireEvent.change(screen.getByLabelText(/^Unidad base/), { target: { value: ids.gram } });
+    chooseValue(screen.getByLabelText(/^Categoría/), ids.groceries);
+    chooseValue(screen.getByLabelText(/^Unidad base/), ids.gram);
     fireEvent.change(screen.getByLabelText(/^Costo de referencia/), {
       target: { value: '0.0185' },
     });
@@ -293,9 +294,7 @@ describe('insumos', () => {
       target: { value: 'Bloque 2.5 kg' },
     });
     fireEvent.change(screen.getByLabelText(/^Contenido/), { target: { value: '2.5' } });
-    fireEvent.change(screen.getByLabelText(/^Unidad del contenido/), {
-      target: { value: ids.kilogram },
-    });
+    chooseValue(screen.getByLabelText(/^Unidad del contenido/), ids.kilogram);
     fireEvent.click(screen.getByRole('button', { name: 'Predeterminada para compra' }));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Agregar presentación' }));
@@ -402,9 +401,7 @@ describe('almacenes', () => {
     // La estación sin asignación usa el predeterminado; la otra tiene historial plegable.
     expect(screen.getByText('Almacén general (predeterminado)')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Historial de asignaciones/ })).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Almacén de Cocina caliente'), {
-      target: { value: ids.bar },
-    });
+    chooseValue(screen.getByLabelText('Almacén de Cocina caliente'), ids.bar);
     await act(async () => {
       fireEvent.click(screen.getAllByRole('button', { name: 'Asignar' })[0]!);
     });

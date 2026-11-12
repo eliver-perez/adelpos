@@ -8,6 +8,7 @@ import type { ExecuteKitchen, Printer, PrintJob, TicketDocument } from '../../se
 import { serverDateTime } from '../../services/restaurant';
 import { renderCurrentLabel, renderCurrentPermission } from '../documents/rerender';
 import { RerenderJob } from './RerenderJob';
+import { Select } from '../../components/Select';
 
 type QueueAction = 'resolve' | 'retry' | 'reprint' | 'rerender';
 
@@ -46,20 +47,17 @@ export function PrintQueue({
           inciertos no se reenvían automáticamente.
         </p>
         <Field label="Filtrar trabajos por estado">
-          <select
+          <Select
             value={state}
-            onChange={(event) => {
-              setState(event.target.value);
+            options={[
+              { value: '', label: 'Todos los estados' },
+              ...Object.entries(jobLabels).map(([key, label]) => ({ value: key, label })),
+            ]}
+            onChange={(next) => {
+              setState(next);
               setPage(1);
             }}
-          >
-            <option value="">Todos los estados</option>
-            {Object.entries(jobLabels).map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
         <Notice>{resource.error}</Notice>
         {resource.data?.map((job) => (
@@ -273,11 +271,15 @@ function JobEditor({
         >
           {action === 'resolve' && (
             <Field label="Decisión tras revisar el resultado">
-              <select value={decision} onChange={(event) => setDecision(event.target.value)}>
-                <option value="cancel">Cancelar administrativamente</option>
-                <option value="accepted">Reconocer aceptación conocida del transporte</option>
-                <option value="send">Autorizar envío, aceptando posible copia adicional</option>
-              </select>
+              <Select
+                value={decision}
+                options={[
+                  { value: 'cancel', label: 'Cancelar administrativamente' },
+                  { value: 'accepted', label: 'Reconocer aceptación conocida del transporte' },
+                  { value: 'send', label: 'Autorizar envío, aceptando posible copia adicional' },
+                ]}
+                onChange={setDecision}
+              />
             </Field>
           )}
           <TextField

@@ -15,6 +15,7 @@ import { countLabel, pluralWord } from '../../services/plural';
 import { DecimalTextField } from './InventoryFields';
 import { formatQuantity } from './inventoryFormat';
 import { isZeroText, receiptFolio, returnFolio, uncertainResult } from './purchasingFormat';
+import { Select } from '../../components/Select';
 
 // Cantidades a devolver por renglón de la recepción (texto tal como se capturó).
 type ReturnQuantities = Record<number, string>;
@@ -138,17 +139,15 @@ export function SupplierReturnForm({
       <form className="form-stack" onSubmit={(event) => void submit(event)}>
         <fieldset className="form-stack" disabled={locked}>
           <Field label="Almacén de la salida" hint="Por omisión, el de la recepción.">
-            <select
+            <Select
               required
               value={warehouseID}
-              onChange={(event) => setWarehouseID(event.target.value)}
-            >
-              {offered.map((warehouse) => (
-                <option key={warehouse.id} value={warehouse.id}>
-                  {warehouse.name}
-                </option>
-              ))}
-            </select>
+              options={offered.map((warehouse) => ({
+                value: warehouse.id,
+                label: warehouse.name,
+              }))}
+              onChange={setWarehouseID}
+            />
           </Field>
           {returnable.map((line) => (
             <fieldset

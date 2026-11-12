@@ -5,6 +5,7 @@ import { formatMoney } from '../src/services/money';
 import { installDriver } from './native-driver';
 import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
+import { chooseOption } from './select';
 
 // Etapa 9A, parte C2: módulo Reportes contra Go y PostgreSQL reales. Se crean por la API dos
 // cuentas cobradas y cerradas con un producto propio (tarjeta de débito y efectivo); la interfaz
@@ -70,7 +71,7 @@ async function openReport(page: Page, group: string, title: string) {
     .click();
   const picker = page.getByRole('combobox', { name: 'Reporte', exact: true });
   if (await picker.isVisible()) {
-    await picker.selectOption({ label: title });
+    await chooseOption(picker, title);
   } else {
     await page
       .getByRole('navigation', { name: `Reportes de ${group}` })

@@ -38,6 +38,7 @@ import {
   openInventorySection,
   sectionTab,
 } from './inventoryNavigationTestUtils';
+import { chooseValue, optionLabels, selectText, waitForOption } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -99,10 +100,9 @@ async function confirmDialog(button: string) {
 
 // Elige el insumo de un renglón de captura después de que llegan las opciones de Go.
 async function chooseLineItem(line: HTMLElement, itemID: string, label: string) {
-  await within(line).findByRole('option', { name: label });
-  fireEvent.change(within(line).getByRole('combobox', { name: 'Insumo' }), {
-    target: { value: itemID },
-  });
+  const picker = within(line).getByRole('combobox', { name: 'Insumo' });
+  await waitForOption(picker, label);
+  chooseValue(picker, itemID);
 }
 
 // Navegación completa con todos los permisos (etapa 9A): cinco grupos con sus secciones.
@@ -334,9 +334,10 @@ describe('ajustes y mermas', () => {
     expect(within(line).getByText(/La merma solo registra salidas/)).toBeTruthy();
     await chooseLineItem(line, ids.flour, 'Harina · HAR-01');
     fireEvent.change(within(line).getByLabelText(/^Cantidad/), { target: { value: '1' } });
-    fireEvent.change(within(line).getByRole('combobox', { name: 'Unidad o presentación' }), {
-      target: { value: `presentation:${ids.sack}` },
-    });
+    chooseValue(
+      within(line).getByRole('combobox', { name: 'Unidad o presentación' }),
+      `presentation:${ids.sack}`,
+    );
     // Sin motivo no se envía.
     await submitWith('Registrar merma');
     await screen.findByText('Elige el motivo.');
@@ -411,34 +412,28 @@ describe('transferencias', () => {
     ]);
     fireEvent.click(await screen.findByRole('button', { name: 'Nueva transferencia' }));
     const destination = screen.getByRole('combobox', { name: /^Almacén de destino/ });
-    await within(destination).findByRole('option', { name: 'Barra' });
-    // El destino no ofrece el almacén de origen.
-    expect(
-      within(destination)
-        .getAllByRole('option')
-        .map((option) => option.textContent),
-    ).toEqual(['Elige el destino', 'Barra']);
-    fireEvent.change(destination, { target: { value: ids.bar } });
+    await waitForOption(destination, 'Barra');
+    // El destino no ofrece el almacén de origen (y «Elige el destino» es solo el texto vacío).
+    expect(selectText(destination)).toBe('Elige el destino');
+    expect(optionLabels(destination)).toEqual(['Barra']);
+    chooseValue(destination, ids.bar);
     // Elegir como origen el mismo almacén deja el destino sin elegir.
-    fireEvent.change(screen.getByRole('combobox', { name: /^Almacén de origen/ }), {
-      target: { value: ids.bar },
-    });
-    expect((destination as HTMLSelectElement).value).toBe('');
+    chooseValue(screen.getByRole('combobox', { name: /^Almacén de origen/ }), ids.bar);
+    expect((destination as HTMLButtonElement).value).toBe('');
     const submit = screen
       .getAllByRole('button', { name: 'Registrar transferencia' })
       .find((button) => button.getAttribute('type') === 'submit') as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
-    fireEvent.change(screen.getByRole('combobox', { name: /^Almacén de origen/ }), {
-      target: { value: ids.general },
-    });
-    fireEvent.change(destination, { target: { value: ids.bar } });
+    chooseValue(screen.getByRole('combobox', { name: /^Almacén de origen/ }), ids.general);
+    chooseValue(destination, ids.bar);
     const line = screen.getByRole('group', { name: 'Renglón 1' });
     expect(within(line).queryByRole('group', { name: 'Sentido del renglón 1' })).toBeNull();
     await chooseLineItem(line, ids.flour, 'Harina · HAR-01');
     fireEvent.change(within(line).getByLabelText(/^Cantidad/), { target: { value: '2' } });
-    fireEvent.change(within(line).getByRole('combobox', { name: 'Unidad o presentación' }), {
-      target: { value: `presentation:${ids.sack}` },
-    });
+    chooseValue(
+      within(line).getByRole('combobox', { name: 'Unidad o presentación' }),
+      `presentation:${ids.sack}`,
+    );
     await submitWith('Registrar transferencia');
     const dialog = await confirmDialog('Registrar transferencia');
     expect(dialog.textContent).toContain('una existencia negativa en el origen no bloquea');

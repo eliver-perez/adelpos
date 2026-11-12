@@ -59,20 +59,35 @@ export function timezoneOptions(current = ''): string[] {
   return result;
 }
 
-function normalized(text: string): string {
-  return text.normalize('NFD').replace(/[̀-ͯ]/g, '').replaceAll('_', ' ').toLowerCase();
-}
-
 // «America/Mexico_City» se muestra como «America/Mexico City».
 export function timezoneLabel(zone: string): string {
   return zone.replaceAll('_', ' ');
 }
 
-// Filtra por cualquier parte del identificador, sin acentos ni guiones bajos.
-export function filterTimezones(zones: string[], query: string): string[] {
-  const wanted = normalized(query.trim());
-  if (!wanted) {
-    return zones;
-  }
-  return zones.filter((zone) => normalized(zone).includes(wanted));
+export interface TimezoneGroup {
+  label: string;
+  options: { value: string; label: string; keywords?: string }[];
+}
+
+// Grupos del selector de zona horaria (etapa 9C): México primero y después las demás. La búsqueda
+// del selector compara el texto visible sin acentos ni guiones bajos; las de México también se
+// encuentran escribiendo «México».
+export function timezoneGroups(current = ''): TimezoneGroup[] {
+  const zones = timezoneOptions(current);
+  const mexico = zones.filter((zone) => mexicoTimezones.includes(zone));
+  const others = zones.filter((zone) => !mexicoTimezones.includes(zone));
+  return [
+    {
+      label: 'México',
+      options: mexico.map((zone) => ({
+        value: zone,
+        label: timezoneLabel(zone),
+        keywords: 'México',
+      })),
+    },
+    {
+      label: 'Otras zonas',
+      options: others.map((zone) => ({ value: zone, label: timezoneLabel(zone) })),
+    },
+  ];
 }

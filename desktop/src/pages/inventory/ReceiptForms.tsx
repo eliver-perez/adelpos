@@ -41,6 +41,7 @@ import {
   uncertainResult,
 } from './purchasingFormat';
 import type { PurchaseLineDraft } from './purchasingFormat';
+import { Select } from '../../components/Select';
 
 // Formularios de recepción (inventory.purchases.receive): de una orden emitida o parcial y directa
 // sin orden (además inventory.purchases.create). Cada envío lleva su operation_id: un reintento
@@ -158,18 +159,15 @@ function ReceiptHeaderFields({
     <>
       <div className="form-grid">
         <Field label="Almacén de la recepción" hint="Donde entra la mercancía.">
-          <select
+          <Select
             required
             value={header.warehouseID}
-            onChange={(event) => onChange({ ...header, warehouseID: event.target.value })}
-          >
-            {offered.map((warehouse) => (
-              <option key={warehouse.id} value={warehouse.id}>
-                {warehouse.name}
-                {warehouse.active ? '' : ' (inactivo)'}
-              </option>
-            ))}
-          </select>
+            options={offered.map((warehouse) => ({
+              value: warehouse.id,
+              label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+            }))}
+            onChange={(warehouseID) => onChange({ ...header, warehouseID })}
+          />
         </Field>
         <Field label="Referencia del proveedor" hint="Factura o remisión; opcional, una línea.">
           <input

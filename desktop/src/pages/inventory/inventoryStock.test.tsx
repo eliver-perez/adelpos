@@ -22,6 +22,7 @@ import {
 import type { RecordedRequest, Responder } from './inventoryTestData';
 import { conflictMessage } from './useInventoryMutation';
 import { openInventorySection, sectionTab } from './inventoryNavigationTestUtils';
+import { chooseOptionAsync, chooseValue } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -114,8 +115,8 @@ describe('existencias', () => {
     expect(screen.queryByText('Valor total del inventario')).toBeNull();
     expect(screen.queryByText(/\$/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Existencia inicial' })).toBeNull();
-    fireEvent.change(screen.getByLabelText('Almacén'), { target: { value: ids.general } });
-    fireEvent.change(screen.getByLabelText('Existencia'), { target: { value: 'negative' } });
+    chooseValue(screen.getByLabelText('Almacén'), ids.general);
+    chooseValue(screen.getByLabelText('Existencia'), 'negative');
     await waitFor(() =>
       expect(lastQuery(requests, 'inventory_stock')).toEqual({
         page: '1',
@@ -195,23 +196,15 @@ describe('existencia inicial', () => {
     });
     // Renglón 1: Harina en costales, al costo de referencia.
     const first = screen.getByRole('group', { name: 'Renglón 1' });
-    await waitFor(() =>
-      expect(within(first).getByRole('option', { name: 'Harina · HAR-01' })).toBeTruthy(),
-    );
-    fireEvent.change(within(first).getByLabelText('Insumo'), { target: { value: ids.flour } });
+    await chooseOptionAsync(within(first).getByLabelText('Insumo'), 'Harina · HAR-01');
     fireEvent.change(within(first).getByLabelText('Cantidad'), { target: { value: '2' } });
-    fireEvent.change(within(first).getByLabelText('Unidad o presentación'), {
-      target: { value: `presentation:${ids.sack}` },
-    });
+    chooseValue(within(first).getByLabelText('Unidad o presentación'), `presentation:${ids.sack}`);
     expect(within(first).getByText('Costo de referencia: $18.00 por kilogramo.')).toBeTruthy();
     fireEvent.click(within(first).getByRole('button', { name: 'Usar el costo de referencia' }));
     // Renglón 2: Tomate en gramos con su costo capturado; sin costo de referencia no se ofrece.
     fireEvent.click(screen.getByRole('button', { name: 'Agregar renglón' }));
     const second = screen.getByRole('group', { name: 'Renglón 2' });
-    await waitFor(() =>
-      expect(within(second).getByRole('option', { name: 'Tomate · TOM-01' })).toBeTruthy(),
-    );
-    fireEvent.change(within(second).getByLabelText('Insumo'), { target: { value: ids.tomato } });
+    await chooseOptionAsync(within(second).getByLabelText('Insumo'), 'Tomate · TOM-01');
     expect(
       (
         within(second).getByRole('button', {
@@ -220,9 +213,7 @@ describe('existencia inicial', () => {
       ).disabled,
     ).toBe(true);
     fireEvent.change(within(second).getByLabelText('Cantidad'), { target: { value: '1500.250' } });
-    fireEvent.change(within(second).getByLabelText('Unidad o presentación'), {
-      target: { value: `unit:${ids.gram}` },
-    });
+    chooseValue(within(second).getByLabelText('Unidad o presentación'), `unit:${ids.gram}`);
     fireEvent.change(within(second).getByLabelText(/^Costo unitario/), {
       target: { value: '0.0230' },
     });
@@ -295,15 +286,10 @@ describe('movimientos', () => {
     expect(screen.queryByRole('columnheader', { name: 'Valor' })).toBeNull();
     expect(document.body.textContent).not.toContain(ids.operation);
     expect(document.body.textContent).not.toContain(ids.movement);
-    await waitFor(() =>
-      expect(
-        within(screen.getByLabelText('Insumo')).getByRole('option', { name: 'Harina · HAR-01' }),
-      ).toBeTruthy(),
-    );
-    fireEvent.change(screen.getByLabelText('Insumo'), { target: { value: ids.flour } });
-    fireEvent.change(screen.getByLabelText('Almacén'), { target: { value: ids.general } });
-    fireEvent.change(screen.getByLabelText('Tipo de movimiento'), { target: { value: 'initial' } });
-    fireEvent.change(screen.getByLabelText('Origen'), { target: { value: 'initial' } });
+    await chooseOptionAsync(screen.getByLabelText('Insumo'), 'Harina · HAR-01');
+    chooseValue(screen.getByLabelText('Almacén'), ids.general);
+    chooseValue(screen.getByLabelText('Tipo de movimiento'), 'initial');
+    chooseValue(screen.getByLabelText('Origen'), 'initial');
     fireEvent.change(screen.getByLabelText('Fecha de negocio desde'), {
       target: { value: '01112026' },
     });

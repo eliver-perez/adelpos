@@ -10,6 +10,7 @@ import type {
 import { inventoryCostShape } from '../../services/numericInput';
 import { ActiveToggle, DecimalTextField } from './InventoryFields';
 import { formatQuantity, inventoryPermissionName } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 const dimensions = Object.keys(dimensionLabels) as Dimension[];
 
@@ -86,17 +87,12 @@ function UnitEditor({
           />
         </Field>
         <Field label="Dimensión" hint="Solo convierte con unidades de la misma dimensión.">
-          <select
+          <Select<Dimension>
             value={dimension}
             disabled={unit !== null}
-            onChange={(event) => setDimension(event.target.value as Dimension)}
-          >
-            {dimensions.map((value) => (
-              <option key={value} value={value}>
-                {dimensionLabels[value]}
-              </option>
-            ))}
-          </select>
+            options={dimensions.map((value) => ({ value, label: dimensionLabels[value] }))}
+            onChange={setDimension}
+          />
         </Field>
         <DecimalTextField
           label="Equivalencia"

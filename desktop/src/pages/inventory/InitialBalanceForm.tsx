@@ -23,6 +23,7 @@ import { countLabel, pluralWord } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
 import { DecimalTextField, ItemPicker } from './InventoryFields';
 import { formatQuantity } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 // Renglón capturado de la existencia inicial. measure vacío es la unidad base del insumo;
 // «unit:<id>» otra unidad de la misma dimensión y «presentation:<id>» una presentación.
@@ -158,29 +159,30 @@ function LineEditor({
           required
         />
         <Field label="Unidad o presentación">
-          <select
+          <Select
             value={line.measure}
             disabled={!item}
-            onChange={(event) => onChange({ ...line, measure: event.target.value })}
-          >
-            {item ? (
-              <option value="">
-                {item.base_unit.name} ({item.base_unit.code}) · unidad base
-              </option>
-            ) : (
-              <option value="">Elige primero el insumo</option>
-            )}
-            {otherUnits.map((unit) => (
-              <option key={unit.id} value={`unit:${unit.id}`}>
-                {unit.name} ({unit.code})
-              </option>
-            ))}
-            {presentations.map((presentation) => (
-              <option key={presentation.id} value={`presentation:${presentation.id}`}>
-                {presentation.name} ({formatQuantity(presentation.base_quantity, item?.base_unit)})
-              </option>
-            ))}
-          </select>
+            options={[
+              {
+                value: '',
+                label: item
+                  ? `${item.base_unit.name} (${item.base_unit.code}) · unidad base`
+                  : 'Elige primero el insumo',
+              },
+              ...otherUnits.map((unit) => ({
+                value: `unit:${unit.id}`,
+                label: `${unit.name} (${unit.code})`,
+              })),
+              ...presentations.map((presentation) => ({
+                value: `presentation:${presentation.id}`,
+                label: `${presentation.name} (${formatQuantity(
+                  presentation.base_quantity,
+                  item?.base_unit,
+                )})`,
+              })),
+            ]}
+            onChange={(measure) => onChange({ ...line, measure })}
+          />
         </Field>
         <DecimalTextField
           label="Costo unitario"
@@ -412,17 +414,15 @@ export function InitialBalanceForm({
         <fieldset className="form-stack" disabled={locked}>
           <div className="form-grid">
             <Field label="Almacén de la existencia inicial">
-              <select
+              <Select
                 required
                 value={warehouseID}
-                onChange={(event) => setWarehouseID(event.target.value)}
-              >
-                {available.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name}
-                  </option>
-                ))}
-              </select>
+                options={available.map((warehouse) => ({
+                  value: warehouse.id,
+                  label: warehouse.name,
+                }))}
+                onChange={setWarehouseID}
+              />
             </Field>
             <Field
               label="Motivo u observación"

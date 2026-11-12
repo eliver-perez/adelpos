@@ -5,6 +5,7 @@ import { installDriver } from './native-driver';
 import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
 import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
+import { chooseOption, expectSelectValue } from './select';
 
 // Etapa 8, fase C (interfaz de compras): recorrido de proveedores, órdenes de compra, recepciones
 // y vínculo con gastos de caja con el mismo transporte de prueba que las demás especificaciones
@@ -139,17 +140,13 @@ async function preparePreconditions(driver: Driver) {
 }
 
 async function chooseItem(line: Locator, code: string, label: string) {
-  await line.getByLabel('Buscar insumo', { exact: true }).fill(code);
   const select = line.getByRole('combobox', { name: /^Insumo/ });
-  await expect(select.locator('option', { hasText: label })).toHaveCount(1);
-  await select.selectOption({ label });
+  await chooseOption(select, label, { search: code });
 }
 
 async function chooseSupplier(scope: Page | Locator) {
-  await scope.getByLabel('Buscar proveedor', { exact: true }).fill('E2E C');
   const select = scope.getByRole('combobox', { name: /^Proveedor/ });
-  await expect(select.locator('option', { hasText: supplierName })).toHaveCount(1);
-  await select.selectOption({ label: supplierName });
+  await chooseOption(select, supplierName, { search: 'E2E C' });
 }
 
 test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción directa y vínculo con un gasto', async ({
@@ -202,13 +199,12 @@ test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción direc
   const supplied = page.getByRole('region', { name: 'Insumos que surte' });
   await supplied.getByRole('button', { name: 'Agregar insumo surtido', exact: true }).click();
   const itemForm = page.getByRole('form', { name: 'Nuevo insumo surtido' });
-  await itemForm.getByLabel('Buscar insumo surtido', { exact: true }).fill(sodaCode);
   const itemSelect = itemForm.getByRole('combobox', { name: /^Insumo surtido/ });
-  await expect(itemSelect.locator('option', { hasText: sodaName })).toHaveCount(1);
-  await itemSelect.selectOption({ label: `${sodaName} · ${sodaCode}` });
-  await itemForm
-    .getByRole('combobox', { name: /^Presentación habitual/ })
-    .selectOption({ label: 'Caja con 24 (24 pza)' });
+  await chooseOption(itemSelect, `${sodaName} · ${sodaCode}`, { search: sodaCode });
+  await chooseOption(
+    itemForm.getByRole('combobox', { name: /^Presentación habitual/ }),
+    'Caja con 24 (24 pza)',
+  );
   await itemForm.getByLabel(/^Código del proveedor/).fill('R-24');
   await itemForm
     .getByRole('button', { name: 'Proveedor preferido de este insumo', exact: true })
@@ -234,7 +230,8 @@ test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción direc
   const orderLine = page.getByRole('group', { name: 'Renglón 1' });
   await chooseItem(orderLine, sodaCode, `${sodaName} · ${sodaCode}`);
   // Se propone la presentación habitual con el proveedor.
-  await expect(orderLine.getByRole('combobox', { name: /^Unidad o presentación/ })).toHaveValue(
+  await expectSelectValue(
+    orderLine.getByRole('combobox', { name: /^Unidad o presentación/ }),
     /^presentation:/,
   );
   await orderLine.getByLabel(/^Cantidad/).fill('20');

@@ -20,6 +20,7 @@ import { Pagination } from './InventoryFields';
 import { inventoryPermissionName } from './inventoryFormat';
 import type { InventoryNavigate } from './inventoryNavigation';
 import { cancellationAccount, operatingDateText } from './recipeFormat';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -391,21 +392,16 @@ function CancellationHistory({
       </div>
       <div className="catalog-filters inventory-inline-filters" aria-label="Filtros del historial">
         <Field label="Clasificación">
-          <select
+          <Select<CancellationState | ''>
             value={filter.state}
-            onChange={(event) =>
-              setFilter({
-                ...filter,
-                state: event.target.value as CancellationState | '',
-                page: 1,
-              })
-            }
-          >
-            <option value="">Todas</option>
-            <option value="not_prepared">No preparado</option>
-            <option value="prepared_waste">Preparado / merma</option>
-            <option value="pending">Pendientes de clasificar</option>
-          </select>
+            options={[
+              { value: '', label: 'Todas' },
+              { value: 'not_prepared', label: 'No preparado' },
+              { value: 'prepared_waste', label: 'Preparado / merma' },
+              { value: 'pending', label: 'Pendientes de clasificar' },
+            ]}
+            onChange={(state) => setFilter({ ...filter, state, page: 1 })}
+          />
         </Field>
         <OptionalDateField
           label="Día operativo desde"

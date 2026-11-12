@@ -23,6 +23,7 @@ import {
   itemPage,
 } from './inventoryTestData';
 import type { RecordedRequest, Responder } from './inventoryTestData';
+import { chooseOption, chooseOptionAsync, chooseValue, waitForOption } from '../../testing/select';
 
 // Etapa 9A, fase A (A2): código interno sugerido, alta rápida y administración de categorías,
 // recepción directa con «Compras de mostrador», devoluciones a proveedor y proveedores formales en
@@ -163,11 +164,9 @@ describe('alta rápida de categorías desde el insumo', () => {
       target: { value: 'Queso fresco' },
     });
     fireEvent.change(codeInput(), { target: { value: 'QUE-02' } });
-    fireEvent.change(screen.getByLabelText(/^Unidad base/), { target: { value: ids.gram } });
+    chooseValue(screen.getByLabelText(/^Unidad base/), ids.gram);
     fireEvent.change(screen.getByLabelText('Descripción'), { target: { value: 'Del rancho' } });
-    fireEvent.change(screen.getByLabelText(/^Categoría/), {
-      target: { value: '__new_category__' },
-    });
+    chooseOption(screen.getByLabelText(/^Categoría/), '+ Nueva categoría');
     const dialog = await screen.findByRole('dialog', { name: 'Nueva categoría de insumos' });
     // El diálogo vive fuera del formulario del insumo (sin formularios anidados).
     expect(dialog.parentElement?.closest('form')).toBeNull();
@@ -188,7 +187,7 @@ describe('alta rápida de categorías desde el insumo', () => {
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await screen.findByText('Categoría «Quesos» creada y seleccionada.');
-    expect((screen.getByLabelText(/^Categoría/) as HTMLSelectElement).value).toBe(newCategoryID);
+    expect((screen.getByLabelText(/^Categoría/) as HTMLButtonElement).value).toBe(newCategoryID);
     expect((screen.getByLabelText('Nombre del insumo') as HTMLInputElement).value).toBe(
       'Queso fresco',
     );
@@ -210,14 +209,12 @@ describe('alta rápida de categorías desde el insumo', () => {
   it('cancelar el diálogo deja la categoría que había y no escribe', async () => {
     const requests = useTransport();
     await openNewItem();
-    fireEvent.change(screen.getByLabelText(/^Categoría/), { target: { value: ids.dairy } });
-    fireEvent.change(screen.getByLabelText(/^Categoría/), {
-      target: { value: '__new_category__' },
-    });
+    chooseValue(screen.getByLabelText(/^Categoría/), ids.dairy);
+    chooseOption(screen.getByLabelText(/^Categoría/), '+ Nueva categoría');
     const dialog = await screen.findByRole('dialog', { name: 'Nueva categoría de insumos' });
     fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect((screen.getByLabelText(/^Categoría/) as HTMLSelectElement).value).toBe(ids.dairy);
+    expect((screen.getByLabelText(/^Categoría/) as HTMLButtonElement).value).toBe(ids.dairy);
     expect(writes(requests, 'inventory_create_category')).toHaveLength(0);
   });
 
@@ -226,8 +223,13 @@ describe('alta rápida de categorías desde el insumo', () => {
     renderInventory(['inventory.read']);
     await openInventorySection('Insumos');
     fireEvent.click(await screen.findByRole('button', { name: 'Ver el insumo Harina' }));
+    // Sin el permiso el formulario es de solo lectura: el selector no se abre y, por lo tanto, no
+    // ofrece la acción «+ Nueva categoría».
     const select = await screen.findByLabelText(/^Categoría/);
-    expect(within(select).queryByRole('option', { name: '+ Nueva categoría' })).toBeNull();
+    expect(select.matches(':disabled')).toBe(true);
+    fireEvent.click(select);
+    expect(select.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('option', { name: '+ Nueva categoría' })).toBeNull();
   });
 });
 
@@ -270,7 +272,7 @@ describe('categorías de insumos en Configuración', () => {
         category_id: ids.dairy,
       }),
     );
-    expect((screen.getByLabelText('Categoría') as HTMLSelectElement).value).toBe(ids.dairy);
+    expect((screen.getByLabelText('Categoría') as HTMLButtonElement).value).toBe(ids.dairy);
   });
 });
 
@@ -354,13 +356,11 @@ describe('recepción directa con «Compras de mostrador»', () => {
       target: { value: 'Central de abastos' },
     });
     const line = screen.getByRole('group', { name: 'Renglón 1' });
-    await within(line).findByRole('option', { name: 'Refresco · REF-01' });
-    fireEvent.change(within(line).getByRole('combobox', { name: /^Insumo/ }), {
-      target: { value: purchasingIDs.soda },
-    });
-    fireEvent.change(within(line).getByRole('combobox', { name: /^Unidad o presentación/ }), {
-      target: { value: '' },
-    });
+    await chooseOptionAsync(
+      within(line).getByRole('combobox', { name: /^Insumo/ }),
+      'Refresco · REF-01',
+    );
+    chooseValue(within(line).getByRole('combobox', { name: /^Unidad o presentación/ }), '');
     fireEvent.change(within(line).getByLabelText(/^Cantidad/), { target: { value: '6' } });
     fireEvent.change(within(line).getByLabelText(/^Precio unitario sin IVA/), {
       target: { value: '15' },
@@ -396,7 +396,10 @@ describe('recepción directa con «Compras de mostrador»', () => {
     renderInventory(purchasingPermissions);
     await openInventorySection('Recepciones');
     fireEvent.click(await screen.findByRole('button', { name: 'Recepción directa' }));
-    await screen.findByRole('option', { name: 'Distribuidora del Norte' });
+    await waitForOption(
+      await screen.findByRole('combobox', { name: /^Proveedor/ }),
+      'Distribuidora del Norte',
+    );
     // El selector de la recepción pide solo proveedores formales activos.
     const pickerQuery = writes(requests, 'inventory_suppliers').filter(
       (request) => request.query?.active === 'true' && request.query?.page_size === '50',
@@ -444,7 +447,7 @@ describe('recepción directa con «Compras de mostrador»', () => {
     renderInventory(purchasingPermissions);
     await openInventorySection('Recepciones');
     await screen.findByText('Mostrador · Mercado Juárez');
-    fireEvent.change(screen.getByLabelText('Tipo de recepción'), { target: { value: 'counter' } });
+    chooseValue(screen.getByLabelText('Tipo de recepción'), 'counter');
     await waitFor(() =>
       expect(writes(requests, 'inventory_receipts').at(-1)?.query).toMatchObject({
         supplier_kind: 'counter',

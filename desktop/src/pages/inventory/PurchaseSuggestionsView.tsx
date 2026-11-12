@@ -16,6 +16,7 @@ import { Pagination } from './InventoryFields';
 import { formatQuantity } from './inventoryFormat';
 import { SupplierPicker } from './PurchaseFields';
 import { isZeroText, orderFolio, purchasingPermissionName } from './purchasingFormat';
+import { Select } from '../../components/Select';
 
 const pageSize = 100;
 
@@ -381,20 +382,17 @@ export function PurchaseSuggestionsView({
           />
         </Field>
         <Field label="Categoría">
-          <select
+          <Select
             value={category}
-            onChange={(event) => {
-              setCategory(event.target.value);
+            options={[
+              { value: '', label: 'Todas' },
+              ...(categories.data ?? []).map((entry) => ({ value: entry.id, label: entry.name })),
+            ]}
+            onChange={(next) => {
+              setCategory(next);
               setPage(1);
             }}
-          >
-            <option value="">Todas</option>
-            {(categories.data ?? []).map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
       </section>
       <Notice>{list.error}</Notice>

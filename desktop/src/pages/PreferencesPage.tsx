@@ -4,6 +4,7 @@ import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
 import type { Identity, Preferences } from '../services/models';
 import { savePreferences } from '../services/preferences';
+import { Select } from '../components/Select';
 
 // Apariencia de un usuario. Desde la etapa 9C la pantalla inicial es de la terminal (Sistema →
 // Terminales): el formulario ya no la ofrece y reenvía sin cambios el valor que guarda Go, que
@@ -29,13 +30,14 @@ export function UserPreferencesForm({
     >
       <div className="form-grid">
         <Field label="Tema">
-          <select
+          <Select<Preferences['theme']>
             value={theme}
-            onChange={(event) => setTheme(event.target.value as Preferences['theme'])}
-          >
-            <option value="light">Claro</option>
-            <option value="dark">Oscuro</option>
-          </select>
+            options={[
+              { value: 'light', label: 'Claro' },
+              { value: 'dark', label: 'Oscuro' },
+            ]}
+            onChange={setTheme}
+          />
         </Field>
       </div>
     </Form>
@@ -93,14 +95,15 @@ export function PreferencesPage({
           }}
         >
           <Field label="Teclado virtual para formularios futuros">
-            <select
+            <Select<typeof keyboard>
               value={keyboard}
-              onChange={(event) => setKeyboard(event.target.value as typeof keyboard)}
-            >
-              <option value="auto">Automático</option>
-              <option value="always">Siempre habilitado</option>
-              <option value="disabled">Desactivado</option>
-            </select>
+              options={[
+                { value: 'auto', label: 'Automático' },
+                { value: 'always', label: 'Siempre habilitado' },
+                { value: 'disabled', label: 'Desactivado' },
+              ]}
+              onChange={setKeyboard}
+            />
           </Field>
           <p className="muted text-sm">
             Esta etapa guarda la preferencia. El teclado flotante se incorporará con los formularios

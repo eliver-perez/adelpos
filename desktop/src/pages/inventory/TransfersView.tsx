@@ -26,6 +26,7 @@ import { defaultWarehouseID, WarehouseSelect, WarningList } from './ControlShare
 import { Pagination } from './InventoryFields';
 import { formatQuantity, inventoryPermissionName } from './inventoryFormat';
 import { measureName } from './PurchaseFields';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -85,18 +86,17 @@ function TransferFilters({
         />
       </Field>
       <Field label="Almacén de origen o destino">
-        <select
+        <Select
           value={filter.warehouse}
-          onChange={(event) => onChange({ ...filter, warehouse: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          {warehouses.map((warehouse) => (
-            <option key={warehouse.id} value={warehouse.id}>
-              {warehouse.name}
-              {warehouse.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...warehouses.map((warehouse) => ({
+              value: warehouse.id,
+              label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          onChange={(warehouse) => onChange({ ...filter, warehouse, page: 1 })}
+        />
       </Field>
       <OptionalDateField
         label="Desde"

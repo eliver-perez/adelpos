@@ -14,6 +14,7 @@ import type { Shift } from '../../services/payments';
 import { serverDateTime } from '../../services/restaurant';
 import { businessDate } from './movementRows';
 import { ShiftHistoryDetail } from './ShiftHistoryDetail';
+import { Select } from '../../components/Select';
 
 // Diferencia del cierre tal como la entregó Go; sin permiso no viaja y no se muestra nada.
 function differenceText(closure: ClosureSummary | null) {
@@ -40,17 +41,17 @@ function HistoryFilters({
     <div className="catalog-filters">
       {registers.length > 1 && (
         <Field label="Caja">
-          <select
+          <Select
             value={filter.register_id ?? ''}
-            onChange={(event) => onChange({ ...filter, register_id: event.target.value, page: '' })}
-          >
-            <option value="">Todas</option>
-            {registers.map((entry) => (
-              <option key={entry.register.id} value={entry.register.id}>
-                {entry.register.name}
-              </option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: 'Todas' },
+              ...registers.map((entry) => ({
+                value: entry.register.id,
+                label: entry.register.name,
+              })),
+            ]}
+            onChange={(register_id) => onChange({ ...filter, register_id, page: '' })}
+          />
         </Field>
       )}
       <OptionalDateField
@@ -64,21 +65,22 @@ function HistoryFilters({
         onChange={(until) => onChange({ ...filter, until, page: '' })}
       />
       <Field label="Estado">
-        <select
+        <Select
           value={filter.state ?? ''}
-          onChange={(event) =>
+          options={[
+            { value: '', label: 'Todos' },
+            { value: 'open', label: 'Abierto' },
+            { value: 'closing', label: 'Cierre en curso' },
+            { value: 'closed', label: 'Cerrado' },
+          ]}
+          onChange={(state) =>
             onChange({
               ...filter,
-              state: (event.target.value || undefined) as ShiftHistoryFilter['state'],
+              state: (state || undefined) as ShiftHistoryFilter['state'],
               page: '',
             })
           }
-        >
-          <option value="">Todos</option>
-          <option value="open">Abierto</option>
-          <option value="closing">Cierre en curso</option>
-          <option value="closed">Cerrado</option>
-        </select>
+        />
       </Field>
     </div>
   );

@@ -4,6 +4,7 @@ import { APIError } from '../../services/api';
 import type { InventoryWarning, Warehouse } from '../../services/inventory';
 import type { NotifyOptions } from '../../services/notify';
 import type { InventoryNavigate } from './inventoryNavigation';
+import { Select } from '../../components/Select';
 
 // Avisos que devuelve Go y que nunca bloquean: existencia negativa, renglones sin contar,
 // consumos o cancelaciones pendientes… Se muestran tal como llegan, sin códigos internos.
@@ -55,15 +56,16 @@ export function WarehouseSelect({
   );
   return (
     <Field label={label} hint={hint}>
-      <select required value={value} onChange={(event) => onChange(event.target.value)}>
-        {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
-        {offered.map((warehouse) => (
-          <option key={warehouse.id} value={warehouse.id}>
-            {warehouse.name}
-            {warehouse.active ? '' : ' (inactivo)'}
-          </option>
-        ))}
-      </select>
+      <Select
+        required
+        value={value}
+        placeholder={emptyLabel}
+        options={offered.map((warehouse) => ({
+          value: warehouse.id,
+          label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+        }))}
+        onChange={onChange}
+      />
     </Field>
   );
 }

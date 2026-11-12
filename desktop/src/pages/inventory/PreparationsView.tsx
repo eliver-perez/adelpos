@@ -8,6 +8,7 @@ import { countLabel } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
 import { formatQuantity } from './inventoryFormat';
 import type { RecipeDraftTarget } from './RecipeEditor';
+import { Select } from '../../components/Select';
 
 // Una sola página de hasta 100 preparaciones (el máximo de Go) se reparte entre las dos
 // modalidades; con más, la búsqueda acota el listado.
@@ -165,11 +166,15 @@ export function PreparationsView({
           />
         </Field>
         <Field label="Estado de la preparación">
-          <select value={active} onChange={(event) => setActive(event.target.value)}>
-            <option value="">Todas</option>
-            <option value="true">Activas</option>
-            <option value="false">Inactivas</option>
-          </select>
+          <Select
+            value={active}
+            options={[
+              { value: '', label: 'Todas' },
+              { value: 'true', label: 'Activas' },
+              { value: 'false', label: 'Inactivas' },
+            ]}
+            onChange={setActive}
+          />
         </Field>
       </section>
       <Notice>{list.error}</Notice>

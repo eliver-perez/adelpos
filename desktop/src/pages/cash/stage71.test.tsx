@@ -19,6 +19,7 @@ import {
   shiftOf,
 } from './cashTestData';
 import { MovementsTimeline } from './MovementsView';
+import { chooseOption, closeSelect, openSelect, queryOption } from '../../testing/select';
 
 // Fase C de la etapa 7.1 en la interfaz: tarjetas de acción de Caja, cierre del panel tras
 // registrar con su aviso e «Imprimir comprobante», atajo «Caja» de las pantallas operativas, aviso
@@ -470,9 +471,9 @@ describe('intentos rechazados en Movimientos', () => {
   it('el filtro solo existe con permiso de consultar el esperado y nunca muestra el esperado', async () => {
     renderTimeline(() => true);
     const filter = await screen.findByRole('combobox', { name: /Tipo de movimiento/ });
-    expect(within(filter).getByRole('option', { name: 'Intentos rechazados' })).toBeTruthy();
+    expect(queryOption(filter, 'Intentos rechazados')).toBeTruthy();
     expect(sent('payments_shift_rejected_outflows')).toHaveLength(0);
-    fireEvent.change(filter, { target: { value: 'rejected' } });
+    chooseOption(filter, 'Intentos rechazados');
     const table = await screen.findByRole('table', { name: 'Intentos rechazados' });
     const row = within(table).getByText('Cajera Rosa').closest('tr')!;
     expect(row.textContent).toContain('Retiro');
@@ -487,7 +488,7 @@ describe('intentos rechazados en Movimientos', () => {
     renderTimeline((permission) => permission !== 'cash.expected.read');
     const plain = await screen.findByRole('combobox', { name: /Tipo de movimiento/ });
     await waitFor(() => expect(sent('payments_shift_movements').length).toBeGreaterThan(0));
-    expect(within(plain).queryByRole('option', { name: 'Intentos rechazados' })).toBeNull();
+    expect(queryOption(plain, 'Intentos rechazados')).toBeNull();
     expect(sent('payments_shift_rejected_outflows')).toHaveLength(0);
   });
 });
@@ -547,14 +548,14 @@ describe('cajón por CUPS en la configuración', () => {
       </PendingOperationsProvider>,
     );
     const select = await screen.findByLabelText('Impresora del cajón');
-    const usb = within(select).getByRole('option', {
-      name: 'Tickets USB · CUPS · USB',
-    }) as HTMLOptionElement;
-    const airprint = within(select).getByRole('option', {
+    const listbox = openSelect(select);
+    const usb = within(listbox).getByRole('option', { name: 'Tickets USB · CUPS · USB' });
+    const airprint = within(listbox).getByRole('option', {
       name: 'Oficina · CUPS · Bonjour · no compatible',
-    }) as HTMLOptionElement;
-    expect(usb.disabled).toBe(false);
-    expect(airprint.disabled).toBe(true);
+    });
+    expect(usb.getAttribute('aria-disabled')).toBeNull();
+    expect(airprint.getAttribute('aria-disabled')).toBe('true');
+    closeSelect(select);
     const explained = screen.getByLabelText('Impresoras que no sirven para el cajón');
     expect(explained.textContent).toContain('AirPrint o IPP Everywhere');
     fireEvent.click(screen.getByRole('button', { name: 'Probar apertura' }));
@@ -596,7 +597,7 @@ describe('cajón por CUPS en la configuración', () => {
       </PendingOperationsProvider>,
     );
     const select = await screen.findByLabelText('Impresora del cajón');
-    fireEvent.change(select, { target: { value: 'impresora-red' } });
+    chooseOption(select, /^Barra/);
     const test = screen.getByRole('button', { name: 'Probar apertura' }) as HTMLButtonElement;
     expect(test.disabled).toBe(true);
     expect(screen.getByText('Guarda los cambios para probar la apertura con ellos.')).toBeTruthy();

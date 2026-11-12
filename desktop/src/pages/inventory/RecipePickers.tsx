@@ -8,10 +8,13 @@ import type {
   ItemReference,
   RecipePage,
 } from '../../services/inventoryRecipes';
+import { Select } from '../../components/Select';
+import type { SelectItem } from '../../components/Select';
 
 // Selectores de componentes de receta: insumos, preparaciones e ingredientes del catálogo, con
-// búsqueda en Go (hasta 50 coincidencias). El elemento elegido se conserva aunque deje de aparecer
-// en una búsqueda nueva. Ninguno muestra identificadores: solo nombres y códigos internos.
+// búsqueda en Go (hasta 50 coincidencias) integrada en la lista (etapa 9C). El elemento elegido se
+// conserva aunque deje de aparecer en una búsqueda nueva. Ninguno muestra identificadores: solo
+// nombres y códigos internos.
 
 // Preparación elegida como componente: su dimensión (la de su rendimiento) decide las unidades
 // en que se captura la cantidad.
@@ -72,32 +75,24 @@ export function RecipeItemPicker({
   const options = value && !found.some((item) => item.id === value.id) ? [value, ...found] : found;
   return (
     <div className="inventory-picker">
-      <Field label={`Buscar ${label.toLowerCase()}`}>
-        <input
-          type="search"
-          maxLength={100}
-          autoComplete="off"
-          value={search}
-          placeholder="Nombre, código o código de barras"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </Field>
       <Field label={label}>
-        <select
+        <Select
           value={value?.id ?? ''}
           required={required}
-          onChange={(event) => {
-            onChange(options.find((item) => item.id === event.target.value) ?? null);
-          }}
-        >
-          <option value="">{emptyLabel}</option>
-          {options.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name} · {item.code}
-              {item.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          placeholder={emptyLabel}
+          options={[
+            ...(required ? [] : [{ value: '', label: emptyLabel }]),
+            ...options.map((item) => ({
+              value: item.id,
+              label: `${item.name} · ${item.code}${item.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          searchLabel={`Buscar ${label.toLowerCase()}`}
+          searchPlaceholder="Nombre, código o código de barras"
+          onSearchChange={setSearch}
+          loading={results.loading}
+          onChange={(id) => onChange(options.find((item) => item.id === id) ?? null)}
+        />
       </Field>
       {results.error && <small className="muted">{results.error}</small>}
     </div>
@@ -140,33 +135,27 @@ export function PreparationPicker({
       : found;
   return (
     <div className="inventory-picker">
-      <Field label={`Buscar ${label.toLowerCase()}`}>
-        <input
-          type="search"
-          maxLength={100}
-          autoComplete="off"
-          value={search}
-          placeholder="Nombre de la preparación"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </Field>
       <Field label={label}>
-        <select
+        <Select
           value={value?.id ?? ''}
           required={required}
-          onChange={(event) => {
-            const selected = options.find((entry) => entry.choice.id === event.target.value);
+          placeholder="Elige una preparación"
+          options={[
+            ...(required ? [] : [{ value: '', label: 'Elige una preparación' }]),
+            ...options.map((entry) => ({
+              value: entry.choice.id,
+              label: `${entry.choice.name}${entry.mode ? ` · ${entry.mode}` : ''}`,
+            })),
+          ]}
+          searchLabel={`Buscar ${label.toLowerCase()}`}
+          searchPlaceholder="Nombre de la preparación"
+          onSearchChange={setSearch}
+          loading={results.loading}
+          onChange={(id) => {
+            const selected = options.find((entry) => entry.choice.id === id);
             onChange(selected?.choice ?? null);
           }}
-        >
-          <option value="">Elige una preparación</option>
-          {options.map((entry) => (
-            <option key={entry.choice.id} value={entry.choice.id}>
-              {entry.choice.name}
-              {entry.mode ? ` · ${entry.mode}` : ''}
-            </option>
-          ))}
-        </select>
+        />
       </Field>
       {results.error && <small className="muted">{results.error}</small>}
       {results.data && results.data.total === 0 && search.trim() === '' && (
@@ -203,51 +192,35 @@ export function CatalogIngredientPicker({
   const known = [...productIngredients, ...others];
   const extra = value && !known.some((ingredient) => ingredient.id === value.id) ? [value] : [];
   const options = [...extra, ...known];
+  const toOption = (ingredient: IngredientChoice) => ({
+    value: ingredient.id,
+    label: ingredient.name,
+  });
+  const items: SelectItem[] = [];
+  if (!required) {
+    items.push({ value: '', label: 'Elige un ingrediente' });
+  }
+  items.push(...extra.map(toOption));
+  if (productIngredients.length > 0) {
+    items.push({ label: 'Ingredientes del producto', options: productIngredients.map(toOption) });
+  }
+  if (others.length > 0) {
+    items.push({ label: 'Otros ingredientes del catálogo', options: others.map(toOption) });
+  }
   return (
     <div className="inventory-picker">
-      <Field label="Buscar ingrediente del catálogo">
-        <input
-          type="search"
-          maxLength={100}
-          autoComplete="off"
-          value={search}
-          placeholder="Nombre del ingrediente"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </Field>
       <Field label="Ingrediente del catálogo">
-        <select
+        <Select
           value={value?.id ?? ''}
           required={required}
-          onChange={(event) => {
-            onChange(options.find((ingredient) => ingredient.id === event.target.value) ?? null);
-          }}
-        >
-          <option value="">Elige un ingrediente</option>
-          {extra.map((ingredient) => (
-            <option key={ingredient.id} value={ingredient.id}>
-              {ingredient.name}
-            </option>
-          ))}
-          {productIngredients.length > 0 && (
-            <optgroup label="Ingredientes del producto">
-              {productIngredients.map((ingredient) => (
-                <option key={ingredient.id} value={ingredient.id}>
-                  {ingredient.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          {others.length > 0 && (
-            <optgroup label="Otros ingredientes del catálogo">
-              {others.map((ingredient) => (
-                <option key={ingredient.id} value={ingredient.id}>
-                  {ingredient.name}
-                </option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          placeholder="Elige un ingrediente"
+          options={items}
+          searchLabel="Buscar ingrediente del catálogo"
+          searchPlaceholder="Nombre del ingrediente"
+          onSearchChange={setSearch}
+          loading={results.loading}
+          onChange={(id) => onChange(options.find((ingredient) => ingredient.id === id) ?? null)}
+        />
       </Field>
       {results.error && <small className="muted">{results.error}</small>}
     </div>
@@ -279,20 +252,14 @@ export function DimensionUnitSelect({
     : [];
   return (
     <Field label={label} hint={hint}>
-      <select
+      <Select
         required
         value={value}
         disabled={disabled || dimension === null}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {dimension === null && <option value="">Elige primero el componente</option>}
-        {dimension !== null && value === '' && <option value="">Elige la unidad</option>}
-        {offered.map((unit) => (
-          <option key={unit.id} value={unit.id}>
-            {unit.name} ({unit.code})
-          </option>
-        ))}
-      </select>
+        placeholder={dimension === null ? 'Elige primero el componente' : 'Elige la unidad'}
+        options={offered.map((unit) => ({ value: unit.id, label: `${unit.name} (${unit.code})` }))}
+        onChange={onChange}
+      />
     </Field>
   );
 }

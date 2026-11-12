@@ -31,8 +31,8 @@ interface PendingConfirmation extends ConfirmRequest {
 const focusableSelector = [
   'button:not([disabled])',
   'a[href]',
-  'input:not([disabled]):not([type="hidden"])',
-  'select:not([disabled])',
+  // El campo oculto de validación del selector (tabindex -1) no cuenta como destino del foco.
+  'input:not([disabled]):not([type="hidden"]):not([tabindex="-1"])',
   'textarea:not([disabled])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
