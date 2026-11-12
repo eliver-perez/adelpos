@@ -827,3 +827,71 @@ Archivos: `desktop/src/pages/restaurant/capture/draftSync.ts`, `desktop/src/hook
 `desktop/src/pages/restaurant/TablePanel.tsx`, `desktop/src/pages/restaurant/OperationalPage.tsx` (condición del aviso
 de `recoverDraft`), `desktop/src/pages/restaurant/capture/draftSync.test.ts`,
 `desktop/src/pages/restaurant/stage9dAccounts.test.tsx` y `docs/NAVIGATION_AND_SHORTCUTS.md`.
+
+## Revisión independiente (un solo agente, tres partes)
+
+Un mismo agente de solo lectura revisó la etapa en tres partes, cada una sobre una copia exacta de los commits: (1)
+`ecae96d..2c00064` (backend de D y E, fase A y fase E): sin críticos ni altos; un medio (M1: una cuenta descartable se
+podía «cancelar» y quedaba en los reportes con $0) y siete bajos (B1–B7), corregidos en `d723e92` salvo B6, que quedó
+como nota en `docs/REPORTS.md`; (2) `2c00064..d723e92` (fases B y C y esas correcciones): sin críticos, altos ni medios;
+confirmó M1 y B1–B5/B7 resueltas; dos observaciones bajas (O1 y O2) que la fase D incorporó; (3) `d723e92..81ff531` (fase
+D): sin críticos, altos ni medios; tres observaciones bajas: P1 y P2 corregidas en `a79aee0` y P3 documentada. Informes en
+el directorio temporal de la sesión (`docs9dReview/review_1.md`, `review_2.md`, `review_3.md`).
+
+## Fase F · Regresión final, instalación real y fusión
+
+### Regresión final
+
+Ejecutada el 12/11/2026 (14:04–14:30, 1576 s) por un solo agente con el script del coordinador, sobre una copia exacta
+de `a79aee0` (`git archive`), con el clúster temporal 55499, Go temporal en 8183 y Vite en 1421; la pantalla del equipo
+estuvo desbloqueada durante todo Playwright (comprobado cinco veces), así que WebKit es una aprobación real.
+
+| Suite                                    | Resultado                                                                                                                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato (Prettier, `gofmt`, `cargo fmt`) | aprobado                                                                                                                                                                                                   |
+| Metadatos (`sync-metadata --check`)      | aprobado                                                                                                                                                                                                   |
+| `go vet` (normal y `-tags=integration`)  | aprobado                                                                                                                                                                                                   |
+| Go unitarias con `-race`                 | 22 paquetes `ok`                                                                                                                                                                                           |
+| Integración PostgreSQL con `-race`       | 9 de 9 paquetes: `database` 7.2 s, `administration` 64.7 s, `catalog` 8.8 s, `operations` 250.8 s, `payments` 2.4 s, `reports` 121.4 s, `reports/operational` 40.7 s, `designer` 20.4 s, `identity` 17.8 s |
+| `tsc --noEmit`                           | sin errores                                                                                                                                                                                                |
+| Vitest (`npm test`)                      | 75 archivos, 751 pruebas aprobadas                                                                                                                                                                         |
+| `npm run build`                          | correcto (solo el aviso de tamaño de fragmentos ya conocido)                                                                                                                                               |
+| `cargo test --locked --offline`          | 41 aprobadas, 1 ignorada                                                                                                                                                                                   |
+| Playwright Chromium                      | 19 de 19 aprobadas (7.4 min)                                                                                                                                                                               |
+| Playwright WebKit                        | 19 de 19 aprobadas (7.3 min)                                                                                                                                                                               |
+| `.app` (`tauri build --bundles app`)     | 0.9.3, Mach-O arm64, 10.02 MiB                                                                                                                                                                             |
+
+Sin fallos ni repeticiones. Las mediciones de volumen y la impresión física no corren por omisión (por diseño).
+
+### Instalación real (12/11/2026, regla de autonomía de §0)
+
+Sobre `a79aee0` con el árbol limpio, después de la regresión final aprobada:
+
+1. **Estado previo**: servidor 0.9.2 en marcha, readiness 200, `api/v1/version` 0.9.2 / esquema 20. Comprobación de solo
+   lectura (transacción `read_only`, solo conteos y estados; script del coordinador en el directorio temporal de la sesión, ensayado antes en
+   una base temporal con las migraciones 0001–0020 y luego 0021): migraciones 1–20, 132 tablas en `app`, 153 permisos
+   (administrador 153), cuentas `closed:2, open:8` (mesa abiertas 4, para llevar abiertas 4), 15 unidades, 2 pagos, turnos
+   `closed:1, open:1`, 5 operaciones de caja, 0 movimientos de inventario, 147 eventos de auditoría, 9 reconocimientos de
+   venta; **0 turnos en arqueo y 0 trabajos de impresión sin terminar** (condiciones para seguir). Repetida justo antes de
+   detener el servidor: idéntica.
+2. **Respaldo** `backups/adel_pos-20261112T203123Z-ec18a4.dump` (663 999 bytes, catálogo legible).
+3. **Ensayo de restauración**: `python3 scripts/restore-check.py backups/adel_pos-20261112T203123Z-ec18a4.dump` →
+   «Restauración completa verificada: 132 tablas con conteos idénticos».
+4. **Servidor detenido** de forma ordenada (`server-stop`; `status` → detenido).
+5. **Migración**: `./scripts/dev.sh migrate` → `applied:1`; repetición → `applied:0`.
+6. **Servidor 0.9.3 iniciado** (`server-start`): readiness 200; `api/v1/version` → **0.9.3 / esquema 21**.
+7. **Comprobación posterior** de solo lectura, comparada con la previa: solo cambian las migraciones (1–21), las tablas
+   (134: `account_cancel_reasons` y `account_cancellations`), los permisos (154; `accounts.cancel` solo al administrador),
+   los cuatro motivos sembrados («Cliente se retiró sin pagar» con la marca de merma, «Cliente canceló el pedido», «Error
+   de captura» y «Otro», que exige descripción), 0 cuentas canceladas registradas y el umbral `long_open_hours` = 12.
+   Cuentas, unidades, pagos, caja, cocina, inventario, catálogo, auditoría y ventas: **idénticos**. Ningún dato de
+   operación se borró ni se reescribió. Las cuentas vacías existentes (#1 y #3 de mesa con solo borrador; #5, #8, #9 y
+   #10 para llevar) siguen abiertas: el propietario puede descartarlas con «Descartar cuenta vacía».
+8. **Aplicación**: `./scripts/dev.sh build-macos` → `AD-EL POS.app` 0.9.3 (10.02 MiB); `./scripts/dev.sh open-app` → la
+   aplicación 0.9.3 quedó abierta (no había otra ventana en marcha).
+9. **Fusión**: `etapa-9d` se fusiona en `main` por avance rápido y se envía a `origin` al cerrar esta sección (resultado en
+   la entrega final).
+
+No verificado con este procedimiento (queda para el propietario): el recorrido en la ventana nativa con pantalla táctil
+física (arrastre del mapa con el dedo, cursor de macOS sobre controles deshabilitados, barras de desplazamiento de
+WKWebView), la impresión real del aviso de cancelación (la instalación no tiene estaciones, rutas ni impresoras) y Windows.

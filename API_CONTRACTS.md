@@ -2655,7 +2655,7 @@ acepta.
 
 ## Etapa 9D · cancelar cuenta, descartar cuentas vacías, motivos, umbral de cuenta abierta y reportes (esquema 21)
 
-Migración `0021_account_cancellation.sql` (**todavía sin aplicar en la instalación real**): tablas
+Migración `0021_account_cancellation.sql` (aplicada a la instalación real el 12/11/2026): tablas
 `account_cancel_reasons` y `account_cancellations`, columna `restaurant_settings.long_open_hours` y permiso
 `accounts.cancel` («Cancelar cuentas», solo al administrador). Las escrituras de `restaurant/*` siguen las reglas del
 esquema 4: `operation_id` UUID, `revision`, resultado idempotente, auditoría y eventos en la misma transacción, lock

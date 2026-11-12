@@ -24,7 +24,7 @@ reducir cantidades, y el dato no se inventa. La sección se abre desde **Adminis
 selector único de la 9C ([NAVIGATION_AND_SHORTCUTS.md](NAVIGATION_AND_SHORTCUTS.md)). Lo demás no cambia. Contratos en
 [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9C»); evidencia en [VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md).
 
-**Etapa 9D** (esquema 21; la migración `0021_account_cancellation.sql` **todavía no se aplica** a la instalación real):
+**Etapa 9D** (esquema 21; la migración `0021_account_cancellation.sql` se aplicó a la instalación real el 12/11/2026):
 «Cancelar cuenta» (§5 de [etapas/ETAPA_9D_v2.md](etapas/ETAPA_9D_v2.md)) guarda un registro por cuenta con su motivo
 y quién autorizó, de modo que «Cuentas anuladas» pasa a **«Cuentas canceladas»** (mismo identificador
 `sales.voided_accounts`) con motivo, descripción, «Canceló» y **«Autorizó»**, filtro por motivo y sin el filtro «Tipo», y
@@ -931,7 +931,7 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
   conteo de canceladas en el resumen sigue sin implementar.
 - **Reportes de la 9D**: «Cuentas canceladas» y «Cancelaciones por motivo» suman lo que seguía activo al cancelar (las
   unidades canceladas antes una por una solo están en «Productos cancelados»); las anulaciones anteriores a la 9D no
-  tienen «Autorizó» ni motivo del catálogo. La 0021 todavía no se aplica a la instalación real.
+  tienen «Autorizó» ni motivo del catálogo. La 0021 se aplicó a la instalación real el 12/11/2026.
 - **Reportes de la 9C**: «Cuentas anuladas» (desde la 9D, «Cuentas canceladas») muestra la mesa y el área actuales de la cuenta; si la respuesta idempotente
   de una cancelación no tuviera las partidas, la cantidad anterior y la nueva quedan vacías (la diferencia y el importe
   salen siempre del evento).
