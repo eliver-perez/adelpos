@@ -22,6 +22,11 @@ import type { DraftOperation } from './draftOperations';
 //   conservan hasta que el operador elige agregarlos a esa cuenta o abrir una nueva.
 // - Etapa 9D (§4.1, decisión 2): el pedido para llevar y la cuenta sin mesa nacen igual, con su
 //   primer producto (sin mesa no hay cuentas vistas que comparar).
+// - Etapa 9D (revisión, P2): si se sale de la captura con la creación en curso, la creación sigue
+//   (abandonPending). Si Go la rechaza de forma definitiva sin la captura a la vista, nadie puede
+//   corregir los toques: la cuenta pendiente se olvida y se informa con onCreationRejected para
+//   avisar fuera de la captura. Un resultado incierto no cambia: se recupera con el mismo
+//   operation_id.
 
 export interface DraftSyncTransport {
   // Guarda el borrador completo con un operation_id nuevo.
@@ -61,6 +66,16 @@ export interface PendingCreation {
   seenAccountIDs: string[];
 }
 
+// Cuenta pendiente cuya captura ya se cerró y que Go rechazó de forma definitiva (etapa 9D,
+// revisión P2): no se creó nada y sus toques se olvidaron.
+export interface RejectedCreation {
+  localID: string;
+  mode: 'dine_in' | 'takeaway';
+  tableID: string | null;
+  // Rechazo de Go (su texto en español y su código para el aviso).
+  problem: unknown;
+}
+
 // Cuenta pendiente detenida porque otra terminal abrió una cuenta en la mesa.
 export interface TableAccountConflict {
   localID: string;
@@ -71,6 +86,10 @@ export interface TableAccountConflict {
 interface Creation extends PendingCreation {
   // Cuentas que Go informó con TABLE_HAS_ACCOUNT; mientras existan no se envía nada.
   accounts: TableAccountRef[] | null;
+  // La captura de la cuenta pendiente se cerró (abandonPending) mientras aún había algo que crear.
+  abandoned: boolean;
+  // Último rechazo definitivo de la creación, mientras no haya otro intento.
+  rejection: { problem: unknown } | null;
 }
 
 export class DraftSyncError extends Error {
@@ -137,6 +156,7 @@ export class DraftSyncEngine {
   private creations = new Map<string, Creation>();
   private renamed = new Map<string, string>();
   private createdListeners = new Set<(localID: string, bill: Bill) => void>();
+  private rejectedListeners = new Set<(rejection: RejectedCreation) => void>();
 
   constructor(
     private transport: DraftSyncTransport,
@@ -157,6 +177,15 @@ export class DraftSyncEngine {
     this.createdListeners.add(listener);
     return () => {
       this.createdListeners.delete(listener);
+    };
+  };
+
+  // Avisa cuando Go rechaza de forma definitiva la creación de una cuenta pendiente cuya captura ya
+  // se cerró: la cuenta pendiente y sus toques se olvidaron.
+  onCreationRejected = (listener: (rejection: RejectedCreation) => void) => {
+    this.rejectedListeners.add(listener);
+    return () => {
+      this.rejectedListeners.delete(listener);
     };
   };
 
@@ -181,7 +210,7 @@ export class DraftSyncEngine {
         this.creations.delete(id);
       }
     }
-    this.creations.set(localID, { ...creation, accounts: null });
+    this.creations.set(localID, { ...creation, accounts: null, abandoned: false, rejection: null });
   }
 
   // Olvida una cuenta pendiente sin toques ni envíos: salir sin productos no deja registro.
@@ -203,6 +232,58 @@ export class DraftSyncEngine {
     this.entries.delete(localID);
     this.emit();
     return true;
+  }
+
+  // Se cerró la captura de la cuenta pendiente (etapa 9D, revisión P2). Lo pendiente se envía de
+  // inmediato, como al dejar de mostrar cualquier cuenta. Sin toques ni envíos se olvida y devuelve
+  // true. Si la creación sigue en curso (en vuelo, por enviar, incierta o a la espera de la decisión
+  // ante TABLE_HAS_ACCOUNT, que se muestra fuera de la captura), continúa: al crearse se avisa con
+  // onAccountCreated y, si Go la rechaza de forma definitiva, se olvida y se avisa con
+  // onCreationRejected. Si Go ya la había rechazado, se olvida y se avisa ahora.
+  abandonPending(localID: string): boolean {
+    const waiting = this.entries.get(localID);
+    if (waiting && waiting.timer !== null && this.creations.has(localID)) {
+      this.clearTimer(waiting);
+      this.trySend(waiting);
+    }
+    if (this.discardPendingIfIdle(localID)) {
+      return true;
+    }
+    const creation = this.creations.get(localID);
+    const entry = this.entries.get(localID);
+    if (!creation || !entry) {
+      return false;
+    }
+    creation.abandoned = true;
+    if (
+      creation.rejection &&
+      !creation.accounts &&
+      !this.sendingAccount(localID) &&
+      entry.timer === null
+    ) {
+      this.dropRejected(localID, creation, creation.rejection.problem);
+      this.emit();
+    }
+    return false;
+  }
+
+  // Olvida la cuenta pendiente rechazada (no se creó nada en Go) e informa del rechazo.
+  private dropRejected(localID: string, creation: Creation, problem: unknown) {
+    const entry = this.entries.get(localID);
+    if (entry) {
+      this.clearTimer(entry);
+    }
+    this.creations.delete(localID);
+    this.entries.delete(localID);
+    const rejection: RejectedCreation = {
+      localID,
+      mode: creation.mode ?? 'dine_in',
+      tableID: creation.tableID,
+      problem,
+    };
+    for (const listener of this.rejectedListeners) {
+      listener(rejection);
+    }
   }
 
   // Primera cuenta pendiente detenida por TABLE_HAS_ACCOUNT.
@@ -444,6 +525,9 @@ export class DraftSyncEngine {
     entry.sentCount = entry.operations.length;
     entry.due = false;
     entry.error = '';
+    if (creation) {
+      creation.rejection = null;
+    }
     const request = creation
       ? this.transport.create({
           mode: creation.mode ?? 'dine_in',
@@ -517,6 +601,15 @@ export class DraftSyncEngine {
       creation.accounts = accounts;
       entry.error = '';
       return;
+    }
+    if (creation?.abandoned) {
+      // Rechazo definitivo con la captura ya cerrada: Go no creó nada y nadie puede corregir los
+      // toques; se olvidan (tampoco se reenvían) y se avisa fuera de la captura.
+      this.dropRejected(entry.accountID, creation, problem);
+      return;
+    }
+    if (creation) {
+      creation.rejection = { problem };
     }
     if (conflictError(problem)) {
       entry.conflict = true;

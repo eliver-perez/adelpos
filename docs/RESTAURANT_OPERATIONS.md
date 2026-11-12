@@ -203,13 +203,17 @@ de cobro ni las acciones del panel de mesa; solo su presentación y lo que dice 
   ya admitía; para llevar con el origen «Para llevar» y sin mesa). Salir sin productos no deja nada guardado. Los datos
   del pedido (cliente, teléfono, programación) se capturan con «Datos del pedido» en cuanto el pedido existe, es decir,
   después del primer producto (la barra de la captura lo indica: «Después podrás capturar los datos del cliente»). Un
-  rechazo de Go al crear se explica en la cuenta y los productos se conservan en la terminal. La apertura inmediata
-  (`quickOpen`) se retiró.
+  rechazo de Go al crear se explica en la cuenta y los productos se conservan en la terminal. Si se sale de la captura
+  mientras se guarda el primer producto y Go lo rechaza de forma definitiva (por ejemplo, un producto desactivado en otra
+  terminal), un aviso de error lo explica fuera de la captura («El pedido nuevo para llevar y sus productos no se
+  guardaron…»; igual para «Cuenta sin mesa» y la mesa de la 7.1), la cuenta pendiente se olvida y la pantalla queda en el
+  listado o en el mapa; un resultado incierto sigue con «Recuperar resultado del borrador» y la misma operación. La
+  apertura inmediata (`quickOpen`) se retiró.
 - **Descartar cuentas vacías** (§4.2 y decisión 1): una cuenta que Go marca `discardable` (sin productos enviados,
   pagos, documentos ni registros de cocina, aunque tenga productos sin enviar) ofrece **Descartar cuenta vacía** (rojo)
   en lugar de «Cancelar cuenta», en «Más…» (panel de la mesa, captura, Cuentas y Para llevar), a la vista en el detalle
   de Cuentas y Para llevar y en el panel de la mesa cuando no es liberable; si la cuenta no tiene nada, sigue **Liberar
-  mesa** de la 7.1. Sin motivo ni supervisor (`accounts.open`; para llevar, `takeaway.manage`). La confirmación roja dice
+  mesa** de la 7.1 (entonces «Más…» del panel no repite «Descartar cuenta vacía»). Sin motivo ni supervisor (`accounts.open`; para llevar, `takeaway.manage`). La confirmación roja dice
   cuántos productos sin enviar se borran, que **descartar no es una cancelación** (no pide motivo ni aparece en los
   reportes) y si la mesa queda libre; «Conservar la cuenta» tiene el foco. Así se quitan las cuentas vacías que ya
   existían: en la instalación real, cuando reciba la 0.9.3, las #1 y #3 de mesa (solo con un borrador) y las #5, #8, #9

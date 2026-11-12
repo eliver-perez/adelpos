@@ -204,6 +204,13 @@ export function TablePanel({
     writable &&
     can('accounts.open') &&
     !releasable;
+  // «Más…» de la cuenta. Con «Liberar mesa» a la vista no ofrece además «Descartar cuenta vacía»: hace
+  // lo mismo (etapa 9D, revisión P1). En Cuentas, Para llevar y la captura no cambia.
+  const more = account
+    ? accountMoreActions(account, can, localDraft.length).filter(
+        (action) => !releasable || action.id !== 'discardAccount',
+      )
+    : [];
   // Cuenta abierta por mucho tiempo (§3.4): la marca la calcula Go para la mesa (su cuenta abierta
   // más antigua) y para cada cuenta.
   const longOpen = !!table.long_open || open.some((entry) => entry.long_open);
@@ -433,11 +440,7 @@ export function TablePanel({
                   </button>
                 )}
                 {serviceButton}
-                <MoreActions
-                  actions={accountMoreActions(account, can, localDraft.length)}
-                  disabled={blocked}
-                  onAction={onAction}
-                />
+                <MoreActions actions={more} disabled={blocked} onAction={onAction} />
               </div>
             </footer>
           )}

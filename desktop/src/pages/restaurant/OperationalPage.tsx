@@ -489,12 +489,14 @@ export function OperationalPage({
     }
   }
 
-  // Recupera el guardado incierto del borrador. Un rechazo queda indicado en la cuenta.
+  // Recupera el guardado incierto del borrador. Un rechazo queda indicado en la cuenta; el de una
+  // cuenta nueva cuya captura ya se cerró se avisa aparte y la cuenta pendiente ya no existe
+  // (etapa 9D, revisión P2), así que tampoco es un éxito.
   async function recoverDraft() {
     const accountID = workspace.draft.uncertainAccountID;
     await workspace.recoverDraft();
     const stored = accountID ? workspace.draft.view(accountID) : null;
-    if (accountID && !workspace.draft.uncertain && !stored?.error) {
+    if (accountID && stored && !workspace.draft.uncertain && !stored.error) {
       notifySuccess('Productos nuevos guardados en la cuenta.');
     }
   }

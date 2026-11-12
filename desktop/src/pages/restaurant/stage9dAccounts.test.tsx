@@ -59,6 +59,19 @@ let saves: { id: string; body: Record<string, unknown> }[];
 let discards: { id: string; body: Record<string, unknown> }[];
 let replays: Map<string, unknown>;
 let openFailure: { code: string; message: string } | null;
+// Revisión P2: la apertura puede quedar en vuelo hasta abrir la compuerta, y su respuesta puede
+// perderse (503) después de registrarse en «Go».
+let openGate: { promise: Promise<void>; release: () => void } | null;
+let openOperationIDs: string[];
+let openUncertain: boolean;
+
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
 
 function accountID(folio: number) {
   return `00000000-0000-4000-8000-0000000009${String(folio).padStart(2, '0')}`;
@@ -349,6 +362,13 @@ function openAccount(body: Record<string, unknown>) {
   };
   const result = bill(accounts[id]!);
   replays.set(String(body.operation_id), result);
+  if (openUncertain) {
+    openUncertain = false;
+    return {
+      status: 503,
+      body: { error: { code: 'SERVICE_UNAVAILABLE', message: 'El servidor no respondió.' } },
+    };
+  }
   return result;
 }
 
@@ -510,6 +530,9 @@ beforeEach(() => {
   discards = [];
   replays = new Map();
   openFailure = null;
+  openGate = null;
+  openOperationIDs = [];
+  openUncertain = false;
   native.invoke.mockImplementation(
     async (
       command: string,
@@ -521,6 +544,10 @@ beforeEach(() => {
       },
     ) => {
       if (command !== 'api_request') return null;
+      if (args.operation === 'restaurant_open_account') {
+        openOperationIDs.push(String(args.body?.operation_id));
+        if (openGate) await openGate.promise;
+      }
       const result = respond(args.operation, args.resourceId, args.body, args.query) as {
         status?: number;
         body?: unknown;
@@ -830,6 +857,197 @@ describe('descartar cuentas vacías (§4.2 y decisión 1)', () => {
     expect(saves).toHaveLength(1);
     expect(discards[0]!.body.revision).toBe(4);
     await screen.findByText('Pedido #3 descartado.');
+  });
+});
+
+describe('correcciones de la revisión (parte 3)', () => {
+  it('P1: con «Liberar mesa» a la vista, «Más…» no repite «Descartar cuenta vacía»', async () => {
+    // Cuenta de mesa sin productos ni borrador: Go la marca liberable y descartable.
+    accounts[accountID(5)] = {
+      id: accountID(5),
+      folio: 5,
+      revision: 2,
+      mode: 'dine_in',
+      tableID: ids.freeTable,
+      state: 'open',
+      draft: [],
+      lines: [],
+      total: '0.00',
+      preparation: 'without_items',
+      customerName: '',
+    };
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /^Mesa A, Ocupada/ }));
+    const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa A' });
+    await within(panel).findByRole('button', { name: 'Liberar mesa' });
+    expect(within(panel).queryByRole('button', { name: 'Descartar cuenta vacía' })).toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Más…' }));
+    const menu = within(panel).getByRole('group', { name: 'Más acciones de la cuenta' });
+    expect(within(menu).queryByRole('button', { name: 'Descartar cuenta vacía' })).toBeNull();
+    expect(within(menu).queryByRole('button', { name: 'Cancelar cuenta' })).toBeNull();
+    expect(within(menu).getByRole('button', { name: 'Historial de cambios' })).toBeTruthy();
+    // Una sola acción roja en el panel: «Liberar mesa».
+    expect(
+      Array.from(panel.querySelectorAll('.danger-button')).map((button) => button.textContent),
+    ).toEqual(['Liberar mesa']);
+    // En la captura de la misma cuenta, «Más…» sigue ofreciendo el descarte (sin cambios).
+    fireEvent.click(within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }));
+    await screen.findByRole('heading', { name: 'Mesa A · Cuenta #5' });
+    const bill = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    fireEvent.click(within(bill).getByRole('button', { name: 'Más…' }));
+    expect(within(bill).getByRole('button', { name: 'Descartar cuenta vacía' })).toBeTruthy();
+  });
+
+  // P2: el primer guardado de una cuenta nueva sigue en vuelo cuando se sale de la captura y Go lo
+  // rechaza de forma definitiva (un producto desactivado en otra terminal).
+  const inactive = {
+    code: 'PRODUCT_INACTIVE',
+    message: 'Filete de prueba ya no está disponible.',
+  };
+
+  async function leaveWhileCreating() {
+    openGate = gate();
+    openFailure = inactive;
+    await addSteak();
+    await waitFor(() => expect(openOperationIDs).toHaveLength(1), { timeout: 2500 });
+    fireEvent.click(document.querySelector('.capture-topbar-back')!);
+  }
+
+  async function rejectAndExpectNotice(description: string) {
+    await act(async () => openGate!.release());
+    await screen.findByText(inactive.message);
+    expect(screen.getByText(description)).toBeTruthy();
+    // El aviso no muestra el código interno.
+    expect(document.body.textContent).not.toContain('PRODUCT_INACTIVE');
+    // No se creó nada y los toques no se reenvían.
+    await settle(900);
+    expect(openOperationIDs).toHaveLength(1);
+    expect(Object.values(accounts)).toHaveLength(4);
+  }
+
+  it('P2: Para llevar avisa fuera de la captura y vuelve al listado con un pedido elegido', async () => {
+    renderPage('takeaway');
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
+    await screen.findByRole('heading', { name: 'Para llevar · Pedido nuevo' });
+    await leaveWhileCreating();
+    const cards = await screen.findByRole('group', { name: 'Pedidos para llevar' });
+    await rejectAndExpectNotice(
+      'El pedido nuevo para llevar y sus productos no se guardaron. Vuelve a capturarlo con «Nuevo pedido».',
+    );
+    // Sin detalle vacío: el listado elige el primer pedido.
+    const bill = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    await within(bill).findByRole('heading', { name: 'Cuenta #3' });
+    expect(within(cards).getAllByRole('button')).toHaveLength(2);
+    expect(screen.queryByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeNull();
+    // Se puede volver a capturar un pedido nuevo, vacío.
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo pedido' }));
+    await screen.findByRole('heading', { name: 'Para llevar · Pedido nuevo' });
+    const capture = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    expect(within(capture).queryByRole('article', { name: /Filete de prueba/ })).toBeNull();
+  });
+
+  it('P2: «Cuenta sin mesa» avisa fuera de la captura y vuelve al listado de Cuentas', async () => {
+    renderPage();
+    const summary = await screen.findByRole('complementary', { name: 'Resumen del área' });
+    fireEvent.click(within(summary).getByRole('button', { name: 'Cuenta sin mesa' }));
+    await screen.findByRole('heading', { name: 'Cuenta nueva sin mesa' });
+    await leaveWhileCreating();
+    await screen.findByRole('group', { name: 'Cuentas disponibles' });
+    await rejectAndExpectNotice(
+      'La cuenta nueva sin mesa y sus productos no se guardaron. Vuelve a capturarla con «Cuenta sin mesa».',
+    );
+    const bill = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    await within(bill).findByRole('heading', { name: 'Cuenta #1' });
+    expect(screen.queryByRole('heading', { name: 'Cuenta nueva sin mesa' })).toBeNull();
+  });
+
+  it('P2: la cuenta pendiente de una mesa (7.1) avisa y deja la mesa libre en el mapa', async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /^Mesa A, Libre/ }));
+    let panel = await screen.findByRole('complementary', { name: 'Panel de Mesa A' });
+    fireEvent.click(
+      await within(panel).findByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+    );
+    await screen.findByRole('heading', { name: 'Mesa A · Cuenta nueva' });
+    await leaveWhileCreating();
+    panel = await screen.findByRole('complementary', { name: 'Panel de Mesa A' });
+    await rejectAndExpectNotice(
+      'La cuenta nueva de Mesa A y sus productos no se guardaron. Vuelve a capturarla desde la mesa.',
+    );
+    expect(screen.getByRole('region', { name: 'Mapa del restaurante' })).toBeTruthy();
+    await within(panel).findByText('Sin cuenta abierta');
+    expect(within(panel).queryByText(/Filete de prueba/)).toBeNull();
+    // «Capturar» empieza otra cuenta nueva, sin los productos rechazados.
+    fireEvent.click(within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }));
+    await screen.findByRole('heading', { name: 'Mesa A · Cuenta nueva' });
+    const capture = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    expect(within(capture).queryByRole('article', { name: /Filete de prueba/ })).toBeNull();
+  });
+
+  it('P2: rechazado con la captura a la vista, el error sigue en la cuenta; al salir se avisa', async () => {
+    openFailure = inactive;
+    renderPage('takeaway');
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
+    await screen.findByRole('heading', { name: 'Para llevar · Pedido nuevo' });
+    await addSteak();
+    const capture = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    await within(capture).findByText(inactive.message, {}, { timeout: 2500 });
+    // Dentro de la captura no hay aviso aparte: los productos se conservan para corregirlos.
+    expect(screen.queryByText(/no se guardaron/)).toBeNull();
+    expect(within(capture).getByRole('article', { name: '1 × Filete de prueba' })).toBeTruthy();
+    fireEvent.click(document.querySelector('.capture-topbar-back')!);
+    await screen.findByText(
+      'El pedido nuevo para llevar y sus productos no se guardaron. Vuelve a capturarlo con «Nuevo pedido».',
+    );
+    const bill = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    await within(bill).findByRole('heading', { name: 'Cuenta #3' });
+    expect(Object.values(accounts)).toHaveLength(4);
+  });
+
+  it('P2: «Nuevo pedido» vacío que se deja desde Mesas no reabre la captura de otro pedido', async () => {
+    const view = render(page('takeaway'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
+    await screen.findByRole('heading', { name: 'Para llevar · Pedido nuevo' });
+    // A Mesas desde la barra (la captura de Para llevar se conserva) y se elige una mesa.
+    view.rerender(page('tables', { requestKey: 1 }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Mesa B, Ocupada/ }));
+    await screen.findByRole('complementary', { name: 'Panel de Mesa B' });
+    // De vuelta en Para llevar: el listado con su primer pedido, no la captura de ese pedido.
+    view.rerender(page('takeaway', { requestKey: 2 }));
+    await screen.findByRole('group', { name: 'Pedidos para llevar' });
+    const bill = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    await within(bill).findByRole('heading', { name: 'Cuenta #3' });
+    await settle();
+    expect(screen.queryByRole('heading', { level: 1, name: /^Para llevar · Pedido/ })).toBeNull();
+    expect(opens).toHaveLength(0);
+  });
+
+  it('P2: un resultado incierto no es un error; se recupera con el mismo operation_id', async () => {
+    renderPage('takeaway');
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
+    await screen.findByRole('heading', { name: 'Para llevar · Pedido nuevo' });
+    openGate = gate();
+    openUncertain = true;
+    await addSteak();
+    await waitFor(() => expect(openOperationIDs).toHaveLength(1), { timeout: 2500 });
+    fireEvent.click(document.querySelector('.capture-topbar-back')!);
+    await screen.findByRole('group', { name: 'Pedidos para llevar' });
+    await act(async () => openGate!.release());
+    // El panel de recuperación sigue fuera de la captura; no hay aviso de error ni se descarta.
+    const recover = await screen.findByRole('button', {
+      name: 'Recuperar resultado del borrador',
+    });
+    expect(screen.queryByText(/no se guardaron/)).toBeNull();
+    openGate = null;
+    fireEvent.click(recover);
+    await screen.findByText('Productos nuevos guardados en la cuenta.');
+    expect(openOperationIDs).toHaveLength(2);
+    expect(openOperationIDs[1]).toBe(openOperationIDs[0]);
+    // Go lo había registrado una sola vez: el pedido queda elegido en el listado.
+    expect(opens).toHaveLength(1);
+    const bill = screen.getByRole('complementary', { name: 'Cuenta actual' });
+    await within(bill).findByRole('heading', { name: 'Cuenta #5' });
+    expect(screen.queryByText(/no se guardaron/)).toBeNull();
   });
 });
 
