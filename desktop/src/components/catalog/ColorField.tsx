@@ -62,7 +62,7 @@ export function ColorField({
           <span>{name}</span>
         </button>
         {value && (
-          <button type="button" className="secondary-button" onClick={() => choose('')}>
+          <button type="button" className="danger-button" onClick={() => choose('')}>
             Quitar color
           </button>
         )}

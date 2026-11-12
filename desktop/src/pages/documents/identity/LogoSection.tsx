@@ -43,7 +43,7 @@ export function LogoSection({
         </p>
       </div>
       <div className="grid gap-5 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
-        <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-[var(--border)] bg-white p-3">
+        <div className="grid min-h-[140px] place-items-center rounded-xl border border-dashed border-[var(--border)] bg-[var(--logo-paper)] p-3">
           {logo?.data_uri ? (
             <img
               src={logo.data_uri}
@@ -51,7 +51,7 @@ export function LogoSection({
               className="max-h-[160px] max-w-full object-contain"
             />
           ) : (
-            <span className="text-center text-sm text-[#5b6675]">
+            <span className="text-center text-sm text-[var(--paper-muted)]">
               {logo ? 'Original no disponible' : 'Sin logotipo'}
             </span>
           )}

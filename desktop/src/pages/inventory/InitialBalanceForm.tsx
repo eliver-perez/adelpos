@@ -137,7 +137,7 @@ function LineEditor({
       <div className="section-heading inventory-line-heading">
         <strong>Renglón {number}</strong>
         {removable && (
-          <button type="button" className="secondary-button" onClick={onRemove}>
+          <button type="button" className="danger-button" onClick={onRemove}>
             Quitar renglón
           </button>
         )}

@@ -272,7 +272,74 @@ descripción de `accounts.manage`. Sin cambios a `restaurant_accounts` (se reuti
 11. **Umbral de cuenta abierta (§3.4)**: `restaurant_settings.long_open_hours` (12 por omisión) en la 0021, editable en
     «Funciones del establecimiento».
 
-### Fases D y E · backend (parte BE)
+## Fase A · Color de marca y estilos generales (§1)
+
+Agente A, 12/11/2026, sobre `etapa-9d` (`ecae96d`), solo presentación (sin Go, migraciones, `api.rs` ni
+`services/*.ts`). Tabla completa de tokens, contraste por par y colores eliminados: notas de la fase
+(`docs9dA/tokens.md` en el directorio temporal de la sesión).
+
+- **Tokens en un solo lugar** (`desktop/src/styles.css`, `:root` y `:root[data-theme='dark']`): marca constante
+  (`--brand-blue #1f5fa8`, `--brand-blue-pressed #173d6e`, `--brand-blue-light #4090f0`), paleta de estado de §0-B con
+  sus suaves (`--blue`/`-strong`/`-soft #e7eef7`/`-border #a9c2e2`, `--amber`, `--grape`, `--gray`, `--teal`, `--red`)
+  y usos (`--accent`, `--accent-strong`, `--on-accent`, `--warning`, `--warning-mark`, `--danger`, `--info`, `--table-*`,
+  `--cash-*`, `--status-online`, sombras, velo, papel y marca compacta). Tema oscuro: azul `#529bf2` (el del logotipo
+  aclarado lo necesario: 5.55:1 sobre el panel y 4.93:1 sobre el fondo suave) con texto oscuro `#0b1626` encima
+  (6.33:1). Todos los pares principales cumplen AA en ambos temas (texto ≥ 4.5:1; bordes y puntos de estado ≥ 3:1).
+- **El verde sale de la interfaz**: acento, selección, ocupada, «Turno abierto», «En línea», tarjeta de entradas de Caja,
+  marca compacta (`.brand-mark`), punto de «Estado del sistema» y selección del papel simulado pasan al azul. Se
+  conservan la paleta de colores de categorías (dato de Go) y la serie verde de los gráficos (`--chart-3`), decisión 6.
+- **Estados de mesa** (§1.2): libre blanco con borde gris, ocupada azul claro con borde azul medio, esperando pago ámbar,
+  pago parcial uva (violeta, a más de 45° de tono del azul) y fuera de servicio gris rayado con candado. Cada estado
+  lleva su icono en el mosaico, en la leyenda y en el panel; «Libre» recibe la palomita (`tableStateIcons`, compartido por
+  `TableMap` y `TablePanel`). Selección como antes (contorno azul de 3 px); la ocupada seleccionada pasa su borde al azul
+  principal con contorno de 4 px. «Pago: Abono» de las tarjetas de cuenta también en uva.
+- **Avisos** (§1.3): éxito azul con palomita, información turquesa con «i», advertencia ámbar con triángulo y error rojo
+  con equis (iconos ya existentes; cambian los tokens; `Icon` expone `data-icon` para las pruebas).
+- **Importes** (§1.4): total, saldo, cambio, cortesía, importe del cobro y precio del producto en el color del texto y en
+  negritas (antes en el acento).
+- **Acciones destructivas en rojo** (§1.5), en toda la aplicación: contorno rojo (`danger-button`, borde rojo suave) en
+  «Cancelar unidades», «Anular cuenta vacía» del menú «Más…» (`MoreAction.tone`), «Liberar mesa», «Cancelar ajuste»,
+  «Descartar selección / posiciones locales / mis cambios / cambios», «Cancelar el arqueo y volver a contar», «Borrar
+  captura», «Cancelar conteo», todo «Quitar …» (renglones, niveles, porción, imagen, color, fecha, hora y los
+  `RemoveButton` del catálogo), «Retirar de prueba», el icono «Quitar el dato» del diseñador y la opción «Descartar mi
+  borrador» de `ChoiceDialog` (`DialogChoice.tone`); relleno rojo (`danger-solid-button`) en el confirmar de
+  `ConfirmDialog` con `tone: 'danger'` (se agregó a «Liberar mesa»), en «Confirmar cancelación de unidades» y en la
+  variante destructiva nueva de `Form` (`tone="danger"`, usada por «Anular cuenta vacía»). No se pintan de rojo, por no
+  destruir nada: «Registrar devolución» (flujo de cobro; su confirmación ya es roja), «Retirar efectivo», «Retirar todos
+  los complementos» (elección del cliente), «Desactivar» (reversible), «Liberar a preparación» y «Cancelar» a secas.
+  Una prueba recorre el código y falla si un botón con verbo destructivo pierde la clase roja.
+- **Cursor** (§1.6): todo control deshabilitado (`button`, `input`, `textarea`, `select`, opciones y botones con
+  `aria-disabled`, selector, producto de la captura, paleta) con `cursor: not-allowed`; ya no queda `cursor: wait` ni
+  `default`. El de progreso solo con `aria-busy` (formularios de `Form` mientras Go responde, `ChoiceDialog` ocupado,
+  reportes y cotizaciones que ya lo marcaban).
+- **Indicadores** (solo color; la posición la cambia la fase B): «Turno abierto» y «En línea» azules, turno cerrado gris,
+  arqueo ámbar (punto con `--warning-mark`), reconectando ámbar, sin conexión rojo. Caja: entradas en azul y cierre en
+  ámbar (decisión 8). Sección activa de la barra y pestañas de áreas, Inventarios y Reportes con fondo `#e7eef7` y
+  borde `#a9c2e2`; la tarjeta seleccionada conserva el borde azul principal (3:1 frente al panel).
+- **Sin colores escritos directamente**: se retiraron los 28 de `styles.css` fuera de los tokens y los 5 de
+  `LogoSection`/`PaperPreview` (lista en las notas). `src/styles.test.ts` recorre `src/**/*.{ts,tsx,css}` y falla con
+  cualquier hexadecimal, `rgb()`/`hsl()`…, nombre de color de CSS o clase de color fijo de Tailwind fuera de los
+  bloques de tokens; única excepción: la máscara alfa del papel simulado (2 líneas, exigidas por la prueba). No se
+  recorren pruebas ni datos de prueba (colores de categorías como dato).
+- **Pruebas**: Vitest `src/styles.test.ts` (16: colores escritos, valores de la marca, contraste AA de 29 pares y 3:1 de
+  9 en ambos temas, sin verde, uva frente a azul, asignación de la paleta, reglas de avisos, importes, destructivos,
+  sección activa, cursores y selección) y `src/components/stage9dStyles.test.tsx` (13: avisos por tipo con su icono,
+  estados de mesa con icono en mosaico, leyenda y panel, destructivos de `ConfirmDialog`, `ChoiceDialog`, `Form` con
+  `aria-busy`, menú «Más…» y recorrido del código). Playwright `e2e/workflow-stage9d-colors.spec.ts` (Chromium y
+  WebKit): colores calculados contra los tokens en ambos temas, iconos de los cinco estados, cursor `not-allowed` en
+  «Cobrar» deshabilitado y `progress` con `aria-busy`, ocupada seleccionada con contorno de 4 px, saldo en el color del
+  texto, «Liberar mesa» y su confirmación en rojo, los cuatro avisos, la barra con turno abierto, en arqueo, sin conexión
+  y sin turno, y 48 capturas (Mesas, Mesas › Cuentas, Para llevar, confirmación destructiva, barra en cuatro estados y
+  cuatro avisos, en claro y oscuro a 1280 × 720 y 1920 × 1080). «Esperando pago» exige una precuenta impresa (impresora
+  de tickets): en la captura el puente de la prueba presenta así una mesa con pedido confirmado; «Sin conexión» se
+  simula rechazando las peticiones en el puente, como lo vería la terminal.
+- **Resultados** (copia aislada = `HEAD ecae96d` + archivos de la fase A, sin los cambios en curso del agente BE):
+  `npx tsc --noEmit` sin errores; `npm test` 70 archivos y 666 pruebas aprobadas; `npm run build` correcto; Playwright
+  completo 16/16 en Chromium y 16/16 en WebKit (en una primera corrida WebKit falló `workflow-stage9c-keyboard` al
+  cerrar «Acerca de» con Escape —foco del diálogo, sin relación con los colores— y arrastró a las tres siguientes por
+  el reinicio del trabajador; la segunda corrida completa, con la versión final, aprobó todo en ambos motores).
+
+## Fases D y E · backend (parte BE)
 
 Hecha por un solo agente (BE) el 12/11/2026 en `etapa-9d` sobre la Fase 0 (`ecae96d`), sin subagentes, en paralelo
 con la parte A (colores). Copia aislada y clúster temporal 55499; sin tocar la instalación real. Contratos JSON para

@@ -236,6 +236,7 @@ export function OperationalPage({
           : `${accountLabel(account)} no tiene productos, pagos ni registros de cocina. Se anulará y la mesa quedará libre.`,
       confirmLabel: 'Liberar mesa',
       cancelLabel: 'Conservar la cuenta',
+      tone: 'danger',
     });
     if (!release) {
       return;
@@ -611,7 +612,7 @@ export function OperationalPage({
             Retomar selección
           </button>
           <button
-            className="secondary-button"
+            className="danger-button"
             disabled={mutation.busy}
             onClick={() => void discardPendingSelection()}
           >

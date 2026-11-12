@@ -176,7 +176,7 @@ export function AdjustmentList({
             <div className="button-row">
               <button
                 type="button"
-                className="secondary-button"
+                className="danger-button"
                 disabled={locked}
                 onClick={() => setVoiding(adjustment.id)}
               >

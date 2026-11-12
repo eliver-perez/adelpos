@@ -91,59 +91,109 @@
   }
 }
 
+/* Etapa 9D (§1): los colores de la interfaz se escriben solo en estos dos bloques (`:root` y
+   `:root[data-theme='dark']`). Las reglas y los componentes usan las variables; un cambio de color se
+   hace aquí. La prueba src/styles.test.ts falla si aparece un color escrito en otro lugar y
+   comprueba el contraste de los pares principales en ambos temas.
+   Capas: marca (constantes, iguales en ambos temas) → paleta de estado de §0-B (azul, ámbar, uva,
+   gris, turquesa y rojo, cada una con su tono suave) → usos (acento, avisos, mesas, caja, barra). */
 :root {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color-scheme: light;
+  /* Marca AD-EL POS: azul principal, presionado y el azul claro del logotipo. No cambian con el
+     tema; el papel simulado y la marca compacta los usan tal cual. */
+  --brand-blue: #1f5fa8;
+  --brand-blue-pressed: #173d6e;
+  --brand-blue-light: #4090f0;
+  /* Neutros. --muted oscurecido en la 9D para llegar a 4.5:1 sobre --bg y sobre --accent-soft. */
   --bg: #f6f7f9;
   --panel: #fff;
   --text: #202b3e;
-  --muted: #728093;
+  --muted: #5f6d80;
   --border: #e5e9ef;
   --subtle: #fafbfd;
-  --accent: #1b7568;
-  --accent-soft: #eaf5f1;
-  --banner: #edf4f4;
-  --warning: #c08636;
-  /* Etapa 7.1: tonos de avisos y de acciones destructivas. */
-  --warning-soft: #fbf3e6;
-  --danger: #b4473c;
-  --danger-soft: #fbeceb;
+  /* Paleta de estado (§0-B). Cada tono llega a 4.5:1 como texto sobre --panel y sobre su suave. */
+  --blue: var(--brand-blue);
+  --blue-strong: var(--brand-blue-pressed);
+  --blue-soft: #e7eef7;
+  --blue-border: #a9c2e2;
+  --amber: #9a5b0c;
+  --amber-soft: #fbf3e6;
+  --grape: #7b3fa6;
+  --grape-soft: #f3eaf9;
+  --gray: #5a6878;
+  --gray-soft: #eef1f5;
+  --teal: #0b737a;
+  --teal-soft: #e5f5f5;
+  --red: #b42318;
+  --red-soft: #fdecea;
+  /* Acento (azul): botones principales, selección, foco, sección activa e indicadores positivos.
+     --on-accent es el texto sobre el acento; --accent-strong, el botón presionado. */
+  --accent: var(--blue);
+  --accent-strong: var(--blue-strong);
+  --accent-soft: var(--blue-soft);
+  --accent-border: var(--blue-border);
+  --on-accent: #fff;
+  --banner: #eef2f7;
+  /* Avisos y acciones destructivas: éxito azul (--accent), información turquesa, advertencia ámbar
+     y error o destructivo rojo. */
+  --warning: var(--amber);
+  --warning-soft: var(--amber-soft);
+  /* Ámbar más luminoso para los puntos de estado (caja en arqueo, reconectando): no es texto, llega
+     a 3:1 sobre --panel y se lee como ámbar y no como marrón. */
+  --warning-mark: #c27c0e;
+  --danger: var(--red);
+  --danger-soft: var(--red-soft);
+  --danger-border: #eda39b;
   --danger-contrast: #fff;
-  --info: #2f6db3;
-  --info-soft: #eaf1fa;
+  --info: var(--teal);
+  --info-soft: var(--teal-soft);
   --toast-shadow: 0 12px 32px rgb(15 23 32 / 18%);
   --toast-offset-top: 92px;
-  /* Etapa 7.1: estados de mesa. Propuesta inicial ajustable por el propietario; además del tono,
-     la luminosidad baja de libre a pago parcial y fuera de servicio lleva rayas y borde punteado. */
-  --table-free-bg: #fff;
-  --table-free-border: #c5ced9;
-  --table-free-text: #202b3e;
-  --table-occupied-bg: #d3ece2;
-  --table-occupied-border: #1b7568;
-  --table-occupied-text: #0f4d43;
+  /* Sombras y velo de los diálogos, hojas y menús emergentes. */
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 18%);
+  --shadow-dialog: 0 18px 40px rgb(0 0 0 / 22%);
+  --shadow-sheet: 0 18px 40px rgb(0 0 0 / 28%);
+  --shadow-keyboard: 0 6px 24px rgb(0 0 0 / 12%);
+  --backdrop: rgb(15 23 32 / 45%);
+  /* Estados de mesa (§1.2): libre blanco con borde gris, ocupada azul claro con borde azul medio,
+     esperando pago ámbar, pago parcial uva (violeta, distinto del azul) y fuera de servicio gris con
+     rayas y borde punteado. Además del color, cada estado lleva su icono y su texto; en el tema
+     claro la luminosidad baja de libre a pago parcial. Los bordes llegan a 3:1 sobre el lienzo. */
+  --table-free-bg: var(--panel);
+  --table-free-border: #8691a0;
+  --table-free-text: var(--text);
+  --table-occupied-bg: #dce8f6;
+  --table-occupied-border: #3f7fcb;
+  --table-occupied-text: var(--blue-strong);
   --table-awaiting-bg: #f3c76f;
   --table-awaiting-border: #a86a12;
   --table-awaiting-text: #4a2f05;
-  --table-partial-bg: #8fb9e9;
-  --table-partial-border: #245a99;
-  --table-partial-text: #0f2c4f;
+  --table-partial-bg: #c9a6e8;
+  --table-partial-border: var(--grape);
+  --table-partial-text: #2e1048;
   --table-out-bg: #e4e7eb;
   --table-out-stripe: #cfd5dc;
   --table-out-border: #98a3b0;
   --table-out-text: #4f5b69;
-  /* Etapa 7.1: acentos de las tarjetas de Caja (entradas, salidas, informes y cierre) y estado del
-     turno en el atajo «Caja». */
-  --cash-entry: #1d7a4b;
-  --cash-entry-soft: #e3f3ea;
-  --cash-exit: #9a5b0c;
-  --cash-exit-soft: #fbefdc;
-  --cash-report: #5a6878;
-  --cash-report-soft: #eef1f5;
-  --cash-closing: #5b46b0;
-  --cash-closing-soft: #eeebfa;
+  /* Caja (decisión 8 de la 9D): entradas y turno abierto en azul, salidas y arqueo en ámbar,
+     informes en gris; el cierre deja el violeta para no confundirse con «Pago parcial». */
+  --cash-entry: var(--blue);
+  --cash-entry-soft: var(--blue-soft);
+  --cash-exit: var(--amber);
+  --cash-exit-soft: var(--amber-soft);
+  --cash-report: var(--gray);
+  --cash-report-soft: var(--gray-soft);
+  --cash-closing: var(--amber);
+  --cash-closing-soft: var(--amber-soft);
+  /* Estado del servidor en la barra: en línea azul (reconectando ámbar con --warning-mark y sin
+     conexión rojo con --danger). */
+  --status-online: var(--blue);
+  --status-online-soft: var(--blue-soft);
   /* Etapa 9A: gráficos de Reportes. Paleta categórica validada (luminosidad, croma, daltonismo y
      visión normal) sobre --panel; contraste menor de 3:1 en tres tonos, por eso cada gráfico lleva
-     rótulos visibles y su tabla alternativa. --chart-previous es el gris del periodo anterior. */
+     rótulos visibles y su tabla alternativa. --chart-previous es el gris del periodo anterior.
+     --chart-3 es la serie verde que conserva la 9D (decisión 6: codifica datos, no estado). */
   --chart-1: #2a78d6;
   --chart-2: #eb6834;
   --chart-3: #1baf7a;
@@ -152,15 +202,31 @@
   --chart-previous: #a6b0bd;
   --chart-grid: #e9edf2;
   --chart-axis: #c5ced9;
-  /* Etapa 9C: estado del servidor en la barra superior (en línea, reconectando, fuera de línea). */
-  --status-online: #1d7a4b;
-  --status-online-soft: #e3f3ea;
+  --chart-label: #fff;
+  --chart-label-dark: #0b0b0b;
+  /* Marca compacta de la barra (debajo de 1280 px): «A·» en los azules de la marca. */
+  --brand-mark-bg: var(--brand-blue-pressed);
+  --brand-mark-text: #fff;
+  --brand-mark-dot: var(--brand-blue-light);
+  /* Papel simulado (diseñador de documentos e identidad del establecimiento): siempre claro, como
+     el papel, en ambos temas. */
+  --paper-bg: #fffef8;
+  --paper-ink: #1c1c1a;
+  --paper-muted: #6b6b66;
+  --paper-edge: #d7dce3;
+  --paper-shadow: rgb(0 0 0 / 18%);
+  --paper-accent: var(--brand-blue);
+  /* Fondo blanco de las vistas previas del logotipo del restaurante (original y convertido). */
+  --logo-paper: #fff;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
+/* Tema oscuro: el azul se basa en el claro del logotipo (#4090f0), aclarado lo necesario para
+   llegar a 4.5:1 como texto sobre --panel y sobre --accent-soft; el texto sobre el azul es oscuro
+   (--on-accent). */
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #121922;
@@ -169,41 +235,40 @@
   --muted: #9baabd;
   --border: #2a3543;
   --subtle: #16202a;
-  --accent: #79ceba;
-  --accent-soft: #203b36;
-  --banner: #203130;
-  --warning: #e6b15f;
-  --warning-soft: #3a2f1c;
-  --danger: #f08c80;
-  --danger-soft: #3a2422;
+  --blue: #529bf2;
+  --blue-strong: #8dbdf6;
+  --blue-soft: #1b2c42;
+  --blue-border: #2f5684;
+  --amber: #e6b15f;
+  --amber-soft: #3a2f1c;
+  --grape: #c7a2ec;
+  --grape-soft: #33264a;
+  --gray: #a9b6c6;
+  --gray-soft: #243140;
+  --teal: #4fc6cc;
+  --teal-soft: #163a3d;
+  --red: #f08c80;
+  --red-soft: #3a2422;
+  --on-accent: #0b1626;
+  --banner: #1e2a38;
+  --warning-mark: var(--amber);
+  --danger-border: #6b3530;
   --danger-contrast: #1a0f0e;
-  --info: #8bb8ec;
-  --info-soft: #1d2b3d;
   --toast-shadow: 0 12px 32px rgb(0 0 0 / 45%);
-  --table-free-bg: #19232e;
-  --table-free-border: #3d4a5a;
-  --table-free-text: #e4ebf2;
-  --table-occupied-bg: #1e4d42;
-  --table-occupied-border: #79ceba;
-  --table-occupied-text: #dff5ee;
+  --table-free-border: #5f6e84;
+  --table-occupied-bg: #1d3a5f;
+  --table-occupied-border: var(--blue);
+  --table-occupied-text: #dceafb;
   --table-awaiting-bg: #7d5c12;
   --table-awaiting-border: #e6b15f;
   --table-awaiting-text: #fff0cc;
-  --table-partial-bg: #4475b0;
-  --table-partial-border: #8bb8ec;
-  --table-partial-text: #fff;
+  --table-partial-bg: #4b2c6e;
+  --table-partial-border: var(--grape);
+  --table-partial-text: #f5ebff;
   --table-out-bg: #1d252f;
   --table-out-stripe: #27313d;
   --table-out-border: #56637a;
   --table-out-text: #9baabd;
-  --cash-entry: #7fd3a4;
-  --cash-entry-soft: #1b3a2a;
-  --cash-exit: #e6b15f;
-  --cash-exit-soft: #3a2f1c;
-  --cash-report: #a9b6c6;
-  --cash-report-soft: #243140;
-  --cash-closing: #b7a9f2;
-  --cash-closing-soft: #2c2748;
   --chart-1: #3987e5;
   --chart-2: #d95926;
   --chart-3: #199e70;
@@ -212,8 +277,7 @@
   --chart-previous: #5f6d80;
   --chart-grid: #26303c;
   --chart-axis: #3d4a5a;
-  --status-online: #7fd3a4;
-  --status-online-soft: #1b3a2a;
+  --brand-mark-bg: var(--brand-blue);
 }
 body {
   margin: 0;
@@ -224,8 +288,19 @@ button {
   touch-action: manipulation;
 }
 button:disabled {
-  cursor: wait;
   opacity: 0.55;
+}
+/* Etapa 9D (§1.6): todo control deshabilitado muestra el cursor «no disponible» (antes el de espera,
+   que en macOS comunica «cargando»). El cursor de progreso se reserva para cuando de verdad se
+   espera una respuesta: los contenedores con aria-busy (formularios al guardar, reportes al
+   consultar); esa regla va al final de este archivo para prevalecer sobre las variantes. */
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled,
+[role='button'][aria-disabled='true'],
+[role='option'][aria-disabled='true'] {
+  cursor: not-allowed;
 }
 button:focus-visible {
   outline: 3px solid var(--accent);
@@ -243,8 +318,8 @@ button:focus-visible {
   width: 38px;
   height: 38px;
   border-radius: 11px;
-  background: #1e3d37;
-  color: #fff;
+  background: var(--brand-mark-bg);
+  color: var(--brand-mark-text);
   display: grid;
   align-content: center;
   justify-content: center;
@@ -255,7 +330,7 @@ button:focus-visible {
   padding-right: 3px;
 }
 .brand-mark span {
-  color: #96dcc4;
+  color: var(--brand-mark-dot);
 }
 .brand-logo {
   display: inline-flex;
@@ -324,11 +399,11 @@ button:focus-visible {
   flex-shrink: 0;
 }
 .status-dot.good {
-  background: #2ea686;
-  box-shadow: 0 0 0 4px #2ea68613;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
 }
 .status-dot.warning {
-  background: var(--warning);
+  background: var(--warning-mark);
 }
 .status-dot.neutral {
   background: var(--muted);
@@ -351,7 +426,7 @@ button:focus-visible {
 }
 .primary-button {
   background: var(--accent);
-  color: var(--panel);
+  color: var(--on-accent);
   border-radius: 10px;
   min-height: 44px;
   padding: 10px 16px;
@@ -361,6 +436,10 @@ button:focus-visible {
 .primary-button svg {
   width: 16px;
   height: 16px;
+}
+/* Etapa 9D (§1.1): botón principal presionado con el azul presionado de la marca. */
+.primary-button:active:not(:disabled) {
+  background: var(--accent-strong);
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -450,7 +529,7 @@ fieldset:disabled {
   border-color: var(--danger);
 }
 .select-trigger:disabled {
-  cursor: default;
+  cursor: not-allowed;
 }
 .select-value {
   flex: 1 1 auto;
@@ -543,7 +622,7 @@ fieldset:disabled {
 }
 .select-option[aria-disabled='true'] {
   color: var(--muted);
-  cursor: default;
+  cursor: not-allowed;
 }
 .select-option-text {
   display: grid;
@@ -708,6 +787,16 @@ fieldset:disabled {
   font-weight: 550;
 }
 .danger-button {
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+/* Etapa 9D (§1.5): toda acción que no se puede deshacer usa el estilo destructivo rojo; al tocarla
+   se rellena con el rojo suave. */
+.danger-button:active:not(:disabled) {
+  background: var(--danger-soft);
+}
+.icon-button.danger-icon-button {
+  border-color: var(--danger-border);
   color: var(--danger);
 }
 .button-row {
@@ -915,7 +1004,9 @@ summary {
 .quote-panel h2.quote-total {
   font-size: 38px;
   letter-spacing: -0.04em;
-  color: var(--accent);
+  /* Etapa 9D (§1.4): los importes van en el color del texto y en negritas (antes en el acento). */
+  color: var(--text);
+  font-weight: 700;
 }
 .price-breakdown {
   display: grid;
@@ -1287,7 +1378,7 @@ summary {
 .selected-area {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: var(--accent);
+  border-color: var(--accent-border);
 }
 .table-search {
   position: relative;
@@ -1391,7 +1482,8 @@ summary {
 .restaurant-table.table-round {
   border-radius: 50%;
 }
-/* Etapa 7.1: cinco estados calculados por Go, con tokens por tema; el color no cambia en la 9C. */
+/* Etapa 7.1: cinco estados calculados por Go, con tokens por tema. Etapa 9D (§1.2): paleta de
+   §0-B (libre blanco, ocupada azul, esperando pago ámbar, pago parcial uva, fuera de servicio gris). */
 .restaurant-table.table-free {
   background: var(--table-free-bg);
   border-color: var(--table-free-border);
@@ -1536,6 +1628,12 @@ summary {
 .restaurant-table.selected-table {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
+}
+/* Etapa 9D (§1.2): la mesa ocupada seleccionada conserva su relleno azul claro y cambia su borde
+   azul medio por el azul principal, más grueso. */
+.restaurant-table.table-occupied.selected-table {
+  border-color: var(--accent);
+  outline-width: 4px;
 }
 .table-map-designer .table-map-viewport {
   max-height: none;
@@ -1695,7 +1793,7 @@ summary {
   border-left-color: var(--warning);
 }
 .account-list-card.account-urgency-overdue {
-  border-left-color: #bf7057;
+  border-left-color: var(--danger);
 }
 .account-list-card.account-list-selected {
   border-color: var(--accent);
@@ -1746,7 +1844,7 @@ summary {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
+  box-shadow: var(--shadow-keyboard);
   z-index: 40;
 }
 .virtual-keyboard-numeric {
@@ -1931,11 +2029,11 @@ summary {
   border-radius: 8px;
 }
 .kitchen-warning {
-  border-left: 4px solid #ba8b32;
+  border-left: 4px solid var(--warning);
 }
 .kitchen-late,
 .kitchen-job-uncertain {
-  border-left: 4px solid #b66443;
+  border-left: 4px solid var(--danger);
 }
 .kitchen-preparation-note {
   font-weight: 600;
@@ -2108,7 +2206,8 @@ summary {
 }
 .checkout-selection-total {
   flex-wrap: wrap;
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 700;
 }
 .checkout-selection-total .secondary-button {
   margin-left: auto;
@@ -2157,7 +2256,8 @@ summary {
   font-weight: 650;
 }
 .checkout-summary-balance dd {
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 700;
 }
 .checkout-figures {
   gap: 2px;
@@ -2193,7 +2293,8 @@ summary {
 .checkout-figure-emphasis dd {
   font-size: clamp(22px, 2.4vw, 30px);
   letter-spacing: -0.02em;
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 700;
 }
 .checkout-account-actions .secondary-button {
   flex: 1 1 140px;
@@ -2361,9 +2462,9 @@ summary {
   font-size: 22px;
 }
 .amount-field-value {
-  font-weight: 650;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  color: var(--text);
 }
 .amount-field-hint {
   grid-column: 1 / -1;
@@ -2392,8 +2493,8 @@ summary {
 }
 .checkout-result-change {
   font-size: clamp(18px, 2vw, 24px);
-  font-weight: 650;
-  color: var(--accent);
+  font-weight: 700;
+  color: var(--text);
 }
 .checkout-conflict,
 .checkout-uncertain {
@@ -2509,9 +2610,11 @@ summary {
   font-weight: 600;
   color: var(--muted);
 }
+/* Etapa 9D (§0-B): el pago parcial («Abono») es uva, como el estado de mesa «Pago parcial». */
 .finance-badge-partial {
-  color: var(--warning);
-  border-color: var(--warning);
+  color: var(--grape);
+  border-color: var(--grape);
+  background: var(--grape-soft);
 }
 .finance-badge-paid,
 .finance-badge-delivered {
@@ -2706,8 +2809,8 @@ summary {
   align-items: center;
   min-height: 44px;
   font-size: 15px;
-  font-weight: 650;
-  color: var(--accent);
+  font-weight: 700;
+  color: var(--text);
 }
 .adjustment-lines {
   display: grid;
@@ -2887,7 +2990,7 @@ summary {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgb(15 23 32 / 45%);
+  background: var(--backdrop);
 }
 .dialog-panel {
   width: min(460px, 100%);
@@ -2898,7 +3001,7 @@ summary {
   border-radius: 14px;
   background: var(--panel);
   color: var(--text);
-  box-shadow: 0 18px 40px rgb(0 0 0 / 22%);
+  box-shadow: var(--shadow-dialog);
 }
 .dialog-panel h2 {
   margin: 0;
@@ -3415,7 +3518,7 @@ summary {
   background: var(--accent-soft);
 }
 .capture-product-main:disabled {
-  cursor: default;
+  cursor: not-allowed;
 }
 .capture-product-stripe {
   position: absolute;
@@ -3437,7 +3540,7 @@ summary {
   margin-top: auto;
   font-size: 15px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 .capture-product-tag {
@@ -3910,7 +4013,7 @@ summary {
   font-weight: 700;
 }
 .capture-totals .capture-grand-total dd {
-  color: var(--accent);
+  color: var(--text);
   font-size: 24px;
   font-weight: 800;
 }
@@ -3964,7 +4067,7 @@ summary {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-popover);
 }
 .capture-more-menu .secondary-button {
   min-height: 48px;
@@ -4278,7 +4381,7 @@ summary {
   text-align: right;
 }
 .table-panel-totals .table-panel-balance dd {
-  color: var(--accent);
+  color: var(--text);
   font-size: 22px;
   font-weight: 800;
 }
@@ -4896,7 +4999,7 @@ summary {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-popover);
 }
 .cash-shortcut-menu > p {
   margin: 0 2px 2px;
@@ -4920,7 +5023,7 @@ summary {
   place-items: start center;
   padding: 24px 16px;
   overflow-y: auto;
-  background: rgb(15 23 32 / 45%);
+  background: var(--backdrop);
 }
 .cash-sheet {
   display: grid;
@@ -4934,7 +5037,7 @@ summary {
   border-radius: 16px;
   background: var(--bg);
   color: var(--text);
-  box-shadow: 0 18px 40px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow-sheet);
 }
 .cash-sheet:focus {
   outline: none;
@@ -5712,7 +5815,7 @@ th.inventory-number {
 .inventory-sections .tab-active {
   color: var(--accent);
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: var(--accent-border);
   font-weight: 650;
 }
 .inventory-page .inventory-navigation {
@@ -5780,7 +5883,7 @@ th.inventory-number {
 .reports-list .reports-list-active {
   color: var(--accent);
   background: var(--accent-soft);
-  border-color: var(--accent);
+  border-color: var(--accent-border);
   font-weight: 650;
 }
 .reports-content {
@@ -6392,14 +6495,14 @@ th[aria-sort='descending'] {
   opacity: 0.85;
 }
 .chart-segment-label {
-  fill: #fff;
+  fill: var(--chart-label);
   stroke: none;
   font-size: 12px;
   font-weight: 650;
   pointer-events: none;
 }
 .chart-segment-label-dark {
-  fill: #0b0b0b;
+  fill: var(--chart-label-dark);
 }
 .chart-table table {
   font-size: 12px;
@@ -7116,7 +7219,7 @@ th[aria-sort='descending'] {
   --paper-margin: 3.1ch;
   font-family: ui-monospace, 'SF Mono', Menlo, Monaco, monospace;
   font-size: clamp(9px, calc(100cqw / (var(--paper-total) * 0.62)), 15px);
-  filter: drop-shadow(0 6px 14px rgb(0 0 0 / 18%));
+  filter: drop-shadow(0 6px 14px var(--paper-shadow));
 }
 .paper-strip[data-paper='80'] {
   --paper-total: 46.8;
@@ -7127,8 +7230,8 @@ th[aria-sort='descending'] {
   width: calc(var(--paper-print) * 1ch);
   box-sizing: content-box;
   padding: 1.4em var(--paper-margin) 2.2em;
-  background: #fffef8;
-  color: #1c1c1a;
+  background: var(--paper-bg);
+  color: var(--paper-ink);
   /* Borde inferior dentado, como el corte del papel. */
   -webkit-mask: conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% /
     12px 100%;
@@ -7149,15 +7252,15 @@ th[aria-sort='descending'] {
   text-align: left;
 }
 .paper-segment-button:hover {
-  background: rgb(27 117 104 / 8%);
+  background: color-mix(in srgb, var(--paper-accent) 8%, transparent);
 }
 .paper-segment-button:focus-visible {
-  outline: 2px solid #1b7568;
+  outline: 2px solid var(--paper-accent);
   outline-offset: 1px;
 }
 .paper-segment-selected {
-  background: rgb(27 117 104 / 16%);
-  box-shadow: 0 0 0 2px #1b7568;
+  background: color-mix(in srgb, var(--paper-accent) 16%, transparent);
+  box-shadow: 0 0 0 2px var(--paper-accent);
 }
 .paper-line {
   display: block;
@@ -7196,12 +7299,12 @@ th[aria-sort='descending'] {
   image-rendering: pixelated;
 }
 .paper-image-missing {
-  color: #6b6b66;
+  color: var(--paper-muted);
   white-space: normal;
 }
 .paper-empty {
   margin: 0;
-  color: #6b6b66;
+  color: var(--paper-muted);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 13px;
   white-space: normal;
@@ -7363,8 +7466,10 @@ th[aria-sort='descending'] {
   flex: 0 0 auto;
   color: var(--muted);
 }
+/* Etapa 9D (§1.1): sección activa con el fondo suave de la marca y su borde (#a9c2e2); el texto y el
+   icono en el azul principal la identifican. */
 .topbar-section-active {
-  border-color: var(--accent);
+  border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -7381,7 +7486,8 @@ th[aria-sort='descending'] {
   color: var(--text);
 }
 
-/* Caja en la barra: indicador del turno verde (abierto), ámbar (en arqueo) y gris (sin turno). */
+/* Caja en la barra: indicador del turno azul (abierto, desde la etapa 9D), ámbar (en arqueo) y gris
+   (sin turno). */
 .cash-shortcut-indicator {
   display: none;
 }
@@ -7410,7 +7516,7 @@ th[aria-sort='descending'] {
 }
 .cash-shortcut-closing .cash-shortcut-indicator {
   border: 0;
-  background: var(--cash-exit);
+  background: var(--warning-mark);
   box-shadow: 0 0 0 3px var(--cash-exit-soft);
 }
 .cash-shortcut-none .cash-shortcut-indicator {
@@ -7469,7 +7575,7 @@ th[aria-sort='descending'] {
   color: var(--warning);
 }
 .server-status-reconnecting .server-status-dot {
-  background: var(--warning);
+  background: var(--warning-mark);
 }
 .server-status-offline {
   border-color: var(--danger);
@@ -7528,7 +7634,7 @@ th[aria-sort='descending'] {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--panel);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-popover);
 }
 .topbar-menu-heading {
   display: grid;
@@ -7762,7 +7868,7 @@ th[aria-sort='descending'] {
   border-radius: 14px;
   background: var(--panel);
   color: var(--text);
-  box-shadow: 0 18px 40px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow-sheet);
 }
 .command-palette-search {
   display: flex;
@@ -7801,7 +7907,7 @@ th[aria-sort='descending'] {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .command-palette-option.command-palette-disabled {
-  cursor: default;
+  cursor: not-allowed;
   opacity: 0.6;
 }
 .command-palette-text {
@@ -7960,4 +8066,13 @@ th[aria-sort='descending'] {
   width: 150px;
   font-variant-numeric: tabular-nums;
   text-align: center;
+}
+
+/* Etapa 9D (§1.6): mientras se espera de verdad una respuesta (aria-busy en el formulario que
+   guarda o en la zona que consulta), el cursor es el de progreso, también sobre los controles que se
+   deshabilitaron por la espera. Va al final para prevalecer sobre «not-allowed». */
+[aria-busy='true'],
+[aria-busy='true'] :disabled,
+[aria-busy='true'] [aria-disabled='true'] {
+  cursor: progress;
 }

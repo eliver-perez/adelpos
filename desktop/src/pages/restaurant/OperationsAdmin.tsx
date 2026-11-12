@@ -363,7 +363,7 @@ export function OperationsAdmin({
             Guardar distribución
           </button>
           <button
-            className="secondary-button"
+            className="danger-button"
             disabled={busy || pendingPositions === 0}
             onClick={() => void discardPositions()}
           >

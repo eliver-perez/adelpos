@@ -257,7 +257,7 @@ export function CaptureBill({
               </button>
               <button
                 type="button"
-                className="secondary-button"
+                className="danger-button"
                 onClick={() =>
                   void confirm({
                     title: 'Descartar productos nuevos',

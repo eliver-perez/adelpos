@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 // Conjunto único de iconos de la aplicación: SVG propios de 24×24 con trazo uniforme de 1.6, sin
 // relleno y sin librerías externas. Son decorativos (aria-hidden): un botón con icono conserva su
 // texto, y un botón solo con icono debe llevar aria-label.
+// data-icon expone el nombre del icono (etapa 9D) para comprobar en las pruebas que un estado o un
+// aviso lleva el icono correcto; no cambia el dibujo.
 export type IconName =
   | 'server'
   | 'database'
@@ -433,6 +435,7 @@ export function Icon({
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
+      data-icon={name}
     >
       {paths[name]}
     </svg>

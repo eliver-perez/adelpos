@@ -91,7 +91,7 @@ function LevelForm({
         {level?.configured && (
           <button
             type="button"
-            className="secondary-button"
+            className="danger-button"
             disabled={locked}
             onClick={() => void save(true)}
           >

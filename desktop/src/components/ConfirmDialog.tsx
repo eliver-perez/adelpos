@@ -145,6 +145,16 @@ export function ConfirmDialog({
 export interface DialogChoice {
   label: string;
   onSelect: () => void;
+  // Etapa 9D (§1.5): una opción que descarta algo sin poder deshacerlo va en rojo.
+  tone?: ConfirmTone;
+}
+
+// Clase del botón de una opción: la primera es la principal; una opción destructiva, roja.
+function choiceClass(choice: DialogChoice, index: number) {
+  if (choice.tone === 'danger') {
+    return 'danger-button';
+  }
+  return index === 0 ? 'primary-button' : 'secondary-button';
 }
 
 // Diálogo con varias opciones equivalentes y sin «Cancelar» (etapa 7.1, «Esta mesa ya tiene una
@@ -206,13 +216,14 @@ export function ChoiceDialog({
         <div id={messageID} className="dialog-message">
           {message}
         </div>
-        <div className="dialog-actions dialog-choices">
+        <div className="dialog-actions dialog-choices" aria-busy={busy || undefined}>
           {choices.map((choice, index) => (
             <button
               key={choice.label}
               ref={index === 0 ? firstChoice : undefined}
               type="button"
-              className={`${index === 0 ? 'primary-button' : 'secondary-button'} dialog-button`}
+              className={`${choiceClass(choice, index)} dialog-button`}
+              data-tone={choice.tone ?? 'default'}
               disabled={busy}
               onClick={choice.onSelect}
             >

@@ -43,7 +43,13 @@ const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
     permission: 'accounts.transfer',
     icon: 'edit',
   },
-  { id: 'void', label: 'Anular cuenta vacía', permission: 'accounts.manage', icon: 'ban' },
+  {
+    id: 'void',
+    label: 'Anular cuenta vacía',
+    permission: 'accounts.manage',
+    icon: 'ban',
+    tone: 'danger',
+  },
 ];
 
 // Acciones del menú «Más…» que aplican a la cuenta con los permisos del usuario. Las comparten la

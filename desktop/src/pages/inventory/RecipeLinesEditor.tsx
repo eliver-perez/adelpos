@@ -198,7 +198,7 @@ function RecipeLineEditor({
         <strong>
           Renglón {number} · {componentKindLabels[line.kind]}
         </strong>
-        <button type="button" className="secondary-button" onClick={onRemove}>
+        <button type="button" className="danger-button" onClick={onRemove}>
           Quitar renglón
         </button>
       </div>

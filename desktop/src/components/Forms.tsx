@@ -56,6 +56,10 @@ export function PageTitle({
 
 type SubmitIntent = 'save' | 'new';
 
+// Etapa 9D (§1.5): 'danger' pinta el envío con el estilo destructivo rojo en los formularios que
+// confirman una acción que no se puede deshacer (anular o cancelar una cuenta, por ejemplo).
+export type FormTone = 'default' | 'danger';
+
 export function Form({
   onSave,
   children,
@@ -64,6 +68,7 @@ export function Form({
   onSaveAndNew,
   saveAndNewLabel = 'Guardar y crear otra',
   successMessage = 'Cambios guardados.',
+  tone = 'default',
 }: {
   onSave: () => Promise<void>;
   children: ReactNode;
@@ -76,6 +81,7 @@ export function Form({
   saveAndNewLabel?: string;
   // Confirmación que se muestra como aviso al guardar con el botón principal.
   successMessage?: string;
+  tone?: FormTone;
 }) {
   const [busy, setBusy] = useState(false);
   const intent = useRef<SubmitIntent>('save');
@@ -123,7 +129,13 @@ export function Form({
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="form-stack">
+    // aria-busy mientras Go responde: el cursor de progreso (styles.css) indica la espera real; los
+    // controles deshabilitados sin espera muestran «no disponible».
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="form-stack"
+      aria-busy={busy || undefined}
+    >
       <fieldset ref={fields} disabled={locked} className="form-stack">
         {children}
       </fieldset>
@@ -132,7 +144,8 @@ export function Form({
       <div className="form-actions">
         <button
           type="submit"
-          className="primary-button"
+          className={tone === 'danger' ? 'danger-solid-button' : 'primary-button'}
+          data-tone={tone}
           disabled={locked}
           onClick={() => {
             intent.current = 'save';
