@@ -118,6 +118,15 @@ function operationVisible(context: CommandContext) {
   return context.screen === 'restaurant' || context.screen === 'takeaway';
 }
 
+// Abrir otra cuenta o elegir otra mesa: no durante una operación en curso ni con el cobro abierto
+// (la interfaz no ofrece esos botones en el cobro y cerrarlo perdería lo tecleado; revisión 9C).
+function freeForAnotherAccount(context: CommandContext) {
+  return !context.operation?.blocked && !context.operation?.checkoutOpen;
+}
+
+const anotherAccountHint =
+  'Disponible sin un cobro abierto y cuando termine la operación en curso.';
+
 // Opción del menú rápido de Caja: visible con su permiso (las calcula shortcutOptions) y
 // habilitada como en el menú rápido (ingreso, retiro, gasto y corte parcial exigen turno abierto).
 function cashAction(
@@ -175,8 +184,8 @@ export const actions: ActionDefinition[] = [
       has(context, 'restaurant.tables.read') &&
       has(context, 'restaurant.areas.read') &&
       context.operation !== null,
-    enabled: (context) => !context.operation?.blocked,
-    hint: 'Espera a que termine la operación en curso.',
+    enabled: freeForAnotherAccount,
+    hint: anotherAccountHint,
     run: async (runtime, context) => {
       // La misma función que «Capturar» o «Nueva cuenta» de la mesa: entra a la captura sin crear
       // la cuenta (Go la crea con el primer producto).
@@ -197,8 +206,8 @@ export const actions: ActionDefinition[] = [
     description: 'Abre una cuenta sin mesa, como «Cuenta sin mesa» en Mesas → Cuentas.',
     visible: (context) =>
       allowed(context, 'restaurant') && has(context, 'accounts.open') && context.operation !== null,
-    enabled: (context) => !context.operation?.blocked,
-    hint: 'Espera a que termine la operación en curso.',
+    enabled: freeForAnotherAccount,
+    hint: anotherAccountHint,
     run: async (runtime) => {
       if (await runtime.requestScreen('restaurant')) {
         runtime.operation()?.accountWithoutTable();
@@ -216,8 +225,8 @@ export const actions: ActionDefinition[] = [
       has(context, 'accounts.open') &&
       has(context, 'takeaway.manage') &&
       context.operation !== null,
-    enabled: (context) => !context.operation?.blocked,
-    hint: 'Espera a que termine la operación en curso.',
+    enabled: freeForAnotherAccount,
+    hint: anotherAccountHint,
     run: async (runtime) => {
       if (await runtime.requestScreen('takeaway')) {
         runtime.operation()?.newTakeaway();
@@ -516,7 +525,8 @@ export function commandEntries(
         kind: 'Mesa',
         description: table.areaName,
         keywords: ['mesa', table.areaName],
-        enabled: true,
+        enabled: !context.operation?.checkoutOpen,
+        hint: 'Cierra el cobro antes de elegir otra mesa.',
         run: async () => {
           if (await runtime.requestScreen('restaurant')) {
             runtime.operation()?.chooseTable(table.id);

@@ -254,8 +254,9 @@ function ApplicationContent() {
             Volver al acceso
           </button>
           {/* Antes de iniciar sesión no se sabe quién usa la terminal: el diagnóstico conserva su
-              función con el mismo lenguaje sencillo y la información técnica plegada. */}
-          <StatusPage support />
+              función con el mismo lenguaje sencillo, sin «Información para soporte», que §4.1
+              reserva al administrador (revisión 9C). */}
+          <StatusPage />
         </main>
       </AccessShell>
     );

@@ -387,7 +387,8 @@ describe('navegación de la etapa 9C', () => {
     await screen.findByRole('heading', { name: 'Revisa la conexión' });
     fireEvent.click(screen.getByRole('button', { name: 'Ver estado del sistema' }));
     await screen.findByRole('heading', { name: 'Estado del sistema' });
-    expect(screen.getByRole('button', { name: /Información para soporte/ })).toBeTruthy();
+    // Antes de iniciar sesión no se sabe quién usa la terminal: sin «Información para soporte».
+    expect(screen.queryByRole('button', { name: /Información para soporte/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Volver al acceso' })).toBeTruthy();
   });
 });
