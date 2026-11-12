@@ -4,6 +4,7 @@ import { tableStateIcons } from '../../components/restaurant/tableStateIcons';
 import { shortcutProps } from '../../commands/hints';
 import type { Lookups } from '../../services/catalog';
 import { formatMoney } from '../../services/money';
+import { longOpenText } from '../../components/restaurant/TableMap';
 import { accountLabel, elapsedTime, tableStateLabels } from '../../services/restaurant';
 import type {
   Account,
@@ -120,6 +121,10 @@ function EmptyTotals() {
   );
 }
 
+// Etapa 9D (§3.3): el botón principal del panel, relleno en azul; Cobrar, Precuenta, Dividir y
+// Más… son secundarios.
+const captureLabel = 'Capturar pedidos en esta mesa';
+
 // Panel lateral de la mesa seleccionada en el mapa (etapa 6.2): nombre, estado y tiempo abierta;
 // cuentas abiertas como botones; productos, totales y acciones de la cuenta elegida.
 //
@@ -144,6 +149,7 @@ export function TablePanel({
   onCheckout,
   onRelease,
   onService,
+  longOpenHours,
 }: {
   table: RestaurantTable;
   // Cuentas abiertas de la mesa; null mientras se consultan.
@@ -161,6 +167,8 @@ export function TablePanel({
   onCheckout: () => void;
   onRelease: (account: Account) => void;
   onService: (outOfService: boolean) => void;
+  // Umbral de cuenta abierta por mucho tiempo (settings.long_open_hours de Go), para el texto.
+  longOpenHours?: number;
 }) {
   const open = accounts ?? [];
   const occupied = open.length > 0;
@@ -181,6 +189,9 @@ export function TablePanel({
   // «Liberar mesa»: lo decide Go (releasable) y no debe haber productos nuevos sin guardar.
   const releasable =
     !!account && account.releasable && can('accounts.open') && localDraft.length === 0;
+  // Cuenta abierta por mucho tiempo (§3.4): la marca la calcula Go para la mesa (su cuenta abierta
+  // más antigua) y para cada cuenta.
+  const longOpen = !!table.long_open || open.some((entry) => entry.long_open);
   // Habilitar procede siempre; poner fuera de servicio solo en una mesa sin cuentas abiertas.
   const serviceButton = canManage ? (
     table.out_of_service ? (
@@ -221,9 +232,15 @@ export function TablePanel({
               Mesa para {table.seats}
             </li>
             {occupied && (
-              <li>
-                <Icon name="clock" size={15} />
+              // Etapa 9D (§3.4): con una cuenta abierta más horas que el umbral (long_open, de
+              // Go), el tiempo va en ámbar con el triángulo de advertencia.
+              <li
+                className={longOpen ? 'table-panel-long-open' : undefined}
+                title={longOpen ? longOpenText(longOpenHours) : undefined}
+              >
+                <Icon name={longOpen ? 'alert' : 'clock'} size={15} />
                 Abierta hace {elapsedTime(oldest)}
+                {longOpen && <span className="sr-only"> · {longOpenText(longOpenHours)}</span>}
               </li>
             )}
           </ul>
@@ -254,19 +271,23 @@ export function TablePanel({
                 disabled={blocked || !canOpen}
                 onClick={onOpenAccount}
               >
-                <IconLabel icon="edit">Capturar</IconLabel>
+                <IconLabel icon="edit">{captureLabel}</IconLabel>
               </button>
-              {can('payments.read') && can('payments.collect') && (
-                <button type="button" className="primary-button capture-checkout" disabled>
-                  <IconLabel icon="cash">Cobrar</IconLabel>
-                </button>
-              )}
             </div>
             <div
               className="capture-secondary-actions"
               role="group"
               aria-label="Acciones de la cuenta"
             >
+              {can('payments.read') && can('payments.collect') && (
+                <button
+                  type="button"
+                  className="secondary-button capture-checkout capture-checkout-outline"
+                  disabled
+                >
+                  <IconLabel icon="cash">Cobrar</IconLabel>
+                </button>
+              )}
               {can('payments.read') && (
                 <button type="button" className="secondary-button" disabled>
                   <IconLabel icon="receipt">Precuenta</IconLabel>
@@ -340,20 +361,21 @@ export function TablePanel({
                   disabled={blocked}
                   onClick={onCapture}
                 >
-                  <IconLabel icon="edit">Capturar</IconLabel>
+                  <IconLabel icon="edit">{captureLabel}</IconLabel>
                 </button>
-                <CheckoutButton
-                  account={account}
-                  can={can}
-                  disabled={blocked}
-                  onCheckout={onCheckout}
-                />
               </div>
               <div
                 className="capture-secondary-actions"
                 role="group"
                 aria-label="Acciones de la cuenta"
               >
+                <CheckoutButton
+                  account={account}
+                  can={can}
+                  disabled={blocked}
+                  onCheckout={onCheckout}
+                  tone="secondary"
+                />
                 {can('payments.read') && (
                   <button
                     type="button"

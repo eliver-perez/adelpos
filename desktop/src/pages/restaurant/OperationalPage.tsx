@@ -9,10 +9,11 @@ import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
+import { useNavigation } from '../../navigation/NavigationContext';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { notifyError, notifySuccess } from '../../services/notify';
 import { accountLabel, isPendingAccount } from '../../services/restaurant';
-import type { Account, RestaurantTable } from '../../services/restaurant';
+import type { Account, RestaurantTable, TableState } from '../../services/restaurant';
 import {
   CashShortcut,
   CashShortcutSheet,
@@ -31,6 +32,7 @@ import { CancelAccount } from './CancelAccount';
 import { CancelItem } from './CancelItem';
 import { OperationsAdmin } from './OperationsAdmin';
 import { TablePanel } from './TablePanel';
+import { TablesSummaryPanel, areaTables } from './TablesSummaryPanel';
 import { CheckoutPanel } from './checkout/CheckoutPanel';
 import { CheckoutToolbar } from './checkout/CheckoutToolbar';
 import { AccountAdjustments } from './adjustments/AccountAdjustments';
@@ -53,6 +55,8 @@ export function OperationalPage({
   onCommandState,
   commandHandlers,
   shellControls,
+  connectionLost = false,
+  onRetryConnection,
 }: {
   active: boolean;
   timezone: string;
@@ -74,6 +78,10 @@ export function OperationalPage({
   commandHandlers?: RefObject<OperationCommandHandlers | null>;
   // Controles del armazón para la barra reducida de la captura (usuario y estado del servidor).
   shellControls?: ReactNode;
+  // Etapa 9D (§3.5): los datos se actualizan solos (eventos en tiempo real y sondeo); «Reintentar»
+  // aparece solo cuando la terminal perdió la conexión con el servidor («Sin conexión»).
+  connectionLost?: boolean;
+  onRetryConnection?: () => void;
 }) {
   const workspace = useRestaurantWorkspace(active, requestedView, can, requestKey);
   // Atajo «Caja» (etapa 7.1): una sola consulta del turno de la terminal para la barra, la captura
@@ -100,6 +108,13 @@ export function OperationalPage({
   // El cobro abierto desde «Marcar como entregado» inicia con la entrega activada.
   const [checkoutDeliver, setCheckoutDeliver] = useState(false);
   const { confirm, dialog } = useConfirmDialog();
+  const navigation = useNavigation();
+  // Etapa 9D (§3.1): estado que el resumen del panel resalta en el mapa. Se quita al cambiar de
+  // área o al elegir una mesa (el resumen deja de estar a la vista).
+  const [highlight, setHighlight] = useState<TableState | null>(null);
+  useEffect(() => {
+    setHighlight(null);
+  }, [workspace.areaID, workspace.tableID]);
   const draftUncertain = workspace.draft.uncertain;
   const blocked = mutation.busy || mutation.uncertain || draftUncertain;
   const selectedTable = overview.data?.tables.find((table) => table.id === workspace.tableID);
@@ -508,6 +523,19 @@ export function OperationalPage({
     return null;
   }
 
+  // «Reintentar» vuelve a consultar el servidor y los datos de la operación.
+  function retryConnection() {
+    onRetryConnection?.();
+    workspace.refresh();
+  }
+
+  // Nuevo pedido para llevar desde el panel de Mesas: lleva a Para llevar (como la paleta) y abre
+  // el pedido con la misma función del botón «Nuevo pedido».
+  function newTakeawayFromTables() {
+    navigation?.requestScreen('takeaway');
+    openAccount('takeaway', null);
+  }
+
   const toolbar = (
     <div className="operation-toolbar">
       {visibleViews.length > 1 && (
@@ -538,10 +566,14 @@ export function OperationalPage({
         />
       )}
       <div className={`button-row ${checkoutOpen ? 'operation-toolbar-secondary' : ''}`}>
-        <button className="secondary-button" onClick={workspace.refresh}>
-          <IconLabel icon="refresh">Actualizar</IconLabel>
-        </button>
-        {/* En Mesas, la cuenta se abre desde el panel lateral de la mesa. */}
+        {/* Etapa 9D (§3.5): sin «Actualizar» (los datos llegan solos); «Reintentar» solo sin
+            conexión. */}
+        {connectionLost && (
+          <button className="secondary-button operation-retry" onClick={retryConnection}>
+            <IconLabel icon="refresh">Reintentar</IconLabel>
+          </button>
+        )}
+        {/* En Mesas, la cuenta se abre desde el panel lateral de la mesa o desde el resumen. */}
         {can('accounts.open') && !checkoutOpen && (view === 'takeaway' || view === 'accounts') && (
           <button
             className="primary-button"
@@ -706,15 +738,18 @@ export function OperationalPage({
           cashShortcut={active ? <CashShortcut shortcut={cashShortcut} can={can} /> : undefined}
           shiftNotice={<NoShiftNotice shortcut={cashShortcut} can={can} />}
           shellControls={shellControls}
+          connectionLost={connectionLost}
+          onRetry={retryConnection}
         />
       </div>
     );
   }
 
   if (view === 'tables') {
-    // Mapa operativo (sin controles de edición) a la izquierda y panel lateral de la mesa a la
-    // derecha. Una acción de la cuenta (dividir, precuenta, historial…) ocupa el lugar del mapa
-    // y al cerrarse vuelve a él; el panel permanece.
+    // Mapa operativo (sin controles de edición) a la izquierda y panel lateral a la derecha, siempre
+    // a la vista y con el mismo ancho (etapa 9D, §3.1): sin mesa elegida, el resumen del área; con
+    // mesa, el panel de la mesa. Una acción de la cuenta (dividir, precuenta, historial…) ocupa el
+    // lugar del mapa y al cerrarse vuelve a él; el panel permanece.
     const tablePanelAction = panel === 'capture' || panel === 'editor' ? null : accountPanel();
     const tableAccounts =
       selectedTable && workspace.accounts.data
@@ -722,23 +757,23 @@ export function OperationalPage({
             (entry) => entry.state === 'open' && entry.table_id === selectedTable.id,
           )
         : null;
+    const longOpenHours = overview.data?.settings.long_open_hours;
+    const currentArea = overview.data?.areas.find((area) => area.id === workspace.areaID) ?? null;
     return (
       <div className="operational-page">
         {toolbar}
         {banners}
-        <div className={`operation-map-screen ${selectedTable ? 'operation-map-split' : ''}`}>
+        <div className="operation-map-screen operation-map-split">
           {tablePanelAction ? (
             <section className="operation-map-card operation-map-action">
               {tablePanelAction}
             </section>
           ) : overview.data ? (
-            <section className="operation-map-card" aria-label="Mapa del restaurante">
+            <section
+              className="operation-map-card operation-map-live"
+              aria-label="Mapa del restaurante"
+            >
               <Notice>{overview.error}</Notice>
-              {!selectedTable && (
-                <p className="muted text-sm">
-                  Toca una mesa para ver sus cuentas, abrir una nueva o capturar productos.
-                </p>
-              )}
               <TableMap
                 areas={overview.data.areas}
                 tables={overview.data.tables}
@@ -746,6 +781,9 @@ export function OperationalPage({
                 selectedTableID={workspace.tableID}
                 onAreaChange={workspace.setAreaID}
                 onSelect={(table) => showTable(table.id)}
+                autoFit
+                highlight={selectedTable ? null : highlight}
+                longOpenHours={longOpenHours}
               />
             </section>
           ) : (
@@ -754,7 +792,7 @@ export function OperationalPage({
               <p className="muted">Consultando áreas y mesas…</p>
             </section>
           )}
-          {selectedTable && (
+          {selectedTable ? (
             <TablePanel
               table={selectedTable}
               accounts={tableAccounts}
@@ -771,6 +809,22 @@ export function OperationalPage({
               onCheckout={() => openCheckout(false)}
               onRelease={(account) => void releaseAccount(selectedTable, account)}
               onService={(outOfService) => void changeTableService(selectedTable, outOfService)}
+              longOpenHours={longOpenHours}
+            />
+          ) : (
+            <TablesSummaryPanel
+              area={currentArea}
+              tables={areaTables(overview.data?.tables ?? [], workspace.areaID)}
+              loading={!overview.data}
+              highlight={highlight}
+              onHighlight={setHighlight}
+              canOpenWithoutTable={can('accounts.open')}
+              canOpenTakeaway={
+                can('accounts.open') && can('takeaway.read') && can('takeaway.manage')
+              }
+              blocked={blocked}
+              onAccountWithoutTable={() => openAccount('dine_in', null)}
+              onNewTakeaway={newTakeawayFromTables}
             />
           )}
         </div>

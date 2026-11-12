@@ -1,5 +1,5 @@
-import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { shortcutHint } from '../../commands/hints';
 import { formatMoney } from '../../services/money';
 import { countLabel } from '../../services/plural';
@@ -23,12 +23,119 @@ interface TableMapProps {
   onSelect: (table: RestaurantTable) => void;
   designer?: boolean;
   onPosition?: (id: string, x: number, y: number) => void;
+  // Etapa 9D (§3.2): escala automática al espacio disponible (mapa operativo de Mesas). Sin ella,
+  // el lienzo proporcional de 1000 × 560 de siempre (diseñador y consulta en «Áreas y
+  // distribución»).
+  autoFit?: boolean;
+  // Etapa 9D (§3.1): estado que el resumen del panel resalta en el mapa (null: ninguno).
+  highlight?: TableState | null;
+  // Umbral de cuenta abierta por mucho tiempo (settings.long_open_hours de Go), para el texto de la
+  // advertencia; la marca long_open de cada mesa la calcula Go.
+  longOpenHours?: number;
 }
+
+// Etapa 9D (§3.2): escala automática del mapa operativo. Al abrir un área, el mapa calcula una sola
+// escala (píxeles por unidad del espacio lógico de 1000 × 560) para que se vean todas sus mesas en el
+// espacio disponible, con la misma escala para todas. Ninguna mesa queda con su lado menor por
+// debajo de unos 64 px: si con ese tamaño no caben, el mapa se desplaza (arrastrando con el dedo y
+// con barras). La escala tampoco pasa del doble, para que pocas mesas no se vuelvan enormes. Solo
+// presentación: las posiciones y medidas guardadas en Go no cambian.
+export const minimumTableSide = 64;
+export const maximumMapScale = 2;
+const fitMargin = 16;
+
+export interface TableFit {
+  scale: number;
+  // Esquina superior izquierda del conjunto de mesas, en unidades lógicas.
+  originX: number;
+  originY: number;
+  // Margen en píxeles antes de la primera mesa (centra el conjunto si sobra espacio).
+  offsetX: number;
+  offsetY: number;
+  // Medidas del lienzo en píxeles (al menos las del espacio visible).
+  width: number;
+  height: number;
+  // Las mesas no caben con el tamaño mínimo: el mapa se desplaza.
+  overflow: boolean;
+}
+
+type TableBox = Pick<RestaurantTable, 'x' | 'y' | 'width' | 'height'>;
+
+export function fitTables(
+  tables: TableBox[],
+  viewport: { width: number; height: number },
+): TableFit | null {
+  if (tables.length === 0 || viewport.width <= 0 || viewport.height <= 0) {
+    return null;
+  }
+  const originX = Math.min(...tables.map((table) => table.x));
+  const originY = Math.min(...tables.map((table) => table.y));
+  const spanX = Math.max(1, Math.max(...tables.map((table) => table.x + table.width)) - originX);
+  const spanY = Math.max(1, Math.max(...tables.map((table) => table.y + table.height)) - originY);
+  const available = {
+    width: Math.max(1, viewport.width - fitMargin * 2),
+    height: Math.max(1, viewport.height - fitMargin * 2),
+  };
+  const fit = Math.min(available.width / spanX, available.height / spanY);
+  const smallest = Math.max(
+    1,
+    Math.min(...tables.map((table) => Math.min(table.width, table.height))),
+  );
+  const minimum = minimumTableSide / smallest;
+  const scale = Math.max(minimum, Math.min(fit, maximumMapScale));
+  const content = {
+    width: spanX * scale + fitMargin * 2,
+    height: spanY * scale + fitMargin * 2,
+  };
+  // Medio píxel de tolerancia: el redondeo del punto flotante no debe crear barras de un píxel.
+  const overflowX = content.width > viewport.width + 0.5;
+  const overflowY = content.height > viewport.height + 0.5;
+  return {
+    scale,
+    originX,
+    originY,
+    offsetX: fitMargin + Math.max(0, (viewport.width - content.width) / 2),
+    offsetY: fitMargin + Math.max(0, (viewport.height - content.height) / 2),
+    width: overflowX ? Math.ceil(content.width) : viewport.width,
+    height: overflowY ? Math.ceil(content.height) : viewport.height,
+    overflow: overflowX || overflowY,
+  };
+}
+
+// Medida del espacio visible del mapa (sin barras de desplazamiento). Sin ResizeObserver (pruebas
+// sin diseño) queda en cero y el mapa usa la distribución proporcional de siempre.
+function useViewportSize(element: RefObject<HTMLDivElement | null>, enabled: boolean) {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const node = element.current;
+    if (!enabled || !node) {
+      return;
+    }
+    const measure = () => {
+      const next = { width: node.clientWidth, height: node.clientHeight };
+      setSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [element, enabled]);
+  return size;
+}
+
+// Distancia que debe recorrer el dedo (o el puntero) para que el toque se tome como arrastre del
+// mapa y no como toque de una mesa.
+const panThreshold = 8;
 
 // Nombre accesible del mosaico: nombre y estado primero (así lo buscan las pruebas y los lectores
 // de pantalla), después cuentas, tiempo ocupada, precuenta o saldo y la capacidad de la mesa. El
 // tiempo y el saldo los calcula Go; aquí solo se presentan.
-function accessibleName(table: RestaurantTable) {
+function accessibleName(table: RestaurantTable, longOpenHours?: number) {
   const parts = [
     table.name,
     tableStateLabels[table.state],
@@ -43,10 +150,18 @@ function accessibleName(table: RestaurantTable) {
   if (table.state === 'partial_payment') {
     parts.push(`saldo ${formatMoney(table.balance)}`);
   }
+  if (table.long_open) {
+    parts.push(longOpenText(longOpenHours));
+  }
   if (table.state !== 'out_of_service') {
     parts.push(`mesa para ${table.seats}`);
   }
   return parts.join(', ');
+}
+
+// Texto de la advertencia de cuenta abierta por mucho tiempo (§3.4).
+export function longOpenText(hours?: number) {
+  return hours ? `abierta hace más de ${hours} h` : 'abierta por mucho tiempo';
 }
 
 // Mosaico de la mesa (etapa 9C, §4): icono de mesa y nombre grande; estado en texto con su icono;
@@ -54,7 +169,11 @@ function accessibleName(table: RestaurantTable) {
 // de una. La cuenta no guarda comensales: el icono de personas indica la capacidad de la mesa
 // (lugares), como explica la leyenda. En mesas pequeñas se ocultan primero los datos secundarios
 // (consultas de contenedor en styles.css); el nombre accesible los conserva todos.
-function TableTile({ table }: { table: RestaurantTable }) {
+//
+// Etapa 9D (§3.4): una mesa cuya cuenta lleva abierta más horas que el umbral (long_open, de Go)
+// muestra su tiempo en una etiqueta ámbar con el triángulo de advertencia, distinta del color de
+// cualquier estado.
+function TableTile({ table, longOpenHours }: { table: RestaurantTable; longOpenHours?: number }) {
   const withAccounts = table.account_count > 0;
   return (
     <span className="table-tile">
@@ -72,8 +191,11 @@ function TableTile({ table }: { table: RestaurantTable }) {
       {table.state !== 'out_of_service' && (
         <span className="table-tile-details">
           {withAccounts && (
-            <span className="table-tile-time">
-              <Icon name="clock" size={12} />
+            <span
+              className={`table-tile-time ${table.long_open ? 'table-tile-long-open' : ''}`}
+              title={table.long_open ? longOpenText(longOpenHours) : undefined}
+            >
+              <Icon name={table.long_open ? 'alert' : 'clock'} size={12} />
               {elapsedTime(table.occupied_seconds)}
             </span>
           )}
@@ -215,8 +337,12 @@ export function TableMap({
   onSelect,
   designer = false,
   onPosition,
+  autoFit = false,
+  highlight = null,
+  longOpenHours,
 }: TableMapProps) {
   const canvas = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
   const dragging = useRef<{
     id: string;
     clientX: number;
@@ -226,6 +352,17 @@ export function TableMap({
     width: number;
     height: number;
   } | null>(null);
+  // Arrastre del mapa operativo cuando las mesas no caben (§3.2).
+  const panning = useRef<{
+    pointerID: number;
+    clientX: number;
+    clientY: number;
+    left: number;
+    top: number;
+    moved: boolean;
+  } | null>(null);
+  const swallowClick = useRef(false);
+  const [panActive, setPanActive] = useState(false);
   const [query, setQuery] = useState('');
   const availableAreas = designer ? areas : areas.filter((area) => area.active);
   const visible = tables.filter(
@@ -235,6 +372,26 @@ export function TableMap({
   const results = searching
     ? searchTables(operationalTables(tables, areas), areas, query, areaID)
     : [];
+  // El diseñador de «Áreas y distribución» conserva el lienzo proporcional de 1000 × 560 (las
+  // posiciones se editan sobre el espacio completo); el mapa operativo se ajusta a las mesas.
+  const fitMode = autoFit && !designer;
+  const size = useViewportSize(viewport, fitMode);
+  const fit = fitMode ? fitTables(visible, size) : null;
+
+  // Al abrir otra área el mapa vuelve a su esquina superior izquierda.
+  useEffect(() => {
+    viewport.current?.scrollTo?.({ left: 0, top: 0 });
+  }, [areaID]);
+
+  // Al resaltar un estado desde el resumen, la primera mesa resaltada queda a la vista.
+  useEffect(() => {
+    if (!highlight) {
+      return;
+    }
+    canvas.current
+      ?.querySelector<HTMLElement>('.table-highlighted')
+      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [highlight, areaID]);
 
   // Elegir una mesa encontrada la muestra (con su área) y lleva el foco a su mosaico: así Escape
   // cierra su panel y los atajos (⌘N, ⌘P) actúan, porque el foco ya no está en un campo.
@@ -268,8 +425,94 @@ export function TableMap({
     );
   }
 
+  // Arrastrar el mapa con el dedo o el puntero lo desplaza; el toque que termina un arrastre no
+  // elige la mesa sobre la que empezó. Con el tacto nativo el navegador puede tomar el
+  // desplazamiento por su cuenta (pointercancel): entonces este arrastre se descarta.
+  function panStart(event: PointerEvent<HTMLDivElement>) {
+    swallowClick.current = false;
+    const node = viewport.current;
+    if (!fitMode || !node || event.button !== 0) {
+      return;
+    }
+    if (node.scrollWidth <= node.clientWidth && node.scrollHeight <= node.clientHeight) {
+      return;
+    }
+    panning.current = {
+      pointerID: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      left: node.scrollLeft,
+      top: node.scrollTop,
+      moved: false,
+    };
+  }
+
+  function panMove(event: PointerEvent<HTMLDivElement>) {
+    const current = panning.current;
+    const node = viewport.current;
+    if (!current || !node || current.pointerID !== event.pointerId) {
+      return;
+    }
+    const dx = event.clientX - current.clientX;
+    const dy = event.clientY - current.clientY;
+    if (!current.moved) {
+      if (Math.hypot(dx, dy) < panThreshold) {
+        return;
+      }
+      current.moved = true;
+      setPanActive(true);
+      node.setPointerCapture?.(event.pointerId);
+    }
+    node.scrollLeft = current.left - dx;
+    node.scrollTop = current.top - dy;
+  }
+
+  function panEnd(event: PointerEvent<HTMLDivElement>) {
+    const current = panning.current;
+    if (!current || current.pointerID !== event.pointerId) {
+      return;
+    }
+    panning.current = null;
+    setPanActive(false);
+    if (current.moved && event.type === 'pointerup') {
+      swallowClick.current = true;
+    }
+  }
+
+  function clickCapture(event: MouseEvent<HTMLDivElement>) {
+    if (swallowClick.current) {
+      swallowClick.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  // Posición y medida de cada mesa: en píxeles con la escala automática (mapa operativo) o en
+  // proporción del lienzo de 1000 × 560 (diseñador y pruebas sin diseño).
+  function tableStyle(table: RestaurantTable): CSSProperties {
+    if (fit) {
+      return {
+        left: `${fit.offsetX + (table.x - fit.originX) * fit.scale}px`,
+        top: `${fit.offsetY + (table.y - fit.originY) * fit.scale}px`,
+        width: `${table.width * fit.scale}px`,
+        height: `${table.height * fit.scale}px`,
+      };
+    }
+    return {
+      left: `min(${table.x / 10}%, calc(100% - 44px))`,
+      top: `min(${table.y / 5.6}%, calc(100% - 44px))`,
+      width: `${table.width / 10}%`,
+      height: `${table.height / 5.6}%`,
+    };
+  }
+
+  const pannable = !!fit?.overflow;
   return (
-    <div className={`table-map ${designer ? 'table-map-designer' : ''}`}>
+    <div
+      className={`table-map ${designer ? 'table-map-designer' : ''} ${
+        fitMode ? 'table-map-operation' : ''
+      }`}
+    >
       {/* Etapa 9C (§4): encabezado del mapa con el selector de área y, en la operación, el
           buscador de mesas. */}
       <div className="table-map-header">
@@ -300,102 +543,118 @@ export function TableMap({
         )}
       </div>
       {searching && <SearchResults query={query} results={results} onChoose={choose} />}
-      <div className="table-map-viewport">
+      {/* Etapa 9D (§3.2): el mapa y su leyenda en un mismo marco; la leyenda va dentro, en una sola
+          línea, y solo las mesas se desplazan. */}
+      <div className="table-map-frame">
         <div
-          className="table-canvas"
-          ref={canvas}
-          aria-label={designer ? 'Diseñador de distribución de mesas' : 'Mapa de mesas'}
+          className={`table-map-viewport ${pannable ? 'table-map-pannable' : ''} ${
+            panActive ? 'table-map-panning' : ''
+          }`}
+          ref={viewport}
+          onPointerDown={panStart}
+          onPointerMove={panMove}
+          onPointerUp={panEnd}
+          onPointerCancel={panEnd}
+          onClickCapture={clickCapture}
         >
-          {visible.length === 0 && (
-            <p className="table-map-empty muted">
-              {availableAreas.length
-                ? 'Esta área aún no tiene mesas.'
-                : 'Crea un área y sus mesas para comenzar.'}
-            </p>
-          )}
-          {visible.map((table) => {
-            const style: CSSProperties = {
-              left: `min(${table.x / 10}%, calc(100% - 44px))`,
-              top: `min(${table.y / 5.6}%, calc(100% - 44px))`,
-              width: `${table.width / 10}%`,
-              height: `${table.height / 5.6}%`,
-            };
-            return (
-              <button
-                key={table.id}
-                type="button"
-                data-table-id={table.id}
-                style={style}
-                className={`restaurant-table table-${table.state} table-${table.shape} ${selectedTableID === table.id ? 'selected-table' : ''}`}
-                aria-label={accessibleName(table)}
-                aria-pressed={selectedTableID === table.id}
-                onClick={() => onSelect(table)}
-                onPointerDown={(event) => {
-                  if (!designer || !onPosition) return;
-                  event.currentTarget.setPointerCapture?.(event.pointerId);
-                  dragging.current = {
-                    id: table.id,
-                    clientX: event.clientX,
-                    clientY: event.clientY,
-                    x: table.x,
-                    y: table.y,
-                    width: table.width,
-                    height: table.height,
-                  };
-                }}
-                onPointerMove={move}
-                onPointerUp={() => {
-                  dragging.current = null;
-                }}
-                onPointerCancel={() => {
-                  dragging.current = null;
-                }}
-                onKeyDown={(event) => {
-                  if (!designer || !onPosition) return;
-                  const directions: Record<string, [number, number]> = {
-                    ArrowLeft: [-1, 0],
-                    ArrowRight: [1, 0],
-                    ArrowUp: [0, -1],
-                    ArrowDown: [0, 1],
-                  };
-                  const direction = directions[event.key];
-                  if (!direction) return;
-                  event.preventDefault();
-                  const step = event.shiftKey ? 1 : 10;
-                  onPosition(
-                    table.id,
-                    Math.max(0, Math.min(1000 - table.width, table.x + direction[0] * step)),
-                    Math.max(0, Math.min(560 - table.height, table.y + direction[1] * step)),
-                  );
-                }}
-              >
-                <TableTile table={table} />
-              </button>
-            );
-          })}
+          <div
+            className={`table-canvas ${fit ? 'table-canvas-fit' : ''}`}
+            ref={canvas}
+            aria-label={designer ? 'Diseñador de distribución de mesas' : 'Mapa de mesas'}
+            style={fit ? { width: `${fit.width}px`, height: `${fit.height}px` } : undefined}
+            data-scale={fit ? fit.scale.toFixed(4) : undefined}
+            data-overflow={fit ? String(fit.overflow) : undefined}
+          >
+            {visible.length === 0 && (
+              <p className="table-map-empty muted">
+                {availableAreas.length
+                  ? 'Esta área aún no tiene mesas.'
+                  : 'Crea un área y sus mesas para comenzar.'}
+              </p>
+            )}
+            {visible.map((table) => {
+              const highlighted = !!highlight && table.state === highlight;
+              return (
+                <button
+                  key={table.id}
+                  type="button"
+                  data-table-id={table.id}
+                  style={tableStyle(table)}
+                  className={`restaurant-table table-${table.state} table-${table.shape} ${
+                    selectedTableID === table.id ? 'selected-table' : ''
+                  } ${highlighted ? 'table-highlighted' : ''} ${
+                    table.long_open ? 'table-long-open' : ''
+                  }`}
+                  aria-label={accessibleName(table, longOpenHours)}
+                  aria-pressed={selectedTableID === table.id}
+                  onClick={() => onSelect(table)}
+                  onPointerDown={(event) => {
+                    if (!designer || !onPosition) return;
+                    event.currentTarget.setPointerCapture?.(event.pointerId);
+                    dragging.current = {
+                      id: table.id,
+                      clientX: event.clientX,
+                      clientY: event.clientY,
+                      x: table.x,
+                      y: table.y,
+                      width: table.width,
+                      height: table.height,
+                    };
+                  }}
+                  onPointerMove={move}
+                  onPointerUp={() => {
+                    dragging.current = null;
+                  }}
+                  onPointerCancel={() => {
+                    dragging.current = null;
+                  }}
+                  onKeyDown={(event) => {
+                    if (!designer || !onPosition) return;
+                    const directions: Record<string, [number, number]> = {
+                      ArrowLeft: [-1, 0],
+                      ArrowRight: [1, 0],
+                      ArrowUp: [0, -1],
+                      ArrowDown: [0, 1],
+                    };
+                    const direction = directions[event.key];
+                    if (!direction) return;
+                    event.preventDefault();
+                    const step = event.shiftKey ? 1 : 10;
+                    onPosition(
+                      table.id,
+                      Math.max(0, Math.min(1000 - table.width, table.x + direction[0] * step)),
+                      Math.max(0, Math.min(560 - table.height, table.y + direction[1] * step)),
+                    );
+                  }}
+                >
+                  <TableTile table={table} longOpenHours={longOpenHours} />
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
-      <div className="map-legend muted">
-        <ul className="map-legend-states" aria-label="Estados de las mesas">
-          {legend.map((state) => (
-            <li key={state} className="map-legend-state">
-              <i className={`legend-swatch legend-${state}`} aria-hidden="true" />
-              <Icon name={tableStateIcons[state]} size={12} />
-              {tableStateLabels[state]}
+        <div className="map-legend muted">
+          <ul className="map-legend-states" aria-label="Estados de las mesas">
+            {legend.map((state) => (
+              <li key={state} className="map-legend-state">
+                <i className={`legend-swatch legend-${state}`} aria-hidden="true" />
+                <Icon name={tableStateIcons[state]} size={12} />
+                {tableStateLabels[state]}
+              </li>
+            ))}
+          </ul>
+          <ul className="map-legend-states" aria-label="Datos de cada mesa">
+            <li className="map-legend-state">
+              <Icon name="clock" size={12} />
+              Tiempo ocupada
             </li>
-          ))}
-        </ul>
-        <ul className="map-legend-states" aria-label="Datos de cada mesa">
-          <li className="map-legend-state">
-            <Icon name="clock" size={12} />
-            Tiempo ocupada
-          </li>
-          <li className="map-legend-state">
-            <Icon name="users" size={12} />
-            Capacidad (lugares)
-          </li>
-        </ul>
-        {designer && <span>Arrastra o usa flechas; Shift mueve de uno en uno.</span>}
+            <li className="map-legend-state">
+              <Icon name="users" size={12} />
+              Capacidad (lugares)
+            </li>
+          </ul>
+          {designer && <span>Arrastra o usa flechas; Shift mueve de uno en uno.</span>}
+        </div>
       </div>
     </div>
   );

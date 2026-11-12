@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// Etapa 9D, fase B (§2): reglas de estilo de la barra superior que no se ven
+// Etapa 9D, fases B y C (§2 y §3): reglas de estilo de la barra superior y de Mesas que no se ven
 // en jsdom (las comprueba también Playwright con los colores calculados). Todos los colores salen
 // de los tokens de la fase A.
 
@@ -54,5 +54,47 @@ describe('barra superior (§2)', () => {
   it('si falta espacio solo se acorta el nombre del usuario', () => {
     expect(rule('.topbar-end > *')).toContain('flex-shrink: 0;');
     expect(rule('.topbar-end > .user-menu')).toContain('flex-shrink: 1;');
+  });
+});
+
+describe('Mesas (§3)', () => {
+  it('panel lateral de ancho fijo y mapa a la misma altura', () => {
+    const split = rule('.operation-map-split');
+    expect(split).toContain('--table-panel-width: 360px;');
+    expect(split).toContain('grid-template-columns: minmax(0, 1fr) var(--table-panel-width);');
+    expect(split).toContain('align-content: stretch;');
+    expect(rule('.table-map-operation .table-map-viewport')).toContain('overflow: auto;');
+  });
+
+  it('leyenda en una sola línea dentro del marco del mapa', () => {
+    const legend = rule('.map-legend');
+    expect(legend).toContain('flex-wrap: nowrap;');
+    expect(legend).toContain('white-space: nowrap;');
+    expect(rule('.map-legend-states')).toContain('flex-wrap: nowrap;');
+  });
+
+  it('«Cobrar» fuera de la captura con contorno azul, sin relleno', () => {
+    const outline = rule('.capture-checkout-outline:not(:disabled)');
+    expect(outline).toContain('border: 2px solid var(--accent);');
+    expect(outline).toContain('background: var(--panel);');
+    expect(outline).toContain('color: var(--accent);');
+  });
+
+  it('advertencia ámbar discreta de la cuenta abierta por mucho tiempo', () => {
+    expect(rule('.table-tile-time.table-tile-long-open')).toContain('color: var(--warning);');
+    expect(rule('.restaurant-table.table-long-open::after')).toContain(
+      'background: var(--warning-mark);',
+    );
+    expect(rule('.table-panel-long-open')).toContain('color: var(--warning);');
+    expect(rule('.account-list-card.account-long-open')).toContain(
+      'border-left-color: var(--warning-mark);',
+    );
+  });
+
+  it('las mesas resaltadas desde el resumen no se confunden con la seleccionada', () => {
+    expect(rule('.restaurant-table.table-highlighted')).toContain(
+      'outline: 3px dashed var(--accent);',
+    );
+    expect(rule('.restaurant-table.selected-table')).toContain('outline: 3px solid var(--accent);');
   });
 });

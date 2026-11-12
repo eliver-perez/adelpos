@@ -678,7 +678,9 @@ async function openFirstAccount() {
   // Etapa 6.2: tocar la mesa abre su panel lateral; «Capturar» entra a la cuenta elegida.
   fireEvent.click(await screen.findByRole('button', { name: /^Mesa 1, Ocupada/ }));
   const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 1' });
-  fireEvent.click(await within(panel).findByRole('button', { name: 'Capturar' }));
+  fireEvent.click(
+    await within(panel).findByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+  );
   await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #1' });
   return screen.getByRole('complementary', { name: 'Cuenta actual' });
 }
@@ -1071,7 +1073,9 @@ async function openFreeTable() {
   renderCapture();
   fireEvent.click(await screen.findByRole('button', { name: /^Mesa 2, Libre/ }));
   const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
-  fireEvent.click(await within(panel).findByRole('button', { name: 'Capturar' }));
+  fireEvent.click(
+    await within(panel).findByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+  );
   await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta nueva' });
   await waitFor(() => expect(disabled(productButton('Filete de prueba'))).toBe(false));
   return screen.getByRole('complementary', { name: 'Cuenta actual' });

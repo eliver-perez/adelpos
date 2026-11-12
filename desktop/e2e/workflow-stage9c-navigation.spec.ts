@@ -303,7 +303,7 @@ test('navegación 9C: barra superior, mosaicos, ruta, inicio por terminal y capt
   await page.getByRole('button', { name: /^Mesa 9C, Libre/ }).click();
   await page
     .getByRole('complementary', { name: 'Panel de Mesa 9C' })
-    .getByRole('button', { name: 'Capturar', exact: true })
+    .getByRole('button', { name: 'Capturar pedidos en esta mesa', exact: true })
     .click();
   await expect(page.getByRole('heading', { name: 'Mesa 9C · Cuenta nueva' })).toBeVisible();
   await expect(page.locator('.app-topbar')).toHaveCount(0);

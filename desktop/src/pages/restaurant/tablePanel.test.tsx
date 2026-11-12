@@ -461,7 +461,7 @@ describe('panel lateral de la mesa', () => {
     expect(within(panel).getByText('Total').nextSibling?.textContent).toBe('$0.00');
     expect(within(panel).getByText('Pagado').nextSibling?.textContent).toBe('$0.00');
     expect(within(panel).getByText('Saldo').nextSibling?.textContent).toBe('$0.00');
-    const capture = within(panel).getByRole('button', { name: 'Capturar' });
+    const capture = within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' });
     expect((capture as HTMLButtonElement).disabled).toBe(false);
     for (const label of ['Cobrar', 'Precuenta', 'Dividir']) {
       expect(
@@ -511,7 +511,9 @@ describe('panel lateral de la mesa', () => {
     expect(within(panel).getByText('Total').nextSibling?.textContent).toBe('$263.40');
     expect(within(panel).getByText('Pagado').nextSibling?.textContent).toBe('$100.00');
     expect(within(panel).getByText('Saldo').nextSibling?.textContent).toBe('$163.40');
-    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
+    expect(
+      within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+    ).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Cobrar · $163.40' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Precuenta' })).toBeTruthy();
     expect(within(panel).getByRole('button', { name: 'Dividir' })).toBeTruthy();
@@ -542,7 +544,7 @@ describe('panel lateral de la mesa', () => {
       expect(within(panel).getByRole('heading', { name: 'Cuenta #2 · Familia Ruiz' })).toBeTruthy(),
     );
     expect(within(panel).getByText('La cuenta aún no tiene productos.')).toBeTruthy();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Capturar' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #2' });
     expect(opens).toHaveLength(0);
     // «Mesas» vuelve al mapa con el panel de la misma mesa.
@@ -554,7 +556,9 @@ describe('panel lateral de la mesa', () => {
     renderPage();
     await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
     const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
-    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
+    expect(
+      within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+    ).toBeTruthy();
     expect(screen.queryByRole('complementary', { name: 'Panel de Mesa 1' })).toBeNull();
     expect(screen.getByRole('region', { name: 'Mapa del restaurante' })).toBeTruthy();
   });
@@ -562,7 +566,7 @@ describe('panel lateral de la mesa', () => {
   it('«Nueva cuenta» entra a capturar en la mesa ocupada sin crear la cuenta', async () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
-    await within(panel).findByRole('button', { name: 'Capturar' });
+    await within(panel).findByRole('button', { name: 'Capturar pedidos en esta mesa' });
     fireEvent.click(within(panel).getByRole('button', { name: 'Nueva cuenta' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta nueva' });
     expect(openRequests).toBe(0);
@@ -585,7 +589,7 @@ describe('panel lateral de la mesa', () => {
   it('un doble toque en «Capturar» no abre cuentas', async () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
-    const capture = within(panel).getByRole('button', { name: 'Capturar' });
+    const capture = within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' });
     fireEvent.click(capture);
     fireEvent.click(capture);
     await screen.findByRole('heading', { name: 'Mesa 2 · Cuenta nueva' });
@@ -692,8 +696,11 @@ describe('liberar mesa y fuera de servicio (etapa 7.1)', () => {
     );
     expect(within(disabledPanel).getByText('Fuera de servicio')).toBeTruthy();
     expect(
-      (within(disabledPanel).getByRole('button', { name: 'Capturar' }) as HTMLButtonElement)
-        .disabled,
+      (
+        within(disabledPanel).getByRole('button', {
+          name: 'Capturar pedidos en esta mesa',
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
     fireEvent.click(within(disabledPanel).getByRole('button', { name: 'Habilitar' }));
     await waitFor(() => expect(services).toHaveLength(2));
@@ -706,7 +713,9 @@ describe('liberar mesa y fuera de servicio (etapa 7.1)', () => {
     renderPage('tables', (permission) => permission !== 'restaurant.tables.manage');
     const panel = await tablePanel(/^Mesa 2, Libre/, 'Mesa 2');
     expect(within(panel).queryByRole('button', { name: 'Poner fuera de servicio' })).toBeNull();
-    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
+    expect(
+      within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+    ).toBeTruthy();
   });
 });
 
@@ -992,7 +1001,9 @@ describe('buscador de mesas y selector de área (etapa 9C, §4)', () => {
     fireEvent.change(box, { target: { value: 'mesa 2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Mesa 2, Salón, Libre' }));
     const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
-    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
+    expect(
+      within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+    ).toBeTruthy();
     expect(
       screen.getByRole('button', { name: /^Mesa 2, Libre/ }).getAttribute('aria-pressed'),
     ).toBe('true');
@@ -1009,7 +1020,7 @@ describe('datos de la cuenta durante la captura', () => {
     );
     fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #2 · Familia Ruiz' }));
     await within(panel).findByRole('heading', { name: 'Cuenta #2 · Familia Ruiz' });
-    fireEvent.click(within(panel).getByRole('button', { name: 'Capturar' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Capturar pedidos en esta mesa' }));
     await screen.findByRole('heading', { name: 'Mesa 1 · Cuenta #2' });
     fireEvent.click(screen.getByRole('button', { name: 'Datos de la cuenta' }));
     const details = await screen.findByRole('region', { name: 'Datos de la cuenta #2' });
@@ -1062,7 +1073,9 @@ describe('datos de la cuenta durante la captura', () => {
   it('sin permiso de listas de precios no se muestra el selector de lista', async () => {
     renderPage('tables', (permission) => permission !== 'orders.price_list.manage');
     const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
-    fireEvent.click(await within(panel).findByRole('button', { name: 'Capturar' }));
+    fireEvent.click(
+      await within(panel).findByRole('button', { name: 'Capturar pedidos en esta mesa' }),
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Datos de la cuenta' }));
     const details = await screen.findByRole('region', { name: 'Datos de la cuenta #1' });
     expect(within(details).queryByLabelText('Lista de precios para nuevas capturas')).toBeNull();
@@ -1105,7 +1118,10 @@ describe('para llevar sin formulario', () => {
     order.total = '150.00';
     order.balance = '150.00';
     order.revision += 1;
-    fireEvent.click(screen.getByRole('button', { name: 'Actualizar' }));
+    // Etapa 9D (§3.5): sin «Actualizar»; el aviso de cambio del servidor (tiempo real) vuelve a
+    // consultar la cuenta.
+    expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
+    window.dispatchEvent(new Event('adel-server-change'));
     await screen.findByText('Pedido sin nombre · se identifica como Pedido #3');
     fireEvent.click(screen.getByRole('button', { name: 'Datos del pedido' }));
     const again = await screen.findByRole('region', { name: 'Datos del pedido #3' });

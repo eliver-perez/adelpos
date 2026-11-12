@@ -6,6 +6,13 @@ import { formatMoney } from '../../services/money';
 import { deliveryStateBadges, paymentStateBadges } from '../../services/payments';
 import { countLabel } from '../../services/plural';
 import { Select } from '../../components/Select';
+import { Icon } from '../../components/Icon';
+import { longOpenText } from '../../components/restaurant/TableMap';
+
+// Cuenta abierta más horas que el umbral del establecimiento (§3.4); la marca la calcula Go.
+function longOpen(account: Account) {
+  return account.state === 'open' && account.long_open;
+}
 
 function accountStateText(account: Account) {
   if (account.state === 'open') {
@@ -110,7 +117,7 @@ export function AccountList({
         {value?.items.map((account) => (
           <button
             key={account.id}
-            className={`account-list-card ${selectedID === account.id ? 'account-list-selected' : ''} ${takeaway ? `account-urgency-${account.urgency}` : ''}`}
+            className={`account-list-card ${selectedID === account.id ? 'account-list-selected' : ''} ${takeaway ? `account-urgency-${account.urgency}` : ''} ${longOpen(account) ? 'account-long-open' : ''}`}
             aria-pressed={selectedID === account.id}
             onClick={() => onSelect(account.id)}
           >
@@ -120,7 +127,23 @@ export function AccountList({
             </div>
             <div className="account-list-card-detail">
               <span>{serverDateTime(account.created_at, value.timezone)}</span>
-              <strong>{elapsedTime(account.elapsed_seconds)}</strong>
+              {/* Etapa 9D (§3.4): abierta más horas que el umbral (long_open, de Go): el tiempo en
+                  ámbar con el triángulo de advertencia. */}
+              {longOpen(account) ? (
+                <strong
+                  className="account-long-open-time"
+                  title={longOpenText(value.settings?.long_open_hours)}
+                >
+                  <Icon name="alert" size={13} />
+                  {elapsedTime(account.elapsed_seconds)}
+                  <span className="sr-only">
+                    {' '}
+                    · {longOpenText(value.settings?.long_open_hours)}
+                  </span>
+                </strong>
+              ) : (
+                <strong>{elapsedTime(account.elapsed_seconds)}</strong>
+              )}
             </div>
             <p>
               Preparación:{' '}

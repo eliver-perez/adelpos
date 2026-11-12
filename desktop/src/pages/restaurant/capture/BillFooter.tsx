@@ -89,31 +89,37 @@ export function accountMoreActions(
 
 // Botón de cobro: Cobrar exige registrar cobros y consultar la información financiera; muestra el
 // saldo que calculó Go. Sin permiso de cobro basta la consulta.
+//
+// Etapa 9D (§3.3 y decisión 7): un solo botón principal por panel. Dentro de la captura «Cobrar»
+// es principal junto a «Enviar a cocina»; fuera de ella (panel de la mesa y detalle de la cuenta en
+// Cuentas y Para llevar) el principal es «Capturar…» y «Cobrar» conserva su texto e importe con el
+// estilo de contorno (tone «secondary»).
 export function CheckoutButton({
   account,
   can,
   disabled,
   onCheckout,
+  tone = 'primary',
 }: {
   account: Account;
   can: (permission: string) => boolean;
   disabled: boolean;
   onCheckout: () => void;
+  tone?: 'primary' | 'secondary';
 }) {
   const pending = usePendingEntry(paymentPendingKey(account.id));
   if (!can('payments.read')) {
     return null;
   }
+  const collectClass =
+    tone === 'primary'
+      ? 'primary-button capture-checkout'
+      : 'secondary-button capture-checkout capture-checkout-outline';
   const collectable =
     account.state === 'open' && account.confirmed_quantity > 0 && account.payment_state !== 'paid';
   if (collectable && can('payments.collect')) {
     return (
-      <button
-        type="button"
-        className="primary-button capture-checkout"
-        disabled={disabled}
-        onClick={onCheckout}
-      >
+      <button type="button" className={collectClass} disabled={disabled} onClick={onCheckout}>
         <IconLabel icon="cash">
           Cobrar{account.finance ? ` · ${formatMoney(account.finance.balance)}` : ''}
         </IconLabel>
@@ -127,7 +133,7 @@ export function CheckoutButton({
     // haya algo confirmado que cobrar.
     if (account.state === 'open' && can('payments.collect')) {
       return (
-        <button type="button" className="primary-button capture-checkout" disabled>
+        <button type="button" className={collectClass} disabled>
           <IconLabel icon="cash">Cobrar</IconLabel>
         </button>
       );
@@ -147,7 +153,9 @@ export function CheckoutButton({
 }
 
 // Pie de la cuenta: totales de Go, acciones secundarias como botones y las dos acciones
-// principales («Enviar a cocina» y «Cobrar»).
+// principales («Enviar a cocina» y «Cobrar»). Fuera de la captura (emphasis «overview»: el detalle
+// de la cuenta en Cuentas y Para llevar) el botón principal es «Capturar productos en esta cuenta»
+// y estas dos conservan su lugar con el estilo de contorno (etapa 9D, decisión 7).
 export function BillFooter({
   account,
   localDraft,
@@ -163,6 +171,7 @@ export function BillFooter({
   onAction,
   onSend,
   onCheckout,
+  emphasis = 'capture',
 }: {
   account: Account;
   localDraft: DraftItem[];
@@ -179,6 +188,7 @@ export function BillFooter({
   onAction: (action: BillAction) => void;
   onSend: () => void;
   onCheckout: () => void;
+  emphasis?: 'capture' | 'overview';
 }) {
   const writable =
     account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
@@ -274,7 +284,9 @@ export function BillFooter({
         {writable && can('orders.confirm') && (
           <button
             type="button"
-            className="primary-button capture-send"
+            className={`${
+              emphasis === 'capture' ? 'primary-button' : 'secondary-button'
+            } capture-send`}
             disabled={newUnits === 0 || blocked || sending || conflict || linesLocked}
             onClick={onSend}
           >
@@ -288,6 +300,7 @@ export function BillFooter({
           can={can}
           disabled={blocked || sending}
           onCheckout={onCheckout}
+          tone={emphasis === 'capture' ? 'primary' : 'secondary'}
         />
       </div>
     </footer>

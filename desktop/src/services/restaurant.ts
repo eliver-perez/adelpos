@@ -444,10 +444,20 @@ export function serverDateTime(value: string, timezone: string) {
   }).format(new Date(value));
 }
 
+// Tiempo transcurrido que calculó Go (segundos), en el formato único de la aplicación: mesas,
+// cuentas, Para llevar, «Abierta hace…» y Cocina. Menos de una hora en minutos («45 min»), menos
+// de un día en horas y minutos («5 h 12 min») y, desde 24 horas, en días y horas («3 d 14 h»,
+// etapa 9D §3.4). Siempre hacia abajo: nunca muestra más tiempo del transcurrido.
 export function elapsedTime(seconds: number) {
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} h ${minutes % 60} min`;
+  }
+  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
 }
 
 // Mesas que muestra el mapa operativo: las de un área activa que siguen activas o que aún tienen

@@ -32,6 +32,8 @@ export function CaptureScreen({
   cashShortcut,
   shiftNotice,
   shellControls,
+  connectionLost = false,
+  onRetry,
 }: {
   workspace: Workspace;
   can: (permission: string) => boolean;
@@ -48,6 +50,9 @@ export function CaptureScreen({
   shiftNotice?: ReactNode;
   // Etapa 9C: usuario y estado del servidor en la barra reducida de la captura.
   shellControls?: ReactNode;
+  // Etapa 9D (§3.5): «Reintentar» solo cuando se perdió la conexión con el servidor.
+  connectionLost?: boolean;
+  onRetry?: () => void;
 }) {
   const { bill, lookups, editor, view } = workspace;
   const [category, setCategory] = useState('');
@@ -138,7 +143,8 @@ export function CaptureScreen({
         onChooseAccount={workspace.chooseAccount}
         onNewAccount={onNewAccount}
         onDetails={() => onAction('metadata')}
-        onRefresh={workspace.refresh}
+        connectionLost={connectionLost}
+        onRetry={onRetry ?? workspace.refresh}
         cashShortcut={cashShortcut}
         shellControls={shellControls}
       />

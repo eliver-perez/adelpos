@@ -250,8 +250,11 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     await expect(tablePanel.getByRole('button', { name: label, exact: true })).toBeDisabled();
   }
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  const captureButton = tablePanel.getByRole('button', { name: 'Capturar', exact: true });
-  await panelThemes(page, testInfo, 'table-panel-free', 'Capturar');
+  const captureButton = tablePanel.getByRole('button', {
+    name: 'Capturar pedidos en esta mesa',
+    exact: true,
+  });
+  await panelThemes(page, testInfo, 'table-panel-free', 'Capturar pedidos en esta mesa');
   // Etapa 7.1 §2.1: mesa libre → capturar → salir sin productos → la mesa sigue libre.
   await captureButton.click();
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta nueva' })).toBeVisible();
@@ -460,10 +463,16 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   ).toBeVisible();
   await expect(tablePanel).toContainText('En cocina');
   await expect(tablePanel.locator('.table-panel-balance')).toContainText('$150.00');
-  for (const label of ['Capturar', 'Cobrar · $150.00', 'Precuenta', 'Dividir', 'Más…']) {
+  for (const label of [
+    'Capturar pedidos en esta mesa',
+    'Cobrar · $150.00',
+    'Precuenta',
+    'Dividir',
+    'Más…',
+  ]) {
     await expect(tablePanel.getByRole('button', { name: label, exact: true })).toBeVisible();
   }
-  await panelThemes(page, testInfo, 'table-panel', 'Capturar');
+  await panelThemes(page, testInfo, 'table-panel', 'Capturar pedidos en esta mesa');
   // «Nueva cuenta» (icono +) entra a capturar en la mesa ocupada; sin productos no se crea.
   await tablePanel.getByRole('button', { name: 'Nueva cuenta', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta nueva' })).toBeVisible();
@@ -497,7 +506,9 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   // Capturar y cobrar desde el panel lateral.
   await panelAccounts.getByRole('button', { name: 'Cuenta #2', exact: true }).click();
   await expect(tablePanel.getByRole('heading', { name: 'Cuenta #2', exact: true })).toBeVisible();
-  await tablePanel.getByRole('button', { name: 'Capturar', exact: true }).click();
+  await tablePanel
+    .getByRole('button', { name: 'Capturar pedidos en esta mesa', exact: true })
+    .click();
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
   // Etapa 7 (fase B): turno por denominaciones, ingreso, retiro, corte parcial, arqueo ciego que
   // bloquea el cobro y cierre con faltante. Luego el cobro abre un turno nuevo en la misma caja.
@@ -523,7 +534,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(awaitingTable.locator('.table-tile-state')).toHaveText('Esperando pago');
   await expect(awaitingTable.locator('.table-tile-state svg')).toHaveCount(1);
   await expect(tablePanel.locator('.table-panel-state')).toHaveText('Esperando pago');
-  await panelThemes(page, testInfo, 'table-awaiting-payment', 'Capturar');
+  await panelThemes(page, testInfo, 'table-awaiting-payment', 'Capturar pedidos en esta mesa');
   await openSection(page, 'Para llevar');
   // Etapa 6.2 §2: «Nuevo pedido» entra directo a la captura, sin formulario previo.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();

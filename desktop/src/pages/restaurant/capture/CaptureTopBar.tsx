@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Icon, IconLabel } from '../../../components/Icon';
+import { IconLabel } from '../../../components/Icon';
 import type { Account, RestaurantTable } from '../../../services/restaurant';
 import {
   accountCustomName,
@@ -72,6 +72,8 @@ function captureDetails(account: Account, table: RestaurantTable | null, timezon
 // (sin listas desplegables). Tocar el título también abre los datos. Desde la etapa 9C es la barra
 // reducida de la aplicación durante la captura (§1.2): «‹ Mesas» o «‹ Para llevar», la mesa y la
 // cuenta (o el pedido), el indicador de Caja y el usuario; Enviar a cocina y Cobrar no se mueven.
+// Desde la etapa 9D (§3.5) no tiene «Actualizar» (la cuenta se actualiza sola); «Reintentar»
+// aparece solo cuando la terminal perdió la conexión con el servidor.
 export function CaptureTopBar({
   account,
   backLabel,
@@ -85,7 +87,8 @@ export function CaptureTopBar({
   onChooseAccount,
   onNewAccount,
   onDetails,
-  onRefresh,
+  connectionLost = false,
+  onRetry,
   cashShortcut,
   shellControls,
 }: {
@@ -101,7 +104,8 @@ export function CaptureTopBar({
   onChooseAccount: (id: string) => void;
   onNewAccount: () => void;
   onDetails: () => void;
-  onRefresh: () => void;
+  connectionLost?: boolean;
+  onRetry: () => void;
   // Atajo «Caja» con el estado del turno (etapa 7.1).
   cashShortcut?: ReactNode;
   // Usuario y estado del servidor de la barra reducida (etapa 9C).
@@ -188,14 +192,11 @@ export function CaptureTopBar({
         </div>
       )}
       {cashShortcut}
-      <button
-        type="button"
-        className="secondary-button capture-topbar-refresh"
-        aria-label="Actualizar"
-        onClick={onRefresh}
-      >
-        <Icon name="refresh" size={20} />
-      </button>
+      {connectionLost && (
+        <button type="button" className="secondary-button capture-topbar-retry" onClick={onRetry}>
+          <IconLabel icon="refresh">Reintentar</IconLabel>
+        </button>
+      )}
       {shellControls}
     </header>
   );

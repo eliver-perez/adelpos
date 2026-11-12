@@ -224,7 +224,7 @@ test('mesas, selector de hora y apariencia 9C (parte D2)', async ({ page }, test
   const facts = panel.getByRole('list', { name: 'Datos de la mesa' });
   await expect(facts).toContainText('Mesa para 4');
   await expect(facts).toContainText(/Abierta hace \d+ min/);
-  const capture = panel.getByRole('button', { name: 'Capturar', exact: true });
+  const capture = panel.getByRole('button', { name: 'Capturar pedidos en esta mesa', exact: true });
   await expect(capture).toHaveClass(/primary-button/);
   await expect(capture.locator('svg')).toHaveCount(1);
   for (const label of ['Precuenta', 'Liberar mesa']) {

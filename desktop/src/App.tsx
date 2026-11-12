@@ -496,6 +496,8 @@ function ApplicationContent() {
                     {userMenu(true)}
                   </>
                 }
+                connectionLost={server === 'offline'}
+                onRetryConnection={() => void session.refresh()}
               />
             </div>
           )}
