@@ -386,7 +386,10 @@ test('color de marca, estados, avisos, destructivos y cursor (etapa 9D, fase A)'
   expect(await computed(checkout, 'cursor')).toBe('not-allowed');
   // Un botón habilitado conserva la mano.
   expect(
-    await computed(freePanel.getByRole('button', { name: 'Capturar', exact: true }), 'cursor'),
+    await computed(
+      freePanel.getByRole('button', { name: 'Capturar pedidos en esta mesa', exact: true }),
+      'cursor',
+    ),
   ).toBe('pointer');
 
   // 4. Aviso de información (turquesa): la precuenta con el atajo sin una cuenta con productos.

@@ -101,6 +101,6 @@ export async function openAdministration(page: Page, target: AdministrationScree
 export async function returnToTableCapture(page: Page, table: string, heading: string | RegExp) {
   await openSection(page, 'Mesas');
   const panel = page.getByRole('complementary', { name: `Panel de ${table}` });
-  await panel.getByRole('button', { name: 'Capturar', exact: true }).click();
+  await panel.getByRole('button', { name: 'Capturar pedidos en esta mesa', exact: true }).click();
   await expect(page.getByRole('heading', { name: heading })).toBeVisible();
 }

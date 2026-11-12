@@ -198,12 +198,10 @@ export function CaptureBill({
       </header>
       <div className="capture-bill-lines">
         <Notice>{error}</Notice>
+        {/* Etapa 9D (§3.3, decisión 7): fuera de la captura es el único botón principal del
+            detalle de la cuenta; «Enviar a cocina» y «Cobrar» quedan con contorno. */}
         {onCapture && capturable && (
-          <button
-            type="button"
-            className="secondary-button capture-open-button"
-            onClick={onCapture}
-          >
+          <button type="button" className="primary-button capture-open-button" onClick={onCapture}>
             <IconLabel icon="edit">Capturar productos en esta cuenta</IconLabel>
           </button>
         )}
@@ -320,6 +318,7 @@ export function CaptureBill({
         onAction={onAction}
         onSend={onSend}
         onCheckout={onCheckout}
+        emphasis={onCapture ? 'overview' : 'capture'}
       />
     </aside>
   );

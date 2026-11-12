@@ -1446,13 +1446,20 @@ summary {
   font-size: 11px;
   font-weight: 500;
 }
+/* Marco del mapa (etapa 9D, §3.2): las mesas y, dentro del mismo marco, la leyenda. */
+.table-map-frame {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--subtle);
+  overflow: hidden;
+}
 .table-map-viewport {
   max-height: 190px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--subtle);
 }
 .table-canvas {
   /* Escala uniforme: el lienzo conserva la proporción del espacio lógico de 1000 × 560, de modo
@@ -1466,6 +1473,59 @@ summary {
   overflow: hidden;
   background-image: radial-gradient(var(--border) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+/* Etapa 9D (§3.2): mapa operativo con escala automática. El mapa ocupa toda la altura del panel
+   lateral; el lienzo mide en píxeles lo que calcula TableMap (una sola escala para todas las mesas,
+   ninguna con su lado menor por debajo de 64 px) y, si no cabe, el espacio visible se desplaza con
+   barras o arrastrando con el dedo. */
+.table-map-operation {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.table-map-operation .table-map-frame {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.table-map-operation .table-map-viewport {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.table-canvas.table-canvas-fit {
+  aspect-ratio: auto;
+  max-width: none;
+  min-width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+.table-map-pannable {
+  cursor: grab;
+}
+/* Barras de desplazamiento siempre visibles (también donde el sistema las oculta hasta usarlas),
+   con objetivos amplios para el dedo. */
+.table-map-pannable::-webkit-scrollbar {
+  width: 14px;
+  height: 14px;
+}
+.table-map-pannable::-webkit-scrollbar-track {
+  background: var(--subtle);
+}
+.table-map-pannable::-webkit-scrollbar-thumb {
+  border: 3px solid var(--subtle);
+  border-radius: 8px;
+  background: var(--muted);
+}
+.table-map-pannable::-webkit-scrollbar-corner {
+  background: var(--subtle);
+}
+.table-map-pannable.table-map-panning,
+.table-map-pannable.table-map-panning .restaurant-table {
+  cursor: grabbing;
+  user-select: none;
 }
 .restaurant-table {
   position: absolute;
@@ -1635,6 +1695,33 @@ summary {
   border-color: var(--accent);
   outline-width: 4px;
 }
+/* Etapa 9D (§3.1): mesas resaltadas desde el resumen del panel, con un contorno discontinuo que no
+   se confunde con la selección (contorno continuo). No se atenúan las demás mesas. */
+.restaurant-table.table-highlighted {
+  outline: 3px dashed var(--accent);
+  outline-offset: 3px;
+  z-index: 1;
+}
+/* Etapa 9D (§3.4): cuenta abierta más horas que el umbral (long_open, de Go). Advertencia ámbar
+   discreta: un punto en la esquina de la mesa y el tiempo en una etiqueta ámbar con el triángulo. */
+.restaurant-table.table-long-open::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warning-mark);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.table-tile-time.table-tile-long-open {
+  padding: 0 5px;
+  border: 1px solid var(--warning-mark);
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
 .table-map-designer .table-map-viewport {
   max-height: none;
 }
@@ -1646,13 +1733,20 @@ summary {
   padding: 24px;
   font-size: 12px;
 }
+/* Etapa 9D (§3.2): la leyenda va dentro del marco del mapa, en una sola línea. */
 .map-legend {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 12px;
-  padding-top: 8px;
+  gap: 14px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
   font-size: 10px;
+  white-space: nowrap;
+  overflow-x: auto;
+  flex-shrink: 0;
 }
 .map-legend span {
   display: flex;
@@ -1662,9 +1756,9 @@ summary {
 /* Leyenda con los cinco estados de mesa: muestra, icono y texto. */
 .map-legend-states {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px 14px;
+  gap: 6px 12px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1788,6 +1882,16 @@ summary {
 .account-list-card p {
   color: var(--muted);
   font-size: 11px;
+}
+/* Etapa 9D (§3.4): cuenta abierta más horas que el umbral, con la franja y el tiempo en ámbar. */
+.account-list-card.account-long-open {
+  border-left-color: var(--warning-mark);
+}
+.account-long-open-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--warning);
 }
 .account-list-card.account-urgency-warning {
   border-left-color: var(--warning);
@@ -3377,13 +3481,12 @@ summary {
 .capture-new-account {
   border-style: dashed;
 }
-.capture-topbar-refresh {
-  display: inline-grid;
-  place-items: center;
-  min-width: 48px;
+/* Etapa 9D (§3.5): sin «Actualizar»; «Reintentar» solo cuando se perdió la conexión. */
+.capture-topbar-retry {
   min-height: 48px;
-  padding: 0;
-  font-size: 18px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 650;
   flex-shrink: 0;
 }
 .capture-body {
@@ -3883,9 +3986,14 @@ summary {
   padding: 10px;
   font-size: 12px;
 }
+/* Etapa 9D (§3.3): fuera de la captura, «Capturar productos en esta cuenta» es el botón principal
+   del detalle de la cuenta. */
 .capture-open-button {
   width: 100%;
+  min-height: 52px;
   margin: 8px 0;
+  font-size: 14px;
+  font-weight: 700;
 }
 .capture-line {
   display: grid;
@@ -4284,9 +4392,22 @@ summary {
 /* Etapa 6.2: mapa operativo con panel lateral de la mesa. El mapa (sin controles de edición)
    ocupa la izquierda y el panel la derecha, con desplazamiento interno en cada columna; tocar otra
    mesa cambia el panel sin ventanas emergentes. */
+/* Etapa 9D (§3.1): el panel lateral está siempre a la vista con un ancho fijo (360 px; 420 px en
+   monitores amplios): elegir una mesa ya no cambia el tamaño del mapa. */
 .operation-map-split {
-  grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 460px);
+  --table-panel-width: 360px;
+  grid-template-columns: minmax(0, 1fr) var(--table-panel-width);
   align-content: stretch;
+  overflow: hidden;
+}
+@media (min-width: 1600px) {
+  .operation-map-split {
+    --table-panel-width: 420px;
+  }
+}
+.operation-map-split > .operation-map-live {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 .operation-map-split > .operation-map-card {
@@ -4366,12 +4487,115 @@ summary {
   padding: 0 10px;
   font-size: 13px;
 }
-/* En el panel de la mesa la acción principal es «Capturar» (relleno de acento); «Cobrar» conserva
-   su lugar y su tamaño con borde y texto de acento (§0-B de la etapa 9C). */
-.table-panel-footer .capture-checkout:not(:disabled) {
+/* Etapa 9D (§3.3): con «Cobrar» a todo el ancho, Precuenta, Dividir, Liberar mesa y Más… van en tres
+   columnas para dejar más alto a los productos a 1280 × 720. */
+.table-panel-footer .capture-secondary-actions:has(> .capture-checkout) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.table-panel-footer .capture-secondary-actions:has(> .capture-checkout) .secondary-button {
+  padding: 0 4px;
+  font-size: 12px;
+}
+.table-panel-footer .capture-secondary-actions:has(> .capture-checkout) > .capture-checkout {
+  font-size: 14px;
+}
+/* Etapa 9D (§3.3, decisión 7): un solo botón principal por panel. En el panel de la mesa el
+   principal es «Capturar pedidos en esta mesa» (relleno azul, a todo el ancho); «Cobrar» conserva
+   su texto e importe como primera acción secundaria, a todo el ancho, con contorno y texto azules. */
+.capture-checkout-outline:not(:disabled) {
   border: 2px solid var(--accent);
-  background: var(--accent-soft);
+  background: var(--panel);
   color: var(--accent);
+}
+.table-panel-footer .capture-secondary-actions > .capture-checkout {
+  grid-column: 1 / -1;
+  min-height: 48px;
+  font-size: 14px;
+}
+.table-panel-footer .capture-send {
+  font-size: 15px;
+}
+.table-panel-long-open {
+  color: var(--warning);
+  font-weight: 650;
+}
+/* Etapa 9D (§3.1): panel de Mesas sin mesa elegida. Resumen del área en cuatro números tocables
+   (con la franja del color de su estado), acciones rápidas y ayuda. */
+.table-summary-body {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.table-summary-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.table-summary-count {
+  display: grid;
+  justify-items: start;
+  align-content: center;
+  gap: 6px;
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left-width: 6px;
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+}
+.table-summary-free {
+  border-left-color: var(--table-free-border);
+}
+.table-summary-occupied {
+  border-left-color: var(--table-occupied-border);
+}
+.table-summary-awaiting_payment {
+  border-left-color: var(--table-awaiting-border);
+}
+.table-summary-partial_payment {
+  border-left-color: var(--table-partial-border);
+}
+.table-summary-count[aria-pressed='true'] {
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.table-summary-number {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.table-summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+.table-summary-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+}
+.table-summary-help {
+  margin: 0;
+  line-height: 1.45;
+}
+.table-summary-actions {
+  display: grid;
+  gap: 8px;
+}
+.table-summary-actions .secondary-button {
+  min-height: 52px;
+  font-size: 14px;
+  font-weight: 650;
 }
 .table-panel-state {
   flex-shrink: 0;

@@ -384,6 +384,71 @@ la parte E. Usa los tokens de la fase A; no cambian acciones, permisos ni el men
   `workflow-stage9c-navigation`, `workflow-stage9d-cancel-account` y `workflow-stage9d-colors` (4/4 en Chromium y en
   WebKit). La suite completa de Playwright se corrió al final de ambas fases (ver la fase C).
 
+## Fase C · Mesas (§3)
+
+Agente BC, 12/11/2026, sobre `etapa-9d` (`4abe78d`; validada al final sobre `2c00064`), solo interfaz; usa `long_open` y `settings.long_open_hours` que
+ya entrega Go (parte BE, `b84e3be`). No cambian acciones, estados, reglas ni cálculos.
+
+- **Panel lateral siempre visible** (§3.1, `OperationalPage.tsx`, nuevo `TablesSummaryPanel.tsx`): ancho fijo de 360 px
+  (420 px desde 1600 px); elegir una mesa ya no cambia el tamaño del mapa. Sin mesa elegida muestra el **resumen del
+  área** (libres, ocupadas, esperando pago y pago parcial; React solo cuenta las mesas por el estado que calcula Go):
+  cada número se toca para **resaltar esas mesas** en el mapa (contorno azul discontinuo, distinto de la selección; se
+  vuelve a tocar para quitarlo; sin mesas en ese estado, el número no se toca), y aparte «N mesas fuera de servicio».
+  Debajo, las **acciones rápidas** «Cuenta sin mesa» y «Nuevo pedido para llevar» (las mismas funciones de hoy:
+  `openAccount`; el pedido para llevar además lleva a la sección Para llevar, como la paleta; la fase D las pasará a la
+  creación diferida) y el **texto de ayuda** que antes estaba sobre el mapa. Con mesa elegida, el panel de siempre.
+  Escape cierra el panel de la mesa y vuelve al resumen.
+- **Mapa** (§3.2, `components/restaurant/TableMap.tsx`): a la misma altura que el panel; **escala automática** al abrir
+  un área o cambiar el tamaño de la ventana (`fitTables`: una sola escala para todas las mesas del área, recortando el
+  espacio vacío del lienzo de 1000 × 560 y centrando el conjunto, sin pasar del doble); **lado menor de cada mesa de al
+  menos 64 px**: si así no caben, el mapa se desplaza **arrastrando** (dedo o puntero; el toque que termina un arrastre
+  no elige la mesa) y con **barras de desplazamiento siempre visibles**. La **leyenda va dentro del marco del mapa, en
+  una sola línea**. El diseñador de «Áreas y distribución» conserva el lienzo proporcional de siempre (las posiciones se
+  editan sobre el espacio completo; prop `autoFit` solo en Mesas): arrastrar y mover con flechas sigue igual.
+- **Un solo botón principal por panel** (§3.3, decisión 7): en el panel de la mesa, **«Capturar pedidos en esta mesa»**
+  (antes «Capturar») relleno en azul a todo el ancho; «Cobrar · $saldo» conserva su texto e importe como primera acción
+  secundaria con contorno azul (sin relleno) y Precuenta, Dividir, Liberar mesa y Más… en tres columnas. En el detalle
+  de la cuenta de Cuentas y Para llevar, **«Capturar productos en esta cuenta»** pasa a relleno azul y «Enviar a cocina»
+  y «Cobrar» quedan con contorno (`BillFooter` `emphasis="overview"`, `CheckoutButton` `tone="secondary"`); dentro de la
+  captura «Enviar a cocina» y «Cobrar» siguen como principales (§4.6). En el panel no existe «Ver cuenta»: no se agregó
+  ninguna acción.
+- **Tiempos** (§3.4, `services/restaurant.ts` `elapsedTime`): desde 24 h, «3 d 14 h» (antes «87 h 33 min»); menos de
+  un día sigue «5 h 12 min» y menos de una hora «45 min». Un solo formato para mesas, cuentas, Para llevar, «Abierta
+  hace…» y Cocina. **Advertencia ámbar discreta** con la marca `long_open` de Go (React no la calcula): en la mesa, un
+  punto ámbar en la esquina y el tiempo en una etiqueta ámbar con el triángulo (nombre accesible «…, abierta hace más de
+  N h»); en el panel, «Abierta hace…» en ámbar con el triángulo; en la tarjeta de Cuentas y Para llevar, la franja y el
+  tiempo en ámbar con el triángulo. N es `settings.long_open_hours`.
+- **Sin «Actualizar»** (§3.5) en Mesas, Cuentas, Para llevar y la barra de la captura: los datos llegan solos (eventos y
+  sondeo; `workspace.refresh` se conserva para uso interno). **«Reintentar»** aparece solo cuando la barra indica «Sin
+  conexión» (App pasa `connectionLost`): vuelve a consultar la sesión y los datos de la operación; en la captura va en
+  su barra reducida.
+- **Pruebas**: Vitest `pages/restaurant/stage9dTables.test.tsx` (16: formato «d h», escala que ve todas las mesas,
+  mínimo de 64 px con desplazamiento, tope del doble y centrado, mapa en píxeles con la misma escala y la leyenda dentro
+  del marco, diseñador proporcional, advertencia por `long_open` en mosaico y nombre accesible, resumen por estado con
+  resaltado y acciones rápidas, panel siempre visible y resaltado en el mapa, «Cuenta sin mesa» con la apertura de
+  siempre, un solo principal en el panel de la mesa y en el detalle de Cuentas, «Abierta hace 3 d 14 h» en ámbar, sin
+  «Actualizar» y «Reintentar» solo sin conexión en Mesas y en la captura) y `src/stage9dLayout.test.ts` (reglas de
+  Mesas: ancho fijo, leyenda en una línea, contorno de «Cobrar», ámbar con tokens, resaltado distinto de la selección).
+  Se ajustaron `tablePanel.test.tsx` y `capture/capture.test.tsx` («Capturar pedidos en esta mesa»; la prueba que usaba
+  «Actualizar» ahora recibe el aviso de cambio del servidor). Playwright `workflow-stage9d-topbar-tables.spec.ts`
+  (Chromium y WebKit): panel siempre visible de 360 px con y sin mesa, mapa y panel a la misma altura, resumen y
+  resaltado, escala automática con todas las mesas dentro y la misma escala (mesa redonda redonda), 35 mesas que a
+  1280 × 720 no caben con 64 px y se desplazan arrastrando sin elegir mesa (y caben a 1920 × 1080), «3 d 14 h» y ámbar
+  en la mesa, el panel y la tarjeta, botones principales en el panel y en el detalle, sin «Actualizar» en Mesas, Cuentas,
+  Para llevar ni la captura, «Reintentar» sin conexión, diseñador que mueve y guarda una mesa y «Nuevo pedido para
+  llevar» del resumen. «3 d 14 h» y `long_open` se presentan con el puente de la prueba (Go los calcula con su hora; la
+  prueba no puede envejecer una cuenta). Se actualizaron las especificaciones que usaban «Capturar»
+  (`restaurant.spec.ts`, `navigation.ts`, `workflow-stage9c-navigation`, `workflow-stage9c-tables-time`,
+  `workflow-stage9d-colors`). Capturas de Mesas sin y con mesa elegida, desplazamiento y detalle de Cuentas (claro y
+  oscuro, 1280 × 720 y 1920 × 1080) en `shots9dBC/`.
+- **Resultados** (12/11/2026; copia aislada `repo9dBC` = `HEAD 2c00064` —fase E de la interfaz— + fases B y C; clúster
+  temporal 55499, Go temporal 8186, vista previa 1424): `npx tsc --noEmit` sin errores; `npm test` 74 archivos y 714
+  pruebas aprobadas; `npm run build` correcto; Playwright completo, al final de ambas fases (no de cada una), **18/18 en
+  Chromium y 18/18 en WebKit** (registro `docs9dBC/e2e_full_final.log`). Antes, con la fase E aún sin commit, una
+  primera corrida completa reprodujo en WebKit la falla de `workflow-stage9c-keyboard` («Acerca de» con Escape; por el
+  reinicio del trabajador, las cuatro siguientes fallaron al no encontrar la base preparada); con el foco del diálogo
+  corregido (fase B) la segunda corrida y la final aprobaron todo en ambos motores.
+
 ## Fases D y E · backend (parte BE)
 
 Hecha por un solo agente (BE) el 12/11/2026 en `etapa-9d` sobre la Fase 0 (`ecae96d`), sin subagentes, en paralelo
