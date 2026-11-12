@@ -44,15 +44,30 @@ func run(logger *slog.Logger) error {
 	flags := flag.NewFlagSet(product.Read().ServerBinary, flag.ContinueOnError)
 	filename := flags.String("config", ".local/server.json", "archivo de configuración JSON")
 	lanIP := flags.String("lan-ip", "", "IP privada opcional para el certificado TLS local")
+	pid := flags.Int("pid", 0, "PID del servidor que «stop» debe detener (solo Windows)")
+	logFile := flags.String("log-file", "", "archivo de bitácora JSON en lugar de la salida estándar")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("argumentos adicionales no permitidos")
 	}
+	// Etapa 9E: en Windows el servidor corre sin consola (procesos ocultos o lanzados por la aplicación),
+	// así que su bitácora va a un archivo. El archivo queda abierto hasta que termina el proceso.
+	if *logFile != "" {
+		output, err := openLogFile(*logFile)
+		if err != nil {
+			return err
+		}
+		*logger = *slog.New(slog.NewJSONHandler(output, nil))
+	}
 	if command == "version" {
 		fmt.Println(product.Read().Version)
 		return nil
+	}
+	// Etapa 9E: en Windows no hay SIGTERM; «stop» activa el evento de parada del servidor indicado.
+	if command == "stop" {
+		return stopProcess(*pid)
 	}
 	allowedCommands := map[string]bool{
 		"serve": true, "migrate": true, "check-config": true,
@@ -81,6 +96,9 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	// En Windows también se detiene en orden con el evento de parada (stop_windows.go); en macOS no cambia.
+	ctx, stopWatch := withPlatformStop(ctx)
+	defer stopWatch()
 	pool, err := database.Open(ctx, cfg.Database)
 	if err != nil {
 		return errors.New("no se pudo crear el pool PostgreSQL")

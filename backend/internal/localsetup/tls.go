@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"local/ad-el-pos/server/internal/fileacl"
 )
 
 func CreateTLS(directory, lanIP string) error {
@@ -26,6 +28,11 @@ func CreateTLS(directory, lanIP string) error {
 		addresses = append(addresses, address)
 	}
 	if err := os.MkdirAll(directory, 0700); err != nil {
+		return err
+	}
+	// En Windows los bits 0700/0600 no protegen: la carpeta recibe una ACL privada que heredan las claves
+	// (etapa 9E). En macOS no cambia nada.
+	if err := fileacl.Protect(directory); err != nil {
 		return err
 	}
 	for _, name := range []string{"ca.pem", "ca.key", "server.pem", "server.key"} {

@@ -241,3 +241,72 @@ oficiales para Windows (zip de EDB, sin instalador ni servicio).
   espurios. Las once especificaciones de `docs/etapas/` quedaron idénticas a lo versionado (md5 de cada archivo igual
   al de `git show HEAD:…`; los md5 de la Fase 0 eran de las copias con CRLF).
 - Comprobado: `go build ./...` y `GOOS=darwin GOARCH=arm64 go build ./...` compilan.
+
+## Fase B · Modo desarrollo y pruebas existentes en Windows (12/11/2026)
+
+### Scripts de desarrollo para Windows
+
+`scripts/dev.sh` y los scripts de Python son de macOS y no se tocaron. Se agregaron sus equivalentes:
+
+- `scripts/env.ps1`: herramientas de `.tools` en el `PATH` de la sesión y cachés en `.cache` (equivalente de `env.sh`).
+- `scripts/dev.ps1 <comando>`: punto de entrada (`powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 …`); la
+  lógica está en `scripts/windows/dev.mjs` (Node del proyecto, sin dependencias) porque maneja rutas con espacios
+  (la carpeta del repositorio es «ADEL POS») y procesos mejor que PowerShell 5.1. Comandos: `sync`, `install`,
+  `format`, `format-check`, `db-init`, `db-start`, `db-stop`, `backup`, `restore-check`, `build-server`, `migrate`,
+  `check-config`, `prepare-setup`, `provision-sa`, `reset-sa`, `tls-init`, `create-enrollment`, `server`,
+  `server-start`, `server-stop`, `status`, `desktop`, `open-app`, `test`, `test-integration`, `test-browser` y
+  `build-windows`. Conservan las reglas de macOS: clúster exclusivo con marcador, secretos sin mostrar, bases
+  desechables `adel_pos_test_*` y parada ordenada.
+
+Dos defectos reales de Windows aparecieron al usarlos y se corrigieron:
+
+1. **Herencia de tuberías**: `pg_ctl start` deja a PostgreSQL con las salidas de `pg_ctl`, y un hijo de Node hereda
+   las tuberías de Node; la consola que lanzó el comando esperaba a que PostgreSQL o Go terminaran. `db-start` ya
+   no comparte su salida con PostgreSQL y `server-start` lanza Go con `Start-Process` (sin herencia), con la
+   bitácora en archivo (opción nueva `--log-file` de Go, con rotación simple al pasar de 20 MiB).
+2. **Sin `SIGTERM`**: en Windows cada servidor crea un evento con nombre ligado a su PID y el comando nuevo
+   `ad-el-pos-server stop --pid N` lo activa después de comprobar que el proceso es el mismo programa
+   (`cmd/ad-el-pos-server/stop_windows.go`; en macOS `stop_other.go` no hace nada y la parada sigue con `SIGTERM`).
+   Medido: parada ordenada en 561 ms con «server_shutdown_complete»; un PID de otro programa se rechaza sin enviar
+   nada.
+
+Comprobado en este equipo: `db-init` (clúster `.local\postgres`, rol, base y `server.json`), `db-stop`, `db-start`,
+`db-init` repetido, `migrate` (`applied: 21`), `prepare-setup`, `server-start` (readiness 200, versión 0.9.3, esquema
+21), `status` y `server-stop`.
+
+### Pruebas existentes en Windows
+
+| Suite                                                              | Resultado en Windows                                                                                               |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `go test ./...` (sin `-race`: no hay compilador de C para cgo)     | 22 paquetes aprobados y 1 falla: `TestTLSRequiresTrustedCAAndCorrectHostname` (corregida, ver abajo)               |
+| `go test -tags=integration` (`dev.ps1 test-integration`, PostgreSQL 18.6 real, una base desechable por paquete) | **los 9 paquetes aprobados** (`database`, `administration`, `catalog`, `operations`, `payments`, `reports`, `reports/operational`, `designer`, `identity`; 559 s) |
+| Vitest (`npm test`)                                                | 750 de 751 aprobadas; 1 intermitente (corregida, ver abajo)                                                        |
+| `npm run build` (TypeScript + Vite)                                | aprobado                                                                                                           |
+| `cargo test --locked`                                              | al principio no compilaba (faltaba `icons/icon.ico`, ver abajo); después **41 aprobadas**                          |
+| Playwright Chromium (`dev.ps1 test-browser`, Go temporal en 8183)  | **19 de 19 aprobadas** (7.6 min); WebKit se ejecuta después, junto con la fase C                                   |
+
+Entre lo que pasó sin cambios: las equivalencias **byte a byte** de las plantillas de documentos de la 9B
+(`kitchen/legacy_template_test.go`, `payments/legacy_documents_test.go`), la generación de PDF y Excel con las
+fuentes Go incluidas (acentos y «ñ»), las zonas horarias (Go trae `time/tzdata`) y el corte del día a las 05:00
+(`internal/businessday`), y la barra superior a 1280 × 720 con la fuente Segoe UI.
+
+Clasificación y corrección de los fallos:
+
+- **`TestTLSRequiresTrustedCAAndCorrectHostname` · prueba dependiente de macOS y defecto real de Windows.** Comprobaba
+  los bits 0600 de la clave privada, que en Windows no protegen. Paquete nuevo `internal/fileacl`: en Windows fija una
+  ACL propia sin herencia (cuenta actual, SYSTEM y Administradores) y en macOS no hace nada. Se aplica a la carpeta
+  TLS, al token de aprovisionamiento y al código de enrolamiento; la prueba comprueba la ACL en Windows
+  (`private_windows_test.go`) y los bits 0600 en macOS (`private_unix_test.go`).
+- **`closing.test.tsx` («guarda el borrador con su revisión…») · prueba frágil por tiempos, no un defecto de
+  Windows.** Fallaba 1 de cada 3 veces: el toque del teclado llegaba antes del efecto que adopta el borrador del
+  servidor y quedaba reemplazado. La prueba vacía los efectos pendientes con `act` antes de teclear; 6 de 6 corridas
+  aprobadas.
+- **Rust sin `icons/icon.ico` · requisito de Windows.** `tauri-build` exige un `.ico` para el recurso del ejecutable.
+  Se generó con `tauri icon` a partir del mismo `icons/icon.png` (sin modificarlo) y solo se agregó el `.ico`.
+- **`provision-sa` y `reset-sa` · defecto de Windows.** Abrían `/dev/tty`; en Windows usan la consola (`CONIN$` y
+  `CONOUT$`, `terminal_windows.go`), y en macOS siguen con `/dev/tty` (`terminal_unix.go`). No se ejecutaron (son
+  solo del propietario); se comprobó que compilan para las dos plataformas.
+
+Además se movió `golang.org/x/sys` (ya en `go.sum`, v0.49.0) de indirecta a directa: lo usan los archivos de Windows.
+Ningún módulo, crate ni paquete npm nuevo. `go build ./...` y `GOOS=darwin GOARCH=arm64 go build ./...` y `go vet`
+para ambas plataformas aprobados.

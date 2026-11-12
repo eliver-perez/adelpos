@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PendingOperationsProvider } from '../../hooks/pendingOperations';
 import type { CashCount, ClosureView } from '../../services/cash';
@@ -197,7 +197,12 @@ async function countFiveHundred() {
   const field = await screen.findByLabelText('Billetes de $500');
   fireEvent.click(field);
   const keypad = screen.getByRole('group', { name: 'Teclado numérico del arqueo' });
+  // El campo aparece en el mismo render que trae el arqueo, pero el borrador del servidor se adopta en
+  // un efecto posterior que sustituye la captura. En un equipo lento (se observó en Windows, etapa 9E)
+  // el toque podía llegar antes y quedar reemplazado: primero se vacían los efectos pendientes.
+  await act(async () => {});
   fireEvent.click(within(keypad).getByRole('button', { name: '1' }));
+  await act(async () => {});
   expect((field as HTMLInputElement).value).toBe('1');
 }
 

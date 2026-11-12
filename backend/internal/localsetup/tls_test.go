@@ -53,8 +53,5 @@ func TestTLSRequiresTrustedCAAndCorrectHostname(t *testing.T) {
 	if err != nil || certificate.VerifyHostname("192.168.1.20") != nil || certificate.VerifyHostname("192.168.1.21") == nil {
 		t.Fatal("La validación de identidad del servidor no funciona")
 	}
-	permissions, _ := os.Stat(filepath.Join(directory, "server.key"))
-	if permissions.Mode().Perm() != 0600 {
-		t.Fatal("La clave privada no tiene permisos privados")
-	}
+	requirePrivateKey(t, filepath.Join(directory, "server.key"))
 }
