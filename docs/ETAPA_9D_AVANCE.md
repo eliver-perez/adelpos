@@ -339,6 +339,51 @@ Agente A, 12/11/2026, sobre `etapa-9d` (`ecae96d`), solo presentación (sin Go, 
   cerrar «Acerca de» con Escape —foco del diálogo, sin relación con los colores— y arrastró a las tres siguientes por
   el reinicio del trabajador; la segunda corrida completa, con la versión final, aprobó todo en ambos motores).
 
+## Fase B · Barra superior (§2)
+
+Agente BC, 12/11/2026, sobre `etapa-9d` (`4abe78d`; validada al final sobre `2c00064`), solo interfaz (sin Go, migraciones ni `api.rs`), en paralelo con
+la parte E. Usa los tokens de la fase A; no cambian acciones, permisos ni el menú rápido de Caja.
+
+- **Nuevo orden** (`navigation/TopBar.tsx`): a la izquierda el logotipo y **Mesas, Para llevar, Cocina y
+  Administración** seguidas y **del mismo ancho** (cuadrícula de columnas iguales: cada una mide lo que la más larga,
+  «Administración»); a la derecha **Caja**, el estado del servidor, el menú del usuario y pantalla completa. El grupo
+  `nav` «Navegación principal» contiene solo las cuatro secciones; Caja sale del grupo (§0-B).
+- **Caja en dos renglones** (`pages/cash/CashShortcut.tsx`, `placement="bar"`): «Caja» y debajo el estado del turno con
+  su indicador (azul abierto, ámbar en arqueo, gris sin turno; «Consultando…» mientras llega el turno). Mismo botón,
+  mismo menú rápido de la 7.1/9C, mismos permisos y mismo nombre accesible («Caja · Turno abierto»); el menú se alinea
+  ahora con el borde derecho. Sin el turno visible (solo `cash.shifts.read`) el botón «Caja» también va a la derecha y
+  abre la pantalla. La barra reducida de la captura conserva su Caja (en línea) y el usuario.
+- **Estado del servidor** (`navigation/serverState.ts`, decisión 9): «En línea» (texto y punto en azul, ahora visible
+  también a 1280 px), «Reconectando» (ámbar) y **«Sin conexión»** (rojo) en lugar de «Fuera de línea».
+- **Atajos sin cambio**: ⌘/Ctrl + 1–4 siguen siendo Mesas, Para llevar, Cocina y Caja (⌘5 Administración); el registro
+  de secciones (`sections.ts`) no cambió (la barra separa Caja al dibujarse).
+- **Sin cortes a 1280 px**: botones de 52 px (rango 52–56); de 1280 a 1599 px menos relleno (secciones 8 px, logotipo
+  116 px, servidor 8 px) para que quepan las cuatro secciones iguales, Caja en dos renglones y «Sin conexión»; si aun
+  así faltara espacio (un nombre de usuario largo), solo se acorta el nombre del usuario con puntos suspensivos. Debajo
+  de 1280 px sigue la barra compacta de la 9C (marca abreviada; servidor en línea y turno como punto).
+- **Corrección del foco de «Acerca de» y «Atajos de teclado»** (`commands/CommandDialog.tsx`): se reprodujo en WebKit la
+  falla intermitente de `workflow-stage9c-keyboard` («Acerca de» no se cerraba con Escape; la captura de la falla
+  muestra el foco en «Cerrar» cuando ya era tarde). Causa: el foco entraba al diálogo en un `useEffect`, que corre
+  después de dibujar; un Escape pulsado en cuanto el diálogo aparece caía fuera de él, y la capa de teclado deja Escape a
+  los diálogos abiertos, así que nadie lo atendía. Ahora el foco entra antes de dibujar (`useLayoutEffect`) y, si el foco
+  queda fuera del diálogo, un oyente de Escape en el documento lo cierra igual. Prueba nueva en
+  `commands/commandCenter.test.tsx`.
+- **Pruebas**: Vitest `navigation/navigation.test.tsx` (orden de las cuatro secciones, Caja a la derecha antes del
+  servidor, el usuario y pantalla completa, Caja en dos renglones con su indicador y estados abierto/arqueo/sin turno,
+  Caja sin turno visible a la derecha, «Sin conexión»), `App.test.tsx` («Sin conexión» y recuperación) y
+  `src/stage9dLayout.test.ts` (columnas iguales, 52 px, colores de los indicadores por token, menú de Caja a la
+  derecha, solo el nombre del usuario se acorta). Playwright `e2e/workflow-stage9d-topbar-tables.spec.ts` (Chromium y
+  WebKit): orden, mismo ancho (±1 px), Caja a la derecha en dos renglones, alturas 52–56 px, ningún texto cortado ni
+  desbordamiento a 1280 × 720 y 1920 × 1080 en ambos temas, «En línea» e indicador del turno en azul, menú de Caja
+  dentro de la ventana y «Sin conexión» en rojo sin cortes. Se actualizaron `e2e/navigation.ts` (`appBar`,
+  `cashButton` y `openCash` buscan Caja en toda la barra) y `workflow-stage9c-navigation.spec.ts` (nuevo orden).
+  Capturas de la barra (en línea y sin conexión, claro y oscuro, 1280 × 720 y 1920 × 1080) en las notas de la fase
+  (directorio temporal, `shots9dBC/`).
+- **Resultados** (12/11/2026): la fase B sola (copia = `HEAD 2c00064` + archivos de la fase B) aprobó `npx tsc --noEmit`,
+  `npm test` (73 archivos, 693 pruebas), `npm run build` y Playwright `workflow-stage9c-keyboard`,
+  `workflow-stage9c-navigation`, `workflow-stage9d-cancel-account` y `workflow-stage9d-colors` (4/4 en Chromium y en
+  WebKit). La suite completa de Playwright se corrió al final de ambas fases (ver la fase C).
+
 ## Fases D y E · backend (parte BE)
 
 Hecha por un solo agente (BE) el 12/11/2026 en `etapa-9d` sobre la Fase 0 (`ecae96d`), sin subagentes, en paralelo

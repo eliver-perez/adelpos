@@ -7536,11 +7536,11 @@ th[aria-sort='descending'] {
   }
 }
 
-/* Etapa 9C · Barra superior fija de una sola fila (§1.1): logotipo, secciones operativas,
-   Administración, estado del servidor, menú del usuario y pantalla completa. Botones de 52 px
-   (rango 52–56 del propietario) con icono a la izquierda y texto; la sección activa se resalta con
-   fondo y borde. Tokens del tema; en 1280 px el estado del servidor y el del turno se reducen a un
-   punto de color con su descripción accesible. */
+/* Etapa 9C · Barra superior fija de una sola fila (§1.1). Orden de la etapa 9D (§2): a la
+   izquierda el logotipo y Mesas, Para llevar, Cocina y Administración, seguidas y del mismo ancho; a
+   la derecha Caja en dos renglones, el estado del servidor, el menú del usuario y pantalla completa.
+   Botones de 52 px (rango 52–56 del propietario) con icono a la izquierda y texto; la sección
+   activa se resalta con fondo y borde. Tokens del tema. */
 .app-topbar {
   position: sticky;
   top: 0;
@@ -7569,19 +7569,39 @@ th[aria-sort='descending'] {
 .topbar-logo .brand-logo {
   width: 128px;
 }
+/* Las secciones forman una cuadrícula de columnas iguales: cada una mide lo que la más larga
+   («Administración»), de modo que las cuatro se leen como un solo grupo del mismo tamaño. */
 .topbar-sections {
-  display: flex;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
+}
+.topbar-sections .topbar-section {
+  justify-content: center;
 }
 .topbar-end {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  min-width: 0;
+  flex-shrink: 1;
+}
+/* Caja, el servidor y pantalla completa conservan su ancho; si falta espacio (un nombre de usuario
+   largo), solo se acorta el nombre del usuario, con puntos suspensivos. */
+.topbar-end > * {
   flex-shrink: 0;
+}
+.topbar-end > .user-menu {
+  flex-shrink: 1;
+  min-width: 0;
+}
+.topbar-end .user-menu-button {
+  min-width: 0;
 }
 .topbar-button {
   display: inline-flex;
@@ -7622,8 +7642,8 @@ th[aria-sort='descending'] {
   color: var(--text);
 }
 
-/* Caja en la barra: indicador del turno azul (abierto, desde la etapa 9D), ámbar (en arqueo) y gris
-   (sin turno). */
+/* Caja en la barra (etapa 9D, §2): a la derecha, en dos renglones, «Caja» y debajo el estado del
+   turno con su indicador: azul (abierto), ámbar (en arqueo) y gris (sin turno). */
 .cash-shortcut-indicator {
   display: none;
 }
@@ -7633,6 +7653,18 @@ th[aria-sort='descending'] {
   padding: 0 14px;
   font-size: 14px;
   font-weight: 600;
+}
+.cash-shortcut-lines {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.2;
+}
+.cash-shortcut-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .cash-shortcut-bar .cash-shortcut-indicator {
   display: inline-block;
@@ -7660,24 +7692,30 @@ th[aria-sort='descending'] {
   background: var(--muted);
   box-shadow: 0 0 0 3px var(--subtle);
 }
-/* En la barra el estado va como texto junto al punto (sin la píldora de la barra de la captura). */
+/* En la barra el estado va como texto junto al punto, debajo de «Caja» (sin la píldora de la barra
+   de la captura); consultando el turno, en el color secundario. */
 .cash-shortcut-bar .cash-shortcut-state {
   padding: 0;
-  border-color: transparent;
+  border: 0;
   background: none;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 650;
 }
 .cash-shortcut-bar .cash-shortcut-none .cash-shortcut-state {
   border-color: transparent;
   background: none;
 }
+.cash-shortcut-bar .cash-shortcut-unknown .cash-shortcut-state {
+  color: var(--muted);
+}
+/* Caja está a la derecha: su menú rápido se alinea con el borde derecho del botón. */
 .cash-shortcut-bar .cash-shortcut-menu {
-  left: 0;
-  right: auto;
+  left: auto;
+  right: 0;
 }
 
-/* Estado del servidor: punto de color; el texto se ve siempre que no esté en línea. */
+/* Estado del servidor: punto de color y texto. En la barra superior «En línea» se lee en azul
+   (§2 de la 9D); en la barra reducida de la captura solo aparece si no está en línea. */
 .server-status {
   display: inline-flex;
   align-items: center;
@@ -7704,6 +7742,13 @@ th[aria-sort='descending'] {
 }
 .server-status-online .server-status-text {
   display: none;
+}
+.app-topbar .server-status-online {
+  padding: 0 6px;
+}
+.app-topbar .server-status-online .server-status-text {
+  display: inline;
+  color: var(--status-online);
 }
 .server-status-reconnecting {
   border-color: var(--warning);
@@ -7820,9 +7865,30 @@ th[aria-sort='descending'] {
   .topbar-logo .brand-logo {
     width: 150px;
   }
-  .server-status-online .server-status-text {
-    display: inline;
-    color: var(--muted);
+}
+/* De 1280 a 1599 px las cuatro secciones del mismo ancho, Caja en dos renglones y el estado del
+   servidor («En línea» o «Sin conexión») caben en una fila con un poco menos de relleno. */
+@media (max-width: 1599px) {
+  .app-topbar {
+    gap: 6px;
+  }
+  .topbar-sections {
+    gap: 4px;
+  }
+  .topbar-sections .topbar-section {
+    padding: 0 8px;
+  }
+  .topbar-logo {
+    padding: 0 6px;
+  }
+  .topbar-logo .brand-logo {
+    width: 116px;
+  }
+  .cash-shortcut-bar .cash-shortcut-button {
+    padding: 0 10px;
+  }
+  .app-topbar .server-status {
+    padding: 0 8px;
   }
 }
 
@@ -7868,6 +7934,7 @@ th[aria-sort='descending'] {
     padding: 0 10px;
   }
   .app-topbar .user-menu-identity,
+  .app-topbar .server-status-online .server-status-text,
   .cash-shortcut-bar .cash-shortcut-state {
     display: none;
   }

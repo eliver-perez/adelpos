@@ -207,9 +207,9 @@ function shortcutContext(shortcut: CashShortcutState) {
 }
 
 // Botón «Caja» con el estado del turno y su menú rápido. El menú se cierra con Escape o al tocar
-// fuera de él. Desde la etapa 9C vive en la barra superior (placement «bar»: sección de 52–56 px con
-// el indicador azul, ámbar o gris del turno; azul desde la etapa 9D) y en la barra reducida de la
-// captura.
+// fuera de él. Desde la etapa 9C vive en la barra superior (placement «bar»: botón de 52–56 px con
+// el indicador azul, ámbar o gris del turno; desde la etapa 9D, a la derecha de la barra y en dos
+// renglones) y en la barra reducida de la captura.
 export function CashShortcut({
   shortcut,
   can,
@@ -285,10 +285,26 @@ export function CashShortcut({
         onClick={() => setMenuOpen(!menuOpen)}
       >
         <Icon name="cash" size={20} />
-        <span className="cash-shortcut-name">Caja</span>
-        {/* Indicador del turno (§1.1, 9D): azul abierto, ámbar en arqueo y gris sin turno. */}
-        <span className="cash-shortcut-indicator" aria-hidden="true" />
-        {shortcut.state !== 'unknown' && <span className="cash-shortcut-state">{status}</span>}
+        {placement === 'bar' ? (
+          // Etapa 9D (§2): en la barra superior, dos renglones: «Caja» y debajo el estado del turno
+          // con su indicador (azul abierto, ámbar en arqueo y gris sin turno).
+          <span className="cash-shortcut-lines">
+            <span className="cash-shortcut-name">Caja</span>
+            <span className="cash-shortcut-status">
+              <span className="cash-shortcut-indicator" aria-hidden="true" />
+              <span className="cash-shortcut-state">
+                {shortcut.state === 'unknown' ? 'Consultando…' : status}
+              </span>
+            </span>
+          </span>
+        ) : (
+          <>
+            <span className="cash-shortcut-name">Caja</span>
+            {/* Indicador del turno (§1.1, 9D): azul abierto, ámbar en arqueo y gris sin turno. */}
+            <span className="cash-shortcut-indicator" aria-hidden="true" />
+            {shortcut.state !== 'unknown' && <span className="cash-shortcut-state">{status}</span>}
+          </>
+        )}
       </button>
       {menuOpen && (
         <div

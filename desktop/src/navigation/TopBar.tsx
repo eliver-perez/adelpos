@@ -24,16 +24,18 @@ function SectionButton({
   entry,
   active,
   onNavigate,
+  className = '',
 }: {
   entry: SectionEntry;
   active: boolean;
   onNavigate: (next: ScreenID) => void;
+  className?: string;
 }) {
   const action = sectionActions[entry.id];
   return (
     <button
       type="button"
-      className={`topbar-button topbar-section ${active ? 'topbar-section-active' : ''}`}
+      className={`topbar-button topbar-section ${className} ${active ? 'topbar-section-active' : ''}`}
       aria-current={active ? 'page' : undefined}
       {...(action ? shortcutProps(action, entry.label) : {})}
       onClick={() => onNavigate(entry.id)}
@@ -44,11 +46,13 @@ function SectionButton({
   );
 }
 
-// Barra superior fija de una sola fila (etapa 9C, §1.1), de izquierda a derecha: logotipo (vuelve
-// al inicio de la terminal), Mesas, Para llevar, Cocina y Caja (con el estado del turno y su menú
-// rápido de la 7.1), Administración, estado del servidor, menú del usuario y pantalla completa.
-// Cada usuario ve solo lo que su rol permite; sin opciones de administración no hay botón
-// Administración. Toda navegación pasa por onNavigate (el requestScreen de App).
+// Barra superior fija de una sola fila (etapa 9C, §1.1; orden de la etapa 9D, §2). A la izquierda,
+// el logotipo (vuelve al inicio de la terminal) y las secciones Mesas, Para llevar, Cocina y
+// Administración, seguidas y del mismo ancho. A la derecha, Caja en dos renglones («Caja» y el
+// estado del turno, con el menú rápido de la 7.1), el estado del servidor, el menú del usuario y
+// pantalla completa. Cada usuario ve solo lo que su rol permite; sin opciones de administración no
+// hay botón Administración. Toda navegación pasa por onNavigate (el requestScreen de App). Los
+// atajos no cambian: ⌘/Ctrl + 1–4 siguen siendo Mesas, Para llevar, Cocina y Caja.
 export function TopBar({
   permissions,
   highlight,
@@ -70,6 +74,8 @@ export function TopBar({
   userMenu: ReactNode;
 }) {
   const operation = barSections(permissions);
+  const sectionsLeft = operation.filter((entry) => entry.id !== 'cash');
+  const cash = operation.find((entry) => entry.id === 'cash');
   const administration = canOpen('administration', permissions);
   return (
     <header className="app-topbar">
@@ -82,29 +88,14 @@ export function TopBar({
         <BrandLogo />
       </button>
       <nav className="topbar-sections" aria-label="Navegación principal">
-        {operation.map((entry) => {
-          // Caja conserva el menú rápido de la 7.1 cuando el usuario puede ver el turno; si solo ve
-          // la pantalla de Caja, el botón lleva directamente a ella.
-          if (entry.id === 'cash' && cashShortcut.visible) {
-            return (
-              <CashShortcut
-                key={entry.id}
-                shortcut={cashShortcut}
-                can={can}
-                placement="bar"
-                active={highlight === 'cash'}
-              />
-            );
-          }
-          return (
-            <SectionButton
-              key={entry.id}
-              entry={entry}
-              active={highlight === entry.id}
-              onNavigate={onNavigate}
-            />
-          );
-        })}
+        {sectionsLeft.map((entry) => (
+          <SectionButton
+            key={entry.id}
+            entry={entry}
+            active={highlight === entry.id}
+            onNavigate={onNavigate}
+          />
+        ))}
         {administration && (
           <SectionButton
             entry={sectionByID('administration')}
@@ -114,6 +105,24 @@ export function TopBar({
         )}
       </nav>
       <div className="topbar-end">
+        {/* Caja conserva el menú rápido de la 7.1 cuando el usuario puede ver el turno; si solo ve
+            la pantalla de Caja, el botón lleva directamente a ella. */}
+        {cash &&
+          (cashShortcut.visible ? (
+            <CashShortcut
+              shortcut={cashShortcut}
+              can={can}
+              placement="bar"
+              active={highlight === 'cash'}
+            />
+          ) : (
+            <SectionButton
+              entry={cash}
+              active={highlight === 'cash'}
+              onNavigate={onNavigate}
+              className="topbar-cash"
+            />
+          ))}
         <ServerStatus state={server} />
         {userMenu}
         <WindowControls placement="bar" />

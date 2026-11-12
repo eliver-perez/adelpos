@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { trapFocus } from '../components/ConfirmDialog';
 import { IconLabel } from '../components/Icon';
@@ -20,7 +20,11 @@ export function CommandDialog({
   const panel = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  // Etapa 9D: el foco entra al diálogo antes de dibujarlo (no después, como con useEffect), para
+  // que un Escape pulsado en cuanto aparece llegue al diálogo. En WebKit, con el efecto posterior,
+  // un Escape inmediato caía fuera del diálogo y no lo cerraba (falla intermitente de
+  // workflow-stage9c-keyboard).
+  useLayoutEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeButton.current?.focus();
     return () => {
@@ -29,6 +33,25 @@ export function CommandDialog({
       }
     };
   }, []);
+
+  // Si el foco quedó fuera del diálogo (otra parte de la pantalla lo tomó), Escape lo cierra igual.
+  // La capa de teclado no atiende Escape con un diálogo abierto; dentro del diálogo lo atiende
+  // handleKeyDown.
+  useEffect(() => {
+    function escape(event: globalThis.KeyboardEvent) {
+      const node = panel.current;
+      if (event.key !== 'Escape' || event.defaultPrevented || !node) {
+        return;
+      }
+      if (node.contains(document.activeElement)) {
+        return;
+      }
+      event.preventDefault();
+      onClose();
+    }
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [onClose]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {

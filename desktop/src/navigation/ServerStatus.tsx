@@ -1,9 +1,10 @@
 import { serverStateDescriptions, serverStateLabels } from './serverState';
 import type { ServerState } from './serverState';
 
-// Indicador compacto del servidor (§1.1). En línea se reduce a un punto de color con su descripción
-// accesible (el texto aparece en monitores amplios); reconectando o fuera de línea, el texto queda
-// siempre visible como aviso.
+// Indicador del servidor (§1.1 de la 9C y §2 de la 9D): punto de color y texto («En línea» en azul,
+// «Reconectando» en ámbar, «Sin conexión» en rojo). En la barra reducida de la captura, en línea se
+// reduce al punto con su descripción accesible; reconectando o sin conexión, el texto queda siempre
+// visible como aviso.
 export function ServerStatus({ state }: { state: ServerState }) {
   const label = serverStateLabels[state];
   return (

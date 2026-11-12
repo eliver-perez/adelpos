@@ -136,13 +136,14 @@ test('navegación 9C: barra superior, mosaicos, ruta, inicio por terminal y capt
   await expect(page.getByRole('heading', { name: 'Estado del sistema' })).toHaveCount(0);
   await expect(page.getByRole('combobox', { name: 'Pantalla', exact: true })).toHaveCount(0);
   await expect(page.locator('.admin-sidebar, .sidebar, .mobile-navigation')).toHaveCount(0);
+  // Etapa 9D (§2): las cuatro secciones a la izquierda y Caja a la derecha.
   await expect(bar.getByRole('button')).toHaveText([
     'Mesas',
     'Para llevar',
     'Cocina',
-    /^Caja/,
     'Administración',
   ]);
+  await expect(cashButton(page)).toBeVisible();
   await expect(page.getByRole('status', { name: 'Servidor: En línea' })).toBeVisible();
   await expectTouchHeights(page.locator('.app-topbar'));
   await checkViews(page, testInfo, 'bar-mesas', page.locator('.app-topbar'));

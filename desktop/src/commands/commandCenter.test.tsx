@@ -388,4 +388,17 @@ describe('paleta de comandos', () => {
     press(document.body, { key: 'k', ctrlKey: true });
     expect(screen.queryByRole('dialog', { name: 'Paleta de comandos' })).toBeNull();
   });
+
+  it('«Acerca de» tiene el foco al aparecer y Escape lo cierra aunque el foco salga (etapa 9D)', async () => {
+    render(<Harness authenticated={false} permissions={[]} screen={null} operation={null} />);
+    const channel = native.channels.at(-1)!;
+    act(() => channel.onmessage?.({ action: 'help.about' }));
+    const about = await screen.findByRole('dialog', { name: 'Acerca de AD-EL POS' });
+    expect(document.activeElement).toBe(within(about).getByRole('button', { name: 'Cerrar' }));
+    // Otra parte de la pantalla tomó el foco: Escape cierra el diálogo de todos modos.
+    (document.activeElement as HTMLElement).blur();
+    expect(about.contains(document.activeElement)).toBe(false);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Acerca de AD-EL POS' })).toBeNull();
+  });
 });
