@@ -5,15 +5,18 @@ mod connection;
 mod export;
 mod menu;
 mod realtime;
+mod server_host;
 mod vault;
 mod window_check;
+#[cfg(target_os = "windows")]
+mod window_state;
 
 use connection::{load_config, ConnectionConfig};
 use serde::Serialize;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use tauri::{Manager, State};
+use tauri::{Manager, RunEvent, State};
 use vault::Vault;
 
 pub struct TerminalState {
@@ -23,20 +26,51 @@ pub struct TerminalState {
     provisioning_token: Option<String>,
     enrollment_code: Option<String>,
     events_generation: Arc<AtomicU64>,
+    // Servidor local de la instalación de Windows (etapa 9E); siempre None en macOS.
+    host: Option<server_host::ServerHost>,
 }
 
 impl TerminalState {
     fn vault(&self) -> Result<&Vault, String> {
         self.vault
             .get()
-            .ok_or_else(|| {
-                "Esperando autorización del almacén seguro del sistema. Revisa el diálogo de macOS."
-                    .to_string()
-            })?
+            .ok_or_else(|| STORAGE_PENDING_MESSAGE.to_string())?
             .as_ref()
             .map_err(Clone::clone)
     }
+
+    /// Token del asistente inicial: el de ADEL_PROVISIONING_FILE (macOS y desarrollo) o, en la
+    /// instalación de Windows, el que el servidor local deja en la carpeta de datos (etapa 9E).
+    pub fn provisioning_token(&self) -> Option<String> {
+        self.provisioning_token.clone().or_else(|| {
+            self.host
+                .as_ref()
+                .and_then(|host| host.provisioning_token())
+        })
+    }
+
+    /// Explicación de una petición sin respuesta: la general o, mientras el servidor local de Windows
+    /// arranca, que el equipo se está preparando.
+    pub fn connection_error(&self) -> String {
+        self.host
+            .as_ref()
+            .and_then(|host| host.connection_message())
+            .unwrap_or(
+                "No se pudo conectar con el servidor. Comprueba su estado y la confianza TLS.",
+            )
+            .to_string()
+    }
 }
+
+// El almacén seguro es Keychain en macOS y el Administrador de credenciales en Windows (etapa 9E).
+#[cfg(target_os = "macos")]
+const STORAGE_PENDING_MESSAGE: &str =
+    "Esperando autorización del almacén seguro del sistema. Revisa el diálogo de macOS.";
+#[cfg(target_os = "windows")]
+const STORAGE_PENDING_MESSAGE: &str =
+    "Esperando autorización del almacén seguro del sistema. Revisa el aviso de Windows.";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+const STORAGE_PENDING_MESSAGE: &str = "Esperando autorización del almacén seguro del sistema.";
 
 #[derive(Serialize)]
 pub struct HTTPResult {
@@ -68,7 +102,13 @@ fn window_set_fullscreen(window: tauri::WebviewWindow, fullscreen: bool) -> Resu
     // La API nativa conserva los Spaces y controles normales de macOS; no es modo quiosco.
     window
         .set_fullscreen(fullscreen)
-        .map_err(|_| "No se pudo cambiar la pantalla completa.".into())
+        .map_err(|_| "No se pudo cambiar la pantalla completa.".to_string())?;
+    // Windows: al salir de pantalla completa vuelve el último tamaño y posición en modo ventana.
+    #[cfg(target_os = "windows")]
+    if !fullscreen {
+        window_state::restore_windowed(&window);
+    }
+    Ok(())
 }
 
 async fn get(client: &reqwest::Client, base: &str, route: &str) -> Option<HTTPResult> {
@@ -157,6 +197,8 @@ fn main() {
                 .and_then(|filename| std::fs::read_to_string(filename).ok())
                 .map(|value| value.trim().to_string())
                 .filter(|value| value.len() == 43);
+            // Instalación de Windows: la aplicación lanza y vigila el servidor local (server_host.rs).
+            let host = config.as_ref().ok().and_then(server_host::start);
             let enrollment_code = std::env::var_os("ADEL_ENROLLMENT_FILE")
                 .and_then(|filename| std::fs::read_to_string(filename).ok())
                 .map(|value| value.trim().to_string())
@@ -168,8 +210,12 @@ fn main() {
                 provisioning_token,
                 enrollment_code,
                 events_generation: Arc::new(AtomicU64::new(0)),
+                host,
             });
             window_check::start(app.handle().clone());
+            // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
+            #[cfg(target_os = "windows")]
+            window_state::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -185,8 +231,16 @@ fn main() {
             menu::menu_subscribe,
             menu::menu_set_state,
         ])
-        .run(tauri::generate_context!())
-        .expect("No se pudo iniciar la aplicación de escritorio");
+        .build(tauri::generate_context!())
+        .expect("No se pudo iniciar la aplicación de escritorio")
+        .run(|app, event| {
+            // Al salir, el servidor local de Windows se apaga en orden; en macOS no hay ninguno.
+            if let RunEvent::Exit = event {
+                if let Some(host) = app.state::<TerminalState>().host.as_ref() {
+                    host.shutdown();
+                }
+            }
+        });
 }
 
 #[cfg(test)]
@@ -202,6 +256,7 @@ mod startup_tests {
             provisioning_token: None,
             enrollment_code: None,
             events_generation: Arc::new(AtomicU64::new(0)),
+            host: None,
         };
         assert!(state
             .vault()

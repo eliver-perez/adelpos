@@ -310,3 +310,63 @@ Clasificación y corrección de los fallos:
 Además se movió `golang.org/x/sys` (ya en `go.sum`, v0.49.0) de indirecta a directa: lo usan los archivos de Windows.
 Ningún módulo, crate ni paquete npm nuevo. `go build ./...` y `GOOS=darwin GOARCH=arm64 go build ./...` y `go vet`
 para ambas plataformas aprobados.
+
+## Fase C · Adaptaciones a Windows (12/11/2026)
+
+### C1 · Procesos, recuperación, secretos, rutas, ventana y respaldos
+
+**Servidor y PostgreSQL en la instalación (§3.1).** Como se señaló en la Fase 0, la 9E pide que en Windows la
+aplicación los inicie y los detenga; en macOS nada cambia (`server_host::start` devuelve `None` y Tauri sigue sin
+iniciar procesos). Piezas:
+
+- `ad-el-pos-server host` (solo Windows, `cmd/ad-el-pos-server/host_windows.go` y paquete nuevo
+  `internal/standalone`, todo con `//go:build windows`): toma un bloqueo exclusivo de la carpeta de datos
+  (`host.lock`, que Windows libera aunque el proceso termine mal), le fija la ACL privada, crea el clúster la primera
+  vez con los binarios incluidos (`initdb --locale=C --auth=scram-sha-256`, solo `127.0.0.1:55432`, UTC, sin socket de
+  Unix y con marcador de propiedad como en macOS), lo arranca con `pg_ctl` (o adopta el que siga activo), borra un
+  `postmaster.pid` huérfano, crea el rol `adel_app` y la base `adel_pos`, escribe `server.json` y el token del
+  asistente, **respalda antes de aplicar migraciones sobre una base con datos** (`backups\…-antes-de-migrar.dump`),
+  migra, sirve exactamente como `serve` (misma función `serveHTTP`) y al terminar detiene HTTP, los trabajadores y
+  PostgreSQL (`pg_ctl stop -m fast`). Los procesos hijos no tienen ventana (`CREATE_NO_WINDOW`) ni heredan tuberías.
+- `desktop/src-tauri/src/server_host.rs` (solo Windows y solo si junto al ejecutable están el servidor y
+  `postgresql\bin`, es decir, en la instalación): un supervisor revisa cada medio segundo; si nadie responde en
+  `127.0.0.1:8181`, lanza `host --watch-stdin` oculto con la entrada estándar en una tubería. Al salir, la aplicación
+  cierra la tubería y espera hasta 25 s; si la aplicación termina mal, Windows cierra la tubería y Go se apaga igual.
+  Relanza con espera creciente (1, 2, 4… hasta 30 s) si el servidor muere enseguida, y mientras arranca la pantalla
+  de conexión dice que el equipo se está preparando (la primera vez tarda hasta un minuto). El token del asistente
+  se lee de la carpeta de datos (en macOS sigue llegando por `ADEL_PROVISIONING_FILE`). En `tauri dev` no lanza nada.
+
+Comprobado con el `.exe` real y PostgreSQL 18.6 en una carpeta con espacios y acentos («Datos José Ñandú»):
+
+| Caso                                                              | Resultado                                                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Primer arranque (crear clúster, rol, base, 21 migraciones)        | listo en 26 s                                                                   |
+| Cierre de la entrada estándar (como al cerrar la aplicación)       | apagado ordenado en 4.7 s, código 0, **ningún proceso de PostgreSQL restante** |
+| Segundo arranque                                                  | 2.7 s                                                                           |
+| Servidor terminado a la fuerza (PostgreSQL sigue vivo)            | el siguiente arranque adopta PostgreSQL: 1.8 s                                 |
+| Todo terminado a la fuerza (`postmaster.pid` huérfano)             | se borra el pid huérfano, PostgreSQL se recupera: 5.7 s                         |
+| Segundo servidor sobre la misma carpeta                           | rechazado («la carpeta de datos ya está en uso»), el primero sigue sirviendo   |
+| Carpeta en forma corta (`EXPEDI~1`) y larga mezcladas              | corregido: todas las comparaciones usan la forma larga de Windows               |
+
+**Respaldos (§3.8).** `ad-el-pos-server backup`, `restore-check` y `restore` usan los `pg_dump` y `pg_restore`
+incluidos y funcionan con la aplicación abierta o cerrada (cerrada, arrancan y detienen PostgreSQL). `restore` exige
+la aplicación cerrada, solo acepta respaldos de la carpeta `backups` y antes crea un respaldo de seguridad
+(`…-antes-de-restaurar.dump`). Comprobado: respaldo creado y legible, ensayo de restauración con 134 tablas de
+conteos idénticos, restauración real y ensayo del respaldo de seguridad; rechazo sin `--file` y de un archivo
+fuera de `backups`. Los mensajes para el restaurante van a la consola y el detalle técnico a
+`logs\maintenance.log`.
+
+**Secretos (§3.3).** Mismo `vault.rs` con el backend `windows-native` de `keyring` (Administrador de credenciales).
+La prueba real del almacén, que solo existía para macOS, ahora también corre en Windows y pasó: escribió, leyó y
+borró una credencial temporal. El aviso de espera del almacén dice «Revisa el aviso de Windows» en Windows y sigue
+diciendo «Revisa el diálogo de macOS» en macOS.
+
+**Ventana (§3.7).** `window_state.rs` (solo Windows): sigue abriendo en pantalla completa como en macOS, pero si se
+cerró en modo ventana vuelve con el mismo tamaño, posición y maximización (`window-state.json` en la carpeta de
+configuración de la aplicación; nunca datos del restaurante) y al salir de pantalla completa regresa a la última
+geometría en modo ventana. Una posición fuera de los monitores conectados no se aplica.
+
+Pruebas: `go test ./internal/standalone` con 8 pruebas, incluida la de ciclo completo con PostgreSQL real
+(`ADEL_STANDALONE_PG_BIN`, 26 s); `cargo test --locked` con 46 pruebas (lanzador: solo el servidor local de la
+instalación, nada en desarrollo, carpeta de datos y espera creciente; estado de la ventana); `go vet` y `go build`
+para Windows y `GOOS=darwin GOARCH=arm64`.

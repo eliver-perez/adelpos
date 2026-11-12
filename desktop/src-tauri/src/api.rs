@@ -712,7 +712,7 @@ pub fn authentication_state(state: State<'_, TerminalState>) -> Result<LocalStat
     Ok(LocalState {
         enrolled: credentials.device_id.is_some() && credentials.device_token.is_some(),
         has_session: credentials.session_token.is_some(),
-        local_setup_available: state.provisioning_token.is_some(),
+        local_setup_available: state.provisioning_token().is_some(),
         local_enrollment_available: state.enrollment_code.is_some(),
     })
 }
@@ -741,8 +741,7 @@ pub async fn api_request(
     }
     if operation == "setup" {
         let token = state
-            .provisioning_token
-            .as_ref()
+            .provisioning_token()
             .ok_or("Prepara primero el aprovisionamiento local desde Terminal.")?;
         request = request.header("X-Provisioning-Token", token);
     }
@@ -771,9 +770,7 @@ pub async fn api_request(
     if let Some(body) = body {
         request = request.json(&body);
     }
-    let mut response = request.send().await.map_err(|_| {
-        "No se pudo conectar con el servidor. Comprueba su estado y la confianza TLS."
-    })?;
+    let mut response = request.send().await.map_err(|_| state.connection_error())?;
     let status = response.status().as_u16();
     let mut bytes = Vec::new();
     while let Some(chunk) = response

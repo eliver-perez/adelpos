@@ -63,13 +63,15 @@ impl Vault {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+// Prueba real del almacén seguro: Keychain en macOS y el Administrador de credenciales de Windows
+// (etapa 9E), con el mismo vault.rs y el backend windows-native de keyring.
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    #[ignore = "Escribe y elimina una credencial temporal en el Keychain real; ejecutar explícitamente."]
+    #[ignore = "Escribe y elimina una credencial temporal en el almacén seguro real; ejecutar explícitamente."]
     fn real_system_vault_roundtrip() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
