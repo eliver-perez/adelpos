@@ -1,0 +1,54 @@
+# Fin de línea (etapa 9E). Todo el texto del repositorio se guarda y se extrae con LF en cualquier sistema.
+# Git para Windows trae core.autocrlf=true y extraería CRLF: cambiaría el SHA-256 de las migraciones embebidas
+# (historial incompatible con la instalación de macOS), las comparaciones byte a byte de plantillas y datos
+# de prueba, la lectura de api.rs, menu.rs y export.rs en native-driver.ts y el formato de Prettier y gofmt.
+* text=auto eol=lf
+
+# Código, SQL, plantillas, scripts y datos de prueba: explícitos, aunque text=auto ya los detecta.
+*.go text eol=lf
+*.mod text eol=lf
+*.sum text eol=lf
+*.sql text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.svg text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=lf
+*.nsi text eol=lf
+*.nsh text eol=lf
+*.plist text eol=lf
+*.example text eol=lf
+
+# Scripts que interpreta cmd.exe: requieren CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binarios: nunca se convierten ni se muestran como texto en los diffs.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.xlsx binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.dump binary
+*.bin binary
