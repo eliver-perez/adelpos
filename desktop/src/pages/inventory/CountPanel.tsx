@@ -293,7 +293,7 @@ function CountLineRow({
             {line.counted && (
               <button
                 type="button"
-                className="danger-button"
+                className="secondary-button"
                 disabled={saving || current.quantity === ''}
                 aria-label={`Borrar la captura de ${line.item.name}`}
                 onClick={() => onDraft({ ...current, quantity: '' })}

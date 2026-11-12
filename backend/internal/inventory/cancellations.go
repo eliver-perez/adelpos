@@ -35,6 +35,12 @@ var resolutionLabels = map[string]string{
 	"correction": "Corrección autorizada",
 }
 
+// preclassifiedLabel es la etiqueta de la clasificación que creó el trabajador al cancelar una
+// cuenta con un motivo que marca merma (etapa 9D, decisión 4), mientras nadie la corrija. Se guarda
+// como resolución manual a nombre de quien canceló (la restricción de forma de la etapa 8 no
+// cambia), pero no la clasificó el encargado.
+const preclassifiedLabel = "Preclasificada al cancelar la cuenta"
+
 // classificationRow es una clasificación bloqueada para cambiarla.
 type classificationRow struct {
 	ID          string

@@ -11,7 +11,10 @@ import (
 // corregir una clasificación vencida), inventory.adjustments.authorize. Ambos permisos se
 // comprueban antes de escribir.
 
-// Cancellation es una cancelación de una unidad consumida con su clasificación.
+// Cancellation es una cancelación de una unidad consumida con su clasificación. Preclassified (etapa
+// 9D): «Preparado / merma» que el trabajador asignó al cancelar la cuenta con un motivo que marca
+// merma y que nadie ha corregido; ClassifiedByName es entonces quien canceló la cuenta, no quien la
+// clasificó, y ResolutionLabel lo dice («Preclasificada al cancelar la cuenta»).
 type Cancellation struct {
 	ID                 string            `json:"id"`
 	RestaurantUnitID   string            `json:"restaurant_unit_id"`
@@ -26,6 +29,7 @@ type Cancellation struct {
 	StateLabel         string            `json:"state_label"`
 	Resolution         *string           `json:"resolution"`
 	ResolutionLabel    *string           `json:"resolution_label"`
+	Preclassified      bool              `json:"preclassified"`
 	ClassifiedByName   *string           `json:"classified_by_name"`
 	ClassifiedAt       *time.Time        `json:"classified_at"`
 	Notes              *string           `json:"notes"`
@@ -60,7 +64,9 @@ type CancellationPage struct {
 
 const cancellationColumns = `SELECT c.id,c.restaurant_unit_id,coalesce(v.quote_line->>'name',''),a.folio,a.name,c.cancelled_at,
         to_char(c.operating_date,'YYYY-MM-DD'),c.deadline_at,c.deadline_at<=now() OR c.resolution IS NOT DISTINCT FROM 'automatic',c.state,c.resolution,author.display_name,
-        c.classified_at,c.notes,c.revision
+        c.classified_at,c.notes,c.revision,
+        c.resolution IS NOT DISTINCT FROM 'manual' AND c.revision=1 AND EXISTS(SELECT FROM app.restaurant_events e
+            WHERE e.id=q.source_id AND e.kind='account.cancelled')
         FROM app.inventory_cancellation_classifications c
         JOIN app.inventory_consumption_requests q ON q.id=c.request_id
         JOIN app.restaurant_item_versions v ON v.id=q.version_id
@@ -72,13 +78,18 @@ func (handler *service) scanCancellation(row interface{ Scan(...any) error }) (*
 	var item Cancellation
 	err := row.Scan(&item.ID, &item.RestaurantUnitID, &item.ProductName, &item.AccountFolio, &item.AccountName, &item.CancelledAt,
 		&item.OperatingDate, &item.DeadlineAt, &item.Expired, &item.State, &item.Resolution, &item.ClassifiedByName, &item.ClassifiedAt,
-		&item.Notes, &item.Revision)
+		&item.Notes, &item.Revision, &item.Preclassified)
 	if err != nil {
 		return nil, err
 	}
 	item.StateLabel = classificationLabels[item.State]
 	if item.Resolution != nil {
 		label := resolutionLabels[*item.Resolution]
+		// Una clasificación manual en su primera revisión que viene de account.cancelled solo puede
+		// ser la preclasificación del trabajador: toda clasificación del encargado sube la revisión.
+		if item.Preclassified {
+			label = preclassifiedLabel
+		}
 		item.ResolutionLabel = &label
 	}
 	item.RequiredPermission = permissionWasteRecord

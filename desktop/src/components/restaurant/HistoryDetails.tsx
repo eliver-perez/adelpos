@@ -29,11 +29,19 @@ function PreparationChange({ value }: { value: unknown }) {
 }
 
 // Etapa 9D (§5): «Cancelar cuenta» registra el motivo del catálogo, la descripción, quién autorizó
-// (si hizo falta un supervisor), las unidades y el importe que calculó Go.
+// (si hizo falta un supervisor), las unidades y el importe que calculó Go. Del supervisor se muestra
+// su nombre visible (`authorized_by_name`), como en el detalle de la cuenta y en «Cuentas
+// canceladas»; solo un evento anterior que no lo guardó muestra su usuario.
+function supervisorName(after: RecordValue) {
+  if (typeof after.authorized_by_name === 'string' && after.authorized_by_name) {
+    return after.authorized_by_name;
+  }
+  return typeof after.authorized_by_username === 'string' ? after.authorized_by_username : '';
+}
+
 function AccountCancelled({ event, after }: { event: HistoryEvent; after: RecordValue }) {
   const description = typeof after.description === 'string' ? after.description : '';
-  const authorized =
-    typeof after.authorized_by_username === 'string' ? after.authorized_by_username : '';
+  const authorized = supervisorName(after);
   const discarded =
     typeof after.discarded_draft_items === 'number' ? after.discarded_draft_items : 0;
   return (

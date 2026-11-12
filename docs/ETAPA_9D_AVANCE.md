@@ -609,3 +609,67 @@ Pruebas (copia aislada = `HEAD 4abe78d` + cambios de E, sin los de BC; clúster 
   directorio de capturas de la fase (`shots9dE`), sin desbordamiento horizontal.
 - Comprobación adicional sobre el árbol completo (E + cambios en curso de BC, copia sincronizada): `tsc` sin errores y
   `npm test` 74 archivos, 714 pruebas aprobadas.
+
+## Correcciones de la revisión independiente (parte 1)
+
+Agente Fix1, 12/11/2026, sobre `etapa-9d` (`ffcaed7`), sin subagentes y en paralelo con la fase D (interfaz). Atiende
+el informe de la revisión independiente de `ecae96d..2c00064` (sin defectos críticos ni altos; uno medio y siete bajos)
+con las decisiones del coordinador. Sin migraciones, permisos nuevos ni cambios de cálculo. Copia aislada = `HEAD` +
+solo los archivos de Fix1 (sin los cambios en curso de D); parche desde `HEAD` en las notas de la parte.
+
+- **M1 · Una cuenta vacía no se «cancela»**: `cancel-account` sobre una cuenta `discardable` (sin productos enviados ni
+  registros, aunque tenga borrador, como las #1, #3, #5, #8, #9 y #10 de la instalación real) responde **409
+  `ACCOUNT_DISCARDABLE`** «Esta cuenta no tiene productos enviados: descártala; no hace falta motivo.», después del
+  permiso de la ruta y de la revisión y **antes** del motivo y de la contraseña del supervisor (no cuenta en el límite de
+  intentos), sin escribir nada. Así ninguna cuenta vacía queda como cancelación de $0 en los reportes (§4.2). En esas
+  cuentas `cancel_requires_authorization` es `false` y `cancel_blocker` vacío; no se agregó `"discardable"` a
+  `cancel_blocker` porque el tipo es cerrado y la interfaz de la fase E trata cualquier valor como bloqueo financiero (la
+  interfaz decide por `discardable`; ofrecer «Descartar» en su lugar es de la fase D). Ninguna prueba de Go del repositorio
+  cancelaba cuentas vacías (solo la reproducción del revisor, en su copia).
+- **B2 · Respuesta después de cocina**: la respuesta de `cancel-account` y su resultado idempotente se leen después de
+  integrar cocina: con una estación inactiva dicen `change_pending`, igual que una lectura posterior y que un reintento con
+  el mismo `operation_id`; el evento conserva la cuenta previa a la integración.
+- **B5 · Nombre del supervisor en el historial**: el evento `account.cancelled` guarda `authorized_by_name` (nombre
+  visible, sin datos sensibles) y el historial dice «Autorizó: <nombre>», como el detalle y «Cuentas canceladas» (un
+  evento anterior sin el campo muestra el usuario).
+- **B1 · Preclasificación en Inventarios**: Go marca `preclassified` y entrega la etiqueta «Preclasificada al cancelar la
+  cuenta» cuando la clasificación sigue en su primera revisión, es manual y su solicitud viene de un `account.cancelled`
+  (sin migración; la restricción de forma de la etapa 8 no cambia). Ajustes y mermas ya no la atribuye al encargado:
+  «Clasificó: Al cancelar la cuenta» y «Canceló la cuenta: <nombre>». En cuanto el encargado la cambia vuelve a
+  «Clasificada por el encargado».
+- **B4 · `restaurant_void` fuera del puente**: se retiró de la lista cerrada de `api.rs` (su prueba Rust exige ahora que
+  no tenga ruta) y del tipo de operaciones de `services/api.ts`; ningún servicio la llamaba. Go conserva
+  `POST restaurant/accounts/{id}/void` por compatibilidad (sus pruebas de integración la usan para crear anulaciones
+  anteriores), pero ningún cliente de la aplicación la alcanza.
+- **B3 · Rojo solo para lo que no se deshace (§1.5)**: vuelven al estilo secundario los «Quitar» que solo vacían un campo o
+  quitan un renglón de un formulario sin guardar (hora, fecha, color, imagen del catálogo, `RemoveButton` del catálogo,
+  renglones de ajustes, saldo inicial, compras y recetas, selección de un conteo nuevo, «Borrar captura» de un renglón de
+  conteo, bloque del diseñador con «Deshacer» y el icono «Quitar el dato»). Siguen en rojo Eliminar, Descartar, Cancelar
+  cuenta/unidades/ajuste/orden/conteo/arqueo, Liberar mesa, Revocar, Retirar logotipo y de prueba y lo que se aplica al
+  instante («Quitar nivel», «Quitar porción», insumos surtidos de un proveedor, renglón de un conteo abierto).
+- **B7 · Pruebas de la fase A**: `styles.test.ts` detecta los 148 nombres de color de CSS y los colores del sistema
+  (también en `fillStyle`/`strokeStyle`), con una prueba del detector; `stage9dStyles.test.tsx` separa los destructivos
+  de la lista explícita y justificada de reversibles (falla si uno se pinta de rojo o si la lista queda obsoleta) y revisa
+  las etiquetas por propiedad (`confirmLabel` y `label` de «Más…» y `ChoiceDialog` exigen `tone: 'danger'`).
+- **B6 · Sin cambio de cálculo**: «Cancelaciones por motivo» suma lo activo al cancelar; lo cancelado antes por unidades
+  está en «Productos cancelados». Queda como nota para `docs/REPORTS.md` en las notas de la parte.
+
+Pruebas (copia aislada `repo9dFix1` = `HEAD ffcaed7` + archivos de Fix1; clúster temporal 55499; puertos 8186/1424):
+
+- **Go**: `gofmt -l` sin salida; `go vet ./...` con y sin `-tags=integration`, aprobado; `go test -race` de `operations`,
+  `inventory`, `reports`, `kitchen` y `payments`, aprobado. Integración (`iter_snap.sh`): `internal/database` ok (7.0 s),
+  `internal/reports` ok (125.1 s) e `internal/operations` ok (251.4 s; repetida sobre el código final: 254.8 s), con
+  `TestStage9DAccountCancellation` ampliada: rechazo `ACCOUNT_DISCARDABLE` de cuentas para llevar vacías y de mesa solo
+  con borrador (con permiso propio, sin permiso, con contraseña incorrecta que no cuenta en el límite de intentos y con
+  «Otro» sin descripción; nada escrito), subprueba nueva con la estación inactiva (respuesta, lectura y reintento
+  idempotente en `change_pending`; tras reactivar y reintentar cocina, un solo aviso y todo cancelado), nombre del
+  supervisor en el evento y la preclasificación en `GET inventory/cancellations` (y su paso a «Clasificada por el
+  encargado» al corregirla). Sin las correcciones, la subprueba de cocina y la de descarte fallan (comprobado).
+- **Rust**: `cargo test --locked --offline` 41 aprobadas, 1 ignorada; `rustfmt --check` limpio.
+- **Interfaz**: `npx tsc --noEmit` sin errores; `npm test` 74 archivos y **719 pruebas** aprobadas (HEAD: 714); `npm run
+build` correcto; Prettier limpio en los archivos de Fix1. Pruebas nuevas: detector de los 148 nombres de color,
+  etiquetas destructivas por propiedad, detector de propiedades, `RemoveButton` secundario y la preclasificación en
+  Ajustes y mermas; ajustadas: recorrido de destructivos (lista de reversibles) e historial de «Cuenta cancelada» con el
+  nombre del supervisor.
+- **Playwright** (puertos 8186/1424) `workflow-stage9d-cancel-account` y `workflow-stage9d-colors`: 2/2 en Chromium y 2/2
+  en WebKit. La suite completa queda para la regresión final.

@@ -321,6 +321,7 @@ describe('cuenta cancelada, historial y Cocina', () => {
           cancelled_amount: '230.00',
           authorized_by: 'supervisor',
           authorized_by_username: 'gerente',
+          authorized_by_name: 'Gerente General',
           discarded_draft_items: 1,
         },
       },
@@ -336,7 +337,9 @@ describe('cuenta cancelada, historial y Cocina', () => {
     expect(text).toContain('Unidades canceladas: 2');
     expect(text).toContain('Importe cancelado: $230.00');
     expect(text).toContain('Canceló: Laura');
-    expect(text).toContain('Autorizó: gerente');
+    // El nombre visible del supervisor, como el detalle y el reporte; nunca su usuario.
+    expect(text).toContain('Autorizó: Gerente General');
+    expect(text).not.toContain('gerente');
     expect(text).toContain('Productos sin enviar descartados: 1');
     expect(text).toContain('no cuenta como venta');
     // Los identificadores de las unidades canceladas no se presentan como «conservadas».
@@ -352,6 +355,7 @@ describe('cuenta cancelada, historial y Cocina', () => {
               ...(event.payload.after as Record<string, unknown>),
               authorized_by: null,
               authorized_by_username: null,
+              authorized_by_name: null,
             },
           },
         }}
@@ -359,6 +363,23 @@ describe('cuenta cancelada, historial y Cocina', () => {
     );
     expect(own.container.textContent).toContain('Autorizó: con su propio permiso');
     own.unmount();
+    // Un evento anterior a la corrección (sin el nombre) muestra el usuario.
+    const previous = render(
+      <HistoryDetails
+        event={{
+          ...event,
+          payload: {
+            before: event.payload.before,
+            after: {
+              ...(event.payload.after as Record<string, unknown>),
+              authorized_by_name: undefined,
+            },
+          },
+        }}
+      />,
+    );
+    expect(previous.container.textContent).toContain('Autorizó: gerente');
+    previous.unmount();
     const discarded = render(
       <HistoryDetails
         event={{

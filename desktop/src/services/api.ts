@@ -229,7 +229,6 @@ export type Operation =
   | 'restaurant_merge'
   | 'restaurant_move'
   | 'restaurant_assign'
-  | 'restaurant_void'
   | 'restaurant_release_account'
   // Etapa 9D: descartar cuentas vacías, cancelar cuentas y catálogo de motivos de cancelación.
   | 'restaurant_discard_account'

@@ -25,6 +25,10 @@ import (
 //   - auditoría restaurant.account.cancelled (sin contraseñas) y evento en tiempo real.
 // Nunca cuenta como venta: una cuenta anulada no se cierra ni se reconoce en sales_recognitions.
 //
+// Una cuenta sin productos enviados ni registros (discardable, aunque tenga borrador) no se cancela:
+// se descarta sin motivo (§4.2, «no cuenta como cancelación ni aparece en reportes»). La ruta responde
+// 409 ACCOUNT_DISCARDABLE antes de validar el motivo o pedir la contraseña del supervisor.
+//
 // Permiso: con accounts.cancel basta el propio; sin él, la autorización puntual de un supervisor que
 // lo tenga, con el mismo mecanismo de los descuentos (validada antes de escribir, sin sesión, con el
 // límite de intentos del inicio de sesión y sin autoautorización). La contraseña nunca forma parte de
@@ -175,6 +179,11 @@ func (handler *service) cancelAccount(id string) (any, error) {
 	if err := ensureOpen(account, input.Revision); err != nil {
 		return nil, err
 	}
+	// Una cuenta vacía o solo con borrador se descarta: cancelarla dejaría en los reportes una
+	// cancelación de $0 (revisión independiente 9D, M1). Se decide antes del motivo y del supervisor.
+	if account.Discardable {
+		return nil, &Error{Status: 409, Code: "ACCOUNT_DISCARDABLE", Message: discardableMessage}
+	}
 	reason, description, err := handler.resolveCancelReason(input.ReasonID, input.Description)
 	if err != nil {
 		return nil, err
@@ -226,9 +235,9 @@ func (handler *service) cancelAccount(id string) (any, error) {
 	if _, err := handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET state='voided' WHERE id=$1", id); err != nil {
 		return nil, err
 	}
-	var authorizedBy, authorizedName *string
+	var authorizedBy, authorizedUsername *string
 	if supervisor != nil {
-		authorizedBy, authorizedName = &supervisor.UserID, &supervisor.Username
+		authorizedBy, authorizedUsername = &supervisor.UserID, &supervisor.Username
 	}
 	_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.account_cancellations(account_id,operation_id,reason_id,reason_name,
             description,prepared_is_waste,cancelled_by,authorized_by,device_id,cancelled_units,cancelled_amount)
@@ -245,19 +254,38 @@ func (handler *service) cancelAccount(id string) (any, error) {
 			return nil, err
 		}
 	}
-	saved, err := handler.readBill(id)
+	// El evento lleva la cuenta tal como queda antes de integrar cocina y, del registro recién
+	// guardado, el nombre visible del supervisor (como el detalle y el reporte); nunca su contraseña.
+	saved, err := handler.readAccount(id)
 	if err != nil {
 		return nil, err
 	}
+	record, err := handler.readCancellation(id)
+	if err != nil {
+		return nil, err
+	}
+	var authorizedName *string
+	if record != nil {
+		authorizedName = record.AuthorizedByName
+	}
 	before := map[string]any{"account": account, "lines": lines, "draft": draft}
 	after := map[string]any{
-		"account": saved.Account, "reason_id": reason.ID, "reason": reason.Name, "description": description,
+		"account": saved, "reason_id": reason.ID, "reason": reason.Name, "description": description,
 		"prepared_is_waste": reason.PreparedIsWaste, "unit_ids": identifiers, "cancelled_units": len(units),
-		"cancelled_amount": amount, "authorized_by": authorizedBy, "authorized_by_username": authorizedName,
-		"discarded_draft_items": len(draft),
+		"cancelled_amount": amount, "authorized_by": authorizedBy, "authorized_by_username": authorizedUsername,
+		"authorized_by_name": authorizedName, "discarded_draft_items": len(draft),
 	}
-	return saved, handler.event(id, nil, "account.cancelled", before, after)
+	if err := handler.event(id, nil, "account.cancelled", before, after); err != nil {
+		return nil, err
+	}
+	// La respuesta (y el resultado idempotente que guarda Handle) refleja la cuenta después de
+	// integrar cocina: con una estación inactiva el cambio queda pendiente y la lectura lo dice
+	// (revisión independiente 9D, B2). after.account conserva el estado previo a la integración.
+	return handler.readBill(id)
 }
+
+// discardableMessage explica por qué una cuenta sin productos enviados no se cancela.
+const discardableMessage = "Esta cuenta no tiene productos enviados: descártala; no hace falta motivo."
 
 // readCancellation lee el registro de cancelación de una cuenta; nil si la cuenta no se canceló con
 // motivo (anulaciones anteriores, liberaciones y descartes).

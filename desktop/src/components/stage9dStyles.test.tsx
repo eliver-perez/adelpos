@@ -12,6 +12,7 @@ import type { Account, RestaurantTable, TableState } from '../services/restauran
 import { notifyError, notifyInfo, notifySuccess, notifyWarning } from '../services/notify';
 import { ChoiceDialog, ConfirmDialog } from './ConfirmDialog';
 import { Form } from './Forms';
+import { RemoveButton } from './catalog/EditorFields';
 import { TableMap } from './restaurant/TableMap';
 import { tableStateIcons } from './restaurant/tableStateIcons';
 
@@ -296,11 +297,18 @@ describe('acciones destructivas en rojo (§1.5)', () => {
   });
 });
 
-// Recorrido del código: todo botón cuyo texto empieza con un verbo destructivo («Quitar»,
-// «Descartar», «Eliminar», «Borrar», «Anular», «Revocar», «Retirar logotipo/de prueba», «Liberar
-// mesa», «Cancelar unidades/ajuste/orden/conteo/arqueo/cuenta») lleva la clase destructiva. Las
-// excepciones no destruyen nada: teclas de borrado del teclado, «Retirar efectivo» (operación de
-// caja), «Retirar todos los complementos» (elección del cliente en la captura), «Liberar a
+// Recorrido del código (§1.5: el rojo es solo para lo que no se puede deshacer). Todo botón cuyo
+// texto empieza con un verbo destructivo («Quitar», «Descartar», «Eliminar», «Borrar», «Anular»,
+// «Revocar», «Retirar logotipo/de prueba», «Liberar mesa», «Cancelar unidades/ajuste/orden/conteo/
+// arqueo/cuenta») lleva la clase destructiva, salvo dos listas explícitas:
+//   - `notDestructive`: no destruyen nada (teclas de borrado de los teclados en pantalla);
+//   - `reversible`: vacían un campo o quitan un renglón de un formulario que todavía no se guarda (o
+//     se deshacen con «Deshacer»); usan el estilo secundario normal y nunca el rojo.
+// Siguen en rojo Eliminar, Descartar, Cancelar cuenta/unidades, Liberar mesa, Retirar de prueba y
+// todo lo que se aplica en el momento sin poder deshacerse (p. ej. «Quitar nivel», «Quitar porción»,
+// el «Quitar» de los insumos de un proveedor y el de un renglón de un conteo abierto, que guardan al
+// instante). Otros textos no entran en la expresión porque no destruyen nada: «Retirar efectivo»
+// (operación de caja), «Retirar todos los complementos» (elección del cliente), «Liberar a
 // preparación» (envía a cocina) y «Cancelar» a secas o «Cancelar corrección/apertura del cajón»
 // (cierran un formulario sin registrar nada).
 const destructiveLabel =
@@ -309,6 +317,27 @@ const notDestructive = [
   'components/VirtualKeyboard.tsx: Borrar',
   'components/NumericKeypad.tsx: Borrar último carácter',
 ];
+const reversible: Record<string, string> = {
+  'components/TimeField.tsx: Quitar':
+    'vacía la hora del campo; nada se guarda hasta enviar el formulario',
+  'components/catalog/ColorField.tsx: Quitar color': 'vacía el color del registro en edición',
+  'components/catalog/DateField.tsx: Quitar fecha': 'vacía la fecha del campo',
+  'components/catalog/ImageEditor.tsx: Quitar imagen':
+    'desasigna la imagen del registro en edición; se aplica al guardarlo',
+  'pages/inventory/ControlLinesEditor.tsx: Quitar renglón': 'renglón de un ajuste sin registrar',
+  'pages/inventory/InitialBalanceForm.tsx: Quitar renglón':
+    'renglón del saldo inicial sin registrar',
+  'pages/inventory/PurchaseFields.tsx: Quitar renglón': 'renglón de una compra sin guardar',
+  'pages/inventory/RecipeLinesEditor.tsx: Quitar renglón': 'renglón de la receta en edición',
+  'pages/inventory/CountsView.tsx: Quitar':
+    'insumo de la selección de un conteo que aún no se crea',
+  'pages/inventory/CountPanel.tsx: Borrar captura': 'vacía la cantidad del renglón, sin guardar',
+  'pages/documents/designer/StructureList.tsx: Quitar':
+    'bloque del borrador de la plantilla, con «Deshacer»',
+};
+// Componentes que reciben su texto por la propiedad `label` y solo quitan un renglón de un
+// formulario sin guardar (los repetibles del catálogo): secundarios, como `reversible`.
+const reversibleComponents = ['RemoveButton'];
 
 function sources(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {
@@ -320,21 +349,56 @@ function sources(directory: string): string[] {
   });
 }
 
+function sourceFiles() {
+  const root = join(__dirname, '..');
+  return sources(root).map((path) => ({
+    file: relative(root, path).split(sep).join('/'),
+    lines: readFileSync(path, 'utf8').split('\n'),
+  }));
+}
+
+const indentation = (line: string) => /^\s*/.exec(line)![0].length;
+
+// Las propiedades hermanas de la línea `index` en el objeto o el elemento JSX que la contiene (el
+// código pasa por Prettier: los hermanos comparten la sangría y el cierre tiene una menor).
+function siblings(lines: string[], index: number) {
+  const depth = indentation(lines[index]!);
+  const found: string[] = [];
+  for (const step of [-1, 1]) {
+    for (let at = index + step; at >= 0 && at < lines.length; at += step) {
+      const line = lines[at]!;
+      if (line.trim() === '') {
+        continue;
+      }
+      if (indentation(line) < depth) {
+        found.push(line);
+        break;
+      }
+      if (indentation(line) === depth) {
+        found.push(line);
+      }
+    }
+  }
+  return found;
+}
+
+const dangerTone = /\btone(?::\s*|=\{?\s*)['"]danger['"]/;
+
 describe('recorrido de acciones destructivas', () => {
-  it('todo botón con un verbo destructivo usa el estilo rojo', () => {
-    const root = join(__dirname, '..');
+  it('todo botón con un verbo destructivo usa el estilo rojo, salvo los reversibles', () => {
     const missing: string[] = [];
+    const red: string[] = [];
+    const seen = new Set<string>();
     let checked = 0;
-    for (const path of sources(root)) {
-      const file = relative(root, path).split(sep).join('/');
-      const lines = readFileSync(path, 'utf8').split('\n');
+    for (const { file, lines } of sourceFiles()) {
       lines.forEach((line, index) => {
         // Texto JSX: la línea completa o el contenido de <IconLabel>…</IconLabel>.
         const text = /^\s*([^<>{}]+?)\s*$/.exec(line)?.[1] ?? />([^<>{}]+)<\//.exec(line)?.[1];
         if (!text || !destructiveLabel.test(text.trim()) || line.includes('//')) {
           return;
         }
-        if (notDestructive.includes(`${file}: ${text.trim()}`)) {
+        const key = `${file}: ${text.trim()}`;
+        if (notDestructive.includes(key)) {
           return;
         }
         const context = lines.slice(Math.max(0, index - 16), index + 1).reverse();
@@ -343,12 +407,93 @@ describe('recorrido de acciones destructivas', () => {
           return;
         }
         checked += 1;
-        if (!className?.includes('danger')) {
+        if (key in reversible) {
+          seen.add(key);
+          if (className?.includes('danger') || !className?.includes('secondary-button')) {
+            red.push(`${file}:${index + 1} ${text.trim()} (${reversible[key]})`);
+          }
+        } else if (!className?.includes('danger')) {
           missing.push(`${file}:${index + 1} ${text.trim()}`);
         }
       });
     }
     expect(missing).toEqual([]);
+    // Lo que se deshace no se pinta de rojo, y la lista no conserva entradas que ya no existen.
+    expect(red).toEqual([]);
+    expect([...seen].sort()).toEqual(Object.keys(reversible).sort());
     expect(checked).toBeGreaterThan(25);
+  });
+
+  it('las etiquetas por propiedad (confirmLabel, label de «Más…» y de ChoiceDialog) también', () => {
+    // `confirmLabel` de ConfirmDialog/useConfirmDialog y `label` de MoreAction o DialogChoice: un
+    // texto destructivo exige `tone: 'danger'` (o `tone="danger"`) en el mismo objeto o elemento.
+    // Los `label` de `reversibleComponents` (renglones del catálogo sin guardar) son secundarios.
+    const property = /(?<![-\w])(confirmLabel|label)(?::\s*|=\{?\s*)(['"`])((?:(?!\2).)*)\2/g;
+    const missing: string[] = [];
+    const counted = { confirm: 0, label: 0, reversible: 0 };
+    for (const { file, lines } of sourceFiles()) {
+      lines.forEach((line, index) => {
+        if (line.trim().startsWith('//')) {
+          return;
+        }
+        for (const match of line.matchAll(property)) {
+          const [, name, , text] = match;
+          if (!text || !destructiveLabel.test(text)) {
+            continue;
+          }
+          const around = [line, ...siblings(lines, index)];
+          const component = reversibleComponents.find((entry) =>
+            around.some((candidate) => candidate.includes(`<${entry}`)),
+          );
+          if (name === 'label' && component) {
+            counted.reversible += 1;
+            continue;
+          }
+          counted[name === 'confirmLabel' ? 'confirm' : 'label'] += 1;
+          if (!around.some((candidate) => dangerTone.test(candidate))) {
+            missing.push(`${file}:${index + 1} ${name}: ${text}`);
+          }
+        }
+      });
+    }
+    expect(missing).toEqual([]);
+    expect(counted.confirm).toBeGreaterThan(15);
+    expect(counted.label).toBeGreaterThanOrEqual(2);
+    expect(counted.reversible).toBeGreaterThanOrEqual(9);
+  });
+
+  it('el detector de propiedades reconoce el tono en el objeto o el elemento', () => {
+    const object = [
+      '    const confirmed = await confirm({',
+      "      title: 'Quitar insumo surtido',",
+      "      confirmLabel: 'Quitar insumo',",
+      "      cancelLabel: 'Conservar',",
+      "      tone: 'danger',",
+      '    });',
+    ];
+    expect(siblings(object, 2).some((line) => dangerTone.test(line))).toBe(true);
+    const plain = [
+      '    const confirmed = await confirm({',
+      "      confirmLabel: 'Descartar cambios',",
+      "      cancelLabel: 'Seguir',",
+      '    });',
+      "    const other = { tone: 'danger' };",
+    ];
+    expect(siblings(plain, 1).some((line) => dangerTone.test(line))).toBe(false);
+    const element = [
+      '        <ConfirmDialog',
+      '          title="Cancelar el arqueo"',
+      '          confirmLabel="Cancelar el arqueo"',
+      '          tone="danger"',
+      '        />',
+    ];
+    expect(siblings(element, 2).some((line) => dangerTone.test(line))).toBe(true);
+  });
+
+  it('«Quitar» de los repetibles del catálogo usa el estilo secundario', () => {
+    render(<RemoveButton label="Quitar tramo" onClick={() => undefined} />);
+    const button = screen.getByRole('button', { name: 'Quitar tramo' });
+    expect(button.className).toContain('secondary-button');
+    expect(button.className).not.toContain('danger');
   });
 });

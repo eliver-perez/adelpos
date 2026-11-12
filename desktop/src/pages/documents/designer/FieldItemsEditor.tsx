@@ -70,7 +70,7 @@ export function FieldItemsEditor({
           </label>
           <button
             type="button"
-            className="icon-button danger-icon-button designer-remove"
+            className="icon-button designer-remove"
             aria-label={`Quitar el dato ${index + 1}`}
             disabled={disabled || items.length <= 1}
             onClick={() => onChange(items.filter((_, position) => position !== index))}

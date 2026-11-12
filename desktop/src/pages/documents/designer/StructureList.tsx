@@ -252,7 +252,7 @@ export function StructureList({
                   </button>
                   <button
                     type="button"
-                    className="danger-button"
+                    className="secondary-button"
                     aria-label={
                       removable ? `Quitar ${label}` : `${label}: obligatorio, no se puede quitar`
                     }

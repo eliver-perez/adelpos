@@ -220,6 +220,36 @@ describe('cancelaciones por clasificar', () => {
       ).toMatchObject({ state: 'not_prepared' }),
     );
   });
+
+  it('lo preclasificado al cancelar la cuenta no se atribuye al encargado', async () => {
+    // Etapa 9D (decisión 4): Go la registra a nombre de quien canceló la cuenta, pero no la
+    // clasificó nadie; la etiqueta es de Go.
+    const preclassified = pendingCancellation({
+      state: 'prepared_waste',
+      state_label: 'Preparado / merma',
+      resolution: 'manual',
+      resolution_label: 'Preclasificada al cancelar la cuenta',
+      preclassified: true,
+      classified_by_name: 'Mesero 9D',
+      classified_at: '2026-11-10T20:30:01Z',
+      notes: 'Preclasificada al cancelar la cuenta con el motivo «Cliente se retiró sin pagar».',
+    });
+    useTransport(cancellationResponder([], [preclassified]));
+    renderInventory(allInventoryPermissions);
+    await openInventorySection('Ajustes y mermas');
+    const history = await screen.findByRole('region', { name: 'Historial de clasificaciones' });
+    const row = (await within(history).findByText('Hamburguesa de prueba')).closest('tr')!;
+    expect(within(row).getByText('Preclasificada al cancelar la cuenta')).toBeTruthy();
+    expect(within(row).getByText('Al cancelar la cuenta')).toBeTruthy();
+    expect(within(row).getByText('Canceló la cuenta: Mesero 9D')).toBeTruthy();
+    expect(row.textContent).not.toContain('Clasificada por el encargado');
+    // El encargado la puede cambiar antes del corte, como cualquier clasificación.
+    expect(
+      within(row).getByRole('button', {
+        name: 'Cambiar la clasificación de Hamburguesa de prueba',
+      }),
+    ).toBeTruthy();
+  });
 });
 
 describe('diagnóstico del consumo en Movimientos', () => {

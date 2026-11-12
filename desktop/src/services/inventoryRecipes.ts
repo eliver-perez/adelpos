@@ -351,6 +351,10 @@ export interface Cancellation {
   state_label: string;
   resolution: CancellationResolution | null;
   resolution_label: string | null;
+  // Etapa 9D: «Preparado / merma» que Go asignó al cancelar la cuenta con un motivo que marca merma
+  // y que nadie ha corregido. Entonces `classified_by_name` es quien canceló la cuenta (no la
+  // clasificó el encargado) y `resolution_label` dice «Preclasificada al cancelar la cuenta».
+  preclassified: boolean;
   classified_by_name: string | null;
   classified_at: string | null;
   notes: string | null;
