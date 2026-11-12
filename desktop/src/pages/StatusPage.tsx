@@ -17,7 +17,7 @@ const cardState: Record<CheckState, 'good' | 'warning' | 'neutral'> = {
 // acceso. Muestra en lenguaje sencillo si el servidor responde, si hay conexión con la base de
 // datos, la versión y qué hacer si algo falla. Los datos técnicos quedan plegados en «Información
 // para soporte», solo para el administrador (support); antes de iniciar sesión no se sabe quién usa
-// la terminal y el bloque se conserva plegado para no perder la función del diagnóstico.
+// la terminal y el bloque no se muestra (revisión 9C).
 export function StatusPage({ support = false }: { support?: boolean }) {
   const { config, diagnostics, configError, refreshing, refresh } = useConnection();
   const status = plainStatus(diagnostics, configError);

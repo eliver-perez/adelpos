@@ -277,6 +277,13 @@ describe('registro de acciones', () => {
     );
     expect(busy).not.toContain('file.account_without_table');
     expect(busy).not.toContain('file.table_account');
+    // Revisión 9C: con el cobro abierto tampoco (la interfaz no ofrece esos botones en el cobro).
+    const checkout = enabledMenuActions(
+      context({ operation: { ...context().operation!, captureMode: true, checkoutOpen: true } }),
+    );
+    expect(checkout).not.toContain('file.account_without_table');
+    expect(checkout).not.toContain('file.takeaway_order');
+    expect(checkout).not.toContain('file.table_account');
   });
 
   it('el mesero no ve Caja ni Administración; antes de iniciar sesión solo Ayuda y la ventana', () => {
@@ -388,6 +395,17 @@ describe('paleta de comandos', () => {
     await entry!.run();
     expect(tools.requestScreen).toHaveBeenCalledWith('restaurant');
     expect(chooseTable).toHaveBeenCalledWith('5');
+  });
+
+  it('con el cobro abierto no ofrece elegir otra mesa (cerrarlo perdería lo tecleado)', () => {
+    const checkout = context({
+      operation: { ...context().operation!, captureMode: true, checkoutOpen: true },
+    });
+    const entry = commandEntries(checkout, runtime(), tables).find(
+      (candidate) => candidate.id === 'table.5',
+    );
+    expect(entry?.enabled).toBe(false);
+    expect(entry?.hint).toBe('Cierra el cobro antes de elegir otra mesa.');
   });
 });
 

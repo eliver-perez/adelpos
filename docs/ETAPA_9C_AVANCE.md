@@ -830,3 +830,29 @@ Copia `repo9cD2` (árbol de `etapa-9c` con los cambios de la parte), clúster te
 - Playwright WebKit pendiente de repetir con la sesión del equipo desbloqueada (ver Pruebas).
 
 WebKit no se pudo ejecutar en esta parte: la pantalla del equipo se bloqueó durante la corrida y, con la sesión bloqueada, WebKit no puede hacer clic (también falla así una copia de `HEAD` sin estos cambios, y el revisor lo observó en especificaciones anteriores a la 9C). Se ejecuta en la regresión final.
+
+## Revisión independiente y correcciones
+
+Un solo agente de solo lectura revisó las fases 0, A, B y C y la parte D1 (`0c7e488..88d54f0`) en una copia exacta, con
+reproducciones propias y sin subagentes. **Sin hallazgos críticos ni altos.** Revisado sin problemas: permisos y
+visibilidad de la barra, mosaicos, ruta, menú, paleta y atajos (Go sigue validando; inicio por terminal con
+`devices.manage`, lista cerrada y auditoría); ninguna acción financiera o irreversible sin su confirmación; sin doble
+ejecución; Escape compatible con el cobro, los diálogos y el selector; operaciones nuevas del puente cerradas; Edición sin
+⌘W; toda la navegación por `requestScreen`; valores del selector idénticos a los anteriores; reportes nuevos, columnas por
+impresora (equivalencia, CHECK, reimpresión, prueba de ancho) y apariencia de usuarios nuevos correctos; 0020 sobre un
+esquema 19 con datos. Hallazgos y correcciones (cada una con su prueba):
+
+- **Medio · límite de barridos JPEG del catálogo evitable** (`FF D8 00 FF DB …`: el recorrido exigía la firma
+  `FF D8 FF`, pero el decodificador de Go acepta bytes sueltos). Corregido en `logoraster.CheckJPEGMarkers`: recorre todo
+  archivo que empiece con SOI (`FF D8`); pruebas en `logoraster` y `catalog` con el archivo de la revisión (1 MiB,
+  ≈ 61 000 barridos y un byte suelto) rechazado en menos de 0.5 s. Unitarias de `logoraster`, `catalog` e `identity` e
+  integración de `catalog` (11.4 s) e `identity` (20.6 s) `ok` (`0dc0cfc`).
+- **Bajo · «Cuenta sin mesa», «Nuevo pedido para llevar» y «Nueva cuenta en mesa» habilitadas con el cobro abierto**, y
+  elegir una mesa en la paleta cerraba el cobro. Ahora se deshabilitan con el cobro abierto, con su explicación (la
+  interfaz no ofrece esos botones en el cobro); pruebas en `commands.test.ts`.
+- **Bajo · «Información para soporte» antes de iniciar sesión.** §4.1 la reserva al administrador y antes de iniciar
+  sesión no se sabe quién usa la terminal: el diagnóstico del acceso ya no la muestra (dentro de la sesión sigue con
+  `settings.manage`); prueba en `App.test.tsx`.
+
+Tras las dos correcciones de interfaz: `tsc --noEmit` sin errores y `npm test` 68 archivos, 637 pruebas aprobadas (copia
+del árbol).
