@@ -3,6 +3,7 @@ import type { KeyboardEvent, ReactNode } from 'react';
 import { trapFocus } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
 import { Icon, IconLabel } from '../../components/Icon';
+import { shortcutHint } from '../../commands/hints';
 import type { IconName } from '../../components/Icon';
 import { useCashEvents } from '../../hooks/useCashEvents';
 import { useLiveResource } from '../../hooks/useLiveResource';
@@ -251,6 +252,8 @@ export function CashShortcut({
   }
   const status = shortcutStateLabels[shortcut.state];
   const options = shortcutOptions(shortcut, can);
+  // Etapa 9C: el atajo de «Ir a Caja» en la descripción del botón (el botón abre el menú rápido).
+  const goHint = shortcutHint('view.cash');
 
   function choose(option: ShortcutOption) {
     if (option.id === 'cash') {
@@ -273,6 +276,7 @@ export function CashShortcut({
         type="button"
         className={buttonClass}
         aria-label={`Caja · ${status}`}
+        title={goHint ? `Caja · ${status} · Ir a Caja: ${goHint.label}` : undefined}
         aria-expanded={menuOpen}
         aria-controls={menuID}
         aria-current={active ? 'page' : undefined}

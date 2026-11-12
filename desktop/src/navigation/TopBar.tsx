@@ -2,12 +2,23 @@ import type { ReactNode } from 'react';
 import { BrandLogo } from '../components/BrandLogo';
 import { Icon } from '../components/Icon';
 import { WindowControls } from '../components/WindowControls';
+import { shortcutProps } from '../commands/hints';
+import type { ActionID } from '../commands/actions';
 import { CashShortcut } from '../pages/cash/CashShortcut';
 import type { CashShortcutState } from '../pages/cash/CashShortcut';
 import { ServerStatus } from './ServerStatus';
 import type { ServerState } from './serverState';
 import { barSections, canOpen, sectionByID } from './sections';
 import type { ScreenID, SectionEntry } from './sections';
+
+// Acción del registro que hace lo mismo que cada botón de la barra (su atajo va en la descripción).
+const sectionActions: Partial<Record<ScreenID, ActionID>> = {
+  restaurant: 'view.tables',
+  takeaway: 'view.takeaway',
+  kitchen: 'view.kitchen',
+  cash: 'view.cash',
+  administration: 'view.administration',
+};
 
 function SectionButton({
   entry,
@@ -18,11 +29,13 @@ function SectionButton({
   active: boolean;
   onNavigate: (next: ScreenID) => void;
 }) {
+  const action = sectionActions[entry.id];
   return (
     <button
       type="button"
       className={`topbar-button topbar-section ${active ? 'topbar-section-active' : ''}`}
       aria-current={active ? 'page' : undefined}
+      {...(action ? shortcutProps(action, entry.label) : {})}
       onClick={() => onNavigate(entry.id)}
     >
       <Icon name={entry.icon} size={20} />

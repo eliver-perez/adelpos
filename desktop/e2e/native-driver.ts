@@ -50,8 +50,27 @@ function sanitizeFileName(name: string, extension: string) {
   return `${stem}${extension}`;
 }
 
+// Menú nativo (etapa 9C, fase C): simulación de las operaciones cerradas menu_subscribe y
+// menu_set_state de src-tauri/src/menu.rs. Lee la misma lista cerrada MENU_ACTIONS de menu.rs (las
+// entradas conservan la forma `MenuAction { id: "…", … }`), rechaza como Rust cualquier
+// identificador fuera de ella y entrega los eventos por el canal con el mismo mensaje
+// `{ action }`. La prueba «elige» una opción con clickMenu(id): como en el menú real, una opción
+// deshabilitada no se puede elegir.
+function readMenuActions() {
+  const source = readFileSync(new URL('../src-tauri/src/menu.rs', import.meta.url), 'utf8');
+  const start = source.indexOf('pub const MENU_ACTIONS');
+  const block = source.slice(start, source.indexOf('];', start));
+  return new Set(
+    [...block.matchAll(/MenuAction\s*\{\s*id:\s*"([a-z_.]+)"/g)].map((match) => match[1]!),
+  );
+}
+
 export async function installDriver(page: Page) {
   let fullscreen = true;
+  const menuActions = readMenuActions();
+  let menuChannel: number | null = null;
+  let menuIndex = 0;
+  let menuEnabled = new Set<string>(['view.fullscreen', 'help.shortcuts', 'help.about']);
   let streamGeneration = 0;
   const streams = new Map<number, AbortController>();
   page.on('close', () => {
@@ -368,6 +387,23 @@ export async function installDriver(page: Page) {
         streams.get(Number(args.subscriptionId))?.abort();
         return;
       }
+      if (command === 'menu_subscribe') {
+        // Una suscripción nueva sustituye a la anterior, como en Rust.
+        menuChannel = Number(args.channel);
+        menuIndex = 0;
+        return menuChannel;
+      }
+      if (command === 'menu_set_state') {
+        const enabled = args.enabled;
+        if (!Array.isArray(enabled) || enabled.length > menuActions.size) {
+          return { __bridgeRejection: 'Estado del menú no válido.' };
+        }
+        if (enabled.some((id) => typeof id !== 'string' || !menuActions.has(id))) {
+          return { __bridgeRejection: 'Opción de menú no reconocida.' };
+        }
+        menuEnabled = new Set(enabled as string[]);
+        return;
+      }
       if (command === 'authentication_state')
         return {
           enrolled: !!deviceID,
@@ -429,5 +465,29 @@ export async function installDriver(page: Page) {
       runCallback: (id: number, message: unknown) => callbacks.get(id)?.(message),
     };
   });
-  return { request, nextSaveDialog, exports };
+  // Elige una opción del menú nativo simulado. Devuelve false si la opción está deshabilitada (no
+  // se envía nada); una opción fuera de la lista cerrada es un error de la prueba.
+  async function clickMenu(action: string) {
+    if (!menuActions.has(action)) {
+      throw new Error(`Opción de menú desconocida: ${action}`);
+    }
+    if (!menuEnabled.has(action) || menuChannel === null) {
+      return false;
+    }
+    const channel = menuChannel;
+    await page.evaluate(
+      ({ channel, index, message }) => {
+        const native = window as unknown as {
+          __TAURI_INTERNALS__: { runCallback: (id: number, message: unknown) => void };
+        };
+        native.__TAURI_INTERNALS__.runCallback(channel, { index, message });
+      },
+      { channel, index: menuIndex++, message: { action } },
+    );
+    return true;
+  }
+  function menuState() {
+    return [...menuEnabled].sort();
+  }
+  return { request, nextSaveDialog, exports, clickMenu, menuState, menuActions };
 }

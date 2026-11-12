@@ -1,4 +1,5 @@
 import { IconLabel } from '../../../components/Icon';
+import { shortcutProps } from '../../../commands/hints';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
 import { formatMoney } from '../../../services/money';
 import { paymentPendingKey } from '../../../services/payments';
@@ -242,6 +243,7 @@ export function BillFooter({
             type="button"
             className="secondary-button"
             disabled={blocked || !secondary.precheckReady}
+            {...shortcutProps('file.print_precheck', 'Precuenta')}
             onClick={() => onAction('precheck')}
           >
             <IconLabel icon="receipt">Precuenta</IconLabel>

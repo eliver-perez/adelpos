@@ -3,6 +3,7 @@ import { Field, Form, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
 import type { Identity, Preferences } from '../services/models';
+import { savePreferences } from '../services/preferences';
 
 // Apariencia de un usuario. Desde la etapa 9C la pantalla inicial es de la terminal (Sistema →
 // Terminales): el formulario ya no la ofrece y reenvía sin cambios el valor que guarda Go, que
@@ -21,10 +22,8 @@ export function UserPreferencesForm({
     <Form
       successMessage="Preferencias guardadas."
       onSave={async () => {
-        await api(userID ? 'save_user_preferences' : 'save_preferences', {
-          id: userID,
-          body: { theme, home_screen: value.home_screen },
-        });
+        // La misma operación que la acción «Tema claro u oscuro» (etapa 9C, fase C).
+        await savePreferences({ theme, home_screen: value.home_screen }, userID);
         await onSaved();
       }}
     >

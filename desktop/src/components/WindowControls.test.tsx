@@ -20,7 +20,9 @@ it('consulta el modo nativo y permite salir y volver desde el botón de icono', 
   await waitFor(() => expect(invoke).toHaveBeenCalledWith('window_fullscreen_state'));
   const exit = screen.getByRole('button', { name: 'Salir de pantalla completa' });
   expect(exit.textContent).toBe('');
-  expect(exit.getAttribute('title')).toBe('Salir de pantalla completa · Control + ⌘ + F');
+  // El atajo depende de la plataforma (⌃⌘F en macOS; jsdom no se identifica como macOS: F11).
+  expect(exit.getAttribute('title')).toBe('Salir de pantalla completa · F11');
+  expect(exit.getAttribute('aria-keyshortcuts')).toBe('F11');
   fireEvent.click(exit);
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith('window_set_fullscreen', { fullscreen: false }),

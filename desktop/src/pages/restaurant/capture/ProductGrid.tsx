@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CatalogImage } from '../../../components/catalog/EditorFields';
 import { Notice } from '../../../components/Forms';
 import { Icon } from '../../../components/Icon';
+import { shortcutHint } from '../../../commands/hints';
 import { ToggleButton } from '../../../components/ToggleButton';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import type { Lookups } from '../../../services/catalog';
@@ -87,6 +88,8 @@ export function ProductGrid({
             maxLength={100}
             placeholder="Buscar por nombre o código…"
             aria-label="Buscar producto por nombre o código"
+            aria-keyshortcuts={shortcutHint('edit.find')?.aria}
+            data-screen-search
             onChange={(event) => {
               onSearch(event.target.value);
               setPage(1);

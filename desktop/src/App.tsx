@@ -16,11 +16,14 @@ import { DevicesPage } from './pages/DevicesPage';
 import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
-import { CashShortcutSheet, useCashShortcut } from './pages/cash/CashShortcut';
+import { CashShortcutSheet, shortcutOptions, useCashShortcut } from './pages/cash/CashShortcut';
 import { InventoryPage } from './pages/inventory/InventoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
 import { DocumentsPage } from './pages/documents/DocumentsPage';
 import { useConfirmDialog } from './components/ConfirmDialog';
+import type { CashOptionState } from './commands/actions';
+import type { OperationCommandHandlers, OperationCommandState } from './commands/operationBridge';
+import { useCommandCenter } from './commands/useCommandCenter';
 import { leaveWarning } from './hooks/useLeaveGuard';
 import { PendingOperationsProvider } from './hooks/pendingOperations';
 import { RegistersPage } from './pages/RegistersPage';
@@ -39,7 +42,8 @@ import { TopBar } from './navigation/TopBar';
 import { UserMenu } from './navigation/UserMenu';
 import { barHighlight, canOpen, resolveHome } from './navigation/sections';
 import type { ScreenID } from './navigation/sections';
-import { dismissNotice, notifyError, notifyWarning } from './services/notify';
+import { dismissNotice, notifyError, notifySuccess, notifyWarning } from './services/notify';
+import { savePreferences } from './services/preferences';
 
 const connectionNoticeID = 'connection';
 
@@ -55,12 +59,14 @@ export function App() {
 }
 
 // Pantallas de acceso y del asistente: sin barra superior, con el control de pantalla completa fijo
-// arriba a la derecha (como en las etapas anteriores).
-function AccessShell({ children }: { children: ReactNode }) {
+// arriba a la derecha (como en las etapas anteriores). «Atajos de teclado» y «Acerca de AD-EL POS»
+// del menú nativo también se abren aquí (overlay).
+function AccessShell({ children, overlay }: { children: ReactNode; overlay: ReactNode }) {
   return (
     <>
       <WindowControls placement="floating" />
       {children}
+      {overlay}
     </>
   );
 }
@@ -80,6 +86,9 @@ function ApplicationContent() {
   const [captureActive, setCaptureActive] = useState(false);
   const [tail, setTailState] = useState<{ screen: ScreenID; label: string } | null>(null);
   const [technical, setTechnical] = useState(false);
+  // Contexto y botones de la pantalla operativa para el registro de acciones (etapa 9C, fase C).
+  const [operationCommands, setOperationCommands] = useState<OperationCommandState | null>(null);
+  const operationHandlers = useRef<OperationCommandHandlers | null>(null);
   const initializedUser = useRef<string | null>(null);
   const { confirm, dialog: leaveDialog } = useConfirmDialog();
   const identity = session.identity;
@@ -95,7 +104,27 @@ function ApplicationContent() {
   const cashShortcut = useCashShortcut({
     active: authenticated && !!identity,
     can,
-    onOpenCash: () => requestScreen('cash'),
+    onOpenCash: () => void requestScreen('cash'),
+  });
+  // Opciones del menú rápido de Caja que el menú nativo, la paleta y los atajos ofrecen igual.
+  const cashOptions: CashOptionState[] = cashShortcut.visible
+    ? shortcutOptions(cashShortcut, can).map((option) => ({
+        id: option.id,
+        disabled: option.disabled,
+      }))
+    : [];
+  // Menú nativo, atajos y paleta (etapa 9C, fase C): ejecutan las mismas funciones de los botones.
+  const commands = useCommandCenter({
+    authenticated: authenticated && !!identity,
+    permissions,
+    screen: authenticated && identity ? screen : null,
+    operation: can('accounts.read') ? operationCommands : null,
+    operationHandlers,
+    cashOptions,
+    requestScreen,
+    openCashSheet: (sheet) => cashShortcut.openSheet(sheet),
+    logout,
+    toggleTheme,
   });
 
   const setTail = useCallback((owner: ScreenID, label: string | null) => {
@@ -165,9 +194,10 @@ function ApplicationContent() {
   }
 
   // Único punto de navegación (etapa 9C): barra superior, logotipo, mosaicos, ruta, menú del
-  // usuario, «Ir a Caja», Inventarios → Configuración y, en la fase C, el menú nativo, la paleta y
-  // los atajos. Sin cambios pendientes la navegación es inmediata; con ellos espera la confirmación.
-  function requestScreen(next: ScreenID) {
+  // usuario, «Ir a Caja», Inventarios → Configuración y, desde la fase C, el menú nativo, la paleta
+  // y los atajos. Sin cambios pendientes la navegación es inmediata; con ellos espera la
+  // confirmación. Devuelve si se navegó (las acciones que siguen en la pantalla nueva lo esperan).
+  async function requestScreen(next: ScreenID): Promise<boolean> {
     const go = () => {
       setScreen(next);
       if (isOperation(next)) {
@@ -176,13 +206,13 @@ function ApplicationContent() {
     };
     if (next === screen || !leaveWarning()) {
       go();
-      return;
+      return true;
     }
-    void confirmLeave().then((confirmed) => {
-      if (confirmed) {
-        go();
-      }
-    });
+    const confirmed = await confirmLeave();
+    if (confirmed) {
+      go();
+    }
+    return confirmed;
   }
 
   async function logout() {
@@ -196,9 +226,29 @@ function ApplicationContent() {
     }
   }
 
+  // «Tema claro u oscuro» del menú nativo y la paleta: guarda el tema con la misma operación de
+  // Mis preferencias y lo aplica al recargar la identidad.
+  async function toggleTheme() {
+    if (!identity) {
+      return;
+    }
+    const theme = identity.preferences.theme === 'dark' ? 'light' : 'dark';
+    try {
+      await savePreferences({ theme, home_screen: identity.preferences.home_screen });
+      await session.refresh();
+      notifySuccess(
+        theme === 'dark'
+          ? 'Tema oscuro guardado en tus preferencias.'
+          : 'Tema claro guardado en tus preferencias.',
+      );
+    } catch (error) {
+      notifyError(error, 'No se pudo cambiar el tema.');
+    }
+  }
+
   if (technical && session.phase !== 'authenticated') {
     return (
-      <AccessShell>
+      <AccessShell overlay={commands.overlay}>
         <main className="p-8">
           <button className="secondary-button mb-6" onClick={() => setTechnical(false)}>
             Volver al acceso
@@ -216,7 +266,7 @@ function ApplicationContent() {
     session.phase === 'secure-storage'
   ) {
     return (
-      <AccessShell>
+      <AccessShell overlay={commands.overlay}>
         <AccessFrame
           title={
             session.phase === 'loading'
@@ -246,7 +296,7 @@ function ApplicationContent() {
   }
   if (session.phase === 'setup') {
     return (
-      <AccessShell>
+      <AccessShell overlay={commands.overlay}>
         <SetupPage
           available={session.local?.local_setup_available ?? false}
           refresh={session.refresh}
@@ -256,7 +306,7 @@ function ApplicationContent() {
   }
   if (session.phase === 'enroll') {
     return (
-      <AccessShell>
+      <AccessShell overlay={commands.overlay}>
         <EnrollmentPage
           message={session.message}
           refresh={session.refresh}
@@ -267,7 +317,7 @@ function ApplicationContent() {
   }
   if (session.phase === 'login' || !identity) {
     return (
-      <AccessShell>
+      <AccessShell overlay={commands.overlay}>
         <LoginPage message={session.message} refresh={session.refresh} />
       </AccessShell>
     );
@@ -437,6 +487,8 @@ function ApplicationContent() {
                 cashShortcut={cashShortcut}
                 onViewChange={setOperationView}
                 onCaptureChange={setCaptureActive}
+                onCommandState={setOperationCommands}
+                commandHandlers={operationHandlers}
                 shellControls={
                   <>
                     {server !== 'online' && <ServerStatus state={server} />}
@@ -453,6 +505,7 @@ function ApplicationContent() {
           timezone={identity.establishment.timezone}
         />
         <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
+        {commands.overlay}
         {leaveDialog}
       </div>
     </NavigationContext.Provider>

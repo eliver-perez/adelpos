@@ -497,3 +497,129 @@ de la pantalla la cambia la parte D2.
 - La densidad fraccionaria de CUPS (13.71, 12.8) y 48/32 columnas en papel: prueba física pendiente; la prueba de ancho
   existe para comprobarlo antes de elegir.
 - La lista de impresoras de la vista previa es un `<select>` (la fase B lo sustituye por el selector nuevo).
+
+## Fase C · Teclado, menú nativo y paleta de comandos
+
+Hecha el 11/11/2026 sobre `etapa-9c` (fase A confirmada en `e575ad0`), por un agente sin subagentes, en
+paralelo con la parte D1 y con la fase B ya en curso. Sin cambios de reglas de negocio, cálculos,
+permisos, rutas de Go ni migraciones: el menú, los atajos y la paleta ejecutan las mismas funciones
+que los botones de la interfaz.
+
+### Qué cambió
+
+- **Registro de acciones** (`desktop/src/commands/actions.ts`), sobre el registro de secciones de la
+  fase A: 23 acciones con identificador, nombre, grupo de menú (Archivo, Edición, Ver, Caja, Ayuda),
+  sinónimos para la paleta, atajo por plataforma, visibilidad por permisos (las reglas de la
+  interfaz), habilitación por contexto con su explicación y ejecución = la función del botón:
+  navegar con el único `requestScreen` de App (que ahora devuelve si se navegó y sigue respetando
+  «Salir sin guardar»), abrir la hoja de Caja con su opción (`openSheet` del menú rápido de la 7.1),
+  «Capturar»/«Nueva cuenta» de la mesa, «Cuenta sin mesa», «Nuevo pedido», «Precuenta», «‹ Mesas»,
+  el tema de Mis preferencias (`services/preferences.ts`, la misma operación que su formulario),
+  cerrar sesión y el cambio de pantalla completa del botón de la barra
+  (`setWindowFullscreen`/`toggleWindowFullscreen` de `WindowControls`). La paleta agrega las
+  pantallas de Administración (con su ruta y sinónimos) y las mesas del mapa.
+- **Despachador único** (`commands/dispatcher.ts`): menú, teclado y paleta pasan por él. Una misma
+  acción que llega por la otra vía dentro de 700 ms se descarta una sola vez (la gemela del
+  acelerador del menú nativo y la pulsación en el WebView); una pulsación que no actuó (mientras se
+  escribe o con un diálogo abierto) también consume su gemela del menú; una acción asíncrona en
+  curso no se vuelve a ejecutar.
+- **Menú nativo en Rust** (`src-tauri/src/menu.rs`, registrado en `main.rs` con `Builder::menu` y
+  `on_menu_event`): «AD-EL POS» solo en macOS (Acerca de, Ocultar, Ocultar otras, Mostrar todas,
+  Salir ⌘Q), Archivo (Nueva cuenta en mesa, Cuenta sin mesa, Nuevo pedido para llevar, Imprimir
+  precuenta, Cerrar sesión, Salir), Edición con los elementos predefinidos (deshacer, rehacer,
+  cortar, copiar, pegar, seleccionar todo) y «Buscar en la pantalla», Ver (Mesas, Para llevar,
+  Cocina, Caja, Administración, Paleta de comandos, Pantalla completa, Tema claro u oscuro), Caja
+  (Ingreso, Retiro, Gasto, Corte parcial, Abrir cajón, Abrir turno, Ir a Caja) y Ayuda (Atajos de
+  teclado, Acerca de AD-EL POS). Sin submenú Ventana ni ⌘W. Aceleradores junto a cada opción.
+  «Salir» lo atiende Rust (`app.exit(0)`): cierra la aplicación sin detener Go ni PostgreSQL.
+- **Dos operaciones cerradas nuevas del puente**: `menu_subscribe(channel)` (eventos
+  `{ action }` por un `Channel`, una sola suscripción vigente) y `menu_set_state(enabled)` (React
+  informa las opciones habilitadas; un identificador fuera de la lista cerrada `MENU_ACTIONS`
+  rechaza el estado). En `build.rs`, `permissions/diagnostics.toml` (`allow-diagnostics`),
+  `generate_handler!`, con pruebas Rust y simuladas en `e2e/native-driver.ts`, que lee la misma
+  lista `MENU_ACTIONS` de `menu.rs` y ofrece `clickMenu(id)`/`menuState()` a las pruebas. Sin
+  permisos `core:*` nuevos.
+- **Atajos** (⌘ en macOS, Ctrl en Windows): 1–4 Mesas, Para llevar, Cocina y Caja; 5
+  Administración; K paleta; F buscar en la pantalla; N nueva cuenta en mesa; P precuenta; ⌃⌘F / F11
+  pantalla completa; Esc cerrar o volver un nivel. No actúan mientras se escribe en un campo (salvo
+  Esc) ni con un diálogo, menú o lista abiertos; la pulsación se consume para que el navegador
+  (buscar, imprimir, ventana nueva) y el acelerador nativo no actúen. Ninguna acción financiera tiene
+  atajo: las de Caja solo abren su hoja (que registra con su confirmación de siempre) y «Imprimir
+  precuenta» abre la precuenta, cuyo botón «Imprimir precuenta» sigue siendo el que imprime.
+- **Escape**: cierra el panel abierto de la cuenta (como su «Volver»), sale de la captura (como
+  «‹ Mesas»), cierra el panel lateral de la mesa y, en Administración, vuelve a la pantalla
+  anterior de la ruta. Los diálogos, la hoja y el menú rápido de Caja, «Más…», el menú del usuario,
+  el selector y los controles propios (gráficos) conservan su Escape; el teclado del cobro conserva
+  «Escape limpia el importe»; el primer Escape en un campo solo sale del campo.
+- **⌘F / Ctrl+F**: el buscador de la pantalla visible (productos en la captura, que se marcó con
+  `data-screen-search`; cuentas; tablas de Administración); en el mapa de mesas, «Buscar mesa» en
+  la paleta; en una pantalla sin buscador, la paleta.
+- **Paleta de comandos** (`commands/CommandPalette.tsx`): diálogo modal con el patrón ARIA combobox
+  - listbox (`aria-activedescendant`), flechas, Re Pág/Av Pág, Ctrl+Inicio/Fin, Intro, Escape y
+    ⌘K/Ctrl+K para cerrar; búsqueda sin acentos por palabras al inicio del nombre o de sus sinónimos
+    («productos» → Catálogo, «retiro», «corte», «mesa 5» sin «Mesa 15»); filtrada por permisos y
+    contexto (lo que el contexto impide se ve deshabilitado con su motivo); opciones de 48 px.
+- **«Atajos de teclado»** y **«Acerca de AD-EL POS»** (`commands/HelpDialogs.tsx`) desde Ayuda y la
+  paleta, también antes de iniciar sesión. Los atajos se muestran en el menú, en la paleta y en las
+  descripciones (`title` y `aria-keyshortcuts`) de los botones de la barra, de Caja, de
+  «Precuenta», del buscador de productos y de pantalla completa (antes fijo «Control + ⌘ + F»).
+
+### Decisiones y desviaciones
+
+- ⌘5 → Administración, ⌘N → Nueva cuenta en mesa y ⌘P → Imprimir precuenta se agregaron a la
+  propuesta mínima (no chocan con nada existente). «Cuenta sin mesa» y «Nuevo pedido para llevar»
+  crean la cuenta al instante como sus botones, por eso no tienen atajo (solo menú y paleta).
+- «Nueva cuenta en mesa» actúa sobre la mesa del panel lateral o de la captura de una mesa; sin
+  mesa elegida abre el mapa y lo explica con un aviso.
+- «Abrir turno» se agregó al menú Caja (es una opción del menú rápido de la 7.1). «Acerca de»
+  está en el menú de la aplicación de macOS y en Ayuda; «Salir», en el menú de la aplicación (⌘Q)
+  y en Archivo.
+- ⌘1/⌘2 dentro de la captura de esa sección equivalen a «‹ Mesas» / «‹ Para llevar»; en el cobro
+  solo navegan (no lo cierran).
+- En Administración, Escape no sale de una pantalla con un formulario a la vista, para no
+  descartar lo capturado (los formularios no tienen protección de cambios sin guardar); Escape no
+  cierra la personalización de la captura (su «Volver» confirma el descarte).
+- Archivos de otros alcances con cambios mínimos: `pages/PreferencesPage.tsx` (el guardado usa
+  `savePreferences`, sobre el cambio de la fase B), `styles.css` (bloque al final),
+  `pages/cash/CashShortcut.tsx`, `pages/restaurant/TablePanel.tsx`,
+  `pages/restaurant/capture/BillFooter.tsx` y `ProductGrid.tsx` (descripciones con el atajo) y
+  `pages/restaurant/OperationalPage.tsx` (informa su contexto y entrega sus botones).
+- La especificación nueva se llama `workflow-stage9c-keyboard.spec.ts` (nombre del encargo): se
+  ordena antes de `workflow-stage9c-navigation.spec.ts`, después de todas las demás; usa su propia
+  área y mesa («Terraza teclado», «Mesa 5») y la suite completa comprueba que no interfiere.
+
+### Pruebas de la fase C (copia aislada: `HEAD` de `etapa-9c` + solo los archivos de la fase C, 11/11/2026)
+
+La copia aislada se armó con `git archive HEAD` (`e575ad0`) más solo los archivos de la fase C
+(en `PreferencesPage.tsx` y `styles.css`, la versión de HEAD con el cambio de C), para no mezclar el
+trabajo en curso de B y D1.
+
+- Rust: `cargo fmt --check` sin diferencias; `cargo test --locked --offline` → 40 aprobadas,
+  1 ignorada (Keychain real), con las 6 nuevas de `menu::tests`.
+- Frontend: `npx tsc --noEmit` sin errores; `npm test` → 65 archivos, 602 pruebas aprobadas
+  (incluye `commands/commands.test.ts` con 15, `commands/commandCenter.test.tsx` con 13 y los
+  `WindowControls.test.tsx` y `navigation.test.tsx` actualizados); `npm run build` correcto (con el
+  aviso de tamaño de bloque que ya existía).
+- Playwright (Go temporal 8187, vista previa 1425), suite completa: Chromium 14/14 (5.3 min) y
+  WebKit 14/14 (5.2 min), con `workflow-stage9c-keyboard.spec.ts` nuevo y las 13 anteriores sin
+  cambios (todas usan el puente con la simulación del menú). Después se agregó a la especificación
+  nueva la comprobación sin desbordamiento de la paleta y de «Atajos de teclado» a 1280 × 720 y
+  1920 × 1080 en ambos temas, con capturas: Chromium y WebKit aprobadas (6.2 s y 5.8 s).
+- En el árbol compartido (con la fase B a medias) Vitest falla en 18 archivos ajenos a esta fase
+  (selectores reemplazados por la fase B y vista previa de impresoras de D1); con solo los archivos
+  de C, todo aprueba.
+
+### Limitaciones
+
+- Sin verificar en la ventana nativa (WKWebView): el menú real de macOS, si `preventDefault` en el
+  WebView evita el acelerador del menú (el despachador evita la doble ejecución en ambos casos),
+  los elementos que macOS agrega por su cuenta (Dictado y Emoji en Edición; posiblemente «Entrar en
+  pantalla completa» en Ver) y el menú en pantalla completa (macOS lo muestra al acercar el puntero
+  arriba; por eso existen los atajos y la paleta). El menú de Windows no se compiló ni probó (solo
+  su estructura en las pruebas Rust); en Windows los aceleradores pueden no llegar al menú con el
+  foco en el WebView, y entonces los atiende la capa de teclado de React.
+- «Salir» no pregunta por cambios sin guardar (como cerrar la ventana antes).
+- Un menú nativo no muestra el motivo de una opción deshabilitada; la paleta sí.
+- Sin pantalla táctil física ni teclado virtual sobre la paleta.
+
+La fase C se confirmó antes que la B (que seguía en curso) con sus archivos propios; en `PreferencesPage.tsx` y `styles.css`, compartidos con la B, solo entró su parte. Se probó sobre la fase A más sus archivos (sin la parte D1 ni la B), y la integración conjunta se comprueba al cerrar la fase B y en la regresión final.
