@@ -500,8 +500,8 @@ function RecipeCostPanel({ recipe, units }: { recipe: Recipe; units: InventoryUn
       <div>
         <h3 id="recipe-cost-title">Costo teórico de la versión vigente</h3>
         <p className="muted text-xs">
-          Calculado por el servidor con el costo vigente de cada insumo. Las opciones de grupo y los
-          componentes de combo tienen sus propias recetas y no se suman aquí.
+          Calculado con el costo vigente de cada insumo. Las opciones de grupo y los componentes de
+          combo tienen sus propias recetas y no se suman aquí.
         </p>
       </div>
       <div className="inventory-figures">

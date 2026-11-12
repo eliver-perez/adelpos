@@ -58,15 +58,17 @@ export function PrintersAdmin({
     <div className="kitchen-editor-layout">
       <section className="panel form-stack">
         <div className="section-heading">
-          <h2>Impresoras del servidor</h2>
+          <h2>Impresoras</h2>
           <button className="primary-button" onClick={() => setValue(emptyPrinter())}>
             Registrar impresora
           </button>
         </div>
         <Notice>{printers.error}</Notice>
         <p className="muted">
-          Se utilizan las colas y conexiones disponibles en el host de Go. Una impresora conectada a
-          otra terminal requiere un destino de red accesible o un agente futuro.
+          Se usan las impresoras instaladas en el equipo servidor (colas CUPS, el sistema de
+          impresión de macOS) y las impresoras de tickets conectadas a la red. Una impresora
+          conectada a otra terminal todavía no se puede usar: conéctala a la red o al equipo
+          servidor.
         </p>
         {printers.data?.map((printer) => (
           <button
@@ -77,10 +79,10 @@ export function PrintersAdmin({
             <strong>{printer.name}</strong>
             <span>
               {printer.transport === 'cups'
-                ? 'CUPS del servidor'
+                ? 'CUPS del equipo servidor'
                 : printer.transport === 'escpos_tcp'
                   ? 'ESC/POS por red'
-                  : 'Agente futuro'}{' '}
+                  : 'Otra terminal (aún no disponible)'}{' '}
               · {printer.paper_width} mm · {printerColumns(printer)} columnas ·{' '}
               {printer.active ? 'Activa' : 'Inactiva'}
             </span>
@@ -88,10 +90,10 @@ export function PrintersAdmin({
         ))}
         <Accordion
           title="Colas anunciadas por CUPS"
-          summary="La disponibilidad del spooler no confirma papel ni conexión física"
+          summary="Que una cola aparezca no confirma que la impresora tenga papel ni esté conectada"
         >
           <button className="secondary-button" onClick={() => void discovery.reload()}>
-            Consultar impresoras del servidor
+            Consultar impresoras del equipo servidor
           </button>
           <Notice>{discovery.error}</Notice>
           {discovery.data?.map((printer) => (
@@ -135,7 +137,7 @@ export function PrintersAdmin({
               className="secondary-button"
               onClick={() => setValue({ ...value, revision: current.revision })}
             >
-              Usar revisión vigente y conservar mis campos
+              Usar la versión vigente y conservar mis campos
             </button>
           )}
           <Form
@@ -161,9 +163,9 @@ export function PrintersAdmin({
               <Select<Printer['transport']>
                 value={value.transport}
                 options={[
-                  { value: 'cups', label: 'Cola CUPS del servidor' },
+                  { value: 'cups', label: 'Cola CUPS del equipo servidor' },
                   { value: 'escpos_tcp', label: 'Impresora ESC/POS en red privada' },
-                  { value: 'agent', label: 'Impresora de otra terminal · agente futuro' },
+                  { value: 'agent', label: 'Impresora de otra terminal (aún no disponible)' },
                 ]}
                 onChange={(transport) =>
                   setValue({
@@ -199,11 +201,11 @@ export function PrintersAdmin({
                 <p className="muted text-sm">
                   Actívala solo si la impresora es térmica y entiende comandos ESC/POS. Así, los
                   documentos con negrita, tamaños o logotipo se le envían con formato cuando su cola
-                  admite datos raw. Desactivada, o con una cola sin datos raw, la impresora recibe
-                  solo el texto, sin formato ni logotipo, y el documento se imprime igual. Una
-                  impresora de oficina o una que solo imprime con su controlador debe quedar
-                  desactivada: con comandos ESC/POS imprimiría hojas en blanco o caracteres
-                  extraños.
+                  acepta datos sin convertir («raw»). Desactivada, o con una cola que los convierte,
+                  la impresora recibe solo el texto, sin formato ni logotipo, y el documento se
+                  imprime igual. Una impresora de oficina o una que solo imprime con su controlador
+                  debe quedar desactivada: con comandos ESC/POS imprimiría hojas en blanco o
+                  caracteres extraños.
                 </p>
               </>
             )}
@@ -217,16 +219,17 @@ export function PrintersAdmin({
                   onChange={(port) => setValue({ ...value, port })}
                 />
                 <p className="muted text-sm">
-                  El controlador utiliza CP850 para acentos españoles. Los caracteres fuera de esa
-                  codificación se sustituyen por ?. Por red la impresora recibe comandos ESC/POS:
-                  los documentos con negrita, tamaños o logotipo se imprimen con su formato.
+                  Los acentos y la ñ se imprimen con la tabla de caracteres CP850 de la impresora;
+                  los caracteres que no existen en ella salen como «?». Por red la impresora recibe
+                  comandos ESC/POS: los documentos con negrita, tamaños o logotipo se imprimen con
+                  su formato.
                 </p>
               </>
             )}
             {value.transport === 'agent' && (
               <Notice>
-                Este destino requiere un agente que aún no existe. Sus trabajos permanecen en
-                intervención; no se ejecutan comandos remotos.
+                Imprimir en una impresora de otra terminal aún no está disponible. Sus trabajos
+                quedan en espera de revisión y no se envía nada a esa terminal.
               </Notice>
             )}
             <div className="form-grid">

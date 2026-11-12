@@ -340,6 +340,83 @@ export function elapsedTime(seconds: number) {
   return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
+// Mesas que muestra el mapa operativo: las de un área activa que siguen activas o que aún tienen
+// cuentas abiertas (una mesa desactivada con cuenta abierta sigue a la vista hasta cerrarla).
+export function operationalTables(tables: RestaurantTable[], areas: Area[]) {
+  const active = new Set(areas.filter((area) => area.active).map((area) => area.id));
+  return tables.filter(
+    (table) => active.has(table.area_id) && (table.active || table.account_count > 0),
+  );
+}
+
+export interface TableMatch {
+  table: RestaurantTable;
+  area: Area;
+}
+
+function searchWords(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+// Buscador de mesas del encabezado del mapa (etapa 9C, §4). Sin distinguir mayúsculas ni acentos,
+// cada palabra escrita debe ser el inicio de una palabra del nombre de la mesa o de su área: «5»
+// encuentra «Mesa 5» pero no «Mesa 15», y «terraza 2» la Mesa 2 de la Terraza. Primero el nombre
+// idéntico a lo escrito, luego el que empieza así, luego el que contiene todas las palabras y al
+// final las coincidencias solo por el área; a igual coincidencia, las del área a la vista y el
+// orden del mapa.
+export function searchTables(
+  tables: RestaurantTable[],
+  areas: Area[],
+  query: string,
+  currentAreaID: string,
+): TableMatch[] {
+  const tokens = searchWords(query);
+  if (tokens.length === 0) {
+    return [];
+  }
+  const phrase = tokens.join(' ');
+  const found: { match: TableMatch; score: number; here: boolean; index: number }[] = [];
+  tables.forEach((table, index) => {
+    const area = areas.find((entry) => entry.id === table.area_id);
+    if (!area) {
+      return;
+    }
+    const nameWords = searchWords(table.name);
+    const words = [...nameWords, ...searchWords(area.name)];
+    const matches = (candidates: string[]) =>
+      tokens.every((token) => candidates.some((word) => word.startsWith(token)));
+    if (!matches(words)) {
+      return;
+    }
+    const name = nameWords.join(' ');
+    let score = 0;
+    if (name === phrase) {
+      score = 3;
+    } else if (name.startsWith(phrase)) {
+      score = 2;
+    } else if (matches(nameWords)) {
+      score = 1;
+    }
+    found.push({ match: { table, area }, score, here: table.area_id === currentAreaID, index });
+  });
+  return found
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (left.here !== right.here) {
+        return left.here ? -1 : 1;
+      }
+      return left.index - right.index;
+    })
+    .map(({ match }) => match);
+}
+
 // Referencias neutras (etapa 6.2): Go asigna a una cuenta abierta o editada sin nombre el nombre
 // de su mesa («Cuenta» sin mesa) o «Pedido para llevar». También se tratan como neutras las que
 // proponía el formulario anterior («Cuenta», «Para llevar»). Una cuenta con referencia neutra se

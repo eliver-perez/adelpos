@@ -10,7 +10,7 @@ import { Select } from '../../components/Select';
 // consumos o cancelaciones pendientes… Se muestran tal como llegan, sin códigos internos.
 export function WarningList({
   warnings,
-  label = 'Avisos del servidor',
+  label = 'Avisos',
 }: {
   warnings: InventoryWarning[];
   label?: string;

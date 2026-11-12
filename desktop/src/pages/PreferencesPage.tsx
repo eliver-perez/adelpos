@@ -29,7 +29,12 @@ export function UserPreferencesForm({
       }}
     >
       <div className="form-grid">
-        <Field label="Tema">
+        {/* Etapa 9C (§4.4): la apariencia propia del usuario es la que se aplica; la de
+            Configuración general solo es la inicial de los usuarios nuevos. */}
+        <Field
+          label="Apariencia"
+          hint="Claro u oscuro. Se aplica en cuanto la guardas y en cualquier terminal donde entres con este usuario."
+        >
           <Select<Preferences['theme']>
             value={theme}
             options={[
@@ -79,7 +84,7 @@ export function PreferencesPage({
     <>
       <PageTitle
         title="Mis preferencias"
-        description="Tu apariencia se conserva por usuario. El teclado y la pantalla inicial se configuran por terminal."
+        description="Tu apariencia se conserva por usuario. El teclado en pantalla se configura en cada terminal."
       />
       <section className="surface panel">
         <h2 className="mb-5">Apariencia personal</h2>
@@ -94,7 +99,10 @@ export function PreferencesPage({
             await refresh();
           }}
         >
-          <Field label="Teclado virtual para formularios futuros">
+          <Field
+            label="Teclado en pantalla"
+            hint="Automático: aparece al escribir si el equipo tiene pantalla táctil (si no, con el botón «Teclado»). Siempre: aparece en cada campo. Desactivado: no aparece."
+          >
             <Select<typeof keyboard>
               value={keyboard}
               options={[
@@ -105,10 +113,6 @@ export function PreferencesPage({
               onChange={setKeyboard}
             />
           </Field>
-          <p className="muted text-sm">
-            Esta etapa guarda la preferencia. El teclado flotante se incorporará con los formularios
-            que lo necesiten.
-          </p>
         </Form>
       </section>
     </>
@@ -123,7 +127,7 @@ export function PasswordPage({ refresh }: { refresh: () => Promise<void> }) {
     <>
       <PageTitle
         title="Cambiar contraseña"
-        description="La nueva credencial se guarda como hash seguro y reemplaza tu sesión actual."
+        description="La nueva contraseña se guarda de forma segura y sigues trabajando en esta terminal."
       />
       <section className="surface panel">
         <Form

@@ -10,9 +10,10 @@ import { notifyError, notifySuccess } from '../services/notify';
 import type { EstablishmentFeature } from '../services/features';
 import type { Settings } from '../services/models';
 import { timezoneGroups } from '../services/timezones';
-import { formatDayStartDigits, saveBusinessDay } from '../services/reports';
+import { saveBusinessDay } from '../services/reports';
 import type { BusinessDaySettings } from '../services/reports';
 import { Select } from '../components/Select';
+import { TimeField } from '../components/TimeField';
 
 export const initialSettings: Settings = {
   name: '',
@@ -35,10 +36,7 @@ export function TimezoneField({
 }) {
   const groups = useMemo(() => timezoneGroups(value), [value]);
   return (
-    <Field
-      label="Zona horaria"
-      hint="Las zonas de México aparecen primero. El servidor confirma la zona al guardar."
-    >
+    <Field label="Zona horaria del restaurante" hint="Las zonas de México aparecen primero.">
       <Select
         required
         value={value}
@@ -77,9 +75,12 @@ export function AutoGrowTextarea(props: TextareaHTMLAttributes<HTMLTextAreaEleme
 export function SettingsFields({
   value,
   onChange,
+  setup = false,
 }: {
   value: Settings;
   onChange: (value: Settings) => void;
+  // En el asistente inicial la apariencia también es la del administrador que se crea.
+  setup?: boolean;
 }) {
   function change(key: keyof Settings, next: string) {
     onChange({ ...value, [key]: next });
@@ -100,7 +101,16 @@ export function SettingsFields({
         <span>Moneda</span>
         <p className="read-only-value">MXN · Peso mexicano</p>
       </div>
-      <Field label="Apariencia inicial">
+      {/* Etapa 9C (§4.4): Go copia esta apariencia a cada usuario nuevo; la de cada usuario se
+          cambia en Mis preferencias y es la que se aplica. */}
+      <Field
+        label="Apariencia predeterminada para usuarios nuevos"
+        hint={
+          setup
+            ? 'También es la de tu usuario administrador. Cada usuario la cambia en Mis preferencias.'
+            : 'Cada usuario la cambia en Mis preferencias; los usuarios que ya existen conservan la suya.'
+        }
+      >
         <Select
           value={value.theme}
           options={[
@@ -212,8 +222,8 @@ export function FeaturesSection({ can }: { can: (key: string) => boolean }) {
         <h2 id="features-title">Funciones del establecimiento</h2>
         <p className="muted text-sm">
           Activa solo lo que usa este restaurante. Una función desactivada no aparece en la
-          operación y el servidor rechaza sus datos; desactivarla nunca borra ni altera los
-          registros que ya generó.
+          operación ni admite registros nuevos; desactivarla nunca borra ni altera los registros que
+          ya generó.
         </p>
       </div>
       <Notice>{resource.error}</Notice>
@@ -275,27 +285,15 @@ function BusinessDayForm({
       }}
     >
       <div className="form-grid">
-        <Field
+        {/* Etapa 9C (§2.1): hora y minutos con el selector, de 5 en 5; una hora guardada fuera del
+            paso (por ejemplo 05:07) se conserva. Go valida de 00:00 a 23:59. */}
+        <TimeField
           label="Hora de inicio del día"
-          hint="HH:MM en la zona horaria del establecimiento (de 00:00 a 23:59)."
-        >
-          <input
-            type="text"
-            inputMode="numeric"
-            autoComplete="off"
-            required
-            maxLength={5}
-            pattern="([01][0-9]|2[0-3]):[0-5][0-9]"
-            placeholder="05:00"
-            value={dayStart}
-            onChange={(event) => {
-              const formatted = formatDayStartDigits(event.target.value);
-              if (formatted !== null) {
-                setDayStart(formatted);
-              }
-            }}
-          />
-        </Field>
+          hint="En la zona horaria del restaurante (de 00:00 a 23:59)."
+          required
+          value={dayStart}
+          onChange={setDayStart}
+        />
       </div>
     </Form>
   );
@@ -342,10 +340,7 @@ export function SettingsPage({
   const resource = useResource<Settings>('settings');
   return (
     <>
-      <PageTitle
-        title="Configuración general"
-        description="Datos del establecimiento guardados en PostgreSQL."
-      >
+      <PageTitle title="Configuración general" description="Datos del establecimiento.">
         {onOpenStatus && (
           <button type="button" className="secondary-button" onClick={onOpenStatus}>
             <IconLabel icon="activity">Ver estado del sistema</IconLabel>

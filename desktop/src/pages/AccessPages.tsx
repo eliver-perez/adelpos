@@ -52,7 +52,7 @@ export function SetupPage({
             await refresh();
           }}
         >
-          <SettingsFields value={settings} onChange={setSettings} />
+          <SettingsFields setup value={settings} onChange={setSettings} />
           <Field label="Nombre de esta terminal">
             <input
               required

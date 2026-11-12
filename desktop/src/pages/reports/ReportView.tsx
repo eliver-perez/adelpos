@@ -185,7 +185,6 @@ export function ReportView({
             comparison={data?.meta.comparison ?? null}
             allowCompare={report.comparison}
             dayStart={data?.meta.day_start ?? catalog.day_start}
-            timezone={data?.meta.timezone ?? catalog.timezone}
           />
         ) : (
           <p className="muted text-sm">

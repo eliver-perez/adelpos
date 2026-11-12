@@ -493,7 +493,10 @@ describe('panel lateral de la mesa', () => {
     renderPage();
     const panel = await tablePanel(/^Mesa 1, Ocupada/, 'Mesa 1');
     expect(within(panel).getByText('Ocupada')).toBeTruthy();
-    expect(within(panel).getByText('Mesa para 4 · Abierta hace 1 h 5 min')).toBeTruthy();
+    // Etapa 9C (§4): capacidad y tiempo abierta, cada dato con su icono.
+    const facts = within(panel).getByRole('list', { name: 'Datos de la mesa' });
+    expect(within(facts).getByText('Mesa para 4').querySelector('svg')).not.toBeNull();
+    expect(within(facts).getByText('Abierta hace 1 h 5 min').querySelector('svg')).not.toBeNull();
     const group = within(panel).getByRole('group', { name: 'Cuentas abiertas de la mesa' });
     const first = within(group).getByRole('button', { name: 'Cuenta #1' });
     await waitFor(() => expect(pressed(first)).toBe('true'));
@@ -779,43 +782,63 @@ describe('mapa de mesas y leyenda (etapa 7.1)', () => {
 
   it('cada estado se distingue por texto o icono, no solo por color', () => {
     renderMap();
-    const free = screen.getByRole('button', { name: 'Mesa 1, Libre, 0 cuentas' });
+    const free = screen.getByRole('button', { name: 'Mesa 1, Libre, 0 cuentas, mesa para 4' });
     expect(free.className).toContain('table-free');
     expect(within(free).getByText('Libre')).toBeTruthy();
     // Ocupada: tiempo calculado por Go («45 min»).
-    const occupied = screen.getByRole('button', { name: 'Mesa 2, Ocupada, 1 cuenta, 45 min' });
+    const occupied = screen.getByRole('button', {
+      name: 'Mesa 2, Ocupada, 1 cuenta, 45 min, mesa para 4',
+    });
     expect(occupied.className).toContain('table-occupied');
+    expect(within(occupied).getByText('Ocupada').querySelector('svg')).not.toBeNull();
     expect(within(occupied).getByText('45 min')).toBeTruthy();
-    expect(occupied.querySelector('svg')).not.toBeNull();
-    // Esperando pago: icono de recibo y «Precuenta».
+    // Esperando pago: icono de recibo y su estado en texto.
     const awaiting = screen.getByRole('button', {
-      name: 'Mesa 3, Esperando pago, 1 cuenta, precuenta impresa',
+      name: 'Mesa 3, Esperando pago, 1 cuenta, 45 min, precuenta impresa, mesa para 4',
     });
     expect(awaiting.className).toContain('table-awaiting_payment');
-    expect(within(awaiting).getByText('Precuenta')).toBeTruthy();
-    expect(awaiting.querySelector('svg')).not.toBeNull();
+    expect(within(awaiting).getByText('Esperando pago').querySelector('svg')).not.toBeNull();
     // Pago parcial: el saldo de Go y, con varias cuentas, cuántas son.
     const partial = screen.getByRole('button', {
-      name: 'Mesa 4, Pago parcial, 2 cuentas, saldo $163.40',
+      name: 'Mesa 4, Pago parcial, 2 cuentas, 45 min, saldo $163.40, mesa para 4',
     });
     expect(partial.className).toContain('table-partial_payment');
     expect(within(partial).getByText('Saldo $163.40')).toBeTruthy();
     expect(within(partial).getByText('2 cuentas')).toBeTruthy();
-    // Fuera de servicio: candado.
+    // Fuera de servicio: candado y sin datos de ocupación.
     const blocked = screen.getByRole('button', { name: 'Mesa 5, Fuera de servicio, 0 cuentas' });
     expect(blocked.className).toContain('table-out_of_service');
-    expect(blocked.querySelector('svg')).not.toBeNull();
+    expect(within(blocked).getByText('Fuera de servicio').querySelector('svg')).not.toBeNull();
+    expect(blocked.querySelector('.table-tile-details')).toBeNull();
   });
 
-  it('la leyenda muestra los cinco estados', () => {
+  it('mosaicos más legibles (etapa 9C): icono de mesa, nombre grande, tiempo y capacidad con icono', () => {
+    renderMap();
+    const occupied = screen.getByRole('button', { name: /^Mesa 2, Ocupada/ });
+    const name = within(occupied).getByText('Mesa 2');
+    expect(name.tagName).toBe('STRONG');
+    expect(name.parentElement?.querySelector('svg.table-tile-icon')).not.toBeNull();
+    const time = occupied.querySelector('.table-tile-time')!;
+    expect(time.textContent).toBe('45 min');
+    expect(time.querySelector('svg')).not.toBeNull();
+    const seats = occupied.querySelector('.table-tile-seats')!;
+    expect(seats.textContent).toBe('4');
+    expect(seats.querySelector('svg')).not.toBeNull();
+    // Una mesa libre muestra su capacidad, pero no tiempo.
+    const free = screen.getByRole('button', { name: /^Mesa 1, Libre/ });
+    expect(free.querySelector('.table-tile-time')).toBeNull();
+    expect(free.querySelector('.table-tile-seats')?.textContent).toBe('4');
+  });
+
+  it('la leyenda muestra los cinco estados y qué indican los iconos', () => {
     renderMap();
     const legend = screen.getByRole('list', { name: 'Estados de las mesas' });
     const items = within(legend).getAllByRole('listitem');
     expect(items.map((item) => item.textContent)).toEqual([
       'Libre',
-      'Ocupada· tiempo',
-      'Esperando pago· precuenta',
-      'Pago parcial· saldo',
+      'Ocupada',
+      'Esperando pago',
+      'Pago parcial',
       'Fuera de servicio',
     ]);
     for (const state of [
@@ -827,6 +850,150 @@ describe('mapa de mesas y leyenda (etapa 7.1)', () => {
     ]) {
       expect(legend.querySelector(`.legend-${state}`)).not.toBeNull();
     }
+    const data = screen.getByRole('list', { name: 'Datos de cada mesa' });
+    expect(
+      within(data)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Tiempo ocupada', 'Capacidad (lugares)']);
+  });
+});
+
+describe('buscador de mesas y selector de área (etapa 9C, §4)', () => {
+  const salon = {
+    id: 'salon',
+    name: 'Salón',
+    description: '',
+    sort_order: 10,
+    active: true,
+    revision: 1,
+    table_count: 3,
+  };
+  const terrace = { ...salon, id: 'terraza', name: 'Terraza', sort_order: 20, table_count: 2 };
+  const closed = { ...salon, id: 'cerrada', name: 'Privado', sort_order: 30, active: false };
+  const table = {
+    shape: 'rectangle' as const,
+    x: 20,
+    y: 20,
+    width: 120,
+    height: 100,
+    seats: 4,
+    active: true,
+    out_of_service: false,
+    revision: 1,
+    account_count: 0,
+    state: 'free' as const,
+    occupied_since: null,
+    occupied_seconds: 0,
+    balance: '0.00',
+  };
+  const tables = [
+    { ...table, id: 't1', area_id: 'salon', name: 'Mesa 1' },
+    { ...table, id: 't5', area_id: 'salon', name: 'Mesa 5', x: 200 },
+    { ...table, id: 't15', area_id: 'salon', name: 'Mesa 15', x: 380 },
+    { ...table, id: 't25', area_id: 'terraza', name: 'Mesa 25' },
+    { ...table, id: 'tb', area_id: 'terraza', name: 'Barra', x: 200 },
+    { ...table, id: 'off', area_id: 'salon', name: 'Mesa 50', active: false },
+    { ...table, id: 'hidden', area_id: 'cerrada', name: 'Mesa 51' },
+  ];
+
+  function renderSearch(onSelect = vi.fn(), onAreaChange = vi.fn()) {
+    render(
+      <TableMap
+        areas={[salon, terrace, closed]}
+        tables={tables}
+        areaID="salon"
+        onAreaChange={onAreaChange}
+        onSelect={onSelect}
+      />,
+    );
+    return { onSelect, onAreaChange };
+  }
+
+  function search() {
+    return screen.getByRole('searchbox', { name: 'Buscar mesa por nombre, número o área' });
+  }
+
+  function found() {
+    return within(screen.getByRole('group', { name: 'Mesas encontradas' }))
+      .getAllByRole('button')
+      .map((button) => button.getAttribute('aria-label'));
+  }
+
+  it('el encabezado tiene el selector de área y el buscador marcado para ⌘F / Ctrl+F', () => {
+    renderSearch();
+    const areasGroup = screen.getByRole('group', { name: 'Áreas del restaurante' });
+    // Solo las áreas activas; la elegida, marcada.
+    expect(
+      within(areasGroup)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Salón', 'Terraza']);
+    expect(
+      within(areasGroup).getByRole('button', { name: 'Salón' }).getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(search().hasAttribute('data-screen-search')).toBe(true);
+    expect(screen.getByRole('search', { name: 'Mesas' })).toBeTruthy();
+    // Sin escribir no hay resultados.
+    expect(screen.queryByRole('group', { name: 'Mesas encontradas' })).toBeNull();
+  });
+
+  it('«5» encuentra la Mesa 5 y no la 15; busca en todas las áreas activas, también por área', () => {
+    const { onSelect } = renderSearch();
+    fireEvent.change(search(), { target: { value: '5' } });
+    expect(found()).toEqual(['Mesa 5, Salón, Libre']);
+    expect(screen.getByRole('status').textContent).toBe('1 mesa encontrada');
+    fireEvent.change(search(), { target: { value: 'mesa 2' } });
+    expect(found()).toEqual(['Mesa 25, Terraza, Libre']);
+    fireEvent.change(search(), { target: { value: 'terraza' } });
+    expect(found()).toEqual(['Mesa 25, Terraza, Libre', 'Barra, Terraza, Libre']);
+    // Sin acentos ni mayúsculas; las mesas desactivadas y las de áreas inactivas no aparecen.
+    fireEvent.change(search(), { target: { value: 'SALON 5' } });
+    expect(found()).toEqual(['Mesa 5, Salón, Libre']);
+    fireEvent.change(search(), { target: { value: 'zz' } });
+    expect(screen.queryByRole('group', { name: 'Mesas encontradas' })).toBeNull();
+    expect(screen.getByRole('status').textContent).toBe('Ninguna mesa coincide con «zz».');
+    // Elegir un resultado de otra área lo informa con la mesa (la página cambia de área) y limpia
+    // la búsqueda.
+    fireEvent.change(search(), { target: { value: 'barra' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Barra, Terraza, Libre' }));
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'tb', area_id: 'terraza' }),
+    );
+    expect((search() as HTMLInputElement).value).toBe('');
+  });
+
+  it('Intro elige la primera coincidencia y Escape borra lo escrito', () => {
+    const { onSelect } = renderSearch();
+    fireEvent.change(search(), { target: { value: '1' } });
+    // «1» empieza «1» y «15»: primero el nombre que coincide completo.
+    expect(found()).toEqual(['Mesa 1, Salón, Libre', 'Mesa 15, Salón, Libre']);
+    fireEvent.keyDown(search(), { key: 'Escape' });
+    expect((search() as HTMLInputElement).value).toBe('');
+    fireEvent.change(search(), { target: { value: '15' } });
+    fireEvent.keyDown(search(), { key: 'Enter' });
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 't15' }));
+    // El foco pasa al mosaico elegido: Escape y los atajos ya no están dentro de un campo.
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^Mesa 15, Libre/ }));
+    // El botón de borrar aparece solo con texto.
+    expect(screen.queryByRole('button', { name: 'Borrar la búsqueda de mesas' })).toBeNull();
+    fireEvent.change(search(), { target: { value: 'me' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Borrar la búsqueda de mesas' }));
+    expect((search() as HTMLInputElement).value).toBe('');
+  });
+
+  it('en la pantalla, elegir una mesa encontrada abre su panel como tocarla en el mapa', async () => {
+    renderPage();
+    const box = await screen.findByRole('searchbox', {
+      name: 'Buscar mesa por nombre, número o área',
+    });
+    fireEvent.change(box, { target: { value: 'mesa 2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Mesa 2, Salón, Libre' }));
+    const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 2' });
+    expect(within(panel).getByRole('button', { name: 'Capturar' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /^Mesa 2, Libre/ }).getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 });
 

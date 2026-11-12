@@ -94,7 +94,7 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
         WHERE id=$1`, mutation.OperationID).Scan(&actorID, &deviceID, &previousFingerprint, &response)
 	if err == nil {
 		if actorID != request.Actor.UserID || deviceID != request.Actor.DeviceID || previousFingerprint != fingerprint {
-			return nil, &Error{Status: 409, Code: "IDEMPOTENCY_CONFLICT", Message: "Ese identificador corresponde a otra operación."}
+			return nil, &Error{Status: 409, Code: "IDEMPOTENCY_CONFLICT", Message: "Esta operación ya se había enviado con otros datos y no se repitió. Consulta el resultado antes de intentarlo de nuevo."}
 		}
 		// Revalidar también ámbitos antes de devolver información de un resultado previo.
 		if err := handler.authorizeResource(parts); err != nil {

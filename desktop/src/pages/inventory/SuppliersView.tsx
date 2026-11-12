@@ -321,7 +321,7 @@ function SupplierForm({
         {!counter && (
           <Field
             label="RFC"
-            hint="Opcional: 12 caracteres (persona moral) o 13 (persona física). El servidor valida el formato y la fecha."
+            hint="Opcional: 12 caracteres (persona moral) o 13 (persona física). Al guardar se revisan el formato y la fecha."
           >
             <input
               maxLength={13}

@@ -111,8 +111,8 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
                 Vista previa de los puntos que se envían a la impresora. El resultado en papel es
                 una prueba física pendiente: compruébalo con tus impresoras. El logotipo solo se
                 imprime por ESC/POS en red o en impresoras CUPS marcadas «Esta impresora entiende
-                ESC/POS (formato y logotipo)» cuya cola admita datos raw; en las demás se omite con
-                un aviso y el documento se imprime igual.
+                ESC/POS (formato y logotipo)» cuya cola acepte datos sin convertir («raw»); en las
+                demás se omite con un aviso y el documento se imprime igual.
               </p>
             </div>
             <PresentationControls
@@ -194,8 +194,8 @@ function IdentityStatus({ editor }: { editor: IdentityEditor }) {
       <div className="notice" role="alert">
         <p>
           <strong>No se confirmó si se pudo {actionNames[editor.pending.action]}.</strong> Al
-          reintentar se usa el mismo identificador de operación: si ya se aplicó, no se repite. Los
-          textos, la presentación y el logotipo no se pueden cambiar hasta confirmar el resultado.
+          reintentar no se duplica: si ya se aplicó, no se repite. Los textos, la presentación y el
+          logotipo no se pueden cambiar hasta confirmar el resultado.
         </p>
         <div className="button-row mt-3">
           <button
@@ -234,8 +234,8 @@ function ReloadStatus({ editor }: { editor: IdentityEditor }) {
         {editor.loadError}
       </p>
       <p className="muted text-sm">
-        Se muestra lo último que respondió el servidor; las vistas previas pueden faltar hasta
-        volver a cargar.
+        Se muestra lo último que se consultó; las vistas previas pueden faltar hasta volver a
+        cargar.
       </p>
       <div className="button-row mt-3">
         <button type="button" className="secondary-button" onClick={() => void editor.reload()}>

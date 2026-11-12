@@ -32,7 +32,7 @@ export function KitchenTickets({ timezone }: { timezone: string }) {
             </strong>
             <span>{serverDateTime(ticket.created_at, timezone)}</span>
             {ticket.pending_kds && (
-              <span className="kitchen-pending-kds">Recepción KDS pendiente</span>
+              <span className="kitchen-pending-kds">Recepción en pantalla de cocina pendiente</span>
             )}
           </button>
         ))}

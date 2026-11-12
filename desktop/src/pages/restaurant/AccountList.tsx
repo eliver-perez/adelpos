@@ -95,9 +95,7 @@ export function AccountList({
           />
         </Field>
       </div>
-      {takeaway && (
-        <p className="muted text-xs">Más antiguos primero · Antigüedad calculada por el servidor</p>
-      )}
+      {takeaway && <p className="muted text-xs">Más antiguos primero</p>}
       <Notice>{error}</Notice>
       {!value && !error && <p className="muted">Consultando cuentas…</p>}
       {value?.items.length === 0 && (

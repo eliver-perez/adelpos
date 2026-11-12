@@ -151,7 +151,7 @@ export function OperationsAdmin({
     }
     const discard = await confirm({
       title: '¿Descartar las posiciones sin guardar?',
-      message: 'Las mesas vuelven a la distribución guardada en el servidor.',
+      message: 'Las mesas vuelven a la última distribución guardada.',
       confirmLabel: 'Descartar posiciones',
       cancelLabel: 'Conservarlas',
       tone: 'danger',
@@ -374,7 +374,7 @@ export function OperationsAdmin({
       {can('restaurant.settings.manage') && (
         <Accordion
           title="Advertencias del tablero para llevar"
-          summary="Umbrales de antigüedad calculados por el servidor"
+          summary="Umbrales de antigüedad de los pedidos"
         >
           <Form
             disabled={busy}

@@ -238,13 +238,21 @@ test('teclado 9C: atajos, paleta, Escape y menú nativo simulado', async ({
   await page.keyboard.press('Escape');
   await expect(panel).toHaveCount(0);
 
-  // 8. En el mapa (sin buscador propio), ⌘/Ctrl + F busca mesas.
+  // 8. En el mapa, ⌘/Ctrl + F lleva al buscador de mesas del encabezado (etapa 9C, §4); Intro
+  // elige la primera coincidencia, abre su panel y deja el foco en su mosaico.
   await page.keyboard.press(`${mod}+f`);
-  const tableSearch = page.getByRole('dialog', { name: 'Buscar mesa' });
-  await expect(tableSearch).toBeVisible();
+  const tableSearch = page.getByRole('searchbox', {
+    name: 'Buscar mesa por nombre, número o área',
+  });
+  await expect(tableSearch).toBeFocused();
   await page.keyboard.type('mesa 5');
+  await expect(
+    page.getByRole('group', { name: 'Mesas encontradas' }).getByRole('button').first(),
+  ).toHaveAccessibleName(/^Mesa 5, /);
   await page.keyboard.press('Enter');
   await expect(panel).toBeVisible();
+  await expect(tableSearch).toHaveValue('');
+  await expect(page.getByRole('button', { name: /^Mesa 5, / })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(panel).toHaveCount(0);
 

@@ -174,7 +174,7 @@ function PortionForm({
             onChange={setUnitID}
             hint={
               item
-                ? `Go la convierte a ${item.unit.name.toLowerCase()} (${item.unit.code}).`
+                ? `Se convierte a ${item.unit.name.toLowerCase()} (${item.unit.code}).`
                 : undefined
             }
           />

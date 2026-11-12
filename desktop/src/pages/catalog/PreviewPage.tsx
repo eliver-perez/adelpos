@@ -93,13 +93,12 @@ export function PreviewPage({
     <>
       {embedded ? (
         <p className="muted text-sm mb-5">
-          Comprueba productos reales y promociones con el motor del servidor, sin crear pedidos ni
-          ventas.
+          Comprueba precios de productos reales y promociones, sin crear pedidos ni ventas.
         </p>
       ) : (
         <PageTitle
           title="Vista previa"
-          description="Comprueba productos reales y promociones con el motor del servidor, sin crear pedidos ni ventas."
+          description="Comprueba precios de productos reales y promociones, sin crear pedidos ni ventas."
         />
       )}
       <Notice>{lookup.error}</Notice>
@@ -168,7 +167,7 @@ export function PreviewPage({
               {can('catalog.availability.override') && (
                 <Accordion title="Excepción autorizada de disponibilidad">
                   <Check
-                    label="Ignorar pausa temporal y horarios (queda auditado)"
+                    label="Ignorar pausa temporal y horarios (queda en el Registro de movimientos)"
                     value={override}
                     onChange={setOverride}
                   />

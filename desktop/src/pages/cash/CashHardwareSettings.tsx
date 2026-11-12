@@ -128,17 +128,18 @@ export function DrawerAdmin({ execute }: { execute: Execute }) {
   return (
     <div className="form-stack">
       <p className="muted text-sm">
-        El cajón se abre con un comando ESC/POS que envía la impresora a la que está conectado: una
-        impresora ESC/POS por red o una cola CUPS (por ejemplo, una impresora USB) que admita datos
-        raw. El servidor consulta cada cola sin imprimir nada y explica por qué una no sirve. Con el
-        cajón activado se abre tras cobros y devoluciones en efectivo e ingresos, retiros y gastos;
-        nunca con pagos electrónicos. La pantalla indica que el comando se envió, no que el cajón se
-        abrió.
+        El cajón se abre con un comando ESC/POS (el lenguaje de las impresoras de tickets) que envía
+        la impresora a la que está conectado: una impresora ESC/POS por red o una cola CUPS (una
+        impresora instalada en el equipo servidor, por ejemplo por USB) que acepte datos sin
+        convertir («raw»). AD-EL POS revisa cada cola sin imprimir nada y explica por qué una no
+        sirve. Con el cajón activado se abre tras cobros y devoluciones en efectivo e ingresos,
+        retiros y gastos; nunca con pagos electrónicos. La pantalla indica que el comando se envió,
+        no que el cajón se abrió.
       </p>
       {printers.every((printer) => !printer.compatible) && (
         <Notice>
           No hay impresoras compatibles con el cajón: registra una impresora ESC/POS por red o una
-          cola CUPS con datos raw en Cocina y preparación → Impresoras.
+          cola CUPS que acepte datos sin convertir («raw») en Cocina y preparación → Impresoras.
         </Notice>
       )}
       <IncompatiblePrinters printers={printers} />
@@ -206,7 +207,7 @@ function DrawerTest({
     }
     const accepted = await confirm({
       title: `¿Probar la apertura del cajón de ${drawer.register_name}?`,
-      message: `Se enviará el comando de apertura a ${printerName}. Hazlo con alguien frente a la caja: la prueba queda registrada y auditada.`,
+      message: `Se enviará el comando de apertura a ${printerName}. Hazlo con alguien frente a la caja: la prueba queda en el Registro de movimientos.`,
       confirmLabel: 'Enviar prueba de apertura',
       cancelLabel: 'No enviar',
     });

@@ -212,18 +212,28 @@ export function TablePanel({
       </button>
     ) : null
   ) : null;
-  // El estado se muestra en la etiqueta del encabezado; aquí, capacidad y tiempo abierta.
-  const details = [`Mesa para ${table.seats}`];
-  if (occupied) {
-    details.push(`Abierta hace ${elapsedTime(oldest)}`);
-  }
-
+  // Etapa 9C (§4): el estado va en la etiqueta del encabezado; debajo del nombre, la capacidad
+  // (la cuenta no guarda comensales) y el tiempo abierta, cada dato con su icono.
   return (
     <aside className="table-panel" aria-label={`Panel de ${table.name}`}>
       <header className="table-panel-header">
-        <div>
-          <h2>{table.name}</h2>
-          <p className="muted">{details.join(' · ')}</p>
+        <div className="table-panel-title">
+          <h2>
+            <Icon name="table" size={22} className="table-panel-icon" />
+            {table.name}
+          </h2>
+          <ul className="table-panel-facts muted" aria-label="Datos de la mesa">
+            <li>
+              <Icon name="users" size={15} />
+              Mesa para {table.seats}
+            </li>
+            {occupied && (
+              <li>
+                <Icon name="clock" size={15} />
+                Abierta hace {elapsedTime(oldest)}
+              </li>
+            )}
+          </ul>
         </div>
         <StateChip state={state} />
       </header>

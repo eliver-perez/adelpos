@@ -74,8 +74,8 @@ export function StationsAdmin({
               {station.reception === 'printer'
                 ? 'Impresora'
                 : station.reception === 'both'
-                  ? 'Impresora y KDS'
-                  : 'Solo KDS'}{' '}
+                  ? 'Impresora y pantalla de cocina'
+                  : 'Solo pantalla de cocina'}{' '}
               · objetivo {station.target_minutes} min
             </span>
           </button>
@@ -104,7 +104,7 @@ export function StationsAdmin({
               className="secondary-button"
               onClick={() => setSelected({ ...selected, revision: current.revision })}
             >
-              Usar revisión vigente y conservar mis campos
+              Usar la versión vigente y conservar mis campos
             </button>
           )}
           <Form
@@ -152,8 +152,8 @@ export function StationsAdmin({
                 value={selected.reception}
                 options={[
                   { value: 'printer', label: 'Solo impresora' },
-                  { value: 'kds', label: 'Solo KDS' },
-                  { value: 'both', label: 'Impresora y KDS' },
+                  { value: 'kds', label: 'Solo pantalla de cocina' },
+                  { value: 'both', label: 'Impresora y pantalla de cocina' },
                 ]}
                 onChange={(reception) => setSelected({ ...selected, reception })}
               />
@@ -170,8 +170,8 @@ export function StationsAdmin({
             )}
             {selected.reception !== 'printer' && (
               <p className="muted">
-                La recepción KDS queda pendiente hasta que un cliente autorizado reciba y confirme
-                la comanda.
+                La recepción en la pantalla de cocina queda pendiente hasta que una pantalla de
+                cocina autorizada reciba y confirme la comanda.
               </p>
             )}
             <Accordion
@@ -255,7 +255,7 @@ function DeviceStations({
   const [expected, setExpected] = useState<string[]>([]);
   return (
     <Accordion
-      title="Ámbitos de terminales y futuro KDS"
+      title="Estaciones de cada terminal"
       summary="Las terminales sin permiso global solo operan sus estaciones asignadas"
     >
       <Notice>{resource.error}</Notice>

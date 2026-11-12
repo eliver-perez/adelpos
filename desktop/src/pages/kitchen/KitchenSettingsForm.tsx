@@ -123,7 +123,7 @@ function SettingsEditor({
         </Accordion>
         <Accordion
           title="Seguimiento y pedidos programados"
-          summary="Go ejecuta la programación aunque Tauri esté cerrado"
+          summary="La programación se cumple aunque las terminales estén cerradas"
           defaultOpen
         >
           <fieldset disabled={!can('kitchen.timing.manage')} className="form-stack">

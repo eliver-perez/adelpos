@@ -114,8 +114,8 @@ export function ConsumptionRequestsSection({
       <div className="form-stack">
         <p className="muted text-sm">
           Cada partida liberada a cocina con el control de inventario activado genera una solicitud
-          que el servidor procesa en segundo plano. Las que fallan se reintentan solas y bloquean
-          solo los cambios posteriores de la misma partida.
+          que AD-EL POS procesa en segundo plano. Las que fallan se reintentan solas y bloquean solo
+          los cambios posteriores de la misma partida.
         </p>
         <Field label="Solicitudes">
           <Select<RequestFilter>

@@ -16,6 +16,7 @@ import { ToggleButton } from '../ToggleButton';
 import { dayShortNames, scheduleSummary, weekOrder } from '../../services/scheduleSummary';
 import { Select } from '../Select';
 import type { SelectOption } from '../Select';
+import { TimeField } from '../TimeField';
 
 export function TextField({
   label,
@@ -300,8 +301,8 @@ export function ScheduleEditor({
     <Accordion title="Restricciones de horario" summary={scheduleSummary(value)}>
       <ul className="schedule-help muted text-sm">
         <li>
-          Sin restricciones, el registro está disponible siempre. Se usa el reloj del servidor con
-          la zona horaria del establecimiento.
+          Sin restricciones, el registro está disponible siempre. Se usa la hora del restaurante (su
+          zona horaria).
         </li>
         <li>Si no eliges días, aplica todos los días de la semana.</li>
         <li>
@@ -358,9 +359,12 @@ export function ScheduleEditor({
       >
         {(value.windows ?? []).map((window, index) => (
           <div className="repeat-row" key={index}>
-            <TextField
+            {/* Etapa 9C (§2.1): hora y minutos con el selector, de 5 en 5 (un horario guardado
+                fuera del paso se conserva); «24:00» solo existe en la hora final. Go valida el
+                formato, el orden y los traslapes. */}
+            <TimeField
               label="Hora inicial"
-              type="time"
+              required
               value={window.start}
               onChange={(start) =>
                 onChange({
@@ -371,9 +375,10 @@ export function ScheduleEditor({
                 })
               }
             />
-            <TextField
-              label="Hora final, no incluida (HH:mm; 24:00 = medianoche)"
-              type="text"
+            <TimeField
+              label="Hora final, no incluida"
+              endOfDay
+              required
               value={window.end}
               onChange={(end) =>
                 onChange({

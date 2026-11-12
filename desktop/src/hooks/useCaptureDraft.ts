@@ -149,7 +149,7 @@ export function useCaptureDraft({
       ) {
         // Lo que vio el operador ya no coincide con el cálculo vigente: primero se revisa.
         onError(
-          'El cálculo de Go cambió desde que se mostró. Revisa los importes y vuelve a enviar.',
+          'El precio calculado cambió desde que se mostró. Revisa los importes y vuelve a enviar.',
           'No se pudo enviar a cocina.',
         );
         void savedQuote.reload();

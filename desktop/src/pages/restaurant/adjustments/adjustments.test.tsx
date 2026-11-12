@@ -344,7 +344,7 @@ describe('descuentos, cortesías, cargos y cancelaciones', () => {
         },
       };
     };
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar sin duplicar' }));
     await screen.findByText(/su autorización no se conserva\. Solicita de nuevo/);
     expect(screen.getByTestId('pendiente').textContent).toBe('');
     expect(requests('payments_discount')).toHaveLength(2);

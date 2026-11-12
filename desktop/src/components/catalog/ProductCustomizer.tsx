@@ -64,9 +64,7 @@ export function ProductCustomizer({
         <div>
           <h3>{product.name}</h3>
           <p className="muted text-sm">{product.description}</p>
-          <p className="muted text-xs">
-            Configuración r{product.revision} · {data.timezone}
-          </p>
+          <p className="muted text-xs">Versión {product.revision} del producto</p>
         </div>
       </div>
       <Notice>{data.availability_reason}</Notice>

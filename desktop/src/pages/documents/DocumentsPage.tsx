@@ -30,7 +30,7 @@ export function DocumentsPage({
         <>
           <PageTitle
             title="Documentos"
-            description="Diseña con bloques tickets, precuentas, comandas, avisos de cocina, comprobantes y cortes, y configura la identidad que se imprime. Lo que ves en la vista previa es exactamente lo que genera el servidor."
+            description="Diseña con bloques tickets, precuentas, comandas, avisos de cocina, comprobantes y cortes, y configura la identidad que se imprime. Lo que ves en la vista previa es exactamente lo que se envía a la impresora."
           />
           <div className="catalog-tabs" role="tablist" aria-label="Secciones de documentos">
             <button

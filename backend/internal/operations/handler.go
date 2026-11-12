@@ -235,7 +235,7 @@ func (handler *service) replay(fingerprint string) (any, bool, error) {
 		return nil, false, &Error{
 			Status:  409,
 			Code:    "IDEMPOTENCY_CONFLICT",
-			Message: "El identificador de operación ya corresponde a otra solicitud. No se repitieron sus cambios.",
+			Message: "Esta operación ya se había enviado con otros datos y no se repitió. Consulta el resultado antes de intentarlo de nuevo.",
 		}
 	}
 	return result, true, nil

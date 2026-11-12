@@ -439,13 +439,11 @@ describe('pantalla de cobro', () => {
         },
       },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar sin duplicar' }));
     const notice = await screen.findByRole('alert', { name: 'Error' });
     expect(notice.textContent).toContain('no se registró ni se duplicó');
     expect(notice.textContent).toContain('La caja Caja 1 está en arqueo de cierre');
-    expect(
-      screen.queryByRole('button', { name: 'Reintentar con el mismo identificador' }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reintentar sin duplicar' })).toBeNull();
   });
 
   it('muestra el conflicto de cobro y el saldo real tras BALANCE_CHANGED', async () => {
@@ -521,7 +519,7 @@ describe('pantalla de cobro', () => {
         printing: { requested: false },
       },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar sin duplicar' }));
     await screen.findByText('Pago registrado');
     const retried = requests('payments_pay')[1]?.[1] as { body: { operation_id: string } };
     expect(retried.body.operation_id).toBe(first.body.operation_id);

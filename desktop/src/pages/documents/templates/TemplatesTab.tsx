@@ -162,7 +162,7 @@ export function TemplatesTab({
             onRestoreDefault={() => void actions.restoreDefault(kind)}
           />
         ) : (
-          <Notice>Este tipo de documento no está en el catálogo del servidor.</Notice>
+          <Notice>Este tipo de documento no está disponible.</Notice>
         )}
       </div>
       {history && (

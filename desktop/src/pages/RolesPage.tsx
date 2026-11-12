@@ -103,7 +103,7 @@ export function RolesPage({
     <>
       <PageTitle
         title="Roles y permisos"
-        description="Perfiles persistentes para las operaciones implementadas."
+        description="Cada rol reúne los permisos de un puesto de trabajo; cada usuario tiene un rol."
       >
         {editable && (
           <button className="primary-button" onClick={() => setEditing(null)}>

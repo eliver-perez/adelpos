@@ -63,7 +63,7 @@ export function Form({
   disabled = false,
   onSaveAndNew,
   saveAndNewLabel = 'Guardar y crear otra',
-  successMessage = 'Cambios guardados en el servidor.',
+  successMessage = 'Cambios guardados.',
 }: {
   onSave: () => Promise<void>;
   children: ReactNode;
@@ -106,7 +106,7 @@ export function Form({
     try {
       if (createAnother) {
         const message = await onSaveAndNew();
-        notifySuccess(message || 'Registro guardado en el servidor. Captura el siguiente.');
+        notifySuccess(message || 'Registro guardado. Captura el siguiente.');
         setFocusRequest((current) => current + 1);
       } else {
         await onSave();

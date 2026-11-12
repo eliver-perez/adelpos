@@ -100,7 +100,7 @@ function ClosureComments({
               onChange={(event) => setComment(event.target.value)}
             />
             <small id={`${identifier}-hint`} className="muted">
-              El comentario queda auditado y no cambia la diferencia.
+              El comentario queda en el Registro de movimientos y no cambia la diferencia.
             </small>
           </div>
           <button

@@ -390,9 +390,7 @@ describe('órdenes de compra', () => {
       'true',
     );
     // Antes de guardar no hay importes: los calcula Go.
-    expect(
-      screen.getByText(/Los importes los calcula el servidor al guardar el borrador/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Los importes se calculan al guardar el borrador/)).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Crear borrador' }));
     });
@@ -706,14 +704,12 @@ describe('recepciones de una orden', () => {
       .find((button) => button.getAttribute('type') === 'submit') as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }),
-      );
+      fireEvent.click(screen.getByRole('button', { name: 'Reintentar sin duplicar' }));
     });
     const [first, retry] = writes(requests, 'inventory_record_receipt');
     expect(retry?.body?.operation_id).toBe(first?.body?.operation_id);
     expect(writes(requests, 'inventory_record_receipt')).toHaveLength(2);
-    await screen.findByText('Cambio de inventario confirmado en el servidor.');
+    await screen.findByText('Cambio de inventario confirmado.');
     expect(submit.disabled).toBe(true);
   });
 });

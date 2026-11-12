@@ -368,7 +368,7 @@ describe('estado del servidor', () => {
   it('en línea es un punto con descripción; si no, el aviso queda visible', () => {
     render(<ServerStatus state="online" />);
     const online = screen.getByRole('status', { name: 'Servidor: En línea' });
-    expect(online.getAttribute('title')).toContain('El servidor responde');
+    expect(online.getAttribute('title')).toContain('El equipo servidor responde');
     expect(online.className).toContain('server-status-online');
     cleanup();
     render(<ServerStatus state="reconnecting" />);

@@ -9,6 +9,7 @@ import { accountCustomName, takeawayOrigins } from '../../services/restaurant';
 import type { Account, AccountInput, Bill } from '../../services/restaurant';
 import type { ExecuteMutation } from './OperationsAdmin';
 import { Select } from '../../components/Select';
+import { DateTimeField, formatLocalDateTime } from '../../components/TimeField';
 
 function initialInput(account: Account): AccountInput {
   return {
@@ -33,7 +34,6 @@ function initialInput(account: Account): AccountInput {
 // aquí, para no sustituir una reprogramación hecha en cocina.
 export function AccountDetails({
   account,
-  timezone,
   lookups,
   can,
   execute,
@@ -41,7 +41,6 @@ export function AccountDetails({
   onClose,
 }: {
   account: Account;
-  timezone: string;
   lookups: Lookups | null;
   can: (permission: string) => boolean;
   execute: ExecuteMutation;
@@ -131,7 +130,7 @@ export function AccountDetails({
               title="Pedido programado"
               summary={
                 input.scheduled_local
-                  ? `${input.scheduled_local} · ${timezone}`
+                  ? formatLocalDateTime(input.scheduled_local)
                   : 'Opcional; no se envía automáticamente a cocina'
               }
               defaultOpen={!!input.scheduled_local}
@@ -153,10 +152,12 @@ export function AccountDetails({
                   }
                 />
               </Field>
+              {/* Etapa 9C (§2.1): fecha dd/mm/aaaa y hora con el selector, de 5 en 5. Go recibe el
+                  mismo «AAAA-MM-DDTHH:MM» en la zona del establecimiento y valida que exista. */}
               {input.schedule_kind && (
-                <TextField
-                  label={`Fecha y hora · ${timezone}`}
-                  type="datetime-local"
+                <DateTimeField
+                  label="Fecha y hora"
+                  hint="En la zona horaria del restaurante."
                   required
                   value={input.scheduled_local}
                   onChange={(scheduled_local) => setInput({ ...input, scheduled_local })}

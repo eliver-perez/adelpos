@@ -190,16 +190,3 @@ export function fetchBusinessDay() {
 export function saveBusinessDay(input: { operating_day_cutoff: string; revision: number }) {
   return api<BusinessDaySettings>('save_settings_business_day', { body: input });
 }
-
-// Reconstruye HH:MM a partir de los dígitos tecleados (como el campo de fechas dd/mm/aaaa). Solo
-// acomoda texto: la validación es de Go.
-export function formatDayStartDigits(text: string): string | null {
-  if (!/^[0-9:]*$/.test(text)) {
-    return null;
-  }
-  const digits = text.replaceAll(':', '').slice(0, 4);
-  if (digits.length <= 2) {
-    return digits;
-  }
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
-}

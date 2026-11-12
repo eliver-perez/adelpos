@@ -152,10 +152,7 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
 
   return (
     <>
-      <PageTitle
-        title="Catálogo comercial"
-        description="Productos, preparación y reglas de precio persistidos en el servidor."
-      >
+      <PageTitle title="Catálogo comercial" description="Productos, preparación y precios.">
         {editable && !draft && view === 'records' && (
           <button
             className="primary-button"

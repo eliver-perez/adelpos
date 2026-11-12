@@ -3,10 +3,11 @@
 // Etapa 9A: «Hora de inicio del día» en Configuración general (una sola configuración, editable
 // solo con settings.manage) y servicios de reportes sin aritmética en React.
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BusinessDaySection } from './SettingsPage';
-import { fetchFilterOptions, formatDayStartDigits, runReport } from '../services/reports';
+import { fetchFilterOptions, runReport } from '../services/reports';
+import { chooseOption, optionLabels, selectText } from '../testing/select';
 import type { BusinessDaySettings } from '../services/reports';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -53,17 +54,20 @@ describe('hora de inicio del día', () => {
 
   it('explica la configuración con un ejemplo y guarda la hora con su revisión', async () => {
     render(<BusinessDaySection can={() => true} />);
-    const field = (await screen.findByLabelText(/^Hora de inicio del día/, {
-      selector: 'input',
-    })) as HTMLInputElement;
-    expect(field.value).toBe('05:00');
+    // Etapa 9C (§2.1): hora y minutos con el selector, sin escritura libre.
+    const field = await screen.findByRole('group', { name: 'Hora de inicio del día' });
+    const hour = within(field).getByRole('combobox', { name: 'Hora' });
+    const minutes = within(field).getByRole('combobox', { name: 'Minutos' });
+    expect(selectText(hour)).toBe('05');
+    expect(selectText(minutes)).toBe('00');
+    expect(field.querySelector('input:not([aria-hidden="true"])')).toBeNull();
+    // Go acepta de 00:00 a 23:59: no se ofrece «24».
+    expect(optionLabels(hour)).not.toContain('24');
     expect(
       screen.getByText(/con 05:00 una venta de la 01:30 pertenece al día anterior/),
     ).toBeTruthy();
     expect(screen.getByText(/Cambiarla no modifica los registros/)).toBeTruthy();
-    expect(field.getAttribute('type')).toBe('text');
-    fireEvent.change(field, { target: { value: '0000' } });
-    expect(field.value).toBe('00:00');
+    chooseOption(hour, '00');
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Guardar hora de inicio' }));
     });
@@ -75,18 +79,11 @@ describe('hora de inicio del día', () => {
 
   it('sin settings.manage se muestra pero no se puede guardar', async () => {
     render(<BusinessDaySection can={(key) => key === 'settings.read'} />);
-    await screen.findByLabelText(/^Hora de inicio del día/, { selector: 'input' });
+    await screen.findByRole('group', { name: 'Hora de inicio del día' });
     const button = screen.getByRole('button', {
       name: 'Guardar hora de inicio',
     }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-  });
-
-  it('acomoda los dígitos tecleados sin validar en React', () => {
-    expect(formatDayStartDigits('0530')).toBe('05:30');
-    expect(formatDayStartDigits('5')).toBe('5');
-    expect(formatDayStartDigits('05:3')).toBe('05:3');
-    expect(formatDayStartDigits('ab')).toBeNull();
   });
 });
 
