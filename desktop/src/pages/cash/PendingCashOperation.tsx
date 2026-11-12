@@ -30,8 +30,8 @@ export function PendingCashOperation({ mutation }: { mutation: CashMutation }) {
     <div className="checkout-uncertain" role="alert">
       <strong>No se pudo confirmar el resultado {describe(mutation)}.</strong>
       <p>
-        No registres otra operación en este turno hasta conocer el resultado. Reintenta con el mismo
-        identificador: si ya llegó al servidor se recupera sin duplicarse.
+        No registres otra operación en este turno hasta conocer el resultado. Usa «Reintentar sin
+        duplicar»: si ya se había registrado, se recupera sin registrarse dos veces.
       </p>
       {authorized && (
         <p>
@@ -47,7 +47,7 @@ export function PendingCashOperation({ mutation }: { mutation: CashMutation }) {
           onClick={() => void mutation.retry()}
         >
           <IconLabel icon="refresh">
-            {mutation.busy ? 'Reintentando…' : 'Reintentar con el mismo identificador'}
+            {mutation.busy ? 'Reintentando…' : 'Reintentar sin duplicar'}
           </IconLabel>
         </button>
       </div>

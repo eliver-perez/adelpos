@@ -189,16 +189,14 @@ describe('operaciones de efectivo', () => {
     await screen.findByText(
       'No se pudo confirmar el resultado del ingreso de efectivo por $100.00.',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar sin duplicar' }));
     // El rechazo del reintento es un aviso de error persistente que conserva el texto completo.
     const alert = await screen.findByRole('alert', { name: 'Error' });
     expect(alert.textContent).toContain('El reintento no se registró.');
     const notice = await screen.findByText(/no se registró ni se duplicó/);
     expect(notice.textContent).toContain('El turno de Caja 1 ya está cerrado.');
     expect(notice.textContent).toContain('regístrala como una operación nueva en un turno abierto');
-    expect(
-      screen.queryByRole('button', { name: 'Reintentar con el mismo identificador' }),
-    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reintentar sin duplicar' })).toBeNull();
     const [first, retried] = sent('payments_shift_income');
     expect(retried!.body.operation_id).toBe(first!.body.operation_id);
     // El pendiente se descartó: la captura se conserva y admite registrarse como operación nueva.

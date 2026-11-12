@@ -97,7 +97,7 @@ function PresentationForm({
         />
         <Field
           label="Unidad del contenido"
-          hint={`Go lo convierte a ${item.base_unit.name.toLowerCase()} (${item.base_unit.code}).`}
+          hint={`Se convierte a ${item.base_unit.name.toLowerCase()} (${item.base_unit.code}).`}
         >
           <Select
             value={unitID}

@@ -41,7 +41,7 @@ export function PrintQueue({
   return (
     <div className="kitchen-editor-layout">
       <section className="panel form-stack">
-        <h2>Cola persistente de impresión</h2>
+        <h2>Cola de impresión</h2>
         <p className="muted">
           Aceptado por CUPS o por la conexión de red no confirma que salió papel. Los resultados
           inciertos no se reenvían automáticamente.

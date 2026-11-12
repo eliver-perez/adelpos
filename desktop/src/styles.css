@@ -1258,24 +1258,102 @@ summary {
 .operation-inline-panel .notice {
   margin: 0;
 }
-.area-tabs {
+/* Etapa 9C (§4): encabezado del mapa con el selector de área (botones de 44 px) y el buscador de
+   mesas a la derecha. Si no caben en una fila, el buscador baja a la suya. */
+.table-map-header {
   display: flex;
-  gap: 5px;
-  overflow: auto;
-  padding: 2px 0 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding-bottom: 8px;
+}
+.area-tabs {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px;
 }
 .area-tabs button {
   flex-shrink: 0;
-  min-height: 38px;
-  padding: 8px 12px;
-  border-radius: 9px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 10px;
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
 }
 .selected-area {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: var(--accent);
+}
+.table-search {
+  position: relative;
+  flex: 0 1 300px;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+}
+.table-search .table-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.table-search input {
+  min-height: 44px;
+  padding-left: 40px;
+  padding-right: 48px;
+  font-size: 14px;
+}
+.table-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+.table-search-clear {
+  position: absolute;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 9px;
+  color: var(--muted);
+}
+.table-search-results {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+.table-search-status {
+  margin: 0;
+  font-size: 12px;
+}
+.table-search-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.table-search-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 14px 6px 10px;
+  text-align: left;
+}
+.table-search-option-text {
+  display: grid;
+  line-height: 1.2;
+}
+.table-search-option-text strong {
+  font-size: 14px;
+}
+.table-search-option-text span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
 }
 .table-map-viewport {
   max-height: 190px;
@@ -1305,25 +1383,15 @@ summary {
   border: 1px solid var(--border);
   border-radius: 11px;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 5px;
+  padding: 0;
   background: var(--panel);
-  font-size: 11px;
   line-height: 1.15;
   overflow: hidden;
-}
-.restaurant-table span {
-  font-size: 9px;
-  color: var(--muted);
 }
 .restaurant-table.table-round {
   border-radius: 50%;
 }
-/* Etapa 7.1: cinco estados calculados por Go, con tokens por tema y un indicador de texto o icono
-   en cada mesa (tiempo, «Precuenta», «Saldo $X», candado). */
+/* Etapa 7.1: cinco estados calculados por Go, con tokens por tema; el color no cambia en la 9C. */
 .restaurant-table.table-free {
   background: var(--table-free-bg);
   border-color: var(--table-free-border);
@@ -1353,34 +1421,120 @@ summary {
   border: 1px dashed var(--table-out-border);
   color: var(--table-out-text);
 }
-.restaurant-table .table-indicator {
-  /* En mesas pequeñas (o redondas) el icono pasa arriba del texto en lugar de recortarlo. */
+/* Etapa 9C (§4): contenido del mosaico. El tamaño de letra sigue al tamaño de la mesa (unidades de
+   contenedor) y los datos secundarios se ocultan primero en mesas pequeñas; los márgenes
+   automáticos centran el contenido sin recortar el nombre cuando no cabe. */
+.table-tile {
+  container-type: size;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 5px;
+  overflow: hidden;
+  text-align: center;
+}
+.table-tile > :first-child {
+  margin-top: auto;
+}
+.table-tile > :last-child {
+  margin-bottom: auto;
+}
+.table-tile-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+}
+.table-tile-name strong {
+  min-width: 0;
+  font-size: clamp(14px, min(17cqw, 28cqh), 30px);
+  font-weight: 750;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.table-tile-icon {
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+.table-tile-state,
+.table-tile-details,
+.table-tile-balance,
+.table-tile-accounts {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 1px 3px;
+  gap: 1px 4px;
   max-width: 100%;
   color: inherit;
-  font-size: 9.5px;
-  font-weight: 650;
+  font-size: clamp(11px, min(11cqw, 17cqh), 15px);
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
-  text-align: center;
+  line-height: 1.15;
 }
-.restaurant-table .table-indicator svg {
-  flex: 0 0 auto;
+/* El estado, el saldo y las cuentas se leen como texto: su icono va en la línea y el texto se
+   parte entre palabras si no cabe («Fuera de / servicio»). */
+.table-tile-state,
+.table-tile-balance,
+.table-tile-accounts {
+  display: block;
 }
-.restaurant-table .table-account-count {
-  color: inherit;
+.table-tile-state svg {
+  display: inline-block;
+  margin-right: 3px;
+  vertical-align: -2px;
+}
+.table-tile-state {
+  font-weight: 700;
+}
+.table-tile-balance {
+  font-weight: 700;
+}
+.table-tile-details {
+  gap: 1px 8px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+.table-tile-time,
+.table-tile-seats {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.table-tile-accounts {
   opacity: 0.85;
 }
-.restaurant-table.table-free .table-indicator,
-.restaurant-table.table-out_of_service .table-indicator {
-  font-weight: 500;
+.table-tile svg {
+  flex: 0 0 auto;
+}
+@container (max-height: 88px) {
+  .table-tile-accounts {
+    display: none;
+  }
+}
+@container (max-height: 72px) {
+  .table-tile-balance + .table-tile-details {
+    display: none;
+  }
+}
+@container (max-height: 56px) {
+  .table-tile-details,
+  .table-tile-balance {
+    display: none;
+  }
+}
+@container (max-width: 84px) {
+  .table-tile-icon {
+    display: none;
+  }
 }
 .restaurant-table.selected-table {
-  outline: 2px solid var(--accent);
+  outline: 3px solid var(--accent);
   outline-offset: 2px;
 }
 .table-map-designer .table-map-viewport {
@@ -1423,10 +1577,6 @@ summary {
   align-items: center;
   gap: 5px;
   color: var(--text);
-}
-.map-legend .map-legend-hint {
-  display: inline;
-  color: var(--muted);
 }
 .legend-swatch {
   width: 18px;
@@ -3781,16 +3931,6 @@ summary {
   padding: 0 6px;
   font-size: 12px;
 }
-/* Etapa 9A (§33): en el panel de la mesa, «Poner fuera de servicio» pasa a su propia fila a todo el
-   ancho de las acciones secundarias, así su texto cabe en una línea con cualquier ancho del panel
-   (a 1280 × 720 ocupaba tres líneas en un tercio de la fila). Las demás acciones, de base cero,
-   siguen compartiendo su fila. */
-.table-panel-footer .capture-secondary-actions {
-  flex-wrap: wrap;
-}
-.capture-secondary-actions > .table-service-action {
-  flex: 1 0 100%;
-}
 /* Pie angosto (cuenta de 1280 px o menos): el icono va sobre el texto para que las cuatro acciones
    secundarias quepan en una fila y las principales conserven su texto en una línea, sin cambiar
    su altura (44 y 56 px) ni su orden. */
@@ -3941,13 +4081,58 @@ summary {
   flex-shrink: 0;
 }
 .table-panel-header h2 {
-  font-size: 20px;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 22px;
+  font-weight: 750;
   line-height: 1.2;
   overflow-wrap: anywhere;
 }
-.table-panel-header p {
-  font-size: 12px;
+/* Etapa 9C (§4): icono de mesa junto al nombre y, debajo, capacidad y tiempo abierta con sus
+   iconos. */
+.table-panel-title {
+  min-width: 0;
+}
+.table-panel-icon {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.table-panel-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.table-panel-facts li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+/* En el panel de la mesa las acciones secundarias van en una cuadrícula de dos o más columnas, con
+   el icono a la izquierda del texto en una sola línea (etapa 9C, §4: a 1280 × 720 cuatro en una
+   fila recortaban «Precuenta»). «Poner fuera de servicio» conserva su fila a todo el ancho (etapa
+   9A, §33: así su texto cabe en una línea con cualquier ancho del panel). */
+.table-panel-footer .capture-secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+}
+.table-panel-footer .capture-secondary-actions > .table-service-action {
+  grid-column: 1 / -1;
+}
+.table-panel-footer .capture-secondary-actions .secondary-button {
+  padding: 0 10px;
+  font-size: 13px;
+}
+/* En el panel de la mesa la acción principal es «Capturar» (relleno de acento); «Cobrar» conserva
+   su lugar y su tamaño con borde y texto de acento (§0-B de la etapa 9C). */
+.table-panel-footer .capture-checkout:not(:disabled) {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 .table-panel-state {
   flex-shrink: 0;
@@ -7736,4 +7921,43 @@ th[aria-sort='descending'] {
   color: var(--text);
   font-size: 16px;
   font-weight: 600;
+}
+
+/* Etapa 9C, fase D (D2): selector de hora (components/TimeField.tsx). Hora y minutos son dos
+   selectores de la fase B de ancho fijo con cifras tabulares, separados por «:»; la variante con
+   fecha antepone el campo dd/mm/aaaa. Sin escritura libre en la hora. */
+.time-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.time-inputs .time-select {
+  flex: 0 0 auto;
+  width: 96px;
+}
+.time-inputs .time-select .select-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.time-inputs .time-select .select-placeholder {
+  font-weight: 400;
+}
+.time-separator {
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 700;
+}
+.date-time-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.date-time-inputs .date-time-date {
+  flex: 0 0 auto;
+  width: 150px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }

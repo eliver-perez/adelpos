@@ -246,9 +246,9 @@ function UncertainReceipt() {
   return (
     <div className="inventory-negative-notice" role="status">
       <p>
-        No se pudo confirmar si la recepción quedó registrada. Recupérala con «Reintentar con el
-        mismo identificador» (arriba): así nunca se registra dos veces. Después consulta el listado
-        de recepciones antes de capturarla de nuevo.
+        No se pudo confirmar si la recepción quedó registrada. Recupérala con «Reintentar sin
+        duplicar» (arriba): así nunca se registra dos veces. Después consulta el listado de
+        recepciones antes de capturarla de nuevo.
       </p>
     </div>
   );
@@ -341,7 +341,7 @@ function OrderReceiptLine({
           value={draft.discount}
           onChange={(discount) => onChange({ ...draft, discount })}
           shape={amountShape}
-          hint="Vacío: la parte proporcional del descuento de la orden, calculada por el servidor."
+          hint="Vacío: la parte proporcional del descuento de la orden."
         />
         <TaxRateControl
           label={`Tasa de IVA de ${line.item.name}`}
@@ -559,7 +559,7 @@ export function DirectReceiptForm({
   return (
     <ReceiptPanel
       title="Recepción directa"
-      description="Mercancía recibida sin orden de compra. El proveedor es obligatorio; los importes los calcula el servidor."
+      description="Mercancía recibida sin orden de compra. El proveedor es obligatorio; los importes se calculan al guardar."
       closeLabel="Volver a recepciones"
       onClose={onClose}
     >

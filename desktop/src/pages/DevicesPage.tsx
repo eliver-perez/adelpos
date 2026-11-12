@@ -208,7 +208,9 @@ export function DevicesPage({
               <tr key={device.id}>
                 <td>
                   <strong>{device.name}</strong>
-                  <small className="muted block font-mono">{device.id}</small>
+                  <small className="muted block">
+                    Código: <span className="font-mono">{device.id}</span>
+                  </small>
                 </td>
                 <td>{device.register_name ?? 'Sin asociación'}</td>
                 <td>{homeLabel(device)}</td>

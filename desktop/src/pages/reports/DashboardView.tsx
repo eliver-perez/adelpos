@@ -164,7 +164,6 @@ export function DashboardView({
           comparison={data?.comparison ?? null}
           allowCompare
           dayStart={data?.day_start ?? catalog.day_start}
-          timezone={data?.timezone ?? catalog.timezone}
         />
       </div>
       {error && (

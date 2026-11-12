@@ -165,8 +165,8 @@ function LinkExpenseForm({
       {uncertain && (
         <div className="inventory-negative-notice" role="status">
           <p>
-            No se pudo confirmar el vínculo. Recupéralo con «Reintentar con el mismo identificador»
-            (arriba) antes de intentarlo otra vez.
+            No se pudo confirmar el vínculo. Recupéralo con «Reintentar sin duplicar» (arriba) antes
+            de intentarlo otra vez.
           </p>
         </div>
       )}

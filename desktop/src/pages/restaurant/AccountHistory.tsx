@@ -29,9 +29,7 @@ export function AccountHistory({ bill, onClose }: { bill: Bill; onClose: () => v
           title={eventLabels[event.kind] ?? event.kind}
           summary={`${serverDateTime(event.created_at, bill.timezone)} · ${event.author_name} · ${event.device_name}`}
         >
-          <p className="muted text-xs">
-            Registro persistente #{event.sequence}. Integración con cocina pendiente.
-          </p>
+          <p className="muted text-xs">Movimiento #{event.sequence} de la cuenta.</p>
           <HistoryDetails event={event} />
         </Accordion>
       ))}

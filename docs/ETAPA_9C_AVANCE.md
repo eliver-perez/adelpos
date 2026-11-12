@@ -720,3 +720,113 @@ Sobre una copia exacta de `88d54f0` (fases A, B y C y parte D1): Prettier, gofmt
 con y sin `-tags=integration` sin hallazgos; `tsc --noEmit` sin errores; `npm test` (66 archivos, 618 pruebas) y
 `npm run build` correctos; `cargo test` 40 aprobadas y 1 ignorada; Playwright completo Chromium 14/14 (5.4 min) y WebKit
 14/14 (5.2 min).
+
+## Fase D (parte D2) · Mesas, selector de hora, textos y apariencia
+
+Hecha el 11/11/2026 sobre `etapa-9c` (fases A, B y C y parte D1 ya confirmadas), por un solo agente sin
+subagentes. Sin cambios de reglas de negocio, cálculos, permisos, rutas, formatos que valida Go ni
+migraciones; las acciones del panel de mesa, los estados y sus colores no cambian (§0-B).
+
+### Qué cambió
+
+- **Mapa de mesas (§4).** Encabezado del mapa con el selector de área (botones de 44 px) y un
+  **buscador de mesas**: busca en todas las áreas activas por palabras al inicio del nombre de la mesa o
+  de su área, sin acentos («5» encuentra «Mesa 5» y no «Mesa 15»), muestra hasta 8 coincidencias como
+  botones con área y estado, Intro elige la primera y Escape borra lo escrito; elegir una es tocarla en
+  el mapa (cambia de área si hace falta, abre su panel y deja el foco en su mosaico). Participa en
+  ⌘F / Ctrl+F de la fase C (`data-screen-search`); la búsqueda de mesas de la paleta queda para cuando
+  el mapa no está a la vista. **Mosaicos más legibles**: icono de mesa y nombre grande (la letra sigue al
+  tamaño de la mesa), estado siempre en texto con su icono, tiempo ocupada con reloj y capacidad con el
+  icono de personas (la cuenta no guarda comensales: es `seats`, la capacidad de la mesa, y la leyenda
+  lo dice: «Capacidad (lugares)»), saldo en pago parcial y número de cuentas con más de una; en mesas
+  pequeñas se ocultan primero los datos secundarios. **Panel lateral**: icono de mesa junto al nombre,
+  capacidad y tiempo abierta con sus iconos, las mismas acciones con el icono a la izquierda (las
+  secundarias en una cuadrícula de dos o más columnas: a 1280 × 720 cuatro en una fila recortaban
+  «Precuenta») y «Capturar» destacada como principal («Cobrar» conserva lugar y tamaño, con borde de
+  acento).
+- **Selector de hora (§2.1).** Componente `components/TimeField.tsx` sobre el selector de la fase B:
+  hora y minutos (24 h) sin escritura libre, de 5 en 5 o de 1 en 1, conserva un valor guardado fuera
+  del paso, «24» (medianoche) solo en la hora final de las restricciones, y una variante con fecha
+  (dd/mm/aaaa + hora). En los seis lugares de la Fase 0: hora de inicio del día, hora inicial y final de
+  las restricciones de horario (producto, presentación, categoría y promoción), pedido programado,
+  reprogramación desde cocina y filtros Desde/Hasta del Registro de movimientos (de minuto en minuto;
+  sin hora proponen 00:00 y 23:59). No se encontró otra captura de hora. Go recibe los mismos formatos y
+  sigue validando. No queda ningún `type="time"`, `datetime-local` ni `type="number"` en la interfaz.
+- **Textos sin términos técnicos (§4.3).** 131 reemplazos en 73 archivos más los hechos a mano en los
+  componentes nuevos (lista completa, antes → después, en las notas de la parte): «Cambios guardados en
+  el servidor.» → «Cambios guardados.»; «Reintentar con el mismo identificador» → «Reintentar sin
+  duplicar» (con su explicación: si ya se había registrado, no se registra dos veces); «Zona horaria» →
+  «Zona horaria del restaurante» y sin el identificador de la zona en etiquetas y resúmenes; los
+  ejemplos de la especificación («Datos del establecimiento.», «Productos, preparación y precios.», caja
+  sin la frase del servidor); «Go», «Tauri», «persistente», «calculado por el servidor» y «KDS»
+  («pantalla de cocina») fuera de los textos visibles; claves de permisos ocultas (se ve su
+  descripción); en el Registro de movimientos, etiquetas de filtro claras y el tipo de autor en
+  palabras; «queda registrada en la auditoría» → «queda en el Registro de movimientos». El vocabulario
+  de impresoras (ESC/POS, CUPS, «raw») se conserva en su configuración, explicado. Go: el mensaje de
+  `IDEMPOTENCY_CONFLICT` (seis módulos) y el de la zona horaria del asistente, solo texto. No se tocaron
+  la «Información para soporte», la documentación técnica ni los registros internos.
+- **Apariencia (§4.4).** Configuración general: «Apariencia predeterminada para usuarios nuevos» con la
+  línea «Cada usuario la cambia en Mis preferencias; los usuarios que ya existen conservan la suya.» (en
+  el asistente inicial: «También es la de tu usuario administrador…»); Go ya la copia a los usuarios
+  nuevos desde la D1. Mis preferencias: «Apariencia» (la propia, la que se aplica), con su explicación;
+  además «Teclado en pantalla» con lo que hace cada opción en lugar de «para formularios futuros».
+
+### Decisiones y desviaciones
+
+- El buscador de mesas muestra resultados como botones en lugar de atenuar mesas en el mapa: atenuar
+  se confundiría con «Fuera de servicio» (gris tenue) y los colores de estado no cambian (§0-B).
+- «Capturar» queda como la acción principal del panel (§0-B); «Cobrar» pasa de relleno a borde de
+  acento solo en el panel de la mesa (en la captura no cambia).
+- Capacidad en lugar de comensales: la cuenta no los guarda y no se inventan (Fase 0, punto 12).
+- El indicador de la 7.1 «Precuenta» del mosaico en espera de pago pasa a ser el estado en texto
+  «Esperando pago» con el icono del recibo (el nombre accesible conserva «precuenta impresa»); en una
+  mesa ocupada el tiempo sigue a la vista, ahora junto al estado «Ocupada».
+- En Terminales el identificador de la terminal queda como «Código: …» porque el filtro «Código de la
+  terminal» del Registro de movimientos lo necesita; las claves de los permisos se ocultaron.
+- Los mensajes de protocolo de Go («cuerpo JSON válido», «operation_id válido») no llegan en uso normal
+  y no se cambiaron; el mensaje de la configuración inicial con `./scripts/dev.sh prepare-setup` es una
+  instrucción para quien instala y se conservó.
+- Especificaciones Playwright actualizadas: `workflow-stage9c-keyboard.spec.ts` (paso 8: ⌘F lleva al
+  buscador del mapa, Intro elige la mesa y deja el foco en su mosaico), `restaurant.spec.ts` (pedido
+  programado con el selector de fecha y hora; datos del panel con sus iconos; estado «Esperando pago» en
+  el mosaico), `kitchen-flow.ts` («Recepción en pantalla de cocina pendiente») y `cash-flow.ts`
+  («Borrador guardado.»). `commands/` no se tocó: ⌘F ya buscaba el campo marcado con
+  `data-screen-search`.
+
+### Pruebas de la parte D2 (copia aislada del agente, 11/11/2026)
+
+Copia `repo9cD2` (árbol de `etapa-9c` con los cambios de la parte), clúster temporal 55499, Go temporal
+8188 y vista previa 1426.
+
+- Go: `go vet ./...` sin hallazgos; `go test -race` de `administration`, `designer`, `identity`,
+  `inventory`, `kitchen`, `operations` y `payments` → todos `ok`; integración (`-tags=integration`) de
+  los mismos siete paquetes → todos `ok` (`operations` 241 s).
+- Frontend: `npx tsc --noEmit` sin errores; `npm test` → 68 archivos, 636 pruebas aprobadas (nuevas:
+  `components/TimeField.test.tsx` con 10 y `pages/plainLanguage.test.tsx` con 4; 5 nuevas en
+  `pages/restaurant/tablePanel.test.tsx` —mosaicos, leyenda y buscador— y actualizadas
+  `businessDay` (se retiró la prueba de `formatDayStartDigits`), `reports`, `navigation`, `formsPhaseB` (2), `closing`, `operations`, `adjustments`,
+  `checkout`, `financial` e `inventoryPurchasing`); `npm run build` correcto (con el aviso de tamaño de
+  bloque que ya existía); Prettier sin diferencias en los archivos de la parte; `gofmt -l` vacío.
+- Playwright Chromium, suite completa: 15/15 (las 14 anteriores y la nueva
+  `workflow-stage9c-tables-time.spec.ts`), con capturas a 1280 × 720 y 1920 × 1080 en ambos temas del
+  mapa con el panel de una mesa ocupada, del buscador, del selector de hora abierto, de Configuración
+  general y de los filtros con fecha y hora del Registro de movimientos.
+- Playwright WebKit: **no se pudo ejecutar**. La pantalla del equipo quedó bloqueada (y la pantalla
+  apagada) a partir de las 21:52, y desde entonces WebKit no puede hacer clic ni en «Entrar» del acceso
+  («<html> intercepts pointer events»); la misma especificación sobre una copia exacta de `HEAD`
+  (sin estos cambios) falla igual, así que no es un efecto de la parte D2. Queda pendiente repetir la
+  suite WebKit con la sesión desbloqueada.
+
+### Limitaciones
+
+- Sin pantalla táctil física, teclado virtual real sobre el selector de hora ni ventana nativa
+  (WKWebView): comprobado con Vitest y Playwright Chromium; WebKit pendiente (ver Pruebas).
+- La letra de los mosaicos depende del tamaño que cada mesa tiene en el diseñador: en mesas de 100
+  unidades de ancho a 1280 × 720 con el panel abierto el icono de mesa se oculta y el nombre usa 14 px.
+- Las zonas horarias se siguen listando con su nombre de la base de zonas (por ejemplo
+  «America/Monterrey»).
+- Con muchas áreas, el selector de área se desplaza a lo ancho dentro del encabezado (el buscador
+  conserva su lugar); no se convirtió en lista desplegable para no agregar un toque.
+- Playwright WebKit pendiente de repetir con la sesión del equipo desbloqueada (ver Pruebas).
+
+WebKit no se pudo ejecutar en esta parte: la pantalla del equipo se bloqueó durante la corrida y, con la sesión bloqueada, WebKit no puede hacer clic (también falla así una copia de `HEAD` sin estos cambios, y el revisor lo observó en especificaciones anteriores a la 9C). Se ejecuta en la regresión final.

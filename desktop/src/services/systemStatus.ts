@@ -68,7 +68,7 @@ export function plainStatus(diagnostics: Diagnostics | null, configError: boolea
     return {
       tone: 'problem',
       summary: 'La versión de esta terminal y la del servidor no coinciden.',
-      advice: `${callSupport} Hay que actualizar AD-EL POS en esta terminal o en el servidor.`,
+      advice: `${callSupport} Hay que actualizar AD-EL POS en esta terminal o en el equipo servidor.`,
       server,
       database,
       versionMatches,

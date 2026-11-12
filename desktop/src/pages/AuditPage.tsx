@@ -3,7 +3,17 @@ import { useState } from 'react';
 import { dateTime, Field, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
 import { countLabel } from '../services/plural';
+import { DateTimeField } from '../components/TimeField';
 import type { AuditPage as AuditPageData } from '../services/models';
+
+// Quién hizo el movimiento, en palabras del restaurante (Go guarda un código por tipo de autor).
+const actorKinds: Record<string, string> = {
+  user: 'Usuario',
+  device: 'Terminal',
+  local_owner: 'Equipo servidor',
+  process: 'Proceso automático',
+  migration: 'Actualización del sistema',
+};
 
 export function AuditPage() {
   const [actor, setActor] = useState('');
@@ -37,33 +47,39 @@ export function AuditPage() {
         }}
       >
         <div className="form-grid">
-          <Field label="Actor (usuario exacto)">
+          <Field label="Usuario (nombre de acceso exacto)">
             <input value={actor} onChange={(event) => setActor(event.target.value)} />
           </Field>
-          <Field label="Operación exacta">
+          <Field label="Código de la operación" hint="Tal como aparece en la columna Operación.">
             <input
               placeholder="Por ejemplo: user.updated"
               value={action}
               onChange={(event) => setAction(event.target.value)}
             />
           </Field>
-          <Field label="ID de terminal">
+          <Field
+            label="Código de la terminal"
+            hint="El que aparece bajo su nombre en Sistema → Terminales."
+          >
             <input value={device} onChange={(event) => setDevice(event.target.value)} />
           </Field>
-          <Field label="Desde">
-            <input
-              type="datetime-local"
-              value={from}
-              onChange={(event) => setFrom(event.target.value)}
-            />
-          </Field>
-          <Field label="Hasta">
-            <input
-              type="datetime-local"
-              value={until}
-              onChange={(event) => setUntil(event.target.value)}
-            />
-          </Field>
+          {/* Etapa 9C (§2.1): fecha y hora con el selector, de minuto en minuto. Sin hora, «Desde»
+              propone 00:00 y «Hasta» 23:59; el filtro se sigue enviando en la hora de esta terminal
+              convertida a UTC, como antes. */}
+          <DateTimeField
+            label="Desde"
+            step={1}
+            defaultTime="00:00"
+            value={from}
+            onChange={setFrom}
+          />
+          <DateTimeField
+            label="Hasta"
+            step={1}
+            defaultTime="23:59"
+            value={until}
+            onChange={setUntil}
+          />
         </div>
         <div>
           <button className="primary-button" type="submit">
@@ -77,7 +93,7 @@ export function AuditPage() {
           <thead>
             <tr>
               <th>Momento</th>
-              <th>Actor</th>
+              <th>Usuario</th>
               <th>Operación</th>
               <th>Resultado</th>
               <th>Detalles</th>
@@ -89,7 +105,9 @@ export function AuditPage() {
                 <td>{dateTime(event.occurred_at)}</td>
                 <td>
                   {event.actor_username}
-                  <small className="muted block">{event.actor_kind}</small>
+                  <small className="muted block">
+                    {actorKinds[event.actor_kind] ?? event.actor_kind}
+                  </small>
                 </td>
                 <td>
                   <span className="font-mono text-xs">{event.action}</span>
@@ -99,7 +117,7 @@ export function AuditPage() {
                 <td>
                   <Accordion title="Ver cambios">
                     <dl className="audit-details">
-                      <dt>Entidad</dt>
+                      <dt>Registro afectado</dt>
                       <dd>{event.entity_id ?? '—'}</dd>
                       <dt>Terminal</dt>
                       <dd>{event.device_id ?? 'Local'}</dd>

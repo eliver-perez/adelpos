@@ -167,8 +167,8 @@ export function ShiftOpening({
       {mutation.uncertain && (
         <div className="operation-recovery">
           <p>
-            No se pudo confirmar la apertura del turno. Reintenta con el mismo identificador o
-            consulta el turno actual.
+            No se pudo confirmar la apertura del turno. Usa «Reintentar sin duplicar» o consulta el
+            turno actual.
           </p>
           <button
             type="button"
@@ -176,7 +176,7 @@ export function ShiftOpening({
             disabled={mutation.busy}
             onClick={() => void state.retry()}
           >
-            <IconLabel icon="refresh">Reintentar con el mismo identificador</IconLabel>
+            <IconLabel icon="refresh">Reintentar sin duplicar</IconLabel>
           </button>
           <button type="button" className="secondary-button" onClick={onChanged}>
             Consultar turno

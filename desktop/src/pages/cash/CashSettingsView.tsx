@@ -262,7 +262,7 @@ export function CashSettingsView({ catalog }: { catalog: CashCatalog | null }) {
   async function retry() {
     const problem = await mutation.retry();
     if (!problem) {
-      notifySuccess('Cambio de configuración confirmado en el servidor.');
+      notifySuccess('Cambio de configuración confirmado.');
       return;
     }
     if (!mutation.isPending()) {
@@ -284,14 +284,14 @@ export function CashSettingsView({ catalog }: { catalog: CashCatalog | null }) {
     <div className="form-stack">
       {mutation.uncertain && (
         <div className="operation-recovery">
-          <p>No se pudo confirmar el último cambio. Reintenta con el mismo identificador.</p>
+          <p>No se pudo confirmar el último cambio. Usa «Reintentar sin duplicar».</p>
           <button
             type="button"
             className="primary-button"
             disabled={mutation.busy}
             onClick={() => void retry()}
           >
-            Reintentar con el mismo identificador
+            Reintentar sin duplicar
           </button>
         </div>
       )}

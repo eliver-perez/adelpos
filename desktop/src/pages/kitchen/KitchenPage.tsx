@@ -89,7 +89,7 @@ export function KitchenPage({
     <div className="kitchen-page form-stack">
       <PageTitle
         title="Cocina y preparación"
-        description="Comandas, estaciones y colas persistentes. Preparación, pago y entrega son procesos independientes."
+        description="Comandas, estaciones e impresión. Preparación, pago y entrega son procesos independientes."
       />
       <div className="kitchen-navigation" role="group" aria-label="Funciones de cocina">
         {tabs.map((tab) => (
@@ -210,7 +210,7 @@ const historyLabels: Record<string, string> = {
   'release.automatic': 'Liberación automática revisada',
   'states.changed': 'Preparación actualizada',
   'change.retried': 'Modificación pendiente revisada',
-  'kds.acknowledged': 'Recepción KDS confirmada',
+  'kds.acknowledged': 'Recepción en pantalla de cocina confirmada',
   'print.test_requested': 'Prueba de impresión solicitada',
   'print.submitted': 'Documento aceptado por el transporte',
   'print.error': 'Error de impresión confirmado',

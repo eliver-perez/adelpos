@@ -429,7 +429,7 @@ describe('configuración general', () => {
     // Búsqueda integrada (sin el campo aparte de antes): México primero, en su propio grupo.
     const listbox = openSelect(zone);
     expect(within(listbox).getByRole('group', { name: 'México' })).toBeTruthy();
-    const search = screen.getByRole('searchbox', { name: 'Buscar zona horaria' });
+    const search = screen.getByRole('searchbox', { name: 'Buscar zona horaria del restaurante' });
     fireEvent.change(search, { target: { value: 'tijuana' } });
     expect(
       within(listbox)

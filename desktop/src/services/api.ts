@@ -381,7 +381,10 @@ export async function api<T>(
   } = {},
 ): Promise<T> {
   if (!isTauri()) {
-    throw new APIError('DESKTOP_REQUIRED', 'Esta operación requiere la aplicación Tauri.');
+    throw new APIError(
+      'DESKTOP_REQUIRED',
+      'Esta operación requiere la aplicación de escritorio AD-EL POS.',
+    );
   }
   let response: { status: number; body: unknown };
   try {

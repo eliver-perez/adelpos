@@ -84,7 +84,7 @@ export function DrawerControl({
               onChange={(event) => setReason(event.target.value)}
             />
             <small id={`${reasonID}-hint`} className="muted">
-              Entre 5 y 500 caracteres. La apertura manual queda registrada y auditada.
+              Entre 5 y 500 caracteres. La apertura manual queda en el Registro de movimientos.
             </small>
           </div>
           <button

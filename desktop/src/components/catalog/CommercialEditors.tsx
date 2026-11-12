@@ -334,8 +334,9 @@ export function PromotionEditor({
       />
       <p className="muted text-sm">
         Productos o categorías: basta coincidir con cualquiera. En 2×1/cantidad se bonifican las
-        unidades elegibles de menor importe. Los empates se resuelven por posición. Promociones con
-        igual prioridad se ordenan por identificador.
+        unidades elegibles de menor importe. Los empates se resuelven por posición. Si dos
+        promociones tienen la misma prioridad, el orden entre ellas es fijo: usa prioridades
+        distintas para decidirlo.
       </p>
       <ScopeSelector
         title="Productos participantes"

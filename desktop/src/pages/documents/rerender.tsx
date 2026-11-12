@@ -23,7 +23,7 @@ export function renderCurrentConfirmation(subject: string): ConfirmRequest {
           importes y pagos no cambian) pero con la plantilla activa hoy y la identidad vigente del
           establecimiento, así que su presentación puede ser distinta.
         </p>
-        <p>No crea ventas, pagos ni movimientos y queda registrada en la auditoría.</p>
+        <p>No crea ventas, pagos ni movimientos y queda en el Registro de movimientos.</p>
       </>
     ),
     confirmLabel: renderCurrentLabel,

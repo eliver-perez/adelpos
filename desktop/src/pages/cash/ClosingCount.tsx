@@ -94,14 +94,14 @@ function DraftStatus({
     <>
       <p className="muted text-xs" role="status">
         {draft.dirty
-          ? 'Cambios sin guardar: el borrador se guarda en el servidor automáticamente.'
-          : `Borrador guardado en el servidor (revisión ${draft.baseRevision}).`}
+          ? 'Cambios sin guardar: el borrador se guarda automáticamente.'
+          : 'Borrador guardado.'}
       </p>
       {draft.conflict && (
         <div className="cash-warning" role="alert">
           <strong>El conteo cambió en otra terminal.</strong>
           <p>
-            Se cargó la revisión vigente del servidor y tu captura local se conserva. Revisa las
+            Se cargó el conteo vigente y lo que capturaste en esta terminal se conserva. Revisa las
             cantidades y guarda tu conteo para sustituir el de la otra terminal.
           </p>
           <button

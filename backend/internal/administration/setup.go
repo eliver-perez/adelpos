@@ -35,7 +35,7 @@ func (input *EstablishmentInput) validate() error {
 		return invalid("Indica un nombre de hasta 100 caracteres y moneda MXN.")
 	}
 	if !validTimezone(input.Timezone) {
-		return invalid("Elige una zona horaria de la lista (identificador IANA válido).")
+		return invalid("Elige la zona horaria del restaurante de la lista.")
 	}
 	if input.Theme != "light" && input.Theme != "dark" {
 		return invalid("El tema debe ser light o dark.")

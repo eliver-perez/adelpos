@@ -324,12 +324,11 @@ function PurchaseOrderEditor({
     }
   }
 
-  let totalsNote = 'Los importes los calcula el servidor al guardar el borrador.';
+  let totalsNote = 'Los importes se calculan al guardar el borrador.';
   if (order && dirty) {
-    totalsNote =
-      'Totales del borrador guardado. Guarda el borrador para que el servidor calcule los cambios.';
+    totalsNote = 'Totales del borrador guardado. Guarda el borrador para calcular los cambios.';
   } else if (order) {
-    totalsNote = 'Calculados por el servidor: suma exacta de los renglones.';
+    totalsNote = 'Suma exacta de los renglones.';
   }
 
   return (

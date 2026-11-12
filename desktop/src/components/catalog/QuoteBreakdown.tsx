@@ -44,7 +44,7 @@ export function ProductDetails({
   return (
     <div className="quote-product-details">
       <p className="muted text-xs">
-        {value.price_origin} · Configuración r{value.revision}
+        {value.price_origin} · versión {value.revision} del producto
       </p>
       <dl className="price-breakdown">
         <dt>Base</dt>
@@ -115,11 +115,9 @@ export function QuoteBreakdown({ value }: { value: Quote }) {
   return (
     <div className="form-stack">
       <div>
-        <p className="eyebrow">Cálculo confirmado por Go</p>
+        <p className="eyebrow">Precio calculado</p>
         <h2 className="quote-total">{formatMoney(value.total)}</h2>
-        <p className="muted text-xs">
-          {value.price_list_name} · {value.timezone}
-        </p>
+        <p className="muted text-xs">{value.price_list_name}</p>
       </div>
       <dl className="price-breakdown">
         <dt>Subtotal</dt>

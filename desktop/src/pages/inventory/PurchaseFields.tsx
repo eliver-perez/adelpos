@@ -420,9 +420,7 @@ function PurchaseLineEditor({
       {line.computed ? (
         <LineAmounts line={line.computed} />
       ) : (
-        <p className="muted text-xs">
-          Importe, IVA y total del renglón los calcula el servidor al guardar.
-        </p>
+        <p className="muted text-xs">Importe, IVA y total del renglón se calculan al guardar.</p>
       )}
     </fieldset>
   );

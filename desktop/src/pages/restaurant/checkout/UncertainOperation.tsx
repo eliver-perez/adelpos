@@ -40,8 +40,9 @@ export function UncertainOperation({
     <div className="checkout-uncertain" role="alert">
       <strong>No se pudo confirmar el resultado {describe(request, methods)}.</strong>
       <p>
-        No registres otra operación financiera en esta cuenta. Reintenta con el mismo identificador:
-        si ya llegó al servidor se recupera sin duplicarse. También puedes consultar el resultado.
+        No registres otra operación financiera en esta cuenta. Usa «Reintentar sin duplicar»: si ya
+        se había registrado, se recupera sin registrarse dos veces. También puedes consultar el
+        resultado.
       </p>
       {authorized && (
         <p>
@@ -51,9 +52,7 @@ export function UncertainOperation({
       )}
       <div className="button-row">
         <button type="button" className="primary-button" disabled={busy} onClick={onRetry}>
-          <IconLabel icon="refresh">
-            {busy ? 'Reintentando…' : 'Reintentar con el mismo identificador'}
-          </IconLabel>
+          <IconLabel icon="refresh">{busy ? 'Reintentando…' : 'Reintentar sin duplicar'}</IconLabel>
         </button>
         <button type="button" className="secondary-button" onClick={onConsult}>
           Consultar resultado

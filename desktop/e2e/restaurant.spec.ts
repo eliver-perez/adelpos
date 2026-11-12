@@ -444,7 +444,9 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.locator('.capture-topbar').getByRole('button', { name: /Mesas/ }).click();
   await expect(tablePanel).toBeVisible();
   await expect(tablePanel.locator('.table-panel-state')).toHaveText('Ocupada');
-  await expect(tablePanel).toContainText(/Mesa para 4 · Abierta hace/);
+  // Etapa 9C (§4): capacidad y tiempo abierta, cada dato con su icono.
+  const tableFacts = tablePanel.getByRole('list', { name: 'Datos de la mesa' });
+  await expect(tableFacts.getByRole('listitem')).toHaveText(['Mesa para 4', /^Abierta hace /]);
   const panelAccounts = tablePanel.getByRole('group', { name: 'Cuentas abiertas de la mesa' });
   await expect(
     panelAccounts.getByRole('button', { name: 'Cuenta #2', exact: true }),
@@ -517,7 +519,9 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await precheckPanel.getByRole('button', { name: 'Volver', exact: true }).click();
   const awaitingTable = page.getByRole('button', { name: /^Mesa 1, Esperando pago/ });
   await expect(awaitingTable).toBeVisible({ timeout: 10000 });
-  await expect(awaitingTable).toContainText('Precuenta');
+  // Etapa 9C (§4): el mosaico muestra el estado en texto con el icono del recibo (antes, «Precuenta»).
+  await expect(awaitingTable.locator('.table-tile-state')).toHaveText('Esperando pago');
+  await expect(awaitingTable.locator('.table-tile-state svg')).toHaveCount(1);
   await expect(tablePanel.locator('.table-panel-state')).toHaveText('Esperando pago');
   await panelThemes(page, testInfo, 'table-awaiting-payment', 'Capturar');
   await openSection(page, 'Para llevar');
@@ -541,11 +545,21 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await chooseOption(page.getByRole('combobox', { name: 'Programación', exact: true }), {
     value: 'delivery',
   });
-  await page.getByLabel('Fecha y hora · America/Monterrey').fill('2026-12-15T19:30');
+  // Etapa 9C (§2.1): fecha dd/mm/aaaa y hora con el selector (hora y minutos), sin escritura libre
+  // en la hora ni el identificador de la zona horaria en la etiqueta.
+  const when = order.getByRole('group', { name: 'Fecha y hora' });
+  await when.getByRole('textbox', { name: 'Fecha', exact: true }).fill('15122026');
+  await chooseOption(when.getByRole('combobox', { name: 'Hora', exact: true }), '19');
+  await chooseOption(when.getByRole('combobox', { name: 'Minutos', exact: true }), '30');
+  await expect(order.getByRole('button', { name: /Pedido programado/ })).toContainText(
+    '15/12/2026 19:30',
+  );
   await scheduled.click();
   await scheduled.focus();
   await page.keyboard.press('Space');
-  await expect(page.getByLabel('Fecha y hora · America/Monterrey')).toHaveValue('2026-12-15T19:30');
+  await expect(when.getByRole('textbox', { name: 'Fecha', exact: true })).toHaveValue('15/12/2026');
+  await expectSelectValue(when.getByRole('combobox', { name: 'Hora', exact: true }), '19');
+  await expectSelectValue(when.getByRole('combobox', { name: 'Minutos', exact: true }), '30');
   await order.getByRole('button', { name: 'Guardar datos del pedido', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Productos' })).toBeVisible();
   await expect(page.locator('.capture-topbar')).toContainText('Ventanilla');

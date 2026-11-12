@@ -58,7 +58,6 @@ export function PeriodFilter({
   comparison = null,
   allowCompare,
   dayStart,
-  timezone,
   disabled = false,
 }: {
   periods: FilterOption[];
@@ -69,7 +68,6 @@ export function PeriodFilter({
   comparison?: ResolvedPeriod | null;
   allowCompare: boolean;
   dayStart?: string;
-  timezone?: string;
   disabled?: boolean;
 }) {
   const [draft, setDraft] = useState(value);
@@ -324,10 +322,7 @@ export function PeriodFilter({
           {dayStart && (
             <div>
               <dt>Inicio del día</dt>
-              <dd>
-                {dayStart}
-                {timezone ? ` · ${timezone}` : ''}
-              </dd>
+              <dd>{dayStart}</dd>
             </div>
           )}
         </dl>

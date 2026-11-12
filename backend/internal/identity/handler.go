@@ -223,7 +223,7 @@ func (handler *service) replay(operationID, fingerprint string) (any, bool, erro
 	if actorID != actor.UserID || deviceID != actor.DeviceID || previous != fingerprint {
 		return nil, false, conflict(
 			"IDEMPOTENCY_CONFLICT",
-			"El identificador de operación ya corresponde a otra solicitud. No se repitieron sus cambios.",
+			"Esta operación ya se había enviado con otros datos y no se repitió. Consulta el resultado antes de intentarlo de nuevo.",
 		)
 	}
 	return response, true, nil

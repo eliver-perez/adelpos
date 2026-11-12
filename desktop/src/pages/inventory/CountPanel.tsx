@@ -595,7 +595,7 @@ function CountActions({
               'No se pudo aplicar el conteo.',
               {
                 title: `Aplicar el ${folio.toLowerCase()}`,
-                message: `${count.theoretical_visible ? `Con las diferencias calculadas ahora, ${pluralWord(withDifference, 'se registrará', 'se registrarán')} ${countLabel(withDifference, 'movimiento de ajuste', 'movimientos de ajuste')} (faltantes y sobrantes) con la hora de cada renglón. ` : ''}Go calcula antes los consumos de ventas pendientes y conserva los movimientos posteriores a cada captura. No se puede deshacer ni aplicar dos veces.`,
+                message: `${count.theoretical_visible ? `Con las diferencias calculadas ahora, ${pluralWord(withDifference, 'se registrará', 'se registrarán')} ${countLabel(withDifference, 'movimiento de ajuste', 'movimientos de ajuste')} (faltantes y sobrantes) con la hora de cada renglón. ` : ''}Antes se calculan los consumos de ventas pendientes y se conservan los movimientos posteriores a cada captura. No se puede deshacer ni aplicar dos veces.`,
                 confirmLabel: 'Aplicar ajustes',
               },
             )

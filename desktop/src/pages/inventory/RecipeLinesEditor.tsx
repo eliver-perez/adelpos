@@ -145,10 +145,10 @@ export function lineInput(line: LineDraft, ownerKind: RecipeOwnerKind): RecipeLi
 function unitHint(line: LineDraft) {
   if (consumesItem(line) && line.item) {
     const unit = line.item.unit;
-    return `Go la convierte a ${unit.name.toLowerCase()} (${unit.code}), la unidad base del insumo.`;
+    return `Se convierte a ${unit.name.toLowerCase()} (${unit.code}), la unidad base del insumo.`;
   }
   if (!consumesItem(line) && line.preparation) {
-    return 'Go la convierte a la unidad base de la preparación.';
+    return 'Se convierte a la unidad base de la preparación.';
   }
   return undefined;
 }

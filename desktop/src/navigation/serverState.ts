@@ -36,9 +36,9 @@ export const serverStateLabels: Record<ServerState, string> = {
 
 // Descripción accesible y del aviso: qué significa cada estado para quien usa la terminal.
 export const serverStateDescriptions: Record<ServerState, string> = {
-  online: 'El servidor responde y los cambios se reciben al momento.',
+  online: 'El equipo servidor responde y los cambios llegan al momento.',
   reconnecting:
-    'El servidor responde, pero el aviso inmediato de cambios se está recuperando; la terminal se actualiza cada pocos segundos.',
+    'El equipo servidor responde, pero el aviso inmediato de cambios se está recuperando; la terminal se actualiza cada pocos segundos.',
   offline:
-    'No hay comunicación con el servidor. Se reintenta automáticamente; los cambios deben confirmarse por el servidor.',
+    'No hay comunicación con el equipo servidor. Se reintenta automáticamente; espera a que vuelva la conexión para guardar cambios.',
 };

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Field, Form, Notice } from '../../components/Forms';
-import { Check, IntegerField, TextField } from '../../components/catalog/EditorFields';
+import { Check, IntegerField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { preparationLabels, zonedInput } from '../../services/kitchen';
 import type { Board, ExecuteKitchen, Release, Task } from '../../services/kitchen';
@@ -9,6 +9,7 @@ import { notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import { elapsedTime, serverDateTime } from '../../services/restaurant';
 import { Select } from '../../components/Select';
+import { DateTimeField } from '../../components/TimeField';
 
 export function PreparationBoard({
   can,
@@ -128,8 +129,7 @@ export function PreparationBoard({
                   </p>
                   {release.scheduled_at && (
                     <p className="muted">
-                      Programado: {serverDateTime(release.scheduled_at, board.timezone)} ·{' '}
-                      {board.timezone}
+                      Programado: {serverDateTime(release.scheduled_at, board.timezone)}
                     </p>
                   )}
                   {release.due_at && (
@@ -212,7 +212,7 @@ export function PreparationBoard({
       )}
       <div className="section-heading">
         <h2>Preparación por estación</h2>
-        <span className="muted text-sm">Más antiguos primero · estado del servidor</span>
+        <span className="muted text-sm">Más antiguos primero</span>
       </div>
       <div className="kitchen-board-grid">
         {Array.from(grouped.entries()).map(([key, tasks]) => {
@@ -362,9 +362,11 @@ function ScheduleEditor({
           onClose();
         }}
       >
-        <TextField
-          label={`Fecha y hora programada · ${timezone}`}
-          type="datetime-local"
+        {/* Etapa 9C (§2.1): fecha dd/mm/aaaa y hora con el selector, de 5 en 5. Go recibe el mismo
+            «AAAA-MM-DDTHH:MM» en la zona del establecimiento. */}
+        <DateTimeField
+          label="Fecha y hora programada"
+          hint="En la zona horaria del restaurante."
           required
           value={date}
           onChange={setDate}
@@ -376,7 +378,11 @@ function ScheduleEditor({
           value={lead}
           onChange={setLead}
         />
-        <Check label="Liberación automática desde Go" value={automatic} onChange={setAutomatic} />
+        <Check
+          label="Liberar a cocina automáticamente a su hora"
+          value={automatic}
+          onChange={setAutomatic}
+        />
         <p className="muted">
           Esta operación ajusta preparación; conserva cantidades, precios y la hora comercial del
           pedido.

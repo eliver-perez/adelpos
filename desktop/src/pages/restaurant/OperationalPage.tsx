@@ -307,8 +307,9 @@ export function OperationalPage({
     return false;
   }
 
-  // Elegir una mesa desde la paleta es tocarla en el mapa (con su área a la vista).
-  function chooseTableFromCommand(id: string) {
+  // Elegir una mesa desde la paleta o desde el buscador del mapa es tocarla en el mapa (con su
+  // área a la vista).
+  function showTable(id: string) {
     const table = overview.data?.tables.find((entry) => entry.id === id);
     if (!table) {
       return;
@@ -335,7 +336,7 @@ export function OperationalPage({
     newTakeaway: () => openAccount('takeaway', null),
     openPrecheck: () => openAccountAction('precheck', 'capture'),
     leaveCapture: workspace.leaveCapture,
-    chooseTable: chooseTableFromCommand,
+    chooseTable: showTable,
     tables: () => {
       const areas = overview.data?.areas ?? [];
       return (overview.data?.tables ?? [])
@@ -369,7 +370,7 @@ export function OperationalPage({
   async function recoverOperation() {
     const problem = await mutation.retry();
     if (!problem) {
-      notifySuccess('Resultado recuperado: el servidor confirmó la operación.');
+      notifySuccess('Resultado recuperado: la operación quedó registrada.');
       return;
     }
     if (!uncertainError(problem)) {
@@ -421,7 +422,6 @@ export function OperationalPage({
         <AccountDetails
           key={bill.account.id}
           account={bill.account}
-          timezone={bill.timezone || timezone}
           lookups={lookups.data}
           can={can}
           execute={workspace.execute}
@@ -726,7 +726,7 @@ export function OperationalPage({
                 areaID={workspace.areaID}
                 selectedTableID={workspace.tableID}
                 onAreaChange={workspace.setAreaID}
-                onSelect={(table) => workspace.chooseTable(table.id)}
+                onSelect={(table) => showTable(table.id)}
               />
             </section>
           ) : (

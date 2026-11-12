@@ -106,14 +106,14 @@ export function ShiftRateCapture({
         </p>
         {mutation.uncertain && (
           <div className="operation-recovery">
-            <p>No se pudo confirmar el tipo de cambio. Reintenta con el mismo identificador.</p>
+            <p>No se pudo confirmar el tipo de cambio. Usa «Reintentar sin duplicar».</p>
             <button
               type="button"
               className="primary-button"
               disabled={mutation.busy}
               onClick={() => void retry()}
             >
-              <IconLabel icon="refresh">Reintentar con el mismo identificador</IconLabel>
+              <IconLabel icon="refresh">Reintentar sin duplicar</IconLabel>
             </button>
           </div>
         )}

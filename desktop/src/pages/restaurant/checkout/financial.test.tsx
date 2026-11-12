@@ -404,7 +404,7 @@ describe('devoluciones y correcciones en la pantalla de cobro', () => {
       status: 200,
       body: { refund_ids: ['r'], plan: planFor({ mode: 'total' }), finance, reopened: false },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Reintentar con el mismo identificador' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar sin duplicar' }));
     await waitFor(() => expect(requests('payments_refund')).toHaveLength(2));
     expect(lastBody<{ operation_id: string }>('payments_refund').operation_id).toBe(
       first.operation_id,

@@ -156,7 +156,7 @@ export function PreviewPane({
       </div>
       {problem && (
         <div className="designer-preview-problem" role="alert">
-          <strong>Go no pudo armar esta vista previa.</strong>
+          <strong>No se pudo armar esta vista previa.</strong>
           <span>{problem.message}</span>
           {problem.blockID && (
             <button

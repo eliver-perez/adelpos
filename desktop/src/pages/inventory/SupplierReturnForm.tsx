@@ -120,8 +120,7 @@ export function SupplierReturnForm({
         <div>
           <h2>Devolución a proveedor · {folio}</h2>
           <p className="muted text-xs">
-            {receipt.supplier.trade_name} · el valor asociado lo calcula el servidor al costo
-            original de la recepción
+            {receipt.supplier.trade_name} · el valor se calcula al costo original de la recepción
           </p>
         </div>
         <button type="button" className="secondary-button" onClick={onDone}>
@@ -131,8 +130,8 @@ export function SupplierReturnForm({
       {uncertain && (
         <div className="inventory-negative-notice" role="status">
           <p>
-            No se pudo confirmar si la devolución quedó registrada. Recupérala con «Reintentar con
-            el mismo identificador» (arriba) antes de capturarla de nuevo.
+            No se pudo confirmar si la devolución quedó registrada. Recupérala con «Reintentar sin
+            duplicar» (arriba) antes de capturarla de nuevo.
           </p>
         </div>
       )}

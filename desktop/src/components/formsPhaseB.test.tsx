@@ -259,7 +259,7 @@ describe('formulario con alta continua', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Guardar y crear otra' }));
     await waitFor(() => expect(saveAndNew).toHaveBeenCalledTimes(1));
     expect(save).not.toHaveBeenCalled();
-    await screen.findByText('Registro guardado en el servidor. Captura el siguiente.');
+    await screen.findByText('Registro guardado. Captura el siguiente.');
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Nombre')));
     fireEvent.click(screen.getByRole('button', { name: 'Guardar mesa' }));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));

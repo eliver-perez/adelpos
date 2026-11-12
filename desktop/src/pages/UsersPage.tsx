@@ -156,10 +156,7 @@ function UserPermissionEditor({
                     )?.effect ?? 'inherit';
                   return (
                     <tr key={permission.key}>
-                      <td>
-                        {permission.description}
-                        <small className="muted block font-mono">{permission.key}</small>
-                      </td>
+                      <td>{permission.description}</td>
                       <td>
                         <Select
                           aria-label={`Excepción: ${permission.description}`}

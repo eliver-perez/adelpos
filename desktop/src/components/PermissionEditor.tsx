@@ -24,10 +24,7 @@ export function PermissionChecklist({
               )
             }
           />
-          <span>
-            {permission.description}
-            <small className="muted block font-mono">{permission.key}</small>
-          </span>
+          <span>{permission.description}</span>
         </label>
       ))}
     </div>

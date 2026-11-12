@@ -42,7 +42,7 @@ export function useInventoryMutation() {
   async function retry() {
     const problem = await mutation.retry();
     if (!problem) {
-      notifySuccess('Cambio de inventario confirmado en el servidor.');
+      notifySuccess('Cambio de inventario confirmado.');
       return;
     }
     if (!mutation.isPending()) {

@@ -148,7 +148,7 @@ function ApplicationContent() {
       return;
     }
     notifyWarning(
-      `${connectionError} Se reintentará automáticamente; los cambios deben confirmarse por el servidor.`,
+      `${connectionError} Se reintenta automáticamente; espera a que vuelva la conexión para guardar cambios.`,
       {
         id: connectionNoticeID,
         persistent: true,
@@ -278,7 +278,7 @@ function ApplicationContent() {
           description={
             session.phase === 'secure-storage'
               ? 'El sistema operativo debe autorizar la recuperación de tus credenciales locales. Revisa su diálogo de acceso al Llavero.'
-              : 'La aplicación consulta el servidor configurado y su estado real.'
+              : 'La terminal se comunica con el equipo servidor del restaurante.'
           }
         >
           <Notice>{session.connectionError}</Notice>

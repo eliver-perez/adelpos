@@ -157,7 +157,7 @@ export function ReportsPage({
     <div className="reports-page form-stack">
       <PageTitle
         title="Reportes"
-        description="Ventas, cobros, descuentos, caja, inventarios y compras por día comercial, semana, mes o rango. Go calcula cada cifra con la hora de inicio del día; consultar un reporte no detiene cobros, captura ni cocina."
+        description="Ventas, cobros, descuentos, caja, inventarios y compras por día comercial, semana, mes o rango. Cada cifra se calcula con la hora de inicio del día; consultar un reporte no detiene cobros, captura ni cocina."
       />
       {catalogResource.error && (
         <div className="report-state report-state-error" role="alert">

@@ -291,7 +291,7 @@ async function countAndClose(page: Page, testInfo: TestInfo) {
   await expect(closing.getByLabel('Total declarado', { exact: true })).toContainText('$300.00');
   // El borrador se guarda solo en el servidor (sobrevive a la navegación y al cierre de la app).
   await expect(closing.getByText(/Cambios sin guardar/)).toHaveCount(0);
-  await expect(closing.getByText(/Borrador guardado en el servidor/)).toBeVisible();
+  await expect(closing.getByText('Borrador guardado.', { exact: true })).toBeVisible();
   // Captura ciega: ninguna cifra del esperado ni de diferencias en la pantalla del arqueo.
   const cashPage = page.locator('.cash-page');
   await expect(cashPage.getByText(/Efectivo esperado/)).toHaveCount(0);

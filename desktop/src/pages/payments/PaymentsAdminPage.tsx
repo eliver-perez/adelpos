@@ -60,7 +60,7 @@ export function PaymentsAdminPage({
   async function retry() {
     const problem = await mutation.retry();
     if (!problem) {
-      notifySuccess('Cambio de configuración confirmado en el servidor.');
+      notifySuccess('Cambio de configuración confirmado.');
       return;
     }
     if (!mutation.isPending()) {
@@ -74,7 +74,7 @@ export function PaymentsAdminPage({
     <div className="payments-admin form-stack">
       <PageTitle
         title="Cobros"
-        description="Métodos de pago, motivos de descuento, IVA, políticas de cobro y turno de caja. Los importes y las validaciones se calculan en el servidor."
+        description="Métodos de pago, motivos de descuento, IVA, políticas de cobro y turno de caja."
       />
       {!readable && (
         <Notice>
@@ -85,8 +85,8 @@ export function PaymentsAdminPage({
       {mutation.uncertain && (
         <div className="operation-recovery">
           <p>
-            El resultado del último cambio no pudo confirmarse. Recupéralo con el mismo
-            identificador antes de realizar otro.
+            El resultado del último cambio no pudo confirmarse. Recupéralo con «Reintentar sin
+            duplicar» antes de realizar otro.
           </p>
           <button
             type="button"
@@ -94,7 +94,7 @@ export function PaymentsAdminPage({
             disabled={mutation.busy}
             onClick={() => void retry()}
           >
-            Reintentar con el mismo identificador
+            Reintentar sin duplicar
           </button>
         </div>
       )}

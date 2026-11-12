@@ -290,7 +290,7 @@ export function InventoryPage({
     <div className="inventory-page form-stack">
       <PageTitle
         title="Inventarios"
-        description="Insumos, recetas, almacenes, existencias y movimientos. Las cantidades, conversiones y costos los calcula y valida el servidor."
+        description="Insumos, recetas, almacenes, existencias y movimientos."
       />
       {!can('inventory.read') && (
         <Notice>
@@ -300,8 +300,8 @@ export function InventoryPage({
       {mutation.uncertain && (
         <div className="operation-recovery" role="status">
           <p>
-            El resultado del último cambio de inventario no pudo confirmarse. Recupéralo con el
-            mismo identificador antes de realizar otro.
+            El resultado del último cambio de inventario no pudo confirmarse. Recupéralo con
+            «Reintentar sin duplicar» antes de realizar otro.
           </p>
           <button
             type="button"
@@ -309,7 +309,7 @@ export function InventoryPage({
             disabled={mutation.running}
             onClick={() => void mutation.retry()}
           >
-            Reintentar con el mismo identificador
+            Reintentar sin duplicar
           </button>
         </div>
       )}

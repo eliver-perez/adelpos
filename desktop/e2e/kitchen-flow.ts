@@ -86,7 +86,9 @@ export async function checkPreparation(page: Page) {
     await expect(burgers).toHaveCount(remaining);
   }
   await page.getByRole('button', { name: 'Comandas', exact: true }).click();
-  await expect(page.getByText('Recepción KDS pendiente', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Recepción en pantalla de cocina pendiente', { exact: true }),
+  ).toBeVisible();
   await page.locator('.kitchen-list-button').first().click();
   await expect(page.locator('.kitchen-document')).toContainText('COCINA CALIENTE');
   await expect(page.locator('.kitchen-document')).toContainText('FREIDORAS');

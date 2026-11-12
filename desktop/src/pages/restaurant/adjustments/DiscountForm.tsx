@@ -304,7 +304,7 @@ export function DiscountForm({
       {!courtesy && (
         <Field
           label={method === 'percent' ? 'Porcentaje de descuento (%)' : 'Importe del descuento ($)'}
-          hint="Hasta dos decimales. Go valida el límite y el importe."
+          hint="Hasta dos decimales. Al aplicarlo se comprueba tu límite de descuento."
         >
           <input
             type="text"

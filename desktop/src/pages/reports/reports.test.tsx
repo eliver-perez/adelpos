@@ -503,7 +503,6 @@ describe('filtro de periodo', () => {
         resolved={resolved}
         allowCompare
         dayStart="05:00"
-        timezone={timezone}
       />,
     );
     return onChange;
@@ -512,7 +511,9 @@ describe('filtro de periodo', () => {
   it('cada periodo rápido se aplica con un toque y Go dice el periodo aplicado', () => {
     const onChange = renderFilter({ ...defaultPeriod });
     expect(screen.getByText('Hoy, martes 10 de noviembre de 2026')).toBeTruthy();
-    expect(screen.getByText('05:00 · America/Monterrey')).toBeTruthy();
+    // Etapa 9C (§4.3): la hora de inicio sin el identificador de la zona horaria.
+    expect(screen.getByText('05:00')).toBeTruthy();
+    expect(screen.queryByText(/America\/Monterrey/)).toBeNull();
     for (const [label, kind] of [
       ['Hoy', 'today'],
       ['Ayer', 'yesterday'],

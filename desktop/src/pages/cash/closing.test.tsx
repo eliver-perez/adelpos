@@ -237,7 +237,7 @@ describe('arqueo y cierre ciego', () => {
       lines: [{ denomination_id: 'den-mxn-500', quantity: 1 }],
       notes: '',
     });
-    await screen.findByText('Borrador guardado en el servidor (revisión 4).');
+    await screen.findByText('Borrador guardado.');
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar cierre del turno' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog.textContent).toContain('$500.00 declarados');

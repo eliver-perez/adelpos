@@ -92,7 +92,7 @@ export function CashPage({
     <div className="cash-page form-stack">
       <PageTitle
         title="Caja"
-        description="Turno de la caja, ingresos, retiros, gastos, cortes, arqueo y cierre ciego. Los importes y las autorizaciones los calcula y valida el servidor."
+        description="Turno de la caja, ingresos, retiros, gastos, cortes, arqueo y cierre ciego."
       />
       {!can('cash.shifts.read') && (
         <Notice>

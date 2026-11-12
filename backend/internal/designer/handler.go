@@ -281,7 +281,7 @@ func (handler *service) replay(fingerprint string) (any, bool, error) {
 		return nil, false, err
 	}
 	if actorID != handler.request.Actor.UserID || deviceID != handler.request.Actor.DeviceID || previousFingerprint != fingerprint {
-		return nil, false, conflict("IDEMPOTENCY_CONFLICT", "El identificador de operación ya corresponde a otra solicitud. No se repitieron sus cambios.")
+		return nil, false, conflict("IDEMPOTENCY_CONFLICT", "Esta operación ya se había enviado con otros datos y no se repitió. Consulta el resultado antes de intentarlo de nuevo.")
 	}
 	return result, true, nil
 }

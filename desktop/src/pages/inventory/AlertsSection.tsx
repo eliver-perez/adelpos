@@ -198,7 +198,7 @@ export function AlertsSection({
         <div>
           <h2 id="inventory-alerts-title">Alertas de inventario</h2>
           <p className="muted text-xs">
-            Calculadas por el servidor al consultar. Ninguna bloquea ventas ni operaciones.
+            Se calculan al consultar. Ninguna bloquea ventas ni operaciones.
           </p>
         </div>
         {counts && (

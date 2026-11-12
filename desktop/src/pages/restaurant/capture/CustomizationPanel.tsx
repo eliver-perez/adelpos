@@ -241,7 +241,7 @@ export function CustomizationPanel({
           )}
           {preview?.quote && (
             <Accordion
-              title="Desglose calculado por el servidor"
+              title="Desglose del precio"
               summary={`Cuenta resultante: ${formatMoney(preview.combined.total)}`}
             >
               <p className="muted text-sm">{preview.pricing_policy}</p>
@@ -294,7 +294,7 @@ export function CustomizationPanel({
           </IconLabel>
         </button>
         <p className="muted text-xs capture-add-status" role="status">
-          {calculating ? 'Calculando en el servidor…' : ''}
+          {calculating ? 'Calculando el precio…' : ''}
         </p>
       </footer>
     </section>
