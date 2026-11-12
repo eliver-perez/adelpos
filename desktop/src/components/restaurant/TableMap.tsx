@@ -102,6 +102,17 @@ export function fitTables(
   };
 }
 
+// Medidas del lienzo en el estilo. El espacio visible puede medir fracciones de píxel (por ejemplo, con
+// la pantalla de Windows al 125 %) y clientWidth/clientHeight lo informan redondeado: un lienzo con esa
+// medida podía pasarse una fracción, mostrar la barra de desplazamiento (que en Windows ocupa espacio),
+// encoger el espacio, quitar la barra y repetir sin fin (etapa 9E). En la dimensión que no se desborda,
+// el lienzo se pide 1 px menor y su min-width/min-height de 100 % lo estira a la medida exacta.
+export function canvasStyle(fit: TableFit, viewport: { width: number; height: number }) {
+  const width = fit.width > viewport.width ? fit.width : Math.max(0, fit.width - 1);
+  const height = fit.height > viewport.height ? fit.height : Math.max(0, fit.height - 1);
+  return { width: `${width}px`, height: `${height}px` };
+}
+
 // Medida del espacio visible del mapa (sin barras de desplazamiento). Sin ResizeObserver (pruebas
 // sin diseño) queda en cero y el mapa usa la distribución proporcional de siempre.
 function useViewportSize(element: RefObject<HTMLDivElement | null>, enabled: boolean) {
@@ -561,7 +572,7 @@ export function TableMap({
             className={`table-canvas ${fit ? 'table-canvas-fit' : ''}`}
             ref={canvas}
             aria-label={designer ? 'Diseñador de distribución de mesas' : 'Mapa de mesas'}
-            style={fit ? { width: `${fit.width}px`, height: `${fit.height}px` } : undefined}
+            style={fit ? canvasStyle(fit, size) : undefined}
             data-scale={fit ? fit.scale.toFixed(4) : undefined}
             data-overflow={fit ? String(fit.overflow) : undefined}
           >
