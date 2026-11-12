@@ -4,94 +4,26 @@ import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
 import type { Identity, Preferences } from '../services/models';
 
-export interface ScreenEntry {
-  id: string;
-  label: string;
-  permission: string;
-  // Basta con uno de estos permisos para ver la pantalla.
-  anyPermission?: string[];
-  // Falso cuando el servidor todavía no admite la pantalla como inicio.
-  home?: boolean;
-}
-
-export const screens: ScreenEntry[] = [
-  { id: 'kitchen', label: 'Cocina y preparación', permission: 'kitchen.states.read' },
-  { id: 'restaurant', label: 'Restaurante', permission: 'accounts.read' },
-  { id: 'takeaway', label: 'Para llevar', permission: 'takeaway.read' },
-  // Etapa 7: administración de caja (turno, movimientos, arqueo, historial y reportes).
-  { id: 'cash', label: 'Caja', permission: 'cash.shifts.read' },
-  { id: 'catalog', label: 'Catálogo', permission: 'catalog.read' },
-  // Etapa 8: inventarios (insumos, almacenes, existencias, movimientos y su configuración).
-  { id: 'inventory', label: 'Inventarios', permission: 'inventory.read' },
-  // Etapa 9A: reportes, resumen ejecutivo y exportaciones (Go admite la pantalla como inicio).
-  { id: 'reports', label: 'Reportes', permission: 'reports.read' },
-  // Etapa 9B: plantillas de documentos con su editor visual e identidad del establecimiento. Go no
-  // la admite todavía como pantalla de inicio.
-  { id: 'documents', label: 'Documentos', permission: 'documents.templates.read', home: false },
-  { id: 'status', label: 'Estado del sistema', permission: '' },
-  { id: 'users', label: 'Usuarios', permission: 'users.read' },
-  { id: 'roles', label: 'Roles', permission: 'roles.read' },
-  { id: 'devices', label: 'Terminales', permission: 'devices.read' },
-  { id: 'registers', label: 'Cajas físicas', permission: 'registers.read' },
-  {
-    id: 'payments',
-    label: 'Cobros',
-    permission: '',
-    anyPermission: [
-      'payments.methods.manage',
-      'payments.settings.manage',
-      'payments.tax.manage',
-      'cash.shifts.read',
-    ],
-    home: false,
-  },
-  { id: 'sessions', label: 'Sesiones', permission: 'sessions.read' },
-  { id: 'settings', label: 'Configuración', permission: 'settings.read' },
-  { id: 'audit', label: 'Auditoría', permission: 'audit.read' },
-  { id: 'preferences', label: 'Mis preferencias', permission: '' },
-];
-
-// «Probar personalización» (preview) salió del menú principal en la etapa 6.1 y ahora es la
-// pestaña «Vista previa» de Catálogo. Una pantalla de inicio guardada con ese valor abre Catálogo
-// (Go aplica la misma equivalencia al leer y guardar preferencias).
-export function homeScreen(saved: string): string {
-  return saved === 'preview' ? 'catalog' : saved;
-}
-
-// Una pantalla se autoriza con su permiso propio y, si declara alternativas, con alguna de ellas.
-export function screenAuthorized(entry: ScreenEntry, permissions: string[]) {
-  if (entry.permission && !permissions.includes(entry.permission)) {
-    return false;
-  }
-  if (entry.anyPermission && !entry.anyPermission.some((key) => permissions.includes(key))) {
-    return false;
-  }
-  return true;
-}
-
+// Apariencia de un usuario. Desde la etapa 9C la pantalla inicial es de la terminal (Sistema →
+// Terminales): el formulario ya no la ofrece y reenvía sin cambios el valor que guarda Go, que
+// conserva el campo por compatibilidad y ya no lo usa para abrir la aplicación.
 export function UserPreferencesForm({
   value,
   userID,
-  permissions,
   onSaved,
 }: {
   value: Preferences;
   userID?: string;
-  permissions?: string[];
   onSaved: () => Promise<void>;
 }) {
   const [theme, setTheme] = useState(value.theme);
-  const [home, setHome] = useState(homeScreen(value.home_screen));
-  const available = screens.filter(
-    (screen) => screen.home !== false && (!permissions || screenAuthorized(screen, permissions)),
-  );
   return (
     <Form
       successMessage="Preferencias guardadas."
       onSave={async () => {
         await api(userID ? 'save_user_preferences' : 'save_preferences', {
           id: userID,
-          body: { theme, home_screen: home },
+          body: { theme, home_screen: value.home_screen },
         });
         await onSaved();
       }}
@@ -104,18 +36,6 @@ export function UserPreferencesForm({
           >
             <option value="light">Claro</option>
             <option value="dark">Oscuro</option>
-          </select>
-        </Field>
-        <Field
-          label="Pantalla inicial"
-          hint="Si deja de estar permitida, se utilizará Estado del sistema."
-        >
-          <select value={home} onChange={(event) => setHome(event.target.value)}>
-            {available.map((screen) => (
-              <option value={screen.id} key={screen.id}>
-                {screen.label}
-              </option>
-            ))}
           </select>
         </Field>
       </div>
@@ -158,15 +78,11 @@ export function PreferencesPage({
     <>
       <PageTitle
         title="Mis preferencias"
-        description="Tu apariencia se conserva por usuario. El teclado se configura por terminal."
+        description="Tu apariencia se conserva por usuario. El teclado y la pantalla inicial se configuran por terminal."
       />
       <section className="surface panel">
         <h2 className="mb-5">Apariencia personal</h2>
-        <UserPreferencesForm
-          value={identity.preferences}
-          permissions={identity.user.permissions}
-          onSaved={refresh}
-        />
+        <UserPreferencesForm value={identity.preferences} onSaved={refresh} />
       </section>
       <section className="surface panel">
         <h2 className="mb-5">Teclado de {identity.terminal.name}</h2>

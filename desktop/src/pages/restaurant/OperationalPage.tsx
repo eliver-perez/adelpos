@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChoiceDialog, useConfirmDialog } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
@@ -15,6 +15,7 @@ import {
   NoShiftNotice,
   useCashShortcut,
 } from '../cash/CashShortcut';
+import type { CashShortcutState } from '../cash/CashShortcut';
 import { uncertainError } from './capture/draftSync';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
@@ -40,19 +41,49 @@ export function OperationalPage({
   requestedView,
   can,
   onOpenCash,
+  cashShortcut: sharedCashShortcut,
+  requestKey = 0,
+  onViewChange,
+  onCaptureChange,
+  shellControls,
 }: {
   active: boolean;
   timezone: string;
   requestedView: 'tables' | 'takeaway';
   can: (permission: string) => boolean;
-  // «Ir a Caja» del atajo «Caja» (etapa 7.1): abre la pantalla Caja del menú principal.
+  // «Ir a Caja» del atajo «Caja» (etapa 7.1) cuando la pantalla crea su propio atajo.
   onOpenCash?: () => void;
+  // Etapa 9C: atajo «Caja» compartido con la barra superior de App (una sola consulta del turno).
+  cashShortcut?: CashShortcutState;
+  // Cambia cada vez que se elige Mesas o Para llevar en la barra superior.
+  requestKey?: number;
+  // Vista operativa visible (la barra resalta Mesas o Para llevar según ella).
+  onViewChange?: (view: RestaurantView) => void;
+  // Indica si la captura está abierta: App reduce entonces la barra superior (§1.2).
+  onCaptureChange?: (capture: boolean) => void;
+  // Controles del armazón para la barra reducida de la captura (usuario y estado del servidor).
+  shellControls?: ReactNode;
 }) {
-  const workspace = useRestaurantWorkspace(active, requestedView, can);
+  const workspace = useRestaurantWorkspace(active, requestedView, can, requestKey);
   // Atajo «Caja» (etapa 7.1): una sola consulta del turno de la terminal para la barra, la captura
-  // y la hoja superpuesta.
-  const cashShortcut = useCashShortcut({ active, can, onOpenCash });
+  // y la hoja superpuesta. En la aplicación lo crea App (barra superior, etapa 9C); montada sola,
+  // la pantalla crea el suyo y lo muestra en su barra operativa.
+  const ownCashShortcut = useCashShortcut({
+    active: active && !sharedCashShortcut,
+    can,
+    onOpenCash,
+  });
+  const cashShortcut = sharedCashShortcut ?? ownCashShortcut;
+  // Dentro del armazón de App (con la barra superior) la pantalla recibe el atajo compartido.
+  const inShell = !!sharedCashShortcut;
   const { view, panel, bill, overview, lookups, editor, mutation } = workspace;
+  const captureMode = workspace.captureMode;
+  useEffect(() => {
+    onViewChange?.(view);
+  }, [view, onViewChange]);
+  useEffect(() => {
+    onCaptureChange?.(captureMode);
+  }, [captureMode, onCaptureChange]);
   // Panel al que vuelve una acción de cuenta: dividir o transferir desde el cobro regresa al cobro.
   const [actionReturn, setActionReturn] = useState<WorkspacePanel>('capture');
   // El cobro abierto desde «Marcar como entregado» inicia con la entrega activada.
@@ -68,23 +99,40 @@ export function OperationalPage({
     panel === 'editor' &&
     !!editor &&
     editor.accountID === bill?.account.id;
+  // Etapa 9C: Mesas y Para llevar son secciones de la barra superior. Dentro de Mesas siguen como
+  // pestañas «Cuentas» y «Áreas y distribución» (decisión 5 del coordinador); Para llevar no lleva
+  // pestañas. Montada sola (pruebas), la pantalla conserva las cuatro vistas.
+  const section: RestaurantView = view === 'takeaway' ? 'takeaway' : 'tables';
   const views: { id: RestaurantView; label: string; allowed: boolean }[] = [
     {
       id: 'tables',
       label: 'Mesas',
-      allowed: can('restaurant.tables.read') && can('restaurant.areas.read'),
+      allowed:
+        can('restaurant.tables.read') &&
+        can('restaurant.areas.read') &&
+        (!inShell || section === 'tables'),
     },
-    { id: 'takeaway', label: 'Para llevar', allowed: can('takeaway.read') },
-    { id: 'accounts', label: 'Cuentas', allowed: can('accounts.read') },
+    {
+      id: 'takeaway',
+      label: 'Para llevar',
+      allowed: can('takeaway.read') && !inShell,
+    },
+    {
+      id: 'accounts',
+      label: 'Cuentas',
+      allowed: can('accounts.read') && (!inShell || section === 'tables'),
+    },
     {
       id: 'manage',
       label: 'Áreas y distribución',
       allowed:
-        can('restaurant.areas.manage') ||
-        can('restaurant.tables.manage') ||
-        can('restaurant.settings.manage'),
+        (can('restaurant.areas.manage') ||
+          can('restaurant.tables.manage') ||
+          can('restaurant.settings.manage')) &&
+        (!inShell || section === 'tables'),
     },
   ];
+  const visibleViews = views.filter((entry) => entry.allowed);
 
   function openAccountAction(action: BillAction | 'checkout', origin: WorkspacePanel) {
     setActionReturn(origin);
@@ -286,10 +334,9 @@ export function OperationalPage({
 
   const toolbar = (
     <div className="operation-toolbar">
-      <div className="operation-view-tabs" role="group" aria-label="Vistas operativas">
-        {views
-          .filter((entry) => entry.allowed)
-          .map((entry) => (
+      {visibleViews.length > 1 && (
+        <div className="operation-view-tabs" role="group" aria-label="Vistas operativas">
+          {visibleViews.map((entry) => (
             <button
               key={entry.id}
               type="button"
@@ -300,9 +347,11 @@ export function OperationalPage({
               {entry.label}
             </button>
           ))}
-      </div>
-      {/* Atajo «Caja» junto a las vistas: en el cobro no agrega otra fila a la barra. */}
-      <CashShortcut shortcut={cashShortcut} can={can} />
+        </div>
+      )}
+      {/* Atajo «Caja» junto a las vistas cuando la pantalla está sola; en la aplicación está en la
+          barra superior (etapa 9C). */}
+      {!inShell && <CashShortcut shortcut={cashShortcut} can={can} />}
       {checkoutOpen && bill && (
         <CheckoutToolbar
           bill={bill}
@@ -341,7 +390,8 @@ export function OperationalPage({
   const banners = (
     <>
       {dialog}
-      <CashShortcutSheet shortcut={cashShortcut} can={can} timezone={timezone} />
+      {/* Con el atajo compartido, App muestra la hoja una sola vez. */}
+      {!inShell && <CashShortcutSheet shortcut={cashShortcut} can={can} timezone={timezone} />}
       {conflict && (
         <ChoiceDialog
           title="Esta mesa ya tiene una cuenta"
@@ -456,8 +506,11 @@ export function OperationalPage({
     );
   }
 
-  if (workspace.captureMode) {
+  if (captureMode) {
     const content = panel === 'capture' || panel === 'editor' ? null : accountPanel();
+    // Con la operación oculta (otra pantalla visible) el botón Caja de la captura no se monta:
+    // comparte el estado del menú con el de la barra superior y, al tocar ese menú, su «tocar
+    // fuera» lo cerraría.
     return (
       <div className="operational-page">
         {banners}
@@ -474,8 +527,9 @@ export function OperationalPage({
           onNewAccount={() =>
             openAccount('dine_in', bill?.account.table_id ?? (workspace.tableID || null))
           }
-          cashShortcut={<CashShortcut shortcut={cashShortcut} can={can} />}
+          cashShortcut={active ? <CashShortcut shortcut={cashShortcut} can={can} /> : undefined}
           shiftNotice={<NoShiftNotice shortcut={cashShortcut} can={can} />}
+          shellControls={shellControls}
         />
       </div>
     );

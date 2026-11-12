@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openSection, topBar } from './navigation';
 
 // Etapa 9A, parte A1. (1) §3.1: un producto con «El precio puede bajar al cambiar complementos»
 // baja de precio al sustituir un complemento por uno más barato, con la diferencia con signo que
@@ -143,7 +144,7 @@ test('precio que baja al sustituir complementos y «Poner fuera de servicio» en
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
+  await expect(topBar(page)).toBeVisible();
   await prepareCatalog(driver);
   const area = await create(driver, 'restaurant/areas', {
     operation_id: randomUUID(),
@@ -164,8 +165,7 @@ test('precio que baja al sustituir complementos y «Poner fuera de servicio» en
   });
 
   // §33: «Poner fuera de servicio» en una sola línea en el panel de la mesa libre.
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
-  await page.getByRole('button', { name: 'Mesas', exact: true }).click();
+  await openSection(page, 'Mesas');
   await page
     .getByRole('group', { name: 'Áreas del restaurante' })
     .getByRole('button', { name: 'Terraza 9A', exact: true })
@@ -181,7 +181,7 @@ test('precio que baja al sustituir complementos y «Poner fuera de servicio» en
 
   // §3.1: sustituir el arroz ($20) por frijoles ($10) baja el precio de $150 a $140. Los nombres
   // del catálogo son propios: los complementos y grupos tienen nombre único.
-  await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
+  await openSection(page, 'Para llevar');
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
   await page

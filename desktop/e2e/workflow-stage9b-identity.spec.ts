@@ -2,6 +2,7 @@ import { deflateSync } from 'node:zlib';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration } from './navigation';
 import { notice } from './notices';
 
 // El nombre «workflow-stage9b-…» la ordena después de las especificaciones existentes: todas comparten
@@ -112,10 +113,7 @@ test('identidad 9B: subir logotipo, vista previa 58/80, presentación, retiro y 
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Documentos', exact: true })
-    .click();
+  await openAdministration(page, 'Documentos');
   await page.getByRole('tab', { name: 'Identidad del establecimiento', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Datos del establecimiento' })).toBeVisible();
   await expect(

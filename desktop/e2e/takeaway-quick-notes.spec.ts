@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openSection, topBar } from './navigation';
 
 // Etapa 8, fase B (Bq): en la captura, una indicación rápida con efecto aplica la misma selección
 // del personalizador y las guarniciones de varias porciones se sustituyen en dos toques. Mismo
@@ -167,11 +168,10 @@ test('captura: indicación con efecto y sustitución de guarniciones en dos toqu
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
+  await expect(topBar(page)).toBeVisible();
   await prepareCatalog(driver);
 
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
-  await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
+  await openSection(page, 'Para llevar');
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
   await page

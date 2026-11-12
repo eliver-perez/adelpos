@@ -31,6 +31,7 @@ export function CaptureScreen({
   onNewAccount,
   cashShortcut,
   shiftNotice,
+  shellControls,
 }: {
   workspace: Workspace;
   can: (permission: string) => boolean;
@@ -45,6 +46,8 @@ export function CaptureScreen({
   // Atajo «Caja» de la barra y aviso discreto sin turno (etapa 7.1).
   cashShortcut?: ReactNode;
   shiftNotice?: ReactNode;
+  // Etapa 9C: usuario y estado del servidor en la barra reducida de la captura.
+  shellControls?: ReactNode;
 }) {
   const { bill, lookups, editor, view } = workspace;
   const [category, setCategory] = useState('');
@@ -137,6 +140,7 @@ export function CaptureScreen({
         onDetails={() => onAction('metadata')}
         onRefresh={workspace.refresh}
         cashShortcut={cashShortcut}
+        shellControls={shellControls}
       />
       <div className="capture-body">
         {panelContent ? (

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration, openSection } from './navigation';
 import { expectNoticesClosedOnTime, notice, watchNotices } from './notices';
 import { checkCashShift } from './cash-flow';
 import { configureKitchen, checkPreparation } from './kitchen-flow';
@@ -167,8 +168,12 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await configureReceiptPrinter(page);
   // Etapa 6.1 §3.3: el pago en dólares se activa antes de abrir el turno.
   await enableUSDCash(page);
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
-  await page.getByRole('button', { name: 'Áreas y distribución', exact: true }).click();
+  // Etapa 9C: Mesas es una sección de la barra superior; «Áreas y distribución» sigue como pestaña.
+  await openSection(page, 'Mesas');
+  await page
+    .getByRole('group', { name: 'Vistas operativas' })
+    .getByRole('button', { name: 'Áreas y distribución', exact: true })
+    .click();
   await page.getByRole('button', { name: 'Crear área', exact: true }).click();
   // Etapa 6.1 §2.2: el orden se elige por posición, no con un número.
   await expect(page.getByLabel('Orden del área', { exact: true })).toHaveCount(0);
@@ -218,7 +223,10 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect
     .poll(async () => (await driver.request('GET', 'restaurant/overview')).body.tables[0].x)
     .toBe(30);
-  await page.getByRole('button', { name: 'Mesas', exact: true }).click();
+  await page
+    .getByRole('group', { name: 'Vistas operativas' })
+    .getByRole('button', { name: 'Mesas', exact: true })
+    .click();
   const tableID = (await driver.request('GET', 'restaurant/overview')).body.tables[0].id as string;
   // Etapa 6.2 §1.1–1.2: tocar la mesa abre el panel lateral (sin ventana emergente).
   await expect(page.getByRole('button', { name: 'Abrir cuenta en mesa', exact: true })).toHaveCount(
@@ -510,7 +518,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(awaitingTable).toContainText('Precuenta');
   await expect(tablePanel.locator('.table-panel-state')).toHaveText('Esperando pago');
   await panelThemes(page, testInfo, 'table-awaiting-payment', 'Capturar');
-  await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
+  await openSection(page, 'Para llevar');
   // Etapa 6.2 §2: «Nuevo pedido» entra directo a la captura, sin formulario previo.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
@@ -602,7 +610,8 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(
     page.getByRole('button', { name: 'Probar personalización', exact: true }),
   ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Catálogo', exact: true }).click();
+  // Etapa 9C: desde la captura se vuelve con «‹ Para llevar» y se entra a Administración → Catálogo.
+  await openAdministration(page, 'Catálogo');
   await page.getByRole('tab', { name: 'Vista previa', exact: true }).click();
   await page
     .getByRole('button', { name: 'Excepción autorizada de disponibilidad', exact: true })

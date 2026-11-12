@@ -5,6 +5,7 @@ import { notifyError, notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import { CatalogRecord } from './CatalogRecord';
 import { useResource } from '../../hooks/useResource';
+import { useBreadcrumbTail } from '../../navigation/NavigationContext';
 import { api } from '../../services/api';
 import type {
   CatalogDocument,
@@ -42,6 +43,12 @@ export function CatalogPage({ can }: { can: (permission: string) => boolean }) {
   // ya se editó a mano) no pasa al registro siguiente.
   const [editorSession, setEditorSession] = useState(0);
   const [focusName, setFocusName] = useState(false);
+  // Etapa 9C: la pestaña visible es el último tramo de la ruta («… › Catálogo › Productos»).
+  useBreadcrumbTail(
+    view === 'preview'
+      ? 'Vista previa'
+      : (catalogTabs.find((item) => item.id === tab)?.label ?? null),
+  );
   const { confirm, dialog } = useConfirmDialog();
   const resource = tab === 'combos' ? 'products' : tab;
   const lookup = useResource<Lookups>('catalog_lookups');

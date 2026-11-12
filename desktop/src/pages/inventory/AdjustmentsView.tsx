@@ -316,7 +316,7 @@ function ClassificationChange({
       </p>
       <Field
         label="Motivo del cambio"
-        hint="Opcional; hasta 500 caracteres. Queda en la auditoría."
+        hint="Opcional; hasta 500 caracteres. Queda en el Registro de movimientos."
       >
         <input maxLength={500} value={notes} onChange={(event) => setNotes(event.target.value)} />
       </Field>

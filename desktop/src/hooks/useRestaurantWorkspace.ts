@@ -62,6 +62,9 @@ export function useRestaurantWorkspace(
   active: boolean,
   requestedView: 'tables' | 'takeaway',
   can: (permission: string) => boolean,
+  // Etapa 9C: cambia cada vez que la persona elige Mesas o Para llevar en la barra superior, aunque
+  // ya esté en esa sección, para volver a su vista (el mapa o el listado).
+  requestKey = 0,
 ) {
   const [view, setView] = useState<RestaurantView>(requestedView);
   const [panel, setPanel] = useState<WorkspacePanel>('capture');
@@ -201,7 +204,7 @@ export function useRestaurantWorkspace(
 
   useEffect(() => {
     if (active) setView(requestedView === 'tables' && !canMap ? 'accounts' : requestedView);
-  }, [active, requestedView, canMap]);
+  }, [active, requestedView, canMap, requestKey]);
 
   // Etapa 7.1: cuando la cuenta pendiente se crea (o sus productos se agregan a otra cuenta de la
   // mesa), la selección, la personalización abierta y el mapa pasan a la cuenta real.

@@ -12,7 +12,7 @@ import { CatalogPage } from './catalog/CatalogPage';
 import { CatalogEditor } from './catalog/CatalogEditor';
 import { newCatalogDocument } from './catalog/catalogState';
 import { SettingsFields, initialSettings } from './SettingsPage';
-import { homeScreen, screens } from './PreferencesPage';
+import { sections } from '../navigation/sections';
 import { codeFromName, suggestProductCode } from '../services/productCode';
 import { mexicoTimezones, timezoneOptions } from '../services/timezones';
 import type { Category, CatalogDocument, Lookups, Product } from '../services/catalog';
@@ -388,11 +388,11 @@ describe('catálogo: posiciones, alta continua y vista previa', () => {
 });
 
 describe('«Probar personalización» fuera del menú principal', () => {
-  it('ya no es una pantalla del menú y la preferencia heredada abre Catálogo', () => {
-    expect(screens.some((entry) => entry.id === 'preview')).toBe(false);
-    expect(screens.some((entry) => entry.label === 'Probar personalización')).toBe(false);
-    expect(homeScreen('preview')).toBe('catalog');
-    expect(homeScreen('users')).toBe('users');
+  // Desde la etapa 9C la pantalla de inicio es de la terminal; Go sigue interpretando la
+  // preferencia heredada «preview» como Catálogo (security_test.go), pero ya no decide el inicio.
+  it('no es una sección del registro de navegación', () => {
+    expect(sections.some((entry) => (entry.id as string) === 'preview')).toBe(false);
+    expect(sections.some((entry) => entry.label === 'Probar personalización')).toBe(false);
   });
 });
 

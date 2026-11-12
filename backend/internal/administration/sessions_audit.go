@@ -42,7 +42,7 @@ func auditLog(ctx context.Context, tx pgx.Tx, request Request, principal Princip
 		return nil, err
 	}
 	if request.Method != "GET" {
-		return nil, invalid("La auditoría es de solo consulta.")
+		return nil, invalid("El registro de movimientos es de solo consulta.")
 	}
 	page, size := 1, 25
 	if request.Query.Get("page") != "" {

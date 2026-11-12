@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { Notice, PageTitle } from '../../components/Forms';
+import { useBreadcrumbTail } from '../../navigation/NavigationContext';
 import { AdjustmentsView } from './AdjustmentsView';
 import { CategoriesView, UnitsView } from './ConfigurationViews';
 import { CountsView } from './CountsView';
 import { inventoryPermissionName } from './inventoryFormat';
 import type { InventoryTarget } from './inventoryNavigation';
-import { availableNavigation, groupOf } from './inventorySections';
+import { availableNavigation, groupOf, inventorySections } from './inventorySections';
 import type { InventoryGroup, InventorySection } from './inventorySections';
 import { ItemsView } from './ItemsView';
 import { MovementsView } from './MovementsView';
@@ -76,6 +77,9 @@ export function InventoryPage({
   const fallback = allowed[0] ?? 'summary';
   const current = allowed.includes(section) ? section : fallback;
   const currentGroup = groups.find((group) => group.id === groupOf(current)) ?? null;
+  // Etapa 9C: el apartado visible es el último tramo de la ruta («… › Inventarios › Recetas»).
+  const currentLabel = inventorySections.find((entry) => entry.id === current)?.label ?? null;
+  useBreadcrumbTail(currentLabel);
 
   function open(next: InventorySection, target: InventoryTarget | null) {
     setDestination((previous) => ({ version: previous.version + 1, target }));

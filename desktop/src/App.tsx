@@ -1,27 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { OperationalPage } from './pages/restaurant/OperationalPage';
 import { WindowControls } from './components/WindowControls';
 import { VirtualKeyboard } from './components/VirtualKeyboard';
 import { Notice } from './components/Forms';
 import { AppToaster } from './components/AppToaster';
-import { BrandLogo } from './components/BrandLogo';
 import { CatalogPage } from './pages/catalog/CatalogPage';
-import { Icon } from './components/Icon';
 import { useSession } from './hooks/useSession';
 import { useRealtime } from './hooks/useRealtime';
+import type { RestaurantView } from './hooks/useRestaurantWorkspace';
 import { KitchenPage } from './pages/kitchen/KitchenPage';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
 import { AuditPage } from './pages/AuditPage';
 import { DevicesPage } from './pages/DevicesPage';
-import {
-  PasswordPage,
-  PreferencesPage,
-  homeScreen,
-  screenAuthorized,
-  screens,
-} from './pages/PreferencesPage';
+import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
+import { CashShortcutSheet, useCashShortcut } from './pages/cash/CashShortcut';
 import { InventoryPage } from './pages/inventory/InventoryPage';
 import { ReportsPage } from './pages/reports/ReportsPage';
 import { DocumentsPage } from './pages/documents/DocumentsPage';
@@ -34,7 +29,16 @@ import { SessionsPage } from './pages/SessionsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { StatusPage } from './pages/StatusPage';
 import { UsersPage } from './pages/UsersPage';
-import product from './generated/product.json';
+import { Breadcrumb } from './navigation/Breadcrumb';
+import { NavigationContext } from './navigation/NavigationContext';
+import type { NavigationValue } from './navigation/NavigationContext';
+import { ServerStatus } from './navigation/ServerStatus';
+import { serverState } from './navigation/serverState';
+import { TileScreen } from './navigation/TileScreen';
+import { TopBar } from './navigation/TopBar';
+import { UserMenu } from './navigation/UserMenu';
+import { barHighlight, canOpen, resolveHome } from './navigation/sections';
+import type { ScreenID } from './navigation/sections';
 import { dismissNotice, notifyError, notifyWarning } from './services/notify';
 
 const connectionNoticeID = 'connection';
@@ -44,34 +48,70 @@ export function App() {
   // el operation_id de un cobro o una operación de cocina sin resultado confirmado.
   return (
     <PendingOperationsProvider>
-      <WindowControls />
       <ApplicationContent />
       <AppToaster />
     </PendingOperationsProvider>
   );
 }
 
+// Pantallas de acceso y del asistente: sin barra superior, con el control de pantalla completa fijo
+// arriba a la derecha (como en las etapas anteriores).
+function AccessShell({ children }: { children: ReactNode }) {
+  return (
+    <>
+      <WindowControls placement="floating" />
+      {children}
+    </>
+  );
+}
+
+function isOperation(screen: ScreenID) {
+  return screen === 'restaurant' || screen === 'takeaway';
+}
+
 function ApplicationContent() {
   const session = useSession();
-  const [screen, setScreen] = useState('status');
+  // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal.
+  const [screen, setScreen] = useState<ScreenID>('restaurant');
+  // Cada elección de Mesas o Para llevar en la barra vuelve a la vista de esa sección.
+  const [operationRequest, setOperationRequest] = useState(0);
+  // Vista operativa visible y captura abierta (las informa OperationalPage).
+  const [operationView, setOperationView] = useState<RestaurantView>('tables');
+  const [captureActive, setCaptureActive] = useState(false);
+  const [tail, setTailState] = useState<{ screen: ScreenID; label: string } | null>(null);
   const [technical, setTechnical] = useState(false);
   const initializedUser = useRef<string | null>(null);
   const { confirm, dialog: leaveDialog } = useConfirmDialog();
   const identity = session.identity;
-  const realtimeStatus = useRealtime(
-    identity?.user.id ?? '',
-    !!identity?.user.permissions.includes('events.read'),
-  );
-  const operationMode = screen === 'restaurant' || screen === 'takeaway';
+  const permissions = identity?.user.permissions ?? [];
+  const realtimeEnabled = permissions.includes('events.read');
+  const realtimeStatus = useRealtime(identity?.user.id ?? '', realtimeEnabled);
+  const operationMode = isOperation(screen);
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
-  const available = screens.filter((entry) => {
-    const authorized = screenAuthorized(entry, identity?.user.permissions ?? []);
-    return authorized && (entry.id !== 'takeaway' || can('accounts.read'));
+  const authenticated = session.phase === 'authenticated';
+  const home = resolveHome(identity?.terminal.home_screen, permissions);
+  // Atajo «Caja» de la barra superior (etapa 9C): el gancho y la hoja de la 7.1 suben aquí para
+  // que el botón Caja muestre el turno en todas las pantallas con una sola consulta.
+  const cashShortcut = useCashShortcut({
+    active: authenticated && !!identity,
+    can,
+    onOpenCash: () => requestScreen('cash'),
   });
 
+  const setTail = useCallback((owner: ScreenID, label: string | null) => {
+    setTailState((current) => {
+      if (label === null) {
+        return current?.screen === owner ? null : current;
+      }
+      if (current?.screen === owner && current.label === label) {
+        return current;
+      }
+      return { screen: owner, label };
+    });
+  }, []);
+
   // La pérdida de conexión con una sesión abierta se avisa con un mensaje persistente que se
-  // retira solo cuando el servidor vuelve a responder (la cabecera también indica «Sin conexión»).
-  const authenticated = session.phase === 'authenticated';
+  // retira solo cuando el servidor vuelve a responder (la barra también indica «Fuera de línea»).
   const connectionError = session.connectionError;
   useEffect(() => {
     if (!authenticated || !connectionError) {
@@ -87,84 +127,26 @@ function ApplicationContent() {
     );
   }, [authenticated, connectionError]);
 
+  // Inicio por terminal (§1.5 y §4.1): al iniciar sesión se abre la pantalla de la terminal (o la
+  // primera sección permitida), nunca «Estado del sistema». Si la pantalla visible deja de estar
+  // permitida, se vuelve al inicio.
   useEffect(() => {
     if (!identity) {
       initializedUser.current = null;
       return;
     }
     document.documentElement.dataset.theme = identity.preferences.theme;
+    const start = resolveHome(identity.terminal.home_screen, identity.user.permissions);
     if (initializedUser.current !== identity.user.id) {
-      setScreen(homeScreen(identity.preferences.home_screen));
       initializedUser.current = identity.user.id;
+      setScreen(start);
+      setOperationRequest((current) => current + 1);
+      return;
     }
-    const current = screens.find((entry) => entry.id === screen);
-    if (current && !screenAuthorized(current, identity.user.permissions)) {
-      setScreen('status');
+    if (!canOpen(screen, identity.user.permissions)) {
+      setScreen(start);
     }
   }, [identity, screen]);
-
-  if (technical && session.phase !== 'authenticated') {
-    return (
-      <main className="p-8">
-        <button className="secondary-button mb-6" onClick={() => setTechnical(false)}>
-          Volver al acceso
-        </button>
-        <StatusPage />
-      </main>
-    );
-  }
-  if (
-    session.phase === 'loading' ||
-    session.phase === 'offline' ||
-    session.phase === 'secure-storage'
-  ) {
-    return (
-      <AccessFrame
-        title={
-          session.phase === 'loading'
-            ? 'Conectando'
-            : session.phase === 'secure-storage'
-              ? 'Revisa el acceso seguro'
-              : 'Revisa la conexión'
-        }
-        description={
-          session.phase === 'secure-storage'
-            ? 'El sistema operativo debe autorizar la recuperación de tus credenciales locales. Revisa su diálogo de acceso al Llavero.'
-            : 'La aplicación consulta el servidor configurado y su estado real.'
-        }
-      >
-        <Notice>{session.connectionError}</Notice>
-        <div className="button-row">
-          <button className="primary-button" onClick={() => void session.refresh()}>
-            Volver a comprobar
-          </button>
-          <button className="secondary-button" onClick={() => setTechnical(true)}>
-            Diagnóstico técnico
-          </button>
-        </div>
-      </AccessFrame>
-    );
-  }
-  if (session.phase === 'setup') {
-    return (
-      <SetupPage
-        available={session.local?.local_setup_available ?? false}
-        refresh={session.refresh}
-      />
-    );
-  }
-  if (session.phase === 'enroll') {
-    return (
-      <EnrollmentPage
-        message={session.message}
-        refresh={session.refresh}
-        localAvailable={session.local?.local_enrollment_available}
-      />
-    );
-  }
-  if (session.phase === 'login' || !identity) {
-    return <LoginPage message={session.message} refresh={session.refresh} />;
-  }
 
   // Navegación pedida por la persona: si una pantalla tiene cambios sin guardar (editor de
   // plantillas, etapa 9B), se confirma antes de salir de ella.
@@ -182,15 +164,23 @@ function ApplicationContent() {
     });
   }
 
-  // Sin cambios pendientes la navegación es inmediata; con ellos espera la confirmación.
-  function requestScreen(next: string) {
-    if (next === screen || !leaveWarning()) {
+  // Único punto de navegación (etapa 9C): barra superior, logotipo, mosaicos, ruta, menú del
+  // usuario, «Ir a Caja», Inventarios → Configuración y, en la fase C, el menú nativo, la paleta y
+  // los atajos. Sin cambios pendientes la navegación es inmediata; con ellos espera la confirmación.
+  function requestScreen(next: ScreenID) {
+    const go = () => {
       setScreen(next);
+      if (isOperation(next)) {
+        setOperationRequest((current) => current + 1);
+      }
+    };
+    if (next === screen || !leaveWarning()) {
+      go();
       return;
     }
     void confirmLeave().then((confirmed) => {
       if (confirmed) {
-        setScreen(next);
+        go();
       }
     });
   }
@@ -206,6 +196,83 @@ function ApplicationContent() {
     }
   }
 
+  if (technical && session.phase !== 'authenticated') {
+    return (
+      <AccessShell>
+        <main className="p-8">
+          <button className="secondary-button mb-6" onClick={() => setTechnical(false)}>
+            Volver al acceso
+          </button>
+          {/* Antes de iniciar sesión no se sabe quién usa la terminal: el diagnóstico conserva su
+              función con el mismo lenguaje sencillo y la información técnica plegada. */}
+          <StatusPage support />
+        </main>
+      </AccessShell>
+    );
+  }
+  if (
+    session.phase === 'loading' ||
+    session.phase === 'offline' ||
+    session.phase === 'secure-storage'
+  ) {
+    return (
+      <AccessShell>
+        <AccessFrame
+          title={
+            session.phase === 'loading'
+              ? 'Conectando'
+              : session.phase === 'secure-storage'
+                ? 'Revisa el acceso seguro'
+                : 'Revisa la conexión'
+          }
+          description={
+            session.phase === 'secure-storage'
+              ? 'El sistema operativo debe autorizar la recuperación de tus credenciales locales. Revisa su diálogo de acceso al Llavero.'
+              : 'La aplicación consulta el servidor configurado y su estado real.'
+          }
+        >
+          <Notice>{session.connectionError}</Notice>
+          <div className="button-row">
+            <button className="primary-button" onClick={() => void session.refresh()}>
+              Volver a comprobar
+            </button>
+            <button className="secondary-button" onClick={() => setTechnical(true)}>
+              Ver estado del sistema
+            </button>
+          </div>
+        </AccessFrame>
+      </AccessShell>
+    );
+  }
+  if (session.phase === 'setup') {
+    return (
+      <AccessShell>
+        <SetupPage
+          available={session.local?.local_setup_available ?? false}
+          refresh={session.refresh}
+        />
+      </AccessShell>
+    );
+  }
+  if (session.phase === 'enroll') {
+    return (
+      <AccessShell>
+        <EnrollmentPage
+          message={session.message}
+          refresh={session.refresh}
+          localAvailable={session.local?.local_enrollment_available}
+        />
+      </AccessShell>
+    );
+  }
+  if (session.phase === 'login' || !identity) {
+    return (
+      <AccessShell>
+        <LoginPage message={session.message} refresh={session.refresh} />
+      </AccessShell>
+    );
+  }
+
   function content() {
     if (!identity) {
       return null;
@@ -214,6 +281,16 @@ function ApplicationContent() {
       case 'restaurant':
       case 'takeaway':
         return null;
+      case 'administration':
+      case 'staff':
+      case 'system':
+        return (
+          <TileScreen
+            parent={screen}
+            permissions={identity.user.permissions}
+            onNavigate={requestScreen}
+          />
+        );
       case 'kitchen':
         return <KitchenPage can={can} timezone={identity.establishment.timezone} />;
       case 'catalog':
@@ -223,7 +300,7 @@ function ApplicationContent() {
       case 'roles':
         return <RolesPage can={can} onChanged={session.refresh} />;
       case 'devices':
-        return <DevicesPage can={can} />;
+        return <DevicesPage can={can} onSaved={session.refresh} />;
       case 'registers':
         return <RegistersPage can={can} />;
       case 'payments':
@@ -241,7 +318,7 @@ function ApplicationContent() {
           <InventoryPage
             can={can}
             timezone={identity.establishment.timezone}
-            onOpenSettings={() => setScreen('settings')}
+            onOpenSettings={() => requestScreen('settings')}
           />
         );
       case 'documents':
@@ -263,7 +340,17 @@ function ApplicationContent() {
       case 'sessions':
         return <SessionsPage can={can} />;
       case 'settings':
-        return <SettingsPage can={can} onSaved={session.refresh} />;
+        return (
+          <SettingsPage
+            can={can}
+            onSaved={session.refresh}
+            onOpenStatus={() => requestScreen('status')}
+          />
+        );
+      case 'status':
+        // «Información para soporte» solo para el administrador: quien administra la
+        // configuración general del establecimiento.
+        return <StatusPage support={can('settings.manage')} />;
       case 'audit':
         return <AuditPage />;
       case 'preferences':
@@ -271,79 +358,54 @@ function ApplicationContent() {
       case 'password':
         return <PasswordPage refresh={session.refresh} />;
       default:
-        return <StatusPage />;
+        return null;
     }
   }
 
+  const server = serverState(session.connectionError, realtimeEnabled, realtimeStatus);
+  // En la operación la barra resalta la vista visible (Mesas o Para llevar).
+  const highlight = operationMode
+    ? operationView === 'takeaway'
+      ? 'takeaway'
+      : 'restaurant'
+    : barHighlight(screen);
+  // Durante la captura (§1.2) la barra superior se reduce a la de la captura: regreso, mesa y
+  // cuenta, Caja y el usuario.
+  const reducedBar = operationMode && captureActive;
+  const userMenu = (compact: boolean) => (
+    <UserMenu
+      name={identity.user.display_name}
+      role={identity.user.role_name}
+      compact={compact}
+      onPreferences={() => requestScreen('preferences')}
+      onPassword={() => requestScreen('password')}
+      onLogout={() => void logout()}
+    />
+  );
+  const navigation: NavigationValue = { screen, home, requestScreen, setTail };
+
   return (
-    <div className={`app-shell min-h-screen ${operationMode ? 'operation-mode' : ''}`}>
-      <aside className="sidebar admin-sidebar">
-        <div className="brand-heading">
-          <div className="brand-heading-content">
-            <BrandLogo />
-            <p className="muted text-xs">Administración · v{product.version}</p>
-          </div>
-        </div>
-        <nav aria-label="Navegación principal">
-          {available.map((entry) => (
-            <button
-              key={entry.id}
-              className={screen === entry.id ? 'nav-selected' : ''}
-              onClick={() => requestScreen(entry.id)}
-              aria-current={screen === entry.id ? 'page' : undefined}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-user">
-          <strong>{identity.user.display_name}</strong>
-          <p className="muted text-xs">{identity.user.role_name}</p>
-          <button onClick={() => requestScreen('password')} className="secondary-button mt-4">
-            Cambiar contraseña
-          </button>
-          <button className="secondary-button mt-2" onClick={() => void logout()}>
-            Cerrar sesión
-          </button>
-        </div>
-      </aside>
-      <div className="min-w-0">
-        <header className="application-header">
-          <div>
-            <strong>{identity.establishment.name}</strong>
-            <p className="muted text-xs">
-              {identity.terminal.name} · {identity.establishment.currency}
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Icon name="server" />
-            <span className="text-xs">
-              {session.connectionError ? 'Sin conexión' : 'Sesión verificada'}
-            </span>
-            <span className="realtime-status text-xs">
-              {!session.connectionError && realtimeStatus}
-            </span>
-          </div>
-        </header>
-        <div className="mobile-navigation">
-          <select
-            aria-label="Pantalla"
-            value={screen}
-            onChange={(event) => requestScreen(event.target.value)}
-          >
-            {available.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label}
-              </option>
-            ))}
-            <option value="password">Cambiar contraseña</option>
-          </select>
-          <button className="secondary-button" onClick={() => void logout()}>
-            Salir
-          </button>
-        </div>
+    <NavigationContext.Provider value={navigation}>
+      <div
+        className={`app-shell min-h-screen ${operationMode ? 'operation-mode' : ''} ${
+          reducedBar ? 'capture-active' : ''
+        }`}
+      >
+        {!reducedBar && (
+          <TopBar
+            permissions={identity.user.permissions}
+            highlight={highlight}
+            home={home}
+            onNavigate={requestScreen}
+            cashShortcut={cashShortcut}
+            can={can}
+            server={server}
+            userMenu={userMenu(false)}
+          />
+        )}
         <main className="admin-main">
-          {identity.user.initial_password && (
+          {/* La recomendación no ocupa espacio de la captura (§1.2): reaparece al salir de ella. */}
+          {identity.user.initial_password && !reducedBar && (
             <div className="password-warning" role="status">
               <div>
                 <strong>Recomendamos cambiar tu contraseña inicial.</strong>
@@ -354,6 +416,11 @@ function ApplicationContent() {
               </button>
             </div>
           )}
+          <Breadcrumb
+            screen={screen}
+            tail={tail?.screen === screen ? tail.label : null}
+            onNavigate={requestScreen}
+          />
           {content()}
           {can('accounts.read') && (
             <div
@@ -365,15 +432,29 @@ function ApplicationContent() {
                 key={identity.user.id}
                 active={operationMode}
                 requestedView={screen === 'takeaway' ? 'takeaway' : 'tables'}
+                requestKey={operationRequest}
                 can={can}
-                onOpenCash={() => setScreen('cash')}
+                cashShortcut={cashShortcut}
+                onViewChange={setOperationView}
+                onCaptureChange={setCaptureActive}
+                shellControls={
+                  <>
+                    {server !== 'online' && <ServerStatus state={server} />}
+                    {userMenu(true)}
+                  </>
+                }
               />
             </div>
           )}
         </main>
+        <CashShortcutSheet
+          shortcut={cashShortcut}
+          can={can}
+          timezone={identity.establishment.timezone}
+        />
+        <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
+        {leaveDialog}
       </div>
-      <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
-      {leaveDialog}
-    </div>
+    </NavigationContext.Provider>
   );
 }

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TextareaHTMLAttributes } from 'react';
 import { Field, Form, Notice, PageTitle } from '../components/Forms';
+import { IconLabel } from '../components/Icon';
 import { ToggleButton } from '../components/ToggleButton';
 import { useResource } from '../hooks/useResource';
 import { api, APIError } from '../services/api';
@@ -344,9 +345,12 @@ export function BusinessDaySection({ can }: { can: (key: string) => boolean }) {
 export function SettingsPage({
   can,
   onSaved,
+  onOpenStatus,
 }: {
   can: (key: string) => boolean;
   onSaved: () => Promise<void>;
+  // Etapa 9C (§4.1): «Estado del sistema» salió de la navegación y se abre desde aquí.
+  onOpenStatus?: () => void;
 }) {
   const resource = useResource<Settings>('settings');
   return (
@@ -354,7 +358,13 @@ export function SettingsPage({
       <PageTitle
         title="Configuración general"
         description="Datos del establecimiento guardados en PostgreSQL."
-      />
+      >
+        {onOpenStatus && (
+          <button type="button" className="secondary-button" onClick={onOpenStatus}>
+            <IconLabel icon="activity">Ver estado del sistema</IconLabel>
+          </button>
+        )}
+      </PageTitle>
       <Notice>{resource.error}</Notice>
       {resource.data && (
         <SettingsEditor

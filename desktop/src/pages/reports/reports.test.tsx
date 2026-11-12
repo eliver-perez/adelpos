@@ -31,7 +31,7 @@ import type {
   ReportResult,
   ResolvedPeriod,
 } from '../../services/reports';
-import { screenAuthorized, screens } from '../PreferencesPage';
+import { screenAuthorized, sectionByID } from '../../navigation/sections';
 import { dashboardRefreshMilliseconds } from './DashboardView';
 import { ReportChart } from './ReportChart';
 import { ReportsPage } from './ReportsPage';
@@ -436,12 +436,12 @@ async function openSalesByDay() {
 }
 
 describe('pantalla Reportes y navegación por catálogo', () => {
-  it('se registra como pantalla principal con reports.read y admite ser pantalla de inicio', () => {
-    const entry = screens.find((screenEntry) => screenEntry.id === 'reports');
-    expect(entry?.label).toBe('Reportes');
-    expect(entry?.home).not.toBe(false);
-    expect(screenAuthorized(entry!, ['reports.read'])).toBe(true);
-    expect(screenAuthorized(entry!, ['reports.sales.read'])).toBe(false);
+  it('es un mosaico de Administración que se ve con reports.read', () => {
+    const entry = sectionByID('reports');
+    expect(entry.label).toBe('Reportes');
+    expect(entry.parent).toBe('administration');
+    expect(screenAuthorized(entry, ['reports.read'])).toBe(true);
+    expect(screenAuthorized(entry, ['reports.sales.read'])).toBe(false);
   });
 
   it('muestra solo los grupos y reportes que entrega Go, con el resumen ejecutivo primero', async () => {

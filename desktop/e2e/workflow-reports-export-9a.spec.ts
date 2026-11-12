@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration } from './navigation';
 import { notice } from './notices';
 
 // Etapa 9A, parte C1: exportación de un reporte a PDF y Excel desde la pantalla Reportes con la
@@ -27,10 +28,7 @@ test('reportes 9A: exportar PDF y Excel con el diálogo nativo simulado (guardar
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Reportes', exact: true })
-    .click();
+  await openAdministration(page, 'Reportes');
   await expect(page.getByRole('heading', { name: 'Reportes', exact: true })).toBeVisible();
   await page
     .getByRole('tablist', { name: 'Grupos de reportes' })

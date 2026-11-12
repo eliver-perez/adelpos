@@ -2,14 +2,25 @@ package administration
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-const devicesQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.created_at,d.last_seen_at,d.revoked_at
+const devicesQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at
     FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id`
+
+// terminalHomeScreens es la lista cerrada de pantallas de inicio de una terminal (etapa 9C, §1.5):
+// las secciones operativas de la barra superior. Coincide con el CHECK devices_home_screen_check de
+// la migración 0020; «Estado del sistema» y las pantallas de administración nunca son el inicio.
+var terminalHomeScreens = []string{"tables", "takeaway", "kitchen", "cash"}
+
+// validTerminalHome indica si la pantalla pedida pertenece a la lista cerrada.
+func validTerminalHome(screen string) bool {
+	return slices.Contains(terminalHomeScreens, screen)
+}
 
 func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principal, parts []string) (any, error) {
 	if request.Method == "GET" && len(parts) == 1 {
@@ -59,6 +70,9 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		Name         string  `json:"name"`
 		RegisterID   *string `json:"register_id"`
 		KeyboardMode string  `json:"keyboard_mode"`
+		// Pantalla de inicio de la terminal (etapa 9C). Opcional: si no se envía, se conserva la
+		// guardada, de modo que los clientes anteriores siguen editando la terminal sin cambiarla.
+		HomeScreen *string `json:"home_screen"`
 	}
 	if err := decode(request.Body, &input); err != nil {
 		return nil, err
@@ -66,6 +80,9 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	input.Name = strings.TrimSpace(input.Name)
 	if input.Name == "" || len(input.Name) > 80 || (input.KeyboardMode != "auto" && input.KeyboardMode != "always" && input.KeyboardMode != "disabled") {
 		return nil, invalid("Revisa el nombre de terminal y el modo de teclado.")
+	}
+	if input.HomeScreen != nil && !validTerminalHome(*input.HomeScreen) {
+		return nil, invalid("Elige la pantalla inicial de la terminal: Mesas, Para llevar, Cocina o Caja.")
 	}
 	if input.RegisterID != nil {
 		if !identifierPattern.MatchString(*input.RegisterID) {
@@ -91,7 +108,8 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	if registerChanged && shiftOpen {
 		return nil, &Fault{Status: 409, Code: "SHIFT_OPEN", Message: "La caja actual de esta terminal tiene un turno abierto o en arqueo de cierre. No se puede cambiar de caja hasta cerrarlo."}
 	}
-	if _, err := tx.Exec(ctx, "UPDATE app.devices SET name=$1,register_id=$2,keyboard_mode=$3 WHERE id=$4", input.Name, input.RegisterID, input.KeyboardMode, deviceID); err != nil {
+	// coalesce conserva la pantalla de inicio guardada cuando la petición no la incluye.
+	if _, err := tx.Exec(ctx, "UPDATE app.devices SET name=$1,register_id=$2,keyboard_mode=$3,home_screen=coalesce($4,home_screen) WHERE id=$5", input.Name, input.RegisterID, input.KeyboardMode, input.HomeScreen, deviceID); err != nil {
 		return nil, err
 	}
 	next, err := object(ctx, tx, devicesQuery+" WHERE d.id=$1", deviceID)

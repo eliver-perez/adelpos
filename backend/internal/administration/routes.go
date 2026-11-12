@@ -225,7 +225,9 @@ func currentIdentity(ctx context.Context, tx pgx.Tx, principal Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode FROM app.devices WHERE id=$1", principal.DeviceID)
+	// La terminal informa su pantalla de inicio (etapa 9C, §1.5): la aplicación abre en ella al
+	// iniciar sesión y el logotipo vuelve a ella. La preferencia por usuario ya no decide el inicio.
+	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen FROM app.devices WHERE id=$1", principal.DeviceID)
 	if err != nil {
 		return nil, err
 	}

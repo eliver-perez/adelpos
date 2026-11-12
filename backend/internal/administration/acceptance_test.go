@@ -290,7 +290,7 @@ func TestStageTwoAcceptance(t *testing.T) {
 			t.Fatal("La actividad de soporte no quedó auditada")
 		}
 	})
-	testDelegationRules(t, &delegationEnvironment{
+	environment := &delegationEnvironment{
 		ctx:             ctx,
 		pool:            pool,
 		call:            call,
@@ -298,7 +298,10 @@ func TestStageTwoAcceptance(t *testing.T) {
 		device:          terminal{id: primary.id, secret: primary.secret},
 		admin:           primary,
 		supportPassword: supportPassword,
-	})
+	}
+	// Etapa 9C: pantalla de inicio por terminal (terminal_home_acceptance_test.go).
+	testTerminalHome(t, environment)
+	testDelegationRules(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

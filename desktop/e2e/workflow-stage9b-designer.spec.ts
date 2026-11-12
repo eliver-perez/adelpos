@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration, openSection } from './navigation';
 import { notice } from './notices';
 
 // El nombre «workflow-stage9b-…» la ordena después de las especificaciones existentes: todas comparten
@@ -216,10 +217,7 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Documentos', exact: true })
-    .click();
+  await openAdministration(page, 'Documentos');
   await expect(page.getByRole('heading', { name: 'Documentos', exact: true })).toBeVisible();
   const kinds = page.getByRole('navigation', { name: 'Tipos de documento' });
   for (const group of ['Venta', 'Cocina', 'Caja']) {
@@ -404,10 +402,7 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
 
   // 10. En los documentos de la cuenta, «Imprimir con la plantilla vigente» es otra acción, con
   // su confirmación, y usa la plantilla activa.
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Para llevar', exact: true })
-    .click();
+  await openSection(page, 'Para llevar');
   await page
     .getByRole('group', { name: 'Pedidos para llevar' })
     .getByRole('button')
@@ -439,10 +434,7 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
   );
 
   // 11. Restaurar la predeterminada: activa la del sistema y conserva la copia.
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Documentos', exact: true })
-    .click();
+  await openAdministration(page, 'Documentos');
   await receipts.getByRole('button', { name: 'Restaurar predeterminada', exact: true }).click();
   const restore = page.getByRole('alertdialog', { name: 'Restaurar la plantilla predeterminada' });
   await expect(restore).toContainText('se conservan');

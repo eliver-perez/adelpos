@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { formatMoney } from '../src/services/money';
 import { installDriver } from './native-driver';
+import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
 
 // Etapa 9A, parte C2: módulo Reportes contra Go y PostgreSQL reales. Se crean por la API dos
@@ -182,11 +183,11 @@ test('reportes 9A: resumen ejecutivo con una venta real, reporte desde una tarje
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  const reports = page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Reportes', exact: true });
-  await expect(reports).toBeVisible();
-  await reports.click();
+  // Etapa 9C: Inventarios, Reportes y Documentos son mosaicos de Administración.
+  await expect(
+    topBar(page).getByRole('button', { name: 'Administración', exact: true }),
+  ).toBeVisible();
+  await openAdministration(page, 'Reportes');
   await expect(page.getByRole('heading', { name: 'Reportes', exact: true })).toBeVisible();
 
   // 1. Resumen ejecutivo: los grupos salen del catálogo de Go y la tarjeta «Ventas netas» muestra

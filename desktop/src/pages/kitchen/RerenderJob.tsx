@@ -78,7 +78,7 @@ export function RerenderJob({
         required
         value={reason}
         onChange={setReason}
-        hint="Al menos 5 caracteres; queda en la auditoría."
+        hint="Al menos 5 caracteres; queda en el Registro de movimientos."
       />
       {canRedirect && (
         <ReferenceField

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import product from './generated/product.json';
+import { useLeaveGuard } from './hooks/useLeaveGuard';
 import type { Identity } from './services/models';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -40,6 +41,18 @@ let enrolled = true;
 let hasSession = false;
 let offline = false;
 let replaced = false;
+// Identidad que entrega `me` en cada prueba (permisos y pantalla de inicio de la terminal).
+let current: Identity = identity;
+
+const settings = {
+  name: 'ADEL POS',
+  timezone: 'America/Monterrey',
+  currency: 'MXN',
+  phone: '',
+  email: '',
+  address: '',
+  theme: 'light',
+};
 
 beforeEach(() => {
   configured = true;
@@ -47,6 +60,7 @@ beforeEach(() => {
   hasSession = false;
   offline = false;
   replaced = false;
+  current = identity;
   native.invoke.mockImplementation(async (command: string, args?: { operation?: string }) => {
     if (command === 'authentication_state') {
       return {
@@ -109,7 +123,14 @@ beforeEach(() => {
             },
           };
         }
-        return { status: 200, body: identity };
+        return { status: 200, body: current };
+      case 'settings':
+        return { status: 200, body: settings };
+      case 'settings_business_day':
+        return {
+          status: 200,
+          body: { operating_day_cutoff: '05:00', timezone: 'America/Monterrey' },
+        };
       default:
         return { status: 200, body: [] };
     }
@@ -136,7 +157,7 @@ describe('acceso y recuperación de la interfaz', () => {
     });
     render(<App />);
     await screen.findByRole('heading', { name: 'Revisa el acceso seguro' });
-    expect(screen.getByRole('button', { name: 'Diagnóstico técnico' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Ver estado del sistema' })).toBeTruthy();
     expect(native.invoke.mock.calls.some(([command]) => command === 'api_request')).toBe(false);
     pending = false;
     fireEvent.click(screen.getByRole('button', { name: 'Volver a comprobar' }));
@@ -169,10 +190,15 @@ describe('acceso y recuperación de la interfaz', () => {
     await screen.findByRole('heading', { name: 'Inicia sesión' });
     fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'admin' } });
     fireEvent.click(screen.getByRole('button', { name: 'Entrar' }));
-    await screen.findByRole('heading', { name: 'Estado del sistema' });
+    // Etapa 9C: sin secciones operativas abre Administración, nunca «Estado del sistema».
+    await screen.findByRole('heading', { name: 'Administración' });
+    expect(screen.queryByRole('heading', { name: 'Estado del sistema' })).toBeNull();
     expect(screen.getByText('Recomendamos cambiar tu contraseña inicial.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Menú del usuario/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Mis preferencias' }));
     expect(screen.getByRole('heading', { name: 'Apariencia personal' })).toBeTruthy();
+    // «Pantalla inicial» salió de Mis preferencias: es de la terminal.
+    expect(screen.queryByText('Pantalla inicial')).toBeNull();
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 
@@ -183,19 +209,21 @@ describe('acceso y recuperación de la interfaz', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByRole('heading', { name: 'Estado del sistema' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Administración' })).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
     offline = true;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(screen.getByText('Sin conexión')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Usuarios' })).toBeTruthy();
+    const status = screen.getByRole('status', { name: 'Servidor: Fuera de línea' });
+    expect(status.textContent).toBe('Fuera de línea');
+    expect(screen.getByRole('button', { name: 'Personal' })).toBeTruthy();
     offline = false;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
     });
-    expect(screen.getByText('Sesión verificada')).toBeTruthy();
-    expect(screen.queryByText('Sin conexión')).toBeNull();
+    expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
+    expect(screen.queryByRole('status', { name: 'Servidor: Fuera de línea' })).toBeNull();
   });
 
   it('notifica el reemplazo de sesión y vuelve al acceso', async () => {
@@ -205,7 +233,7 @@ describe('acceso y recuperación de la interfaz', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(screen.getByRole('heading', { name: 'Estado del sistema' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Administración' })).toBeTruthy();
     replaced = true;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -214,6 +242,151 @@ describe('acceso y recuperación de la interfaz', () => {
     expect(
       screen.getByText('Tu sesión se cerró por un nuevo acceso en otra terminal.'),
     ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Usuarios' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Personal' })).toBeNull();
+  });
+});
+
+// Componente de prueba con cambios sin guardar, como el editor de plantillas de la 9B.
+function UnsavedChanges() {
+  useLeaveGuard(true, 'Hay cambios sin guardar en la plantilla.');
+  return null;
+}
+
+function withPermissions(permissions: string[], home?: Identity['terminal']['home_screen']) {
+  current = {
+    ...identity,
+    user: { ...identity.user, initial_password: false, permissions },
+    terminal: { ...identity.terminal, home_screen: home },
+  };
+}
+
+async function signedIn(ui = <App />) {
+  hasSession = true;
+  render(ui);
+  return screen.findByRole('navigation', { name: 'Navegación principal' });
+}
+
+describe('navegación de la etapa 9C', () => {
+  it('sin el permiso de la pantalla de la terminal abre la primera permitida, nunca el estado', async () => {
+    withPermissions(['users.read', 'roles.read', 'sessions.read'], 'kitchen');
+    const navigation = await signedIn();
+    await screen.findByRole('heading', { name: 'Administración' });
+    expect(
+      within(navigation)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Administración']);
+    expect(
+      within(navigation)
+        .getByRole('button', { name: 'Administración' })
+        .getAttribute('aria-current'),
+    ).toBe('page');
+    expect(screen.queryByRole('heading', { name: 'Estado del sistema' })).toBeNull();
+  });
+
+  it('Personal abre su segunda pantalla de mosaicos con ruta y el logotipo vuelve al inicio', async () => {
+    withPermissions(['users.read', 'roles.read', 'sessions.read']);
+    await signedIn();
+    fireEvent.click(await screen.findByRole('button', { name: 'Personal' }));
+    await screen.findByRole('heading', { name: 'Personal' });
+    const route = screen.getByRole('navigation', { name: 'Ruta de navegación' });
+    expect(route.textContent).toBe('Administración›Personal');
+    expect(screen.getByRole('button', { name: 'Usuarios' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Roles' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sesiones' })).toBeTruthy();
+    fireEvent.click(within(route).getByRole('button', { name: 'Administración' }));
+    await screen.findByRole('heading', { name: 'Administración' });
+    fireEvent.click(screen.getByRole('button', { name: 'Personal' }));
+    await screen.findByRole('heading', { name: 'Personal' });
+    fireEvent.click(screen.getByRole('button', { name: /^AD-EL POS · Ir al inicio/ }));
+    await screen.findByRole('heading', { name: 'Administración' });
+  });
+
+  it('la barra, los mosaicos y el logotipo respetan los cambios sin guardar', async () => {
+    withPermissions(['users.read', 'settings.read']);
+    const navigation = await signedIn(
+      <>
+        <App />
+        <UnsavedChanges />
+      </>,
+    );
+    await screen.findByRole('heading', { name: 'Administración' });
+    fireEvent.click(screen.getByRole('button', { name: 'Sistema' }));
+    let dialog = await screen.findByRole('alertdialog', { name: 'Salir sin guardar' });
+    expect(dialog.textContent).toContain('Hay cambios sin guardar en la plantilla.');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Seguir editando' }));
+    await act(async () => undefined);
+    expect(screen.getByRole('heading', { name: 'Administración' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sistema' }));
+    dialog = await screen.findByRole('alertdialog', { name: 'Salir sin guardar' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salir sin guardar' }));
+    await screen.findByRole('heading', { name: 'Sistema' });
+    // Desde la barra superior.
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Administración' }));
+    dialog = await screen.findByRole('alertdialog', { name: 'Salir sin guardar' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Seguir editando' }));
+    await act(async () => undefined);
+    expect(screen.getByRole('heading', { name: 'Sistema' })).toBeTruthy();
+    // Desde el logotipo y el menú del usuario.
+    fireEvent.click(screen.getByRole('button', { name: /^AD-EL POS · Ir al inicio/ }));
+    dialog = await screen.findByRole('alertdialog', { name: 'Salir sin guardar' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Seguir editando' }));
+    await act(async () => undefined);
+    fireEvent.click(screen.getByRole('button', { name: /^Menú del usuario/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mis preferencias' }));
+    dialog = await screen.findByRole('alertdialog', { name: 'Salir sin guardar' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Salir sin guardar' }));
+    await screen.findByRole('heading', { name: 'Mis preferencias' });
+  });
+
+  it('«Ver estado del sistema» en Sistema → Configuración, con soporte solo para el administrador', async () => {
+    withPermissions(['settings.read', 'settings.manage']);
+    await signedIn();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sistema' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Configuración' }));
+    await screen.findByRole('heading', { name: 'Configuración general' });
+    expect(screen.getByRole('navigation', { name: 'Ruta de navegación' }).textContent).toBe(
+      'Administración›Sistema›Configuración',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ver estado del sistema' }));
+    await screen.findByRole('heading', { name: 'Estado del sistema' });
+    expect(screen.getByRole('navigation', { name: 'Ruta de navegación' }).textContent).toBe(
+      'Administración›Sistema›Configuración›Estado del sistema',
+    );
+    expect(
+      await screen.findByText(
+        'Todo funciona correctamente: el servidor responde y la base de datos está conectada.',
+      ),
+    ).toBeTruthy();
+    const main = document.querySelector('main')!;
+    const support = screen.getByRole('button', { name: /Información para soporte/ });
+    expect(support.getAttribute('aria-expanded')).toBe('false');
+    // Lo visible sin desplegar el soporte no usa nombres de tecnologías ni direcciones.
+    const visible = Array.from(
+      main.querySelectorAll('.page-title, .system-status-summary, .surface'),
+    )
+      .map((element) => element.textContent)
+      .join(' ');
+    for (const technical of ['Go', 'PostgreSQL', 'Tauri', 'React', '127.0.0.1', '8181']) {
+      expect(visible).not.toContain(technical);
+    }
+    cleanup();
+    withPermissions(['settings.read']);
+    await signedIn();
+    fireEvent.click(await screen.findByRole('button', { name: 'Sistema' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Configuración' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver estado del sistema' }));
+    await screen.findByRole('heading', { name: 'Estado del sistema' });
+    expect(screen.queryByRole('button', { name: /Información para soporte/ })).toBeNull();
+  });
+
+  it('el diagnóstico antes de iniciar sesión usa el mismo lenguaje sencillo', async () => {
+    offline = true;
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Revisa la conexión' });
+    fireEvent.click(screen.getByRole('button', { name: 'Ver estado del sistema' }));
+    await screen.findByRole('heading', { name: 'Estado del sistema' });
+    expect(screen.getByRole('button', { name: /Información para soporte/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Volver al acceso' })).toBeTruthy();
   });
 });

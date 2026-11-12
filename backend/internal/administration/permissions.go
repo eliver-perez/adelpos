@@ -36,7 +36,7 @@ var Permissions = []Permission{
 	{"settings.features.manage", "Activar o desactivar funciones del establecimiento"},
 	{"registers.read", "Consultar cajas físicas"},
 	{"registers.manage", "Crear y configurar cajas físicas"},
-	{"audit.read", "Consultar auditoría"},
+	{"audit.read", "Consultar el registro de movimientos"},
 }
 
 func init() {
