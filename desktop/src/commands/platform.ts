@@ -12,6 +12,19 @@ export function currentPlatform(): Platform {
   return /Mac|iPhone|iPad/.test(source) ? 'mac' : 'other';
 }
 
+// Windows (etapa 9E): solo para los textos que dependen del sistema, como la cola de impresión
+// del equipo (CUPS en macOS, la de Windows en Windows). Distingue mayúsculas a propósito: WebView2
+// informa «Win32» y «Windows NT», mientras que el agente de jsdom («(win32)») no cuenta, de modo que
+// las pruebas de Vitest conservan los textos de macOS en cualquier sistema. En macOS ningún texto
+// cambia.
+export function isWindows() {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+  const source = `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`;
+  return /Win/.test(source);
+}
+
 // Combinación de teclas. `mod` es ⌘ en macOS y Ctrl en Windows; `ctrl` es Control además de `mod`
 // (solo el atajo de pantalla completa de macOS, ⌃⌘F). `key` es una letra en minúscula, un dígito o
 // el nombre de una tecla (F11).

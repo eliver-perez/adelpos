@@ -1,3 +1,4 @@
+import { isWindows } from '../../../commands/platform';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import { ToggleButton } from '../../../components/ToggleButton';
 import type {
@@ -187,9 +188,13 @@ export function BlockProperties({
       )}
       {(properties.has('size') || properties.has('bold') || block.type === 'logo') && (
         <p className="designer-printer-note text-xs">
-          Tamaños, negrita y logotipo requieren una impresora ESC/POS por red o una impresora CUPS
-          marcada «Esta impresora entiende ESC/POS (formato y logotipo)» cuya cola acepte datos sin
-          convertir («raw»); en las demás se imprime el mismo texto sin ese formato.
+          {/* Etapa 9E: en Windows la marca ESC/POS no aplica; en macOS el texto no cambia. */}
+          {isWindows()
+            ? 'Tamaños, negrita y logotipo se imprimen por ESC/POS en red y en las impresoras ' +
+              'instaladas en Windows que reciben los datos sin convertir («raw»).'
+            : 'Tamaños, negrita y logotipo requieren una impresora ESC/POS por red o una impresora ' +
+              'CUPS marcada «Esta impresora entiende ESC/POS (formato y logotipo)» cuya cola acepte ' +
+              'datos sin convertir («raw»); en las demás se imprime el mismo texto sin ese formato.'}
         </p>
       )}
       {(properties.has('spacing_before') || properties.has('spacing_after')) && (

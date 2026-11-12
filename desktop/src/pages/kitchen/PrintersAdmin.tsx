@@ -18,6 +18,7 @@ import {
 } from '../../services/kitchen';
 import { notifySuccess } from '../../services/notify';
 import { Select } from '../../components/Select';
+import { isWindows } from '../../commands/platform';
 
 const emptyPrinter = (): Printer => ({
   id: '',
@@ -54,6 +55,9 @@ export function PrintersAdmin({
   const [value, setValue] = useState<Printer | null>(null);
   const current = printers.data?.find((entry) => entry.id === value?.id);
   const stale = !!value?.id && current?.revision !== value.revision;
+  // Etapa 9E: en Windows la cola de impresión del equipo es la de las impresoras instaladas en
+  // Windows (siempre ESC/POS sin convertir), no CUPS; en macOS los textos no cambian.
+  const windows = isWindows();
   return (
     <div className="kitchen-editor-layout">
       <section className="panel form-stack">
@@ -64,12 +68,20 @@ export function PrintersAdmin({
           </button>
         </div>
         <Notice>{printers.error}</Notice>
-        <p className="muted">
-          Se usan las impresoras instaladas en el equipo servidor (colas CUPS, el sistema de
-          impresión de macOS) y las impresoras de tickets conectadas a la red. Una impresora
-          conectada a otra terminal todavía no se puede usar: conéctala a la red o al equipo
-          servidor.
-        </p>
+        {windows ? (
+          <p className="muted">
+            Se usan las impresoras instaladas en Windows en el equipo servidor y las impresoras de
+            tickets conectadas a la red. Una impresora conectada a otra terminal todavía no se puede
+            usar: conéctala a la red o al equipo servidor.
+          </p>
+        ) : (
+          <p className="muted">
+            Se usan las impresoras instaladas en el equipo servidor (colas CUPS, el sistema de
+            impresión de macOS) y las impresoras de tickets conectadas a la red. Una impresora
+            conectada a otra terminal todavía no se puede usar: conéctala a la red o al equipo
+            servidor.
+          </p>
+        )}
         {printers.data?.map((printer) => (
           <button
             className="kitchen-list-button"
@@ -79,7 +91,9 @@ export function PrintersAdmin({
             <strong>{printer.name}</strong>
             <span>
               {printer.transport === 'cups'
-                ? 'CUPS del equipo servidor'
+                ? windows
+                  ? 'Impresora instalada en Windows'
+                  : 'CUPS del equipo servidor'
                 : printer.transport === 'escpos_tcp'
                   ? 'ESC/POS por red'
                   : 'Otra terminal (aún no disponible)'}{' '}
@@ -89,8 +103,12 @@ export function PrintersAdmin({
           </button>
         ))}
         <Accordion
-          title="Colas anunciadas por CUPS"
-          summary="Que una cola aparezca no confirma que la impresora tenga papel ni esté conectada"
+          title={windows ? 'Impresoras instaladas en Windows' : 'Colas anunciadas por CUPS'}
+          summary={
+            windows
+              ? 'Que una impresora aparezca no confirma que tenga papel ni esté conectada'
+              : 'Que una cola aparezca no confirma que la impresora tenga papel ni esté conectada'
+          }
         >
           <button className="secondary-button" onClick={() => void discovery.reload()}>
             Consultar impresoras del equipo servidor
@@ -106,17 +124,24 @@ export function PrintersAdmin({
                   setValue({ ...emptyPrinter(), name: printer.queue, destination: printer.queue })
                 }
               >
-                Usar esta cola
+                {windows ? 'Usar esta impresora' : 'Usar esta cola'}
               </button>
-              <Accordion title={`Opciones del controlador ${printer.queue}`}>
-                <pre className="kitchen-document">
-                  {printer.options || 'El controlador no anunció opciones adicionales.'}
-                </pre>
-              </Accordion>
+              {/* Windows no anuncia opciones de controlador: el resumen ya dice puerto y estado. */}
+              {!windows && (
+                <Accordion title={`Opciones del controlador ${printer.queue}`}>
+                  <pre className="kitchen-document">
+                    {printer.options || 'El controlador no anunció opciones adicionales.'}
+                  </pre>
+                </Accordion>
+              )}
             </div>
           ))}
           {discovery.data?.length === 0 && (
-            <p className="muted">CUPS no anunció colas configuradas.</p>
+            <p className="muted">
+              {windows
+                ? 'Windows no tiene impresoras instaladas en el equipo servidor.'
+                : 'CUPS no anunció colas configuradas.'}
+            </p>
           )}
         </Accordion>
       </section>
@@ -163,7 +188,12 @@ export function PrintersAdmin({
               <Select<Printer['transport']>
                 value={value.transport}
                 options={[
-                  { value: 'cups', label: 'Cola CUPS del equipo servidor' },
+                  {
+                    value: 'cups',
+                    label: windows
+                      ? 'Impresora instalada en Windows en el equipo servidor'
+                      : 'Cola CUPS del equipo servidor',
+                  },
                   { value: 'escpos_tcp', label: 'Impresora ESC/POS en red privada' },
                   { value: 'agent', label: 'Impresora de otra terminal (aún no disponible)' },
                 ]}
@@ -182,7 +212,9 @@ export function PrintersAdmin({
             <TextField
               label={
                 value.transport === 'cups'
-                  ? 'Nombre de cola CUPS'
+                  ? windows
+                    ? 'Nombre de la impresora en Windows'
+                    : 'Nombre de cola CUPS'
                   : value.transport === 'escpos_tcp'
                     ? 'IP privada de la impresora'
                     : 'Referencia del destino remoto'
@@ -191,7 +223,20 @@ export function PrintersAdmin({
               value={value.destination}
               onChange={(destination) => setValue({ ...value, destination })}
             />
-            {value.transport === 'cups' && (
+            {/* En Windows la impresora recibe siempre ESC/POS sin convertir: la marca no aplica. */}
+            {value.transport === 'cups' && windows && (
+              <p className="muted text-sm">
+                En Windows la impresora recibe los comandos ESC/POS (el lenguaje de las impresoras
+                de tickets) sin convertir: los documentos con negrita, tamaños o logotipo se
+                imprimen con su formato y los acentos y la ñ con la tabla de caracteres CP850 de la
+                impresora. Usa solo impresoras térmicas de tickets instaladas con un puerto USB,
+                serie, paralelo o TCP/IP estándar: una impresora de oficina imprimiría hojas en
+                blanco o caracteres extraños. AD-EL POS revisa la impresora antes de cada envío y no
+                envía nada a una impresora virtual (PDF, XPS), a un archivo ni a una impresora de
+                otro equipo.
+              </p>
+            )}
+            {value.transport === 'cups' && !windows && (
               <>
                 <Check
                   label="Esta impresora entiende ESC/POS (formato y logotipo)"
@@ -279,7 +324,8 @@ export function PrintersAdmin({
                 value={value.cut}
                 onChange={(cut) => setValue({ ...value, cut })}
               />
-              {value.transport === 'cups' && value.cut && (
+              {/* En Windows el corte es el comando ESC/POS de la impresora, no una opción de CUPS. */}
+              {value.transport === 'cups' && value.cut && !windows && (
                 <TextField
                   label="Opción de corte anunciada por CUPS"
                   value={value.cutter_option}

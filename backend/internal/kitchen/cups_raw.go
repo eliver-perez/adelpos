@@ -14,8 +14,9 @@ import (
 // la computadora: con una impresora USB (o cualquier conexión que CUPS entregue tal cual) el pulso
 // ESC/POS viaja en modo raw a su cola. Antes de usar una cola se consulta, solo con lpstat y
 // lpoptions (nunca se imprime nada para averiguarlo), si CUPS puede entregar los bytes sin
-// convertirlos. Todo el envío queda detrás de Transport: en Windows se implementará con su
-// sistema de impresión sin cambiar la lógica de pagos ni de la cola.
+// convertirlos. Todo el envío queda detrás de Transport: en Windows (etapa 9E) lo hace el
+// administrador de impresión de Windows (windows_queue.go) sin cambiar la lógica de pagos ni de
+// la cola.
 
 // commandRunner ejecuta un programa del sistema con argumentos separados, nunca un shell
 // construido con datos del cliente. combined devuelve también la salida de error (lp la usa para
@@ -54,9 +55,12 @@ type QueueInspector interface {
 	InspectQueue(ctx context.Context, queue string) QueueCapability
 }
 
-// HostQueueInspector consulta las colas CUPS del equipo donde corre Go, solo con lecturas.
+// HostQueueInspector consulta las colas CUPS del equipo donde corre Go, solo con lecturas. En
+// Windows (etapa 9E) consulta la impresora instalada en Windows y su puerto (windows_queue.go).
 type HostQueueInspector struct {
 	commands commandRunner
+	// spooler sustituye en las pruebas el administrador de impresión de Windows.
+	spooler spoolerAPI
 }
 
 // queueInspectionTimeout limita cada consulta: una cola que no responde no debe retener la
@@ -64,6 +68,9 @@ type HostQueueInspector struct {
 const queueInspectionTimeout = 3 * time.Second
 
 func (inspector HostQueueInspector) InspectQueue(ctx context.Context, queue string) QueueCapability {
+	if spooler, windows := inspector.windowsSpooler(); windows {
+		return inspectWindowsQueue(ctx, spooler, queue)
+	}
 	commands := inspector.commands
 	if commands == nil {
 		commands = hostCommands{}

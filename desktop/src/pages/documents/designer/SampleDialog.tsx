@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isWindows } from '../../../commands/platform';
 import { api } from '../../../services/api';
 import { printDocumentSample } from '../../../services/documents';
 import type {
@@ -25,6 +26,15 @@ const transportLabels: Record<PrinterCompatibility['transport'], string> = {
   escpos_tcp: 'ESC/POS por red',
   agent: 'Agente de impresión',
 };
+
+// Transporte de la impresora como lo ve el restaurante. En Windows (etapa 9E) la cola del equipo es
+// la de las impresoras instaladas en Windows; en macOS sigue siendo «CUPS».
+function transportLabel(transport: PrinterCompatibility['transport']) {
+  if (transport === 'cups' && isWindows()) {
+    return 'Impresora de Windows';
+  }
+  return transportLabels[transport] ?? 'Impresora';
+}
 
 // Estados en los que el trabajo ya no cambia solo.
 const settledStates = ['submitted', 'error', 'uncertain', 'cancelled', 'intervention'];
@@ -184,8 +194,8 @@ export function SampleDialog({
             >
               <strong>{item.name}</strong>
               <span className="muted text-xs">
-                {transportLabels[item.transport] ?? 'Impresora'} · papel de {item.paper_width} mm ·{' '}
-                {item.columns} columnas
+                {transportLabel(item.transport)} · papel de {item.paper_width} mm · {item.columns}{' '}
+                columnas
               </span>
               <PrinterSupport printer={item} />
             </button>

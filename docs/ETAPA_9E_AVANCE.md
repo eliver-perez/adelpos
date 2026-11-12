@@ -9,31 +9,31 @@ repositorio. Este archivo registra solo lo que realmente se ejecutó.
 
 ### 1. Equipo
 
-| Dato             | Valor                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------- |
-| Windows          | Windows 11 Pro 25H2, versión 10.0.26200, compilación 26200.9168                              |
-| Arquitectura     | x64 (64 bits); procesador Intel Core i7-1355U (10 núcleos, 12 hilos)                         |
-| Memoria          | 31.7 GB (16.7 GB libres al iniciar)                                                          |
-| Disco C:         | 1 331 GB libres (530 GB usados)                                                              |
-| Usuario          | `Expediente`, perfil `C:\Users\Expediente` (sin espacios ni acentos); la sesión **no** está elevada |
-| Directivas       | `ExecutionPolicy` del equipo `RemoteSigned`; la del proceso de esta sesión, `Bypass`         |
+| Dato         | Valor                                                                                               |
+| ------------ | --------------------------------------------------------------------------------------------------- |
+| Windows      | Windows 11 Pro 25H2, versión 10.0.26200, compilación 26200.9168                                     |
+| Arquitectura | x64 (64 bits); procesador Intel Core i7-1355U (10 núcleos, 12 hilos)                                |
+| Memoria      | 31.7 GB (16.7 GB libres al iniciar)                                                                 |
+| Disco C:     | 1 331 GB libres (530 GB usados)                                                                     |
+| Usuario      | `Expediente`, perfil `C:\Users\Expediente` (sin espacios ni acentos); la sesión **no** está elevada |
+| Directivas   | `ExecutionPolicy` del equipo `RemoteSigned`; la del proceso de esta sesión, `Bypass`                |
 
 ### 2. Herramientas encontradas
 
-| Herramienta                                    | Estado                                                                                                            |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Git                                            | 2.56.0.windows.4 (`C:\Program Files\Git`); `core.autocrlf=true` en el `gitconfig` del sistema                     |
-| Go                                             | **no instalado** (el proyecto usa 1.27.3; `go.mod` declara 1.27.0)                                                |
-| Node / npm                                     | 20.19.6 / 10.8.2 instalados en todo el equipo (`C:\Program Files\nodejs`); el proyecto usa **24.22.2**           |
-| Gestor de paquetes del proyecto                | npm con `package-lock.json` (`npm ci`)                                                                            |
-| Rust (`rustup`, `x86_64-pc-windows-msvc`)      | **no instalado** (el proyecto usa 1.99.1, `Cargo.toml` `rust-version = "1.99"`)                                    |
-| Visual Studio Build Tools («Desarrollo para el escritorio con C++») | **no instalado** (no existe `vswhere.exe`)                                         |
-| WebView2                                       | 157.0.4341.46 (Evergreen, en todo el equipo)                                                                      |
-| CLI de Tauri                                   | se instala con `npm ci` (`@tauri-apps/cli` 2.12.4 fijado en `package.json`)                                       |
-| PostgreSQL                                     | **no instalado** (el proyecto usa 18.6)                                                                           |
-| Python                                         | solo el alias de Microsoft Store (no hay intérprete)                                                              |
-| Compilador de C para `cgo` (`go test -race`)   | no instalado                                                                                                      |
-| winget                                         | 1.29.380                                                                                                          |
+| Herramienta                                                         | Estado                                                                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Git                                                                 | 2.56.0.windows.4 (`C:\Program Files\Git`); `core.autocrlf=true` en el `gitconfig` del sistema          |
+| Go                                                                  | **no instalado** (el proyecto usa 1.27.3; `go.mod` declara 1.27.0)                                     |
+| Node / npm                                                          | 20.19.6 / 10.8.2 instalados en todo el equipo (`C:\Program Files\nodejs`); el proyecto usa **24.22.2** |
+| Gestor de paquetes del proyecto                                     | npm con `package-lock.json` (`npm ci`)                                                                 |
+| Rust (`rustup`, `x86_64-pc-windows-msvc`)                           | **no instalado** (el proyecto usa 1.99.1, `Cargo.toml` `rust-version = "1.99"`)                        |
+| Visual Studio Build Tools («Desarrollo para el escritorio con C++») | **no instalado** (no existe `vswhere.exe`)                                                             |
+| WebView2                                                            | 157.0.4341.46 (Evergreen, en todo el equipo)                                                           |
+| CLI de Tauri                                                        | se instala con `npm ci` (`@tauri-apps/cli` 2.12.4 fijado en `package.json`)                            |
+| PostgreSQL                                                          | **no instalado** (el proyecto usa 18.6)                                                                |
+| Python                                                              | solo el alias de Microsoft Store (no hay intérprete)                                                   |
+| Compilador de C para `cgo` (`go test -race`)                        | no instalado                                                                                           |
+| winget                                                              | 1.29.380                                                                                               |
 
 Red: se comprobó acceso a go.dev, nodejs.org, static.rust-lang.org, get.enterprisedb.com (existe
 `postgresql-18.6-1-windows-x64-binaries.zip`), github.com, registry.npmjs.org, proxy.golang.org e index.crates.io.
@@ -109,7 +109,7 @@ Según [NOTAS_WINDOWS.md](NOTAS_WINDOWS.md) y el código (`scripts/dev.sh`, `scr
 - `desktop/src/App.tsx:281`: «Revisa su diálogo de acceso al Llavero».
 - `desktop/src-tauri/src/vault.rs:66`: la prueba real del almacén seguro solo existe para macOS.
 - Textos con «CUPS» o «macOS» en la configuración de impresión: `pages/kitchen/PrintersAdmin.tsx:68-69, 82, 92, 119,
-  166, 176, 185, 284`, `pages/cash/CashHardwareSettings.tsx:132, 142`, `pages/documents/IdentityPanel.tsx:113`,
+166, 176, 185, 284`, `pages/cash/CashHardwareSettings.tsx:132, 142`, `pages/documents/IdentityPanel.tsx:113`,
   `pages/documents/designer/BlockProperties.tsx:190`, `pages/documents/designer/SampleDialog.tsx:24`,
   `pages/kitchen/PrintQueue.tsx:46`, `services/cash.ts:461`.
 
@@ -210,15 +210,15 @@ oficiales para Windows (zip de EDB, sin instalador ni servicio).
 
 ### Herramientas instaladas
 
-| Herramienta                     | Versión                       | Dónde y cómo                                                                                                       |
-| ------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Go                              | 1.27.3 windows/amd64          | `.tools\go`, zip oficial de go.dev (SHA-256 `f26081f4…7885fff`, igual al publicado)                                |
-| Node / npm                      | 24.22.2 / 11.19.1             | `.tools\node`, zip oficial de nodejs.org (SHA-256 `ca1bff5d…7799e2`, igual a `SHASUMS256.txt`); el Node 20 del equipo no se tocó |
-| Rust                            | rustc 1.99.1, cargo 1.99.1, rustfmt 1.10.0 | `.tools\rustup` y `.tools\cargo` con `rustup-init.exe` oficial (SHA-256 `38027d51…63eec7db`, igual al publicado); destino `x86_64-pc-windows-msvc`, perfil mínimo, sin modificar el `PATH` del usuario |
-| Visual Studio Build Tools 2022  | 17.14.37906.3 (paquete winget 17.14.45) | winget `Microsoft.VisualStudio.2022.BuildTools` con la carga `Microsoft.VisualStudio.Workload.VCTools` y los componentes recomendados (MSVC x64 y SDK de Windows 11 10.0.26100); por equipo, con una confirmación de Control de cuentas de usuario; `isRebootRequired=false` |
-| PostgreSQL                      | 18.6 (binarios EDB 18.6-1)    | `.tools\pgsql`, `postgresql-18.6-1-windows-x64-binaries.zip` de get.enterprisedb.com (SHA-256 `fbe23da2…0252f8c`; EDB no publica la suma del zip). Sin instalador ni servicio |
-| CLI de Tauri                    | 2.12.4                        | `npm ci` en `desktop` (`package-lock.json` sin cambios)                                                            |
-| Módulos de Go                   | los de `go.sum`               | `go mod download` a `.cache\go-mod`                                                                                |
+| Herramienta                    | Versión                                    | Dónde y cómo                                                                                                                                                                                                                                                                 |
+| ------------------------------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go                             | 1.27.3 windows/amd64                       | `.tools\go`, zip oficial de go.dev (SHA-256 `f26081f4…7885fff`, igual al publicado)                                                                                                                                                                                          |
+| Node / npm                     | 24.22.2 / 11.19.1                          | `.tools\node`, zip oficial de nodejs.org (SHA-256 `ca1bff5d…7799e2`, igual a `SHASUMS256.txt`); el Node 20 del equipo no se tocó                                                                                                                                             |
+| Rust                           | rustc 1.99.1, cargo 1.99.1, rustfmt 1.10.0 | `.tools\rustup` y `.tools\cargo` con `rustup-init.exe` oficial (SHA-256 `38027d51…63eec7db`, igual al publicado); destino `x86_64-pc-windows-msvc`, perfil mínimo, sin modificar el `PATH` del usuario                                                                       |
+| Visual Studio Build Tools 2022 | 17.14.37906.3 (paquete winget 17.14.45)    | winget `Microsoft.VisualStudio.2022.BuildTools` con la carga `Microsoft.VisualStudio.Workload.VCTools` y los componentes recomendados (MSVC x64 y SDK de Windows 11 10.0.26100); por equipo, con una confirmación de Control de cuentas de usuario; `isRebootRequired=false` |
+| PostgreSQL                     | 18.6 (binarios EDB 18.6-1)                 | `.tools\pgsql`, `postgresql-18.6-1-windows-x64-binaries.zip` de get.enterprisedb.com (SHA-256 `fbe23da2…0252f8c`; EDB no publica la suma del zip). Sin instalador ni servicio                                                                                                |
+| CLI de Tauri                   | 2.12.4                                     | `npm ci` en `desktop` (`package-lock.json` sin cambios)                                                                                                                                                                                                                      |
+| Módulos de Go                  | los de `go.sum`                            | `go mod download` a `.cache\go-mod`                                                                                                                                                                                                                                          |
 
 - Windows tiene un **reinicio pendiente de Windows Update** (marcas `RebootPending` y `RebootRequired`), ajeno a esta
   etapa: Visual Studio no pidió reiniciar y nada de lo siguiente lo necesita.
@@ -276,14 +276,14 @@ Comprobado en este equipo: `db-init` (clúster `.local\postgres`, rol, base y `s
 
 ### Pruebas existentes en Windows
 
-| Suite                                                              | Resultado en Windows                                                                                               |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `go test ./...` (sin `-race`: no hay compilador de C para cgo)     | 22 paquetes aprobados y 1 falla: `TestTLSRequiresTrustedCAAndCorrectHostname` (corregida, ver abajo)               |
+| Suite                                                                                                           | Resultado en Windows                                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `go test ./...` (sin `-race`: no hay compilador de C para cgo)                                                  | 22 paquetes aprobados y 1 falla: `TestTLSRequiresTrustedCAAndCorrectHostname` (corregida, ver abajo)                                                              |
 | `go test -tags=integration` (`dev.ps1 test-integration`, PostgreSQL 18.6 real, una base desechable por paquete) | **los 9 paquetes aprobados** (`database`, `administration`, `catalog`, `operations`, `payments`, `reports`, `reports/operational`, `designer`, `identity`; 559 s) |
-| Vitest (`npm test`)                                                | 750 de 751 aprobadas; 1 intermitente (corregida, ver abajo)                                                        |
-| `npm run build` (TypeScript + Vite)                                | aprobado                                                                                                           |
-| `cargo test --locked`                                              | al principio no compilaba (faltaba `icons/icon.ico`, ver abajo); después **41 aprobadas**                          |
-| Playwright Chromium (`dev.ps1 test-browser`, Go temporal en 8183)  | **19 de 19 aprobadas** (7.6 min); WebKit se ejecuta después, junto con la fase C                                   |
+| Vitest (`npm test`)                                                                                             | 750 de 751 aprobadas; 1 intermitente (corregida, ver abajo)                                                                                                       |
+| `npm run build` (TypeScript + Vite)                                                                             | aprobado                                                                                                                                                          |
+| `cargo test --locked`                                                                                           | al principio no compilaba (faltaba `icons/icon.ico`, ver abajo); después **41 aprobadas**                                                                         |
+| Playwright Chromium (`dev.ps1 test-browser`, Go temporal en 8183)                                               | **19 de 19 aprobadas** (7.6 min); WebKit se ejecuta después, junto con la fase C                                                                                  |
 
 Entre lo que pasó sin cambios: las equivalencias **byte a byte** de las plantillas de documentos de la 9B
 (`kitchen/legacy_template_test.go`, `payments/legacy_documents_test.go`), la generación de PDF y Excel con las
@@ -338,15 +338,15 @@ iniciar procesos). Piezas:
 
 Comprobado con el `.exe` real y PostgreSQL 18.6 en una carpeta con espacios y acentos («Datos José Ñandú»):
 
-| Caso                                                              | Resultado                                                                       |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Primer arranque (crear clúster, rol, base, 21 migraciones)        | listo en 26 s                                                                   |
-| Cierre de la entrada estándar (como al cerrar la aplicación)       | apagado ordenado en 4.7 s, código 0, **ningún proceso de PostgreSQL restante** |
-| Segundo arranque                                                  | 2.7 s                                                                           |
-| Servidor terminado a la fuerza (PostgreSQL sigue vivo)            | el siguiente arranque adopta PostgreSQL: 1.8 s                                 |
-| Todo terminado a la fuerza (`postmaster.pid` huérfano)             | se borra el pid huérfano, PostgreSQL se recupera: 5.7 s                         |
-| Segundo servidor sobre la misma carpeta                           | rechazado («la carpeta de datos ya está en uso»), el primero sigue sirviendo   |
-| Carpeta en forma corta (`EXPEDI~1`) y larga mezcladas              | corregido: todas las comparaciones usan la forma larga de Windows               |
+| Caso                                                         | Resultado                                                                      |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Primer arranque (crear clúster, rol, base, 21 migraciones)   | listo en 26 s                                                                  |
+| Cierre de la entrada estándar (como al cerrar la aplicación) | apagado ordenado en 4.7 s, código 0, **ningún proceso de PostgreSQL restante** |
+| Segundo arranque                                             | 2.7 s                                                                          |
+| Servidor terminado a la fuerza (PostgreSQL sigue vivo)       | el siguiente arranque adopta PostgreSQL: 1.8 s                                 |
+| Todo terminado a la fuerza (`postmaster.pid` huérfano)       | se borra el pid huérfano, PostgreSQL se recupera: 5.7 s                        |
+| Segundo servidor sobre la misma carpeta                      | rechazado («la carpeta de datos ya está en uso»), el primero sigue sirviendo   |
+| Carpeta en forma corta (`EXPEDI~1`) y larga mezcladas        | corregido: todas las comparaciones usan la forma larga de Windows              |
 
 **Respaldos (§3.8).** `ad-el-pos-server backup`, `restore-check` y `restore` usan los `pg_dump` y `pg_restore`
 incluidos y funcionan con la aplicación abierta o cerrada (cerrada, arrancan y detienen PostgreSQL). `restore` exige
@@ -370,3 +370,48 @@ Pruebas: `go test ./internal/standalone` con 8 pruebas, incluida la de ciclo com
 (`ADEL_STANDALONE_PG_BIN`, 26 s); `cargo test --locked` con 46 pruebas (lanzador: solo el servidor local de la
 instalación, nada en desarrollo, carpeta de datos y espera creciente; estado de la ventana); `go vet` y `go build`
 para Windows y `GOOS=darwin GOARCH=arm64`.
+
+### C2 · Impresión, cajón, menú nativo y comprobación para macOS
+
+**Impresión y cajón (§3.5)**, hecha por un agente con el diseño indicado y revisada antes de integrarla (sin
+migración: el transporte guardado como `cups` pasa a significar «cola de impresión del equipo»):
+
+- En **Windows** esa cola es la impresora instalada en Windows y recibe **ESC/POS en modo RAW** por la API del
+  administrador de impresión (`winspool.drv` cargada solo desde System32: `OpenPrinter`, `StartDocPrinter` con
+  `RAW`, `WritePrinter`, `EndDocPrinter`, `AbortPrinter`), con los mismos bytes que ESC/POS por red: texto con
+  `ESCPosBytes`, documentos con formato y logotipo con `documents.EncodeESCPos` (la marca «Esta impresora entiende
+  ESC/POS» no aplica en Windows) y el pulso del cajón con `DrawerPulseBytes`. Antes de cada envío se consulta la
+  impresora (solo lectura) y se rechazan, sin enviar nada y con el motivo, las remotas, de red, de Escritorio
+  remoto o de la nube, las virtuales (PDF, XPS, OneNote, fax), `FILE:`, `PORTPROMPT:`, `NUL:`, puertos WSD y
+  monitores desconocidos; se aceptan puertos USB, COM, LPT y TCP/IP estándar. Resultados: error si nada se envió,
+  incierto (nunca se reintenta) si falló después de empezar el documento, y aceptado con «Aceptado por la cola de
+  impresión de Windows; no confirma salida física de papel.». «Consultar impresoras del equipo servidor» lista
+  las impresoras instaladas en Windows (`EnumPrinters`).
+- En **macOS** nada cambia: el despacho (`kitchen/system_queue*.go`) devuelve CUPS fuera de Windows y las
+  pruebas con los programas de CUPS simulados siguen corriendo en ambos sistemas.
+- Interfaz: `isWindows()` en `commands/platform.ts` y textos de Windows («Impresora instalada en Windows»,
+  «Usar esta impresora») en la configuración de impresoras, la cola, el cajón, la identidad, el diseñador y las
+  muestras; en Windows se ocultan la opción de corte de CUPS y la casilla «entiende ESC/POS». En macOS todos
+  los textos quedan idénticos (prueba `printersWindows.test.tsx`).
+- No se usó ninguna impresora física: la única del equipo es «Microsoft Print to PDF» y con ella solo se hicieron
+  consultas de lectura (la prueba confirma que se rechaza como virtual).
+
+**Menú nativo (§3.6)**: en Windows aparecía como barra clásica «Archivo Edición Ver Caja Ayuda» incluso en pantalla
+completa (captura en modo desarrollo). No es táctil y repite la barra superior, la paleta (Ctrl+K) y los atajos con
+Ctrl, que atiende la capa de React; **se omite en Windows** (`with_native_menu` en `main.rs`), sin errores:
+`menu_subscribe` y `menu_set_state` siguen respondiendo y el registro de acciones no cambia. En macOS el menú sigue
+igual. Para cerrar la aplicación en Windows: salir de pantalla completa y cerrar la ventana, o Alt+F4.
+
+**Modo desarrollo de la interfaz (§2.3)**: `dev.ps1 desktop` (`tauri dev`) abrió la aplicación en pantalla completa
+con el asistente inicial, la versión y la zona horaria del sistema (America/Mexico_City) contra el servidor de
+desarrollo.
+
+**Comprobación para macOS** (solo verificación; no se genera nada para Mac): `cargo check --locked` y
+`cargo check --tests` con el destino `aarch64-apple-darwin` aprobados **sin errores ni avisos**, con el Tauri real
+de macOS. La dependencia `objc2-exception-helper` compila un archivo de Objective-C con el compilador de Apple; para
+`cargo check`, que no enlaza, se usó un compilador sustituto que solo produce archivos vacíos, fuera del
+repositorio. `GOOS=darwin GOARCH=arm64 go build ./...` y `go vet ./...` aprobados.
+
+Pruebas de C2: `go test ./...` (25 paquetes aprobados), `go vet ./...` para Windows y macOS, integración con
+PostgreSQL de `designer`, `payments` y `operations` aprobada (74 s), Vitest de las áreas tocadas (236 pruebas) y
+completo por el agente (756), `tsc --noEmit`, `cargo test --locked` (46) y Prettier del repositorio completo.

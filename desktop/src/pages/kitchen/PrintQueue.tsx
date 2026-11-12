@@ -9,6 +9,7 @@ import { serverDateTime } from '../../services/restaurant';
 import { renderCurrentLabel, renderCurrentPermission } from '../documents/rerender';
 import { RerenderJob } from './RerenderJob';
 import { Select } from '../../components/Select';
+import { isWindows } from '../../commands/platform';
 
 type QueueAction = 'resolve' | 'retry' | 'reprint' | 'rerender';
 
@@ -42,10 +43,18 @@ export function PrintQueue({
     <div className="kitchen-editor-layout">
       <section className="panel form-stack">
         <h2>Cola de impresión</h2>
-        <p className="muted">
-          Aceptado por CUPS o por la conexión de red no confirma que salió papel. Los resultados
-          inciertos no se reenvían automáticamente.
-        </p>
+        {/* Etapa 9E: en Windows acepta la cola de impresión de Windows; en macOS no cambia. */}
+        {isWindows() ? (
+          <p className="muted">
+            Aceptado por la cola de impresión de Windows o por la conexión de red no confirma que
+            salió papel. Los resultados inciertos no se reenvían automáticamente.
+          </p>
+        ) : (
+          <p className="muted">
+            Aceptado por CUPS o por la conexión de red no confirma que salió papel. Los resultados
+            inciertos no se reenvían automáticamente.
+          </p>
+        )}
         <Field label="Filtrar trabajos por estado">
           <Select
             value={state}

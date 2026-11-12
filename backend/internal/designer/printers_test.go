@@ -116,3 +116,71 @@ func TestPrinterCompatibilityHasTotalTimeBudget(t *testing.T) {
 		t.Fatalf("GET documents/printers no debe tomar locks consultivos: %+v", route)
 	}
 }
+
+// windowsInspector declara la cola de impresión de Windows (etapa 9E) y responde con capacidades
+// fijas por impresora, sin consultar Windows.
+type windowsInspector struct {
+	capabilities map[string]kitchen.QueueCapability
+	queried      []string
+}
+
+func (inspector *windowsInspector) SystemQueue() string {
+	return kitchen.SystemQueueWindows
+}
+
+func (inspector *windowsInspector) InspectQueue(_ context.Context, queue string) kitchen.QueueCapability {
+	inspector.queried = append(inspector.queried, queue)
+	if capability, found := inspector.capabilities[queue]; found {
+		return capability
+	}
+	return kitchen.QueueCapability{Queue: queue, Reason: "No se pudo consultar la impresora " + queue + " en Windows."}
+}
+
+// En Windows la marca «Esta impresora entiende ESC/POS» no aplica: toda impresora instalada en
+// Windows se consulta y recibe formato y logotipo si entrega los datos sin alterar; si no, no recibe
+// ningún documento y el motivo lo dice.
+func TestPrinterCompatibilityOnWindowsQueues(t *testing.T) {
+	inspector := &windowsInspector{capabilities: map[string]kitchen.QueueCapability{
+		"POS 80":  {Queue: "POS 80", Checked: true, Raw: true, Connection: "usb"},
+		"Oficina": {Queue: "Oficina", Checked: true, Reason: "La impresora Oficina es una impresora virtual o de fax (PDF): no imprime tickets en papel."},
+	}}
+	printers := []kitchen.Printer{
+		cupsPrinter("sin-marca", "POS 80", false),
+		cupsPrinter("virtual", "Oficina", false),
+		cupsPrinter("ausente", "No instalada", true),
+	}
+	result := printerCompatibilities(context.Background(), inspector, printers, false)
+	expected := map[string][2]string{
+		"sin-marca": {"supported", compatibilityRawQueue},
+		"virtual":   {"unsupported", compatibilityNotRaw},
+		"ausente":   {"unknown", compatibilityUnavailable},
+	}
+	for _, item := range result {
+		want := expected[item.ID]
+		if item.Format.Status != want[0] || item.Format.Code != want[1] || item.Logo != item.Format {
+			t.Fatalf("%s: compatibilidad %+v, se esperaba %v", item.ID, item.Format, want)
+		}
+		if strings.Contains(item.Format.Reason, "CUPS") || strings.Contains(item.Format.Reason, "Esta impresora entiende") {
+			t.Fatalf("%s: el motivo habla de CUPS o de la marca ESC/POS en Windows: %q", item.ID, item.Format.Reason)
+		}
+	}
+	if !strings.Contains(result[0].Format.Reason, "cola de impresión de Windows") ||
+		!strings.HasPrefix(result[1].Format.Reason, "La impresora no recibe los comandos ESC/POS sin alterar") {
+		t.Fatalf("Motivos en Windows: %q / %q", result[0].Format.Reason, result[1].Format.Reason)
+	}
+	// Las tres se consultan aunque ninguna tenga la marca.
+	if strings.Join(inspector.queried, ",") != "POS 80,Oficina,No instalada" {
+		t.Fatalf("En Windows se consultan todas las impresoras de la cola del equipo: %v", inspector.queried)
+	}
+	// Sin tiempo del límite total la impresora queda sin confirmar, sin consultarse.
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	late := windowsQueueCompatibility(expired, inspector, printers[0])
+	if late.Status != "unknown" || late.Code != compatibilityTimeout || !strings.Contains(late.Reason, "Windows no respondió a tiempo") {
+		t.Fatalf("Sin tiempo la impresora debe quedar sin confirmar: %+v", late)
+	}
+	// El inspector del equipo declara su cola; los simulados que no la declaran son CUPS.
+	if kitchen.SystemQueueOf(&recordingInspector{}) != kitchen.SystemQueueCUPS {
+		t.Fatal("Un inspector que no declara su cola se trata como CUPS")
+	}
+}

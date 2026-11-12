@@ -167,9 +167,33 @@ func printerCompatibility(ctx context.Context, inspector kitchen.QueueInspector,
 		return Compatibility{Status: "supported", Code: compatibilityNetwork,
 			Reason: "La impresora recibe comandos ESC/POS por red; el resultado en papel es una prueba física pendiente."}
 	case "cups":
+		if kitchen.SystemQueueOf(inspector) == kitchen.SystemQueueWindows {
+			return windowsQueueCompatibility(ctx, inspector, printer)
+		}
 		return cupsCompatibility(ctx, inspector, printer)
 	}
 	return Compatibility{Status: "unsupported", Code: compatibilityAgent, Reason: "El agente de impresión aún no existe."}
+}
+
+// windowsQueueCompatibility aplica la regla de la cola de impresión de Windows (etapa 9E): la
+// impresora instalada en Windows recibe siempre ESC/POS en modo RAW, así que la marca «Esta
+// impresora entiende ESC/POS» no aplica; una impresora que no entrega los datos sin alterar no
+// recibe ningún documento (no hay un camino de texto como el de CUPS).
+func windowsQueueCompatibility(ctx context.Context, inspector kitchen.QueueInspector, printer kitchen.Printer) Compatibility {
+	if ctx.Err() != nil {
+		return Compatibility{Status: "unknown", Code: compatibilityTimeout,
+			Reason: "Windows no respondió a tiempo: no se consultó la impresora " + printer.Destination + ". Vuelve a consultar en unos momentos."}
+	}
+	capability := inspector.InspectQueue(ctx, printer.Destination)
+	switch {
+	case !capability.Checked:
+		return Compatibility{Status: "unknown", Code: compatibilityUnavailable, Reason: capability.Reason}
+	case capability.Raw:
+		return Compatibility{Status: "supported", Code: compatibilityRawQueue,
+			Reason: "La impresora recibe los comandos ESC/POS sin alterar por la cola de impresión de Windows; el resultado en papel es una prueba física pendiente."}
+	}
+	return Compatibility{Status: "unsupported", Code: compatibilityNotRaw,
+		Reason: "La impresora no recibe los comandos ESC/POS sin alterar: AD-EL POS no le envía documentos. " + capability.Reason}
 }
 
 // cupsCompatibility aplica la regla de CUPS: primero la marca de la impresora (sin consultar la
