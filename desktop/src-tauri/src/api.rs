@@ -86,6 +86,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9A: «Hora de inicio del día» (una sola configuración, settings.manage).
         "settings_business_day" => Some((Method::GET, "settings/business-day")),
         "save_settings_business_day" => Some((Method::PUT, "settings/business-day")),
+        // Etapa 9D: umbral de cuenta abierta por mucho tiempo, en «Funciones del establecimiento».
+        "settings_long_open_hours" => Some((Method::GET, "settings/long-open-hours")),
+        "save_settings_long_open_hours" => Some((Method::PUT, "settings/long-open-hours")),
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
@@ -163,6 +166,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "restaurant_staff" => Some((Method::GET, "restaurant/staff")),
         "restaurant_accounts" => Some((Method::GET, "restaurant/accounts")),
         "restaurant_open_account" => Some((Method::POST, "restaurant/accounts")),
+        // Etapa 9D: catálogo de motivos de cancelación de cuentas.
+        "restaurant_cancel_reasons" => Some((Method::GET, "restaurant/cancel-reasons")),
+        "restaurant_create_cancel_reason" => Some((Method::POST, "restaurant/cancel-reasons")),
         // Etapa 8 (fase A): inventario.
         "inventory_summary" => Some((Method::GET, "inventory/summary")),
         "inventory_settings" => Some((Method::GET, "inventory/settings")),
@@ -369,6 +375,20 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "restaurant_release_account" => (
             Method::POST,
             format!("restaurant/accounts/{identifier}/release"),
+        ),
+        // Etapa 9D: «Descartar» una cuenta vacía (aunque tenga borrador) sin motivo y «Cancelar cuenta»
+        // con motivo y, si falta el permiso, la autorización de un supervisor.
+        "restaurant_discard_account" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/discard"),
+        ),
+        "restaurant_cancel_account" => (
+            Method::POST,
+            format!("restaurant/accounts/{identifier}/cancel-account"),
+        ),
+        "restaurant_save_cancel_reason" => (
+            Method::PATCH,
+            format!("restaurant/cancel-reasons/{identifier}"),
         ),
         "payments_save_method" => (Method::PATCH, format!("payments/methods/{identifier}")),
         "payments_save_discount_reason" => (
@@ -2026,6 +2046,76 @@ mod tests {
         assert!(route("documents_identity_logo", None).is_err());
         assert!(route("documents_identity_raster", None).is_err());
         assert!(route("documents_delete_identity_logo", None).is_err());
+    }
+
+    #[test]
+    fn stage9d_account_cancellation_routes_are_closed_and_keep_write_methods() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, method, path) in [
+            (
+                "restaurant_cancel_account",
+                Method::POST,
+                format!("restaurant/accounts/{identifier}/cancel-account"),
+            ),
+            (
+                "restaurant_discard_account",
+                Method::POST,
+                format!("restaurant/accounts/{identifier}/discard"),
+            ),
+            (
+                "restaurant_save_cancel_reason",
+                Method::PATCH,
+                format!("restaurant/cancel-reasons/{identifier}"),
+            ),
+        ] {
+            assert_eq!(route(operation, Some(identifier)).unwrap(), (method, path));
+            // Solo con un identificador válido: nunca rutas arbitrarias.
+            assert!(route(operation, Some("../../users")).is_err());
+            assert!(route(operation, None).is_err());
+        }
+        for (operation, method, path) in [
+            (
+                "restaurant_cancel_reasons",
+                Method::GET,
+                "restaurant/cancel-reasons",
+            ),
+            (
+                "restaurant_create_cancel_reason",
+                Method::POST,
+                "restaurant/cancel-reasons",
+            ),
+            (
+                "settings_long_open_hours",
+                Method::GET,
+                "settings/long-open-hours",
+            ),
+            (
+                "save_settings_long_open_hours",
+                Method::PUT,
+                "settings/long-open-hours",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+            // Las rutas fijas no cambian con un identificador.
+            assert_eq!(
+                route(operation, Some("../../etc/passwd")).unwrap().1,
+                path.to_string()
+            );
+        }
+        // La anulación anterior se conserva por compatibilidad; no hay rutas para borrar motivos.
+        assert_eq!(
+            route("restaurant_void", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("restaurant/accounts/{identifier}/void")
+            )
+        );
+        assert!(route("restaurant_delete_cancel_reason", Some(identifier)).is_err());
+        assert!(route(
+            "restaurant_cancel_account",
+            Some(&format!("{identifier}/x"))
+        )
+        .is_err());
     }
 
     #[test]

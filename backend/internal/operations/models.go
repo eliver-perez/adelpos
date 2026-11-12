@@ -43,12 +43,19 @@ type Table struct {
 	OccupiedSeconds int64      `json:"occupied_seconds"`
 	// Balance es la suma de los saldos de las cuentas abiertas, calculada por payments.
 	Balance string `json:"balance"`
+	// LongOpen (etapa 9D, §3.4): la cuenta abierta más antigua de la mesa lleva más de
+	// restaurant_settings.long_open_hours horas abierta. Lo calcula Go en cada lectura.
+	LongOpen bool `json:"long_open"`
 }
 
 type Settings struct {
 	WarningMinutes int `json:"warning_minutes"`
 	OverdueMinutes int `json:"overdue_minutes"`
-	Revision       int `json:"revision"`
+	// LongOpenHours (etapa 9D, §3.4) es el umbral de cuenta abierta por mucho tiempo, de 1 a 72 horas
+	// (12 por omisión). Se entrega con el mapa y las cuentas; PUT restaurant/settings no lo cambia: se
+	// edita en «Funciones del establecimiento» (PUT settings/long-open-hours, settings.features.manage).
+	LongOpenHours int `json:"long_open_hours"`
+	Revision      int `json:"revision"`
 }
 
 type Mutation struct {
@@ -123,6 +130,16 @@ type Account struct {
 	// Releasable: la cuenta está abierta y vacía en sentido estricto, por lo que «Liberar mesa»
 	// procede sin motivo (etapa 7.1). Lo calcula Go en cada lectura.
 	Releasable bool `json:"releasable"`
+	// Etapa 9D. Discardable: «Descartar» procede sin motivo (abierta, sin productos enviados ni
+	// registros financieros o de cocina, aunque tenga borrador). CancelBlocker: vacío si «Cancelar
+	// cuenta» procede, "payments" si conserva pagos o propinas (primero la devolución) o "adjustments"
+	// si tiene un descuento, cortesía o cargo vigente (primero quitarlo). CancelRequiresAuthorization:
+	// el usuario no tiene accounts.cancel y la cancelación pedirá la autorización de un supervisor.
+	// LongOpen: lleva abierta más de restaurant_settings.long_open_hours horas (§3.4).
+	Discardable                 bool   `json:"discardable"`
+	CancelBlocker               string `json:"cancel_blocker"`
+	CancelRequiresAuthorization bool   `json:"cancel_requires_authorization"`
+	LongOpen                    bool   `json:"long_open"`
 }
 
 type Totals struct {
@@ -156,6 +173,9 @@ type Bill struct {
 	Lines      []ConfirmedLine `json:"lines"`
 	ServerTime time.Time       `json:"server_time"`
 	Timezone   string          `json:"timezone"`
+	// Cancellation (etapa 9D) es el registro de «Cancelar cuenta» de una cuenta anulada con motivo
+	// del catálogo; null en cualquier otra cuenta (también las anuladas antes, liberadas o descartadas).
+	Cancellation *AccountCancellation `json:"cancellation"`
 }
 
 type QuoteResult struct {

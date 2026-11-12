@@ -165,6 +165,15 @@ func routePermission(method string, parts []string) string {
 			if method == "GET" {
 				return "accounts.transfer"
 			}
+		// Etapa 9D: el catálogo de motivos de cancelación lo consulta quien cancela cuentas y lo
+		// administra el permiso de políticas de cobro, el mismo de los motivos de descuento.
+		case "cancel-reasons":
+			if method == "GET" {
+				return "accounts.read"
+			}
+			if method == "POST" {
+				return cancelReasonsPermission
+			}
 		case "accounts":
 			if method == "GET" {
 				return "accounts.read"
@@ -180,9 +189,10 @@ func routePermission(method string, parts []string) string {
 	}
 	if len(parts) == 2 && method == "PATCH" {
 		return map[string]string{
-			"areas":    "restaurant.areas.manage",
-			"tables":   "restaurant.tables.manage",
-			"accounts": "accounts.manage",
+			"areas":          "restaurant.areas.manage",
+			"tables":         "restaurant.tables.manage",
+			"accounts":       "accounts.manage",
+			"cancel-reasons": cancelReasonsPermission,
 		}[resource]
 	}
 	if resource == "accounts" && len(parts) == 2 && method == "GET" {
@@ -203,18 +213,30 @@ func routePermission(method string, parts []string) string {
 				"cancel": "orders.cancel", "split": "accounts.split", "transfer": "accounts.transfer_items",
 				"merge": "accounts.merge", "move": "accounts.move", "assign": "accounts.transfer",
 				"void": "accounts.manage", "release": "accounts.open",
+				// Etapa 9D: descartar una cuenta vacía (sin motivo) y cancelar una cuenta con motivo. La
+				// cancelación no puede exigir accounts.cancel aquí: sin él procede con la autorización de un
+				// supervisor, que la ruta decide antes de escribir (account_cancellation.go).
+				"discard": "accounts.open", "cancel-account": "accounts.open",
 			}[action]
 		}
 	}
 	return ""
 }
 
+// requestFingerprint identifica el contenido de la operación. Como en los cobros, excluye la
+// contraseña de una autorización de supervisor (etapa 9D): nunca se conserva un derivado del secreto
+// y un reintento puede enviarse sin ella para recuperar el resultado ya confirmado.
 func requestFingerprint(request Request) (string, error) {
 	var value any
 	decoder := json.NewDecoder(strings.NewReader(string(request.Body)))
 	decoder.UseNumber()
 	if err := decoder.Decode(&value); err != nil {
 		return "", invalid("La operación no contiene JSON válido.")
+	}
+	if fields, ok := value.(map[string]any); ok {
+		if authorization, ok := fields["authorization"].(map[string]any); ok {
+			delete(authorization, "password")
+		}
 	}
 	digest := sha256.Sum256([]byte(request.Method + " " + request.Route + "\n" + string(jsonValue(value))))
 	return fmt.Sprintf("%x", digest), nil
@@ -258,6 +280,8 @@ func (handler *service) dispatch(parts []string) (any, error) {
             FROM app.users WHERE active AND NOT support ORDER BY display_name,id`)
 	case "accounts":
 		return handler.accounts(parts)
+	case "cancel-reasons":
+		return handler.cancelReasons(parts)
 	}
 	return nil, invalid("Operación no implementada.")
 }

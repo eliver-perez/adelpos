@@ -47,7 +47,8 @@ func RecordReleases(ctx context.Context, tx pgx.Tx, releaseID string, units []Re
 	return err
 }
 
-// changePayload es lo que el inventario lee del evento comercial item.modified o item.cancelled.
+// changePayload es lo que el inventario lee del evento comercial item.modified, item.cancelled o,
+// desde la etapa 9D, account.cancelled («Cancelar cuenta», con todas las unidades en unit_ids).
 type changePayload struct {
 	After struct {
 		Modified  []string `json:"modified_unit_ids"`
@@ -64,7 +65,7 @@ type changePayload struct {
 // llama antes del procesamiento de cocina, de modo que se registra también si el cambio de cocina
 // queda pendiente por advertencias. Con la función desactivada no registra nada.
 func RecordChange(ctx context.Context, tx pgx.Tx, eventID, kind string, payload []byte) error {
-	if kind != "item.modified" && kind != "item.cancelled" {
+	if kind != "item.modified" && kind != "item.cancelled" && kind != "account.cancelled" {
 		return nil
 	}
 	enabled, err := features.Enabled(ctx, tx, features.InventoryControl)
@@ -77,7 +78,7 @@ func RecordChange(ctx context.Context, tx pgx.Tx, eventID, kind string, payload 
 	}
 	modified := change.After.Modified
 	cancelled := change.After.Cancelled
-	if kind == "item.cancelled" {
+	if kind == "item.cancelled" || kind == "account.cancelled" {
 		modified = nil
 		cancelled = change.After.UnitIDs
 	}

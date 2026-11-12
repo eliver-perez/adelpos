@@ -88,7 +88,7 @@ func RequireNoFinancialRecords(ctx context.Context, tx pgx.Tx, accountID string)
 	return nil
 }
 
-// RequireNoNetFinance permite anular una cuenta solo si todo lo cobrado ya se devolvió y no
+// RequireNoNetFinance permite anular o cancelar una cuenta solo si todo lo cobrado ya se devolvió y no
 // quedan descuentos ni cargos vigentes. El historial financiero se conserva intacto.
 func RequireNoNetFinance(ctx context.Context, tx pgx.Tx, accountID string) error {
 	brief, err := AccountBrief(ctx, tx, accountID)
@@ -101,9 +101,65 @@ func RequireNoNetFinance(ctx context.Context, tx pgx.Tx, accountID string) error
 		return err
 	}
 	if adjusted || decimal.RequireFromString(brief.Paid).Sign() != 0 || decimal.RequireFromString(brief.Tips).Sign() != 0 {
-		return conflict("ACCOUNT_HAS_PAYMENTS", "La cuenta conserva pagos, propinas o ajustes vigentes. Registra primero la devolución o cancela los ajustes antes de anularla.")
+		return conflict("ACCOUNT_HAS_PAYMENTS", "La cuenta conserva pagos, propinas o ajustes vigentes. Registra primero la devolución o cancela los ajustes antes de cancelarla.")
 	}
 	return nil
+}
+
+// Motivos por los que una cuenta no se puede cancelar (etapa 9D, §5.1): la interfaz los explica en
+// lugar de solo deshabilitar el botón. La regla es la misma de RequireNoNetFinance; solo se separan
+// los dos casos para decir qué hacer primero.
+const (
+	// CancelBlockedByPayments: la cuenta conserva pagos o propinas netos; primero se devuelven.
+	CancelBlockedByPayments = "payments"
+	// CancelBlockedByAdjustments: la cuenta tiene un descuento, una cortesía o un cargo vigente.
+	CancelBlockedByAdjustments = "adjustments"
+)
+
+// CancellationBlocker indica, sin escribir, si los registros financieros de la cuenta impiden
+// cancelarla: CancelBlockedByPayments, CancelBlockedByAdjustments o vacío si no hay impedimento.
+// Los pagos van primero porque su devolución puede requerir además quitar el ajuste.
+func CancellationBlocker(ctx context.Context, tx pgx.Tx, accountID string) (string, error) {
+	brief, err := AccountBrief(ctx, tx, accountID)
+	if err != nil {
+		return "", err
+	}
+	return CancellationBlockerWithBrief(ctx, tx, accountID, brief)
+}
+
+// CancellationBlockerWithBrief es CancellationBlocker con el resumen financiero ya leído en la misma
+// transacción (la lectura de cuentas lo tiene), para no repetir la consulta por cada cuenta.
+func CancellationBlockerWithBrief(ctx context.Context, tx pgx.Tx, accountID string, brief *Brief) (string, error) {
+	if decimal.RequireFromString(brief.Paid).Sign() != 0 || decimal.RequireFromString(brief.Tips).Sign() != 0 {
+		return CancelBlockedByPayments, nil
+	}
+	var adjusted bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.account_adjustments j WHERE j.account_id=$1 AND `+activeAdjustment+`)`,
+		accountID).Scan(&adjusted); err != nil {
+		return "", err
+	}
+	if adjusted {
+		return CancelBlockedByAdjustments, nil
+	}
+	return "", nil
+}
+
+// RequireCancellable rechaza cancelar una cuenta con pagos o propinas netos (409
+// ACCOUNT_HAS_PAYMENTS: primero la devolución) o con ajustes vigentes (409 ACCOUNT_HAS_ADJUSTMENTS:
+// primero quitar el descuento o el cargo). Después aplica la guarda de la etapa 6
+// (RequireNoNetFinance), que no se debilita.
+func RequireCancellable(ctx context.Context, tx pgx.Tx, accountID string) error {
+	blocker, err := CancellationBlocker(ctx, tx, accountID)
+	if err != nil {
+		return err
+	}
+	switch blocker {
+	case CancelBlockedByPayments:
+		return conflict("ACCOUNT_HAS_PAYMENTS", "La cuenta tiene pagos o propinas registrados. Registra primero la devolución y después cancela la cuenta.")
+	case CancelBlockedByAdjustments:
+		return conflict("ACCOUNT_HAS_ADJUSTMENTS", "La cuenta tiene un descuento, una cortesía o un cargo vigente. Quítalo primero desde los ajustes de la cuenta y después cancélala.")
+	}
+	return RequireNoNetFinance(ctx, tx, accountID)
 }
 
 // CurrentTaxRate es la tasa de IVA vigente que se copia a cada versión confirmada.

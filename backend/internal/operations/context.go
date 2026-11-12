@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/payments"
 )
 
 type Error struct {
@@ -47,7 +48,10 @@ var Permissions = []Permission{
 	{"restaurant.settings.manage", "Configurar umbrales del tablero para llevar"},
 	{"accounts.read", "Consultar cuentas e importes"},
 	{"accounts.open", "Abrir cuentas"},
-	{"accounts.manage", "Editar referencias y anular cuentas sin partidas activas"},
+	// Etapa 9D: «Cancelar cuenta» tiene permiso propio (sin él, autorización de supervisor) y la ruta
+	// anterior de anulación de cuentas vacías queda con accounts.manage por compatibilidad.
+	{"accounts.manage", "Editar datos de cuentas y cancelar cuentas vacías con motivo libre"},
+	{"accounts.cancel", "Cancelar cuentas"},
 	{"accounts.split", "Dividir cuentas"},
 	{"accounts.merge", "Combinar cuentas compatibles"},
 	{"accounts.transfer", "Transferir la responsabilidad de cuentas"},
@@ -88,6 +92,10 @@ type Request struct {
 	Query  url.Values
 	Body   json.RawMessage
 	Actor  Actor
+	// Authorize valida la autorización puntual de un supervisor (etapa 9D, «Cancelar cuenta») con el
+	// mismo mecanismo de los cobros: administration lo implementa en la misma transacción, sin
+	// sesión, con el límite de intentos del inicio de sesión y sin autoautorización.
+	Authorize payments.Authorizer
 }
 
 type Audit func(context.Context, pgx.Tx, string, string, *string, any, any) error

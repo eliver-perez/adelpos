@@ -46,6 +46,7 @@ const EXPORTABLE_REPORTS: &[&str] = &[
     "sales.by_shift",
     "sales.accounts",
     "sales.voided_accounts",
+    "sales.cancellations_by_reason",
     "sales.evolution",
     "sales.in_progress",
     "products.top",

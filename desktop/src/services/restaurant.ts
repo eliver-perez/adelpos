@@ -1,5 +1,6 @@
+import { api } from './api';
 import type { Customization, PreviewLine, ProductBreakdown, Quote } from './catalog';
-import type { DeliveryState, FinanceBrief, PaymentState } from './payments';
+import type { AuthorizationInput, DeliveryState, FinanceBrief, PaymentState } from './payments';
 
 export interface Area {
   id: string;
@@ -32,6 +33,10 @@ export interface RestaurantTable {
   occupied_seconds: number;
   // Suma de los saldos de las cuentas abiertas, calculada por Go.
   balance: string;
+  // Etapa 9D (§3.4): la cuenta abierta más antigua lleva más horas que el umbral del
+  // establecimiento (settings.long_open_hours). Lo calcula Go y siempre lo envía; es opcional solo
+  // para las mesas que arma la interfaz (por ejemplo, una mesa nueva en la distribución).
+  long_open?: boolean;
 }
 
 export type TableState =
@@ -56,6 +61,9 @@ export interface TableAccountRef {
 export interface RestaurantSettings {
   warning_minutes: number;
   overdue_minutes: number;
+  // Etapa 9D (§3.4): umbral de cuenta abierta por mucho tiempo, de 1 a 72 horas (12 por omisión).
+  // Go siempre lo envía; `restaurant_save_settings` no lo cambia: se edita con `saveLongOpenHours`.
+  long_open_hours?: number;
   revision: number;
 }
 
@@ -117,7 +125,20 @@ export interface Account {
   totals: Totals;
   // Go la marca liberable cuando está abierta y vacía en sentido estricto (etapa 7.1).
   releasable: boolean;
+  // Etapa 9D. «Descartar» procede sin motivo (abierta, sin productos enviados ni registros
+  // financieros o de cocina, aunque tenga borrador).
+  discardable: boolean;
+  // Qué impide «Cancelar cuenta»: '' si procede, 'payments' si conserva pagos o propinas (primero la
+  // devolución) o 'adjustments' si tiene un descuento, cortesía o cargo vigente (primero quitarlo).
+  // Solo en cuentas abiertas; lo decide Go.
+  cancel_blocker: CancelBlocker;
+  // El usuario no tiene «Cancelar cuentas»: la cancelación pedirá la autorización de un supervisor.
+  cancel_requires_authorization: boolean;
+  // Lleva abierta más horas que el umbral del establecimiento (§3.4).
+  long_open: boolean;
 }
+
+export type CancelBlocker = '' | 'payments' | 'adjustments';
 
 export interface AccountInput {
   name: string;
@@ -162,6 +183,91 @@ export interface Bill {
   lines: ConfirmedLine[];
   server_time: string;
   timezone: string;
+  // Etapa 9D: registro de «Cancelar cuenta» de una cuenta cancelada con motivo del catálogo; null en
+  // las demás (también las anuladas antes, liberadas o descartadas). Opcional para las cuentas
+  // pendientes que arma la interfaz.
+  cancellation?: AccountCancellation | null;
+}
+
+// Registro de una cuenta cancelada tal como se guardó al cancelarla (etapa 9D). El importe llega
+// calculado por Go.
+export interface AccountCancellation {
+  reason_id: string;
+  reason_name: string;
+  description: string | null;
+  prepared_is_waste: boolean;
+  cancelled_by_name: string;
+  authorized_by_name: string | null;
+  cancelled_units: number;
+  cancelled_amount: string;
+  created_at: string;
+}
+
+// Motivo del catálogo de cancelación de cuentas (etapa 9D). Solo «Otro» exige descripción y solo
+// «Cliente se retiró sin pagar» marca lo enviado a cocina como merma.
+export interface CancelReason {
+  id: string;
+  name: string;
+  requires_description: boolean;
+  prepared_is_waste: boolean;
+  active: boolean;
+  sort_order: number;
+  revision: number;
+  updated_at: string;
+}
+
+// Alta o cambio de un motivo; `position` usa el orden por posiciones de la etapa 6.1.
+export interface CancelReasonInput {
+  name: string;
+  requires_description: boolean;
+  prepared_is_waste: boolean;
+  active: boolean;
+  revision?: number;
+  position?: { after: string | null };
+}
+
+// Cuerpo de «Cancelar cuenta». La autorización solo se envía si Go la pide
+// (`cancel_requires_authorization` o el error AUTHORIZATION_REQUIRED); su contraseña nunca se guarda.
+export interface CancelAccountInput {
+  revision: number;
+  reason_id: string;
+  description: string;
+  authorization?: AuthorizationInput;
+}
+
+// Umbral de cuenta abierta por mucho tiempo («Funciones del establecimiento», etapa 9D).
+export interface LongOpenHoursSettings {
+  long_open_hours: number;
+  minimum_hours: number;
+  maximum_hours: number;
+  revision: number;
+}
+
+export function listCancelReasons() {
+  return api<CancelReason[]>('restaurant_cancel_reasons');
+}
+
+export function createCancelReason(operationID: string, input: CancelReasonInput) {
+  return api<CancelReason>('restaurant_create_cancel_reason', {
+    body: { operation_id: operationID, ...input },
+  });
+}
+
+export function saveCancelReason(operationID: string, id: string, input: CancelReasonInput) {
+  return api<CancelReason>('restaurant_save_cancel_reason', {
+    id,
+    body: { operation_id: operationID, ...input },
+  });
+}
+
+export function readLongOpenHours() {
+  return api<LongOpenHoursSettings>('settings_long_open_hours');
+}
+
+// Sin operation_id: es una escritura de configuración con revisión optimista, como las funciones del
+// establecimiento.
+export function saveLongOpenHours(input: { long_open_hours: number; revision: number }) {
+  return api<LongOpenHoursSettings>('save_settings_long_open_hours', { body: input });
 }
 
 export interface AccountPage {
@@ -318,6 +424,10 @@ export function pendingAccountBill({
       draft_quantity: 0,
       totals: zero,
       releasable: false,
+      discardable: false,
+      cancel_blocker: '',
+      cancel_requires_authorization: false,
+      long_open: false,
     },
     draft: [],
     lines: [],
@@ -466,8 +576,10 @@ export const eventLabels: Record<string, string> = {
   'account.updated': 'Datos actualizados',
   'account.move': 'Cambio de mesa',
   'account.assign': 'Cambio de responsable',
-  'account.void': 'Cuenta vacía anulada',
+  'account.void': 'Cuenta vacía cancelada',
   'account.released': 'Cuenta vacía liberada',
+  'account.discarded': 'Cuenta vacía descartada',
+  'account.cancelled': 'Cuenta cancelada',
   'account.split': 'División de cuenta',
   'account.merged': 'Combinación de cuentas',
   'items.transferred': 'Transferencia de unidades',

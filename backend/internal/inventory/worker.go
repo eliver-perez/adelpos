@@ -385,6 +385,13 @@ func processCancel(ctx context.Context, tx pgx.Tx, request *consumptionRequest) 
 	if err != nil {
 		return requestOutcome{}, err
 	}
+	preclassified, err := wastePreclassification(ctx, tx, request)
+	if err != nil {
+		return requestOutcome{}, err
+	}
+	if preclassified != nil {
+		return requestOutcome{alerts: true}, recordPreclassifiedWaste(ctx, tx, request, day, preclassified)
+	}
 	_, err = tx.Exec(ctx, `INSERT INTO app.inventory_cancellation_classifications(restaurant_unit_id,request_id,cancelled_at,
             operating_date,deadline_at)
         VALUES ($1,$2,$3,$4,$5) ON CONFLICT ON CONSTRAINT inventory_cancellation_classifications_unit_key DO NOTHING`,

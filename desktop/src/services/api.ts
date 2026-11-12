@@ -62,6 +62,9 @@ export type Operation =
   // Etapa 9A: «Hora de inicio del día» y reportes (services/reports.ts).
   | 'settings_business_day'
   | 'save_settings_business_day'
+  // Etapa 9D: umbral de cuenta abierta por mucho tiempo («Funciones del establecimiento»).
+  | 'settings_long_open_hours'
+  | 'save_settings_long_open_hours'
   | 'reports_catalog'
   | 'reports_run'
   | 'reports_dashboard'
@@ -228,6 +231,12 @@ export type Operation =
   | 'restaurant_assign'
   | 'restaurant_void'
   | 'restaurant_release_account'
+  // Etapa 9D: descartar cuentas vacías, cancelar cuentas y catálogo de motivos de cancelación.
+  | 'restaurant_discard_account'
+  | 'restaurant_cancel_account'
+  | 'restaurant_cancel_reasons'
+  | 'restaurant_create_cancel_reason'
+  | 'restaurant_save_cancel_reason'
   // Etapa 8 (fase A): inventario.
   | 'inventory_summary'
   | 'inventory_settings'

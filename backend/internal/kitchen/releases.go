@@ -307,10 +307,12 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		if _, err := handler.createRelease(eventID, accountID, order.OrderID, ids); err != nil {
 			return err
 		}
-	case "item.modified", "item.cancelled":
+	case "item.modified", "item.cancelled", "account.cancelled":
 		// Inventario (etapa 8): las modificaciones y cancelaciones de unidades ya liberadas se
 		// registran antes de procesar cocina, para que queden aunque el cambio de cocina quede
-		// pendiente por advertencias.
+		// pendiente por advertencias. Desde la etapa 9D, «Cancelar cuenta» (account.cancelled) retira
+		// en un solo evento todas las unidades activas de la cuenta con la misma forma (after.unit_ids
+		// y after.reason) y recibe el mismo trato que item.cancelled.
 		if err := inventory.RecordChange(ctx, tx, eventID, kind, payload); err != nil {
 			return err
 		}

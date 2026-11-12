@@ -16,12 +16,15 @@ import (
 	"local/ad-el-pos/server/internal/reports"
 )
 
-// Etapa 9C (§5.1) contra PostgreSQL con la API real: «Cuentas anuladas» (anulación con motivo y
-// cuenta vacía liberada) y «Modificaciones de cantidades» (cancelaciones y modificaciones que
-// reducen una partida ya confirmada) con sus totales, filtros, permisos y exportaciones PDF y
-// Excel; y la referencia del comprobante como columna opcional de «Devoluciones» y «Correcciones
-// de pagos». Ninguno tiene columna «Autorizó»: ese dato no existe. Con ADEL_REPORTS_MEASURE=1 mide
-// además los dos reportes con un año de volumen sintético.
+// Etapa 9C (§5.1) contra PostgreSQL con la API real: «Cuentas anuladas» (desde la etapa 9D
+// «Cuentas canceladas»: la anulación anterior con motivo libre aparece con «Autorizó» vacío y la
+// cuenta vacía liberada ya no aparece, porque no es una cancelación) y «Modificaciones de
+// cantidades» (cancelaciones y modificaciones que reducen una partida ya confirmada) con sus
+// totales, filtros, permisos y exportaciones PDF y Excel; y la referencia del comprobante como
+// columna opcional de «Devoluciones» y «Correcciones de pagos». «Modificaciones de cantidades» no
+// tiene columna «Autorizó»: ese dato no existe. Con ADEL_REPORTS_MEASURE=1 mide además los dos
+// reportes con un año de volumen sintético. Las cancelaciones de la 9D se prueban en
+// stage9d_cancellations_integration_test.go.
 //
 // Como la prueba de exportaciones, usa su propia base desde cero y la deja vacía al terminar.
 func TestStage9CCancellationReports(t *testing.T) {
@@ -94,37 +97,34 @@ func TestStage9CCancellationReports(t *testing.T) {
 
 	t.Run("cuentas anuladas con quién, terminal, motivo, lugar e importe cancelado", func(t *testing.T) {
 		result := fixture.report(t, fixture.admin, "sales.voided_accounts", "")
-		if len(result.Rows) != 2 {
-			t.Fatalf("Se esperaban la anulación y la liberación: %+v", result.Rows)
+		if len(result.Rows) != 1 || result.Meta.Title != "Cuentas canceladas" {
+			t.Fatalf("Se esperaba solo la anulación (la liberación no es cancelación): %s %+v", result.Meta.Title, result.Rows)
 		}
 		row := find(t, result, "folio", text(voided.Account.Folio))
 		expected := map[string]string{
-			"kind": "Anulada", "voided_by": admin, "terminal": "Caja principal", "reason": "Cliente se fue sin consumir",
-			"mode": "Salón", "place": "Mesa 1", "area": "Salón", "cancelled_units": "5", "cancelled_amount": "410.00",
-			"account": "Mesa que se fue", "opened_by": admin,
+			"kind": "Cancelación anterior con motivo libre", "cancelled_by": admin, "authorized_by": "", "terminal": "Caja principal",
+			"reason": "Cliente se fue sin consumir", "description": "", "mode": "Salón", "place": "Mesa 1", "area": "Salón",
+			"cancelled_units": "5", "cancelled_amount": "410.00", "account": "Mesa que se fue", "opened_by": admin,
 		}
 		for key, value := range expected {
 			if text(row[key]) != value {
 				t.Fatalf("Cuenta anulada: %s = %q, se esperaba %q (%+v)", key, text(row[key]), value, row)
 			}
 		}
-		released := find(t, result, "folio", text(empty.Account.Folio))
-		if text(released["kind"]) != "Cuenta vacía liberada" || text(released["reason"]) != "Cuenta vacía liberada" ||
-			text(released["place"]) != "Mesa 2" || text(released["area"]) != "Terraza" || text(released["cancelled_amount"]) != "0.00" ||
-			text(released["cancelled_units"]) != "0" {
-			t.Fatalf("Cuenta vacía liberada: %+v", released)
-		}
 		if text(result.Totals["cancelled_amount"]) != "410.00" || text(result.Totals["cancelled_units"]) != "5" {
 			t.Fatalf("Totales de cuentas anuladas: %+v", result.Totals)
 		}
-		for query, folio := range map[string]string{
-			"kind=released": text(empty.Account.Folio), "kind=void": text(voided.Account.Folio),
-			"area_id=" + fixture.terrace.ID: text(empty.Account.Folio),
+		for query, count := range map[string]int{
+			"reason_id=none": 1, "area_id=" + fixture.terrace.ID: 0, "area_id=" + fixture.area.ID: 1,
 		} {
-			filtered := fixture.report(t, fixture.admin, "sales.voided_accounts", query)
-			if len(filtered.Rows) != 1 || text(filtered.Rows[0]["folio"]) != folio {
+			if filtered := fixture.report(t, fixture.admin, "sales.voided_accounts", query); len(filtered.Rows) != count {
 				t.Fatalf("Filtro %s: %+v", query, filtered.Rows)
 			}
+		}
+		// El filtro anterior por tipo ya no existe.
+		fixture.get(t, fixture.admin, "reports/run/sales.voided_accounts?kind=released", 400)
+		if released := fixture.scalar(t, "SELECT state FROM app.restaurant_accounts WHERE id=$1", empty.Account.ID); released != "voided" {
+			t.Fatalf("La cuenta vacía liberada debía seguir anulada: %s", released)
 		}
 		if takeaway := fixture.report(t, fixture.admin, "sales.voided_accounts", "mode=takeaway"); len(takeaway.Rows) != 0 {
 			t.Fatalf("Ninguna cuenta para llevar se anuló: %+v", takeaway.Rows)
@@ -138,7 +138,6 @@ func TestStage9CCancellationReports(t *testing.T) {
 		if before := fixture.report(t, fixture.admin, "sales.voided_accounts", "period=day&date="+yesterday); len(before.Rows) != 0 {
 			t.Fatalf("Periodo anterior: %+v", before.Rows)
 		}
-		assertNoAuthorizationColumn(t, result)
 	})
 
 	t.Run("modificaciones de cantidades con cantidad anterior y nueva, diferencia, quién y motivo", func(t *testing.T) {
@@ -254,7 +253,7 @@ func TestStage9CCancellationReports(t *testing.T) {
 	t.Run("exportaciones PDF y Excel iguales a la pantalla", func(t *testing.T) {
 		for id, names := range map[string][]string{
 			// El PDF corta los textos largos en varias líneas de su celda: se buscan palabras sueltas.
-			"sales.voided_accounts":     {"Cuentas anuladas", "Anulada", "Administrador", "Terraza", "$410.00"},
+			"sales.voided_accounts":     {"Cuentas canceladas", "Cancelación", "Administrador", "Mesa", "$410.00"},
 			"products.quantity_changes": {"Modificaciones de cantidades", "Hamburguesa", "Refresco", "Ensalada", "-$460.00"},
 		} {
 			result := fixture.screen(t, fixture.admin, id, "")
@@ -291,7 +290,7 @@ func TestStage9CCancellationReports(t *testing.T) {
 }
 
 // assertNoAuthorizationColumn comprueba que el reporte no tiene una columna «Autorizó»: AD-EL POS no
-// pide la autorización de otra persona para anular ni para reducir cantidades.
+// pide la autorización de otra persona para cancelar ni reducir una partida.
 func assertNoAuthorizationColumn(t *testing.T, result reportResult) {
 	t.Helper()
 	for _, column := range result.Columns {

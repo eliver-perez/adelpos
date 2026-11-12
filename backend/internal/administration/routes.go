@@ -49,9 +49,12 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return terminalPreferences(ctx, tx, request, principal)
 	}
 	if strings.HasPrefix(route, "restaurant/") {
+		// Desde la etapa 9D la operación recibe el autorizador de supervisor, como los cobros, para
+		// «Cancelar cuenta» sin el permiso propio.
 		result, err := operations.Handle(ctx, tx, operations.Request{
 			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
-			Actor: operations.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+			Actor:     operations.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+			Authorize: supervisorAuthorizer(principal),
 		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
 			return audit(ctx, tx, principal, action, entity, id, before, after, true)
 		})
@@ -141,6 +144,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	// «Hora de inicio del día» (etapa 9A): un solo valor, editable solo aquí.
 	if route == "settings/business-day" {
 		return businessDaySettings(ctx, tx, request, principal)
+	}
+	// Umbral de cuenta abierta por mucho tiempo (etapa 9D, §3.4), en «Funciones del establecimiento».
+	if route == "settings/long-open-hours" {
+		return longOpenHoursSettings(ctx, tx, request, principal)
 	}
 	parts := strings.Split(route, "/")
 	if len(parts) > 1 && parts[1] != "invitations" && !identifierPattern.MatchString(parts[1]) {

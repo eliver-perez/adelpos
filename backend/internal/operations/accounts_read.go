@@ -74,9 +74,25 @@ func (handler *service) decorateAccount(account *Account) error {
 	if account.ScheduledAt != nil {
 		account.ScheduledLocal = account.ScheduledAt.In(location).Format("2006-01-02T15:04")
 	}
-	// Etapa 7.1: Go decide si la cuenta se puede liberar sin motivo («Liberar mesa»).
-	account.Releasable, err = handler.releasable(account)
-	return err
+	// Etapa 7.1: Go decide si la cuenta se puede liberar sin motivo («Liberar mesa»); desde la 9D
+	// también si se puede descartar con su borrador («Descartar»).
+	account.Discardable, err = handler.discardable(account)
+	if err != nil {
+		return err
+	}
+	account.Releasable = account.Discardable && account.DraftQuantity == 0
+	// Etapa 9D (§3.4): cuenta abierta por más horas que el umbral del establecimiento.
+	account.LongOpen = account.State == "open" && account.ElapsedSeconds > int64(settings.LongOpenHours)*3600
+	// Etapa 9D (§5.1): Go dice si «Cancelar cuenta» procede o qué hay que hacer primero, y si pedirá
+	// la autorización de un supervisor. Solo para cuentas abiertas.
+	if account.State == "open" {
+		account.CancelBlocker, err = payments.CancellationBlockerWithBrief(handler.ctx, handler.tx, account.ID, brief)
+		if err != nil {
+			return err
+		}
+		account.CancelRequiresAuthorization = !handler.request.Actor.Can(cancelPermission)
+	}
+	return nil
 }
 
 func (handler *service) listAccounts() (any, error) {
@@ -197,7 +213,14 @@ func (handler *service) readBill(id string) (*Bill, error) {
 		}
 		lines[index].PreparationState = state
 	}
-	return &Bill{Account: *account, Draft: draft, Lines: lines, ServerTime: time.Now().UTC(), Timezone: location.String()}, nil
+	bill := &Bill{Account: *account, Draft: draft, Lines: lines, ServerTime: time.Now().UTC(), Timezone: location.String()}
+	if account.State == "voided" {
+		bill.Cancellation, err = handler.readCancellation(id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return bill, nil
 }
 
 func (handler *service) history(id string) (any, error) {
@@ -274,6 +297,10 @@ func (handler *service) accounts(parts []string) (any, error) {
 		return handler.accountAction(id, parts[2])
 	case "release":
 		return handler.releaseAccount(id)
+	case "discard":
+		return handler.discardAccount(id)
+	case "cancel-account":
+		return handler.cancelAccount(id)
 	case "history":
 		return handler.history(id)
 	}
