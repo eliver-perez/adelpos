@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["nsis"],
+    "publisher": "AD-EL POS",
+    "shortDescription": "Punto de venta para restaurantes",
+    "icon": ["icons/icon.png", "icons/icon.ico"],
+    "externalBin": ["binaries/ad-el-pos-server"],
+    "resources": {
+      "target/windows-bundle/postgresql/": "postgresql/"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "template": "windows/installer.nsi",
+        "installerHooks": "windows/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "languages": ["Spanish"],
+        "displayLanguageSelector": false,
+        "startMenuFolder": "AD-EL POS"
+      }
+    }
+  }
+}

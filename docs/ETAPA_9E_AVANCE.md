@@ -415,3 +415,47 @@ repositorio. `GOOS=darwin GOARCH=arm64 go build ./...` y `go vet ./...` aprobado
 Pruebas de C2: `go test ./...` (25 paquetes aprobados), `go vet ./...` para Windows y macOS, integración con
 PostgreSQL de `designer`, `payments` y `operations` aprobada (74 s), Vitest de las áreas tocadas (236 pruebas) y
 completo por el agente (756), `tsc --noEmit`, `cargo test --locked` (46) y Prettier del repositorio completo.
+
+## Fase D · Instalador NSIS (12/11/2026)
+
+Versión **0.9.4** en `config/product.json` (sincronizada con `dev.ps1 sync`; en los lockfiles solo cambia la versión
+del propio paquete). Sin migraciones: el esquema sigue en 21.
+
+**Decisión (0-B)**: instalador **por usuario** (`installMode: currentUser`), sin permisos de administrador.
+
+| Qué                                             | Dónde                                                                                                                                     |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Programa                                        | `%LOCALAPPDATA%\Programs\AD-EL POS\` (`ad-el-pos-desktop.exe`, `ad-el-pos-server.exe`, `postgresql\`, `uninstall.exe`)                    |
+| Datos del restaurante                           | `%LOCALAPPDATA%\AD-EL POS\` (clúster `postgres\`, `server.json`, secretos, `logs\`, `backups\`), con ACL privada                          |
+| Preferencias de la ventana y perfil de WebView2 | `%APPDATA%\local.adel.pos.dev\` y `%LOCALAPPDATA%\local.adel.pos.dev\` (las únicas que borra la casilla «borrar datos» del desinstalador) |
+| Credenciales de la terminal                     | Administrador de credenciales de Windows (destino con `local.adel.pos.dev`)                                                               |
+
+Piezas (solo para Windows; `tauri.conf.json` de macOS no cambió más que la versión):
+
+- `desktop/src-tauri/tauri.windows-installer.conf.json`, que se combina solo al empaquetar (`--config`; `tauri dev`
+  no lo usa): destino `nsis`, icono `icons/icon.ico`, el servidor como binario externo
+  (`binaries/ad-el-pos-server-x86_64-pc-windows-msvc.exe` → `ad-el-pos-server.exe`), PostgreSQL como recurso,
+  instalador de arranque de WebView2 incluido (`embedBootstrapper`), idioma español, carpeta «AD-EL POS» en el menú
+  Inicio y casilla de acceso directo en el escritorio (opcional, en la última página).
+- `desktop/src-tauri/windows/installer.nsi`: copia de la plantilla NSIS de Tauri 2.12.4 con dos cambios marcados
+  «AD-EL POS»: la carpeta de instalación por usuario es `%LOCALAPPDATA%\Programs\AD-EL POS` (la original usaba
+  `%LOCALAPPDATA%\AD-EL POS`, la carpeta de datos) y, después de cerrar la aplicación abierta, se espera a que el
+  servidor local y PostgreSQL terminen antes de reemplazar o borrar sus archivos.
+- `desktop/src-tauri/windows/hooks.nsh` (UTF-8 con BOM): la espera anterior (si PostgreSQL quedó activo tras un
+  cierre anómalo, `pg_ctl stop -m fast`, que conserva los datos) y dos accesos directos de mantenimiento en el menú
+  Inicio: «Crear respaldo de AD-EL POS» (`ad-el-pos-server.exe backup --pause`) y «Respaldos de AD-EL POS» (abre la
+  carpeta de respaldos). Ningún paso borra la carpeta de datos.
+- PostgreSQL incluido, solo lo que se usa (64.4 MB sin comprimir): `initdb`, `pg_ctl`, `postgres`, `pg_dump`,
+  `pg_restore` y `psql` con sus 13 DLL (obtenidas con `dumpbin /dependents`), PL/pgSQL, diccionarios Snowball y
+  conversiones de codificación, `share` sin traducciones (22 MB menos) y las licencias de PostgreSQL. El runtime de
+  Visual C++ (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`) va junto a PostgreSQL porque los binarios
+  de EDB no lo traen; la aplicación de escritorio no lo necesita (solo depende de DLL del sistema y del CRT universal).
+- `scripts/build-windows.ps1`: todo de principio a fin con un solo comando (herramientas, metadatos, servidor,
+  PostgreSQL reducido con comprobación por `initdb`, instalador y su SHA-256).
+
+Resultado de `powershell -ExecutionPolicy Bypass -File scripts\build-windows.ps1` (4 min con las cachés de Rust y
+Go; Tauri descargó NSIS 3.13, `nsis_tauri_utils` 0.5.3 con su hash y el instalador de arranque de WebView2):
+
+- **`desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_0.9.4_x64-setup.exe`**
+- **36.6 MB** (38 412 295 bytes), SHA-256 `a975ef448a7148edb5855e50d53af6a2709a77c88d37e7179bff158bf617e8fe`
+- Sin firma digital (es normal el aviso de SmartScreen).
