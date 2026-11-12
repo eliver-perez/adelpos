@@ -205,3 +205,39 @@ macOS, desde los archivos oficiales con su SHA-256: no requieren administrador y
 este equipo (actualizarlo con winget afectaría otros programas del usuario). Visual Studio Build Tools solo se instala
 por equipo: se usa winget y Windows pedirá permiso de administrador (UAC) una vez. PostgreSQL 18.6 con los binarios
 oficiales para Windows (zip de EDB, sin instalador ni servicio).
+
+## Fase A · Herramientas de desarrollo y fin de línea (12/11/2026)
+
+### Herramientas instaladas
+
+| Herramienta                     | Versión                       | Dónde y cómo                                                                                                       |
+| ------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Go                              | 1.27.3 windows/amd64          | `.tools\go`, zip oficial de go.dev (SHA-256 `f26081f4…7885fff`, igual al publicado)                                |
+| Node / npm                      | 24.22.2 / 11.19.1             | `.tools\node`, zip oficial de nodejs.org (SHA-256 `ca1bff5d…7799e2`, igual a `SHASUMS256.txt`); el Node 20 del equipo no se tocó |
+| Rust                            | rustc 1.99.1, cargo 1.99.1, rustfmt 1.10.0 | `.tools\rustup` y `.tools\cargo` con `rustup-init.exe` oficial (SHA-256 `38027d51…63eec7db`, igual al publicado); destino `x86_64-pc-windows-msvc`, perfil mínimo, sin modificar el `PATH` del usuario |
+| Visual Studio Build Tools 2022  | 17.14.37906.3 (paquete winget 17.14.45) | winget `Microsoft.VisualStudio.2022.BuildTools` con la carga `Microsoft.VisualStudio.Workload.VCTools` y los componentes recomendados (MSVC x64 y SDK de Windows 11 10.0.26100); por equipo, con una confirmación de Control de cuentas de usuario; `isRebootRequired=false` |
+| PostgreSQL                      | 18.6 (binarios EDB 18.6-1)    | `.tools\pgsql`, `postgresql-18.6-1-windows-x64-binaries.zip` de get.enterprisedb.com (SHA-256 `fbe23da2…0252f8c`; EDB no publica la suma del zip). Sin instalador ni servicio |
+| CLI de Tauri                    | 2.12.4                        | `npm ci` en `desktop` (`package-lock.json` sin cambios)                                                            |
+| Módulos de Go                   | los de `go.sum`               | `go mod download` a `.cache\go-mod`                                                                                |
+
+- Windows tiene un **reinicio pendiente de Windows Update** (marcas `RebootPending` y `RebootRequired`), ajeno a esta
+  etapa: Visual Studio no pidió reiniciar y nada de lo siguiente lo necesita.
+- Go, Node y Rust van **dentro del proyecto**, como en macOS: no piden administrador, no cambian variables del
+  usuario y no reemplazan el Node 20 instalado en el equipo. `scripts\env.ps1` los antepone al `PATH` solo en la
+  sesión que lo carga.
+- No se instaló Python (los scripts de Windows usan Node) ni un compilador de C para `cgo`: `go test -race` necesita
+  cgo en Windows, así que las suites de Go corren sin `-race` en este equipo (los scripts lo usan solo si encuentran
+  `gcc`). En macOS siguen con `-race`.
+- Los binarios de PostgreSQL de EDB **no incluyen** el runtime de Visual C++ (`vcruntime140.dll`, `msvcp140.dll`): el
+  instalador debe llevarlo (fase D).
+
+### Fin de línea
+
+- `.gitattributes` nuevo: `* text=auto eol=lf`, entradas explícitas para código, SQL, plantillas, scripts y datos
+  (`*.go`, `*.sql`, `*.rs`, `*.ts(x)`, `*.json`, `*.md`, `*.sh`, `*.py`, `*.ps1`, `*.nsi`/`*.nsh`, …), CRLF solo para
+  `*.cmd`/`*.bat` y binarios marcados (`*.png`, `*.ico`, fuentes, `*.pdf`, `*.xlsx`, `*.dump`, `*.bin`, …).
+- `git add --renormalize .` no cambió nada en el índice (ya tenía LF). Se volvió a extraer el área de trabajo:
+  `git ls-files --eol` informa **1 008 archivos `i/lf w/lf` y 5 binarios**, y `git status` no muestra cambios
+  espurios. Las once especificaciones de `docs/etapas/` quedaron idénticas a lo versionado (md5 de cada archivo igual
+  al de `git show HEAD:…`; los md5 de la Fase 0 eran de las copias con CRLF).
+- Comprobado: `go build ./...` y `GOOS=darwin GOARCH=arm64 go build ./...` compilan.
