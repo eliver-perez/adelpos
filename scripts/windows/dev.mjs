@@ -147,20 +147,37 @@ function dbStart() {
     console.log('PostgreSQL del proyecto ya está activo.');
     return;
   }
-  // En Windows, PostgreSQL hereda las salidas de pg_ctl: si fueran las de esta consola, quien la lea
-  // esperaría a que PostgreSQL termine. Su salida va a .local\postgres.log; el resultado, por el código.
-  const result = run(
-    pg('pg_ctl'),
-    ['-D', DATA, '-l', path.join(LOCAL, 'postgres.log'), '-w', 'start'],
-    {
-      detachOutput: true,
-      allowFailure: true,
-    },
-  );
-  if (result.status !== 0) {
+  // En Windows, PostgreSQL hereda las salidas de pg_ctl y pg_ctl las de quien lo lanza: con un hijo de
+  // Node heredaría también la tubería de esta consola y quien la lea (por ejemplo «| Out-Null») esperaría a
+  // que PostgreSQL termine. pg_ctl se lanza sin heredar nada y su salida va a .local\postgres.log.
+  const status = runWithoutInheritance(pg('pg_ctl'), [
+    '-D',
+    DATA,
+    '-l',
+    path.join(LOCAL, 'postgres.log'),
+    '-w',
+    'start',
+  ]);
+  if (status !== 0) {
     fail('PostgreSQL no pudo iniciar. Revisa .local\\postgres.log.');
   }
   console.log('PostgreSQL del proyecto iniciado.');
+}
+
+// runWithoutInheritance ejecuta un programa oculto con Start-Process (ShellExecute: sin heredar
+// identificadores de este proceso), espera a que termine solo él (no sus descendientes) y devuelve su código.
+function runWithoutInheritance(program, args) {
+  const single = (value) => `'${value.replaceAll("'", "''")}'`;
+  const script =
+    `$p = Start-Process -FilePath ${single(program)} ` +
+    `-ArgumentList ${single(args.map(quoteArgument).join(' '))} ` +
+    // $p.Handle se lee antes de esperar: sin eso, Windows PowerShell 5.1 no conserva el código de salida.
+    `-WorkingDirectory ${single(ROOT)} -WindowStyle Hidden -PassThru; $null = $p.Handle; ` +
+    `$p.WaitForExit(); exit $p.ExitCode`;
+  return run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    capture: true,
+    allowFailure: true,
+  }).status;
 }
 
 function dbStop() {

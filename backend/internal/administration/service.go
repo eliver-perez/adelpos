@@ -30,7 +30,10 @@ type Service struct {
 	Rasters documents.RasterSource
 	// Reports ejecuta las consultas de reportes (etapa 9A) en su transacción de solo lectura con un
 	// semáforo propio. Sin valor se crea al primer uso; las pruebas pueden inyectar uno.
-	Reports     *reports.Runner
+	Reports *reports.Runner
+	// Stopping se cierra cuando el servidor empieza a apagarse (etapa 9E): los flujos SSE terminan de
+	// inmediato y el cierre ordenado no agota su plazo. Sin valor (pruebas) nunca se activa.
+	Stopping    <-chan struct{}
 	reportsOnce sync.Once
 	streamMutex sync.Mutex
 	streams     map[string]int
