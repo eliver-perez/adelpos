@@ -3,7 +3,7 @@ import { APIError } from '../../../services/api';
 import type { Bill, DraftItem } from '../../../services/restaurant';
 import { addLineOperation, quantityOperation } from './draftOperations';
 import { DraftSyncEngine } from './draftSync';
-import type { DraftSyncTransport } from './draftSync';
+import type { DraftSyncTransport, RejectedCreation } from './draftSync';
 
 // Motor de sincronización del borrador: antirrebote, una sola petición en vuelo, ningún toque
 // perdido, conflictos explícitos y recuperación de la misma operación incierta.
@@ -425,5 +425,219 @@ describe('cuenta creada con el primer producto (etapa 7.1)', () => {
     expect(engine.uncertain).toBe(false);
     expect(engine.resolve('pendiente:mesa')).toBe('cuenta-real');
     expect(engine.view('cuenta-real')?.pending).toBe(false);
+  });
+});
+
+describe('creación con la captura ya cerrada (etapa 9D, revisión P2)', () => {
+  const inactive = () =>
+    new APIError('PRODUCT_INACTIVE', 'El producto Filete ya no está disponible.', 409);
+
+  function watch(engine: DraftSyncEngine) {
+    const rejected: RejectedCreation[] = [];
+    const created: string[] = [];
+    engine.onCreationRejected((rejection) => rejected.push(rejection));
+    engine.onAccountCreated((localID, result) => created.push(`${localID}>${result.account.id}`));
+    return { rejected, created };
+  }
+
+  it('un rechazo definitivo después de salir olvida la cuenta pendiente y lo informa, sin reenviar', async () => {
+    const { transport, creations, calls } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const { rejected, created } = watch(engine);
+    engine.preparePending('pendiente:pedido', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    const pending = pendingBill('pendiente:pedido');
+    engine.stage(pending, addLineOperation([], filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    expect(creations).toHaveLength(1);
+    // Un segundo toque durante la creación y después se sale de la captura (se envía de inmediato:
+    // queda acumulado detrás de la creación en vuelo).
+    engine.stage(pending, addLineOperation(engine.view('pendiente:pedido')!.items, filete, newID));
+    engine.flushNow('pendiente:pedido');
+    expect(engine.abandonPending('pendiente:pedido')).toBe(false);
+    expect(rejected).toHaveLength(0);
+    const problem = inactive();
+    creations[0]!.reject(problem);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rejected).toEqual([
+      { localID: 'pendiente:pedido', mode: 'takeaway', tableID: null, problem },
+    ]);
+    expect(engine.view('pendiente:pedido')).toBeNull();
+    expect(engine.isPending('pendiente:pedido')).toBe(false);
+    expect(engine.busy).toBe(false);
+    // Los toques acumulados no se reenvían: nadie puede corregirlos fuera de la captura.
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(creations).toHaveLength(1);
+    expect(calls).toHaveLength(0);
+    expect(created).toEqual([]);
+  });
+
+  it('con la captura a la vista el rechazo sigue en la cuenta; al salir después, se informa', async () => {
+    const { transport, creations } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const { rejected } = watch(engine);
+    engine.preparePending('pendiente:mesa', { tableID: 'mesa', seenAccountIDs: [] });
+    engine.stage(pendingBill(), addLineOperation([], filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    const problem = inactive();
+    creations[0]!.reject(problem);
+    await vi.advanceTimersByTimeAsync(0);
+    // Sin salir de la captura: el error queda en la cuenta pendiente con sus toques (como antes).
+    expect(rejected).toHaveLength(0);
+    expect(engine.view('pendiente:mesa')?.error).toBe('El producto Filete ya no está disponible.');
+    expect(engine.view('pendiente:mesa')?.items).toHaveLength(1);
+    // Al salir de la captura ya no hay nada que esperar: se olvida y se informa en ese momento.
+    expect(engine.abandonPending('pendiente:mesa')).toBe(false);
+    expect(rejected).toEqual([
+      { localID: 'pendiente:mesa', mode: 'dine_in', tableID: 'mesa', problem },
+    ]);
+    expect(engine.view('pendiente:mesa')).toBeNull();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(creations).toHaveLength(1);
+  });
+
+  it('salir sin productos la olvida; si la creación sale bien, pasa a la cuenta real', async () => {
+    const { transport, creations } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const { rejected, created } = watch(engine);
+    engine.preparePending('pendiente:vacia', {
+      mode: 'dine_in',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    expect(engine.abandonPending('pendiente:vacia')).toBe(true);
+    engine.preparePending('pendiente:sin-mesa', {
+      mode: 'dine_in',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    engine.stage(pendingBill('pendiente:sin-mesa'), addLineOperation([], filete, newID));
+    engine.flushNow('pendiente:sin-mesa');
+    expect(engine.abandonPending('pendiente:sin-mesa')).toBe(false);
+    creations[0]!.resolve(createdBill('cuenta-real', creations[0]!.body.items));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created).toEqual(['pendiente:sin-mesa>cuenta-real']);
+    expect(rejected).toEqual([]);
+    expect(engine.resolve('pendiente:sin-mesa')).toBe('cuenta-real');
+  });
+
+  it('al salir se envía de inmediato lo pendiente; toques que se anulan no dejan nada', async () => {
+    const { transport, creations } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const { rejected } = watch(engine);
+    // Toques que se anulan entre sí, todavía en el antirrebote: no hay nada que crear.
+    engine.preparePending('pendiente:anulada', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    const anulada = pendingBill('pendiente:anulada');
+    engine.stage(anulada, addLineOperation([], filete, newID));
+    engine.stage(
+      anulada,
+      quantityOperation(engine.view('pendiente:anulada')!.items[0]!, -1, newID),
+    );
+    expect(engine.abandonPending('pendiente:anulada')).toBe(true);
+    expect(engine.view('pendiente:anulada')).toBeNull();
+    // Un producto en el antirrebote se envía al salir, sin esperar.
+    engine.preparePending('pendiente:pedido', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    engine.stage(pendingBill('pendiente:pedido'), addLineOperation([], filete, newID));
+    expect(creations).toHaveLength(0);
+    expect(engine.abandonPending('pendiente:pedido')).toBe(false);
+    expect(creations).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(creations).toHaveLength(1);
+    expect(rejected).toEqual([]);
+  });
+
+  it('un resultado incierto no es un rechazo: se recupera con la misma operación', async () => {
+    const { transport, creations, retries } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const { rejected, created } = watch(engine);
+    engine.preparePending('pendiente:pedido', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    engine.stage(pendingBill('pendiente:pedido'), addLineOperation([], filete, newID));
+    engine.flushNow('pendiente:pedido');
+    expect(engine.abandonPending('pendiente:pedido')).toBe(false);
+    creations[0]!.reject(new APIError('CONNECTION_ERROR', 'Sin conexión'));
+    await vi.advanceTimersByTimeAsync(0);
+    // Sigue pendiente de recuperar (su panel está fuera de la captura); no se informa ni se olvida.
+    expect(rejected).toEqual([]);
+    expect(engine.uncertainAccountID).toBe('pendiente:pedido');
+    expect(engine.view('pendiente:pedido')?.items).toHaveLength(1);
+    expect(engine.abandonPending('pendiente:pedido')).toBe(false);
+    expect(rejected).toEqual([]);
+    // Otra recuperación incierta tampoco.
+    let recovery = engine.recover();
+    retries[0]!.reject(new APIError('CONNECTION_ERROR', 'Sin conexión'));
+    await recovery;
+    expect(rejected).toEqual([]);
+    expect(engine.uncertainAccountID).toBe('pendiente:pedido');
+    // Si la misma operación resulta creada, pasa a la cuenta real.
+    recovery = engine.recover();
+    retries[1]!.resolve(createdBill('pedido-real', creations[0]!.body.items));
+    await recovery;
+    expect(created).toEqual(['pendiente:pedido>pedido-real']);
+    expect(creations).toHaveLength(1);
+    expect(retries).toHaveLength(2);
+    // Si Go la rechaza al recuperarla, se olvida y se informa.
+    engine.preparePending('pendiente:otro', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    engine.stage(pendingBill('pendiente:otro'), addLineOperation([], filete, newID));
+    engine.flushNow('pendiente:otro');
+    engine.abandonPending('pendiente:otro');
+    creations[1]!.reject(new APIError('SERVER_ERROR', 'Error del servidor', 503));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.uncertainAccountID).toBe('pendiente:otro');
+    const problem = inactive();
+    recovery = engine.recover();
+    retries[2]!.reject(problem);
+    await recovery;
+    expect(engine.uncertain).toBe(false);
+    expect(rejected).toEqual([
+      { localID: 'pendiente:otro', mode: 'takeaway', tableID: null, problem },
+    ]);
+    expect(engine.view('pendiente:otro')).toBeNull();
+  });
+
+  it('TABLE_HAS_ACCOUNT con la captura cerrada sigue esperando la decisión del operador', async () => {
+    const { transport, creations } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const { rejected } = watch(engine);
+    engine.preparePending('pendiente:mesa', { tableID: 'mesa', seenAccountIDs: [] });
+    engine.stage(pendingBill(), addLineOperation([], filete, newID));
+    engine.flushNow('pendiente:mesa');
+    engine.abandonPending('pendiente:mesa');
+    creations[0]!.reject(
+      new APIError('TABLE_HAS_ACCOUNT', 'Esta mesa ya tiene una cuenta.', 409, {
+        accounts: [{ id: 'cuenta-ajena', folio: 12, name: 'Mesa 3' }],
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    // La decisión se muestra fuera de la captura: no es un rechazo definitivo.
+    expect(rejected).toEqual([]);
+    expect(engine.tableConflict()?.localID).toBe('pendiente:mesa');
+    // «Abrir una cuenta nueva» y Go la rechaza de forma definitiva: se olvida y se informa.
+    engine.openNewAccount('pendiente:mesa');
+    const problem = inactive();
+    creations[1]!.reject(problem);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rejected).toEqual([
+      { localID: 'pendiente:mesa', mode: 'dine_in', tableID: 'mesa', problem },
+    ]);
+    expect(engine.tableConflict()).toBeNull();
   });
 });

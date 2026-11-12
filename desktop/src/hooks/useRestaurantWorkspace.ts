@@ -26,6 +26,7 @@ import { useRestaurantMutation } from './useRestaurantMutation';
 import type { AccountAction } from '../pages/restaurant/AccountActions';
 import type { CaptureProduct } from '../pages/restaurant/capture/captureRules';
 import { DraftSyncError, uncertainError } from '../pages/restaurant/capture/draftSync';
+import type { RejectedCreation } from '../pages/restaurant/capture/draftSync';
 
 export type RestaurantView = 'tables' | 'takeaway' | 'accounts' | 'manage';
 export type WorkspacePanel =
@@ -75,6 +76,23 @@ function replaceSelection(current: Record<RestaurantView, string>, from: string,
   return next;
 }
 
+// Etapa 9D (revisión, P2): aviso fuera de la captura cuando Go rechaza la creación de una cuenta
+// pendiente cuya captura ya se cerró. El mensaje es el rechazo de Go; la descripción dice qué no se
+// guardó y cómo volver a capturarlo.
+function rejectedCreationDescription(
+  rejection: RejectedCreation,
+  tables: { id: string; name: string }[] | undefined,
+) {
+  if (rejection.mode === 'takeaway') {
+    return 'El pedido nuevo para llevar y sus productos no se guardaron. Vuelve a capturarlo con «Nuevo pedido».';
+  }
+  if (!rejection.tableID) {
+    return 'La cuenta nueva sin mesa y sus productos no se guardaron. Vuelve a capturarla con «Cuenta sin mesa».';
+  }
+  const table = tables?.find((entry) => entry.id === rejection.tableID)?.name;
+  return `La cuenta nueva ${table ? `de ${table}` : 'de la mesa'} y sus productos no se guardaron. Vuelve a capturarla desde la mesa.`;
+}
+
 const uncertainResultMessage =
   'La conexión no permitió conocer el resultado. Usa «Recuperar resultado» antes de realizar otra operación.';
 
@@ -119,6 +137,9 @@ export function useRestaurantWorkspace(
   const [cancelLine, setCancelLine] = useState<ConfirmedLine | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [pending, setPending] = useState<PendingAccount | null>(null);
+  // Creaciones de cuentas pendientes que Go rechazó con la captura ya cerrada (etapa 9D, revisión
+  // P2): se avisan y se quitan de la selección en el efecto de abajo.
+  const [rejectedCreations, setRejectedCreations] = useState<RejectedCreation[]>([]);
   // Cuentas que esta terminal creó desde una cuenta pendiente: mientras llega su consulta se
   // muestra la respuesta de la creación.
   const createdIDs = useRef(new Set<string>());
@@ -263,6 +284,48 @@ export function useRestaurantWorkspace(
     [draft.engine],
   );
 
+  // Etapa 9D (revisión, P2): se salió de la captura con el primer guardado de una cuenta nueva en
+  // curso (Para llevar, «Cuenta sin mesa» o la mesa de la 7.1) y Go lo rechazó de forma definitiva
+  // (por ejemplo, un producto desactivado en otra terminal). El motor ya olvidó la cuenta pendiente:
+  // se avisa fuera de la captura, se quita su identificador local de la selección y, si su captura
+  // seguía abierta en su vista, se cierra para volver al listado o al mapa (la selección automática
+  // elige entonces la primera cuenta). Un resultado incierto no llega aquí: sigue con su panel
+  // «Recuperar resultado del borrador» y el mismo operation_id.
+  useEffect(
+    () =>
+      draft.engine.onCreationRejected((rejection) =>
+        setRejectedCreations((current) => [...current, rejection]),
+      ),
+    [draft.engine],
+  );
+
+  useEffect(() => {
+    if (rejectedCreations.length === 0) return;
+    setRejectedCreations([]);
+    const localIDs = rejectedCreations.map((rejection) => rejection.localID);
+    for (const rejection of rejectedCreations) {
+      notifyError(rejection.problem, 'No se pudo guardar el primer producto.', {
+        id: `creacion-rechazada:${rejection.localID}`,
+        description: rejectedCreationDescription(rejection, overview.data?.tables),
+      });
+    }
+    const views = (Object.keys(selections) as RestaurantView[]).filter((key) =>
+      localIDs.includes(selections[key]),
+    );
+    if (views.length > 0) {
+      setCaptureViews((current) => {
+        const next = { ...current };
+        for (const key of views) next[key] = false;
+        return next;
+      });
+    }
+    setSelections((current) =>
+      localIDs.reduce((next, localID) => replaceSelection(next, localID, ''), current),
+    );
+    setEditor((current) => (current && localIDs.includes(current.accountID) ? null : current));
+    setPending((current) => (current && localIDs.includes(current.localID) ? null : current));
+  }, [rejectedCreations, selections, overview.data]);
+
   useEffect(() => {
     if (!areaID && overview.data?.areas.length)
       setAreaID(
@@ -366,13 +429,20 @@ export function useRestaurantWorkspace(
   }
 
   // Deja de mostrar la cuenta pendiente. Sin productos no queda ningún registro: la mesa sigue
-  // libre. Si aún se está creando, la creación continúa y su resultado actualiza el mapa.
+  // libre. Si aún se está creando, la creación continúa y su resultado actualiza el mapa; si Go la
+  // rechaza de forma definitiva (o ya la había rechazado), se avisa fuera de la captura (etapa 9D,
+  // revisión P2: onCreationRejected).
   function leavePending() {
     if (!pending) {
       return;
     }
-    if (draft.engine.discardPendingIfIdle(pending.localID)) {
+    if (draft.engine.abandonPending(pending.localID)) {
       setSelections((current) => replaceSelection(current, pending.localID, ''));
+      // Sin nada que crear, su captura se cierra también si quedó abierta en otra vista (por
+      // ejemplo, Para llevar después de ir a Mesas desde la barra): al volver se ve el listado y no
+      // la captura del primer pedido que elija la selección automática.
+      const target = pendingView(pending);
+      if (target !== view) setCaptureOpen(target, false);
     }
     setPending(null);
   }

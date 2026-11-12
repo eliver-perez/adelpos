@@ -763,3 +763,67 @@ build` correcto; Prettier limpio en los archivos de Fix1. Pruebas nuevas: detect
   nombre del supervisor.
 - **Playwright** (puertos 8186/1424) `workflow-stage9d-cancel-account` y `workflow-stage9d-colors`: 2/2 en Chromium y 2/2
   en WebKit. La suite completa queda para la regresión final.
+
+## Correcciones de la revisión independiente (parte 3)
+
+Agente Fix2, 12/11/2026, sobre `etapa-9d` en `04e6a78`, sin subagentes. Solo interfaz: sin Go, migraciones, contratos,
+`api.rs` ni cambios en las reglas de negocio. Copia aislada `repo9dFix2` (HEAD exacto + estos cambios); clúster temporal
+55499, Go temporal 8187, vista previa 1425.
+
+- **P1 · «Liberar mesa» sin repetir «Descartar cuenta vacía»** (`TablePanel.tsx`): cuando el panel de la mesa muestra
+  «Liberar mesa» (Go marca la cuenta `releasable` y no hay productos nuevos sin guardar), «Más…» ya no ofrece además
+  «Descartar cuenta vacía» (mismo efecto, dos acciones rojas). En Cuentas, Para llevar, la captura y una mesa no liberable
+  no cambia nada (`accountMoreActions` sigue igual; el filtro es del panel).
+- **P2 · Rechazo definitivo de una cuenta nueva con la captura ya cerrada** (`draftSync.ts`, `useRestaurantWorkspace.ts`):
+  si se sale de la captura con el primer guardado en curso (Para llevar, «Cuenta sin mesa» y la cuenta pendiente de mesa
+  de la 7.1) y Go lo rechaza de forma definitiva (por ejemplo, un producto desactivado en otra terminal), el motor del
+  borrador olvida la cuenta pendiente (sus toques no se reenvían: nadie puede corregirlos fuera de la captura) y lo
+  informa (`onCreationRejected`). La pantalla avisa con `notifyError`: el mensaje es el texto de Go (sin código interno) y
+  la descripción dice qué no se guardó y cómo volver a capturarlo («El pedido nuevo para llevar y sus productos no se
+  guardaron. Vuelve a capturarlo con «Nuevo pedido».», «La cuenta nueva sin mesa…», «La cuenta nueva de Mesa A…»). Quita
+  el identificador local de la selección y cierra su captura si seguía abierta en su vista: se vuelve al listado (con el
+  primer pedido o cuenta elegido) o al mapa (la mesa libre), sin detalle vacío; también se descarta la selección de
+  personalización de esa cuenta pendiente si la había. Si el rechazo llegó con la captura a la vista, el error sigue en
+  la cuenta con sus productos como antes y el aviso aparece al salir. `leavePending` usa `abandonPending` (sustituye a
+  `discardPendingIfIdle` en ese punto; lo pendiente de la cuenta se envía de inmediato al salir, como `flushCurrent`).
+  **Sin cambios** en un resultado incierto (sigue con «Recuperar resultado del borrador» fuera de la captura y el mismo
+  `operation_id`; si al recuperarlo Go lo rechaza, se avisa igual) ni en `TABLE_HAS_ACCOUNT` (su decisión ya se muestra
+  fuera de la captura). `OperationalPage.recoverDraft` ya no muestra «Productos nuevos guardados» si la recuperación
+  terminó en ese rechazo (la cuenta pendiente ya no existe).
+- **Extensión de P2 (mismo mecanismo)**: una cuenta pendiente **vacía** que se deja desde otra vista (por ejemplo,
+  «Nuevo pedido» → ⌘1/Mesas → tocar una mesa) cerraba su selección pero no su captura, y al volver a Para llevar se abría
+  la captura del primer pedido del listado (reproducido en Vitest antes de corregir). Ahora `leavePending` también
+  cierra esa captura cuando la cuenta pendiente es de otra vista.
+- **P3 · Nota** (`docs/NAVIGATION_AND_SHORTCUTS.md`, «La barra durante la captura»): la captura se conserva por sección;
+  si se va a otra sección sin «‹ Mesas»/«‹ Para llevar», al volver se retoma la captura de la mesa o del pedido; para el
+  mapa o el listado se toca «‹ Mesas»/«‹ Para llevar». Sin cambio de comportamiento.
+
+Pruebas (copia `repo9dFix2` = `04e6a78` + estos cambios; 12/11/2026):
+
+- **Vitest nuevo**: `draftSync.test.ts` (+6, «creación con la captura ya cerrada»): rechazo definitivo después de salir
+  (se olvida, se informa una vez, no se reenvían los toques acumulados), rechazo con la captura a la vista (el error
+  sigue en la cuenta; al salir se informa), salir sin productos y creación correcta tras salir, envío inmediato al salir
+  y toques que se anulan, resultado incierto (no se informa ni se olvida; otra recuperación incierta tampoco; la misma
+  operación pasa a la cuenta real; un rechazo al recuperar se informa) y `TABLE_HAS_ACCOUNT` con la captura cerrada
+  (sigue esperando la decisión; «Abrir una cuenta nueva» rechazada se informa). `stage9dAccounts.test.tsx` (+7,
+  «correcciones de la revisión (parte 3)»): P1 (panel con «Liberar mesa» como única acción roja y sin «Descartar» en
+  «Más…»; en la captura de la misma cuenta «Más…» sí lo ofrece); P2 en los tres caminos con la apertura retenida en el
+  puente y rechazada después de «‹ Para llevar» / «‹ Cuentas» / «‹ Mesas» (aviso con el texto de Go y la descripción, sin
+  código interno, una sola petición, nada creado, listado con su primer pedido o cuenta, mapa con la mesa libre y una
+  captura nueva vacía); rechazo con la captura a la vista y salida; pendiente vacío dejado desde Mesas; incierto con la
+  captura cerrada (panel de recuperación, sin aviso de error, mismo `operation_id`, una sola apertura en «Go», el pedido
+  queda elegido). Las seis pruebas que dependen de la corrección fallan sobre `04e6a78` (comprobado).
+- `npx tsc --noEmit` sin errores; `npm test` **75 archivos, 751 pruebas aprobadas** (738 + 13); `npm run build`
+  correcto; Prettier sin diferencias en los 7 archivos.
+- **Playwright** (Go temporal 8187, vista previa 1425, base nueva por motor) con `restaurant.spec.ts`,
+  `workflow-stage9d-accounts.spec.ts` y `workflow-stage9d-topbar-tables.spec.ts` sobre el código final: **3/3 en
+  Chromium (2.0 min) y 3/3 en WebKit (1.9 min)** (registro `docs9dFix2/e2e_final.log`; una corrida anterior, con parte
+  del código previo al envío inmediato de `abandonPending`, también aprobó 3/3 y 3/3). La suite completa queda para la
+  regresión final.
+- **Parche** `docs9dFix2/fix2_desde_HEAD.patch` (desde `04e6a78`, 7 archivos): `git apply --check` limpio sobre el árbol
+  real sin cambios y aplicado (sin commit); los 7 archivos del árbol real quedan idénticos a la copia probada.
+
+Archivos: `desktop/src/pages/restaurant/capture/draftSync.ts`, `desktop/src/hooks/useRestaurantWorkspace.ts`,
+`desktop/src/pages/restaurant/TablePanel.tsx`, `desktop/src/pages/restaurant/OperationalPage.tsx` (condición del aviso
+de `recoverDraft`), `desktop/src/pages/restaurant/capture/draftSync.test.ts`,
+`desktop/src/pages/restaurant/stage9dAccounts.test.tsx` y `docs/NAVIGATION_AND_SHORTCUTS.md`.

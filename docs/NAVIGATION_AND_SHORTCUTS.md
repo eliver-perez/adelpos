@@ -137,6 +137,10 @@ Al capturar un pedido (de una mesa o para llevar) la barra se reduce para dejar 
 
 **Enviar a cocina** y **Cobrar** no cambiaron de lugar.
 
+La captura se conserva por sección: si vas a otra sección sin tocar «‹ Mesas» o «‹ Para llevar» (por ejemplo, con ⌘3 o
+desde Caja), al volver a Mesas o a Para llevar se retoma la captura de la mesa o del pedido que dejaste, con sus
+productos; para ver el mapa o el listado, toca «‹ Mesas» o «‹ Para llevar».
+
 ## Administración
 
 El botón **Administración** abre una pantalla de mosaicos grandes, cada uno con icono, nombre y una línea de
