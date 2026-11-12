@@ -856,3 +856,73 @@ esquema 19 con datos. Hallazgos y correcciones (cada una con su prueba):
 
 Tras las dos correcciones de interfaz: `tsc --noEmit` sin errores y `npm test` 68 archivos, 637 pruebas aprobadas (copia
 del árbol).
+
+## Fase E · Regresión completa, documentación y entrega
+
+### Versión
+
+`config/product.json` pasa a **0.9.2** con el esquema **20** (desde la fase A), con `./scripts/dev.sh sync`
+(`sync --check`: «Metadatos coherentes»); en `Cargo.lock` y `package-lock.json` solo cambia la entrada del propio paquete
+(`d268600`). Sin dependencias nuevas.
+
+### Documentación
+
+Guía nueva [docs/NAVIGATION_AND_SHORTCUTS.md](NAVIGATION_AND_SHORTCUTS.md) (barra, mosaicos, ruta, inicio por terminal,
+selector, menú nativo, atajos, paleta y cómo agregar una pantalla o una acción) y
+[docs/VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md); actualizados `CLAUDE.md`, `AGENTS.md`, `README.md`,
+`ARCHITECTURE.md`, `API_CONTRACTS.md`, `NEXT_STEPS_FOR_SOL.md`, `docs/VERIFICATION.md`, `docs/REPORTS.md`,
+`docs/KITCHEN_AND_PRINTING.md`, `docs/DOCUMENT_DESIGNER.md` y `docs/DEPENDENCIES.md`. Escrita por un agente de
+documentación en paralelo con la regresión final; el coordinador completó la regresión y la instalación.
+
+### Regresión final
+
+Un solo agente, sin subagentes, sobre una copia exacta de `d268600` (0.9.2, esquema 20), clúster temporal 55499 y Go
+temporal en 8183; una sola pasada sin fallos ni repeticiones (1338 s): formato (Prettier, gofmt y `cargo fmt --check`),
+metadatos, `go vet` con y sin `-tags=integration`, 22 paquetes Go con `-race`, integración PostgreSQL de `database`
+(6.3 s), `administration` (62.2 s), `catalog` (8.7 s), `operations` (235.2 s), `payments` (2.2 s), `reports` (104.7 s),
+`reports/operational` (40.2 s), `designer` (20.4 s) e `identity` (17.8 s), `tsc --noEmit`, Vitest (68 archivos, 637
+pruebas), `npm run build`, `cargo test` (40 aprobadas, 1 ignorada), Playwright Chromium 15/15 (5.7 min) y WebKit 15/15
+(5.6 min) —con la pantalla del equipo bloqueada, sin el síntoma que impidió WebKit en la parte D2— y `.app` 0.9.2 compilado
+en la copia aislada (10.00 MiB, Mach-O arm64). **Todo aprobado.**
+
+### Procedimiento para la instalación real
+
+Respaldo → `restore-check.py` → comprobación de solo lectura (script en el directorio temporal que carga
+`scripts/database.py` con `runpy`, usa `admin_env()` con `PGOPTIONS=-c default_transaction_read_only=on` y solo imprime
+conteos; ensayado antes en bases temporales de esquema 19 y 20) → `server-stop` → `migrate` (`applied:1`) y repetición
+(`applied:0`) → `server-start` → readiness y `/api/v1/version` 0.9.2/20 → comprobación posterior → `build-macos` →
+`open-app`. Condiciones: ningún turno en arqueo ni trabajo de impresión pendiente. Advertencia: `migrate`,
+`server-start` y `build-macos` desde `etapa-9c` actúan sobre la instalación real.
+
+### Instalación real
+
+Con la **autorización previa del propietario** (11/11/2026: «Cuando termines si todo está bien aplica los cambios, no
+esperes mi confirmación») y después de que la regresión final aprobara todas las suites sobre `d268600`. Ejecutada el
+11/11/2026 de 22:59 a 23:02 (hora de Monterrey) con el procedimiento anterior; el código del árbol era idéntico a
+`d268600` (solo había documentación sin confirmar):
+
+1. **Estado previo**: servidor 0.9.1 en marcha, readiness 200 y `/api/v1/version` con 0.9.1 y esquema 19; aplicación de
+   escritorio cerrada.
+2. **Comprobación previa** (solo lectura, `transaction_read_only = on`; el script se ensayó antes en bases temporales de
+   esquema 19 y 20): migraciones 1–19, 132 tablas en `app`, 153 permisos (administrador 153, cajero 1, finanzas 1,
+   supervisor 4), cuentas cerradas 2 y abiertas 5, 15 unidades, 2 pagos, turnos cerrado 1 y abierto 1 (**ninguno en
+   arqueo**), 5 operaciones de caja, 0 tickets y 0 trabajos de impresión (**ninguno pendiente**), sin impresoras, 1
+   terminal, 2 usuarios, 4 categorías, 6 productos, 1 imagen del catálogo, 10 plantillas, identidad sin logotipo, 135
+   eventos de auditoría, 9 reconocimientos de venta, funciones activables desactivadas y sin las columnas de la 0020.
+3. **Respaldo** `backups/adel_pos-20261112T045957Z-a3a2b3.dump` (660 502 bytes, catálogo legible) y **ensayo de
+   restauración**: «Restauración completa verificada: 132 tablas con conteos idénticos»
+   (`.local/stage20-restore-verification.json`).
+4. Comprobación previa repetida justo antes de detener el servidor: sin cambios.
+5. **Servidor detenido** de forma ordenada; **migración** `migrate` → `applied:1` y repetición `applied:0`.
+6. **Servidor 0.9.2 iniciado**: readiness 200 (PostgreSQL disponible, esquema compatible) y `/api/v1/version` con 0.9.2 y
+   esquema 20.
+7. **Comprobación posterior** (solo lectura): solo cambiaron la lista de migraciones (1–20) y la existencia de
+   `devices.home_screen` y `kitchen_printers.columns`; **todos los conteos operativos, permisos, auditoría y ventas son
+   idénticos**; la terminal quedó con inicio en Mesas (`tables`), ninguna impresora con columnas propias (no hay
+   impresoras) y las restricciones `devices_home_screen_check` y `kitchen_printers_columns_check` existen.
+8. **Aplicación de escritorio**: `build-macos` → `AD-EL POS.app` 0.9.2 (10.00 MiB) y `open-app` (proceso de la aplicación
+   en marcha). El recorrido en la ventana nativa (barra superior, menú nativo real, atajos, selector, mapa y selector de
+   hora) **no se verificó**: queda como verificación del propietario.
+
+La 0020 es ahora inmutable; la siguiente ampliación requiere 0021 y, sobre la instalación real, autorización expresa con
+respaldo y ensayo de restauración.

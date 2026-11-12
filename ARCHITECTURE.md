@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9B
+# Arquitectura · Etapa 9C
 
 ## Responsabilidades
 
@@ -68,7 +68,7 @@ La contraseña introducida y el código de enrolamiento existen transitoriamente
 
 La migración 0001 se conserva. La 0002 crea establecimiento, roles, permisos, usuarios, excepciones, cajas, terminales, invitaciones, sesiones, intentos de acceso, preferencias y auditoría. IDs UUID estables y claves foráneas explícitas. Los datos históricos no se eliminan al desactivar usuarios. Turnos, pagos y movimientos económicos llegan con la 0006 (etapa 6).
 
-La configuración del establecimiento persiste nombre, zona IANA, MXN, contacto y apariencia inicial. El asistente toma la zona del sistema operativo y permite cambiarla. Los instantes se almacenan como timestamptz y se transportan en UTC; la zona del establecimiento es una configuración de negocio independiente. El tema y pantalla inicial se guardan por usuario; el teclado por terminal. Las pantallas retiradas o no autorizadas vuelven a Estado del sistema.
+La configuración del establecimiento persiste nombre, zona IANA, MXN, contacto y apariencia inicial. El asistente toma la zona del sistema operativo y permite cambiarla. Los instantes se almacenan como timestamptz y se transportan en UTC; la zona del establecimiento es una configuración de negocio independiente. El tema y pantalla inicial se guardan por usuario; el teclado por terminal. Las pantallas retiradas o no autorizadas vuelven a Estado del sistema. Desde la etapa 9C la pantalla de inicio es de cada terminal (`devices.home_screen`, migración 0020), la preferencia por usuario se conserva sin usarse y una pantalla no autorizada vuelve al inicio de la terminal, nunca a Estado del sistema (ver «Navegación, selector, teclado y menú nativo · etapa 9C»).
 
 Las cantidades monetarias usan numeric/decimal y cadenas decimales en JSON; nunca float o aritmética financiera con number de JavaScript. Mantener transacciones por invariante y auditoría del actor/dispositivo/operación.
 
@@ -225,3 +225,67 @@ sustituye a la marca de la aplicación.
 **Interfaz y puente.** Pantalla «Documentos» (`pages/documents/`) con las pestañas «Plantillas» e «Identidad del
 establecimiento»; editor en tres áreas con antirrebote y una sola vista previa en vuelo, conflicto de revisión con
 borrador conservado e invalidación por SSE (ámbito `documents`). 22 operaciones nuevas en la lista cerrada de `api.rs`.
+
+## Navegación, selector, teclado y menú nativo · etapa 9C
+
+**Sin cambios de reglas de negocio, cálculos, permisos ni flujos operativos** (§0-B y §7 de la especificación): la etapa
+cambia cómo se llega a cada pantalla y cómo se presentan los controles. Sin paquetes Go, locks, permisos ni dependencias
+nuevos. Una sola migración, `0020_terminal_home_and_printer_columns.sql`, transaccional y sin modificar 0001–0019:
+`devices.home_screen` (`text NOT NULL DEFAULT 'tables'` con `devices_home_screen_check`, lista cerrada `tables`,
+`takeaway`, `kitchen`, `cash`) y `kitchen_printers.columns` (`smallint`, NULL = predeterminado del papel, con
+`kitchen_printers_columns_check`: 42/48 en 80 mm y 30/32 en 58 mm, con `IS NOT NULL` explícito en las ramas que validan).
+Aplicada a la instalación real el 11 de noviembre de 2026 con la autorización previa del propietario. Guía: [NAVIGATION_AND_SHORTCUTS.md](docs/NAVIGATION_AND_SHORTCUTS.md).
+
+**Navegación en React.** La aplicación no tiene rutas de URL: `App.tsx` guarda la pantalla visible y la dibuja. La fuente
+única es el registro de secciones (`desktop/src/navigation/sections.ts`): pantalla, nombre, icono, grupo (operación,
+administración o personal), mosaico padre, descripción, regla de permisos (la de la antigua tabla `screens`, que solo
+decide qué se muestra) e inicio de terminal. De él salen la barra superior (`TopBar`), los mosaicos (`TileScreen`), la ruta
+(`Breadcrumb`), el inicio (`resolveHome`) y la paleta. Toda navegación pasa por **un único `requestScreen`**
+(`NavigationContext`), que respeta `useLeaveGuard`. El estado del servidor (`serverState.ts`) se deriva de las dos
+fuentes reales: la consulta de la sesión (`useSession`, cada 5 s) y el canal SSE (`useRealtime`). El gancho y la hoja del
+atajo «Caja» de la 7.1 subieron a `App.tsx`: una sola consulta del turno (cada 15 s) para la barra y la captura.
+
+**Inicio por terminal en Go.** `auth/me` informa `terminal.home_screen` y `GET devices` lo incluye; `PATCH devices/{id}`
+lo acepta como campo opcional con el permiso existente `devices.manage`, validado contra la lista cerrada de
+`administration/devices.go` (y el CHECK), auditado en `device.updated`; sin el campo se conserva el guardado.
+`user_preferences.home_screen` se conserva en Go sin usarse para abrir.
+
+**Registro de acciones, despachador y teclado.** `desktop/src/commands/actions.ts` declara las 23 acciones que comparten el
+menú nativo, los atajos y la paleta: visibilidad con las reglas de permisos de cada botón, habilitación por contexto
+(`operationBridge.ts` entrega el estado y las funciones de la pantalla operativa) y ejecución con la misma función del
+botón; ninguna crea un camino nuevo hacia el servidor ni ejecuta algo financiero. El despachador (`dispatcher.ts`) descarta
+una sola vez la gemela de una acción llegada por otra vía en 700 ms (acelerador del menú y pulsación en el WebView) y no
+repite una acción asíncrona en curso. La capa de teclado (`useCommandCenter.tsx`, `keyboard.ts`, `platform.ts`) no actúa
+en campos ni con diálogos, menús o listas abiertos y decide Escape después de los demás oyentes, para no romper los que ya
+lo usan (el teclado del cobro, los diálogos, la hoja de Caja, el selector).
+
+**Menú nativo en Rust.** `desktop/src-tauri/src/menu.rs` arma el menú en español con `Builder::menu` y `on_menu_event`
+(sin capacidades `core:*` nuevas): submenú «AD-EL POS» solo en macOS, Archivo, Edición con los elementos predefinidos del
+sistema (sin ⌘W), Ver, Caja y Ayuda. Las opciones propias son la lista cerrada `MENU_ACTIONS`; Rust no ejecuta acciones de
+negocio ni conoce rutas: envía `{action}` a React por un `Channel` (operación cerrada `menu_subscribe`) y React informa qué
+opciones habilitar (`menu_set_state`, que rechaza identificadores fuera de la lista). Solo «Salir» lo atiende Rust
+(`app.exit(0)`), sin detener Go ni PostgreSQL. Ambas operaciones están en `build.rs`, `permissions/diagnostics.toml` y
+`generate_handler!`, con pruebas Rust y simuladas en `e2e/native-driver.ts`. Diseñado para Windows; no compilado ni
+probado allí.
+
+**Selector y selector de hora.** `components/Select.tsx` (`Select` y `MultiSelect`, con `SelectPopup.tsx`,
+`selectHooks.ts` y la lógica pura `selectModel.ts`) es propio, sin dependencia: patrón ARIA combobox con la lista en un
+portal de posición fija, búsqueda sin acentos (en React, o en Go con `onSearchChange`), grupos, acciones, selección
+múltiple, teclado completo, compatibilidad con el teclado virtual y con la validación nativa mediante un campo oculto.
+Sustituyó todos los `<select>`; los valores enviados a Go no cambian. `components/TimeField.tsx` compone dos selectores
+(hora y minutos) y, en su variante con fecha, el campo de fecha existente; envía los mismos formatos de siempre
+(`HH:MM`, `AAAA-MM-DDTHH:MM`, RFC 3339 en los filtros del Registro de movimientos) y Go sigue validando.
+
+**Pendientes acordados (§5).** Dos reportes en el registro cerrado de la 9A (`reports/cancellations.go`: cuentas anuladas
+y modificaciones de cantidades, desde eventos de `restaurant_events` y unidades canceladas, sin locks; de 92 a 94
+reportes, sin índice nuevo tras medir); `catalog/images.go` aplica `logoraster.CheckJPEGMarkers` antes de decodificar;
+columnas por impresora: `kitchen.Printer.RenderOptions` da al renderizador único el papel y las columnas de la impresora
+destino (con el predeterminado `Columns` queda en cero y la IR es idéntica a la de la 9B), la fotografía de la impresora
+del trabajo conserva las columnas para la reimpresión, CUPS en texto ajusta `cpi` en proporción, y la prueba de ancho
+(`kitchen/printer_width.go` con `documents/ruler.go`) encola un ticket `test` sin ventas ni movimientos. La vista previa
+del diseñador acepta una impresora (`printer_id`).
+
+**Textos y apariencia.** Textos visibles sin términos técnicos; en Go solo cambió texto (el mensaje de
+`IDEMPOTENCY_CONFLICT` en seis módulos, el de la zona horaria del asistente y los de «Registro de movimientos»), nunca
+códigos ni lógica. «Información para soporte» plegada con `settings.manage`. Go copia la apariencia de Configuración general a cada usuario nuevo y la usa
+como respaldo al leer preferencias.

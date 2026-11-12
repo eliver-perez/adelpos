@@ -138,3 +138,20 @@ dependencias nuevas; `Cargo.toml` y `package.json` solo cambian de versión, 0.9
   encabezado de los reportes); el original no se modificó y una prueba compara bytes y SHA-256.
 - El editor visual usa solo React y los componentes propios (`Icon`, `ConfirmDialog`, `notify.ts`); el arrastre y la
   reordenación no usan librería externa.
+
+## Etapa 9C
+
+**Sin módulos, crates ni paquetes npm nuevos** (`backend/go.mod`, `go.sum`, `Cargo.lock` y `package-lock.json` sin
+dependencias nuevas; `Cargo.toml`, `package.json` y la entrada del propio paquete en los dos lockfiles solo cambian de
+versión, 0.9.2; comprobado con `git diff` desde `etapa-9b`).
+
+- **Selector único** (`desktop/src/components/Select.tsx` y sus partes) y **selector de hora** (`TimeField.tsx`):
+  construidos con React 19 y los tokens de `styles.css`, sin librería (la especificación permitía una librería madura;
+  no hizo falta ninguna) y sin red.
+- **Menú nativo** (`desktop/src-tauri/src/menu.rs`): usa la API de menús que ya trae Tauri 2.12.5 (`tauri::menu`:
+  `Menu`, `Submenu`, `MenuItem`, `PredefinedMenuItem`) y `tauri::ipc::Channel`, sin plugins ni características
+  (`features`) nuevas en `Cargo.toml` y sin permisos `core:*` en la ventana.
+- **Atajos y paleta de comandos** (`desktop/src/commands/`): código propio, sin librería de atajos ni de búsqueda.
+- **Reportes nuevos, columnas por impresora y validación de JPEG del catálogo**: Go estándar y los paquetes ya fijados
+  (`pgx`, `shopspring/decimal`, `excelize` y `fpdf` para las exportaciones); el recorrido de marcadores JPEG es el de
+  `internal/logoraster` (etapa 9B), exportado.

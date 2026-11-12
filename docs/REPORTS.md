@@ -15,6 +15,15 @@ el logotipo del restaurante (o el de AD-EL POS si no hay) con su nombre y sus da
 [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). Contenido, columnas, totales, orden, consultas, permisos, límites y
 auditoría siguen igual.
 
+**Etapa 9C** (versión 0.9.2, esquema 20; la migración 0020 no toca reportes y se aplicó a la instalación real el 11 de
+noviembre de 2026): dos reportes nuevos del sistema anterior (§5.1 de [etapas/ETAPA_9C_v3.md](etapas/ETAPA_9C_v3.md)), «Cuentas
+anuladas» (`sales.voided_accounts`) y «Modificaciones de cantidades» (`products.quantity_changes`), y la referencia del
+comprobante como columna opcional en «Devoluciones» y «Correcciones de pagos»; el registro pasa de 92 a **94
+reportes**. Ninguno lleva columna «Autorizó»: AD-EL POS no pide la autorización de otra persona para anular ni para
+reducir cantidades, y el dato no se inventa. La sección se abre desde **Administración → Reportes** y sus listas usan el
+selector único de la 9C ([NAVIGATION_AND_SHORTCUTS.md](NAVIGATION_AND_SHORTCUTS.md)). Lo demás no cambia. Contratos en
+[API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9C»); evidencia en [VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md).
+
 ## Contenido
 
 - [Principios](#principios)
@@ -123,26 +132,26 @@ periodo (`required`) o es una fotografía de la situación actual (`none`), si a
 (`DateBasis`), los filtros que admite, las columnas tipadas, el orden por omisión, la consulta y, si hace falta, sus
 totales propios. `TestReportRegistryIsClosedAndConsistent` valida el registro completo.
 
-Hay **92 reportes** en 13 grupos, en este orden de navegación:
+Hay **94 reportes** en 13 grupos (92 de la etapa 9A y 2 de la 9C), en este orden de navegación:
 
-| Grupo                      | Reportes                                                                                                                                                                                                                                                                                                       |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Resumen ejecutivo          | El resumen (`GET reports/dashboard`), con 9 secciones.                                                                                                                                                                                                                                                         |
-| Ventas (15)                | `sales.summary` (por tasa de IVA), `by_day`, `by_week` (ISO), `by_month`, `by_hour`, `by_product`, `by_variant`, `by_mode`, `dine_in` (área y mesa), `takeaway` (origen), `by_price_list`, `by_shift`, `accounts` (cuentas cerradas), `evolution` (con el anterior) e `in_progress` («En curso», sin periodo). |
-| Categorías (1)             | `sales.by_category`.                                                                                                                                                                                                                                                                                           |
-| Productos (8)              | `products.top`, `bottom` (incluye activos sin ventas), `combos`, `combo_components` (sin importe), `complements`, `cancelled`, `discounted` y `trends`.                                                                                                                                                        |
-| Pagos (12)                 | `payments.by_method`, `by_register`, `by_shift`, `by_user`, `by_day`, `list`, `mixed_partial`, `refunds`, `corrections`, `tips`, `currency` (efectivo por moneda) y `pending` (importes pendientes, sin periodo).                                                                                              |
-| Descuentos y cortesías (8) | `discounts.summary` (por día con % sobre ventas), `by_reason`, `by_user`, `by_product`, `list`, `general`, `courtesies` y `authorizations`.                                                                                                                                                                    |
-| Caja (7)                   | `cash.shifts`, `sales_collections_by_shift`, `by_register`, `by_day`, `operations`, `cuts` y `by_user`.                                                                                                                                                                                                        |
-| Cocina y operación (3)     | `kitchen.demand_by_product`, `demand_by_hour` y `stations`.                                                                                                                                                                                                                                                    |
-| Inventarios (18)           | `inventory.stock`, `stock_by_warehouse`, `negative`, `below_minimum`, `valuation`, `average_costs`, `kardex`, `entries`, `outflows`, `transfers`, `adjustments`, `waste`, `counts`, `count_differences`, `consumption_by_item`, `consumption_by_day`, `consumption_by_product` y `consumption_by_kitchen`.     |
-| Compras (7)                | `purchases.received` (compras recibidas por periodo), `ordered`, `pending`, `by_supplier`, `by_item`, `supplier_returns` y `cash_links`.                                                                                                                                                                       |
-| Proveedores (1)            | `suppliers.activity`.                                                                                                                                                                                                                                                                                          |
-| Costos y márgenes (9)      | `costs.margin_by_product`, `margin_by_category`, `margin_by_period`, `cost_status`, `theoretical_products`, `theoretical_recipes`, `consumption_valued`, `waste` y `cost_adjustments`.                                                                                                                         |
-| Empleados (3)              | `employees.activity`, `responsible_sales` y `confirmations`.                                                                                                                                                                                                                                                   |
+| Grupo                      | Reportes                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resumen ejecutivo          | El resumen (`GET reports/dashboard`), con 9 secciones.                                                                                                                                                                                                                                                                                                               |
+| Ventas (16)                | `sales.summary` (por tasa de IVA), `by_day`, `by_week` (ISO), `by_month`, `by_hour`, `by_product`, `by_variant`, `by_mode`, `dine_in` (área y mesa), `takeaway` (origen), `by_price_list`, `by_shift`, `accounts` (cuentas cerradas), `evolution` (con el anterior), `in_progress` («En curso», sin periodo) y, desde la 9C, `voided_accounts` («Cuentas anuladas»). |
+| Categorías (1)             | `sales.by_category`.                                                                                                                                                                                                                                                                                                                                                 |
+| Productos (9)              | `products.top`, `bottom` (incluye activos sin ventas), `combos`, `combo_components` (sin importe), `complements`, `cancelled`, `discounted`, `trends` y, desde la 9C, `quantity_changes` («Modificaciones de cantidades»).                                                                                                                                           |
+| Pagos (12)                 | `payments.by_method`, `by_register`, `by_shift`, `by_user`, `by_day`, `list`, `mixed_partial`, `refunds`, `corrections`, `tips`, `currency` (efectivo por moneda) y `pending` (importes pendientes, sin periodo).                                                                                                                                                    |
+| Descuentos y cortesías (8) | `discounts.summary` (por día con % sobre ventas), `by_reason`, `by_user`, `by_product`, `list`, `general`, `courtesies` y `authorizations`.                                                                                                                                                                                                                          |
+| Caja (7)                   | `cash.shifts`, `sales_collections_by_shift`, `by_register`, `by_day`, `operations`, `cuts` y `by_user`.                                                                                                                                                                                                                                                              |
+| Cocina y operación (3)     | `kitchen.demand_by_product`, `demand_by_hour` y `stations`.                                                                                                                                                                                                                                                                                                          |
+| Inventarios (18)           | `inventory.stock`, `stock_by_warehouse`, `negative`, `below_minimum`, `valuation`, `average_costs`, `kardex`, `entries`, `outflows`, `transfers`, `adjustments`, `waste`, `counts`, `count_differences`, `consumption_by_item`, `consumption_by_day`, `consumption_by_product` y `consumption_by_kitchen`.                                                           |
+| Compras (7)                | `purchases.received` (compras recibidas por periodo), `ordered`, `pending`, `by_supplier`, `by_item`, `supplier_returns` y `cash_links`.                                                                                                                                                                                                                             |
+| Proveedores (1)            | `suppliers.activity`.                                                                                                                                                                                                                                                                                                                                                |
+| Costos y márgenes (9)      | `costs.margin_by_product`, `margin_by_category`, `margin_by_period`, `cost_status`, `theoretical_products`, `theoretical_recipes`, `consumption_valued`, `waste` y `cost_adjustments`.                                                                                                                                                                               |
+| Empleados (3)              | `employees.activity`, `responsible_sales` y `confirmations`.                                                                                                                                                                                                                                                                                                         |
 
 Las columnas, los filtros y los permisos de cada reporte están en [API_CONTRACTS.md](../API_CONTRACTS.md) («Reportes
-registrados (fase B1)» y «Reportes nuevos (45)» de la parte B2). El catálogo (`GET reports/catalog`) solo incluye los
+registrados (fase B1)» y «Reportes nuevos (45)» de la parte B2, y «Etapa 9C» para los dos últimos). El catálogo (`GET reports/catalog`) solo incluye los
 grupos con reportes que el usuario puede consultar y, en cada reporte, solo las columnas que puede ver.
 
 ### Modelo de resultado único
@@ -380,12 +389,30 @@ la mesa y el área son las actuales de la cuenta.
   con el anterior.
 - Cocina: demanda por producto y por hora y preparación por estación, con la fecha de liberación a cocina.
 - **Cuentas divididas y combinadas** no duplican venta: cada unidad se reconoce una vez.
+- **Cuentas anuladas** (etapa 9C, `sales.voided_accounts`, con `reports.sales.read` como «Productos cancelados»): una fila
+  por cuenta anulada con motivo (evento `account.void`) o cuenta vacía liberada (`account.released`, motivo fijo «Cuenta
+  vacía liberada»), en la fecha de la anulación con la hora de inicio del día: folio, tipo, quién anuló, terminal, motivo,
+  modalidad, mesa u origen, área, unidades canceladas e importe de esas unidades (opcionales: nombre de la cuenta,
+  apertura y quién abrió). Una cuenta solo se anula sin productos activos ni borradores y con cobros netos en cero: el
+  importe útil es el de las unidades que se cancelaron en ella antes. Filtros: tipo, modalidad, área y usuario.
+- **Modificaciones de cantidades** (etapa 9C, `products.quantity_changes`, mismo permiso): una fila por cancelación
+  (`item.cancelled`) o modificación que retiró unidades (`item.modified` con `cancelled_unit_ids`) de una partida ya
+  confirmada, en su fecha con la hora de inicio del día: producto, cambio («Cantidad reducida» o «Partida cancelada»),
+  cantidad anterior y nueva, diferencia en unidades e importe (negativos, con total), quién y motivo (opcionales: acción,
+  terminal, modalidad, mesa u origen y unidades ya liberadas a cocina). La cantidad anterior de una modificación sale de
+  su evento; la de una cancelación, de la respuesta idempotente de esa misma operación más lo retirado; si faltara, queda
+  vacía. Filtros: producto, modalidad y usuario.
+- Ninguno de los dos tiene «Autorizó»: AD-EL POS no pide autorización de otra persona para esas acciones (basta
+  `accounts.manage` u `orders.cancel` de quien las hace); ambos lo dicen en una nota.
 
 ## Pagos
 
 - Cobros por método, caja, turno, usuario y día, y detalle de cobros (`payments.list`), en su fecha de registro.
 - Devoluciones (`payments.refunds`) en su propio día y correcciones (`payments.corrections`: el reverso y el pago que lo
-  sustituye). Pagos mixtos y parciales (`payments.mixed_partial`), derivados de los pagos registrados.
+  sustituye). Desde la etapa 9C, **referencia del comprobante** como columnas opcionales: «Referencia» y «Referencia del
+  pago original» en devoluciones, y «Referencia original» y «Referencia correcta» en correcciones; «Detalle de cobros»
+  ya tenía «Referencia» (la que se captura en débito, crédito y los demás métodos no efectivo; AD-EL POS no guarda un
+  folio de tarjeta distinto de la referencia). Pagos mixtos y parciales (`payments.mixed_partial`), derivados de los pagos registrados.
 - Importes pendientes (`payments.pending`, sin periodo): saldos de las cuentas abiertas con la fórmula única.
 - **Dólares físicos, cambio y tipo de cambio histórico**: `payments.currency` (efectivo por moneda) da los pesos y dólares
   físicos recibidos y entregados de `cash_movements`, con la equivalencia al tipo de cambio de cada cobro (el fijo de su
@@ -475,7 +502,7 @@ Con `reports.purchases.read`:
 
 - **Compras recibidas por periodo** (`purchases.received`): fecha, folio de la recepción y de la orden, modalidad,
   proveedor, comercio, almacén, insumo, cantidad y unidad capturada y base, precio unitario sin IVA, descuento, importe sin
-  IVA, tasa e IVA, importe y quién recibió; filtros de proveedor, insumo, categoría de insumo, almacén, modalidad y estado
+  IVA, tasa e IVA, importe y quién recibió (columna «Recibió»: el usuario que registró la recepción); filtros de proveedor, insumo, categoría de insumo, almacén, modalidad y estado
   de la orden; cifras de recepciones, total, **pagado desde caja** (ya incluido en el total, nunca otra compra) y
   devoluciones del periodo (aparte). El valor de inventario y el costo por unidad base exigen `inventory.costs.read`.
 - **Modalidad**: `order` (recepción de una orden de compra), `direct` (recepción directa de un proveedor formal) y
@@ -550,7 +577,8 @@ que solo consulta con la ventana visible.
 
 ## Interfaz
 
-La sección **Reportes** (`reports.read`; también pantalla de inicio) es genérica sobre el catálogo de Go: los grupos, los
+La sección **Reportes** (`reports.read`; desde la etapa 9C en **Administración → Reportes**, y ya no es pantalla de inicio
+porque el inicio lo decide cada terminal) es genérica sobre el catálogo de Go: los grupos, los
 reportes, los filtros, las columnas, el periodo y la comparación salen de la declaración de cada reporte, de modo que un
 reporte nuevo aparece sin escribir una pantalla.
 
@@ -684,7 +712,7 @@ un 422 no se audita como exportación.
 
 Operación cerrada `export_report(report, format, query)` en `desktop/src-tauri/src/export.rs`:
 
-- Lista cerrada de los 92 reportes (`EXPORTABLE_REPORTS`, igual al registro de Go: `TestExportBridgeListsEveryReport` lee
+- Lista cerrada de los 94 reportes desde la etapa 9C (`EXPORTABLE_REPORTS`, igual al registro de Go: `TestExportBridgeListsEveryReport` lee
   `export.rs` y exige que coincidan) y parámetros de la lista blanca `reports_*` de `api.rs` sin paginación ni búsqueda
   (más `paper` en PDF); valores de hasta 120 caracteres sin caracteres de control.
 - Credenciales e invalidación como `api_request` (los tokens nunca llegan al WebView), 120 s, tope de 32 MiB y una
@@ -766,6 +794,12 @@ Detalle de lo ejecutado en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
   lectura, sin locks consultivos) y `identity` (PDF y Excel con el logotipo del restaurante y con el respaldo). Comparado
   con el código de la 9A: las cadenas del PDF y la hoja «Datos» del Excel son idénticas. `assertSafeWorkbook` admite
   exactamente el dibujo y la imagen del encabezado.
+- **Etapa 9C**: integración `reports/cancellations_integration_test.go` (`TestStage9CCancellationReports`: cuentas
+  anuladas con quién, terminal, motivo, lugar e importe cancelado; modificaciones de cantidades con cantidad anterior y
+  nueva, diferencia, quién y motivo; referencia del comprobante en devoluciones y correcciones; permisos de origen como
+  «Productos cancelados» por API directa; PDF y Excel iguales a la pantalla; medición opcional con un año sintético). La
+  lista del puente sigue igual al registro (`TestExportBridgeListsEveryReport`). Detalle en
+  [VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md).
 - **Rust**: `report_routes_are_closed_read_only_and_keyed` (`api.rs`) y las pruebas de `export.rs` (lista cerrada,
   parámetros en lista blanca, tipo y firma antes del diálogo, nombres saneados, escritura atómica, cancelación sin
   escribir, una exportación a la vez y ventana sin permisos de diálogo ni de archivos).
@@ -810,6 +844,12 @@ el índice de pagos por fecha, `inventory_movements_occurred_idx`, `inventory_mo
 `inventory_consumption_requests_unit_idx`; las de un año recorren las tablas completas porque el año es todo el volumen.
 Ningún reporte se acercó al límite de 30 s, por lo que no se agregó otra migración de índices (no existe la 0018).
 
+**Reportes de la 9C** (`TestStage9CCancellationReports`, opcional con `ADEL_REPORTS_MEASURE=1`): un año sintético de
+607 214 eventos de restaurante (667 MB), con 1 038 cuentas anuladas y 5 201 cancelaciones en el año: «Cuentas anuladas»
+21 ms y «Modificaciones de cantidades» 141 ms (mejor de 3, ejecutor completo). Con un índice parcial candidato sobre
+`restaurant_events(created_at)` para esos tipos, 20 ms y 141 ms: no lo usan (parten de las cuentas anuladas y de las
+unidades canceladas, con el índice de la 0017, y leen el evento por el índice de la cuenta), así que no se agregó.
+
 **Exportaciones** (`TestReportExports`, con `-race`): `payments.list` con 3 004 renglones, PDF de 95 páginas (307 912
 bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de 4.7 MB en 11.1 s y Excel de 2.7 MB en
 7.7 s.
@@ -847,7 +887,12 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
 - **Funciones del sistema anterior no incluidas** (reportadas sin implementar; requieren confirmación del propietario):
   reporte de modificaciones de cantidades autorizadas, lista de cuentas anuladas con quién autorizó, columna «Recibió» en
   compras (el reporte muestra quién registró la recepción), folio del comprobante de tarjeta y conteo de canceladas en el
-  resumen.
+  resumen. **Desde la etapa 9C** existen «Cuentas anuladas» y «Modificaciones de cantidades» (sin «Autorizó», porque el
+  dato no existe en AD-EL POS), la referencia del comprobante en devoluciones y correcciones y la columna «Recibió»; el
+  conteo de canceladas en el resumen sigue sin implementar.
+- **Reportes de la 9C**: «Cuentas anuladas» muestra la mesa y el área actuales de la cuenta; si la respuesta idempotente
+  de una cancelación no tuviera las partidas, la cantidad anterior y la nueva quedan vacías (la diferencia y el importe
+  salen siempre del evento).
 
 ## Cómo agregar un reporte
 
