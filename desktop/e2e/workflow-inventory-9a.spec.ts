@@ -8,6 +8,7 @@ import {
   openInventorySection,
 } from './inventory-navigation';
 import { installDriver } from './native-driver';
+import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
 
 // Etapa 9A, fase A (A2): navegación agrupada de Inventarios, alta de un insumo con el código
@@ -121,12 +122,12 @@ test('inventarios 9A: navegación agrupada, código sugerido, categoría desde e
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  const inventory = page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Inventarios', exact: true });
-  await expect(inventory).toBeVisible();
+  // Etapa 9C: Inventarios, Reportes y Documentos son mosaicos de Administración.
+  await expect(
+    topBar(page).getByRole('button', { name: 'Administración', exact: true }),
+  ).toBeVisible();
   await preparePreconditions(driver);
-  await inventory.click();
+  await openAdministration(page, 'Inventarios');
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
 
   // 1. Navegación agrupada: cinco grupos y sus secciones, cada fila en una sola línea, sin

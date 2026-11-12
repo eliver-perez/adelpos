@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Field, PageTitle } from '../../components/Forms';
 import { defaultPeriod } from '../../components/reports/period';
+import { useBreadcrumbTail } from '../../navigation/NavigationContext';
 import type { PeriodSelection } from '../../components/reports/period';
 import { fetchFilterOptions, fetchReportCatalog } from '../../services/reports';
 import type { FilterOption, ReportCatalog } from '../../services/reports';
@@ -95,6 +96,8 @@ export function ReportsPage({
 
   const groups = catalog ? navigationGroups(catalog) : [];
   const currentGroup = groups.find((group) => group.id === groupID) ?? groups[0] ?? null;
+  // Etapa 9C: el grupo visible es el último tramo de la ruta («… › Reportes › Ventas»).
+  useBreadcrumbTail(currentGroup?.title ?? null);
   const entryID =
     currentGroup &&
     (currentGroup.entries.some((entry) => entry.id === selected[currentGroup.id])

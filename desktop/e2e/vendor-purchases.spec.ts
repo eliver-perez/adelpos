@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
 import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
 
@@ -171,12 +172,12 @@ test('compras: proveedor, orden de 20 cajas recibida en 12 + 8, recepción direc
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  const inventory = page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Inventarios', exact: true });
-  await expect(inventory).toBeVisible();
+  // Etapa 9C: Inventarios, Reportes y Documentos son mosaicos de Administración.
+  await expect(
+    topBar(page).getByRole('button', { name: 'Administración', exact: true }),
+  ).toBeVisible();
   const prepared = await preparePreconditions(driver);
-  await inventory.click();
+  await openAdministration(page, 'Inventarios');
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
   // Etapa 9A: cinco grupos en la primera fila (las secciones van en la segunda).
   await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);

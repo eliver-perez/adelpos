@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
+import { openAdministration, openCash, openSection } from './navigation';
 import { expectNoticeClosesUnderPointer, expectNoticeLayout, notice } from './notices';
 
 // Recorrido de caja de la etapa 7 (fases B y C) contra Go y PostgreSQL reales: apertura por
@@ -69,7 +70,7 @@ async function noShiftInCapture(page: Page) {
 
 // 1. Apertura por denominaciones: 2 × $200 + 1 × $100; Go calcula el fondo de $500.00.
 async function openByDenominations(page: Page, testInfo: TestInfo) {
-  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  await openCash(page);
   const opening = page.getByRole('region', { name: 'Turno de caja', exact: true });
   await expect(opening).toContainText('No hay un turno abierto en Caja 1');
   await opening.getByRole('button', { name: 'Por denominaciones', exact: true }).click();
@@ -99,7 +100,7 @@ async function openByDenominations(page: Page, testInfo: TestInfo) {
 // 2. Ingreso de $100 desde el atajo «Caja» de la captura (etapa 7.1) y retiro de $200 desde Caja,
 // autoautorizado por el permiso del administrador.
 async function incomeFromShortcut(page: Page, testInfo: TestInfo) {
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await openSection(page, 'Mesas');
   await expect(page.getByRole('heading', { name: 'Mesa 1 · Cuenta #2' })).toBeVisible();
   await expect(page.getByRole('status', { name: 'Turno de caja', exact: true })).toHaveCount(0);
   const shortcut = page
@@ -210,12 +211,12 @@ async function previewPartialCut(page: Page, testInfo: TestInfo) {
 async function cashLimitWarning(page: Page, testInfo: TestInfo) {
   const features = page.getByRole('region', { name: 'Funciones del establecimiento' });
   const toggle = features.getByRole('button', { name: 'Tope de efectivo en caja', exact: true });
-  await page.getByRole('button', { name: 'Configuración', exact: true }).click();
+  await openAdministration(page, 'Configuración');
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
   await expect(notice(page, 'Tope de efectivo en caja: activada.')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  await openCash(page);
   const sections = page.getByRole('tablist', { name: 'Secciones de caja' });
   await sections.getByRole('tab', { name: 'Configuración', exact: true }).click();
   await page.getByRole('button', { name: /^Tope de caja/ }).click();
@@ -229,10 +230,10 @@ async function cashLimitWarning(page: Page, testInfo: TestInfo) {
   await expect(warning).toContainText('no impide cobrar');
   await cashThemes(page, testInfo, 'cash-limit');
 
-  await page.getByRole('button', { name: 'Configuración', exact: true }).click();
+  await openAdministration(page, 'Configuración');
   await toggle.click();
   await expect(notice(page, 'Tope de efectivo en caja: desactivada.')).toBeVisible();
-  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  await openCash(page);
   await expect(page.getByLabel('Turno de Caja 1', { exact: true })).toContainText('Abierto');
   await expect(warning).toHaveCount(0);
 }
@@ -256,7 +257,7 @@ async function startClosingAndCheckCheckout(page: Page) {
     page.getByRole('region', { name: 'Arqueo de cierre en curso', exact: true }),
   ).toBeVisible();
 
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await openSection(page, 'Mesas');
   // El atajo «Caja» de la captura refleja la pausa; no es el aviso sin turno.
   await expect(
     page.locator('.capture-topbar').getByRole('button', { name: 'Caja · En arqueo', exact: true }),
@@ -278,7 +279,7 @@ async function startClosingAndCheckCheckout(page: Page) {
 // 5. Conteo ciego (1 × $200 + 1 × $100 = $300.00 declarados), confirmación y resultado con el
 // faltante de $100.00 que calcula Go frente a los $400.00 esperados.
 async function countAndClose(page: Page, testInfo: TestInfo) {
-  await page.getByRole('button', { name: 'Caja', exact: true }).click();
+  await openCash(page);
   const closing = page.getByRole('region', { name: 'Arqueo de cierre en curso', exact: true });
   await expect(closing).toBeVisible();
   const keypad = closing.getByRole('group', { name: 'Teclado numérico del arqueo' });
@@ -355,7 +356,7 @@ async function reviewClosedShift(page: Page) {
   await sections.getByRole('tab', { name: 'Operación', exact: true }).click();
 }
 
-// Recorrido completo; termina en Restaurante con la cuenta lista para el recorrido de cobro, que
+// Recorrido completo; termina en Mesas con la cuenta lista para el recorrido de cobro, que
 // abre un turno nuevo en la misma caja.
 export async function checkCashShift(page: Page, testInfo: TestInfo) {
   await noShiftInCapture(page);
@@ -368,5 +369,5 @@ export async function checkCashShift(page: Page, testInfo: TestInfo) {
   await startClosingAndCheckCheckout(page);
   await countAndClose(page, testInfo);
   await reviewClosedShift(page);
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await openSection(page, 'Mesas');
 }

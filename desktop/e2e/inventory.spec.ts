@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration } from './navigation';
 import { notice } from './notices';
 import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
 
@@ -57,10 +58,7 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Inventarios', exact: true })
-    .click();
+  await openAdministration(page, 'Inventarios');
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
   // Etapa 9A: cinco grupos en la primera fila (las secciones van en la segunda).
   await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);

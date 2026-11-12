@@ -69,7 +69,9 @@ function captureDetails(account: Account, table: RestaurantTable | null, timezon
 
 // Barra superior de la captura: regreso al mapa o al listado, mesa y cuenta en grande con sus
 // datos, «Datos de la cuenta» (o «Datos del pedido») y las demás cuentas de la mesa como botones
-// (sin listas desplegables). Tocar el título también abre los datos.
+// (sin listas desplegables). Tocar el título también abre los datos. Desde la etapa 9C es la barra
+// reducida de la aplicación durante la captura (§1.2): «‹ Mesas» o «‹ Para llevar», la mesa y la
+// cuenta (o el pedido), el indicador de Caja y el usuario; Enviar a cocina y Cobrar no se mueven.
 export function CaptureTopBar({
   account,
   backLabel,
@@ -85,6 +87,7 @@ export function CaptureTopBar({
   onDetails,
   onRefresh,
   cashShortcut,
+  shellControls,
 }: {
   account: Account | null;
   backLabel: string;
@@ -101,6 +104,8 @@ export function CaptureTopBar({
   onRefresh: () => void;
   // Atajo «Caja» con el estado del turno (etapa 7.1).
   cashShortcut?: ReactNode;
+  // Usuario y estado del servidor de la barra reducida (etapa 9C).
+  shellControls?: ReactNode;
 }) {
   const takeaway = account?.mode === 'takeaway';
   const title = captureTitle(account);
@@ -118,7 +123,7 @@ export function CaptureTopBar({
   return (
     <header className="capture-topbar">
       <button type="button" className="secondary-button capture-topbar-back" onClick={onBack}>
-        <IconLabel icon="back">{backLabel}</IconLabel>
+        <IconLabel icon="chevron-left">{backLabel}</IconLabel>
       </button>
       <div className="capture-topbar-title">
         <h1>
@@ -191,6 +196,7 @@ export function CaptureTopBar({
       >
         <Icon name="refresh" size={20} />
       </button>
+      {shellControls}
     </header>
   );
 }

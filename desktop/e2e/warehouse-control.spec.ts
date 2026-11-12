@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
 import {
   allInventorySections,
@@ -183,12 +184,12 @@ test('control de inventario: transferencia, merma, conteo aplicado y alerta en e
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
-  const inventory = page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Inventarios', exact: true });
-  await expect(inventory).toBeVisible();
+  // Etapa 9C: Inventarios, Reportes y Documentos son mosaicos de Administración.
+  await expect(
+    topBar(page).getByRole('button', { name: 'Administración', exact: true }),
+  ).toBeVisible();
   await preparePreconditions(driver);
-  await inventory.click();
+  await openAdministration(page, 'Inventarios');
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
   // Los cinco grupos con sus secciones en el orden de la especificación (§3.6 de la etapa 9A).
   await expect(groupTablist(page).getByRole('tab')).toHaveText(inventoryGroups);

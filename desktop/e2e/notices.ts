@@ -23,13 +23,18 @@ async function settled(page: Page, toast: Locator) {
   );
 }
 
-// Comprueba la presentación de un aviso visible: arriba al centro, por debajo de la cabecera,
-// con un botón de cierre táctil de al menos 44 px que lo retira con un toque.
+// Comprueba la presentación de un aviso visible: arriba al centro, por debajo de la barra superior
+// (o, durante la captura, de su barra reducida; etapa 9C), con un botón de cierre táctil de al
+// menos 44 px que lo retira con un toque.
 export async function expectNoticeLayout(page: Page, text: string | RegExp) {
   const message = notice(page, text);
   await expect(message).toBeVisible();
   const toast = page.locator('[data-sonner-toaster] .app-toast').filter({ hasText: text });
-  const header = await page.locator('.application-header').boundingBox();
+  const header = await page
+    .locator('.app-topbar, .capture-topbar')
+    .filter({ visible: true })
+    .first()
+    .boundingBox();
   // La entrada del aviso es animada (se desliza y escala al pasar al frente de la pila): se mide
   // cuando terminó. Si el aviso aparece justo al cerrarse un panel, la medición inmediata lo
   // encontraría a medio camino.

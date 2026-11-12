@@ -1,3 +1,5 @@
+import type { TerminalHome } from '../navigation/sections';
+
 export interface Preferences {
   theme: 'light' | 'dark';
   home_screen: string;
@@ -57,6 +59,8 @@ export interface Device {
   register_id: string | null;
   register_name?: string | null;
   keyboard_mode: 'auto' | 'always' | 'disabled';
+  // Pantalla de inicio de la terminal (etapa 9C, §1.5); Go la informa desde la migración 0020.
+  home_screen?: TerminalHome;
   last_seen_at?: string;
   revoked_at?: string | null;
 }

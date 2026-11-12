@@ -152,6 +152,9 @@
   --chart-previous: #a6b0bd;
   --chart-grid: #e9edf2;
   --chart-axis: #c5ced9;
+  /* Etapa 9C: estado del servidor en la barra superior (en línea, reconectando, fuera de línea). */
+  --status-online: #1d7a4b;
+  --status-online-soft: #e3f3ea;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -209,6 +212,8 @@
   --chart-previous: #5f6d80;
   --chart-grid: #26303c;
   --chart-axis: #3d4a5a;
+  --status-online: #7fd3a4;
+  --status-online-soft: #1b3a2a;
 }
 body {
   margin: 0;
@@ -226,14 +231,13 @@ button:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 4px;
 }
+/* Etapa 9C: armazón sin menú lateral. La barra superior fija ocupa una fila y el contenido el resto
+   del ancho; en la operación cada panel desplaza su propio contenido. */
 .app-shell {
-  display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
-}
-.sidebar {
-  background: var(--panel);
-  border-color: var(--border);
-  min-height: 100vh;
+  --app-topbar-height: 64px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 .brand-mark {
   width: 38px;
@@ -274,12 +278,6 @@ button:focus-visible {
 }
 :root[data-theme='dark'] .brand-logo .brand-logo-dark {
   display: block;
-}
-.brand-heading-content {
-  width: 100%;
-}
-.brand-heading-content p {
-  margin-top: 8px;
 }
 .muted {
   color: var(--muted);
@@ -363,14 +361,6 @@ button:focus-visible {
 .primary-button svg {
   width: 16px;
   height: 16px;
-}
-@media (max-width: 920px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-  }
-  .sidebar {
-    display: none;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -486,53 +476,11 @@ fieldset:disabled {
   align-items: center;
   gap: 8px;
 }
-.admin-sidebar {
-  display: flex;
-  flex-direction: column;
-  padding: 28px 18px;
-}
-.brand-heading {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 6px 32px;
-}
-.admin-sidebar nav {
-  display: grid;
-  gap: 4px;
-}
-.admin-sidebar nav button {
-  min-height: 44px;
-  text-align: left;
-  padding: 11px 14px;
-  border-radius: 10px;
-  font-size: 13px;
-}
-.sidebar-user {
-  display: flex;
-  flex-direction: column;
-  margin-top: auto;
-  padding: 32px 8px 0;
-  font-size: 13px;
-}
-.application-header {
-  min-height: 80px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  padding: 18px 36px;
-  border-bottom: 1px solid var(--border);
-}
 .admin-main {
+  width: 100%;
   max-width: none;
   margin: 0 auto;
-  padding: 32px 36px 48px;
-}
-.mobile-navigation {
-  display: none;
-  padding: 16px;
-  gap: 12px;
+  padding: 28px 36px 48px;
 }
 .page-title {
   display: flex;
@@ -936,17 +884,6 @@ summary {
   cursor: pointer;
   min-height: 44px;
 }
-@media (max-width: 920px) {
-  .mobile-navigation {
-    display: flex;
-  }
-  .admin-main {
-    padding: 24px 18px;
-  }
-  .application-header {
-    padding: 18px;
-  }
-}
 @media (max-width: 760px) {
   .form-grid,
   .permission-grid {
@@ -958,42 +895,11 @@ summary {
   }
 }
 
-/* La operación mantiene la cuenta y sus acciones visibles; cada panel desplaza su contenido. */
-.operation-mode {
-  grid-template-columns: 184px minmax(0, 1fr);
-}
-.operation-mode .admin-sidebar {
-  height: 100dvh;
-  min-height: 0;
-  padding: 16px 12px;
-  position: sticky;
-  top: 0;
-  overflow: hidden;
-}
-.operation-mode .brand-heading {
-  padding: 0 4px 16px;
-  flex-shrink: 0;
-}
-.operation-mode .admin-sidebar nav {
-  min-height: 0;
-  overflow: auto;
-  align-content: start;
-}
-.operation-mode .sidebar-user {
-  padding: 16px 4px 0;
-  flex-shrink: 0;
-}
-.operation-mode .sidebar-user button {
-  min-height: 36px;
-  padding: 6px 10px;
-}
-.operation-mode .application-header {
-  height: 56px;
-  min-height: 56px;
-  padding: 8px 20px;
-}
+/* La operación mantiene la cuenta y sus acciones visibles; cada panel desplaza su contenido. Con la
+   captura abierta la barra superior se reduce a la de la captura (§1.2) y la operación ocupa toda
+   la altura. */
 .operation-mode .admin-main {
-  height: calc(100dvh - 56px - var(--virtual-keyboard-height, 0px));
+  height: calc(100dvh - var(--app-topbar-height) - var(--virtual-keyboard-height, 0px));
   max-width: none;
   padding: 12px 16px;
   display: flex;
@@ -1510,9 +1416,6 @@ summary {
   min-height: 30px;
 }
 @media (max-width: 1000px) {
-  .operation-mode {
-    grid-template-columns: 148px minmax(0, 1fr);
-  }
   .operation-workspace {
     grid-template-columns: minmax(0, 1fr) 310px;
   }
@@ -1520,20 +1423,6 @@ summary {
   .operation-toolbar .secondary-button {
     min-height: 38px;
     padding: 7px 10px;
-  }
-}
-@media (max-width: 920px) {
-  .operation-mode {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .operation-mode .admin-sidebar {
-    display: none;
-  }
-  .operation-mode .mobile-navigation {
-    padding: 8px 16px;
-  }
-  .operation-mode .admin-main {
-    height: calc(100dvh - 116px - var(--virtual-keyboard-height, 0px));
   }
 }
 
@@ -1548,12 +1437,11 @@ summary {
   gap: 8px;
 }
 .window-controls button {
-  min-height: 32px;
-  font-size: 11px;
-}
-.application-header,
-.operation-mode .application-header {
-  padding-right: 206px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 52px;
+  min-height: 52px;
+  padding: 0;
 }
 .operation-workspace {
   grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 500px);
@@ -4351,8 +4239,13 @@ summary {
 
 /* Etapa 7.1 · Sistema único de mensajes (Sonner sin estilos propios). La pila queda arriba al
    centro, debajo de la cabecera, para no tapar las acciones principales de cobro y captura. */
-:root:has(.app-shell.operation-mode) {
-  --toast-offset-top: 64px;
+/* Etapa 9C: los avisos quedan debajo de la barra superior (64 px) o, durante la captura, debajo de
+   la barra reducida de la captura. */
+:root:has(.app-shell) {
+  --toast-offset-top: 76px;
+}
+:root:has(.app-shell.capture-active) {
+  --toast-offset-top: 92px;
 }
 .app-toast-frame {
   width: var(--width);
@@ -4539,9 +4432,13 @@ summary {
   font-size: 13px;
   font-weight: 650;
 }
-/* En la barra operativa va junto a las pestañas de vista y conserva su altura (44 px). */
+/* En la barra operativa (pantalla montada sola) va junto a las pestañas de vista y conserva su
+   altura (44 px). */
 .operation-toolbar > .cash-shortcut {
   margin-right: auto;
+}
+.operation-toolbar > .button-row:last-child {
+  margin-left: auto;
 }
 .operation-toolbar .cash-shortcut-button {
   min-height: 44px;
@@ -7016,4 +6913,452 @@ th[aria-sort='descending'] {
   .designer-history {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Etapa 9C · Barra superior fija de una sola fila (§1.1): logotipo, secciones operativas,
+   Administración, estado del servidor, menú del usuario y pantalla completa. Botones de 52 px
+   (rango 52–56 del propietario) con icono a la izquierda y texto; la sección activa se resalta con
+   fondo y borde. Tokens del tema; en 1280 px el estado del servidor y el del turno se reducen a un
+   punto de color con su descripción accesible. */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--app-topbar-height);
+  min-height: var(--app-topbar-height);
+  padding: 6px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  flex-shrink: 0;
+}
+.topbar-logo {
+  display: inline-flex;
+  align-items: center;
+  height: 52px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: none;
+  flex-shrink: 0;
+}
+.topbar-logo .brand-logo {
+  width: 128px;
+}
+.topbar-sections {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.topbar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.topbar-button .app-icon {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.topbar-section-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.topbar-section-active .app-icon {
+  color: var(--accent);
+}
+.topbar-icon-button {
+  justify-content: center;
+  width: 52px;
+  padding: 0;
+  border-color: var(--border);
+}
+.topbar-icon-button .app-icon {
+  color: var(--text);
+}
+
+/* Caja en la barra: indicador del turno verde (abierto), ámbar (en arqueo) y gris (sin turno). */
+.cash-shortcut-indicator {
+  display: none;
+}
+.cash-shortcut-bar .cash-shortcut-button {
+  height: 52px;
+  min-height: 52px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.cash-shortcut-bar .cash-shortcut-indicator {
+  display: inline-block;
+}
+.cash-shortcut-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px dashed var(--muted);
+  flex-shrink: 0;
+}
+.cash-shortcut-open .cash-shortcut-indicator {
+  border: 0;
+  background: var(--cash-entry);
+  box-shadow: 0 0 0 3px var(--cash-entry-soft);
+}
+.cash-shortcut-closing .cash-shortcut-indicator {
+  border: 0;
+  background: var(--cash-exit);
+  box-shadow: 0 0 0 3px var(--cash-exit-soft);
+}
+.cash-shortcut-none .cash-shortcut-indicator {
+  border: 0;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px var(--subtle);
+}
+/* En la barra el estado va como texto junto al punto (sin la píldora de la barra de la captura). */
+.cash-shortcut-bar .cash-shortcut-state {
+  padding: 0;
+  border-color: transparent;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+.cash-shortcut-bar .cash-shortcut-none .cash-shortcut-state {
+  border-color: transparent;
+  background: none;
+}
+.cash-shortcut-bar .cash-shortcut-menu {
+  left: 0;
+  right: auto;
+}
+
+/* Estado del servidor: punto de color; el texto se ve siempre que no esté en línea. */
+.server-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 22px;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.server-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.server-status-online .server-status-dot {
+  background: var(--status-online);
+  box-shadow: 0 0 0 4px var(--status-online-soft);
+}
+.server-status-online .server-status-text {
+  display: none;
+}
+.server-status-reconnecting {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.server-status-reconnecting .server-status-dot {
+  background: var(--warning);
+}
+.server-status-offline {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.server-status-offline .server-status-dot {
+  background: var(--danger);
+}
+
+/* Menú del usuario y menús desplegables de la barra. */
+.user-menu {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+.user-menu-button {
+  max-width: 230px;
+  gap: 10px;
+  padding: 0 12px;
+  border-color: var(--border);
+}
+.user-menu-identity {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+  line-height: 1.25;
+}
+.user-menu-identity strong {
+  font-size: 13px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-menu-identity small {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-menu-compact .user-menu-button {
+  max-width: 190px;
+}
+.topbar-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  gap: 6px;
+  width: min(260px, calc(100vw - 32px));
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.topbar-menu-heading {
+  display: grid;
+  gap: 2px;
+  margin: 2px 4px 4px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.topbar-menu .secondary-button {
+  min-height: 48px;
+  padding: 0 14px;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: 13px;
+}
+.topbar-menu .secondary-button .icon-label {
+  justify-content: flex-start;
+}
+.window-controls-bar {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+}
+.window-controls-error {
+  font-size: 12px;
+  color: var(--danger);
+}
+.window-controls-bar .window-controls-error {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--panel);
+}
+@media (min-width: 1600px) {
+  .topbar-sections {
+    gap: 8px;
+  }
+  .topbar-button {
+    padding: 0 18px;
+  }
+  .topbar-logo .brand-logo {
+    width: 150px;
+  }
+  .server-status-online .server-status-text {
+    display: inline;
+    color: var(--muted);
+  }
+}
+
+/* Captura (§1.2): sin la barra superior, la operación ocupa toda la altura y la barra de la captura
+   es la barra reducida de la aplicación. */
+.operation-mode.capture-active .admin-main {
+  height: calc(100dvh - var(--virtual-keyboard-height, 0px));
+}
+.capture-topbar .user-menu-button {
+  height: 52px;
+  min-height: 52px;
+}
+.capture-topbar .server-status {
+  flex-shrink: 0;
+}
+/* En ventanas angostas la barra reducida conserva todo en una fila: el usuario queda como icono y
+   el turno como punto de color (su nombre accesible conserva el texto). */
+@media (max-width: 1100px) {
+  .capture-topbar .user-menu-identity {
+    display: none;
+  }
+  .capture-topbar .cash-shortcut-state {
+    display: none;
+  }
+  .capture-topbar .cash-shortcut-indicator {
+    display: inline-block;
+  }
+}
+/* Debajo de 1280 × 720 (fuera del diseño mínimo) la barra superior se compacta para no desbordar:
+   la marca abreviada, el usuario como icono y menos relleno. */
+@media (max-width: 1279px) {
+  .topbar-logo .brand-logo {
+    width: 38px;
+  }
+  .topbar-logo .brand-logo .brand-logo-light,
+  :root[data-theme='dark'] .topbar-logo .brand-logo .brand-logo-dark {
+    display: none;
+  }
+  .topbar-logo .brand-logo .brand-logo-compact {
+    display: grid;
+  }
+  .app-topbar .topbar-button {
+    padding: 0 10px;
+  }
+  .app-topbar .user-menu-identity,
+  .cash-shortcut-bar .cash-shortcut-state {
+    display: none;
+  }
+}
+
+/* Ruta de navegación de Administración (§1.4): cada pantalla anterior es tocable (44 px). */
+.breadcrumb {
+  margin: 0 0 18px;
+}
+.breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.breadcrumb-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 650;
+}
+.breadcrumb-root {
+  padding-left: 8px;
+}
+.breadcrumb-separator {
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 18px;
+}
+.breadcrumb-current {
+  padding: 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+}
+.breadcrumb-tail {
+  color: var(--muted);
+}
+
+/* Administración por mosaicos (§1.3): mosaicos grandes con icono, nombre y descripción. */
+.admin-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.admin-tile {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  height: 100%;
+  min-height: 128px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+}
+.admin-tile:active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.admin-tile-icon {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.admin-tile-text {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.admin-tile-text strong {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.admin-tile-text span {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.admin-tile-chevron {
+  color: var(--muted);
+}
+
+/* Estado del sistema en lenguaje sencillo (§4.1). */
+.system-status-summary {
+  display: grid;
+  gap: 6px;
+}
+.system-status-summary strong {
+  font-size: 15px;
+}
+.system-status-summary p {
+  margin: 0;
+}
+.support-information dl {
+  margin: 0;
 }

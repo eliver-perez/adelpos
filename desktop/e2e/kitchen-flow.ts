@@ -1,10 +1,12 @@
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { openSection, returnToTableCapture } from './navigation';
 
 export async function configureKitchen(page: Page) {
+  // Etapa 9C: la pantalla completa es un botón de icono de la barra superior (reducir/maximizar).
   await page.getByRole('button', { name: 'Salir de pantalla completa', exact: true }).click();
   await page.getByRole('button', { name: 'Pantalla completa', exact: true }).click();
-  await page.getByRole('button', { name: 'Cocina y preparación', exact: true }).click();
+  await openSection(page, 'Cocina');
   await page.getByRole('button', { name: 'Impresoras', exact: true }).click();
   await page.getByRole('button', { name: 'Registrar impresora', exact: true }).click();
   await page.getByLabel('Nombre descriptivo de impresora').fill('Destino controlado E2E');
@@ -51,13 +53,14 @@ export async function configureKitchen(page: Page) {
   await expect(
     page.locator('.kitchen-list-button').filter({ hasText: 'Categoría · Platillos' }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await openSection(page, 'Mesas');
 }
 
 // Lote enviado desde la captura táctil: 2 filetes y 1 hamburguesa con aros de cebolla, cada uno
-// en las dos estaciones de la ruta de Platillos.
+// en las dos estaciones de la ruta de Platillos. Etapa 9C: se sale de la captura con «‹ Mesas»
+// para usar la barra superior y se vuelve a la misma cuenta desde el panel de la mesa.
 export async function checkPreparation(page: Page) {
-  await page.getByRole('button', { name: 'Cocina y preparación', exact: true }).click();
+  await openSection(page, 'Cocina');
   await page.getByRole('button', { name: 'Preparación', exact: true }).click();
   const steaks = page.locator('.kitchen-preparation-card').filter({ hasText: 'Filete de prueba' });
   await expect(steaks).toHaveCount(2);
@@ -94,7 +97,7 @@ export async function checkPreparation(page: Page) {
     .fill('Destino de aceptación sin hardware físico');
   await page.getByRole('button', { name: 'Registrar decisión', exact: true }).click();
   await expect(page.locator('.kitchen-job')).toContainText('Cancelado administrativamente');
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await returnToTableCapture(page, 'Mesa 1', 'Mesa 1 · Cuenta #1');
   await expect(page.getByRole('complementary', { name: 'Cuenta actual' })).toContainText(
     'Preparación: Listo',
   );

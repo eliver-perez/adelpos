@@ -15,9 +15,11 @@ export function AuditPage() {
   const resource = useResource<AuditPageData>('audit', { query });
   return (
     <>
+      {/* Etapa 9C (§4.2): la antigua «Auditoría» se llama «Registro de movimientos»; el permiso
+          audit.read, la ruta y los datos no cambian. */}
       <PageTitle
-        title="Auditoría"
-        description="Historial persistente de accesos y cambios administrativos."
+        title="Registro de movimientos"
+        description="Historial de accesos y cambios administrativos: quién los hizo, cuándo y desde qué terminal."
       />
       <form
         className="surface panel form-stack"

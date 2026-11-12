@@ -287,3 +287,106 @@ con las acciones de la 6.2/7.1 ya con `IconLabel`. Sin buscador de mesas. La cue
    modo que la reimpresión de comandas sale con las columnas originales.
 8. **`schema_version` 20** desde el inicio de la fase A (la versión 0.9.2 se fija al final). Verificado: la 0020 se aplica
    sobre una instalación con datos (`internal/database` en el clúster temporal: `ok`).
+
+## Fase A · Barra superior, Administración y navegación
+
+Hecha el 11/11/2026 sobre `etapa-9c` en una copia aislada, por un agente sin subagentes, en paralelo con la parte D1. Sin cambios de reglas de negocio, cálculos, permisos ni rutas nuevas; la única escritura
+nueva es el campo opcional `home_screen` del recurso de terminales existente (migración 0020 del
+coordinador, sin editarla).
+
+### Qué cambió
+
+- **Registro de secciones** (`desktop/src/navigation/sections.ts`): una sola fuente con id, nombre,
+  icono, grupo (operación, administración, personal), pantalla padre (mosaicos y ruta), descripción
+  del mosaico, regla de permisos (la de `screens`/`screenAuthorized`, movida aquí; Para llevar exige
+  además `accounts.read` en el registro) y la clave de inicio de la terminal. Funciones
+  `screenAuthorized`, `barSections`, `tilesOf`, `breadcrumbOf`, `barHighlight` y `resolveHome`. La
+  navegación compartida (`NavigationContext`) expone el único `requestScreen` de App.tsx, que respeta
+  `useLeaveGuard`; ahora también lo usan Inventarios → Configuración, «Ir a Caja», el logotipo, los
+  mosaicos, la ruta y el menú del usuario.
+- **Barra superior fija** (`navigation/TopBar.tsx`) de una fila con botones de 52 px: logotipo
+  (vuelve al inicio de la terminal), Mesas, Para llevar, Cocina, Caja (indicador verde, ámbar o gris y
+  el menú rápido de la 7.1 con sus permisos, «Abrir turno» incluido; el gancho y la hoja subieron a
+  App.tsx), Administración (solo con alguna opción de administración), estado del servidor (en línea,
+  reconectando, fuera de línea; en 1280 px un punto con descripción accesible y texto visible si no
+  está en línea), menú del usuario (nombre y rol: Mis preferencias, Cambiar contraseña, Cerrar
+  sesión) y pantalla completa (un botón de icono maximizar/reducir con el comportamiento de
+  `WindowControls`; en el acceso y el asistente sigue fijo arriba a la derecha). Sin menú lateral ni
+  navegación angosta. Iconos nuevos en `components/Icon.tsx`: mesa, cocina, engrane, usuario,
+  usuarios, lupa, maximizar, reducir, mosaicos, etiqueta, documento, tarjeta, escudo, llave,
+  historial, flechas, ayuda, teclado y salir.
+- **Captura** (§1.2): la barra superior se reduce a la de la captura: «‹ Mesas» o «‹ Para llevar», mesa
+  y cuenta (o pedido), Caja, Actualizar, el usuario y, solo si no está en línea, el estado del
+  servidor. Enviar a cocina y Cobrar no se movieron.
+- **Mesas y Para llevar**: secciones de la barra que comparten la pantalla operativa (montada siempre,
+  como antes). Dentro de Mesas siguen las pestañas Mesas, Cuentas y Áreas y distribución (decisión 5);
+  Para llevar ya no muestra pestañas.
+- **Administración por mosaicos** (`navigation/TileScreen.tsx`): Catálogo, Inventarios, Reportes,
+  Documentos, Cobros (solo con `payments.methods.manage`, `payments.settings.manage` o
+  `payments.tax.manage`), Personal (Usuarios, Roles, Sesiones) y Sistema (Configuración, Terminales,
+  Cajas físicas, Registro de movimientos). Personal y Sistema abren una segunda pantalla de mosaicos.
+  **Ruta** «‹ Administración › Sistema › Terminales» con cada pantalla anterior tocable; Catálogo,
+  Inventarios y Reportes informan su pestaña o grupo como último tramo.
+- **Inicio por terminal**: Go lee `devices.home_screen` en `auth/me` y en la lista de terminales y lo
+  edita en `PATCH devices/{id}` con `devices.manage` (campo opcional, lista cerrada `tables`,
+  `takeaway`, `kitchen`, `cash`, auditado en `device.updated`). Sistema → Terminales lo elige con un
+  control segmentado y muestra la columna «Pantalla inicial». Al iniciar sesión y con el logotipo, la
+  pantalla de la terminal; si el usuario no puede verla, la primera de la barra; nunca «Estado del
+  sistema». «Pantalla inicial» salió de Mis preferencias (y de las preferencias de otro usuario); Go
+  conserva `user_preferences.home_screen` y la aplicación reenvía el valor guardado sin usarlo.
+- **Estado del sistema** fuera de la navegación: «Ver estado del sistema» en Sistema → Configuración,
+  en lenguaje sencillo (servidor, base de datos, versión y qué hacer) con «Información para soporte»
+  plegado solo con `settings.manage`; antes de iniciar sesión, «Ver estado del sistema» en el acceso
+  con el mismo lenguaje y el bloque de soporte plegado.
+- **«Auditoría» → «Registro de movimientos»**: mosaico, título, descripción visible del permiso
+  (`audit.read` = «Consultar el registro de movimientos» en Go; la descripción guardada en la base no
+  cambia), mensaje de Go de solo consulta y dos ayudas que la mencionaban. Clave, rutas y datos sin
+  cambios.
+
+### Decisiones y desviaciones
+
+- Personal y Sistema como segunda pantalla de mosaicos (no pestañas): cada pantalla interna ya tiene
+  título, acciones y, a veces, pestañas propias.
+- «Información para soporte» del administrador = quien tiene `settings.manage` (la interfaz no conoce
+  el código del rol). Antes de iniciar sesión se muestra plegado: no hay usuario y es la única vía de
+  diagnóstico sin sesión.
+- En la ruta, la pantalla actual y su pestaña son texto (`aria-current`), no botones.
+- Pendiente fuera de mi alcance: «queda registrada en la auditoría» en
+  `pages/documents/rerender.tsx` (archivo del alcance de D1).
+- `preferences.go` no se tocó (la apariencia la cambió D1); `acceptance_test.go` solo para enlazar
+  `testTerminalHome` (D1 agregó después su propia llamada en el mismo lugar).
+
+- Correcciones encontradas por Playwright: con la captura abierta en segundo plano, su botón Caja (que
+  comparte el estado del menú con el de la barra) ya no se monta mientras la operación está oculta,
+  porque su «tocar fuera» cerraba el menú de la barra; y la recomendación de cambiar la contraseña
+  inicial no se muestra durante la captura (dejaba la barra reducida debajo de los avisos).
+
+### Pruebas de la fase A (copia aislada del agente, 11/11/2026)
+
+- Go: `go vet ./...` y `go vet -tags=integration` de `internal/administration` e
+  `internal/database` sin hallazgos; `go test -race -count=1 ./internal/administration
+./internal/database` → `ok` (8.4 s y 1.6 s; incluye `TestTerminalHomeIsAClosedList`).
+- Integración en el clúster temporal 55499: `internal/administration` → `ok` (63.6 s), con
+  `TestStageTwoAcceptance/9C_lectura_mesas_por_omision`, `9C_edicion_con_permiso_y_auditoria`,
+  `9C_lista_cerrada_en_go_y_en_la_base` y `9C_sin_devices_manage_no_se_edita` aprobadas;
+  `internal/database` → `ok` (6.6 s), con `TestStage9CTerminalHomeUpgrade` (la 0020 sobre un esquema
+  19 con terminales e impresoras) aprobada.
+- Frontend: `npx tsc --noEmit` sin errores; `npm test` → 63 archivos, 575 pruebas aprobadas (incluye
+  `navigation/navigation.test.tsx` y los `App.test.tsx` y `WindowControls.test.tsx` actualizados);
+  `npm run build` correcto.
+- Playwright (Go temporal 8184, vista previa 1422): suite completa, Chromium 13/13 (5.2 min) y WebKit
+  13/13 (5.1 min), con `workflow-stage9c-navigation.spec.ts` nuevo y los 12 recorridos anteriores y
+  sus ayudantes (`e2e/navigation.ts` nuevo; `cash-flow.ts`, `kitchen-flow.ts`, `payments-flow.ts`,
+  `notices.ts`) en la barra superior. Capturas claro/oscuro a 1280 × 720 y 1920 × 1080 de la barra
+  con Mesas, Administración, Catálogo con su ruta, Estado del sistema y la captura reducida.
+- Sin Rust: no se tocó `src-tauri`.
+
+### Limitaciones
+
+- Sin verificar en la ventana nativa (WKWebView), con pantalla táctil física ni con el teclado
+  virtual sobre la barra superior. El turno de Caja se consulta ahora cada 15 s en todas las
+  pantallas (antes solo en la operación).
+- Debajo de 1280 px (fuera del diseño mínimo) la barra se compacta; no se probó por debajo de 1024 px
+  fuera de la captura.
+- Los módulos con pestañas propias que no informan su pestaña a la ruta: Documentos (alcance de D1),
+  Caja (no es de Administración), Cobros y Configuración (acordeones).

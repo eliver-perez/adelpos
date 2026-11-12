@@ -47,7 +47,28 @@ export type IconName =
   | 'info'
   | 'alert'
   | 'error'
-  | 'inventory';
+  | 'inventory'
+  | 'table'
+  | 'kitchen'
+  | 'gear'
+  | 'user'
+  | 'users'
+  | 'search'
+  | 'maximize'
+  | 'minimize'
+  | 'grid'
+  | 'tag'
+  | 'document'
+  | 'card'
+  | 'shield'
+  | 'key'
+  | 'history'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'chevron-down'
+  | 'help'
+  | 'keyboard'
+  | 'logout';
 
 const paths: Record<IconName, ReactNode> = {
   server: (
@@ -282,6 +303,110 @@ const paths: Record<IconName, ReactNode> = {
       <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5v-9Z" />
       <path d="m3.5 7.5 8.5 4.5 8.5-4.5M12 12v9" />
       <path d="m7.75 5.25 8.5 4.5" />
+    </>
+  ),
+  // Etapa 9C: iconos de la barra superior, de los mosaicos de Administración y de la ruta.
+  table: (
+    <>
+      <path d="M3 9h18M5 9l-1 11M19 9l1 11M8 9v6h8V9" />
+      <path d="M7 5h10" />
+    </>
+  ),
+  kitchen: (
+    <>
+      <path d="M6 13a6 6 0 0 1 12 0H6Z" />
+      <path d="M4 13h16M12 7V5M10 5h4M6 17h12v3H6z" />
+    </>
+  ),
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" />
+    </>
+  ),
+  user: (
+    <>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </>
+  ),
+  users: (
+    <>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m15.5 15.5 5 5" />
+    </>
+  ),
+  maximize: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
+  minimize: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />,
+  grid: (
+    <>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
+    </>
+  ),
+  tag: (
+    <>
+      <path d="M3 12V4h8l10 10-8 8L3 12Z" />
+      <circle cx="7.5" cy="8.5" r="1.4" />
+    </>
+  ),
+  document: (
+    <>
+      <path d="M6 3h8l4 4v14H6V3Z" />
+      <path d="M14 3v4h4M9 12h6M9 16h6" />
+    </>
+  ),
+  card: (
+    <>
+      <rect x="2.5" y="5" width="19" height="14" rx="2" />
+      <path d="M2.5 10h19M6 15h4" />
+    </>
+  ),
+  shield: (
+    <>
+      <path d="M12 3 4.5 6v6c0 4.5 3.2 7.8 7.5 9 4.3-1.2 7.5-4.5 7.5-9V6L12 3Z" />
+      <path d="m9 12 2 2 4-4" />
+    </>
+  ),
+  key: (
+    <>
+      <circle cx="8" cy="15" r="4" />
+      <path d="m11 12 9-9M16 7l2.5 2.5M14 9l2 2" />
+    </>
+  ),
+  history: (
+    <>
+      <path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5" />
+      <path d="M3.5 4v4.5H8M12 8v4.5l3 2" />
+    </>
+  ),
+  'chevron-left': <path d="m15 5-7 7 7 7" />,
+  'chevron-right': <path d="m9 5 7 7-7 7" />,
+  'chevron-down': <path d="m5 9 7 7 7-7" />,
+  help: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17h.01" />
+    </>
+  ),
+  keyboard: (
+    <>
+      <rect x="2.5" y="6" width="19" height="12" rx="2" />
+      <path d="M6 10h.01M9 10h.01M12 10h.01M15 10h.01M18 10h.01M7 14h10" />
+    </>
+  ),
+  logout: (
+    <>
+      <path d="M14 4H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h8" />
+      <path d="M10 12h10M16.5 8.5 20 12l-3.5 3.5" />
     </>
   ),
 };

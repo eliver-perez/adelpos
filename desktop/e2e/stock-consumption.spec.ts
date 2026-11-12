@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
+import { openAdministration, openSection, topBar } from './navigation';
 import { notice } from './notices';
 import { sendTakeawayToKitchen } from './payments-flow';
 import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
@@ -56,10 +57,7 @@ async function checkLayout(page: Page, testInfo: TestInfo, name: string, capture
 }
 
 async function openInventory(page: Page) {
-  await page
-    .getByRole('navigation', { name: 'Navegación principal' })
-    .getByRole('button', { name: 'Inventarios', exact: true })
-    .click();
+  await openAdministration(page, 'Inventarios');
   await expect(page.getByRole('heading', { name: 'Inventarios', exact: true })).toBeVisible();
 }
 
@@ -130,10 +128,7 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(
-    page.getByRole('navigation', { name: 'Navegación principal' }).getByRole('button', {
-      name: 'Inventarios',
-      exact: true,
-    }),
+    topBar(page).getByRole('button', { name: 'Administración', exact: true }),
   ).toBeVisible();
   const pendingStatus = await preparePreconditions(driver);
   await openInventory(page);
@@ -249,8 +244,7 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
   // Pedido para llevar con el filete, enviado a cocina, y su cancelación ya liberado.
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
-  await page.getByRole('button', { name: 'Para llevar', exact: true }).first().click();
+  await openSection(page, 'Para llevar');
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
   await sendTakeawayToKitchen(page);

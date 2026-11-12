@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
+import { openAdministration, openSection } from './navigation';
 import { notice } from './notices';
 
 // Recorridos de cobro de la etapa 6 contra Go y PostgreSQL reales. Todas las cifras que se
@@ -17,7 +18,7 @@ async function typeOnKeypad(keypad: Locator, digits: string) {
 // Activa el pago en dólares en Configuración → Funciones del establecimiento antes de abrir el
 // turno. El interruptor es un botón con aria-pressed, sin casillas.
 export async function enableUSDCash(page: Page) {
-  await page.getByRole('button', { name: 'Configuración', exact: true }).click();
+  await openAdministration(page, 'Configuración');
   const features = page.getByRole('region', { name: 'Funciones del establecimiento' });
   const toggle = features.getByRole('button', { name: 'Pago en dólares en efectivo', exact: true });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
@@ -36,14 +37,14 @@ function checkoutStatus(page: Page) {
 // Configura la impresora de tickets en Cobros → Políticas con el destino controlado de la
 // aceptación (sin hardware). El ticket queda en la cola durable con su estado real.
 export async function configureReceiptPrinter(page: Page) {
-  await page.getByRole('button', { name: 'Cobros', exact: true }).click();
+  await openAdministration(page, 'Cobros');
   await page.getByRole('button', { name: /Políticas de cobro/ }).click();
   await page
     .getByRole('combobox', { name: /Impresora de tickets/ })
     .selectOption({ label: 'Destino controlado E2E' });
   await page.getByRole('button', { name: 'Guardar políticas', exact: true }).click();
   await expect(page.getByRole('combobox', { name: /Impresora de tickets/ })).toHaveValue(/.+/);
-  await page.getByRole('button', { name: 'Restaurante', exact: true }).click();
+  await openSection(page, 'Mesas');
 }
 
 // Cuenta de salón con un producto de $150: apertura de turno, abono en efectivo con cambio,

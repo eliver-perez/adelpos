@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../App';
 import { PendingOperationsProvider } from '../../hooks/pendingOperations';
 import type { Identity } from '../../services/models';
-import { screenAuthorized, screens } from '../PreferencesPage';
+import { screenAuthorized, sections } from '../../navigation/sections';
 import { InventoryPage } from './InventoryPage';
 import {
   allInventoryPermissions,
@@ -63,7 +63,7 @@ function writes(requests: RecordedRequest[], operation: string) {
 describe('navegación de Inventarios', () => {
   it('la pantalla solo aparece con inventory.read', () => {
     const visible = (permissions: string[]) =>
-      screens
+      sections
         .filter((entry) => screenAuthorized(entry, permissions))
         .map((entry) => entry.id)
         .includes('inventory');
@@ -72,7 +72,7 @@ describe('navegación de Inventarios', () => {
     expect(visible([])).toBe(false);
   });
 
-  it('el menú principal muestra Inventarios con el permiso y abre su resumen', async () => {
+  it('Administración muestra el mosaico Inventarios con el permiso y abre su resumen', async () => {
     const identity: Identity = {
       user: {
         id: '00000000-0000-0000-0000-000000000001',
@@ -126,8 +126,10 @@ describe('navegación de Inventarios', () => {
       return transport.handler(command, args);
     });
     const { unmount } = render(<App />);
+    // Sin secciones operativas, la aplicación abre en Administración (etapa 9C).
     const navigation = await screen.findByRole('navigation', { name: 'Navegación principal' });
-    fireEvent.click(within(navigation).getByRole('button', { name: 'Inventarios' }));
+    expect(within(navigation).getByRole('button', { name: 'Administración' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Inventarios' }));
     await screen.findByRole('heading', { name: 'Inventarios' });
     await screen.findByText('Control de inventario');
     expect(navigationMap()).toEqual(readOnlyNavigation);
@@ -135,7 +137,8 @@ describe('navegación de Inventarios', () => {
     permissions = ['inventory.stock.read'];
     render(<App />);
     const other = await screen.findByRole('navigation', { name: 'Navegación principal' });
-    expect(within(other).queryByRole('button', { name: 'Inventarios' })).toBeNull();
+    expect(within(other).queryByRole('button', { name: 'Administración' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Inventarios' })).toBeNull();
   });
 });
 

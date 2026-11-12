@@ -15,12 +15,12 @@ import { PartialCutPanel } from './PartialCutPanel';
 import { PendingCashOperation } from './PendingCashOperation';
 import { useCashRecording } from './recordingFlow';
 
-// Atajo «Caja» de las pantallas operativas (etapa 7.1, decisión 10): un botón compacto en la barra
-// de mesas, para llevar, cuentas, cobro y captura con el estado del turno de la caja de la
-// terminal. Su menú rápido abre, en una hoja superpuesta, los mismos componentes de la etapa 7
+// Atajo «Caja» (etapa 7.1, decisión 10): un botón con el estado del turno de la caja de la terminal.
+// Su menú rápido abre, en una hoja superpuesta, los mismos componentes de la etapa 7
 // (CashOperationForm, PartialCutPanel, DrawerControl y ShiftOpening): no hay un segundo flujo de
-// caja. Cada opción aparece solo con su permiso y Go vuelve a validar todo al registrar. El menú
-// principal de la aplicación no cambia.
+// caja. Cada opción aparece solo con su permiso y Go vuelve a validar todo al registrar. Desde la
+// etapa 9C el gancho y la hoja viven en App.tsx: el botón está en la barra superior de todas las
+// pantallas y en la barra reducida de la captura, con una sola consulta del turno.
 
 export type CashSheet = 'income' | 'withdrawal' | 'expense' | 'partial' | 'drawer' | 'opening';
 export type ShortcutState = 'open' | 'closing' | 'none' | 'unknown';
@@ -41,8 +41,9 @@ const sheetTitles: Record<CashSheet, string> = {
   opening: 'Abrir turno',
 };
 
-// Estado del turno de la caja de la terminal, del menú y de la hoja. Lo crea la pantalla
-// operativa una sola vez: la barra, la captura y la hoja comparten la misma consulta.
+// Estado del turno de la caja de la terminal, del menú y de la hoja. Lo crea App.tsx una sola vez
+// (etapa 9C): la barra superior, la captura y la hoja comparten la misma consulta. Una pantalla
+// operativa montada sola (pruebas) crea el suyo.
 export function useCashShortcut({
   active,
   can,
@@ -205,13 +206,19 @@ function shortcutContext(shortcut: CashShortcutState) {
 }
 
 // Botón «Caja» con el estado del turno y su menú rápido. El menú se cierra con Escape o al tocar
-// fuera de él.
+// fuera de él. Desde la etapa 9C vive en la barra superior (placement «bar»: sección de 52–56 px con
+// el indicador verde, ámbar o gris del turno) y en la barra reducida de la captura.
 export function CashShortcut({
   shortcut,
   can,
+  placement = 'inline',
+  active = false,
 }: {
   shortcut: CashShortcutState;
   can: (permission: string) => boolean;
+  placement?: 'inline' | 'bar';
+  // Resalta la sección cuando la pantalla visible es Caja.
+  active?: boolean;
 }) {
   const menuID = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -254,18 +261,28 @@ export function CashShortcut({
     shortcut.openSheet(option.id);
   }
 
+  const buttonClass =
+    placement === 'bar'
+      ? `topbar-button topbar-section cash-shortcut-button cash-shortcut-${shortcut.state} ${
+          active ? 'topbar-section-active' : ''
+        }`
+      : `secondary-button cash-shortcut-button cash-shortcut-${shortcut.state}`;
   return (
-    <div className="cash-shortcut" ref={root}>
+    <div className={`cash-shortcut cash-shortcut-${placement}`} ref={root}>
       <button
         type="button"
-        className={`secondary-button cash-shortcut-button cash-shortcut-${shortcut.state}`}
+        className={buttonClass}
         aria-label={`Caja · ${status}`}
         aria-expanded={menuOpen}
         aria-controls={menuID}
+        aria-current={active ? 'page' : undefined}
+        data-shift-state={shortcut.state}
         onClick={() => setMenuOpen(!menuOpen)}
       >
         <Icon name="cash" size={20} />
         <span className="cash-shortcut-name">Caja</span>
+        {/* Indicador del turno (§1.1): verde abierto, ámbar en arqueo y gris sin turno. */}
+        <span className="cash-shortcut-indicator" aria-hidden="true" />
         {shortcut.state !== 'unknown' && <span className="cash-shortcut-state">{status}</span>}
       </button>
       {menuOpen && (

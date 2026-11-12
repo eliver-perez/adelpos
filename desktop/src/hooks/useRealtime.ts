@@ -25,8 +25,18 @@ interface StreamMessage {
   status?: number;
 }
 
+// Textos del estado del canal de eventos. La barra superior (etapa 9C) los traduce a sus tres
+// estados del servidor (navigation/serverState.ts) a partir de estas mismas constantes.
+export const realtimeLabels = {
+  periodic: 'Actualización periódica',
+  connected: 'En tiempo real',
+  reconnecting: 'Recuperando eventos · sondeo activo',
+  interrupted: 'Canal interrumpido · sondeo activo',
+  unavailable: 'Sondeo activo · canal no disponible',
+} as const;
+
 export function useRealtime(identityKey: string, enabled: boolean) {
-  const [status, setStatus] = useState('Actualización periódica');
+  const [status, setStatus] = useState<string>(realtimeLabels.periodic);
   const cursor = useRef(0);
   const seen = useRef(new Set<string>());
   const previousIdentity = useRef(identityKey);
@@ -38,7 +48,7 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       previousIdentity.current = identityKey;
     }
     if (!enabled) {
-      setStatus('Actualización periódica');
+      setStatus(realtimeLabels.periodic);
       return;
     }
     let active = true;
@@ -49,10 +59,10 @@ export function useRealtime(identityKey: string, enabled: boolean) {
       if (message.connection)
         setStatus(
           message.connection === 'connected'
-            ? 'En tiempo real'
-            : 'Recuperando eventos · sondeo activo',
+            ? realtimeLabels.connected
+            : realtimeLabels.reconnecting,
         );
-      if (message.error) setStatus('Canal interrumpido · sondeo activo');
+      if (message.error) setStatus(realtimeLabels.interrupted);
       let changed = !!message.reset || message.connection === 'connected';
       // Los eventos de caja (etapa 7) se publican además con su tipo y su turno o caja, para que
       // Caja y el cobro vuelvan a consultar de inmediato. Un reinicio del cursor también los avisa.
@@ -115,7 +125,7 @@ export function useRealtime(identityKey: string, enabled: boolean) {
         if (!active) void invoke('events_stop', { subscriptionId: identifier });
       })
       .catch(() => {
-        if (active) setStatus('Sondeo activo · canal no disponible');
+        if (active) setStatus(realtimeLabels.unavailable);
       });
     return () => {
       active = false;
