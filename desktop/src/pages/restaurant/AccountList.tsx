@@ -17,7 +17,8 @@ function accountStateText(account: Account) {
   if (account.state === 'merged') {
     return 'Cuenta combinada';
   }
-  return 'Cuenta anulada';
+  // Etapa 9D: el estado cerrado sin venta reúne las cuentas canceladas y las vacías descartadas.
+  return 'Cuenta cancelada o descartada';
 }
 
 // Pago y entrega se muestran separados de la preparación, con los estados que calcula Go.
@@ -86,7 +87,7 @@ export function AccountList({
               { value: 'closed', label: 'Cerradas y liquidadas' },
               { value: 'all', label: 'Todas con historial' },
               { value: 'merged', label: 'Combinadas' },
-              { value: 'voided', label: 'Anuladas sin productos activos' },
+              { value: 'voided', label: 'Canceladas o descartadas' },
             ]}
             onChange={(next) => {
               onStateChange(next);

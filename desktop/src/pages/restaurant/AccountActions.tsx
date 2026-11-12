@@ -9,14 +9,15 @@ import { accountCustomName, accountLabel } from '../../services/restaurant';
 import type { AccountPage, Bill, Overview } from '../../services/restaurant';
 import type { ExecuteMutation } from './OperationsAdmin';
 
-export type AccountAction = 'split' | 'transfer' | 'merge' | 'move' | 'assign' | 'void';
+// Etapa 9D (§5): la anulación de cuentas vacías con motivo libre salió de la interfaz; «Cancelar
+// cuenta» tiene su propio panel (CancelAccount.tsx) con el motivo del catálogo.
+export type AccountAction = 'split' | 'transfer' | 'merge' | 'move' | 'assign';
 const titles = {
   split: 'Dividir cuenta',
   transfer: 'Transferir productos',
   merge: 'Combinar cuentas',
   move: 'Cambiar mesa',
   assign: 'Cambiar responsable',
-  void: 'Anular cuenta vacía',
 };
 
 // Confirmación que muestra el aviso de éxito al terminar cada acción.
@@ -26,7 +27,6 @@ const successMessages = {
   merge: 'Cuentas combinadas',
   move: 'Mesa de la cuenta cambiada',
   assign: 'Responsable de la cuenta cambiado',
-  void: 'Cuenta anulada',
 };
 
 export function AccountActions({
@@ -53,7 +53,6 @@ export function AccountActions({
     const custom = accountCustomName(bill.account);
     return custom ? `${custom} · separada` : `Separada de la cuenta #${bill.account.folio}`;
   });
-  const [reason, setReason] = useState('');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [search, setSearch] = useState('');
   const candidates = useLiveResource<AccountPage>('restaurant_accounts', {
@@ -97,7 +96,6 @@ export function AccountActions({
         disabled={busy || stale}
         label={titles[action]}
         successMessage={successMessages[action]}
-        tone={action === 'void' ? 'danger' : 'default'}
         onSave={async () => {
           const body: Record<string, unknown> = { revision };
           if (action === 'split' || action === 'transfer') {
@@ -113,7 +111,6 @@ export function AccountActions({
           }
           if (action === 'move') body.table_id = tableID || null;
           if (action === 'assign') body.assigned_user_id = staffID;
-          if (action === 'void') body.reason = reason;
           await execute(`restaurant_${action}`, { id: bill.account.id, body });
           onClose();
         }}
@@ -186,14 +183,6 @@ export function AccountActions({
             value={staffID}
             options={staff.data ?? []}
             onChange={setStaffID}
-          />
-        )}
-        {action === 'void' && (
-          <TextField
-            required
-            label="Motivo de anulación de cuenta vacía"
-            value={reason}
-            onChange={setReason}
           />
         )}
       </Form>

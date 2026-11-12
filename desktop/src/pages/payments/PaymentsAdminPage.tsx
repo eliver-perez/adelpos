@@ -10,7 +10,9 @@ import type { EstablishmentFeature } from '../../services/features';
 import { permissionName } from '../../services/payments';
 import type { DiscountReason, PaymentMethod, PaymentSettings } from '../../services/payments';
 import { countLabel } from '../../services/plural';
+import type { CancelReason } from '../../services/restaurant';
 import type { ExecuteMutation } from '../restaurant/OperationsAdmin';
+import { CancelReasonsAdmin } from './CancelReasonsAdmin';
 import { DiscountReasonsAdmin } from './DiscountReasonsAdmin';
 import { MethodsAdmin } from './MethodsAdmin';
 import { PaymentPoliciesForm } from './PaymentPoliciesForm';
@@ -24,8 +26,8 @@ function changed() {
   window.dispatchEvent(new CustomEvent('adel-server-change'));
 }
 
-// Administración de cobros: métodos de pago, motivos de descuento, IVA, políticas y turno actual
-// con sus movimientos.
+// Administración de cobros: métodos de pago, motivos de descuento y de cancelación de cuentas
+// (etapa 9D), IVA, políticas y turno actual con sus movimientos.
 export function PaymentsAdminPage({
   can,
   timezone,
@@ -38,6 +40,12 @@ export function PaymentsAdminPage({
   const methods = useResource<PaymentMethod[]>('payments_methods', { enabled: readable });
   const reasons = useResource<DiscountReason[]>('payments_discount_reasons', {
     enabled: readable,
+  });
+  // Los motivos de cancelación se leen con «Consultar cuentas e importes» (los ofrece «Cancelar
+  // cuenta») y se administran con el mismo permiso de los motivos de descuento.
+  const cancelReadable = readable && can('accounts.read');
+  const cancelReasons = useResource<CancelReason[]>('restaurant_cancel_reasons', {
+    enabled: cancelReadable,
   });
   // El rango del tipo de cambio solo aparece con el pago en dólares activo.
   const features = useResource<EstablishmentFeature[]>('settings_features');
@@ -69,12 +77,13 @@ export function PaymentsAdminPage({
   }
   const activeMethods = methods.data?.filter((method) => method.active).length ?? 0;
   const activeReasons = reasons.data?.filter((reason) => reason.active).length ?? 0;
+  const activeCancelReasons = cancelReasons.data?.filter((reason) => reason.active).length ?? 0;
 
   return (
     <div className="payments-admin form-stack">
       <PageTitle
         title="Cobros"
-        description="Métodos de pago, motivos de descuento, IVA, políticas de cobro y turno de caja."
+        description="Métodos de pago, motivos de descuento y de cancelación, IVA, políticas de cobro y turno de caja."
       />
       {!readable && (
         <Notice>
@@ -128,6 +137,24 @@ export function PaymentsAdminPage({
               busy={busy}
             />
           </Accordion>
+          {cancelReadable && (
+            <Accordion
+              title="Motivos de cancelación"
+              summary={
+                cancelReasons.data
+                  ? `${countLabel(activeCancelReasons, 'activo', 'activos')} de ${cancelReasons.data.length}`
+                  : 'Consultando motivos…'
+              }
+            >
+              <Notice>{cancelReasons.error}</Notice>
+              <CancelReasonsAdmin
+                reasons={cancelReasons.data ?? []}
+                can={can}
+                execute={execute}
+                busy={busy}
+              />
+            </Accordion>
+          )}
           <Accordion
             title="IVA"
             summary={

@@ -236,7 +236,7 @@ describe('acciones destructivas en rojo (§1.5)', () => {
     let finish: () => void = () => undefined;
     render(
       <Form
-        label="Anular cuenta vacía"
+        label="Cancelar cuenta"
         tone="danger"
         onSave={() =>
           new Promise<void>((resolve) => {
@@ -247,7 +247,7 @@ describe('acciones destructivas en rojo (§1.5)', () => {
         <input aria-label="Motivo" defaultValue="Cliente se retiró" />
       </Form>,
     );
-    const submit = screen.getByRole('button', { name: 'Anular cuenta vacía' });
+    const submit = screen.getByRole('button', { name: 'Cancelar cuenta' });
     expect(submit.className).toContain('danger-solid-button');
     const form = submit.closest('form')!;
     expect(form.getAttribute('aria-busy')).toBeNull();
@@ -272,7 +272,7 @@ describe('acciones destructivas en rojo (§1.5)', () => {
     );
   });
 
-  it('«Anular cuenta vacía» del menú «Más…» va en rojo y las demás opciones no', () => {
+  it('«Cancelar cuenta» del menú «Más…» va en rojo y las demás opciones no', () => {
     const account = {
       id: '00000000-0000-4000-8000-00000000d9c1',
       state: 'open',
@@ -283,11 +283,11 @@ describe('acciones destructivas en rojo (§1.5)', () => {
       releasable: false,
     } as unknown as Account;
     const actions = accountMoreActions(account, () => true, 0);
-    expect(actions.find((action) => action.id === 'void')?.tone).toBe('danger');
+    expect(actions.find((action) => action.id === 'cancelAccount')?.tone).toBe('danger');
     render(<MoreActions actions={actions} disabled={false} onAction={() => undefined} />);
     fireEvent.click(screen.getByRole('button', { name: 'Más…' }));
     const menu = screen.getByRole('group', { name: 'Más acciones de la cuenta' });
-    expect(within(menu).getByRole('button', { name: 'Anular cuenta vacía' }).className).toContain(
+    expect(within(menu).getByRole('button', { name: 'Cancelar cuenta' }).className).toContain(
       'danger-button',
     );
     expect(within(menu).getByRole('button', { name: 'Historial de cambios' }).className).toContain(
@@ -298,13 +298,13 @@ describe('acciones destructivas en rojo (§1.5)', () => {
 
 // Recorrido del código: todo botón cuyo texto empieza con un verbo destructivo («Quitar»,
 // «Descartar», «Eliminar», «Borrar», «Anular», «Revocar», «Retirar logotipo/de prueba», «Liberar
-// mesa», «Cancelar unidades/ajuste/orden/conteo/arqueo») lleva la clase destructiva. Las
+// mesa», «Cancelar unidades/ajuste/orden/conteo/arqueo/cuenta») lleva la clase destructiva. Las
 // excepciones no destruyen nada: teclas de borrado del teclado, «Retirar efectivo» (operación de
 // caja), «Retirar todos los complementos» (elección del cliente en la captura), «Liberar a
 // preparación» (envía a cocina) y «Cancelar» a secas o «Cancelar corrección/apertura del cajón»
 // (cierran un formulario sin registrar nada).
 const destructiveLabel =
-  /^(Quitar|Descartar|Eliminar|Borrar|Anular|Revocar|Retirar (logotipo|de prueba)|Liberar mesa|Cancelar (unidades|ajuste|orden|conteo|arqueo|el arqueo))\b/;
+  /^(Quitar|Descartar|Eliminar|Borrar|Anular|Revocar|Retirar (logotipo|de prueba)|Liberar mesa|Cancelar (unidades|ajuste|orden|conteo|arqueo|el arqueo|cuenta))\b/;
 const notDestructive = [
   'components/VirtualKeyboard.tsx: Borrar',
   'components/NumericKeypad.tsx: Borrar último carácter',

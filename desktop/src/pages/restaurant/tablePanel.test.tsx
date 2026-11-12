@@ -632,10 +632,12 @@ describe('liberar mesa y fuera de servicio (etapa 7.1)', () => {
     expect(within(panel).queryByRole('button', { name: 'Liberar mesa' })).toBeNull();
     fireEvent.click(within(group).getByRole('button', { name: 'Cuenta #2 · Familia Ruiz' }));
     const release = await within(panel).findByRole('button', { name: 'Liberar mesa' });
-    // La anulación con motivo no se ofrece para una cuenta que se libera sin motivo.
+    // Etapa 9D: la anulación con motivo libre salió de la interfaz; «Cancelar cuenta» (motivo del
+    // catálogo) sigue en «Más…» aunque la cuenta también se pueda liberar sin motivo.
     fireEvent.click(within(panel).getByRole('button', { name: 'Más…' }));
     const menu = within(panel).getByRole('group', { name: 'Más acciones de la cuenta' });
-    expect(within(menu).queryByRole('button', { name: 'Anular cuenta vacía' })).toBeNull();
+    expect(within(menu).queryByRole('button', { name: /^Anular/ })).toBeNull();
+    expect(within(menu).getByRole('button', { name: 'Cancelar cuenta' })).toBeTruthy();
     fireEvent.click(release);
     const dialog = await screen.findByRole('alertdialog', { name: '¿Liberar Mesa 1?' });
     expect(dialog.textContent).toContain('Cuenta #2');

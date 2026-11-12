@@ -39,6 +39,8 @@ export type WorkspacePanel =
   | 'refund'
   | 'adjustments'
   | 'precheck'
+  // Etapa 9D (§5): panel «Cancelar cuenta» con el motivo del catálogo y, si hace falta, supervisor.
+  | 'cancelAccount'
   | AccountAction;
 
 // Cuenta pendiente que se muestra en la captura de una mesa sin cuenta (etapa 7.1).

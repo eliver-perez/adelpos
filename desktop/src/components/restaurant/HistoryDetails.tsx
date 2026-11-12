@@ -28,12 +28,43 @@ function PreparationChange({ value }: { value: unknown }) {
   );
 }
 
+// Etapa 9D (§5): «Cancelar cuenta» registra el motivo del catálogo, la descripción, quién autorizó
+// (si hizo falta un supervisor), las unidades y el importe que calculó Go.
+function AccountCancelled({ event, after }: { event: HistoryEvent; after: RecordValue }) {
+  const description = typeof after.description === 'string' ? after.description : '';
+  const authorized =
+    typeof after.authorized_by_username === 'string' ? after.authorized_by_username : '';
+  const discarded =
+    typeof after.discarded_draft_items === 'number' ? after.discarded_draft_items : 0;
+  return (
+    <div className="form-stack">
+      {description && <p>Descripción: {description}</p>}
+      {typeof after.cancelled_units === 'number' && (
+        <p>Unidades canceladas: {after.cancelled_units}</p>
+      )}
+      {typeof after.cancelled_amount === 'string' && (
+        <p>Importe cancelado: {formatMoney(after.cancelled_amount)}</p>
+      )}
+      <p>Canceló: {event.author_name}</p>
+      <p>Autorizó: {authorized || 'con su propio permiso'}</p>
+      {discarded > 0 && <p>Productos sin enviar descartados: {discarded}</p>}
+      {after.prepared_is_waste === true && <p>Lo preparado cuenta como merma.</p>}
+      <p>La cancelación no cuenta como venta ni registra una devolución de dinero.</p>
+    </div>
+  );
+}
+
 export function HistoryDetails({ event }: { event: HistoryEvent }) {
   const before = record(event.payload.before);
   const after = record(event.payload.after);
   const account = record(after.account ?? event.payload.after);
   const totals = record(after.totals ?? after.preserved_totals);
-  const units = Array.isArray(after.unit_ids) ? after.unit_ids.length : null;
+  // En «Cancelar cuenta» los identificadores son las unidades canceladas (se detallan aparte).
+  const units =
+    Array.isArray(after.unit_ids) && event.kind !== 'account.cancelled'
+      ? after.unit_ids.length
+      : null;
+  const discardedDraft = Array.isArray(before.draft) ? before.draft.length : 0;
   return (
     <div className="form-stack">
       {typeof after.reason === 'string' && after.reason && <p>Motivo: {after.reason}</p>}
@@ -59,6 +90,15 @@ export function HistoryDetails({ event }: { event: HistoryEvent }) {
         after.items.map((item, index) => <PreparationChange key={index} value={item} />)}
       {Array.isArray(event.payload.after) && (
         <p>Partidas en borrador: {event.payload.after.length}</p>
+      )}
+      {event.kind === 'account.cancelled' && <AccountCancelled event={event} after={after} />}
+      {event.kind === 'account.discarded' && (
+        <div className="form-stack">
+          {discardedDraft > 0 && <p>Productos sin enviar descartados: {discardedDraft}</p>}
+          <p>
+            Cuenta vacía descartada sin motivo: no es una cancelación ni aparece en los reportes.
+          </p>
+        </div>
       )}
       {event.kind === 'item.cancelled' && (
         <div className="form-stack">

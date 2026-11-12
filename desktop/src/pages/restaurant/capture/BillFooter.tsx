@@ -7,12 +7,13 @@ import { isPendingAccount } from '../../../services/restaurant';
 import type { Account, DraftItem, OrderQuote } from '../../../services/restaurant';
 import type { AccountAction } from '../AccountActions';
 import { adjustmentsAvailable } from '../adjustments/AccountAdjustments';
+import { cancelBlockerHints } from '../CancelAccount';
 import { draftUnits } from './captureRules';
 import { MoreActions } from './MoreActions';
 import type { MoreAction } from './MoreActions';
 
 export type BillAction =
-  AccountAction | 'metadata' | 'history' | 'kitchen' | 'adjustments' | 'precheck';
+  AccountAction | 'metadata' | 'history' | 'kitchen' | 'adjustments' | 'precheck' | 'cancelAccount';
 
 // Acciones menos frecuentes del menú «Más…» (antes «Acciones de cuenta…»), con su permiso.
 const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
@@ -43,21 +44,26 @@ const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
     permission: 'accounts.transfer',
     icon: 'edit',
   },
+  // Etapa 9D (§5): «Cancelar cuenta» sustituye a «Anular cuenta vacía». La ruta pide abrir cuentas
+  // (para llevar, administrarlas); Go decide si basta el permiso propio o hace falta un supervisor.
   {
-    id: 'void',
-    label: 'Anular cuenta vacía',
-    permission: 'accounts.manage',
+    id: 'cancelAccount',
+    label: 'Cancelar cuenta',
+    permission: 'accounts.open',
     icon: 'ban',
     tone: 'danger',
   },
 ];
 
 // Acciones del menú «Más…» que aplican a la cuenta con los permisos del usuario. Las comparten la
-// cuenta de la captura y el panel lateral de la mesa.
+// cuenta de la captura y el panel lateral de la mesa. Desde la etapa 9D los productos nuevos aún
+// sin guardar de esta terminal ya no condicionan ninguna opción (antes ocultaban la anulación de
+// cuentas vacías; «Cancelar cuenta» los descarta): el tercer parámetro se conserva para los
+// llamadores.
 export function accountMoreActions(
   account: Account,
   can: (permission: string) => boolean,
-  localDraftItems: number,
+  _localDraftItems: number,
 ): MoreAction<BillAction>[] {
   // Una cuenta pendiente (etapa 7.1) aún no existe en Go: no tiene acciones propias.
   if (isPendingAccount(account)) {
@@ -65,19 +71,20 @@ export function accountMoreActions(
   }
   const writable =
     account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
-  return moreActions.filter(
-    (action) =>
-      can(action.permission) &&
-      (action.id === 'history' || action.id === 'kitchen' || writable) &&
-      (action.id !== 'move' || account.mode === 'dine_in') &&
-      (action.id !== 'void' ||
-        (account.confirmed_quantity === 0 &&
-          account.draft_quantity === 0 &&
-          localDraftItems === 0 &&
-          // Una cuenta de mesa vacía en sentido estricto se libera sin motivo con «Liberar mesa»
-          // desde el panel de la mesa.
-          !(account.releasable && !!account.table_id && can('accounts.open')))),
-  );
+  return moreActions
+    .filter(
+      (action) =>
+        can(action.permission) &&
+        (action.id === 'history' || action.id === 'kitchen' || writable) &&
+        (action.id !== 'move' || account.mode === 'dine_in'),
+    )
+    .map((action) =>
+      // Con pagos o ajustes vigentes «Cancelar cuenta» sigue a la vista y dice qué hacer primero;
+      // su panel lo explica con el acceso a la devolución o a los descuentos y cargos.
+      action.id === 'cancelAccount' && account.cancel_blocker
+        ? { ...action, hint: cancelBlockerHints[account.cancel_blocker] }
+        : action,
+    );
 }
 
 // Botón de cobro: Cobrar exige registrar cobros y consultar la información financiera; muestra el

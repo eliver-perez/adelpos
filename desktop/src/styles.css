@@ -3226,6 +3226,21 @@ summary {
   color: var(--accent);
   font-weight: 600;
 }
+/* Etapa 9D (§3.4): umbral de cuenta abierta dentro de «Funciones del establecimiento». */
+.feature-threshold {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+.feature-threshold h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.feature-threshold p {
+  margin: 0;
+}
 @media (max-width: 720px) {
   .feature-row {
     grid-template-columns: minmax(0, 1fr);
@@ -4074,6 +4089,127 @@ summary {
   padding: 0 14px;
   text-align: left;
   font-size: 13px;
+}
+/* Etapa 9D (§5): «Cancelar cuenta» en el menú «Más…» con el mismo tamaño que las demás opciones y,
+   si Go indica qué hacer primero, la aclaración debajo del texto. */
+.capture-more-menu .danger-button {
+  min-height: 48px;
+  padding: 0 14px;
+  text-align: left;
+  font-size: 13px;
+}
+.capture-more-menu .capture-more-hinted {
+  display: grid;
+  justify-items: start;
+  align-content: center;
+  gap: 2px;
+  padding: 6px 14px;
+}
+.capture-more-hint {
+  padding-left: 26px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+/* Panel «Cancelar cuenta»: lo que se cancela, el motivo, el efecto en cocina y, si Go lo pide, la
+   autorización del supervisor. */
+.cancel-account-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.cancel-account-summary > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.cancel-account-summary dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.cancel-account-summary dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.cancel-account-kitchen,
+.cancel-account-blocked,
+.cancel-account-stale {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.cancel-account-kitchen {
+  border: 1px solid var(--border);
+  background: var(--banner);
+}
+.cancel-account-kitchen p,
+.cancel-account-blocked p,
+.cancel-account-stale p {
+  margin: 0;
+}
+.cancel-account-blocked,
+.cancel-account-stale {
+  border: 1px solid var(--warning);
+  background: var(--warning-soft);
+}
+.cancel-account-blocked strong {
+  color: var(--warning);
+  font-size: 14px;
+}
+.cancel-account-fields {
+  min-width: 0;
+}
+/* El envío es la única acción del panel: rojo relleno con objetivo táctil amplio. */
+.cancel-account .form-actions .danger-solid-button {
+  min-height: 52px;
+  padding: 10px 22px;
+  font-size: 14px;
+}
+/* Registro de una cuenta cancelada en su detalle. */
+.cancel-account-record {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: 12px;
+  background: var(--danger-soft);
+  font-size: 12px;
+}
+.cancel-account-record > strong {
+  color: var(--danger);
+  font-size: 13px;
+}
+.cancel-account-record dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+}
+.cancel-account-record dl > div {
+  display: contents;
+}
+.cancel-account-record dt {
+  color: var(--muted);
+}
+.cancel-account-record dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cancel-account-record p {
+  margin: 0;
 }
 .capture-primary-actions {
   display: grid;

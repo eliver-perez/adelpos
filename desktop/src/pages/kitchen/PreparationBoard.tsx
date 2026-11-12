@@ -171,8 +171,12 @@ export function PreparationBoard({
             })}
             {board.pending_changes.map((change) => (
               <article className="kitchen-preparation-card" key={change.event_id}>
+                {/* Etapa 9D: «Cancelar cuenta» (account.cancelled) también es una cancelación. */}
                 <strong>
-                  Aviso de {change.kind === 'item.cancelled' ? 'cancelación' : 'modificación'}{' '}
+                  Aviso de{' '}
+                  {change.kind === 'item.cancelled' || change.kind === 'account.cancelled'
+                    ? 'cancelación'
+                    : 'modificación'}{' '}
                   pendiente
                 </strong>
                 {change.warnings.map((warning, index) => (

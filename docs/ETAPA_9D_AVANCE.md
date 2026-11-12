@@ -408,3 +408,94 @@ aprobadas; las de `operations` y `reports` se repitieron sobre el árbol final. 
 aprobadas (incluida la prueba de las rutas nuevas), `rustfmt --check` limpio; `npx tsc --noEmit` sin errores y
 Prettier limpio en los servicios. Vitest de `src/services` y `tablePanel.test.tsx` (110 pruebas) aprobado como
 comprobación adicional; la suite completa de Vitest y Playwright quedan para la fase de interfaz y la regresión final.
+
+## Fase E · Cancelar cuenta (interfaz, §5)
+
+Agente E, 12/11/2026, sobre `etapa-9d` (`4abe78d`, fase A, sobre `b84e3be`, backend de D y E), sin subagentes, en
+paralelo con BC (barra y Mesas). Solo interfaz: sin Go, migraciones, `api.rs` ni servicios (los tipos y llamadas de BE
+ya estaban). Copia aislada = `HEAD` + los cambios de E (sin los cambios en curso de BC); los cambios se llevaron al
+árbol con parches que no tocan las partes de BC.
+
+- **«Cancelar cuenta»** sustituye a «Anular cuenta vacía» en el menú «Más…» de cualquier cuenta abierta de mesa o para
+  llevar (panel de la mesa, captura, Cuentas y Para llevar), en rojo, con el permiso de la ruta (`accounts.open`; para
+  llevar, `takeaway.manage`). Abre un panel en el lugar del mapa, del listado o del catálogo de la captura, con la
+  cuenta a la vista: unidades enviadas e importe que se cancela (de Go, sin sumar en React), productos sin enviar que se
+  descartan, motivo del catálogo con botones táctiles (solo los activos, con «Exige descripción» y «Lo preparado cuenta
+  como merma»), descripción obligatoria de 5 a 500 caracteres cuando el motivo la exige («Otro»), qué pasa con lo
+  enviado a cocina (lo no liberado se retira sin imprimir, las estaciones reciben el aviso; con la marca de merma, lo
+  preparado cuenta como merma —«Preparado / merma» corregible hasta el corte si hay control de inventario—; sin ella,
+  por clasificar), «no cuenta como venta» y si la mesa queda libre. Con `cancel_requires_authorization`, la autorización
+  de supervisor con el componente de los descuentos (`SupervisorAuthorization` + `useSupervisorAuthorization`): la
+  contraseña sale del formulario al enviar y el almacén de pendientes no la guarda. Confirmación final con
+  `ConfirmDialog` en tono peligroso («¿Cancelar la cuenta #N?» / «¿Cancelar el pedido #N?», foco en «Conservar la
+  cuenta»). Al terminar, aviso «Cuenta #N cancelada.», la mesa queda libre y se vuelve al mapa o al listado (el
+  espacio de trabajo deja de seleccionar la cuenta cerrada).
+- **Bloqueos que explican**: con `cancel_blocker = payments` o `adjustments` la opción sigue habilitada en «Más…» con la
+  aclaración «Primero registra la devolución» / «Primero quita el descuento o cargo» (descripción accesible del botón)
+  y el panel explica qué hacer, con «Ir a devoluciones» o «Ver descuentos y cargos» si el usuario tiene el permiso (si
+  no, qué permiso hace falta). Una cuenta que cambió en otra terminal pide «Revisé los cambios de esta cuenta» antes de
+  enviar.
+- **Resultado incierto**: el panel ofrece «Reintentar sin duplicar» con el mismo `operation_id` (la mutación del
+  espacio de trabajo; «Recuperar resultado» de la página también sirve). Si la cancelación era con supervisor y no llegó
+  a registrarse, el reintento sin contraseña vuelve con un error de autorización y el formulario pide repetirla
+  (`requireRepeat`). Los rechazos del motivo (`CANCEL_DESCRIPTION_REQUIRED`, `…_TOO_LONG`, `CANCEL_REASON_INACTIVE`)
+  se explican junto al campo; los de autorización, en el formulario del supervisor.
+- **Nombres**: ya no queda «Anular cuenta» en la interfaz. El filtro «Anuladas sin productos activos» es «Canceladas o
+  descartadas» y la tarjeta dice «Cuenta cancelada o descartada»; «Liberar mesa» confirma «Se descartará»; el detalle
+  de una cuenta cancelada muestra su registro (`Bill.cancellation`: motivo, descripción, canceló, autorizó, unidades,
+  importe y fecha) y las anteriores, liberadas o descartadas, «Cuenta cancelada sin productos activos o descartada
+  vacía». Historial: «Cuenta cancelada» detalla motivo, descripción, unidades e importe, quién canceló y quién
+  autorizó, productos sin enviar descartados y la merma; «Cuenta vacía descartada», que no es cancelación. Registro de
+  movimientos: nombre legible sobre el código de las operaciones de la 9D. Cocina: «Aviso de cancelación pendiente»
+  también para `account.cancelled`. Los permisos visibles y los títulos de los reportes vienen de Go (sin cambios en la
+  interfaz); el menú nativo y la paleta no mencionaban la anulación.
+- **Catálogo de motivos de cancelación** en Administración → Cobros, acordeón «Motivos de cancelación» junto a
+  «Motivos de descuento» y con su mismo estilo: lista con sus marcas, crear, renombrar, activar o desactivar, ordenar
+  por posición, «Exige descripción» y «Lo enviado a cocina cuenta como merma»; lectura con `accounts.read`, cambios con
+  `payments.settings.manage` (el permiso de los motivos de descuento), por la mutación de la página con `operation_id`.
+- **Umbral de cuenta abierta** al final de «Funciones del establecimiento»: «Marcar una cuenta abierta después de
+  (horas)», 1–72 con la entrada numérica de la 7.1 (sin `type="number"`), explicación «Las cuentas abiertas más de N
+  horas se marcan en ámbar en Mesas y en las tarjetas…» y «Guardar umbral» con revisión (`settings.features.manage`);
+  un conflicto carga el valor vigente y al guardar las pantallas abiertas vuelven a consultar el mapa y las cuentas.
+- **Reportes**: «Cuentas canceladas» (con «Autorizó») y «Cancelaciones por motivo» se ven y exportan bien sin cambios
+  en la interfaz (títulos, columnas y filtros de Go).
+- **Archivos de otros alcances con cambio mínimo** (aplicados con parche, sin tocar lo de BC): `OperationalPage.tsx`
+  (BC: importar y mostrar el panel `cancelAccount`, quitar `'void'` de las acciones y «Se anulará» → «Se descartará»),
+  `BillFooter.tsx` (la opción del menú; BC cambia «Cobrar» en el mismo archivo), `CaptureBill.tsx` y `AccountList.tsx`
+  (BC y D: solo el aviso de la cuenta cancelada, el filtro y el texto de la tarjeta), `styles.css` (un bloque propio),
+  `useRestaurantWorkspace.ts` (D: un tipo de panel), `MoreActions.tsx` (aclaración opcional) y las pruebas
+  `capture.test.tsx`, `tablePanel.test.tsx` y `stage9dStyles.test.tsx` (de «Anular cuenta vacía» a «Cancelar cuenta»;
+  el recorrido de destructivos exige también «Cancelar cuenta» en rojo).
+
+Pruebas (copia aislada = `HEAD 4abe78d` + cambios de E, sin los de BC; clúster temporal 55499; puertos 8187/1425;
+12/11/2026):
+
+- **Vitest nuevo**: `pages/restaurant/cancelAccount.test.tsx` (10: permiso propio con importe de Go, confirmación roja y
+  mesa libre; supervisor desde el principio con la contraseña retirada y el rechazo en su formulario; «Otro» sin
+  descripción y el 422 junto al campo; bloqueo por pagos con su aclaración, «Ir a devoluciones» y sin permiso de
+  devoluciones; bloqueo por ajustes con «Ver descuentos y cargos»; para llevar sin productos enviados; reintento
+  incierto con el mismo `operation_id`; reintento incierto con supervisor sin contraseña que pide repetirla; cuenta que
+  cambió en otra terminal) y `pages/stage9dCancelAdmin.test.tsx` (12: catálogo —lista con marcas, crear con posición,
+  renombrar, desactivar y reordenar con revisión, solo lectura sin permiso—; umbral —entrada de texto numérica, fuera de
+  intervalo, guardado con revisión y aviso, conflicto que recarga, sin permiso—; registro de la cuenta cancelada con
+  «Autorizó» y sin supervisor; historial de `account.cancelled` y `account.discarded`; efecto en cocina; Cocina con
+  «cancelación»; filtro «Canceladas o descartadas»; recorrido del código sin textos de «anular» cuentas). Ajustadas:
+  `capture.test.tsx`, `tablePanel.test.tsx` y `stage9dStyles.test.tsx` (el recorrido de destructivos exige también
+  «Cancelar cuenta» en rojo).
+- `npx tsc --noEmit` sin errores; `npm test` **72 archivos, 688 pruebas aprobadas**; `npm run build` correcto;
+  Prettier sin diferencias en los archivos de E.
+- **Playwright** `e2e/workflow-stage9d-cancel-account.spec.ts` (Chromium y WebKit, datos reales de Go): bloqueo por pago
+  con abono real (la opción de «Más…» habilitada con su descripción accesible), cancelación con permiso propio
+  («Cliente se retiró sin pagar», 3 unidades enviadas, confirmación roja, Mesa E1 libre), cancelación por un usuario
+  creado sin `accounts.cancel` con la autorización del administrador («Otro» con descripción, Mesa E2 libre), registro de
+  Go con quién canceló y quién autorizó, «Cuentas canceladas» con «Autorizó» y «Cancelaciones por motivo» en pantalla y
+  exportados a PDF y Excel, motivo nuevo con la marca de merma en Cobros y umbral de 6 h guardado (la prueba lo deja en
+  12 h). **Suite completa: 17/17 en Chromium (6.8 min) y 17/17 en WebKit (6.7 min)**; después de dos ajustes menores
+  (texto repetido en la confirmación de una cuenta sin productos enviados y una espera en Vitest) se repitió la
+  especificación nueva: 1/1 en ambos motores. La especificación nueva se ordena antes de `workflow-stage9d-colors`
+  (nombre fijado por el encargo); esa corrió después y aprobó en ambos motores.
+- **Capturas** (claro y oscuro, 1280 × 720 y 1920 × 1080, Chromium y WebKit, 56): panel de Cancelar cuenta sin y con
+  supervisor, bloqueado por pago, menú «Más…» con la aclaración, confirmación, catálogo de motivos y umbral, en el
+  directorio de capturas de la fase (`shots9dE`), sin desbordamiento horizontal.
+- Comprobación adicional sobre el árbol completo (E + cambios en curso de BC, copia sincronizada): `tsc` sin errores y
+  `npm test` 74 archivos, 714 pruebas aprobadas.
