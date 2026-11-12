@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Category, CategoryQuickNote } from '../../services/catalog';
 import { CategoryQuickNotes, quickNoteProblem } from './CategoryQuickNotes';
+import { chooseOption } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -196,7 +197,7 @@ describe('indicaciones rápidas de una categoría', () => {
     // Un efecto exige su ingrediente.
     expect(add.disabled).toBe(true);
     const select = within(form).getByRole('combobox', { name: /Ingrediente vinculado/ });
-    fireEvent.change(select, { target: { value: ingredients[0]!.id } });
+    chooseOption(select, ingredients[0]!.name);
     expect(add.disabled).toBe(false);
     await act(async () => {
       fireEvent.click(add);
@@ -218,7 +219,7 @@ describe('indicaciones rápidas de una categoría', () => {
         .getAttribute('aria-pressed'),
     ).toBe('true');
     expect(
-      (within(editor).getByRole('combobox', { name: /Ingrediente vinculado/ }) as HTMLSelectElement)
+      (within(editor).getByRole('combobox', { name: /Ingrediente vinculado/ }) as HTMLButtonElement)
         .value,
     ).toBe(ingredients[1]!.id);
     fireEvent.click(within(editorEffects).getByRole('button', { name: 'Solo instrucción' }));

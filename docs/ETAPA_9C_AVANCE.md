@@ -634,3 +634,82 @@ cerró solo durante el clic y el clic se reintentó hasta agotar el tiempo); las
 cascada porque Playwright reinicia el proceso y pierde la terminal preparada. Se corrigió el ayudante de la prueba (el clic
 tolera que el aviso desaparezca y el bucle tiene tope) y se repitió Chromium sobre la copia exacta de `a3f6534`: 14/14
 (5.8 min).
+
+## Fase B · Selector moderno para listas desplegables
+
+Hecha por un solo agente (B) el 11/11/2026 sobre `etapa-9c` (después de la fase A y de la parte D1), sin dependencias
+nuevas, sin migraciones y sin cambios en Go, Rust, permisos ni reglas de negocio. En paralelo trabajó el agente C (teclado,
+menú nativo y paleta) sin archivos compartidos salvo `styles.css` (bloques distintos).
+
+### Qué cambió
+
+- **Componente único propio** `components/Select.tsx` (`Select` y `MultiSelect`; partes en `SelectPopup.tsx`,
+  `selectHooks.ts` y la lógica pura en `selectModel.ts`), patrón ARIA _combobox_ con lista emergente: disparador
+  `<button role="combobox">` de 44 px con el aspecto de los demás campos, nombre tomado del `<label>` de `Forms.Field`
+  (la indicación queda como descripción) y lista en un portal con posición fija que nunca se corta (acordeones, áreas con
+  desplazamiento, borde de la ventana, teclado virtual). Opciones de 44 px, grupos (`optgroup`), opción vacía, opciones
+  deshabilitadas, **opciones de acción** al final y siempre visibles («+ Nueva categoría» de la 9A y «Otra unidad o
+  presentación…» del conteo ya no son valores especiales), **búsqueda automática con más de 8 opciones** sin distinguir
+  mayúsculas ni acentos (cada palabra en cualquier orden) con anuncio de resultados, y **selección múltiple** con marcas,
+  «Listo» y etiquetas para quitar lo elegido con un toque. Temas claro y oscuro con los tokens de `styles.css`.
+- **Teclado completo**: flechas, Inicio/Fin, Re Pág/Av Pág, Intro, Espacio, Esc (cierra solo la lista y no llega al diálogo
+  ni a los atajos de la fase C), Alt+↓/↑, Tab (cierra sin cambiar y avanza al siguiente campo) y escribir para buscar (con
+  búsqueda va al campo; sin ella, a la opción que empieza así).
+- **Teclado virtual**: con el dedo la búsqueda no se enfoca sola; al tocarla aparece el teclado virtual, se escribe con él y
+  la lista no se cierra al tocarlo; la lista se coloca por encima de él.
+- **Formularios**: con `required` o `name`, un campo oculto participa en la validación nativa (el acordeón cerrado se
+  revela y el foco vuelve al disparador) y en el envío; `Form` («Guardar y crear otra»), `ModalPanel` y `ConfirmDialog`
+  reconocen el selector como campo.
+- **Sustituidos los 104 `<select>`** que quedaban (el de la navegación angosta lo retiró la fase A), en 55 archivos,
+  incluidos los compartidos `ReferenceField` (30 usos), `PositionField` (9), `ItemPicker`, `SupplierPicker`,
+  `WarehouseSelect`, `DimensionUnitSelect`, `MeasureSelect`, `RecipeItemPicker`, `PreparationPicker`,
+  `CatalogIngredientPicker`, los filtros de Reportes y el selector de impresora de la vista previa del diseñador (D1).
+  No queda ningún `<select>`, `<option>` ni `<optgroup>` en la interfaz. Las tasas de IVA siguen como botones cerrados.
+- **Selección múltiple** en lugar de las casillas de `ScopeSelector` de promociones (productos, categorías y listas;
+  decisión 4 de la Fase 0). Estaciones de rutas y terminales, el editor de permisos y los días no cambian.
+- **Búsquedas**: se retiraron los campos de búsqueda aparte de la zona horaria (ahora con grupos «México» y «Otras zonas»)
+  y de los selectores de insumo, proveedor, preparación e ingrediente del catálogo; la búsqueda integrada la sigue
+  resolviendo Go con los mismos criterios (nombre, código, código de barras, RFC, contacto…) y conserva el nombre del campo
+  anterior. Se conserva «Buscar producto/insumo» de los filtros de Reportes, que consulta a Go solo al pulsar «Buscar»
+  (regla de la 9A: nunca por tecla); su selector filtra en pantalla las coincidencias ya recibidas.
+- **Pruebas**: ayudante único de Playwright `e2e/select.ts` (elegir por etiqueta, por valor o con búsqueda; comprobar valor,
+  texto y opciones) usado por todas las especificaciones y ayudantes que usaban `selectOption`, `locator('option')` o
+  `toHaveValue` sobre una lista; ayudante de Vitest `src/testing/select.ts`, con el que se actualizaron las pruebas de las
+  pantallas que cambian.
+
+### Decisiones y desviaciones
+
+- Sin librería: el componente se construyó con React y los tokens existentes (ninguna dependencia nueva que registrar en
+  `docs/DEPENDENCIES.md`).
+- En los selectores obligatorios, «Selecciona…» o «Elige …» es el texto vacío del disparador y ya no una opción elegible;
+  en los opcionales y en los filtros («Sin asignar», «Todos», «Sin filtro»…) sigue siendo una opción.
+- Tab cierra sin cambiar el valor (como Select2 por omisión) para evitar cambios accidentales; Intro y Espacio eligen.
+- Al cerrar la lista se vacía la búsqueda; en las búsquedas de Go se vuelve a pedir la primera página. Con la búsqueda en Go
+  en curso, Intro no elige nada (un lector de códigos que termina con Intro no toma un resultado anterior).
+- El valor elegido queda en el atributo `value` del disparador y cada opción lleva `data-value`, para que las pruebas
+  comprueben y elijan por valor como antes.
+
+### Pruebas de la fase B (copia aislada del agente, 11/11/2026)
+
+- `npx tsc --noEmit` → sin errores.
+- `npm test` → 66 archivos, 618 pruebas aprobadas (incluye `components/Select.test.tsx`, 15 pruebas: nombre por etiqueta,
+  ratón, teclado completo, búsqueda sin acentos con anuncio, grupos, acciones, validación con acordeón, deshabilitado,
+  múltiple con etiquetas, búsqueda en Go, teclado virtual, apertura con el dedo, sin `type="number"` ni `<select>`, posición
+  dentro de la ventana y opción con valor vacío; y una prueba nueva de promociones con selección múltiple en
+  `catalogFixes.test.tsx`).
+- `npm run build` → compilación correcta.
+- Playwright con la suite completa en Chromium y WebKit (puertos 8186/1424, clúster temporal 55499): 15/15 en cada motor —las
+  14 especificaciones del repositorio más una especificación temporal de capturas que no se versiona—. Capturas del selector
+  corto, con búsqueda (zona horaria) y múltiple (promociones), en claro y oscuro a 1280 × 720, en el directorio temporal de
+  la sesión (`shots9cB`). Antes de llegar ahí, dos ejecuciones encontraron y permitieron corregir dos defectos propios: la
+  opción con valor vacío («Todos») se mostraba como «Selecciona…» y, en WebKit, abrir con el ratón no dejaba el foco en el
+  disparador (Esc no cerraba la lista).
+
+### Limitaciones
+
+- No verificado en pantalla táctil física, ventana nativa (WKWebView) ni con un lector de pantalla real (VoiceOver): lo táctil
+  y la accesibilidad se comprobaron con Vitest, Testing Library y Playwright.
+- La lista no se virtualiza (≈420 zonas se dibujan al abrir); no se midió en hardware de punto de venta.
+- El aviso nativo de un selector obligatorio vacío es el de un campo de texto («Completa este campo»).
+
+La fase B se confirmó después de la C (las dos corrieron a la vez); su copia aislada era idéntica al árbol de trabajo, que ya contenía las fases A y C y la parte D1.

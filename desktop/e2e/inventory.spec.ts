@@ -4,6 +4,7 @@ import { installDriver } from './native-driver';
 import { openAdministration } from './navigation';
 import { notice } from './notices';
 import { groupTablist, inventoryGroups, openInventorySection } from './inventory-navigation';
+import { chooseOption } from './select';
 
 // Etapa 8, fase A: recorrido corto de Inventarios con el mismo transporte de prueba que
 // restaurant.spec.ts (Go temporal y base adel_pos_test_*). Crea un insumo con una presentación,
@@ -77,9 +78,7 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
   await page.getByRole('button', { name: 'Nuevo insumo', exact: true }).click();
   await page.getByLabel('Nombre del insumo', { exact: true }).fill('Harina de prueba');
   await page.getByLabel(/^Código interno/).fill('HAR-E2E');
-  await page
-    .getByRole('combobox', { name: /^Unidad base/ })
-    .selectOption({ label: 'Kilogramo (kg)' });
+  await chooseOption(page.getByRole('combobox', { name: /^Unidad base/ }), 'Kilogramo (kg)');
   await page.getByLabel(/^Costo de referencia/).fill('18.5');
   await page.getByLabel(/^Existencia mínima/).fill('5');
   await expect(page.locator('input[type="number"]')).toHaveCount(0);
@@ -89,9 +88,7 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
   await page.getByRole('button', { name: 'Nueva presentación', exact: true }).click();
   await page.getByLabel(/^Nombre de la presentación/).fill('Costal 25 kg');
   await page.getByLabel(/^Contenido/).fill('25000');
-  await page
-    .getByRole('combobox', { name: /^Unidad del contenido/ })
-    .selectOption({ label: 'Gramo (g)' });
+  await chooseOption(page.getByRole('combobox', { name: /^Unidad del contenido/ }), 'Gramo (g)');
   await page.getByRole('button', { name: 'Predeterminada para compra', exact: true }).click();
   await page.getByRole('button', { name: 'Agregar presentación', exact: true }).click();
   await expect(notice(page, 'Presentación agregada.')).toBeVisible();
@@ -110,14 +107,16 @@ test('inventarios: insumo con presentación, existencia inicial, existencias y m
   await openTab(page, 'Existencias');
   await page.getByRole('button', { name: 'Existencia inicial', exact: true }).click();
   const line = page.getByRole('group', { name: 'Renglón 1' });
-  await line.getByLabel('Buscar insumo', { exact: true }).fill('HAR-E2E');
-  await line
-    .getByRole('combobox', { name: 'Insumo', exact: true })
-    .selectOption({ label: 'Harina de prueba · HAR-E2E' });
+  await chooseOption(
+    line.getByRole('combobox', { name: 'Insumo', exact: true }),
+    'Harina de prueba · HAR-E2E',
+    { search: 'HAR-E2E' },
+  );
   await line.getByLabel('Cantidad', { exact: true }).fill('2');
-  await line
-    .getByRole('combobox', { name: 'Unidad o presentación', exact: true })
-    .selectOption({ label: 'Costal 25 kg (25\u00a0kg)' });
+  await chooseOption(
+    line.getByRole('combobox', { name: 'Unidad o presentación', exact: true }),
+    'Costal 25 kg (25\u00a0kg)',
+  );
   await line.getByLabel(/^Costo unitario/).fill('450');
   await page.getByLabel(/^Motivo u observación/).fill('Inventario de apertura E2E');
   await checkLayout(page, testInfo, 'existencia-inicial', true);

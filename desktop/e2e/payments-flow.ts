@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import { openAdministration, openSection } from './navigation';
 import { notice } from './notices';
+import { chooseOption, expectSelectValue } from './select';
 
 // Recorridos de cobro de la etapa 6 contra Go y PostgreSQL reales. Todas las cifras que se
 // verifican provienen de Go; la interfaz solo las muestra. Desde la etapa 6.1 (fase C) el
@@ -39,11 +40,12 @@ function checkoutStatus(page: Page) {
 export async function configureReceiptPrinter(page: Page) {
   await openAdministration(page, 'Cobros');
   await page.getByRole('button', { name: /Políticas de cobro/ }).click();
-  await page
-    .getByRole('combobox', { name: /Impresora de tickets/ })
-    .selectOption({ label: 'Destino controlado E2E' });
+  await chooseOption(
+    page.getByRole('combobox', { name: /Impresora de tickets/ }),
+    'Destino controlado E2E',
+  );
   await page.getByRole('button', { name: 'Guardar políticas', exact: true }).click();
-  await expect(page.getByRole('combobox', { name: /Impresora de tickets/ })).toHaveValue(/.+/);
+  await expectSelectValue(page.getByRole('combobox', { name: /Impresora de tickets/ }), /.+/);
   await openSection(page, 'Mesas');
 }
 

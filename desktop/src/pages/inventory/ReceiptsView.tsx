@@ -26,6 +26,7 @@ import type { PurchasingNavigation } from './purchasingNavigation';
 import { ReceiptDetail } from './ReceiptDetail';
 import { DirectReceiptForm, OrderReceiptForm } from './ReceiptForms';
 import type { DirectReceiptMode } from './ReceiptForms';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -85,28 +86,26 @@ function ReceiptFilters({
         />
       </Field>
       <Field label="Tipo de recepción">
-        <select
+        <Select
           value={filter.direct}
-          onChange={(event) => onChange({ ...filter, direct: event.target.value, page: 1 })}
-        >
-          <option value="">Todas</option>
-          <option value="false">De una orden de compra</option>
-          <option value="true">Directas</option>
-          <option value="counter">Compras de mostrador</option>
-        </select>
+          options={[
+            { value: '', label: 'Todas' },
+            { value: 'false', label: 'De una orden de compra' },
+            { value: 'true', label: 'Directas' },
+            { value: 'counter', label: 'Compras de mostrador' },
+          ]}
+          onChange={(direct) => onChange({ ...filter, direct, page: 1 })}
+        />
       </Field>
       <Field label="Almacén">
-        <select
+        <Select
           value={filter.warehouse}
-          onChange={(event) => onChange({ ...filter, warehouse: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          {warehouses.map((warehouse) => (
-            <option key={warehouse.id} value={warehouse.id}>
-              {warehouse.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name })),
+          ]}
+          onChange={(warehouse) => onChange({ ...filter, warehouse, page: 1 })}
+        />
       </Field>
       <OptionalDateField
         label="Fecha de negocio desde"

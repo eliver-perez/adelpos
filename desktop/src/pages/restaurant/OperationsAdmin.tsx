@@ -21,6 +21,7 @@ import type {
   RestaurantTable,
   RestaurantSettings,
 } from '../../services/restaurant';
+import { Select } from '../../components/Select';
 
 // Borrador local del área: la posición elegida solo viaja al guardar.
 type AreaDraft = Area & { position?: Position };
@@ -289,15 +290,14 @@ export function OperationsAdmin({
                 onChange={(seats) => setTable({ ...table, seats })}
               />
               <Field label="Forma">
-                <select
+                <Select<RestaurantTable['shape']>
                   value={table.shape}
-                  onChange={(event) =>
-                    setTable({ ...table, shape: event.target.value as RestaurantTable['shape'] })
-                  }
-                >
-                  <option value="rectangle">Rectangular</option>
-                  <option value="round">Redonda</option>
-                </select>
+                  options={[
+                    { value: 'rectangle', label: 'Rectangular' },
+                    { value: 'round', label: 'Redonda' },
+                  ]}
+                  onChange={(shape) => setTable({ ...table, shape })}
+                />
               </Field>
               <IntegerField
                 label="Posición horizontal"

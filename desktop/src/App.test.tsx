@@ -6,6 +6,7 @@ import { App } from './App';
 import product from './generated/product.json';
 import { useLeaveGuard } from './hooks/useLeaveGuard';
 import type { Identity } from './services/models';
+import { chooseOption } from './testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -170,10 +171,10 @@ describe('acceso y recuperación de la interfaz', () => {
     render(<App />);
     await screen.findByRole('heading', { name: 'Prepara tu establecimiento' });
     const name = screen.getByLabelText('Nombre comercial') as HTMLInputElement;
-    const timezone = screen.getByRole('combobox', { name: /Zona horaria/ }) as HTMLInputElement;
+    const timezone = screen.getByRole('combobox', { name: /Zona horaria/ }) as HTMLButtonElement;
     expect(name.value).toBe('ADEL POS');
     expect(timezone.value).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-    fireEvent.change(timezone, { target: { value: 'America/Tijuana' } });
+    chooseOption(timezone, 'America/Tijuana');
     fireEvent.click(screen.getByRole('button', { name: 'Configurar establecimiento' }));
     await screen.findByRole('heading', { name: 'Inicia sesión' });
     expect(native.invoke).toHaveBeenCalledWith(

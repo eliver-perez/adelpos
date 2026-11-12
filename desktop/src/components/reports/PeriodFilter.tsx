@@ -16,6 +16,7 @@ import {
   shortPeriodLabels,
 } from './period';
 import type { PeriodSelection } from './period';
+import { Select } from '../Select';
 
 // Filtro de periodo reutilizable de Reportes y del resumen ejecutivo (§7). Los periodos rápidos
 // (hoy, ayer, semana, mes y año actuales) se aplican con un toque; los que necesitan un dato (día,
@@ -219,17 +220,15 @@ export function PeriodFilter({
           {draft.period === 'month' && (
             <>
               <Field label="Mes">
-                <select
+                <Select
                   value={draft.month}
-                  onChange={(event) => setDraft({ ...draft, month: event.target.value })}
-                >
-                  <option value="">Elige un mes</option>
-                  {monthNames.map((name, index) => (
-                    <option key={name} value={String(index + 1)}>
-                      {name.charAt(0).toUpperCase() + name.slice(1)}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Elige un mes"
+                  options={monthNames.map((name, index) => ({
+                    value: String(index + 1),
+                    label: name.charAt(0).toUpperCase() + name.slice(1),
+                  }))}
+                  onChange={(month) => setDraft({ ...draft, month })}
+                />
               </Field>
               <Field label="Año">
                 <input

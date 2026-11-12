@@ -16,6 +16,8 @@ import {
   unitTrace,
 } from './inventoryRecipesTestData';
 import { openInventorySection } from './inventoryNavigationTestUtils';
+import { chooseValue } from '../../testing/select';
+import { optionLabels } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -211,9 +213,7 @@ describe('cancelaciones por clasificar', () => {
       notes: 'Sí se preparó',
     });
     // Filtros del historial por clasificación.
-    fireEvent.change(within(history).getByLabelText('Clasificación'), {
-      target: { value: 'not_prepared' },
-    });
+    chooseValue(within(history).getByLabelText('Clasificación'), 'not_prepared');
     await waitFor(() =>
       expect(
         requests.filter((request) => request.operation === 'inventory_cancellations').at(-1)?.query,
@@ -297,10 +297,8 @@ describe('diagnóstico del consumo en Movimientos', () => {
       screen.getAllByRole('button', { name: /^Ver consumo de la partida del movimiento/ }),
     ).toHaveLength(1);
     // El filtro de origen incluye los de la fase B.
-    const origin = screen.getByLabelText('Origen') as HTMLSelectElement;
-    expect(Array.from(origin.options).map((option) => option.textContent)).toContain(
-      'Liberación a cocina',
-    );
+    const origin = screen.getByLabelText('Origen');
+    expect(optionLabels(origin)).toContain('Liberación a cocina');
     fireEvent.click(button);
     const trace = await screen.findByRole('region', { name: 'Consumo de la partida' });
     await within(trace).findByRole('columnheader', { name: 'Valor neto' });

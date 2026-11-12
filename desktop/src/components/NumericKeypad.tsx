@@ -51,6 +51,7 @@ function foreignEditable(target: EventTarget | null) {
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
+    target.getAttribute('role') === 'combobox' ||
     target.isContentEditable
   );
 }

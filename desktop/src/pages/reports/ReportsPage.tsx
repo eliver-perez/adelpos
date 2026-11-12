@@ -8,6 +8,7 @@ import type { FilterOption, ReportCatalog } from '../../services/reports';
 import { DashboardView } from './DashboardView';
 import { ReportView } from './ReportView';
 import { useReportData } from './useReportData';
+import { Select } from '../../components/Select';
 
 // Sección principal «Reportes» (etapa 9A, §4 y §26), con reports.read. La navegación sale del
 // catálogo de Go: solo aparecen los grupos y reportes que el usuario puede consultar (Resumen
@@ -231,19 +232,16 @@ export function ReportsPage({
             {currentGroup.entries.length > 1 && (
               <div className="reports-picker">
                 <Field label="Reporte">
-                  <select
+                  <Select
                     value={entryID ?? ''}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setSelected((current) => ({ ...current, [currentGroup.id]: next }));
-                    }}
-                  >
-                    {currentGroup.entries.map((entry) => (
-                      <option key={entry.id} value={entry.id}>
-                        {entry.title}
-                      </option>
-                    ))}
-                  </select>
+                    options={currentGroup.entries.map((entry) => ({
+                      value: entry.id,
+                      label: entry.title,
+                    }))}
+                    onChange={(next) =>
+                      setSelected((current) => ({ ...current, [currentGroup.id]: next }))
+                    }
+                  />
                 </Field>
               </div>
             )}

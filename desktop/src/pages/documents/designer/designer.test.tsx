@@ -22,6 +22,7 @@ import {
   template,
 } from './designerTestData';
 import { previewDelay } from './usePreview';
+import { chooseOption, optionLabels } from '../../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -660,21 +661,21 @@ describe('vista previa con el ancho de una impresora', () => {
     await previewReady();
     // Las opciones no repiten el texto del ancho que se ve («42 columnas»), que sigue siendo único.
     expect(screen.getAllByText(/42 columnas/)).toHaveLength(1);
-    const select = screen.getByLabelText('Ver con el ancho de una impresora') as HTMLSelectElement;
-    const options = Array.from(select.options).map((option) => option.textContent);
+    const select = screen.getByLabelText('Ver con el ancho de una impresora') as HTMLButtonElement;
+    const options = optionLabels(select);
     expect(options).toEqual([
       'Ancho predeterminado del papel',
       'Destino controlado · 80 mm · columnas: 42 (predeterminado)',
       'Cocina caliente · 80 mm · columnas: 48',
       'Barra · 58 mm · columnas: 32',
     ]);
-    fireEvent.change(select, { target: { value: 'p-48' } });
+    chooseOption(select, 'Cocina caliente · 80 mm · columnas: 48');
     await waitFor(() => expect(calls('documents_preview').at(-1)?.body.printer_id).toBe('p-48'));
     expect(calls('documents_preview').at(-1)?.body.paper_width).toBeUndefined();
     await screen.findByText('Cocina caliente · 80 mm · 48 columnas', {
       selector: '.designer-preview-status',
     });
-    fireEvent.change(select, { target: { value: 'p-32' } });
+    chooseOption(select, 'Barra · 58 mm · columnas: 32');
     await screen.findByText('Barra · 58 mm · 32 columnas', {
       selector: '.designer-preview-status',
     });
@@ -685,8 +686,8 @@ describe('vista previa con el ancho de una impresora', () => {
   it('58 u 80 mm vuelven al ancho predeterminado sin impresora', async () => {
     renderDesigner({ printers: kitchenPrinters });
     await previewReady();
-    const select = screen.getByLabelText('Ver con el ancho de una impresora') as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: 'p-48' } });
+    const select = screen.getByLabelText('Ver con el ancho de una impresora') as HTMLButtonElement;
+    chooseOption(select, 'Cocina caliente · 80 mm · columnas: 48');
     await screen.findByText('Cocina caliente · 80 mm · 48 columnas', {
       selector: '.designer-preview-status',
     });

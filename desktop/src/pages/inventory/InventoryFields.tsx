@@ -9,6 +9,7 @@ import type { InventoryItem, ItemPage } from '../../services/inventory';
 import { acceptDecimalText } from '../../services/numericInput';
 import type { DecimalShape } from '../../services/numericInput';
 import { countLabel } from '../../services/plural';
+import { Select } from '../../components/Select';
 
 // Cantidad, costo o equivalencia capturados como texto (nunca un campo numérico nativo): un carácter no válido
 // se descarta al teclear y la cadena viaja a Go tal como se capturó; Go la vuelve a validar.
@@ -145,8 +146,8 @@ export function Pagination({
 }
 
 // Selector de insumo con búsqueda por nombre, código o código de barras (también de sus
-// presentaciones). Consulta a Go hasta 50 coincidencias; el insumo elegido se conserva aunque deje
-// de aparecer entre los resultados de una búsqueda nueva.
+// presentaciones). La búsqueda va integrada en la lista (etapa 9C) y la resuelve Go: hasta 50
+// coincidencias; el insumo elegido se conserva aunque deje de aparecer entre los resultados.
 export function ItemPicker({
   label,
   value,
@@ -178,33 +179,24 @@ export function ItemPicker({
   const options = value && !found.some((item) => item.id === value.id) ? [value, ...found] : found;
   return (
     <div className="inventory-picker">
-      <Field label={`Buscar ${label.toLowerCase()}`}>
-        <input
-          type="search"
-          maxLength={100}
-          autoComplete="off"
-          value={search}
-          placeholder="Nombre, código o código de barras"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </Field>
       <Field label={label}>
-        <select
+        <Select
           value={value?.id ?? ''}
           required={required}
-          onChange={(event) => {
-            const selected = options.find((item) => item.id === event.target.value) ?? null;
-            onChange(selected);
-          }}
-        >
-          <option value="">{emptyLabel}</option>
-          {options.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name} · {item.code}
-              {item.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          placeholder={emptyLabel}
+          options={[
+            ...(required ? [] : [{ value: '', label: emptyLabel }]),
+            ...options.map((item) => ({
+              value: item.id,
+              label: `${item.name} · ${item.code}${item.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          searchLabel={`Buscar ${label.toLowerCase()}`}
+          searchPlaceholder="Nombre, código o código de barras"
+          onSearchChange={setSearch}
+          loading={results.loading}
+          onChange={(id) => onChange(options.find((item) => item.id === id) ?? null)}
+        />
       </Field>
       {results.error && <small className="muted">{results.error}</small>}
     </div>

@@ -5,6 +5,7 @@ import type { Account, AccountPage } from '../../services/restaurant';
 import { formatMoney } from '../../services/money';
 import { deliveryStateBadges, paymentStateBadges } from '../../services/payments';
 import { countLabel } from '../../services/plural';
+import { Select } from '../../components/Select';
 
 function accountStateText(account: Account) {
   if (account.state === 'open') {
@@ -78,19 +79,20 @@ export function AccountList({
           />
         </Field>
         <Field label="Estado de cuenta">
-          <select
+          <Select
             value={state}
-            onChange={(event) => {
-              onStateChange(event.target.value);
+            options={[
+              { value: 'open', label: 'Abiertas' },
+              { value: 'closed', label: 'Cerradas y liquidadas' },
+              { value: 'all', label: 'Todas con historial' },
+              { value: 'merged', label: 'Combinadas' },
+              { value: 'voided', label: 'Anuladas sin productos activos' },
+            ]}
+            onChange={(next) => {
+              onStateChange(next);
               onPageChange(1);
             }}
-          >
-            <option value="open">Abiertas</option>
-            <option value="closed">Cerradas y liquidadas</option>
-            <option value="all">Todas con historial</option>
-            <option value="merged">Combinadas</option>
-            <option value="voided">Anuladas sin productos activos</option>
-          </select>
+          />
         </Field>
       </div>
       {takeaway && (

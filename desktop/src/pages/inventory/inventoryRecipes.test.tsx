@@ -21,6 +21,7 @@ import {
   targetPage,
 } from './inventoryRecipesTestData';
 import { openInventorySection } from './inventoryNavigationTestUtils';
+import { chooseValue, optionLabels, waitForOption } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -95,10 +96,6 @@ async function openRecipes(permissions = allInventoryPermissions) {
   await openInventorySection('Recetas');
 }
 
-function optionLabels(select: HTMLElement) {
-  return Array.from((select as HTMLSelectElement).options).map((option) => option.textContent);
-}
-
 describe('destinos de receta', () => {
   it('lista productos, variantes y complementos y filtra los que no tienen receta', async () => {
     const requests = useTransport();
@@ -118,9 +115,7 @@ describe('destinos de receta', () => {
     ).toBeTruthy();
     // Por omisión solo los activos del catálogo.
     expect(lastQuery(requests, 'inventory_recipe_targets')).toMatchObject({ active: 'true' });
-    fireEvent.change(screen.getByLabelText('Estado de la receta'), {
-      target: { value: 'without_recipe' },
-    });
+    chooseValue(screen.getByLabelText('Estado de la receta'), 'without_recipe');
     await waitFor(() =>
       expect(lastQuery(requests, 'inventory_recipe_targets')).toMatchObject({
         state: 'without_recipe',
@@ -170,30 +165,23 @@ describe('editor de recetas', () => {
     // Renglón 1: insumo en kilogramos capturado en gramos; solo se ofrecen unidades de masa.
     fireEvent.click(screen.getByRole('button', { name: 'Agregar insumo' }));
     const first = screen.getByRole('group', { name: 'Renglón 1' });
-    await waitFor(() =>
-      expect(optionLabels(within(first).getByLabelText('Insumo'))).toContain(
-        'Carne molida · CAR-01',
-      ),
-    );
-    fireEvent.change(within(first).getByLabelText('Insumo'), { target: { value: recipeIDs.meat } });
+    await waitForOption(within(first).getByLabelText('Insumo'), 'Carne molida · CAR-01');
+    chooseValue(within(first).getByLabelText('Insumo'), recipeIDs.meat);
     const firstUnit = within(first).getByLabelText(/^Unidad/);
     expect(optionLabels(firstUnit)).toEqual(['Gramo (g)', 'Kilogramo (kg)']);
-    expect((firstUnit as HTMLSelectElement).value).toBe(ids.kilogram);
-    fireEvent.change(firstUnit, { target: { value: ids.gram } });
+    expect((firstUnit as HTMLButtonElement).value).toBe(ids.kilogram);
+    chooseValue(firstUnit, ids.gram);
     fireEvent.change(within(first).getByLabelText(/^Cantidad/), { target: { value: '150x' } });
     fireEvent.change(within(first).getByLabelText(/^Cantidad/), { target: { value: '150' } });
 
     // Renglón 2: preparación medida en volumen.
     fireEvent.click(screen.getByRole('button', { name: 'Agregar preparación' }));
     const second = screen.getByRole('group', { name: 'Renglón 2' });
-    await waitFor(() =>
-      expect(optionLabels(within(second).getByLabelText('Preparación'))).toContain(
-        'Salsa de la casa · Elaboración inmediata',
-      ),
+    await waitForOption(
+      within(second).getByLabelText('Preparación'),
+      'Salsa de la casa · Elaboración inmediata',
     );
-    fireEvent.change(within(second).getByLabelText('Preparación'), {
-      target: { value: recipeIDs.sauceRecipe },
-    });
+    chooseValue(within(second).getByLabelText('Preparación'), recipeIDs.sauceRecipe);
     expect(optionLabels(within(second).getByLabelText(/^Unidad/))).toEqual([
       'Litro (l)',
       'Mililitro (ml)',
@@ -203,34 +191,21 @@ describe('editor de recetas', () => {
     // Renglón 3: ingrediente del catálogo con su porción para este producto (sin «solo para llevar»).
     fireEvent.click(screen.getByRole('button', { name: 'Agregar ingrediente del catálogo' }));
     const third = screen.getByRole('group', { name: 'Renglón 3' });
-    await waitFor(() =>
-      expect(optionLabels(within(third).getByLabelText('Ingrediente del catálogo'))).toContain(
-        'Cebolla',
-      ),
+    await waitForOption(within(third).getByLabelText('Ingrediente del catálogo'), 'Cebolla');
+    chooseValue(
+      within(third).getByLabelText('Ingrediente del catálogo'),
+      recipeIDs.onionIngredient,
     );
-    fireEvent.change(within(third).getByLabelText('Ingrediente del catálogo'), {
-      target: { value: recipeIDs.onionIngredient },
-    });
     expect(within(third).queryByRole('button', { name: 'Solo para llevar' })).toBeNull();
-    await waitFor(() =>
-      expect(optionLabels(within(third).getByLabelText('Insumo'))).toContain(
-        'Cebolla blanca · CEB-01',
-      ),
-    );
-    fireEvent.change(within(third).getByLabelText('Insumo'), {
-      target: { value: recipeIDs.onion },
-    });
+    await waitForOption(within(third).getByLabelText('Insumo'), 'Cebolla blanca · CEB-01');
+    chooseValue(within(third).getByLabelText('Insumo'), recipeIDs.onion);
     fireEvent.change(within(third).getByLabelText(/^Cantidad/), { target: { value: '20' } });
 
     // Renglón 4: bolsa solo para llevar (piezas).
     fireEvent.click(screen.getByRole('button', { name: 'Agregar insumo' }));
     const fourth = screen.getByRole('group', { name: 'Renglón 4' });
-    await waitFor(() =>
-      expect(optionLabels(within(fourth).getByLabelText('Insumo'))).toContain(
-        'Bolsa para llevar · BOL-01',
-      ),
-    );
-    fireEvent.change(within(fourth).getByLabelText('Insumo'), { target: { value: recipeIDs.bag } });
+    await waitForOption(within(fourth).getByLabelText('Insumo'), 'Bolsa para llevar · BOL-01');
+    chooseValue(within(fourth).getByLabelText('Insumo'), recipeIDs.bag);
     expect(optionLabels(within(fourth).getByLabelText(/^Unidad/))).toEqual(['Pieza (pza)']);
     fireEvent.change(within(fourth).getByLabelText(/^Cantidad/), { target: { value: '1' } });
     fireEvent.click(within(fourth).getByRole('button', { name: 'Solo para llevar' }));
@@ -464,7 +439,7 @@ describe('porciones habituales', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Porciones habituales' }));
     expect(await screen.findByText('20 g de Cebolla blanca')).toBeTruthy();
     expect(screen.getByText('Sin porción', { selector: '.tag' })).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('Porción'), { target: { value: 'false' } });
+    chooseValue(screen.getByLabelText('Porción'), 'false');
     await waitFor(() =>
       expect(lastQuery(requests, 'inventory_ingredient_portions')).toMatchObject({
         configured: 'false',
@@ -515,12 +490,11 @@ describe('elaboraciones', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Registrar elaboración' }));
     const select = await screen.findByLabelText('Preparación elaborada');
     // Solo las almacenables activas se elaboran.
-    await waitFor(() =>
-      expect(optionLabels(select)).toEqual(['Elige la preparación', 'Arroz rojo']),
-    );
-    fireEvent.change(select, { target: { value: recipeIDs.storedRiceRecipe } });
+    await waitForOption(select, 'Arroz rojo');
+    expect(optionLabels(select)).toEqual(['Arroz rojo']);
+    chooseValue(select, recipeIDs.storedRiceRecipe);
     await screen.findByText(/cada lote rinde 2,400 g descontada la merma/);
-    expect((screen.getByLabelText(/^Almacén de la elaboración/) as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText(/^Almacén de la elaboración/) as HTMLButtonElement).value).toBe(
       ids.general,
     );
     fireEvent.change(screen.getByLabelText(/^Lotes elaborados/), { target: { value: '2' } });

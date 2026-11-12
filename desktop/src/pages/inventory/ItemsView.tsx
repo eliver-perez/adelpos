@@ -15,6 +15,7 @@ import { countLabel } from '../../services/plural';
 import { Pagination } from './InventoryFields';
 import { formatQuantity } from './inventoryFormat';
 import { ItemEditorPanel } from './ItemEditor';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -88,38 +89,37 @@ function ItemFilters({
         />
       </Field>
       <Field label="Categoría">
-        <select
+        <Select
           value={filter.category}
-          onChange={(event) => onChange({ ...filter, category: event.target.value, page: 1 })}
-        >
-          <option value="">Todas</option>
-          <option value="none">Sin categoría</option>
-          {categories.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todas' },
+            { value: 'none', label: 'Sin categoría' },
+            ...categories.map((category) => ({ value: category.id, label: category.name })),
+          ]}
+          onChange={(category) => onChange({ ...filter, category, page: 1 })}
+        />
       </Field>
       <Field label="Estado">
-        <select
+        <Select
           value={filter.active}
-          onChange={(event) => onChange({ ...filter, active: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          <option value="true">Activos</option>
-          <option value="false">Inactivos</option>
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            { value: 'true', label: 'Activos' },
+            { value: 'false', label: 'Inactivos' },
+          ]}
+          onChange={(active) => onChange({ ...filter, active, page: 1 })}
+        />
       </Field>
       <Field label="Tipo">
-        <select
+        <Select
           value={filter.kind}
-          onChange={(event) => onChange({ ...filter, kind: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          <option value="purchased">Comprados</option>
-          <option value="prepared">Preparaciones almacenables</option>
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            { value: 'purchased', label: 'Comprados' },
+            { value: 'prepared', label: 'Preparaciones almacenables' },
+          ]}
+          onChange={(kind) => onChange({ ...filter, kind, page: 1 })}
+        />
       </Field>
     </section>
   );

@@ -14,6 +14,7 @@ import { inventoryQuantityShape } from '../../services/numericInput';
 import { countLabel } from '../../services/plural';
 import { ActiveToggle, DecimalTextField } from './InventoryFields';
 import { formatQuantity } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 // Alta o edición de una presentación de compra («Caja con 24», «Costal 25 kg»). La equivalencia se
 // captura en la unidad base o en otra unidad de la misma dimensión; Go la convierte y la guarda
@@ -98,13 +99,14 @@ function PresentationForm({
           label="Unidad del contenido"
           hint={`Go lo convierte a ${item.base_unit.name.toLowerCase()} (${item.base_unit.code}).`}
         >
-          <select value={unitID} onChange={(event) => setUnitID(event.target.value)}>
-            {sameDimension.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.name} ({unit.code})
-              </option>
-            ))}
-          </select>
+          <Select
+            value={unitID}
+            options={sameDimension.map((unit) => ({
+              value: unit.id,
+              label: `${unit.name} (${unit.code})`,
+            }))}
+            onChange={setUnitID}
+          />
         </Field>
       </div>
       <div className="button-row">

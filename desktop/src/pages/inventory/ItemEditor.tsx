@@ -25,9 +25,7 @@ import { inventoryPermissionName } from './inventoryFormat';
 import { PresentationsEditor } from './PresentationsEditor';
 import { QuickCategoryDialog } from './QuickCategoryDialog';
 import { StockLevelsEditor } from './StockLevelsEditor';
-
-// Valor de la opción «+ Nueva categoría» del selector (no es un identificador).
-const newCategoryOption = '__new_category__';
+import { Select } from '../../components/Select';
 
 // Espera antes de preguntar a Go por un código, para no consultar en cada tecla.
 const codeCheckDelay = 300;
@@ -148,26 +146,23 @@ function BaseUnitSelect({
   const offered = units.filter((unit) => unit.active || unit.id === value);
   const dimensions = Array.from(new Set(offered.map((unit) => unit.dimension)));
   return (
-    <select
+    <Select
       required
       value={value}
       disabled={locked}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">Elige la unidad base</option>
-      {dimensions.map((dimension) => {
+      placeholder="Elige la unidad base"
+      options={dimensions.map((dimension) => {
         const members = offered.filter((unit) => unit.dimension === dimension);
-        return (
-          <optgroup key={dimension} label={members[0]?.dimension_label ?? dimension}>
-            {members.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.name} ({unit.code})
-              </option>
-            ))}
-          </optgroup>
-        );
+        return {
+          label: members[0]?.dimension_label ?? dimension,
+          options: members.map((unit) => ({
+            value: unit.id,
+            label: `${unit.name} (${unit.code})`,
+          })),
+        };
       })}
-    </select>
+      onChange={onChange}
+    />
   );
 }
 
@@ -249,14 +244,6 @@ function ItemForm({
     update('name', name);
   }
 
-  function changeCategory(value: string) {
-    if (value === newCategoryOption) {
-      setCreatingCategory(true);
-      return;
-    }
-    update('categoryID', value);
-  }
-
   let codeHint: string | undefined;
   if (codeCheck && !codeCheck.available && !suggesting) {
     const holder = codeCheck.taken_by ? ` lo usa «${codeCheck.taken_by}»` : ' ya existe';
@@ -325,19 +312,24 @@ function ItemForm({
             />
           </Field>
           <Field label="Categoría">
-            <select
+            {/* «+ Nueva categoría» (etapa 9A) es una opción de acción: abre el alta rápida sin
+                cambiar la categoría elegida; siempre aparece, también al buscar. */}
+            <Select
               value={form.categoryID}
-              onChange={(event) => changeCategory(event.target.value)}
-            >
-              <option value="">Sin categoría</option>
-              {offeredCategories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                  {category.active ? '' : ' (inactiva)'}
-                </option>
-              ))}
-              {editable && <option value={newCategoryOption}>+ Nueva categoría</option>}
-            </select>
+              options={[
+                { value: '', label: 'Sin categoría' },
+                ...offeredCategories.map((category) => ({
+                  value: category.id,
+                  label: `${category.name}${category.active ? '' : ' (inactiva)'}`,
+                })),
+              ]}
+              actions={
+                editable
+                  ? [{ label: '+ Nueva categoría', onSelect: () => setCreatingCategory(true) }]
+                  : []
+              }
+              onChange={(categoryID) => update('categoryID', categoryID)}
+            />
           </Field>
           <Field
             label="Unidad base"
@@ -354,13 +346,14 @@ function ItemForm({
             label="Tipo de insumo"
             hint="Una preparación almacenable aumenta con cada elaboración registrada en Recetas."
           >
-            <select
+            <Select<ItemKind>
               value={form.kind}
-              onChange={(event) => update('kind', event.target.value as ItemKind)}
-            >
-              <option value="purchased">Comprado</option>
-              <option value="prepared">Preparación almacenable</option>
-            </select>
+              options={[
+                { value: 'purchased', label: 'Comprado' },
+                { value: 'prepared', label: 'Preparación almacenable' },
+              ]}
+              onChange={(kind) => update('kind', kind)}
+            />
           </Field>
           {costEditable && (
             <DecimalTextField

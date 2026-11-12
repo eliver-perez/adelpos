@@ -35,6 +35,7 @@ import { screenAuthorized, sectionByID } from '../../navigation/sections';
 import { dashboardRefreshMilliseconds } from './DashboardView';
 import { ReportChart } from './ReportChart';
 import { ReportsPage } from './ReportsPage';
+import { chooseOptionAsync, chooseValue, waitForOption } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -691,14 +692,12 @@ describe('reporte: tabla, filtros, paginación y estados', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ayer' }));
     await waitFor(() => expect(requests('reports_run').at(-1)?.query.period).toBe('yesterday'));
     await screen.findByText('Lunes 9 de noviembre de 2026');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Modalidad' }), {
-      target: { value: 'dine_in' },
-    });
+    chooseValue(screen.getByRole('combobox', { name: 'Modalidad' }), 'dine_in');
     await waitFor(() => expect(requests('reports_run').at(-1)?.query.mode).toBe('dine_in'));
     expect(await screen.findByText('Modalidad: Salón')).toBeTruthy();
     // Las opciones de la categoría vienen de reports/filters/categories.
     const category = screen.getByRole('combobox', { name: 'Categoría' });
-    await within(category).findByRole('option', { name: 'Bebidas' });
+    await waitForOption(category, 'Bebidas');
     expect(requests('reports_filters')[0]?.id).toBe('categories');
     // Una consulta por elección: Ayer y Modalidad.
     expect(requests('reports_run').length - before).toBe(2);
@@ -735,8 +734,7 @@ describe('reporte: tabla, filtros, paginación y estados', () => {
     await screen.findByRole('heading', { name: 'Resumen ejecutivo' });
     fireEvent.click(screen.getByRole('tab', { name: 'Ventas' }));
     const category = await screen.findByRole('combobox', { name: 'Categoría' });
-    await within(category).findByRole('option', { name: 'Bebidas' });
-    fireEvent.change(category, { target: { value: '11111111-1111-4111-8111-111111111111' } });
+    await chooseOptionAsync(category, 'Bebidas');
     await waitFor(() =>
       expect(requests('reports_run').at(-1)?.query.category_id).toBe(
         '11111111-1111-4111-8111-111111111111',

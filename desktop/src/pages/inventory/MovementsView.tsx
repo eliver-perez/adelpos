@@ -21,6 +21,7 @@ import {
   movementKindOptions,
   sourceKindOptions,
 } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 const pageSize = 50;
 
@@ -79,45 +80,28 @@ function MovementFilters({
         onChange={(item) => onChange({ ...filter, item, page: 1 })}
       />
       <Field label="Almacén">
-        <select
+        <Select
           value={filter.warehouse}
-          onChange={(event) => onChange({ ...filter, warehouse: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          {warehouses.map((warehouse) => (
-            <option key={warehouse.id} value={warehouse.id}>
-              {warehouse.name}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name })),
+          ]}
+          onChange={(warehouse) => onChange({ ...filter, warehouse, page: 1 })}
+        />
       </Field>
       <Field label="Tipo de movimiento">
-        <select
+        <Select<MovementKind | ''>
           value={filter.kind}
-          onChange={(event) =>
-            onChange({ ...filter, kind: event.target.value as MovementKind | '', page: 1 })
-          }
-        >
-          <option value="">Todos</option>
-          {movementKindOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todos' }, ...movementKindOptions]}
+          onChange={(kind) => onChange({ ...filter, kind, page: 1 })}
+        />
       </Field>
       <Field label="Origen">
-        <select
+        <Select
           value={filter.source}
-          onChange={(event) => onChange({ ...filter, source: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          {sourceKindOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todos' }, ...sourceKindOptions]}
+          onChange={(source) => onChange({ ...filter, source, page: 1 })}
+        />
       </Field>
       <OptionalDateField
         label="Fecha de negocio desde"

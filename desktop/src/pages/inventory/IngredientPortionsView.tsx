@@ -18,6 +18,7 @@ import { serverDateTime } from '../../services/restaurant';
 import { DecimalTextField, Pagination } from './InventoryFields';
 import { formatQuantity, inventoryPermissionName } from './inventoryFormat';
 import { DimensionUnitSelect, RecipeItemPicker } from './RecipePickers';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -309,24 +310,26 @@ export function IngredientPortionsView({
           />
         </Field>
         <Field label="Porción">
-          <select
+          <Select
             value={filter.configured}
-            onChange={(event) => setFilter({ ...filter, configured: event.target.value, page: 1 })}
-          >
-            <option value="">Todas</option>
-            <option value="true">Con porción</option>
-            <option value="false">Sin porción</option>
-          </select>
+            options={[
+              { value: '', label: 'Todas' },
+              { value: 'true', label: 'Con porción' },
+              { value: 'false', label: 'Sin porción' },
+            ]}
+            onChange={(configured) => setFilter({ ...filter, configured, page: 1 })}
+          />
         </Field>
         <Field label="Estado del ingrediente">
-          <select
+          <Select
             value={filter.active}
-            onChange={(event) => setFilter({ ...filter, active: event.target.value, page: 1 })}
-          >
-            <option value="true">Activos</option>
-            <option value="false">Inactivos</option>
-            <option value="">Todos</option>
-          </select>
+            options={[
+              { value: 'true', label: 'Activos' },
+              { value: 'false', label: 'Inactivos' },
+              { value: '', label: 'Todos' },
+            ]}
+            onChange={(active) => setFilter({ ...filter, active, page: 1 })}
+          />
         </Field>
       </section>
       <Notice>{list.error}</Notice>

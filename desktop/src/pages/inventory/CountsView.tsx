@@ -31,6 +31,7 @@ import { CountPanel } from './CountPanel';
 import { ItemPicker, Pagination } from './InventoryFields';
 import { inventoryPermissionName } from './inventoryFormat';
 import type { InventoryNavigate } from './inventoryNavigation';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -91,33 +92,24 @@ function CountFilters({
         />
       </Field>
       <Field label="Estado del conteo">
-        <select
+        <Select<CountStateFilter | ''>
           value={filter.state}
-          onChange={(event) =>
-            onChange({ ...filter, state: event.target.value as CountStateFilter | '', page: 1 })
-          }
-        >
-          <option value="">Todos</option>
-          {countStateOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          options={[{ value: '', label: 'Todos' }, ...countStateOptions]}
+          onChange={(state) => onChange({ ...filter, state, page: 1 })}
+        />
       </Field>
       <Field label="Almacén">
-        <select
+        <Select
           value={filter.warehouse}
-          onChange={(event) => onChange({ ...filter, warehouse: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          {warehouses.map((warehouse) => (
-            <option key={warehouse.id} value={warehouse.id}>
-              {warehouse.name}
-              {warehouse.active ? '' : ' (inactivo)'}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            ...warehouses.map((warehouse) => ({
+              value: warehouse.id,
+              label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+            })),
+          ]}
+          onChange={(warehouse) => onChange({ ...filter, warehouse, page: 1 })}
+        />
       </Field>
       <OptionalDateField
         label="Creado desde"
@@ -336,18 +328,16 @@ function CountForm({
           {scope === 'category' && (
             <div className="form-grid">
               <Field label="Categoría que se cuenta" hint="Sus insumos activos.">
-                <select
+                <Select
                   required
                   value={categoryID}
-                  onChange={(event) => setCategoryID(event.target.value)}
-                >
-                  <option value="">Elige la categoría</option>
-                  {activeCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Elige la categoría"
+                  options={activeCategories.map((category) => ({
+                    value: category.id,
+                    label: category.name,
+                  }))}
+                  onChange={setCategoryID}
+                />
               </Field>
             </div>
           )}

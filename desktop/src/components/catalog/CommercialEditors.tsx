@@ -1,6 +1,4 @@
-import { Accordion } from '../Accordion';
 import { Field } from '../Forms';
-import { countLabel } from '../../services/plural';
 import type { Lookups, OptionGroup, PriceList, Promotion } from '../../services/catalog';
 import {
   Check,
@@ -12,6 +10,7 @@ import {
   ScheduleEditor,
   TierEditor,
 } from './EditorFields';
+import { MultiSelect, Select } from '../Select';
 
 export function GroupEditor({
   value,
@@ -25,13 +24,14 @@ export function GroupEditor({
   return (
     <>
       <Field label="Regla de precio del grupo">
-        <select
+        <Select
           value={value.pricing_mode}
-          onChange={(event) => onChange({ ...value, pricing_mode: event.target.value })}
-        >
-          <option value="value">Equivalencia por valor incluido</option>
-          <option value="quantity">Tramos por unidades adicionales</option>
-        </select>
+          options={[
+            { value: 'value', label: 'Equivalencia por valor incluido' },
+            { value: 'quantity', label: 'Tramos por unidades adicionales' },
+          ]}
+          onChange={(pricing_mode) => onChange({ ...value, pricing_mode })}
+        />
       </Field>
       <div className="form-grid">
         <DecimalField
@@ -159,13 +159,14 @@ export function PriceListEditor({
         onChange={(allow_promotions) => onChange({ ...value, allow_promotions })}
       />
       <Field label="Cuando no exista un precio específico">
-        <select
+        <Select
           value={value.fallback}
-          onChange={(event) => onChange({ ...value, fallback: event.target.value })}
-        >
-          <option value="base">Usar precio base de producto/presentación</option>
-          <option value="reject">Rechazar el cálculo y solicitar precio explícito</option>
-        </select>
+          options={[
+            { value: 'base', label: 'Usar precio base de producto/presentación' },
+            { value: 'reject', label: 'Rechazar el cálculo y solicitar precio explícito' },
+          ]}
+          onChange={(fallback) => onChange({ ...value, fallback })}
+        />
       </Field>
       <RepeatSection
         title="Precios por producto o presentación"
@@ -225,6 +226,9 @@ export function PriceListEditor({
   );
 }
 
+// Alcance de la promoción (etapa 9C, decisión 4 de la Fase 0): selección múltiple con búsqueda en
+// lugar de una casilla por producto o categoría. Lo elegido queda a la vista como etiquetas que se
+// quitan con un toque.
 function ScopeSelector({
   title,
   options,
@@ -237,30 +241,14 @@ function ScopeSelector({
   onChange: (value: string[]) => void;
 }) {
   return (
-    <Accordion
-      defaultOpen={selected.length > 0}
-      title={
-        <>
-          {' '}
-          {title} · {countLabel(selected.length, 'seleccionado', 'seleccionados')}{' '}
-        </>
-      }
-    >
-      <div className="scope-options">
-        {options.map((option) => (
-          <Check
-            key={option.id}
-            label={option.name}
-            value={selected.includes(option.id)}
-            onChange={(checked) =>
-              onChange(
-                checked ? [...selected, option.id] : selected.filter((id) => id !== option.id),
-              )
-            }
-          />
-        ))}
-      </div>
-    </Accordion>
+    <Field label={title}>
+      <MultiSelect
+        value={selected}
+        placeholder="Ninguno"
+        options={options.map((option) => ({ value: option.id, label: option.name }))}
+        onChange={onChange}
+      />
+    </Field>
   );
 }
 
@@ -276,15 +264,16 @@ export function PromotionEditor({
   return (
     <>
       <Field label="Tipo de promoción automática">
-        <select
+        <Select
           value={value.kind}
-          onChange={(event) => onChange({ ...value, kind: event.target.value })}
-        >
-          <option value="two_for_one">2 × 1</option>
-          <option value="percent">Descuento porcentual</option>
-          <option value="quantity">Compra una cantidad y paga otra</option>
-          <option value="special_price">Precio especial por unidad</option>
-        </select>
+          options={[
+            { value: 'two_for_one', label: '2 × 1' },
+            { value: 'percent', label: 'Descuento porcentual' },
+            { value: 'quantity', label: 'Compra una cantidad y paga otra' },
+            { value: 'special_price', label: 'Precio especial por unidad' },
+          ]}
+          onChange={(kind) => onChange({ ...value, kind })}
+        />
       </Field>
       <div className="form-grid">
         {value.kind === 'percent' && (

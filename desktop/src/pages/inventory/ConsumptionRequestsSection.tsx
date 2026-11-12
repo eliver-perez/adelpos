@@ -12,6 +12,7 @@ import { countLabel } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
 import { Pagination } from './InventoryFields';
 import { diagnosticTexts, requestAccount, serviceModeLabels } from './recipeFormat';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -117,19 +118,20 @@ export function ConsumptionRequestsSection({
           solo los cambios posteriores de la misma partida.
         </p>
         <Field label="Solicitudes">
-          <select
+          <Select<RequestFilter>
             value={state}
-            onChange={(event) => {
-              setState(event.target.value as RequestFilter);
+            options={[
+              { value: '', label: 'Sin procesar (pendientes o con error)' },
+              { value: 'pending', label: 'Pendientes' },
+              { value: 'failed', label: 'Con error' },
+              { value: 'processed', label: 'Procesadas' },
+              { value: 'all', label: 'Todas' },
+            ]}
+            onChange={(next) => {
+              setState(next);
               setPage(1);
             }}
-          >
-            <option value="">Sin procesar (pendientes o con error)</option>
-            <option value="pending">Pendientes</option>
-            <option value="failed">Con error</option>
-            <option value="processed">Procesadas</option>
-            <option value="all">Todas</option>
-          </select>
+          />
         </Field>
         <Notice>{list.error}</Notice>
         {data && (

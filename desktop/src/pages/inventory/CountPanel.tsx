@@ -35,6 +35,7 @@ import { ItemPicker } from './InventoryFields';
 import { formatQuantity, formatSignedQuantity, inventoryPermissionName } from './inventoryFormat';
 import type { InventoryNavigate } from './inventoryNavigation';
 import { MeasureSelect, ReasonAction } from './PurchaseFields';
+import { Select } from '../../components/Select';
 
 // Renglones que se muestran a la vez; «Mostrar más» agrega otro bloque (la hoja puede tener hasta
 // 2000 insumos).
@@ -96,9 +97,6 @@ function matches(line: CountLine, search: string, view: LineView) {
   );
 }
 
-// Opción del selector que pide las demás unidades y presentaciones del insumo.
-const moreMeasures = 'more';
-
 // Unidad del renglón. Al principio solo ofrece la unidad base y la de la captura guardada; la
 // opción «Otra unidad o presentación…» consulta ese insumo para ofrecer sus demás unidades y
 // presentaciones (sin consultar todos los insumos de la hoja).
@@ -138,32 +136,28 @@ function CountMeasure({
   return (
     <label className="field count-line-measure">
       <span>{label}</span>
-      <select
+      <Select
         value={value}
         disabled={disabled || expanded}
-        onChange={(event) => {
-          if (event.target.value === moreMeasures) {
-            setExpanded(true);
-            return;
-          }
-          onChange(event.target.value);
-        }}
-      >
-        <option value="">
-          {line.item.unit.name} ({line.item.unit.code})
-        </option>
-        {line.presentation && (
-          <option value={`presentation:${line.presentation.id}`}>{line.presentation.name}</option>
-        )}
-        {line.unit && line.unit.id !== line.item.unit.id && (
-          <option value={`unit:${line.unit.id}`}>
-            {line.unit.name} ({line.unit.code})
-          </option>
-        )}
-        <option value={moreMeasures}>
-          {expanded ? 'Consultando unidades…' : 'Otra unidad o presentación…'}
-        </option>
-      </select>
+        options={[
+          { value: '', label: `${line.item.unit.name} (${line.item.unit.code})` },
+          ...(line.presentation
+            ? [{ value: `presentation:${line.presentation.id}`, label: line.presentation.name }]
+            : []),
+          ...(line.unit && line.unit.id !== line.item.unit.id
+            ? [{ value: `unit:${line.unit.id}`, label: `${line.unit.name} (${line.unit.code})` }]
+            : []),
+        ]}
+        actions={[
+          {
+            label: expanded ? 'Consultando unidades…' : 'Otra unidad o presentación…',
+            icon: 'more',
+            disabled: expanded,
+            onSelect: () => setExpanded(true),
+          },
+        ]}
+        onChange={onChange}
+      />
       {loaded.error && <small className="muted">{loaded.error}</small>}
     </label>
   );

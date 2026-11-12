@@ -12,6 +12,7 @@ import { useLiveResource } from '../../hooks/useLiveResource';
 import { positionPayload } from '../../services/positions';
 import type { Position } from '../../services/catalog';
 import type { DeviceScope, ExecuteKitchen, Station } from '../../services/kitchen';
+import { Select } from '../../components/Select';
 
 // Borrador local de la estación: la posición elegida solo viaja al guardar.
 type StationDraft = Station & { position?: Position };
@@ -147,19 +148,15 @@ export function StationsAdmin({
               onChange={(after) => setSelected({ ...selected, position: { after } })}
             />
             <Field label="Recepción de comandas">
-              <select
+              <Select<Station['reception']>
                 value={selected.reception}
-                onChange={(event) =>
-                  setSelected({
-                    ...selected,
-                    reception: event.target.value as Station['reception'],
-                  })
-                }
-              >
-                <option value="printer">Solo impresora</option>
-                <option value="kds">Solo KDS</option>
-                <option value="both">Impresora y KDS</option>
-              </select>
+                options={[
+                  { value: 'printer', label: 'Solo impresora' },
+                  { value: 'kds', label: 'Solo KDS' },
+                  { value: 'both', label: 'Impresora y KDS' },
+                ]}
+                onChange={(reception) => setSelected({ ...selected, reception })}
+              />
             </Field>
             {selected.reception !== 'kds' && (
               <ReferenceField
@@ -182,34 +179,26 @@ export function StationsAdmin({
               summary="Varias estaciones pueden compartir la misma impresora"
             >
               <Field label="Agrupación de comandas">
-                <select
+                <Select<Station['grouping']>
                   value={selected.grouping}
-                  onChange={(event) =>
-                    setSelected({
-                      ...selected,
-                      grouping: event.target.value as Station['grouping'],
-                    })
-                  }
-                >
-                  <option value="inherit">Usar configuración del establecimiento</option>
-                  <option value="independent">Ticket independiente</option>
-                  <option value="unified">Unificar con estaciones de la misma impresora</option>
-                </select>
+                  options={[
+                    { value: 'inherit', label: 'Usar configuración del establecimiento' },
+                    { value: 'independent', label: 'Ticket independiente' },
+                    { value: 'unified', label: 'Unificar con estaciones de la misma impresora' },
+                  ]}
+                  onChange={(grouping) => setSelected({ ...selected, grouping })}
+                />
               </Field>
               <Field label="Seguimiento de la estación">
-                <select
+                <Select<Station['tracking']>
                   value={selected.tracking}
-                  onChange={(event) =>
-                    setSelected({
-                      ...selected,
-                      tracking: event.target.value as Station['tracking'],
-                    })
-                  }
-                >
-                  <option value="inherit">Usar configuración del establecimiento</option>
-                  <option value="item">Por producto</option>
-                  <option value="order">Por pedido</option>
-                </select>
+                  options={[
+                    { value: 'inherit', label: 'Usar configuración del establecimiento' },
+                    { value: 'item', label: 'Por producto' },
+                    { value: 'order', label: 'Por pedido' },
+                  ]}
+                  onChange={(tracking) => setSelected({ ...selected, tracking })}
+                />
               </Field>
             </Accordion>
             <Accordion

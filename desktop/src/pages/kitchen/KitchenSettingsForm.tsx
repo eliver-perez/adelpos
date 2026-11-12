@@ -4,6 +4,7 @@ import { Field, Form, Notice } from '../../components/Forms';
 import { Check, IntegerField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { ExecuteKitchen, KitchenSettings } from '../../services/kitchen';
+import { Select } from '../../components/Select';
 
 export function KitchenSettingsForm({
   can,
@@ -67,46 +68,34 @@ function SettingsEditor({
         >
           <fieldset disabled={!can('kitchen.formats.manage')} className="form-stack">
             <Field label="Agrupación del establecimiento">
-              <select
+              <Select<KitchenSettings['grouping']>
                 value={value.grouping}
-                onChange={(event) =>
-                  setValue({
-                    ...value,
-                    grouping: event.target.value as KitchenSettings['grouping'],
-                  })
-                }
-              >
-                <option value="independent">Tickets independientes por estación</option>
-                <option value="unified">Unificar estaciones de una misma impresora</option>
-              </select>
+                options={[
+                  { value: 'independent', label: 'Tickets independientes por estación' },
+                  { value: 'unified', label: 'Unificar estaciones de una misma impresora' },
+                ]}
+                onChange={(grouping) => setValue({ ...value, grouping })}
+              />
             </Field>
             <Field label="Tamaño del texto">
-              <select
+              <Select<KitchenSettings['text_size']>
                 value={value.text_size}
-                onChange={(event) =>
-                  setValue({
-                    ...value,
-                    text_size: event.target.value as KitchenSettings['text_size'],
-                  })
-                }
-              >
-                <option value="normal">Normal</option>
-                <option value="large">Grande, según controlador</option>
-              </select>
+                options={[
+                  { value: 'normal', label: 'Normal' },
+                  { value: 'large', label: 'Grande, según controlador' },
+                ]}
+                onChange={(text_size) => setValue({ ...value, text_size })}
+              />
             </Field>
             <Field label="Presentación de cantidades">
-              <select
+              <Select<KitchenSettings['quantity_style']>
                 value={value.quantity_style}
-                onChange={(event) =>
-                  setValue({
-                    ...value,
-                    quantity_style: event.target.value as KitchenSettings['quantity_style'],
-                  })
-                }
-              >
-                <option value="prefix">Cantidad antes del producto</option>
-                <option value="multiplier">Producto seguido de cantidad</option>
-              </select>
+                options={[
+                  { value: 'prefix', label: 'Cantidad antes del producto' },
+                  { value: 'multiplier', label: 'Producto seguido de cantidad' },
+                ]}
+                onChange={(quantity_style) => setValue({ ...value, quantity_style })}
+              />
             </Field>
             <IntegerField
               label="Separación entre productos"
@@ -139,18 +128,14 @@ function SettingsEditor({
         >
           <fieldset disabled={!can('kitchen.timing.manage')} className="form-stack">
             <Field label="Seguimiento predeterminado">
-              <select
+              <Select<KitchenSettings['tracking']>
                 value={value.tracking}
-                onChange={(event) =>
-                  setValue({
-                    ...value,
-                    tracking: event.target.value as KitchenSettings['tracking'],
-                  })
-                }
-              >
-                <option value="item">Por producto o partida</option>
-                <option value="order">Por pedido completo</option>
-              </select>
+                options={[
+                  { value: 'item', label: 'Por producto o partida' },
+                  { value: 'order', label: 'Por pedido completo' },
+                ]}
+                onChange={(tracking) => setValue({ ...value, tracking })}
+              />
             </Field>
             <Check
               label="Liberar automáticamente los pedidos programados"

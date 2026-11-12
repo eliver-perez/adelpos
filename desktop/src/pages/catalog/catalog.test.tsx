@@ -17,6 +17,7 @@ import type {
   OptionGroup,
   Product,
 } from '../../services/catalog';
+import { chooseOptionAsync } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -211,9 +212,7 @@ describe('catálogo y personalización', () => {
   it('presenta importes del servidor y envía la selección estructurada sin calcular en JavaScript', async () => {
     render(<PreviewPage can={() => true} />);
     await screen.findByRole('combobox', { name: 'Producto a comprobar' });
-    fireEvent.change(screen.getByLabelText('Producto a comprobar'), {
-      target: { value: product.id },
-    });
+    await chooseOptionAsync(screen.getByLabelText('Producto a comprobar'), product.name);
     await screen.findByRole('heading', { name: 'Guarniciones' });
     const quantities = screen.getAllByLabelText('Porciones solicitadas');
     fireEvent.change(quantities[0]!, { target: { value: '0' } });
@@ -319,9 +318,7 @@ describe('catálogo y personalización', () => {
     });
     render(<PreviewPage can={() => false} />);
     await screen.findByLabelText('Producto a comprobar');
-    fireEvent.change(screen.getByLabelText('Producto a comprobar'), {
-      target: { value: product.id },
-    });
+    await chooseOptionAsync(screen.getByLabelText('Producto a comprobar'), product.name);
     await waitFor(() => expect(previews).toBe(1));
     fireEvent.change(screen.getByLabelText('Unidades para probar promociones'), {
       target: { value: '2' },

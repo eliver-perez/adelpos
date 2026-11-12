@@ -1,6 +1,7 @@
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { openSection, returnToTableCapture } from './navigation';
+import { chooseOption } from './select';
 
 export async function configureKitchen(page: Page) {
   // Etapa 9C: la pantalla completa es un botón de icono de la barra superior (reducir/maximizar).
@@ -10,9 +11,9 @@ export async function configureKitchen(page: Page) {
   await page.getByRole('button', { name: 'Impresoras', exact: true }).click();
   await page.getByRole('button', { name: 'Registrar impresora', exact: true }).click();
   await page.getByLabel('Nombre descriptivo de impresora').fill('Destino controlado E2E');
-  await page
-    .getByRole('combobox', { name: 'Transporte de impresión', exact: true })
-    .selectOption('agent');
+  await chooseOption(page.getByRole('combobox', { name: 'Transporte de impresión', exact: true }), {
+    value: 'agent',
+  });
   await page.getByLabel('Referencia del destino remoto').fill('Agente de aceptación no disponible');
   await page.getByRole('button', { name: 'Guardar impresora', exact: true }).click();
   await expect(
@@ -28,25 +29,28 @@ export async function configureKitchen(page: Page) {
   ]) {
     await page.getByRole('button', { name: 'Nueva estación', exact: true }).click();
     await page.getByLabel('Nombre de la estación', { exact: true }).fill(name!);
-    await page
-      .getByRole('combobox', { name: 'Recepción de comandas', exact: true })
-      .selectOption(reception!);
-    await page
-      .getByRole('combobox', { name: 'Impresora compartida o exclusiva', exact: true })
-      .selectOption({ label: 'Destino controlado E2E' });
+    await chooseOption(page.getByRole('combobox', { name: 'Recepción de comandas', exact: true }), {
+      value: reception!,
+    });
+    await chooseOption(
+      page.getByRole('combobox', { name: 'Impresora compartida o exclusiva', exact: true }),
+      'Destino controlado E2E',
+    );
     await page.getByRole('button', { name: 'Guardar estación', exact: true }).click();
     await expect(page.locator('.kitchen-list-button').filter({ hasText: name })).toBeVisible();
   }
   await page.getByRole('button', { name: 'Comandas y tiempos', exact: true }).click();
-  await page
-    .getByRole('combobox', { name: 'Agrupación del establecimiento', exact: true })
-    .selectOption('unified');
+  await chooseOption(
+    page.getByRole('combobox', { name: 'Agrupación del establecimiento', exact: true }),
+    { value: 'unified' },
+  );
   await page.getByRole('button', { name: 'Guardar configuración de cocina', exact: true }).click();
   await page.getByRole('button', { name: 'Enrutamiento', exact: true }).click();
   await page.getByRole('button', { name: 'Nueva ruta', exact: true }).click();
-  await page
-    .getByRole('combobox', { name: 'Categoría de la ruta', exact: true })
-    .selectOption({ label: 'Platillos' });
+  await chooseOption(
+    page.getByRole('combobox', { name: 'Categoría de la ruta', exact: true }),
+    'Platillos',
+  );
   await page.getByRole('checkbox', { name: 'Cocina caliente', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Freidoras', exact: true }).check();
   await page.getByRole('button', { name: 'Guardar ruta', exact: true }).click();

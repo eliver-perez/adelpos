@@ -13,6 +13,7 @@ import { ActiveToggle, ItemPicker, Pagination } from './InventoryFields';
 import { purchasingPermissionName } from './purchasingFormat';
 import type { PurchasingNavigation } from './purchasingNavigation';
 import { SupplierHistorySection, SupplierItemsSection } from './SupplierSections';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -125,24 +126,26 @@ function SupplierFilters({
         />
       </Field>
       <Field label="Modalidad">
-        <select
+        <Select
           value={filter.kind}
-          onChange={(event) => onChange({ ...filter, kind: event.target.value, page: 1 })}
-        >
-          <option value="">Todas</option>
-          <option value="formal">Proveedores formales</option>
-          <option value="counter">Compras de mostrador</option>
-        </select>
+          options={[
+            { value: '', label: 'Todas' },
+            { value: 'formal', label: 'Proveedores formales' },
+            { value: 'counter', label: 'Compras de mostrador' },
+          ]}
+          onChange={(kind) => onChange({ ...filter, kind, page: 1 })}
+        />
       </Field>
       <Field label="Estado">
-        <select
+        <Select
           value={filter.active}
-          onChange={(event) => onChange({ ...filter, active: event.target.value, page: 1 })}
-        >
-          <option value="">Todos</option>
-          <option value="true">Activos</option>
-          <option value="false">Inactivos</option>
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            { value: 'true', label: 'Activos' },
+            { value: 'false', label: 'Inactivos' },
+          ]}
+          onChange={(active) => onChange({ ...filter, active, page: 1 })}
+        />
       </Field>
       <ItemPicker
         label="Insumo surtido"

@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { CatalogPage } from './CatalogPage';
 import { newCatalogDocument } from './catalogState';
 import { ComboEditor } from '../../components/catalog/ComboEditor';
+import { PromotionEditor } from '../../components/catalog/CommercialEditors';
 import { ImageEditor } from '../../components/catalog/ImageEditor';
 import { ProductEditor } from '../../components/catalog/ProductEditor';
 import {
@@ -24,9 +25,17 @@ import type {
   Lookups,
   Product,
   ProductReference,
+  Promotion,
   QuantityTier,
   Schedule,
 } from '../../services/catalog';
+import {
+  chooseOption,
+  closeSelect,
+  openSelect,
+  optionLabels,
+  selectText,
+} from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -176,9 +185,7 @@ describe('etapa 6.1 · errores del catálogo', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Agregar' }));
     const component = screen.getByRole('group', { name: 'Componente 1' });
     expect(within(component).queryByLabelText('Producto permitido')).toBeNull();
-    fireEvent.change(within(component).getByLabelText('Producto original'), {
-      target: { value: 'burger' },
-    });
+    chooseOption(within(component).getByLabelText('Producto original'), 'Hamburguesa');
     expect(latest[0]?.default_product_id).toBe('burger');
     expect(latest[0]?.options).toEqual([
       { product_id: 'burger', substitution_price: '0.00', tiers: [] },
@@ -204,25 +211,26 @@ describe('etapa 6.1 · errores del catálogo', () => {
       .getAllByRole('heading', { name: 'Componentes del combo' })[0]!
       .closest('section')!;
     fireEvent.click(within(components).getAllByRole('button', { name: 'Agregar' })[0]!);
-    const original = screen.getByLabelText('Producto original') as HTMLSelectElement;
+    const original = screen.getByLabelText('Producto original') as HTMLButtonElement;
     expect(original.value).toBe('');
-    expect(original.selectedOptions[0]?.textContent).toBe('Selecciona…');
-    const names = Array.from(original.options).map((option) => option.textContent);
+    expect(selectText(original)).toBe('Selecciona…');
+    const names = optionLabels(original);
+    expect(names).toContain('Hamburguesa');
     expect(names).not.toContain('Combo del día');
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Componente 1' })).getAllByRole('button', {
         name: 'Agregar',
       })[0]!,
     );
-    const allowed = screen.getByLabelText('Producto permitido') as HTMLSelectElement;
+    const allowed = screen.getByLabelText('Producto permitido') as HTMLButtonElement;
     expect(allowed.value).toBe('');
   });
 
   it('1.5 un producto nuevo no hereda la primera categoría sin elegirla', async () => {
     await openNewProduct();
-    const select = screen.getByLabelText('Categoría') as HTMLSelectElement;
+    const select = screen.getByLabelText('Categoría') as HTMLButtonElement;
     expect(select.value).toBe('');
-    expect(select.selectedOptions[0]?.textContent).toBe('Selecciona…');
+    expect(selectText(select)).toBe('Selecciona…');
   });
 
   it('1.6 cada tramo muestra sus campos y los botones indican qué quitan', () => {
@@ -270,5 +278,40 @@ describe('etapa 6.1 · errores del catálogo', () => {
     expect(latest.starts_on).toBe('');
     fireEvent.click(screen.getByRole('button', { name: 'Quitar fecha' }));
     expect(from.value).toBe('');
+  });
+});
+
+describe('etapa 9C · alcance de una promoción con selección múltiple', () => {
+  it('elige productos con búsqueda, los muestra como etiquetas y los quita sin casillas', () => {
+    let latest = newCatalogDocument('promotions', false, '') as Promotion;
+    function Editor() {
+      const [value, setValue] = useState(latest);
+      latest = value;
+      return <PromotionEditor value={value} onChange={setValue} lookups={lookups} />;
+    }
+    render(<Editor />);
+    // Sin casillas por producto (decisión 4 de la Fase 0): un selector múltiple por alcance.
+    expect(screen.queryByRole('checkbox', { name: 'Hamburguesa' })).toBeNull();
+    const products = screen.getByRole('combobox', { name: 'Productos participantes' });
+    expect(selectText(products)).toBe('Ninguno');
+    const listbox = openSelect(products);
+    expect(listbox.getAttribute('aria-multiselectable')).toBe('true');
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Hamburguesa' }));
+    fireEvent.click(within(listbox).getByRole('option', { name: 'Papas' }));
+    expect(latest.product_ids).toEqual(['burger', 'fries']);
+    closeSelect(products);
+    expect(selectText(products)).toBe('2 seleccionados');
+    const chosen = screen.getByRole('list', { name: 'Elegidos' });
+    expect(
+      within(chosen)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Hamburguesa', 'Papas']);
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar «Hamburguesa»' }));
+    expect(latest.product_ids).toEqual(['fries']);
+    // Las categorías y las listas son selectores independientes.
+    chooseOption(screen.getByRole('combobox', { name: 'Categorías participantes' }), 'Platillos');
+    expect(latest.category_ids).toEqual([category.id]);
+    expect(latest.product_ids).toEqual(['fries']);
   });
 });

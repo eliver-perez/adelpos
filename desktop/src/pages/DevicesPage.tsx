@@ -8,6 +8,7 @@ import type { TerminalHome } from '../navigation/sections';
 import { api } from '../services/api';
 import { notifyError, notifySuccess } from '../services/notify';
 import type { Device, Register } from '../services/models';
+import { Select } from '../components/Select';
 
 function DeviceEditor({
   device,
@@ -54,26 +55,27 @@ function DeviceEditor({
             />
           </Field>
           <Field label="Caja física">
-            <select value={registerID} onChange={(event) => setRegisterID(event.target.value)}>
-              <option value="">Sin caja asociada</option>
-              {registers
-                .filter((register) => register.active)
-                .map((register) => (
-                  <option key={register.id} value={register.id}>
-                    {register.name}
-                  </option>
-                ))}
-            </select>
+            <Select
+              value={registerID}
+              options={[
+                { value: '', label: 'Sin caja asociada' },
+                ...registers
+                  .filter((register) => register.active)
+                  .map((register) => ({ value: register.id, label: register.name })),
+              ]}
+              onChange={setRegisterID}
+            />
           </Field>
           <Field label="Teclado virtual">
-            <select
+            <Select<Device['keyboard_mode']>
               value={keyboard}
-              onChange={(event) => setKeyboard(event.target.value as Device['keyboard_mode'])}
-            >
-              <option value="auto">Automático</option>
-              <option value="always">Siempre habilitado</option>
-              <option value="disabled">Desactivado</option>
-            </select>
+              options={[
+                { value: 'auto', label: 'Automático' },
+                { value: 'always', label: 'Siempre habilitado' },
+                { value: 'disabled', label: 'Desactivado' },
+              ]}
+              onChange={setKeyboard}
+            />
           </Field>
         </div>
         {/* Etapa 9C (§1.5): pantalla en la que abre la aplicación en esta terminal y a la que vuelve

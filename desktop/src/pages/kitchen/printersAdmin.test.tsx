@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Printer } from '../../services/kitchen';
 import { PrintersAdmin } from './PrintersAdmin';
+import { chooseValue } from '../../testing/select';
 
 // Revisión de la etapa 9B (hallazgo medio 4): una impresora CUPS solo recibe formato y logotipo si
 // se marca «Esta impresora entiende ESC/POS (formato y logotipo)», desactivada por omisión. La
@@ -71,9 +72,7 @@ describe('impresoras del servidor', () => {
     );
     renderAdmin(execute);
     fireEvent.click(screen.getByLabelText(label));
-    fireEvent.change(screen.getByLabelText('Transporte de impresión'), {
-      target: { value: 'escpos_tcp' },
-    });
+    chooseValue(screen.getByLabelText('Transporte de impresión'), 'escpos_tcp');
     expect(screen.queryByLabelText(label)).toBeNull();
     expect(screen.getByText(/Por red la impresora recibe comandos ESC\/POS/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Nombre descriptivo de impresora'), {
@@ -156,7 +155,7 @@ describe('columnas de texto por impresora', () => {
     expect(screen.getByRole('button', { name: '48 columnas' }).getAttribute('aria-pressed')).toBe(
       'true',
     );
-    fireEvent.change(screen.getByLabelText('Ancho de papel'), { target: { value: '58' } });
+    chooseValue(screen.getByLabelText('Ancho de papel'), '58');
     const narrow = Array.from(columnsGroup().querySelectorAll('button')).map(
       (button) => button.textContent,
     );
@@ -215,7 +214,7 @@ describe('columnas de texto por impresora', () => {
   it('con el papel cambiado sin guardar pide guardarlo antes de la prueba', async () => {
     renderSaved(savedPrinter());
     await openSaved('Cocina caliente');
-    fireEvent.change(screen.getByLabelText('Ancho de papel'), { target: { value: '58' } });
+    chooseValue(screen.getByLabelText('Ancho de papel'), '58');
     const button = screen.getByRole('button', {
       name: 'Imprimir prueba de ancho (30 columnas)',
     }) as HTMLButtonElement;

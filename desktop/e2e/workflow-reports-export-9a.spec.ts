@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { openAdministration } from './navigation';
 import { notice } from './notices';
+import { chooseOption } from './select';
 
 // Etapa 9A, parte C1: exportación de un reporte a PDF y Excel desde la pantalla Reportes con la
 // operación cerrada export_report. El diálogo nativo «Guardar como» se simula en native-driver.ts
@@ -36,7 +37,7 @@ test('reportes 9A: exportar PDF y Excel con el diálogo nativo simulado (guardar
     .click();
   const picker = page.getByRole('combobox', { name: 'Reporte', exact: true });
   if (await picker.isVisible()) {
-    await picker.selectOption({ label: 'Cobros por método' });
+    await chooseOption(picker, 'Cobros por método');
   } else {
     await page
       .getByRole('navigation', { name: 'Reportes de Pagos' })

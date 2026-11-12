@@ -9,9 +9,10 @@ import { saveFeature } from '../services/features';
 import { notifyError, notifySuccess } from '../services/notify';
 import type { EstablishmentFeature } from '../services/features';
 import type { Settings } from '../services/models';
-import { filterTimezones, timezoneLabel, timezoneOptions } from '../services/timezones';
+import { timezoneGroups } from '../services/timezones';
 import { formatDayStartDigits, saveBusinessDay } from '../services/reports';
 import type { BusinessDaySettings } from '../services/reports';
+import { Select } from '../components/Select';
 
 export const initialSettings: Settings = {
   name: '',
@@ -23,8 +24,8 @@ export const initialSettings: Settings = {
   theme: 'light',
 };
 
-// Zona horaria sin escritura libre: un buscador filtra la lista IANA (México primero) y la
-// elección se hace en el selector. La zona elegida permanece visible aunque el filtro la oculte.
+// Zona horaria sin escritura libre: la búsqueda integrada del selector filtra la lista IANA (sin
+// acentos ni guiones bajos) y las zonas de México van primero, en su propio grupo.
 export function TimezoneField({
   value,
   onChange,
@@ -32,39 +33,21 @@ export function TimezoneField({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const [query, setQuery] = useState('');
-  const zones = useMemo(() => timezoneOptions(value), [value]);
-  const matches = filterTimezones(zones, query);
-  const options = matches.includes(value) || !value ? matches : [value, ...matches];
+  const groups = useMemo(() => timezoneGroups(value), [value]);
   return (
-    <div className="timezone-field">
-      <Field label="Buscar zona horaria">
-        <input
-          type="search"
-          maxLength={60}
-          value={query}
-          placeholder="Ej. Monterrey, Tijuana o Madrid"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </Field>
-      <Field
-        label="Zona horaria"
-        hint={
-          matches.length === 0
-            ? 'Ninguna zona coincide con la búsqueda.'
-            : 'Las zonas de México aparecen primero. El servidor confirma la zona al guardar.'
-        }
-      >
-        <select required value={value} onChange={(event) => onChange(event.target.value)}>
-          {!value && <option value="">Selecciona…</option>}
-          {options.map((zone) => (
-            <option key={zone} value={zone}>
-              {timezoneLabel(zone)}
-            </option>
-          ))}
-        </select>
-      </Field>
-    </div>
+    <Field
+      label="Zona horaria"
+      hint="Las zonas de México aparecen primero. El servidor confirma la zona al guardar."
+    >
+      <Select
+        required
+        value={value}
+        options={groups}
+        searchPlaceholder="Ej. Monterrey, Tijuana o Madrid"
+        emptyMessage="Ninguna zona coincide con la búsqueda."
+        onChange={onChange}
+      />
+    </Field>
   );
 }
 
@@ -118,10 +101,14 @@ export function SettingsFields({
         <p className="read-only-value">MXN · Peso mexicano</p>
       </div>
       <Field label="Apariencia inicial">
-        <select value={value.theme} onChange={(event) => change('theme', event.target.value)}>
-          <option value="light">Claro</option>
-          <option value="dark">Oscuro</option>
-        </select>
+        <Select
+          value={value.theme}
+          options={[
+            { value: 'light', label: 'Claro' },
+            { value: 'dark', label: 'Oscuro' },
+          ]}
+          onChange={(theme) => change('theme', theme)}
+        />
       </Field>
       <Field label="Teléfono (opcional)">
         <input

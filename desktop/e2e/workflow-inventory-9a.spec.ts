@@ -10,6 +10,7 @@ import {
 import { installDriver } from './native-driver';
 import { openAdministration, topBar } from './navigation';
 import { notice } from './notices';
+import { chooseOption, expectSelectText } from './select';
 
 // Etapa 9A, fase A (A2): navegación agrupada de Inventarios, alta de un insumo con el código
 // sugerido por Go y una categoría creada desde su editor, consulta de la categoría y una recepción
@@ -96,10 +97,8 @@ async function preparePreconditions(driver: Driver) {
 }
 
 async function chooseItem(line: Locator, code: string, label: string) {
-  await line.getByLabel('Buscar insumo', { exact: true }).fill(code);
   const select = line.getByRole('combobox', { name: /^Insumo/ });
-  await expect(select.locator('option', { hasText: label })).toHaveCount(1);
-  await select.selectOption({ label });
+  await chooseOption(select, label, { search: code });
 }
 
 test('inventarios 9A: navegación agrupada, código sugerido, categoría desde el insumo y compra de mostrador', async ({
@@ -166,15 +165,13 @@ test('inventarios 9A: navegación agrupada, código sugerido, categoría desde e
   await page.getByLabel('Nombre del insumo', { exact: true }).fill(itemName);
   const code = page.getByLabel(/^Código interno/);
   await expect(code).toHaveValue(suggestedCode);
-  await page
-    .getByRole('combobox', { name: /^Unidad base/ })
-    .selectOption({ label: 'Kilogramo (kg)' });
+  await chooseOption(page.getByRole('combobox', { name: /^Unidad base/ }), 'Kilogramo (kg)');
   await page.getByLabel(/^Existencia mínima/).fill('3');
   await page.getByLabel(/^Descripción/).fill('Para quesadillas');
 
   // 3. «+ Nueva categoría» desde el selector: se crea sin salir del insumo, queda seleccionada y
   // lo capturado se conserva; el insumo todavía no se crea.
-  await page.getByRole('combobox', { name: /^Categoría/ }).selectOption('__new_category__');
+  await chooseOption(page.getByRole('combobox', { name: /^Categoría/ }), '+ Nueva categoría');
   const dialog = page.getByRole('dialog', { name: 'Nueva categoría de insumos' });
   await expect(dialog).toBeVisible();
   await dialog.getByLabel(/^Nombre de la categoría/).fill(categoryName);
@@ -183,7 +180,7 @@ test('inventarios 9A: navegación agrupada, código sugerido, categoría desde e
   await expect(notice(page, `Categoría «${categoryName}» creada y seleccionada.`)).toBeVisible();
   await expect(dialog).toHaveCount(0);
   const category = page.getByRole('combobox', { name: /^Categoría/ });
-  await expect(category.locator('option:checked')).toHaveText(categoryName);
+  await expectSelectText(category, categoryName);
   await expect(page.getByLabel('Nombre del insumo', { exact: true })).toHaveValue(itemName);
   await expect(code).toHaveValue(suggestedCode);
   await expect(page.getByLabel(/^Descripción/)).toHaveValue('Para quesadillas');
@@ -242,7 +239,9 @@ test('inventarios 9A: navegación agrupada, código sugerido, categoría desde e
     '$160.00',
   );
   await page.getByRole('button', { name: 'Volver a recepciones', exact: true }).click();
-  await page.getByRole('combobox', { name: /^Tipo de recepción/ }).selectOption('counter');
+  await chooseOption(page.getByRole('combobox', { name: /^Tipo de recepción/ }), {
+    value: 'counter',
+  });
   const counterRow = page.getByRole('row').filter({ hasText: `Mostrador · ${storeName}` });
   await expect(counterRow).toContainText('$160.00');
   await checkLayout(page, testInfo, 'recepciones-mostrador', true);

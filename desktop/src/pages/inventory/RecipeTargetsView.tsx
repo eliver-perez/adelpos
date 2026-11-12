@@ -13,6 +13,7 @@ import { pluralWord } from '../../services/plural';
 import { Pagination } from './InventoryFields';
 import { targetKindLabels } from './recipeFormat';
 import type { RecipeDraftTarget } from './RecipeEditor';
+import { Select } from '../../components/Select';
 
 const pageSize = 25;
 
@@ -111,40 +112,39 @@ function TargetFilters({
         />
       </Field>
       <Field label="Tipo de destino">
-        <select
+        <Select<RecipeTargetKind | ''>
           value={filter.kind}
-          onChange={(event) =>
-            onChange({ ...filter, kind: event.target.value as RecipeTargetKind | '', page: 1 })
-          }
-        >
-          <option value="">Todos</option>
-          <option value="product">Productos</option>
-          <option value="variant">Variantes</option>
-          <option value="complement">Complementos</option>
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            { value: 'product', label: 'Productos' },
+            { value: 'variant', label: 'Variantes' },
+            { value: 'complement', label: 'Complementos' },
+          ]}
+          onChange={(kind) => onChange({ ...filter, kind, page: 1 })}
+        />
       </Field>
       <Field label="Estado de la receta">
-        <select
+        <Select<RecipeTargetStatus | ''>
           value={filter.state}
-          onChange={(event) =>
-            onChange({ ...filter, state: event.target.value as RecipeTargetStatus | '', page: 1 })
-          }
-        >
-          <option value="">Todos</option>
-          <option value="without_recipe">Sin receta</option>
-          <option value="with_recipe">Con receta</option>
-          <option value="no_preparation">Sin preparación</option>
-        </select>
+          options={[
+            { value: '', label: 'Todos' },
+            { value: 'without_recipe', label: 'Sin receta' },
+            { value: 'with_recipe', label: 'Con receta' },
+            { value: 'no_preparation', label: 'Sin preparación' },
+          ]}
+          onChange={(state) => onChange({ ...filter, state, page: 1 })}
+        />
       </Field>
       <Field label="Disponibilidad en el catálogo">
-        <select
+        <Select
           value={filter.active}
-          onChange={(event) => onChange({ ...filter, active: event.target.value, page: 1 })}
-        >
-          <option value="true">Activos</option>
-          <option value="false">Inactivos</option>
-          <option value="">Todos</option>
-        </select>
+          options={[
+            { value: 'true', label: 'Activos' },
+            { value: 'false', label: 'Inactivos' },
+            { value: '', label: 'Todos' },
+          ]}
+          onChange={(active) => onChange({ ...filter, active, page: 1 })}
+        />
       </Field>
     </section>
   );

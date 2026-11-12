@@ -13,6 +13,7 @@ import { ScheduleEditor, emptySchedule } from './catalog/EditorFields';
 import { currentAfter, orderSiblings, positionPayload } from '../services/positions';
 import { scheduleSummary } from '../services/scheduleSummary';
 import type { PaletteColor, Schedule } from '../services/catalog';
+import { chooseOption, optionLabels } from '../testing/select';
 
 afterEach(() => {
   cleanup();
@@ -52,8 +53,8 @@ describe('selector de posición', () => {
         onChange={() => {}}
       />,
     );
-    const select = screen.getByLabelText('Posición') as HTMLSelectElement;
-    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+    const select = screen.getByLabelText('Posición') as HTMLButtonElement;
+    expect(optionLabels(select)).toEqual([
       'Al inicio',
       'Después de «Desayunos»',
       'Después de «Postres»',
@@ -94,9 +95,9 @@ describe('selector de posición', () => {
       );
     }
     render(<Editor />);
-    const select = screen.getByLabelText('Posición') as HTMLSelectElement;
+    const select = screen.getByLabelText('Posición') as HTMLButtonElement;
     expect(select.value).toBe('bebidas');
-    fireEvent.change(select, { target: { value: '' } });
+    chooseOption(select, 'Al inicio');
     expect(chosen).toBe('');
     expect(select.value).toBe('');
   });

@@ -16,6 +16,7 @@ import { countLabel } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
 import { ActiveToggle } from './InventoryFields';
 import { inventoryPermissionName } from './inventoryFormat';
+import { Select } from '../../components/Select';
 
 // Alta o edición de un almacén. El predeterminado («Almacén general») no se desactiva; Go además
 // rechaza desactivar un almacén con existencias o asignado a estaciones.
@@ -229,21 +230,21 @@ function StationRow({
         {editable && (
           <div className="inventory-station-assign">
             <Field label={`Almacén de ${station.station_name}`}>
-              <select
+              <Select
                 value={selected}
                 disabled={busy || saving}
-                onChange={(event) => setSelected(event.target.value)}
-              >
-                <option value="">
-                  Usar el predeterminado{fallback ? ` («${fallback.name}»)` : ''}
-                </option>
-                {choices.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name}
-                    {warehouse.active ? '' : ' (inactivo)'}
-                  </option>
-                ))}
-              </select>
+                options={[
+                  {
+                    value: '',
+                    label: `Usar el predeterminado${fallback ? ` («${fallback.name}»)` : ''}`,
+                  },
+                  ...choices.map((warehouse) => ({
+                    value: warehouse.id,
+                    label: `${warehouse.name}${warehouse.active ? '' : ' (inactivo)'}`,
+                  })),
+                ]}
+                onChange={setSelected}
+              />
             </Field>
             <button
               type="button"

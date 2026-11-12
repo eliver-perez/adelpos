@@ -13,6 +13,7 @@ import {
   configureReceiptPrinter,
   enableUSDCash,
 } from './payments-flow';
+import { chooseOption, expectSelectValue } from './select';
 
 // Revisión visual de la captura: 1280 × 720, 1920 × 1080 y 1024 × 768 en tema claro y oscuro.
 async function captureThemes(page: Page, testInfo: TestInfo, name: string) {
@@ -177,7 +178,8 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.getByRole('button', { name: 'Crear área', exact: true }).click();
   // Etapa 6.1 §2.2: el orden se elige por posición, no con un número.
   await expect(page.getByLabel('Orden del área', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('combobox', { name: 'Posición del área', exact: true })).toHaveValue(
+  await expectSelectValue(
+    page.getByRole('combobox', { name: 'Posición del área', exact: true }),
     '',
   );
   await page.getByLabel('Nombre del área', { exact: true }).fill('Salón principal');
@@ -204,7 +206,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
     tableActions!.y + tableActions!.height + 20,
   );
   // Etapa 6.1 §1.1: una mesa redonda de 100 × 100 debe dibujarse como círculo en cualquier ventana.
-  await page.getByRole('combobox', { name: /^Forma/ }).selectOption('round');
+  await chooseOption(page.getByRole('combobox', { name: /^Forma/ }), { value: 'round' });
   await page.getByLabel('Alto', { exact: true }).fill('100');
   await page.getByRole('button', { name: 'Guardar mesa', exact: true }).click();
   await expect(page.getByRole('button', { name: /Mesa 1, Libre/ })).toBeVisible();
@@ -536,7 +538,9 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   const scheduled = page.getByRole('button', { name: /Pedido programado/ });
   await scheduled.focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('combobox', { name: 'Programación', exact: true }).selectOption('delivery');
+  await chooseOption(page.getByRole('combobox', { name: 'Programación', exact: true }), {
+    value: 'delivery',
+  });
   await page.getByLabel('Fecha y hora · America/Monterrey').fill('2026-12-15T19:30');
   await scheduled.click();
   await scheduled.focus();
