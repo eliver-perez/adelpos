@@ -371,34 +371,38 @@ export function isPendingAccount(account: Pick<Account, 'id'> | null | undefined
 
 // Cuenta mostrada mientras la mesa aún no tiene cuenta: abierta, sin productos ni importes. Usa la
 // lista de precios predeterminada (la misma que Go asignará al crearla) para los precios del
-// catálogo.
+// catálogo. Etapa 9D (§4.1 y decisión 2): también el pedido para llevar y la cuenta sin mesa
+// (table null) nacen así; Go los crea con el primer producto guardado.
 export function pendingAccountBill({
   localID,
+  mode = 'dine_in',
   table,
   priceListID,
   createdAt,
   timezone,
 }: {
   localID: string;
-  table: Pick<RestaurantTable, 'id' | 'name'>;
+  mode?: Account['mode'];
+  table: Pick<RestaurantTable, 'id' | 'name'> | null;
   priceListID: string;
   createdAt: string;
   timezone: string;
 }): Bill {
   const zero: Totals = { subtotal: '0.00', discount: '0.00', total: '0.00' };
+  const takeaway = mode === 'takeaway';
   return {
     account: {
       id: localID,
       folio: 0,
-      name: table.name,
-      mode: 'dine_in',
+      name: table?.name ?? (takeaway ? 'Pedido para llevar' : 'Cuenta'),
+      mode,
       state: 'open',
-      table_id: table.id,
-      table_name: table.name,
+      table_id: takeaway ? null : (table?.id ?? null),
+      table_name: takeaway ? null : (table?.name ?? null),
       price_list_id: priceListID,
       customer_name: '',
       phone: '',
-      origin: '',
+      origin: takeaway ? defaultTakeawayOrigin : '',
       notes: '',
       scheduled_at: null,
       scheduled_local: '',
@@ -566,7 +570,7 @@ export function takeawayCustomerName(
 // si lo tiene.
 export function accountLabel(account: Account): string {
   if (isPendingAccount(account)) {
-    return 'Cuenta nueva';
+    return account.mode === 'takeaway' ? 'Pedido nuevo' : 'Cuenta nueva';
   }
   if (account.mode === 'takeaway') {
     const customer = takeawayCustomerName(account);

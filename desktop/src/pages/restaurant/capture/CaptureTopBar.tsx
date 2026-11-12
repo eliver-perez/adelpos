@@ -21,12 +21,14 @@ function captureTitle(account: Account | null) {
   if (!account) {
     return 'Consultando cuenta…';
   }
+  // Etapa 7.1: la mesa aún no tiene cuenta; Go la crea con el primer producto. Etapa 9D: también el
+  // pedido para llevar y la cuenta sin mesa.
+  const pending = isPendingAccount(account);
   if (account.mode === 'takeaway') {
-    return `Para llevar · Pedido #${account.folio}`;
+    return pending ? 'Para llevar · Pedido nuevo' : `Para llevar · Pedido #${account.folio}`;
   }
-  // Etapa 7.1: la mesa aún no tiene cuenta; Go la crea con el primer producto.
-  if (isPendingAccount(account)) {
-    return `${account.table_name ?? 'Mesa'} · Cuenta nueva`;
+  if (pending) {
+    return account.table_name ? `${account.table_name} · Cuenta nueva` : 'Cuenta nueva sin mesa';
   }
   if (account.table_name) {
     return `${account.table_name} · Cuenta #${account.folio}`;
@@ -36,6 +38,13 @@ function captureTitle(account: Account | null) {
 
 function captureDetails(account: Account, table: RestaurantTable | null, timezone: string) {
   const details: string[] = [];
+  // Etapa 9D (§4.1): los datos del pedido (cliente, teléfono, programación) se capturan cuando el
+  // pedido ya existe, después de guardar el primer producto.
+  if (account.mode === 'takeaway' && isPendingAccount(account)) {
+    details.push('El pedido se abre al guardar el primer producto');
+    details.push('Después podrás capturar los datos del cliente');
+    return details;
+  }
   if (account.mode === 'takeaway') {
     details.push(takeawayCustomerName(account) || 'Sin nombre del cliente');
     if (account.phone) details.push(account.phone);

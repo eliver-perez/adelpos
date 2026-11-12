@@ -203,7 +203,9 @@ export const actions: ActionDefinition[] = [
     label: 'Cuenta sin mesa',
     group: 'file',
     keywords: ['cuenta', 'sin mesa', 'barra', 'nueva'],
-    description: 'Abre una cuenta sin mesa, como «Cuenta sin mesa» en Mesas → Cuentas.',
+    // Etapa 9D (§4.1): entra a la captura sin crear nada; la cuenta nace con el primer producto.
+    description:
+      'Captura una cuenta sin mesa, como «Cuenta sin mesa» en Mesas → Cuentas. Se abre al guardar el primer producto.',
     visible: (context) =>
       allowed(context, 'restaurant') && has(context, 'accounts.open') && context.operation !== null,
     enabled: freeForAnotherAccount,
@@ -219,7 +221,8 @@ export const actions: ActionDefinition[] = [
     label: 'Nuevo pedido para llevar',
     group: 'file',
     keywords: ['pedido', 'para llevar', 'nuevo', 'ventanilla'],
-    description: 'Abre un pedido para llevar, como «Nuevo pedido» en Para llevar.',
+    description:
+      'Captura un pedido para llevar, como «Nuevo pedido» en Para llevar. Se abre al guardar el primer producto.',
     visible: (context) =>
       allowed(context, 'takeaway') &&
       has(context, 'accounts.open') &&

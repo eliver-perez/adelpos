@@ -20,12 +20,20 @@ import type { DraftOperation } from './draftOperations';
 //   entrada pasa al identificador real y los guardados siguientes usan PUT …/draft. Si otra
 //   terminal abrió una cuenta en la mesa (TABLE_HAS_ACCOUNT), no se crea nada: los toques se
 //   conservan hasta que el operador elige agregarlos a esa cuenta o abrir una nueva.
+// - Etapa 9D (§4.1, decisión 2): el pedido para llevar y la cuenta sin mesa nacen igual, con su
+//   primer producto (sin mesa no hay cuentas vistas que comparar).
 
 export interface DraftSyncTransport {
   // Guarda el borrador completo con un operation_id nuevo.
   save(accountID: string, body: { revision: number; items: DraftItem[] }): Promise<Bill>;
-  // Crea la cuenta de la mesa con su primer producto (etapa 7.1) con un operation_id nuevo.
-  create(body: { table_id: string; seen_account_ids: string[]; items: DraftItem[] }): Promise<Bill>;
+  // Crea la cuenta con su primer producto (etapa 7.1; desde la 9D también para llevar y sin mesa)
+  // con un operation_id nuevo.
+  create(body: {
+    mode: 'dine_in' | 'takeaway';
+    table_id: string | null;
+    seen_account_ids: string[];
+    items: DraftItem[];
+  }): Promise<Bill>;
   // Reintenta la última operación incierta con el mismo operation_id y cuerpo.
   retry(): Promise<Bill>;
 }
@@ -45,9 +53,11 @@ export interface DraftView {
   error: string;
 }
 
-// Mesa y cuentas que la terminal conocía al empezar a capturar sin cuenta.
+// Mesa y cuentas que la terminal conocía al empezar a capturar sin cuenta. Etapa 9D: la modalidad
+// (en salón por omisión) y la mesa opcional del pedido para llevar o de la cuenta sin mesa.
 export interface PendingCreation {
-  tableID: string;
+  mode?: 'dine_in' | 'takeaway';
+  tableID: string | null;
   seenAccountIDs: string[];
 }
 
@@ -198,7 +208,7 @@ export class DraftSyncEngine {
   // Primera cuenta pendiente detenida por TABLE_HAS_ACCOUNT.
   tableConflict(): TableAccountConflict | null {
     for (const [localID, creation] of this.creations) {
-      if (creation.accounts) {
+      if (creation.accounts && creation.tableID) {
         return { localID, tableID: creation.tableID, accounts: creation.accounts };
       }
     }
@@ -436,6 +446,7 @@ export class DraftSyncEngine {
     entry.error = '';
     const request = creation
       ? this.transport.create({
+          mode: creation.mode ?? 'dine_in',
           table_id: creation.tableID,
           seen_account_ids: [...creation.seenAccountIDs],
           items,
@@ -499,7 +510,8 @@ export class DraftSyncEngine {
     }
     entry.sentCount = 0;
     const creation = this.creations.get(entry.accountID);
-    const accounts = creation ? tableAccountsOf(problem) : null;
+    // Sin mesa (para llevar o cuenta sin mesa) no hay cuentas de la mesa que decidir.
+    const accounts = creation?.tableID ? tableAccountsOf(problem) : null;
     if (creation && accounts) {
       // Otra terminal abrió una cuenta en la mesa: Go no creó nada y el operador decide.
       creation.accounts = accounts;

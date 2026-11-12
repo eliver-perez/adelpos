@@ -35,7 +35,12 @@ interface Deferred {
 }
 
 interface Creation {
-  body: { table_id: string; seen_account_ids: string[]; items: DraftItem[] };
+  body: {
+    mode: 'dine_in' | 'takeaway';
+    table_id: string | null;
+    seen_account_ids: string[];
+    items: DraftItem[];
+  };
   resolve: (value: Bill) => void;
   reject: (problem: unknown) => void;
 }
@@ -264,6 +269,7 @@ describe('cuenta creada con el primer producto (etapa 7.1)', () => {
     expect(creations).toHaveLength(1);
     expect(calls).toHaveLength(0);
     expect(creations[0]!.body).toEqual({
+      mode: 'dine_in',
       table_id: 'mesa',
       seen_account_ids: ['vista'],
       items: [expect.objectContaining({ product_id: 'filete', quantity: 2 })],
@@ -343,6 +349,63 @@ describe('cuenta creada con el primer producto (etapa 7.1)', () => {
     expect(saveTargets).toEqual(['cuenta-tercera']);
     expect(calls[0]!.body.revision).toBe(6);
     expect(calls[0]!.body.items.map((item) => item.product_id)).toEqual(['agua', 'filete']);
+  });
+
+  it('el pedido para llevar y la cuenta sin mesa nacen con el primer producto (etapa 9D)', async () => {
+    const { transport, calls, creations, saveTargets } = controlledTransport();
+    const engine = new DraftSyncEngine(transport, 700);
+    const created: string[] = [];
+    engine.onAccountCreated((localID, result) => created.push(`${localID}>${result.account.id}`));
+    // Sin productos no se crea nada.
+    engine.preparePending('pendiente:pedido', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    expect(engine.discardPendingIfIdle('pendiente:pedido')).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(creations).toHaveLength(0);
+    // Con el primer producto nace el pedido, sin mesa y con su modalidad.
+    engine.preparePending('pendiente:otro', {
+      mode: 'takeaway',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    engine.stage(pendingBill('pendiente:otro'), addLineOperation([], filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    expect(creations).toHaveLength(1);
+    expect(creations[0]!.body).toEqual({
+      mode: 'takeaway',
+      table_id: null,
+      seen_account_ids: [],
+      items: [expect.objectContaining({ product_id: 'filete', quantity: 1 })],
+    });
+    creations[0]!.resolve(createdBill('pedido-real', creations[0]!.body.items));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(created).toEqual(['pendiente:otro>pedido-real']);
+    expect(engine.resolve('pendiente:otro')).toBe('pedido-real');
+    // La cuenta sin mesa: en el salón, sin mesa. Un rechazo TABLE_HAS_ACCOUNT (imposible sin mesa)
+    // no la detiene a la espera de una decisión: queda como error del guardado.
+    engine.preparePending('pendiente:sin-mesa', {
+      mode: 'dine_in',
+      tableID: null,
+      seenAccountIDs: [],
+    });
+    engine.stage(pendingBill('pendiente:sin-mesa'), addLineOperation([], filete, newID));
+    await vi.advanceTimersByTimeAsync(700);
+    expect(creations[1]!.body).toEqual(
+      expect.objectContaining({ mode: 'dine_in', table_id: null, seen_account_ids: [] }),
+    );
+    creations[1]!.reject(
+      new APIError('TABLE_HAS_ACCOUNT', 'Esta mesa ya tiene una cuenta.', 409, {
+        accounts: [{ id: 'otra', folio: 4, name: 'Cuenta' }],
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.tableConflict()).toBeNull();
+    expect(engine.view('pendiente:sin-mesa')?.error).toBe('Esta mesa ya tiene una cuenta.');
+    expect(calls).toHaveLength(0);
+    expect(saveTargets).toEqual([]);
   });
 
   it('una creación incierta se recupera con la misma operación y pasa a la cuenta real', async () => {

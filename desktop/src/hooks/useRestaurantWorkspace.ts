@@ -4,13 +4,13 @@ import type { Operation } from '../services/api';
 import type { Lookups } from '../services/catalog';
 import { notifyError, notifyWarning } from '../services/notify';
 import {
-  defaultTakeawayOrigin,
   emptyCustomization,
   normalizeSelection,
   pendingAccountBill,
   pendingAccountPrefix,
 } from '../services/restaurant';
 import type {
+  Account,
   AccountPage,
   Bill,
   ConfirmedLine,
@@ -43,11 +43,36 @@ export type WorkspacePanel =
   | 'cancelAccount'
   | AccountAction;
 
-// Cuenta pendiente que se muestra en la captura de una mesa sin cuenta (etapa 7.1).
+// Cuenta pendiente que se muestra en la captura de una mesa sin cuenta (etapa 7.1). Etapa 9D (§4.1,
+// decisión 2): también el pedido para llevar y la cuenta sin mesa (sin tableID).
 interface PendingAccount {
   localID: string;
-  tableID: string;
+  mode: Account['mode'];
+  tableID: string | null;
   createdAt: string;
+}
+
+// Vista en que se captura una cuenta pendiente: la mesa en Mesas, el pedido en Para llevar y la
+// cuenta sin mesa en Cuentas (las mismas vistas a las que llevaba la apertura inmediata).
+function pendingView(pending: Pick<PendingAccount, 'mode' | 'tableID'>): RestaurantView {
+  if (pending.mode === 'takeaway') {
+    return 'takeaway';
+  }
+  return pending.tableID ? 'tables' : 'accounts';
+}
+
+// Cambia en todas las vistas la selección de una cuenta (o de una cuenta pendiente) por otra; con
+// '' deja de seleccionarla.
+function replaceSelection(current: Record<RestaurantView, string>, from: string, to: string) {
+  const views = Object.keys(current) as RestaurantView[];
+  if (!views.some((key) => current[key] === from)) {
+    return current;
+  }
+  const next = { ...current };
+  for (const key of views) {
+    if (next[key] === from) next[key] = to;
+  }
+  return next;
 }
 
 const uncertainResultMessage =
@@ -97,6 +122,9 @@ export function useRestaurantWorkspace(
   // Cuentas que esta terminal creó desde una cuenta pendiente: mientras llega su consulta se
   // muestra la respuesta de la creación.
   const createdIDs = useRef(new Set<string>());
+  // Cuentas que esta terminal acaba de descartar, cancelar o liberar: mientras el listado aún no se
+  // actualiza, no se vuelven a elegir como primera cuenta del listado.
+  const closedIDs = useRef(new Set<string>());
   const canMap = can('restaurant.areas.read') && can('restaurant.tables.read');
   const draft = useDraftSync();
   // Una cuenta pendiente ya creada se sigue por su identificador real.
@@ -105,7 +133,7 @@ export function useRestaurantWorkspace(
   // mientras se crea después de volver al mapa).
   const localSelected = selectedID.startsWith(pendingAccountPrefix);
   const pendingSelected =
-    localSelected && !!pending && view === 'tables' && selectedID === pending.localID;
+    localSelected && !!pending && view === pendingView(pending) && selectedID === pending.localID;
   const overview = useLiveResource<Overview>('restaurant_overview', { enabled: active && canMap });
   const lookups = useLiveResource<Lookups>('catalog_lookups', {
     enabled: active && can('catalog.read'),
@@ -130,19 +158,21 @@ export function useRestaurantWorkspace(
   const fetched = resource.data?.account.id === selectedID ? resource.data : null;
   // La respuesta de un guardado propio del borrador puede ser más reciente que el último sondeo.
   const synced = selectedID && !localSelected ? draft.engine.latestBill(selectedID) : null;
-  const pendingTable = pendingSelected
-    ? overview.data?.tables.find((entry) => entry.id === pending.tableID)
-    : undefined;
+  const pendingTable =
+    pendingSelected && pending.tableID
+      ? overview.data?.tables.find((entry) => entry.id === pending.tableID)
+      : undefined;
   const defaultPriceList =
     lookups.data?.['price-lists'].find((list) => list.is_default && list.active)?.id ?? '';
   const pendingBill =
-    pendingSelected && pendingTable
+    pendingSelected && (!pending.tableID || pendingTable)
       ? pendingAccountBill({
           localID: pending.localID,
-          table: pendingTable,
+          mode: pending.mode,
+          table: pendingTable ?? null,
           priceListID: defaultPriceList,
           createdAt: pending.createdAt,
-          timezone: overview.data?.timezone ?? 'UTC',
+          timezone: overview.data?.timezone ?? accounts.data?.timezone ?? 'UTC',
         })
       : null;
   const justCreated = !!selectedID && createdIDs.current.has(selectedID);
@@ -186,7 +216,13 @@ export function useRestaurantWorkspace(
         setEditor((current) => (current?.accountID === record.account?.id ? null : current));
       }
       const account = record.account ?? record.target?.account;
-      if (account) {
+      if (account?.state === 'voided') {
+        // Etapa 9D: la cuenta se descartó, se canceló o se liberó. Deja de mostrarse y se vuelve
+        // al mapa o al listado de la vista en que se hizo, sin pasar la captura a otra cuenta.
+        closedIDs.current.add(account.id);
+        setSelections((current) => replaceSelection(current, account.id, ''));
+        setCaptureOpen(view, false);
+      } else if (account) {
         const destination: RestaurantView =
           account.mode === 'takeaway' ? 'takeaway' : account.table_id ? 'tables' : 'accounts';
         if (operation === 'restaurant_open_account') {
@@ -215,9 +251,7 @@ export function useRestaurantWorkspace(
       draft.engine.onAccountCreated((localID, created) => {
         const accountID = created.account.id;
         createdIDs.current.add(accountID);
-        setSelections((current) =>
-          current.tables === localID ? { ...current, tables: accountID } : current,
-        );
+        setSelections((current) => replaceSelection(current, localID, accountID));
         setEditor((current) =>
           current?.accountID === localID
             ? { ...current, accountID, revision: created.account.revision }
@@ -237,9 +271,13 @@ export function useRestaurantWorkspace(
   }, [overview.data, areaID]);
 
   useEffect(() => {
-    if (!selectedID && accounts.data?.items[0]) {
-      const first = accounts.data.items[0];
-      setSelections((current) => ({ ...current, [view]: first.id }));
+    const first = accounts.data?.items.find(
+      (entry) => entry.state !== 'open' || !closedIDs.current.has(entry.id),
+    );
+    if (!selectedID && first) {
+      // Solo si la vista sigue sin cuenta elegida: un toque en el mismo instante («Nuevo pedido»,
+      // que elige una cuenta pendiente) no se pisa con la primera del listado.
+      setSelections((current) => (current[view] ? current : { ...current, [view]: first.id }));
     }
   }, [selectedID, accounts.data, view]);
 
@@ -334,9 +372,7 @@ export function useRestaurantWorkspace(
       return;
     }
     if (draft.engine.discardPendingIfIdle(pending.localID)) {
-      setSelections((current) =>
-        current.tables === pending.localID ? { ...current, tables: '' } : current,
-      );
+      setSelections((current) => replaceSelection(current, pending.localID, ''));
     }
     setPending(null);
   }
@@ -382,19 +418,32 @@ export function useRestaurantWorkspace(
   // sin crear la cuenta. La cuenta se crea en Go con el primer producto guardado (motor del
   // borrador), sabiendo qué cuentas de la mesa veía esta terminal para no abrir una segunda en
   // silencio. Un doble toque solo vuelve a mostrar una cuenta pendiente vacía.
-  function startPendingCapture(table: string) {
+  //
+  // Etapa 9D (§4.1 y decisión 2: «ninguna cuenta se guarda sin productos»): «Nuevo pedido» (para
+  // llevar) y «Cuenta sin mesa» hacen lo mismo, sin mesa: el pedido o la cuenta nacen con el primer
+  // producto y salir sin productos no deja nada guardado.
+  function startPendingCapture(table: string | null, mode: Account['mode'] = 'dine_in') {
     flushCurrent();
     leavePending();
-    const seenAccountIDs = (accounts.data?.items ?? [])
-      .filter((entry) => entry.state === 'open' && entry.table_id === table)
-      .map((entry) => entry.id);
+    const tableID = mode === 'takeaway' ? null : table;
+    const seenAccountIDs = tableID
+      ? (accounts.data?.items ?? [])
+          .filter((entry) => entry.state === 'open' && entry.table_id === tableID)
+          .map((entry) => entry.id)
+      : [];
     const localID = `${pendingAccountPrefix}${newID()}`;
-    draft.engine.preparePending(localID, { tableID: table, seenAccountIDs });
-    setPending({ localID, tableID: table, createdAt: new Date().toISOString() });
-    setView('tables');
-    setTableID(table);
-    setSelections((current) => ({ ...current, tables: localID }));
-    setCaptureOpen('tables', true);
+    draft.engine.preparePending(localID, { mode, tableID, seenAccountIDs });
+    const target = pendingView({ mode, tableID });
+    setPending({ localID, mode, tableID, createdAt: new Date().toISOString() });
+    if (target !== view) {
+      setSearch('');
+      setPage(1);
+      setState('open');
+    }
+    setView(target);
+    if (tableID) setTableID(tableID);
+    setSelections((current) => ({ ...current, [target]: localID }));
+    setCaptureOpen(target, true);
     setPanel('capture');
   }
 
@@ -422,37 +471,6 @@ export function useRestaurantWorkspace(
   function enterCapture() {
     setCaptureOpen(view, true);
     setPanel('capture');
-  }
-
-  // Apertura rápida (etapa 6.2): abre la cuenta sin formulario con la apertura idempotente
-  // existente y, al confirmarse, entra directo a la captura (ver onResolved). Go asigna la lista
-  // predeterminada, el responsable y la referencia neutra del nombre. Un doble toque no abre otra
-  // cuenta: mientras la apertura está en vuelo (o incierta) el segundo toque se ignora sin generar
-  // otro operation_id.
-  async function quickOpen(mode: 'dine_in' | 'takeaway', table: string | null) {
-    if (mutation.isPending()) {
-      return;
-    }
-    flushCurrent();
-    const body: Record<string, unknown> = {
-      name: '',
-      mode,
-      table_id: mode === 'takeaway' ? null : table,
-      price_list_id: null,
-      customer_name: '',
-      phone: '',
-      origin: mode === 'takeaway' ? defaultTakeawayOrigin : '',
-      notes: '',
-      scheduled_local: '',
-      schedule_kind: '',
-      assigned_user_id: null,
-    };
-    try {
-      await execute<Bill>('restaurant_open_account', { body });
-    } catch (problem) {
-      // Un resultado incierto queda en «Recuperar resultado»; los demás errores se avisan.
-      reportError(problem, 'No se pudo abrir la cuenta.');
-    }
   }
 
   // Abre un panel de la cuenta. Las acciones que escriben parten de la cuenta sincronizada: se
@@ -573,7 +591,6 @@ export function useRestaurantWorkspace(
     captureMode,
     enterCapture,
     leaveCapture,
-    quickOpen,
     startPendingCapture,
     pendingAccount: pendingSelected,
     tableConflict,

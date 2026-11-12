@@ -172,8 +172,9 @@ test('captura: indicación con efecto y sustitución de guarniciones en dos toqu
   await prepareCatalog(driver);
 
   await openSection(page, 'Para llevar');
+  // Etapa 9D (§4.1): el pedido nace al agregar el primer producto.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeVisible();
   await page
     .getByRole('navigation', { name: 'Categorías' })
     .getByRole('button', { name: /Platos fuertes/ })

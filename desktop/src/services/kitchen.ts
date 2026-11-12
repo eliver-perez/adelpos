@@ -204,7 +204,9 @@ export const preparationLabels: Record<string, string> = {
   without_items: 'Sin productos confirmados',
   draft: 'Borrador por confirmar',
   confirmed_pending_dispatch: 'Pendiente de liberación',
-  pending_release: 'Pendiente de liberación · revisar cocina',
+  // Etapa 9D (§4.4, decisión 10): la liberación quedó bloqueada (por ejemplo, sin ruta de
+  // preparación) y se libera a mano en Cocina; el texto ya no suena a error.
+  pending_release: 'Enviado · sin confirmar en cocina',
   change_pending: 'Cambio de cocina pendiente de revisión',
   scheduled: 'Programado para preparación',
   released: 'Liberado a preparación',

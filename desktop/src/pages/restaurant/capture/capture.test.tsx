@@ -1012,6 +1012,8 @@ describe('captura táctil de pedidos', () => {
     accounts[ids.first]!.confirmedTotal = '281.10';
     const bill = await openFirstAccount();
     const line = await within(bill).findByRole('article', { name: '2 × Filete de prueba' });
+    // Etapa 9D (§4.5): «Cancelar unidades» está en el menú del producto («⋯»).
+    fireEvent.click(within(line).getByRole('button', { name: 'Acciones de 2 × Filete de prueba' }));
     fireEvent.click(within(line).getByRole('button', { name: 'Cancelar unidades' }));
     await screen.findByRole('heading', { name: 'Cancelar unidades · Filete de prueba' });
     fireEvent.change(screen.getByLabelText('Motivo de cancelación'), {

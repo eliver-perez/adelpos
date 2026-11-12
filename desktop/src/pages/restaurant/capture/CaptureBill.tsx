@@ -39,6 +39,21 @@ function paymentDescription(account: Account) {
   return label;
 }
 
+// Encabezado de la cuenta: preparación y, en el salón, el pago. Etapa 9D (§4.4): «Enviado · sin
+// confirmar en cocina» se indica una sola vez en cada producto y ya no se repite aquí.
+function headerDescription(account: Account) {
+  const parts: string[] = [];
+  if (account.preparation_state !== 'pending_release') {
+    parts.push(
+      `Preparación: ${preparationLabels[account.preparation_state] ?? account.preparation_state}`,
+    );
+  }
+  if (account.mode !== 'takeaway') {
+    parts.push(`Pago: ${paymentDescription(account)}`);
+  }
+  return parts.join(' · ');
+}
+
 function closedDescription(account: Account) {
   if (account.mode === 'takeaway') {
     return 'Pedido liquidado y entregado; la cuenta está cerrada.';
@@ -148,9 +163,15 @@ export function CaptureBill({
     );
   }
   const account = bill.account;
+  const pendingAccount = isPendingAccount(account);
   const writable =
     account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
   const capturable = writable && can('orders.capture');
+  // Etapa 9D (§4.2): fuera de la captura, una cuenta descartable para Go ofrece «Descartar cuenta
+  // vacía» a la vista (dentro de la captura está en «Más…»).
+  const discardVisible =
+    !!onCapture && writable && account.discardable && can('accounts.open') && !pendingAccount;
+  const header = pendingAccount ? '' : headerDescription(account);
   const quoted = quotedDraftLines(quote, persistedDraft, persistedRevision, account.id);
   const pending = !!draftView && (draftView.pending || draftView.sending);
   // La cotización corresponde exactamente al borrador visible: no hay toques sin guardar.
@@ -177,19 +198,15 @@ export function CaptureBill({
     <aside className="capture-bill" aria-label="Cuenta actual">
       {dialog}
       <header className="capture-bill-header">
-        {isPendingAccount(account) ? (
+        {pendingAccount ? (
           <div>
-            <h2>Cuenta nueva</h2>
+            <h2>{account.mode === 'takeaway' ? 'Pedido nuevo' : 'Cuenta nueva'}</h2>
             <p className="muted text-xs">Se abre al guardar el primer producto.</p>
           </div>
         ) : (
           <div>
             <h2>Cuenta #{account.folio}</h2>
-            <p className="muted text-xs">
-              Preparación:{' '}
-              {preparationLabels[account.preparation_state] ?? account.preparation_state}
-              {account.mode !== 'takeaway' && ` · Pago: ${paymentDescription(account)}`}
-            </p>
+            {header && <p className="muted text-xs">{header}</p>}
           </div>
         )}
         <p className="muted text-xs capture-sync-status" role="status">
@@ -204,6 +221,19 @@ export function CaptureBill({
           <button type="button" className="primary-button capture-open-button" onClick={onCapture}>
             <IconLabel icon="edit">Capturar productos en esta cuenta</IconLabel>
           </button>
+        )}
+        {discardVisible && (
+          <div className="bill-discard">
+            <p className="muted text-xs">Sin productos enviados a cocina ni pagos.</p>
+            <button
+              type="button"
+              className="danger-button bill-discard-button"
+              disabled={blocked}
+              onClick={() => onAction('discardAccount')}
+            >
+              <IconLabel icon="trash">Descartar cuenta vacía</IconLabel>
+            </button>
+          </div>
         )}
         {account.state === 'merged' && (
           <Notice>
@@ -225,11 +255,12 @@ export function CaptureBill({
         {account.state === 'voided' && (
           <AccountCancellationRecord cancellation={bill.cancellation} timezone={bill.timezone} />
         )}
-        {account.mode === 'takeaway' && (
+        {account.mode === 'takeaway' && !pendingAccount && (
           <div className="takeaway-dimensions">
-            <span>Pago: {paymentDescription(account)}</span>
+            {/* Etapa 9D (§4.5): pago y entrega en un renglón para que quepan más productos. */}
             <span>
-              Entrega: {deliveryStateDescriptions[account.delivery_state] ?? account.delivery_state}
+              Pago: {paymentDescription(account)} · Entrega:{' '}
+              {deliveryStateDescriptions[account.delivery_state] ?? account.delivery_state}
             </span>
             {account.customer_name && (
               <strong>

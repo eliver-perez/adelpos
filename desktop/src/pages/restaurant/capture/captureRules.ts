@@ -136,6 +136,26 @@ function coveredIngredients(
   return covered;
 }
 
+function comparableName(text: string) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Nombre de lo elegido en un grupo o componente (etapa 9D, §4.4): «Grupo: elección» solo si lo
+// elegido no repite el nombre del grupo. Si lo repite («Papas a la francesa» en «Papas a la
+// francesa», «Hamburguesa sencilla» en «Hamburguesa»), solo lo elegido.
+export function choiceLabel(group: string, choice: string) {
+  const name = comparableName(group);
+  if (!name || ` ${comparableName(choice)} `.includes(` ${name} `)) {
+    return choice;
+  }
+  return `${group}: ${choice}`;
+}
+
 // Resumen breve de una partida desde el desglose de Go (nombres y cantidades que devolvió el
 // motor). Solo describe lo que cambió respecto de la configuración original.
 export function describeBreakdown(breakdown: ProductBreakdown | null | undefined): string[] {
@@ -176,7 +196,7 @@ export function describeBreakdown(breakdown: ProductBreakdown | null | undefined
   for (const component of breakdown.components ?? []) {
     if (component.product && component.quantity > 0) {
       const nested = describeBreakdown(component.product);
-      const label = `${component.name}: ${component.product.name}`;
+      const label = choiceLabel(component.name, component.product.name);
       parts.push(nested.length > 0 ? `${label} (${nested.join(', ')})` : label);
     }
   }
@@ -186,11 +206,65 @@ export function describeBreakdown(breakdown: ProductBreakdown | null | undefined
   return parts;
 }
 
+// Complementos elegidos de un producto enviado para el «Desglose» de la cuenta (etapa 9D, §4.4):
+// los cambios de ingredientes, lo elegido en cada grupo (también lo incluido de origen) y, en un
+// combo, cada componente con lo elegido en él. Sin precios por opción ni números de versión: los
+// cargos se muestran con los totales de Go de la partida.
+export function chosenComplements(breakdown: ProductBreakdown | null | undefined): string[] {
+  if (!breakdown) {
+    return [];
+  }
+  const parts: string[] = [];
+  for (const ingredient of breakdown.ingredients ?? []) {
+    const requested = toThousandths(ingredient.requested);
+    const included = toThousandths(ingredient.included);
+    if (requested === 0 && included > 0) {
+      parts.push(`Sin ${ingredient.name}`);
+    } else if (requested > included) {
+      parts.push(`Extra ${ingredient.name}`);
+    }
+  }
+  for (const group of breakdown.groups ?? []) {
+    const options = group.options ?? [];
+    const requested = options.filter((option) => toThousandths(option.requested) > 0);
+    if (requested.length === 0) {
+      if (options.some((option) => toThousandths(option.included) > 0)) {
+        parts.push(`Sin ${group.name}`);
+      }
+      continue;
+    }
+    const names = requested.map((option) => {
+      const quantity = displayQuantity(option.requested);
+      return quantity === '1' ? option.name : `${quantity} × ${option.name}`;
+    });
+    parts.push(choiceLabel(group.name, names.join(', ')));
+  }
+  for (const component of breakdown.components ?? []) {
+    if (!component.product || component.quantity <= 0) {
+      continue;
+    }
+    const name = choiceLabel(component.name, component.product.name);
+    const label = component.quantity === 1 ? name : `${component.quantity} × ${name}`;
+    const nested = chosenComplements(component.product);
+    parts.push(nested.length > 0 ? `${label} (${nested.join(', ')})` : label);
+  }
+  return parts;
+}
+
 // Resumen de respaldo mientras una partida nueva aún no tiene desglose de Go: usa los nombres
 // de los lookups para las opciones elegidas y las indicaciones escritas.
 export function describeSelection(line: PreviewLine, lookups: Lookups | null): string[] {
   const parts: string[] = [];
-  const customization = line.customization;
+  // Un borrador guardado sin personalización completa (por ejemplo, por la API) se describe con lo
+  // que tenga, sin fallar.
+  const saved: Partial<PreviewLine['customization']> = line.customization ?? {};
+  const customization = {
+    ...saved,
+    ingredients: saved.ingredients ?? [],
+    groups: saved.groups ?? [],
+    components: saved.components ?? [],
+    notes: saved.notes ?? '',
+  };
   if (line.variant_id) {
     const product = lookups?.products.find((entry) => entry.id === line.product_id);
     const variant = product?.variants.find((entry) => entry.id === line.variant_id);

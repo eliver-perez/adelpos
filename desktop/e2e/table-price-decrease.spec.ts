@@ -182,8 +182,9 @@ test('precio que baja al sustituir complementos y «Poner fuera de servicio» en
   // §3.1: sustituir el arroz ($20) por frijoles ($10) baja el precio de $150 a $140. Los nombres
   // del catálogo son propios: los complementos y grupos tienen nombre único.
   await openSection(page, 'Para llevar');
+  // Etapa 9D (§4.1): el pedido nace al agregar el primer producto.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeVisible();
   await page
     .getByRole('navigation', { name: 'Categorías' })
     .getByRole('button', { name: /Precio flexible/ })

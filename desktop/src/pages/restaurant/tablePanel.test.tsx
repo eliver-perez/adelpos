@@ -600,28 +600,22 @@ describe('panel lateral de la mesa', () => {
     expect(Object.values(accounts).filter((entry) => entry.tableID === ids.free)).toHaveLength(0);
   });
 
-  it('un rechazo de Go al abrir se avisa en español, sin código interno, y no se cierra solo', async () => {
-    // Para llevar sigue abriendo al instante (etapa 6.2): su rechazo es un aviso persistente.
+  it('«Nuevo pedido» entra a la captura sin llamar al servidor y salir no deja nada', async () => {
+    // Etapa 9D (§4.1): el pedido para llevar nace con el primer producto, como la cuenta de una
+    // mesa (el rechazo de Go al crearlo se prueba en stage9dAccounts.test.tsx).
     renderPage('takeaway');
-    openFailure = {
-      code: 'TAKEAWAY_DISABLED',
-      message: 'No se pudo abrir el pedido: revisa los datos del establecimiento.',
-    };
     fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
-    const alert = await screen.findByRole('alert', { name: 'Error' });
-    expect(alert.textContent).toContain(
-      'No se pudo abrir el pedido: revisa los datos del establecimiento.',
-    );
-    expect(alert.textContent).not.toContain('TAKEAWAY_DISABLED');
-    // No queda un banner superior duplicado ni un panel de recuperación: el rechazo fue definitivo.
-    expect(document.querySelector('.operational-page > .notice')).toBeNull();
-    expect(document.querySelector('.operation-recovery')).toBeNull();
-    expect(screen.queryByRole('heading', { name: /Pedido #/ })).toBeNull();
+    await screen.findByRole('heading', { name: 'Para llevar · Pedido nuevo' });
+    expect(screen.getByText(/El pedido se abre al guardar el primer producto/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Datos del pedido' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Para llevar/ }));
+    await screen.findByRole('button', { name: 'Nuevo pedido' });
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 4500));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(screen.queryByRole('alert', { name: 'Error' })).not.toBeNull();
-  }, 10000);
+    expect(openRequests).toBe(0);
+    expect(Object.values(accounts).filter((entry) => entry.mode === 'takeaway')).toHaveLength(0);
+  });
 });
 
 describe('liberar mesa y fuera de servicio (etapa 7.1)', () => {
@@ -1083,18 +1077,25 @@ describe('datos de la cuenta durante la captura', () => {
 });
 
 describe('para llevar sin formulario', () => {
-  it('«Nuevo pedido» entra a la captura; «Datos del pedido» y aviso «Pedido sin nombre»', async () => {
+  it('«Datos del pedido» y aviso «Pedido sin nombre» en un pedido ya abierto', async () => {
+    // Etapa 9D (§4.1): «Nuevo pedido» ya no abre el pedido al instante (nace con el primer
+    // producto); aquí el pedido ya existe y se elige en el listado.
+    accounts['00000000-0000-4000-8000-000000000903'] = serverAccount({
+      id: '00000000-0000-4000-8000-000000000903',
+      folio: 3,
+      revision: 1,
+      mode: 'takeaway',
+      tableID: null,
+      name: 'Pedido para llevar',
+      origin: 'Para llevar',
+      elapsed: 0,
+    });
     renderPage('takeaway');
-    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo pedido' }));
+    const bill = await screen.findByRole('complementary', { name: 'Cuenta actual' });
+    fireEvent.click(
+      await within(bill).findByRole('button', { name: 'Capturar productos en esta cuenta' }),
+    );
     await screen.findByRole('heading', { name: 'Para llevar · Pedido #3' });
-    expect(opens).toEqual([
-      expect.objectContaining({
-        name: '',
-        mode: 'takeaway',
-        table_id: null,
-        origin: 'Para llevar',
-      }),
-    ]);
     expect(screen.queryByLabelText('Nombre del cliente (opcional)')).toBeNull();
     // Antes de enviar a cocina no hay aviso; el nombre se sugiere sin bloquear.
     expect(screen.queryByText(/Pedido sin nombre/)).toBeNull();
