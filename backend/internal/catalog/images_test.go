@@ -105,6 +105,21 @@ func TestCatalogImageRejectsProgressiveJPEGWithTooManyScans(t *testing.T) {
 	}
 }
 
+// Revisión de la etapa 9C: un byte suelto después de SOI (FF D8 00 FF DB …) no debe evitar el
+// recorrido, porque el decodificador de Go acepta ese archivo y lo decodifica igual de despacio.
+func TestCatalogImageCountsScansAfterStrayByteAfterSOI(t *testing.T) {
+	scans := (1024*1024 - len(progressiveJPEG(0, []byte{0x00}))) / 17
+	content := progressiveJPEG(scans, []byte{0x00})
+	if len(content) > 1024*1024 || scans < 60000 || content[2] != 0x00 {
+		t.Fatalf("El archivo de prueba no reproduce el caso: %d bytes, %d barridos, prefijo % X", len(content), scans, content[:4])
+	}
+	started := time.Now()
+	assertImageRejected(t, "JPEG con un byte suelto tras SOI", content, "La imagen JPEG tiene demasiados barridos progresivos (máximo 100)")
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("El rechazo tardó %v: se decodificó antes de contar los barridos", elapsed)
+	}
+}
+
 // Los segmentos tienen su propio límite y su propio mensaje; un JPEG secuencial común y un PNG no
 // se ven afectados, y el mensaje nunca menciona el logotipo.
 func TestCatalogImageLimitsJPEGSegments(t *testing.T) {
