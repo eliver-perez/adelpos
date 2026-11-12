@@ -164,7 +164,7 @@ Sin cambios en el ciclo de los pedidos ni en sus contratos: el inventario se int
 
 Especificación: [etapas/ETAPA_9D_v2.md](etapas/ETAPA_9D_v2.md) (§0-B prevalece); avance en
 [ETAPA_9D_AVANCE.md](ETAPA_9D_AVANCE.md); contratos en [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9D»). Migración
-`0021_account_cancellation.sql` (esquema 21), **todavía sin aplicar en la instalación real**. No cambian las reglas de
+`0021_account_cancellation.sql` (esquema 21), aplicada a la instalación real el 12/11/2026. No cambian las reglas de
 negocio, los cálculos, la clasificación de cancelaciones de la etapa 8 (salvo la preclasificación como merma), los flujos
 de cobro ni las acciones del panel de mesa; solo su presentación y lo que dice §0-B.
 

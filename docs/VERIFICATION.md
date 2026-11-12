@@ -26,9 +26,8 @@ por fase: [VERIFICATION_STAGE9D.md](VERIFICATION_STAGE9D.md). Evidencia anterior
   se corrigió en la fase B y la de la fase D fue un clic en «Administración» que no navegó antes de cualquier paso de la
   fase; las repeticiones y las corridas finales aprobaron todo en ambos motores.
 - **Regresión final (fase F)**: ver «Regresión final».
-- **Instalación real**: **sigue en 0.9.2 y esquema 20**. La 0021 y la 0.9.3 **todavía no se aplican**; cuando se
-  apliquen, el registro (respaldo, ensayo de restauración, `migrate`, verificación posterior e instalación del `.app`)
-  quedará en [ETAPA_9D_AVANCE.md](ETAPA_9D_AVANCE.md), «Instalación real».
+- **Instalación real**: **0.9.3 y esquema 21** desde el 12/11/2026 (respaldo `backups/adel_pos-20261112T203123Z-ec18a4.dump` con restauración verificada: 132 tablas idénticas; `migrate` `applied:1` y repetición `applied:0`; readiness 200 con esquema compatible; servidor y `.app` 0.9.3); registro en
+  [ETAPA_9D_AVANCE.md](ETAPA_9D_AVANCE.md), «Instalación real».
 - **Las pruebas no tocaron la instalación real** (`.local`, Keychain, servidor 8181, clúster 55432) ni enviaron trabajos
   a CUPS real, a una impresora, a un cajón o a una conexión TCP fuera de loopback; las consultas de la Fase 0 a la
   instalación real fueron de solo lectura.
@@ -69,7 +68,26 @@ parciales y los reportes usan datos reales de Go.
 
 ## Regresión final
 
-PENDIENTE: la completa el coordinador con la salida real
+Ejecutada el 12/11/2026 (14:04–14:30, 1576 s) por un solo agente con el script del coordinador, sobre una copia exacta
+de `a79aee0` (`git archive`), con el clúster temporal 55499, Go temporal en 8183 y Vite en 1421; la pantalla del equipo
+estuvo desbloqueada durante todo Playwright (comprobado cinco veces), así que WebKit es una aprobación real.
+
+| Suite                                    | Resultado                                                                                                                                                                                                  |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato (Prettier, `gofmt`, `cargo fmt`) | aprobado                                                                                                                                                                                                   |
+| Metadatos (`sync-metadata --check`)      | aprobado                                                                                                                                                                                                   |
+| `go vet` (normal y `-tags=integration`)  | aprobado                                                                                                                                                                                                   |
+| Go unitarias con `-race`                 | 22 paquetes `ok`                                                                                                                                                                                           |
+| Integración PostgreSQL con `-race`       | 9 de 9 paquetes: `database` 7.2 s, `administration` 64.7 s, `catalog` 8.8 s, `operations` 250.8 s, `payments` 2.4 s, `reports` 121.4 s, `reports/operational` 40.7 s, `designer` 20.4 s, `identity` 17.8 s |
+| `tsc --noEmit`                           | sin errores                                                                                                                                                                                                |
+| Vitest (`npm test`)                      | 75 archivos, 751 pruebas aprobadas                                                                                                                                                                         |
+| `npm run build`                          | correcto (solo el aviso de tamaño de fragmentos ya conocido)                                                                                                                                               |
+| `cargo test --locked --offline`          | 41 aprobadas, 1 ignorada                                                                                                                                                                                   |
+| Playwright Chromium                      | 19 de 19 aprobadas (7.4 min)                                                                                                                                                                               |
+| Playwright WebKit                        | 19 de 19 aprobadas (7.3 min)                                                                                                                                                                               |
+| `.app` (`tauri build --bundles app`)     | 0.9.3, Mach-O arm64, 10.02 MiB                                                                                                                                                                             |
+
+Sin fallos ni repeticiones. Las mediciones de volumen y la impresión física no corren por omisión (por diseño).
 
 ## Repetir las comprobaciones
 

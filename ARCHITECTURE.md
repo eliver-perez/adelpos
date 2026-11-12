@@ -300,7 +300,7 @@ Go, locks ni dependencias nuevos; un permiso nuevo, `accounts.cancel`. Una sola 
 solo inserción por disparador, con FK diferida a `restaurant_operations`, índices por fecha y por motivo y CHECK
 `account_cancellations_authorizer_check`: quien autoriza nunca es quien cancela), `restaurant_settings.long_open_hours`
 (12, CHECK 1–72) y el permiso, concedido solo al administrador. La cuenta cancelada reutiliza el estado `voided`. **La 0021
-todavía no se aplica a la instalación real.** Avance: [ETAPA_9D_AVANCE.md](docs/ETAPA_9D_AVANCE.md).
+se aplicó a la instalación real el 12/11/2026.** Avance: [ETAPA_9D_AVANCE.md](docs/ETAPA_9D_AVANCE.md).
 
 **Cancelar cuenta en Go.** `administration` pasa a `operations` el mismo autorizador de supervisor que a `payments`
 (`supervisor.go`; `operations.Request.Authorize`). `POST restaurant/accounts/{id}/cancel-account`
