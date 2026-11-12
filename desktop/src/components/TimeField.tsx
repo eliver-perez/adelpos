@@ -301,7 +301,7 @@ export function DateTimeField({
           disabled={disabled}
         />
         {!required && (text !== '' || time !== '') && (
-          <button type="button" className="danger-button" disabled={disabled} onClick={clear}>
+          <button type="button" className="secondary-button" disabled={disabled} onClick={clear}>
             Quitar
           </button>
         )}

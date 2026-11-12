@@ -376,7 +376,7 @@ function CountForm({
                       </div>
                       <button
                         type="button"
-                        className="danger-button"
+                        className="secondary-button"
                         aria-label={`Quitar ${item.name} de la selección`}
                         onClick={() =>
                           setSelection((current) => current.filter((entry) => entry.id !== item.id))

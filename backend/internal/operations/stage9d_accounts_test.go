@@ -27,6 +27,10 @@ import (
 // la idempotencia sin contraseña en la huella, los rechazos por pagos parciales y por descuentos, el
 // motivo «Otro» sin descripción, el catálogo de motivos, «Descartar» cuentas vacías y con borrador, la
 // creación de cuentas con su primer producto sin mesa y para llevar, y el umbral de cuenta abierta.
+// Correcciones de la revisión independiente: una cuenta descartable no se cancela (409
+// ACCOUNT_DISCARDABLE antes del motivo y del supervisor, M1), la respuesta refleja cocina ya integrada
+// con una estación inactiva (B2), el historial guarda el nombre visible del supervisor (B5) e
+// Inventarios distingue lo preclasificado al cancelar la cuenta de lo clasificado por el encargado (B1).
 //
 // Usa su propia base desde cero (corre después de la aceptación encadenada, en otro archivo).
 
@@ -135,6 +139,9 @@ func TestStage9DAccountCancellation(t *testing.T) {
 	})
 	t.Run("pagos parciales, descuentos y motivos inválidos", func(t *testing.T) {
 		testStage9DCancelRejections(t, fixture)
+	})
+	t.Run("cancelar con una estación inactiva: la respuesta refleja el cambio pendiente de cocina", func(t *testing.T) {
+		testStage9DCancelPendingKitchen(t, fixture)
 	})
 	t.Run("descartar cuentas vacías y con borrador", func(t *testing.T) {
 		testStage9DDiscard(t, fixture)
@@ -350,6 +357,10 @@ func testStage9DCancelWithPermission(t *testing.T, fixture *stage9DFixture) {
 		t.Fatalf("El borrador debía descartarse: %d", count)
 	}
 	eventID := fixture.scalar(t, "SELECT id::text FROM app.restaurant_events WHERE account_id=$1 AND kind='account.cancelled'", bill.Account.ID)
+	if named := fixture.scalar(t, `SELECT coalesce(payload->'after'->>'authorized_by_name','(nulo)')
+        FROM app.restaurant_events WHERE id=$1`, eventID); named != "(nulo)" {
+		t.Fatalf("Con permiso propio el evento no lleva supervisor: %s", named)
+	}
 	// Cocina: las tareas liberadas se cancelan con su aviso de cancelación a la estación; la liberación
 	// bloqueada (sin ruta) se cancela sin papel.
 	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tasks k JOIN app.restaurant_item_units u ON u.id=k.unit_id
@@ -427,10 +438,34 @@ func testStage9DCancelWithPermission(t *testing.T, fixture *stage9DFixture) {
         JOIN app.restaurant_item_units u ON u.id=m.restaurant_unit_id WHERE u.account_id=$1`, bill.Account.ID); net != "2.000000" {
 		t.Fatalf("Consumo neto de la cuenta cancelada: %s", net)
 	}
+	// Inventarios la presenta como preclasificada al cancelar la cuenta (no «Clasificada por el
+	// encargado»), con quien canceló como responsable del registro.
+	listed := decodeResponse[inventory.CancellationPage](t, fixture.adminCall(t, "GET", "inventory/cancellations?state=prepared_waste", nil, 200))
+	preclassified := 0
+	for _, item := range listed.Items {
+		if item.AccountFolio == nil || *item.AccountFolio != bill.Account.Folio {
+			continue
+		}
+		preclassified++
+		if !item.Preclassified || item.ResolutionLabel == nil || *item.ResolutionLabel != "Preclasificada al cancelar la cuenta" ||
+			item.ClassifiedByName == nil || *item.ClassifiedByName != "Administrador" {
+			t.Fatalf("Preclasificación en Inventarios: %+v", item)
+		}
+	}
+	if preclassified != 2 {
+		t.Fatalf("Preclasificadas en Inventarios: %d", preclassified)
+	}
 	corrected := decodeResponse[inventory.Cancellation](t, fixture.mutate(t, "POST", "inventory/cancellations/"+found[0].id+"/classify",
 		map[string]any{"revision": found[0].revision, "state": "not_prepared"}, 200))
-	if corrected.State != "not_prepared" || corrected.Resolution == nil || *corrected.Resolution != "manual" {
+	if corrected.State != "not_prepared" || corrected.Resolution == nil || *corrected.Resolution != "manual" || corrected.Preclassified ||
+		corrected.ResolutionLabel == nil || *corrected.ResolutionLabel != "Clasificada por el encargado" {
 		t.Fatalf("Corrección del encargado: %+v", corrected)
+	}
+	// Volver a «Preparado / merma» también es del encargado: deja de ser la preclasificación.
+	again := decodeResponse[inventory.Cancellation](t, fixture.mutate(t, "POST", "inventory/cancellations/"+found[0].id+"/classify",
+		map[string]any{"revision": corrected.Revision, "state": "prepared_waste"}, 200))
+	if again.Preclassified || again.ResolutionLabel == nil || *again.ResolutionLabel != "Clasificada por el encargado" {
+		t.Fatalf("Reclasificación del encargado: %+v", again)
 	}
 }
 
@@ -488,6 +523,11 @@ func testStage9DCancelWithSupervisor(t *testing.T, fixture *stage9DFixture) {
 	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.audit_events WHERE action='restaurant.supervisor_authorized'
         AND entity_id=$1 AND after_state->>'supervisor'='supervisor_9d'`, bill.Account.ID); count != 1 {
 		t.Fatalf("La autorización no quedó auditada: %d", count)
+	}
+	// El historial muestra el nombre visible del supervisor, como el detalle y el reporte.
+	if named := fixture.scalar(t, `SELECT (payload->'after'->>'authorized_by_name')||'/'||(payload->'after'->>'authorized_by_username')
+        FROM app.restaurant_events WHERE account_id=$1 AND kind='account.cancelled'`, bill.Account.ID); named != "Prueba supervisor_9d/supervisor_9d" {
+		t.Fatalf("Supervisor en el evento: %s", named)
 	}
 	// La contraseña no queda en la huella, la respuesta, los eventos ni la auditoría: un reintento sin
 	// ella recupera el mismo resultado.
@@ -578,6 +618,12 @@ func testStage9DDiscard(t *testing.T, fixture *stage9DFixture) {
 	if !takeaway.Account.Discardable || !takeaway.Account.Releasable {
 		t.Fatalf("Una cuenta vacía debía poder descartarse: %+v", takeaway.Account)
 	}
+	// Una cuenta descartable no se cancela: no pide supervisor (el mesero no tiene accounts.cancel) y
+	// no tiene impedimento financiero.
+	if takeaway.Account.CancelRequiresAuthorization || takeaway.Account.CancelBlocker != "" {
+		t.Fatalf("Marcas de cancelación de una cuenta descartable: %+v", takeaway.Account)
+	}
+	fixture.requireDiscardable(t, takeaway)
 	discarded := decodeResponse[operations.Bill](t, fixture.operate(t, fixture.waiter, "POST",
 		"restaurant/accounts/"+takeaway.Account.ID+"/discard", map[string]any{"revision": takeaway.Account.Revision}, 200))
 	if discarded.Account.State != "voided" || discarded.Cancellation != nil {
@@ -592,6 +638,7 @@ func testStage9DDiscard(t *testing.T, fixture *stage9DFixture) {
 	if !draft.Account.Discardable || draft.Account.Releasable || draft.Account.DraftQuantity != 1 {
 		t.Fatalf("Cuenta con borrador: %+v", draft.Account)
 	}
+	fixture.requireDiscardable(t, draft)
 	route := "restaurant/accounts/" + draft.Account.ID
 	if code := errorCode(t, fixture.operate(t, fixture.waiter, "POST", route+"/release", map[string]any{"revision": draft.Account.Revision}, 409)); code != "ACCOUNT_NOT_EMPTY" {
 		t.Fatalf("Liberar con borrador: %s", code)
@@ -629,6 +676,104 @@ func testStage9DDiscard(t *testing.T, fixture *stage9DFixture) {
 	if code := errorCode(t, fixture.mutate(t, "POST", "restaurant/accounts/"+sent.Account.ID+"/discard",
 		map[string]any{"revision": sent.Account.Revision}, 409)); code != "ACCOUNT_NOT_EMPTY" {
 		t.Fatalf("Descartar con productos: %s", code)
+	}
+}
+
+// requireDiscardable comprueba que «Cancelar cuenta» rechaza una cuenta descartable con
+// ACCOUNT_DISCARDABLE sin escribir nada: con el permiso propio, sin él y sin autorización, y con una
+// contraseña de supervisor incorrecta (que ni siquiera se valida: no cuenta en el límite de intentos).
+// Tampoco valida el motivo: «Otro» sin descripción recibe el mismo rechazo.
+func (fixture *stage9DFixture) requireDiscardable(t *testing.T, bill operations.Bill) {
+	t.Helper()
+	route := "restaurant/accounts/" + bill.Account.ID + "/cancel-account"
+	attempts := func() int {
+		return rowCount(t, fixture.restaurantFixture, `SELECT coalesce((SELECT failures FROM app.login_attempts
+            WHERE device_id=$1 AND username='supervisor_9d'),0)`, fixture.waiter.deviceID)
+	}
+	failures := attempts()
+	for _, entry := range []struct {
+		label    string
+		terminal testTerminal
+		body     map[string]any
+	}{
+		{"con permiso propio", fixture.admin, fixture.cancelBody(t, bill.Account.ID, "Error de captura", "", nil)},
+		{"sin permiso ni autorización", fixture.waiter, fixture.cancelBody(t, bill.Account.ID, "Cliente canceló el pedido", "", nil)},
+		{"con una contraseña incorrecta", fixture.waiter, fixture.cancelBody(t, bill.Account.ID, "Error de captura", "",
+			map[string]any{"username": "supervisor_9d", "password": "incorrecta"})},
+		{"«Otro» sin descripción", fixture.waiter, fixture.cancelBody(t, bill.Account.ID, "Otro", "", stage9DAuthorization("supervisor_9d"))},
+	} {
+		problem := fixture.operate(t, entry.terminal, "POST", route, entry.body, 409)
+		if code := errorCode(t, problem); code != "ACCOUNT_DISCARDABLE" {
+			t.Fatalf("Cancelar una cuenta descartable %s: %s", entry.label, code)
+		}
+		if !strings.Contains(string(problem), "descártala; no hace falta motivo") {
+			t.Fatalf("Mensaje del rechazo: %s", problem)
+		}
+	}
+	if after := attempts(); after != failures {
+		t.Fatalf("Se validó la contraseña del supervisor en una cuenta descartable: %d → %d", failures, after)
+	}
+	unchanged := fixture.refresh(t, bill.Account.ID)
+	if unchanged.Account.State != "open" || unchanged.Account.Revision != bill.Account.Revision ||
+		unchanged.Account.DraftQuantity != bill.Account.DraftQuantity {
+		t.Fatalf("Un rechazo modificó la cuenta descartable: %+v", unchanged.Account)
+	}
+	if count := rowCount(t, fixture.restaurantFixture, "SELECT count(*) FROM app.account_cancellations WHERE account_id=$1", bill.Account.ID); count != 0 {
+		t.Fatalf("Una cuenta descartable quedó como cancelación: %d", count)
+	}
+}
+
+// testStage9DCancelPendingKitchen cancela una cuenta con lo liberado en una estación inactiva: cocina
+// deja el aviso pendiente y la respuesta (y su reintento idempotente) ya lo dice, igual que una lectura
+// posterior; al reactivar la estación y reintentar el cambio de cocina, todo queda cancelado sin
+// duplicados.
+func testStage9DCancelPendingKitchen(t *testing.T, fixture *stage9DFixture) {
+	bill := fixture.order(t, "Estación inactiva", nil, catalog.LineRequest{ProductID: fixture.fries.ID, Quantity: 2})
+	var station kitchen.Station
+	for _, entry := range decodeResponse[[]kitchen.Station](t, fixture.adminCall(t, "GET", "kitchen/stations", nil, 200)) {
+		if entry.ID == fixture.station.ID {
+			station = entry
+		}
+	}
+	station.Active = false
+	station = decodeResponse[kitchen.Station](t, fixture.mutate(t, "PATCH", "kitchen/stations/"+station.ID, station, 200))
+	body := fixture.cancelBody(t, bill.Account.ID, "Cliente canceló el pedido", "", nil)
+	body["operation_id"] = randomID()
+	route := "restaurant/accounts/" + bill.Account.ID + "/cancel-account"
+	first := fixture.adminCall(t, "POST", route, body, 200)
+	cancelled := decodeResponse[operations.Bill](t, first)
+	read := fixture.refresh(t, bill.Account.ID)
+	if cancelled.Account.PreparationState != "change_pending" || read.Account.PreparationState != cancelled.Account.PreparationState {
+		t.Fatalf("Preparación en la respuesta: %s; en una lectura posterior: %s", cancelled.Account.PreparationState,
+			read.Account.PreparationState)
+	}
+	repeated := decodeResponse[operations.Bill](t, fixture.adminCall(t, "POST", route, body, 200))
+	if repeated.Account.PreparationState != "change_pending" || repeated.Account.Revision != cancelled.Account.Revision {
+		t.Fatalf("El reintento idempotente debía devolver lo mismo: %+v", repeated.Account)
+	}
+	// El evento conserva la cuenta tal como quedó antes de integrar cocina.
+	var eventID string
+	var revision int
+	if err := fixture.pool.QueryRow(fixture.ctx, `SELECT event_id::text,revision FROM app.kitchen_pending_changes
+        WHERE account_id=$1 AND kind='account.cancelled'`, bill.Account.ID).Scan(&eventID, &revision); err != nil {
+		t.Fatalf("Sin aviso pendiente de cocina: %v", err)
+	}
+	if state := fixture.scalar(t, "SELECT payload->'after'->'account'->>'state' FROM app.restaurant_events WHERE id=$1", eventID); state != "voided" {
+		t.Fatalf("Cuenta en el evento: %s", state)
+	}
+	station.Active = true
+	fixture.mutate(t, "PATCH", "kitchen/stations/"+station.ID, station, 200)
+	fixture.mutate(t, "POST", "kitchen/changes/"+eventID+"/retry", map[string]any{"revision": revision}, 200)
+	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tickets
+        WHERE source_event_id=$1 AND kind='cancellation'`, eventID); count != 1 {
+		t.Fatalf("Avisos de cancelación tras el reintento: %d", count)
+	}
+	if count := rowCount(t, fixture.restaurantFixture, `SELECT count(*) FROM app.kitchen_tasks k JOIN app.restaurant_item_units u ON u.id=k.unit_id
+        WHERE u.account_id=$1 AND k.state<>'cancelled'`, bill.Account.ID); count != 0 {
+		t.Fatalf("Quedaron %d tareas de cocina activas", count)
+	}
+	if state := fixture.refresh(t, bill.Account.ID).Account.PreparationState; state != "cancelled" {
+		t.Fatalf("Preparación tras el reintento de cocina: %s", state)
 	}
 }
 

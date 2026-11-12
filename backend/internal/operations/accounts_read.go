@@ -84,8 +84,11 @@ func (handler *service) decorateAccount(account *Account) error {
 	// Etapa 9D (§3.4): cuenta abierta por más horas que el umbral del establecimiento.
 	account.LongOpen = account.State == "open" && account.ElapsedSeconds > int64(settings.LongOpenHours)*3600
 	// Etapa 9D (§5.1): Go dice si «Cancelar cuenta» procede o qué hay que hacer primero, y si pedirá
-	// la autorización de un supervisor. Solo para cuentas abiertas.
-	if account.State == "open" {
+	// la autorización de un supervisor. Solo para cuentas abiertas que no se descartan: una cuenta
+	// descartable no tiene registros financieros (cancel_blocker vacío) y no se cancela (la ruta
+	// responde ACCOUNT_DISCARDABLE sin pedir supervisor), así que tampoco pide autorización; la
+	// interfaz ofrece «Descartar» por discardable.
+	if account.State == "open" && !account.Discardable {
 		account.CancelBlocker, err = payments.CancellationBlockerWithBrief(handler.ctx, handler.tx, account.ID, brief)
 		if err != nil {
 			return err

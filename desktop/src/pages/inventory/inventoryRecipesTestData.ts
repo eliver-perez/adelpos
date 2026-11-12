@@ -665,6 +665,7 @@ function cancellation(extra: Partial<Cancellation>): Cancellation {
     state_label: 'Pendiente de clasificar',
     resolution: null,
     resolution_label: null,
+    preclassified: false,
     classified_by_name: null,
     classified_at: null,
     notes: null,

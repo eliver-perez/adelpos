@@ -126,7 +126,9 @@ export interface Account {
   // Go la marca liberable cuando está abierta y vacía en sentido estricto (etapa 7.1).
   releasable: boolean;
   // Etapa 9D. «Descartar» procede sin motivo (abierta, sin productos enviados ni registros
-  // financieros o de cocina, aunque tenga borrador).
+  // financieros o de cocina, aunque tenga borrador). Una cuenta descartable no se cancela: Go
+  // responde ACCOUNT_DISCARDABLE a «Cancelar cuenta» y entrega `cancel_blocker` vacío y
+  // `cancel_requires_authorization` en false.
   discardable: boolean;
   // Qué impide «Cancelar cuenta»: '' si procede, 'payments' si conserva pagos o propinas (primero la
   // devolución) o 'adjustments' si tiene un descuento, cortesía o cargo vigente (primero quitarlo).

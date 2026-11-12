@@ -35,8 +35,13 @@ function otherState(state: CancellationState): ClassifiedState {
   return state === 'not_prepared' ? 'prepared_waste' : 'not_prepared';
 }
 
-// Quién clasificó: la persona o, en las automáticas, el cierre del día operativo.
+// Quién clasificó: la persona o, en las automáticas, el cierre del día operativo. Lo que Go
+// preclasificó al cancelar la cuenta (etapa 9D) no lo clasificó nadie: se dice así y quién canceló
+// la cuenta se muestra aparte, debajo.
 function classifiedBy(cancellation: Cancellation) {
+  if (cancellation.preclassified) {
+    return 'Al cancelar la cuenta';
+  }
   if (cancellation.classified_by_name) {
     return cancellation.classified_by_name;
   }
@@ -470,6 +475,11 @@ function CancellationHistory({
                     </td>
                     <td>
                       {classifiedBy(cancellation)}
+                      {cancellation.preclassified && cancellation.classified_by_name && (
+                        <span className="muted text-xs inventory-cell-detail">
+                          Canceló la cuenta: {cancellation.classified_by_name}
+                        </span>
+                      )}
                       {cancellation.classified_at && (
                         <span className="muted text-xs inventory-cell-detail">
                           {serverDateTime(cancellation.classified_at, timezone)}

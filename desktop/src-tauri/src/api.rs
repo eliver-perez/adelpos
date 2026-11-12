@@ -367,10 +367,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             Method::POST,
             format!("restaurant/accounts/{identifier}/assign"),
         ),
-        "restaurant_void" => (
-            Method::POST,
-            format!("restaurant/accounts/{identifier}/void"),
-        ),
+        // Etapa 9D: la anulación anterior con motivo libre (restaurant/accounts/{id}/void) ya no tiene
+        // operación en el puente: «Cancelar cuenta» la sustituye con motivo del catálogo y supervisor.
+        // Go conserva la ruta por compatibilidad, pero ningún cliente de la aplicación la alcanza.
         // Etapa 7.1: «Liberar mesa» anula sin motivo una cuenta vacía.
         "restaurant_release_account" => (
             Method::POST,
@@ -2102,14 +2101,10 @@ mod tests {
                 path.to_string()
             );
         }
-        // La anulación anterior se conserva por compatibilidad; no hay rutas para borrar motivos.
-        assert_eq!(
-            route("restaurant_void", Some(identifier)).unwrap(),
-            (
-                Method::POST,
-                format!("restaurant/accounts/{identifier}/void")
-            )
-        );
+        // La anulación anterior con motivo libre ya no se alcanza desde la aplicación (revisión
+        // independiente 9D, B4); tampoco hay rutas para borrar motivos.
+        assert!(route("restaurant_void", Some(identifier)).is_err());
+        assert!(route("restaurant_void", None).is_err());
         assert!(route("restaurant_delete_cancel_reason", Some(identifier)).is_err());
         assert!(route(
             "restaurant_cancel_account",

@@ -51,15 +51,47 @@ const exceptions = [
 
 const hexColor = /(?<![\w&-])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b/;
 const functionalColor = /\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(/;
-const namedColors =
-  'white|black|red|green|blue|gray|grey|silver|maroon|navy|teal|olive|lime|aqua|cyan|magenta|fuchsia|purple|orange|yellow|pink|brown|gold|indigo|violet';
+// Los 148 nombres de color de CSS (CSS Color 4, §6.1 «Named Colors»), completos: cualquiera
+// escrito a mano se detecta (antes la lista era corta y, p. ej., «crimson», «darkgreen»,
+// «lightgray» o «whitesmoke» pasaban). `transparent` y `currentColor` no pintan un color propio:
+// no están en la lista y se permiten.
+const cssColorNames = `
+  aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
+  burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan
+  darkgoldenrod darkgray darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid
+  darkred darksalmon darkseagreen darkslateblue darkslategray darkslategrey darkturquoise darkviolet
+  deeppink deepskyblue dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro
+  ghostwhite gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki
+  lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan lightgoldenrodyellow
+  lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray
+  lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine
+  mediumblue mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise
+  mediumvioletred midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab
+  orange orangered orchid palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru
+  pink plum powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown
+  seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen steelblue tan
+  teal thistle tomato turquoise violet wheat white whitesmoke yellow yellowgreen
+`
+  .trim()
+  .split(/\s+/);
+// Colores del sistema (CSS Color 4, §6.2): dependen del sistema operativo, no del tema.
+const cssSystemColors = `
+  AccentColor AccentColorText ActiveText ButtonBorder ButtonFace ButtonText Canvas CanvasText Field
+  FieldText GrayText Highlight HighlightText LinkText Mark MarkText SelectedItem SelectedItemText
+  VisitedText
+`
+  .trim()
+  .split(/\s+/);
+// Paleta predeterminada de Tailwind que no coincide con un nombre de CSS.
+const tailwindPalette = ['slate', 'zinc', 'neutral', 'stone', 'amber', 'emerald', 'sky', 'rose'];
+const namedColors = [...cssColorNames, ...cssSystemColors].join('|');
 const cssNamedColor = new RegExp(`(?:^|[\\s,(])(?:${namedColors})(?:$|[\\s,;)])`, 'i');
 const tailwindColor = new RegExp(
-  `\\b(?:bg|text|border|fill|stroke|ring|outline|from|to|via|shadow|accent|caret|decoration|divide|placeholder)-(?:${namedColors}|slate|zinc|neutral|stone|amber|emerald|sky|rose)(?:-\\d{2,3})?\\b`,
+  `\\b(?:bg|text|border|fill|stroke|ring|outline|from|to|via|shadow|accent|caret|decoration|divide|placeholder)-(?:${[...cssColorNames, ...tailwindPalette].join('|')})(?:-\\d{2,3})?\\b`,
 );
 const tailwindArbitraryColor = /-\[(?:#|rgb|hsl)/;
 const jsxNamedColor = new RegExp(
-  `\\b(?:fill|stroke|color|stopColor|background|backgroundColor|borderColor)\\s*[=:]\\s*\\{?\\s*["'](?:${namedColors})["']`,
+  `\\b(?:fill|stroke|color|stopColor|background|backgroundColor|borderColor|fillStyle|strokeStyle)\\s*[=:]\\s*\\{?\\s*["'](?:${namedColors})["']`,
   'i',
 );
 
@@ -167,6 +199,31 @@ describe('colores escritos directamente (etapa 9D, §1.1)', () => {
     expect(tsxFindings('x.tsx', '<div className="bg-[var(--logo-paper)] p-3">')).toHaveLength(0);
     expect(tsxFindings('x.tsx', '<path fill="none" stroke="currentColor" />')).toHaveLength(0);
     expect(tsxFindings('x.tsx', "<circle fill='white' />")).toHaveLength(1);
+  });
+
+  it('el detector conoce los 148 nombres de color de CSS y los del sistema', () => {
+    expect(new Set(cssColorNames).size).toBe(148);
+    const samples = ['crimson', 'darkgreen', 'lightgray', 'whitesmoke', 'rebeccapurple', 'tan'];
+    for (const name of samples) {
+      expect(cssFindings('otro.css', `.x {\n  color: ${name};\n}`), name).toHaveLength(1);
+      expect(cssFindings('otro.css', `.x {\n  border: 1px solid ${name};\n}`), name).toHaveLength(
+        1,
+      );
+      expect(tsxFindings('x.tsx', `<path fill="${name}" />`), name).toHaveLength(1);
+      expect(
+        tsxFindings('x.tsx', `<div style={{ backgroundColor: '${name}' }} />`),
+        name,
+      ).toHaveLength(1);
+      expect(tsxFindings('x.tsx', `<div className="p-2 bg-${name}" />`), name).toHaveLength(1);
+    }
+    expect(cssFindings('otro.css', '.x {\n  outline-color: Highlight;\n}')).toHaveLength(1);
+    expect(cssFindings('otro.css', '.x {\n  background: Canvas;\n}')).toHaveLength(1);
+    expect(tsxFindings('x.tsx', "context.fillStyle = 'tomato';")).toHaveLength(1);
+    // Palabras que contienen un nombre de color no son colores.
+    expect(cssFindings('otro.css', '.x {\n  transition: opacity 120ms linear;\n}')).toHaveLength(0);
+    expect(cssFindings('otro.css', '.x {\n  border-color: transparent;\n}')).toHaveLength(0);
+    expect(cssFindings('otro.css', '.x {\n  border: 1px solid currentColor;\n}')).toHaveLength(0);
+    expect(tsxFindings('x.tsx', '<div className="text-tangent bg-snowy" />')).toHaveLength(0);
   });
 });
 

@@ -131,10 +131,12 @@ type Account struct {
 	// procede sin motivo (etapa 7.1). Lo calcula Go en cada lectura.
 	Releasable bool `json:"releasable"`
 	// Etapa 9D. Discardable: «Descartar» procede sin motivo (abierta, sin productos enviados ni
-	// registros financieros o de cocina, aunque tenga borrador). CancelBlocker: vacío si «Cancelar
-	// cuenta» procede, "payments" si conserva pagos o propinas (primero la devolución) o "adjustments"
-	// si tiene un descuento, cortesía o cargo vigente (primero quitarlo). CancelRequiresAuthorization:
-	// el usuario no tiene accounts.cancel y la cancelación pedirá la autorización de un supervisor.
+	// registros financieros o de cocina, aunque tenga borrador); una cuenta descartable no se cancela
+	// (cancel-account responde ACCOUNT_DISCARDABLE). CancelBlocker: vacío si «Cancelar cuenta» procede
+	// o si la cuenta es descartable, "payments" si conserva pagos o propinas (primero la devolución) o
+	// "adjustments" si tiene un descuento, cortesía o cargo vigente (primero quitarlo).
+	// CancelRequiresAuthorization: el usuario no tiene accounts.cancel y la cancelación pedirá la
+	// autorización de un supervisor (false en las descartables: no se cancelan).
 	// LongOpen: lleva abierta más de restaurant_settings.long_open_hours horas (§3.4).
 	Discardable                 bool   `json:"discardable"`
 	CancelBlocker               string `json:"cancel_blocker"`
