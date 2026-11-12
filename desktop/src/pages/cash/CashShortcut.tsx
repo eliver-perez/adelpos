@@ -208,7 +208,8 @@ function shortcutContext(shortcut: CashShortcutState) {
 
 // Botón «Caja» con el estado del turno y su menú rápido. El menú se cierra con Escape o al tocar
 // fuera de él. Desde la etapa 9C vive en la barra superior (placement «bar»: sección de 52–56 px con
-// el indicador verde, ámbar o gris del turno) y en la barra reducida de la captura.
+// el indicador azul, ámbar o gris del turno; azul desde la etapa 9D) y en la barra reducida de la
+// captura.
 export function CashShortcut({
   shortcut,
   can,
@@ -285,7 +286,7 @@ export function CashShortcut({
       >
         <Icon name="cash" size={20} />
         <span className="cash-shortcut-name">Caja</span>
-        {/* Indicador del turno (§1.1): verde abierto, ámbar en arqueo y gris sin turno. */}
+        {/* Indicador del turno (§1.1, 9D): azul abierto, ámbar en arqueo y gris sin turno. */}
         <span className="cash-shortcut-indicator" aria-hidden="true" />
         {shortcut.state !== 'unknown' && <span className="cash-shortcut-state">{status}</span>}
       </button>

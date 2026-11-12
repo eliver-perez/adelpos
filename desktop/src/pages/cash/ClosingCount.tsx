@@ -123,7 +123,7 @@ function DraftStatus({
             y vuelve a contar.
           </p>
           {canCancel && (
-            <button type="button" className="secondary-button" onClick={onCancel}>
+            <button type="button" className="danger-button" onClick={onCancel}>
               Cancelar el arqueo y volver a contar
             </button>
           )}

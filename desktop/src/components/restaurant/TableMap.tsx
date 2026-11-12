@@ -11,7 +11,7 @@ import {
 } from '../../services/restaurant';
 import type { Area, RestaurantTable, TableState } from '../../services/restaurant';
 import { Icon } from '../Icon';
-import type { IconName } from '../Icon';
+import { tableStateIcons } from './tableStateIcons';
 
 interface TableMapProps {
   areas: Area[];
@@ -24,16 +24,6 @@ interface TableMapProps {
   designer?: boolean;
   onPosition?: (id: string, x: number, y: number) => void;
 }
-
-// Icono de cada estado (etapa 7.1): además del color, el estado se lee en texto y con su icono.
-// Los colores y los estados son los de la 7.1 (§0-B de la etapa 9C): no cambian.
-const stateIcons: Record<TableState, IconName | null> = {
-  free: null,
-  occupied: 'clock',
-  awaiting_payment: 'receipt',
-  partial_payment: 'cash',
-  out_of_service: 'lock',
-};
 
 // Nombre accesible del mosaico: nombre y estado primero (así lo buscan las pruebas y los lectores
 // de pantalla), después cuentas, tiempo ocupada, precuenta o saldo y la capacidad de la mesa. El
@@ -65,7 +55,6 @@ function accessibleName(table: RestaurantTable) {
 // (lugares), como explica la leyenda. En mesas pequeñas se ocultan primero los datos secundarios
 // (consultas de contenedor en styles.css); el nombre accesible los conserva todos.
 function TableTile({ table }: { table: RestaurantTable }) {
-  const icon = stateIcons[table.state];
   const withAccounts = table.account_count > 0;
   return (
     <span className="table-tile">
@@ -74,7 +63,7 @@ function TableTile({ table }: { table: RestaurantTable }) {
         <strong>{table.name}</strong>
       </span>
       <span className="table-tile-state">
-        {icon && <Icon name={icon} size={13} />}
+        <Icon name={tableStateIcons[table.state]} size={13} />
         {tableStateLabels[table.state]}
       </span>
       {table.state === 'partial_payment' && (
@@ -388,16 +377,13 @@ export function TableMap({
       </div>
       <div className="map-legend muted">
         <ul className="map-legend-states" aria-label="Estados de las mesas">
-          {legend.map((state) => {
-            const icon = stateIcons[state];
-            return (
-              <li key={state} className="map-legend-state">
-                <i className={`legend-swatch legend-${state}`} aria-hidden="true" />
-                {icon && <Icon name={icon} size={12} />}
-                {tableStateLabels[state]}
-              </li>
-            );
-          })}
+          {legend.map((state) => (
+            <li key={state} className="map-legend-state">
+              <i className={`legend-swatch legend-${state}`} aria-hidden="true" />
+              <Icon name={tableStateIcons[state]} size={12} />
+              {tableStateLabels[state]}
+            </li>
+          ))}
         </ul>
         <ul className="map-legend-states" aria-label="Datos de cada mesa">
           <li className="map-legend-state">

@@ -119,7 +119,7 @@ export function PreviewPage({
                     <h2>Producto {index + 1}</h2>
                     {lines.length > 1 && (
                       <button
-                        className="secondary-button"
+                        className="danger-button"
                         onClick={() => setLines(lines.filter((_, position) => position !== index))}
                       >
                         Retirar de prueba

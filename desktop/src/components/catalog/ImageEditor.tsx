@@ -83,7 +83,7 @@ export function ImageEditor({
             {id && (
               <button
                 type="button"
-                className="secondary-button"
+                className="danger-button"
                 disabled={busy}
                 onClick={() => onChange(null)}
               >

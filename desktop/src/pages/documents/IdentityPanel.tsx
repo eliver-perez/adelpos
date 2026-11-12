@@ -179,7 +179,7 @@ function IdentityStatus({ editor }: { editor: IdentityEditor }) {
           </button>
           <button
             type="button"
-            className="secondary-button"
+            className="danger-button"
             disabled={editor.busy !== null}
             onClick={editor.discardMine}
           >
@@ -260,7 +260,7 @@ function IdentityActions({ editor }: { editor: IdentityEditor }) {
       </button>
       <button
         type="button"
-        className="secondary-button"
+        className="danger-button"
         disabled={!editor.dirty || editor.locked}
         onClick={editor.discardDraft}
       >

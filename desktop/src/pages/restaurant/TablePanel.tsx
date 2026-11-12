@@ -1,5 +1,6 @@
 import { Notice } from '../../components/Forms';
 import { Icon, IconLabel } from '../../components/Icon';
+import { tableStateIcons } from '../../components/restaurant/tableStateIcons';
 import { shortcutProps } from '../../commands/hints';
 import type { Lookups } from '../../services/catalog';
 import { formatMoney } from '../../services/money';
@@ -15,19 +16,11 @@ import type { BillAction } from './capture/BillFooter';
 import { CheckoutButton, accountMoreActions } from './capture/BillFooter';
 import { MoreActions } from './capture/MoreActions';
 
-// Icono que acompaña al texto del estado en el encabezado del panel (no solo color).
-const stateIcons: Partial<Record<TableState, 'clock' | 'receipt' | 'cash' | 'lock'>> = {
-  occupied: 'clock',
-  awaiting_payment: 'receipt',
-  partial_payment: 'cash',
-  out_of_service: 'lock',
-};
-
+// Estado en el encabezado del panel: color, icono y texto, como en el mapa (no solo color).
 function StateChip({ state }: { state: TableState }) {
-  const icon = stateIcons[state];
   return (
     <span className={`table-panel-state table-panel-state-${state}`}>
-      {icon && <Icon name={icon} size={14} />}
+      <Icon name={tableStateIcons[state]} size={14} />
       {tableStateLabels[state]}
     </span>
   );
@@ -385,7 +378,7 @@ export function TablePanel({
                 {releasable && (
                   <button
                     type="button"
-                    className="secondary-button"
+                    className="danger-button"
                     disabled={blocked}
                     onClick={() => onRelease(account)}
                   >

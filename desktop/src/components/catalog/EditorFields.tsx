@@ -226,10 +226,10 @@ export function RepeatSection({
 
 // Botón para retirar un elemento repetible. Siempre indica qué retira («Quitar tramo»,
 // «Quitar componente»…): un «Quitar fila» genérico a todo lo ancho parecía una fila vacía del
-// bloque anterior.
+// bloque anterior. Desde la etapa 9D (§1.5) usa el estilo destructivo rojo, como todo «Quitar».
 export function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button type="button" className="secondary-button remove-button" onClick={onClick}>
+    <button type="button" className="danger-button remove-button" onClick={onClick}>
       {label}
     </button>
   );

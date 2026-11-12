@@ -97,6 +97,7 @@ export function AccountActions({
         disabled={busy || stale}
         label={titles[action]}
         successMessage={successMessages[action]}
+        tone={action === 'void' ? 'danger' : 'default'}
         onSave={async () => {
           const body: Record<string, unknown> = { revision };
           if (action === 'split' || action === 'transfer') {

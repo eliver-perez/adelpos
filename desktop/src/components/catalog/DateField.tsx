@@ -111,7 +111,7 @@ export function OptionalDateField({
         {text !== '' && (
           <button
             type="button"
-            className="secondary-button"
+            className="danger-button"
             onClick={() => {
               setText('');
               onChange('');

@@ -7,6 +7,8 @@ export interface MoreAction<T extends string> {
   label: string;
   // Icono opcional a la izquierda del texto del botón.
   icon?: IconName;
+  // Etapa 9D (§1.5): una acción que no se puede deshacer va con el estilo destructivo rojo.
+  tone?: 'danger';
 }
 
 // Menú «Más…» de la cuenta: reúne las acciones menos frecuentes como botones grandes (sustituye
@@ -62,7 +64,7 @@ export function MoreActions<T extends string>({
             <button
               type="button"
               key={action.id}
-              className="secondary-button"
+              className={action.tone === 'danger' ? 'danger-button' : 'secondary-button'}
               onClick={() => {
                 setOpen(false);
                 onAction(action.id);

@@ -99,7 +99,7 @@ export function CancelItem({
           <TextField label="Motivo de cancelación" value={reason} onChange={setReason} required />
         </fieldset>
         <div className="form-actions">
-          <button type="submit" className="primary-button" disabled={locked}>
+          <button type="submit" className="danger-solid-button" disabled={locked}>
             <IconLabel icon="trash">
               {saving ? 'Cancelando…' : 'Confirmar cancelación de unidades'}
             </IconLabel>

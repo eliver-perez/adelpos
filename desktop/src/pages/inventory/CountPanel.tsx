@@ -293,7 +293,7 @@ function CountLineRow({
             {line.counted && (
               <button
                 type="button"
-                className="secondary-button"
+                className="danger-button"
                 disabled={saving || current.quantity === ''}
                 aria-label={`Borrar la captura de ${line.item.name}`}
                 onClick={() => onDraft({ ...current, quantity: '' })}
@@ -304,7 +304,7 @@ function CountLineRow({
             {onRemove && (
               <button
                 type="button"
-                className="secondary-button"
+                className="danger-button"
                 disabled={saving}
                 aria-label={`Quitar ${line.item.name} del conteo`}
                 onClick={onRemove}
@@ -607,7 +607,7 @@ function CountActions({
       {cancellable && (
         <button
           type="button"
-          className="secondary-button"
+          className="danger-button"
           disabled={locked}
           onClick={() => setCancelling(true)}
         >

@@ -69,7 +69,7 @@ export function ConfirmedLines({
                 {can('orders.cancel') && (
                   <button
                     type="button"
-                    className="secondary-button"
+                    className="danger-button"
                     disabled={disabled}
                     onClick={() => onCancel(line)}
                   >

@@ -183,7 +183,7 @@ function PortionForm({
           <div className="button-row">
             <button
               type="button"
-              className="secondary-button"
+              className="danger-button"
               disabled={busy || removing}
               onClick={() => void remove()}
             >

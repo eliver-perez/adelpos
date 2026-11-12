@@ -36,7 +36,7 @@ export function PaperPreview({
                 Papel de {paper.paper_width} mm · {paper.width_dots} puntos
               </figcaption>
               <div
-                className="max-w-full rounded-md border border-[#d7dce3] bg-white px-2 py-4 shadow-sm"
+                className="max-w-full rounded-md border border-[var(--paper-edge)] bg-[var(--logo-paper)] px-2 py-4 shadow-sm"
                 style={{ width: `${paper.width_dots * dotScale + 18}px` }}
               >
                 {raster?.data_uri ? (
@@ -48,7 +48,7 @@ export function PaperPreview({
                     height={raster.height_dots}
                   />
                 ) : (
-                  <p className="m-0 py-6 text-center text-xs text-[#5b6675]">
+                  <p className="m-0 py-6 text-center text-xs text-[var(--paper-muted)]">
                     {hasLogo ? 'Vista previa no disponible' : 'Sin logotipo: no se imprime nada'}
                   </p>
                 )}

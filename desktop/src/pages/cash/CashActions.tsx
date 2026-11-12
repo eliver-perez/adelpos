@@ -5,9 +5,9 @@ import type { Shift } from '../../services/payments';
 
 export type CashAction = 'income' | 'withdrawal' | 'expense' | 'partial' | 'closing';
 
-// Acento de cada tarjeta (etapa 7.1, decisión 11): entradas en verde, salidas en ámbar, informes
-// neutros y el cierre con color propio. Los colores son tokens del tema (styles.css); el texto
-// conserva el color de lectura para mantener el contraste en ambos temas.
+// Acento de cada tarjeta (etapa 7.1, decisión 11; colores de la etapa 9D, decisión 8): entradas en
+// azul, salidas y cierre en ámbar e informes neutros. Los colores son tokens del tema (styles.css);
+// el texto conserva el color de lectura para mantener el contraste en ambos temas.
 export type CashActionTone = 'entry' | 'exit' | 'report' | 'closing';
 
 interface ActionDefinition {

@@ -75,7 +75,7 @@ export function ConflictDialog({
           label: 'Guardar mi borrador como versión más reciente',
           onSelect: onSaveMine,
         },
-        { label: 'Descartar mi borrador', onSelect: onDiscardMine },
+        { label: 'Descartar mi borrador', onSelect: onDiscardMine, tone: 'danger' },
         { label: 'Seguir editando sin guardar', onSelect: onKeepEditing },
       ]}
     />
