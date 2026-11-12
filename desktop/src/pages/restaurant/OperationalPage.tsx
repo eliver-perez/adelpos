@@ -12,6 +12,7 @@ import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
 import { useNavigation } from '../../navigation/NavigationContext';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { notifyError, notifySuccess } from '../../services/notify';
+import { countLabel } from '../../services/plural';
 import { accountLabel, isPendingAccount } from '../../services/restaurant';
 import type { Account, RestaurantTable, TableState } from '../../services/restaurant';
 import {
@@ -21,6 +22,7 @@ import {
   useCashShortcut,
 } from '../cash/CashShortcut';
 import type { CashShortcutState } from '../cash/CashShortcut';
+import { draftUnits } from './capture/captureRules';
 import { uncertainError } from './capture/draftSync';
 import { AccountActions } from './AccountActions';
 import type { AccountAction } from './AccountActions';
@@ -217,6 +219,11 @@ export function OperationalPage({
   ]);
 
   function openAccountAction(action: BillAction | 'checkout', origin: WorkspacePanel) {
+    // «Descartar cuenta vacía» (etapa 9D) no abre un panel: confirma y descarta.
+    if (action === 'discardAccount') {
+      if (bill) void discardAccount(bill.account);
+      return;
+    }
     setActionReturn(origin);
     void workspace.openPanel(action);
   }
@@ -227,14 +234,87 @@ export function OperationalPage({
   }
 
   // Abrir una cuenta no muestra formulario (etapa 6.2). En Mesas (etapa 7.1) se entra a la
-  // captura sin crear la cuenta: Go la crea con el primer producto guardado. Para llevar y
-  // Cuentas («Cuenta sin mesa») siguen abriendo la cuenta al instante.
+  // captura sin crear la cuenta: Go la crea con el primer producto guardado. Desde la etapa 9D
+  // (§4.1 y decisión 2) también «Nuevo pedido» de Para llevar y «Cuenta sin mesa»: ninguna cuenta
+  // se guarda sin productos y salir sin capturar no deja nada.
   function openAccount(mode: 'dine_in' | 'takeaway', table: string | null) {
-    if (mode === 'dine_in' && table) {
-      workspace.startPendingCapture(table);
+    workspace.startPendingCapture(mode === 'takeaway' ? null : table, mode);
+  }
+
+  // La paleta, el menú nativo y «Nuevo pedido para llevar» del resumen de Mesas piden primero la
+  // sección (App vuelve entonces a la vista principal de esa sección) y después abren la captura.
+  // La apertura espera a que la pantalla reciba la sección pedida para que esa vuelta no deje la
+  // captura recién abierta detrás del mapa o del listado.
+  const [queuedOpen, setQueuedOpen] = useState<{
+    mode: 'dine_in' | 'takeaway';
+    section: 'tables' | 'takeaway';
+  } | null>(null);
+  useEffect(() => {
+    if (queuedOpen && active && requestedView === queuedOpen.section) {
+      setQueuedOpen(null);
+      openAccount(queuedOpen.mode, null);
+    }
+    // openAccount cambia en cada render; la apertura depende solo de la petición y de la sección.
+  }, [queuedOpen, active, requestedView, requestKey]);
+
+  // Etapa 9D (§4.2 y decisión 1 del coordinador): «Descartar cuenta vacía», sin motivo ni
+  // supervisor, para una cuenta que Go marca descartable (sin productos enviados, pagos, documentos
+  // ni registros de cocina, aunque tenga productos sin enviar). No es una cancelación: no pide
+  // motivo ni aparece en los reportes. Antes de escribir se guardan los toques pendientes de la
+  // cuenta para descartarla con su revisión vigente.
+  async function discardAccount(account: Account) {
+    if (!account.discardable || account.state !== 'open' || isPendingAccount(account)) {
       return;
     }
-    void workspace.quickOpen(mode, table);
+    const takeaway = account.mode === 'takeaway';
+    const subject = takeaway ? `el pedido #${account.folio}` : `la cuenta #${account.folio}`;
+    const unsent =
+      bill?.account.id === account.id ? draftUnits(workspace.localDraft) : account.draft_quantity;
+    const table = account.table_id
+      ? overview.data?.tables.find((entry) => entry.id === account.table_id)
+      : undefined;
+    const others =
+      workspace.accounts.data?.items.filter(
+        (entry) =>
+          entry.state === 'open' && entry.table_id === account.table_id && entry.id !== account.id,
+      ).length ?? 0;
+    const message = [
+      `${takeaway ? 'El pedido' : 'La cuenta'} no tiene productos enviados a cocina, pagos ni registros de cocina.`,
+      unsent > 0
+        ? `${unsent === 1 ? 'Se borrará' : 'Se borrarán'} ${countLabel(unsent, 'producto sin enviar', 'productos sin enviar')}.`
+        : '',
+      'Descartar no es una cancelación: no pide motivo ni aparece en los reportes.',
+      table
+        ? others > 0
+          ? 'Las demás cuentas de la mesa no cambian.'
+          : `${table.name} quedará libre.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const discard = await confirm({
+      title: `¿Descartar ${subject}?`,
+      message,
+      confirmLabel: 'Descartar cuenta vacía',
+      cancelLabel: takeaway ? 'Conservar el pedido' : 'Conservar la cuenta',
+      tone: 'danger',
+    });
+    if (!discard) {
+      return;
+    }
+    try {
+      const synced = await workspace.draft.settle(account.id);
+      const revision = synced ? Math.max(synced.baseRevision, account.revision) : account.revision;
+      await workspace.execute('restaurant_discard_account', {
+        id: account.id,
+        body: { revision },
+      });
+      notifySuccess(
+        takeaway ? `Pedido #${account.folio} descartado.` : `Cuenta #${account.folio} descartada.`,
+      );
+    } catch (problem) {
+      workspace.reportError(problem, 'No se pudo descartar la cuenta.');
+    }
   }
 
   // «Liberar mesa» (etapa 7.1): una cuenta vacía se descarta sin motivo después de confirmarlo.
@@ -349,8 +429,8 @@ export function OperationalPage({
         openAccount('dine_in', tableForNewAccount);
       }
     },
-    accountWithoutTable: () => openAccount('dine_in', null),
-    newTakeaway: () => openAccount('takeaway', null),
+    accountWithoutTable: () => setQueuedOpen({ mode: 'dine_in', section: 'tables' }),
+    newTakeaway: () => setQueuedOpen({ mode: 'takeaway', section: 'takeaway' }),
     openPrecheck: () => openAccountAction('precheck', 'capture'),
     leaveCapture: workspace.leaveCapture,
     chooseTable: showTable,
@@ -529,11 +609,18 @@ export function OperationalPage({
     workspace.refresh();
   }
 
-  // Nuevo pedido para llevar desde el panel de Mesas: lleva a Para llevar (como la paleta) y abre
-  // el pedido con la misma función del botón «Nuevo pedido».
-  function newTakeawayFromTables() {
-    navigation?.requestScreen('takeaway');
-    openAccount('takeaway', null);
+  // Nuevo pedido para llevar desde el panel de Mesas: lleva a Para llevar (como la paleta, y solo si
+  // la navegación procede: respeta la protección de cambios sin guardar) y entra a la captura con la
+  // misma función del botón «Nuevo pedido». Montada sola (sin la barra superior) la pantalla cambia
+  // de vista directamente.
+  async function newTakeawayFromTables() {
+    if (!navigation) {
+      openAccount('takeaway', null);
+      return;
+    }
+    if (await navigation.requestScreen('takeaway')) {
+      setQueuedOpen({ mode: 'takeaway', section: 'takeaway' });
+    }
   }
 
   const toolbar = (
@@ -808,6 +895,7 @@ export function OperationalPage({
               onAction={(action) => openAccountAction(action, 'capture')}
               onCheckout={() => openCheckout(false)}
               onRelease={(account) => void releaseAccount(selectedTable, account)}
+              onDiscard={(account) => void discardAccount(account)}
               onService={(outOfService) => void changeTableService(selectedTable, outOfService)}
               longOpenHours={longOpenHours}
             />
@@ -824,7 +912,7 @@ export function OperationalPage({
               }
               blocked={blocked}
               onAccountWithoutTable={() => openAccount('dine_in', null)}
-              onNewTakeaway={newTakeawayFromTables}
+              onNewTakeaway={() => void newTakeawayFromTables()}
             />
           )}
         </div>

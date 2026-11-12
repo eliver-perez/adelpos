@@ -69,6 +69,8 @@ const overlaySelector = [
   '.cash-shortcut-menu',
   '.topbar-menu',
   '.capture-more-menu',
+  // Etapa 9D (§4.5): menú de un producto de la cuenta.
+  '.capture-line-menu',
   '.color-palette',
 ].join(',');
 

@@ -6,6 +6,17 @@ import type { Board, Release } from '../../services/kitchen';
 import { preparationLabels } from '../../services/kitchen';
 import type { Bill } from '../../services/restaurant';
 
+// Etapa 9D (§4.4, Fase 0 punto 4): Go registra una advertencia por unidad («Sin ruta de
+// preparación: producto» se repetía por cada unidad). Cada advertencia distinta se muestra una sola
+// vez, con cuántas veces se registró.
+export function distinctWarnings(warnings: string[]) {
+  const counts = new Map<string, number>();
+  for (const warning of warnings) {
+    counts.set(warning, (counts.get(warning) ?? 0) + 1);
+  }
+  return Array.from(counts, ([text, count]) => ({ text, count }));
+}
+
 export function AccountKitchen({
   bill,
   allStations,
@@ -44,8 +55,10 @@ export function AccountKitchen({
           }
           summary={release.created_at}
         >
-          {release.warnings.map((warning, index) => (
-            <Notice key={index}>{warning}</Notice>
+          {distinctWarnings(release.warnings).map((warning) => (
+            <Notice key={warning.text}>
+              {warning.count > 1 ? `${warning.text} (×${warning.count})` : warning.text}
+            </Notice>
           ))}
           <p className="muted">
             El seguimiento y la resolución de impresión se administran en Cocina y preparación.

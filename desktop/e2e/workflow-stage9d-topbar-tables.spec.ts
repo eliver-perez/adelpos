@@ -688,7 +688,8 @@ test('barra superior y Mesas (etapa 9D, fases B y C)', async ({ page }, testInfo
     })
     .toBe(470);
 
-  // 12. «Nuevo pedido para llevar» del resumen: la misma apertura de «Nuevo pedido», en Para llevar.
+  // 12. «Nuevo pedido para llevar» del resumen: la misma apertura de «Nuevo pedido», en Para llevar
+  // (desde la fase D, sin crear nada hasta el primer producto).
   await page
     .getByRole('group', { name: 'Vistas operativas' })
     .getByRole('button', { name: 'Mesas', exact: true })
@@ -698,7 +699,7 @@ test('barra superior y Mesas (etapa 9D, fases B y C)', async ({ page }, testInfo
   await page.keyboard.press('Escape');
   await expect(summary).toBeVisible();
   await summary.getByRole('button', { name: 'Nuevo pedido para llevar', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeVisible();
   await reduced.locator('.capture-topbar-back').click();
   await expect(
     topBar(page).getByRole('button', { name: 'Para llevar', exact: true }),

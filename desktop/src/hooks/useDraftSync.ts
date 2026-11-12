@@ -1,5 +1,6 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { DraftSyncEngine } from '../pages/restaurant/capture/draftSync';
+import { defaultTakeawayOrigin } from '../services/restaurant';
 import type { Bill } from '../services/restaurant';
 import { useRestaurantMutation } from './useRestaurantMutation';
 
@@ -26,17 +27,18 @@ export function useDraftSync(delay = 700) {
           // Etapa 7.1: la cuenta de la mesa se crea con su primer producto, con la misma apertura
           // sin formulario (Go asigna la lista predeterminada, el responsable y la referencia
           // neutra) y la misma clave de pendientes: un resultado incierto se recupera con el mismo
-          // operation_id.
+          // operation_id. Etapa 9D: igual el pedido para llevar (con el origen de «Nuevo pedido»)
+          // y la cuenta sin mesa.
           create: (body) =>
             latest.current.execute<Bill>('restaurant_open_account', {
               body: {
                 name: '',
-                mode: 'dine_in',
+                mode: body.mode,
                 table_id: body.table_id,
                 price_list_id: null,
                 customer_name: '',
                 phone: '',
-                origin: '',
+                origin: body.mode === 'takeaway' ? defaultTakeawayOrigin : '',
                 notes: '',
                 scheduled_local: '',
                 schedule_kind: '',

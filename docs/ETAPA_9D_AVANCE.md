@@ -449,6 +449,96 @@ ya entrega Go (parte BE, `b84e3be`). No cambian acciones, estados, reglas ni cá
   reinicio del trabajador, las cuatro siguientes fallaron al no encontrar la base preparada); con el foco del diálogo
   corregido (fase B) la segunda corrida y la final aprobaron todo en ambos motores.
 
+## Fase D · Cuentas y Para llevar (interfaz, §4)
+
+Agente D, 12/11/2026, sobre `etapa-9d` (empezó en `ffcaed7`; rebasada y validada sobre `d723e92`, correcciones de la
+revisión, parte 1), sin subagentes. Solo interfaz: sin Go, migraciones ni `api.rs` (el backend de D ya estaba en
+`b84e3be`). Copia aislada `repo9dD`; clúster temporal 55499, Go temporal 8188, vista previa 1426.
+
+- **Creación diferida** (§4.1, decisión 2): «Nuevo pedido» (Para llevar), «Cuenta sin mesa» (barra de Mesas › Cuentas
+  y resumen de Mesas), «Nuevo pedido para llevar» del resumen, el menú nativo y la paleta entran a la captura **sin
+  crear nada**, con la cuenta pendiente de la 7.1 generalizada (modalidad y mesa opcional en el motor del borrador
+  `draftSync.ts`, `useDraftSync.ts`, `pendingAccountBill` y `useRestaurantWorkspace.startPendingCapture`). El pedido o
+  la cuenta nacen en Go al guardarse el primer producto (la apertura idempotente con `items` que Go ya admitía; para
+  llevar con el origen «Para llevar»); salir sin productos no deja nada. Títulos «Para llevar · Pedido nuevo» y «Cuenta
+  nueva sin mesa». La apertura rápida inmediata (`quickOpen`) se retiró. La paleta y el menú nativo piden la sección y
+  la apertura espera a que la pantalla la reciba (la vuelta a la vista principal de la sección ya no puede dejar la
+  captura detrás); «Nuevo pedido para llevar» del resumen espera el resultado de `requestScreen` como la paleta
+  (observación O1 de la revisión: respeta la protección de cambios sin guardar; `NavigationValue.requestScreen`
+  devuelve ahora `Promise<boolean>`, como ya hacía App). La selección automática del primer elemento del listado ya no pisa una cuenta elegida en el mismo
+  instante (carrera reproducida en Vitest).
+- **Descartar cuentas vacías** (§4.2, decisión 1 y cambio del coordinador): en una cuenta `discardable` la interfaz
+  ofrece **«Descartar cuenta vacía»** (rojo) en lugar de «Cancelar cuenta» en «Más…» (panel de la mesa, captura,
+  Cuentas y Para llevar); a la vista en el detalle de Cuentas y Para llevar y en el panel de la mesa cuando no es
+  liberable (si no tiene nada, «Liberar mesa» de la 7.1 no cambia). «Cancelar cuenta» solo en las no descartables (Go
+  responde `ACCOUNT_DISCARDABLE`). Sin motivo ni supervisor (`restaurant_discard_account`, `accounts.open`):
+  `ConfirmDialog` de tono peligroso que dice cuántos productos sin enviar se borran, que descartar no es una
+  cancelación ni aparece en reportes y si la mesa queda libre. Antes se guardan los toques pendientes y se usa la
+  revisión vigente. Después (también al cancelar o liberar) se vuelve al mapa o al listado sin pasar la captura a otra
+  cuenta y el listado elige la siguiente, no la recién cerrada.
+- **Tarjetas compactas** (§4.3, `AccountList.tsx`): dos renglones (folio y cliente, mesa u origen no habitual, tiempo e
+  importe; etiquetas de preparación corta, pago, saldo, entrega, unidades o «N sin enviar», programación y antigüedad),
+  sin fecha de apertura, «Confirmado:» ni «unidades confirmadas». ~60 px por tarjeta (antes ~157 px); a 1280 × 720
+  caben cinco o más donde antes cabían dos y media. Selección azul de la fase A.
+- **Textos del detalle** (§4.4): «Pendiente de liberación · revisar cocina» → **«Enviado · sin confirmar en cocina»**
+  (etiqueta ámbar) una vez por producto, ya no en el encabezado; en la tarjeta «Sin confirmar en cocina». «Preparación y
+  comandas» muestra cada advertencia distinta una vez («(×N)»). Desglose solo con complementos elegidos, cargos y
+  descuento de Go (sin «Versión N» ni «Descuento $0.00»; sin nada que desglosar no aparece). Combos sin nombres
+  repetidos (`choiceLabel`: «Grupo: elección» solo si difieren). Pago y entrega de Para llevar en un renglón.
+- **Menú por producto** (§4.5, `BillLines.tsx`): tocar el renglón o «⋯» abre «Modificar» y «Cancelar unidades» (rojo)
+  debajo del producto, uno a la vez; Escape o tocar fuera lo cierran (la capa global de teclado lo cuenta como capa
+  abierta). Los productos nuevos conservan − 1 + y «Personalizar»; «Enviado a cocina» / «Nuevo sin enviar» y «Cobrar ·
+  $importe» no cambian.
+- **Pestañas de Mesas** (observación O2 de la revisión): «Mesas / Cuentas / Áreas y distribución» pasan de 38 a 44 px
+  (13 px de texto), sin desbordar a 1280 × 720.
+- **Archivos de otros alcances con cambio mínimo**: `services/restaurant.ts` (`pendingAccountBill` con modalidad y
+  mesa opcional; «Pedido nuevo»), `services/kitchen.ts` (texto de `pending_release`), `commands/actions.ts`
+  (descripciones), `commands/keyboard.ts` (`.capture-line-menu` como capa), `navigation/NavigationContext.tsx` (tipo
+  de `requestScreen`), `TablePanel.tsx` (botón y `onDiscard`
+  opcional), `CaptureTopBar.tsx`, `AccountKitchen.tsx`, `captureRules.ts` (además, `describeSelection` ya no falla con
+  un borrador sin personalización completa) y las pruebas `capture.test.tsx`, `tablePanel.test.tsx`,
+  `stage9dTables.test.tsx` y `draftSync.test.ts`.
+
+Pruebas (copia aislada `repo9dD` = `HEAD d723e92` + fase D; clúster temporal 55499, Go temporal 8188, vista previa
+1426; 12/11/2026):
+
+- **Vitest nuevo** `pages/restaurant/stage9dAccounts.test.tsx` (18): «Nuevo pedido» sin crear nada y salir sin dejar
+  nada; el pedido nace con el primer producto (para llevar, sin mesa, origen «Para llevar») y el siguiente toque guarda
+  el borrador del pedido real; «Cuenta sin mesa» desde el resumen y desde Cuentas; rechazo de Go al crear explicado en
+  la cuenta sin código interno; «Nuevo pedido para llevar» del resumen que respeta `requestScreen`; paleta y menú
+  nativo (sección y apertura juntas o en orden); descartar en Mesas (botón y «Más…», sin «Liberar mesa» ni «Cancelar
+  cuenta», confirmación roja, cuerpo solo con revisión y `operation_id`, mesa libre), cuenta con productos enviados que
+  conserva «Cancelar cuenta», Para llevar (a la vista, un solo principal, el listado pasa al siguiente), dentro de la
+  captura (vuelve al listado) y con toques sin guardar (los guarda y usa la revisión vigente); tarjetas de dos renglones
+  y reglas de estilo (incluidas las pestañas de 44 px); textos de cocina una vez por producto y no en el encabezado;
+  desglose sin versión ni descuento en cero y combos sin nombres repetidos; `choiceLabel`, `chosenComplements` y
+  `distinctWarnings`; menú por producto (renglón, «⋯», Escape, tocar fuera, uno a la vez, «Cancelar unidades» rojo que
+  abre su panel) y productos nuevos con − 1 + y «Personalizar». `draftSync.test.ts` (+1: pedido y cuenta sin mesa en el
+  motor). Ajustadas: `capture.test.tsx` (menú por producto), `tablePanel.test.tsx` («Nuevo pedido» diferido; «Datos del
+  pedido» sobre un pedido existente) y `stage9dTables.test.tsx` («Cuenta sin mesa» diferida).
+- `npx tsc --noEmit` sin errores; `npm test` **75 archivos, 738 pruebas aprobadas**; `npm run build` correcto;
+  Prettier sin diferencias en los 29 archivos.
+- **Playwright** `e2e/workflow-stage9d-accounts.spec.ts` (Chromium y WebKit, datos reales de Go): «Nuevo pedido» y
+  «Cuenta sin mesa» sin productos no crean nada (consultado en Go antes y después); con el primero nacen (sin mesa); se
+  descarta desde «Más…» de la captura, desde el detalle de Para llevar y de Cuentas y desde el panel de la mesa (Mesa
+  con solo borrador), sin motivo, cuenta en `voided` y **ninguna en «Cuentas canceladas»**; la mesa con producto
+  enviado conserva «Cancelar cuenta»; tarjetas de 44–64 px, cinco o más a la vista a 1280 × 720 y las ocho a 1920 ×
+  1080; «Enviado · sin confirmar en cocina» (producto sin ruta de preparación, liberación bloqueada) una vez y no en el
+  encabezado; menú por producto con «Cancelar unidades» rojo y en una línea; pestañas de 44 px. Se actualizaron
+  `restaurant.spec.ts`, `stock-consumption.spec.ts`, `table-price-decrease.spec.ts`, `takeaway-quick-notes.spec.ts` y
+  `workflow-stage9d-topbar-tables.spec.ts`. La especificación nueva se ordena antes de `workflow-stage9d-cancel-account`
+  (nombre fijado por el encargo; usa nombres propios —Salón D, Mesa D1–D3, Cliente D1–D7— para no cruzarse con las
+  demás).
+- **Suite completa de Playwright: 19/19 en Chromium (7.4 min) y 19/19 en WebKit (7.3 min)** sobre el código final
+  (registro `docs9dD/e2e_full_final.log`). Antes, en una primera corrida (código previo a O1/O2), WebKit falló al
+  inicio de `stock-consumption` (el clic en «Administración» no navegó, antes de cualquier paso de la fase D) y por el
+  reinicio del trabajador las 16 siguientes no encontraron la base preparada; la repetición de WebKit aprobó 19/19 y
+  la corrida final también. Después se repitió solo la especificación nueva (capturas con prefijo propio): 1/1 en ambos
+  motores.
+- **Capturas** (32: Chromium y WebKit, claro y oscuro, 1280 × 720 y 1920 × 1080) en el directorio de la fase
+  (`shots9dD`): Para llevar con tarjetas compactas, Mesas › Cuentas con el detalle y el texto de cocina, el detalle con
+  el menú por producto abierto y la confirmación de «Descartar cuenta vacía»; sin desbordamiento horizontal.
+
 ## Fases D y E · backend (parte BE)
 
 Hecha por un solo agente (BE) el 12/11/2026 en `etapa-9d` sobre la Fase 0 (`ecae96d`), sin subagentes, en paralelo

@@ -13,7 +13,14 @@ import { MoreActions } from './MoreActions';
 import type { MoreAction } from './MoreActions';
 
 export type BillAction =
-  AccountAction | 'metadata' | 'history' | 'kitchen' | 'adjustments' | 'precheck' | 'cancelAccount';
+  | AccountAction
+  | 'metadata'
+  | 'history'
+  | 'kitchen'
+  | 'adjustments'
+  | 'precheck'
+  | 'cancelAccount'
+  | 'discardAccount';
 
 // Acciones menos frecuentes del menú «Más…» (antes «Acciones de cuenta…»), con su permiso.
 const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
@@ -53,6 +60,16 @@ const moreActions: (MoreAction<BillAction> & { permission: string })[] = [
     icon: 'ban',
     tone: 'danger',
   },
+  // Etapa 9D (§4.2 y decisión 1): una cuenta que Go marca descartable (sin productos enviados,
+  // pagos ni registros de cocina) se descarta sin motivo en el mismo lugar, en lugar de cancelarse:
+  // descartar no es una cancelación y no aparece en los reportes.
+  {
+    id: 'discardAccount',
+    label: 'Descartar cuenta vacía',
+    permission: 'accounts.open',
+    icon: 'trash',
+    tone: 'danger',
+  },
 ];
 
 // Acciones del menú «Más…» que aplican a la cuenta con los permisos del usuario. Las comparten la
@@ -76,7 +93,10 @@ export function accountMoreActions(
       (action) =>
         can(action.permission) &&
         (action.id === 'history' || action.id === 'kitchen' || writable) &&
-        (action.id !== 'move' || account.mode === 'dine_in'),
+        (action.id !== 'move' || account.mode === 'dine_in') &&
+        // «Cancelar cuenta» solo si la cuenta no es descartable; si lo es, «Descartar cuenta vacía».
+        (action.id !== 'cancelAccount' || !account.discardable) &&
+        (action.id !== 'discardAccount' || account.discardable),
     )
     .map((action) =>
       // Con pagos o ajustes vigentes «Cancelar cuenta» sigue a la vista y dice qué hacer primero;

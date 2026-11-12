@@ -9,7 +9,6 @@ import { configureKitchen, checkPreparation } from './kitchen-flow';
 import {
   checkDineInPayment,
   checkTakeawayDelivery,
-  sendTakeawayToKitchen,
   configureReceiptPrinter,
   enableUSDCash,
 } from './payments-flow';
@@ -372,6 +371,8 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   ).toBeDisabled();
   await expect(bill.locator('.capture-grand-total')).toContainText('$430.00');
   await checkPreparation(page);
+  // Etapa 9D (§4.5): «Modificar» y «Cancelar unidades» van en el menú del producto («⋯»).
+  await steakLine.getByRole('button', { name: /^Acciones de / }).click();
   await steakLine.getByRole('button', { name: 'Modificar', exact: true }).click();
   const edit = page.getByRole('region', { name: 'Personalizar Filete de prueba' });
   await edit.getByRole('button', { name: 'Escribir otra', exact: true }).click();
@@ -381,6 +382,7 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await edit.getByRole('button', { name: /^Confirmar modificación/ }).click();
   await expect(steakLine).toContainText('Empacar por separado');
   // Cancelación de una partida enviada con su flujo y permiso existentes.
+  await burgerLine.getByRole('button', { name: /^Acciones de / }).click();
   await burgerLine.getByRole('button', { name: 'Cancelar unidades', exact: true }).click();
   await page.getByLabel('Motivo de cancelación').fill('El cliente cambió de opinión');
   await page
@@ -536,10 +538,17 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(tablePanel.locator('.table-panel-state')).toHaveText('Esperando pago');
   await panelThemes(page, testInfo, 'table-awaiting-payment', 'Capturar pedidos en esta mesa');
   await openSection(page, 'Para llevar');
-  // Etapa 6.2 §2: «Nuevo pedido» entra directo a la captura, sin formulario previo.
+  // Etapa 6.2 §2: «Nuevo pedido» entra directo a la captura, sin formulario previo. Etapa 9D
+  // (§4.1): sin crear nada; el pedido nace al guardar el primer producto y entonces se capturan sus
+  // datos.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Productos' })).toBeVisible();
+  await expect(
+    page.locator('.capture-topbar').getByRole('button', { name: 'Datos del pedido' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: /^Filete de prueba/ }).click();
+  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
   await expect(page.locator('.capture-topbar')).toContainText('Sin nombre del cliente');
   // «Datos del pedido»: origen y programación; el nombre del cliente se deja vacío.
   await page.locator('.capture-topbar').getByRole('button', { name: 'Datos del pedido' }).click();
@@ -582,7 +591,12 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await expect(page.getByRole('button', { name: /Marcar.*entregado/ })).toHaveCount(0);
   await expect(bill.getByRole('button', { name: 'Cobrar', exact: true })).toBeDisabled();
   // Se envía a cocina sin nombre: no se bloquea y la captura avisa con discreción.
-  await sendTakeawayToKitchen(page);
+  const takeawaySteak = bill.getByRole('article', { name: '1 × Filete de prueba' });
+  await expect(takeawaySteak).toContainText('Nuevo');
+  await bill.getByRole('button', { name: 'Enviar a cocina · 1', exact: true }).click();
+  await expect(takeawaySteak).toContainText('En cocina');
+  await expect(bill).toContainText('$150.00');
+  await expect(bill).toContainText('Entrega: no entregado');
   const unnamed = page.locator('.capture-topbar').getByRole('status');
   await expect(unnamed).toHaveText(/^Pedido sin nombre · se identifica como Pedido #\d+$/);
   await page.locator('.capture-topbar').getByRole('button', { name: 'Datos del pedido' }).click();
@@ -614,6 +628,9 @@ test('operación real, acordeones y ergonomía a 1280 × 720', async ({ page }, 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.locator('.capture-topbar').getByRole('button', { name: 'Para llevar' }).click();
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
+  // Etapa 9D: los datos del pedido se capturan cuando el pedido ya nació con su primer producto.
+  await page.getByRole('button', { name: /^Filete de prueba/ }).click();
+  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
   await page.locator('.capture-topbar').getByRole('button', { name: 'Datos del pedido' }).click();
   await driver.request('PUT', 'terminal/preferences', { keyboard_mode: 'always' });
   // La preferencia se refresca por el mismo sondeo de sesión de la aplicación nativa.

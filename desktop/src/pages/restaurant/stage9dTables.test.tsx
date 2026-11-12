@@ -493,15 +493,13 @@ describe('Mesas con el panel siempre visible (§3.1, §3.3 y §3.5)', () => {
     expect(map.querySelector('.table-highlighted')).toBeNull();
   });
 
-  it('«Cuenta sin mesa» del resumen usa la misma apertura de siempre', async () => {
+  it('«Cuenta sin mesa» del resumen entra a la captura sin crear la cuenta (fase D)', async () => {
     renderPage();
     const summary = await screen.findByRole('complementary', { name: 'Resumen del área' });
     fireEvent.click(within(summary).getByRole('button', { name: 'Cuenta sin mesa' }));
-    await waitFor(() =>
-      expect(requests.find((entry) => entry.operation === 'restaurant_open_account')?.body).toEqual(
-        expect.objectContaining({ mode: 'dine_in', table_id: null }),
-      ),
-    );
+    // Etapa 9D (§4.1, decisión 2): la cuenta nace con el primer producto guardado.
+    await screen.findByRole('heading', { name: 'Cuenta nueva sin mesa' });
+    expect(requests.some((entry) => entry.operation === 'restaurant_open_account')).toBe(false);
   });
 
   it('un solo botón principal en el panel de la mesa: «Capturar pedidos en esta mesa»', async () => {

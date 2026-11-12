@@ -7,7 +7,8 @@ import type { ScreenID } from './sections';
 export interface NavigationValue {
   screen: ScreenID;
   home: ScreenID;
-  requestScreen: (next: ScreenID) => void;
+  // Devuelve si se navegó (con cambios sin guardar, la persona puede quedarse).
+  requestScreen: (next: ScreenID) => Promise<boolean>;
   // Último tramo de la ruta que informa la pantalla visible (por ejemplo, su pestaña actual).
   setTail: (owner: ScreenID, label: string | null) => void;
 }

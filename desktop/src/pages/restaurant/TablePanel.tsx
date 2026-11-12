@@ -133,6 +133,10 @@ const captureLabel = 'Capturar pedidos en esta mesa';
 // desactivados). «Capturar» y «Nueva cuenta» entran a la captura sin crear la cuenta: Go la crea
 // con el primer producto. «Liberar mesa» solo aparece si Go marcó la cuenta como liberable, y
 // «Poner fuera de servicio» / «Habilitar» requieren administrar mesas.
+//
+// Etapa 9D (§4.2): una cuenta que Go marca descartable pero no liberable (por ejemplo, con
+// productos sin enviar, como las cuentas en «Borrador por confirmar») muestra «Descartar cuenta
+// vacía» en lugar de «Liberar mesa»: sin motivo y sin contar como cancelación.
 export function TablePanel({
   table,
   accounts,
@@ -148,6 +152,7 @@ export function TablePanel({
   onAction,
   onCheckout,
   onRelease,
+  onDiscard,
   onService,
   longOpenHours,
 }: {
@@ -166,6 +171,8 @@ export function TablePanel({
   onAction: (action: BillAction) => void;
   onCheckout: () => void;
   onRelease: (account: Account) => void;
+  // Etapa 9D: «Descartar cuenta vacía» (sin él, el botón no se muestra).
+  onDiscard?: (account: Account) => void;
   onService: (outOfService: boolean) => void;
   // Umbral de cuenta abierta por mucho tiempo (settings.long_open_hours de Go), para el texto.
   longOpenHours?: number;
@@ -189,6 +196,14 @@ export function TablePanel({
   // «Liberar mesa»: lo decide Go (releasable) y no debe haber productos nuevos sin guardar.
   const releasable =
     !!account && account.releasable && can('accounts.open') && localDraft.length === 0;
+  // «Descartar cuenta vacía» (etapa 9D): descartable para Go y sin «Liberar mesa» a la vista.
+  const discardable =
+    !!account &&
+    !!onDiscard &&
+    account.discardable &&
+    writable &&
+    can('accounts.open') &&
+    !releasable;
   // Cuenta abierta por mucho tiempo (§3.4): la marca la calcula Go para la mesa (su cuenta abierta
   // más antigua) y para cada cuenta.
   const longOpen = !!table.long_open || open.some((entry) => entry.long_open);
@@ -405,6 +420,16 @@ export function TablePanel({
                     onClick={() => onRelease(account)}
                   >
                     <IconLabel icon="unlock">Liberar mesa</IconLabel>
+                  </button>
+                )}
+                {discardable && (
+                  <button
+                    type="button"
+                    className="danger-button table-discard-action"
+                    disabled={blocked}
+                    onClick={() => onDiscard?.(account)}
+                  >
+                    <IconLabel icon="trash">Descartar cuenta vacía</IconLabel>
                   </button>
                 )}
                 {serviceButton}

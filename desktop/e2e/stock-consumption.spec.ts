@@ -247,9 +247,11 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
 
   // Pedido para llevar con el filete, enviado a cocina, y su cancelación ya liberado.
   await openSection(page, 'Para llevar');
+  // Etapa 9D (§4.1): el pedido nace con el primer producto.
   await page.getByRole('button', { name: 'Nuevo pedido', exact: true }).click();
-  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Para llevar · Pedido nuevo' })).toBeVisible();
   await sendTakeawayToKitchen(page);
+  await expect(page.getByRole('heading', { name: /^Para llevar · Pedido #/ })).toBeVisible();
 
   // El trabajador de Go escribe el consumo en segundo plano: se espera a que lo registre.
   await expect
@@ -268,6 +270,8 @@ test('inventario: receta, control activado, consumo al enviar a cocina y cancela
     .toBe(1);
   const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
   const steakLine = bill.getByRole('article', { name: '1 × Filete de prueba' });
+  // Etapa 9D (§4.5): «Cancelar unidades» va en el menú del producto («⋯»).
+  await steakLine.getByRole('button', { name: /^Acciones de / }).click();
   await steakLine.getByRole('button', { name: 'Cancelar unidades', exact: true }).click();
   await page.getByLabel('Motivo de cancelación').fill('El cliente ya no lo quiso');
   // Los eventos de cocina e inventario de la liberación recién enviada pueden volver a dibujar la

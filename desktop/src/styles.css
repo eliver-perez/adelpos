@@ -1281,10 +1281,11 @@ summary {
   border-radius: 12px;
   background: var(--panel);
 }
+/* Etapa 9D: pestañas «Mesas / Cuentas / Áreas y distribución» con el objetivo táctil de 44 px. */
 .operation-view-tabs button {
-  min-height: 38px;
-  padding: 8px 12px;
-  font-size: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 13px;
   border-radius: 8px;
 }
 .selected-operation-view {
@@ -1855,33 +1856,71 @@ summary {
 }
 .account-list-items {
   display: grid;
-  gap: 10px;
+  gap: 6px;
 }
+/* Etapa 9D (§4.3): tarjeta compacta en dos renglones (folio, lugar, tiempo e importe; debajo, los
+   estados como etiquetas). Cabe más del doble de tarjetas que con la de cinco a siete renglones. */
 .account-list-card {
   display: grid;
-  gap: 8px;
-  padding: 16px;
+  gap: 4px;
+  min-height: 44px;
+  padding: 7px 12px;
   background: var(--subtle);
   border: 1px solid var(--border);
   border-left: 4px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   text-align: left;
   font-size: 12px;
 }
-.account-list-card-heading,
-.account-list-card-detail {
+.account-card-line {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  overflow-wrap: anywhere;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
-.account-list-card-heading {
+.account-card-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
 }
-.account-list-card-detail,
-.account-list-card p {
+.account-card-place {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.account-card-figures {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.account-card-time {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.account-card-amount {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+.account-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.account-card-tags .finance-badge {
+  padding: 1px 8px;
+}
+.account-card-state {
+  color: var(--text);
 }
 /* Etapa 9D (§3.4): cuenta abierta más horas que el umbral, con la franja y el tiempo en ámbar. */
 .account-list-card.account-long-open {
@@ -1903,16 +1942,22 @@ summary {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
-.account-age-label {
-  font-size: 10px;
-  font-weight: 650;
-  color: var(--text);
+/* Antigüedad del pedido para llevar (urgencia que calcula Go), como etiqueta ámbar o roja. */
+.account-age-label.account-age-warning {
+  color: var(--warning);
+  border-color: var(--warning-mark);
+  background: var(--warning-soft);
+}
+.account-age-label.account-age-overdue {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
 }
 .takeaway-dimensions {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   font-size: 11px;
-  padding: 10px 0;
+  padding: 6px 0;
   color: var(--muted);
 }
 .operation-admin-scroll {
@@ -4079,6 +4124,88 @@ summary {
   min-height: 44px;
   padding: 8px 10px;
 }
+/* Etapa 9D (§4.5): menú por producto. El renglón entero se toca para abrirlo (o «⋯»); el menú se
+   despliega debajo del producto con «Modificar» y «Cancelar unidades» (en rojo). */
+.capture-line-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.capture-line-body {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+.capture-line-tappable {
+  cursor: pointer;
+}
+.capture-line-more {
+  flex: none;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.capture-line-menu-open .capture-line-more {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.capture-line-menu {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+/* Cada acción en una sola línea (la cuenta mide unos 330 px a 1280 × 720). */
+.capture-line-menu button {
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* «Enviado · sin confirmar en cocina»: la liberación quedó bloqueada (se libera en Cocina); aviso
+   ámbar discreto, no un error. */
+.capture-tag-unconfirmed {
+  border-color: var(--warning-mark);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+/* Desglose del producto enviado: complementos elegidos, cargos y descuento de Go. */
+.capture-line-breakdown {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.capture-line-breakdown-amount {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+/* Etapa 9D (§4.2): «Descartar cuenta vacía» a la vista en el detalle de Cuentas y Para llevar. */
+.bill-discard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.bill-discard-button {
+  min-height: 44px;
+}
 .capture-line-cancelled {
   opacity: 0.7;
 }
@@ -4482,6 +4609,12 @@ summary {
 }
 .table-panel-footer .capture-secondary-actions > .table-service-action {
   grid-column: 1 / -1;
+}
+/* Etapa 9D (§4.2): «Descartar cuenta vacía» ocupa su fila, al final, para que su texto quepa en una
+   línea. */
+.table-panel-footer .capture-secondary-actions > .table-discard-action {
+  grid-column: 1 / -1;
+  order: 1;
 }
 .table-panel-footer .capture-secondary-actions .secondary-button {
   padding: 0 10px;

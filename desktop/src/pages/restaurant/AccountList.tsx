@@ -1,6 +1,11 @@
 import { preparationLabels } from '../../services/kitchen';
 import { Field, Notice } from '../../components/Forms';
-import { accountLabel, elapsedTime, serverDateTime } from '../../services/restaurant';
+import {
+  accountLabel,
+  defaultTakeawayOrigin,
+  elapsedTime,
+  serverDateTime,
+} from '../../services/restaurant';
 import type { Account, AccountPage } from '../../services/restaurant';
 import { formatMoney } from '../../services/money';
 import { deliveryStateBadges, paymentStateBadges } from '../../services/payments';
@@ -14,24 +19,46 @@ function longOpen(account: Account) {
   return account.state === 'open' && account.long_open;
 }
 
-function accountStateText(account: Account) {
-  if (account.state === 'open') {
-    return countLabel(account.confirmed_quantity, 'unidad confirmada', 'unidades confirmadas');
-  }
+// Etapa 9D (§4.3): la tarjeta lleva los estados como etiquetas cortas en un solo renglón; el texto
+// completo de la preparación queda en el título de su etiqueta.
+const preparationTags: Record<string, string> = {
+  without_items: 'Sin productos',
+  draft: 'Borrador',
+  confirmed_pending_dispatch: 'Por liberar',
+  pending_release: 'Sin confirmar en cocina',
+  scheduled: 'Programado',
+  released: 'En cocina',
+  preparing: 'En preparación',
+  ready: 'Listo',
+  change_pending: 'Cambio pendiente',
+  cancelled: 'Cancelado',
+};
+
+// Estado de una cuenta que ya no está abierta (en los filtros de cerradas, combinadas o canceladas).
+function closedStateText(account: Account) {
   if (account.state === 'closed') {
-    return 'Cuenta cerrada · liquidada';
+    return 'Cerrada · liquidada';
   }
   if (account.state === 'merged') {
-    return 'Cuenta combinada';
+    return 'Combinada';
   }
   // Etapa 9D: el estado cerrado sin venta reúne las cuentas canceladas y las vacías descartadas.
   return 'Cuenta cancelada o descartada';
 }
 
+// Mesa de la cuenta o, en un pedido para llevar, su origen cuando no es el de siempre. El cliente
+// del pedido ya va en el nombre de la tarjeta.
+function placeText(account: Account, takeaway: boolean) {
+  if (takeaway || account.mode === 'takeaway') {
+    return account.origin && account.origin !== defaultTakeawayOrigin ? account.origin : '';
+  }
+  return account.table_name ?? 'Sin mesa';
+}
+
 // Pago y entrega se muestran separados de la preparación, con los estados que calcula Go.
 function FinanceBadges({ account, takeaway }: { account: Account; takeaway: boolean }) {
   return (
-    <div className="account-finance-badges">
+    <>
       <span className={`finance-badge finance-badge-${account.payment_state}`}>
         Pago: {paymentStateBadges[account.payment_state] ?? account.payment_state}
       </span>
@@ -43,7 +70,93 @@ function FinanceBadges({ account, takeaway }: { account: Account; takeaway: bool
           Entrega: {deliveryStateBadges[account.delivery_state] ?? account.delivery_state}
         </span>
       )}
-    </div>
+    </>
+  );
+}
+
+// Tarjeta compacta de Cuentas y Para llevar (etapa 9D, §4.3), en dos renglones: folio, mesa o
+// cliente, tiempo e importe; debajo, preparación, pago, entrega y unidades como etiquetas. Sin la
+// fecha de apertura (el tiempo transcurrido ya la dice) ni textos repetidos.
+function AccountCard({
+  account,
+  selected,
+  takeaway,
+  timezone,
+  longOpenHours,
+  onSelect,
+}: {
+  account: Account;
+  selected: boolean;
+  takeaway: boolean;
+  timezone: string;
+  longOpenHours?: number;
+  onSelect: (id: string) => void;
+}) {
+  const place = placeText(account, takeaway);
+  const preparation = preparationLabels[account.preparation_state] ?? account.preparation_state;
+  return (
+    <button
+      className={`account-list-card ${selected ? 'account-list-selected' : ''} ${takeaway ? `account-urgency-${account.urgency}` : ''} ${longOpen(account) ? 'account-long-open' : ''}`}
+      aria-pressed={selected}
+      onClick={() => onSelect(account.id)}
+    >
+      <span className="account-card-line">
+        <strong className="account-card-title">{accountLabel(account)}</strong>
+        {place && <span className="account-card-place">{place}</span>}
+        <span className="account-card-figures">
+          {/* Etapa 9D (§3.4): abierta más horas que el umbral (long_open, de Go): el tiempo en
+              ámbar con el triángulo de advertencia. */}
+          {longOpen(account) ? (
+            <strong
+              className="account-card-time account-long-open-time"
+              title={longOpenText(longOpenHours)}
+            >
+              <Icon name="alert" size={13} />
+              {elapsedTime(account.elapsed_seconds)}
+              <span className="sr-only"> · {longOpenText(longOpenHours)}</span>
+            </strong>
+          ) : (
+            <span className="account-card-time">{elapsedTime(account.elapsed_seconds)}</span>
+          )}
+          <strong className="account-card-amount">{formatMoney(account.totals.total)}</strong>
+        </span>
+      </span>
+      <span className="account-card-tags">
+        {account.state !== 'open' && (
+          <span className="finance-badge account-card-state">{closedStateText(account)}</span>
+        )}
+        <span
+          className={`finance-badge account-card-preparation account-preparation-${account.preparation_state}`}
+          title={`Preparación: ${preparation}`}
+        >
+          {preparationTags[account.preparation_state] ?? preparation}
+        </span>
+        <FinanceBadges account={account} takeaway={takeaway} />
+        {/* Unidades enviadas o, sin ellas, las que esperan en el borrador; sin ninguna, la etiqueta
+            de preparación («Sin productos») ya lo dice. */}
+        {account.state === 'open' && account.confirmed_quantity > 0 && (
+          <span className="finance-badge">
+            {countLabel(account.confirmed_quantity, 'unidad', 'unidades')}
+          </span>
+        )}
+        {account.state === 'open' &&
+          account.confirmed_quantity === 0 &&
+          account.draft_quantity > 0 && (
+            <span className="finance-badge">{account.draft_quantity} sin enviar</span>
+          )}
+        {account.scheduled_at && (
+          <span className="finance-badge">
+            {account.schedule_kind === 'delivery' ? 'Entrega' : 'Preparación'}{' '}
+            {serverDateTime(account.scheduled_at, timezone)}
+          </span>
+        )}
+        {takeaway && account.urgency !== 'normal' && (
+          <span className={`finance-badge account-age-label account-age-${account.urgency}`}>
+            {account.urgency === 'overdue' ? 'Antigüedad alta' : 'Revisar antigüedad'}
+          </span>
+        )}
+      </span>
+    </button>
   );
 }
 
@@ -115,57 +228,15 @@ export function AccountList({
         aria-label={takeaway ? 'Pedidos para llevar' : 'Cuentas disponibles'}
       >
         {value?.items.map((account) => (
-          <button
+          <AccountCard
             key={account.id}
-            className={`account-list-card ${selectedID === account.id ? 'account-list-selected' : ''} ${takeaway ? `account-urgency-${account.urgency}` : ''} ${longOpen(account) ? 'account-long-open' : ''}`}
-            aria-pressed={selectedID === account.id}
-            onClick={() => onSelect(account.id)}
-          >
-            <div className="account-list-card-heading">
-              <strong>{accountLabel(account)}</strong>
-              <strong>Confirmado: {formatMoney(account.totals.total)}</strong>
-            </div>
-            <div className="account-list-card-detail">
-              <span>{serverDateTime(account.created_at, value.timezone)}</span>
-              {/* Etapa 9D (§3.4): abierta más horas que el umbral (long_open, de Go): el tiempo en
-                  ámbar con el triángulo de advertencia. */}
-              {longOpen(account) ? (
-                <strong
-                  className="account-long-open-time"
-                  title={longOpenText(value.settings?.long_open_hours)}
-                >
-                  <Icon name="alert" size={13} />
-                  {elapsedTime(account.elapsed_seconds)}
-                  <span className="sr-only">
-                    {' '}
-                    · {longOpenText(value.settings?.long_open_hours)}
-                  </span>
-                </strong>
-              ) : (
-                <strong>{elapsedTime(account.elapsed_seconds)}</strong>
-              )}
-            </div>
-            <p>
-              Preparación:{' '}
-              {preparationLabels[account.preparation_state] ?? account.preparation_state}
-            </p>
-            <FinanceBadges account={account} takeaway={takeaway} />
-            <div className="account-list-card-detail">
-              <span>{takeaway ? account.origin : (account.table_name ?? 'Sin mesa')}</span>
-              <span>{accountStateText(account)}</span>
-            </div>
-            {account.scheduled_at && (
-              <p>
-                Programado: {serverDateTime(account.scheduled_at, value.timezone)} ·{' '}
-                {account.schedule_kind === 'delivery' ? 'entrega prevista' : 'preparación'}
-              </p>
-            )}
-            {takeaway && account.urgency !== 'normal' && (
-              <span className="account-age-label">
-                {account.urgency === 'overdue' ? 'Antigüedad alta' : 'Revisar antigüedad'}
-              </span>
-            )}
-          </button>
+            account={account}
+            selected={selectedID === account.id}
+            takeaway={takeaway}
+            timezone={value.timezone}
+            longOpenHours={value.settings?.long_open_hours}
+            onSelect={onSelect}
+          />
         ))}
       </div>
       <div className="operation-product-pagination">
