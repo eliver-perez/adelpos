@@ -578,6 +578,18 @@ por insumo y almacén, cancelación, movimientos y solicitudes (valores solo con
 - **Reconciliador** (mismo trabajador): aplica «No preparado» automático a toda pendiente cuyo vencimiento ya pasó, una por
   transacción con el lock y `UPDATE … WHERE revision`, y lo audita como `inventory.cancellation_reconciled` con el proceso
   como responsable. Si Go estuvo apagado, al iniciar procesa los días pendientes. Es idempotente.
+- **Cancelar cuenta (etapa 9D)**: «Cancelar cuenta» retira todas las unidades activas de la cuenta con un solo evento
+  `account.cancelled`, que `inventory.RecordChange` trata como `item.cancelled` (solicitudes `cancel` de lo liberado y
+  consumido, solo con la función activada). Si el motivo de la cancelación marca «lo enviado a cocina cuenta como merma»
+  (`prepared_is_waste`, congelado en `account_cancellations`; en la semilla, «Cliente se retiró sin pagar»), el trabajador
+  crea la clasificación como «Preparado / merma» a nombre de quien canceló (resolución `manual`, nota con el motivo,
+  sin movimientos nuevos, auditoría `inventory.cancellation_preclassified`; `inventory/cancellation_preclassification.go`)
+  en lugar de dejarla pendiente. Go la marca `preclassified` («Preclasificada al cancelar la cuenta»; en el historial,
+  «Clasificó: Al cancelar la cuenta» y «Canceló la cuenta: <nombre>») mientras siga en su primera revisión; el encargado
+  la corrige con `inventory.waste.record` hasta el corte, como cualquier clasificación manual, y entonces vuelve a
+  «Clasificada por el encargado». El reconciliador no la toca. Con los demás motivos queda «por clasificar» como
+  siempre. Sin migración en inventario. Con «Control de inventario» desactivado (instalación real) no hay consumo ni
+  clasificación.
 - Interfaz: Ajustes y mermas → «Cancelaciones por clasificar» (tarjeta por partida con cuenta legible, día operativo, límite,
   consumo por insumo y botones según `can_classify` de Go) e «Historial de clasificaciones» (incluidas las resueltas «Por
   cierre del día operativo»).

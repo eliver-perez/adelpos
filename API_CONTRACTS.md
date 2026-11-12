@@ -1,4 +1,4 @@
-# API v1 · Etapa 9C
+# API v1 · Etapa 9D
 
 Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 
@@ -9,6 +9,8 @@ Etapa 9A (ajustes pendientes de catálogo e inventarios, reportes, indicadores y
 Etapa 9B (identidad del establecimiento y diseñador visual de documentos; guía en [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md)): sus contratos están al final: «Etapa 9B · plantillas de documentos, vista previa, muestras e impresión con la plantilla vigente (fase A, esquema 18)», «Etapa 9B · identidad del establecimiento y logotipo (fase B, esquema 19)» y «Etapa 9B · editor visual (fase C, sin cambios de contrato)». Las correcciones de la revisión independiente de la fase D están integradas en la sección de cada ruta. Las reglas comunes del diseñador (`operation_id`, revisión, errores y validación del layout) se describen en la fase A y rigen la B.
 
 Etapa 9C (nueva interfaz principal, navegación, teclado y ajustes; guía en [NAVIGATION_AND_SHORTCUTS.md](docs/NAVIGATION_AND_SHORTCUTS.md)): no cambia reglas de negocio, cálculos ni permisos. Sus contratos están al final, en «Etapa 9C · inicio por terminal, columnas por impresora, reportes nuevos y puente del menú (esquema 20)»: el campo `home_screen` de las terminales, las columnas y la prueba de ancho de las impresoras, la vista previa del diseñador por impresora, dos reportes y columnas nuevas, la validación de JPEG del catálogo, mensajes que cambiaron de texto y tres operaciones nuevas del puente (`kitchen_printer_width_test`, `menu_subscribe` y `menu_set_state`).
+
+Etapa 9D (ajustes de interfaz, color de marca y cancelar cuenta; avance en [ETAPA_9D_AVANCE.md](docs/ETAPA_9D_AVANCE.md)): no cambia reglas de negocio, cálculos, la clasificación de la etapa 8 ni los flujos de cobro salvo lo que dice su §0-B. Sus contratos están al final, en «Etapa 9D · cancelar cuenta, descartar cuentas vacías, motivos, umbral de cuenta abierta y reportes (esquema 21)»: rutas para cancelar y descartar cuentas, el catálogo de motivos de cancelación y el umbral de cuenta abierta; campos nuevos de la cuenta, la mesa y la configuración; dos eventos de cuenta; «Cuentas canceladas» y «Cancelaciones por motivo»; siete operaciones nuevas del puente y la retirada de `restaurant_void`.
 
 HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
@@ -22,7 +24,7 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
 | GET        | `/health/live`            | Público; proceso activo.                                                                              |
 | GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                                                 |
-| GET        | `/version`                | Público; producto, versión, API y versión del esquema (20 en la 0.9.2).                               |
+| GET        | `/version`                | Público; producto, versión, API y versión del esquema (21 en la 0.9.3).                               |
 | GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                                              |
 | GET        | `/setup/status`           | Público; solo configured booleano.                                                                    |
 | POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                                                |
@@ -51,6 +53,9 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | GET / PUT  | `/preferences`            | Sesión propia.                                                                                        |
 | PUT        | `/terminal/preferences`   | Sesión; solo teclado de la terminal actual.                                                           |
 | GET        | `/audit`                  | audit.read; filtros y paginación.                                                                     |
+
+Desde la etapa 9D (esquema 21): `GET / PUT /settings/long-open-hours` (umbral de cuenta abierta por mucho tiempo; GET con
+cualquier sesión autenticada y PUT con settings.features.manage; contrato en «Etapa 9D»).
 
 Delegación: un 403 `PERMISSION_DENIED` con mensaje específico rechaza crear, asignar o editar roles y excepciones cuyo resultado tenga permisos efectivos que el actor no posee, administrar a un usuario con más permisos, y modificar el propio rol o las propias excepciones. Retirar un `deny` (`inherit`) cuenta como concesión. Un cambio que dejaría al sistema sin un administrador completo (usuario ordinario activo con todos los permisos registrados) responde 400 `VALIDATION_ERROR` y no modifica datos.
 
@@ -207,6 +212,17 @@ Todas las rutas bajo `/api/v1/restaurant` requieren sesión y terminal vigentes.
 | POST        | `/accounts/{id}/release`       | `accounts.open` (etapa 7.1)                                   |
 | GET         | `/accounts/{id}/history`       | `orders.history.read`                                         |
 
+Rutas de la etapa 9D (esquema 21; contratos en «Etapa 9D»):
+
+| Método     | Ruta bajo `/restaurant`         | Permiso específico                                                          |
+| ---------- | ------------------------------- | --------------------------------------------------------------------------- |
+| GET / POST | `/cancel-reasons`               | `accounts.read` / `payments.settings.manage`                                |
+| PATCH      | `/cancel-reasons/{id}`          | `payments.settings.manage`                                                  |
+| POST       | `/accounts/{id}/discard`        | `accounts.open`                                                             |
+| POST       | `/accounts/{id}/cancel-account` | `accounts.open`; `accounts.cancel` o supervisor, decidido dentro de la ruta |
+
+Desde la 9D, `POST /accounts/{id}/void` queda solo por compatibilidad: el puente ya no tiene su operación.
+
 Guardar/cotizar borrador, confirmar y editar exige además `catalog.read` y `catalog.prices.read`. Seleccionar otra lista requiere `orders.price_list.manage`. El PATCH de cuenta verifica también `accounts.move` o `accounts.transfer` si cambian esos campos. Un mesero autorizado no necesita otra credencial de supervisor para editar/cancelar.
 
 Las escrituras llevan `operation_id` UUID. Actualizar exige `revision`; transferir/combinar exige también `target_revision`. GET y POST de previsualización no llevan UUID ni persisten cambios. Repetir exactamente una escritura del mismo actor/terminal devuelve el resultado original. `REVISION_CONFLICT`, `QUOTE_CHANGED` e `IDEMPOTENCY_CONFLICT` responden 409 y conservan el estado previo. No hay DELETE. Cuerpos hasta 2 MiB y respuestas nativas hasta 2 MiB.
@@ -254,7 +270,7 @@ Editar envía `{operation_id,revision,version_id,line,reason,expected_fingerprin
 
 Dividir recibe `{operation_id,revision,selections:[{version_id,quantity}],new_account:{name}}`. Transferir recibe esas selecciones y `target_account_id`, `target_revision`. Combinar recibe revisiones y cuenta destino sin selecciones. Las tres responden `{source,target}` con cuentas completas. Las cantidades son unidades comerciales enteras; no se recalculan ni se clonan sus importes. La cuenta nueva de división hereda contexto comercial y responsable.
 
-Mover recibe `{operation_id,revision,table_id}` con null para retirar mesa. Asignar recibe `{operation_id,revision,assigned_user_id}`. Anular cuenta vacía recibe `{operation_id,revision,reason}`. Las respuestas son cuentas completas y todas las acciones se auditan transaccionalmente.
+Mover recibe `{operation_id,revision,table_id}` con null para retirar mesa. Asignar recibe `{operation_id,revision,assigned_user_id}`. Anular cuenta vacía recibe `{operation_id,revision,reason}` (desde la etapa 9D solo por compatibilidad: la aplicación usa «Descartar» y «Cancelar cuenta» y el puente ya no tiene la operación `restaurant_void`). Las respuestas son cuentas completas y todas las acciones se auditan transaccionalmente.
 
 No existen rutas de cobro o entrega. `payment_state:not_recorded` y `delivery_state:not_delivered` siguen independientes de preparación. La etapa 5 integra liberaciones, documentos, impresión y eventos conforme a los contratos siguientes.
 
@@ -2591,6 +2607,7 @@ reducir o cancelar cantidades.
 | `sales.voided_accounts` «Cuentas anuladas» (grupo Ventas)                    | Anulación de la cuenta, con la hora de inicio del día                   | `kind` (`void` «Anuladas con motivo», `released` «Cuentas vacías liberadas»), `mode`, `area_id`, `user_id` («Usuario que anuló») | `voided_at`, `folio`, `kind` (Anulada / Cuenta vacía liberada), `voided_by`, `terminal`, `reason`, `mode`, `place` (mesa u origen), `area`, `cancelled_units` (suma), `cancelled_amount` (suma); opcionales `account`, `opened_at`, `opened_by`. Orden por omisión: `voided_at`.                                                                      |
 | `products.quantity_changes` «Modificaciones de cantidades» (grupo Productos) | Cancelación o modificación de la partida, con la hora de inicio del día | `product_id`, `mode`, `user_id` («Usuario que modificó»)                                                                         | `changed_at`, `folio`, `product`, `change` (Cantidad reducida / Partida cancelada), `previous_quantity` y `new_quantity` (sin total), `difference` (unidades, negativa, suma), `amount_difference` (importe, negativo, suma), `changed_by`, `reason`; opcionales `action`, `terminal`, `mode`, `place`, `released_units` (suma). Orden: `changed_at`. |
 
+- Desde la etapa 9D, `sales.voided_accounts` se llama «Cuentas canceladas» y cambió de columnas y filtros (sin `kind`); ver «Etapa 9D · cancelar cuenta…». Lo que sigue describe la versión de la 9C.
 - «Cuentas anuladas» parte de las cuentas `voided` y lee su evento `account.void` o `account.released`; el importe es el
   de las unidades canceladas en la cuenta antes de anularla (una cuenta solo se anula sin productos activos y con cobros
   netos en cero); mesa y área son las actuales.
@@ -2635,3 +2652,224 @@ acepta.
   «Atajos de teclado» y «Acerca de».
 - `e2e/native-driver.ts` simula ambas operaciones leyendo `MENU_ACTIONS` de `menu.rs` y ofrece `clickMenu(id)` y
   `menuState()` a las pruebas.
+
+## Etapa 9D · cancelar cuenta, descartar cuentas vacías, motivos, umbral de cuenta abierta y reportes (esquema 21)
+
+Migración `0021_account_cancellation.sql` (**todavía sin aplicar en la instalación real**): tablas
+`account_cancel_reasons` y `account_cancellations`, columna `restaurant_settings.long_open_hours` y permiso
+`accounts.cancel` («Cancelar cuentas», solo al administrador). Las escrituras de `restaurant/*` siguen las reglas del
+esquema 4: `operation_id` UUID, `revision`, resultado idempotente, auditoría y eventos en la misma transacción, lock
+7820148305 exclusivo. Errores con la forma de siempre (`{"error": {"code", "message", "details?"}}`). Detalle en
+[docs/ETAPA_9D_AVANCE.md](docs/ETAPA_9D_AVANCE.md) y en [docs/RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
+
+### Cancelar cuenta (`POST restaurant/accounts/{id}/cancel-account`)
+
+Operación del puente `restaurant_cancel_account`. Permiso de la ruta: `accounts.read` + `accounts.open` (para llevar,
+además `takeaway.manage`). La ruta no exige `accounts.cancel`: con ese permiso basta el propio; sin él, procede con la
+autorización puntual de un supervisor que lo tenga, con el mismo mecanismo de los descuentos (sin sesión, con el límite
+de intentos del inicio de sesión y sin autoautorización).
+
+```json
+{
+  "operation_id": "uuid",
+  "revision": 7,
+  "reason_id": "uuid del catálogo",
+  "description": "obligatoria (5 a 500 caracteres) si el motivo la exige; opcional hasta 500",
+  "authorization": { "username": "supervisor", "password": "…" }
+}
+```
+
+- `authorization` solo si Go la pide (`account.cancel_requires_authorization` o el error `AUTHORIZATION_REQUIRED`); se
+  ignora si el usuario tiene `accounts.cancel`. La contraseña **no entra** en la huella idempotente, la respuesta
+  guardada, los eventos ni la auditoría: un reintento incierto se reenvía con el mismo `operation_id` y
+  `authorization: {"username"}` sin contraseña para recuperar el resultado ya confirmado (si no llegó a confirmarse,
+  vuelve `AUTHORIZATION_REQUIRED` y hay que autorizar de nuevo).
+- **Orden de comprobación**, todo antes de escribir: permiso de la ruta, cuenta abierta y `revision` vigente, cuenta
+  descartable (`ACCOUNT_DISCARDABLE`, antes del motivo y de la contraseña: no cuenta en el límite de intentos), motivo,
+  guardas financieras (`ACCOUNT_HAS_PAYMENTS`, `ACCOUNT_HAS_ADJUSTMENTS`) y de unidades, autorización.
+- **Efectos** (misma transacción): borrador descartado; todas las unidades activas canceladas con **un solo evento**
+  `account.cancelled`; cuenta en `state: "voided"` con su fila en `account_cancellations` (motivo, nombre y marca de
+  merma congelados, descripción, quién canceló, quién autorizó —`NULL` si bastó el permiso propio—, terminal, operación,
+  unidades e importe activos al cancelar); mesa libre; auditoría `restaurant.account.cancelled` (y
+  `restaurant.supervisor_authorized` con `scope: "account_cancel"`, el supervisor y el importe, sin contraseña); evento
+  en tiempo real `restaurant.account.cancelled`. Nunca es venta: la cuenta no se cierra ni se reconoce en
+  `sales_recognitions`.
+- **Respuesta 200**: el `Bill` de siempre (cuenta en `voided`, `draft: []`, renglones en `cancelled`) **leído después de
+  integrar cocina**: con una estación inactiva dice `preparation_state: "change_pending"`, igual que una lectura posterior
+  y que un reintento con el mismo `operation_id`. Incluye `cancellation`:
+
+```json
+{
+  "cancellation": {
+    "reason_id": "uuid",
+    "reason_name": "Cliente se retiró sin pagar",
+    "description": "Mesa de la ventana",
+    "prepared_is_waste": true,
+    "cancelled_by_name": "Administrador",
+    "authorized_by_name": null,
+    "cancelled_units": 3,
+    "cancelled_amount": "115.00",
+    "created_at": "2026-11-12T16:00:00Z"
+  }
+}
+```
+
+`GET restaurant/accounts/{id}` devuelve el mismo `cancellation` en una cuenta cancelada y `null` en cualquier otra
+(también las anuladas antes de la 9D, las liberadas y las descartadas).
+
+| Estado | Código                        | Cuándo (nada se escribe)                                                                                 |
+| ------ | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 400    | `OPERATION_VALIDATION`        | Sin `reason_id`, identificador inválido, campos desconocidos o cuenta que ya no está abierta.            |
+| 404    | `NOT_FOUND`                   | Motivo inexistente.                                                                                      |
+| 409    | `ACCOUNT_CONFLICT`            | `revision` vencida.                                                                                      |
+| 409    | `ACCOUNT_DISCARDABLE`         | La cuenta es `discardable`: «Esta cuenta no tiene productos enviados: descártala; no hace falta motivo.» |
+| 409    | `CANCEL_REASON_INACTIVE`      | Motivo desactivado.                                                                                      |
+| 422    | `CANCEL_DESCRIPTION_REQUIRED` | El motivo («Otro») exige una descripción de 5 a 500 caracteres.                                          |
+| 422    | `CANCEL_DESCRIPTION_TOO_LONG` | Descripción de más de 500 caracteres.                                                                    |
+| 409    | `ACCOUNT_HAS_PAYMENTS`        | Pagos o propinas netos: primero la devolución (etapa 6).                                                 |
+| 409    | `ACCOUNT_HAS_ADJUSTMENTS`     | Descuento, cortesía o cargo vigente: primero quitarlo desde los ajustes.                                 |
+| 403    | `AUTHORIZATION_REQUIRED`      | Sin `accounts.cancel` y sin autorización.                                                                |
+| 403    | `SELF_AUTHORIZATION`          | El supervisor es el mismo usuario.                                                                       |
+| 401    | `AUTHORIZATION_INVALID`       | Usuario o contraseña del supervisor incorrectos (cuenta en el límite de intentos).                       |
+| 429    | `AUTHORIZATION_THROTTLED`     | Demasiados intentos.                                                                                     |
+| 403    | `AUTHORIZATION_INSUFFICIENT`  | El supervisor no tiene `accounts.cancel`.                                                                |
+| 409    | `IDEMPOTENCY_CONFLICT`        | Mismo `operation_id` con otro contenido.                                                                 |
+
+Los cinco códigos de autorización son los de los descuentos (`useSupervisorAuthorization.handleError`).
+
+### Descartar cuenta vacía (`POST restaurant/accounts/{id}/discard`)
+
+Operación del puente `restaurant_discard_account`. Permiso `accounts.open` (para llevar, `takeaway.manage`); cuerpo
+`{"operation_id", "revision"}`, **sin motivo ni autorización**. Procede con una cuenta abierta sin unidades en ningún
+estado, sin pedidos confirmados en ella, sin haber recibido una combinación y sin registros financieros ni de cocina,
+aunque tenga un borrador sin enviar, que se borra. Respuesta 200: `Bill` en `voided`, `draft: []`, `cancellation: null`.
+Evento `account.discarded` (auditoría y tiempo real `restaurant.account.discarded`), sin fila en
+`account_cancellations`: **no es una cancelación** y no aparece en «Cuentas canceladas» ni en otro reporte. Errores: 409
+`ACCOUNT_NOT_EMPTY` (productos enviados, pagos, ajustes, documentos o registros de cocina: usar «Cancelar cuenta»), 409
+`ACCOUNT_CONFLICT`, 400 si no está abierta. «Liberar mesa» (`POST …/release`) no cambia de regla; su mensaje de
+`ACCOUNT_NOT_EMPTY` ahora sugiere descartar o cancelar.
+
+### Creación con el primer producto también para llevar y sin mesa (sin cambio de contrato)
+
+Desde la fase D de la 9D la aplicación ya no abre cuentas vacías: «Nuevo pedido» (Para llevar), «Cuenta sin mesa» y
+«Nuevo pedido para llevar» llaman a `POST restaurant/accounts` (puente `restaurant_open_account`) solo al guardarse el
+primer producto, con `{operation_id, mode, table_id: null, seen_account_ids: [], items}`, la apertura idempotente con
+`items` de la etapa 7.1 que Go ya admitía en cualquier modalidad (comprobado en `TestStage9DAccountCancellation`,
+«creación con el primer producto sin mesa y para llevar»). Sin `table_id` no se comprueba la mesa. El contrato no
+cambia; las integraciones pueden seguir abriendo una cuenta sin `items`.
+
+### Campos nuevos de lectura
+
+En cada `Account` (listado `restaurant/accounts`, detalle y respuestas de escritura), calculados por Go en cada lectura:
+
+| Campo                           | Tipo                                    | Significado                                                                                                                                             |
+| ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `discardable`                   | boolean                                 | «Descartar» procede (abierta, sin unidades en ningún estado, pedidos, combinaciones ni registros financieros o de cocina, aunque tenga borrador).       |
+| `releasable`                    | boolean                                 | (7.1) Desde la 9D, `discardable` y sin borrador.                                                                                                        |
+| `cancel_blocker`                | `""` \| `"payments"` \| `"adjustments"` | Solo en abiertas no descartables: qué impide «Cancelar cuenta» (primero la devolución o primero quitar el ajuste); `""` si procede o si es descartable. |
+| `cancel_requires_authorization` | boolean                                 | El usuario que lee no tiene `accounts.cancel`: pedir supervisor desde el principio (`false` en las descartables).                                       |
+| `long_open`                     | boolean                                 | Abierta hace más de `long_open_hours` horas.                                                                                                            |
+
+En cada `RestaurantTable` (`overview`, `tables`, respuestas de mesa): `long_open` (la cuenta abierta más antigua supera el
+umbral). En `RestaurantSettings` (con el mapa, el listado de cuentas y `GET restaurant/settings`): `long_open_hours` (1–72,
+12 por omisión). Regla única en Go: `elapsed_seconds > long_open_hours × 3600` (estricto). `PUT restaurant/settings`
+ignora `long_open_hours` aunque se envíe. En `Bill`: `cancellation` (arriba).
+
+### Motivos de cancelación (`restaurant/cancel-reasons`)
+
+- `GET restaurant/cancel-reasons` (`accounts.read`; puente `restaurant_cancel_reasons`): todos, activos e inactivos, en su
+  orden. «Cancelar cuenta» ofrece solo los activos.
+- `POST restaurant/cancel-reasons` (`payments.settings.manage`, el permiso de los motivos de descuento; puente
+  `restaurant_create_cancel_reason`) y `PATCH restaurant/cancel-reasons/{id}` (mismo permiso; puente
+  `restaurant_save_cancel_reason`).
+
+```json
+{
+  "id": "uuid",
+  "name": "Otro",
+  "requires_description": true,
+  "prepared_is_waste": false,
+  "active": true,
+  "sort_order": 40,
+  "revision": 1,
+  "updated_at": "…"
+}
+```
+
+Cuerpo de alta o cambio: `{operation_id, revision, name, requires_description, prepared_is_waste, active, position:
+{after: uuid|null}}`. `name` de 1 a 60 caracteres sin saltos de línea ni caracteres de control. Errores: 400 nombre
+inválido, 409 `DUPLICATE_NAME`, 409 `REVISION_CONFLICT`, 409 `LAST_ACTIVE_REASON` (debe quedar uno activo), 404.
+Auditoría `restaurant.cancel_reason_created`, `restaurant.cancel_reason_updated` y `restaurant.cancel_reasons_reordered`.
+Renombrar o cambiar las marcas no altera lo registrado; colocar un motivo renumera a sus hermanos (sube su `revision`):
+releer la lista después de guardar. Semilla de la 0021: «Cliente se retiró sin pagar» (`prepared_is_waste`), «Cliente
+canceló el pedido», «Error de captura» y «Otro» (`requires_description`).
+
+### Umbral de cuenta abierta (`settings/long-open-hours`)
+
+- `GET settings/long-open-hours` (cualquier sesión; puente `settings_long_open_hours`):
+  `{"long_open_hours": 12, "minimum_hours": 1, "maximum_hours": 72, "revision": 3}`.
+- `PUT settings/long-open-hours` (`settings.features.manage`, el de «Funciones del establecimiento»; puente
+  `save_settings_long_open_hours`), sin `operation_id`: `{"long_open_hours": 6, "revision": 3}`. Errores: 422
+  `LONG_OPEN_HOURS_INVALID` (fuera de 1–72), 409 `REVISION_CONFLICT`, 400 cuerpo inválido. Repetir el valor no escribe.
+  Audita `settings.long_open_hours_changed` y publica `restaurant.settings.changed` en los ámbitos `restaurant` y
+  `takeaway`. `revision` es la de `restaurant_settings`, compartida con «Advertencias del tablero para llevar».
+
+### Eventos de cuenta e historial
+
+- `account.cancelled`: `before: {account, lines, draft}`; `after: {account, reason_id, reason, description,
+prepared_is_waste, unit_ids, cancelled_units, cancelled_amount, authorized_by, authorized_by_username,
+authorized_by_name, discarded_draft_items}`. `after.account` es la cuenta antes de integrar cocina; `unit_ids` tiene la
+  misma forma que `item.cancelled`, de modo que cocina, inventario y los reportes de productos cancelados lo tratan igual.
+  `authorized_by_name` es el nombre visible del supervisor (`null` si bastó el permiso propio).
+- `account.discarded`: `before: {account, draft}`; `after: {account}`.
+- Etiquetas del historial: «Cuenta cancelada» y «Cuenta vacía descartada». Acciones de auditoría nuevas:
+  `restaurant.account.cancelled`, `restaurant.account.discarded`, `restaurant.supervisor_authorized` (alcance
+  `account_cancel`), las tres del catálogo de motivos, `settings.long_open_hours_changed` e
+  `inventory.cancellation_preclassified`. El Registro de movimientos muestra su nombre legible; el filtro sigue por código.
+
+### Inventario: preclasificación (`GET inventory/cancellations` y la traza de consumo)
+
+`Cancellation` agrega `preclassified` (boolean): una clasificación «Preparado / merma» que el trabajador creó al cancelar
+una cuenta con un motivo que marca merma y que nadie ha corregido (resolución `manual` en su primera revisión, cuya
+solicitud viene de un `account.cancelled`; sin migración ni cambio a la restricción de la etapa 8). Con `preclassified`,
+`resolution_label` es «Preclasificada al cancelar la cuenta» y `classified_by_name` es quien canceló. En cuanto el
+encargado la cambia (aunque vuelva a «Preparado / merma»), `preclassified` es `false` y la etiqueta vuelve a «Clasificada
+por el encargado». `GET inventory/consumption/{unit_id}` recibe la misma etiqueta.
+
+### Reportes (`reports/run`, `reports/export`)
+
+Permisos: `reports.read` + `reports.sales.read`. Registro de 94 a **95 reportes**, todos en `EXPORTABLE_REPORTS`.
+
+| Reporte                                                            | Filtros                                                                                                                                       | Columnas                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sales.voided_accounts` «Cuentas canceladas» (se conserva el id)   | `reason_id` (fuente `cancel_reasons`; `none` = anulaciones anteriores con motivo libre), `mode`, `area_id`, `user_id` («Usuario que canceló») | `cancelled_at` «Cancelación», `folio`, `reason`, `description`, `cancelled_amount` «Importe», `cancelled_units`, `cancelled_by` «Canceló», `authorized_by` «Autorizó», `terminal`, `mode`, `place`, `area`; opcionales `kind` «Registro», `account`, `opened_at`, `opened_by`. Orden: `cancelled_at`. |
+| `sales.cancellations_by_reason` «Cancelaciones por motivo» (nuevo) | `mode`, `area_id`, `user_id`                                                                                                                  | `reason`, `accounts`, `cancelled_units`, `cancelled_amount`, `share` «% del importe» (totales y porcentajes de Go sobre todo el conjunto). Orden: importe descendente.                                                                                                                                |
+
+- «Cuentas canceladas» parte de `account_cancellations` (por su fecha) y de las anulaciones anteriores (cuentas `voided`
+  sin registro cuyo último evento terminal es `account.void`); las liberadas (`account.released`) y las descartadas
+  (`account.discarded`) quedan fuera. El filtro `kind` de la 9C se retiró y responde 400. «Autorizó» está vacía si bastó
+  el permiso propio y en las anulaciones anteriores.
+- «Cancelaciones por motivo» agrupa por el nombre congelado; las anulaciones anteriores se agrupan como «Cancelaciones
+  anteriores con motivo libre». Suma las unidades e importe **activos al cancelar**; lo cancelado antes una por una está
+  en «Productos cancelados».
+- Fuente nueva de filtros `GET reports/filters/cancel_reasons` (operación `reports_filters` con `cancel_reasons`):
+  «Sin motivo del catálogo» (`none`) y los motivos, con «Inactivo» en su detalle.
+- `products.cancelled`, `products.quantity_changes` (un renglón por partida con la acción «Cancelación de la cuenta» y el
+  motivo «Cuenta cancelada: …») y `employees.activity` (unidades canceladas y autorizaciones de supervisor) incluyen las
+  cuentas canceladas.
+
+### Mensajes que cambiaron (solo texto; códigos sin cambio)
+
+«Anular» → «Cancelar» en la descripción de `accounts.manage` («Editar datos de cuentas y cancelar cuentas vacías con
+motivo libre», también en la base por la 0021), en los mensajes de la anulación anterior, de «Liberar mesa» y de la
+guarda financiera.
+
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+Siete operaciones nuevas en la lista cerrada, con la prueba `stage9d_account_cancellation_routes_are_closed_and_keep_write_methods`:
+`restaurant_cancel_account` (POST, con identificador), `restaurant_discard_account` (POST, con identificador),
+`restaurant_cancel_reasons` (GET), `restaurant_create_cancel_reason` (POST), `restaurant_save_cancel_reason` (PATCH, con
+identificador), `settings_long_open_hours` (GET) y `save_settings_long_open_hours` (PUT). **`restaurant_void` se retiró**
+de la lista (la prueba exige que no tenga ruta) y del tipo de operaciones de `services/api.ts`; Go conserva
+`POST restaurant/accounts/{id}/void` por compatibilidad. `export.rs` agrega `sales.cancellations_by_reason` a
+`EXPORTABLE_REPORTS`. Sin operaciones nativas nuevas.

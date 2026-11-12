@@ -138,7 +138,7 @@ Sin migración: la precuenta impresa ya se persistía en `payment_documents`. Co
 
 **Dos terminales en la misma mesa.** La terminal envía las cuentas abiertas que veía en la mesa. Si al guardar el primer producto otra terminal ya abrió una cuenta, Go responde `TABLE_HAS_ACCOUNT` sin crear nada y la captura muestra «Esta mesa ya tiene una cuenta» con dos opciones (sin «Cancelar»; los productos se conservan en la terminal hasta decidir): **Agregar a la Cuenta #N** guarda los productos en el borrador de esa cuenta, con su revisión vigente y conservando su borrador; **Abrir una cuenta nueva** reenvía la creación sabiendo de esa cuenta, con otro `operation_id`. Lo mismo aplica a **Nueva cuenta** en una mesa ocupada si apareció una cuenta que la terminal no conocía.
 
-**Para llevar y «Cuenta sin mesa» no cambian:** siguen abriendo la cuenta al instante (la especificación se limita a mesas; posible extensión futura).
+**Para llevar y «Cuenta sin mesa» no cambian:** siguen abriendo la cuenta al instante (la especificación se limita a mesas; posible extensión futura). Desde la fase D de la etapa 9D también nacen con el primer producto (ver [Mesas, cuentas, Para llevar y cancelar cuenta · etapa 9D](#mesas-cuentas-para-llevar-y-cancelar-cuenta--etapa-9d)).
 
 **Liberar mesa.** Para las cuentas vacías que ya existen, el panel de la mesa ofrece **Liberar mesa** (con confirmación estándar) solo si Go marca la cuenta como liberable (`releasable`) y la terminal no tiene productos nuevos sin guardar. Requiere `accounts.open`, sin motivo ni autorización adicional. Go exige que la cuenta esté abierta y vacía en sentido estricto (sin borrador, unidades en ningún estado, pedidos, combinación recibida, registros financieros ni de cocina), la deja anulada con el motivo fijo «Cuenta vacía liberada», la audita (`restaurant.account.released`) y emite su evento. Una cuenta con cualquier contenido responde `ACCOUNT_NOT_EMPTY` y sigue el flujo normal de anulación o cancelación; «Anular cuenta vacía» ya no se ofrece en «Más…» para una cuenta de mesa liberable.
 
@@ -159,3 +159,126 @@ Sin cambios en el ciclo de los pedidos ni en sus contratos: el inventario se int
 - **Modificar** una partida liberada que ya consumió registra el ajuste del consumo por la diferencia entre la versión nueva y la liberada; **cancelar** unidades liberadas con consumo (también reducir la cantidad) deja la cancelación «por clasificar» en Inventarios (Ajustes y mermas): «No preparado» revierte el consumo y «Preparado (merma)» lo conserva; sin clasificar, Go aplica «No preparado» al pasar el corte del día operativo. Cancelar antes de liberar no tiene efecto en el inventario.
 - **Captura**: se usan las mismas selecciones estructuradas de siempre (el consumo es porciones elegidas × porción habitual); el mesero nunca captura gramos y las observaciones escritas no afectan el inventario. La etapa ajustó solo dos cosas de la captura: las **indicaciones rápidas con efecto** («Sin cebolla», «Queso extra»), que aplican la misma selección que el personalizador y guardan su identificador en `customization.quick_notes` (ver [CATALOG.md](CATALOG.md)), y las **tarjetas de complementos** de los grupos de varias porciones (un toque suma una porción, − en la propia tarjeta, «2 de 2», cambio de precio en vivo de Go y aviso al pasar del máximo). No se agregaron formularios administrativos al flujo de captura.
 - **Para llevar y ventanilla**: los componentes de receta «solo para llevar» (bolsas, vasos, envases) se consumen solo en cuentas para llevar, incluida ventanilla; la modalidad se congela al liberar.
+
+## Mesas, cuentas, Para llevar y cancelar cuenta · etapa 9D
+
+Especificación: [etapas/ETAPA_9D_v2.md](etapas/ETAPA_9D_v2.md) (§0-B prevalece); avance en
+[ETAPA_9D_AVANCE.md](ETAPA_9D_AVANCE.md); contratos en [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9D»). Migración
+`0021_account_cancellation.sql` (esquema 21), **todavía sin aplicar en la instalación real**. No cambian las reglas de
+negocio, los cálculos, la clasificación de cancelaciones de la etapa 8 (salvo la preclasificación como merma), los flujos
+de cobro ni las acciones del panel de mesa; solo su presentación y lo que dice §0-B.
+
+### Mesas (§3)
+
+- **Panel siempre visible** de ancho fijo (360 px; 420 px desde 1600 px): elegir una mesa ya no cambia el tamaño del mapa.
+  Sin mesa elegida muestra el **resumen del área**: cuántas mesas hay libres, ocupadas, esperando pago y con pago parcial
+  (React cuenta las mesas por el estado que calcula Go); tocar un número resalta esas mesas con un contorno discontinuo
+  (distinto de la selección; se quita al volver a tocarlo, al elegir una mesa o al cambiar de área) y, aparte, «N mesas
+  fuera de servicio». Debajo, las acciones rápidas **Cuenta sin mesa** y **Nuevo pedido para llevar** y la ayuda que antes
+  estaba sobre el mapa. Con mesa elegida, el panel de siempre; Escape lo cierra y vuelve al resumen.
+- **Mapa**: a la altura del panel; al abrir un área o cambiar el tamaño de la ventana ajusta la escala para que se vean
+  todas sus mesas, con la misma escala para todas (sin pasar del doble). El lado menor de cada mesa mide al menos 64 px;
+  si así no caben, el mapa se desplaza arrastrando (el toque que termina un arrastre no elige la mesa) y con barras de
+  desplazamiento siempre visibles. La leyenda va dentro del mapa, en una línea, y cada estado conserva su icono (Libre
+  tiene ahora la palomita). El diseñador de **Áreas y distribución** conserva su lienzo proporcional de 1000 × 560.
+- **Un solo botón principal**: **Capturar pedidos en esta mesa** (antes «Capturar») va relleno en azul a todo el ancho;
+  **Cobrar · $saldo** conserva texto e importe con contorno; Precuenta, Dividir, Liberar mesa y Más… quedan como
+  secundarios. En el detalle de Cuentas y Para llevar, **Capturar productos en esta cuenta** es el principal y «Enviar a
+  cocina» y «Cobrar» van con contorno; dentro de la captura, «Enviar a cocina» y «Cobrar» siguen como principales (§4.6).
+- **Tiempos**: menos de una hora «45 min», menos de un día «5 h 12 min» y desde 24 h «3 d 14 h», en mesas, cuentas, Para
+  llevar, «Abierta hace…» y Cocina. **Cuenta abierta por mucho tiempo**: con la marca `long_open` de Go (más de
+  `long_open_hours` horas desde la apertura; 12 por omisión, de 1 a 72, en Configuración → «Funciones del
+  establecimiento», «Marcar una cuenta abierta después de (horas)», con `settings.features.manage`), la mesa muestra un
+  punto ámbar y el tiempo en una etiqueta ámbar con triángulo, el panel «Abierta hace…» en ámbar y la tarjeta una franja
+  ámbar. Solo es un aviso: no bloquea nada.
+- **Sin «Actualizar»** en Mesas, Cuentas, Para llevar y la captura: los datos llegan por eventos y por el sondeo de
+  siempre. **Reintentar** aparece solo cuando la barra indica «Sin conexión».
+
+### Cuentas y Para llevar (§4)
+
+- **Creación diferida** (§4.1 y decisión 2 del coordinador): **Nuevo pedido** (Para llevar) y **Cuenta sin mesa**
+  (Mesas › Cuentas y el resumen de Mesas), **Nuevo pedido para llevar** del resumen, el menú nativo y la paleta entran a
+  la captura **sin crear nada**, como la mesa desde la 7.1. La captura dice «Para llevar · Pedido nuevo» o «Cuenta nueva
+  sin mesa»; el pedido o la cuenta nacen en Go al guardarse el primer producto (la apertura idempotente con `items` que Go
+  ya admitía; para llevar con el origen «Para llevar» y sin mesa). Salir sin productos no deja nada guardado. Los datos
+  del pedido (cliente, teléfono, programación) se capturan con «Datos del pedido» en cuanto el pedido existe, es decir,
+  después del primer producto (la barra de la captura lo indica: «Después podrás capturar los datos del cliente»). Un
+  rechazo de Go al crear se explica en la cuenta y los productos se conservan en la terminal. La apertura inmediata
+  (`quickOpen`) se retiró.
+- **Descartar cuentas vacías** (§4.2 y decisión 1): una cuenta que Go marca `discardable` (sin productos enviados,
+  pagos, documentos ni registros de cocina, aunque tenga productos sin enviar) ofrece **Descartar cuenta vacía** (rojo)
+  en lugar de «Cancelar cuenta», en «Más…» (panel de la mesa, captura, Cuentas y Para llevar), a la vista en el detalle
+  de Cuentas y Para llevar y en el panel de la mesa cuando no es liberable; si la cuenta no tiene nada, sigue **Liberar
+  mesa** de la 7.1. Sin motivo ni supervisor (`accounts.open`; para llevar, `takeaway.manage`). La confirmación roja dice
+  cuántos productos sin enviar se borran, que **descartar no es una cancelación** (no pide motivo ni aparece en los
+  reportes) y si la mesa queda libre; «Conservar la cuenta» tiene el foco. Así se quitan las cuentas vacías que ya
+  existían: en la instalación real, cuando reciba la 0.9.3, las #1 y #3 de mesa (solo con un borrador) y las #5, #8, #9
+  y #10 para llevar. Antes de descartar se guardan los toques pendientes y se usa la revisión vigente; al terminar,
+  «Cuenta #N descartada.» / «Pedido #N descartado.», se vuelve al mapa o al listado y el listado elige la siguiente.
+- **Tarjetas compactas** (§4.3) en Para llevar y Mesas › Cuentas: renglón 1 con folio (y cliente), mesa o «Sin mesa»,
+  tiempo e importe; renglón 2 con etiquetas de preparación, pago, saldo, entrega, unidades, programación y antigüedad.
+  Sin la fecha de apertura, «Confirmado:» ni «unidades confirmadas». La preparación va en una etiqueta corta («Sin
+  productos», «Borrador», «Sin confirmar en cocina», «En cocina», «Listo»…; el texto completo en su título) y un borrador
+  dice «N sin enviar». Unos 60 px por tarjeta (antes ≈ 157 px): a 1280 × 720 caben cinco o más donde antes cabían dos y
+  media. La selección usa el azul de la fase A.
+- **Textos del detalle** (§4.4): «Pendiente de liberación · revisar cocina» pasa a **«Enviado · sin confirmar en
+  cocina»**, una sola vez por producto y ya no en el encabezado (explicación en
+  [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md), etapa 9D). El **desglose** solo aparece si hay complementos
+  elegidos, cargos o descuento, sin «Versión N» ni «Descuento $0.00». **Combos**: «Grupo: elección» solo cuando difieren;
+  si lo elegido repite o contiene el nombre del grupo (sin distinguir mayúsculas ni acentos, por palabras completas),
+  solo lo elegido («Papas a la francesa · Hamburguesa sencilla»). «Preparación y comandas» muestra cada advertencia
+  distinta una vez, con «(×N)». En Para llevar, pago y entrega van en un renglón.
+- **Menú por producto** (§4.5): **Modificar** y **Cancelar unidades** (rojo) ya no ocupan un renglón en cada producto
+  enviado: se abren tocando el renglón o «⋯», debajo del producto, uno a la vez, y se cierran al elegir, con Escape o
+  tocando fuera. Los productos nuevos sin enviar conservan − 1 + y «Personalizar»; «Enviado a cocina» / «Nuevo sin
+  enviar» y «Cobrar · $importe enviado» no cambian (§4.6).
+- **Pestañas de Mesas**: «Mesas / Cuentas / Áreas y distribución» miden 44 px (antes 38), sin desbordar a 1280 × 720.
+
+### Cancelar cuenta (§5)
+
+- **Dónde**: «Cancelar cuenta», en rojo, en el menú «Más…» de cualquier cuenta abierta no descartable, de mesa o para
+  llevar (panel de la mesa, captura, Cuentas y Para llevar). Abre un panel en el lugar del mapa, del listado o del
+  catálogo de la captura, con la cuenta a la vista. «Anular cuenta» ya no existe en la interfaz.
+- **Qué muestra**: unidades enviadas e importe que se cancela (calculados por Go; React no suma), productos sin enviar que
+  se descartan, el motivo con botones táctiles (solo los activos, con sus marcas «Exige descripción» y «Lo preparado
+  cuenta como merma»), la descripción obligatoria de 5 a 500 caracteres cuando el motivo la exige («Otro»), qué pasa con
+  lo enviado a cocina (lo no liberado se retira sin imprimir y las estaciones reciben el aviso de cancelación; con la
+  marca de merma y «Control de inventario» activado, lo preparado queda como «Preparado / merma» corregible hasta el
+  corte; sin ella, por clasificar), que **no cuenta como venta** y si la mesa queda libre.
+- **Permiso y autorización**: con «Cancelar cuentas» (`accounts.cancel`, solo el administrador en una instalación
+  existente) basta el propio permiso; sin él (`cancel_requires_authorization`), el panel pide desde el principio la
+  autorización de un supervisor con el mismo componente de los descuentos. La contraseña sale del formulario al enviar y
+  el almacén de operaciones pendientes no la guarda. Un supervisor sin «Cancelar cuentas», el mismo usuario o una
+  contraseña incorrecta se rechazan en su formulario.
+- **Bloqueos que explican**: con pagos o propinas (`cancel_blocker = payments`) la opción sigue habilitada con la
+  aclaración «Primero registra la devolución»; con un descuento, cortesía o cargo vigente (`adjustments`), «Primero quita
+  el descuento o cargo». El panel explica qué hacer y ofrece «Ir a devoluciones» o «Ver descuentos y cargos» si el
+  usuario tiene el permiso (si no, dice qué permiso hace falta). Una cuenta que cambió en otra terminal pide «Revisé los
+  cambios de esta cuenta» antes de enviar.
+- **Confirmación y resultado**: `ConfirmDialog` rojo («¿Cancelar la cuenta #N?» / «¿Cancelar el pedido #N?», foco en
+  «Conservar la cuenta»). Al terminar, aviso «Cuenta #N cancelada.», la mesa queda libre y se vuelve al mapa o al
+  listado. Con un resultado incierto, «Reintentar sin duplicar» repite con el mismo `operation_id`; si la cancelación con
+  supervisor no llegó a registrarse, el reintento sin contraseña vuelve con un error de autorización y se pide de nuevo.
+- **Después**: el detalle de una cuenta cancelada muestra su registro (motivo, descripción, quién canceló, quién autorizó
+  —«Con su propio permiso» si nadie—, unidades, importe y fecha); las anuladas antes de la 9D, las liberadas y las
+  descartadas dicen «Cuenta cancelada sin productos activos o descartada vacía». El filtro de la lista «Anuladas sin
+  productos activos» se llama «Canceladas o descartadas» (mismo estado `voided`). El historial detalla «Cuenta cancelada»
+  (motivo, descripción, unidades e importe, quién canceló y «Autorizó: <nombre>», productos sin enviar descartados y la
+  marca de merma) y «Cuenta vacía descartada» (no es cancelación). El Registro de movimientos muestra un nombre legible
+  de las acciones nuevas. Reportes: «Cuentas canceladas» y «Cancelaciones por motivo» ([REPORTS.md](REPORTS.md)).
+- **Reglas de Go** (resumen; detalle en `CLAUDE.md` §15, «Etapa 9D»): cualquier cuenta abierta no descartable sin pagos
+  ni propinas netos ni ajustes vigentes, con o sin productos enviados; motivo activo del catálogo; un solo evento
+  `account.cancelled` en la misma transacción que la auditoría, el registro `account_cancellations` y la mesa libre; nunca
+  se reconoce como venta. Una cuenta descartable responde `409 ACCOUNT_DISCARDABLE` sin pedir motivo ni contraseña.
+- **Motivos**: Administración → Cobros → «Motivos de cancelación», junto a «Motivos de descuento», con su mismo estilo
+  ([PAYMENTS_AND_REFUNDS.md](PAYMENTS_AND_REFUNDS.md)).
+
+### Limitaciones
+
+- Una cuenta con unidades canceladas antes una por una se cancela con el importe que le queda activo: en «Cancelaciones
+  por motivo» esas unidades no cuentan para el motivo de la cuenta (están en «Productos cancelados»).
+- Un descuento, cortesía o cargo vigente se quita antes de cancelar (no en la misma operación).
+- Sin verificar en hardware: pantalla táctil física (también el arrastre del mapa con el dedo, que se probó con el ratón
+  de Playwright), ventana nativa e impresión real del aviso de cancelación.
+- Con la creación diferida, «Datos del pedido» solo está disponible después del primer producto, y los toques de una
+  cuenta pendiente aún no guardados (≤ 700 ms) se pierden si se cierra el proceso, como en la 7.1.
