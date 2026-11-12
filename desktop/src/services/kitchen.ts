@@ -14,9 +14,35 @@ export interface Printer {
   // Solo en CUPS: la impresora entiende ESC/POS y recibe formato y logotipo si su cola admite datos
   // raw (etapa 9B). Desactivada por omisión; ESC/POS por red ya los recibe.
   accepts_escpos: boolean;
+  // Columnas de texto (etapa 9C): null es el predeterminado del papel (42 en 80 mm y 30 en 58 mm);
+  // la otra opción de la lista cerrada es 48 o 32. Go valida la lista y la guarda.
+  columns: number | null;
   active: boolean;
   fallback_id: string | null;
   revision: number;
+}
+
+// Columnas de texto que admite cada ancho de papel: el predeterminado primero (lista cerrada de Go,
+// documents.ColumnChoices). Solo sirve para ofrecer las opciones; Go decide y valida.
+export const printerColumnChoices: Record<number, [number, number]> = {
+  80: [42, 48],
+  58: [30, 32],
+};
+
+// Columnas efectivas de una impresora: las elegidas o las predeterminadas de su papel.
+export function printerColumns(printer: Pick<Printer, 'paper_width' | 'columns'>): number {
+  const choices = printerColumnChoices[printer.paper_width] ?? printerColumnChoices[80]!;
+  return printer.columns !== null && choices.includes(printer.columns)
+    ? printer.columns
+    : choices[0];
+}
+
+// Respuesta de la prueba de ancho (POST kitchen/printers/{id}/width-test).
+export interface WidthTestResult {
+  job: { id: string; state: string; last_error: string };
+  ticket_id: string;
+  paper_width: number;
+  columns: number;
 }
 
 export interface Station {

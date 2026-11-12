@@ -296,6 +296,37 @@ func TestStageThreeAcceptance(t *testing.T) {
 		product.ImageID = &result.ID
 		_ = json.Unmarshal(call("PATCH", "catalog/products/"+product.ID, product, 200), &product)
 	})
+	run("JPEG progresivo con demasiados barridos rechazado antes de decodificar", func(t *testing.T) {
+		// Etapa 9C (§5.2): el máximo de barridos (100, con el DC) se acepta y se guarda; el archivo de
+		// 1 MiB con unos 61 000 barridos se rechaza al instante sin guardar nada.
+		upload := func(content []byte, expected int) []byte {
+			return call("POST", "catalog/images", map[string]string{"content_base64": base64.StdEncoding.EncodeToString(content)}, expected)
+		}
+		count := func() int {
+			var total int
+			if err := pool.QueryRow(ctx, "SELECT count(*) FROM app.catalog_images").Scan(&total); err != nil {
+				t.Fatal(err)
+			}
+			return total
+		}
+		before := count()
+		upload(catalog.ProgressiveJPEG(99, nil), 200)
+		if count() != before+1 {
+			t.Fatal("El JPEG progresivo con el máximo de barridos debía guardarse")
+		}
+		scans := (1024*1024 - len(catalog.ProgressiveJPEG(0, nil))) / 17
+		started := time.Now()
+		body := upload(catalog.ProgressiveJPEG(scans, nil), 400)
+		if elapsed := time.Since(started); elapsed > 2*time.Second {
+			t.Fatalf("El rechazo tardó %v: se decodificó antes de contar los barridos", elapsed)
+		}
+		if !strings.Contains(string(body), "demasiados barridos progresivos") {
+			t.Fatalf("Mensaje del rechazo: %s", body)
+		}
+		if count() != before+1 {
+			t.Fatal("El JPEG rechazado no debía guardarse")
+		}
+	})
 	run("combos referencias escalonadas sustituciones y ciclos", func(t *testing.T) {
 		burger := catalog.Product{
 			Metadata:   catalog.Metadata{Name: "Hamburguesa", Active: true},

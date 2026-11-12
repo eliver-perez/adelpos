@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Field, Form, Notice } from '../../components/Forms';
+import { SegmentedControl } from '../../components/SegmentedControl';
 import {
   Check,
   IntegerField,
@@ -8,7 +9,13 @@ import {
   TextField,
 } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import type { ExecuteKitchen, Printer } from '../../services/kitchen';
+import {
+  printerColumnChoices,
+  printerColumns,
+  type ExecuteKitchen,
+  type Printer,
+  type WidthTestResult,
+} from '../../services/kitchen';
 import { notifySuccess } from '../../services/notify';
 
 const emptyPrinter = (): Printer => ({
@@ -23,6 +30,7 @@ const emptyPrinter = (): Printer => ({
   cut: false,
   cutter_option: '',
   accepts_escpos: false,
+  columns: null,
   active: true,
   fallback_id: null,
   revision: 0,
@@ -72,7 +80,8 @@ export function PrintersAdmin({
                 : printer.transport === 'escpos_tcp'
                   ? 'ESC/POS por red'
                   : 'Agente futuro'}{' '}
-              · {printer.paper_width} mm · {printer.active ? 'Activa' : 'Inactiva'}
+              · {printer.paper_width} mm · {printerColumns(printer)} columnas ·{' '}
+              {printer.active ? 'Activa' : 'Inactiva'}
             </span>
           </button>
         ))}
@@ -223,7 +232,9 @@ export function PrintersAdmin({
                 <select
                   value={value.paper_width}
                   onChange={(event) =>
-                    setValue({ ...value, paper_width: Number(event.target.value) })
+                    // Cada papel tiene su propia lista de columnas: al cambiarlo vuelven al
+                    // predeterminado del papel nuevo (Go rechaza una combinación inválida).
+                    setValue({ ...value, paper_width: Number(event.target.value), columns: null })
                   }
                 >
                   <option value="80">80 mm</option>
@@ -238,6 +249,14 @@ export function PrintersAdmin({
                 onChange={(copies) => setValue({ ...value, copies })}
               />
             </div>
+            <PrinterColumns
+              value={value}
+              saved={current}
+              canTest={!!value.id && can('kitchen.printers.manage')}
+              busy={busy}
+              execute={execute}
+              onChange={(columns) => setValue({ ...value, columns })}
+            />
             <Accordion
               title="Corte y respaldo"
               summary="Solo capacidades confirmadas del modelo y del controlador"
@@ -296,6 +315,81 @@ export function PrintersAdmin({
             </button>
           )}
         </section>
+      )}
+    </div>
+  );
+}
+
+// Columnas de texto de la impresora (etapa 9C): lista cerrada por papel y, junto a la opción, la
+// prueba de ancho con las columnas elegidas (aún sin guardar), para decidir tras verla en papel.
+function PrinterColumns({
+  value,
+  saved,
+  canTest,
+  busy,
+  execute,
+  onChange,
+}: {
+  value: Printer;
+  saved: Printer | undefined;
+  canTest: boolean;
+  busy: boolean;
+  execute: ExecuteKitchen;
+  onChange: (columns: number | null) => void;
+}) {
+  const choices = printerColumnChoices[value.paper_width] ?? printerColumnChoices[80]!;
+  const [standard, wide] = choices;
+  const selected = printerColumns(value);
+  // La prueba usa el papel guardado: si se cambió en el formulario, primero hay que guardarlo.
+  const paperPending = !!saved && saved.paper_width !== value.paper_width;
+  async function printWidthTest() {
+    const result = await execute<WidthTestResult>('kitchen_printer_width_test', {
+      id: value.id,
+      body: { columns: selected },
+    });
+    // «Enviada a la cola», nunca «impresa»: Go no confirma el papel.
+    notifySuccess(
+      `Prueba de ancho de ${result.columns} columnas enviada a la cola de ${value.name}.`,
+    );
+  }
+  return (
+    <div className="form-stack">
+      {/* Un grupo de botones, no un campo: no va dentro de una etiqueta. */}
+      <div className="field">
+        <span>Columnas de texto</span>
+        <SegmentedControl
+          label="Columnas de texto"
+          value={String(selected)}
+          options={[
+            { value: String(standard), label: `${standard} (predeterminado)` },
+            { value: String(wide), label: `${wide} columnas` },
+          ]}
+          onChange={(choice) => onChange(Number(choice) === standard ? null : Number(choice))}
+        />
+      </div>
+      <p className="muted text-sm">
+        {standard} columnas es el formato de siempre en papel de {value.paper_width} mm. Usa {wide}{' '}
+        solo si la prueba de ancho muestra completos el último número, la línea de guiones y el
+        importe: muchas impresoras no imprimen todo el ancho del papel y cortarían el final del
+        renglón. El cambio aplica a los documentos nuevos; las copias de documentos ya impresos
+        conservan su ancho.
+      </p>
+      {canTest && (
+        <div className="form-stack">
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy || paperPending}
+            onClick={() => void printWidthTest().catch(() => undefined)}
+          >
+            Imprimir prueba de ancho ({selected} columnas)
+          </button>
+          {paperPending && (
+            <p className="muted text-sm">
+              Guarda primero el nuevo ancho de papel para imprimir su prueba de ancho.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

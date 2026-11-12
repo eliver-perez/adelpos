@@ -1,11 +1,13 @@
 package kitchen
 
 import (
+	"fmt"
 	"net"
 	"regexp"
 	"slices"
 	"strings"
 
+	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 )
 
@@ -30,6 +32,16 @@ func validatePrinter(printer *Printer) error {
 	if !slices.Contains([]int{58, 80}, printer.PaperWidth) || printer.Copies < 1 || printer.Copies > 3 ||
 		printer.Port < 9100 || printer.Port > 9109 || (printer.Cut && !printer.SupportsCut) {
 		return invalid("Revisa papel (58/80 mm), copias (1–3), puerto (9100–9109) y capacidad de corte.")
+	}
+	// Columnas de texto (etapa 9C, §5.3): lista cerrada por papel. Cambiar el papel sin elegir de
+	// nuevo unas columnas válidas se rechaza con el motivo; el predeterminado se guarda como NULL.
+	if printer.Columns != nil {
+		if !documents.ValidColumns(printer.PaperWidth, *printer.Columns) {
+			return invalid(columnsMessage(printer.PaperWidth, *printer.Columns))
+		}
+		if *printer.Columns == documents.ColumnsFor(printer.PaperWidth) {
+			printer.Columns = nil
+		}
 	}
 	switch printer.Transport {
 	case "cups":
@@ -71,6 +83,38 @@ func validatePrinter(printer *Printer) error {
 	return nil
 }
 
+// columnsMessage explica la lista cerrada de columnas de un papel cuando se pide otro valor (por
+// ejemplo, 48 columnas después de cambiar el papel a 58 mm).
+func columnsMessage(paperWidth, columns int) string {
+	choices := documents.ColumnChoices(paperWidth)
+	return fmt.Sprintf("Con papel de %d mm las columnas de texto son %d (predeterminado) o %d; %d no es una opción. "+
+		"Si cambiaste el papel, elige de nuevo las columnas.", paperWidth, choices[0], choices[1], columns)
+}
+
+// TextColumns son las columnas de texto efectivas de la impresora: las elegidas o, sin elegir (o
+// con un valor que ya no corresponde a su papel), las predeterminadas de su papel.
+func (printer Printer) TextColumns() int {
+	if printer.Columns != nil && documents.ValidColumns(printer.PaperWidth, *printer.Columns) {
+		return *printer.Columns
+	}
+	return documents.ColumnsFor(printer.PaperWidth)
+}
+
+// RenderOptions es el ancho con que el renderizador único prepara un documento para esta
+// impresora. Con las columnas predeterminadas Columns queda en cero: la salida es la de la 9B.
+func (printer Printer) RenderOptions() documents.RenderOptions {
+	options := documents.RenderOptions{PaperWidth: printer.PaperWidth}
+	if columns := printer.TextColumns(); columns != documents.ColumnsFor(printer.PaperWidth) {
+		options.Columns = columns
+	}
+	return options
+}
+
+// customColumns indica si la impresora imprime con columnas distintas de las de su papel.
+func (printer Printer) customColumns() bool {
+	return printer.TextColumns() != documents.ColumnsFor(printer.PaperWidth)
+}
+
 func (handler *service) savePrinter(parts []string) (any, error) {
 	var input struct {
 		OperationID string `json:"operation_id"`
@@ -105,9 +149,10 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 		}
 		printer.ID = events.NewID()
 		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_printers(id,name,transport,destination,port,paper_width,
-            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos,"columns")
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
 			printer.ID, printer.Name, printer.Transport, printer.Destination, printer.Port, printer.PaperWidth, printer.Copies,
-			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos)
+			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos, printer.Columns)
 		if err != nil {
 			return nil, err
 		}
@@ -122,9 +167,9 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 		}
 		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_printers SET name=$1,transport=$2,destination=$3,port=$4,
             paper_width=$5,copies=$6,supports_cut=$7,cut=$8,cutter_option=$9,active=$10,fallback_id=$11,accepts_escpos=$12,
-            revision=revision+1,updated_at=now() WHERE id=$13`, printer.Name, printer.Transport, printer.Destination, printer.Port,
-			printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID,
-			printer.AcceptsESCPos, printer.ID)
+            "columns"=$13,revision=revision+1,updated_at=now() WHERE id=$14`, printer.Name, printer.Transport, printer.Destination,
+			printer.Port, printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active,
+			printer.FallbackID, printer.AcceptsESCPos, printer.Columns, printer.ID)
 		if err != nil {
 			return nil, err
 		}

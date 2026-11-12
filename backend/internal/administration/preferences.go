@@ -50,9 +50,13 @@ func allowedHome(screen string, permissions []string) string {
 	return screen
 }
 
+// readPreferences lee las preferencias de un usuario. Un usuario sin preferencias guardadas (por
+// ejemplo, creado antes de la etapa 9C sin fila propia) usa como respaldo la apariencia
+// predeterminada de Configuración general (§4.4) y, sin establecimiento, la clara.
 func readPreferences(ctx context.Context, tx pgx.Tx, userID string, permissions []string) (Preferences, error) {
 	result := Preferences{Theme: "light", HomeScreen: "status"}
-	err := tx.QueryRow(ctx, `SELECT coalesce(p.theme,'light'),coalesce(p.home_screen,'status')
+	err := tx.QueryRow(ctx, `SELECT coalesce(p.theme,(SELECT e.theme FROM app.establishment e LIMIT 1),'light'),
+            coalesce(p.home_screen,'status')
         FROM app.users u LEFT JOIN app.user_preferences p ON p.user_id=u.id WHERE u.id=$1`, userID).Scan(&result.Theme, &result.HomeScreen)
 	result.HomeScreen = allowedHome(result.HomeScreen, permissions)
 	return result, err

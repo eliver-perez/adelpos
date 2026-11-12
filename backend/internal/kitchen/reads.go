@@ -192,6 +192,19 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 	if isCommercialKind(kind) {
 		return handler.commercialDocument(id, kind)
 	}
+	// Una prueba de ancho (etapa 9C) solo contiene la regla y un importe fijo: se muestra su texto.
+	if kind == "test" {
+		widthTest, err := handler.widthTestTicket(id)
+		if err != nil {
+			return nil, err
+		}
+		if widthTest {
+			if err := handler.request.Actor.Require("kitchen.stations.all"); err != nil {
+				return nil, err
+			}
+			return handler.renderedPreview(id, kind)
+		}
+	}
 	document, err := one[Document](handler.ctx, handler.tx, "SELECT document FROM app.kitchen_tickets WHERE id=$1", id)
 	if err != nil {
 		return nil, err
@@ -212,7 +225,7 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 	}
 	document.Sections = visible
 	// La vista previa de la cola usa la misma versión de plantilla que la impresión de la comanda.
-	layout, err := handler.renderStored(*document, 80)
+	layout, err := handler.renderStored(*document, documents.RenderOptions{PaperWidth: 80})
 	if err != nil {
 		return nil, err
 	}

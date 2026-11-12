@@ -169,9 +169,17 @@ func (handler *service) reprint() (any, error) {
 		printer = *current
 	}
 	// Una copia usa la presentación original: no añade una leyenda REIMPRESIÓN. Un documento
-	// comercial conserva su contenido ya renderizado en lugar de interpretarse como comanda.
+	// comercial (y una prueba de ancho, etapa 9C) conserva su contenido ya renderizado en lugar de
+	// interpretarse como comanda.
+	widthTest := false
+	if kind == "test" {
+		widthTest, err = handler.widthTestTicket(original.TicketID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var job *PrintJob
-	if isCommercialKind(kind) {
+	if isCommercialKind(kind) || widthTest {
 		job, err = handler.enqueueJob(original.TicketID, printer, &rootID, original.Content, original.Layout)
 	} else {
 		job, err = handler.enqueue(*document, printer, &rootID)

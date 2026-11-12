@@ -76,7 +76,11 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, "INSERT INTO app.user_preferences(user_id) VALUES ($1)", userID); err != nil {
+		// Etapa 9C (§4.4): un usuario nuevo empieza con la «Apariencia predeterminada para usuarios
+		// nuevos» de Configuración general; después la cambia él mismo en Mis preferencias. Cambiar la
+		// predeterminada no altera a los usuarios que ya existen.
+		if _, err := tx.Exec(ctx, `INSERT INTO app.user_preferences(user_id,theme)
+            SELECT $1,coalesce((SELECT theme FROM app.establishment LIMIT 1),'light')`, userID); err != nil {
 			return nil, err
 		}
 	} else {

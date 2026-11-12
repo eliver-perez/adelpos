@@ -4,14 +4,16 @@ import type {
   DocumentKind,
   DocumentPreview,
   PaperWidth,
+  PrinterCompatibility,
   RecentDocument,
 } from '../../../services/documents';
 import { serverDateTime } from '../../../services/restaurant';
 import { PaperStrip } from './PaperStrip';
 import type { PreviewProblem } from './usePreview';
 
-// Área central del editor: la tira de papel con la IR de Go, el ancho (58/80 mm), el origen de los
-// datos (muestra o documento real) y los avisos de Go. La marca «Vista previa con datos de
+// Área central del editor: la tira de papel con la IR de Go, el ancho (58/80 mm con sus columnas
+// predeterminadas o, desde la etapa 9C, el de una impresora activa con sus columnas), el origen de
+// los datos (muestra o documento real) y los avisos de Go. La marca «Vista previa con datos de
 // muestra» deja claro que nada de lo que se ve es una venta ni un movimiento.
 
 export type PreviewMode = 'sample' | 'real';
@@ -22,6 +24,8 @@ export function PreviewPane({
   problem,
   loading,
   paperWidth,
+  printers,
+  printerID,
   mode,
   ticketID,
   canPreviewReal,
@@ -29,6 +33,7 @@ export function PreviewPane({
   timezone,
   blockName,
   onPaperWidth,
+  onPrinter,
   onMode,
   onTicket,
   onSelect,
@@ -38,6 +43,8 @@ export function PreviewPane({
   problem: PreviewProblem | null;
   loading: boolean;
   paperWidth: PaperWidth;
+  printers: PrinterCompatibility[] | null;
+  printerID: string;
   mode: PreviewMode;
   ticketID: string;
   canPreviewReal: boolean;
@@ -45,6 +52,7 @@ export function PreviewPane({
   timezone: string;
   blockName: (blockID: string) => string;
   onPaperWidth: (width: PaperWidth) => void;
+  onPrinter: (printerID: string) => void;
   onMode: (mode: PreviewMode) => void;
   onTicket: (ticketID: string) => void;
   onSelect: (blockID: string) => void;
@@ -57,13 +65,21 @@ export function PreviewPane({
   const realWithoutTicket = mode === 'real' && !ticketID;
   const sourceLabel =
     mode === 'sample' ? 'Vista previa con datos de muestra' : 'Vista previa con un documento real';
+  const printer = (printers ?? []).find((entry) => entry.id === printerID);
+  // El papel que se ve: el de la impresora elegida o el ancho predeterminado elegido.
+  const shownPaper = printer ? printer.paper_width : paperWidth;
+  const widthLabel = shown
+    ? shown.printer_name
+      ? `${shown.printer_name} · ${shown.paper_width} mm · ${shown.columns} columnas`
+      : `${shown.columns} columnas`
+    : '';
 
   return (
     <section className="designer-preview" aria-label="Vista previa">
       <div className="designer-preview-controls">
         <SegmentedControl
           label="Ancho del papel"
-          value={String(paperWidth) as '58' | '80'}
+          value={String(shownPaper) as '58' | '80'}
           options={[
             { value: '58', label: '58 mm' },
             { value: '80', label: '80 mm' },
@@ -82,6 +98,27 @@ export function PreviewPane({
           />
         )}
       </div>
+      {(printers ?? []).length > 0 && (
+        <label className="field">
+          <span>Ver con el ancho de una impresora</span>
+          <select
+            aria-label="Ver con el ancho de una impresora"
+            value={printer ? printerID : ''}
+            onChange={(event) => onPrinter(event.target.value)}
+          >
+            <option value="">Ancho predeterminado del papel</option>
+            {(printers ?? []).map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name} · {entry.paper_width} mm · columnas: {entry.columns}
+                {entry.columns === entry.default_columns ? ' (predeterminado)' : ''}
+              </option>
+            ))}
+          </select>
+          <small className="muted">
+            Las columnas de cada impresora se eligen en Cocina → Impresoras.
+          </small>
+        </label>
+      )}
       {mode === 'real' && (
         <label className="field">
           <span>Documento reciente</span>
@@ -111,9 +148,7 @@ export function PreviewPane({
             ? 'Datos ficticios: no son ventas, pagos ni movimientos.'
             : 'Datos históricos del documento elegido con esta plantilla; no se imprime ni se guarda nada.'}
         </span>
-        <span className="designer-preview-status">
-          {loading ? 'Actualizando…' : shown ? `${shown.columns} columnas` : ''}
-        </span>
+        <span className="designer-preview-status">{loading ? 'Actualizando…' : widthLabel}</span>
       </div>
       {problem && (
         <div className="designer-preview-problem" role="alert">
@@ -142,7 +177,7 @@ export function PreviewPane({
             selectedID={selectedID}
             blockName={blockName}
             onSelect={onSelect}
-            label={`${sourceLabel}, papel de ${shown.paper_width} mm`}
+            label={`${sourceLabel}, papel de ${shown.paper_width} mm, ${shown.columns} columnas`}
           />
         )}
         {!realWithoutTicket && !shown && !problem && (

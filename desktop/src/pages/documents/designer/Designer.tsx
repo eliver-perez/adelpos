@@ -81,6 +81,11 @@ export function Designer({
   const run = useOperations();
   const { confirm, dialog } = useConfirmDialog();
   const [paperWidth, setPaperWidth] = useState<PaperWidth>(80);
+  // Etapa 9C: impresora elegida para la vista previa (vacía: el ancho predeterminado del papel).
+  const [printerID, setPrinterID] = useState('');
+  const previewPrinter = (printers ?? []).some((printer) => printer.id === printerID)
+    ? printerID
+    : '';
   const [mode, setMode] = useState<PreviewMode>('sample');
   const [ticketID, setTicketID] = useState('');
   const [area, setArea] = useState<Area>('preview');
@@ -109,7 +114,9 @@ export function Designer({
   const source =
     mode === 'real' ? (ticketID ? { ticket_id: ticketID } : null) : { sample: true as const };
   const { preview, problem, loading } = usePreview(
-    source ? { kind: kind.kind, layout: state.draft, paperWidth, source } : null,
+    source
+      ? { kind: kind.kind, layout: state.draft, paperWidth, printerID: previewPrinter, source }
+      : null,
   );
 
   // Una activación o un renombre confirmados desde la lista o el encabezado llegan como una lectura
@@ -445,13 +452,26 @@ export function Designer({
             problem={problem}
             loading={loading}
             paperWidth={paperWidth}
+            printers={printers}
+            printerID={previewPrinter}
             mode={mode}
             ticketID={ticketID}
             canPreviewReal={can(documentPermissions.previewReal)}
             selectedID={state.selectedID}
             timezone={timezone}
             blockName={blockName}
-            onPaperWidth={setPaperWidth}
+            onPaperWidth={(width) => {
+              // Elegir 58 u 80 mm vuelve a los anchos predeterminados, sin impresora.
+              setPaperWidth(width);
+              setPrinterID('');
+            }}
+            onPrinter={(id) => {
+              const chosen = (printers ?? []).find((printer) => printer.id === id);
+              setPrinterID(chosen ? chosen.id : '');
+              if (chosen) {
+                setPaperWidth(chosen.paper_width);
+              }
+            }}
             onMode={(next) => {
               setMode(next);
               setTicketID('');

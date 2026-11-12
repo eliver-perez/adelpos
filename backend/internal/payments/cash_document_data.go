@@ -169,9 +169,9 @@ func (handler *service) rerenderCashDocument(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	layout, err := documents.Render(data.Kind, version.Template, documents.Data{Cash: &data}, documents.RenderOptions{
-		PaperWidth: printer.PaperWidth, IncludeExpected: includeExpected,
-	})
+	options := printer.RenderOptions()
+	options.IncludeExpected = includeExpected
+	layout, err := documents.Render(data.Kind, version.Template, documents.Data{Cash: &data}, options)
 	if err != nil {
 		return nil, err
 	}

@@ -302,6 +302,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	// Etapa 9C: pantalla de inicio por terminal (terminal_home_acceptance_test.go).
 	testTerminalHome(t, environment)
 	testDelegationRules(t, environment)
+	// Etapa 9C: apariencia de los usuarios nuevos (appearance_acceptance_test.go).
+	testNewUserAppearance(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

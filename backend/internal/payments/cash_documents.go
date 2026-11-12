@@ -145,10 +145,11 @@ type renderedCash struct {
 	includeExpected bool
 }
 
-// renderCashSource renderiza un comprobante o corte al ancho de papel indicado con la plantilla
-// activa de su tipo. El esperado y las diferencias solo se incluyen para quien puede consultarlos y
-// fuera del arqueo; si no se incluyen, tampoco quedan en los datos estructurados.
-func (handler *service) renderCashSource(source cashDocumentSource, paper int) (*renderedCash, error) {
+// renderCashSource renderiza un comprobante o corte al ancho indicado (papel y columnas de la
+// impresora de tickets) con la plantilla activa de su tipo. El esperado y las diferencias solo se
+// incluyen para quien puede consultarlos y fuera del arqueo; si no se incluyen, tampoco quedan en
+// los datos estructurados.
+func (handler *service) renderCashSource(source cashDocumentSource, width documents.RenderOptions) (*renderedCash, error) {
 	header, err := handler.readDocumentHeader()
 	if err != nil {
 		return nil, err
@@ -169,9 +170,9 @@ func (handler *service) renderCashSource(source cashDocumentSource, paper int) (
 	if err != nil {
 		return nil, err
 	}
-	layout, err := documents.Render(kind, version.Template, documents.Data{Cash: &data}, documents.RenderOptions{
-		PaperWidth: paper, IncludeExpected: includeExpected,
-	})
+	options := width
+	options.IncludeExpected = includeExpected
+	layout, err := documents.Render(kind, version.Template, documents.Data{Cash: &data}, options)
 	if err != nil {
 		return nil, err
 	}
@@ -179,21 +180,21 @@ func (handler *service) renderCashSource(source cashDocumentSource, paper int) (
 }
 
 // cashPrinter devuelve la impresora de tickets configurada en Cobros (el mismo criterio de los
-// documentos comerciales de la etapa 6) y el ancho de su papel (80 mm si no hay una configurada).
-func (handler *service) cashPrinter() (*string, int, error) {
+// documentos comerciales de la etapa 6) y su ancho: papel y, desde la etapa 9C, columnas (80 mm con
+// las predeterminadas si no hay una configurada).
+func (handler *service) cashPrinter() (*string, documents.RenderOptions, error) {
 	settings, err := handler.settings()
 	if err != nil {
-		return nil, 0, err
+		return nil, documents.RenderOptions{}, err
 	}
 	if settings.ReceiptPrinterID == nil {
-		return nil, 80, nil
+		return nil, documents.RenderOptions{PaperWidth: 80}, nil
 	}
-	var paper int
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT paper_width FROM app.kitchen_printers WHERE id=$1",
-		*settings.ReceiptPrinterID).Scan(&paper); err != nil {
-		return nil, 0, err
+	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *settings.ReceiptPrinterID)
+	if err != nil {
+		return nil, documents.RenderOptions{}, err
 	}
-	return settings.ReceiptPrinterID, paperWidth(paper), nil
+	return settings.ReceiptPrinterID, printer.RenderOptions(), nil
 }
 
 // existingDocument devuelve el documento ya registrado de un corte o de una operación.
@@ -215,8 +216,8 @@ func (handler *service) existingDocument(source cashDocumentSource) (*CashDocume
 
 // enqueueCashDocument registra el documento y su trabajo en la cola con la transacción del
 // servicio. No valida permisos: lo hacen las acciones que lo llaman, antes de escribir.
-func (handler *service) enqueueCashDocument(source cashDocumentSource, printerID string, paper int) (PrintOutcome, error) {
-	rendered, err := handler.renderCashSource(source, paper)
+func (handler *service) enqueueCashDocument(source cashDocumentSource, printerID string, width documents.RenderOptions) (PrintOutcome, error) {
+	rendered, err := handler.renderCashSource(source, width)
 	if err != nil {
 		return PrintOutcome{}, err
 	}
@@ -358,11 +359,11 @@ func (handler *service) operationSource(operationID string) (cashDocumentSource,
 // previewSource renderiza la vista previa sin escribir: los mismos datos, permisos y plantilla
 // que la impresión, con el ancho de la impresora de tickets (80 mm si no hay una configurada).
 func (handler *service) previewSource(source cashDocumentSource) (any, error) {
-	_, paper, err := handler.cashPrinter()
+	_, width, err := handler.cashPrinter()
 	if err != nil {
 		return nil, err
 	}
-	rendered, err := handler.renderCashSource(source, paper)
+	rendered, err := handler.renderCashSource(source, width)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +373,7 @@ func (handler *service) previewSource(source cashDocumentSource) (any, error) {
 	}
 	return CashDocumentPreview{
 		Kind: source.kind, Title: source.title(), Content: rendered.layout.Text(), IncludesExpected: rendered.includeExpected,
-		PaperWidth: paper, Document: existing,
+		PaperWidth: rendered.layout.PaperWidth, Document: existing,
 	}, nil
 }
 

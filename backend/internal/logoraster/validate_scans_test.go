@@ -2,6 +2,8 @@ package logoraster
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,4 +96,31 @@ func TestValidateLimitsJPEGSegments(t *testing.T) {
 		t.Fatalf("Un JPEG secuencial común debía aceptarse: %v", err)
 	}
 	assertRejected(t, "JPEG truncado", ordinary[:len(ordinary)/2], "dañado")
+}
+
+// El recorrido exportado (etapa 9C, §5.2) devuelve errores neutros, sin el texto del logotipo, para
+// que cada módulo ponga su mensaje; un contenido que no es JPEG no se recorre.
+func TestCheckJPEGMarkersReturnsNeutralErrors(t *testing.T) {
+	if err := CheckJPEGMarkers(progressiveJPEG(MaxJPEGScans-1, nil)); err != nil {
+		t.Fatalf("Un JPEG con el máximo de barridos no debía rechazarse: %v", err)
+	}
+	scans := CheckJPEGMarkers(progressiveJPEG(MaxJPEGScans, nil))
+	if !errors.Is(scans, ErrJPEGTooManyScans) {
+		t.Fatalf("Se esperaba ErrJPEGTooManyScans: %v", scans)
+	}
+	segments := CheckJPEGMarkers(progressiveJPEG(5, bytes.Repeat(comment([]byte("x")), MaxJPEGSegments)))
+	if !errors.Is(segments, ErrJPEGTooManySegments) {
+		t.Fatalf("Se esperaba ErrJPEGTooManySegments: %v", segments)
+	}
+	for _, err := range []error{scans, segments} {
+		if strings.Contains(err.Error(), "logotipo") {
+			t.Fatalf("El error exportado debe ser neutro: %q", err.Error())
+		}
+	}
+	if err := CheckJPEGMarkers(encodePNG(t, gradient(8, 8))); err != nil {
+		t.Fatalf("Un PNG no se recorre como JPEG: %v", err)
+	}
+	if err := CheckJPEGMarkers(encodeJPEG(t, gradient(64, 64))); err != nil {
+		t.Fatalf("Un JPEG secuencial común no debía rechazarse: %v", err)
+	}
 }

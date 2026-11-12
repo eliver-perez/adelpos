@@ -122,7 +122,12 @@ func registerPaymentDetails() {
 		Columns: []Column{dateTimeColumn("created_at", "Fecha"), codeColumn("folio", "Folio"), textColumn("method", "Método de salida"),
 			moneyColumn("amount", "Importe devuelto"), moneyColumn("tip", "Propina devuelta"), textColumn("reason", "Motivo"),
 			textColumn("refunded_by", "Devolvió"), textColumn("authorized_by", "Autorizó"), textColumn("register", "Caja"),
-			optional(textColumn("original_method", "Método del pago original")), optional(dateTimeColumn("original_at", "Fecha del pago original"))},
+			optional(textColumn("original_method", "Método del pago original")), optional(dateTimeColumn("original_at", "Fecha del pago original")),
+			// Etapa 9C (§5.1): la referencia o folio del comprobante (tarjeta u otro método no
+			// efectivo) donde se capturó, de la devolución y del pago original.
+			optional(described(textColumn("reference", "Referencia"), "Referencia o folio capturado en la devolución.")),
+			optional(described(textColumn("original_reference", "Referencia del pago original"),
+				"Referencia o folio del comprobante del pago devuelto."))},
 		DefaultSort: Sort{Key: "created_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			list := append(paymentScope(), "r.kind = 'refund'", inPeriod("r.created_at"))
@@ -131,7 +136,7 @@ func registerPaymentDetails() {
 			list.when(query, "user_id", "r.actor_id = @user_id::uuid")
 			return paymentDataset(ctx, query, `SELECT r.created_at,a.folio::text AS folio,r.method_name AS method,r.amount,r.tip,r.reason,
                     actor.display_name AS refunded_by,coalesce(authorizer.display_name,'') AS authorized_by,register.name AS register,
-                    p.method_name AS original_method,p.created_at AS original_at
+                    p.method_name AS original_method,p.created_at AS original_at,r.reference,p.reference AS original_reference
                 FROM app.payment_refunds r
                 JOIN app.cash_shifts s ON s.id=r.shift_id
                 JOIN app.payments p ON p.id=r.payment_id
@@ -150,7 +155,11 @@ func registerPaymentDetails() {
 		Columns: []Column{dateTimeColumn("created_at", "Fecha"), codeColumn("folio", "Folio"),
 			textColumn("original_method", "Método original"), moneyColumn("original_amount", "Importe revertido"),
 			textColumn("new_method", "Método correcto"), moneyColumn("new_amount", "Importe correcto"), textColumn("reason", "Motivo"),
-			textColumn("corrected_by", "Corrigió"), textColumn("authorized_by", "Autorizó")},
+			textColumn("corrected_by", "Corrigió"), textColumn("authorized_by", "Autorizó"),
+			// Etapa 9C (§5.1): la referencia o folio del comprobante de cada pago, donde se capturó (el
+			// reverso de una corrección no lleva referencia propia).
+			optional(described(textColumn("original_reference", "Referencia original"), "Referencia o folio del pago revertido.")),
+			optional(described(textColumn("new_reference", "Referencia correcta"), "Referencia o folio del pago que lo sustituye."))},
 		DefaultSort: Sort{Key: "created_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			list := append(paymentScope(), "r.kind = 'correction'", inPeriod("r.created_at"))
@@ -158,11 +167,13 @@ func registerPaymentDetails() {
 			list.when(query, "user_id", "r.actor_id = @user_id::uuid")
 			return paymentDataset(ctx, query, `SELECT r.created_at,a.folio::text AS folio,r.method_name AS original_method,
                     r.amount AS original_amount,n.method_name AS new_method,n.amount AS new_amount,r.reason,
-                    actor.display_name AS corrected_by,coalesce(authorizer.display_name,'') AS authorized_by
+                    actor.display_name AS corrected_by,coalesce(authorizer.display_name,'') AS authorized_by,
+                    original.reference AS original_reference,coalesce(n.reference,'') AS new_reference
                 FROM app.payment_refunds r
                 JOIN app.cash_shifts s ON s.id=r.shift_id
                 JOIN app.restaurant_accounts a ON a.id=r.account_id
                 JOIN app.users actor ON actor.id=r.actor_id
+                JOIN app.payments original ON original.id=r.payment_id
                 LEFT JOIN app.users authorizer ON authorizer.id=r.authorized_by
                 LEFT JOIN app.payments n ON n.corrects_payment_id=r.payment_id AND n.operation_id=r.operation_id
                 WHERE true`+list.sql())

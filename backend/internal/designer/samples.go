@@ -52,9 +52,10 @@ func (handler *service) printSample(_ []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	layout, err := documents.Render(kind, template, data, documents.RenderOptions{
-		PaperWidth: printer.PaperWidth, IncludeExpected: handler.request.Actor.Can("cash.expected.read"),
-	})
+	// La muestra sale con el papel y las columnas de la impresora elegida (etapa 9C).
+	options := printer.RenderOptions()
+	options.IncludeExpected = handler.request.Actor.Can("cash.expected.read")
+	layout, err := documents.Render(kind, template, data, options)
 	if err != nil {
 		return nil, err
 	}
@@ -94,15 +95,18 @@ const (
 	compatibilityAgent       = "agent"
 )
 
-// PrinterCompatibility es una impresora activa con lo que puede imprimir del diseñador.
+// PrinterCompatibility es una impresora activa con lo que puede imprimir del diseñador. Columns son
+// sus columnas de texto efectivas (desde la etapa 9C, las elegidas en Cocina → Impresoras) y
+// DefaultColumns las predeterminadas de su papel.
 type PrinterCompatibility struct {
-	ID         string        `json:"id"`
-	Name       string        `json:"name"`
-	Transport  string        `json:"transport"`
-	PaperWidth int           `json:"paper_width"`
-	Columns    int           `json:"columns"`
-	Format     Compatibility `json:"format"`
-	Logo       Compatibility `json:"logo"`
+	ID             string        `json:"id"`
+	Name           string        `json:"name"`
+	Transport      string        `json:"transport"`
+	PaperWidth     int           `json:"paper_width"`
+	Columns        int           `json:"columns"`
+	DefaultColumns int           `json:"default_columns"`
+	Format         Compatibility `json:"format"`
+	Logo           Compatibility `json:"logo"`
 }
 
 // printerProbeBudget limita el tiempo total de las consultas a CUPS de una petición
@@ -144,7 +148,7 @@ func printerCompatibilities(ctx context.Context, inspector kitchen.QueueInspecto
 	for _, printer := range printers {
 		item := PrinterCompatibility{
 			ID: printer.ID, Name: printer.Name, Transport: printer.Transport, PaperWidth: printer.PaperWidth,
-			Columns: documents.ColumnsFor(printer.PaperWidth),
+			Columns: printer.TextColumns(), DefaultColumns: documents.ColumnsFor(printer.PaperWidth),
 		}
 		item.Format = printerCompatibility(probe, inspector, printer)
 		item.Logo = item.Format

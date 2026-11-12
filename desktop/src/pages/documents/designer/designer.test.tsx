@@ -616,3 +616,90 @@ describe('muestra impresa', () => {
     expect(document.body.textContent ?? '').not.toMatch(/\bimpres[oa]\b/i);
   });
 });
+
+// Etapa 9C (§5.3): la vista previa permite elegir una impresora activa y muestra su ancho (papel y
+// columnas de Cocina → Impresoras), además de 58 y 80 mm con sus columnas predeterminadas.
+describe('vista previa con el ancho de una impresora', () => {
+  const kitchenPrinters = [
+    ...printers,
+    {
+      ...printers[0]!,
+      id: 'p-48',
+      name: 'Cocina caliente',
+      transport: 'cups' as const,
+      paper_width: 80 as const,
+      columns: 48,
+      default_columns: 42,
+    },
+    {
+      ...printers[0]!,
+      id: 'p-32',
+      name: 'Barra',
+      transport: 'cups' as const,
+      paper_width: 58 as const,
+      columns: 32,
+      default_columns: 30,
+    },
+  ];
+
+  beforeEach(() => {
+    handlers.documents_preview = (body) => {
+      const printer = kitchenPrinters.find((entry) => entry.id === body.printer_id);
+      const paper = printer ? printer.paper_width : (body.paper_width as 58 | 80);
+      return ok({
+        ...previewFor(body.layout as TemplateLayout, paper),
+        ...(printer
+          ? { printer_id: printer.id, printer_name: printer.name, columns: printer.columns }
+          : {}),
+      });
+    };
+  });
+
+  it('elige una impresora, envía su identificador a Go y muestra su papel y columnas', async () => {
+    renderDesigner({ printers: kitchenPrinters });
+    await previewReady();
+    // Las opciones no repiten el texto del ancho que se ve («42 columnas»), que sigue siendo único.
+    expect(screen.getAllByText(/42 columnas/)).toHaveLength(1);
+    const select = screen.getByLabelText('Ver con el ancho de una impresora') as HTMLSelectElement;
+    const options = Array.from(select.options).map((option) => option.textContent);
+    expect(options).toEqual([
+      'Ancho predeterminado del papel',
+      'Destino controlado · 80 mm · columnas: 42 (predeterminado)',
+      'Cocina caliente · 80 mm · columnas: 48',
+      'Barra · 58 mm · columnas: 32',
+    ]);
+    fireEvent.change(select, { target: { value: 'p-48' } });
+    await waitFor(() => expect(calls('documents_preview').at(-1)?.body.printer_id).toBe('p-48'));
+    expect(calls('documents_preview').at(-1)?.body.paper_width).toBeUndefined();
+    await screen.findByText('Cocina caliente · 80 mm · 48 columnas', {
+      selector: '.designer-preview-status',
+    });
+    fireEvent.change(select, { target: { value: 'p-32' } });
+    await screen.findByText('Barra · 58 mm · 32 columnas', {
+      selector: '.designer-preview-status',
+    });
+    expect(screen.getByRole('figure').getAttribute('data-paper')).toBe('58');
+    expect(pressed(screen.getByRole('button', { name: '58 mm' }))).toBe('true');
+  });
+
+  it('58 u 80 mm vuelven al ancho predeterminado sin impresora', async () => {
+    renderDesigner({ printers: kitchenPrinters });
+    await previewReady();
+    const select = screen.getByLabelText('Ver con el ancho de una impresora') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'p-48' } });
+    await screen.findByText('Cocina caliente · 80 mm · 48 columnas', {
+      selector: '.designer-preview-status',
+    });
+    fireEvent.click(screen.getByRole('button', { name: '58 mm' }));
+    await waitFor(() => expect(calls('documents_preview').at(-1)?.body.paper_width).toBe(58));
+    expect(calls('documents_preview').at(-1)?.body.printer_id).toBeUndefined();
+    await screen.findByText('30 columnas');
+    expect(select.value).toBe('');
+  });
+
+  it('sin impresoras activas no ofrece la lista', async () => {
+    renderDesigner({ printers: [] });
+    await previewReady();
+    expect(screen.queryByLabelText('Ver con el ancho de una impresora')).toBeNull();
+  });
+});

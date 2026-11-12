@@ -245,6 +245,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
     let (method, path) = match operation {
         "kitchen_save_station" => (Method::PATCH, format!("kitchen/stations/{identifier}")),
         "kitchen_save_printer" => (Method::PATCH, format!("kitchen/printers/{identifier}")),
+        // Etapa 9C (§5.3): prueba de ancho de una impresora (kitchen.printers.manage en Go).
+        "kitchen_printer_width_test" => (
+            Method::POST,
+            format!("kitchen/printers/{identifier}/width-test"),
+        ),
         "kitchen_save_route" => (Method::PATCH, format!("kitchen/routes/{identifier}")),
         "kitchen_release" => (
             Method::POST,
@@ -1231,6 +1236,21 @@ mod tests {
         assert!(route("kitchen_execute", Some(identifier)).is_err());
         assert!(route("kitchen_job", Some("../../settings")).is_err());
         assert_eq!(route("kitchen_save_settings", None).unwrap().0, Method::PUT);
+    }
+
+    #[test]
+    fn kitchen_printer_width_test_is_a_closed_post_with_identifier() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("kitchen_printer_width_test", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("kitchen/printers/{identifier}/width-test")
+            )
+        );
+        assert!(route("kitchen_printer_width_test", None).is_err());
+        assert!(route("kitchen_printer_width_test", Some("../../settings")).is_err());
+        assert!(route("kitchen_printer_width_test", Some("no-es-uuid")).is_err());
     }
 
     #[test]

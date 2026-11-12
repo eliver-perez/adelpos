@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -80,7 +81,7 @@ func Validate(content []byte) (*Logo, error) {
 		return nil, invalid("El logotipo debe ser una imagen PNG o JPEG; no se aceptan SVG, GIF, WebP ni otros formatos.")
 	}
 	if format == FormatJPEG {
-		if err := checkJPEGSegments(content); err != nil {
+		if err := jpegMarkersProblem(content); err != nil {
 			return nil, err
 		}
 	}
@@ -155,10 +156,35 @@ const (
 	jpegMarkerRST7 = 0xD7
 )
 
-// checkJPEGSegments recorre los marcadores de un JPEG como lo hace el decodificador (sin decodificar
-// nada ni reservar memoria) y rechaza los que exceden MaxJPEGScans barridos o MaxJPEGSegments
-// segmentos. Un archivo mal formado o truncado no se rechaza aquí: lo detecta la decodificación.
-func checkJPEGSegments(content []byte) error {
+// Errores neutros del recorrido de marcadores JPEG (CheckJPEGMarkers): cada módulo que lo usa (el
+// logotipo de la identidad, las imágenes del catálogo) los traduce a su propio mensaje.
+var (
+	ErrJPEGTooManyScans    = errors.New("el JPEG excede el número máximo de barridos")
+	ErrJPEGTooManySegments = errors.New("el JPEG excede el número máximo de segmentos")
+)
+
+// jpegMarkersProblem traduce el recorrido de marcadores a los mensajes del logotipo.
+func jpegMarkersProblem(content []byte) error {
+	err := CheckJPEGMarkers(content)
+	switch {
+	case errors.Is(err, ErrJPEGTooManySegments):
+		return invalid("El logotipo JPEG tiene demasiados segmentos. Guárdalo de nuevo como PNG o como JPEG estándar.")
+	case errors.Is(err, ErrJPEGTooManyScans):
+		return invalid("El logotipo JPEG tiene demasiados barridos progresivos. Guárdalo de nuevo como PNG o como JPEG estándar.")
+	}
+	return nil
+}
+
+// CheckJPEGMarkers recorre los marcadores de un JPEG como lo hace el decodificador (sin decodificar
+// nada ni reservar memoria) y devuelve ErrJPEGTooManyScans si tiene más de MaxJPEGScans barridos o
+// ErrJPEGTooManySegments si tiene más de MaxJPEGSegments segmentos. Debe llamarse antes de
+// decodificar (también antes de image.DecodeConfig). Un contenido que no empieza con la firma JPEG
+// no se recorre, y un archivo mal formado o truncado no se rechaza aquí: lo detecta la
+// decodificación.
+func CheckJPEGMarkers(content []byte) error {
+	if !bytes.HasPrefix(content, jpegSignature) {
+		return nil
+	}
 	scans := 0
 	segments := 0
 	index := len(jpegSignature) - 1
@@ -181,13 +207,13 @@ func checkJPEGSegments(content []byte) error {
 		}
 		segments++
 		if segments > MaxJPEGSegments {
-			return invalid("El logotipo JPEG tiene demasiados segmentos. Guárdalo de nuevo como PNG o como JPEG estándar.")
+			return ErrJPEGTooManySegments
 		}
 		index += length
 		if marker == jpegMarkerSOS {
 			scans++
 			if scans > MaxJPEGScans {
-				return invalid("El logotipo JPEG tiene demasiados barridos progresivos. Guárdalo de nuevo como PNG o como JPEG estándar.")
+				return ErrJPEGTooManyScans
 			}
 			index = skipJPEGEntropyData(content, index)
 		}

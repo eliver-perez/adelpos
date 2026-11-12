@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/text/encoding/charmap"
+
+	"local/ad-el-pos/server/internal/documents"
 )
 
 type Outcome struct {
@@ -162,12 +164,26 @@ func cupsTextArguments(job PrintJob, filename string) []string {
 		lineMillimeters = 8
 	}
 	height := max(60, min(2000, (strings.Count(job.Content, "\n")+4)*lineMillimeters))
-	arguments = append(arguments, "-o", fmt.Sprintf("cpi=%d", cpi), "-o", fmt.Sprintf("media=Custom.%dx%dmm", printer.PaperWidth, height),
+	arguments = append(arguments, "-o", "cpi="+textDensity(printer, cpi), "-o", fmt.Sprintf("media=Custom.%dx%dmm", printer.PaperWidth, height),
 		"-o", "page-left=0", "-o", "page-right=0", "-o", "page-top=0", "-o", "page-bottom=0")
 	if printer.Cut {
 		arguments = append(arguments, "-o", printer.CutterOption)
 	}
 	return append(arguments, filename)
+}
+
+// textDensity es la densidad (cpi) de CUPS en texto para la impresora del trabajo. Con las columnas
+// predeterminadas de su papel es exactamente la de siempre (12, o 6 con el texto grande de Cocina),
+// de modo que los argumentos de lp no cambian. Con otras columnas (48 en 80 mm o 32 en 58 mm, etapa
+// 9C) se ajusta en proporción para que el renglón quepa en el mismo papel: cpi × columnas ÷
+// predeterminado (13.71 para 48 y 12.8 para 32). Que una impresora concreta respete esa densidad es
+// una prueba física pendiente (la prueba de ancho existe para comprobarlo antes de elegir).
+func textDensity(printer Printer, cpi int) string {
+	if !printer.customColumns() {
+		return strconv.Itoa(cpi)
+	}
+	density := float64(cpi) * float64(printer.TextColumns()) / float64(documents.ColumnsFor(printer.PaperWidth))
+	return strings.TrimRight(strings.TrimRight(strconv.FormatFloat(density, 'f', 2, 64), "0"), ".")
 }
 
 // cupsJobReference extrae de la respuesta de lp el identificador del trabajo («cola-123»). La

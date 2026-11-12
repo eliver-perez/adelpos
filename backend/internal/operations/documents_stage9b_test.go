@@ -187,6 +187,8 @@ func testStage9BDocuments(t *testing.T, base *restaurantFixture) {
 			t.Fatal(err)
 		}
 	})
+	// Etapa 9C (§5.3): columnas por impresora con las plantillas del sistema (printer_columns_9c_test.go).
+	testStage9CPrinterColumns(t, fixture)
 }
 
 func testStage9BKitchen(t *testing.T, fixture *stage9BFixture) {

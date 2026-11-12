@@ -182,6 +182,11 @@ export interface PreviewLine {
 export interface DocumentPreview {
   kind: DocumentKind;
   paper_width: PaperWidth;
+  // Impresora elegida para la vista previa (etapa 9C); ausente con los anchos predeterminados.
+  printer_id?: string;
+  printer_name?: string;
+  // Columnas de texto con que Go renderizó (las de la impresora elegida o las del papel; la mitad
+  // con el texto grande de Cocina).
   columns: number;
   text_size: 'normal' | 'large';
   sample: boolean;
@@ -216,7 +221,9 @@ export interface PrinterCompatibility {
   name: string;
   transport: 'cups' | 'escpos_tcp' | 'agent';
   paper_width: PaperWidth;
+  // Columnas de texto de la impresora (Cocina → Impresoras, etapa 9C) y las predeterminadas de su papel.
   columns: number;
+  default_columns: number;
   format: Compatibility;
   logo: Compatibility;
 }
@@ -311,15 +318,19 @@ export function restoreDefaultTemplate(operationID: string, kind: DocumentKind) 
   });
 }
 
-// Vista previa sin escrituras: la IR exacta de Go para el layout en edición.
+// Vista previa sin escrituras: la IR exacta de Go para el layout en edición, al ancho de 58 u 80 mm
+// con sus columnas predeterminadas o, desde la etapa 9C, al de una impresora activa (su papel y sus
+// columnas, que decide Go).
 export function previewDocument(
   kind: DocumentKind,
   layout: TemplateLayout,
   paperWidth: PaperWidth,
   source: PreviewSource,
+  printerID = '',
 ) {
+  const width = printerID ? { printer_id: printerID } : { paper_width: paperWidth };
   return api<DocumentPreview>('documents_preview', {
-    body: { kind, layout, paper_width: paperWidth, source },
+    body: { kind, layout, ...width, source },
   });
 }
 

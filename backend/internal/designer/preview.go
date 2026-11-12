@@ -3,7 +3,10 @@ package designer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
@@ -31,10 +34,14 @@ type PreviewLine struct {
 	Image   *PreviewImage `json:"image"`
 }
 
-// Preview es la respuesta de POST documents/preview.
+// Preview es la respuesta de POST documents/preview. PrinterID es la impresora elegida para la
+// vista previa (etapa 9C; vacío con los anchos predeterminados de 58 u 80 mm) y Columns las
+// columnas de texto con que se renderizó (la mitad con el texto grande de Cocina).
 type Preview struct {
 	Kind             documents.Kind         `json:"kind"`
 	PaperWidth       int                    `json:"paper_width"`
+	PrinterID        string                 `json:"printer_id,omitempty"`
+	PrinterName      string                 `json:"printer_name,omitempty"`
 	Columns          int                    `json:"columns"`
 	TextSize         string                 `json:"text_size"`
 	Sample           bool                   `json:"sample"`
@@ -61,6 +68,7 @@ func (handler *service) preview(_ []string) (any, error) {
 		Kind       string          `json:"kind"`
 		Layout     json.RawMessage `json:"layout"`
 		PaperWidth int             `json:"paper_width"`
+		PrinterID  *string         `json:"printer_id"`
 		Source     previewSource   `json:"source"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
@@ -70,7 +78,19 @@ func (handler *service) preview(_ []string) (any, error) {
 	if !found {
 		return nil, invalid("El tipo de documento no existe.")
 	}
-	if input.PaperWidth != 58 && input.PaperWidth != 80 {
+	// Etapa 9C (§5.3): la vista previa admite, además de 58 y 80 mm con sus columnas
+	// predeterminadas, una impresora activa, con su papel y sus columnas (paper_width puede omitirse
+	// o debe coincidir con su papel).
+	width := documents.RenderOptions{PaperWidth: input.PaperWidth}
+	var printer *kitchen.Printer
+	if input.PrinterID != nil {
+		found, err := handler.previewPrinter(*input.PrinterID, input.PaperWidth)
+		if err != nil {
+			return nil, err
+		}
+		printer = found
+		width = printer.RenderOptions()
+	} else if input.PaperWidth != 58 && input.PaperWidth != 80 {
 		return nil, invalid("El ancho de papel debe ser 58 u 80 mm.")
 	}
 	if input.Source.Sample == (input.Source.TicketID != nil) {
@@ -84,16 +104,39 @@ func (handler *service) preview(_ []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	layout, err := documents.Render(kind, template, source.data, documents.RenderOptions{
-		PaperWidth: input.PaperWidth, IncludeExpected: source.includeExpected,
-	})
+	width.IncludeExpected = source.includeExpected
+	layout, err := documents.Render(kind, template, source.data, width)
 	if err != nil {
 		return nil, err
 	}
 	// Los avisos del origen (p. ej. un documento de caja anterior a la 9B) van antes que los de los
 	// bloques.
 	layout.Warnings = append(source.notices, layout.Warnings...)
-	return handler.previewResponse(kind, layout, input.Source.Sample, source.includeExpected), nil
+	response := handler.previewResponse(kind, layout, input.Source.Sample, source.includeExpected)
+	if printer != nil {
+		response.PrinterID, response.PrinterName = printer.ID, printer.Name
+	}
+	return response, nil
+}
+
+// previewPrinter es la impresora elegida para la vista previa: una impresora activa (las mismas que
+// lista documents/printers, con el mismo permiso de lectura) cuyo papel coincide con paper_width si
+// se indicó.
+func (handler *service) previewPrinter(id string, paperWidth int) (*kitchen.Printer, error) {
+	if err := validID(id); err != nil {
+		return nil, err
+	}
+	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, id)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !printer.Active) {
+		return nil, invalid("Elige una impresora activa para la vista previa.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if paperWidth != 0 && paperWidth != printer.PaperWidth {
+		return nil, invalid("El ancho de papel no corresponde a la impresora elegida.")
+	}
+	return printer, nil
 }
 
 // previewInputData son los datos con que se renderiza una vista previa: includeExpected decide el
