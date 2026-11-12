@@ -38,10 +38,16 @@ type Printer struct {
 	// AcceptsESCPos marca una impresora CUPS que entiende ESC/POS (etapa 9B): solo entonces, y si su
 	// cola admite datos raw, recibe documentos con negrita, tamaños o logotipo. Desactivada por
 	// omisión; en ESC/POS por red no aplica (siempre recibe ESC/POS).
-	AcceptsESCPos bool    `json:"accepts_escpos"`
-	Active        bool    `json:"active"`
-	FallbackID    *string `json:"fallback_id"`
-	Revision      int     `json:"revision"`
+	AcceptsESCPos bool `json:"accepts_escpos"`
+	// Columns son las columnas de texto elegidas para la impresora (etapa 9C, §5.3): nil es el
+	// valor predeterminado de su papel (42 en 80 mm y 30 en 58 mm); la otra opción de la lista
+	// cerrada es 48 (80 mm) o 32 (58 mm). Viaja en la fotografía de cada trabajo: la reimpresión de
+	// una comanda sale con las columnas del original y las fotografías anteriores a la 9C, sin el
+	// campo, con el predeterminado.
+	Columns    *int    `json:"columns"`
+	Active     bool    `json:"active"`
+	FallbackID *string `json:"fallback_id"`
+	Revision   int     `json:"revision"`
 }
 
 type Station struct {

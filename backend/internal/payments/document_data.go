@@ -54,14 +54,15 @@ func commercialPayment(payment DocumentPayment) documents.CommercialPayment {
 	}
 }
 
-// renderCommercial renderiza un documento comercial con una versión de plantilla. identity, si no
-// es nil, sustituye la identidad copiada (impresión con la plantilla vigente).
-func renderCommercial(version *documents.Version, document *CommercialDocument, identity *documents.Identity, paper int) (*documents.Layout, error) {
+// renderCommercial renderiza un documento comercial con una versión de plantilla al ancho indicado
+// (papel y columnas de la impresora). identity, si no es nil, sustituye la identidad copiada
+// (impresión con la plantilla vigente).
+func renderCommercial(version *documents.Version, document *CommercialDocument, identity *documents.Identity, width documents.RenderOptions) (*documents.Layout, error) {
 	data := CommercialData(document)
 	if identity != nil {
 		data.Identity = *identity
 	}
-	return documents.Render(version.Kind, version.Template, documents.Data{Commercial: &data}, documents.RenderOptions{PaperWidth: paper})
+	return documents.Render(version.Kind, version.Template, documents.Data{Commercial: &data}, width)
 }
 
 // rerenderDocument imprime un ticket o precuenta histórico con la plantilla vigente y la identidad
@@ -111,7 +112,7 @@ func (handler *service) rerenderDocument(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	layout, err := renderCommercial(version, &document, &identity, printer.PaperWidth)
+	layout, err := renderCommercial(version, &document, &identity, printer.RenderOptions())
 	if err != nil {
 		return nil, err
 	}

@@ -118,17 +118,25 @@ func kitchenPart(part Part) documents.KitchenPart {
 	return converted
 }
 
-// RenderDocument renderiza una comanda con una versión de plantilla al ancho de papel indicado.
+// RenderDocument renderiza una comanda con una versión de plantilla al ancho de papel indicado, con
+// las columnas predeterminadas del papel.
 func RenderDocument(version *documents.Version, document Document, paperWidth int) (*documents.Layout, error) {
-	data := DocumentData(document)
-	return documents.Render(version.Kind, version.Template, documents.Data{Kitchen: &data}, documents.RenderOptions{PaperWidth: paperWidth})
+	return renderDocumentWith(version, document, documents.RenderOptions{PaperWidth: paperWidth})
 }
 
-// renderStored renderiza una comanda guardada con la versión de plantilla que guardó al emitirse.
-func (handler *service) renderStored(document Document, paperWidth int) (*documents.Layout, error) {
+// renderDocumentWith renderiza una comanda con el ancho indicado (papel y, desde la etapa 9C, las
+// columnas de la impresora destino).
+func renderDocumentWith(version *documents.Version, document Document, options documents.RenderOptions) (*documents.Layout, error) {
+	data := DocumentData(document)
+	return documents.Render(version.Kind, version.Template, documents.Data{Kitchen: &data}, options)
+}
+
+// renderStored renderiza una comanda guardada con la versión de plantilla que guardó al emitirse,
+// con el ancho indicado: el de la impresora destino al imprimir (Printer.RenderOptions).
+func (handler *service) renderStored(document Document, options documents.RenderOptions) (*documents.Layout, error) {
 	version, err := documents.VersionByID(handler.ctx, handler.tx, documentKind(document.Kind), document.TemplateVersionID)
 	if err != nil {
 		return nil, err
 	}
-	return RenderDocument(version, document, paperWidth)
+	return renderDocumentWith(version, document, options)
 }

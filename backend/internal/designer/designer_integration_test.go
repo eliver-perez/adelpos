@@ -292,6 +292,8 @@ func TestDocumentDesignerAcceptance(t *testing.T) {
 	t.Run("vista previa con datos de muestra", func(t *testing.T) { testSamplePreview(t, value) })
 	t.Run("importes de la lista de cocina según Cocina", func(t *testing.T) { testKitchenPricesFollowKitchen(t, value) })
 	t.Run("muestras sin ventas ni pagos y resultado de la cola", func(t *testing.T) { testSamplePrinting(t, value) })
+	// Etapa 9C (§5.3): vista previa y muestras con las columnas de la impresora elegida.
+	t.Run("vista previa con la impresora elegida y sus columnas", func(t *testing.T) { testPrinterPreview(t, value) })
 }
 
 func testSeedAndCatalog(t *testing.T, value *fixture) {

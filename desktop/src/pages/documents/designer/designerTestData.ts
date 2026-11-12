@@ -277,6 +277,7 @@ export const printers: PrinterCompatibility[] = [
     transport: 'agent',
     paper_width: 80,
     columns: 42,
+    default_columns: 42,
     format: {
       status: 'unsupported',
       code: 'agent',

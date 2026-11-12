@@ -390,3 +390,102 @@ coordinador, sin editarla).
   fuera de la captura.
 - Los módulos con pestañas propias que no informan su pestaña a la ruta: Documentos (alcance de D1),
   Caja (no es de Administración), Cobros y Configuración (acordeones).
+
+## Fase D (parte D1, en paralelo con la fase A) · Pendientes de backend
+
+Hecha por un solo agente (D1) el 11/11/2026, en paralelo con la fase A, sin subagentes. Sin migración nueva: usa la
+0020 tal como está (`kitchen_printers.columns`, NULL = predeterminado del papel). Ningún permiso, lock ni regla de
+negocio nuevos.
+
+### §5.1 · reportes del sistema anterior
+
+- **«Cuentas anuladas»** (`sales.voided_accounts`, grupo Ventas, `reports.read` + `reports.sales.read`, como
+  «Productos cancelados»): una fila por cuenta anulada con motivo (`account.void`) o liberada vacía
+  (`account.released`, «Cuenta vacía liberada»): fecha de anulación, folio, tipo, quién anuló, terminal, motivo,
+  modalidad, mesa u origen, área, unidades canceladas e importe de esas unidades (opcionales: nombre de la cuenta,
+  apertura y quién abrió). Filtros: tipo, modalidad, área y usuario. Fecha: la de la anulación con la hora de inicio
+  del día.
+- **«Modificaciones de cantidades»** (`products.quantity_changes`, grupo Productos, mismo permiso): una fila por
+  cancelación (`item.cancelled`) o modificación que retiró unidades (`item.modified` con `cancelled_unit_ids`) de una
+  partida ya confirmada: fecha, folio, producto, cambio («Cantidad reducida» o «Partida cancelada»), cantidad anterior y
+  nueva (sin total), diferencia en unidades e importe (con signo negativo y total), quién y motivo (opcionales: acción,
+  terminal, modalidad, mesa u origen y unidades ya liberadas a cocina). Filtros: producto, modalidad y usuario. La
+  cantidad anterior de una modificación sale de su evento; la de una cancelación, de la respuesta idempotente de esa
+  misma operación (la cuenta como quedó) más lo retirado; si faltara, queda vacía (no se inventa).
+- **Sin columna «Autorizó»** en ninguno: AD-EL POS no pide autorización de otra persona para esas acciones (Fase 0,
+  decisión 3); ambos lo dicen en una nota.
+- «Recibió» ya existía en «Compras recibidas por periodo» (comprobado por su etiqueta). La **referencia del
+  comprobante** es columna opcional nueva en «Devoluciones» («Referencia» y «Referencia del pago original») y en
+  «Correcciones de pagos» («Referencia original» y «Referencia correcta»); «Detalle de cobros» ya la tenía.
+- Registro de 92 a **94 reportes**; ambos en `EXPORTABLE_REPORTS` (`export.rs`). Sin filtros nuevos: `api.rs` no cambió
+  su lista blanca. Transacción de solo lectura del ejecutor, sin locks.
+- **Índice: no hace falta.** Medido con un año sintético (607 214 eventos de restaurante, 667 MB; 1 038 cuentas
+  anuladas y 5 201 cancelaciones en el año): «Cuentas anuladas» 21 ms y «Modificaciones de cantidades» 141 ms (mejor de
+  3, ejecutor completo); con un índice parcial candidato sobre `restaurant_events(created_at)` para esos tipos, 20 ms y
+  141 ms: no lo usan, porque parten de las cuentas anuladas y de las unidades canceladas (índice de la 0017) y leen el
+  evento por el índice de la cuenta. La 0020 no se tocó.
+
+### §5.2 · imágenes del catálogo
+
+`logoraster.CheckJPEGMarkers` exporta el recorrido de marcadores (100 barridos y 1024 segmentos) con errores neutros
+(`ErrJPEGTooManyScans`, `ErrJPEGTooManySegments`); el logotipo conserva sus mensajes. `catalog/images.go` lo llama antes
+de leer el encabezado o decodificar, con mensajes propios («La imagen JPEG tiene demasiados barridos progresivos
+(máximo 100)…»). El JPEG progresivo de 1 MiB con unos 61 000 barridos se rechaza al instante (prueba unitaria < 500 ms
+y aceptación con PostgreSQL < 2 s); el máximo exacto se acepta y se guarda.
+
+### §5.3 · columnas por impresora
+
+- `kitchen.Printer.columns` (null = predeterminado): lista cerrada en Go (80 mm: 42 o 48; 58 mm: 30 o 32) y en
+  PostgreSQL (CHECK de la 0020); el predeterminado se guarda como NULL; cambiar el papel sin elegir columnas válidas se
+  rechaza con «Con papel de 58 mm las columnas de texto son 30 (predeterminado) o 32; 48 no es una opción. Si cambiaste
+  el papel, elige de nuevo las columnas.» (la interfaz las devuelve al predeterminado al cambiar el papel). Requiere
+  `kitchen.printers.manage` y queda en `printer.saved` como cualquier cambio de impresora.
+- El renderizador único usa el papel y las columnas de la impresora destino (`Printer.RenderOptions`; texto grande de
+  Cocina a la mitad; el logotipo sigue por puntos): comandas, prueba técnica, muestras del diseñador, precuentas,
+  tickets, comprobantes y cortes (impresora de tickets de Cobros). La **reimpresión** de comandas usa la fotografía del
+  trabajo original (las anteriores a la 9C no tienen el campo: predeterminado); los comerciales y de caja copian su
+  texto. **«Imprimir con la plantilla vigente»** usa ahora la configuración actual de la impresora del original.
+- **CUPS en texto**: con el predeterminado los argumentos de `lp` no cambian (cpi 12 o 6); con otras columnas, cpi en
+  proporción (12 × columnas ÷ predeterminado: 13.71 para 48 y 12.8 para 32; 6.86 y 6.4 con el texto grande). Que la
+  impresora respete esa densidad es **prueba física pendiente**. ESC/POS por red y CUPS raw no cambian (fuente A: 48 =
+  576 puntos, 32 = 384).
+- **«Imprimir prueba de ancho»** junto a la opción en Cocina → Impresoras (`POST kitchen/printers/{id}/width-test`,
+  `kitchen.printers.manage`, operación cerrada `kitchen_printer_width_test`): regla numerada con decenas, línea completa
+  de guiones y renglón «Producto de ejemplo … $1,234.50», entre marcas «*** PRUEBA DE ANCHO ***», con las columnas
+  elegidas aunque no se hayan guardado, en un ticket `test` por la cola de siempre; sin ventas, pagos ni movimientos;
+  su copia desde la cola repite el texto y se audita (`print.width_test_requested`).
+- **Vista previa del diseñador**: además de 58/80 mm, «Ver con el ancho de una impresora» (impresoras activas de
+  `documents/printers`, que ahora informa sus columnas y `default_columns`); `documents/preview` acepta `printer_id` y
+  responde `printer_id`, `printer_name` y las columnas usadas.
+- **Equivalencia de la 9B intacta con el predeterminado**: `TestDefaultKitchenTemplatesMatchLegacyRenderer`,
+  `TestPlainLayoutKeepsTransportBytesAndArguments`, `TestPlainLayoutKeepsESCPosBytesOverTCP`,
+  `TestDefaultCommercialTemplatesMatchLegacyRenderer`, `TestDefaultCashTemplatesMatchLegacyRenderer` y la cadena 9B de
+  `internal/operations` aprobadas; nuevas: salida a 48 y 32 en los diez tipos, valor fuera de la lista rechazado (Go y
+  PostgreSQL), reimpresión exacta tras cambiar las columnas y prueba de ancho con conteos antes y después.
+
+### §4.4 · apariencia de usuarios nuevos (solo Go)
+
+Al crear un usuario, Go copia la apariencia de Configuración general a sus preferencias; cambiarla después no altera a
+los existentes; un usuario sin preferencias guardadas la usa como respaldo al leerlas (también `auth/me`). La etiqueta
+de la pantalla la cambia la parte D2.
+
+### Pruebas ejecutadas (copia aislada, clúster temporal 55499)
+
+- `go vet ./...` y `go vet -tags=integration ./...`: sin hallazgos. `go test -race` de `reports`, `catalog`,
+  `logoraster`, `kitchen`, `documents`, `designer`, `payments` y `administration`: `ok`.
+- Integración: `internal/reports` (incluye `TestStage9CCancellationReports` y las exportaciones), `internal/reports/operational`,
+  `internal/catalog`, `internal/designer`, `internal/database`, `internal/administration` y `internal/operations`
+  (`TestRestaurantAcceptance` con los cuatro subtests 9C): `ok`.
+- Rust `cargo test --locked --offline`: 34 aprobadas (una nueva). Vitest completo: 63 archivos, 575 pruebas; `npx tsc
+--noEmit` y `npm run build`: sin errores. Playwright (Chromium, puertos 8185/1423):
+  `workflow-stage9b-designer.spec.ts` aprobado con la vista previa nueva.
+
+### Limitaciones
+
+- El respaldo automático de impresora no vuelve a renderizar (como ya ocurría con el papel): si el respaldo tiene
+  otras columnas, el texto conserva las del original y CUPS usa la densidad del respaldo.
+- La vista previa de una comanda en la cola y la precuenta en pantalla siguen a 80 mm y 42 columnas (como antes).
+- Las cuentas anuladas muestran la mesa y el área actuales de la cuenta.
+- La densidad fraccionaria de CUPS (13.71, 12.8) y 48/32 columnas en papel: prueba física pendiente; la prueba de ancho
+  existe para comprobarlo antes de elegir.
+- La lista de impresoras de la vista previa es un `<select>` (la fase B lo sustituye por el selector nuevo).

@@ -21,6 +21,8 @@ export interface PreviewRequest {
   kind: DocumentKind;
   layout: TemplateLayout;
   paperWidth: PaperWidth;
+  // Impresora elegida (etapa 9C): vacía para los anchos predeterminados de 58 u 80 mm.
+  printerID?: string;
   source: PreviewSource;
 }
 
@@ -64,6 +66,7 @@ export function usePreview(request: PreviewRequest | null) {
         next.request.layout,
         next.request.paperWidth,
         next.request.source,
+        next.request.printerID ?? '',
       );
       // Si mientras tanto cambió el borrador, esta respuesta ya no corresponde: se espera la nueva.
       if (mounted.current && next.key === wantedKey.current) {

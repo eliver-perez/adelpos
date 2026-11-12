@@ -70,9 +70,11 @@ func requireNoPendingCopy(ctx context.Context, tx pgx.Tx, ticketID string) error
 }
 
 // RerenderTarget valida que un ticket admite imprimirse con la plantilla vigente y devuelve la
-// fotografía de la impresora de su trabajo original. Como en las reimpresiones, se rechaza mientras
-// el original siga sin resolver (400) o exista otra copia sin resolver del documento, exacta o con
-// la plantilla vigente (409 PRINT_COPY_PENDING).
+// impresora de su trabajo original con su configuración actual (etapa 9C): la impresión con la
+// plantilla vigente es un documento nuevo y usa el papel, las columnas y el destino vigentes de esa
+// impresora, a diferencia de la reimpresión exacta, que conserva la fotografía. Como en las
+// reimpresiones, se rechaza mientras el original siga sin resolver (400) o exista otra copia sin
+// resolver del documento, exacta o con la plantilla vigente (409 PRINT_COPY_PENDING).
 func RerenderTarget(ctx context.Context, tx pgx.Tx, sourceTicketID string) (*Printer, error) {
 	original, err := one[PrintJob](ctx, tx, `SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j
         WHERE ticket_id=$1 AND original_job_id IS NULL ORDER BY created_at LIMIT 1`, sourceTicketID)
@@ -85,8 +87,8 @@ func RerenderTarget(ctx context.Context, tx pgx.Tx, sourceTicketID string) (*Pri
 	if err := requireNoPendingCopy(ctx, tx, sourceTicketID); err != nil {
 		return nil, err
 	}
-	printer := original.PrinterSnapshot
-	return &printer, nil
+	// Las impresoras no se eliminan (los trabajos las referencian): la actual siempre existe.
+	return one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", original.PrinterID)
 }
 
 // rerenderSourceKind es el tipo del documento original de un histórico impreso con la plantilla
@@ -164,7 +166,7 @@ func (handler *service) rerender() (any, error) {
 	}
 	data := DocumentData(*document)
 	data.Identity = identity
-	layout, err := documents.Render(version.Kind, version.Template, documents.Data{Kitchen: &data}, documents.RenderOptions{PaperWidth: printer.PaperWidth})
+	layout, err := documents.Render(version.Kind, version.Template, documents.Data{Kitchen: &data}, printer.RenderOptions())
 	if err != nil {
 		return nil, err
 	}

@@ -77,8 +77,9 @@ type CommercialDocument struct {
 }
 
 // buildDocument arma la precuenta o el ticket y lo renderiza con la plantilla activa de su tipo al
-// ancho de papel indicado. Devuelve también la IR para encolarla.
-func (handler *service) buildDocument(finance *Finance, kind string, payment *PaymentRecord, paper int) (*CommercialDocument, *documents.Layout, error) {
+// ancho indicado (papel y, desde la etapa 9C, las columnas de la impresora de tickets). Devuelve
+// también la IR para encolarla.
+func (handler *service) buildDocument(finance *Finance, kind string, payment *PaymentRecord, width documents.RenderOptions) (*CommercialDocument, *documents.Layout, error) {
 	var establishment, timezone, cashier string
 	err := handler.tx.QueryRow(handler.ctx, "SELECT e.name,e.timezone,u.display_name FROM app.establishment e, app.users u WHERE u.id=$1",
 		handler.request.Actor.UserID).Scan(&establishment, &timezone, &cashier)
@@ -152,7 +153,7 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 	versionID := version.ID
 	document.TemplateVersionID = &versionID
 	document.Identity = &identity
-	layout, err := renderCommercial(version, document, nil, paper)
+	layout, err := renderCommercial(version, document, nil, width)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,14 +201,6 @@ func (handler *service) addDollarTotal(document *CommercialDocument, kind string
 	return nil
 }
 
-// paperWidth normaliza el ancho de papel de una impresora (58 u 80 mm).
-func paperWidth(paper int) int {
-	if paper == 58 {
-		return 58
-	}
-	return 80
-}
-
 // requirePrintPermission valida antes de escribir el permiso para imprimir el ticket solicitado.
 func (handler *service) requirePrintPermission(print *bool) error {
 	if print != nil && *print {
@@ -226,11 +219,13 @@ func (handler *service) enqueueDocument(finance *Finance, kind string, payment *
 		return map[string]any{"requested": true, "status": "not_configured",
 			"message": "No hay impresora de tickets configurada; el pago quedó registrado."}, nil
 	}
-	var paper int
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT paper_width FROM app.kitchen_printers WHERE id=$1", *settings.ReceiptPrinterID).Scan(&paper); err != nil {
+	// El documento se renderiza con el papel y las columnas de la impresora de tickets (etapa 9C);
+	// con las predeterminadas, exactamente como antes.
+	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *settings.ReceiptPrinterID)
+	if err != nil {
 		return nil, err
 	}
-	document, layout, err := handler.buildDocument(finance, kind, payment, paperWidth(paper))
+	document, layout, err := handler.buildDocument(finance, kind, payment, printer.RenderOptions())
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +291,7 @@ func (handler *service) precheck(parts []string) (any, error) {
 		return nil, err
 	}
 	// La vista previa usa la misma plantilla que la impresión, al ancho de 80 mm como antes.
-	document, _, err := handler.buildDocument(finance, "precheck", nil, 80)
+	document, _, err := handler.buildDocument(finance, "precheck", nil, documents.RenderOptions{PaperWidth: 80})
 	return document, err
 }
 

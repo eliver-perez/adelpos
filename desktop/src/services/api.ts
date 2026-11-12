@@ -25,6 +25,7 @@ export type Operation =
   | 'kitchen_reprint'
   | 'kitchen_save_station'
   | 'kitchen_save_printer'
+  | 'kitchen_printer_width_test'
   | 'kitchen_save_route'
   | 'kitchen_release'
   | 'kitchen_schedule'

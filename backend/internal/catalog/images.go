@@ -5,12 +5,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
 
 	"github.com/jackc/pgx/v5"
+
+	"local/ad-el-pos/server/internal/logoraster"
 )
 
 func images(ctx context.Context, tx pgx.Tx, request Request, parts []string, audit Audit) (any, error) {
@@ -47,6 +50,13 @@ func images(ctx context.Context, tx pgx.Tx, request Request, parts []string, aud
 	content, err := base64.StdEncoding.Strict().DecodeString(input.Content)
 	if err != nil || len(content) == 0 || len(content) > 1024*1024 {
 		return nil, invalid("La imagen debe ser PNG o JPEG y ocupar como máximo 1 MiB.")
+	}
+	// Etapa 9C (§5.2): el decodificador de Go no limita los barridos de un JPEG progresivo y cada uno
+	// recorre todos los bloques de la imagen (un archivo de 1 MiB con miles de barridos vacíos tardaba
+	// más de un minuto). Antes de leer el encabezado o decodificar se recorren sus marcadores con la
+	// misma validación del logotipo (como máximo 100 barridos y 1024 segmentos).
+	if err := checkImageMarkers(content); err != nil {
+		return nil, err
 	}
 	configuration, format, err := image.DecodeConfig(bytes.NewReader(content))
 	validFormat := format == "png" || format == "jpeg"
@@ -96,4 +106,19 @@ func images(ctx context.Context, tx pgx.Tx, request Request, parts []string, aud
 		nil,
 		result,
 	)
+}
+
+// checkImageMarkers traduce el recorrido de marcadores JPEG de logoraster a los mensajes del
+// catálogo. Un PNG no se recorre.
+func checkImageMarkers(content []byte) error {
+	err := logoraster.CheckJPEGMarkers(content)
+	switch {
+	case errors.Is(err, logoraster.ErrJPEGTooManyScans):
+		return invalid(fmt.Sprintf("La imagen JPEG tiene demasiados barridos progresivos (máximo %d). "+
+			"Guárdala de nuevo como PNG o como JPEG estándar.", logoraster.MaxJPEGScans))
+	case errors.Is(err, logoraster.ErrJPEGTooManySegments):
+		return invalid(fmt.Sprintf("La imagen JPEG tiene demasiados segmentos (máximo %d). "+
+			"Guárdala de nuevo como PNG o como JPEG estándar.", logoraster.MaxJPEGSegments))
+	}
+	return nil
 }

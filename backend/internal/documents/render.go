@@ -17,19 +17,40 @@ type RenderOptions struct {
 	// PaperWidth es el ancho del papel en milímetros (58 u 80).
 	PaperWidth int
 	// Columns sustituye el ancho en caracteres calculado del papel; cero usa el del papel (30 o 42).
-	// Solo lo usan las envolturas de compatibilidad de las pruebas anteriores a la 9B.
+	// Desde la etapa 9C lo fija la impresora destino cuando tiene otras columnas (48 en 80 mm o 32 en
+	// 58 mm, ColumnChoices); con el predeterminado queda en cero y la salida es idéntica a la de la
+	// 9B. También lo usan las envolturas de compatibilidad de las pruebas anteriores a la 9B.
 	Columns int
 	// IncludeExpected permite el bloque protegido de los cortes: solo cuando quien imprime tiene
 	// cash.expected.read y el turno no está en arqueo (lo decide el módulo de caja).
 	IncludeExpected bool
 }
 
-// ColumnsFor es el ancho en caracteres de una línea normal para un ancho de papel.
+// ColumnsFor es el ancho en caracteres de una línea normal para un ancho de papel: el valor
+// predeterminado desde la etapa 5 (42 en 80 mm y 30 en 58 mm).
 func ColumnsFor(paperWidth int) int {
 	if paperWidth == 58 {
 		return 30
 	}
 	return 42
+}
+
+// ColumnChoices es la lista cerrada de columnas de texto que admite un ancho de papel (etapa 9C,
+// §5.3): el predeterminado primero y el ancho completo después (48 en 80 mm y 32 en 58 mm, para
+// impresoras que imprimen todo el ancho; el restaurante lo elige tras una prueba física).
+func ColumnChoices(paperWidth int) []int {
+	if paperWidth == 58 {
+		return []int{30, 32}
+	}
+	return []int{42, 48}
+}
+
+// ValidColumns indica si unas columnas pertenecen a la lista cerrada de un ancho de papel.
+func ValidColumns(paperWidth, columns int) bool {
+	if paperWidth != 58 && paperWidth != 80 {
+		return false
+	}
+	return slices.Contains(ColumnChoices(paperWidth), columns)
 }
 
 // pendingLine es una línea producida por un bloque antes de aplicar alineación y atributos.

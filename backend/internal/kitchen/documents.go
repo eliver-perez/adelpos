@@ -171,10 +171,12 @@ func clearInstructionPrices(instruction *Instructions) {
 	}
 }
 
-// enqueue renderiza una comanda guardada al ancho de la impresora destino, con la versión de
-// plantilla que guardó al emitirse, y la encola.
+// enqueue renderiza una comanda guardada al ancho de la impresora destino (papel y columnas), con
+// la versión de plantilla que guardó al emitirse, y la encola. Una reimpresión desde la cola pasa
+// la fotografía del trabajo original: sale con las columnas con que se emitió (las fotografías
+// anteriores a la etapa 9C no las tienen y salen con las predeterminadas, como entonces).
 func (handler *service) enqueue(document Document, printer Printer, originalID *string) (*PrintJob, error) {
-	layout, err := handler.renderStored(document, printer.PaperWidth)
+	layout, err := handler.renderStored(document, printer.RenderOptions())
 	if err != nil {
 		return nil, err
 	}

@@ -116,7 +116,7 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		return nil, err
 	}
 	scope := "configuration"
-	if parts[0] == "jobs" || parts[0] == "reprint" || parts[0] == "test-print" || parts[0] == "print-jobs" {
+	if parts[0] == "jobs" || parts[0] == "reprint" || parts[0] == "test-print" || parts[0] == "print-jobs" || isWidthTestRoute(parts) {
 		scope = "printing"
 	}
 	if parts[0] == "states" || parts[0] == "releases" {
@@ -126,6 +126,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 		return nil, err
 	}
 	return result, nil
+}
+
+// isWidthTestRoute identifica kitchen/printers/{id}/width-test (etapa 9C).
+func isWidthTestRoute(parts []string) bool {
+	return len(parts) == 3 && parts[0] == "printers" && parts[2] == "width-test"
 }
 
 // isRerenderRoute identifica kitchen/print-jobs/rerender.
@@ -190,6 +195,10 @@ func routePermission(method string, parts []string) string {
 		if resource == "tickets" && parts[2] == "ack" {
 			return "kitchen.kds.ack"
 		}
+		// Etapa 9C (§5.3): la prueba de ancho es parte de configurar la impresora.
+		if resource == "printers" && parts[2] == "width-test" {
+			return "kitchen.printers.manage"
+		}
 	}
 	return ""
 }
@@ -199,6 +208,9 @@ func (handler *service) write(parts []string) (any, error) {
 	case "stations":
 		return handler.saveStation(parts)
 	case "printers":
+		if isWidthTestRoute(parts) {
+			return handler.widthTest(parts[1])
+		}
 		return handler.savePrinter(parts)
 	case "routes":
 		return handler.saveRoute(parts)
