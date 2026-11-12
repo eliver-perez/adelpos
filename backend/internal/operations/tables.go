@@ -19,6 +19,10 @@ import (
 //   - partial_payment: alguna cuenta tiene pagado neto mayor que cero y saldo pendiente;
 //   - occupied: cualquier otra cuenta abierta, también la que aún no tiene productos.
 //
+// long_open (etapa 9D, §3.4) marca la mesa cuya cuenta abierta más antigua lleva más horas que el
+// umbral del establecimiento (restaurant_settings.long_open_hours), con la misma hora del servidor
+// que occupied_seconds.
+//
 // Con varias cuentas gana el estado más avanzado (esperando pago > pago parcial > ocupada). El total,
 // lo pagado y el saldo salen de la fórmula única de payments (AccountStandingSQL).
 var tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
@@ -26,6 +30,8 @@ var tableQuery = `SELECT to_jsonb(t) || jsonb_build_object(
     'occupied_since',occupancy.occupied_since,
     'occupied_seconds',occupancy.occupied_seconds,
     'balance',occupancy.balance::text,
+    'long_open',occupancy.account_count>0
+        AND occupancy.occupied_seconds>(SELECT s.long_open_hours FROM app.restaurant_settings s)::bigint*3600,
     'state',CASE WHEN NOT t.active OR t.out_of_service THEN 'out_of_service'
         WHEN occupancy.account_count=0 THEN 'free'
         WHEN occupancy.awaiting_payment THEN 'awaiting_payment'

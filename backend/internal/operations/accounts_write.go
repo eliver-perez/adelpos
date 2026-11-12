@@ -305,11 +305,14 @@ func (handler *service) accountAction(id, action string) (any, error) {
 			return nil, err
 		}
 	case "void":
+		// Forma anterior (etapas 4–9C) de cancelar una cuenta vacía con motivo libre, que se conserva por
+		// compatibilidad; desde la etapa 9D la interfaz usa «Cancelar cuenta» (cancel-account) y
+		// «Descartar» (discard).
 		if account.ConfirmedQuantity > 0 || account.DraftQuantity > 0 {
-			return nil, invalid("La cuenta conserva productos activos o borradores. Resuélvelos antes de anularla.")
+			return nil, invalid("La cuenta conserva productos activos o borradores. Resuélvelos antes de cancelarla.")
 		}
 		if len(strings.TrimSpace(input.Reason)) < 5 || len(input.Reason) > 500 {
-			return nil, invalid("Indica un motivo de anulación de entre 5 y 500 caracteres.")
+			return nil, invalid("Indica un motivo de cancelación de entre 5 y 500 caracteres.")
 		}
 		if err := payments.RequireNoNetFinance(handler.ctx, handler.tx, id); err != nil {
 			return nil, err

@@ -199,7 +199,8 @@ func init() {
 	})
 	register(Definition{
 		ID: "products.cancelled", Group: "products", Title: "Productos cancelados",
-		Description: "Unidades confirmadas que se cancelaron, con la fecha de cancelación, el motivo y quién canceló.",
+		Description: "Unidades confirmadas que se cancelaron (también al cancelar su cuenta), con la fecha de cancelación, el motivo y " +
+			"quién canceló.",
 		Permissions: []string{PermissionSales}, DateBasis: "Fecha de cancelación de la unidad, con la hora de inicio del día.",
 		Filters: []Filter{filterProduct(), filterMode()},
 		Columns: []Column{dateTimeColumn("cancelled_at", "Cancelación"), codeColumn("folio", "Folio"), textColumn("product", "Producto"),
@@ -211,15 +212,17 @@ func init() {
 			list.when(query, "product_id", "i.product_id = @product_id::uuid")
 			list.when(query, "mode", "a.mode = @mode")
 			rows, err := query.collect(ctx, `SELECT u.cancelled_at,a.folio::text AS folio,coalesce(v.quote_line->>'name','') AS product,
-                    1::bigint AS quantity,u.total AS amount,coalesce(event.reason,'') AS reason,coalesce(author.display_name,'') AS cancelled_by,
+                    1::bigint AS quantity,u.total AS amount,
+                    CASE WHEN event.kind='account.cancelled' THEN 'Cuenta cancelada: '||coalesce(event.reason,'')
+                        ELSE coalesce(event.reason,'') END AS reason,coalesce(author.display_name,'') AS cancelled_by,
                     CASE WHEN EXISTS(SELECT FROM app.kitchen_unit_releases k WHERE k.unit_id=u.id) THEN 'Sí' ELSE 'No' END AS released
                 FROM app.restaurant_item_units u
                 JOIN app.restaurant_item_versions v ON v.id=u.version_id
                 JOIN app.restaurant_items i ON i.id=u.item_id
                 JOIN app.restaurant_accounts a ON a.id=u.account_id
                 LEFT JOIN LATERAL (
-                    SELECT e.payload->'after'->>'reason' AS reason,e.author_id FROM app.restaurant_events e
-                    WHERE e.account_id=u.account_id AND e.kind IN ('item.cancelled','item.modified')
+                    SELECT e.kind,e.payload->'after'->>'reason' AS reason,e.author_id FROM app.restaurant_events e
+                    WHERE e.account_id=u.account_id AND e.kind IN ('item.cancelled','item.modified','account.cancelled')
                         AND (coalesce(e.payload->'after'->'unit_ids','[]'::jsonb) ? u.id::text
                             OR coalesce(e.payload->'after'->'cancelled_unit_ids','[]'::jsonb) ? u.id::text)
                     ORDER BY e.sequence DESC LIMIT 1

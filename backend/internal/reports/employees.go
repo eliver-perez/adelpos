@@ -7,13 +7,14 @@ import (
 // Reportes por empleado (§16, fase B2): solo lo que los registros respaldan. Relaciones confiables:
 //   - confirmó: autor de la confirmación del pedido (restaurant_orders kind='confirmation'); las
 //     unidades confirmadas son las que nacieron con esa confirmación (no las agregadas después);
-//   - canceló partidas: autor del evento item.cancelled;
+//   - canceló partidas: autor del evento item.cancelled (y, desde la etapa 9D, account.cancelled:
+//     «Cancelar cuenta» retira todas las unidades activas de la cuenta);
 //   - responsable de la cuenta: el responsable copiado al reconocer la venta (al cerrar la cuenta);
 //     la venta se atribuye solo a él, de modo que nunca se cuenta dos veces;
 //   - cobró, devolvió y corrigió: quien registró el pago o la devolución (sin turnos en arqueo y, como
 //     los reportes de cobros y de caja, solo de los turnos que el usuario puede consultar en Caja);
 //   - aplicó descuentos o cortesías y autorizó como supervisor: los ajustes vigentes y las
-//     autorizaciones puntuales;
+//     autorizaciones puntuales (desde la etapa 9D también las de «Cancelar cuenta»);
 //   - movimientos de caja: quien registró la operación de efectivo (sin turnos en arqueo y con el
 //     mismo alcance de Caja).
 // Las cifras de venta (reconocimientos), confirmaciones, cancelaciones, descuentos y autorizaciones
@@ -43,7 +44,7 @@ func init() {
 			described(countColumn("discounts", "Descuentos aplicados"), "Descuentos vigentes que aplicó."),
 			described(moneyColumn("discount_amount", "Importe descontado"), "Importe de esos descuentos."),
 			optional(countColumn("courtesies", "Cortesías aplicadas")), optional(moneyColumn("courtesy_amount", "Importe de cortesías")),
-			described(countColumn("authorizations", "Autorizaciones como supervisor"), "Descuentos, cortesías, devoluciones, correcciones y anulaciones que autorizó."),
+			described(countColumn("authorizations", "Autorizaciones como supervisor"), "Descuentos, cortesías, devoluciones, correcciones, cancelaciones de ajustes y cancelaciones de cuentas que autorizó."),
 			described(countColumn("refunds", "Devoluciones"), "Devoluciones de dinero que registró."),
 			moneyColumn("refunded", "Importe devuelto"),
 			described(countColumn("cash_operations", "Movimientos de caja"),
@@ -122,9 +123,9 @@ func employeeActivityQuery(ctx context.Context, query *Query) (*Dataset, error) 
             SELECT e.author_id AS user_id,coalesce(sum(CASE WHEN jsonb_typeof(c.units)='array' THEN jsonb_array_length(c.units) ELSE 0 END),0)::bigint
                 AS cancelled_units
             FROM app.restaurant_events e
-            CROSS JOIN LATERAL (SELECT CASE e.kind WHEN 'item.cancelled' THEN e.payload->'after'->'unit_ids'
-                ELSE e.payload->'after'->'cancelled_unit_ids' END AS units) c
-            WHERE e.kind IN ('item.cancelled','item.modified') AND `+inPeriod("e.created_at")+` GROUP BY 1
+            CROSS JOIN LATERAL (SELECT CASE e.kind WHEN 'item.modified' THEN e.payload->'after'->'cancelled_unit_ids'
+                ELSE e.payload->'after'->'unit_ids' END AS units) c
+            WHERE e.kind IN ('item.cancelled','item.modified','account.cancelled') AND `+inPeriod("e.created_at")+` GROUP BY 1
         ),
         responsible AS (
             SELECT r.responsible_user_id AS user_id,
@@ -147,8 +148,12 @@ func employeeActivityQuery(ctx context.Context, query *Query) (*Dataset, error) 
                 AND NOT EXISTS(SELECT FROM app.account_adjustment_voids v WHERE v.adjustment_id=a.id) GROUP BY 1
         ),
         authorizations AS (
-            SELECT pa.authorized_by AS user_id,count(*)::bigint AS authorizations FROM app.payment_authorizations pa
-            WHERE `+inPeriod("pa.created_at")+` GROUP BY 1
+            SELECT granted.user_id,count(*)::bigint AS authorizations FROM (
+                SELECT pa.authorized_by AS user_id FROM app.payment_authorizations pa WHERE `+inPeriod("pa.created_at")+`
+                UNION ALL
+                SELECT ac.authorized_by FROM app.account_cancellations ac
+                WHERE ac.authorized_by IS NOT NULL AND `+inPeriod("ac.created_at")+`
+            ) granted GROUP BY 1
         ),
         cash AS (
             SELECT o.actor_id AS user_id,count(*)::bigint AS cash_operations FROM app.cash_operations o JOIN app.cash_shifts s ON s.id=o.shift_id

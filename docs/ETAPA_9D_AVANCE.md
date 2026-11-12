@@ -271,3 +271,73 @@ descripción de `accounts.manage`. Sin cambios a `restaurant_accounts` (se reuti
     (una liberación bloqueada se libera a mano en Cocina) no cambian y se documentan.
 11. **Umbral de cuenta abierta (§3.4)**: `restaurant_settings.long_open_hours` (12 por omisión) en la 0021, editable en
     «Funciones del establecimiento».
+
+### Fases D y E · backend (parte BE)
+
+Hecha por un solo agente (BE) el 12/11/2026 en `etapa-9d` sobre la Fase 0 (`ecae96d`), sin subagentes, en paralelo
+con la parte A (colores). Copia aislada y clúster temporal 55499; sin tocar la instalación real. Contratos JSON para
+la fase DE en las notas de la parte (directorio temporal de la sesión, `docs9dBE/contratos.md`).
+
+- **Migración única `0021_account_cancellation.sql`** (esquema 21; `config/product.json` + `sync`): catálogo
+  `account_cancel_reasons` (como `discount_reasons`, con «Cliente se retiró sin pagar» —marca de merma—, «Cliente
+  canceló el pedido», «Error de captura» y «Otro» —exige descripción—); registro `account_cancellations` (una fila
+  por cuenta, de solo inserción por disparador: motivo, nombre y marca de merma congelados, descripción, quién
+  canceló, **quién autorizó** —nunca el mismo—, terminal, operación, unidades e importe); `restaurant_settings.
+long_open_hours` (12, CHECK 1–72); permiso `accounts.cancel` («Cancelar cuentas») solo al administrador y nueva
+  descripción de `accounts.manage`. Restricciones con nombre y CHECK con `IS NOT NULL` explícito. No modifica
+  cuentas ni eventos existentes (prueba sobre un esquema 20 con datos).
+- **Cancelar cuenta** (`POST restaurant/accounts/{id}/cancel-account`): cualquier cuenta abierta sin pagos netos
+  (409 `ACCOUNT_HAS_PAYMENTS`: primero la devolución) ni ajustes vigentes (409 `ACCOUNT_HAS_ADJUSTMENTS`: primero
+  quitar el descuento o cargo), de mesa o para llevar, con o sin productos enviados, con motivo del catálogo («Otro»
+  sin descripción: 422). Con `accounts.cancel` basta el permiso propio; sin él, la autorización puntual de un
+  supervisor con el mismo mecanismo de los descuentos (`operations.Request` recibe ahora el autorizador, como
+  `payments`; sin sesión, límite de intentos, sin autoautorización; la contraseña no entra en la huella ni en la
+  auditoría). En la misma transacción (lock 7820148305): borrador descartado, unidades activas canceladas con un
+  solo evento nuevo `account.cancelled`, cuenta en `voided` con su registro, mesa libre, auditoría
+  `restaurant.account.cancelled` (y `restaurant.supervisor_authorized` si hubo supervisor) y evento en tiempo real.
+  Nunca es venta (no se cierra; sin reconocimientos). Las guardas de la etapa 6 se reutilizan (`RequireCancellable`
+  separa los dos casos y termina en `RequireNoNetFinance`; `RequireUnitsFree`, `RequireAccountCovered`).
+- **Cocina e inventario**: `kitchen.Integrate` trata `account.cancelled` como `item.cancelled` (cancela sin papel lo
+  no liberado y manda el aviso de cancelación a las estaciones de lo liberado); `inventory.RecordChange` registra
+  las solicitudes `cancel` de lo consumido y el trabajador, si el motivo marca merma (decisión 4), crea la
+  clasificación como «Preparado / merma» a nombre de quien canceló (resolución manual, nota con el motivo,
+  auditoría `inventory.cancellation_preclassified`), corregible por el encargado hasta el corte como en la etapa 8;
+  con los demás motivos queda «por clasificar». Sin columnas nuevas en inventario.
+- **Catálogo de motivos** (`restaurant/cancel-reasons`): listar con `accounts.read`; crear, renombrar, activar o
+  desactivar, ordenar, «exige descripción» y «lo enviado cuenta como merma» con `payments.settings.manage`, el mismo
+  permiso de los motivos de descuento (para que ambos catálogos vivan juntos en Administración → Cobros); al menos
+  uno activo; renombrar no altera lo registrado.
+- **Descartar cuenta vacía** (`POST restaurant/accounts/{id}/discard`, `accounts.open`, sin motivo): cuentas sin
+  unidades, pedidos, combinaciones ni registros financieros o de cocina, aunque tengan borrador (#1 y #3 de la
+  instalación real); borra el borrador, evento `account.discarded`, no es cancelación ni aparece en reportes. Go
+  informa `discardable` en cada cuenta (`releasable` = `discardable` sin borrador; «Liberar mesa» no cambia).
+  Creación diferida (decisión 2): la API existente ya crea una cuenta para llevar o sin mesa con su primer producto
+  (comprobado); la interfaz es de la fase DE.
+- **Reportes**: «Cuentas anuladas» pasa a **«Cuentas canceladas»** conservando el identificador
+  `sales.voided_accounts` (exportaciones y filtros guardados no se rompen) desde el registro nuevo, con motivo,
+  descripción, importe, quién canceló y **quién autorizó**; las anulaciones anteriores aparecen con «Autorizó» vacío
+  y las liberaciones y descartes ya no aparecen (el filtro «Tipo» se retiró; nuevo filtro por motivo con «Sin motivo
+  del catálogo» para las anteriores). Reporte nuevo **«Cancelaciones por motivo»** (`sales.cancellations_by_reason`,
+  cuentas, unidades, importe y porcentaje, PDF y Excel, en `EXPORTABLE_REPORTS`): 95 reportes. «Productos
+  cancelados», «Modificaciones de cantidades» (un renglón por partida, «Cancelación de la cuenta») y «Actividad por
+  empleado» (unidades canceladas y autorizaciones) incluyen las cuentas canceladas.
+- **Umbral de cuenta abierta (§3.4)**: `GET/PUT settings/long-open-hours` (lectura con cualquier sesión; cambio con
+  `settings.features.manage`, el de «Funciones del establecimiento»; Go valida 1–72, revisión, auditoría y aviso).
+  Go entrega `settings.long_open_hours` con el mapa y las cuentas y calcula `long_open` en cada cuenta y mesa
+  (más de N horas desde la apertura de la cuenta más antigua).
+- **Textos de Go**: «Anular» → «Cancelar» en la descripción de `accounts.manage` y en los mensajes de la anulación
+  anterior, de «Liberar mesa» y de la guarda financiera. La ruta `void` (cuentas vacías con motivo libre,
+  `accounts.manage`) se conserva por compatibilidad; la interfaz ya no la necesita.
+- **Puente y servicios**: siete operaciones nuevas en la lista cerrada de `api.rs` con su prueba Rust; tipos y
+  llamadas en `services/restaurant.ts` y `services/api.ts`.
+
+Pruebas (copia aislada `repo9dBE`, clúster temporal 55499, 12/11/2026): `gofmt` sin diferencias; `go vet ./...` con y
+sin `-tags=integration`, aprobado; `go test -race` de `operations`, `administration`, `payments`, `kitchen`,
+`inventory`, `reports`, `ordering` y `database`, aprobado; integración `internal/database` (con la nueva
+`TestStage9DAccountCancellationUpgrade`: 0021 sobre un esquema 20 con datos), `internal/administration` (umbral y
+permiso), `internal/reports` (con `TestStage9DCancelledAccountsReports` y la de la 9C ajustada), `internal/reports/
+operational` e `internal/operations` (aceptación encadenada completa más `TestStage9DAccountCancellation`), todas
+aprobadas; las de `operations` y `reports` se repitieron sobre el árbol final. `cargo test --locked --offline`: 41
+aprobadas (incluida la prueba de las rutas nuevas), `rustfmt --check` limpio; `npx tsc --noEmit` sin errores y
+Prettier limpio en los servicios. Vitest de `src/services` y `tablePanel.test.tsx` (110 pruebas) aprobado como
+comprobación adicional; la suite completa de Vitest y Playwright quedan para la fase de interfaz y la regresión final.

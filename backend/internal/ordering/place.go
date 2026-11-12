@@ -30,6 +30,8 @@ const (
 	CategoryQuickNotes
 	// InventoryCategories ordena las categorías de insumos (etapa 8).
 	InventoryCategories
+	// AccountCancelReasons ordena los motivos de cancelación de cuentas (etapa 9D).
+	AccountCancelReasons
 )
 
 type scopeDefinition struct {
@@ -63,6 +65,8 @@ var scopes = map[Scope]scopeDefinition{
 	CategoryQuickNotes: {table: "app.catalog_category_quick_notes", group: "category_id", label: "text"},
 	// Categorías de insumos (etapa 8).
 	InventoryCategories: {table: "app.inventory_categories"},
+	// Motivos de cancelación de cuentas (etapa 9D).
+	AccountCancelReasons: {table: "app.account_cancel_reasons"},
 }
 
 // Result informa el orden final del registro colocado y los hermanos que cambiaron de número.

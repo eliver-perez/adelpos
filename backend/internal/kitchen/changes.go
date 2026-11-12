@@ -28,7 +28,8 @@ func (handler *service) integrateChange(eventID, accountID, kind string, payload
 	if err := json.Unmarshal(payload, &change); err != nil {
 		return err
 	}
-	if kind == "item.cancelled" {
+	// item.cancelled y account.cancelled (etapa 9D) nombran en unit_ids las unidades retiradas.
+	if kind == "item.cancelled" || kind == "account.cancelled" {
 		change.Cancelled = change.UnitIDs
 	}
 	affected := append(append([]string{}, change.Modified...), change.Cancelled...)

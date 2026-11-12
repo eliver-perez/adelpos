@@ -110,6 +110,13 @@ var filterSources = map[string]string{
             UNION ALL
             SELECT 1,id::text,name,CASE WHEN active THEN '' ELSE 'Inactivo' END,name FROM app.discount_reasons
         ) reasons ORDER BY position,name`,
+	// Motivos de cancelación de cuentas (etapa 9D); «Sin motivo del catálogo» elige las cancelaciones
+	// anteriores con motivo libre.
+	"cancel_reasons": `SELECT value,label,detail FROM (
+            SELECT 0 AS position,'none' AS value,'Sin motivo del catálogo' AS label,'' AS detail,0 AS sort_order,'' AS name
+            UNION ALL
+            SELECT 1,id::text,name,CASE WHEN active THEN '' ELSE 'Inactivo' END,sort_order,name FROM app.account_cancel_reasons
+        ) reasons ORDER BY position,sort_order,name`,
 	"origins": `SELECT DISTINCT origin AS value,origin AS label,'' AS detail FROM app.restaurant_accounts
         WHERE mode='takeaway' ORDER BY origin LIMIT 100`,
 }
@@ -175,6 +182,7 @@ var filterNames = map[string]string{
 	"payment_methods":  `SELECT name FROM app.payment_methods WHERE id=@value::uuid`,
 	"price_lists":      `SELECT name FROM app.catalog_price_lists WHERE id=@value::uuid`,
 	"discount_reasons": `SELECT name FROM app.discount_reasons WHERE id=@value::uuid`,
+	"cancel_reasons":   `SELECT name FROM app.account_cancel_reasons WHERE id=@value::uuid`,
 }
 
 // describeFilters arma la lista legible de filtros aplicados (pantalla y exportaciones). El nombre
