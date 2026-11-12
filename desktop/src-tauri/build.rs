@@ -10,6 +10,8 @@ fn main() {
             "events_start",
             "events_stop",
             "export_report",
+            "menu_subscribe",
+            "menu_set_state",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

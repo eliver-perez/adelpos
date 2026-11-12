@@ -1,5 +1,6 @@
 import { Notice } from '../../components/Forms';
 import { Icon, IconLabel } from '../../components/Icon';
+import { shortcutProps } from '../../commands/hints';
 import type { Lookups } from '../../services/catalog';
 import { formatMoney } from '../../services/money';
 import { accountLabel, elapsedTime, tableStateLabels } from '../../services/restaurant';
@@ -355,6 +356,7 @@ export function TablePanel({
                     type="button"
                     className="secondary-button"
                     disabled={blocked || account.confirmed_quantity === 0}
+                    {...shortcutProps('file.print_precheck', 'Precuenta')}
                     onClick={() => onAction('precheck')}
                   >
                     <IconLabel icon="receipt">Precuenta</IconLabel>

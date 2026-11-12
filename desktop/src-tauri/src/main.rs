@@ -3,6 +3,7 @@
 mod api;
 mod connection;
 mod export;
+mod menu;
 mod realtime;
 mod vault;
 mod window_check;
@@ -132,6 +133,11 @@ fn main() {
         // Diálogo nativo «Guardar como» de la exportación de reportes: solo lo usa Rust (export.rs);
         // la ventana no tiene permisos dialog:* en capabilities.
         .plugin(tauri_plugin_dialog::init())
+        // Menú nativo en español (etapa 9C): Rust arma la lista cerrada de opciones y las envía a
+        // React por un Channel; solo «Salir» se atiende aquí (no detiene Go ni PostgreSQL).
+        .manage(menu::MenuState::default())
+        .menu(menu::build)
+        .on_menu_event(menu::handle_event)
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
             let client = config.as_ref().map_err(Clone::clone).and_then(client);
@@ -176,6 +182,8 @@ fn main() {
             api::authentication_state,
             api::api_request,
             export::export_report,
+            menu::menu_subscribe,
+            menu::menu_set_state,
         ])
         .run(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio");

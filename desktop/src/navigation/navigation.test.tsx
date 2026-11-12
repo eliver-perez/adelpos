@@ -479,7 +479,9 @@ describe('pantalla completa en la barra', () => {
   it('un botón de icono que alterna entre reducir y maximizar con su descripción', async () => {
     renderBar(waiter);
     const exit = await screen.findByRole('button', { name: 'Salir de pantalla completa' });
-    expect(exit.getAttribute('title')).toContain('Control + ⌘ + F');
+    // Fase C: el atajo estándar de cada sistema (⌃⌘F en macOS; jsdom no se identifica como macOS).
+    expect(exit.getAttribute('title')).toContain('F11');
+    expect(exit.getAttribute('aria-keyshortcuts')).toBe('F11');
     expect(exit.getAttribute('data-fullscreen')).toBe('true');
     expect(exit.textContent).toBe('');
     fireEvent.click(exit);

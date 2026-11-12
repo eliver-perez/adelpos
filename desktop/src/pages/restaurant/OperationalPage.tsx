@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
+import type {
+  OperationCommandHandlers,
+  OperationCommandState,
+} from '../../commands/operationBridge';
 import { ChoiceDialog, useConfirmDialog } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
@@ -7,7 +11,7 @@ import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { notifyError, notifySuccess } from '../../services/notify';
-import { accountLabel } from '../../services/restaurant';
+import { accountLabel, isPendingAccount } from '../../services/restaurant';
 import type { Account, RestaurantTable } from '../../services/restaurant';
 import {
   CashShortcut,
@@ -45,6 +49,8 @@ export function OperationalPage({
   requestKey = 0,
   onViewChange,
   onCaptureChange,
+  onCommandState,
+  commandHandlers,
   shellControls,
 }: {
   active: boolean;
@@ -61,6 +67,10 @@ export function OperationalPage({
   onViewChange?: (view: RestaurantView) => void;
   // Indica si la captura está abierta: App reduce entonces la barra superior (§1.2).
   onCaptureChange?: (capture: boolean) => void;
+  // Etapa 9C, fase C: contexto y botones de esta pantalla para el menú nativo, la paleta y los
+  // atajos (las mismas funciones de los botones).
+  onCommandState?: (state: OperationCommandState) => void;
+  commandHandlers?: RefObject<OperationCommandHandlers | null>;
   // Controles del armazón para la barra reducida de la captura (usuario y estado del servidor).
   shellControls?: ReactNode;
 }) {
@@ -134,6 +144,62 @@ export function OperationalPage({
   ];
   const visibleViews = views.filter((entry) => entry.allowed);
 
+  // Registro de acciones (etapa 9C, fase C). «Nueva cuenta en mesa» actúa como «Capturar» / «Nueva
+  // cuenta» del panel de la mesa elegida o como «Nueva cuenta» de la captura de una mesa;
+  // «Imprimir precuenta», como «Precuenta» de la cuenta a la vista.
+  const captureTable =
+    captureMode && view === 'tables' && bill && !isPendingAccount(bill.account)
+      ? overview.data?.tables.find((table) => table.id === bill.account.table_id)
+      : undefined;
+  const newAccountTable = captureMode
+    ? captureTable
+    : view === 'tables'
+      ? selectedTable
+      : undefined;
+  const tableForNewAccount =
+    active &&
+    !blocked &&
+    !checkoutOpen &&
+    can('accounts.open') &&
+    !!newAccountTable &&
+    newAccountTable.active &&
+    !newAccountTable.out_of_service
+      ? newAccountTable.id
+      : null;
+  const precheckVisible =
+    !!bill && (captureMode || view !== 'tables' || bill.account.table_id === workspace.tableID);
+  const precheckReady =
+    active &&
+    !blocked &&
+    !checkoutOpen &&
+    view !== 'manage' &&
+    can('payments.read') &&
+    precheckVisible &&
+    !!bill &&
+    bill.account.state === 'open' &&
+    !isPendingAccount(bill.account) &&
+    bill.account.confirmed_quantity > 0;
+  useEffect(() => {
+    onCommandState?.({
+      active,
+      view,
+      captureMode,
+      checkoutOpen,
+      blocked,
+      tableForNewAccount,
+      precheckReady,
+    });
+  }, [
+    onCommandState,
+    active,
+    view,
+    captureMode,
+    checkoutOpen,
+    blocked,
+    tableForNewAccount,
+    precheckReady,
+  ]);
+
   function openAccountAction(action: BillAction | 'checkout', origin: WorkspacePanel) {
     setActionReturn(origin);
     void workspace.openPanel(action);
@@ -206,6 +272,97 @@ export function OperationalPage({
     setCheckoutDeliver(deliver);
     openAccountAction('checkout', 'capture');
   }
+
+  // Paneles de la cuenta que se cierran volviendo a donde se abrieron (como sus botones).
+  const returningPanels: WorkspacePanel[] = [
+    'metadata',
+    'adjustments',
+    'precheck',
+    ...accountActions,
+  ];
+
+  // Escape (etapa 9C, fase C): cierra el panel de la cuenta, sale de la captura («‹ Mesas») o
+  // cierra el panel lateral de la mesa. El cobro conserva su Escape (limpia el importe) y la
+  // personalización sus propias acciones.
+  function back() {
+    if (!active || checkoutOpen || panel === 'editor' || view === 'manage') {
+      return false;
+    }
+    if (bill && panel !== 'capture') {
+      if (returningPanels.includes(panel)) {
+        closeAction();
+      } else {
+        workspace.setPanel('capture');
+      }
+      return true;
+    }
+    if (captureMode) {
+      workspace.leaveCapture();
+      return true;
+    }
+    if (view === 'tables' && workspace.tableID) {
+      workspace.chooseTable('');
+      return true;
+    }
+    return false;
+  }
+
+  // Elegir una mesa desde la paleta es tocarla en el mapa (con su área a la vista).
+  function chooseTableFromCommand(id: string) {
+    const table = overview.data?.tables.find((entry) => entry.id === id);
+    if (!table) {
+      return;
+    }
+    if (workspace.captureMode) {
+      workspace.leaveCapture();
+    }
+    if (view !== 'tables') {
+      workspace.switchView('tables');
+    }
+    if (table.area_id !== workspace.areaID) {
+      workspace.setAreaID(table.area_id);
+    }
+    workspace.chooseTable(id);
+  }
+
+  const handlers: OperationCommandHandlers = {
+    newTableAccount: () => {
+      if (tableForNewAccount) {
+        openAccount('dine_in', tableForNewAccount);
+      }
+    },
+    accountWithoutTable: () => openAccount('dine_in', null),
+    newTakeaway: () => openAccount('takeaway', null),
+    openPrecheck: () => openAccountAction('precheck', 'capture'),
+    leaveCapture: workspace.leaveCapture,
+    chooseTable: chooseTableFromCommand,
+    tables: () => {
+      const areas = overview.data?.areas ?? [];
+      return (overview.data?.tables ?? [])
+        .filter((table) => table.active)
+        .map((table) => ({
+          id: table.id,
+          name: table.name,
+          areaName: areas.find((area) => area.id === table.area_id)?.name ?? '',
+        }));
+    },
+    back,
+  };
+  // Las funciones cambian en cada render (cierran sobre el estado vigente): se publican después de
+  // cada render y se retiran al desmontar la pantalla.
+  useEffect(() => {
+    if (commandHandlers) {
+      commandHandlers.current = handlers;
+    }
+  });
+  useEffect(
+    () => () => {
+      if (commandHandlers) {
+        commandHandlers.current = null;
+      }
+    },
+    [commandHandlers],
+  );
 
   // «Recuperar resultado» repite la misma operación con su operation_id. Si Go la confirma se
   // avisa; si la rechaza, el error permanece; si sigue sin respuesta, el panel continúa.
