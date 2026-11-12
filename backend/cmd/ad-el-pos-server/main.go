@@ -174,6 +174,13 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	if err != nil {
 		return errors.New("no se pudo abrir el puerto HTTP; compruebe dirección y puerto")
 	}
+	// Al empezar el apagado los flujos de eventos (SSE) terminan; las demás peticiones terminan su
+	// trabajo como siempre. Sin esto el cierre esperaba 5 s a un flujo abierto y salía con error.
+	stopping := make(chan struct{})
+	application.Stopping = stopping
+	server.RegisterOnShutdown(func() {
+		close(stopping)
+	})
 	workerContext, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() {

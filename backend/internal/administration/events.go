@@ -112,6 +112,10 @@ func (service *Service) serveEvents(writer http.ResponseWriter, request *http.Re
 		select {
 		case <-request.Context().Done():
 			return
+		case <-service.Stopping:
+			// El servidor se apaga (etapa 9E): el flujo termina ya, en lugar de que el cierre ordenado
+			// espere sus 5 s y termine con error. El cliente se vuelve a conectar como tras cualquier corte.
+			return
 		case <-lifetime.C:
 			return
 		case <-ticker.C:
