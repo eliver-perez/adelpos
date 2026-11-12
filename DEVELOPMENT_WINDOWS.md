@@ -9,14 +9,14 @@ Python no cambiaron. Lo ejecutado y sus resultados están en [docs/ETAPA_9E_AVAN
 Igual que en macOS, Go, Node y Rust viven **dentro del proyecto** (`.tools\`, excluida de git) para no depender ni
 alterar las versiones del equipo. `scripts\env.ps1` las antepone al `PATH` solo en la sesión que lo carga.
 
-| Herramienta                      | Versión          | Origen y lugar                                                                                       |
-| -------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------- |
-| Go                               | 1.27.3           | zip oficial `go1.27.3.windows-amd64.zip` (go.dev) en `.tools\go`                                    |
-| Node / npm                       | 24.22.2 / 11.19.1 | zip oficial `node-v24.22.2-win-x64.zip` (nodejs.org) en `.tools\node`                               |
-| Rust                             | 1.99.1 (MSVC)    | `rustup-init.exe` oficial con `RUSTUP_HOME=.tools\rustup` y `CARGO_HOME=.tools\cargo`, `--no-modify-path --default-toolchain 1.99.1 --profile minimal --component rustfmt` |
-| Visual Studio Build Tools 2022   | 17.14            | `winget install --id Microsoft.VisualStudio.2022.BuildTools` con la carga `Microsoft.VisualStudio.Workload.VCTools` (por equipo: pide permiso de administrador una vez) |
-| PostgreSQL                       | 18.6             | binarios oficiales para Windows (`postgresql-18.6-1-windows-x64-binaries.zip` de EDB) en `.tools\pgsql`, sin instalador ni servicio |
-| WebView2                         | Evergreen        | ya viene con Windows 11; el instalador incluye su instalador de arranque                            |
+| Herramienta                    | Versión           | Origen y lugar                                                                                                                                                             |
+| ------------------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go                             | 1.27.3            | zip oficial `go1.27.3.windows-amd64.zip` (go.dev) en `.tools\go`                                                                                                           |
+| Node / npm                     | 24.22.2 / 11.19.1 | zip oficial `node-v24.22.2-win-x64.zip` (nodejs.org) en `.tools\node`                                                                                                      |
+| Rust                           | 1.99.1 (MSVC)     | `rustup-init.exe` oficial con `RUSTUP_HOME=.tools\rustup` y `CARGO_HOME=.tools\cargo`, `--no-modify-path --default-toolchain 1.99.1 --profile minimal --component rustfmt` |
+| Visual Studio Build Tools 2022 | 17.14             | `winget install --id Microsoft.VisualStudio.2022.BuildTools` con la carga `Microsoft.VisualStudio.Workload.VCTools` (por equipo: pide permiso de administrador una vez)    |
+| PostgreSQL                     | 18.6              | binarios oficiales para Windows (`postgresql-18.6-1-windows-x64-binaries.zip` de EDB) en `.tools\pgsql`, sin instalador ni servicio                                        |
+| WebView2                       | Evergreen         | ya viene con Windows 11; el instalador incluye su instalador de arranque                                                                                                   |
 
 Comprobar los SHA-256 de los zip con los que publica cada sitio (registrados en el avance). Las dependencias de npm,
 Go y Rust salen de los lockfiles (`npm ci`, `go mod download`, `cargo … --locked`).
@@ -33,21 +33,21 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 <comando>
 `scripts\windows\dev.mjs` (Node), que reproduce las reglas de `dev.sh`, `database.py`, `server-process.py`,
 `browser-tests.py` y `restore-check.py`.
 
-| Comando                                              | Efecto                                                                                                   |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `install`                                            | `npm ci`, sincroniza metadatos y `go mod download` (requiere red).                                       |
-| `sync`, `format`, `format-check`                     | Como en macOS.                                                                                           |
-| `db-init` / `db-start` / `db-stop`                   | Clúster exclusivo `.local\postgres` (puerto 55432, solo `127.0.0.1`, SCRAM, UTC, `locale=C`, sin socket de Unix), rol `adel_app`, base `adel_pos` y `.local\server.json`. |
-| `backup`, `restore-check backups\NOMBRE.dump`        | Respaldo `pg_dump` custom y ensayo de restauración en una base temporal con conteo de todas las tablas.  |
-| `build-server`                                       | `bin\ad-el-pos-server.exe`.                                                                              |
-| `migrate`, `check-config`, `prepare-setup`, `tls-init`, `create-enrollment` | Como en macOS, con `.local\server.json`.                                         |
-| `provision-sa`, `reset-sa`                           | **Solo el propietario**, en una consola interactiva (usa `CONIN$`/`CONOUT$`).                             |
-| `server` / `server-start` / `server-stop` / `status` | Go en primer plano o como proceso oculto independiente (bitácora `.local\server.log`, PID `.local\server.pid`). La parada usa `ad-el-pos-server stop --pid`, que solo detiene a este mismo programa. |
-| `desktop`                                            | `tauri dev` con Vite en 127.0.0.1:1420 (no lanza Go: hay que iniciarlo aparte, como en macOS).          |
-| `test`                                               | `format-check`, `sync --check`, `go test ./...`, `go vet`, Vitest, `npm run build` y `cargo test --locked`. |
-| `test-integration`                                   | Pruebas `-tags=integration` con una base desechable `adel_pos_test_*` por paquete en el clúster del proyecto. |
-| `test-browser`                                       | Go temporal en 8183 y Playwright Chromium y WebKit (`ADEL_BROWSER_ENGINES=chromium` para uno solo).      |
-| `build-windows`                                      | Instalador NSIS de prueba (ver abajo).                                                                    |
+| Comando                                                                     | Efecto                                                                                                                                                                                               |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `install`                                                                   | `npm ci`, sincroniza metadatos y `go mod download` (requiere red).                                                                                                                                   |
+| `sync`, `format`, `format-check`                                            | Como en macOS.                                                                                                                                                                                       |
+| `db-init` / `db-start` / `db-stop`                                          | Clúster exclusivo `.local\postgres` (puerto 55432, solo `127.0.0.1`, SCRAM, UTC, `locale=C`, sin socket de Unix), rol `adel_app`, base `adel_pos` y `.local\server.json`.                            |
+| `backup`, `restore-check backups\NOMBRE.dump`                               | Respaldo `pg_dump` custom y ensayo de restauración en una base temporal con conteo de todas las tablas.                                                                                              |
+| `build-server`                                                              | `bin\ad-el-pos-server.exe`.                                                                                                                                                                          |
+| `migrate`, `check-config`, `prepare-setup`, `tls-init`, `create-enrollment` | Como en macOS, con `.local\server.json`.                                                                                                                                                             |
+| `provision-sa`, `reset-sa`                                                  | **Solo el propietario**, en una consola interactiva (usa `CONIN$`/`CONOUT$`).                                                                                                                        |
+| `server` / `server-start` / `server-stop` / `status`                        | Go en primer plano o como proceso oculto independiente (bitácora `.local\server.log`, PID `.local\server.pid`). La parada usa `ad-el-pos-server stop --pid`, que solo detiene a este mismo programa. |
+| `desktop`                                                                   | `tauri dev` con Vite en 127.0.0.1:1420 (no lanza Go: hay que iniciarlo aparte, como en macOS).                                                                                                       |
+| `test`                                                                      | `format-check`, `sync --check`, `go test ./...`, `go vet`, Vitest, `npm run build` y `cargo test --locked`.                                                                                          |
+| `test-integration`                                                          | Pruebas `-tags=integration` con una base desechable `adel_pos_test_*` por paquete en el clúster del proyecto.                                                                                        |
+| `test-browser`                                                              | Go temporal en 8183 y Playwright Chromium y WebKit (`ADEL_BROWSER_ENGINES=chromium` para uno solo).                                                                                                  |
+| `build-windows`                                                             | Instalador NSIS de prueba (ver abajo).                                                                                                                                                               |
 
 Primera vez:
 
