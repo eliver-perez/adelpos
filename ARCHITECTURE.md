@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9C
+# Arquitectura · Etapa 9D
 
 ## Responsabilidades
 
@@ -22,7 +22,7 @@ Tauri no inicia ni detiene Go o PostgreSQL. Los modos `server-terminal`, `termin
 - `httpapi`: diagnósticos, CORS exacto, request IDs, límites y logs sin secretos.
 - `administration`: servicios con transacción por operación. Archivos por responsabilidad: autenticación, permisos, usuarios, roles, dispositivos, cajas, configuración, preferencias y auditoría.
 - `catalog`: documentos y relaciones del catálogo, revisión optimista, disponibilidad, imágenes y cálculo decimal puro. Recibe actor/auditoría desde administración; no importa administración ni depende del escritorio.
-- `operations`: áreas, mesas, cuentas, borradores, lotes confirmados, versiones, unidades comerciales y diario de cambios. Comparte transacción, permisos y auditoría con administración y reutiliza el motor de catálogo.
+- `operations`: áreas, mesas, cuentas, borradores, lotes confirmados, versiones, unidades comerciales y diario de cambios. Comparte transacción, permisos y auditoría con administración y reutiliza el motor de catálogo. Desde la etapa 9D recibe también el autorizador de supervisor (como `payments`) para «Cancelar cuenta» y administra el catálogo de motivos de cancelación.
 - `localsetup`: CA y certificado TLS locales; no modifica la confianza global del sistema.
 - `licensing`: único límite de integración comercial. Desarrollo permitido, producción bloqueada hasta integrar el proveedor.
 - `kitchen`: rutas de preparación, liberaciones canónicas, tareas por estación, documentos históricos y cola de impresión. Dos trabajadores y un planificador Go independientes de Tauri.
@@ -289,3 +289,61 @@ del diseñador acepta una impresora (`printer_id`).
 `IDEMPOTENCY_CONFLICT` en seis módulos, el de la zona horaria del asistente y los de «Registro de movimientos»), nunca
 códigos ni lógica. «Información para soporte» plegada con `settings.manage`. Go copia la apariencia de Configuración general a cada usuario nuevo y la usa
 como respaldo al leer preferencias.
+
+## Color de marca, barra, mesas y cancelar cuenta · etapa 9D
+
+**Alcance** (§0-B de la especificación): no cambian las reglas de negocio, los cálculos, la clasificación de cancelaciones
+de la etapa 8 (salvo la preclasificación como merma), los flujos de cobro ni las acciones del panel de mesa. Sin paquetes
+Go, locks ni dependencias nuevos; un permiso nuevo, `accounts.cancel`. Una sola migración,
+`0021_account_cancellation.sql`, transaccional y sin modificar 0001–0020 ni filas existentes: catálogo
+`account_cancel_reasons` (con la forma de `discount_reasons`), registro `account_cancellations` (una fila por cuenta, de
+solo inserción por disparador, con FK diferida a `restaurant_operations`, índices por fecha y por motivo y CHECK
+`account_cancellations_authorizer_check`: quien autoriza nunca es quien cancela), `restaurant_settings.long_open_hours`
+(12, CHECK 1–72) y el permiso, concedido solo al administrador. La cuenta cancelada reutiliza el estado `voided`. **La 0021
+todavía no se aplica a la instalación real.** Avance: [ETAPA_9D_AVANCE.md](docs/ETAPA_9D_AVANCE.md).
+
+**Cancelar cuenta en Go.** `administration` pasa a `operations` el mismo autorizador de supervisor que a `payments`
+(`supervisor.go`; `operations.Request.Authorize`). `POST restaurant/accounts/{id}/cancel-account`
+(`operations/account_cancellation.go`) tiene como permiso de ruta `accounts.open` (con `accounts.read`; para llevar,
+`takeaway.manage`) y decide dentro de la ruta, antes de escribir: revisión, `ACCOUNT_DISCARDABLE`, motivo, las guardas
+de `payments` (`RequireCancellable`, que separa pagos y ajustes y termina en `RequireNoNetFinance`) y de unidades, y si
+basta `accounts.cancel` o hace falta un supervisor que lo tenga. Con el lock 7820148305 exclusivo de toda escritura
+operativa (sin locks nuevos ni otro orden): borrador descartado, unidades canceladas, cuenta `voided`, fila de
+`account_cancellations`, evento `account.cancelled` en `restaurant_events` —que `kitchen.Integrate`, y dentro de él
+`inventory.RecordChange`, procesan en la misma transacción como un `item.cancelled`—, auditoría y outbox. La huella
+idempotente excluye la contraseña del supervisor (`requestFingerprint`), como en cobros, y la respuesta se lee después de
+integrar cocina. No pasa por `payments.closeIfSettled`: una cuenta cancelada nunca se reconoce como venta.
+
+**Inventario.** El trabajador procesa las solicitudes `cancel` como en la etapa 8; si la solicitud viene de un
+`account.cancelled` cuyo registro tiene `prepared_is_waste`, crea la clasificación «Preparado / merma»
+(`inventory/cancellation_preclassification.go`), idempotente y sin movimientos nuevos. `inventory` sigue sin importar
+`operations`: lee `account_cancellations` por SQL a partir del evento de la solicitud.
+
+**Descartar y liberar.** `operations/accounts_release.go` comparte una sola comprobación (`accountWithoutRecords`: cada
+módulo responde por sus tablas con `payments.HasAccountRecords` y `kitchen.HasAccountRecords`) para «Liberar mesa» (sin
+borrador) y «Descartar» (con borrador, que se borra). Go calcula `discardable`, `releasable`, `cancel_blocker` y
+`cancel_requires_authorization` al leer cada cuenta.
+
+**Catálogo de motivos, umbral y reportes.** `operations/cancel_reasons.go` (lectura con `accounts.read`, cambios con
+`payments.settings.manage`, orden por posiciones de `internal/ordering`). `administration/long_open_hours.go` sobre la
+fila única de `restaurant_settings` (revisión compartida con las advertencias del tablero para llevar, `FOR UPDATE`);
+`operations` calcula `long_open` al leer (`elapsed_seconds > long_open_hours × 3600`). `reports/cancellations.go`: SQL de
+solo lectura, sin locks consultivos, sobre `account_cancellations` y las anulaciones anteriores (`account.void`, leído por
+el índice de eventos por cuenta), con la fuente de filtros `cancel_reasons`; 95 reportes, todos en `EXPORTABLE_REPORTS`.
+
+**Puente.** Siete operaciones nuevas en la lista cerrada de `api.rs`, con su prueba Rust; `restaurant_void` salió de la
+lista (Go conserva la ruta `void` por compatibilidad). Sin operaciones nativas ni permisos de Tauri nuevos.
+
+**Interfaz.** Los colores viven solo en los tokens de `styles.css` (marca → paleta de estado → usos), vigilados por
+`styles.test.ts`; `components/restaurant/tableStateIcons.ts` comparte el icono de cada estado entre el mapa, la leyenda
+y el panel. `TopBar` separa Caja al dibujarse (`sections.ts` no cambió). En Mesas, `TablesSummaryPanel` solo cuenta los
+estados que entrega Go y `TableMap` calcula la escala (`fitTables`) y el desplazamiento por eventos de puntero únicamente
+en el mapa operativo (`autoFit`; el diseñador conserva su lienzo proporcional). `elapsedTime` es el único formato de
+tiempos. `CancelAccount.tsx` usa el componente y el gancho de autorización de los descuentos
+(`SupervisorAuthorization`, `useSupervisorAuthorization`) y la mutación del espacio de trabajo con el mismo
+`operation_id`; el almacén de pendientes no conserva la contraseña. La creación diferida de Para llevar y «Cuenta sin
+mesa» generaliza la cuenta pendiente de la 7.1 en el motor del borrador (`draftSync.ts`, `useDraftSync.ts`,
+`pendingAccountBill`, `useRestaurantWorkspace.startPendingCapture`) con modalidad y mesa opcional; la apertura inmediata
+(`quickOpen`) se retiró. `NavigationValue.requestScreen` devuelve `Promise<boolean>` y las acciones que cambian de
+sección (paleta, menú nativo y resumen de Mesas) abren la captura solo cuando la pantalla la recibió. El menú por
+producto (`BillLines.tsx`) es una capa más para el teclado (`.capture-line-menu` en `commands/keyboard.ts`).

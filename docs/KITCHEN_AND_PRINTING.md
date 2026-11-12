@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.9.2, esquema 20 (la migración `0020_terminal_home_and_printer_columns.sql` de la etapa 9C agrega las columnas de texto por impresora y se aplicó a la instalación real el 11 de noviembre de 2026 con la autorización previa del propietario; ver «Columnas por impresora y prueba de ancho · etapa 9C»; la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario). Desde la etapa 9B todos los documentos impresos salen de un renderizador único con plantillas por bloques, versiones e identidad del establecimiento, sin cambiar enrutamiento, cola ni reglas de resultado (ver «Plantillas, formato y logotipo · etapa 9B» y [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
+Versión 0.9.3, esquema 21 (la migración `0021_account_cancellation.sql` de la etapa 9D no cambia tablas de cocina y **todavía no se aplica** a la instalación real; la cancelación de cuentas completas llega a cocina como las cancelaciones de partidas, ver «Cancelar cuenta y «Enviado · sin confirmar en cocina» · etapa 9D»; la migración `0020_terminal_home_and_printer_columns.sql` de la etapa 9C agrega las columnas de texto por impresora y se aplicó a la instalación real el 11 de noviembre de 2026 con la autorización previa del propietario; ver «Columnas por impresora y prueba de ancho · etapa 9C»; la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario). Desde la etapa 9B todos los documentos impresos salen de un renderizador único con plantillas por bloques, versiones e identidad del establecimiento, sin cambiar enrutamiento, cola ni reglas de resultado (ver «Plantillas, formato y logotipo · etapa 9B» y [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
@@ -275,3 +275,53 @@ fuera de la lista rechazado en Go y en PostgreSQL; reimpresión exacta tras camb
 ventas ni movimientos (conteos antes y después), todo con el transporte controlado de la cola y ejecutores simulados
 ([VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md)). **El papel a 48 y 32 columnas y la densidad fraccionaria de CUPS
 son una prueba física pendiente**: para eso existe la prueba de ancho.
+
+## Cancelar cuenta y «Enviado · sin confirmar en cocina» · etapa 9D
+
+Sin cambios de enrutamiento, cola, transportes, plantillas ni reglas de resultado; sin tablas nuevas de cocina. Detalle
+de la función en [RESTAURANT_OPERATIONS.md](RESTAURANT_OPERATIONS.md) («Mesas, cuentas, Para llevar y cancelar cuenta ·
+etapa 9D») y contratos en [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9D»).
+
+**Aviso de cancelación de una cuenta completa.** «Cancelar cuenta» registra **un solo evento** `account.cancelled` con
+todas las unidades activas de la cuenta en `after.unit_ids` (la misma forma que `item.cancelled`), y `kitchen.Integrate`
+lo procesa en la misma transacción exactamente como una cancelación de partidas:
+
+- lo que todavía no se liberó (liberación pendiente, programada o bloqueada) se cancela **sin papel**;
+- lo ya liberado cancela sus tareas y genera el **aviso de cancelación** para cada estación que lo recibió, por la cola
+  durable de siempre (un aviso por liberación y estación, con el mismo documento de cancelación de las partidas);
+- con una estación inactiva o un destino inválido, el cambio queda **pendiente y durable**: la respuesta de la
+  cancelación ya dice `change_pending` y Cocina → «Pendientes de liberación y avisos» lo muestra como «Aviso de
+  cancelación pendiente» (antes de la 9D solo `item.cancelled` se llamaba así); su reintento no duplica avisos ni
+  liberaciones;
+- como siempre, `submitted` significa que CUPS o el puerto TCP aceptaron el trabajo, no que salió el papel. **La impresión
+  real del aviso de cancelación de una cuenta no se verificó** (solo el transporte controlado de la cola).
+
+Antes de cocina, `inventory.RecordChange` registra las solicitudes `cancel` de lo ya liberado y consumido (solo con
+«Control de inventario» activado). Si el motivo de la cancelación marca «lo enviado a cocina cuenta como merma»
+(«Cliente se retiró sin pagar» en la semilla), el trabajador de inventario las **preclasifica** como «Preparado / merma»
+(«Preclasificada al cancelar la cuenta», corregible por el encargado hasta el corte del día, como en la etapa 8); con los
+demás motivos quedan por clasificar. La cocina no sabe si algo se preparó: sin pantalla de cocina, las tareas nunca pasan
+a «Listo», por eso la marca vive en el motivo y no en el estado de la tarea.
+
+**«Enviado · sin confirmar en cocina».** Es la etiqueta corta que sustituye, una sola vez por producto y ya no en el
+encabezado de la cuenta, a «Pendiente de liberación · revisar cocina» (`preparation_state: "pending_release"`, que
+`kitchen.VersionPreparation` devuelve cuando una versión tiene unidades activas sin liberación canónica en
+`kitchen_unit_releases` y ninguna liberación programada); en la tarjeta de la cuenta, «Sin confirmar en cocina». Significa que el pedido se confirmó, pero
+**su liberación quedó bloqueada**:
+
+- al confirmar, `prepareRelease` no encuentra ruta («Sin ruta de preparación: producto»), estación activa o destino válido
+  y deja la liberación `blocked` sin unidades liberadas, con una advertencia por unidad: no se imprime nada, no se crean
+  tareas y no se consume inventario. Es la regla de la etapa 5 (una configuración incompleta produce advertencias visibles
+  y una liberación bloqueada, **nunca un envío aparente**);
+- por eso aparece en una instalación **sin estaciones, rutas ni impresoras**, como la instalación real al revisar la
+  Fase 0 de la 9D (0 estaciones, 0 rutas y 0 impresoras; 4 liberaciones bloqueadas, 23 advertencias «Sin ruta de
+  preparación» y 15 unidades activas sin liberar). No es un defecto del cálculo;
+- configurar después la estación y la ruta **no reintenta** una liberación bloqueada (el planificador solo reintenta las
+  programadas). Se libera a mano en **Cocina → «Pendientes de liberación y avisos» → «Liberar a preparación»**
+  (`kitchen.release` + `kitchen.stations.all`). Un pedido nuevo con la configuración completa se libera solo. Para
+  productos que no van a cocina, la ruta **Sin preparación** (`mode='none'`) evita la liberación bloqueada (quedan como
+  «Listo»);
+- las liberaciones bloqueadas de cuentas ya cerradas siguen en esa lista (limitación observada en la Fase 0, sin
+  cambio);
+- «Preparación y comandas» (detalle de la cuenta) muestra cada advertencia distinta una sola vez, con «(×N)» si se
+  registró por varias unidades (Go sigue registrando una por unidad).

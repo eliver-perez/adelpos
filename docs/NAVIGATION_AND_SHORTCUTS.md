@@ -11,6 +11,13 @@ cálculos, permisos ni flujos. Todo lo que aquí se ve lo sigue validando el ser
 automatizadas (Vitest y Playwright con Chromium y WebKit): la ventana nativa, el menú real de macOS, el menú en Windows
 y la pantalla táctil física están **sin verificar** (ver «Lo que falta comprobar» al final).
 
+**Etapa 9D** (versión 0.9.3, esquema 21; avance en [ETAPA_9D_AVANCE.md](ETAPA_9D_AVANCE.md) y evidencia en
+[VERIFICATION_STAGE9D.md](VERIFICATION_STAGE9D.md)): la barra se reacomoda (Caja pasa al lado derecho, en dos renglones),
+el estado del servidor dice «Sin conexión» en lugar de «Fuera de línea», los colores pasan al azul de la marca, desaparece
+«Actualizar» de la captura y Escape en Mesas vuelve al resumen del área. Los atajos, el menú nativo y el registro de
+secciones no cambian. Desde la fase D, «Cuenta sin mesa» y «Nuevo pedido para llevar» (botones, menú nativo y paleta) abren la captura sin
+crear nada: la cuenta nace al guardar el primer producto; las pestañas de Mesas miden 44 px.
+
 La primera parte es para el personal del restaurante; la segunda, para quien desarrolle.
 
 ## Contenido
@@ -33,7 +40,9 @@ La primera parte es para el personal del restaurante; la segunda, para quien des
 ## La barra superior
 
 Ya no hay menú lateral. Toda la navegación está en una barra de una sola fila, fija arriba (no se desplaza con el
-contenido), con botones de 52 px de alto. De izquierda a derecha:
+contenido), con botones de 52 px de alto. Desde la etapa 9D, a la izquierda van el logotipo y las cuatro secciones,
+seguidas y **del mismo ancho**; a la derecha, Caja, el estado del servidor, el usuario y pantalla completa. De izquierda a
+derecha:
 
 | Elemento              | Qué hace                                                                                                         |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -41,9 +50,9 @@ contenido), con botones de 52 px de alto. De izquierda a derecha:
 | **Mesas**             | Mapa de mesas. Dentro siguen las pestañas Mesas, Cuentas (cuentas sin mesa) y Áreas y distribución.              |
 | **Para llevar**       | Listado de pedidos para llevar y ventanilla (sin pestañas).                                                      |
 | **Cocina**            | Preparación, cola de impresión y configuración de cocina (la pantalla se sigue llamando «Cocina y preparación»). |
-| **Caja**              | Indicador del turno de la caja de esta terminal y su menú rápido (ver «Caja»).                                   |
 | **Administración**    | Mosaicos de administración (ver «Administración»).                                                               |
-| Estado del servidor   | En línea, reconectando o fuera de línea (ver «Estado del servidor»).                                             |
+| **Caja**              | A la derecha: «Caja» y debajo el estado del turno de esta terminal, con su menú rápido (ver «Caja»).             |
+| Estado del servidor   | En línea, reconectando o sin conexión (ver «Estado del servidor»).                                               |
 | Menú del usuario      | Nombre y rol; Mis preferencias, Cambiar contraseña y Cerrar sesión.                                              |
 | Pantalla completa     | Un botón de icono: maximizar para entrar y reducir para salir.                                                   |
 
@@ -53,19 +62,23 @@ contenido), con botones de 52 px de alto. De izquierda a derecha:
   ningún permiso: el servidor vuelve a comprobarlos en cada consulta y en cada cambio.
 - Si la pantalla que estás usando tiene cambios sin guardar (hoy, el editor de plantillas de Documentos), salir desde
   la barra, el menú, la paleta o un atajo pregunta primero «Salir sin guardar».
-- Temas claro y oscuro con los colores de siempre.
+- Temas claro y oscuro; desde la etapa 9D con el azul de la marca (la sección activa con fondo azul muy claro y borde azul).
+- De 1280 a 1599 px la barra reduce sus rellenos para que quepan las cuatro secciones del mismo ancho, Caja en dos
+  renglones y «Sin conexión»; si un nombre de usuario muy largo aún no cabe, solo él se acorta con puntos suspensivos (el
+  nombre completo sigue en la descripción del botón). Debajo de 1280 px sigue la barra compacta de la 9C.
 
 ## Caja
 
-El botón **Caja** muestra el estado del turno de la caja asignada a esta terminal:
+El botón **Caja** (desde la etapa 9D a la derecha de la barra, en dos renglones: «Caja» y debajo el estado) muestra el
+estado del turno de la caja asignada a esta terminal:
 
 | Color | Texto           | Significado                                     |
 | ----- | --------------- | ----------------------------------------------- |
-| Verde | «Turno abierto» | Se puede cobrar y registrar efectivo.           |
+| Azul  | «Turno abierto» | Se puede cobrar y registrar efectivo.           |
 | Ámbar | «En arqueo»     | El cierre está en curso: la caja se pausa.      |
 | Gris  | «Sin turno»     | No hay turno abierto (se captura, no se cobra). |
 
-Al tocarlo se abre el **menú rápido de la etapa 7.1**, con las mismas hojas de siempre: Ingreso, Retiro, Gasto, Abrir
+(En la 9C «Turno abierto» era verde.) Mientras llega el turno dice «Consultando…». Al tocarlo se abre el **menú rápido de la etapa 7.1**, alineado con el borde derecho del botón, con las mismas hojas de siempre: Ingreso, Retiro, Gasto, Abrir
 cajón, Corte parcial, Abrir turno (solo sin turno) e Ir a Caja. Cada opción aparece solo con su permiso; Ingreso,
 Retiro, Gasto y Corte parcial requieren un turno abierto. Nada se registra desde el menú: cada hoja pide los datos y la
 confirmación de siempre.
@@ -78,14 +91,16 @@ confirmación de siempre.
 
 Sustituye a los textos «Sesión verificada · En tiempo real»:
 
-| Estado             | Qué significa                                                                                                               |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| **En línea**       | El equipo servidor responde y los cambios llegan al momento.                                                                |
-| **Reconectando**   | El servidor responde, pero el aviso inmediato de cambios se está recuperando; la terminal se actualiza cada pocos segundos. |
-| **Fuera de línea** | No hay comunicación con el equipo servidor. Se reintenta solo; espera a que vuelva la conexión para guardar cambios.        |
+| Estado           | Qué significa                                                                                                               |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **En línea**     | El equipo servidor responde y los cambios llegan al momento.                                                                |
+| **Reconectando** | El servidor responde, pero el aviso inmediato de cambios se está recuperando; la terminal se actualiza cada pocos segundos. |
+| **Sin conexión** | No hay comunicación con el equipo servidor. Se reintenta solo; espera a que vuelva la conexión para guardar cambios.        |
 
-A 1280 px, «En línea» es solo un punto de color (su descripción aparece al pasar el puntero y la leen los lectores de
-pantalla); reconectando o fuera de línea, el texto queda siempre a la vista. El estado sale de dos fuentes reales: la
+Colores desde la etapa 9D: «En línea» azul, «Reconectando» ámbar y «Sin conexión» rojo (hasta la 9C se llamaba «Fuera de
+línea»). Desde la 9D «En línea» se ve con su texto también a 1280 px (antes era solo un punto de color); reconectando o
+sin conexión, el texto queda siempre a la vista. Sin conexión, Mesas, Cuentas, Para llevar y la captura muestran
+**«Reintentar»**, que vuelve a consultar la sesión y los datos. El estado sale de dos fuentes reales: la
 consulta de la sesión cada 5 segundos y el canal de eventos (solo para quien lo recibe; sin canal, con la sesión
 verificada, el estado es «En línea»).
 
@@ -116,7 +131,8 @@ Al capturar un pedido (de una mesa o para llevar) la barra se reduce para dejar 
 
 - **«‹ Mesas»** (o «‹ Para llevar», o «‹ Cuentas» en una cuenta sin mesa) para volver;
 - la mesa y la cuenta (o el pedido) en grande, con «Datos de la cuenta» y las otras cuentas de la mesa;
-- el indicador de **Caja**, **Actualizar** y el usuario;
+- el indicador de **Caja** y el usuario (desde la etapa 9D sin **Actualizar**: los datos llegan solos y **Reintentar**
+  aparece solo sin conexión);
 - el estado del servidor, solo cuando no está en línea.
 
 **Enviar a cocina** y **Cobrar** no cambiaron de lugar.
@@ -256,15 +272,18 @@ paleta, y cada botón que tiene atajo lo muestra en su descripción.
 Reglas:
 
 - **Ningún atajo cobra, cancela, cierra un turno, devuelve ni registra efectivo.** Las opciones de Caja no tienen atajo
-  y solo abren su hoja; «Cuenta sin mesa» y «Nuevo pedido para llevar» tampoco, porque crean la cuenta al instante, como
-  sus botones.
+  y solo abren su hoja; «Cuenta sin mesa» y «Nuevo pedido para llevar» tampoco (en la 9C creaban la cuenta al instante;
+  desde la fase D de la 9D solo abren la captura sin crear nada —su descripción dice «Se abre al guardar el primer
+  producto»—, y siguen sin atajo). Desde el menú o la paleta piden primero la sección y abren la captura solo cuando la
+  pantalla la recibió (así la vista principal de la sección no queda encima de la captura).
 - **Los atajos no actúan mientras escribes en un campo** (salvo Esc), ni con un diálogo, hoja, menú o lista abiertos
   (la pantalla completa sí, con un diálogo abierto), ni al mantener la tecla.
 - **Esc**: cierra el diálogo, la hoja, el menú o la lista abiertos (cada uno con su propio Esc); cierra el panel abierto
   de la cuenta (como su «Volver»); en la captura vuelve al mapa o al listado (como «‹ Mesas»); cierra el panel lateral de
-  la mesa; en Administración vuelve a la pantalla anterior de la ruta (no con un formulario a la vista). En un campo, el
+  la mesa (desde la 9D el panel queda a la vista con el resumen del área); en Administración vuelve a la pantalla anterior de la ruta (no con un formulario a la vista). En un campo, el
   primer Esc solo sale del campo. **En el cobro, Esc sigue limpiando el importe**, como antes. Esc no cierra la
-  personalización de un producto en la captura (su «Volver» confirma el descarte).
+  personalización de un producto en la captura (su «Volver» confirma el descarte). Desde la fase D de la 9D, Esc cierra el
+  menú de un producto del detalle de la cuenta (mientras está abierto, los atajos no actúan).
 - Con el cobro abierto, «Nueva cuenta en mesa», «Cuenta sin mesa», «Nuevo pedido para llevar» y elegir otra mesa en la
   paleta quedan deshabilitados (cerrar el cobro perdería lo tecleado); ⌘1 y ⌘2 en el cobro solo navegan.
 
@@ -302,6 +321,11 @@ ejecutar una acción escribiendo, por ejemplo, «productos», «retiro», «cort
 | `desktop/src/components/TimeField.tsx`                                                                            | Selector de hora (`TimeField` y `DateTimeField`).                                                                     |
 | `desktop/e2e/navigation.ts`, `e2e/select.ts`, `src/testing/select.ts`                                             | Ayudantes de Playwright (barra, mosaicos, selector) y de Vitest (selector).                                           |
 | `desktop/e2e/native-driver.ts`                                                                                    | Simula `menu_subscribe`/`menu_set_state` leyendo `MENU_ACTIONS` de `menu.rs`; ofrece `clickMenu(id)` y `menuState()`. |
+
+Desde la etapa 9D, `requestScreen` de `NavigationContext` devuelve `Promise<boolean>` (`true` si la pantalla cambió, como
+ya hacía la función de `App.tsx`): las acciones que cambian de sección y después abren algo (la paleta, el menú nativo y
+«Nuevo pedido para llevar» del resumen de Mesas) esperan ese resultado y no abren nada si el usuario eligió seguir
+editando.
 
 La aplicación no tiene rutas de URL: `App.tsx` guarda la pantalla visible en su estado y la dibuja en `content()`.
 **Toda navegación pasa por un único `requestScreen`** (barra, logotipo, mosaicos, ruta, menú del usuario, «Ir a Caja»,
@@ -372,7 +396,8 @@ los sinónimos de `screenKeywords`) y las mesas del mapa.
 - No actúa con la tecla mantenida (`event.repeat`), en un campo (`isEditable`: `input` de texto, `textarea`, `select`,
   contenido editable y roles `textbox`, `searchbox`, `combobox` y `spinbutton`, que incluye el disparador del selector)
   ni con algo abierto (`overlayOpen`: `aria-modal`, `role=dialog|alertdialog|listbox|menu`, la hoja y el menú de Caja, los
-  menús de la barra, «Más…» y la paleta de colores); la pantalla completa sí actúa con algo abierto.
+  menús de la barra, «Más…» y la paleta de colores; desde la fase D de la 9D también el menú de un producto,
+  `.capture-line-menu`); la pantalla completa sí actúa con algo abierto.
 - **Esc**: una foto en la fase de captura (¿había algo abierto?, ¿el foco estaba en un campo o en un control propio con
   `tabindex`?) y la decisión después de todos los oyentes (`setTimeout 0`): si alguien lo atendió (`defaultPrevented`,
   como el teclado del cobro) o había algo abierto, no hace nada; en un campo solo sale del campo; si no, `back()` de la
@@ -448,6 +473,14 @@ Una operación nueva del puente (como `menu_subscribe`) se agrega a `build.rs`, 
 - **Teclado, menú y paleta**: `commands/commands.test.ts` y `commands/commandCenter.test.tsx`; Rust `menu::tests` (6).
 - **Playwright** (Chromium y WebKit): `workflow-stage9c-navigation.spec.ts`, `workflow-stage9c-keyboard.spec.ts` y
   `workflow-stage9c-tables-time.spec.ts`, ordenadas después de las demás porque todas comparten la base de cada motor.
+- **Etapa 9D**: `navigation/navigation.test.tsx` (orden de las cuatro secciones, Caja a la derecha antes del servidor, el
+  usuario y pantalla completa, Caja en dos renglones en sus tres estados, Caja sin turno visible a la derecha, «Sin
+  conexión»), `App.test.tsx` («Sin conexión» y recuperación), `src/stage9dLayout.test.ts` (columnas iguales, 52 px,
+  colores de los indicadores por token, menú de Caja a la derecha, solo el nombre del usuario se acorta) y
+  `commands/commandCenter.test.tsx` (Escape de «Acerca de» en cuanto aparece). Playwright
+  `workflow-stage9d-topbar-tables.spec.ts` (orden, mismo ancho, alturas de 52–56 px y ningún texto cortado ni
+  desbordamiento a 1280 × 720 y 1920 × 1080 en ambos temas, menú de Caja dentro de la ventana, «Sin conexión» simulado
+  rechazando peticiones en el puente); `e2e/navigation.ts` busca Caja en toda la barra.
 
 ## Lo que falta comprobar
 
@@ -455,4 +488,6 @@ Pruebas físicas y de entorno que **no** se hicieron: la ventana nativa (WKWebVi
 pulsación y el acelerador llegan dos veces, los elementos que macOS agrega por su cuenta en Edición y Ver, el menú en
 pantalla completa); el menú en Windows (no se compiló); la pantalla táctil física (barra, mosaicos, selector y selector
 de hora); el teclado virtual sobre el selector y sobre la paleta; un lector de pantalla real (VoiceOver). Detalle en
-[VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md).
+[VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md). De la 9D tampoco se comprobó en hardware: la barra nueva en la
+ventana nativa y en una pantalla táctil física, el cursor «no disponible» en la ventana nativa y el arrastre del mapa con
+el dedo ([VERIFICATION_STAGE9D.md](VERIFICATION_STAGE9D.md)).

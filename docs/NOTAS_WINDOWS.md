@@ -245,6 +245,38 @@ de Go en la red privada y ubicación de `ca.pem` en la terminal. Go rechaza escu
 
 ## 5. Detalles de la etapa 9D que afectan a Windows
 
-- El cursor `not-allowed` de los controles deshabilitados y la paleta azul son CSS: iguales en WebView2.
-- Los atajos siguen en `commands/platform.ts` (Ctrl en Windows); no se agregan atajos nuevos que dependan de ⌘.
-- (Completar en la fase F con lo que agreguen las fases A–E.)
+Revisado en la fase F leyendo el código de las fases A–E y de las correcciones de la revisión (hasta `81ff531`).
+**Nada de esto se probó en Windows.** La 9D no agrega dependencias, operaciones
+nativas, permisos de Tauri ni textos con «macOS», «CUPS» o «Llavero».
+
+- **Colores y cursor**: la paleta azul vive en los tokens de `desktop/src/styles.css` y usa CSS estándar; `color-mix()` ya
+  se usaba antes de la 9D y requiere un WebView2 basado en Chromium 111 o posterior (por comprobar con el WebView2 que
+  incluya el instalador). En Windows `cursor: not-allowed` es el círculo tachado del sistema y `cursor: progress` la
+  flecha con el indicador de espera: comunican lo mismo que en macOS. Las pruebas solo compararon el estilo calculado en
+  Chromium y WebKit, no el puntero real.
+- **Barra superior a 1280 px**: la fuente de la interfaz es `-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`
+  (regla `:root` de `styles.css`); en Windows se usará Segoe UI, con anchos de texto distintos a los de macOS. La barra se probó sin
+  cortes a 1280 × 720 y 1920 × 1080 con las fuentes de macOS (Chromium y WebKit); en Windows hay que repetir esa prueba.
+  Si falta espacio, solo se acorta el nombre del usuario (las cuatro secciones son columnas iguales).
+- **Mapa de Mesas**: el desplazamiento por arrastre usa eventos de puntero con `setPointerCapture`
+  (`components/restaurant/TableMap.tsx`) y el mapa operativo no fija `touch-action: none` (solo el diseñador), así que en
+  una pantalla táctil el WebView puede tomar el desplazamiento nativo del contenedor (`overflow: auto`). Las barras siempre
+  visibles usan `::-webkit-scrollbar` (`styles.css`, `.table-map-pannable`), que WebView2 admite mientras no se declaren
+  `scrollbar-width` o `scrollbar-color` en ese elemento (Chromium ignora `::-webkit-scrollbar` si están). Por comprobar
+  en una pantalla táctil con Windows 11 (tampoco se verificó en macOS con pantalla táctil).
+- **Atajos**: sin cambios: siguen en `commands/platform.ts` (Ctrl en Windows; ⌘/Ctrl + 1–4 y ⌘5) y no se agregó ningún
+  atajo que dependa de ⌘. Escape en Mesas vuelve al resumen del área y también cierra el menú de un producto del
+  detalle de la cuenta (que se abre al tocar el renglón o «⋯», sin depender de hover).
+- **Foco de los diálogos de Ayuda**: «Acerca de» y «Atajos de teclado» llevan el foco al diálogo antes de dibujar
+  (`useLayoutEffect` en `commands/CommandDialog.tsx`) y tienen un oyente de Escape en el documento, por una carrera que se
+  reprodujo en WebKit; en WebView2 no se probó.
+- **«Sin conexión» y «Reintentar»**: dependen de que las peticiones del puente fallen (`api_request`), igual en cualquier
+  sistema. Con Go como servicio de Windows (2.2), un servicio detenido se verá como «Sin conexión».
+- **Migración 0021**: solo SQL de PostgreSQL 18 (`gen_random_uuid()`, `numeric(18,2)` y un disparador PL/pgSQL de solo
+  inserción como los de la etapa 8); no depende del sistema. Aplicarla en Windows exige el mismo procedimiento de
+  respaldo y ensayo de restauración, que hoy vive en scripts de macOS (`database.py`, `restore-check.py`; ver 2.1 y 2.13).
+- **Cancelar cuenta y el aviso a cocina**: el aviso de cancelación de una cuenta viaja por la cola y los transportes de
+  siempre (CUPS o ESC/POS TCP; ver 2.5): en Windows depende del transporte que se elija para la impresión. La autorización
+  de supervisor es la de los cobros (Go), sin nada del sistema.
+- **Exportación de los reportes nuevos** («Cuentas canceladas» y «Cancelaciones por motivo»): por la misma operación
+  `export_report` y el diálogo de `tauri-plugin-dialog` (ver 2.10); sin cambios de plataforma.

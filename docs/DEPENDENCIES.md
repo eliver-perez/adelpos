@@ -155,3 +155,21 @@ versión, 0.9.2; comprobado con `git diff` desde `etapa-9b`).
 - **Reportes nuevos, columnas por impresora y validación de JPEG del catálogo**: Go estándar y los paquetes ya fijados
   (`pgx`, `shopspring/decimal`, `excelize` y `fpdf` para las exportaciones); el recorrido de marcadores JPEG es el de
   `internal/logoraster` (etapa 9B), exportado.
+
+## Etapa 9D
+
+**Sin módulos, crates ni paquetes npm nuevos**: `backend/go.mod`, `go.sum`, `desktop/package.json`,
+`package-lock.json`, `src-tauri/Cargo.toml` y `Cargo.lock` no cambian entre `main` (9C) y `81ff531`, la fase D incluida
+(comprobado con `git diff --stat`). Al fijar la versión
+0.9.3 solo debe cambiar el número de versión del propio paquete en `Cargo.toml`, `package.json` y sus lockfiles.
+
+- **Color de marca, paleta y cursor**: CSS propio con los tokens de `styles.css` sobre Tailwind 4 sin configuración nueva;
+  `color-mix()` ya se usaba antes de la 9D y las barras de desplazamiento del mapa usan `::-webkit-scrollbar`
+  (WKWebView y WebView2). La prueba de colores y de contraste (`styles.test.ts`) calcula el contraste WCAG con código
+  propio (solo `node:fs`, `node:path` y Vitest).
+- **Mesas** (escala automática, arrastre y resumen del área): React 19 y eventos de puntero estándar, sin librería de
+  mapas, de gestos ni de desplazamiento.
+- **Cancelar cuenta y motivos**: Go estándar y los paquetes ya fijados (`pgx`, `shopspring/decimal`); la autorización de
+  supervisor reutiliza la de los cobros. La 0021 usa solo funciones de PostgreSQL 18 (`gen_random_uuid()` y un
+  disparador en PL/pgSQL, como las de la etapa 8).
+- **Reportes nuevos**: el registro de la 9A con `excelize` y `fpdf` para las exportaciones, sin versiones nuevas.
