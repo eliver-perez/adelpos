@@ -391,6 +391,14 @@ coordinador, sin editarla).
 - Los módulos con pestañas propias que no informan su pestaña a la ruta: Documentos (alcance de D1),
   Caja (no es de Administración), Cobros y Configuración (acordeones).
 
+### Cierre de la fase A
+
+Sobre una copia exacta del commit `e575ad0` (`git archive`, clúster temporal 55499), sin los cambios de D1: Prettier y
+gofmt limpios; `go vet` con y sin `-tags=integration` sin hallazgos; `go test -race` de `administration` y `database`
+`ok`; integración `administration` (59.1 s) y `database` (6.6 s) `ok`; `tsc --noEmit` sin errores; `npm test` (63
+archivos, 567 pruebas) y `npm run build` correctos; Playwright completo Chromium 13/13 (5.2 min) y WebKit 13/13
+(5.1 min).
+
 ## Fase D (parte D1, en paralelo con la fase A) · Pendientes de backend
 
 Hecha por un solo agente (D1) el 11/11/2026, en paralelo con la fase A, sin subagentes. Sin migración nueva: usa la
