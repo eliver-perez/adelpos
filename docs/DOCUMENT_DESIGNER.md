@@ -8,6 +8,13 @@ describe solo lo implementado y probado en la rama `etapa-9b`. Las decisiones de
 [ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md); los contratos HTTP completos, en [API_CONTRACTS.md](../API_CONTRACTS.md)
 (secciones «Etapa 9B»); la evidencia, en [VERIFICATION_STAGE9B.md](VERIFICATION_STAGE9B.md).
 
+**Etapa 9C** (versión 0.9.2, esquema 20; la 0020 se aplicó a la instalación real el 11 de noviembre de 2026): Documentos se abre desde
+**Administración → Documentos**; cada impresora elige sus **columnas de texto** (80 mm: 42 o 48; 58 mm: 30 o 32) con una
+**prueba de ancho** en papel, el renderizador único usa las columnas de la impresora destino y la vista previa del
+editor puede mostrarse **con el ancho de una impresora**. Con el valor predeterminado nada cambia: las plantillas siguen
+produciendo exactamente la misma salida que en la 9B. Detalle en «Columnas por impresora · etapa 9C» y en
+[KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md); evidencia en [VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md).
+
 La primera parte es para el personal del restaurante; la segunda, para quien desarrolle.
 
 ## Contenido
@@ -21,6 +28,7 @@ La primera parte es para el personal del restaurante; la segunda, para quien des
 - Para quien desarrolle: [Arquitectura](#arquitectura) · [Modelo de plantilla](#modelo-de-plantilla) ·
   [Catálogo de bloques](#catálogo-de-bloques) · [Campos de datos](#campos-de-datos) · [Límites](#límites) ·
   [Representación intermedia](#representación-intermedia-ir) · [Impresión](#impresión) ·
+  [Columnas por impresora](#columnas-por-impresora--etapa-9c) ·
   [Documentos históricos](#documentos-históricos-y-reimpresión) · [Muestras](#muestras) ·
   [Identidad y logotipo](#identidad-y-logotipo-técnico) · [Seguridad](#seguridad) · [Permisos](#permisos) ·
   [API, eventos y auditoría](#api-eventos-y-auditoría) · [Persistencia](#persistencia) ·
@@ -47,10 +55,11 @@ lo mismo que antes (sin logotipo), hasta que el restaurante active una plantilla
 
 ## Entrar a Documentos
 
-En el menú principal, **Documentos** (visible con el permiso «Consultar plantillas de documentos»; el administrador lo
-tiene). Arriba hay dos pestañas: **Plantillas** e **Identidad del establecimiento**. Quien solo puede consultar ve
+En **Administración → Documentos** (desde la etapa 9C; antes, en el menú lateral), visible con el permiso «Consultar
+plantillas de documentos» (el administrador lo tiene). Arriba hay dos pestañas: **Plantillas** e **Identidad del establecimiento**. Quien solo puede consultar ve
 plantillas, historial, vista previa e identidad, pero no los botones para cambiarlos; el servidor vuelve a comprobar
-cada permiso. «Documentos» todavía no se puede elegir como pantalla de inicio.
+cada permiso. Desde la etapa 9C la pantalla de inicio la decide cada terminal (Mesas, Para llevar, Cocina o Caja), así
+que Documentos no es pantalla de inicio.
 
 ## Identidad del establecimiento
 
@@ -114,7 +123,8 @@ y propiedades», sin perder lo que estabas haciendo.
    - «Ya está en la plantilla» indica un elemento que solo puede ir una vez (por ejemplo, la lista de productos o el
      aviso fiscal).
 2. **Vista previa** (centro): una tira de papel con **exactamente** las líneas que se imprimirán y el ancho real (30
-   caracteres en 58 mm y 42 en 80 mm). Arriba se elige **58 mm** u **80 mm**. La franja «Vista previa con datos de
+   caracteres en 58 mm y 42 en 80 mm). Arriba se elige **58 mm** u **80 mm** o, desde la etapa 9C, **«Ver con el ancho de
+   una impresora»**: una de las impresoras activas, con su papel y sus columnas (por ejemplo, 48 en 80 mm). La franja «Vista previa con datos de
    muestra» recuerda que los datos son de ejemplo: no son ventas ni movimientos.
    - **Tocar una línea** elige el bloque que la produce y resalta sus líneas.
    - «No imprimen nada con estos datos» lista los bloques vacíos con su motivo (por ejemplo, «Total en dólares» sin
@@ -199,6 +209,9 @@ Las impresoras térmicas imprimen línea por línea: por eso el diseño es una l
 - Si un trabajo se envía a una impresora de **otro ancho de papel** (respaldo, redirección o copia a otra impresora), el
   logotipo convertido para el ancho original no se envía.
 - Un documento sin negrita, tamaños ni logotipo viaja exactamente como antes de la 9B.
+- **Columnas por impresora** (etapa 9C): en **Cocina → Impresoras** cada impresora usa 42 columnas en 80 mm y 30 en 58 mm
+  (lo de siempre) o, si la **prueba de ancho** muestra completo el renglón en papel, 48 o 32. Tus plantillas se imprimen
+  con las columnas de la impresora que recibe el documento; las copias de documentos ya impresos conservan su ancho.
 - **Cómo sale en papel cada impresora es una prueba física pendiente** que hará el propietario: nada de lo anterior se
   comprobó con papel. Las impresoras de 80 mm que solo imprimen 512 puntos (en lugar de 576) recortarían el borde derecho
   del logotipo.
@@ -351,25 +364,25 @@ valor; varios datos se unen con « · ». El editor ofrece cada clave como atajo
 
 ## Límites
 
-| Límite                                    | Valor                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------ |
-| Bloques por plantilla                     | 1–60                                                               |
-| Tamaño de la plantilla                    | 32 KiB (la columna admite hasta 64 KiB)                            |
-| Texto fijo                                | 300 caracteres y 8 líneas                                          |
-| Etiquetas de campo y título personalizado | 40 caracteres                                                      |
-| Datos por campo                           | 1–4 (`pair`: exactamente 1)                                        |
-| Espaciado antes y después                 | 0–3 líneas                                                         |
-| Espacio (`spacer`)                        | 1–5 líneas                                                         |
-| Logotipos por plantilla                   | 3                                                                  |
-| Nombre de plantilla                       | 1–80 caracteres, único por tipo sin distinguir mayúsculas          |
-| Nota de versión                           | 200 caracteres                                                     |
-| Historial                                 | las 200 versiones más recientes                                    |
-| Documentos recientes (vista previa real)  | 20                                                                 |
-| Cuerpo de `documents/*`                   | 64 KiB (la carga del logotipo, 2 MiB)                              |
-| Logotipo                                  | PNG o JPEG, ≤ 1 MiB, 1 × 1 a 2048 × 2048 px                        |
-| Conversión térmica                        | 384 puntos (58 mm) o 576 (80 mm) de ancho, ≤ 320 de alto (≈ 40 mm) |
-| Textos de la identidad                    | 300 caracteres y 8 renglones cada uno                              |
-| Columnas                                  | 30 (58 mm) y 42 (80 mm); 15 y 21 con texto grande de cocina        |
+| Límite                                    | Valor                                                                                                                       |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Bloques por plantilla                     | 1–60                                                                                                                        |
+| Tamaño de la plantilla                    | 32 KiB (la columna admite hasta 64 KiB)                                                                                     |
+| Texto fijo                                | 300 caracteres y 8 líneas                                                                                                   |
+| Etiquetas de campo y título personalizado | 40 caracteres                                                                                                               |
+| Datos por campo                           | 1–4 (`pair`: exactamente 1)                                                                                                 |
+| Espaciado antes y después                 | 0–3 líneas                                                                                                                  |
+| Espacio (`spacer`)                        | 1–5 líneas                                                                                                                  |
+| Logotipos por plantilla                   | 3                                                                                                                           |
+| Nombre de plantilla                       | 1–80 caracteres, único por tipo sin distinguir mayúsculas                                                                   |
+| Nota de versión                           | 200 caracteres                                                                                                              |
+| Historial                                 | las 200 versiones más recientes                                                                                             |
+| Documentos recientes (vista previa real)  | 20                                                                                                                          |
+| Cuerpo de `documents/*`                   | 64 KiB (la carga del logotipo, 2 MiB)                                                                                       |
+| Logotipo                                  | PNG o JPEG, ≤ 1 MiB, 1 × 1 a 2048 × 2048 px                                                                                 |
+| Conversión térmica                        | 384 puntos (58 mm) o 576 (80 mm) de ancho, ≤ 320 de alto (≈ 40 mm)                                                          |
+| Textos de la identidad                    | 300 caracteres y 8 renglones cada uno                                                                                       |
+| Columnas                                  | 30 (58 mm) y 42 (80 mm); 15 y 21 con texto grande de cocina. Desde la 9C, por impresora: 32 o 48 (16 y 24 con texto grande) |
 
 ## Representación intermedia (IR)
 
@@ -416,6 +429,28 @@ en todos los trabajos de las plantillas predeterminadas: esos trabajos son igual
   cambian.
 - **Prueba técnica de impresora** (`kitchen/printers/test`, «PRUEBA DE IMPRESIÓN»): no es uno de los diez tipos y sigue
   igual, con la versión 1 de la comanda.
+
+## Columnas por impresora · etapa 9C
+
+- `documents.ColumnsFor(paper)` sigue siendo el predeterminado (30 o 42); `documents.ColumnChoices(paper)` es la lista
+  cerrada (30/32 en 58 mm, 42/48 en 80 mm) y `documents.ValidColumns` la valida. La impresora destino fija
+  `RenderOptions.Columns` (`kitchen.Printer.RenderOptions`): **con el predeterminado queda en cero y la IR es idéntica a
+  la de la 9B** (`TestDefaultColumnsKeepEveryDocumentIdentical` y las equivalencias de la 9B). `Layout.Columns` es el ancho
+  efectivo (la mitad con el texto grande de Cocina). Con 48 o 32 columnas se recalculan los renglones «concepto … importe»
+  y los cortes (`TestWideColumnsRecalculateRowsAndCuts`); el logotipo sigue por puntos.
+- Usan las columnas de la impresora destino: comandas y avisos, la prueba técnica, las muestras del diseñador,
+  precuentas, tickets, comprobantes y cortes (impresora de tickets de Cobros). La reimpresión de una comanda usa la
+  fotografía de la impresora del trabajo original; «Imprimir con la plantilla vigente», la configuración actual de esa
+  impresora.
+- **Prueba de ancho**: `documents.RenderWidthTest` (`documents/ruler.go`) produce un texto plano con la regla numerada
+  (decenas), una línea de guiones a todo el ancho y «Producto de ejemplo … $1,234.50» entre marcas «*** PRUEBA DE ANCHO
+  ***»; no es uno de los diez tipos ni usa plantilla (`TestWidthTestRuler`). La encola `POST
+kitchen/printers/{id}/width-test` como ticket `test` (ver [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md)).
+- **Vista previa por impresora**: `POST documents/preview` acepta `printer_id` (impresora activa; `paper_width` omitido o
+  igual a su papel) y responde `printer_id`, `printer_name` y las `columns` usadas; `GET documents/printers` informa las
+  columnas efectivas de cada impresora y `default_columns`. En el editor, «Ver con el ancho de una impresora» usa el
+  selector único de la 9C. Pruebas: `designer/printer_preview_integration_test.go` y `designer.test.tsx` («vista previa
+  con el ancho de una impresora»).
 
 ## Documentos históricos y reimpresión
 
@@ -621,7 +656,8 @@ código. Se reportaron en la fase 0 y **no se implementaron; requieren confirmac
 1. **Logotipo guardado en la memoria de la impresora** (imagen NV, `FS p`): la 9B envía la imagen raster en cada
    documento, como pide §0-B.
 2. **48 columnas en 80 mm**: AD-EL POS usa 42 (y 30 en 58 mm) desde la etapa 5; un número de columnas por impresora
-   cambiaría todos los documentos.
+   cambiaría todos los documentos. **Implementado en la etapa 9C** como opción por impresora (42 o 48 en 80 mm, 30 o 32
+   en 58 mm) con el predeterminado de siempre, sin cambiar ningún documento hasta que el restaurante la elija.
 3. **Precio unitario por renglón**: las unidades de una partida pueden tener importes distintos por el reparto de
    centavos; imprimirlo requeriría una regla nueva.
 4. **RFC como dato propio del establecimiento**: no existe; la «Información adicional» (texto libre) permite imprimirlo
@@ -663,7 +699,8 @@ imprimió en papel**.
 
 ## Limitaciones conocidas
 
-- **Instalación real**: 0018 y 0019 sin aplicar hasta la autorización del propietario.
+- **Instalación real**: 0018 y 0019 se aplicaron el 11 de noviembre de 2026 con autorización del propietario (ver
+  «Instalación»); la 0020 de la etapa 9C (columnas por impresora), el 11 de noviembre de 2026.
 - **Papel**: ningún documento con plantilla propia, formato o logotipo se imprimió en una impresora real; el resultado del
   logotipo en papel es una prueba física pendiente. Las impresoras de 80 mm con 512 puntos imprimibles recortarían 64
   puntos a la derecha (un ancho imprimible por impresora no se pidió).
@@ -704,4 +741,6 @@ Las migraciones 0018 y 0019 se aplican a una instalación existente con el proce
 `applied:0` → `server-start` → `build-macos` → `open-app`), **solo con autorización expresa del propietario**. En la
 instalación de este Mac se aplicaron así el 11 de noviembre de 2026 (registro en
 [ETAPA_9B_AVANCE.md](ETAPA_9B_AVANCE.md), «Instalación real»). Al aplicarlas, las diez plantillas del sistema quedan activas y la
-identidad vacía y sin logotipo: ningún documento cambia hasta que el restaurante lo decida.
+identidad vacía y sin logotipo: ningún documento cambia hasta que el restaurante lo decida. La 0020 de la etapa 9C (columnas por
+impresora) se aplica con el mismo procedimiento y la misma autorización; al aplicarla, todas las impresoras quedan con
+el predeterminado (NULL) y ningún documento cambia.

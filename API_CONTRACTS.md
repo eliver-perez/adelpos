@@ -1,4 +1,4 @@
-# API v1 · Etapa 9B
+# API v1 · Etapa 9C
 
 Los contratos anteriores se mantienen. El detalle operativo nuevo está al final de este documento y en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md).
 
@@ -7,6 +7,8 @@ Etapa 8 (inventarios, recetas, almacenes, compras y costos; guía en [INVENTORY_
 Etapa 9A (ajustes pendientes de catálogo e inventarios, reportes, indicadores y exportaciones; guía en [REPORTS.md](docs/REPORTS.md)): sus contratos están al final, en el orden de sus partes: «Etapa 9A · precio de complementos y vigencia de la precuenta (parte A1, esquema 15)», «Etapa 9A · proveedores, compras de mostrador, código sugerido, categorías y navegación de Inventarios (parte A2, esquema 16)», «Etapa 9A · reportes, día comercial y reconocimiento de ventas (parte B1, esquema 17)», «Etapa 9A · reportes de caja, inventarios, costos y márgenes, compras, proveedores y empleados (parte B2, sin migración nueva)», «Etapa 9A · exportación PDF y Excel y operación del puente (parte C1, sin migración nueva)» y «Etapa 9A · interfaz de Reportes (parte C2, sin cambios de contrato)». Las reglas comunes de los reportes (ejecución en una transacción de solo lectura, resultado único, permisos, formato de valores y errores) se describen en la parte B1 y rigen las partes B2, C1 y C2.
 
 Etapa 9B (identidad del establecimiento y diseñador visual de documentos; guía en [DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md)): sus contratos están al final: «Etapa 9B · plantillas de documentos, vista previa, muestras e impresión con la plantilla vigente (fase A, esquema 18)», «Etapa 9B · identidad del establecimiento y logotipo (fase B, esquema 19)» y «Etapa 9B · editor visual (fase C, sin cambios de contrato)». Las correcciones de la revisión independiente de la fase D están integradas en la sección de cada ruta. Las reglas comunes del diseñador (`operation_id`, revisión, errores y validación del layout) se describen en la fase A y rigen la B.
+
+Etapa 9C (nueva interfaz principal, navegación, teclado y ajustes; guía en [NAVIGATION_AND_SHORTCUTS.md](docs/NAVIGATION_AND_SHORTCUTS.md)): no cambia reglas de negocio, cálculos ni permisos. Sus contratos están al final, en «Etapa 9C · inicio por terminal, columnas por impresora, reportes nuevos y puente del menú (esquema 20)»: el campo `home_screen` de las terminales, las columnas y la prueba de ancho de las impresoras, la vista previa del diseñador por impresora, dos reportes y columnas nuevas, la validación de JPEG del catálogo, mensajes que cambiaron de texto y tres operaciones nuevas del puente (`kitchen_printer_width_test`, `menu_subscribe` y `menu_set_state`).
 
 HTTP JSON bajo `/api/v1`. Por defecto `http://127.0.0.1:8181`; LAN requiere HTTPS con identidad de servidor verificada.
 
@@ -20,14 +22,14 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | ---------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
 | GET        | `/health/live`            | Público; proceso activo.                                                                              |
 | GET        | `/health/ready`           | Público; PostgreSQL y esquema compatibles, 200 o 503.                                                 |
-| GET        | `/version`                | Público; producto, versión, API y versión del esquema (17 en la 0.9.0).                               |
+| GET        | `/version`                | Público; producto, versión, API y versión del esquema (20 en la 0.9.2).                               |
 | GET        | `/events`                 | SSE; sesión/dispositivo, events.read y ámbitos vigentes.                                              |
 | GET        | `/setup/status`           | Público; solo configured booleano.                                                                    |
 | POST       | `/setup`                  | Loopback y X-Provisioning-Token del propietario local.                                                |
 | POST       | `/devices/enroll`         | Código de autorización de un solo uso, no requiere sesión previa.                                     |
 | POST       | `/auth/login`             | Dispositivo autorizado; username y password.                                                          |
 | POST       | `/auth/logout`            | Sesión; revoca la actual.                                                                             |
-| GET        | `/auth/me`                | Sesión; identidad, permisos, preferencias y terminal.                                                 |
+| GET        | `/auth/me`                | Sesión; identidad, permisos, preferencias y terminal (con `home_screen` desde la 9C).                 |
 | POST       | `/auth/password`          | Sesión; contraseña actual/nueva; rota la sesión.                                                      |
 | GET / POST | `/users`                  | users.read / users.manage; el rol asignado no puede superar los permisos del actor.                   |
 | PATCH      | `/users/{id}`             | users.manage; no modifica sa, el propio rol ni usuarios con más permisos que el actor.                |
@@ -42,7 +44,7 @@ El puente nativo añade `X-Device-ID`, `X-Device-Token` y `Authorization: Bearer
 | PATCH      | `/registers/{id}`         | registers.manage; desactivar requiere desasociar terminales activas.                                  |
 | GET        | `/devices`                | devices.read.                                                                                         |
 | POST       | `/devices/invitations`    | devices.manage; código válido diez minutos.                                                           |
-| PATCH      | `/devices/{id}`           | devices.manage; nombre, caja y teclado.                                                               |
+| PATCH      | `/devices/{id}`           | devices.manage; nombre, caja, teclado y pantalla inicial (9C).                                        |
 | POST       | `/devices/{id}/revoke`    | devices.manage; revoca terminal y sesiones.                                                           |
 | GET        | `/sessions`               | sessions.read; hasta 200 recientes, sin tokens.                                                       |
 | POST       | `/sessions/{id}/revoke`   | sessions.manage; una cuenta ordinaria no revoca directamente sesiones de sa.                          |
@@ -60,7 +62,7 @@ Setup/settings: `name`, `timezone` IANA (Go exige una zona existente con `time.L
 
 Usuarios: `username`, `display_name`, `role_id`, `active`; POST añade password de 8 a 256 caracteres. PATCH no restablece contraseñas. Rol: `name`, `permissions` (claves del registro). Excepciones: `{ "overrides": { "users.read": "allow", "registers.read": "deny", "audit.read": "inherit" } }`. Heredar elimina la excepción; las demás claves enviadas se actualizan.
 
-Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled. Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Desde la etapa 6.1 `preview` ya no es una pantalla: un valor guardado o enviado como `preview` se interpreta como `catalog` (la vista previa vive en Catálogo). Desde la etapa 7 (fase B) `cash` («Caja») es una pantalla de inicio válida con `cash.shifts.read`. Desde la etapa 8 (fase A) `inventory` («Inventarios») también lo es, con `inventory.read`, y desde la etapa 9A (parte B1) `reports` («Reportes»), con `reports.read`. Contraseña propia: `current_password`, `new_password`.
+Cajas: `name`, `description`, `active`. Dispositivo: `name`, `register_id` UUID o null, `keyboard_mode` auto/always/disabled y, desde la etapa 9C, `home_screen` opcional (ver «Etapa 9C»). Enrolamiento: `code`, `name`. Preferencias: `theme` light/dark y `home_screen`; se normaliza a status si no está implementada o permitida. Desde la etapa 6.1 `preview` ya no es una pantalla: un valor guardado o enviado como `preview` se interpreta como `catalog` (la vista previa vive en Catálogo). Desde la etapa 7 (fase B) `cash` («Caja») es una pantalla de inicio válida con `cash.shifts.read`. Desde la etapa 8 (fase A) `inventory` («Inventarios») también lo es, con `inventory.read`, y desde la etapa 9A (parte B1) `reports` («Reportes»), con `reports.read`. Desde la etapa 9C la aplicación **ya no usa** `home_screen` de las preferencias para abrir (lo decide la terminal, `devices.home_screen`): Go lo sigue leyendo, normalizando y guardando, y la interfaz reenvía el valor guardado sin cambiarlo. Contraseña propia: `current_password`, `new_password`.
 
 Login devuelve session_token al cliente nativo. Setup/enrolamiento devuelven device_id y device_token al cliente nativo. Rust los guarda en Keychain y elimina campos secretos antes de responder al WebView. El UUID público de sesión no autentica peticiones. Caducidad de sesión: doce horas; nuevo acceso reemplaza la anterior. El evento lógico de reemplazo se informa con SESSION_REPLACED en la siguiente consulta, no mediante un WebSocket activo.
 
@@ -2503,3 +2505,133 @@ existente `kitchen_job` (seguimiento del trabajo de una muestra, con `kitchen.qu
   `details.block_id` marca el bloque. `409 REVISION_CONFLICT` → `GET documents/templates/{id}` y diálogo de opciones;
   «guardar mi borrador» repite el `PUT` con la revisión leída. El `operation_id` de cada acción se conserva mientras su
   resultado sea incierto (sin conexión o error ≥ 500) y el cuerpo no cambie.
+
+## Etapa 9C · inicio por terminal, columnas por impresora, reportes nuevos y puente del menú (esquema 20)
+
+Migración `0020_terminal_home_and_printer_columns.sql` (aplicada en la instalación real el 11 de noviembre de 2026). Sin rutas de Go nuevas
+salvo `POST kitchen/printers/{id}/width-test`, sin permisos nuevos y sin cambios de reglas de negocio: los demás cambios
+son campos opcionales, columnas de reportes y mensajes. Detalle en [docs/ETAPA_9C_AVANCE.md](docs/ETAPA_9C_AVANCE.md).
+
+### Inicio por terminal (`auth/me` y `devices`)
+
+- `GET auth/me`: `terminal` agrega `home_screen` (`tables` | `takeaway` | `kitchen` | `cash`; `tables` en todas las
+  terminales existentes al aplicar la 0020).
+- `GET devices` (`devices.read`): cada terminal agrega `home_screen`.
+- `PATCH devices/{id}` (`devices.manage`, sin cambio): campo **opcional** `home_screen` en el cuerpo
+  `{name, register_id, keyboard_mode, home_screen?}`. Sin el campo (o con `null`) se conserva el guardado, de modo que un
+  cliente anterior sigue editando la terminal sin cambiarlo. Otro valor → `400 VALIDATION_ERROR` «Elige la pantalla
+  inicial de la terminal: Mesas, Para llevar, Cocina o Caja.». Defensa en la base: `devices_home_screen_check`. Se audita
+  en `device.updated` con el antes y el después (que incluyen `home_screen`).
+- `GET/PUT preferences` y `users/{id}/preferences` no cambian de forma (`home_screen` del usuario se conserva, pero la
+  aplicación ya no lo usa para abrir; el respaldo de la apariencia se describe abajo).
+
+### Apariencia de usuarios nuevos
+
+`POST users` (sin cambio de cuerpo ni permisos): Go copia la apariencia de Configuración general (el campo `theme` de
+`/settings`, `app.establishment.theme`) a las
+preferencias del usuario nuevo; cambiarla después no altera a los existentes. Un usuario sin preferencias guardadas recibe
+esa apariencia como respaldo en `GET preferences` y `GET auth/me` (antes, `light`).
+
+### Impresoras de Cocina: `columns` y prueba de ancho
+
+`GET kitchen/printers`, `POST kitchen/printers` y `PATCH kitchen/printers/{id}` (`kitchen.printers.manage`, sin cambio)
+llevan un campo nuevo:
+
+- `columns: number | null`: `null` = predeterminado del papel (42 en 80 mm, 30 en 58 mm). Lista cerrada: 80 mm → 42 o
+  48; 58 mm → 30 o 32. Elegir el predeterminado se guarda como `null`. Otro valor, o uno que no corresponde al papel →
+  `400 KITCHEN_VALIDATION` («Con papel de 58 mm las columnas de texto son 30 (predeterminado) o 32; 48 no es una opción.
+  Si cambiaste el papel, elige de nuevo las columnas.»). Defensa en la base: `kitchen_printers_columns_check`. Queda en el
+  historial `printer.saved` como cualquier cambio de impresora.
+- La fotografía de la impresora en cada trabajo (`printer_snapshot`) lleva `columns`; los trabajos anteriores a la 9C no
+  lo tienen y usan el predeterminado. La reimpresión de una comanda vuelve a renderizar con esa fotografía; precuentas,
+  tickets y documentos de caja copian su contenido. «Imprimir con la plantilla vigente» usa la configuración actual de la
+  impresora del trabajo original.
+- CUPS en texto: con el predeterminado los argumentos de `lp` no cambian (`cpi` 12, o 6 con el texto grande de Cocina);
+  con otras columnas, `cpi` = 12 × columnas ÷ predeterminado, con dos decimales (13.71 para 48, 12.8 para 32; 6.86 y 6.4
+  con el texto grande). ESC/POS por red y CUPS raw no cambian.
+
+`POST kitchen/printers/{id}/width-test` (`kitchen.printers.manage`; operación del puente `kitchen_printer_width_test`):
+
+```json
+{ "operation_id": "uuid", "columns": 48 }
+```
+
+- `columns` opcional: las del formulario aunque aún no se hayan guardado; sin ellas, las de la impresora. Fuera de la
+  lista → `400 KITCHEN_VALIDATION` con el mensaje anterior.
+- Respuesta: `{"job": PrintJob, "ticket_id": "uuid", "paper_width": 80, "columns": 48}`.
+- Encola por la cola de siempre un ticket `test` (con `purpose: "width_test"` en su documento) con la regla numerada del
+  ancho elegido, una línea completa de guiones y el renglón «Producto de ejemplo … $1,234.50», entre las marcas
+  «*** PRUEBA DE ANCHO ***». El trabajo lleva la fotografía de la impresora con las columnas probadas. **No crea ventas,
+  pagos ni movimientos de caja o inventario.**
+- Como toda escritura de cocina: lock 7820148305 exclusivo, idempotencia por `operation_id` en `restaurant_operations`,
+  historial `print.width_test_requested` (auditoría `kitchen.print.width_test_requested`) y evento
+  `kitchen.printers.changed` en el ámbito `printing`. Una copia desde la cola repite el mismo texto; su vista en la cola
+  exige `kitchen.stations.all`.
+
+### Diseñador: vista previa por impresora
+
+- `POST documents/preview` acepta `printer_id` (opcional): una impresora **activa**; `paper_width` puede omitirse o debe
+  coincidir con su papel (si no, `400 DOCUMENTS_VALIDATION`: «Elige una impresora activa para la vista previa.» o «El
+  ancho de papel no corresponde a la impresora elegida.»). Sin `printer_id`, como antes (58 u 80 mm con sus columnas
+  predeterminadas). La respuesta `Preview` agrega `printer_id` y `printer_name` (omitidos sin impresora); `columns` son
+  las columnas con que se renderizó (la mitad con el texto grande de Cocina).
+- `GET documents/printers`: `PrinterCompatibility.columns` son ahora las columnas **efectivas** de la impresora y se
+  agrega `default_columns` (las del papel).
+- Las muestras (`POST documents/samples`) salen con las columnas de la impresora elegida.
+
+### Reportes nuevos y columnas nuevas (`reports/run`, `reports/export`)
+
+Registro cerrado de 92 a **94 reportes**, ambos en `EXPORTABLE_REPORTS` de `export.rs`; sin filtros nuevos (la lista
+blanca `reports_*` de `api.rs` no cambió). Permisos: `reports.read` + `reports.sales.read` (como «Productos cancelados»).
+Ninguno tiene columna «Autorizó»: AD-EL POS no pide la autorización de otra persona para anular una cuenta ni para
+reducir o cancelar cantidades.
+
+| Reporte                                                                      | Fecha                                                                   | Filtros                                                                                                                          | Columnas                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sales.voided_accounts` «Cuentas anuladas» (grupo Ventas)                    | Anulación de la cuenta, con la hora de inicio del día                   | `kind` (`void` «Anuladas con motivo», `released` «Cuentas vacías liberadas»), `mode`, `area_id`, `user_id` («Usuario que anuló») | `voided_at`, `folio`, `kind` (Anulada / Cuenta vacía liberada), `voided_by`, `terminal`, `reason`, `mode`, `place` (mesa u origen), `area`, `cancelled_units` (suma), `cancelled_amount` (suma); opcionales `account`, `opened_at`, `opened_by`. Orden por omisión: `voided_at`.                                                                      |
+| `products.quantity_changes` «Modificaciones de cantidades» (grupo Productos) | Cancelación o modificación de la partida, con la hora de inicio del día | `product_id`, `mode`, `user_id` («Usuario que modificó»)                                                                         | `changed_at`, `folio`, `product`, `change` (Cantidad reducida / Partida cancelada), `previous_quantity` y `new_quantity` (sin total), `difference` (unidades, negativa, suma), `amount_difference` (importe, negativo, suma), `changed_by`, `reason`; opcionales `action`, `terminal`, `mode`, `place`, `released_units` (suma). Orden: `changed_at`. |
+
+- «Cuentas anuladas» parte de las cuentas `voided` y lee su evento `account.void` o `account.released`; el importe es el
+  de las unidades canceladas en la cuenta antes de anularla (una cuenta solo se anula sin productos activos y con cobros
+  netos en cero); mesa y área son las actuales.
+- «Modificaciones de cantidades» parte de las unidades canceladas del periodo y lee el evento `item.cancelled` o
+  `item.modified` (con `cancelled_unit_ids`) que las retiró; si falta la cantidad anterior, queda vacía (no se inventa).
+- Columnas opcionales nuevas (ocultas por omisión): `payments.refunds` → `reference` («Referencia», de la devolución) y
+  `original_reference` («Referencia del pago original»); `payments.corrections` → `original_reference` («Referencia
+  original») y `new_reference` («Referencia correcta»). `payments.list` ya tenía `reference`; `purchases.received` ya
+  tenía «Recibió».
+
+### Catálogo: imágenes JPEG
+
+`POST catalog/images` (`catalog.images.manage`, sin cambio): un archivo que empieza con `FF D8` se recorre por marcadores
+**antes** de leer el encabezado o decodificar. Más de 100 barridos o 1024 segmentos → `400 CATALOG_VALIDATION` («La imagen
+JPEG tiene demasiados barridos progresivos (máximo 100)…» o «…demasiados segmentos (máximo 1024)…»). El máximo exacto se
+acepta.
+
+### Mensajes que cambiaron (solo texto; códigos sin cambio)
+
+- `409 IDEMPOTENCY_CONFLICT` en `payments`, `operations`, `kitchen`, `inventory`, `designer` e `identity`: «Esta operación
+  ya se había enviado con otros datos y no se repitió. Consulta el resultado antes de intentarlo de nuevo.».
+- `POST setup` con zona horaria inválida: «Elige la zona horaria del restaurante de la lista.».
+- `GET permissions`: la descripción de `audit.read` es «Consultar el registro de movimientos» (la columna
+  `app.permissions.description` de la base no cambia); el mensaje de solo consulta de `audit` es «El registro de
+  movimientos es de solo consulta.».
+
+### Puente nativo
+
+- `api.rs`: operación nueva `kitchen_printer_width_test` (`POST`, con identificador UUID), con la prueba
+  `kitchen_printer_width_test_is_a_closed_post_with_identifier` (rechaza rutas y valores que no son UUID).
+- Operaciones nativas nuevas (`src-tauri/src/menu.rs`, permiso `allow-diagnostics`, registradas en `build.rs`,
+  `permissions/diagnostics.toml` y `generate_handler!`; sin permisos `core:*`):
+
+| Operación        | Argumentos                                                           | Resultado                                                                  | Errores                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `menu_subscribe` | `channel: Channel<{ action: string }>`                               | `u64` (identificador de la suscripción; una nueva sustituye a la anterior) | «No se pudo preparar el menú.»                                                                                                                         |
+| `menu_set_state` | `enabled: string[]` (identificadores de `MENU_ACTIONS`, a lo más 23) | `()`; las demás opciones propias se deshabilitan                           | «Opción de menú no reconocida.» (fuera de la lista, incluido `file.quit`), «Estado del menú no válido.» (demasiadas), «No se pudo actualizar el menú.» |
+
+- Rust envía `{ "action": "<id>" }` por el canal al elegir una opción propia. Los elementos predefinidos (deshacer,
+  copiar…, ocultar, «Salir de AD-EL POS») los atiende el sistema; «Salir» de Archivo (`file.quit`) lo atiende Rust con
+  `app.exit(0)` y nunca llega a React. Antes del primer `menu_set_state` solo están habilitadas «Pantalla completa»,
+  «Atajos de teclado» y «Acerca de».
+- `e2e/native-driver.ts` simula ambas operaciones leyendo `MENU_ACTIONS` de `menu.rs` y ofrece `clickMenu(id)` y
+  `menuState()` a las pruebas.

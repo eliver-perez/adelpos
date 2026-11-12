@@ -1,6 +1,6 @@
 # Cocina, comandas e impresión · Etapa 5
 
-Versión 0.9.1, esquema 19 (la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario). Desde la etapa 9B todos los documentos impresos salen de un renderizador único con plantillas por bloques, versiones e identidad del establecimiento, sin cambiar enrutamiento, cola ni reglas de resultado (ver «Plantillas, formato y logotipo · etapa 9B» y [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
+Versión 0.9.2, esquema 20 (la migración `0020_terminal_home_and_printer_columns.sql` de la etapa 9C agrega las columnas de texto por impresora y se aplicó a la instalación real el 11 de noviembre de 2026 con la autorización previa del propietario; ver «Columnas por impresora y prueba de ancho · etapa 9C»; la migración 0009 de la etapa 7.1 se aplicó a la instalación real el 9 de noviembre de 2026; ver «Cajón por CUPS en modo raw · etapa 7.1»; las 0010–0014 de la etapa 8 y las 0015–0017 de la etapa 9A se aplicaron el 10 de noviembre de 2026; las 0018 y 0019 de la etapa 9B se aplicaron a la instalación real el 11 de noviembre de 2026 con autorización del propietario). Desde la etapa 9B todos los documentos impresos salen de un renderizador único con plantillas por bloques, versiones e identidad del establecimiento, sin cambiar enrutamiento, cola ni reglas de resultado (ver «Plantillas, formato y logotipo · etapa 9B» y [DOCUMENT_DESIGNER.md](DOCUMENT_DESIGNER.md)). La etapa 9A no cambia la cocina: los reportes de demanda por producto y por hora y de preparación por estación leen las liberaciones canónicas con su fecha de liberación, en una transacción de solo lectura y sin el lock operativo ([REPORTS.md](REPORTS.md)). Go es la autoridad de preparación y ejecuta los trabajadores sin depender de una ventana Tauri. No existe aplicación KDS independiente. Desde la etapa 8 la liberación canónica es el origen del consumo de inventario (ver «Consumo de inventario · etapa 8»). La preparación lista no significa pagado o entregado: pago y entrega pertenecen a `payments` (etapa 6).
 
 ## Configuración inicial
 
@@ -222,3 +222,56 @@ respaldo, cola, lease, serialización por impresora, reintentos y resultados inc
 - **Verificación**: solo con el transporte controlado de la cola, un puerto TCP de loopback y un ejecutor simulado de
   CUPS. **Ningún documento con formato o logotipo se imprimió en papel**: el resultado en cada impresora es una prueba
   física pendiente del propietario.
+
+## Columnas por impresora y prueba de ancho · etapa 9C
+
+AD-EL POS imprime desde la etapa 5 con 42 columnas en 80 mm y 30 en 58 mm; el sistema anterior imprimía 48 en 80 mm. No
+todas las impresoras de 80 mm imprimen el ancho completo (muchas tienen 72 mm imprimibles), así que **el restaurante
+elige el valor por impresora después de una prueba en papel** (§5.3 de [etapas/ETAPA_9C_v3.md](etapas/ETAPA_9C_v3.md)).
+
+**En la pantalla** (Cocina → «Cocina y preparación» → Impresoras, con `kitchen.printers.manage`):
+
+- **Columnas de texto**: en 80 mm, «42 (predeterminado)» o «48 columnas»; en 58 mm, «30 (predeterminado)» o «32
+  columnas». Lista cerrada, sin escritura libre. Al cambiar el papel las columnas vuelven al predeterminado del papel
+  nuevo. El listado muestra papel y columnas de cada impresora.
+- **Imprimir prueba de ancho (N columnas)**, junto a la opción: imprime, por la cola de siempre, una regla numerada del
+  ancho elegido (con las decenas), una línea completa de guiones y el renglón «Producto de ejemplo … $1,234.50», entre
+  las marcas «*** PRUEBA DE ANCHO ***». Usa las columnas elegidas en el formulario aunque aún no se hayan guardado; si se
+  cambió el papel, hay que guardarlo antes de imprimir su prueba. **No crea ventas, pagos ni movimientos de caja o
+  inventario.** Usa 48 o 32 solo si en el papel se ven completos el último número, la línea de guiones y el importe.
+- El cambio aplica a los documentos nuevos; las copias de documentos ya impresos conservan su ancho.
+
+**Reglas** (Go y PostgreSQL):
+
+- `kitchen_printers.columns` (0020): NULL = predeterminado del papel, de modo que las impresoras existentes y las
+  fotografías guardadas en trabajos anteriores imprimen exactamente igual. Lista cerrada en Go
+  (`documents.ColumnChoices`, `documents.ValidColumns`) y en el CHECK `kitchen_printers_columns_check`; elegir el
+  predeterminado se guarda como NULL; un valor fuera de la lista o que no corresponde al papel se rechaza (`400
+KITCHEN_VALIDATION`). Queda en el historial `printer.saved` como cualquier cambio de impresora.
+- **El renderizador único usa las columnas de la impresora destino** (`kitchen.Printer.RenderOptions`): comandas y avisos
+  al encolar, prueba técnica, muestras del diseñador, precuentas, tickets, comprobantes y cortes (impresora de tickets de
+  Cobros). Con 48 o 32 columnas los renglones «concepto … importe» y los cortes de línea se recalculan al nuevo ancho; el
+  texto grande de Cocina sigue usando la mitad de las columnas; el logotipo no cambia (depende de los puntos, 384 o 576).
+  **Con el predeterminado la salida es idéntica a la de la 9B** (las pruebas de equivalencia de la 9B siguen aprobadas).
+- **Reimpresión exacta**: la copia de una comanda desde la cola se vuelve a renderizar con la **fotografía de la
+  impresora del trabajo original** (`printer_snapshot`, que ahora incluye las columnas), así que sale con las columnas con
+  que se emitió aunque después cambien; una fotografía anterior a la 9C no tiene el campo y usa el predeterminado.
+  Precuentas, tickets y documentos de caja copian su texto, como antes. «Imprimir con la plantilla vigente» usa la
+  configuración actual de la impresora del trabajo original.
+- **CUPS en texto**: con el predeterminado los argumentos de `lp` no cambian (`cpi` 12, o 6 con el texto grande); con
+  otras columnas, `cpi` en proporción (12 × columnas ÷ predeterminado: 13.71 para 48 y 12.8 para 32; 6.86 y 6.4 con el
+  texto grande). ESC/POS por red y CUPS raw no cambian (fuente A de 12 puntos: 48 × 12 = 576 y 32 × 12 = 384 puntos).
+- **Prueba de ancho** (`POST kitchen/printers/{id}/width-test`, operación del puente `kitchen_printer_width_test`): ticket
+  `test` con `purpose: "width_test"`, trabajo con la fotografía de la impresora con las columnas probadas (para que CUPS
+  de texto use la misma densidad que usará al guardarlas), idempotente por `operation_id`, historial
+  `print.width_test_requested`. Una copia desde la cola repite el mismo texto. Contrato en
+  [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9C»).
+- El respaldo automático de impresora no vuelve a renderizar (como ya ocurría con el papel): si el respaldo tiene otras
+  columnas, el texto conserva las del original y CUPS usa la densidad del respaldo. La vista previa de una comanda en la
+  cola y la precuenta en pantalla siguen a 80 mm y 42 columnas.
+
+**Verificación**: equivalencia sin cambios con el predeterminado; salida a 48 y 32 columnas en los diez tipos; valor
+fuera de la lista rechazado en Go y en PostgreSQL; reimpresión exacta tras cambiar las columnas; prueba de ancho sin
+ventas ni movimientos (conteos antes y después), todo con el transporte controlado de la cola y ejecutores simulados
+([VERIFICATION_STAGE9C.md](VERIFICATION_STAGE9C.md)). **El papel a 48 y 32 columnas y la densidad fraccionaria de CUPS
+son una prueba física pendiente**: para eso existe la prueba de ancho.
