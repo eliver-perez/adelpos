@@ -713,3 +713,10 @@ menú nativo y paleta) sin archivos compartidos salvo `styles.css` (bloques dist
 - El aviso nativo de un selector obligatorio vacío es el de un campo de texto («Completa este campo»).
 
 La fase B se confirmó después de la C (las dos corrieron a la vez); su copia aislada era idéntica al árbol de trabajo, que ya contenía las fases A y C y la parte D1.
+
+### Cierre de la fase B
+
+Sobre una copia exacta de `88d54f0` (fases A, B y C y parte D1): Prettier, gofmt y `cargo fmt --check` limpios; `go vet`
+con y sin `-tags=integration` sin hallazgos; `tsc --noEmit` sin errores; `npm test` (66 archivos, 618 pruebas) y
+`npm run build` correctos; `cargo test` 40 aprobadas y 1 ignorada; Playwright completo Chromium 14/14 (5.4 min) y WebKit
+14/14 (5.2 min).
