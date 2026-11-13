@@ -460,7 +460,7 @@ Go; Tauri descargó NSIS 3.13, `nsis_tauri_utils` 0.5.3 con su hash y el instala
 - **36.6 MB** (38 412 295 bytes), SHA-256 `a975ef448a7148edb5855e50d53af6a2709a77c88d37e7179bff158bf617e8fe`
 - Sin firma digital (es normal el aviso de SmartScreen).
 
-## Fase E · Instalación real y pruebas (12/11/2026, en curso)
+## Fase E · Instalación real y pruebas (12/11/2026)
 
 Herramientas: `scripts/windows/verify-installed.ps1` (instalación en silencio, arranque, ventanas de consola,
 memoria, cierre ordenado, desinstalación con datos conservados; informe JSON) y `scripts/windows/installed-smoke.ps1`
@@ -503,17 +503,36 @@ Defectos reales de Windows encontrados en esta fase y corregidos (con pruebas):
 - Icono: el de la etapa 1 era una «A» verde provisional; ahora es el símbolo de la marca (Windows y macOS).
 - Respaldo antes de migrar sobre datos existentes: `TestMigrateWithBackupProtectsExistingData` (PostgreSQL real).
 
-### Pendiente para reanudar
+### Usuario con acentos e instalador final (reanudación del 12/11/2026)
 
-1. Quitar la instalación de prueba con acentos: `"%LOCALAPPDATA%\Programs\Prueba José Ñandú\AD-EL POS\uninstall.exe" /S`
-   y borrar `%TEMP%\adel9e` (datos de prueba).
-2. `scripts\build-windows.ps1` (incluye la corrección de acentos), repetir la instalación en la carpeta con acentos
-   y la aplicación con `LOCALAPPDATA` apuntando a una carpeta con acentos; después desinstalarla.
-3. Instalar el instalador final en la carpeta predeterminada: los datos de «Fonda Doña Ñeli» siguen en
-   `%LOCALAPPDATA%\AD-EL POS` y la aplicación debe abrir con ellos (queda instalada y lista para el propietario).
-4. Fase F: regresión completa (`dev.ps1 test`, `test-integration`, `test-browser` con Chromium y WebKit,
-   `GOOS=darwin go build`, `cargo check --target aarch64-apple-darwin` con el compilador sustituto descrito en C2),
-   `CLAUDE.md` (0.9.4, compilar en Windows, carpetas y diferencias por plataforma), `docs/INSTALAR_EN_WINDOWS.md`
-   (borrador ya escrito: revisar ruta, tamaño y SHA-256 finales), `NOTAS_WINDOWS.md`, `KITCHEN_AND_PRINTING.md` y
-   `API_CONTRACTS.md` (impresión por la cola de Windows, `503 SPOOLER_UNAVAILABLE`), commit, fusión en `main` y push
-   de `main` y `etapa-9e-windows`. Anotar que la próxima sesión en la Mac debe correr la regresión completa allí.
+Se quitó la instalación de prueba anterior (`Prueba José Ñandú`) y sus datos temporales, y se recompiló con
+`scripts\build-windows.ps1` (incluye la corrección de acentos):
+
+- **`desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_0.9.4_x64-setup.exe`**, **36.7 MB** (38 465 086 bytes),
+  SHA-256 `e04c87b8c61e5c3ed736dc9a068ed3739189fc3b6b7bca2bc21f144439c43674`, sin firma.
+
+**Usuario con acentos (§5.6), simulado sin crear cuentas de Windows**: instalación en silencio con
+`/D=%TEMP%\adel9e-acentos\Programa José Ñandú\AD-EL POS` (8.8 s) y la aplicación abierta con `LOCALAPPDATA` en
+`…\Usuario José Ñandú\AppData\Local` y un perfil de credenciales aparte (`ADEL_TERMINAL_CONFIG` con
+`credential_namespace` propio, para no tocar la credencial de la terminal real). Resultado: servidor listo en 15.7 s
+(clúster creado y 21 migraciones) con la carpeta de datos en «Usuario José Ñandú», PostgreSQL ejecutado por la ruta
+corta 8.3, asistente inicial («Prueba José Ñandú») e inicio de sesión con admin/admin (Playwright por CDP), cierre
+ordenado en 4.7 s sin procesos ni `postmaster.pid`, desinstalación con los datos conservados. Después se borraron
+la credencial del perfil de prueba y las carpetas temporales; la credencial real (`…8181|main`) y los datos reales
+(2 033 archivos) no cambiaron. **Límite**: el perfil de WebView2 y la carpeta de configuración de la ventana los
+resuelve Windows por su API de carpetas conocidas (no por la variable), así que siguieron en la carpeta real del
+usuario; solo una cuenta de Windows con acentos los pondría en una ruta con acentos.
+
+**Observación del instalador** (comportamiento de la plantilla de Tauri, sin cambio): el instalador recuerda la última
+carpeta de instalación en `HKCU\Software\AD-EL POS\AD-EL POS` y la reutiliza aunque se haya desinstalado; solo la
+olvida la casilla «borrar datos de la aplicación» del desinstalador. Por eso el primer intento de instalar en la
+carpeta predeterminada volvió a la carpeta de prueba; se desinstaló, se borró ese valor y se repitió. El propietario
+no lo verá mientras instale siempre en la carpeta predeterminada.
+
+**Instalación final** en `%LOCALAPPDATA%\Programs\AD-EL POS` sobre los datos de «Fonda Doña Ñeli»
+(`verify-installed.ps1`): instalación en silencio en 7.1 s, 108.8 MB en disco; ventana en 2.39 s y servidor listo en
+3.06 s (con datos); **0 ventanas de consola**; memoria con la aplicación abierta ≈ 790 MB de conjunto de trabajo
+(≈ 403 MB privados: WebView2 186, servidor 122, PostgreSQL 89, aplicación 6.5); cierre ordenado en 0.61 s sin
+procesos restantes; menú Inicio con los 3 accesos y acceso en el escritorio. Al volver a abrirla, la sesión volvió
+del Administrador de credenciales y mostró «Salón principal» con Mesa 1 y Mesa 2. **Queda instalada y lista** (cerrada)
+para el propietario.
