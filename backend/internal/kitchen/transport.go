@@ -112,7 +112,12 @@ func submitCUPS(ctx context.Context, job PrintJob) Outcome {
 	probe := exec.CommandContext(ctx, "/usr/bin/lpstat", "-p", printer.Destination)
 	probe.Env = append(os.Environ(), "LC_ALL=C")
 	if err := probe.Run(); err != nil {
-		return Outcome{State: "error", Message: "No se pudo consultar la cola CUPS del servidor; no se envió el documento."}
+		// Revisión 9F (B4): una cola que lpstat no reconoce no existe en el equipo; se configura la impresora.
+		code := ProblemNotFound
+		if ctx.Err() != nil {
+			code = ProblemUnreachable
+		}
+		return Outcome{State: "error", Code: code, Message: "No se pudo consultar la cola CUPS del servidor; no se envió el documento."}
 	}
 	// Por CUPS de texto no se pueden enviar comandos ESC/POS: el corte es la opción del controlador. Sin
 	// opción configurada el documento se imprime sin corte (etapa 9F, decisión D5); antes quedaba en
@@ -225,9 +230,10 @@ func ESCPosBytes(content string, printer Printer, textSize ...string) []byte {
 		result = append(result, 0x1d, 0x21, 0x11)
 	}
 	result = append(result, characters...)
-	// Final del documento (etapa 9F, §4.4): sin corte, los tres saltos de siempre; con corte, los
-	// renglones de avance de la impresora y GS V 0 (total) o GS V 1 (parcial).
-	return append(result, printer.PaperCut().Ending()...)
+	// Final del documento (etapa 9F, §4.4): sin corte, los tres saltos de siempre; con corte, el salto que
+	// cierra el último renglón si quedó abierto, los renglones de avance de la impresora y GS V 0 (total)
+	// o GS V 1 (parcial).
+	return append(result, printer.PaperCut().Ending(documents.TextLineOpen(text))...)
 }
 
 func submitESCPos(ctx context.Context, job PrintJob) Outcome {
@@ -313,7 +319,8 @@ func submitDrawerPulseCUPS(ctx context.Context, job PrintJob, commands commandRu
 	queue := job.PrinterSnapshot.Destination
 	capability := inspectQueue(ctx, commands, queue)
 	if !capability.Checked {
-		return Outcome{State: "error", Message: "No se pudo consultar la cola CUPS del cajón; no se envió el comando de apertura."}
+		return Outcome{State: "error", Code: capability.unavailableCode(),
+			Message: "No se pudo consultar la cola CUPS del cajón; no se envió el comando de apertura."}
 	}
 	if !capability.Raw {
 		return Outcome{State: "intervention", Message: capability.Reason + " No se envió el comando de apertura."}

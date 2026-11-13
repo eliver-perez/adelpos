@@ -7,20 +7,26 @@
 -- =====================================================================================================================
 
 -- 1. Corte de papel por impresora (§4.4, decisión D5). «Cortar el papel al terminar» sigue siendo la columna cut; se
---    agregan el tipo de corte (total o parcial, GS V 0 / GS V 1) y los renglones de avance antes del corte (lista
---    cerrada de 0 a 8). Las impresoras existentes conservan su papel: corte total y 3 renglones de avance, los mismos
---    bytes que hasta la etapa 9E; las impresoras nuevas reciben 4 renglones. Sin corte, el final de cada documento no
---    cambia. supports_cut y su CHECK (NOT cut OR supports_cut) se conservan: Go guarda supports_cut = cut.
+--    agregan el tipo de corte (total o parcial, GS V 0 / GS V 1) y los renglones de avance: los renglones en blanco
+--    entre el último renglón del documento y el corte (lista cerrada de 0 a 8), iguales en todos los documentos. Sin
+--    corte, el final de cada documento no cambia. supports_cut y su CHECK (NOT cut OR supports_cut) se conservan: Go
+--    guarda supports_cut = cut. Las impresoras nuevas reciben 4 renglones.
+--    Las impresoras existentes conservan su papel: corte total y, si ya cortaban, cut_feed_lines NULL = «como hasta la
+--    etapa 9E» (tres saltos fijos y el corte; ningún número de renglones reproduce a la vez ese final en precuentas,
+--    tickets y documentos de caja, que terminan sin salto, y en comandas, que terminan con él). Las que no cortaban
+--    reciben 4, que solo se usan si el propietario activa el corte.
 ALTER TABLE app.kitchen_printers
     ADD COLUMN cut_mode text NOT NULL DEFAULT 'full'
         CONSTRAINT kitchen_printers_cut_mode_check CHECK (cut_mode IN ('full', 'partial')),
-    ADD COLUMN cut_feed_lines smallint NOT NULL DEFAULT 3
+    ADD COLUMN cut_feed_lines smallint
         CONSTRAINT kitchen_printers_cut_feed_lines_check CHECK (cut_feed_lines BETWEEN 0 AND 8);
+UPDATE app.kitchen_printers SET cut_feed_lines = 4 WHERE NOT cut;
 ALTER TABLE app.kitchen_printers ALTER COLUMN cut_feed_lines SET DEFAULT 4;
 
 -- 2. Nombre visible del documento previo al cobro (§4.5): «Precuenta» (precheck, predeterminado), «Ticket de venta»
 --    (sales_ticket, como lo llamaba el sistema anterior) o «Cuenta» (bill). Es el mismo documento con las mismas
---    reglas; solo cambian los botones, los avisos y el encabezado impreso. Se cambia en Cobros › Políticas de cobro.
+--    reglas; solo cambian los botones, los avisos y el encabezado impreso. Se cambia en Administración › Documentos
+--    (identidad del establecimiento, documents.identity.manage).
 ALTER TABLE app.payment_settings
     ADD COLUMN precheck_name text NOT NULL DEFAULT 'precheck'
         CONSTRAINT payment_settings_precheck_name_check CHECK (precheck_name IN ('precheck', 'sales_ticket', 'bill'));
@@ -59,3 +65,8 @@ CREATE INDEX kitchen_user_stations_station_idx ON app.kitchen_user_stations(stat
 -- 3. Encargo de la fase E: la ruta antigua de anulación se retiró y accounts.manage ya no cancela cuentas vacías; la
 --    descripción se alinea con la que muestra Go.
 UPDATE app.permissions SET description = 'Editar datos de cuentas' WHERE key = 'accounts.manage';
+
+-- 4. kitchen.stations.manage: las estaciones por terminal ya no son un ámbito de autorización (punto 1), sino las
+--    que muestra cada terminal; la descripción se alinea con la que muestra Go.
+UPDATE app.permissions SET description = 'Administrar estaciones y las estaciones que muestra cada terminal'
+WHERE key = 'kitchen.stations.manage';

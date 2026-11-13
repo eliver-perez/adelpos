@@ -54,6 +54,10 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
 		// Estaciones de prueba fuera de las terminales, de los usuarios (etapa 9F) y de las rutas que se
 		// conservan.
 		{`DELETE FROM app.kitchen_device_stations WHERE station_id::text = ANY($1::text[])`, []any{stations}},
+		// Una terminal cuya selección eran solo estaciones de prueba pasa a «Todas las estaciones» (revisión 9F,
+		// parte 3, B3): nunca queda sin ninguna.
+		{`UPDATE app.devices SET kitchen_all_stations = true WHERE id::text = ANY($1::text[])`,
+			[]any{list(plan.allStationsDevices)}},
 		{`DELETE FROM app.kitchen_user_stations WHERE station_id::text = ANY($1::text[])`, []any{stations}},
 		{`UPDATE app.kitchen_routes SET revision = revision + 1, updated_at = now() WHERE id::text = ANY($1::text[])`,
 			[]any{list(plan.trimmedRoutes)}},

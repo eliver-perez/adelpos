@@ -88,6 +88,25 @@ func (handler *service) jobAction(id, action string) (any, error) {
 			return nil, invalid("El destino debe estar activo.")
 		}
 		printer = *found
+	} else if input.Decision == "send" {
+		// Revisión 9F (M2): un trabajo que se vuelve a enviar sale con la configuración vigente de su
+		// impresora (corregida, por ejemplo, con «Configurar impresora»), no con la fotografía con la que falló.
+		current, err := currentPrinter(handler.ctx, handler.tx, job.PrinterID)
+		if err != nil {
+			return nil, err
+		}
+		printer = *current
+	}
+	if input.Decision == "send" {
+		// Con otro papel u otras columnas, el documento se prepara de nuevo con sus datos guardados.
+		refreshed, err := refreshPrint(handler.ctx, handler.tx, job, ticketKind, printer, handler.request.Renderer)
+		if err != nil {
+			return nil, err
+		}
+		printer = refreshed.Printer
+		if err := storeRefreshedContent(handler.ctx, handler.tx, id, refreshed); err != nil {
+			return nil, err
+		}
 	}
 	// Autorizar envío tras incertidumbre reconoce el riesgo de una segunda copia.
 	// No se toca la liberación, el estado comercial ni el punto de consumo futuro.
@@ -116,7 +135,9 @@ func validReason(reason string) error {
 
 // DocumentRetry es el reintento de un documento comercial o de caja desde su propio aviso (etapa 9F,
 // §4.2): lo pide el módulo de pagos, que ya validó el permiso de imprimir ese documento y que el trabajo
-// le pertenece. Reason es opcional.
+// le pertenece. Reason es opcional. Printer es la impresora de esos documentos con su configuración vigente
+// (la impresora de tickets de Cobros, ya validada por pagos); sin ella, la del trabajo con su configuración
+// vigente. Renderer prepara el documento de nuevo si el papel o las columnas cambiaron (revisión 9F, M2).
 type DocumentRetry struct {
 	JobID       string
 	TicketID    string
@@ -124,13 +145,17 @@ type DocumentRetry struct {
 	OperationID string
 	ActorID     string
 	DeviceID    string
+	Printer     *Printer
+	Renderer    StoredRenderer
 }
 
 // RetryDocument vuelve a poner en la cola un trabajo de una precuenta, un ticket o un documento de caja que
-// nunca salió en papel (error confirmado o en intervención), con la misma impresora y sin motivo, como
-// «Reintentar» de la cola. Debe ser el trabajo más reciente de su documento; una impresora que ya no puede
-// imprimir (desactivada o de otra terminal) responde PRINTER_UNAVAILABLE para que la persona la configure.
-// Un resultado incierto nunca se reintenta desde aquí: se resuelve en la cola.
+// nunca salió en papel (error confirmado o en intervención), sin motivo, como «Reintentar» de la cola, con la
+// configuración vigente de la impresora (revisión 9F, M2): la fotografía del trabajo se sustituye y, si cambió
+// el papel o las columnas, el documento se prepara de nuevo con sus datos guardados. Debe ser el trabajo más
+// reciente de su documento; una impresora que ya no puede imprimir (desactivada o de otra terminal) responde
+// PRINTER_UNAVAILABLE para que la persona la configure. Un resultado incierto nunca se reintenta desde aquí:
+// se resuelve en la cola.
 func RetryDocument(ctx context.Context, tx pgx.Tx, input DocumentRetry) (*PrintJob, error) {
 	if err := validID(input.JobID); err != nil {
 		return nil, err
@@ -163,17 +188,27 @@ func RetryDocument(ctx context.Context, tx pgx.Tx, input DocumentRetry) (*PrintJ
 		}
 		return nil, &Error{Status: 409, Code: "PRINT_NOT_FAILED", Message: "El documento no tiene una impresión fallida que reintentar."}
 	}
-	current, err := one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", job.PrinterID)
-	if err != nil {
-		return nil, err
+	current := input.Printer
+	if current == nil {
+		current, err = currentPrinter(ctx, tx, job.PrinterID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if problem := PrinterProblem(current); problem != "" {
 		return nil, UnavailablePrinterError(problem, current.Name)
 	}
+	refreshed, err := refreshPrint(ctx, tx, job, kind, *current, input.Renderer)
+	if err != nil {
+		return nil, err
+	}
+	if err := storeRefreshedContent(ctx, tx, job.ID, refreshed); err != nil {
+		return nil, err
+	}
 	handler := service{ctx: ctx, tx: tx, operationID: input.OperationID, request: Request{Actor: Actor{UserID: input.ActorID, DeviceID: input.DeviceID}}}
-	_, err = tx.Exec(ctx, `UPDATE app.kitchen_print_jobs SET state='pending',next_attempt_at=now(),last_error=$1,result=$2,
-        revision=revision+1,updated_at=now() WHERE id=$3`, input.Reason,
-		encoded(map[string]string{"decision": "send", "actor": input.ActorID, "origin": "document"}), job.ID)
+	_, err = tx.Exec(ctx, `UPDATE app.kitchen_print_jobs SET state='pending',printer_id=$1,printer_snapshot=$2,next_attempt_at=now(),
+        last_error=$3,result=$4,revision=revision+1,updated_at=now() WHERE id=$5`, refreshed.Printer.ID, encoded(refreshed.Printer),
+		input.Reason, encoded(map[string]string{"decision": "send", "actor": input.ActorID, "origin": "document"}), job.ID)
 	if err != nil {
 		return nil, err
 	}

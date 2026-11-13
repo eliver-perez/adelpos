@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { installDriver } from './native-driver';
-import { openSection } from './navigation';
+import { openAdministration, openSection } from './navigation';
 import { notice } from './notices';
 import { receiptPrinterName, receiptPrinterQueue } from './payments-flow';
 import { chooseOption } from './select';
 
 // Etapa 9F, fase B (§4.1–§4.5 y §8) contra Go y PostgreSQL reales. Sin impresora de tickets, la
 // precuenta avisa en el momento con «Configurar impresora» (que lleva a Cobros › Políticas de cobro) y
-// «Reintentar»; el nombre visible elegido («Ticket de venta») cambia botones, avisos, el menú nativo y
-// el encabezado impreso; una impresión que no salió se explica y se reintenta con un toque, sin motivo;
+// «Reintentar»; el nombre visible elegido en Administración › Documentos («Ticket de venta», revisión 9F
+// M3) cambia botones, avisos, el menú nativo y el encabezado impreso; una impresión que no salió se explica y se reintenta con un toque, sin motivo;
 // reimprimir pide motivo; la «Cola de impresión» tiene altura limitada y su detalle aparece a la vista; y
 // el corte de papel se elige por impresora y viaja en la prueba de ancho. La impresora de tickets es la
 // de la aceptación (payments-flow.ts): una cola del equipo que no existe, de modo que nada sale en papel.
@@ -62,6 +62,16 @@ async function setReceipt(driver: Driver, printerID: string | null, precheckName
     print_receipt_default: settings.print_receipt_default,
     receipt_printer_id: printerID,
     refund_authorization_threshold: settings.refund_authorization_threshold,
+  });
+  // Revisión 9F (M3): el nombre de la precuenta se guarda con la identidad del establecimiento.
+  const identity = await call(driver, 'GET', 'documents/identity');
+  await call(driver, 'PUT', 'documents/identity', {
+    operation_id: randomUUID(),
+    revision: identity.revision,
+    additional_info: identity.additional_info,
+    header_text: identity.header_text,
+    footer_text: identity.footer_text,
+    presentation: identity.presentation,
     precheck_name: precheckName,
   });
 }
@@ -213,13 +223,18 @@ test('impresión 9F: aviso sin impresora, nombre de la precuenta, reintento, mot
   const printerField = page.getByRole('combobox', { name: /Impresora de tickets/ });
   await expect(printerField).toBeInViewport();
   await chooseOption(printerField, receiptPrinterName);
-  // §4.5: el nombre visible, de la lista cerrada.
+  await page.getByRole('button', { name: 'Guardar políticas', exact: true }).click();
+  await expect(notice(page, 'Políticas de cobro guardadas.')).toBeVisible();
+  // §4.5: el nombre visible, de la lista cerrada, en Administración › Documentos (revisión 9F, M3).
+  await expect(page.getByText(/Se elige en Administración › Documentos/)).toBeVisible();
+  await openAdministration(page, 'Documentos');
+  await page.getByRole('tab', { name: 'Identidad del establecimiento', exact: true }).click();
   await chooseOption(
     page.getByRole('combobox', { name: 'Nombre de la precuenta' }),
     'Ticket de venta',
   );
-  await page.getByRole('button', { name: 'Guardar políticas', exact: true }).click();
-  await expect(notice(page, 'Políticas de cobro guardadas.')).toBeVisible();
+  await page.getByRole('button', { name: 'Guardar cambios', exact: true }).click();
+  await expect(notice(page, 'Identidad del establecimiento guardada.')).toBeVisible();
 
   // 2. §4.5: botones, menú nativo, panel y encabezado impreso con «Ticket de venta». Mesas conserva
   // la precuenta que se dejó abierta: al volver ya se llama «Ticket de venta» (llega con la sesión).
@@ -251,10 +266,13 @@ test('impresión 9F: aviso sin impresora, nombre de la precuenta, reintento, mot
   await finalError(driver, document.job_id, 3);
   await ticket.getByRole('button', { name: 'Volver', exact: true }).click();
 
-  // 3. §4.2: la impresión que no salió se explica sin términos técnicos y se reintenta sin motivo.
+  // 3. §4.2: la impresión que no salió se explica sin términos técnicos y se reintenta sin motivo. La cola
+  // de la aceptación no existe en el equipo: desde la revisión 9F (B4) se explica como impresora no
+  // encontrada (no como «no responde»), que se resuelve configurándola.
   await panel.getByRole('button', { name: /^Cobrar/ }).click();
   const documents = page.getByRole('region', { name: 'Documentos de la cuenta' });
-  await expect(documents).toContainText('La impresora de caja no responde.');
+  await expect(documents).toContainText('No se encontró la impresora de caja en el equipo.');
+  await expect(documents).not.toContainText('no responde');
   await expect(documents).not.toContainText('Cola de impresión');
   await documents.getByRole('button', { name: 'Reintentar', exact: true }).click();
   await expect(notice(page, /Reintento enviado a la impresora/)).toBeVisible();

@@ -40,8 +40,10 @@ type Printer struct {
 	// CutMode es el tipo de corte (etapa 9F, §4.4): «full» (GS V 0) o «partial» (GS V 1). Vacío en las
 	// fotografías de impresora anteriores a la 9F, que cortan como entonces (total).
 	CutMode string `json:"cut_mode"`
-	// CutFeedLines son los renglones de avance antes del corte (lista cerrada de 0 a 8). nil en las
-	// fotografías anteriores a la 9F, que conservan los tres saltos de siempre.
+	// CutFeedLines son los renglones en blanco entre el último renglón del documento y el corte (lista
+	// cerrada de 0 a 8), iguales en todos los documentos. nil en las impresoras que ya existían antes de la
+	// 9F (la 0022 no les asigna avance) y en las fotografías de esa época: conservan el final de siempre,
+	// tres saltos y el corte (revisión 9F, M1), hasta que el propietario elija sus renglones.
 	CutFeedLines *int `json:"cut_feed_lines"`
 	// AcceptsESCPos marca una impresora CUPS que entiende ESC/POS (etapa 9B): solo entonces, y si su
 	// cola admite datos raw, recibe documentos con negrita, tamaños o logotipo. Desactivada por

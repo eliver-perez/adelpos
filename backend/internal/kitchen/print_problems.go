@@ -8,8 +8,13 @@ import "strings"
 // restaurante con el nombre de la impresora («La impresora de caja no responde»), sin términos técnicos.
 // El mensaje técnico del transporte se conserva para soporte.
 const (
-	// ProblemUnreachable: la impresora o la cola del equipo no respondió; nada salió en papel.
+	// ProblemUnreachable: la impresora no respondió (conexión de red, cola del equipo que no contestó a
+	// tiempo); nada salió en papel.
 	ProblemUnreachable = "unreachable"
+	// ProblemNotFound: la impresora o su cola no existe en el equipo servidor (cola CUPS inexistente,
+	// impresora de Windows no instalada o renombrada; revisión 9F, B4). Reintentar no lo resuelve: se
+	// configura la impresora.
+	ProblemNotFound = "not_found"
 	// ProblemInactive: la impresora (o una estación del documento) está desactivada.
 	ProblemInactive = "inactive"
 	// ProblemUnsupported: la impresora es de otra terminal (agente), que todavía no puede imprimir.

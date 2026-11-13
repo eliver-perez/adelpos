@@ -238,19 +238,36 @@ Etapa 9A (parte A1): `operations/stage9a_test.go`, encadenada al final de `TestR
   `details.document` y `details.problem`) sin encolar nada, y el ticket de un pago responde `not_configured` con el
   motivo (`problem`, `printer_name`, `message`): **el pago queda registrado**. La interfaz avisa al momento con
   «Configurar impresora» y «Reintentar»; para el ticket, «Reintentar» llama a `POST …/documents/receipt` con el pago,
-  que imprime su ticket una sola vez (después se reimprime con motivo).
+  que imprime su ticket una sola vez (después se reimprime con motivo). Desde la revisión independiente (B1) esa ruta
+  solo imprime el ticket de un pago **cuyo ticket quedó sin imprimir por falta de impresora válida** (la respuesta
+  guardada del cobro dice `not_configured`) y que no tenga devoluciones ni corrección: si no, 409
+  `RECEIPT_NOT_PENDING` o `PAYMENT_REFUNDED`. No es un camino para emitir después, sin motivo, el comprobante de
+  cualquier pago.
+- **Impresora de tickets** (revisión independiente, B3): Políticas de cobro solo ofrece impresoras activas que ya
+  pueden imprimir; las desactivadas y las de otra terminal aparecen deshabilitadas con el motivo y Go rechaza elegirlas
+  (`422 RECEIPT_PRINTER_UNAVAILABLE`). La que ya estaba elegida y dejó de servir no impide guardar las demás políticas.
 - **Reintentar** una precuenta o un ticket que nunca salió en papel: `POST …/documents/retry` con
   `payments.tickets.print`, sin motivo y sin el permiso de la cola de cocina (la lista de documentos de la cuenta lo
-  ofrece con la explicación de qué pasó). Un resultado incierto se resuelve en Cocina › Cola de impresión.
+  ofrece con la explicación de qué pasó). Un resultado incierto se resuelve en Cocina › Cola de impresión. Desde la
+  revisión independiente (M2) el reintento sale en la **impresora de tickets vigente con su configuración actual**, no
+  con la fotografía con la que falló: «Configurar impresora» (corregir la cola o la dirección, o elegir otra) seguido de
+  «Reintentar» funciona. Si cambió el papel o las columnas, el documento se prepara de nuevo con los datos guardados y
+  la misma versión de plantilla (`payments.RenderStoredDocument`).
 - **Reimprimir** (`POST …/documents/reprint`) pide motivo de 5 a 500 caracteres desde la 9F; queda en la auditoría
-  `payments.document_reprinted` y en el historial del trabajo.
-- **Nombre visible de la precuenta** (§4.5): en Cobros › Políticas de cobro, «Nombre de la precuenta»: «Precuenta»
-  (predeterminado), «Ticket de venta» (como llamaba el sistema anterior al documento que entregaba antes de cobrar) o
-  «Cuenta». Lo cambia quien tiene `payments.settings.manage`, se audita con las políticas y lo leen todos los usuarios
-  con la sesión. Se usa en los botones, avisos, la paleta, el menú nativo y el encabezado impreso («TICKET DE VENTA»,
-  «CUENTA»); internamente es la misma precuenta con las mismas reglas y la leyenda de que no es un comprobante fiscal se
-  conserva. Con «Precuenta» la salida es idéntica a la anterior. El documento guarda el nombre con el que se emitió: su
-  reimpresión lo conserva.
+  `payments.document_reprinted` y en el historial del trabajo. Desde la revisión independiente (M2) la copia también
+  sale en la impresora de tickets vigente con su destino actual, idéntica al original (conserva el papel y las
+  columnas con que se emitió). **«Imprimir con la plantilla vigente»**
+  (`POST …/documents/rerender`) pide también motivo desde la revisión B2 (auditoría
+  `payments.document_rerendered` e historial `print.rerendered`).
+- **Nombre visible de la precuenta** (§4.5): «Nombre de la precuenta»: «Precuenta» (predeterminado), «Ticket de venta»
+  (como llamaba el sistema anterior al documento que entregaba antes de cobrar) o «Cuenta». Desde la revisión
+  independiente (M3) se elige en **Administración › Documentos › Identidad del establecimiento**, con
+  `documents.identity.manage` (auditado como `documents.precheck_name_changed`); Políticas de cobro solo lo informa. Lo
+  leen todos los usuarios con la sesión y también lo usan el mapa de mesas («ticket de venta impreso»), el Registro de
+  movimientos, la operación pendiente de imprimirla y los textos de ayuda de Cobros, Documentos e Impresoras. Se usa en
+  los botones, avisos, la paleta, el menú nativo y el encabezado impreso («TICKET DE VENTA», «CUENTA»); internamente es
+  la misma precuenta con las mismas reglas y la leyenda de que no es un comprobante fiscal se conserva. Con «Precuenta»
+  la salida es idéntica a la anterior. El documento guarda el nombre con el que se emitió: su reimpresión lo conserva.
 - **«Mesa» sin repetir**: el contexto de la precuenta y del ticket es «Mesa 4», pero «Mesa 1» (no «Mesa Mesa 1») cuando
   la mesa ya se llama así (sin distinguir mayúsculas ni acentos; «Mesón 3» sigue siendo «Mesa Mesón 3»).
 - **Huella idempotente**: la de los cobros ya no depende de la contraseña de la autorización de un supervisor, la escriba

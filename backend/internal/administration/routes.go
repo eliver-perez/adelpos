@@ -19,8 +19,11 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		return service.eventSnapshot(ctx, tx, request, principal)
 	}
 	if strings.HasPrefix(route, "kitchen/") {
+		// La cola vuelve a preparar precuentas, tickets y documentos de caja con el renderizador de pagos
+		// cuando su impresora cambió de papel (revisión 9F, M2).
 		result, err := kitchen.Handle(ctx, tx, kitchen.Request{Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
-			Actor: kitchen.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions}},
+			Actor:    kitchen.Actor{UserID: principal.UserID, DeviceID: principal.DeviceID, Permissions: principal.Permissions},
+			Renderer: payments.RenderStoredDocument},
 			func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
 				return audit(ctx, tx, principal, action, entity, id, before, after, true)
 			})

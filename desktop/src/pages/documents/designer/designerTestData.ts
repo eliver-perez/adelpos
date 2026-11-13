@@ -107,7 +107,7 @@ const sharedBlocks: CatalogBlock[] = [
 
 export const receiptKind: CatalogKind = {
   kind: 'receipt',
-  name: 'Ticket de venta',
+  name: 'Ticket de pago',
   family: 'commercial',
   text_sizes: ['normal'],
   blocks: [
@@ -225,7 +225,7 @@ export function template(overrides: Partial<TemplateDetail> = {}): TemplateDetai
   return {
     id: 't-own',
     kind: 'receipt',
-    kind_name: 'Ticket de venta',
+    kind_name: 'Ticket de pago',
     name: 'Ticket de la casa',
     system: false,
     active: false,

@@ -58,7 +58,8 @@ func (transport HostTransport) submitFormatted(ctx context.Context, job PrintJob
 		}
 		capability := inspectQueue(ctx, transport.runner(), printer.Destination)
 		if !capability.Checked {
-			return Outcome{State: "error", Message: "No se pudo consultar la cola CUPS del servidor; no se envió el documento."}
+			return Outcome{State: "error", Code: capability.unavailableCode(),
+				Message: "No se pudo consultar la cola CUPS del servidor; no se envió el documento."}
 		}
 		if !capability.Raw {
 			outcome := transport.submitText(ctx, job)

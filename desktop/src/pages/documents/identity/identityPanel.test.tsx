@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocumentIdentity, IdentityPresentation } from '../../../services/documentIdentity';
+import { chooseValue } from '../../../testing/select';
 import { IdentityPanel } from '../IdentityPanel';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -60,6 +61,7 @@ function identity(overrides: Partial<DocumentIdentity> = {}): DocumentIdentity {
     updated_by: { id: 'u1', name: 'Administrador' },
     limits,
     warnings: [],
+    precheck_name: 'precheck',
     ...overrides,
   };
 }
@@ -319,6 +321,29 @@ describe('IdentityPanel', () => {
     // La vista previa guardada sí se consulta.
     expect(screen.getByAltText('Logotipo convertido para papel de 58 mm')).toBeTruthy();
     expect(callsTo('documents_preview_identity_logo')).toHaveLength(0);
+  });
+
+  it('elige el nombre de la precuenta y lo guarda con la identidad (revisión 9F, M3)', async () => {
+    let current = identity();
+    serve(() => current, {
+      documents_save_identity: (body) => {
+        current = identity({ revision: 4, precheck_name: body?.precheck_name as 'sales_ticket' });
+        return respond(200, current);
+      },
+    });
+    await renderPanel();
+    const field = screen.getByRole('combobox', { name: 'Nombre de la precuenta' });
+    expect(field.textContent).toContain('Precuenta');
+    chooseValue(field, 'sales_ticket');
+    expect(screen.getByText(/TICKET DE VENTA/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(callsTo('documents_save_identity')).toHaveLength(1));
+    expect(bodyOf('documents_save_identity', 0)).toMatchObject({
+      revision: 3,
+      precheck_name: 'sales_ticket',
+      footer_text: 'Gracias por su visita',
+    });
+    await screen.findByText('Sin cambios pendientes.');
   });
 
   it('ante un conflicto de revisión conserva lo escrito y lo guarda sobre la versión nueva', async () => {

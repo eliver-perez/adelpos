@@ -16,9 +16,9 @@ import (
 // en el texto plano y con formato, por cada transporte, sin enviar nada a una impresora real (conexión de
 // loopback de la prueba, administrador de Windows simulado y programas de CUPS simulados).
 
-// legacyFullCut es el corte de una fotografía anterior a la 9F con «cut» y «supports_cut»: total con los
-// tres saltos de siempre.
-var legacyFullCut = documents.PaperCut{Enabled: true, FeedLines: documents.LegacyCutFeedLines}
+// legacyFullCut es el corte de una impresora o fotografía anterior a la 9F con «cut» y «supports_cut» (sin
+// renglones de avance guardados): total con los tres saltos de siempre.
+var legacyFullCut = documents.PaperCut{Enabled: true, Legacy: true}
 
 func feedLines(value int) *int {
 	return &value
@@ -30,30 +30,45 @@ func cutPrinter(mode string, feed int) Printer {
 		Cut: true, SupportsCut: true, CutMode: mode, CutFeedLines: feedLines(feed)}
 }
 
-// expectedEnding son los bytes esperados escritos a mano: N saltos y GS V m.
+// expectedEnding son los bytes esperados escritos a mano después de un renglón ya cerrado: N renglones en
+// blanco y GS V m.
 func expectedEnding(feed int, mode byte) []byte {
 	return append(bytes.Repeat([]byte{'\n'}, feed), 0x1d, 0x56, mode)
 }
 
+// closedEnding es el final esperado de un documento cuyo último renglón quedó abierto (precuentas, tickets
+// y documentos de caja): el salto que lo cierra, N renglones en blanco y GS V m (revisión 9F, M1).
+func closedEnding(feed int, mode byte) []byte {
+	return append([]byte{'\n'}, expectedEnding(feed, mode)...)
+}
+
 func TestPaperCutEndingBytes(t *testing.T) {
 	cases := []struct {
-		name    string
-		printer Printer
-		want    []byte
+		name     string
+		printer  Printer
+		lineOpen bool
+		want     []byte
 	}{
-		{"sin corte", Printer{}, []byte{'\n', '\n', '\n'}},
-		{"sin corte aunque tenga avance y tipo", Printer{CutMode: CutPartial, CutFeedLines: feedLines(8)}, []byte{'\n', '\n', '\n'}},
-		{"total con avance 0", cutPrinter(CutFull, 0), []byte{0x1d, 0x56, 0x00}},
-		{"total con avance 4", cutPrinter(CutFull, 4), expectedEnding(4, 0x00)},
-		{"total con avance 8", cutPrinter(CutFull, 8), expectedEnding(8, 0x00)},
-		{"parcial con avance 0", cutPrinter(CutPartial, 0), []byte{0x1d, 0x56, 0x01}},
-		{"parcial con avance 4", cutPrinter(CutPartial, 4), expectedEnding(4, 0x01)},
-		{"parcial con avance 8", cutPrinter(CutPartial, 8), expectedEnding(8, 0x01)},
-		// Una fotografía anterior a la 9F (sin tipo ni avance) corta como entonces.
-		{"fotografía anterior con corte", Printer{Cut: true, SupportsCut: true}, []byte{'\n', '\n', '\n', 0x1d, 0x56, 0x00}},
+		{"sin corte", Printer{}, false, []byte{'\n', '\n', '\n'}},
+		{"sin corte con renglón abierto", Printer{}, true, []byte{'\n', '\n', '\n'}},
+		{"sin corte aunque tenga avance y tipo", Printer{CutMode: CutPartial, CutFeedLines: feedLines(8)}, true, []byte{'\n', '\n', '\n'}},
+		{"total con avance 0", cutPrinter(CutFull, 0), false, []byte{0x1d, 0x56, 0x00}},
+		{"total con avance 0 y renglón abierto", cutPrinter(CutFull, 0), true, []byte{'\n', 0x1d, 0x56, 0x00}},
+		{"total con avance 4", cutPrinter(CutFull, 4), false, expectedEnding(4, 0x00)},
+		{"total con avance 4 y renglón abierto", cutPrinter(CutFull, 4), true, closedEnding(4, 0x00)},
+		{"total con avance 8", cutPrinter(CutFull, 8), false, expectedEnding(8, 0x00)},
+		{"parcial con avance 0", cutPrinter(CutPartial, 0), false, []byte{0x1d, 0x56, 0x01}},
+		{"parcial con avance 0 y renglón abierto", cutPrinter(CutPartial, 0), true, []byte{'\n', 0x1d, 0x56, 0x01}},
+		{"parcial con avance 4", cutPrinter(CutPartial, 4), false, expectedEnding(4, 0x01)},
+		{"parcial con avance 8", cutPrinter(CutPartial, 8), true, closedEnding(8, 0x01)},
+		// Una fotografía anterior a la 9F (sin tipo ni avance) o una impresora que ya cortaba antes de la 9F
+		// (la 0022 la deja sin avance) corta como entonces: tres saltos y GS V 0, con o sin renglón abierto.
+		{"fotografía anterior con corte", Printer{Cut: true, SupportsCut: true}, false, []byte{'\n', '\n', '\n', 0x1d, 0x56, 0x00}},
+		{"fotografía anterior con renglón abierto", Printer{Cut: true, SupportsCut: true}, true, []byte{'\n', '\n', '\n', 0x1d, 0x56, 0x00}},
+		{"impresora migrada que cortaba", Printer{Cut: true, SupportsCut: true, CutMode: CutFull}, true, []byte{'\n', '\n', '\n', 0x1d, 0x56, 0x00}},
 	}
 	for _, testCase := range cases {
-		if got := testCase.printer.PaperCut().Ending(); !bytes.Equal(got, testCase.want) {
+		if got := testCase.printer.PaperCut().Ending(testCase.lineOpen); !bytes.Equal(got, testCase.want) {
 			t.Fatalf("%s: % x, se esperaba % x", testCase.name, got, testCase.want)
 		}
 	}
@@ -61,6 +76,7 @@ func TestPaperCutEndingBytes(t *testing.T) {
 
 // El texto plano (comandas, tickets, precuentas, cortes, pruebas) termina con el corte de la impresora.
 // Sin corte, los bytes son idénticos a los de la etapa 9E: ESC @, ESC t 2, el texto en CP850 y tres saltos.
+// Con corte, los renglones de avance son los mismos termine o no el texto con salto (revisión 9F, M1).
 func TestPlainTextESCPosBytesWithPaperCut(t *testing.T) {
 	legacy := append([]byte{0x1b, 0x40, 0x1b, 0x74, 0x02}, []byte("Caf\x82 \xa4\n")...)
 	legacy = append(legacy, '\n', '\n', '\n')
@@ -79,15 +95,35 @@ func TestPlainTextESCPosBytesWithPaperCut(t *testing.T) {
 			}
 		}
 	}
-	// El texto grande de Cocina conserva GS ! 0x11 antes del texto.
+	// El texto grande de Cocina conserva GS ! 0x11 antes del texto; «Comanda» termina sin salto y se cierra.
 	large := ESCPosBytes("Comanda", cutPrinter(CutPartial, 4), "large")
-	if !bytes.HasPrefix(large, []byte{0x1b, 0x40, 0x1b, 0x74, 0x02, 0x1d, 0x21, 0x11}) || !bytes.HasSuffix(large, expectedEnding(4, 0x01)) {
+	if !bytes.HasPrefix(large, []byte{0x1b, 0x40, 0x1b, 0x74, 0x02, 0x1d, 0x21, 0x11}) || !bytes.HasSuffix(large, []byte("Comanda\n\n\n\n\n\x1dV\x01")) {
 		t.Fatalf("El texto grande con corte parcial quedó mal: % x", large)
+	}
+	// Una precuenta en texto plano termina sin salto: con 0 renglones, el último renglón se cierra antes de
+	// GS V (sin eso, la impresora no lo imprime ni corta); con 4, cuatro renglones en blanco como la comanda.
+	precheck := "PRECUENTA\nEste documento no es un comprobante fiscal (CFDI)."
+	prefix := append([]byte{0x1b, 0x40, 0x1b, 0x74, 0x02}, []byte(precheck)...)
+	for _, feed := range []int{0, 4} {
+		for mode, code := range map[string]byte{CutFull: 0x00, CutPartial: 0x01} {
+			got := ESCPosBytes(precheck, cutPrinter(mode, feed))
+			if want := append(append([]byte{}, prefix...), closedEnding(feed, code)...); !bytes.Equal(got, want) {
+				t.Fatalf("Precuenta con corte %s y avance %d: % x", mode, feed, got)
+			}
+		}
+	}
+	// Sin corte y con una impresora migrada, los bytes de la 9E.
+	if got := ESCPosBytes(precheck, Printer{}); !bytes.Equal(got, append(append([]byte{}, prefix...), '\n', '\n', '\n')) {
+		t.Fatalf("Precuenta sin corte: % x", got)
+	}
+	if got := ESCPosBytes(precheck, Printer{Cut: true, SupportsCut: true, CutMode: CutFull}); !bytes.Equal(got,
+		append(append([]byte{}, prefix...), '\n', '\n', '\n', 0x1d, 0x56, 0x00)) {
+		t.Fatalf("Precuenta en una impresora migrada: % x", got)
 	}
 }
 
-// Un documento con formato o logotipo termina igual: sin corte, idéntico al de la 9E; con corte, los
-// renglones de avance y GS V 0/1.
+// Un documento con formato o logotipo termina igual: sin corte, idéntico al de la 9E; con corte, el salto
+// que cierra su último renglón (termina sin salto, como un ticket), los renglones de avance y GS V 0/1.
 func TestFormattedESCPosWithPaperCut(t *testing.T) {
 	layout := formattedLayout()
 	withoutCut := documents.EncodeESCPos(layout, nil, documents.NoPaperCut)
@@ -99,7 +135,7 @@ func TestFormattedESCPosWithPaperCut(t *testing.T) {
 	for _, feed := range []int{0, 4, 8} {
 		for mode, code := range map[string]byte{CutFull: 0x00, CutPartial: 0x01} {
 			got := documents.EncodeESCPos(layout, nil, cutPrinter(mode, feed).PaperCut())
-			if !bytes.Equal(got, append(append([]byte{}, body...), expectedEnding(feed, code)...)) {
+			if !bytes.Equal(got, append(append([]byte{}, body...), closedEnding(feed, code)...)) {
 				t.Fatalf("Formato con corte %s y avance %d: % x", mode, feed, got)
 			}
 		}
@@ -149,7 +185,8 @@ func TestPaperCutThroughWindowsQueue(t *testing.T) {
 		!bytes.HasSuffix(spooler.written, expectedEnding(4, 0x01)) {
 		t.Fatalf("El corte parcial no viajó por la cola de Windows: %+v % x", outcome, spooler.written)
 	}
-	// Con formato, el documento RAW termina con el corte total sin avance.
+	// Con formato, el documento RAW termina con el corte total sin avance: un solo salto, el que cierra su
+	// último renglón, antes de GS V 0.
 	formatted := usbSpooler()
 	document := formattedJob("cups")
 	document.PrinterSnapshot.Destination = "POS_80"
@@ -159,7 +196,7 @@ func TestPaperCutThroughWindowsQueue(t *testing.T) {
 	if outcome := (HostTransport{spooler: formatted}).Submit(context.Background(), document); outcome.State != "submitted" {
 		t.Fatalf("El documento con formato no se aceptó: %+v", outcome)
 	}
-	if !bytes.HasSuffix(formatted.written, []byte{0x1d, 0x56, 0x00}) || bytes.HasSuffix(formatted.written, []byte{'\n', 0x1d, 0x56, 0x00}) {
+	if !bytes.HasSuffix(formatted.written, []byte{0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, '\n', 0x1d, 0x56, 0x00}) {
 		t.Fatalf("El corte total sin avance no terminó el documento RAW: % x", formatted.written)
 	}
 }
@@ -249,6 +286,20 @@ func TestPaperCutDefaultsWhenSaving(t *testing.T) {
 	applyCutDefaults(&single, nil, map[string]bool{"cut": true})
 	if !single.SupportsCut {
 		t.Fatal("«Cortar el papel al terminar» exige todavía una segunda casilla")
+	}
+	// Una impresora que ya cortaba antes de la 9F (sin renglones de avance) conserva su final al editarla sin
+	// elegirlos; una que no cortaba y empieza a cortar recibe los 4 renglones de una impresora nueva.
+	migrated := Printer{PaperWidth: 80, Cut: true, SupportsCut: true, CutMode: CutFull}
+	renamed := Printer{PaperWidth: 80, Name: "Caja"}
+	applyCutDefaults(&renamed, &migrated, none)
+	if !renamed.Cut || renamed.CutFeedLines != nil || !renamed.PaperCut().Legacy {
+		t.Fatalf("Editar una impresora migrada cambió su final: %+v", renamed)
+	}
+	notCutting := Printer{PaperWidth: 80, CutMode: CutFull}
+	enabled := Printer{PaperWidth: 80, Cut: true}
+	applyCutDefaults(&enabled, &notCutting, map[string]bool{"cut": true})
+	if enabled.CutFeedLines == nil || *enabled.CutFeedLines != documents.DefaultCutFeedLines || enabled.PaperCut().Legacy {
+		t.Fatalf("Activar el corte no dio los renglones predeterminados: %+v", enabled)
 	}
 }
 

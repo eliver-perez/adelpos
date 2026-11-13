@@ -114,11 +114,19 @@ type storedCashTicket struct {
 // documents.history.render_current; si el documento incluye el esperado, además consultarlo y que
 // el turno no esté en arqueo. Usa los datos estructurados que guarda el ticket desde la 9B: los
 // documentos anteriores solo admiten la reimpresión exacta. Nunca crea un cash_documents nuevo.
+// Desde la revisión 9F (B2) pide motivo (5–500), como reimprimir; queda en la auditoría y en el historial.
 func (handler *service) rerenderCashDocument(parts []string) (any, error) {
 	if err := handler.request.Actor.Require(documents.PermissionRenderCurrent); err != nil {
 		return nil, err
 	}
-	if err := decodeOperationOnly(handler.request.Body); err != nil {
+	var input struct {
+		OperationID string `json:"operation_id"`
+		Reason      string `json:"reason"`
+	}
+	if err := decode(handler.request.Body, &input); err != nil {
+		return nil, err
+	}
+	if err := validReprintReason(input.Reason); err != nil {
 		return nil, err
 	}
 	records, err := handler.listCashDocuments("d.id=$1", parts[1])
@@ -183,7 +191,7 @@ func (handler *service) rerenderCashDocument(parts []string) (any, error) {
 	versionID := version.ID
 	job, ticketID, err := kitchen.EnqueueRendered(handler.ctx, handler.tx, kitchen.RenderedPrint{
 		Kind: documents.TicketKindRerender, Document: document, Layout: layout, TemplateVersionID: &versionID, Printer: printer,
-		History:     "print.rerendered",
+		History: "print.rerendered", Reason: input.Reason,
 		OperationID: handler.operationID, ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
 	})
 	if err != nil {
@@ -198,5 +206,6 @@ func (handler *service) rerenderCashDocument(parts []string) (any, error) {
 	}
 	return result, handler.audit(handler.ctx, handler.tx, "cash.document_rerendered", "cash_shift", &shift.ID, nil, map[string]any{
 		"document_id": record.ID, "kind": record.Kind, "job_id": job.ID, "ticket_id": ticketID, "template_version_id": version.ID,
+		"reason": input.Reason,
 	})
 }

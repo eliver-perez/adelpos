@@ -76,6 +76,9 @@ type Plan struct {
 	drawerRegisters  []string
 	fallbackPrinters []string
 	deviceLinks      bool
+	// allStationsDevices son las terminales cuya selección eran solo estaciones de prueba (revisión 9F, parte
+	// 3, B3): sin ellas se quedarían sin ninguna estación, así que pasan a «Todas las estaciones».
+	allStationsDevices []string
 	// userLinks: algún usuario atendía una estación de prueba (etapa 9F, «Estaciones que puede atender»).
 	userLinks bool
 }
@@ -736,13 +739,19 @@ type namedRow struct {
 	Name string
 }
 
-// decideDeviceLinks quita las estaciones de prueba de las estaciones de cada terminal.
+// decideDeviceLinks quita las estaciones de prueba de las estaciones de cada terminal. Una terminal cuya
+// selección eran solo estaciones de prueba se quedaría sin ninguna (una combinación que la pantalla de la
+// terminal no permite guardar y que dejaría vacía Preparación, incluso para quien atiende todas): desde la
+// revisión 9F (parte 3, B3) pasa a «Todas las estaciones», que es el valor predeterminado de una terminal
+// (decisión D6), y la vista previa lo dice en su motivo.
 func (builder *planBuilder) decideDeviceLinks() error {
 	plan := builder.plan
 	if len(plan.testStations) == 0 {
 		return nil
 	}
-	rows, err := builder.tx.Query(builder.ctx, `SELECT d.id::text, d.name, s.id::text, s.name
+	rows, err := builder.tx.Query(builder.ctx, `SELECT d.id::text, d.name, s.id::text, s.name,
+            NOT d.kitchen_all_stations AND NOT EXISTS(SELECT FROM app.kitchen_device_stations other
+                WHERE other.device_id = d.id AND NOT other.station_id::text = ANY($1::text[]))
         FROM app.kitchen_device_stations ds
         JOIN app.devices d ON d.id = ds.device_id
         JOIN app.kitchen_stations s ON s.id = ds.station_id
@@ -752,17 +761,35 @@ func (builder *planBuilder) decideDeviceLinks() error {
 		return err
 	}
 	defer rows.Close()
+	// Las terminales que pasan a «todas» se presentan una sola vez.
+	onlyTest := map[string]bool{}
 	for rows.Next() {
 		var deviceID, deviceName, stationID, stationName string
-		if err := rows.Scan(&deviceID, &deviceName, &stationID, &stationName); err != nil {
+		var emptied bool
+		if err := rows.Scan(&deviceID, &deviceName, &stationID, &stationName, &emptied); err != nil {
 			return err
 		}
 		plan.deviceLinks = true
+		if !emptied {
+			plan.Unlink = append(plan.Unlink, Entry{
+				Kind:   KindSetting,
+				ID:     "terminal:" + deviceID + ":" + stationID,
+				Name:   fmt.Sprintf("Estaciones de la terminal «%s»", deviceName),
+				Reason: fmt.Sprintf("Se quita la estación de prueba «%s».", stationName),
+			})
+			continue
+		}
+		if onlyTest[deviceID] {
+			continue
+		}
+		onlyTest[deviceID] = true
+		plan.allStationsDevices = append(plan.allStationsDevices, deviceID)
 		plan.Unlink = append(plan.Unlink, Entry{
-			Kind:   KindSetting,
-			ID:     "terminal:" + deviceID + ":" + stationID,
-			Name:   fmt.Sprintf("Estaciones de la terminal «%s»", deviceName),
-			Reason: fmt.Sprintf("Se quita la estación de prueba «%s».", stationName),
+			Kind: KindSetting,
+			ID:   "terminal:" + deviceID + ":todas",
+			Name: fmt.Sprintf("Estaciones de la terminal «%s»", deviceName),
+			Reason: fmt.Sprintf("La terminal «%s» mostraba solo estaciones de prueba; mostrará todas las estaciones.",
+				deviceName),
 		})
 	}
 	return rows.Err()

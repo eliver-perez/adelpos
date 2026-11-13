@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Field, Form, Notice } from '../../components/Forms';
-import { Check, ReferenceField } from '../../components/catalog/EditorFields';
+import { Check } from '../../components/catalog/EditorFields';
 import { useResource } from '../../hooks/useResource';
 import { acceptAmountText, toWireAmount } from '../../services/amountInput';
 import { Select } from '../../components/Select';
-import { precheckNameOptions, precheckNames } from '../../services/documentNames';
-import type { PrecheckNameKey } from '../../services/documentNames';
+import type { SelectOption } from '../../components/selectModel';
+import { precheckNames } from '../../services/documentNames';
 import type { Printer } from '../../services/kitchen';
 import { permissionName } from '../../services/payments';
 import type { PaymentSettings, SettingsInput } from '../../services/payments';
@@ -19,8 +19,7 @@ function sameValues(left: Policies, right: Policies) {
     left.shared_shifts === right.shared_shifts &&
     left.print_receipt_default === right.print_receipt_default &&
     left.receipt_printer_id === right.receipt_printer_id &&
-    left.threshold === right.threshold &&
-    left.precheck_name === right.precheck_name
+    left.threshold === right.threshold
   );
 }
 
@@ -31,13 +30,35 @@ function initialPolicies(settings: PaymentSettings) {
     print_receipt_default: settings.print_receipt_default,
     receipt_printer_id: settings.receipt_printer_id,
     threshold: settings.refund_authorization_threshold ?? '',
-    precheck_name: settings.precheck_name ?? 'precheck',
   };
 }
 
-// Políticas de cobro: turno compartido, impresión predeterminada, impresora, nombre visible de la
-// precuenta (etapa 9F, §4.5) y umbral de autorización de devoluciones. La revisión de partida evita
-// sobrescribir cambios ajenos.
+// Impresoras que se ofrecen como impresora de tickets (revisión 9F, B3): solo las que pueden imprimir
+// precuentas, tickets y documentos de caja (decisión D4). Las desactivadas y las de otra terminal se
+// muestran deshabilitadas con el motivo; la que ya estaba elegida se conserva visible aunque haya dejado
+// de servir (Go permite guardar lo demás sin cambiarla).
+export function receiptPrinterOptions(printers: Printer[]): SelectOption[] {
+  const options: SelectOption[] = [{ value: '', label: 'Sin asignar' }];
+  for (const printer of printers) {
+    let reason = '';
+    if (printer.transport === 'agent') {
+      reason = 'Esta impresora todavía no puede usarse para imprimir';
+    } else if (!printer.active) {
+      reason = 'desactivada';
+    }
+    options.push({
+      value: printer.id,
+      label: printer.name,
+      description: reason || undefined,
+      disabled: reason !== '',
+    });
+  }
+  return options;
+}
+
+// Políticas de cobro: turno compartido, impresión predeterminada, impresora y umbral de autorización de
+// devoluciones. La revisión de partida evita sobrescribir cambios ajenos. El nombre visible de la precuenta
+// (etapa 9F, §4.5) se elige en Administración › Documentos desde la revisión 9F (M3); aquí solo se informa.
 export function PaymentPoliciesForm({
   settings,
   can,
@@ -64,12 +85,7 @@ export function PaymentPoliciesForm({
       setValue(initialPolicies(settings));
     }
   }, [stale, dirty, settings]);
-  const printerOptions =
-    printers.data?.map((printer) => ({
-      id: printer.id,
-      name: printer.name,
-      active: printer.active,
-    })) ?? [];
+  const printerOptions = receiptPrinterOptions(printers.data ?? []);
 
   return (
     <div className="form-stack">
@@ -106,7 +122,6 @@ export function PaymentPoliciesForm({
             print_receipt_default: value.print_receipt_default,
             receipt_printer_id: value.receipt_printer_id,
             refund_authorization_threshold: threshold === '' ? null : threshold,
-            precheck_name: value.precheck_name,
           };
           const saved = await execute<PaymentSettings>('payments_save_settings', {
             body: { ...body },
@@ -144,13 +159,17 @@ export function PaymentPoliciesForm({
             />
           </Field>
           {printersAllowed ? (
-            <ReferenceField
-              optional
+            <Field
               label="Impresora de tickets"
-              value={value.receipt_printer_id}
-              options={printerOptions}
-              onChange={(id) => setValue({ ...value, receipt_printer_id: id || null })}
-            />
+              hint={`Imprime ${precheckNames[settings.precheck_name]?.plural ?? 'precuentas'}, tickets de pago y documentos de caja. Solo se ofrecen las impresoras activas que ya pueden imprimir.`}
+            >
+              <Select
+                value={value.receipt_printer_id ?? ''}
+                placeholder="Sin asignar"
+                options={printerOptions}
+                onChange={(id) => setValue({ ...value, receipt_printer_id: id || null })}
+              />
+            </Field>
           ) : (
             <Field
               label="Impresora de tickets"
@@ -159,18 +178,10 @@ export function PaymentPoliciesForm({
               <input readOnly value={settings.receipt_printer_name ?? 'Sin asignar'} />
             </Field>
           )}
-          <Field
-            label="Nombre de la precuenta"
-            hint={`Así se llama en los botones, en los avisos y en el encabezado impreso (${precheckNames[value.precheck_name].printed}). Es el mismo documento previo al cobro; no es un comprobante fiscal.`}
-          >
-            <Select<PrecheckNameKey>
-              value={value.precheck_name}
-              options={precheckNameOptions}
-              disabled={!editable}
-              onChange={(precheck_name) => setValue({ ...value, precheck_name })}
-            />
-          </Field>
         </div>
+        <p className="muted text-sm">
+          {`Nombre de la precuenta: «${(precheckNames[settings.precheck_name] ?? precheckNames.precheck).label}». Se elige en Administración › Documentos, en «Identidad del establecimiento».`}
+        </p>
         <Notice>{printers.error}</Notice>
       </Form>
     </div>

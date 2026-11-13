@@ -5,9 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actionByID } from '../../commands/actions';
 import { precheckName, setPrecheckName } from '../../services/documentNames';
 import type { Printer, PrintJob } from '../../services/kitchen';
-import { printProblemMessage } from '../../services/printProblems';
+import {
+  printerSetupProblem,
+  printProblemHint,
+  printProblemMessage,
+} from '../../services/printProblems';
 import { tableField, tableNameIncludesWord } from '../../services/restaurant';
 import { chooseValue } from '../../testing/select';
+import { receiptPrinterOptions } from '../payments/PaymentPoliciesForm';
 import { PrintersAdmin } from './PrintersAdmin';
 import { groupJobs, PrintQueue } from './PrintQueue';
 
@@ -124,6 +129,52 @@ describe('corte de papel por impresora (§4.4)', () => {
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
     expect(execute.mock.calls[0]![1].body).toMatchObject({ cut: false, supports_cut: false });
   });
+
+  it('una impresora que ya cortaba conserva «Como hasta ahora» hasta que se eligen los renglones', async () => {
+    const migrated: Printer = {
+      id: 'p-migrada',
+      name: 'Caja vieja',
+      transport: 'cups',
+      destination: 'CAJA',
+      port: 9100,
+      paper_width: 80,
+      copies: 1,
+      supports_cut: true,
+      cut: true,
+      cut_mode: 'full',
+      cut_feed_lines: null,
+      cutter_option: '',
+      accepts_escpos: false,
+      columns: null,
+      active: true,
+      fallback_id: null,
+      revision: 2,
+    };
+    native.invoke.mockImplementation(async (_command: string, args: { operation: string }) => ({
+      status: 200,
+      body: args.operation === 'kitchen_printers' ? [migrated] : [],
+    }));
+    // La respuesta conserva la revisión de la lista para que el formulario siga vigente.
+    const execute = vi.fn(async (_operation: string, options: { body?: unknown }) => ({
+      ...(options.body as Printer),
+    }));
+    render(<PrintersAdmin can={() => true} execute={execute as never} busy={false} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Caja vieja/ }));
+    const section = screen.getByRole('button', { name: /Corte de papel y respaldo/ });
+    expect(section.textContent).toContain('avance como en versiones anteriores');
+    fireEvent.click(section);
+    const feed = screen.getByRole('combobox', { name: 'Renglones de avance antes del corte' });
+    expect(feed.textContent).toContain('Como hasta ahora');
+    // Guardar sin tocarlo conserva el final anterior (Go lo mantiene con null).
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar impresora' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute.mock.calls[0]![1].body).toMatchObject({ cut: true, cut_feed_lines: null });
+    // Elegir un número pasa al avance uniforme.
+    chooseValue(screen.getByRole('combobox', { name: 'Renglones de avance antes del corte' }), '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar impresora' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute.mock.calls[1]![1].body).toMatchObject({ cut_feed_lines: 2 });
+  });
 });
 
 describe('cola de impresión (§4.3)', () => {
@@ -191,6 +242,26 @@ describe('cola de impresión (§4.3)', () => {
   });
 });
 
+describe('impresora de tickets que puede imprimir (revisión 9F, B3)', () => {
+  it('ofrece solo las activas que ya imprimen y muestra las demás deshabilitadas con el motivo', () => {
+    const printer = (overrides: Partial<Printer>): Printer =>
+      ({ id: 'p', name: 'Tickets', transport: 'cups', active: true, ...overrides }) as Printer;
+    const options = receiptPrinterOptions([
+      printer({ id: 'ok', name: 'Caja' }),
+      printer({ id: 'agent', name: 'Otra terminal', transport: 'agent' }),
+      printer({ id: 'off', name: 'Apagada', active: false }),
+    ]);
+    expect(options.map((option) => [option.value, option.disabled ?? false])).toEqual([
+      ['', false],
+      ['ok', false],
+      ['agent', true],
+      ['off', true],
+    ]);
+    expect(options[2]!.description).toBe('Esta impresora todavía no puede usarse para imprimir');
+    expect(options[3]!.description).toBe('desactivada');
+  });
+});
+
 describe('nombre visible de la precuenta (§4.5)', () => {
   it('cambia la acción de la paleta y del menú', () => {
     expect(actionByID('file.print_precheck')?.label).toBe('Imprimir precuenta');
@@ -219,6 +290,20 @@ describe('textos de impresión y «Mesa» sin repetir (§4.2 y §4.6)', () => {
       'Esta impresora todavía no puede usarse para imprimir.',
     );
     expect(printProblemMessage(null, 'Tickets')).toBe('');
+  });
+
+  it('una impresora que no existe en el equipo se configura, no solo se reintenta (revisión 9F, B4)', () => {
+    expect(printProblemMessage('not_found', 'Tickets', 'cash')).toBe(
+      'No se encontró la impresora de caja en el equipo.',
+    );
+    expect(printProblemMessage('not_found', 'Cocina')).toBe(
+      'No se encontró la impresora Cocina en el equipo.',
+    );
+    expect(printProblemHint('not_found', 'Cocina')).toContain('Cocina › Impresoras');
+    expect(printerSetupProblem('not_found')).toBe(true);
+    expect(printerSetupProblem('setup')).toBe(true);
+    expect(printerSetupProblem('unreachable')).toBe(false);
+    expect(printerSetupProblem('uncertain')).toBe(false);
   });
 
   it('no repite «Mesa» en Preparación ni en los detalles', () => {

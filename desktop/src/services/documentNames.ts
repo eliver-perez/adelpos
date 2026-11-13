@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from 'react';
 
 // Nombre visible del documento previo al cobro (etapa 9F, §4.5). El sistema anterior llamaba «ticket
-// de venta» a lo que se entregaba antes de cobrar; el restaurante elige en Cobros › Políticas de cobro
-// cómo se llama en botones, avisos, la paleta, el menú y el encabezado impreso. Internamente es la
+// de venta» a lo que se entregaba antes de cobrar; el restaurante elige en Administración › Documentos
+// (revisión 9F, M3; antes en Cobros › Políticas de cobro) cómo se llama en botones, avisos, la paleta, el
+// menú y el encabezado impreso. Internamente es la
 // misma precuenta, con las mismas reglas. La clave llega con la sesión (establishment.precheck_name),
 // que leen todos los usuarios, y Go la valida contra la misma lista cerrada.
 
@@ -22,6 +23,8 @@ export interface PrecheckName {
   plural: string;
   // Participio que concuerda en género: «enviada» o «enviado».
   sent: string;
+  // «impresa» o «impreso» (revisión 9F, M3: «precuenta impresa» en el mapa de mesas y el Registro).
+  printedAdjective: string;
   // Encabezado impreso.
   printed: string;
 }
@@ -35,6 +38,7 @@ export const precheckNames: Record<PrecheckNameKey, PrecheckName> = {
     ofWithArticle: 'de la precuenta',
     plural: 'precuentas',
     sent: 'enviada',
+    printedAdjective: 'impresa',
     printed: 'PRECUENTA',
   },
   sales_ticket: {
@@ -45,6 +49,7 @@ export const precheckNames: Record<PrecheckNameKey, PrecheckName> = {
     ofWithArticle: 'del ticket de venta',
     plural: 'tickets de venta',
     sent: 'enviado',
+    printedAdjective: 'impreso',
     printed: 'TICKET DE VENTA',
   },
   bill: {
@@ -55,11 +60,12 @@ export const precheckNames: Record<PrecheckNameKey, PrecheckName> = {
     ofWithArticle: 'de la cuenta',
     plural: 'cuentas',
     sent: 'enviada',
+    printedAdjective: 'impresa',
     printed: 'CUENTA',
   },
 };
 
-// Opciones de la lista cerrada en su orden (Cobros › Políticas de cobro).
+// Opciones de la lista cerrada en su orden (Administración › Documentos › Identidad del establecimiento).
 export const precheckNameOptions = (Object.keys(precheckNames) as PrecheckNameKey[]).map((key) => ({
   value: key,
   label: precheckNames[key].label,

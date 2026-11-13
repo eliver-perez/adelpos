@@ -11,14 +11,17 @@ import {
 import { useLiveResource } from '../../hooks/useLiveResource';
 import {
   cutFeedLineChoices,
+  cutFeedSummary,
   defaultCutFeedLines,
   defaultCutFor,
+  previousCutFeedChoice,
   printerColumnChoices,
   printerColumns,
   type ExecuteKitchen,
   type Printer,
   type WidthTestResult,
 } from '../../services/kitchen';
+import { usePrecheckName } from '../../services/documentNames';
 import { notifySuccess } from '../../services/notify';
 import { Select } from '../../components/Select';
 import { isWindows } from '../../commands/platform';
@@ -45,6 +48,19 @@ const emptyPrinter = (): Printer => ({
   revision: 0,
 });
 
+// Opciones de los renglones de avance: la lista cerrada de 0 a 8 y, solo para una impresora que ya
+// cortaba antes de la 9F y conserva su final, «Como hasta ahora».
+function cutFeedOptions(previousEnding: boolean) {
+  const options = cutFeedLineChoices.map((lines) => ({
+    value: String(lines),
+    label: lines === defaultCutFeedLines ? `${lines} (predeterminado)` : String(lines),
+  }));
+  if (previousEnding) {
+    options.unshift({ value: previousCutFeedChoice, label: 'Como hasta ahora' });
+  }
+  return options;
+}
+
 export function PrintersAdmin({
   can,
   execute,
@@ -60,6 +76,8 @@ export function PrintersAdmin({
     { interval: 60000 },
   );
   const [value, setValueState] = useState<Printer | null>(null);
+  // Nombre visible de la precuenta (etapa 9F, §4.5) en la explicación del corte.
+  const precheck = usePrecheckName();
   // El corte de una impresora nueva sigue a su papel hasta que la persona lo elige.
   const [cutChosen, setCutChosen] = useState(false);
   const setValue = (next: Printer | null) => {
@@ -336,7 +354,7 @@ export function PrintersAdmin({
               title="Corte de papel y respaldo"
               summary={
                 value.cut
-                  ? `Corta al terminar · ${value.cut_mode === 'partial' ? 'parcial' : 'total'} · ${value.cut_feed_lines} renglones de avance`
+                  ? `Corta al terminar · ${value.cut_mode === 'partial' ? 'parcial' : 'total'} · ${cutFeedSummary(value.cut_feed_lines)}`
                   : 'Sin corte al terminar'
               }
               defaultOpen={!value.id}
@@ -346,8 +364,15 @@ export function PrintersAdmin({
                 value={value.cut}
                 onChange={(cut) => {
                   setCutChosen(true);
-                  // Una sola casilla (etapa 9F): Go guarda «el modelo admite corte» igual a ésta.
-                  setValueState({ ...value, cut, supports_cut: cut });
+                  // Una sola casilla (etapa 9F): Go guarda «el modelo admite corte» igual a ésta. Una
+                  // impresora que no cortaba y empieza a cortar recibe los renglones predeterminados.
+                  const startsCutting = cut && value.cut_feed_lines === null && !current?.cut;
+                  setValueState({
+                    ...value,
+                    cut,
+                    supports_cut: cut,
+                    cut_feed_lines: startsCutting ? defaultCutFeedLines : value.cut_feed_lines,
+                  });
                 }}
               />
               {value.cut && (
@@ -368,28 +393,31 @@ export function PrintersAdmin({
                   </div>
                   <Field label="Renglones de avance antes del corte">
                     <Select
-                      value={String(value.cut_feed_lines)}
-                      options={cutFeedLineChoices.map((lines) => ({
-                        value: String(lines),
-                        label:
-                          lines === defaultCutFeedLines
-                            ? `${lines} (predeterminado)`
-                            : String(lines),
-                      }))}
+                      value={
+                        value.cut_feed_lines === null
+                          ? previousCutFeedChoice
+                          : String(value.cut_feed_lines)
+                      }
+                      options={cutFeedOptions(!!current?.cut && current.cut_feed_lines === null)}
                       onChange={(lines) =>
-                        setValueState({ ...value, cut_feed_lines: Number(lines) })
+                        setValueState({
+                          ...value,
+                          cut_feed_lines: lines === previousCutFeedChoice ? null : Number(lines),
+                        })
                       }
                     />
                   </Field>
                 </>
               )}
               <p className="muted text-sm">
-                Al final de cada documento (tickets, precuentas, comandas, avisos y cortes de caja)
-                la impresora avanza los renglones elegidos para que el corte no caiga sobre el texto
-                y corta: total separa el papel; parcial deja una pequeña unión. La mayoría de las
-                impresoras sin cortador ignoran la orden de corte; pruébalo con «Imprimir prueba de
-                ancho», que también corta. Las de 58 mm muchas veces no tienen cortador: por eso el
-                corte empieza desactivado en ese papel.
+                Al final de cada documento (tickets, {precheck.plural}, comandas, avisos y cortes de
+                caja) la impresora deja en blanco los renglones elegidos después del último renglón,
+                para que el corte no caiga sobre el texto, y corta: total separa el papel; parcial
+                deja una pequeña unión. «Como hasta ahora» conserva el final de las versiones
+                anteriores en una impresora que ya cortaba. La mayoría de las impresoras sin
+                cortador ignoran la orden de corte; pruébalo con «Imprimir prueba de ancho», que
+                también corta. Las de 58 mm muchas veces no tienen cortador: por eso el corte
+                empieza desactivado en ese papel.
               </p>
               {/* En Windows el corte es el comando ESC/POS de la impresora, no una opción de CUPS. */}
               {value.transport === 'cups' && value.cut && !windows && (

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Field, Form, Notice } from '../../components/Forms';
 import { PositionField } from '../../components/PositionField';
 import { ToggleButton } from '../../components/ToggleButton';
+import { usePrecheckName } from '../../services/documentNames';
 import { permissionName } from '../../services/payments';
 import type { DiscountReason } from '../../services/payments';
 import { orderSiblings, positionPayload } from '../../services/positions';
@@ -108,6 +109,8 @@ export function DiscountReasonsAdmin({
   busy: boolean;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  // Nombre visible de la precuenta (etapa 9F, §4.5).
+  const precheck = usePrecheckName();
   const ordered = orderSiblings(reasons);
   const current = ordered.find((reason) => reason.id === editing) ?? null;
   const editable = can('payments.settings.manage');
@@ -115,7 +118,8 @@ export function DiscountReasonsAdmin({
     <div className="form-stack">
       <p className="muted text-sm">
         Se eligen con botones al aplicar un descuento o una cortesía y aparecen en el historial de
-        la cuenta, el ticket y la precuenta. «Exige descripción» pide al cajero explicar el motivo.
+        la cuenta, el ticket y {precheck.withArticle}. «Exige descripción» pide al cajero explicar
+        el motivo.
       </p>
       {!editable && (
         <Notice>

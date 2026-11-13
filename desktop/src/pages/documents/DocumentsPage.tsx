@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { usePrecheckName } from '../../services/documentNames';
 import { Notice, PageTitle } from '../../components/Forms';
 import { useResource } from '../../hooks/useResource';
 import type { DocumentCatalog } from '../../services/documents';
@@ -23,6 +24,8 @@ export function DocumentsPage({
   const [tab, setTab] = useState<Tab>('templates');
   const [editing, setEditing] = useState(false);
   const catalog = useResource<DocumentCatalog>('documents_catalog');
+  // Nombre visible de la precuenta (etapa 9F, §4.5).
+  const precheck = usePrecheckName();
 
   return (
     <div className={`documents-page ${editing ? 'documents-page-editing' : ''}`}>
@@ -30,7 +33,7 @@ export function DocumentsPage({
         <>
           <PageTitle
             title="Documentos"
-            description="Diseña con bloques tickets, precuentas, comandas, avisos de cocina, comprobantes y cortes, y configura la identidad que se imprime. Lo que ves en la vista previa es exactamente lo que se envía a la impresora."
+            description={`Diseña con bloques tickets, ${precheck.plural}, comandas, avisos de cocina, comprobantes y cortes, y configura la identidad que se imprime. Lo que ves en la vista previa es exactamente lo que se envía a la impresora.`}
           />
           <div className="catalog-tabs" role="tablist" aria-label="Secciones de documentos">
             <button

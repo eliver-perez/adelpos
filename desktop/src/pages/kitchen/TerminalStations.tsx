@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { unlockKitchenSound } from '../../services/kitchenSound';
 import { Accordion } from '../../components/Accordion';
 import { Field, Form, Notice } from '../../components/Forms';
 import { MultiSelect } from '../../components/Select';
@@ -114,7 +115,13 @@ export function TerminalStations({
             <Check
               label="Aviso sonoro al llegar una comanda nueva"
               value={draft.sound_alert}
-              onChange={(sound_alert) => setDraft({ ...draft, sound_alert })}
+              onChange={(sound_alert) => {
+                // Activarlo es un toque: el equipo permite preparar el sonido (revisión 9F, parte 3, B2).
+                if (sound_alert) {
+                  unlockKitchenSound();
+                }
+                setDraft({ ...draft, sound_alert });
+              }}
             />
           </Form>
         </>

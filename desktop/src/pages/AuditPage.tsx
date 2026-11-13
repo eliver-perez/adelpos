@@ -1,4 +1,5 @@
 import { Accordion } from '../components/Accordion';
+import { precheckName } from '../services/documentNames';
 import { useState } from 'react';
 import { dateTime, Field, Notice, PageTitle } from '../components/Forms';
 import { useResource } from '../hooks/useResource';
@@ -32,13 +33,21 @@ const actionLabels: Record<string, string> = {
   // Etapa 9F: «Quitar datos de prueba» (también el intento sin respaldo, con resultado fallido).
   'maintenance.test_data_removed': 'Datos de prueba quitados',
   // Etapa 9F (fase B): impresoras (corte de papel incluido), reintentos sin motivo y reimpresiones con
-  // motivo, y la configuración de cobro que guarda el nombre de la precuenta.
+  // motivo, y la configuración de cobro.
   'kitchen.printer.saved': 'Impresora guardada',
   'kitchen.print.retry': 'Reintento de impresión',
   'kitchen.print.resolve': 'Resultado de impresión resuelto',
   'kitchen.print.reprinted': 'Copia adicional solicitada',
   'payments.settings_changed': 'Políticas de cobro cambiadas',
-  'payments.precheck_printed': 'Precuenta impresa',
+  // Con el nombre visible que eligió el restaurante (revisión 9F, M3), que desde entonces se elige en
+  // Administración › Documentos.
+  get 'payments.precheck_printed'() {
+    return `${precheckName().label} ${precheckName().printedAdjective}`;
+  },
+  'documents.precheck_name_changed': 'Nombre de la precuenta cambiado',
+  // Revisión 9F (B2): otra copia con la plantilla vigente, con motivo.
+  'payments.document_rerendered': 'Documento impreso con la plantilla vigente',
+  'cash.document_rerendered': 'Documento de caja impreso con la plantilla vigente',
   'payments.receipt_printed': 'Ticket de pago impreso después del pago',
   'payments.document_retried': 'Reintento de impresión de un documento',
   'payments.document_reprinted': 'Reimpresión de un documento',

@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { PrecheckNameKey } from './documentNames';
 
 // Identidad del establecimiento para documentos (etapa 9B, fase B2): información adicional, texto
 // de encabezado y de pie, y logotipo del restaurante con su presentación en papel térmico. Go es la
@@ -76,6 +77,8 @@ export interface DocumentIdentity {
   updated_by: IdentityPerson | null;
   limits: IdentityLimits;
   warnings: string[];
+  // Nombre visible de la precuenta (etapa 9F, §4.5): desde la revisión 9F (M3) se elige aquí.
+  precheck_name: PrecheckNameKey;
 }
 
 // Campos que la persona edita y se guardan juntos con PUT documents/identity.
@@ -84,6 +87,7 @@ export interface IdentityFields {
   header_text: string;
   footer_text: string;
   presentation: IdentityPresentation;
+  precheck_name: PrecheckNameKey;
 }
 
 export interface LogoPreview {
@@ -130,6 +134,7 @@ export function saveDocumentIdentity(
       header_text: fields.header_text,
       footer_text: fields.footer_text,
       presentation: fields.presentation,
+      precheck_name: fields.precheck_name,
     },
   });
 }
@@ -166,6 +171,7 @@ export function identityFields(identity: DocumentIdentity): IdentityFields {
     header_text: identity.header_text,
     footer_text: identity.footer_text,
     presentation: { ...identity.presentation },
+    precheck_name: identity.precheck_name ?? 'precheck',
   };
 }
 
@@ -183,6 +189,7 @@ export function sameFields(left: IdentityFields, right: IdentityFields) {
     left.additional_info === right.additional_info &&
     left.header_text === right.header_text &&
     left.footer_text === right.footer_text &&
+    left.precheck_name === right.precheck_name &&
     samePresentation(left.presentation, right.presentation)
   );
 }

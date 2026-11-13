@@ -18,8 +18,9 @@ import (
 
 // Etapa 9F (fase B): actualización desde el esquema 21 con impresoras, trabajos de impresión y la
 // configuración de cobro existentes. La 0022 agrega el tipo de corte y los renglones de avance por
-// impresora (las existentes conservan su papel: corte total y 3 renglones, los bytes de siempre; las
-// nuevas reciben 4) y el nombre visible de la precuenta («Precuenta» por omisión), con CHECK con nombre.
+// impresora (las existentes conservan su papel: corte total y, si ya cortaban, sin renglones de avance,
+// que es el final de siempre; las que no cortaban y las nuevas reciben 4) y el nombre visible de la
+// precuenta («Precuenta» por omisión), con CHECK con nombre.
 // No cambia impresoras, trabajos ni sus fotografías, ni la configuración de cobro. Deja la base vacía.
 func TestStage9FPrintingUpgrade(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
@@ -107,16 +108,17 @@ func stage9FSnapshot(ctx context.Context, t *testing.T, pool *pgxpool.Pool) stri
 	return snapshot
 }
 
-// Las impresoras existentes conservan corte total y 3 renglones (los bytes de siempre); una impresora
-// nueva recibe 4; la lista cerrada se valida con CHECK con nombre.
+// Las impresoras existentes conservan corte total; la que ya cortaba queda sin renglones de avance (NULL: los
+// tres saltos de siempre y el corte, revisión 9F M1) y la que no cortaba recibe 4, como una impresora nueva;
+// la lista cerrada se valida con CHECK con nombre.
 func checkStage9FPaperCut(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	var existing string
-	if err := pool.QueryRow(ctx, `SELECT string_agg(name||':'||cut_mode||':'||cut_feed_lines,',' ORDER BY name)
+	if err := pool.QueryRow(ctx, `SELECT string_agg(name||':'||cut_mode||':'||coalesce(cut_feed_lines::text,'NULL'),',' ORDER BY name)
         FROM app.kitchen_printers`).Scan(&existing); err != nil {
 		t.Fatal(err)
 	}
-	if existing != "Comandas 58:full:3,Tickets:full:3" {
+	if existing != "Comandas 58:full:4,Tickets:full:NULL" {
 		t.Fatalf("las impresoras existentes cambiaron su corte: %s", existing)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO app.kitchen_printers(id,name,transport,destination)
@@ -144,7 +146,8 @@ func checkStage9FPaperCut(ctx context.Context, t *testing.T, pool *pgxpool.Pool)
 		{"UPDATE app.kitchen_printers SET cut_feed_lines=8 WHERE name='Nueva'", true},
 		{"UPDATE app.kitchen_printers SET cut_feed_lines=9 WHERE name='Nueva'", false},
 		{"UPDATE app.kitchen_printers SET cut_feed_lines=-1 WHERE name='Nueva'", false},
-		{"UPDATE app.kitchen_printers SET cut_feed_lines=NULL WHERE name='Nueva'", false},
+		// NULL es el final anterior a la 9F; Go nunca lo escribe en una impresora nueva ni lo pone al editar.
+		{"UPDATE app.kitchen_printers SET cut_feed_lines=NULL WHERE name='Nueva'", true},
 		{"UPDATE app.kitchen_printers SET cut_mode='medio' WHERE name='Nueva'", false},
 		{"UPDATE app.kitchen_printers SET cut_mode=NULL WHERE name='Nueva'", false},
 		// El CHECK de la 0005 sigue vigente: cortar exige supports_cut (Go guarda supports_cut = cut).

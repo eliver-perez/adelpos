@@ -13,8 +13,9 @@ import { notifyActionError } from './actionErrors';
 
 // Ticket de pago que no se imprimió por falta de una impresora válida (etapa 9F, §4.1): el pago ya quedó
 // registrado y el resultado lo dice; aquí, «Configurar impresora» (si el usuario puede elegirla) y
-// «Reintentar», que imprime el ticket de ese pago una vez configurada (Go valida el permiso de imprimir y
-// que el pago aún no tenga ticket).
+// «Reintentar», que imprime el ticket de ese pago una vez configurada (Go valida el permiso de imprimir, que
+// el ticket de ese pago quedó pendiente por falta de impresora, que aún no lo tenga y, desde la revisión 9F
+// B1, que el pago no tenga devoluciones).
 export function ReceiptRecovery({
   accountID,
   paymentID,

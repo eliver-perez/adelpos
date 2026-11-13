@@ -138,9 +138,12 @@ type RenderedPrint struct {
 	PrinterID         string
 	Printer           *Printer
 	History           string
-	OperationID       string
-	ActorID           string
-	DeviceID          string
+	// Reason es el motivo de una impresión con la plantilla vigente (otra copia de un documento ya emitido,
+	// revisión 9F B2): queda en el historial del trabajo junto con él. Vacío en las muestras.
+	Reason      string
+	OperationID string
+	ActorID     string
+	DeviceID    string
 }
 
 // EnqueueRendered guarda el ticket y su trabajo en la cola durable de siempre, con el mismo lease,
@@ -168,27 +171,45 @@ func EnqueueRendered(ctx context.Context, tx pgx.Tx, input RenderedPrint) (*Prin
 	if err != nil {
 		return nil, "", err
 	}
+	if input.Reason != "" {
+		return job, ticketID, handler.history(input.History, &job.ID, nil, map[string]any{"job": job, "reason": input.Reason})
+	}
 	return job, ticketID, handler.history(input.History, &job.ID, nil, job)
+}
+
+// CommercialReprint es una reimpresión con motivo de una precuenta, un ticket o un documento de caja (etapa 9F,
+// decisión D3). Printer es la impresora de esos documentos con su configuración vigente (la impresora de
+// tickets de Cobros, ya validada por pagos); sin ella, la del trabajo original con su configuración vigente.
+type CommercialReprint struct {
+	TicketID    string
+	Reason      string
+	OperationID string
+	ActorID     string
+	DeviceID    string
+	Printer     *Printer
 }
 
 // ReprintCommercial solicita otra copia idéntica de un documento comercial. Como en las comandas,
 // se rechaza mientras exista otra copia pendiente o sin resolver del documento, exacta o con la
-// plantilla vigente.
-func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, reason, operationID, actorID, deviceID string) (*PrintJob, error) {
+// plantilla vigente. Desde la revisión 9F (M2) la copia sale con la configuración vigente de la impresora
+// (destino, transporte, corte y copias), no con la fotografía del original, que podía apuntar a una cola o
+// una dirección ya corregidas; como reimpresión exacta (decisión de la 9C) conserva el contenido y el papel y
+// las columnas con que se emitió, para que salga idéntica.
+func ReprintCommercial(ctx context.Context, tx pgx.Tx, input CommercialReprint) (*PrintJob, error) {
 	// Etapa 9F (decisión D3): reimprimir un documento que ya salió (o se canceló) pide motivo, como la
 	// copia adicional de la cola; queda en el historial del trabajo y en la auditoría de quien lo pide.
-	if err := validReason(reason); err != nil {
+	if err := validReason(input.Reason); err != nil {
 		return nil, err
 	}
 	var kind string
-	if err := tx.QueryRow(ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", ticketID).Scan(&kind); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", input.TicketID).Scan(&kind); err != nil {
 		return nil, err
 	}
 	if !isCommercialKind(kind) {
 		return nil, invalid("El documento no es un ticket, una precuenta ni un documento de caja.")
 	}
 	original, err := one[PrintJob](ctx, tx, `SELECT to_jsonb(j) FROM app.kitchen_print_jobs j
-        WHERE ticket_id=$1 AND original_job_id IS NULL ORDER BY created_at LIMIT 1`, ticketID)
+        WHERE ticket_id=$1 AND original_job_id IS NULL ORDER BY created_at LIMIT 1`, input.TicketID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,16 +218,29 @@ func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, reason, operati
 	}
 	// Ni otra copia exacta ni una impresión con la plantilla vigente del mismo documento pueden
 	// seguir sin resolver.
-	if err := requireNoPendingCopy(ctx, tx, ticketID); err != nil {
+	if err := requireNoPendingCopy(ctx, tx, input.TicketID); err != nil {
 		return nil, err
 	}
-	handler := service{ctx: ctx, tx: tx, operationID: operationID, request: Request{Actor: Actor{UserID: actorID, DeviceID: deviceID}}}
+	target := input.Printer
+	if target == nil {
+		target, err = currentPrinter(ctx, tx, original.PrinterID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if problem := PrinterProblem(target); problem != "" {
+		return nil, UnavailablePrinterError(problem, target.Name)
+	}
+	printer := *target
+	printer.PaperWidth = original.PrinterSnapshot.PaperWidth
+	printer.Columns = original.PrinterSnapshot.Columns
+	handler := service{ctx: ctx, tx: tx, operationID: input.OperationID, request: Request{Actor: Actor{UserID: input.ActorID, DeviceID: input.DeviceID}}}
 	// La copia conserva el contenido y, si lo tiene, el layout con atributos del original.
-	job, err := handler.enqueueJob(ticketID, original.PrinterSnapshot, &original.ID, original.Content, original.Layout)
+	job, err := handler.enqueueJob(input.TicketID, printer, &original.ID, original.Content, original.Layout)
 	if err != nil {
 		return nil, err
 	}
-	return job, handler.history("print.reprinted", &job.ID, nil, map[string]any{"job": job, "reason": reason})
+	return job, handler.history("print.reprinted", &job.ID, nil, map[string]any{"job": job, "reason": input.Reason})
 }
 
 // DrawerPulse es la orden de apertura del cajón: el pin del conector (0 = pin 2, 1 = pin 5). El

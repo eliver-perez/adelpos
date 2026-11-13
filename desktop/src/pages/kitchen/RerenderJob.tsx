@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { precheckName } from '../../services/documentNames';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
 import { ReferenceField, TextField } from '../../components/catalog/EditorFields';
@@ -61,8 +62,8 @@ export function RerenderJob({
     return (
       <Notice>
         Solo las comandas y los avisos de cocina se imprimen con la plantilla vigente desde aquí.
-        Los tickets y las precuentas se imprimen desde la cuenta en Cobros; los documentos de caja,
-        desde Caja.
+        Los tickets y {precheckName().plural} se imprimen desde la cuenta en Cobros; los documentos
+        de caja, desde Caja.
       </Notice>
     );
   }

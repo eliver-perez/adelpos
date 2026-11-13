@@ -199,7 +199,15 @@ func (handler *service) saveAccess() (any, error) {
 	if err := validID(input.DeviceID); err != nil {
 		return nil, err
 	}
-	allStations := len(input.StationIDs) == 0
+	// Revisión 9F (parte 3, B1): hasta la 9E una lista vacía significaba «ninguna estación» (la forma de cerrar
+	// Cocina en una terminal); desde la decisión D6 una terminal sin selección muestra todas. Para que un
+	// cliente anterior no abra una terminal a todas por accidente, una lista vacía exige indicar
+	// explícitamente all_stations; sin all_stations, una lista con estaciones sigue siendo una selección.
+	if input.AllStations == nil && len(input.StationIDs) == 0 {
+		return nil, &Error{Status: 422, Code: "KITCHEN_ACCESS_ALL_REQUIRED", Message: "Indica «Todas las estaciones» o elige " +
+			"al menos una estación: una lista vacía ya no quita las estaciones de la terminal, la deja mostrando todas."}
+	}
+	allStations := false
 	if input.AllStations != nil {
 		allStations = *input.AllStations
 	}

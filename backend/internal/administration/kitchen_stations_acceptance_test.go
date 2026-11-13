@@ -117,6 +117,26 @@ func testKitchenUserStations(t *testing.T, env *delegationEnvironment) {
 		if env.scalar(t, "SELECT count(*) FROM app.realtime_events WHERE kind='kitchen.access.changed'") != before+1 {
 			t.Fatal("las pantallas de Cocina no recibieron el aviso del cambio")
 		}
+		// Revisión 9F (parte 3, B4): reenviar el mismo guardado (su respuesta se perdió) responde con lo vigente,
+		// sin el 409 «cambiaron en otra terminal» y sin escribir, auditar ni avisar otra vez.
+		audits := env.scalar(t, "SELECT count(*) FROM app.audit_events WHERE action='user.kitchen_stations_changed' AND entity_id=$1", cookID)
+		var resent userStations
+		if err := json.Unmarshal(save(env.admin, cookID, map[string]any{
+			"all_stations": false, "station_ids": []string{desserts, bar}, "expected_all_stations": true, "expected_station_ids": []string{},
+		}, 200), &resent); err != nil {
+			t.Fatal(err)
+		}
+		if resent.AllStations || !slices.Equal(resent.StationIDs, expected) {
+			t.Fatalf("el reenvío no respondió la selección vigente: %+v", resent)
+		}
+		if env.scalar(t, "SELECT count(*) FROM app.audit_events WHERE action='user.kitchen_stations_changed' AND entity_id=$1", cookID) != audits ||
+			env.scalar(t, "SELECT count(*) FROM app.realtime_events WHERE kind='kitchen.access.changed'") != before+1 {
+			t.Fatal("el reenvío volvió a escribir, auditar o avisar")
+		}
+		// El reenvío sigue validando la selección y los permisos.
+		save(env.admin, cookID, map[string]any{
+			"all_stations": false, "station_ids": []string{bar, bar}, "expected_all_stations": true, "expected_station_ids": []string{},
+		}, 400)
 		// De vuelta a «todas».
 		save(env.admin, cookID, map[string]any{
 			"all_stations": true, "station_ids": []string{}, "expected_all_stations": false, "expected_station_ids": []string{bar, desserts},

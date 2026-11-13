@@ -47,6 +47,18 @@ type QueueCapability struct {
 	Connection string `json:"connection,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Reason     string `json:"reason,omitempty"`
+	// Missing indica que la cola (o la impresora de Windows) no existe en el equipo servidor, a diferencia
+	// de una que no contestó: el problema del trabajo es ProblemNotFound (revisión 9F, B4).
+	Missing bool `json:"-"`
+}
+
+// unavailableCode es la clave del problema de una cola que no se pudo consultar: inexistente o sin
+// respuesta.
+func (capability QueueCapability) unavailableCode() string {
+	if capability.Missing {
+		return ProblemNotFound
+	}
+	return ProblemUnreachable
 }
 
 // QueueInspector consulta si una cola CUPS admite datos raw. La implementación del equipo usa
@@ -91,7 +103,11 @@ func inspectQueue(ctx context.Context, commands commandRunner, queue string) Que
 	limited, cancel := context.WithTimeout(ctx, queueInspectionTimeout)
 	defer cancel()
 	if _, err := commands.run(limited, false, "/usr/bin/lpstat", "-p", queue); err != nil {
-		return unavailable
+		// lpstat -p falla con una cola desconocida (en macOS el planificador de CUPS se inicia a demanda):
+		// se trata como cola inexistente, que se resuelve configurando la impresora.
+		missing := unavailable
+		missing.Missing = limited.Err() == nil
+		return missing
 	}
 	output, err := commands.run(limited, false, "/usr/bin/lpoptions", "-p", queue)
 	if err != nil {

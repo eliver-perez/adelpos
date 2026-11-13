@@ -79,13 +79,28 @@ describe('documentos de una cuenta', () => {
     expect(screen.queryByRole('button', { name: 'Imprimir con la plantilla vigente' })).toBeNull();
   });
 
-  it('con su permiso, confirma la diferencia con «Reimprimir» y usa su operación', async () => {
+  // Revisión 9F (B2): otra copia en papel de un documento ya emitido pide motivo, como reimprimir.
+  function askReason(reason: string) {
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir con la plantilla vigente' }));
+    const form = screen.getByRole('form', {
+      name: 'Impresión con la plantilla vigente con motivo',
+    });
+    const submit = within(form).getByRole('button', { name: 'Imprimir con la plantilla vigente' });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(
+      within(form).getByLabelText('Motivo de la impresión con la plantilla vigente'),
+      { target: { value: reason } },
+    );
+    fireEvent.click(submit);
+  }
+
+  it('con su permiso, pide motivo, confirma la diferencia con «Reimprimir» y usa su operación', async () => {
     handlers.payments_rerender = () => ({
       status: 200,
       body: { status: 'pending', job_id: 'job-2', ticket_id: 'tk-2', source_ticket_id: 'tk-1' },
     });
     renderList(allowing('payments.tickets.reprint', 'documents.history.render_current'));
-    fireEvent.click(screen.getByRole('button', { name: 'Imprimir con la plantilla vigente' }));
+    askReason('Cambió el logotipo del restaurante');
     const dialog = await screen.findByRole('alertdialog', {
       name: 'Imprimir con la plantilla vigente',
     });
@@ -93,7 +108,12 @@ describe('documentos de una cuenta', () => {
     expect(within(dialog).getByText(/plantilla activa hoy/)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
     expect(calls('payments_rerender')).toHaveLength(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Imprimir con la plantilla vigente' }));
+    // El motivo escrito se conserva para volver a intentarlo.
+    fireEvent.click(
+      within(
+        screen.getByRole('form', { name: 'Impresión con la plantilla vigente con motivo' }),
+      ).getByRole('button', { name: 'Imprimir con la plantilla vigente' }),
+    );
     fireEvent.click(
       within(
         await screen.findByRole('alertdialog', { name: 'Imprimir con la plantilla vigente' }),
@@ -102,7 +122,7 @@ describe('documentos de una cuenta', () => {
     await waitFor(() => expect(calls('payments_rerender')).toHaveLength(1));
     expect(calls('payments_rerender')[0]).toMatchObject({
       resourceId: 'acc-1',
-      body: { ticket_id: 'tk-1' },
+      body: { ticket_id: 'tk-1', reason: 'Cambió el logotipo del restaurante' },
     });
     expect(typeof calls('payments_rerender')[0]?.body.operation_id).toBe('string');
     expect(calls('payments_reprint')).toHaveLength(0);

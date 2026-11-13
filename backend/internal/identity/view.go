@@ -15,7 +15,12 @@ func buildView(ctx context.Context, db querier, row *identityRow, withPreviews b
 	if err != nil {
 		return nil, err
 	}
+	precheckName, err := readPrecheckName(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	view := &View{
+		PrecheckName:   precheckName,
 		Revision:       row.Revision,
 		Establishment:  establishment,
 		AdditionalInfo: row.AdditionalInfo,

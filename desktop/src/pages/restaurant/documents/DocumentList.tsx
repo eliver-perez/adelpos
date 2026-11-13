@@ -11,12 +11,14 @@ import {
   printAttentionStates,
 } from '../../../services/payments';
 import type { DocumentRecord, PaymentMethod, ReprintResult } from '../../../services/payments';
+import { usePrecheckName } from '../../../services/documentNames';
 import { countLabel, pluralWord } from '../../../services/plural';
 import {
   notifyPrinterRejection,
   printProblemHint,
   printProblemMessage,
   printerActions,
+  printerSetupProblem,
   retryableProblem,
 } from '../../../services/printProblems';
 import { serverDateTime } from '../../../services/restaurant';
@@ -80,7 +82,11 @@ export function DocumentList({
   const canRetry = can('payments.tickets.print');
   const canRenderCurrent = canReprint && can(renderCurrentPermission);
   const { confirm, dialog } = useConfirmDialog();
+  // Nombre visible de la precuenta (etapa 9F, §4.5) en los textos de esta lista.
+  const precheck = usePrecheckName();
   const [reprinting, setReprinting] = useState<string | null>(null);
+  // Documento cuyo motivo de «Imprimir con la plantilla vigente» se está escribiendo (revisión 9F, B2).
+  const [rendering, setRendering] = useState<string | null>(null);
   const retryRef = useRef<(document: DocumentRecord) => void>(() => undefined);
 
   async function reprint(ticketID: string, reason: string) {
@@ -117,20 +123,22 @@ export function DocumentList({
   }
   retryRef.current = (document) => void retryDocument(document);
 
-  // Etapa 9B: otra representación del mismo documento con la plantilla activa, confirmada antes.
-  async function renderCurrent(ticketID: string, kind: string) {
+  // Etapa 9B: otra representación del mismo documento con la plantilla activa, confirmada antes. Desde la
+  // revisión 9F (B2) pide motivo, como reimprimir: es otra copia en papel de un documento ya emitido.
+  async function renderCurrent(document: DocumentRecord, reason: string) {
     if (mutation.isPending()) {
       return;
     }
-    const subject = kind === 'precheck' ? 'la precuenta' : 'el ticket';
+    const subject = document.kind === 'precheck' ? precheck.withArticle : 'el ticket de pago';
     if (!(await confirm(renderCurrentConfirmation(subject)))) {
       return;
     }
     try {
       await mutation.execute('payments_rerender', {
         id: accountID,
-        body: { ticket_id: ticketID },
+        body: { ticket_id: document.ticket_id, reason },
       });
+      setRendering(null);
     } catch (problem) {
       notifyActionError(problem, 'No se pudo imprimir con la plantilla vigente.');
     }
@@ -165,12 +173,13 @@ export function DocumentList({
       notifyWarning(`${subject}: ${problemText(document) || 'la impresión no salió.'}`, {
         id: `print-failed:${document.ticket_id}`,
         description: printProblemHint(document.job_problem, document.printer_name),
-        actions:
-          document.job_problem === 'unreachable'
-            ? retryAction
-              ? [{ label: 'Reintentar', onClick: retryAction }]
-              : []
-            : printerActions(retryAction),
+        // «Configurar impresora» solo cuando se resuelve configurándola (también una impresora que no
+        // existe en el equipo, revisión 9F B4); si no responde, basta con «Reintentar».
+        actions: printerSetupProblem(document.job_problem)
+          ? printerActions(retryAction)
+          : retryAction
+            ? [{ label: 'Reintentar', onClick: retryAction }]
+            : [],
       });
     }
   }, [documents, canRetry]);
@@ -230,34 +239,45 @@ export function DocumentList({
                   </button>
                 </div>
               )}
-              {canReprint && reprinting !== document.ticket_id && (
-                <div className="button-row payment-history-actions">
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={locked}
-                    onClick={() => setReprinting(document.ticket_id)}
-                  >
-                    <IconLabel icon="printer">Reimprimir {label.toLowerCase()}</IconLabel>
-                  </button>
-                  {canRenderCurrent && (
+              {canReprint &&
+                reprinting !== document.ticket_id &&
+                rendering !== document.ticket_id && (
+                  <div className="button-row payment-history-actions">
                     <button
                       type="button"
                       className="secondary-button"
                       disabled={locked}
-                      onClick={() => void renderCurrent(document.ticket_id, document.kind)}
+                      onClick={() => setReprinting(document.ticket_id)}
                     >
-                      {renderCurrentLabel}
+                      <IconLabel icon="printer">Reimprimir {label.toLowerCase()}</IconLabel>
                     </button>
-                  )}
-                </div>
-              )}
+                    {canRenderCurrent && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={locked}
+                        onClick={() => setRendering(document.ticket_id)}
+                      >
+                        {renderCurrentLabel}
+                      </button>
+                    )}
+                  </div>
+                )}
               {canReprint && reprinting === document.ticket_id && (
                 <ReprintReason
                   subject={documentSubject(document)}
                   busy={locked}
                   onSubmit={(reason) => void reprint(document.ticket_id, reason)}
                   onCancel={() => setReprinting(null)}
+                />
+              )}
+              {canRenderCurrent && rendering === document.ticket_id && (
+                <ReprintReason
+                  action="renderCurrent"
+                  subject={documentSubject(document)}
+                  busy={locked}
+                  onSubmit={(reason) => void renderCurrent(document, reason)}
+                  onCancel={() => setRendering(null)}
                 />
               )}
             </li>

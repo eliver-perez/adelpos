@@ -747,12 +747,21 @@ el predeterminado (NULL) y ningún documento cambia.
 
 ## Etapa 9F · nombre de la precuenta, «Mesa» sin repetir y corte de papel
 
-- **Encabezado de la precuenta**: el título predeterminado sale del nombre visible elegido en Cobros › Políticas de
-  cobro: «PRECUENTA» (predeterminado), «TICKET DE VENTA» o «CUENTA» (`CommercialData.Title`, guardado con el documento
-  como `title`; vacío con «Precuenta»). Un título propio de la plantilla lo sigue sustituyendo. Con «Precuenta» la salida
-  es idéntica byte a byte a la anterior; las plantillas predeterminadas no cambian. El editor sigue llamando
-  «Precuenta» al tipo de documento y «Ticket de venta» al ticket de pago (nombres de la 9B); con el nombre «Ticket de
-  venta» elegido para la precuenta, la plantilla que se edita es la del tipo «Precuenta».
+- **Encabezado de la precuenta**: el título predeterminado sale del nombre visible de la precuenta: «PRECUENTA»
+  (predeterminado), «TICKET DE VENTA» o «CUENTA» (`CommercialData.Title`, guardado con el documento como `title`; vacío
+  con «Precuenta»). Un título propio de la plantilla lo sigue sustituyendo. Con «Precuenta» la salida es idéntica byte a
+  byte a la anterior; las plantillas predeterminadas no cambian.
+- **Dónde se elige** (revisión independiente, M3; §4.5 pide «en la configuración de documentos»): en
+  **Administración › Documentos › Identidad del establecimiento**, sección «Documento previo al cobro», campo «Nombre
+  de la precuenta», que se guarda con el resto de la identidad (`PUT documents/identity` con `precheck_name`, permiso
+  `documents.identity.manage`, «Modificar la identidad documental y el logotipo del establecimiento»; auditado como
+  `documents.precheck_name_changed`). Sigue guardándose en `payment_settings.precheck_name`, que no se aplicó a ninguna
+  instalación con su primera forma. Cobros › Políticas de cobro ya no lo cambia: solo dice cuál es y dónde se elige.
+- **«Ticket de pago»**: el editor llamaba «Ticket de venta» al ticket que se entrega después de cobrar (nombre de la
+  9B), el mismo nombre que puede elegirse para la precuenta. Desde la revisión independiente (M3) el tipo `receipt` se
+  llama **«Ticket de pago»** en el editor y en las plantillas (como su título impreso «TICKET DE PAGO» y «Reimprimir
+  ticket de pago»); solo cambia la etiqueta del tipo: las plantillas, sus versiones y su salida no cambian. El tipo
+  `precheck` sigue llamándose «Precuenta» en el editor.
 - **«Mesa» sin repetir** (§4.6): la precuenta y el ticket componían el contexto «Mesa » + nombre de la mesa e
   imprimían «Mesa Mesa 1» con mesas llamadas «Mesa 1». Ahora no se antepone «Mesa» si el nombre ya empieza con esa
   palabra (sin distinguir mayúsculas ni acentos, solo como palabra completa: `documents.TableContext`). La corrección es
@@ -762,5 +771,10 @@ el predeterminado (NULL) y ningún documento cambia.
   ya incluye la palabra («Mesa 1», no «Mesa: Mesa 1»); con otra etiqueta o un nombre como «Terraza» no cambia. Pruebas:
   `documents/table_names_test.go`, la integración `9F_mesa_sin_repetir` y la tarjeta de Preparación en Vitest.
 - **Corte de papel**: el final de los documentos con formato (`EncodeESCPos`) usa el corte de la impresora
-  (`PaperCut`): sin corte, los tres saltos de siempre; con corte, los renglones de avance elegidos y `GS V 0` o `GS V 1`.
-  La IR no cambia.
+  (`PaperCut`): sin corte, los tres saltos de siempre; con corte, el salto que cierra el último renglón si quedó
+  abierto (revisión independiente, M1: precuentas, tickets y documentos de caja no terminan con salto), los renglones
+  en blanco elegidos y `GS V 0` o `GS V 1`; una impresora que ya cortaba antes de la 9F conserva los tres saltos fijos.
+  Una imagen al final no deja renglón abierto. La IR no cambia.
+- **Imprimir con la plantilla vigente** (revisión independiente, B2): en los documentos de una cuenta y de Caja pide
+  motivo (5–500), como la de la cola de cocina, porque saca otra copia en papel de un documento ya emitido; la
+  confirmación que la distingue de «Reimprimir» se conserva.
