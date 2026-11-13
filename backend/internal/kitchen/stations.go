@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/ordering"
 )
@@ -165,18 +167,47 @@ func (handler *service) placeStation(position *ordering.Position, id, after stri
 	})
 }
 
+// deviceStations es la configuración de cocina de una terminal (etapa 9F): si muestra todas las
+// estaciones o su selección, y el aviso sonoro al llegar una comanda nueva.
+type deviceStations struct {
+	DeviceID    string   `json:"device_id"`
+	AllStations bool     `json:"all_stations"`
+	StationIDs  []string `json:"station_ids"`
+	SoundAlert  bool     `json:"sound_alert"`
+}
+
+// saveAccess guarda «Estaciones que muestra esta terminal» y su aviso sonoro (etapa 9F, decisión D6).
+// Hasta la 9E la lista era el ámbito de autorización de quien no tenía kitchen.stations.all; ahora es lo
+// que la terminal muestra, para todos, intersectado con las estaciones que atiende cada usuario.
+//
+// all_stations es opcional por compatibilidad: sin él, una lista vacía significa «todas» y una lista con
+// estaciones, esa selección. sound_alert es opcional: sin él se conserva. La selección esperada
+// (expected_station_ids y, si se envía, expected_all_stations) rechaza una edición concurrente.
 func (handler *service) saveAccess() (any, error) {
 	var input struct {
-		OperationID        string   `json:"operation_id"`
-		DeviceID           string   `json:"device_id"`
-		StationIDs         []string `json:"station_ids"`
-		ExpectedStationIDs []string `json:"expected_station_ids"`
+		OperationID         string   `json:"operation_id"`
+		DeviceID            string   `json:"device_id"`
+		AllStations         *bool    `json:"all_stations"`
+		StationIDs          []string `json:"station_ids"`
+		SoundAlert          *bool    `json:"sound_alert"`
+		ExpectedAllStations *bool    `json:"expected_all_stations"`
+		ExpectedStationIDs  []string `json:"expected_station_ids"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
 	if err := validID(input.DeviceID); err != nil {
 		return nil, err
+	}
+	allStations := len(input.StationIDs) == 0
+	if input.AllStations != nil {
+		allStations = *input.AllStations
+	}
+	if allStations && len(input.StationIDs) > 0 {
+		return nil, invalid("Con «Todas las estaciones» no se elige una selección.")
+	}
+	if !allStations && len(input.StationIDs) == 0 {
+		return nil, invalid("Elige al menos una estación o «Todas las estaciones».")
 	}
 	if len(input.StationIDs) > 100 {
 		return nil, invalid("Una terminal admite hasta 100 estaciones.")
@@ -191,28 +222,50 @@ func (handler *service) saveAccess() (any, error) {
 		}
 		seen[id] = true
 	}
-	before, err := many[string](handler.ctx, handler.tx, `SELECT to_jsonb(station_id) FROM app.kitchen_device_stations WHERE device_id=$1 ORDER BY station_id`, input.DeviceID)
+	// La fila de la terminal se bloquea para que dos ediciones simultáneas no se mezclen.
+	var before deviceStations
+	err := handler.tx.QueryRow(handler.ctx, `SELECT id::text,kitchen_all_stations,kitchen_sound_alert FROM app.devices
+        WHERE id=$1 AND revoked_at IS NULL FOR UPDATE`, input.DeviceID).Scan(&before.DeviceID, &before.AllStations, &before.SoundAlert)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, invalid("La terminal debe existir y estar autorizada.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	before.StationIDs, err = many[string](handler.ctx, handler.tx, `SELECT to_jsonb(station_id) FROM app.kitchen_device_stations WHERE device_id=$1 ORDER BY station_id`, input.DeviceID)
 	if err != nil {
 		return nil, err
 	}
 	slices.Sort(input.ExpectedStationIDs)
-	if !slices.Equal(before, input.ExpectedStationIDs) {
+	if !slices.Equal(before.StationIDs, input.ExpectedStationIDs) {
 		return nil, conflict()
 	}
-	var available bool
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.devices WHERE id=$1 AND revoked_at IS NULL)", input.DeviceID).Scan(&available); err != nil {
+	if input.ExpectedAllStations != nil && *input.ExpectedAllStations != before.AllStations {
+		return nil, conflict()
+	}
+	var existing int
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT count(*) FROM app.kitchen_stations WHERE id::text = ANY($1::text[])", input.StationIDs).Scan(&existing); err != nil {
 		return nil, err
 	}
-	if !available {
-		return nil, invalid("La terminal debe existir y estar autorizada.")
+	if existing != len(input.StationIDs) {
+		return nil, invalid("Elige estaciones existentes.")
+	}
+	after := deviceStations{DeviceID: input.DeviceID, AllStations: allStations, StationIDs: append([]string{}, input.StationIDs...), SoundAlert: before.SoundAlert}
+	slices.Sort(after.StationIDs)
+	if input.SoundAlert != nil {
+		after.SoundAlert = *input.SoundAlert
+	}
+	if _, err := handler.tx.Exec(handler.ctx, "UPDATE app.devices SET kitchen_all_stations=$1,kitchen_sound_alert=$2 WHERE id=$3",
+		after.AllStations, after.SoundAlert, input.DeviceID); err != nil {
+		return nil, err
 	}
 	if _, err := handler.tx.Exec(handler.ctx, "DELETE FROM app.kitchen_device_stations WHERE device_id=$1", input.DeviceID); err != nil {
 		return nil, err
 	}
-	for _, id := range input.StationIDs {
+	for _, id := range after.StationIDs {
 		if _, err := handler.tx.Exec(handler.ctx, "INSERT INTO app.kitchen_device_stations(device_id,station_id) VALUES ($1,$2)", input.DeviceID, id); err != nil {
 			return nil, err
 		}
 	}
-	return input, handler.history("station.access.saved", &input.DeviceID, before, input.StationIDs)
+	return after, handler.history("station.access.saved", &input.DeviceID, before, after)
 }

@@ -25,6 +25,7 @@ import (
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/identity"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/stationscope"
 )
 
 // Rutas documents/identity* por HTTP, con la autenticación, los permisos efectivos, la auditoría
@@ -232,7 +233,7 @@ func routeSubtests(t *testing.T, fixture *identityFixture) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback(context.Background())
-		batch, err := events.Read(fixture.ctx, tx, 0, []string{"documents.templates.read"}, fixture.admin.deviceID, "")
+		batch, err := events.Read(fixture.ctx, tx, 0, []string{"documents.templates.read"}, stationscope.Everything(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,7 +246,7 @@ func routeSubtests(t *testing.T, fixture *identityFixture) {
 		if !found {
 			t.Fatal("documents.identity.changed llega a quien consulta plantillas")
 		}
-		hidden, err := events.Read(fixture.ctx, tx, 0, []string{"accounts.read"}, fixture.admin.deviceID, "")
+		hidden, err := events.Read(fixture.ctx, tx, 0, []string{"accounts.read"}, stationscope.Everything(), "")
 		if err != nil {
 			t.Fatal(err)
 		}

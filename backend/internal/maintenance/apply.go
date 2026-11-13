@@ -51,8 +51,10 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
             WHERE printer_id::text = ANY($1::text[])`, []any{printers}},
 		{`UPDATE app.kitchen_printers SET fallback_id = NULL, revision = revision + 1, updated_at = now()
             WHERE fallback_id::text = ANY($1::text[])`, []any{printers}},
-		// Estaciones de prueba fuera de las terminales y de las rutas que se conservan.
+		// Estaciones de prueba fuera de las terminales, de los usuarios (etapa 9F) y de las rutas que se
+		// conservan.
 		{`DELETE FROM app.kitchen_device_stations WHERE station_id::text = ANY($1::text[])`, []any{stations}},
+		{`DELETE FROM app.kitchen_user_stations WHERE station_id::text = ANY($1::text[])`, []any{stations}},
 		{`UPDATE app.kitchen_routes SET revision = revision + 1, updated_at = now() WHERE id::text = ANY($1::text[])`,
 			[]any{list(plan.trimmedRoutes)}},
 		{`DELETE FROM app.kitchen_route_stations
@@ -107,7 +109,7 @@ func publishChanges(ctx context.Context, tx pgx.Tx, plan *Plan) error {
 		{"kitchen.printers.changed", len(plan.deletePrinters)+len(plan.deactivatePrinters)+len(plan.fallbackPrinters) > 0},
 		{"kitchen.stations.changed", len(plan.deleteStations)+len(plan.deactivateStations) > 0},
 		{"kitchen.routes.changed", len(plan.deleteRoutes)+len(plan.trimmedRoutes) > 0},
-		{"kitchen.access.changed", plan.deviceLinks},
+		{"kitchen.access.changed", plan.deviceLinks || plan.userLinks},
 		{"payments.settings.changed", plan.receiptPrinter},
 	}
 	for _, change := range kitchen {

@@ -735,3 +735,154 @@ parcial y avance, con y sin cortador, por red, USB en Windows y CUPS): prueba f�
 **Para el coordinador**: el parche aplica limpio sobre `b91fb7a`; sobre `e20d006` solo `API_CONTRACTS.md` entra en
 conflicto (ambos agregan una sección al final). `workflow-stage9f-zz-test-data` aprobó en ambas corridas completas con
 las impresoras de tickets nuevas como datos de prueba.
+
+## Fase C · Cocina por estaciones y terminal de cocina (KDS básico)
+
+Un agente sobre `e20d006`, en su propio worktree, en paralelo con la fase B (Go, migración, React, documentación y
+pruebas). Pruebas en una copia aislada con el clúster temporal 55499, Go temporal en 8188 y vista previa en 1426.
+
+### Migración (sección «Fase C» de la 0022)
+
+Sección «Fase C» al final de `backend/migrations/0022_printing_and_kitchen_stations.sql` (el agente la escribió en un
+archivo propio sin depender de la fase B y el coordinador la unió a la 0022 al fusionar): `devices.kitchen_all_stations` (predeterminada; las terminales que ya tenían filas en
+`kitchen_device_stations` quedan con su selección y la marca en falso) y `devices.kitchen_sound_alert` (desactivado);
+`users.kitchen_all_stations` (todas) y la tabla `kitchen_user_stations` (llaves con nombre, índice por estación); y el
+encargo de la fase E: `accounts.manage` = «Editar datos de cuentas» (también en `operations/context.go` y en
+`administration/long_open_hours_acceptance_test.go`). `config/product.json` sube solo `schema_version` a 22 (metadatos
+generados actualizados con el mismo cambio; la versión la sube la fase B). `stage9d_cancellation_upgrade_test.go` deja
+de fijar el esquema 21: aplica hasta la 0021 para comprobar lo suyo. Prueba nueva de subida 21 → 22
+(`database/stage9f_kitchen_upgrade_test.go`).
+
+### Estaciones por terminal y por usuario (§5.1, §5.2, decisión D6)
+
+- **Regla única** en el paquete neutral nuevo `backend/internal/stationscope` (`Load`/`Compute`): estaciones de la
+  terminal (todas o su selección) ∩ estaciones del usuario (todas, su selección o, con `kitchen.stations.all`, siempre
+  todas). La usan cocina, el canal de eventos y la administración.
+- **Cocina** (`kitchen/context.go`, `reads.go`, `states.go` sin cambio de forma, `document_sources.go`): Preparación
+  (`GET kitchen/board`, que además informa `station_scope` y `sound_alert`), los cambios de estado (una tarea de una
+  estación no visible: `403 STATION_SCOPE_DENIED`, «Esta estación no se muestra en esta terminal o tu usuario no la
+  atiende.», sin cambiar nada), los acuses y el filtro por estación usan la intersección **para todos** (también quien
+  tiene `kitchen.stations.all`: ve las estaciones de su terminal). Las comandas guardadas (lista, detalle, vista previa
+  de la cola y del diseñador) y el tiempo real (`events/store.go`, `administration/events.go`) usan la intersección sin
+  `kitchen.stations.all` y todas con él, porque la cola, la reimpresión y el historial son administrativos. Liberar a
+  mano, programar, la cola y el historial siguen con `kitchen.stations.all`. Sin estaciones en común, el tablero
+  responde 200 con `station_scope.common = false` y los nombres.
+- **Terminal** (`PUT kitchen/access`, `kitchen/stations.go`): `all_stations`, `sound_alert` y `expected_all_stations`
+  opcionales (sin `all_stations`, la forma anterior: lista vacía = todas), de 1 a 100 estaciones existentes, conflicto
+  con la selección esperada, fila de la terminal bloqueada y el historial auditado de siempre. Interfaz: **Cocina ›
+  Estaciones › «Terminales de cocina»** (`pages/kitchen/TerminalStations.tsx`, sustituye a «Estaciones de cada
+  terminal»): «Mostrar todas las estaciones», `MultiSelect` «Estaciones que muestra esta terminal», «Aviso sonoro al
+  llegar una comanda nueva» y dónde abre la terminal. Se eligió ese lugar (no Terminales) porque la ruta, el permiso
+  (`kitchen.stations.manage`) y la auditoría ya existían y elegir estaciones exige consultarlas; Sistema › Terminales
+  remite allí junto a «Pantalla inicial».
+- **Usuario** (`administration/user_stations.go`, rutas `GET`/`PUT users/{id}/kitchen-stations` con `users.read` /
+  `users.manage`): validación, conflicto, sin editar las propias ni las de un usuario con más permisos, `sa` excluido,
+  auditoría `user.kitchen_stations_changed` y evento `kitchen.access.changed` en la misma transacción. Interfaz: pestaña
+  **«Estaciones de cocina»** de Personal › Usuarios (`pages/UserKitchenStations.tsx`); con `kitchen.stations.all` dice
+  que siempre atiende todas. Operaciones nuevas del puente `user_kitchen_stations` y `save_user_kitchen_stations`
+  (`api.rs`, con su prueba).
+- **Quitar datos de prueba** (`maintenance/plan.go`, `apply.go`): `kitchen_user_stations` se maneja como configuración
+  («Estaciones que atiende «…»» en «Se desvinculará»); el usuario conserva su marca de selección (nunca se le amplía a
+  «todas» sin que nadie lo decida).
+
+### Un producto en varias estaciones (§5.3)
+
+Comportamiento previo, confirmado con una prueba nueva y documentado (sin cambiar reglas): un **combo** reparte sus
+componentes por sus rutas y cada estación recibe solo su parte; «Marcar producto listo» marca solo esa tarea y la
+partida (y la cuenta) queda lista cuando todas lo están. Un producto simple con una ruta a dos estaciones llega completo
+a ambas (los «4 filetes» de Windows eran esa configuración). **Los complementos no se reparten**: una opción de un grupo
+(papas como guarnición de una hamburguesa) viaja con su producto a la estación de ese producto aunque el complemento
+esté ligado a un producto con otra ruta (`kitchen/routing.go` solo visita componentes de combos; los grupos van dentro
+de la parte). Repartirlos exigiría cambiar `resolveRouting` para visitar los complementos con producto como partes con
+ruta propia (quitándolos de la parte del producto), decidir su cantidad («2 porciones», porción), qué ve cada estación
+en la comanda y en los avisos de modificación o cancelación y cómo se congela en la fotografía de la ruta; el precio y
+el inventario no cambian (salen de la partida). Costo estimado: uno a dos días con pruebas de cocina, comandas y avisos.
+Queda para decisión del coordinador. La tarjeta muestra la parte de su estación a la vista (no plegada).
+
+### Modo cocina de Preparación (§5.4, decisión D7)
+
+- `pages/kitchen/PreparationBoard.tsx` (rehecho; programación en `ScheduleEditor.tsx`, tarjeta en
+  `PreparationTaskCard.tsx` y reglas puras en `preparationModel.ts`): tarjetas con letra grande, la parte de la estación
+  a la vista, botones de 64 px (`kitchen-action-button`), más antiguos primero (orden de Go), color por tiempo contra el
+  objetivo: ámbar desde la advertencia (o el 75 % del objetivo si la advertencia no es menor) con «Por vencer», rojo al
+  pasar el objetivo con «Atrasada», solo con tokens (`--warning*`, `--danger*`) en ambos temas; el atraso
+  (`overdue_minutes`) ya no colorea y Estaciones › Tiempos lo explica. **Sin «Actualizar preparación»**; «Reintentar»
+  solo con «Sin conexión» (`KitchenPage`/`App.tsx` pasan el estado del servidor, como Mesas). Sin estaciones en común:
+  aviso «Esta terminal muestra … y tu usuario atiende …: no hay estaciones en común. Pide que ajusten la terminal o tu
+  usuario.» en lugar de una pantalla vacía. «Mesa 2 · Mesa 2» corregido (`accountContext`: sin repetir la mesa si la
+  cuenta se llama igual, sin distinguir mayúsculas ni acentos; la fase B hace lo mismo en paralelo y se conserva esta
+  versión del archivo). Filtro «Todas mis estaciones».
+- **Aviso sonoro** (`services/kitchenSound.ts`): dos tonos cortos con Web Audio, sin archivos ni red (CSP
+  `default-src 'self'`); suena solo si la terminal lo tiene activado y aparece una liberación nueva y reciente de las
+  estaciones visibles; no suena al abrir la pantalla, al cambiar de filtro, página o estaciones, ni por cambios de
+  estado.
+- La terminal con pantalla inicial «Cocina» ya abría en Preparación (sin cambio); la barra de un usuario de cocina ya se
+  filtraba por permisos: ambos comprobados con Playwright.
+
+### Pruebas
+
+Copia aislada (`rsync` del worktree), clúster 55499, Go 8188 y vista previa 1426.
+
+- `gofmt`, `go vet ./...` y `go vet -tags=integration ./...`: sin hallazgos. `GOOS=windows GOARCH=amd64 go build ./...`
+  y `go vet ./...`: aprobados.
+- `go test -race` (unitarias): `stationscope` (nueva, 4 pruebas de la intersección), `kitchen`, `administration`,
+  `maintenance`, `operations`, `database`, `designer` e `identity` `ok`.
+- Integración PostgreSQL con `-race`: `operations` **ok (298.6 s)**, con la nueva `stage9f_kitchen_stations_test.go`
+  (`TestStage9FKitchenStations`, **7 de 7**: combo en dos estaciones con cada parte; intersección terminal ∩ usuario en
+  el tablero, estaciones, filtro, cambios de estado por tarea y por pedido rechazados sin cambiar nada, acuses y
+  comandas, y el jefe de cocina con `kitchen.stations.all` limitado a su terminal pero con todas las comandas; tiempo
+  real y `events/snapshot` con `station_id`; partida lista solo con sus dos partes y cuenta lista al final; sin
+  estaciones en común con los nombres; complemento ligado a otro producto que viaja con su producto; validaciones,
+  conflictos, aviso sonoro por terminal, auditoría y la forma anterior del `PUT`); **control negativo** en otra copia
+  (la terminal sin filtrar): 3 de 7 fallan. `administration` **ok (85.8 s)**, con las subpruebas nuevas
+  `9F_estaciones_del_usuario_*` (3: todas por omisión y el administrador por permiso; seis cuerpos inválidos, conflicto,
+  auditoría con antes y después, evento y vuelta a «todas»; permisos, denegaciones auditadas, sin editar las propias ni
+  las del administrador, encargado que sí edita y `sa` excluido) y `9F_datos_con_operaciones…` ampliada (usuario que
+  atiende una estación de prueba: «Estaciones que atiende «…»» en la vista previa, desvinculado y con su marca).
+  `database` **ok** (subidas 9C, 9D ajustada y la nueva `TestStage9FKitchenStationsUpgrade`: selección conservada,
+  marcas, restricciones con nombre, NOT NULL y la descripción de `accounts.manage`), `designer`, `identity`, `kitchen` y
+  `maintenance` **ok**.
+- `npx tsc --noEmit`: sin errores. `npm test`: **84 archivos, 801 pruebas aprobadas**, con las nuevas
+  `preparationModel.test.ts` (8: colores D7 con sus umbrales, cuenta y mesa sin repetir, aviso sin estaciones en común,
+  partes visibles y llegadas para el sonido), `preparationBoard.test.tsx` (7: colores con texto, sin «Actualizar» y
+  «Reintentar» solo sin conexión, botones grandes y parte a la vista, «Mesa 2» sin repetir, aviso sin estaciones en
+  común, sonido solo con una comanda nueva y la terminal con el aviso activado), `terminalStations.test.tsx` (2) y
+  `userKitchenStations.test.tsx` (3).
+- `cargo fmt --check` y `cargo test --locked --offline`: **43 aprobadas, 1 ignorada** (con la prueba nueva de las
+  operaciones del puente).
+- `npm run build`: correcto (aviso de tamaño de fragmentos ya conocido); `sync-metadata.mjs --check`: coherentes.
+  Prettier: sin diferencias en los archivos tocados.
+- Playwright nuevo `e2e/workflow-stage9f-kitchen-stations.spec.ts` (el administrador pone «Cocina» como inicio, la
+  terminal con dos de tres estaciones y la cocinera con una, por la interfaz; la cocinera entra directo a Preparación,
+  la barra solo tiene Cocina, ve solo la intersección, colores con texto en ambos temas a 1280 × 720 y 1920 × 1080 sin
+  desbordes, botones ≥ 64 px, sin «Actualizar», «Reintentar» solo sin conexión; con otra estación, el aviso sin
+  estaciones en común; al final restaura la terminal): **Chromium 1/1 y WebKit 1/1**. Junto con las existentes que
+  dependen de lo cambiado, sobre una base por motor (`restaurant.spec`, que usa `kitchen-flow.ts`;
+  `workflow-stage9c-navigation`, Terminales; `workflow-stage9d-cancel-account`, avisos de Cocina): **Chromium 4/4 y
+  WebKit 4/4**, sin errores de página. Una primera corrida se interrumpió porque la Mac entró en reposo por batería baja
+  (no es un defecto); se repitió completa. Pantalla desbloqueada.
+- Sin verificar: Windows/WebView2, la ventana nativa, una pantalla táctil física, el sonido en un equipo real y dos
+  terminales a la vez. Los colores por tiempo los presenta el puente de la prueba (Go calcula los tiempos con su hora);
+  la corrida completa de Playwright queda para el coordinador.
+
+### Para la fusión con la fase B
+
+- `kitchen/context.go`, `kitchen/reads.go` y `kitchen/handler.go`: solo se tocaron `service.scope` y las funciones de
+  alcance (`stationScope`, `documentScope`, `stationAccess`, `documentStationAccess`, `stationDenied`), el tablero, la
+  lectura de `access`, `filteredDocument` (una línea) y `readTickets`; `handler.go` no cambió. `kitchen/stations.go`
+  (`saveAccess`) y `document_sources.go` también.
+- `pages/kitchen/PreparationBoard.tsx`: conservar esta versión (incluye la corrección de «Mesa 2 · Mesa 2»).
+- `styles.css`: se quitó `.kitchen-warning` y la regla `.kitchen-late` (sin uso); `.kitchen-job-uncertain` de la cola se
+  conserva igual.
+- La 0022 de esta fase va al final de la de la fase B; `config/product.json` de la fase B (versión 0.9.5 y esquema 22).
+  `stage9d_cancellation_upgrade_test.go` aplica hasta la 0021; `stage9f_kitchen_upgrade_test.go` exige esquema 22.
+- `events.Read` recibe ahora un `*stationscope.Scope` en lugar del dispositivo (llamadas de prueba en `designer` e
+  `identity` actualizadas).
+
+### Documentación
+
+`docs/TERMINAL_DE_COCINA.md` (nueva, para el propietario), `docs/KITCHEN_AND_PRINTING.md` (configuración, datos de
+prueba, preparación, eventos y sección nueva «Cocina por estaciones y terminal de cocina · etapa 9F»),
+`API_CONTRACTS.md` (alcance, acceso y sección nueva «Etapa 9F · cocina por estaciones y terminal de cocina») y
+`CLAUDE.md` (párrafo «Cocina» de §15 y la nota del modo cocina en §16). El resto de `CLAUDE.md` (versión, esquema,
+estructura, `NOTAS_WINDOWS.md`) queda para el coordinador.

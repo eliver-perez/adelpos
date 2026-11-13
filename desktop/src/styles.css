@@ -2158,10 +2158,6 @@ summary {
   padding: 5px 8px;
   border-radius: 8px;
 }
-.kitchen-warning {
-  border-left: 4px solid var(--warning);
-}
-.kitchen-late,
 .kitchen-job-uncertain {
   border-left: 4px solid var(--danger);
 }
@@ -2196,6 +2192,122 @@ summary {
 .kitchen-account-task {
   padding: 10px;
   border-bottom: 1px solid var(--border);
+}
+
+/* Etapa 9F (§5.4, decisión D7): modo cocina de Preparación. Tarjetas legibles a distancia, color por
+   tiempo contra el objetivo (ámbar al acercarse y rojo al pasarlo, siempre con su texto) y botones de
+   al menos 64 px para tocar con las manos ocupadas. Solo tokens de la paleta. */
+.kitchen-task-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+}
+.kitchen-task-card {
+  gap: 12px;
+  padding: 18px;
+  border-left-width: 8px;
+}
+.kitchen-task-card h3 {
+  font-size: 26px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.kitchen-task-station {
+  font-size: 16px;
+}
+.kitchen-task-context {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.kitchen-task-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  font-size: 18px;
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.kitchen-task-parts li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kitchen-task-parts span {
+  font-size: 15px;
+}
+.kitchen-task-time {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+.kitchen-task-elapsed {
+  font-size: 22px;
+  font-weight: 700;
+}
+.kitchen-urgency {
+  padding: 4px 10px;
+  font-size: 15px;
+  font-weight: 700;
+  background: var(--panel);
+  border: 2px solid currentColor;
+  border-radius: 8px;
+}
+.kitchen-urgency-warning {
+  color: var(--warning);
+}
+.kitchen-urgency-late {
+  color: var(--danger);
+}
+.kitchen-card-warning {
+  background: var(--warning-soft);
+  border-color: var(--warning);
+}
+.kitchen-card-late {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+.kitchen-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: auto;
+}
+.kitchen-action-button {
+  flex: 1 1 160px;
+  min-height: 64px;
+  padding: 12px 18px;
+  font-size: 18px;
+  border-radius: 12px;
+}
+.kitchen-scope-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px;
+  font-size: 18px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--warning-soft);
+  border: 2px solid var(--warning);
+  border-radius: 14px;
+}
+.kitchen-scope-notice strong {
+  font-size: 20px;
+  color: var(--warning);
+}
+.user-stations-permission {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--info-soft);
+  border: 1px solid var(--info);
+  border-radius: 12px;
 }
 @media (max-width: 1150px) {
   .kitchen-editor-layout {

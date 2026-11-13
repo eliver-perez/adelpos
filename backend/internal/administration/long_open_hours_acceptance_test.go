@@ -106,7 +106,7 @@ func testLongOpenHours(t *testing.T, env *delegationEnvironment) {
 			descriptions[permission.Key] = permission.Description
 		}
 		if descriptions["accounts.cancel"] != "Cancelar cuentas" ||
-			descriptions["accounts.manage"] != "Editar datos de cuentas y cancelar cuentas vacías con motivo libre" {
+			descriptions["accounts.manage"] != "Editar datos de cuentas" {
 			t.Fatalf("descripciones visibles: %q / %q", descriptions["accounts.cancel"], descriptions["accounts.manage"])
 		}
 		if env.scalar(t, `SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id

@@ -93,6 +93,12 @@ function DeviceEditor({
             Si un usuario no puede ver esta sección, la aplicación abre en la primera que sí puede
             ver.
           </small>
+          {/* Etapa 9F (§5.1): una terminal de cocina abre en Cocina › Preparación; sus estaciones y
+              su aviso sonoro se eligen junto a las estaciones. */}
+          <small className="muted">
+            Con «Cocina» abre en Preparación. Las estaciones que muestra y el aviso sonoro se eligen
+            en Cocina › Estaciones › Terminales de cocina.
+          </small>
         </div>
       </Form>
     </section>

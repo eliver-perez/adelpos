@@ -37,6 +37,17 @@ const board = {
   stations: [],
   server_time: '2026-11-09T18:00:00Z',
   timezone: 'America/Monterrey',
+  // Etapa 9F: intersección de estaciones y aviso sonoro de la terminal.
+  station_scope: {
+    common: true,
+    all: true,
+    terminal_all: true,
+    terminal_stations: [],
+    user_all: true,
+    user_all_by_permission: true,
+    user_stations: [],
+  },
+  sound_alert: false,
 };
 
 beforeEach(() => {

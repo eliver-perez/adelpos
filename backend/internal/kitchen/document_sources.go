@@ -10,8 +10,9 @@ import (
 )
 
 // Comandas reales para la vista previa del diseñador (etapa 9B). Solo leen y aplican las reglas
-// de consulta de la cola de cocina: kitchen.tickets.read, solo las estaciones de la terminal (o
-// todas con kitchen.stations.all) y los importes solo con catalog.prices.read.
+// de consulta de la cola de cocina: kitchen.tickets.read, solo las estaciones visibles en la terminal
+// para el usuario (desde la etapa 9F; todas con kitchen.stations.all) y los importes solo con
+// catalog.prices.read.
 
 // PreviewSource devuelve los datos de una comanda o aviso emitido, con las secciones que el actor
 // puede ver.
@@ -44,10 +45,15 @@ func RecentDocuments(ctx context.Context, tx pgx.Tx, actor Actor, ticketKind str
 	if err := actor.Require("kitchen.tickets.read"); err != nil {
 		return nil, err
 	}
+	handler := service{ctx: ctx, tx: tx, request: Request{Actor: actor}}
+	scope, err := handler.documentScope()
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `SELECT t.id,t.created_at,coalesce((t.document->'context'->>'folio')::bigint,0),
         coalesce(t.document->'context'->>'account_name','') FROM app.kitchen_tickets t
-        WHERE t.kind=$1 AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations d WHERE d.device_id=$3 AND d.station_id=ANY(t.station_ids)))
-        ORDER BY t.created_at DESC,t.id DESC LIMIT 20`, ticketKind, actor.Can("kitchen.stations.all"), actor.DeviceID)
+        WHERE t.kind=$1 AND ($2 OR t.station_ids && $3::uuid[])
+        ORDER BY t.created_at DESC,t.id DESC LIMIT 20`, ticketKind, scope.All, scope.IDs())
 	if err != nil {
 		return nil, err
 	}

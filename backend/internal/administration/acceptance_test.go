@@ -318,6 +318,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	testLongOpenHours(t, environment)
 	// Etapa 9F: «Quitar datos de prueba» con respaldo previo (test_data_acceptance_test.go).
 	testTestDataRemoval(t, environment)
+	// Etapa 9F, fase C: «Estaciones que puede atender» del usuario (kitchen_stations_acceptance_test.go).
+	testKitchenUserStations(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

@@ -170,6 +170,23 @@ export interface Board {
   server_time: string;
   timezone: string;
   page: number;
+  // Etapa 9F (decisión D6): las estaciones visibles son las de la terminal intersectadas con las del
+  // usuario; Go informa la intersección para el aviso sin estaciones en común.
+  station_scope: StationScope;
+  // Aviso sonoro de esta terminal al llegar una comanda nueva de sus estaciones (desactivado por omisión).
+  sound_alert: boolean;
+}
+
+// Intersección de estaciones que calcula Go (stationscope.Summary): si hay estaciones en común y, para
+// el aviso, qué estaciones muestra la terminal y cuáles atiende el usuario.
+export interface StationScope {
+  common: boolean;
+  all: boolean;
+  terminal_all: boolean;
+  terminal_stations: string[];
+  user_all: boolean;
+  user_all_by_permission: boolean;
+  user_stations: string[];
 }
 
 export interface PrintJob {
@@ -202,15 +219,6 @@ export interface PrintAttempt {
   detail: string | null;
   started_at: string;
   result?: { code?: string; reference?: string } | null;
-}
-
-// Folio, cuenta y mesa de una tarjeta de Preparación (etapa 9F, §4.6): «#7 · Mesa 2 · Mesa 2» repetía la
-// mesa cuando la cuenta lleva su nombre (la referencia neutra de la 6.2); en ese caso se muestra una vez.
-export function taskContext(task: Pick<Task, 'folio' | 'account_name' | 'table_name'>) {
-  if (task.table_name && task.table_name.trim() === task.account_name.trim()) {
-    return `#${task.folio} · ${task.account_name}`;
-  }
-  return `#${task.folio} · ${task.account_name} · ${task.table_name ?? 'Sin mesa'}`;
 }
 
 // Nombre del documento de un trabajo de la cola, para el restaurante.
@@ -248,10 +256,25 @@ export interface TicketDocument {
   preview: string;
 }
 
+// Configuración de cocina de una terminal (GET kitchen/access): desde la etapa 9F, «Estaciones que muestra
+// esta terminal» (todas o una selección) y el aviso sonoro, con su pantalla de inicio.
 export interface DeviceScope {
   device_id: string;
   device_name: string;
+  home_screen: string;
+  all_stations: boolean;
   station_ids: string[];
+  sound_alert: boolean;
+}
+
+// «Estaciones que puede atender» de un usuario (GET users/{id}/kitchen-stations, etapa 9F).
+export interface UserStations {
+  user_id: string;
+  all_stations: boolean;
+  station_ids: string[];
+  // Con «Operar todas las estaciones del establecimiento» atiende todas aunque tenga una selección.
+  all_by_permission: boolean;
+  stations: { id: string; name: string; active: boolean }[];
 }
 
 export type ExecuteKitchen = <T>(

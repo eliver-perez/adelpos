@@ -4,6 +4,7 @@ import { useResource } from '../hooks/useResource';
 import { api } from '../services/api';
 import type { Permission, Role, User } from '../services/models';
 import { OtherUserPreferences } from './PreferencesPage';
+import { UserKitchenStations } from './UserKitchenStations';
 import { Select } from '../components/Select';
 
 function UserEditor({
@@ -240,6 +241,14 @@ export function UsersPage({
                   Preferencias
                 </button>
               )}
+              {can('users.read') && (
+                <button
+                  onClick={() => setTab('kitchen-stations')}
+                  aria-pressed={tab === 'kitchen-stations'}
+                >
+                  Estaciones de cocina
+                </button>
+              )}
             </div>
           )}
           {tab === 'details' && can('users.manage') && (
@@ -261,6 +270,10 @@ export function UsersPage({
           )}
           {tab === 'preferences' && selected && (
             <OtherUserPreferences userID={selected.id} onSaved={onChanged} />
+          )}
+          {/* Etapa 9F (§5.2): «Estaciones que puede atender». */}
+          {tab === 'kitchen-stations' && selected && (
+            <UserKitchenStations key={selected.id} user={selected} editable={can('users.manage')} />
           )}
         </section>
       )}

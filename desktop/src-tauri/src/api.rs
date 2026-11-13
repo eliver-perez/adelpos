@@ -599,6 +599,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "save_user_permissions" => (Method::PUT, format!("users/{identifier}/permissions")),
         "user_preferences" => (Method::GET, format!("users/{identifier}/preferences")),
         "save_user_preferences" => (Method::PUT, format!("users/{identifier}/preferences")),
+        // Etapa 9F: «Estaciones que puede atender» del usuario (users.read / users.manage en Go).
+        "user_kitchen_stations" => (Method::GET, format!("users/{identifier}/kitchen-stations")),
+        "save_user_kitchen_stations" => {
+            (Method::PUT, format!("users/{identifier}/kitchen-stations"))
+        }
         "update_role" => (Method::PATCH, format!("roles/{identifier}")),
         "update_register" => (Method::PATCH, format!("registers/{identifier}")),
         "update_device" => (Method::PATCH, format!("devices/{identifier}")),
@@ -1291,6 +1296,21 @@ mod tests {
         assert!(route("kitchen_printer_width_test", None).is_err());
         assert!(route("kitchen_printer_width_test", Some("../../settings")).is_err());
         assert!(route("kitchen_printer_width_test", Some("no-es-uuid")).is_err());
+    }
+
+    #[test]
+    fn user_kitchen_stations_routes_are_closed_with_identifier() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("user_kitchen_stations", Some(identifier)).unwrap(),
+            (Method::GET, format!("users/{identifier}/kitchen-stations"))
+        );
+        assert_eq!(
+            route("save_user_kitchen_stations", Some(identifier)).unwrap(),
+            (Method::PUT, format!("users/{identifier}/kitchen-stations"))
+        );
+        assert!(route("save_user_kitchen_stations", None).is_err());
+        assert!(route("save_user_kitchen_stations", Some("../../settings")).is_err());
     }
 
     #[test]
