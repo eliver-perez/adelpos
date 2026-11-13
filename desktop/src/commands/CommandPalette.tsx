@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { trapFocus } from '../components/ConfirmDialog';
 import { Icon } from '../components/Icon';
@@ -51,7 +51,9 @@ export function CommandPalette({
   }, [entries, query, tables]);
   const current = results[Math.min(active, Math.max(results.length - 1, 0))];
 
-  useEffect(() => {
+  // El foco entra antes de pintar (etapa 9E, como «Acerca de» en la 9D): con un efecto normal,
+  // un Escape pulsado justo al aparecer el diálogo llegaba fuera de él y no lo cerraba.
+  useLayoutEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     input.current?.focus();
     input.current?.select();

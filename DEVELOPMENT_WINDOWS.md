@@ -77,6 +77,11 @@ powershell -ExecutionPolicy Bypass -File scripts\dev.ps1 desktop
   agregaron exclusiones (cambiar la seguridad de Windows queda fuera del proyecto).
 - **Mismo puerto**: el clúster de desarrollo y el de la aplicación instalada usan 55432 y Go 8181; no pueden correr a
   la vez. Detener el de desarrollo (`db-stop`, `server-stop`) antes de abrir la aplicación instalada.
+- **Playwright WebKit en Windows** se anuncia como Mac en su agente de usuario (`navigator.platform` es «Win32»): la
+  aplicación y las pruebas usan ⌘ para sus atajos, pero la edición de texto va con Ctrl, así que en las pruebas las
+  órdenes de edición se escriben con `ControlOrMeta+…`. Un fallo arrastra en cascada a las especificaciones
+  siguientes: revisar el primero. `dev.ps1 test-browser <filtro>` corre una sola especificación sobre una base nueva
+  (sin lo que dejan las anteriores) y `--repeat-each` no aplica; la validación es la corrida completa.
 
 ## Instalador de prueba
 
@@ -91,3 +96,43 @@ con `initdb` que funcionan y genera el instalador NSIS con `desktop\src-tauri\ta
 resultado queda en `desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_<versión>_x64-setup.exe`. Detalle de la
 instalación y de lo que hace en el equipo: [docs/INSTALAR_EN_WINDOWS.md](docs/INSTALAR_EN_WINDOWS.md) (para el
 propietario) y `CLAUDE.md` §17.
+
+## Pruebas sobre la aplicación instalada
+
+- `scripts\windows\verify-installed.ps1 -Installer <setup.exe> [-Uninstall] [-Report <json>]`: instala en silencio,
+  mide la ventana y el servidor, cuenta ventanas de consola nuevas, suma la memoria, cierra en orden y, con
+  `-Uninstall`, desinstala y comprueba que los datos siguen. Nunca borra `%LOCALAPPDATA%\AD-EL POS`.
+- `scripts\windows\installed-smoke.ps1 [-Grep <paso>]`: abre la aplicación instalada con el puerto de depuración de
+  WebView2 solo en esa ejecución y corre `desktop\e2e-installed` con Playwright por CDP (crea datos reales en la
+  instalación: úsese en un equipo de pruebas).
+- **Otra carpeta de datos** (por ejemplo, simular un usuario con acentos): abrir `ad-el-pos-desktop.exe` con
+  `LOCALAPPDATA` apuntando a otra carpeta **y** `ADEL_TERMINAL_CONFIG` con un `connection.json` que use otro
+  `credential_namespace`. Con el perfil `main`, el servidor nuevo rechazaría la terminal (`DEVICE_REQUIRED`) y la
+  aplicación borraría la credencial de la instalación real. Al terminar, `cmdkey /delete:"http://127.0.0.1:8181|<perfil>.local.adel.pos.dev"`.
+  El perfil de WebView2 y `window-state.json` siguen en las carpetas reales (Windows las resuelve por su API de
+  carpetas conocidas, no por la variable).
+- **Carpeta de instalación recordada**: el instalador guarda la última carpeta en `HKCU\Software\AD-EL POS\AD-EL POS`
+  y la reutiliza aunque se haya desinstalado (solo la olvida la casilla «borrar datos»). Después de instalar en otra
+  carpeta con `/D=`, borrar ese valor (`reg delete "HKCU\Software\AD-EL POS\AD-EL POS" /ve /f`) antes de volver a la
+  predeterminada.
+- Cerrar la aplicación instalada antes de usar el clúster de desarrollo (mismos puertos).
+
+## Comprobar macOS desde Windows
+
+No sustituye la regresión en la Mac, pero detecta errores de compilación condicional:
+
+```powershell
+. scripts\env.ps1
+cd backend
+$env:GOOS = 'darwin'; $env:GOARCH = 'arm64'
+go build ./...
+go vet ./...
+Remove-Item Env:\GOOS, Env:\GOARCH
+```
+
+Para Rust, `rustup target add aarch64-apple-darwin` y `cargo check --locked` (y `--tests`) con
+`--target aarch64-apple-darwin` en `desktop\src-tauri`. La dependencia `objc2-exception-helper` compila un archivo de
+Objective-C con el compilador de Apple, que no existe en Windows; como `cargo check` no enlaza, basta un compilador y un
+archivador sustitutos **fuera del repositorio** que solo crean el archivo de salida vacío (`-o <archivo>` y
+`ar <op> <archivo>`), indicados con `CC_aarch64_apple_darwin` y `AR_aarch64_apple_darwin`, y `SDKROOT` con cualquier
+carpeta (evita que se busque `xcrun`).

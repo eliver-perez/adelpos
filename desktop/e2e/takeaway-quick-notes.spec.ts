@@ -163,13 +163,19 @@ test('captura: indicación con efecto y sustitución de guarniciones en dos toqu
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const driver = await installDriver(page);
+  // El catálogo se prepara antes de abrir la aplicación (etapa 9E): los cambios de catálogo no
+  // publican eventos en tiempo real y la captura vuelve a consultarlo cada 15 s, así que creado
+  // después de iniciar sesión podía no aparecer a tiempo si la captura ya lo había consultado (se
+  // observó en WebKit en Windows).
+  await driver.request('POST', 'auth/login', { username: 'admin', password: 'admin' });
+  await prepareCatalog(driver);
+  await driver.request('POST', 'auth/logout');
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
   await page.getByLabel('Usuario', { exact: true }).fill('admin');
   await page.getByLabel('Contraseña', { exact: true }).fill('admin');
   await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(topBar(page)).toBeVisible();
-  await prepareCatalog(driver);
 
   await openSection(page, 'Para llevar');
   // Etapa 9D (§4.1): el pedido nace al agregar el primer producto.

@@ -406,20 +406,25 @@ export function TableMap({
 
   // Elegir una mesa encontrada la muestra (con su área) y lleva el foco a su mosaico: así Escape
   // cierra su panel y los atajos (⌘N, ⌘P) actúan, porque el foco ya no está en un campo.
-  const focusTable = useRef('');
+  const focusTable = useRef<{ id: string; area: string } | null>(null);
   function choose(table: RestaurantTable) {
     setQuery('');
-    focusTable.current = table.id;
+    focusTable.current = { id: table.id, area: table.area_id };
     onSelect(table);
   }
   useEffect(() => {
-    const id = focusTable.current;
-    if (!id) {
+    const pending = focusTable.current;
+    if (!pending) {
       return;
     }
-    // Un solo intento, en el render que sigue a la elección (la página ya cambió de área).
-    focusTable.current = '';
-    canvas.current?.querySelector<HTMLElement>(`[data-table-id="${id}"]`)?.focus();
+    // Se espera al render que ya muestra el área de la mesa: el mapa puede volver a dibujarse antes
+    // con el área anterior (se observó en WebKit en Windows, etapa 9E) y entonces el mosaico todavía
+    // no existe. En ese render hay un solo intento.
+    if (pending.area !== areaID) {
+      return;
+    }
+    focusTable.current = null;
+    canvas.current?.querySelector<HTMLElement>(`[data-table-id="${pending.id}"]`)?.focus();
   });
 
   function move(event: PointerEvent) {

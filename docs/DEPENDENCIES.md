@@ -173,3 +173,25 @@ versión, 0.9.2; comprobado con `git diff` desde `etapa-9b`).
   supervisor reutiliza la de los cobros. La 0021 usa solo funciones de PostgreSQL 18 (`gen_random_uuid()` y un
   disparador en PL/pgSQL, como las de la etapa 8).
 - **Reportes nuevos**: el registro de la 9A con `excelize` y `fpdf` para las exportaciones, sin versiones nuevas.
+
+## Etapa 9E (Windows)
+
+**Sin módulos, crates ni paquetes npm nuevos**: entre `main` (9D) y la 9E solo cambian la versión del propio paquete en
+`Cargo.toml`, `package.json` y sus lockfiles, y `golang.org/x/sys` (v0.49.0, ya en `go.sum`) pasa de indirecta a directa
+en `go.mod` porque la usan los archivos de Windows (`winspool.drv`, ACL, eventos con nombre, `CREATE_NO_WINDOW`).
+`keyring` ya declaraba el backend `windows-native`.
+
+Herramientas de Windows (detalle y sumas SHA-256 en [ETAPA_9E_AVANCE.md](ETAPA_9E_AVANCE.md), «Fase A»):
+
+| Herramienta                    | Versión                          | Fuente                                                                                  |
+| ------------------------------ | -------------------------------- | --------------------------------------------------------------------------------------- |
+| Go                             | 1.27.3 windows/amd64             | zip oficial de go.dev, en `.tools\go`                                                   |
+| Node / npm                     | 24.22.2 / 11.19.1                | zip oficial de nodejs.org, en `.tools\node`                                             |
+| Rust                           | 1.99.1, `x86_64-pc-windows-msvc` | `rustup-init.exe` oficial con `RUSTUP_HOME`/`CARGO_HOME` en `.tools`                    |
+| Visual Studio Build Tools 2022 | 17.14 con la carga VCTools       | winget `Microsoft.VisualStudio.2022.BuildTools` (por equipo)                            |
+| PostgreSQL                     | 18.6 (EDB 18.6-1)                | `postgresql-18.6-1-windows-x64-binaries.zip` de get.enterprisedb.com, en `.tools\pgsql` |
+
+Lo que incluye el instalador además del código del proyecto: los binarios de PostgreSQL 18.6 que se usan (con su
+licencia), el runtime de Visual C++ (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`) copiado de la carpeta
+`VC\Redist\MSVC` de Build Tools (redistribuible de Microsoft), y el instalador de arranque de WebView2. La CLI de Tauri
+2.12.4 descarga al empaquetar NSIS 3.13 y `nsis_tauri_utils` 0.5.3 (comprobado con su hash).

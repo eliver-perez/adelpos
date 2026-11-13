@@ -1,9 +1,33 @@
 # Notas para Windows · AD-EL POS
 
-Punto de partida para preparar el instalador de Windows 11 (etapa posterior, con un prompt aparte). Recoge cómo se
+Punto de partida para preparar el instalador de Windows 11 (hecho en la etapa 9E: ver la sección 0). Recoge cómo se
 empaqueta y se ejecuta hoy AD-EL POS en macOS y qué partes dependen de macOS, con el archivo y la línea de cada una.
 Se escribió en la Fase 0 de la etapa 9D (versión 0.9.2, esquema 20) leyendo el código; **nada se compiló ni se probó en
 Windows**. Lo marcado «por comprobar» es una expectativa razonable, no un hecho verificado.
+
+## 0. Estado después de la etapa 9E (12/11/2026, versión 0.9.4)
+
+La etapa 9E compiló, probó y empaquetó AD-EL POS en Windows 11 Pro de 64 bits. Las secciones 1 a 5 se conservan como el
+análisis previo; lo que se hizo con cada punto (detalle en [ETAPA_9E_AVANCE.md](ETAPA_9E_AVANCE.md), cómo desarrollar en
+[../DEVELOPMENT_WINDOWS.md](../DEVELOPMENT_WINDOWS.md) y la guía del propietario en
+[INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md)):
+
+| Punto                          | Resultado en la 9E                                                                                                                                                                                                                                                                                              |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.4 Datos y 2.1 PostgreSQL     | En la instalación, datos en `%LOCALAPPDATA%\AD-EL POS` (ACL privada) y PostgreSQL 18.6 de EDB incluido. **No se usa un servicio de Windows**: la aplicación lanza `ad-el-pos-server host`, que crea el clúster (`--locale=C`, SCRAM, UTC, solo `127.0.0.1:55432`, sin socket de Unix), lo arranca y lo detiene. |
+| 2.2 Servidor Go como servicio  | Sin servicio: proceso oculto de la aplicación (`server_host.rs`). Parada con un evento con nombre (`stop --pid`) en lugar de `SIGTERM`; bitácora con `--log-file`. El apagado con SSE abierto ya no agota 5 s (corregido también para macOS).                                                                   |
+| 2.3 Comandos interactivos      | `provision-sa` y `reset-sa` usan `CONIN$`/`CONOUT$` en Windows (`terminal_windows.go`); no se ejecutaron (son del propietario).                                                                                                                                                                                 |
+| 2.4 Permisos                   | `internal/fileacl`: ACL propia sin herencia en Windows; la prueba de 0600 se separó por sistema.                                                                                                                                                                                                                |
+| 2.5 Impresión y cajón          | La cola del equipo (`cups` en la base) es la impresora instalada en Windows con ESC/POS RAW por `winspool.drv`, con inspección previa; ESC/POS por red sin cambios. Textos por plataforma. Ver [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md), «Cola de impresión de Windows». Sin prueba física.           |
+| 2.6 Keychain                   | Administrador de credenciales con el mismo `vault.rs`; la prueba real del almacén pasa en Windows. Textos neutros por sistema.                                                                                                                                                                                  |
+| 2.7 Menú nativo                | Se compiló, se probó y **se omite en Windows** (barra clásica no táctil que repetía la barra superior).                                                                                                                                                                                                         |
+| 2.8 Atajos y pantalla completa | Ctrl y F11 funcionan; la ventana recuerda tamaño y posición en modo ventana (`window_state.rs`).                                                                                                                                                                                                                |
+| 2.9 WebView                    | WebView2; el instalador incluye su instalador de arranque. Los colores de la 9D y las barras siempre visibles del mapa se ven en WebView2 (capturas de la aplicación instalada). El mapa de mesas oscilaba al 125 % (corregido).                                                                                |
+| 2.10 Empaquetado               | Instalador NSIS por usuario (`scripts/build-windows.ps1`, 36.7 MB), `icon.ico` y el símbolo de la marca como icono. Identificador sin cambiar (`local.adel.pos.dev`). La exportación de reportes con el diálogo nativo funcionó en la aplicación instalada.                                                     |
+| 2.11 Servicios                 | Ninguno: Go y PostgreSQL viven mientras la aplicación está abierta.                                                                                                                                                                                                                                             |
+| 2.12 Red local y TLS           | No preparado en Windows: el instalador solo usa `127.0.0.1` y no pide permisos del firewall.                                                                                                                                                                                                                    |
+| 2.13 Scripts y pruebas         | `scripts/dev.ps1` y `env.ps1` (lógica en `scripts/windows/dev.mjs`), `.gitattributes` con LF y todas las suites aprobadas en Windows (Go sin `-race`).                                                                                                                                                          |
+| 4.7 Migrar datos de una Mac    | Sigue sin herramienta: solo `pg_dump`/`pg_restore` custom.                                                                                                                                                                                                                                                      |
 
 ## 1. Cómo funciona hoy en macOS
 

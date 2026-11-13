@@ -122,9 +122,12 @@ test('teclado 9C: atajos, paleta, Escape y menú nativo simulado', async ({
     .toEqual(['help.about', 'help.shortcuts', 'view.fullscreen']);
 
   // 1. Acceso con el teclado.
-  // El campo Usuario ya trae «admin»: se selecciona su texto y se reemplaza.
+  // El campo Usuario ya trae «admin»: se selecciona su texto y se reemplaza. Seleccionar todo es una
+  // orden de edición del sistema donde corre el navegador (⌘A en macOS, Ctrl+A en Windows), no un
+  // atajo de la aplicación: el WebKit de Playwright en Windows se anuncia como Mac en su agente de
+  // usuario (los atajos de la aplicación usan ⌘ allí), pero edita el texto con Ctrl (etapa 9E).
   await page.getByLabel('Usuario', { exact: true }).focus();
-  await page.keyboard.press(`${mod}+a`);
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.type('admin');
   await page.keyboard.press('Tab');
   await page.keyboard.type('admin');
