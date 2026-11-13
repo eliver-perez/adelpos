@@ -43,15 +43,25 @@ func (fixture *paymentsFixture) createPrinter(t *testing.T, printer kitchen.Prin
 	return decodeResponse[kitchen.Printer](t, fixture.mutate(t, "POST", "kitchen/printers", printer, 200))
 }
 
-// setPrecheckName guarda el nombre visible de la precuenta con el resto de las políticas vigentes.
+// setPrecheckName guarda el nombre visible de la precuenta en Administración › Documentos (revisión 9F, M3):
+// PUT documents/identity con la identidad vigente y el nombre.
 func (fixture *paymentsFixture) setPrecheckName(t *testing.T, name string, status int) {
 	t.Helper()
-	settings := decodeResponse[payments.Settings](t, fixture.adminCall(t, "GET", "payments/settings", nil, 200))
-	fixture.adminCall(t, "PUT", "payments/settings", map[string]any{
-		"operation_id": randomID(), "revision": settings.Revision, "shared_shifts": settings.SharedShifts,
-		"print_receipt_default": settings.PrintReceiptDefault, "receipt_printer_id": settings.ReceiptPrinterID,
-		"refund_authorization_threshold": settings.RefundAuthorizationThreshold, "precheck_name": name,
+	identity := decodeResponse[map[string]any](t, fixture.adminCall(t, "GET", "documents/identity", nil, 200))
+	fixture.adminCall(t, "PUT", "documents/identity", map[string]any{
+		"operation_id": randomID(), "revision": identity["revision"], "additional_info": identity["additional_info"],
+		"header_text": identity["header_text"], "footer_text": identity["footer_text"], "presentation": identity["presentation"],
+		"precheck_name": name,
 	}, status)
+}
+
+// forceReceiptPrinter deja como impresora de tickets una que dejó de servir después de elegirla (Go ya no
+// permite elegir una desactivada o de otra terminal, revisión 9F B3).
+func (fixture *paymentsFixture) forceReceiptPrinter(t *testing.T, printerID any) {
+	t.Helper()
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.payment_settings SET receipt_printer_id=$1", printerID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // runWorkerWith procesa solo el trabajo indicado con el adaptador controlado: los demás pendientes de
@@ -112,7 +122,8 @@ func testPrintingStage9F(t *testing.T, fixture *paymentsFixture) {
 			{inactive.ID, "PRINTER_UNAVAILABLE", "inactive", "La impresora Tickets apagada 9F está desactivada."},
 		}
 		for _, testCase := range cases {
-			fixture.receiptSettings(t, testCase.printer, true)
+			fixture.receiptSettings(t, nil, true)
+			fixture.forceReceiptPrinter(t, testCase.printer)
 			before, documents := jobs(), fixture.countRows(t, "SELECT count(*) FROM app.payment_documents")
 			rejected := decodeResponse[printerError](t, fixture.post(t, printerClerk, bill.Account.ID, "precheck/print", map[string]any{}, 409))
 			if rejected.Error.Code != testCase.code || rejected.Error.Message != testCase.message ||
@@ -153,6 +164,43 @@ func testPrintingStage9F(t *testing.T, fixture *paymentsFixture) {
 		fixture.post(t, fixture.observer, bill.Account.ID, "documents/receipt", map[string]any{"payment_id": paid.Payment.ID}, 403)
 		if fixture.countRows(t, "SELECT count(*) FROM app.audit_events WHERE action='payments.receipt_printed'") != 1 {
 			t.Fatal("La impresión del ticket después del pago no se auditó")
+		}
+	})
+
+	t.Run("9F_B1_ticket_solo_del_pago_que_quedo_sin_impresora", func(t *testing.T) {
+		fixture.receiptSettings(t, valid.ID, false)
+		receipts := func() int {
+			return fixture.countRows(t, "SELECT count(*) FROM app.payment_documents WHERE kind='receipt'")
+		}
+		// Un pago registrado sin pedir ticket no recibe uno nuevo, sin motivo, por esta ruta.
+		plain := fixture.account(t, "Sin ticket 9F", line(fixture.soda, 1))
+		paidPlain := decodeResponse[receiptPrinting](t, fixture.pay(t, printerClerk, plain.Account.ID, map[string]any{
+			"method_id": cash, "mode": "total", "received": "50", "print": false,
+		}, 200))
+		before := receipts()
+		if code := errorCode(t, fixture.post(t, printerClerk, plain.Account.ID, "documents/receipt",
+			map[string]any{"payment_id": paidPlain.Payment.ID}, 409)); code != "RECEIPT_NOT_PENDING" {
+			t.Fatalf("Se aceptó el ticket de un pago que no lo tenía pendiente: %s", code)
+		}
+		// Un pago cuyo ticket no salió por falta de impresora, pero ya devuelto, tampoco.
+		fixture.receiptSettings(t, nil, false)
+		refunded := fixture.account(t, "Devuelto 9F", line(fixture.soda, 1))
+		paidRefunded := decodeResponse[receiptPrinting](t, fixture.pay(t, printerClerk, refunded.Account.ID, map[string]any{
+			"method_id": cash, "mode": "total", "received": "50", "print": true,
+		}, 200))
+		if paidRefunded.Printing.Status != "not_configured" {
+			t.Fatalf("El ticket sin impresora no quedó pendiente: %+v", paidRefunded.Printing)
+		}
+		fixture.receiptSettings(t, valid.ID, false)
+		fixture.post(t, fixture.admin, refunded.Account.ID, "refunds", map[string]any{
+			"mode": "total", "method_id": cash, "reason": "Pedido devuelto por el cliente 9F",
+		}, 200)
+		if code := errorCode(t, fixture.post(t, printerClerk, refunded.Account.ID, "documents/receipt",
+			map[string]any{"payment_id": paidRefunded.Payment.ID}, 409)); code != "PAYMENT_REFUNDED" {
+			t.Fatalf("Se aceptó el ticket de un pago devuelto: %s", code)
+		}
+		if receipts() != before {
+			t.Fatal("Se registró un ticket que no debía imprimirse")
 		}
 	})
 
@@ -243,10 +291,161 @@ func testPrintingStage9F(t *testing.T, fixture *paymentsFixture) {
 		}
 	})
 
+	t.Run("9F_M2_reintento_y_reimpresion_con_la_impresora_vigente", func(t *testing.T) {
+		fixed := fixture.createPrinter(t, kitchen.Printer{
+			Name: "Revision 9F", Transport: "cups", Destination: "ADEL_REV_COLA_VIEJA", Active: true, PaperWidth: 80, Copies: 1,
+		})
+		fixture.receiptSettings(t, fixed.ID, false)
+		bill := fixture.account(t, "Revision reintento 9F", line(fixture.soda, 1))
+		precheck := decodeResponse[printingResult](t, fixture.post(t, printerClerk, bill.Account.ID, "precheck/print", map[string]any{}, 200))
+		fixture.runWorkerWith(t, precheck.JobID, "error")
+		snapshot := func(jobID string) (kitchen.Printer, string, string) {
+			t.Helper()
+			var raw []byte
+			var content, printerID string
+			if err := fixture.pool.QueryRow(fixture.ctx, "SELECT printer_snapshot,content,printer_id FROM app.kitchen_print_jobs WHERE id=$1",
+				jobID).Scan(&raw, &content, &printerID); err != nil {
+				t.Fatal(err)
+			}
+			var printer kitchen.Printer
+			if err := json.Unmarshal(raw, &printer); err != nil {
+				t.Fatal(err)
+			}
+			return printer, content, printerID
+		}
+		setJobState := func(state string) {
+			t.Helper()
+			if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_print_jobs SET state=$1 WHERE id=$2", state, precheck.JobID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		updatePrinter := func(assignments string) {
+			t.Helper()
+			if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_printers SET "+assignments+",revision=revision+1 WHERE id=$1", fixed.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, original, _ := snapshot(precheck.JobID)
+		// 1. «Configurar impresora»: se corrige la cola de la misma impresora y se toca «Reintentar» en el aviso.
+		updatePrinter("destination='ADEL_REV_COLA_NUEVA'")
+		fixture.post(t, printerClerk, bill.Account.ID, "documents/retry", map[string]any{"ticket_id": precheck.TicketID, "job_id": precheck.JobID}, 200)
+		if printer, content, _ := snapshot(precheck.JobID); printer.Destination != "ADEL_REV_COLA_NUEVA" || content != original {
+			t.Fatalf("El reintento no tomó la cola corregida o cambió el documento con el mismo papel: %s", printer.Destination)
+		}
+		// 2. Desde la cola, con otro papel: la fotografía es la vigente y la precuenta se prepara para 58 mm con los
+		// mismos datos (cada renglón cabe en 30 columnas y el total es el mismo).
+		fixture.runWorkerWith(t, precheck.JobID, "error")
+		updatePrinter("paper_width=58")
+		detail := decodeResponse[struct {
+			Job kitchen.PrintJob `json:"job"`
+		}](t, fixture.adminCall(t, "GET", "kitchen/jobs/"+precheck.JobID, nil, 200))
+		fixture.mutate(t, "POST", "kitchen/jobs/"+precheck.JobID+"/retry", map[string]any{"revision": detail.Job.Revision}, 200)
+		total := ""
+		for _, row := range strings.Split(original, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(row), "TOTAL") {
+				fields := strings.Fields(row)
+				total = fields[len(fields)-1]
+				break
+			}
+		}
+		printer, narrow, _ := snapshot(precheck.JobID)
+		if printer.PaperWidth != 58 || narrow == original || total == "" || !strings.Contains(narrow, "CFDI") || !strings.Contains(narrow, total) {
+			t.Fatalf("El reintento de la cola no preparó la precuenta para el papel vigente:\n%s", narrow)
+		}
+		for _, row := range strings.Split(narrow, "\n") {
+			if len([]rune(row)) > 30 {
+				t.Fatalf("Un renglón no cabe en 58 mm: %q", row)
+			}
+		}
+		// 3. Si la impresora de tickets de Cobros cambió, el reintento del aviso va a la nueva («Configurar
+		// impresora» lleva a elegirla allí), preparada otra vez para su papel de 80 mm.
+		setJobState("error")
+		fixture.receiptSettings(t, valid.ID, false)
+		fixture.post(t, printerClerk, bill.Account.ID, "documents/retry", map[string]any{"ticket_id": precheck.TicketID, "job_id": precheck.JobID}, 200)
+		if printer, content, printerID := snapshot(precheck.JobID); printerID != valid.ID || printer.Destination != "ADEL_TEST_9F_TICKETS" ||
+			printer.PaperWidth != 80 || content != original {
+			t.Fatalf("El reintento no fue a la impresora de tickets vigente: %s %s", printerID, printer.Destination)
+		}
+		// 4. Sin una impresora válida, el aviso sigue ofreciendo «Configurar impresora».
+		setJobState("error")
+		fixture.forceReceiptPrinter(t, agent.ID)
+		unavailable := decodeResponse[printerError](t, fixture.post(t, printerClerk, bill.Account.ID, "documents/retry",
+			map[string]any{"ticket_id": precheck.TicketID}, 409))
+		if unavailable.Error.Code != "PRINTER_UNAVAILABLE" || unavailable.Error.Details["problem"] != kitchen.ProblemUnsupported ||
+			unavailable.Error.Details["document"] != "precheck" {
+			t.Fatalf("El reintento sin impresora válida no ofrece configurarla: %+v", unavailable.Error)
+		}
+		// 5. Reimprimir (con motivo) sale en la impresora de tickets vigente con su destino actual, pero idéntica
+		// al original: la reimpresión exacta conserva el papel y las columnas con que se emitió (decisión de la 9C).
+		setJobState("submitted")
+		fixture.receiptSettings(t, fixed.ID, false)
+		updatePrinter("destination='ADEL_REV_COLA_OTRA',paper_width=58")
+		copied := decodeResponse[printingResult](t, fixture.post(t, printerClerk, bill.Account.ID, "documents/reprint",
+			map[string]any{"ticket_id": precheck.TicketID, "reason": "Copia en la cola corregida"}, 200))
+		copyPrinter, copyContent, copyPrinterID := snapshot(copied.JobID)
+		if copyPrinterID != fixed.ID || copyPrinter.Destination != "ADEL_REV_COLA_OTRA" || copyPrinter.PaperWidth != 80 || copyContent != original {
+			t.Fatalf("La reimpresión no salió con la impresora vigente e idéntica: %s %d\n%s", copyPrinter.Destination, copyPrinter.PaperWidth, copyContent)
+		}
+		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_print_jobs SET state='cancelled' WHERE ticket_id=$1", precheck.TicketID); err != nil {
+			t.Fatal(err)
+		}
+		fixture.receiptSettings(t, valid.ID, false)
+	})
+	t.Run("9F_B3_impresora_de_tickets_que_puede_imprimir", func(t *testing.T) {
+		save := func(printerID any, status int) []byte {
+			t.Helper()
+			settings := decodeResponse[payments.Settings](t, fixture.adminCall(t, "GET", "payments/settings", nil, 200))
+			return fixture.adminCall(t, "PUT", "payments/settings", map[string]any{
+				"operation_id": randomID(), "revision": settings.Revision, "shared_shifts": settings.SharedShifts,
+				"print_receipt_default": settings.PrintReceiptDefault, "receipt_printer_id": printerID,
+				"refund_authorization_threshold": settings.RefundAuthorizationThreshold,
+			}, status)
+		}
+		fixture.receiptSettings(t, nil, false)
+		for _, testCase := range []struct {
+			printer string
+			problem string
+		}{{agent.ID, kitchen.ProblemUnsupported}, {inactive.ID, kitchen.ProblemInactive}} {
+			rejected := decodeResponse[printerError](t, save(testCase.printer, 422))
+			if rejected.Error.Code != "RECEIPT_PRINTER_UNAVAILABLE" || rejected.Error.Details["problem"] != testCase.problem ||
+				!strings.Contains(rejected.Error.Message, "Elige otra impresora de tickets.") {
+				t.Fatalf("Se aceptó como impresora de tickets una que no puede imprimir: %+v", rejected.Error)
+			}
+		}
+		if settings := decodeResponse[payments.Settings](t, fixture.adminCall(t, "GET", "payments/settings", nil, 200)); settings.ReceiptPrinterID != nil {
+			t.Fatal("El rechazo guardó la impresora")
+		}
+		// La que ya estaba elegida y dejó de servir no impide guardar las demás políticas.
+		save(valid.ID, 200)
+		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_printers SET active=false WHERE id=$1", valid.ID); err != nil {
+			t.Fatal(err)
+		}
+		save(valid.ID, 200)
+		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_printers SET active=true WHERE id=$1", valid.ID); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("9F_nombre_visible_de_la_precuenta", func(t *testing.T) {
 		fixture.receiptSettings(t, valid.ID, false)
 		bill := fixture.account(t, "Nombre 9F", line(fixture.soda, 1))
-		fixture.setPrecheckName(t, "ticket", 400)
+		fixture.setPrecheckName(t, "ticket", 422)
+		// Revisión 9F (M3): se elige en Administración › Documentos, con su permiso; Cobros ya no lo guarda.
+		identityBody := decodeResponse[map[string]any](t, fixture.adminCall(t, "GET", "documents/identity", nil, 200))
+		if identityBody["precheck_name"] != "precheck" {
+			t.Fatalf("La identidad no informa el nombre de la precuenta: %v", identityBody["precheck_name"])
+		}
+		fixture.call(t, fixture.observer, "PUT", "documents/identity", map[string]any{
+			"operation_id": randomID(), "revision": identityBody["revision"], "additional_info": identityBody["additional_info"],
+			"header_text": identityBody["header_text"], "footer_text": identityBody["footer_text"],
+			"presentation": identityBody["presentation"], "precheck_name": "bill",
+		}, 403)
+		settings := decodeResponse[payments.Settings](t, fixture.adminCall(t, "GET", "payments/settings", nil, 200))
+		fixture.adminCall(t, "PUT", "payments/settings", map[string]any{
+			"operation_id": randomID(), "revision": settings.Revision, "shared_shifts": settings.SharedShifts,
+			"print_receipt_default": settings.PrintReceiptDefault, "receipt_printer_id": settings.ReceiptPrinterID,
+			"refund_authorization_threshold": settings.RefundAuthorizationThreshold, "precheck_name": "bill",
+		}, 400)
 		fixture.setPrecheckName(t, "sales_ticket", 200)
 		document := decodeResponse[payments.CommercialDocument](t, fixture.adminCall(t, "GET", "payments/accounts/"+bill.Account.ID+"/precheck", nil, 200))
 		if !strings.Contains(document.Content, "TICKET DE VENTA") || strings.Contains(document.Content, "PRECUENTA") ||
@@ -271,7 +470,7 @@ func testPrintingStage9F(t *testing.T, fixture *paymentsFixture) {
 		}
 		var audited string
 		if err := fixture.pool.QueryRow(fixture.ctx, `SELECT after_state->>'precheck_name' FROM app.audit_events
-            WHERE action='payments.settings_changed' AND before_state->>'precheck_name'='precheck' ORDER BY occurred_at DESC LIMIT 1`).Scan(&audited); err != nil || audited != "sales_ticket" {
+            WHERE action='documents.precheck_name_changed' AND before_state->>'precheck_name'='precheck' ORDER BY occurred_at DESC LIMIT 1`).Scan(&audited); err != nil || audited != "sales_ticket" {
 			t.Fatalf("El cambio del nombre visible no se auditó: %q %v", audited, err)
 		}
 		fixture.setPrecheckName(t, "precheck", 200)
@@ -382,7 +581,8 @@ func testPrintingStage9F(t *testing.T, fixture *paymentsFixture) {
 		if err := json.Unmarshal(raw, &snapshot); err != nil {
 			t.Fatal(err)
 		}
-		if ending := snapshot.PaperCut().Ending(); string(ending) != "\n\n\x1dV\x01" {
+		// La prueba técnica es una comanda: termina con su salto, así que el final son los 2 renglones y GS V 1.
+		if ending := snapshot.PaperCut().Ending(false); string(ending) != "\n\n\x1dV\x01" {
 			t.Fatalf("La prueba de impresión no corta como la impresora: % x", ending)
 		}
 		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_print_jobs SET state='cancelled' WHERE id=$1", width.ID); err != nil {

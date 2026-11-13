@@ -52,7 +52,8 @@ export interface PaymentSettings {
   receipt_printer_id: string | null;
   receipt_printer_name: string | null;
   refund_authorization_threshold: string | null;
-  // Nombre visible del documento previo al cobro (etapa 9F, §4.5; services/documentNames.ts).
+  // Nombre visible del documento previo al cobro (etapa 9F, §4.5; services/documentNames.ts). Solo se
+  // informa: desde la revisión 9F (M3) se elige en Administración › Documentos.
   precheck_name: PrecheckNameKey;
   // Rango del tipo de cambio (MXN por USD) y porcentaje de diferencia que exige confirmación.
   usd_rate_min: string;
@@ -75,7 +76,6 @@ export interface SettingsInput {
   print_receipt_default: boolean;
   receipt_printer_id: string | null;
   refund_authorization_threshold: string | null;
-  precheck_name: PrecheckNameKey;
 }
 
 export interface TaxInput {
@@ -809,7 +809,10 @@ export const financialOperationLabels: Partial<Record<Operation, string>> = {
   payments_refund: 'de la devolución',
   payments_correct: 'de la corrección del pago',
   payments_deliver: 'de la entrega del pedido',
-  payments_print_precheck: 'de la impresión de la precuenta',
+  // Con el nombre visible que eligió el restaurante (etapa 9F, §4.5; revisión 9F, M3).
+  get payments_print_precheck() {
+    return `de la impresión ${precheckName().ofWithArticle}`;
+  },
   payments_reprint: 'de la copia del documento',
   payments_retry_document: 'del reintento de impresión',
   payments_print_receipt: 'de la impresión del ticket de pago',

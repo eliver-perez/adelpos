@@ -389,13 +389,17 @@ propietario (lista en [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md)).
 ### Sin impresora válida, aviso en el momento
 
 Precuentas, tickets de pago y documentos de caja usan la «Impresora de tickets» de Cobros › Políticas de cobro. Desde la
-9F (decisión D4) solo sirve si está configurada, activa y no es de otra terminal; si no, Go avisa **antes de encolar**
+9F (decisión D4) solo sirve si está configurada, activa y no es de otra terminal (desde la revisión independiente, B3,
+Cobros solo ofrece esas impresoras —las demás aparecen deshabilitadas con «desactivada» o «Esta impresora todavía no
+puede usarse para imprimir»— y Go rechaza elegir otra con `422 RECEIPT_PRINTER_UNAVAILABLE`); si no, Go avisa **antes de
+encolar**
 (no queda un trabajo fallido en la cola) y la interfaz lo dice al momento: «No hay impresora configurada para
 precuentas» (con el nombre visible de la precuenta), con **«Configurar impresora»** (lleva con el único `requestScreen`
 a Administración › Cobros con «Políticas de cobro» desplegada; solo si el usuario puede elegir la impresora, si no el
 aviso dice a quién pedirlo) y **«Reintentar»** en el mismo aviso. El ticket de pago nunca hace fallar el pago: el
 resultado del cobro dice por qué no se imprimió y ofrece los mismos dos botones («Reintentar» imprime el ticket de ese
-pago). Las comandas no cambian: una impresora inactiva bloquea la liberación y una de otra terminal deja la comanda en
+pago; desde la revisión B1, solo el de un pago cuyo ticket quedó pendiente por esa razón y sin devoluciones). Las
+comandas no cambian: una impresora inactiva bloquea la liberación y una de otra terminal deja la comanda en
 «Requiere intervención», ahora con «Esta impresora todavía no puede usarse para imprimir.».
 
 ### Reintentar sin motivo, reimprimir con motivo
@@ -404,14 +408,27 @@ pago). Las comandas no cambian: una impresora inactiva bloquea la liberación y 
   cola («Reintentar», `kitchen.queue.retry`) y desde el propio documento (documentos de la cuenta y de Caja, con el
   permiso de imprimirlo: `payments.tickets.print` o `cash.reports.print`, sin necesitar la cola de cocina). El aviso
   dice qué pasó en palabras del restaurante, derivado de la clave del intento (`unreachable`: «La impresora de caja no
-  responde» o «La impresora … está apagada o sin conexión»; `inactive`: «La impresora … está desactivada»;
-  `unsupported`: «Esta impresora todavía no puede usarse para imprimir»; `setup`: «… necesita que se revise su
-  configuración»). Cuando un documento que la pantalla veía en camino a la impresora falla, aparece además un aviso
-  que se cierra solo con «Reintentar».
+  responde» o «La impresora … está apagada o sin conexión»; `not_found`, desde la revisión independiente (B4): «No se
+  encontró la impresora de caja (o la impresora …) en el equipo», cuando la cola CUPS no existe o la impresora de
+  Windows no está instalada o se renombró; `inactive`: «La impresora … está desactivada»; `unsupported`: «Esta
+  impresora todavía no puede usarse para imprimir»; `setup`: «… necesita que se revise su configuración»). Cuando un
+  documento que la pantalla veía en camino a la impresora falla, aparece además un aviso que se cierra solo con
+  «Reintentar» y, si se resuelve configurando la impresora (`not_found`, `inactive`, `unsupported`, `setup`), también
+  «Configurar impresora» (en Caja, junto a «Reintentar» del documento).
+- **El reintento sale con la impresora vigente** (revisión independiente, M2): desde la cola, la configuración actual
+  de la impresora del trabajo (o la elegida); desde el documento, la impresora de tickets de Cobros con su
+  configuración actual. Así «Configurar impresora» + «Reintentar» funciona tanto si se corrigió la cola o la dirección
+  de la misma impresora como si se eligió otra. Si el papel o las columnas cambiaron, el documento se prepara de nuevo
+  con los mismos datos y la misma versión de plantilla (como la reimpresión de una comanda); una muestra del diseñador
+  o un documento de caja anterior a las plantillas no se pueden preparar de nuevo (409 `PRINT_RENDER_UNAVAILABLE`: se
+  cancelan y se vuelven a pedir). La reimpresión con motivo de precuentas, tickets y documentos de caja también sale
+  en la impresora de tickets vigente con su destino actual, pero idéntica al original: conserva el papel y las columnas
+  con que se emitió (la reimpresión exacta de la 9C).
 - Lo que **pudo haber salido** (`uncertain`) sigue exigiendo decisión con motivo en la cola.
 - **Reimprimir** lo que ya salió (o se canceló) pide motivo de 5 a 500 caracteres en cocina (como antes), en las
   precuentas y tickets y en los documentos de caja; el motivo queda en el Registro de movimientos y en el historial del
-  trabajo.
+  trabajo. Desde la revisión independiente (B2), «Imprimir con la plantilla vigente» de cobros y caja también lo pide
+  (como la de cocina): saca otra copia en papel de un documento ya emitido.
 
 ### Pantalla «Cola de impresión»
 
@@ -427,12 +444,20 @@ la misma impresora y el mismo estado) se agrupan con «×N» y «Ver los N traba
 Por impresora, en «Corte de papel y respaldo»: **«Cortar el papel al terminar»** (una sola casilla; Go guarda
 `supports_cut = cut`), **tipo de corte** total o parcial y **«Renglones de avance antes del corte»** (lista cerrada 0–8,
 4 en impresoras nuevas). Activado por omisión en impresoras **nuevas** de 80 mm y desactivado en las de 58 mm (muchas
-no tienen cortador); las impresoras existentes conservan su papel (corte total con 3 renglones, los bytes de siempre).
+no tienen cortador); las impresoras existentes conservan su papel: las que ya cortaban quedan sin renglones de avance
+elegidos (`null`, «Como hasta ahora» en la lista) y cortan como hasta la 9E; las que no cortaban reciben 4.
 Cambiarlo exige `kitchen.printers.manage` y queda en el Registro de movimientos («Impresora guardada»).
 
 Bytes al final de **cada documento** (tickets, precuentas, comandas, avisos, cortes y comprobantes de caja, prueba de
-ancho y prueba técnica; nunca el pulso del cajón): con corte, N saltos de renglón y `GS V 0` (total) o `GS V 1`
-(parcial); **sin corte, los tres saltos de siempre, byte a byte iguales a la 9E**. Es el mismo final en el texto plano
+ancho y prueba técnica; nunca el pulso del cajón): con corte, el salto que cierra el último renglón si quedó abierto,
+**N renglones en blanco** y `GS V 0` (total) o `GS V 1` (parcial); **sin corte, los tres saltos de siempre, byte a byte
+iguales a la 9E**. Revisión independiente (M1): precuentas, tickets y documentos de caja terminan sin salto y una
+impresora solo imprime un renglón al recibir su salto y solo corta al inicio de uno; antes, con 0 renglones, `GS V`
+llegaba con la leyenda «no es un comprobante fiscal» todavía en el búfer y el avance contaba un renglón menos que en
+las comandas. Ahora el avance es el mismo en todos los documentos. Una impresora que ya cortaba antes de la 9F (sin
+renglones elegidos) y las fotografías de esa época conservan su final: tres saltos fijos y `GS V 0`, porque ningún
+número reproduce a la vez el papel de las precuentas (que terminan sin salto) y el de las comandas (que terminan con
+él); al elegir sus renglones pasa al avance uniforme. Es el mismo final en el texto plano
 (`kitchen.ESCPosBytes`) y en el ESC/POS con formato (`documents.EncodeESCPos`, `PaperCut.Ending`), por red, por la cola
 de Windows (RAW) y por CUPS raw con «Esta impresora entiende ESC/POS». **Por CUPS de texto** no se pueden enviar
 comandos ESC/POS: el corte lo hace el controlador con «Opción de corte anunciada por CUPS» si está configurada; sin
@@ -497,8 +522,24 @@ Fase C de la etapa 9F (§5, decisiones D6 y D7 del coordinador). Guía para el p
 - **Aviso sonoro** (`devices.kitchen_sound_alert`, desactivado por omisión): dos tonos cortos generados con Web Audio
   (`services/kitchenSound.ts`, sin archivos ni red) cuando aparece en Preparación una liberación nueva y reciente de
   las estaciones visibles; no suena al abrir la pantalla, al cambiar de filtro o página ni por cambios de estado.
+  WebKit (la ventana de macOS) y WebView2 solo dejan sonar el audio que se preparó durante un toque o una tecla:
+  desde la revisión independiente (parte 3, B2), con el aviso activado, el primer toque o tecla en Preparación (y
+  activar la casilla en Terminales de cocina) crea o reanuda el contexto de audio, y si al llegar una comanda el equipo
+  todavía no permite reproducir, se avisa una sola vez «Toca la pantalla para activar el aviso sonoro.» en lugar de
+  callar el fallo.
+- **Terminal y lista vacía** (revisión independiente, parte 3, B1): hasta la 9E una terminal sin estaciones no mostraba
+  ninguna a quien no tenía `kitchen.stations.all`; desde D6 muestra todas. Para que un cliente anterior no abra una
+  terminal a todas por accidente, `PUT kitchen/access` sin `all_stations` y con la lista vacía responde `422
+KITCHEN_ACCESS_ALL_REQUIRED`. La descripción del permiso `kitchen.stations.manage` pasa a «Administrar estaciones y
+  las estaciones que muestra cada terminal».
+- **Estaciones del usuario** (revisión independiente, parte 3, B4): `PUT users/{id}/kitchen-stations` no lleva
+  `operation_id`; si lo pedido ya es lo guardado (el reenvío de un guardado cuya respuesta se perdió), responde con lo
+  vigente sin escribir en lugar de «cambiaron en otra terminal».
 - **Quitar datos de prueba** (fase A) desvincula también las estaciones de prueba de los usuarios
-  («Estaciones que atiende «…»»); el usuario conserva su marca de selección (no se le amplía a «todas»).
+  («Estaciones que atiende «…»»); el usuario conserva su marca de selección (no se le amplía a «todas»). Una
+  **terminal** cuya selección eran solo estaciones de prueba no se queda sin ninguna: pasa a «Todas las estaciones» y
+  la vista previa lo dice («La terminal «…» mostraba solo estaciones de prueba; mostrará todas las estaciones.»;
+  revisión independiente, parte 3, B3).
 
 **Verificación**: integración PostgreSQL (`operations`, `administration`, `database`), Vitest y
 `workflow-stage9f-kitchen-stations.spec.ts` (Chromium y WebKit). **Pendiente**: pantalla táctil física, sonido en el

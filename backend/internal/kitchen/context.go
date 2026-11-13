@@ -57,6 +57,9 @@ type Request struct {
 	Query  url.Values
 	Body   json.RawMessage
 	Actor  Actor
+	// Renderer prepara de nuevo una precuenta, un ticket o un documento de caja para el papel actual de su
+	// impresora al reintentarlo desde la cola (revisión 9F, M2); lo aporta administración con el de pagos.
+	Renderer StoredRenderer
 }
 type service struct {
 	ctx         context.Context

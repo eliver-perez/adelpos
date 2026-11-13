@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
 )
@@ -136,7 +137,10 @@ func (handler *service) unavailableOutcome(document, problem string, printer *ki
 
 // printReceipt imprime el ticket de un pago que no lo tiene (POST payments/accounts/{id}/documents/receipt,
 // etapa 9F): «Reintentar» del aviso de un ticket que no se imprimió por falta de impresora válida. Exige
-// payments.tickets.print; si el ticket ya existe, se reimprime con su propio permiso y motivo.
+// payments.tickets.print; si el ticket ya existe, se reimprime con su propio permiso y motivo. Desde la
+// revisión 9F (B1) solo procede si el ticket quedó sin imprimir por falta de impresora válida al registrar el
+// pago (la respuesta guardada de su operation_id dice not_configured) y el pago no tiene devoluciones: no es
+// un camino para emitir días después el comprobante de cualquier pago sin motivo.
 func (handler *service) printReceipt(parts []string) (any, error) {
 	var input struct {
 		OperationID string `json:"operation_id"`
@@ -169,6 +173,17 @@ func (handler *service) printReceipt(parts []string) (any, error) {
 	if printed {
 		return nil, conflict("DOCUMENT_EXISTS", "Este ticket ya se imprimió. Para otra copia usa «Reimprimir ticket de pago».")
 	}
+	pending, err := handler.receiptPendingForPrinter(payment.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !pending {
+		return nil, conflict("RECEIPT_NOT_PENDING", "Este pago no tiene un ticket pendiente: aquí solo se imprime el ticket que no "+
+			"salió al cobrar por falta de una impresora válida. Para otra copia de un ticket ya impreso usa «Reimprimir ticket de pago».")
+	}
+	if decimal.RequireFromString(payment.RefundedAmount).Sign() != 0 || payment.Corrected {
+		return nil, conflict("PAYMENT_REFUNDED", "El pago tiene devoluciones registradas: su ticket ya no se imprime desde aquí.")
+	}
 	printer, problem, err := handler.receiptPrinter()
 	if err != nil {
 		return nil, err
@@ -186,6 +201,18 @@ func (handler *service) printReceipt(parts []string) (any, error) {
 	return result, handler.audit(handler.ctx, handler.tx, "payments.receipt_printed", "account", &finance.AccountID, nil, result)
 }
 
+// receiptPendingForPrinter indica si el ticket del pago quedó sin imprimir por falta de impresora válida: la
+// respuesta guardada del cobro (restaurant_operations, por su operation_id) informa not_configured.
+func (handler *service) receiptPendingForPrinter(paymentID string) (bool, error) {
+	var status string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT coalesce(o.response->'printing'->>'status','') FROM app.payments p
+        JOIN app.restaurant_operations o ON o.id=p.operation_id WHERE p.id=$1`, paymentID).Scan(&status)
+	if isNoRows(err) {
+		return false, nil
+	}
+	return status == "not_configured", err
+}
+
 // retryDocument vuelve a enviar a la impresora una precuenta o un ticket que nunca salió en papel (POST
 // payments/accounts/{id}/documents/retry, etapa 9F): un toque, sin motivo, con el permiso de imprimir
 // tickets y precuentas, sin pasar por la cola de cocina (que exige operar todas las estaciones).
@@ -201,15 +228,16 @@ func (handler *service) retryDocument(parts []string) (any, error) {
 	if err := validateID(input.TicketID); err != nil {
 		return nil, err
 	}
-	var found bool
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.payment_documents WHERE ticket_id=$1 AND account_id=$2)",
-		input.TicketID, parts[1]).Scan(&found); err != nil {
-		return nil, err
-	}
-	if !found {
+	var kind string
+	err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.payment_documents WHERE ticket_id=$1 AND account_id=$2",
+		input.TicketID, parts[1]).Scan(&kind)
+	if isNoRows(err) {
 		return nil, notFound("El documento no pertenece a esta cuenta.")
 	}
-	job, err := handler.retryJob(input.TicketID, input.JobID)
+	if err != nil {
+		return nil, err
+	}
+	job, err := handler.retryJob(input.TicketID, input.JobID, commercialDocument(kind))
 	if err != nil {
 		return nil, err
 	}
@@ -229,8 +257,42 @@ func (handler *service) retryDocument(parts []string) (any, error) {
 	return result, handler.audit(handler.ctx, handler.tx, "payments.document_retried", "account", &accountID, nil, result)
 }
 
-// retryJob reintenta el trabajo indicado (o, sin él, el más reciente) del documento.
-func (handler *service) retryJob(ticketID, jobID string) (*kitchen.PrintJob, error) {
+// validReprintReason exige el motivo (5–500 caracteres) de una copia de un documento ya emitido: reimprimirlo
+// (decisión D3) o imprimirlo con la plantilla vigente (revisión 9F, B2). Se valida antes de buscar la
+// impresora, con el mismo texto que la cola de cocina.
+func validReprintReason(reason string) error {
+	if len(strings.TrimSpace(reason)) < 5 || len(reason) > 500 {
+		return invalid("Indica un motivo de entre 5 y 500 caracteres.")
+	}
+	return nil
+}
+
+// commercialDocument es el documento que avisa la falta de impresora para una precuenta o un ticket de pago.
+func commercialDocument(kind string) string {
+	if kind == "precheck" {
+		return documentPrecheck
+	}
+	return documentReceipt
+}
+
+// documentPrinter devuelve la impresora de tickets de Cobros con su configuración vigente para volver a
+// imprimir un documento ya emitido (reintento o reimpresión, revisión 9F M2): es la impresora de esos
+// documentos (decisión D4) y la que se corrige con «Configurar impresora». Sin una válida, el rechazo con el
+// motivo para que el aviso ofrezca «Configurar impresora».
+func (handler *service) documentPrinter(document string) (*kitchen.Printer, error) {
+	printer, problem, err := handler.receiptPrinter()
+	if err != nil {
+		return nil, err
+	}
+	if problem != "" {
+		return nil, handler.printerUnavailableError(document, problem, printer)
+	}
+	return printer, nil
+}
+
+// retryJob reintenta el trabajo indicado (o, sin él, el más reciente) del documento en la impresora de tickets
+// con su configuración vigente (revisión 9F, M2); document dice qué documento es para el aviso sin impresora.
+func (handler *service) retryJob(ticketID, jobID, document string) (*kitchen.PrintJob, error) {
 	if jobID == "" {
 		err := handler.tx.QueryRow(handler.ctx, `SELECT id FROM app.kitchen_print_jobs WHERE ticket_id=$1
             ORDER BY created_at DESC,id DESC LIMIT 1`, ticketID).Scan(&jobID)
@@ -241,8 +303,13 @@ func (handler *service) retryJob(ticketID, jobID string) (*kitchen.PrintJob, err
 			return nil, err
 		}
 	}
+	printer, err := handler.documentPrinter(document)
+	if err != nil {
+		return nil, err
+	}
 	return kitchen.RetryDocument(handler.ctx, handler.tx, kitchen.DocumentRetry{
 		JobID: jobID, TicketID: ticketID, OperationID: handler.operationID,
 		ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
+		Printer: printer, Renderer: RenderStoredDocument,
 	})
 }

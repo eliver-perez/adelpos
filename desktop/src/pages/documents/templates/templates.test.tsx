@@ -117,7 +117,7 @@ function renderPage(permissions = manager) {
 }
 
 async function receiptPanel() {
-  const panel = await screen.findByRole('region', { name: 'Plantillas de Ticket de venta' });
+  const panel = await screen.findByRole('region', { name: 'Plantillas de Ticket de pago' });
   await within(panel).findByText('Ticket de la casa');
   return panel;
 }

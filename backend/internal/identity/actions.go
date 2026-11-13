@@ -3,7 +3,9 @@ package identity
 import (
 	"encoding/base64"
 
+	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/logoraster"
+	"local/ad-el-pos/server/internal/payments"
 )
 
 // maxEncodedLogo es el largo máximo del base64 de un logotipo de 1 MiB: se rechaza antes de
@@ -45,11 +47,13 @@ type saveInput struct {
 	HeaderText     string       `json:"header_text"`
 	FooterText     string       `json:"footer_text"`
 	Presentation   Presentation `json:"presentation"`
+	// PrecheckName es el nombre visible de la precuenta (revisión 9F, M3); opcional: sin él se conserva.
+	PrecheckName *string `json:"precheck_name"`
 }
 
-// save atiende PUT documents/identity: textos y presentación del logotipo. Si hay logotipo y la
-// presentación cambia, se generan (o reutilizan) sus conversiones en la misma transacción. Guardar
-// sin cambios no crea revisión, auditoría ni evento.
+// save atiende PUT documents/identity: textos y presentación del logotipo y, desde la revisión 9F (M3), el
+// nombre visible de la precuenta. Si hay logotipo y la presentación cambia, se generan (o reutilizan) sus
+// conversiones en la misma transacción. Guardar sin cambios no crea revisión, auditoría ni evento.
 func (handler *service) save() (any, error) {
 	var input saveInput
 	if err := decodeStrict(handler.request.Body, &input); err != nil {
@@ -73,11 +77,22 @@ func (handler *service) save() (any, error) {
 		return nil, err
 	}
 	next.Presentation = input.Presentation
-	unchanged := next.AdditionalInfo == handler.current.AdditionalInfo &&
+	precheckBefore, err := readPrecheckName(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, err
+	}
+	precheckAfter := precheckBefore
+	if input.PrecheckName != nil {
+		if !payments.ValidPrecheckName(*input.PrecheckName) {
+			return nil, invalid("Elige el nombre de la precuenta: Precuenta, Ticket de venta o Cuenta.")
+		}
+		precheckAfter = *input.PrecheckName
+	}
+	identityUnchanged := next.AdditionalInfo == handler.current.AdditionalInfo &&
 		next.HeaderText == handler.current.HeaderText &&
 		next.FooterText == handler.current.FooterText &&
 		next.Presentation == handler.current.Presentation
-	if unchanged {
+	if identityUnchanged && precheckAfter == precheckBefore {
 		return handler.result()
 	}
 	if next.LogoID != nil && next.Presentation != handler.current.Presentation {
@@ -88,21 +103,48 @@ func (handler *service) save() (any, error) {
 		}
 		assignRasters(&next, rasters)
 	}
+	// La revisión de la identidad también cambia con solo el nombre de la precuenta: es el mismo formulario.
 	if err := saveIdentity(handler.ctx, handler.tx, &next, handler.request.Actor.UserID); err != nil {
 		return nil, err
 	}
 	next.Revision = handler.current.Revision + 1
-	err = handler.changed(
-		"documents.identity_updated",
-		"document_identity",
-		nil,
-		identitySummary(handler.current),
-		identitySummary(&next),
-	)
-	if err != nil {
-		return nil, err
+	if !identityUnchanged {
+		err = handler.changed(
+			"documents.identity_updated",
+			"document_identity",
+			nil,
+			identitySummary(handler.current),
+			identitySummary(&next),
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if precheckAfter != precheckBefore {
+		if err := handler.savePrecheckName(precheckBefore, precheckAfter, identityUnchanged); err != nil {
+			return nil, err
+		}
 	}
 	return handler.result()
+}
+
+// savePrecheckName guarda el nombre visible de la precuenta (revisión 9F, M3) con su auditoría y los avisos
+// en tiempo real: el de la identidad (si no se publicó ya) y el de la configuración de cobro, que comparten
+// las pantallas que muestran el nombre. Los documentos ya emitidos conservan el encabezado con que salieron.
+func (handler *service) savePrecheckName(before, after string, notifyIdentity bool) error {
+	if _, err := handler.tx.Exec(handler.ctx, "UPDATE app.payment_settings SET precheck_name=$1,updated_at=now()", after); err != nil {
+		return err
+	}
+	if err := handler.audit(handler.ctx, handler.tx, "documents.precheck_name_changed", "payment_settings", nil,
+		map[string]string{"precheck_name": before}, map[string]string{"precheck_name": after}); err != nil {
+		return err
+	}
+	if notifyIdentity {
+		if err := events.Append(handler.ctx, handler.tx, EventChanged, Scope, nil, nil); err != nil {
+			return err
+		}
+	}
+	return events.Append(handler.ctx, handler.tx, "payments.settings.changed", "configuration", nil, nil)
 }
 
 // uploadInput es el cuerpo de POST documents/identity/logo.

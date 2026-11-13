@@ -7,7 +7,11 @@ import type { NotifyAction } from './notify';
 // capa la convierte en una frase con el nombre de la impresora, sin términos técnicos. El mensaje técnico
 // del transporte queda solo para soporte.
 
-export type PrintProblem = 'unreachable' | 'inactive' | 'unsupported' | 'setup' | 'uncertain';
+// «not_found» (revisión 9F, B4): la impresora o su cola no existe en el equipo servidor (cola CUPS
+// desconocida, impresora no instalada o renombrada en Windows); a diferencia de «no responde», reintentar no
+// lo resuelve y el aviso ofrece «Configurar impresora».
+export type PrintProblem =
+  'unreachable' | 'not_found' | 'inactive' | 'unsupported' | 'setup' | 'uncertain';
 
 // Qué impresora: la de caja (precuentas, tickets y documentos de caja, la «Impresora de tickets» de
 // Cobros) o cualquier otra (comandas, pruebas y muestras, por su nombre).
@@ -29,6 +33,10 @@ export function printProblemMessage(
       return role === 'cash'
         ? 'La impresora de caja no responde.'
         : `${named(printerName)} está apagada o sin conexión.`;
+    case 'not_found':
+      return role === 'cash'
+        ? 'No se encontró la impresora de caja en el equipo.'
+        : `No se encontró ${printerName?.trim() ? `la impresora ${printerName.trim()}` : 'la impresora'} en el equipo.`;
     case 'inactive':
       return `${named(printerName)} está desactivada.`;
     case 'unsupported':
@@ -49,12 +57,25 @@ export function printProblemHint(problem: string | null | undefined, printerName
       return `Revisa que ${name ? `la impresora ${name}` : 'la impresora'} esté encendida, con papel y conectada, y toca «Reintentar».`;
     case 'uncertain':
       return 'Revisa el papel en la impresora antes de pedir otra copia; se resuelve en Cocina › Cola de impresión.';
+    case 'not_found':
+      return 'Revisa en Cocina › Impresoras que esté elegida la impresora del equipo o elige otra en Cobros › Políticas de cobro.';
     case 'inactive':
     case 'unsupported':
     case 'setup':
       return 'Revisa la impresora en Cocina › Impresoras o elige otra en Cobros › Políticas de cobro.';
   }
   return '';
+}
+
+// Problemas que se resuelven configurando la impresora (no esperando a que vuelva a responder): con ellos se
+// ofrece «Configurar impresora» además de «Reintentar» (revisión 9F, B4).
+export function printerSetupProblem(problem: string | null | undefined) {
+  return (
+    problem === 'not_found' ||
+    problem === 'inactive' ||
+    problem === 'unsupported' ||
+    problem === 'setup'
+  );
 }
 
 // Un trabajo que nunca salió en papel se reintenta con un toque, sin motivo.

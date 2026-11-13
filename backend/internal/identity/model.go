@@ -173,6 +173,9 @@ type View struct {
 	UpdatedBy      *Person       `json:"updated_by"`
 	Limits         Limits        `json:"limits"`
 	Warnings       []string      `json:"warnings"`
+	// PrecheckName es el nombre visible del documento previo al cobro (etapa 9F, §4.5; revisión 9F M3): se
+	// elige aquí, en Administración › Documentos, y se guarda en payment_settings.precheck_name.
+	PrecheckName string `json:"precheck_name"`
 }
 
 // normalizeText prepara un texto de la identidad para guardarlo: unifica los saltos de línea,

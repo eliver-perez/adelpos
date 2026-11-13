@@ -14,10 +14,12 @@ export interface Printer {
   supports_cut: boolean;
   cut: boolean;
   cutter_option: string;
-  // Tipo de corte y renglones de avance antes del corte (etapa 9F, §4.4; lista cerrada 0–8). Una
-  // impresora nueva sin ellos recibe corte total y 4 renglones.
+  // Tipo de corte y renglones de avance antes del corte (etapa 9F, §4.4; lista cerrada 0–8): los
+  // renglones en blanco entre el último renglón del documento y el corte, iguales en todos los
+  // documentos. Una impresora nueva sin ellos recibe corte total y 4 renglones. null en una impresora
+  // que ya cortaba antes de la 9F: conserva el final de siempre hasta que se elijan (revisión 9F, M1).
   cut_mode: 'full' | 'partial';
-  cut_feed_lines: number;
+  cut_feed_lines: number | null;
   // Solo en CUPS: la impresora entiende ESC/POS y recibe formato y logotipo si su cola admite datos
   // raw (etapa 9B). Desactivada por omisión; ESC/POS por red ya los recibe.
   accepts_escpos: boolean;
@@ -34,6 +36,17 @@ export interface Printer {
 // Renglones de avance antes del corte (etapa 9F, §4.4): lista cerrada de Go y del CHECK de la 0022.
 export const cutFeedLineChoices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 export const defaultCutFeedLines = 4;
+
+// Opción del selector para el final de siempre de una impresora que ya cortaba antes de la 9F (null).
+export const previousCutFeedChoice = 'previous';
+
+// Resumen del avance de una impresora que corta.
+export function cutFeedSummary(lines: number | null) {
+  if (lines === null) {
+    return 'avance como en versiones anteriores';
+  }
+  return `${lines} ${lines === 1 ? 'renglón' : 'renglones'} de avance`;
+}
 
 // Corte predeterminado de una impresora nueva: activado en 80 mm y desactivado en 58 mm (muchas no
 // tienen cortador; el propietario lo activa si la suya lo tiene).

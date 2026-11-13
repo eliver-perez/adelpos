@@ -345,16 +345,28 @@ func (handler *service) reprintDocument(parts []string) (any, error) {
 	if err := validateID(input.TicketID); err != nil {
 		return nil, err
 	}
-	var found bool
-	if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.payment_documents WHERE ticket_id=$1 AND account_id=$2)",
-		input.TicketID, parts[1]).Scan(&found); err != nil {
-		return nil, err
-	}
-	if !found {
+	var kind string
+	err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.payment_documents WHERE ticket_id=$1 AND account_id=$2",
+		input.TicketID, parts[1]).Scan(&kind)
+	if isNoRows(err) {
 		return nil, notFound("El documento no pertenece a esta cuenta.")
 	}
-	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, input.TicketID, input.Reason, handler.operationID,
-		handler.request.Actor.UserID, handler.request.Actor.DeviceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validReprintReason(input.Reason); err != nil {
+		return nil, err
+	}
+	// Revisión 9F (M2): la copia sale en la impresora de tickets con su configuración vigente.
+	printer, err := handler.documentPrinter(commercialDocument(kind))
+	if err != nil {
+		return nil, err
+	}
+	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, kitchen.CommercialReprint{
+		TicketID: input.TicketID, Reason: input.Reason, OperationID: handler.operationID,
+		ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
+		Printer: printer,
+	})
 	if err != nil {
 		return nil, err
 	}

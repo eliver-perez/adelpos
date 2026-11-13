@@ -120,6 +120,17 @@ func readEstablishment(ctx context.Context, db querier) (Establishment, error) {
 	return establishment, err
 }
 
+// readPrecheckName lee el nombre visible de la precuenta (payment_settings.precheck_name); sin la fila de
+// cobros, el predeterminado.
+func readPrecheckName(ctx context.Context, db querier) (string, error) {
+	var name string
+	err := db.QueryRow(ctx, "SELECT precheck_name FROM app.payment_settings").Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "precheck", nil
+	}
+	return name, err
+}
+
 // logoRow es un logotipo guardado (sin su contenido).
 type logoRow struct {
 	ID         string

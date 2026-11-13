@@ -481,6 +481,16 @@ func testStage9FTerminalConfiguration(t *testing.T, fixture *stage9FKitchenFixtu
 	if audited != 1 {
 		t.Fatalf("auditoría de la terminal: %d", audited)
 	}
+	// Revisión 9F (parte 3, B1): la forma anterior de «quitar» la terminal (sin all_stations y con la lista
+	// vacía) ya no la abre a todas en silencio: 422 con un mensaje claro y sin escribir.
+	rejected := fixture.saveTerminal(t, fixture.cook.deviceID, map[string]any{"station_ids": []string{}, "expected_station_ids": []string{}}, 422)
+	if code := errorCode(t, rejected); code != "KITCHEN_ACCESS_ALL_REQUIRED" {
+		t.Fatalf("la lista vacía sin «todas» no se rechazó con su código: %s", code)
+	}
+	fixture.saveTerminal(t, fixture.cook.deviceID, map[string]any{"expected_station_ids": []string{}}, 422)
+	if board := fixture.board(t, fixture.cook, "", 200); !board.StationScope.All || !board.SoundAlert {
+		t.Fatalf("el rechazo cambió la terminal: %+v", board.StationScope)
+	}
 	// Compatibilidad: sin all_stations, una lista con estaciones es una selección (como antes de la 9F).
 	fixture.saveTerminal(t, fixture.cook.deviceID, map[string]any{"station_ids": []string{fixture.postres.ID}, "expected_station_ids": []string{}}, 200)
 	if board := fixture.board(t, fixture.cook, "", 200); !slices.Equal(stage9FNames(board.Stations), []string{"Postres 9F"}) || !board.SoundAlert {

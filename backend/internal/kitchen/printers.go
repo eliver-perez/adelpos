@@ -105,18 +105,19 @@ func validatePaperCut(printer Printer) error {
 }
 
 // PaperCut es el final de cada documento de la impresora: con «Cortar el papel al terminar», sus renglones
-// de avance y el corte total o parcial; sin corte, los tres saltos de siempre. Una fotografía anterior a
-// la etapa 9F (sin tipo ni avance) corta como entonces: total y con tres saltos.
+// de avance y el corte total o parcial; sin corte, los tres saltos de siempre. Sin renglones de avance
+// guardados (una impresora que ya existía antes de la etapa 9F o una fotografía de esa época) corta como
+// entonces: los tres saltos de siempre y el corte (documents.PaperCut.Legacy).
 func (printer Printer) PaperCut() documents.PaperCut {
-	feed := documents.LegacyCutFeedLines
+	cut := documents.PaperCut{
+		Enabled: printer.Cut && printer.SupportsCut,
+		Partial: printer.CutMode == CutPartial,
+		Legacy:  printer.CutFeedLines == nil,
+	}
 	if printer.CutFeedLines != nil {
-		feed = *printer.CutFeedLines
+		cut.FeedLines = *printer.CutFeedLines
 	}
-	return documents.PaperCut{
-		Enabled:   printer.Cut && printer.SupportsCut,
-		Partial:   printer.CutMode == CutPartial,
-		FeedLines: feed,
-	}
+	return cut
 }
 
 // presentFields lee qué campos trae el cuerpo JSON: un cliente anterior a la etapa 9F no envía el tipo de
@@ -136,7 +137,9 @@ func presentFields(body []byte) map[string]bool {
 // applyCutDefaults completa el corte de papel antes de validar (etapa 9F, decisión D5):
 //   - una impresora nueva sin «cut» corta al terminar si su papel es de 80 mm (las de 58 mm muchas veces no
 //     tienen cortador); sin tipo, corte total; sin avance, 4 renglones;
-//   - al editar, lo que el cliente no envía conserva lo guardado (compatibilidad de la API);
+//   - al editar, lo que el cliente no envía conserva lo guardado (compatibilidad de la API), incluido el
+//     final anterior a la 9F (sin renglones de avance) de una impresora que ya cortaba; si no cortaba y
+//     ahora corta, sin avance recibe los 4 renglones de una impresora nueva;
 //   - supports_cut sigue a cut: ya no hacen falta dos casillas para cortar.
 func applyCutDefaults(printer *Printer, before *Printer, present map[string]bool) {
 	if before == nil {
@@ -159,6 +162,10 @@ func applyCutDefaults(printer *Printer, before *Printer, present map[string]bool
 		}
 		if printer.CutFeedLines == nil {
 			printer.CutFeedLines = before.CutFeedLines
+		}
+		if printer.CutFeedLines == nil && printer.Cut && !before.Cut {
+			feed := documents.DefaultCutFeedLines
+			printer.CutFeedLines = &feed
 		}
 	}
 	printer.SupportsCut = printer.Cut

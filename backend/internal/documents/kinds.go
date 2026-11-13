@@ -57,7 +57,9 @@ type KindInfo struct {
 
 // Kinds es la lista cerrada de tipos, en el orden en que los muestra el editor.
 var Kinds = []KindInfo{
-	{KindReceipt, "Ticket de venta", FamilyCommercial},
+	// Revisión 9F (M3): el ticket de después de cobrar se llama «Ticket de pago», como su título impreso y
+	// «Reimprimir ticket de pago»; «Ticket de venta» es uno de los nombres que puede elegirse para la precuenta.
+	{KindReceipt, "Ticket de pago", FamilyCommercial},
 	{KindPrecheck, "Precuenta", FamilyCommercial},
 	{KindKitchenOrder, "Comanda", FamilyKitchen},
 	{KindKitchenModification, "Aviso de modificación", FamilyKitchen},

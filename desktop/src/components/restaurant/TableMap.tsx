@@ -1,4 +1,5 @@
 import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, RefObject } from 'react';
+import { precheckName } from '../../services/documentNames';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { shortcutHint } from '../../commands/hints';
 import { formatMoney } from '../../services/money';
@@ -156,7 +157,9 @@ function accessibleName(table: RestaurantTable, longOpenHours?: number) {
     parts.push(elapsedTime(table.occupied_seconds));
   }
   if (table.state === 'awaiting_payment') {
-    parts.push('precuenta impresa');
+    // Con el nombre visible que eligió el restaurante (etapa 9F, §4.5).
+    const precheck = precheckName();
+    parts.push(`${precheck.lower} ${precheck.printedAdjective}`);
   }
   if (table.state === 'partial_payment') {
     parts.push(`saldo ${formatMoney(table.balance)}`);

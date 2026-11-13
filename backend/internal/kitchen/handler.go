@@ -20,7 +20,9 @@ type Permission struct {
 
 var Permissions = []Permission{
 	{"kitchen.stations.read", "Consultar configuración de estaciones"},
-	{"kitchen.stations.manage", "Administrar estaciones y ámbitos de terminal"},
+	// Etapa 9F (fase C, decisión D6): las estaciones por terminal ya no son un ámbito de autorización, sino
+	// lo que muestra cada terminal; la 0022 alinea la descripción guardada.
+	{"kitchen.stations.manage", "Administrar estaciones y las estaciones que muestra cada terminal"},
 	{"kitchen.stations.all", "Operar todas las estaciones del establecimiento"},
 	{"kitchen.routing.manage", "Administrar rutas de preparación"},
 	{"kitchen.printers.manage", "Administrar impresoras y destinos"},

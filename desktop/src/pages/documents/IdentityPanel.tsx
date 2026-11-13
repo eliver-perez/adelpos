@@ -3,10 +3,12 @@ import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { dateTime, Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { identityPermissions } from '../../services/documentIdentity';
+import { usePrecheckName } from '../../services/documentNames';
 import { EstablishmentSummary } from './identity/EstablishmentSummary';
 import { IdentityTexts } from './identity/IdentityTexts';
 import { LogoSection } from './identity/LogoSection';
 import { PaperPreview } from './identity/PaperPreview';
+import { PrecheckNameField } from './identity/PrecheckNameField';
 import { PresentationControls } from './identity/PresentationControls';
 import { useIdentityEditor } from './identity/useIdentityEditor';
 
@@ -23,7 +25,8 @@ const actionNames = {
 //
 // - Los datos del establecimiento (nombre, dirección, teléfono y correo) se reutilizan de
 //   Configuración general y aquí solo se consultan.
-// - Información adicional, encabezado, pie y la presentación del logotipo se guardan juntos.
+// - Información adicional, encabezado, pie, la presentación del logotipo y, desde la revisión 9F (M3), el
+//   nombre visible de la precuenta se guardan juntos.
 // - El logotipo se carga, reemplaza o retira al momento, con su vista previa en 58 y 80 mm.
 // - Sin documents.identity.manage todo es de solo lectura (Go lo vuelve a comprobar).
 export function IdentityPanel(props: { permissions: string[]; onOpenSettings: () => void }) {
@@ -88,12 +91,17 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
         onOpenSettings={props.onOpenSettings}
       />
       <div className="grid min-w-0 gap-6 xl:grid-cols-2">
-        <div className="min-w-0">
+        <div className="form-stack min-w-0">
           <IdentityTexts
             fields={fields}
             limits={identity.limits}
             readOnly={readOnly || locked}
             onChange={editor.change}
+          />
+          <PrecheckNameField
+            value={fields.precheck_name}
+            readOnly={readOnly || locked}
+            onChange={(precheck_name) => editor.change({ precheck_name })}
           />
         </div>
         <div className="min-w-0">
@@ -153,12 +161,14 @@ export function IdentityPanel(props: { permissions: string[]; onOpenSettings: ()
 }
 
 function IdentityIntro({ readOnly }: { readOnly: boolean }) {
+  // Nombre visible de la precuenta (etapa 9F, §4.5).
+  const precheck = usePrecheckName();
   return (
     <div className="form-stack">
       <p className="muted text-sm">
-        La identidad del establecimiento se usa en tickets, precuentas, comandas, comprobantes y
-        cortes según los bloques de cada plantilla, y en el encabezado de los reportes PDF y Excel.
-        La marca AD-EL POS de la aplicación no cambia.
+        La identidad del establecimiento se usa en tickets, {precheck.plural}, comandas,
+        comprobantes y cortes según los bloques de cada plantilla, y en el encabezado de los
+        reportes PDF y Excel. La marca AD-EL POS de la aplicación no cambia.
       </p>
       {readOnly && (
         <Notice>

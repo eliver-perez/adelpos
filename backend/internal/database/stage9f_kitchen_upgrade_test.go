@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/product"
 	"local/ad-el-pos/server/migrations"
 )
@@ -20,8 +21,9 @@ import (
 // 0022 convierte kitchen_device_stations en «Estaciones que muestra esta terminal» con la marca «todas»
 // (una terminal que ya tenía estaciones conserva su selección; las demás muestran todas), agrega el aviso
 // sonoro por terminal (desactivado), «Estaciones que puede atender» por usuario (todas por omisión, tabla
-// kitchen_user_stations con restricciones con nombre) y corrige la descripción de accounts.manage (encargo
-// de la fase E). No cambia los demás datos de terminales, usuarios ni estaciones. Deja la base vacía.
+// kitchen_user_stations con restricciones con nombre) y corrige las descripciones de accounts.manage (encargo
+// de la fase E) y de kitchen.stations.manage (las estaciones por terminal ya no son un ámbito de
+// autorización). No cambia los demás datos de terminales, usuarios ni estaciones. Deja la base vacía.
 func TestStage9FKitchenStationsUpgrade(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
 	u, err := url.Parse(dsn)
@@ -68,6 +70,9 @@ func TestStage9FKitchenStationsUpgrade(t *testing.T) {
 	if manageBefore != "Editar datos de cuentas y cancelar cuentas vacías con motivo libre" {
 		t.Fatalf("descripción de accounts.manage en el esquema 21: %q", manageBefore)
 	}
+	if stations := permissionDescription(ctx, t, pool, "kitchen.stations.manage"); stations != "Administrar estaciones y ámbitos de terminal" {
+		t.Fatalf("descripción de kitchen.stations.manage en el esquema 21: %q", stations)
+	}
 	before := stage9FKitchenSnapshot(ctx, t, pool)
 	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-21 {
 		t.Fatalf("la 0022 no se aplicó sobre el esquema 21: %d %v", n, err)
@@ -87,6 +92,26 @@ func TestStage9FKitchenStationsUpgrade(t *testing.T) {
 	if manage != "Editar datos de cuentas" {
 		t.Fatalf("descripción de accounts.manage: %q", manage)
 	}
+	// La descripción guardada coincide con la del registro de permisos de Go.
+	stations := permissionDescription(ctx, t, pool, "kitchen.stations.manage")
+	if stations != "Administrar estaciones y las estaciones que muestra cada terminal" {
+		t.Fatalf("descripción de kitchen.stations.manage: %q", stations)
+	}
+	for _, permission := range kitchen.Permissions {
+		if permission.Key == "kitchen.stations.manage" && permission.Description != stations {
+			t.Fatalf("la descripción de Go (%q) no coincide con la de la base (%q)", permission.Description, stations)
+		}
+	}
+}
+
+// permissionDescription lee la descripción guardada de un permiso.
+func permissionDescription(ctx context.Context, t *testing.T, pool *pgxpool.Pool, key string) string {
+	t.Helper()
+	var description string
+	if err := pool.QueryRow(ctx, "SELECT description FROM app.permissions WHERE key=$1", key).Scan(&description); err != nil {
+		t.Fatal(err)
+	}
+	return description
 }
 
 // stage9FKitchenSnapshot resume lo que la 0022 no debe tocar: terminales, usuarios, estaciones y la

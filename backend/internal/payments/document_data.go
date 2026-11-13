@@ -1,8 +1,10 @@
 package payments
 
 import (
+	"context"
 	"encoding/json"
 
+	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 )
@@ -65,10 +67,58 @@ func renderCommercial(version *documents.Version, document *CommercialDocument, 
 	return documents.Render(version.Kind, version.Template, documents.Data{Commercial: &data}, width)
 }
 
+// RenderStoredDocument vuelve a preparar una precuenta, un ticket de pago o un documento de caja ya emitido
+// para el papel y las columnas de otra impresora (revisión 9F, M2; kitchen.StoredRenderer): con los datos que
+// guardó su ticket, la versión de plantilla con que se emitió y la identidad copiada, de modo que solo cambia
+// el ancho. Un documento de caja emitido antes de las plantillas (sin datos guardados) no se puede preparar.
+func RenderStoredDocument(ctx context.Context, tx pgx.Tx, ticketKind string, stored []byte, templateVersionID *string,
+	options documents.RenderOptions) (*documents.Layout, error) {
+	switch ticketKind {
+	case "precheck", "receipt":
+		var document CommercialDocument
+		if err := json.Unmarshal(stored, &document); err != nil {
+			return nil, err
+		}
+		if templateVersionID == nil {
+			templateVersionID = document.TemplateVersionID
+		}
+		version, err := documents.VersionByID(ctx, tx, documents.Kind(ticketKind), templateVersionID)
+		if err != nil {
+			return nil, err
+		}
+		return renderCommercial(version, &document, nil, options)
+	case kitchen.KindCashReport, kitchen.KindCashVoucher:
+		var ticket struct {
+			Data              *documents.CashData `json:"data"`
+			IncludesExpected  bool                `json:"includes_expected"`
+			TemplateVersionID *string             `json:"template_version_id"`
+		}
+		if err := json.Unmarshal(stored, &ticket); err != nil {
+			return nil, err
+		}
+		if ticket.Data == nil {
+			return nil, kitchen.RenderUnavailable()
+		}
+		if templateVersionID == nil {
+			templateVersionID = ticket.TemplateVersionID
+		}
+		version, err := documents.VersionByID(ctx, tx, ticket.Data.Kind, templateVersionID)
+		if err != nil {
+			return nil, err
+		}
+		// Lo protegido solo vuelve a salir si el documento original lo incluía (y sus datos lo guardaron).
+		options.IncludeExpected = ticket.IncludesExpected && ticket.Data.Cut != nil && ticket.Data.Cut.Sensitive != nil
+		return documents.Render(ticket.Data.Kind, version.Template, documents.Data{Cash: ticket.Data}, options)
+	}
+	return nil, kitchen.RenderUnavailable()
+}
+
 // rerenderDocument imprime un ticket o precuenta histórico con la plantilla vigente y la identidad
 // vigente (POST payments/accounts/{id}/documents/rerender). Es una acción distinta de la
 // reimpresión exacta, con su propio permiso y auditoría: crea un ticket «document_rerender» y su
 // trabajo, nunca un payment_documents nuevo, de modo que no cambia «Esperando pago» ni ningún cobro.
+// Desde la revisión 9F (B2) pide motivo (5–500), como reimprimir: saca otra copia en papel de un documento
+// ya emitido; queda en la auditoría y en el historial del trabajo.
 func (handler *service) rerenderDocument(parts []string) (any, error) {
 	if err := handler.request.Actor.Require(documents.PermissionRenderCurrent); err != nil {
 		return nil, err
@@ -76,11 +126,15 @@ func (handler *service) rerenderDocument(parts []string) (any, error) {
 	var input struct {
 		OperationID string `json:"operation_id"`
 		TicketID    string `json:"ticket_id"`
+		Reason      string `json:"reason"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
 	if err := validateID(input.TicketID); err != nil {
+		return nil, err
+	}
+	if err := validReprintReason(input.Reason); err != nil {
 		return nil, err
 	}
 	var kind string
@@ -124,7 +178,7 @@ func (handler *service) rerenderDocument(parts []string) (any, error) {
 	versionID := version.ID
 	job, ticketID, err := kitchen.EnqueueRendered(handler.ctx, handler.tx, kitchen.RenderedPrint{
 		Kind: documents.TicketKindRerender, Document: ticket, Layout: layout, TemplateVersionID: &versionID, Printer: printer,
-		History:     "print.rerendered",
+		History: "print.rerendered", Reason: input.Reason,
 		OperationID: handler.operationID, ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
 	})
 	if err != nil {
@@ -135,5 +189,6 @@ func (handler *service) rerenderDocument(parts []string) (any, error) {
 	}
 	return result, handler.audit(handler.ctx, handler.tx, "payments.document_rerendered", "account", &accountID, nil, map[string]string{
 		"source_ticket_id": input.TicketID, "ticket_id": ticketID, "job_id": job.ID, "template_version_id": version.ID,
+		"reason": input.Reason,
 	})
 }

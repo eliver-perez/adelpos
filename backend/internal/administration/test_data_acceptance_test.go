@@ -351,6 +351,11 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		if value.Unlink[3].Reason != "Se quita la estación de prueba «Cocina caliente»." {
 			t.Fatalf("motivo del usuario: %+v", value.Unlink[3])
 		}
+		// Revisión 9F (parte 3, B3): la terminal mostraba solo la estación de prueba; no se queda sin ninguna,
+		// pasa a «todas» y la vista previa lo dice.
+		if value.Unlink[2].Reason != "La terminal «"+terminalName+"» mostraba solo estaciones de prueba; mostrará todas las estaciones." {
+			t.Fatalf("motivo de la terminal: %+v", value.Unlink[2])
+		}
 		if value.Unlink[0].Reason != "Solo enviaba a estaciones de prueba («Cocina caliente» y «Freidoras»); se quita: "+
 			"sus productos sin ruta propia quedarán sin ruta de preparación hasta que le asignes otra." {
 			t.Fatalf("motivo de la ruta del restaurante: %+v", value.Unlink[0])
@@ -379,6 +384,9 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 			env.scalar(t, "SELECT count(*) FROM app.kitchen_device_stations WHERE station_id = ANY($1::uuid[])", []string{hot, fryers}) != 0 ||
 			env.scalar(t, "SELECT count(*) FROM app.kitchen_user_stations WHERE station_id = ANY($1::uuid[])", []string{hot, fryers}) != 0 {
 			t.Fatal("las rutas o las estaciones por terminal o por usuario siguen apuntando a estaciones de prueba")
+		}
+		if env.scalar(t, "SELECT count(*) FROM app.devices WHERE id=$1 AND kitchen_all_stations", env.device.id) != 1 {
+			t.Fatal("la terminal que mostraba solo estaciones de prueba no pasó a «todas»")
 		}
 		// El usuario conserva su marca de selección (no se le amplía a «todas» sin que nadie lo decida).
 		if env.scalar(t, "SELECT count(*) FROM app.users WHERE id=$1 AND NOT kitchen_all_stations", cookID) != 1 {

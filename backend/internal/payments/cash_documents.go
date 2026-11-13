@@ -470,8 +470,18 @@ func (handler *service) reprintCashDocument(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, document.TicketID, input.Reason, handler.operationID,
-		handler.request.Actor.UserID, handler.request.Actor.DeviceID)
+	if err := validReprintReason(input.Reason); err != nil {
+		return nil, err
+	}
+	printer, err := handler.documentPrinter(documentCash)
+	if err != nil {
+		return nil, err
+	}
+	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, kitchen.CommercialReprint{
+		TicketID: document.TicketID, Reason: input.Reason, OperationID: handler.operationID,
+		ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
+		Printer: printer,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +539,7 @@ func (handler *service) retryCashDocument(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	job, err := handler.retryJob(document.TicketID, input.JobID)
+	job, err := handler.retryJob(document.TicketID, input.JobID, documentCash)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package kitchen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -39,6 +40,11 @@ import (
 // spoolerAPI es la parte del administrador de impresión de Windows que usa AD-EL POS. La
 // implementación real (winspool_windows.go) llama a winspool.drv; las pruebas usan una simulada
 // que nunca toca impresoras reales.
+// errPrinterNotInstalled es el error de spoolerAPI.printer cuando Windows no tiene instalada una impresora con
+// ese nombre (ERROR_INVALID_PRINTER_NAME de OpenPrinterW; revisión 9F, B4): se distingue de un administrador
+// de impresión que no responde.
+var errPrinterNotInstalled = errors.New("la impresora no está instalada en Windows")
+
 type spoolerAPI interface {
 	// listPrinters enumera las impresoras locales y las conexiones (EnumPrintersW, nivel 2).
 	listPrinters() ([]spoolerPrinter, error)
@@ -293,6 +299,12 @@ func inspectWindowsQueue(ctx context.Context, api spoolerAPI, queue string) Queu
 	}()
 	select {
 	case read := <-result:
+		// Revisión 9F (B4): una impresora que Windows no tiene instalada (o se renombró) se configura; un
+		// administrador de impresión que no responde se reintenta.
+		if errors.Is(read.err, errPrinterNotInstalled) {
+			return QueueCapability{Queue: queue, Missing: true,
+				Reason: "La impresora " + queue + " no está instalada en Windows en el equipo servidor."}
+		}
 		if read.err != nil {
 			return unavailable
 		}
@@ -549,7 +561,7 @@ func submitWindowsDocument(ctx context.Context, api spoolerAPI, job PrintJob, da
 	queue := job.PrinterSnapshot.Destination
 	capability := inspectWindowsQueue(ctx, api, queue)
 	if !capability.Checked {
-		return Outcome{State: "error", Message: capability.Reason + " No se envió el documento."}
+		return Outcome{State: "error", Code: capability.unavailableCode(), Message: capability.Reason + " No se envió el documento."}
 	}
 	if !capability.Raw {
 		return Outcome{State: "intervention", Message: capability.Reason + " No se envió el documento."}
@@ -578,7 +590,7 @@ func submitDrawerPulseWindows(ctx context.Context, api spoolerAPI, job PrintJob)
 	queue := job.PrinterSnapshot.Destination
 	capability := inspectWindowsQueue(ctx, api, queue)
 	if !capability.Checked {
-		return Outcome{State: "error", Message: capability.Reason + " No se envió el comando de apertura."}
+		return Outcome{State: "error", Code: capability.unavailableCode(), Message: capability.Reason + " No se envió el comando de apertura."}
 	}
 	if !capability.Raw {
 		return Outcome{State: "intervention", Message: capability.Reason + " No se envió el comando de apertura."}

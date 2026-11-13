@@ -3,6 +3,7 @@ package documents
 import (
 	"bytes"
 	"context"
+	"strings"
 
 	"golang.org/x/text/encoding/charmap"
 )
@@ -46,7 +47,8 @@ func sizeCommand(size string) byte {
 // texto, GS ! n y ESC E n con el reinicio al final de la línea, el texto y el salto; por línea de
 // imagen, GS v 0 con los bits que entregue rasters (una imagen sin bits se omite). Con el texto
 // grande de Cocina cada línea va a doble tamaño, como antes de la 9B. Al final, el cierre del
-// documento según el corte de la impresora (PaperCut.Ending): sin corte, los tres saltos de siempre.
+// documento según el corte de la impresora (PaperCut.Ending, que sabe si el último renglón quedó
+// abierto): sin corte, los tres saltos de siempre.
 //
 // GS v 0 se ejecuta al inicio de una línea, con el búfer de impresión vacío (muchas impresoras
 // ignoran la imagen o la mezclan con el texto si no). Por eso, si una imagen sigue a la última
@@ -91,15 +93,15 @@ func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut PaperCut) []by
 			lineOpen = true
 		}
 	}
-	return append(result, cut.Ending()...)
+	return append(result, cut.Ending(lineOpen)...)
 }
 
 // Corte de papel (etapa 9F, §4.4, decisión D5). Cada impresora decide si corta al terminar, el tipo de
 // corte y cuántos renglones avanza antes de cortar, para que la cuchilla no caiga sobre el texto.
 const (
-	// LegacyCutFeedLines son los saltos que llevaba siempre el final de un documento hasta la etapa 9E. Son
-	// los de un documento sin corte y los de las fotografías de impresora anteriores a la 9F (sin el
-	// campo), de modo que su reimpresión sale idéntica.
+	// LegacyCutFeedLines son los saltos que llevaba siempre el final de un documento hasta la etapa 9E: los
+	// de un documento sin corte y los del corte de las impresoras y fotografías anteriores a la 9F
+	// (PaperCut.Legacy), de modo que su papel no cambia.
 	LegacyCutFeedLines = 3
 	// DefaultCutFeedLines son los renglones de avance de una impresora nueva.
 	DefaultCutFeedLines = 4
@@ -107,31 +109,57 @@ const (
 	MaxCutFeedLines = 8
 )
 
-// PaperCut es el final de un documento ESC/POS: con Enabled, FeedLines saltos de renglón y el corte
-// GS V 0 (total) o GS V 1 (parcial, Partial); sin corte, los tres saltos de siempre, byte a byte
-// iguales a los de la etapa 9E. La mayoría de las impresoras sin cortador ignoran GS V.
+// PaperCut es el final de un documento ESC/POS.
+//
+//   - Sin corte (Enabled falso): los tres saltos de siempre, byte a byte iguales a los de la etapa 9E.
+//   - Con corte: se cierra el último renglón si quedó abierto (precuentas, tickets y documentos de caja
+//     terminan sin salto; comandas, avisos y pruebas, con él), después FeedLines renglones en blanco y el
+//     corte GS V 0 (total) o GS V 1 (parcial, Partial). Así GS V llega siempre al inicio de un renglón,
+//     también con 0 renglones de avance (una impresora solo imprime un renglón al recibir su salto y solo
+//     corta al inicio de uno), y los renglones de avance son los mismos en todos los documentos.
+//   - Legacy (revisión 9F, M1): el corte de las impresoras que ya cortaban antes de la 9F y de las
+//     fotografías de esa época (sin renglones de avance guardados): los tres saltos de siempre y el corte,
+//     sin cerrar aparte el renglón, como hasta la 9E. Con el avance uniforme, una impresora migrada con 3
+//     renglones daría un renglón más en precuentas, tickets y documentos de caja (que terminan sin salto) que
+//     en comandas: ningún número reproduce a la vez el papel de unos y otros, así que estas impresoras
+//     conservan el final anterior hasta que el propietario elija sus renglones de avance.
+//
+// La mayoría de las impresoras sin cortador ignoran GS V.
 type PaperCut struct {
 	Enabled   bool
 	Partial   bool
 	FeedLines int
+	Legacy    bool
 }
 
 // NoPaperCut es el final de un documento sin corte.
 var NoPaperCut = PaperCut{}
 
-// Ending devuelve los bytes que cierran el documento. Nunca forma parte del pulso del cajón, que no
-// imprime ni corta.
-func (cut PaperCut) Ending() []byte {
+// Ending devuelve los bytes que cierran el documento; lineOpen indica que el último renglón se escribió
+// sin su salto. Nunca forma parte del pulso del cajón, que no imprime ni corta.
+func (cut PaperCut) Ending(lineOpen bool) []byte {
 	if !cut.Enabled {
 		return []byte{'\n', '\n', '\n'}
 	}
-	feed := min(max(cut.FeedLines, 0), MaxCutFeedLines)
 	mode := byte(0x00)
 	if cut.Partial {
 		mode = 0x01
 	}
-	ending := bytes.Repeat([]byte{'\n'}, feed)
+	if cut.Legacy {
+		return []byte{'\n', '\n', '\n', 0x1d, 0x56, mode}
+	}
+	ending := []byte{}
+	if lineOpen {
+		ending = append(ending, '\n')
+	}
+	feed := min(max(cut.FeedLines, 0), MaxCutFeedLines)
+	ending = append(ending, bytes.Repeat([]byte{'\n'}, feed)...)
 	return append(ending, 0x1d, 0x56, mode)
+}
+
+// TextLineOpen indica si un texto plano termina con un renglón sin su salto (vacío no deja ninguno).
+func TextLineOpen(text string) bool {
+	return text != "" && !strings.HasSuffix(text, "\n")
 }
 
 // encodeCP850 limpia el texto y lo codifica en CP850; un carácter sin equivalente se imprime «?».

@@ -8,6 +8,7 @@ import (
 	"github.com/shopspring/decimal"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/features"
+	"local/ad-el-pos/server/internal/kitchen"
 )
 
 type Settings struct {
@@ -19,7 +20,8 @@ type Settings struct {
 	ReceiptPrinterName           *string  `json:"receipt_printer_name"`
 	RefundAuthorizationThreshold *string  `json:"refund_authorization_threshold"`
 	// PrecheckName es el nombre visible del documento previo al cobro (etapa 9F, §4.5): precheck
-	// («Precuenta»), sales_ticket («Ticket de venta») o bill («Cuenta»).
+	// («Precuenta»), sales_ticket («Ticket de venta») o bill («Cuenta»). Solo se informa: desde la revisión
+	// 9F (M3) se elige en Administración › Documentos (PUT documents/identity, documents.identity.manage).
 	PrecheckName string `json:"precheck_name"`
 	// Rango aceptable del tipo de cambio (MXN por USD) y diferencia contra el turno anterior que
 	// exige confirmación. Solo se aplican con la función usd_cash activa.
@@ -60,14 +62,9 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 		PrintReceiptDefault          bool    `json:"print_receipt_default"`
 		ReceiptPrinterID             *string `json:"receipt_printer_id"`
 		RefundAuthorizationThreshold *string `json:"refund_authorization_threshold"`
-		// Opcional (etapa 9F): un cliente anterior que no lo envía conserva el nombre guardado.
-		PrecheckName *string `json:"precheck_name"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
-	}
-	if input.PrecheckName != nil && !ValidPrecheckName(*input.PrecheckName) {
-		return nil, invalid("Elige el nombre de la precuenta: Precuenta, Ticket de venta o Cuenta.")
 	}
 	previous, err := handler.settings()
 	if err != nil {
@@ -96,14 +93,24 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 		if !exists {
 			return nil, invalid("La impresora de tickets no existe.")
 		}
-	}
-	precheckName := previous.PrecheckName
-	if input.PrecheckName != nil {
-		precheckName = *input.PrecheckName
+		// Revisión 9F (B3): una impresora que no puede imprimir precuentas, tickets ni documentos de caja
+		// (decisión D4: desactivada o de otra terminal) no se elige como impresora de tickets. La que ya estaba
+		// elegida y dejó de servir no impide guardar lo demás: sus documentos avisan con «Configurar impresora».
+		if previous.ReceiptPrinterID == nil || *previous.ReceiptPrinterID != *input.ReceiptPrinterID {
+			printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *input.ReceiptPrinterID)
+			if err != nil {
+				return nil, err
+			}
+			if problem := kitchen.PrinterProblem(printer); problem != "" {
+				return nil, &Error{Status: 422, Code: "RECEIPT_PRINTER_UNAVAILABLE",
+					Message: kitchen.UnavailablePrinterMessage(problem, printer.Name) + " Elige otra impresora de tickets.",
+					Details: map[string]string{"problem": problem, "printer_name": printer.Name}}
+			}
+		}
 	}
 	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.payment_settings SET shared_shifts=$1,print_receipt_default=$2,
-        receipt_printer_id=$3,refund_authorization_threshold=$4::numeric,precheck_name=$5,revision=revision+1,updated_at=now()`,
-		input.SharedShifts, input.PrintReceiptDefault, input.ReceiptPrinterID, threshold, precheckName)
+        receipt_printer_id=$3,refund_authorization_threshold=$4::numeric,revision=revision+1,updated_at=now()`,
+		input.SharedShifts, input.PrintReceiptDefault, input.ReceiptPrinterID, threshold)
 	if err != nil {
 		return nil, err
 	}

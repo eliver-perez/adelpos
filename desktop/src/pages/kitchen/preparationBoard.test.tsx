@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Board, Task } from '../../services/kitchen';
 import { PreparationBoard } from './PreparationBoard';
@@ -12,8 +12,16 @@ import { PreparationBoard } from './PreparationBoard';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
-const sound = vi.hoisted(() => ({ play: vi.fn() }));
-vi.mock('../../services/kitchenSound', () => ({ playArrivalChime: sound.play }));
+const sound = vi.hoisted(() => ({
+  play: vi.fn(async () => true),
+  unlock: vi.fn(),
+  blocked: vi.fn(),
+}));
+vi.mock('../../services/kitchenSound', () => ({
+  playArrivalChime: sound.play,
+  unlockKitchenSound: sound.unlock,
+  notifySoundBlocked: sound.blocked,
+}));
 
 let board: Board;
 
@@ -228,6 +236,29 @@ describe('Preparación en modo cocina', () => {
       window.dispatchEvent(new CustomEvent('adel-server-change'));
     });
     await waitFor(() => expect(sound.play).toHaveBeenCalledTimes(1));
+    expect(sound.blocked).not.toHaveBeenCalled();
+  });
+
+  it('con el aviso activado, el primer toque o tecla prepara el sonido y, si no puede sonar, lo avisa (revisión 9F, parte 3, B2)', async () => {
+    board.sound_alert = true;
+    renderBoard();
+    await cards();
+    fireEvent.pointerDown(document.body);
+    fireEvent.keyDown(document.body, { key: 'a' });
+    expect(sound.unlock).toHaveBeenCalledTimes(2);
+    // El equipo todavía no permite reproducir: se pide tocar la pantalla en lugar de callar el fallo.
+    sound.play.mockResolvedValueOnce(false);
+    board = {
+      ...board,
+      tasks: [
+        ...board.tasks,
+        task({ id: 'nueva', release_id: 'r9', unit_id: 'u9', elapsed_seconds: 3 }),
+      ],
+    };
+    act(() => {
+      window.dispatchEvent(new CustomEvent('adel-server-change'));
+    });
+    await waitFor(() => expect(sound.blocked).toHaveBeenCalledTimes(1));
   });
 
   it('sin el aviso activado en la terminal no suena', async () => {
@@ -245,5 +276,8 @@ describe('Preparación en modo cocina', () => {
     });
     await waitFor(() => expect(document.querySelectorAll('.kitchen-task-card')).toHaveLength(4));
     expect(sound.play).not.toHaveBeenCalled();
+    // Sin el aviso, los toques no preparan el sonido.
+    fireEvent.pointerDown(document.body);
+    expect(sound.unlock).not.toHaveBeenCalled();
   });
 });

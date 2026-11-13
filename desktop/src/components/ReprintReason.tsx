@@ -13,24 +13,46 @@ export function reasonValid(reason: string) {
   return trimmed.length >= minimumReasonLength && reason.length <= maximumReasonLength;
 }
 
+// Textos de cada acción que saca otra copia de un documento ya emitido: reimprimirlo idéntico o, desde la
+// revisión 9F (B2), imprimirlo con la plantilla vigente, que también pide motivo.
+const reasonTexts = {
+  reprint: {
+    form: 'Reimpresión con motivo',
+    field: 'Motivo de la reimpresión',
+    submit: 'Reimprimir',
+    help: (subject: string) =>
+      `El documento ya se envió a la impresora: escribe por qué hace falta otra copia ${subject}`,
+  },
+  renderCurrent: {
+    form: 'Impresión con la plantilla vigente con motivo',
+    field: 'Motivo de la impresión con la plantilla vigente',
+    submit: 'Imprimir con la plantilla vigente',
+    help: (subject: string) =>
+      `Sale otra copia en papel ${subject}, con sus mismos datos y la plantilla activa hoy: escribe por qué hace falta`,
+  },
+};
+
 export function ReprintReason({
   subject,
   busy,
   onSubmit,
   onCancel,
+  action = 'reprint',
 }: {
   // Qué se reimprime, con «de» y su artículo («de la precuenta», «del corte parcial»).
   subject: string;
   busy: boolean;
   onSubmit: (reason: string) => void;
   onCancel: () => void;
+  action?: keyof typeof reasonTexts;
 }) {
   const [reason, setReason] = useState('');
   const valid = reasonValid(reason);
+  const texts = reasonTexts[action];
   return (
     <form
       className="reprint-reason"
-      aria-label="Reimpresión con motivo"
+      aria-label={texts.form}
       onSubmit={(event) => {
         event.preventDefault();
         if (valid && !busy) {
@@ -38,7 +60,7 @@ export function ReprintReason({
         }
       }}
     >
-      <Field label="Motivo de la reimpresión">
+      <Field label={texts.field}>
         <input
           type="text"
           value={reason}
@@ -48,11 +70,11 @@ export function ReprintReason({
         />
       </Field>
       <p className="muted text-sm">
-        {`El documento ya se envió a la impresora: escribe por qué hace falta otra copia ${subject} (${minimumReasonLength} a ${maximumReasonLength} caracteres).`}
+        {`${texts.help(subject)} (${minimumReasonLength} a ${maximumReasonLength} caracteres).`}
       </p>
       <div className="button-row">
         <button type="submit" className="primary-button" disabled={!valid || busy}>
-          <IconLabel icon="printer">Reimprimir</IconLabel>
+          <IconLabel icon="printer">{texts.submit}</IconLabel>
         </button>
         <button type="button" className="secondary-button" onClick={onCancel}>
           Cancelar

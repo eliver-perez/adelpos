@@ -387,20 +387,25 @@ func testStage9BCommercial(t *testing.T, fixture *stage9BFixture) {
 		// Revisión de la 9B (hallazgo bajo 4): con la copia exacta sin resolver no se imprime con la
 		// plantilla vigente.
 		blocked := fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
-			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 409)
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "Copia con la plantilla vigente"}, 409)
 		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
 			t.Fatal("La impresión con la plantilla vigente no se bloqueó con una copia exacta pendiente")
 		}
 		fixture.settle(t, copied.JobID, precheckCopy.JobID)
+		// Revisión 9F (B2): otra copia en papel de un documento ya emitido pide motivo, como reimprimir.
+		fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 400)
+		fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "otra"}, 400)
 		fixture.call(t, fixture.noCurrent, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
-			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 403)
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "Copia con la plantilla vigente"}, 403)
 		result := decodeResponse[struct {
 			Status            string `json:"status"`
 			JobID             string `json:"job_id"`
 			TicketID          string `json:"ticket_id"`
 			TemplateVersionID string `json:"template_version_id"`
 		}](t, fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/rerender",
-			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 200))
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "Copia con la plantilla vigente"}, 200))
 		rerendered := fixture.job(t, result.JobID)
 		if result.TemplateVersionID != precheckVersion || rerendered.ticketKind != documents.TicketKindRerender ||
 			!strings.Contains(rerendered.content, "PRECUENTA 9B") || !strings.Contains(rerendered.content, "PRECUENTA") {
@@ -408,6 +413,18 @@ func testStage9BCommercial(t *testing.T, fixture *stage9BFixture) {
 		}
 		if fixture.writeCounts(t) != before || fixture.countRows(t, "SELECT count(*) FROM app.audit_events WHERE action='payments.document_rerendered'") != 1 {
 			t.Fatal("Imprimir con la plantilla vigente creó pagos o documentos comerciales, o no se auditó")
+		}
+		var auditReason, historyReason string
+		if err := fixture.pool.QueryRow(fixture.ctx, `SELECT after_state->>'reason' FROM app.audit_events
+            WHERE action='payments.document_rerendered' ORDER BY occurred_at DESC LIMIT 1`).Scan(&auditReason); err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.pool.QueryRow(fixture.ctx, `SELECT after_value->>'reason' FROM app.kitchen_history
+            WHERE kind='print.rerendered' AND entity_id=$1`, result.JobID).Scan(&historyReason); err != nil {
+			t.Fatal(err)
+		}
+		if auditReason != "Copia con la plantilla vigente" || historyReason != auditReason {
+			t.Fatalf("El motivo de la impresión con la plantilla vigente no quedó registrado: %q %q", auditReason, historyReason)
 		}
 		// Y con la impresión con la plantilla vigente sin resolver no se acepta la copia exacta.
 		blocked = fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/reprint",
@@ -490,14 +507,15 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 		// Revisión de la 9B (hallazgo bajo 4): con la copia exacta sin resolver no se imprime con la
 		// plantilla vigente; al resolverla, sí.
 		blocked := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender",
-			map[string]any{"operation_id": randomID()}, 409)
+			map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 409)
 		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
 			t.Fatal("La impresión con la plantilla vigente de caja no se bloqueó con una copia exacta pendiente")
 		}
 		fixture.settle(t, copied.JobID, cutCopy.JobID)
-		fixture.call(t, fixture.noCurrent, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 403)
+		fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 400)
+		fixture.call(t, fixture.noCurrent, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender", map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 403)
 		rerendered := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/rerender",
-			map[string]any{"operation_id": randomID()}, 200))
+			map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 200))
 		if job := fixture.job(t, rerendered.JobID); job.ticketKind != documents.TicketKindRerender || !strings.Contains(job.content, "INGRESO 9B") ||
 			!strings.Contains(job.content, "Sobre 9B") {
 			t.Fatalf("El comprobante no se imprimió con la plantilla vigente:\n%s", job.content)
@@ -508,13 +526,13 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 			t.Fatal("La copia exacta de caja no se bloqueó con una impresión con la plantilla vigente pendiente")
 		}
 		cut := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/rerender",
-			map[string]any{"operation_id": randomID()}, 200))
+			map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 200))
 		cutJob := fixture.job(t, cut.JobID)
 		if !cut.IncludesExpected || !strings.Contains(cutJob.content, "CORTE 9B #") || !strings.Contains(cutJob.content, "EFECTIVO ESPERADO") {
 			t.Fatalf("El corte con la plantilla vigente perdió el esperado permitido:\n%s", cutJob.content)
 		}
 		// Sin cash.expected.read no se imprime un documento que contiene el esperado.
-		fixture.call(t, fixture.limited, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 403)
+		fixture.call(t, fixture.limited, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 403)
 		if fixture.writeCounts(t) != before || fixture.countRows(t, "SELECT count(*) FROM app.audit_events WHERE action='cash.document_rerendered'") != 2 {
 			t.Fatal("Imprimir con la plantilla vigente creó documentos de caja o movimientos, o no se auditó")
 		}
@@ -557,7 +575,7 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 		if include, text := preview(fixture.cashier); include || strings.Contains(text, "EFECTIVO ESPERADO") {
 			t.Fatalf("Durante el arqueo la vista previa real mostró el esperado:\n%s", text)
 		}
-		closing := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 409)
+		closing := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 409)
 		if errorCode(t, closing) != "SHIFT_CLOSING" {
 			t.Fatal("Durante el arqueo se imprimió un corte con el esperado")
 		}
@@ -622,7 +640,7 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 		if len(legacy.Warnings) == 0 || !strings.Contains(legacy.Warnings[0], "se emitió antes de las plantillas de documentos") {
 			t.Fatalf("La vista previa de un documento anterior no lo avisó: %v", legacy.Warnings)
 		}
-		unavailable := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+hiddenCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID()}, 409)
+		unavailable := fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+hiddenCut.DocumentID+"/rerender", map[string]any{"operation_id": randomID(), "reason": "Copia con la plantilla vigente"}, 409)
 		if errorCode(t, unavailable) != "DOCUMENT_DATA_UNAVAILABLE" {
 			t.Fatal("Un documento sin datos estructurados se imprimió con la plantilla vigente")
 		}

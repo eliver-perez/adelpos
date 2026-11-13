@@ -15,6 +15,10 @@ import { permissionName } from '../../services/payments';
 import { countLabel } from '../../services/plural';
 import {
   notifyPrinterRejection,
+  openPrinterSetupScreen,
+  printerSetupAvailable,
+  printerSetupLabel,
+  printerSetupProblem,
   printProblemHint,
   printProblemMessage,
   retryableProblem,
@@ -117,6 +121,8 @@ export function CashDocumentActions({
   const options = documentOptions(can, document);
   const { confirm, dialog } = useConfirmDialog();
   const [askingReason, setAskingReason] = useState(false);
+  // Motivo de «Imprimir con la plantilla vigente» (revisión 9F, B2): otra copia en papel, como reimprimir.
+  const [askingRenderReason, setAskingRenderReason] = useState(false);
   const attention = !!document && !!document.job_problem;
 
   async function togglePreview() {
@@ -189,7 +195,7 @@ export function CashDocumentActions({
     }
   }
 
-  async function renderCurrent() {
+  async function renderCurrent(reason: string) {
     if (!document || mutation.isPending()) {
       return;
     }
@@ -199,8 +205,9 @@ export function CashDocumentActions({
     try {
       await mutation.execute<PrintOutcome>('payments_rerender_cash_document', {
         id: document.id,
-        body: {},
+        body: { reason },
       });
+      setAskingRenderReason(false);
       void documents.reload();
     } catch (problem) {
       mutation.reportFailure(problem, 'No se pudo imprimir con la plantilla vigente.');
@@ -237,6 +244,11 @@ export function CashDocumentActions({
             <IconLabel icon="printer">Imprimir</IconLabel>
           </button>
         )}
+        {options.retry && printerSetupProblem(document?.job_problem) && printerSetupAvailable() && (
+          <button type="button" className="secondary-button" onClick={openPrinterSetupScreen}>
+            {printerSetupLabel}
+          </button>
+        )}
         {options.retry && (
           <button
             type="button"
@@ -247,7 +259,7 @@ export function CashDocumentActions({
             <IconLabel icon="printer">Reintentar</IconLabel>
           </button>
         )}
-        {options.reprint && !askingReason && (
+        {options.reprint && !askingReason && !askingRenderReason && (
           <button
             type="button"
             className="secondary-button"
@@ -257,12 +269,12 @@ export function CashDocumentActions({
             <IconLabel icon="printer">Reimprimir</IconLabel>
           </button>
         )}
-        {options.renderCurrent && (
+        {options.renderCurrent && !askingReason && !askingRenderReason && (
           <button
             type="button"
             className="secondary-button"
             disabled={mutation.locked}
-            onClick={() => void renderCurrent()}
+            onClick={() => setAskingRenderReason(true)}
           >
             {renderCurrentLabel}
           </button>
@@ -274,6 +286,15 @@ export function CashDocumentActions({
           busy={mutation.locked}
           onSubmit={(reason) => void reprint(reason)}
           onCancel={() => setAskingReason(false)}
+        />
+      )}
+      {options.renderCurrent && askingRenderReason && document && (
+        <ReprintReason
+          action="renderCurrent"
+          subject={`del ${cashDocumentKindLabels[document.kind].toLowerCase()}`}
+          busy={mutation.locked}
+          onSubmit={(reason) => void renderCurrent(reason)}
+          onCancel={() => setAskingRenderReason(false)}
         />
       )}
       {options.expectedBlocked && (

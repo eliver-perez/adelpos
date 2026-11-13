@@ -6,11 +6,14 @@ import type { Page } from '@playwright/test';
 import { installDriver } from './native-driver';
 import { openAdministration } from './navigation';
 import { notice } from './notices';
+import { receiptPrinterName, receiptPrinterQueue } from './payments-flow';
 
 // Etapa 9F, fase A (§3 y §8): «Quitar datos de prueba» en Administración › Sistema › Mantenimiento con
 // Go y PostgreSQL reales. Por el puente se crean los datos con las firmas exactas de los archivos de
-// prueba (la impresora «Destino controlado E2E» de kitchen-flow.ts como impresora de tickets, sus
-// estaciones «Cocina caliente» y «Freidoras» y la ruta de «Platillos»); en la corrida completa ya los
+// prueba (la impresora «Destino controlado E2E» de kitchen-flow.ts con sus estaciones «Cocina caliente» y
+// «Freidoras» y la ruta de «Platillos», y la impresora de tickets «Tickets controlados E2E» de
+// payments-flow.ts: desde la revisión 9F (B3) Go no acepta una impresora de otra terminal como impresora
+// de tickets); en la corrida completa ya los
 // dejaron las especificaciones anteriores, con ventas y trabajos de impresión, y se reutilizan. La
 // pantalla debe mostrar exactamente la lista que calcula Go, confirmar en rojo que primero se respalda,
 // avisar con el nombre del respaldo y dejar la instalación sin nada por quitar.
@@ -114,14 +117,32 @@ async function prepareTestData(driver: Driver) {
       station_ids: stationIDs,
     });
   }
-  // payments-flow.ts (configureReceiptPrinter): el destino de aceptación como impresora de tickets.
+  // payments-flow.ts (configureReceiptPrinter): la impresora de tickets de la aceptación, una cola del
+  // equipo que no existe (firma de datos de prueba).
+  let receiptID = printers.find((printer) => printer.name === receiptPrinterName)?.id;
+  if (!receiptID) {
+    const created = await call(driver, 'POST', 'kitchen/printers', {
+      operation_id: randomUUID(),
+      name: receiptPrinterName,
+      transport: 'cups',
+      destination: receiptPrinterQueue,
+      port: 9100,
+      paper_width: 80,
+      copies: 1,
+      cutter_option: '',
+      accepts_escpos: false,
+      active: true,
+      fallback_id: null,
+    });
+    receiptID = created.id as string;
+  }
   const settings = await call(driver, 'GET', 'payments/settings');
   await call(driver, 'PUT', 'payments/settings', {
     operation_id: randomUUID(),
     revision: settings.revision,
     shared_shifts: settings.shared_shifts,
     print_receipt_default: settings.print_receipt_default,
-    receipt_printer_id: printerID,
+    receipt_printer_id: receiptID,
     refund_authorization_threshold: settings.refund_authorization_threshold,
   });
 }

@@ -2973,8 +2973,10 @@ signatures.go`, cada una con su archivo): impresoras «Destino controlado E2E» 
   cambios la impresora de prueba que usa una estación del restaurante y la categoría con otros productos o con una
   ruta que incluye estaciones del restaurante. Se **desvincula** la configuración que apunta a lo de prueba: impresora
   de tickets de Cobros, cajón de cada caja (queda desactivado), impresora de respaldo de otras impresoras, estaciones
-  por terminal y estaciones de prueba en rutas que se conservan. Nunca toca ventas, pagos, cortes, movimientos de
-  inventario, cuentas, documentos ni auditoría.
+  por terminal y estaciones de prueba en rutas que se conservan. Una terminal cuya selección eran solo estaciones de
+  prueba pasa a «Todas las estaciones» (`devices.kitchen_all_stations`, revisión independiente parte 3, B3) y se
+  presenta una vez con el motivo «La terminal «…» mostraba solo estaciones de prueba; mostrará todas las estaciones.».
+  Nunca toca ventas, pagos, cortes, movimientos de inventario, cuentas, documentos ni auditoría.
 - Quitar: la transacción de autenticación solo autoriza, valida y comprueba la idempotencia (la misma operación del
   mismo actor y terminal devuelve la respuesta guardada sin otro respaldo; con otro `plan_id`, 409
   `IDEMPOTENCY_CONFLICT`). Después, una sola eliminación a la vez en el servidor: un reenvío de la misma operación
@@ -3069,14 +3071,20 @@ permisos nuevos. Detalle funcional en [docs/KITCHEN_AND_PRINTING.md](docs/KITCHE
 
 ### Impresoras: corte de papel (`kitchen/printers`)
 
-- Campos nuevos de `Printer`: `cut_mode` (`full` | `partial`) y `cut_feed_lines` (entero de la lista cerrada 0–8).
-  CHECK `kitchen_printers_cut_mode_check` y `kitchen_printers_cut_feed_lines_check`; las impresoras existentes quedan
-  con `full` y 3 (los bytes de siempre); el valor por omisión de la columna para las nuevas es 4.
+- Campos nuevos de `Printer`: `cut_mode` (`full` | `partial`) y `cut_feed_lines` (entero de la lista cerrada 0–8 o
+  `null`). CHECK `kitchen_printers_cut_mode_check` y `kitchen_printers_cut_feed_lines_check`; el valor por omisión de la
+  columna para las nuevas es 4. Desde la revisión independiente (M1), `cut_feed_lines` son los **renglones en blanco
+  entre el último renglón del documento y el corte**: Go cierra antes el último renglón si quedó abierto (precuentas,
+  tickets y documentos de caja terminan sin salto), así que `GS V` llega siempre al inicio de un renglón (también con 0)
+  y el avance es el mismo en todos los documentos. Las impresoras existentes quedan con `full` y, si ya cortaban,
+  `cut_feed_lines: null` = «como hasta la 9E» (tres saltos fijos y `GS V 0`, los bytes de siempre); las que no cortaban,
+  con 4. Sin corte, los bytes no cambian.
 - Al guardar (`POST`/`PATCH`, `kitchen.printers.manage`, auditado como `kitchen.printer.saved`): `supports_cut` se
   guarda **igual a `cut`** (la casilla «el modelo admite corte» ya no existe en la interfaz; el CHECK
   `NOT cut OR supports_cut` de la 0005 sigue vigente). Compatibilidad: en una impresora **nueva**, si el cuerpo no trae
   `cut`, corta con papel de 80 mm y no corta con 58 mm; sin `cut_mode`, `full`; sin `cut_feed_lines` (o `null`), 4. Al
-  editar, un campo que el cliente no envía conserva lo guardado. Fuera de la lista: 400 `KITCHEN_VALIDATION`.
+  editar, un campo que el cliente no envía (o `null`) conserva lo guardado, incluido el `null` de una impresora que ya
+  cortaba; una que no cortaba y empieza a cortar sin avance recibe 4. Fuera de la lista: 400 `KITCHEN_VALIDATION`.
 - Las fotografías de impresora guardadas en trabajos anteriores (sin los campos) se imprimen y reimprimen como antes:
   corte total con 3 saltos si tenían `cut`.
 
@@ -3092,6 +3100,9 @@ de otra terminal (`agent`). Si no, Go responde **antes de encolar** (no se crea 
 | Operaciones de caja, cortes y cierre con `print`                      | 200; `printing` igual (`PrintOutcome.problem`, `printer_name`)                         |
 | `POST payments/cash-reports/{id}/print`, `cash-operations/{id}/print` | 409 `PRINTER_NOT_CONFIGURED` o `PRINTER_UNAVAILABLE`                                   |
 | `POST payments/accounts/{id}/documents/receipt`                       | 409 igual                                                                              |
+| `POST payments/accounts/{id}/documents/retry` y `…/reprint`           | 409 igual (revisión M2: la impresora de tickets vigente)                               |
+| `POST payments/cash-documents/{id}/retry` y `…/reprint`               | 409 igual (revisión M2)                                                                |
+| `PUT payments/settings` con otra impresora de tickets                 | 422 `RECEIPT_PRINTER_UNAVAILABLE` (revisión B3)                                        |
 
 `error.details = {document: "precheck" | "receipt" | "cash_document", problem: "missing" | "inactive" |
 "unsupported", printer_name?}`. Mensajes: «No hay impresora configurada para precuentas.» (con el nombre visible:
@@ -3110,32 +3121,63 @@ inactivo o requiere un agente de impresión aún no implementado»).
 | POST   | `payments/cash-documents/{id}/retry`       | `cash.reports.print`     | `{operation_id, job_id?}`            |
 
 - **Reintentar** (decisión D3): vuelve a `pending` el trabajo más reciente del documento (o el indicado) si está en
-  `error` o `intervention`, con la misma impresora y **sin motivo**; no exige `kitchen.stations.all`. Respuesta
+  `error` o `intervention`, **sin motivo**; no exige `kitchen.stations.all`. Desde la revisión independiente (M2) sale
+  en la **impresora de tickets vigente de Cobros con su configuración actual** (la que se corrige con «Configurar
+  impresora»): el trabajo cambia `printer_id` y `printer_snapshot` y, si el papel o las columnas cambiaron, su
+  contenido se prepara de nuevo con los datos guardados del documento y la misma versión de plantilla. Respuesta
   `{status, job_id, ticket_id}` (caja: `PrintOutcome`). Rechazos: 404 si el documento no es de esa cuenta; 409
   `PRINT_NOT_FAILED` (nada que reintentar), `PRINT_UNCERTAIN` (pudo haber salido: se resuelve en la cola),
-  `PRINT_JOB_SUPERSEDED` (hay una impresión más reciente) y `PRINTER_UNAVAILABLE` (la impresora ya no puede imprimir).
+  `PRINT_JOB_SUPERSEDED` (hay una impresión más reciente), `PRINTER_NOT_CONFIGURED` / `PRINTER_UNAVAILABLE` (sin una
+  impresora de tickets válida, con `details.document`) y `PRINT_RENDER_UNAVAILABLE` (un documento de caja anterior a
+  las plantillas, sin datos guardados, en una impresora con otro papel).
   Caja aplica además las reglas de consulta del turno y del efectivo esperado. Auditoría `payments.document_retried` /
   `cash.document_retried`; historial del trabajo `print.retry`.
 - **Ticket de un pago después**: imprime el ticket de un pago de la cuenta que no lo tiene (el «Reintentar» del aviso
   de un ticket que no se imprimió por falta de impresora). 409 `DOCUMENT_EXISTS` si ya existe (se reimprime con su
-  motivo). Auditoría `payments.receipt_printed`.
+  motivo). Desde la revisión independiente (B1) solo para el pago cuyo ticket quedó sin imprimir por falta de impresora
+  válida (la respuesta guardada de su `operation_id` dice `printing.status = "not_configured"`): si no, 409
+  `RECEIPT_NOT_PENDING`; un pago con devoluciones o corregido, 409 `PAYMENT_REFUNDED`. Auditoría
+  `payments.receipt_printed`.
 
 ### Cambios de contrato
 
 - `POST kitchen/jobs/{id}/retry`: `reason` **opcional** (si se envía, 5–500). `resolve` y `POST kitchen/reprint` lo
-  siguen exigiendo.
+  siguen exigiendo. Desde la revisión independiente (M2), todo envío de nuevo desde la cola (`retry` y `resolve` con
+  `decision: "send"`) usa la configuración **actual** de la impresora del trabajo (o la elegida con `printer_id`) y, si
+  su papel o sus columnas cambiaron, prepara el documento de nuevo con sus datos guardados y la misma versión de
+  plantilla (comandas, avisos y prueba técnica en cocina; precuentas, tickets y documentos de caja con el renderizador
+  de pagos, que administración pasa a cocina); una muestra del diseñador, una impresión con la plantilla vigente o un
+  documento de caja sin datos guardados responde 409 `PRINT_RENDER_UNAVAILABLE`, y una prueba de ancho conserva las
+  columnas que probaba (con otro papel, el mismo 409).
 - `POST payments/accounts/{id}/documents/reprint` y `POST payments/cash-documents/{id}/reprint`: **`reason`
-  obligatorio** (5–500, 400 `KITCHEN_VALIDATION` si falta); queda en la auditoría (`payments.document_reprinted`,
-  `cash.document_reprinted`) y en el historial del trabajo (`print.reprinted`).
-- Resultados del transporte y trabajos: `Outcome.code` (clave del problema: `unreachable`, `inactive`,
-  `unsupported`, `setup`, `uncertain`), guardada en `kitchen_print_jobs.result` y en cada intento. Lecturas:
+  obligatorio** (5–500, 400 `PAYMENT_VALIDATION` si falta, antes de buscar la impresora); queda en la auditoría
+  (`payments.document_reprinted`, `cash.document_reprinted`) y en el historial del trabajo (`print.reprinted`). Desde la
+  revisión independiente (M2) la copia sale en la impresora de tickets vigente con su configuración actual (destino,
+  transporte, corte y copias; sin una válida, 409 `PRINTER_NOT_CONFIGURED`/`PRINTER_UNAVAILABLE`) y, como reimpresión
+  exacta (decisión de la 9C), idéntica al original: conserva su contenido y el papel y las columnas con que se emitió.
+- Revisión independiente (B2): `POST payments/accounts/{id}/documents/rerender` y
+  `POST payments/cash-documents/{id}/rerender` («Imprimir con la plantilla vigente») piden **`reason` obligatorio**
+  (5–500, 400 `PAYMENT_VALIDATION`), como la de cocina: queda en la auditoría (`payments.document_rerendered`,
+  `cash.document_rerendered`) y en el historial del trabajo (`print.rerendered`, `{job, reason}`).
+- Revisión independiente (B3): `PUT payments/settings` rechaza elegir como impresora de tickets una desactivada o de
+  otra terminal: 422 `RECEIPT_PRINTER_UNAVAILABLE` con `details {problem, printer_name}` y el mensaje de D4 más «Elige
+  otra impresora de tickets.». La que ya estaba elegida y dejó de servir no impide guardar las demás políticas.
+- Resultados del transporte y trabajos: `Outcome.code` (clave del problema: `unreachable`, `not_found`, `inactive`,
+  `unsupported`, `setup`, `uncertain`), guardada en `kitchen_print_jobs.result` y en cada intento. `not_found` (revisión
+  independiente, B4): la cola CUPS no existe (`lpstat -p` falla) o la impresora de Windows no está instalada
+  (`ERROR_INVALID_PRINTER_NAME`); un administrador de impresión o una conexión que no contesta sigue siendo
+  `unreachable`. Lecturas:
   `GET kitchen/jobs` y `GET kitchen/jobs/{id}` agregan `ticket_kind`, `folio`, `document_title` y `problem`; los
   documentos de la cuenta (`documents[]` de `GET payments/accounts/{id}`) y de caja agregan `job_problem`.
 - `payment_settings.precheck_name` (`precheck` | `sales_ticket` | `bill`, CHECK `payment_settings_precheck_name_check`):
-  `GET payments/settings` lo informa; `PUT payments/settings` lo acepta opcional (sin él, se conserva; fuera de la lista,
-  400), con `payments.settings.manage` y la auditoría `payments.settings_changed` de siempre. `GET auth/me` lo informa en
-  `establishment.precheck_name` para todo usuario. La precuenta guarda `title` («TICKET DE VENTA» o «CUENTA»; vacío con
-  «Precuenta», idéntica a la anterior) y lo imprime como encabezado; una plantilla con título propio lo sigue
+  `GET payments/settings` lo informa. Desde la revisión independiente (M3) se elige en Administración › Documentos: `GET
+documents/identity` lo informa como `precheck_name` y `PUT documents/identity` lo acepta opcional junto con la
+  identidad (`documents.identity.manage`; sin él se conserva; fuera de la lista, 422 `VALIDATION_ERROR`), con la
+  revisión de la identidad, la auditoría `documents.precheck_name_changed` (antes y después) y los eventos
+  `documents.identity.changed` y `payments.settings.changed`. `PUT payments/settings` **ya no lo acepta** (400 por campo
+  desconocido). `GET auth/me` lo informa en `establishment.precheck_name` para todo usuario. El diseñador llama «Ticket
+  de pago» al tipo `receipt` (antes «Ticket de venta»). La precuenta guarda `title` («TICKET DE VENTA» o «CUENTA»; vacío
+  con «Precuenta», idéntica a la anterior) y lo imprime como encabezado; una plantilla con título propio lo sigue
   sustituyendo.
 - Contexto de la precuenta y del ticket: «Mesa X» sin repetir «Mesa» si el nombre de la mesa ya la incluye.
 - Huella idempotente de cobros (`payments/handler.go`): quita la contraseña de toda autorización en cualquier nivel del
@@ -3196,11 +3238,13 @@ en el orden de Cocina y solo los de una selección (con `terminal_all`/`user_all
 
 Cada terminal autorizada agrega `home_screen`, `all_stations` y `sound_alert` a `{device_id, device_name, station_ids}`.
 `PUT` recibe `{operation_id, device_id, all_stations?, station_ids, sound_alert?, expected_all_stations?,
-expected_station_ids}`: sin `all_stations`, una lista vacía es «todas» y una con estaciones es la selección (forma
-anterior); con «todas» la lista va vacía y sin ella lleva de 1 a 100 estaciones existentes sin repetir (`400
-KITCHEN_VALIDATION`); sin `sound_alert` se conserva. La selección esperada (y la marca, si se envía) distinta de la
-vigente responde `409 REVISION_CONFLICT`. Responde `{device_id, all_stations, station_ids, sound_alert}` y lo audita en
-el historial de cocina como `station.access.saved` (antes y después).
+expected_station_ids}`: sin `all_stations`, una lista con estaciones es la selección (forma anterior) y, desde la
+revisión independiente (parte 3, B1), una lista vacía responde `422 KITCHEN_ACCESS_ALL_REQUIRED` (antes de la 9F
+significaba «ninguna»; para «todas» hay que enviar `all_stations: true`); con «todas» la lista va vacía y sin ella lleva
+de 1 a 100 estaciones existentes sin repetir (`400 KITCHEN_VALIDATION`); sin `sound_alert` se conserva. La selección
+esperada (y la marca, si se envía) distinta de la vigente responde `409 REVISION_CONFLICT`. Responde `{device_id,
+all_stations, station_ids, sound_alert}` y lo audita en el historial de cocina como `station.access.saved` (antes y
+después).
 
 ### Usuario (`users/{id}/kitchen-stations`)
 
@@ -3214,7 +3258,13 @@ siempre: nadie cambia sus propias estaciones ni las de un usuario con permisos q
 el usuario reservado `sa` no se consulta ni se cambia, la selección esperada distinta de la vigente responde `409
 REVISION_CONFLICT`, se audita `user.kitchen_stations_changed` (antes y después, solo identificadores) en la misma
 transacción y se publica `kitchen.access.changed` (ámbito `configuration`, sin contenido). `all_by_permission` indica
-que el usuario atiende todas por `kitchen.stations.all` aunque tenga una selección guardada.
+que el usuario atiende todas por `kitchen.stations.all` aunque tenga una selección guardada. La ruta no lleva
+`operation_id`: desde la revisión independiente (parte 3, B4), si lo pedido ya es lo guardado (el reenvío de un guardado
+cuya respuesta se perdió) responde 200 con lo vigente sin escribir, auditar ni publicar, en lugar del 409.
+
+La descripción del permiso `kitchen.stations.manage` pasa a «Administrar estaciones y las estaciones que muestra cada
+terminal» (en Go y con un `UPDATE` en la sección «Fase C» de la 0022), porque las estaciones por terminal ya no son un
+ámbito de autorización.
 
 ### Puente nativo (`desktop/src-tauri/src/api.rs`)
 

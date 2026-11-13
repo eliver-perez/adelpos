@@ -69,7 +69,8 @@ func (spooler *fakeSpooler) printer(name string) (spoolerPrinter, error) {
 			return info, nil
 		}
 	}
-	return spoolerPrinter{}, errors.New("no existe")
+	// Como hostWinspool con ERROR_INVALID_PRINTER_NAME: la impresora no está instalada.
+	return spoolerPrinter{}, errPrinterNotInstalled
 }
 
 func (spooler *fakeSpooler) ports() ([]spoolerPort, error) {

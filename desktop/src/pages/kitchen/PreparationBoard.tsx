@@ -4,7 +4,11 @@ import { Field, Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import type { Board, ExecuteKitchen, Release, Task } from '../../services/kitchen';
-import { playArrivalChime } from '../../services/kitchenSound';
+import {
+  notifySoundBlocked,
+  playArrivalChime,
+  unlockKitchenSound,
+} from '../../services/kitchenSound';
 import { notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import { serverDateTime } from '../../services/restaurant';
@@ -41,6 +45,7 @@ export function PreparationBoard({
   });
   const board = resource.data;
   useArrivalChime(board, `${station}|${state}|${page}`);
+  useSoundUnlock(!!board?.sound_alert);
   const grouped = new Map<string, Task[]>();
   for (const task of board?.tasks ?? []) {
     const key = `${task.release_id}/${task.station_id}/${task.instructions.item_id}/${task.instructions.version_id}/${task.state}`;
@@ -342,7 +347,30 @@ function useArrivalChime(board: Board | null, filterKey: string) {
       current.releases.add(task.release_id);
     }
     if (board.sound_alert && arrivals.size > 0) {
-      void playArrivalChime();
+      // Revisión 9F (parte 3, B2): si el equipo todavía no permite reproducir (nadie tocó la pantalla), se
+      // avisa una sola vez en lugar de callar el fallo.
+      void playArrivalChime().then((played) => {
+        if (!played) {
+          notifySoundBlocked();
+        }
+      });
     }
   }, [board, filterKey]);
+}
+
+// Con el aviso sonoro activado en la terminal, el primer toque o tecla en la pantalla crea o reanuda el
+// contexto de audio (revisión 9F, parte 3, B2): WebKit y WebView2 solo lo dejan sonar si se hace durante
+// un gesto del usuario. Se escucha en la fase de captura para no depender de qué control se toque.
+function useSoundUnlock(enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    document.addEventListener('pointerdown', unlockKitchenSound, true);
+    document.addEventListener('keydown', unlockKitchenSound, true);
+    return () => {
+      document.removeEventListener('pointerdown', unlockKitchenSound, true);
+      document.removeEventListener('keydown', unlockKitchenSound, true);
+    };
+  }, [enabled]);
 }

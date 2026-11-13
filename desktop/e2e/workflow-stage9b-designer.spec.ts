@@ -17,7 +17,7 @@ import { notice } from './notices';
 // imprimir una muestra en el destino controlado (nunca CUPS ni TCP reales) y ver su estado,
 // consultar el historial y restaurar la predeterminada. El ticket cobrado antes de editar se
 // reimprime idéntico y «Imprimir con la plantilla vigente» es una acción distinta en los documentos
-// de la cuenta. Sin desbordamiento horizontal a 1280 × 720 ni a 1920 × 1080 en ambos temas.
+// de la cuenta (desde la revisión 9F, con motivo). Sin desbordamiento horizontal a 1280 × 720 ni a 1920 × 1080 en ambos temas.
 // ADEL_DESIGNER_SHOTS permite guardar las capturas del editor fuera de los artefactos.
 
 type Driver = Awaited<ReturnType<typeof installDriver>>;
@@ -253,7 +253,7 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
   for (const group of ['Venta', 'Cocina', 'Caja']) {
     await expect(kinds.getByRole('heading', { name: group, exact: true })).toBeVisible();
   }
-  const receipts = page.getByRole('region', { name: 'Plantillas de Ticket de venta' });
+  const receipts = page.getByRole('region', { name: 'Plantillas de Ticket de pago' });
   await expect(receipts.getByText('Predeterminada · solo lectura')).toBeVisible();
 
   // 1. Duplicar la predeterminada (solo lectura) y abrir la copia en el editor.
@@ -397,7 +397,7 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
     await checkLayout(page, testInfo, name);
     await view.getByRole('button', { name: 'Volver a plantillas' }).click();
   }
-  await kinds.getByRole('button', { name: 'Ticket de venta', exact: true }).click();
+  await kinds.getByRole('button', { name: 'Ticket de pago', exact: true }).click();
 
   // 9. El ticket cobrado antes de editar se reimprime idéntico (misma versión de plantilla, sin
   // marca de reimpresión), aunque la plantilla activa ya es otra.
@@ -450,6 +450,14 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
     );
   const before = new Set(await jobTickets());
   await documents.getByRole('button', { name: 'Imprimir con la plantilla vigente' }).click();
+  // Revisión 9F (B2): otra copia en papel de un documento ya emitido pide motivo, como reimprimir.
+  const reasonForm = documents.getByRole('form', {
+    name: 'Impresión con la plantilla vigente con motivo',
+  });
+  await reasonForm
+    .getByLabel('Motivo de la impresión con la plantilla vigente')
+    .fill('Revisar el ticket con la plantilla nueva');
+  await reasonForm.getByRole('button', { name: 'Imprimir con la plantilla vigente' }).click();
   const rerender = page.getByRole('alertdialog', { name: 'Imprimir con la plantilla vigente' });
   await expect(rerender).toContainText('envía una copia idéntica al original');
   await expect(rerender).toContainText('plantilla activa hoy');

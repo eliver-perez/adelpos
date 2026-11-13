@@ -204,7 +204,7 @@ export function PaymentsAdminPage({
           <div ref={policies} className="payments-policies-anchor">
             <Accordion
               title="Políticas de cobro"
-              summary="Turno compartido, impresión de ticket, impresora, nombre de la precuenta y devoluciones"
+              summary="Turno compartido, impresión de ticket, impresora y devoluciones"
               defaultOpen={policiesRequested}
             >
               <Notice>{settings.error}</Notice>

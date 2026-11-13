@@ -178,6 +178,7 @@ func (handler *service) rerender() (any, error) {
 	versionID := version.ID
 	job, ticketID, err := EnqueueRendered(handler.ctx, handler.tx, RenderedPrint{
 		Kind: documents.TicketKindRerender, Document: ticket, Layout: layout, TemplateVersionID: &versionID, Printer: printer, History: "print.rerendered",
+		Reason:      input.Reason,
 		OperationID: handler.operationID, ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
 	})
 	if err != nil {

@@ -86,6 +86,14 @@ func userKitchenStations(ctx context.Context, tx pgx.Tx, request Request, princi
 	if err != nil {
 		return nil, err
 	}
+	// Revisión 9F (parte 3, B4): la ruta no lleva operation_id; si lo pedido ya es lo guardado (por ejemplo, el
+	// reenvío de un guardado cuya respuesta se perdió), responde con lo vigente sin escribir, auditar ni
+	// publicar, en lugar de un 409 «cambiaron en otra terminal» por su propio cambio.
+	requested := append([]string{}, input.StationIDs...)
+	slices.Sort(requested)
+	if before.AllStations == input.AllStations && slices.Equal(before.StationIDs, requested) {
+		return readUserStations(ctx, tx, userID)
+	}
 	expected := append([]string{}, input.ExpectedStationIDs...)
 	slices.Sort(expected)
 	if before.AllStations != input.ExpectedAllStations || !slices.Equal(before.StationIDs, expected) {

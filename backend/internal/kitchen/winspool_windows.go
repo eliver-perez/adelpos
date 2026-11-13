@@ -175,6 +175,10 @@ func (hostWinspool) listPrinters() ([]spoolerPrinter, error) {
 
 func (hostWinspool) printer(name string) (spoolerPrinter, error) {
 	handle, err := openPrinter(name)
+	if errors.Is(err, windows.ERROR_INVALID_PRINTER_NAME) {
+		// Revisión 9F (B4): Windows no tiene una impresora con ese nombre (no instalada o renombrada).
+		return spoolerPrinter{}, errPrinterNotInstalled
+	}
 	if err != nil {
 		return spoolerPrinter{}, err
 	}
