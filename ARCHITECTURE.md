@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9E
+# Arquitectura · Etapa 9F
 
 ## Responsabilidades
 
@@ -35,6 +35,8 @@ En macOS y en desarrollo, Tauri no inicia ni detiene Go o PostgreSQL; desde la e
 - `designer` (etapa 9B): rutas `documents/*` (catálogo, plantillas, versiones, vista previa, recientes, muestras e impresoras); usa `documents`, `kitchen` (cola y documentos de cocina) y `payments` (fuentes de vista previa).
 - `identity` (etapa 9B): rutas `documents/identity*`, identidad documental combinada con `app.establishment`, logotipo con sus conversiones guardadas, fuente de bits para el trabajador de impresión y fuente del logotipo de los reportes (un `SELECT` en la transacción de solo lectura del reporte).
 - `logoraster` y `brand` (etapa 9B): puros; validación y conversión monocromática del logotipo y bytes `GS v 0`, y copia embebida de la marca de AD-EL POS para los reportes.
+- `maintenance` (etapa 9F): «Quitar datos de prueba». Firmas exactas de lo que crean las pruebas (lista cerrada, cada una con su archivo de prueba), plan de qué se elimina, desactiva, desvincula o conserva con los registros relacionados leídos de las llaves foráneas de PostgreSQL, aplicación en una transacción y respaldo previo con `pg_dump` (en el `host` de Windows, el de `standalone`). Lo llama `administration` (`maintenance.go`), que autoriza, respalda y aplica.
+- `stationscope` (etapa 9F): paquete neutral con la regla única de las estaciones que se ven en Cocina (estaciones de la terminal ∩ estaciones del usuario; con `kitchen.stations.all`, todas las del usuario). Lo usan `kitchen` (tablero, estados, acuses y comandas), `events` (`events.Read` recibe un `*stationscope.Scope`) y `administration` (SSE y estaciones por usuario).
 
 Las escrituras y sus eventos de auditoría se confirman en la misma transacción. Los fallos de autenticación y denegaciones relevantes se auditan deliberadamente aunque no se autorice la operación. Cada operación autenticada se ejecuta dentro de un savepoint (`administration.runProtected`): un 403 deshace todo lo que la operación hubiera escrito, aunque la verificación de permiso ocurriera después de una escritura, y solo se confirma la auditoría `access.denied`. Así la regla "toda autorización antes de la primera escritura" no depende de convención. Los errores públicos no incluyen SQL, hashes, DSN, secretos o detalles del driver.
 
@@ -332,7 +334,7 @@ solo lectura, sin locks consultivos, sobre `account_cancellations` y las anulaci
 el índice de eventos por cuenta), con la fuente de filtros `cancel_reasons`; 95 reportes, todos en `EXPORTABLE_REPORTS`.
 
 **Puente.** Siete operaciones nuevas en la lista cerrada de `api.rs`, con su prueba Rust; `restaurant_void` salió de la
-lista (Go conserva la ruta `void` por compatibilidad). Sin operaciones nativas ni permisos de Tauri nuevos.
+lista (Go conservó la ruta `void` por compatibilidad hasta la 9F, que la retiró con `410 ROUTE_RETIRED`). Sin operaciones nativas ni permisos de Tauri nuevos.
 
 **Interfaz.** Los colores viven solo en los tokens de `styles.css` (marca → paleta de estado → usos), vigilados por
 `styles.test.ts`; `components/restaurant/tableStateIcons.ts` comparte el icono de cada estado entre el mapa, la leyenda
@@ -400,3 +402,76 @@ binario externo, PostgreSQL como recurso, WebView2 incluido, español). La plant
 `%LOCALAPPDATA%\Programs\AD-EL POS` y espera a que Go y PostgreSQL terminen antes de reemplazar o borrar archivos;
 `hooks.nsh` agrega los accesos «Crear respaldo» y «Respaldos» y nunca borra la carpeta de datos.
 `scripts/build-windows.ps1` arma todo con un solo comando.
+
+## Datos de prueba, impresión y cocina por estaciones · etapa 9F
+
+**Alcance.** Paquetes Go nuevos `maintenance` y `stationscope`; sin locks, permisos ni dependencias nuevos. Una sola
+migración, `0022_printing_and_kitchen_stations.sql`, transaccional, con restricciones y llaves con nombre y sin modificar
+filas operativas ni fotografías de trabajos: `kitchen_printers.cut_mode` y `cut_feed_lines`,
+`payment_settings.precheck_name`, `devices.kitchen_all_stations` y `kitchen_sound_alert`, `users.kitchen_all_stations`,
+la tabla `kitchen_user_stations` y las descripciones de `accounts.manage` y `kitchen.stations.manage`. Lo propio de cada sistema sigue detrás de
+condiciones por plataforma; nada de la 9F se ejecutó en Windows. Avance: [ETAPA_9F_AVANCE.md](docs/ETAPA_9F_AVANCE.md);
+decisiones en `CLAUDE.md` §15, «Etapa 9F».
+
+**Modo de pruebas.** `config.Validate` (que usan todos los comandos) rechaza `test_mode: true` con una base que no sea
+`adel_pos_test_*`; `GET /api/v1/version` informa el modo (`httpapi.NewWithOptions`). El puente de las pruebas
+(`desktop/e2e/native-driver.ts`, `requireTestServer`) lo exige antes de cualquier petición. En Windows, con
+`ADEL_TEST_MODE=1`, `host`, `backup`, `restore-check` y `restore` comparan la carpeta de datos con la carpeta conocida
+del sistema (`FOLDERID_LocalAppData` + «AD-EL POS», no la variable `LOCALAPPDATA`) y se niegan a usarla
+(`standalone/testmode.go`, `//go:build windows`); `server_host.rs` no limpia el entorno del proceso hijo, así que la
+variable llega a Go.
+
+**«Quitar datos de prueba».** `GET maintenance/test-data` calcula el plan con 7820148305, 7820148304 y 7820148308
+compartidos, en ese orden, y lo identifica con `plan_id` (SHA-256 de lo que se elimina, desactiva y desvincula).
+`POST maintenance/test-data/remove` sigue el patrón diferido de los reportes (`completeDeferred`): la transacción de
+autenticación solo autoriza (`settings.manage`) y comprueba la idempotencia en `restaurant_operations`; después, con
+una sola eliminación a la vez en el servidor, se busca la respuesta guardada de la misma `operation_id` (un reenvío no
+crea otro respaldo), se respalda y, solo si el respaldo quedó bien, otra transacción toma los tres locks exclusivos,
+recalcula el plan (`409 TEST_DATA_CHANGED` si cambió), aplica en el orden de las llaves foráneas, audita
+`maintenance.test_data_removed` y publica los eventos de cocina, cobros, caja y mantenimiento. Un respaldo fallido
+responde `503 BACKUP_FAILED` sin quitar nada y se audita aparte con un plazo propio. Las firmas son una lista cerrada en
+Go; los registros relacionados se leen de `pg_constraint`, de modo que una tabla nueva que apunte a un dato de prueba
+hace que se desactive en lugar de borrarse sin tocar esta lógica.
+
+**Impresión.** `payments/document_printing.go` decide la impresora válida de precuentas, tickets y documentos de caja
+(configurada, activa y no de tipo agente; `kitchen.PrinterProblem`) **antes de encolar**: sin ella, la precuenta y la
+impresión de un documento de caja responden 409 con `details`, y el ticket de un pago o los documentos que salen al
+registrar una operación de caja devuelven `not_configured` con el motivo, sin revertir el pago ni la operación. Los
+`Details` de `payments.Error` y `kitchen.Error` se publican en `error.details`. El resultado de cada trabajo e intento
+guarda una clave de problema (`kitchen/print_problems.go`: `unreachable`, `inactive`, `unsupported`, `setup`,
+`uncertain`) que la interfaz traduce. El reintento sin motivo (`kitchen.RetryDocument`) solo toma el trabajo más reciente
+de un documento en `error` o `intervention`, con la configuración actual de la impresora, y lo exponen la cola y dos
+rutas de `payments` con el permiso de imprimir el documento; la cola, el lease, la serialización por impresora y la
+regla de los inciertos no cambian. El final de cada documento sale de `documents.PaperCut` (corte, tipo y avance de la
+impresora destino, guardados en la fotografía del trabajo), igual en texto plano (`kitchen.ESCPosBytes`) y con formato
+(`documents.EncodeESCPos`); sin corte, los mismos bytes que antes. El nombre visible de la precuenta viaja con la sesión
+(`auth/me`) y Rust solo acepta la clave de la lista cerrada para el texto del menú nativo (`menu_set_state`,
+`precheck_menu_label`).
+
+**Cocina por estaciones.** `stationscope.Load`/`Compute` calculan una vez por petición las estaciones de la terminal
+(todas o su selección en `kitchen_device_stations`, que deja de ser ámbito de autorización) y las del usuario (todas, su
+selección en `kitchen_user_stations` o, con `kitchen.stations.all`, todas). `kitchen` aplica la intersección al tablero,
+los cambios de estado (`403 STATION_SCOPE_DENIED`), los acuses y el filtro para todos, y a las comandas guardadas solo
+sin `kitchen.stations.all`; `events` filtra el tiempo real igual. Las acciones administrativas (liberar a mano,
+programar, cola, reimpresión, historial) siguen con `kitchen.stations.all`. El enrutamiento (`kitchen/routing.go`) no
+cambió: los combos reparten sus componentes por estación y los complementos viajan con su producto.
+
+**Operaciones.** `restaurant/accounts/{id}/void` responde `410 ROUTE_RETIRED` antes de permisos, lock o lectura.
+`operations/supervisor_approval.go` (`approveWithSupervisor`) es la autorización común de «Cancelar cuenta», «Cancelar
+unidades» y la reducción desde «Modificar», decidida dentro de la ruta antes de la primera escritura con el autorizador
+de `administration/supervisor.go`; Go calcula `cancel_units_requires_authorization`. La huella idempotente de
+`operations` y `payments` quita la contraseña de todo objeto `authorization` sin distinguir mayúsculas
+(`withoutAuthorizationPasswords`).
+
+**Puente.** Operaciones nuevas en la lista cerrada de `api.rs`, con su prueba Rust: `maintenance_test_data`,
+`maintenance_remove_test_data`, `payments_retry_document`, `payments_print_receipt`, `payments_retry_cash_document`,
+`user_kitchen_stations` y `save_user_kitchen_stations` (las de mantenimiento con un plazo de 130 s). Sin operaciones
+nativas ni permisos de Tauri nuevos.
+
+**Interfaz.** `services/documentNames.ts` (nombre visible de la precuenta), `services/printProblems.ts` con avisos de
+`notify.ts` que llevan acciones, `components/ReprintReason.tsx`, `pages/MaintenancePage.tsx`,
+`pages/kitchen/PreparationBoard.tsx` con `PreparationTaskCard.tsx` y las reglas puras de `preparationModel.ts`,
+`services/kitchenSound.ts` (Web Audio, sin archivos ni red por la CSP), `pages/kitchen/TerminalStations.tsx`,
+`pages/UserKitchenStations.tsx` y la barra compacta (`BrandLogo` con `assets/adel-pos-isotipo.png`, `TopBar.goHome`,
+`CashShortcut` y `ServerStatus`). Las estaciones visibles y lo que permite cada cuenta los decide Go; los colores por
+tiempo salen de reglas puras sobre los tiempos y objetivos que entrega Go.
