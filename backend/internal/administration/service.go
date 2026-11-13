@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/url"
 	"regexp"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
 )
 
@@ -33,7 +35,13 @@ type Service struct {
 	Reports *reports.Runner
 	// Stopping se cierra cuando el servidor empieza a apagarse (etapa 9E): los flujos SSE terminan de
 	// inmediato y el cierre ordenado no agota su plazo. Sin valor (pruebas) nunca se activa.
-	Stopping    <-chan struct{}
+	Stopping <-chan struct{}
+	// Backups crea el respaldo previo a «Quitar datos de prueba» (etapa 9F): pg_dump con la conexión de la
+	// configuración en serve y el respaldo de la instalación en el host de Windows. Sin valor no se
+	// quita nada (las pruebas inyectan uno controlado).
+	Backups maintenance.Backuper
+	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
+	Logger      *slog.Logger
 	reportsOnce sync.Once
 	streamMutex sync.Mutex
 	streams     map[string]int

@@ -36,8 +36,15 @@ func runHostCommand(ctx context.Context, logger *slog.Logger, command string, op
 	if err != nil {
 		return err
 	}
+	// Modo de pruebas (etapa 9F, decisión D1): con ADEL_TEST_MODE=1 ningún comando de la instalación usa
+	// la carpeta de datos real del usuario. La prueba de humo abre la aplicación instalada con otra
+	// carpeta (LOCALAPPDATA temporal); la aplicación hereda la variable y se la pasa a este proceso.
+	testMode, err := hostTestMode(layout)
+	if err != nil {
+		return err
+	}
 	if command == "host" {
-		return runHost(ctx, logger, layout, options, logToFile)
+		return runHost(ctx, logger, layout, options, logToFile, testMode)
 	}
 	// En la consola solo se muestran mensajes para el restaurante; el detalle técnico va a la bitácora.
 	if !logToFile {
@@ -56,7 +63,23 @@ func runHostCommand(ctx context.Context, logger *slog.Logger, command string, op
 	return err
 }
 
-func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout, options hostOptions, logToFile bool) error {
+// hostTestMode lee ADEL_TEST_MODE: «1» activa el modo de pruebas y exige una carpeta de datos que no sea
+// la real del usuario; cualquier otro valor distinto de vacío es un error (no se adivina la intención).
+func hostTestMode(layout standalone.Layout) (bool, error) {
+	value := os.Getenv("ADEL_TEST_MODE")
+	if value == "" {
+		return false, nil
+	}
+	if value != "1" {
+		return false, errors.New("ADEL_TEST_MODE solo admite el valor 1")
+	}
+	if err := standalone.RefuseRealDataDir(layout, product.Read().Name); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout, options hostOptions, logToFile bool, testMode bool) error {
 	// El servidor de la instalación corre sin consola: su bitácora va a la carpeta de datos.
 	if !logToFile {
 		output, err := openLogFile(layout.ServerLog())
@@ -82,7 +105,7 @@ func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout,
 		ctx = watched
 	}
 	started := time.Now()
-	logger.Info("host_starting", "version", product.Read().Version, "data_dir", layout.DataDir)
+	logger.Info("host_starting", "version", product.Read().Version, "data_dir", layout.DataDir, "test_mode", testMode)
 	cluster := standalone.NewCluster(layout, logger)
 	// PostgreSQL se detiene al final pase lo que pase, también si la preparación falló después de iniciarlo.
 	defer func() {
@@ -106,7 +129,23 @@ func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout,
 		return err
 	}
 	logger.Info("host_ready", "duration_ms", time.Since(started).Milliseconds())
-	return serveHTTP(ctx, logger, cfg, pool, newApplication(pool, layout.ConfigFile()))
+	backups := installationBackup{layout: layout, database: cfg.Database}
+	return serveHTTP(ctx, logger, cfg, pool, newApplication(pool, layout.ConfigFile(), backups, logger), testMode)
+}
+
+// installationBackup crea el respaldo previo a «Quitar datos de prueba» (etapa 9F, D2) con el respaldo de
+// la instalación: los pg_dump y pg_restore incluidos, la carpeta backups de los datos y la ACL privada.
+type installationBackup struct {
+	layout   standalone.Layout
+	database config.Database
+}
+
+func (backup installationBackup) Backup(ctx context.Context) (string, error) {
+	filename, err := standalone.Backup(ctx, backup.layout, backup.database, "antes-de-quitar-datos-de-prueba")
+	if err != nil {
+		return "", err
+	}
+	return filepath.Base(filename), nil
 }
 
 // migrateWithBackup aplica las migraciones pendientes. Sobre una base que ya tiene datos (alguna migración

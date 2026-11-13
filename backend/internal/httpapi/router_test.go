@@ -88,3 +88,30 @@ func TestPanicDoesNotLeakInternals(t *testing.T) {
 		t.Fatal("panic response is unsafe")
 	}
 }
+
+// Etapa 9F (§3): /api/v1/version informa el modo de pruebas, falso salvo que el servidor lo declare.
+func TestVersionReportsTestMode(t *testing.T) {
+	probe := func(context.Context) database.Health {
+		return database.Health{Postgres: "available", Schema: "compatible"}
+	}
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	for _, expected := range []bool{false, true} {
+		h := NewWithOptions(Options{TestMode: expected}, probe, nil, logger)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/version", nil))
+		var body struct {
+			TestMode *bool `json:"test_mode"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.TestMode == nil {
+			t.Fatalf("version sin test_mode: %s", w.Body.String())
+		}
+		if *body.TestMode != expected {
+			t.Fatalf("test_mode %v, se esperaba %v", *body.TestMode, expected)
+		}
+	}
+	w := httptest.NewRecorder()
+	handler(database.Health{}).ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/version", nil))
+	if !strings.Contains(w.Body.String(), `"test_mode":false`) {
+		t.Fatalf("el servidor ordinario debe informar test_mode false: %s", w.Body.String())
+	}
+}

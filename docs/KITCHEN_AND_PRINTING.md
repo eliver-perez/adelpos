@@ -14,6 +14,25 @@ Abrir **Cocina y preparación** con permisos administrativos. No se crean estaci
 
 La primera configuración no altera contraseñas, catálogo, cuentas históricas ni credenciales del Llavero. Los veinte permisos nuevos se conceden inicialmente al rol administrador. Los otros roles necesitan asignación explícita. La identidad reservada `sa` conserva su política anterior.
 
+### Datos de prueba · etapa 9F
+
+Las pruebas automáticas crean un destino de aceptación que nunca imprime («Destino controlado E2E», transporte de
+agente, destino «Agente de aceptación no disponible»), estaciones «Cocina caliente» y «Freidoras» con ese destino y la
+ruta de «Platillos». Desde la 9F nunca llegan a una instalación real: el servidor en modo de pruebas (`test_mode`) se
+niega a arrancar contra una base que no sea `adel_pos_test_*`, las pruebas de navegador exigen ese modo y la prueba de
+humo de Windows abre la aplicación con una carpeta de datos temporal y `ADEL_TEST_MODE=1`.
+
+Lo que ya quedó en una instalación se quita en **Administración › Sistema › Mantenimiento › «Quitar datos de prueba»**
+(`settings.manage`): «Revisar datos de prueba» muestra lo que se elimina, lo que se desactiva porque ya tiene
+operaciones registradas (trabajos de impresión, tareas de cocina, ventas), la configuración que se desvincula (impresora
+de tickets de Cobros, cajón, impresora de respaldo, estaciones por terminal y rutas) y lo que se conserva, cada uno con
+su motivo. Solo se reconocen las firmas exactas de los archivos de prueba (nombre más atributos, lista cerrada en
+`backend/internal/maintenance/signatures.go`): una estación «Cocina caliente» con otra impresora, o una categoría
+«Platillos» con productos del restaurante, no se tocan. Al confirmar, Go crea primero un respaldo de la base (si no
+puede, no quita nada), aplica todo en una transacción y lo audita; el aviso dice lo quitado y el nombre del respaldo.
+Ventas, pagos, cortes y movimientos de inventario nunca cambian, así que una instalación de Windows que operó con la
+prueba de humo conserva su turno y sus ventas: para dejarla limpia hay que reinstalar con otra carpeta de datos.
+
 ## Enrutamiento y liberación
 
 La ruta de producto prevalece sobre categoría. Los componentes elegidos de un combo se resuelven recursivamente con sus identidades de catálogo; no se duplican productos ni unidades comerciales. La expansión conserva variantes, porciones, ingredientes, grupos y observaciones. Una ruta ausente, una estación inactiva o un destino inválido produce advertencias visibles y una liberación bloqueada; nunca un envío aparente. Un combo vacío sin ruta tampoco se interpreta como exención implícita.

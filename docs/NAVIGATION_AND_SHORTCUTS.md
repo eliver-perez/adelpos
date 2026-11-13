@@ -172,6 +172,8 @@ descripción. Solo aparecen los que los permisos del usuario permiten:
 
 - **Cobros** ya no aparece solo por poder ver el turno: el turno actual se consulta en Caja. Ningún permiso cambió;
   solo qué mosaicos ve cada rol.
+- **Sistema › Mantenimiento** (etapa 9F): quinto mosaico de Sistema, solo con `settings.manage`, con «Quitar datos de
+  prueba» (ver [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md), «Datos de prueba · etapa 9F»).
 - **Ruta de navegación**: dentro de Administración, arriba del contenido, por ejemplo «‹ Administración › Sistema ›
   Terminales». Cada parte anterior se puede tocar para volver a ella; la pantalla actual es texto. Catálogo, Inventarios
   y Reportes agregan su pestaña o grupo como último tramo («‹ Administración › Catálogo › Productos»).

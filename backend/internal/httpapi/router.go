@@ -23,7 +23,18 @@ type ErrorBody struct {
 }
 type contextKey struct{}
 
+// Options son los ajustes del servidor que informan las rutas técnicas.
+type Options struct {
+	// TestMode lo informa /api/v1/version (etapa 9F): los clientes de las pruebas automáticas se niegan a
+	// correr contra un servidor que no lo declare.
+	TestMode bool
+}
+
 func New(probe Probe, origins []string, logger *slog.Logger, application ...http.Handler) http.Handler {
+	return NewWithOptions(Options{}, probe, origins, logger, application...)
+}
+
+func NewWithOptions(options Options, probe Probe, origins []string, logger *slog.Logger, application ...http.Handler) http.Handler {
 	metadata := product.Read()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health/live", func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +62,7 @@ func New(probe Probe, origins []string, logger *slog.Logger, application ...http
 			"supported_api_versions": []string{metadata.APIVersion},
 			"capabilities":           []string{"technical-health", "identity-administration", "catalog-administration", "exact-price-preview", "restaurant-operations", "kitchen-preparation", "persistent-print-queue", "authenticated-sse-v1"},
 			"events_available":       len(application) > 0,
+			"test_mode":              options.TestMode,
 		})
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {

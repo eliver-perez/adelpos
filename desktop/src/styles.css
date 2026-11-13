@@ -8637,3 +8637,63 @@ th[aria-sort='descending'] {
 [aria-busy='true'] [aria-disabled='true'] {
   cursor: progress;
 }
+
+/* Etapa 9F, fase A: Mantenimiento del administrador («Quitar datos de prueba»). Bloque propio al final
+   del archivo; solo usa los tokens de siempre. */
+.maintenance-help {
+  max-width: 880px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.maintenance-panel .button-row {
+  margin-bottom: 16px;
+}
+.maintenance-empty {
+  font-size: 14px;
+  font-weight: 600;
+}
+.maintenance-groups {
+  display: grid;
+  gap: 20px;
+}
+.maintenance-group h3 {
+  font-size: 14px;
+  font-weight: 650;
+}
+.maintenance-group > p {
+  font-size: 12px;
+  margin: 4px 0 10px;
+}
+.maintenance-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.maintenance-entry {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--subtle);
+  font-size: 13px;
+}
+.maintenance-entry > span:last-child {
+  grid-column: 2;
+  font-size: 12px;
+}
+.maintenance-kind {
+  grid-row: span 2;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.maintenance-backup {
+  margin-top: 18px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

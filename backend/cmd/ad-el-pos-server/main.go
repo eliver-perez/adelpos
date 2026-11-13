@@ -25,6 +25,7 @@ import (
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
+	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/product"
 )
 
@@ -121,7 +122,9 @@ func run(logger *slog.Logger) error {
 		return errors.New("no se pudo crear el pool PostgreSQL")
 	}
 	defer pool.Close()
-	application := newApplication(pool, *filename)
+	// Etapa 9F: el respaldo previo a «Quitar datos de prueba» usa pg_dump con la conexión de esta
+	// configuración (en la instalación de Windows, el respaldo de la instalación; host_windows.go).
+	application := newApplication(pool, *filename, maintenance.NewDumpBackup(cfg, *filename), logger)
 	if command == "provision-sa" || command == "reset-sa" {
 		return provisionSupport(ctx, application, command == "reset-sa")
 	}
@@ -138,15 +141,17 @@ func run(logger *slog.Logger) error {
 		logger.Info("migrations_completed", "applied", count)
 		return nil
 	}
-	return serveHTTP(ctx, logger, cfg, pool, application)
+	return serveHTTP(ctx, logger, cfg, pool, application, cfg.TestMode)
 }
 
 // newApplication arma el servicio de administración que comparten serve y el modo host de Windows. El
 // token de aprovisionamiento vive junto al archivo de configuración.
-func newApplication(pool *pgxpool.Pool, configFile string) *administration.Service {
+func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.Backuper, logger *slog.Logger) *administration.Service {
 	return &administration.Service{
 		Pool:             pool,
 		ProvisioningFile: filepath.Join(filepath.Dir(configFile), "provisioning-token"),
+		Backups:          backups,
+		Logger:           logger,
 		// Consultas de solo lectura de las colas CUPS del equipo para el cajón (etapa 7.1).
 		Queues: kitchen.HostQueueInspector{},
 		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
@@ -155,14 +160,15 @@ func newApplication(pool *pgxpool.Pool, configFile string) *administration.Servi
 }
 
 // serveHTTP sirve la API con los trabajadores de impresión e inventario hasta que se cancela el contexto
-// (SIGTERM en macOS; evento de parada o cierre de la aplicación en Windows) y cierra en orden.
-func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool *pgxpool.Pool, application *administration.Service) error {
+// (SIGTERM en macOS; evento de parada o cierre de la aplicación en Windows) y cierra en orden. testMode
+// lo informa /api/v1/version (etapa 9F): test_mode de la configuración o ADEL_TEST_MODE en el host.
+func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool *pgxpool.Pool, application *administration.Service, testMode bool) error {
 	probe := func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.New(probe, cfg.AllowedOrigins, logger, application),
+		Handler:           httpapi.NewWithOptions(httpapi.Options{TestMode: testMode}, probe, cfg.AllowedOrigins, logger, application),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -205,7 +211,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		}
 		stopped <- server.Serve(listener)
 	}()
-	logger.Info("server_started", "product", product.Read().TechnicalID, "version", product.Read().Version, "environment", cfg.Environment, "mode", cfg.InstallationMode, "listen", cfg.ListenAddress)
+	logger.Info("server_started", "product", product.Read().TechnicalID, "version", product.Read().Version, "environment", cfg.Environment, "mode", cfg.InstallationMode, "listen", cfg.ListenAddress, "test_mode", testMode)
 	select {
 	case err := <-stopped:
 		if !errors.Is(err, http.ErrServerClosed) {

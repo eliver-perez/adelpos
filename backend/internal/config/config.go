@@ -9,9 +9,14 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+// TestDatabasePrefix es el prefijo obligatorio del nombre de la base en modo de pruebas (etapa 9F): el
+// mismo que exigen las pruebas de integración y que usan las bases desechables de los scripts.
+const TestDatabasePrefix = "adel_pos_test_"
 
 type Database struct {
 	Host           string `json:"host"`
@@ -34,6 +39,17 @@ type Config struct {
 	LicenseMode      string   `json:"license_mode"`
 	TLSCertificate   string   `json:"tls_certificate,omitempty"`
 	TLSPrivateKey    string   `json:"tls_private_key,omitempty"`
+	// TestMode («"test_mode": true» en el archivo) marca el servidor de las pruebas automáticas (etapa
+	// 9F). Con él, la configuración solo es válida contra una base desechable (TestDatabasePrefix) y
+	// /api/v1/version lo informa para que los clientes de prueba se nieguen a correr contra un servidor
+	// real. Sin el campo (omitempty) los archivos que escribe la instalación de Windows no cambian.
+	TestMode bool `json:"test_mode,omitempty"`
+	// PostgresBin es la carpeta opcional de pg_dump y pg_restore para el respaldo que se crea antes de
+	// «Quitar datos de prueba» (etapa 9F). Sin valor: ADEL_PG_BIN o la ruta de Homebrew.
+	PostgresBin string `json:"postgres_bin,omitempty"`
+	// BackupDirectory es la carpeta opcional de esos respaldos. Sin valor: «backups» junto a la carpeta
+	// de la configuración (.local/server.json → backups/, como scripts/database.py backup).
+	BackupDirectory string `json:"backup_directory,omitempty"`
 }
 
 func Load(filename string) (Config, error) {
@@ -79,6 +95,14 @@ func (c Config) Validate() error {
 	if !ip.IsLoopback() && !ip.IsPrivate() {
 		return errors.New("la escucha solo admite loopback o una IP privada específica")
 	}
+	if err := c.checkTestMode(); err != nil {
+		return err
+	}
+	relativeBin := c.PostgresBin != "" && !filepath.IsAbs(c.PostgresBin)
+	relativeBackups := c.BackupDirectory != "" && !filepath.IsAbs(c.BackupDirectory)
+	if relativeBin || relativeBackups {
+		return errors.New("postgres_bin y backup_directory deben ser rutas absolutas")
+	}
 	if (c.TLSCertificate == "") != (c.TLSPrivateKey == "") {
 		return errors.New("TLS requiere certificado y clave privada juntos")
 	}
@@ -113,6 +137,20 @@ func (c Config) Validate() error {
 	localDB := dbIP != nil && dbIP.IsLoopback()
 	if db.SSLMode != "verify-full" && !(db.SSLMode == "disable" && localDB && c.Environment == "development") {
 		return errors.New("PostgreSQL requiere verify-full; disable solo se permite en loopback de desarrollo")
+	}
+	return nil
+}
+
+// checkTestMode impide que el modo de pruebas arranque contra la base de una instalación real (etapa 9F,
+// §3): serve, migrate, prepare-setup y los demás comandos cargan la configuración con Validate, de modo
+// que ninguno llega a abrir la base. Sin test_mode no cambia nada.
+func (c Config) checkTestMode() error {
+	if !c.TestMode {
+		return nil
+	}
+	if !strings.HasPrefix(c.Database.Name, TestDatabasePrefix) || len(c.Database.Name) == len(TestDatabasePrefix) {
+		return errors.New("el modo de pruebas solo se usa con una base de datos de pruebas cuyo nombre empiece por " +
+			TestDatabasePrefix + "; nunca con la base de una instalación real")
 	}
 	return nil
 }

@@ -65,6 +65,9 @@ export type Operation =
   // Etapa 9D: umbral de cuenta abierta por mucho tiempo («Funciones del establecimiento»).
   | 'settings_long_open_hours'
   | 'save_settings_long_open_hours'
+  // Etapa 9F: «Quitar datos de prueba» en el Mantenimiento del administrador (services/maintenance.ts).
+  | 'maintenance_test_data'
+  | 'maintenance_remove_test_data'
   | 'reports_catalog'
   | 'reports_run'
   | 'reports_dashboard'

@@ -23,6 +23,10 @@ def run_browser(engine):
     config["database"]["name"] = name
     config["listen_address"] = "127.0.0.1:8183"
     config["allow_lan"] = False
+    # Etapa 9F: modo de pruebas (el servidor se niega a arrancar si la base no es adel_pos_test_* y lo
+    # informa a native-driver.ts) y respaldos de «Quitar datos de prueba» dentro de la carpeta temporal.
+    config["test_mode"] = True
+    config["backup_directory"] = str(directory / "backups")
     filename = directory / "server.json"
     with open(filename, "x", opener=lambda p, f: os.open(p, f, 0o600)) as output:
         json.dump(config, output)

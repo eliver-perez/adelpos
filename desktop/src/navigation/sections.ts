@@ -29,6 +29,7 @@ export type ScreenID =
   | 'devices'
   | 'registers'
   | 'audit'
+  | 'maintenance'
   | 'status'
   | 'preferences'
   | 'password';
@@ -197,7 +198,8 @@ export const sections: SectionEntry[] = [
     group: 'administration',
     parent: 'administration',
     grouping: true,
-    description: 'Configuración general, terminales, cajas físicas y registro de movimientos.',
+    description:
+      'Configuración general, terminales, cajas físicas, registro de movimientos y mantenimiento.',
   },
   {
     id: 'settings',
@@ -237,6 +239,17 @@ export const sections: SectionEntry[] = [
     parent: 'system',
     permission: 'audit.read',
     description: 'Quién hizo cada cambio administrativo y cuándo.',
+  },
+  {
+    // Etapa 9F (§3): «Quitar datos de prueba» con respaldo previo, solo para quien administra la
+    // configuración general (Go vuelve a exigir settings.manage).
+    id: 'maintenance',
+    label: 'Mantenimiento',
+    icon: 'database',
+    group: 'administration',
+    parent: 'system',
+    permission: 'settings.manage',
+    description: 'Quitar los datos que dejaron las pruebas automáticas, con un respaldo previo.',
   },
   {
     // §4.1: «Estado del sistema» ya no es una sección ni el inicio; se abre con «Ver estado del

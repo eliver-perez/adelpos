@@ -57,6 +57,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if strings.HasPrefix(request.URL.Path, "/api/v1/reports/export/") {
 		timeout = exportTimeout
 	}
+	// «Quitar datos de prueba» (etapa 9F) crea antes un respaldo completo de la base.
+	if isMaintenanceRoute(request.URL.Path) {
+		timeout = maintenanceTimeout
+	}
 	// El servidor HTTP corta toda respuesta a los 15 s (WriteTimeout): una ruta con más tiempo amplía
 	// su propio plazo de escritura. Sin soporte (pruebas con httptest) no hace falta.
 	if timeout > 10*time.Second {

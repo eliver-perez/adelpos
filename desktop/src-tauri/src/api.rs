@@ -8,6 +8,9 @@ use tauri::State;
 
 // Tiempo de respuesta de las consultas de reportes (Go responde en hasta 40 s).
 const REPORT_TIMEOUT_SECONDS: u64 = 45;
+// Tiempo de respuesta de «Quitar datos de prueba» (etapa 9F): Go crea antes un respaldo completo de la
+// base y responde en hasta 120 s.
+const MAINTENANCE_TIMEOUT_SECONDS: u64 = 130;
 
 pub(crate) fn resource_id(id: Option<&str>) -> Result<&str, String> {
     let value = id.ok_or("Falta el identificador del registro.")?;
@@ -89,6 +92,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9D: umbral de cuenta abierta por mucho tiempo, en «Funciones del establecimiento».
         "settings_long_open_hours" => Some((Method::GET, "settings/long-open-hours")),
         "save_settings_long_open_hours" => Some((Method::PUT, "settings/long-open-hours")),
+        // Etapa 9F: «Quitar datos de prueba» en el Mantenimiento del administrador (settings.manage).
+        "maintenance_test_data" => Some((Method::GET, "maintenance/test-data")),
+        "maintenance_remove_test_data" => Some((Method::POST, "maintenance/test-data/remove")),
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
@@ -766,6 +772,9 @@ pub async fn api_request(
     // Los reportes tienen su propio tiempo de respuesta en Go (40 s): el puente espera un poco más.
     if operation.starts_with("reports_") {
         request = request.timeout(Duration::from_secs(REPORT_TIMEOUT_SECONDS));
+    }
+    if operation == "maintenance_remove_test_data" {
+        request = request.timeout(Duration::from_secs(MAINTENANCE_TIMEOUT_SECONDS));
     }
     if let Some(body) = body {
         request = request.json(&body);
@@ -2108,6 +2117,30 @@ mod tests {
             Some(&format!("{identifier}/x"))
         )
         .is_err());
+    }
+
+    #[test]
+    fn maintenance_routes_are_fixed() {
+        // Etapa 9F: la vista previa y «Quitar datos de prueba» son rutas fijas, sin identificador.
+        for (operation, method, path) in [
+            (
+                "maintenance_test_data",
+                Method::GET,
+                "maintenance/test-data",
+            ),
+            (
+                "maintenance_remove_test_data",
+                Method::POST,
+                "maintenance/test-data/remove",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+            assert_eq!(
+                route(operation, Some("../../etc/passwd")).unwrap().1,
+                path.to_string()
+            );
+        }
+        assert!(route("maintenance_backup", None).is_err());
     }
 
     #[test]

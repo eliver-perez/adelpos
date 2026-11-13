@@ -65,7 +65,25 @@ function readMenuActions() {
   );
 }
 
+// Etapa 9F (§3): las pruebas solo corren contra un servidor que se declara en modo de pruebas
+// (`test_mode` de la configuración, que exige una base desechable adel_pos_test_*). Así un
+// ADEL_BROWSER_SERVER_URL equivocado nunca escribe en una instalación real.
+async function requireTestServer() {
+  let testMode = false;
+  try {
+    const response = await fetch(`${serverURL}/api/v1/version`);
+    const version = (await response.json()) as { test_mode?: unknown };
+    testMode = response.ok && version.test_mode === true;
+  } catch {
+    testMode = false;
+  }
+  if (!testMode) {
+    throw new Error('Las pruebas solo corren contra un servidor en modo de pruebas');
+  }
+}
+
 export async function installDriver(page: Page) {
+  await requireTestServer();
   let fullscreen = true;
   const menuActions = readMenuActions();
   let menuChannel: number | null = null;

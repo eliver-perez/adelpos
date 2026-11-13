@@ -137,6 +137,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if strings.HasPrefix(route, "reports/") {
 		return handleReports(ctx, tx, request, principal, route)
 	}
+	// Mantenimiento del administrador (etapa 9F): «Quitar datos de prueba» (maintenance.go).
+	if strings.HasPrefix(route, "maintenance/") {
+		return service.maintenanceRoutes(ctx, tx, request, principal, route)
+	}
 	// Las funciones del establecimiento se identifican por código, no por UUID.
 	if route == "settings/features" {
 		return establishmentFeatures(ctx, tx, request, principal)

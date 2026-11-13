@@ -23,7 +23,8 @@ export type AdministrationScreen =
   | 'Configuración'
   | 'Terminales'
   | 'Cajas físicas'
-  | 'Registro de movimientos';
+  | 'Registro de movimientos'
+  | 'Mantenimiento';
 
 // Mosaicos que se tocan desde Administración para llegar a cada pantalla.
 const administrationPaths: Record<AdministrationScreen, string[]> = {
@@ -41,6 +42,8 @@ const administrationPaths: Record<AdministrationScreen, string[]> = {
   Terminales: ['Sistema', 'Terminales'],
   'Cajas físicas': ['Sistema', 'Cajas físicas'],
   'Registro de movimientos': ['Sistema', 'Registro de movimientos'],
+  // Etapa 9F: «Quitar datos de prueba».
+  Mantenimiento: ['Sistema', 'Mantenimiento'],
 };
 
 export function topBar(page: Page): Locator {
