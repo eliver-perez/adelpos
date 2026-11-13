@@ -554,6 +554,10 @@ async function runBrowser(engine) {
   config.database.name = name;
   config.listen_address = '127.0.0.1:8183';
   config.allow_lan = false;
+  // Etapa 9F: modo de pruebas (el servidor se niega a arrancar si la base no es adel_pos_test_* y lo
+  // informa a native-driver.ts) y respaldos de «Quitar datos de prueba» dentro de la carpeta temporal.
+  config.test_mode = true;
+  config.backup_directory = path.join(directory, 'backups');
   const filename = path.join(directory, 'server.json');
   writeJSON(filename, config, true);
   let server = null;

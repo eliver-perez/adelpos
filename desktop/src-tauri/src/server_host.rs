@@ -141,6 +141,9 @@ mod platform {
     }
 
     impl ServerHost {
+        /// El proceso hijo hereda el entorno de la aplicación (no se limpia con `env_clear`): así
+        /// `ADEL_TEST_MODE=1` de la prueba de humo llega a `host`, que entonces se niega a usar la carpeta
+        /// de datos real del usuario (etapa 9F). La carpeta sale de `LOCALAPPDATA` (`data_dir`).
         fn spawn(&self) -> std::io::Result<Child> {
             Command::new(&self.executable)
                 .arg("host")

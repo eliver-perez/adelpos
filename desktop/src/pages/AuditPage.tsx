@@ -28,6 +28,8 @@ const actionLabels: Record<string, string> = {
   'restaurant.cancel_reasons_reordered': 'Motivos de cancelación reordenados',
   'settings.long_open_hours_changed': 'Umbral de cuenta abierta cambiado',
   'inventory.cancellation_preclassified': 'Cancelación preclasificada como merma',
+  // Etapa 9F: «Quitar datos de prueba» (también el intento sin respaldo, con resultado fallido).
+  'maintenance.test_data_removed': 'Datos de prueba quitados',
 };
 
 export function AuditPage() {

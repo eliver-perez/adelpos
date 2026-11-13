@@ -547,6 +547,7 @@ describe('mosaicos de Administración por permisos', () => {
       'Terminales',
       'Cajas físicas',
       'Registro de movimientos',
+      'Mantenimiento',
     ]);
     expect(screen.getByRole('button', { name: 'Registro de movimientos' })).toBeTruthy();
     cleanup();

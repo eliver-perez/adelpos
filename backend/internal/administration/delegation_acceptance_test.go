@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"local/ad-el-pos/server/internal/administration"
 )
 
 type administrationCall func(actor terminal, method, route string, body any, expected int) json.RawMessage
@@ -21,6 +22,8 @@ type delegationEnvironment struct {
 	device          terminal
 	admin           terminal
 	supportPassword string
+	// service es el servicio que atiende las llamadas (etapa 9F: respaldo controlado de mantenimiento).
+	service *administration.Service
 }
 
 func (env *delegationEnvironment) login(t *testing.T, username, password string) terminal {

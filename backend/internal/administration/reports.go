@@ -61,6 +61,11 @@ func handleReports(ctx context.Context, tx pgx.Tx, request Request, principal Pr
 // reporte. Cualquier otro resultado se devuelve tal cual. Un archivo exportado se audita antes de
 // entregarlo: si la auditoría no se puede registrar, el archivo no se entrega.
 func (service *Service) completeDeferred(ctx context.Context, result any) (any, error) {
+	// «Quitar datos de prueba» (etapa 9F): el respaldo y la transacción que quita los datos corren
+	// después de confirmar la autenticación (maintenance.go).
+	if removal, ok := result.(*testDataRemoval); ok {
+		return service.removeTestData(ctx, removal)
+	}
 	pending, ok := result.(*reportPlan)
 	if !ok {
 		return result, nil

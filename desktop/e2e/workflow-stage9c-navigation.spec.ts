@@ -228,6 +228,8 @@ test('navegación 9C: barra superior, mosaicos, ruta, inicio por terminal y capt
     /^Terminales/,
     /^Cajas físicas/,
     /^Registro de movimientos/,
+    // Etapa 9F: «Mantenimiento» («Quitar datos de prueba»), con settings.manage.
+    /^Mantenimiento/,
   ]);
   await tiles.getByRole('button', { name: 'Registro de movimientos', exact: true }).click();
   await expect(

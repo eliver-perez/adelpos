@@ -21,6 +21,9 @@ import {
 // motivo, corte parcial, cierre de turno y el reporte de ventas en PDF y Excel con el diálogo nativo.
 // Reutiliza los recorridos de e2e/ (solo interfaz) y las cifras las calcula Go. Los pasos van en serie y
 // sobre la misma base: si uno falla, se corrige y se vuelve a correr desde ese paso con --grep.
+// Etapa 9F (decisión D1): scripts/windows/installed-smoke.ps1 abre la aplicación con una carpeta de datos
+// temporal, otro perfil de credenciales y ADEL_TEST_MODE=1, y la prueba exige que el servidor lo declare
+// (test_mode en /api/v1/version) antes de escribir nada: nunca corre sobre los datos reales.
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const artifacts = path.resolve(here, '..', '..', '.local', 'installed-artifacts');
@@ -43,7 +46,31 @@ test.beforeAll(async () => {
   }));
   page.viewportSize = () => size;
   page.setViewportSize = async () => {};
+  // La primera vez el servidor local crea la base: se espera a que responda y se exige el modo de pruebas.
+  await expect
+    .poll(async () => (await serverSnapshot()).version?.body?.test_mode ?? null, {
+      timeout: 180000,
+      intervals: [1000],
+    })
+    .not.toBeNull();
+  if ((await serverSnapshot()).version?.body?.test_mode !== true) {
+    throw new Error('Las pruebas solo corren contra un servidor en modo de pruebas');
+  }
 });
+
+// Estado del servidor por el puente real (la misma operación que usa la barra superior).
+async function serverSnapshot() {
+  return page.evaluate(async () => {
+    const internals = (
+      window as unknown as {
+        __TAURI_INTERNALS__: { invoke: (command: string, args: unknown) => Promise<unknown> };
+      }
+    ).__TAURI_INTERNALS__;
+    return (await internals.invoke('server_snapshot', {})) as {
+      version: { status: number; body: { test_mode?: boolean } } | null;
+    };
+  });
+}
 
 async function shot(name: string) {
   await page.screenshot({ path: path.join(artifacts, `${name}.png`) });

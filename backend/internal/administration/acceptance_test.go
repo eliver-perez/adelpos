@@ -127,9 +127,11 @@ func TestStageTwoAcceptance(t *testing.T) {
 		oldSession := primary
 		primary.session = text(response, "session_token")
 		call(oldSession, "GET", "users", nil, 401)
+		// El servicio reiniciado es el que atiende en adelante (la etapa 9F le inyecta un respaldo controlado).
+		service = &administration.Service{Pool: pool, ProvisioningFile: filename}
 		handler = httpapi.New(func(ctx context.Context) database.Health {
 			return database.Probe(ctx, pool)
-		}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), &administration.Service{Pool: pool, ProvisioningFile: filename})
+		}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)
 		call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "admin"}, 401)
 		response = call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": password}, 200)
 		primary.session = text(response, "session_token")
@@ -298,6 +300,7 @@ func TestStageTwoAcceptance(t *testing.T) {
 		device:          terminal{id: primary.id, secret: primary.secret},
 		admin:           primary,
 		supportPassword: supportPassword,
+		service:         service,
 	}
 	// Etapa 9C: pantalla de inicio por terminal (terminal_home_acceptance_test.go).
 	testTerminalHome(t, environment)
@@ -306,6 +309,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	testNewUserAppearance(t, environment)
 	// Etapa 9D: umbral de cuenta abierta y permiso «Cancelar cuentas» (long_open_hours_acceptance_test.go).
 	testLongOpenHours(t, environment)
+	// Etapa 9F: «Quitar datos de prueba» con respaldo previo (test_data_acceptance_test.go).
+	testTestDataRemoval(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

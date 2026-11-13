@@ -234,3 +234,132 @@ Copia aislada del worktree (`sync_tree.sh`), Go temporal en 8185 y vista previa 
 
 `CLAUDE.md` §11–12 («Marca» y «Barra superior, Mesas y cuentas») y `docs/NAVIGATION_AND_SHORTCUTS.md` (párrafo de la
 9F, barra compacta, Caja, estado del servidor y pruebas).
+
+**Cierre de la fase D** (coordinador, copia exacta de `f56fcd9`, clúster temporal 55499, Go 8183, vista previa 1421,
+pantalla desbloqueada): formato, metadatos, `go vet` (también `GOOS=windows`), Go unitarias con `-race`, `tsc`, Vitest
+(77 archivos, 766 pruebas), `npm run build` y `cargo test` (41 + 1 ignorada) aprobados; Playwright de `restaurant`,
+`workflow-stage9c-navigation`, `workflow-stage9d-*` y `workflow-stage9f-topbar-map` juntas sobre una base por motor:
+**Chromium 7/7 y WebKit 7/7**.
+
+## Fase A · Datos de prueba fuera de las instalaciones reales
+
+Un agente en su propio worktree (desde `b8d707b`), sin migración (la marca es la firma exacta). Decisiones D1 y D2.
+
+### Protección del modo de pruebas (D1)
+
+- **Configuración** (`backend/internal/config/config.go`): campo opcional `test_mode`. Con `true`, `Validate` (que usan
+  `config.Load` y todos los comandos) exige una base `adel_pos_test_*`: `serve`, `migrate`, `prepare-setup` y los demás
+  se niegan a arrancar con «el modo de pruebas solo se usa con una base de datos de pruebas…». Sin el campo, nada
+  cambia (`omitempty`: el `server.json` que escribe la instalación de Windows queda igual). Campos opcionales nuevos
+  para el respaldo: `postgres_bin` y `backup_directory` (rutas absolutas).
+- **`GET /api/v1/version`** informa siempre `test_mode` (`httpapi.NewWithOptions`; `serveHTTP` recibe el modo).
+- **`desktop/e2e/native-driver.ts`**: antes de cualquier petición exige `test_mode: true` en `/version`; si no, falla
+  con «Las pruebas solo corren contra un servidor en modo de pruebas». `scripts/browser-tests.py` y
+  `scripts/windows/dev.mjs` (`test-browser`) escriben `test_mode: true` y `backup_directory` dentro de su carpeta
+  temporal. El `e2e_port.sh` del coordinador lo detecta por el texto `"test_mode"` de `config.go` (está en el
+  comentario del campo, porque la etiqueta lleva `omitempty`).
+- **Windows `host`** (`cmd/ad-el-pos-server/host_windows.go`, `internal/standalone/testmode.go`, todo `//go:build
+windows`): con `ADEL_TEST_MODE=1`, `host`, `backup`, `restore-check` y `restore` se niegan a usar la carpeta de datos
+  real (`windows.KnownFolderPath(FOLDERID_LocalAppData)` + «AD-EL POS», comparada con `samePath`; no depende de la
+  variable `LOCALAPPDATA`); otro valor no vacío es un error; `host` informa `test_mode: true`. Rust
+  (`server_host.rs`) no limpia el entorno del proceso hijo, así que la variable llega a Go (comentario en `spawn`).
+- **Prueba de humo de Windows** (`scripts/windows/installed-smoke.ps1`, UTF-8 con BOM, LF): exige la aplicación real
+  cerrada y los puertos 8181, 55432 y 9222 libres; abre la aplicación con `LOCALAPPDATA` temporal,
+  `ADEL_TERMINAL_CONFIG` con un `credential_namespace` propio (`humo-<12 hex>`, archivo JSON sin BOM) y
+  `ADEL_TEST_MODE=1`; al terminar, pase lo que pase, cierra la aplicación en orden (fuerza los procesos que queden tras 60 s), borra la carpeta temporal, borra
+  la credencial (`cmdkey /delete:"http://127.0.0.1:8181|<perfil>.local.adel.pos.dev"`) y avisa si el clúster real quedó
+  en marcha. `desktop/e2e-installed/installed-smoke.spec.ts` exige `test_mode: true` (por `server_snapshot`) antes del
+  primer paso. **No verificado en Windows** (no hay Windows en esta sesión).
+
+### «Quitar datos de prueba» (D1, D2)
+
+- **Paquete nuevo `backend/internal/maintenance`** (solo pruebas unitarias; no hace falta tocar la tupla de
+  `scripts/database.py` ni `dev.mjs`: la integración vive en `internal/administration`):
+  - `signatures.go`: lista cerrada con el archivo de prueba de cada firma: impresoras «Destino controlado E2E»
+    (`e2e/kitchen-flow.ts`) y «Destino controlado 9B» (`e2e/workflow-stage9b-designer.spec.ts`), ambas `agent` con
+    destino «Agente de aceptación no disponible»; estaciones «Cocina caliente» y «Freidoras» solo con una de esas
+    impresoras; producto «Filete de prueba» `FILETE` `product`; categoría «Platillos» `#d64545` solo si contiene un
+    producto de prueba (el rojo es el primer color de la paleta). `signatures_test.go` lee cada archivo de prueba y
+    falla si ya no crea esos datos exactos.
+  - `plan.go` y `references.go`: decide eliminar, desactivar (el producto además se archiva), desvincular o conservar.
+    Los «registros relacionados» se leen de las llaves foráneas del catálogo de PostgreSQL (`pg_constraint`), no de una
+    lista a mano: una tabla nueva que apunte a una estación, impresora, producto o categoría hace que el dato se
+    desactive en lugar de borrarse. Los motivos están en palabras del restaurante («Ya tiene registros: ventas y tareas
+    de cocina.»). Se conserva la impresora de prueba que usa una estación del restaurante y la categoría con otros
+    productos o con una ruta con estaciones del restaurante. Se desvincula la impresora de tickets de Cobros, el cajón
+    de cada caja (queda desactivado), la impresora de respaldo de otras impresoras, las estaciones por terminal y las
+    estaciones de prueba en rutas que se conservan; la ruta cuyas estaciones son todas de prueba se elimina.
+  - `apply.go`: una transacción en el orden de las llaves foráneas, eventos `kitchen.*.changed`,
+    `payments.settings.changed`, `cash.settings.changed` (por caja) y `maintenance.test_data.removed`.
+  - `backup.go`: `pg_dump --format=custom --no-owner --no-acl` con la conexión de la configuración, la contraseña solo
+    en el entorno del hijo (se descartan las `PG*` heredadas), binarios de `postgres_bin`, `ADEL_PG_BIN` o Homebrew,
+    carpeta `backup_directory` o `backups/` junto a la carpeta de la configuración, nombre
+    `<base>-<AAAAMMDDTHHMMSSZ>-<6 hex>.dump` con 0600 (ACL privada en Windows) y `pg_restore --list`; si algo falla
+    borra el archivo. En el `host` de Windows se usa `standalone.Backup` con la etiqueta
+    `antes-de-quitar-datos-de-prueba`.
+- **Rutas** (`administration/maintenance.go`, `settings.manage`): `GET maintenance/test-data` (vista previa con locks
+  compartidos 7820148305, 7820148304 y 7820148308; `plan_id` = SHA-256 de lo que se elimina, desactiva y desvincula) y
+  `POST maintenance/test-data/remove {operation_id, plan_id}`. La transacción de autenticación solo autoriza y comprueba
+  la idempotencia (`restaurant_operations`; misma operación ⇒ respuesta guardada sin otro respaldo; otro plan ⇒ 409
+  `IDEMPOTENCY_CONFLICT`); después (como los reportes, `completeDeferred`) el respaldo y, solo si quedó bien, una
+  transacción con los tres locks exclusivos que recalcula el plan (409 `TEST_DATA_CHANGED` si no es el revisado),
+  aplica, audita `maintenance.test_data_removed` con la lista y el nombre del respaldo y guarda la respuesta. Respaldo
+  fallido: 503 `BACKUP_FAILED` sin quitar nada y auditoría con `success=false`; sin nada que quitar no se respalda.
+  Tiempo de respuesta de `maintenance/*`: 120 s; el puente espera 130 s.
+- **Puente**: `maintenance_test_data` y `maintenance_remove_test_data` en la lista cerrada de `api.rs`.
+- **Interfaz**: `pages/MaintenancePage.tsx` y `services/maintenance.ts`; sección «Mantenimiento» en Sistema
+  (`navigation/sections.ts`, `settings.manage`, icono `database`). «Revisar datos de prueba» → lista agrupada («Se
+  eliminará», «Se desactivará», «Se desvinculará», «Se conserva») o «No hay datos de prueba.» → «Quitar datos de
+  prueba» en rojo con `ConfirmDialog` `tone: 'danger'` («Primero se crea un respaldo de la base de datos…») → aviso
+  «Datos de prueba quitados.» con lo eliminado, desactivado y desvinculado y «Respaldo previo: <archivo>» (sin
+  carpeta). Conserva el `operation_id` ante una respuesta sin conexión. Estilos en un bloque propio al final de
+  `styles.css`. «Registro de movimientos» nombra la acción («Datos de prueba quitados»).
+- **Documentación**: `API_CONTRACTS.md` («Etapa 9F · modo de pruebas y Quitar datos de prueba»),
+  `docs/KITCHEN_AND_PRINTING.md` («Datos de prueba · etapa 9F»), `docs/NAVIGATION_AND_SHORTCUTS.md` (mosaico),
+  `CLAUDE.md` §6 («Modo de pruebas» y la frase de `installed-smoke.ps1`) y `DEVELOPMENT_WINDOWS.md`.
+
+- Se ajustó `desktop/e2e/workflow-stage9c-navigation.spec.ts`, que comprueba los mosaicos exactos de Sistema (ahora
+  con «Mantenimiento»), y `desktop/e2e/navigation.ts` (`openAdministration(page, 'Mantenimiento')`).
+
+### Pruebas (copia aislada, clúster 55499, Go 8184 y vista previa 1422)
+
+13/11/2026, sobre una copia del worktree; pantalla del equipo desbloqueada.
+
+| Suite                                                               | Resultado                                                                   |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Prettier (todo el worktree), `gofmt -l`, `cargo fmt`                | sin diferencias                                                             |
+| `go vet` (normal y `-tags=integration`)                             | aprobado                                                                    |
+| `GOOS=windows`: `go build ./...` y `go vet` (y `-tags=integration`) | aprobado (`standalone/testmode_test.go` solo compila; no se ejecutó)        |
+| Go unitarias con `-race` (`./...`)                                  | 23 paquetes `ok` (nuevo `internal/maintenance`)                             |
+| Integración `internal/administration` con `-race`                   | `ok` (74.6 s), con 6 subpruebas 9F, incluido el respaldo real con `pg_dump` |
+| `tsc --noEmit`                                                      | sin errores                                                                 |
+| Vitest (`npm test`)                                                 | 77 archivos, 764 pruebas (nuevo `pages/maintenance.test.tsx`, 7 pruebas)    |
+| `npm run build`                                                     | correcto (aviso de tamaño de fragmentos ya conocido)                        |
+| `cargo test --locked --offline`                                     | 42 aprobadas, 1 ignorada (nueva `maintenance_routes_are_fixed`)             |
+| Playwright `workflow-stage9f-zz-test-data` sola, base nueva         | Chromium 1/1 y WebKit 1/1 (camino «eliminar»)                               |
+| Playwright corrida completa Chromium                                | 20 de 20 (7.5 min; camino «desactivar», con ventas y trabajos de impresión) |
+| Playwright corrida completa WebKit                                  | 20 de 20 (7.3 min)                                                          |
+
+La primera corrida completa de Chromium falló en `workflow-stage9c-navigation` (esperaba exactamente cuatro mosaicos
+en Sistema) y arrastró en cascada a las seis siguientes; se corrigió la especificación y la repetición aprobó 20 de 20.
+En la corrida completa, la vista previa de Go listó: se elimina la ruta de «Platillos»; se desactivan «Cocina caliente»
+y «Freidoras» (tareas y avisos de cocina), «Filete de prueba» (recetas de inventario, productos en cuentas abiertas y
+ventas), «Destino controlado 9B» y «Destino controlado E2E» (trabajos de impresión); se desvincula la impresora de
+tickets de Cobros; se conserva «Platillos» (tiene «Hamburguesa de prueba»). El respaldo previo quedó como
+`adel_pos_test_browser_…-20261113T154512Z-b5c5b7.dump` (789 270 bytes, permisos 0600) en la carpeta temporal.
+
+Subpruebas de integración 9F: permiso `settings.manage` (403 auditados) y cuerpo inválido; sin datos no se respalda;
+dato real con nombre genérico intacto («Cocina caliente» con otra impresora, «Platillos» con un producto del
+restaurante), impresora de tickets, cajón y respaldo de otra impresora desvinculados, respaldo fallido (503 sin quitar
+nada y auditoría con `success=false`), idempotencia (misma operación sin otro respaldo, 409 con otro plan, 409 con un
+plan viejo) y eventos; datos con venta y tareas desactivados sin cambiar los conteos de 16 tablas de operación;
+categoría de prueba con su ruta «Sin preparación» eliminada; respaldo real con `pg_dump`/`pg_restore --list`.
+
+**No verificado**: Windows (`host` con `ADEL_TEST_MODE=1` y la carpeta conocida, `installed-smoke.ps1` y la prueba
+instalada; solo compilan o se revisaron), y «Quitar datos de prueba» sobre la instalación real de Windows (la hará el
+propietario). La Mac no tiene datos de prueba (Fase 0): no se ejecutó en la instalación real.
+
+**Riesgo para el coordinador**: `workflow-stage9f-zz-test-data.spec.ts` deja la base compartida sin impresora de tickets,
+sin la ruta de «Platillos» y con las estaciones y los destinos de aceptación desactivados. Una especificación que se
+ordene después (por ejemplo `workflow-stage9f-topbar-*`) no debe depender de ellos; si alguna lo hace, conviene que esta
+corra al final.

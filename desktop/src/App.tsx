@@ -12,6 +12,7 @@ import type { RestaurantView } from './hooks/useRestaurantWorkspace';
 import { KitchenPage } from './pages/kitchen/KitchenPage';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
 import { AuditPage } from './pages/AuditPage';
+import { MaintenancePage } from './pages/MaintenancePage';
 import { DevicesPage } from './pages/DevicesPage';
 import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
@@ -404,6 +405,8 @@ function ApplicationContent() {
         return <StatusPage support={can('settings.manage')} />;
       case 'audit':
         return <AuditPage />;
+      case 'maintenance':
+        return <MaintenancePage />;
       case 'preferences':
         return <PreferencesPage identity={identity} refresh={session.refresh} />;
       case 'password':

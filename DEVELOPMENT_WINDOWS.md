@@ -103,8 +103,11 @@ propietario) y `CLAUDE.md` §17.
   mide la ventana y el servidor, cuenta ventanas de consola nuevas, suma la memoria, cierra en orden y, con
   `-Uninstall`, desinstala y comprueba que los datos siguen. Nunca borra `%LOCALAPPDATA%\AD-EL POS`.
 - `scripts\windows\installed-smoke.ps1 [-Grep <paso>]`: abre la aplicación instalada con el puerto de depuración de
-  WebView2 solo en esa ejecución y corre `desktop\e2e-installed` con Playwright por CDP (crea datos reales en la
-  instalación: úsese en un equipo de pruebas).
+  WebView2 solo en esa ejecución y corre `desktop\e2e-installed` con Playwright por CDP. Desde la etapa 9F no toca los
+  datos reales: exige la aplicación real cerrada (mismos puertos), la abre con `LOCALAPPDATA` temporal, otro
+  `credential_namespace` y `ADEL_TEST_MODE=1` (el servidor rechaza la carpeta de datos real y la prueba exige
+  `test_mode` en `/api/v1/version`) y al terminar cierra la aplicación, borra la carpeta temporal y la credencial de
+  prueba (`cmdkey /delete`).
 - **Otra carpeta de datos** (por ejemplo, simular un usuario con acentos): abrir `ad-el-pos-desktop.exe` con
   `LOCALAPPDATA` apuntando a otra carpeta **y** `ADEL_TERMINAL_CONFIG` con un `connection.json` que use otro
   `credential_namespace`. Con el perfil `main`, el servidor nuevo rechazaría la terminal (`DEVICE_REQUIRED`) y la

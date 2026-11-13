@@ -2923,3 +2923,63 @@ fin del flujo como siempre y reconecta con `Last-Event-ID` cuando el servidor vu
 | `host --data-dir D --pg-bin B [--watch-stdin] [--log-file F]`    | solo Windows | Servidor de la instalación: bloqueo de la carpeta, clúster propio, rol, base, respaldo antes de migrar sobre datos, migraciones, `serve` y parada de PostgreSQL.  |
 | `backup [--pause]`, `restore-check --file F`, `restore --file F` | solo Windows | Respaldo y ensayo con los `pg_dump`/`pg_restore` incluidos; `restore` exige la aplicación cerrada, un archivo de `backups` y crea antes un respaldo de seguridad. |
 | `--log-file F` (cualquier comando)                               | ambos        | Bitácora JSON en archivo (rotación simple a 20 MiB) en lugar de la salida estándar.                                                                               |
+
+## Etapa 9F · modo de pruebas y «Quitar datos de prueba» (fase A, sin migración)
+
+### Modo de pruebas (`test_mode`)
+
+- Configuración del servidor: campo opcional `test_mode` (booleano, sin valor = falso). Con `true`, la configuración
+  solo es válida si `database.name` empieza por `adel_pos_test_` (y tiene algo después); si no, `config.Load` la
+  rechaza con «el modo de pruebas solo se usa con una base de datos de pruebas…» y **ningún comando arranca**
+  (`serve`, `migrate`, `prepare-setup`, `check-config` y los demás). Campos opcionales nuevos para el respaldo de
+  mantenimiento: `postgres_bin` (carpeta de `pg_dump`/`pg_restore`) y `backup_directory`, ambos rutas absolutas.
+- `GET /version` informa siempre `test_mode` (`false` en un servidor ordinario). `desktop/e2e/native-driver.ts` se
+  niega a correr si no es `true` («Las pruebas solo corren contra un servidor en modo de pruebas»), y
+  `scripts/browser-tests.py` y `scripts/windows/dev.mjs` (`test-browser`) escriben `test_mode: true` (y
+  `backup_directory` dentro de su carpeta temporal) en la configuración temporal.
+- Windows (`host`, solo línea de comandos): con la variable `ADEL_TEST_MODE=1` (heredada de la aplicación), `host`,
+  `backup`, `restore-check` y `restore` se niegan a usar la carpeta de datos real del usuario (la de la API de
+  carpetas conocidas `FOLDERID_LocalAppData` + «AD-EL POS», independiente de la variable `LOCALAPPDATA`), y `host`
+  informa `test_mode: true` en `/version`. Cualquier otro valor no vacío de la variable es un error.
+
+### Mantenimiento · «Quitar datos de prueba»
+
+| Método | Ruta                            | Requisito                                                                                         |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/test-data`        | `settings.manage`; vista previa con locks compartidos 7820148305, 7820148304 y 7820148308.        |
+| POST   | `/maintenance/test-data/remove` | `settings.manage`; `{operation_id, plan_id}`; respaldo previo y transacción con locks exclusivos. |
+
+- Vista previa: `{plan_id, remove: Entry[], deactivate: Entry[], unlink: Entry[], keep: Entry[]}` con
+  `Entry = {kind: printer|station|route|product|category|setting, id, name, reason}` (motivo en español, sin nombres
+  técnicos). `plan_id` es el SHA-256 hexadecimal de `remove`, `deactivate` y `unlink`.
+- Identificación por **firma exacta** de los archivos de prueba (lista cerrada en `backend/internal/maintenance/
+signatures.go`, cada una con su archivo): impresoras «Destino controlado E2E» y «Destino controlado 9B» con transporte
+  `agent` y destino «Agente de aceptación no disponible»; estaciones «Cocina caliente» y «Freidoras» **solo con una de
+  esas impresoras**; producto «Filete de prueba» con código `FILETE` y tipo `product`; categoría «Platillos» con color
+  `#d64545` **solo si contiene un producto de prueba**. Rutas: se elimina la ruta cuyas estaciones son todas de prueba
+  (o la de un producto o categoría de prueba que se elimina); en las demás solo se quitan las estaciones de prueba.
+- Decisión: un dato sin registros relacionados se elimina; con registros (trabajos de impresión, tareas de cocina,
+  acuses, avisos, ventas, cuentas abiertas, recetas, combos o cualquier otra llave foránea que se agregue después) se
+  **desactiva** (el producto además se archiva); ya inactivo y sin nada que desvincular no aparece. Se **conserva** sin
+  cambios la impresora de prueba que usa una estación del restaurante y la categoría con otros productos o con una
+  ruta que incluye estaciones del restaurante. Se **desvincula** la configuración que apunta a lo de prueba: impresora
+  de tickets de Cobros, cajón de cada caja (queda desactivado), impresora de respaldo de otras impresoras, estaciones
+  por terminal y estaciones de prueba en rutas que se conservan. Nunca toca ventas, pagos, cortes, movimientos de
+  inventario, cuentas, documentos ni auditoría.
+- Quitar: la transacción de autenticación solo autoriza, valida y comprueba la idempotencia (la misma operación del
+  mismo actor y terminal devuelve la respuesta guardada sin otro respaldo; con otro `plan_id`, 409
+  `IDEMPOTENCY_CONFLICT`). Después, si el plan vigente no es el revisado: 409 `TEST_DATA_CHANGED` sin quitar nada; si no
+  hay nada que quitar, responde sin respaldo. Si no: **respaldo previo** (macOS y desarrollo: `pg_dump --format=custom
+--no-owner --no-acl` con la conexión de la configuración y la contraseña solo en el entorno del proceso hijo,
+  `<base>-<AAAAMMDDTHHMMSSZ>-<6 hex>.dump` con permisos 0600 en `backup_directory` o en `backups/` junto a la carpeta de
+  la configuración, comprobado con `pg_restore --list`; instalación de Windows: el respaldo de `internal/standalone` con
+  la etiqueta `antes-de-quitar-datos-de-prueba`). Si el respaldo falla: 503 `BACKUP_FAILED` («No se pudo crear el
+  respaldo de la base de datos; no se quitó ningún dato de prueba.») y auditoría `maintenance.test_data_removed` con
+  `success=false`. Si quedó bien: una transacción con 7820148305, 7820148304 y 7820148308 exclusivos recalcula el plan
+  (409 `TEST_DATA_CHANGED` si cambió), lo aplica, audita `maintenance.test_data_removed` con la lista y el nombre del
+  respaldo, publica `kitchen.printers.changed`, `kitchen.stations.changed`, `kitchen.routes.changed`,
+  `kitchen.access.changed`, `payments.settings.changed` (ámbito `configuration`), `cash.settings.changed` (ámbito
+  `cash`, por caja) y `maintenance.test_data.removed`, y guarda la respuesta en `restaurant_operations`.
+- Respuesta: `{removed, deactivated, unlinked, kept: Entry[], backup}` (`backup` = solo el nombre del archivo, vacío si
+  no había nada que quitar). Tiempo de respuesta de `maintenance/*`: 120 s (el puente espera 130 s).
+- Puente nativo (lista cerrada de `api.rs`): `maintenance_test_data` (GET) y `maintenance_remove_test_data` (POST).
