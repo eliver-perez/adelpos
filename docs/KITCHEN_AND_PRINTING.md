@@ -24,9 +24,11 @@ humo de Windows abre la aplicación con una carpeta de datos temporal y `ADEL_TE
 
 Lo que ya quedó en una instalación se quita en **Administración › Sistema › Mantenimiento › «Quitar datos de prueba»**
 (`settings.manage`): «Revisar datos de prueba» muestra lo que se elimina, lo que se desactiva porque ya tiene
-operaciones registradas (trabajos de impresión, tareas de cocina, ventas), la configuración que se desvincula (impresora
-de tickets de Cobros, cajón, impresora de respaldo, estaciones por terminal y rutas) y lo que se conserva, cada uno con
-su motivo. Solo se reconocen las firmas exactas de los archivos de prueba (nombre más atributos, lista cerrada en
+operaciones registradas (trabajos de impresión, tareas de cocina, ventas) o participa en una promoción del restaurante
+(la promoción no cambia), la configuración que se desvincula (impresora de tickets de Cobros, cajón, impresora de
+respaldo, estaciones por terminal y rutas; la ruta de un producto o una categoría del restaurante que solo enviaba a
+estaciones de prueba se quita y aparece aquí, no como dato de prueba) y lo que se conserva, cada uno con su motivo.
+Solo se reconocen las firmas exactas de los archivos de prueba (nombre más atributos, lista cerrada en
 `backend/internal/maintenance/signatures.go`): una estación «Cocina caliente» con otra impresora, o una categoría
 «Platillos» con productos del restaurante, no se tocan. Al confirmar, Go crea primero un respaldo de la base (si no
 puede, no quita nada), aplica todo en una transacción y lo audita; el aviso dice lo quitado y el nombre del respaldo.

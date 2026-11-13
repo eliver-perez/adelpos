@@ -67,8 +67,9 @@ function readMenuActions() {
 
 // Etapa 9F (§3): las pruebas solo corren contra un servidor que se declara en modo de pruebas
 // (`test_mode` de la configuración, que exige una base desechable adel_pos_test_*). Así un
-// ADEL_BROWSER_SERVER_URL equivocado nunca escribe en una instalación real.
-async function requireTestServer() {
+// ADEL_BROWSER_SERVER_URL equivocado nunca escribe en una instalación real. Se exporta solo para
+// probar el rechazo con un servidor simulado (src/testing/requireTestServer.test.ts).
+export async function requireTestServer() {
   let testMode = false;
   try {
     const response = await fetch(`${serverURL}/api/v1/version`);

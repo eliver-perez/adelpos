@@ -54,10 +54,11 @@ func TestStageTwoAcceptance(t *testing.T) {
 		return database.Probe(ctx, pool)
 	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)
 
-	call := func(actor terminal, method, route string, body any, expected int) json.RawMessage {
-		t.Helper()
+	// send hace la petición sin comprobar el resultado: se puede usar desde otra goroutine (etapa 9F,
+	// reenvío concurrente de «Quitar datos de prueba») y con el contexto de la petición que se elija.
+	send := func(requestContext context.Context, actor terminal, method, route string, body any) *httptest.ResponseRecorder {
 		encoded, _ := json.Marshal(body)
-		request := httptest.NewRequest(method, "/api/v1/"+route, bytes.NewReader(encoded))
+		request := httptest.NewRequestWithContext(requestContext, method, "/api/v1/"+route, bytes.NewReader(encoded))
 		request.RemoteAddr = "127.0.0.1:50505"
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("X-Device-ID", actor.id)
@@ -66,6 +67,11 @@ func TestStageTwoAcceptance(t *testing.T) {
 		request.Header.Set("X-Provisioning-Token", provisioning)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
+		return response
+	}
+	call := func(actor terminal, method, route string, body any, expected int) json.RawMessage {
+		t.Helper()
+		response := send(context.Background(), actor, method, route, body)
 		if response.Code != expected {
 			var failure struct {
 				Error struct {
@@ -296,6 +302,7 @@ func TestStageTwoAcceptance(t *testing.T) {
 		ctx:             ctx,
 		pool:            pool,
 		call:            call,
+		send:            send,
 		text:            text,
 		device:          terminal{id: primary.id, secret: primary.secret},
 		admin:           primary,

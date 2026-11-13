@@ -471,3 +471,110 @@ anulación retirada y autorización para cancelar unidades»), `docs/RESTAURANT_
 `docs/REPORTS.md` (párrafo 9F, «Autorizó», empleados, pruebas y limitaciones), `CLAUDE.md` (§11–12: campo calculado por
 Go; §15: nota de la 9C, la ruta `void` retirada y un apartado «Etapa 9F, fase E») y `AGENTS.md` (las dos reglas que
 decían que no había «Autorizó» y que `void` seguía en Go).
+
+**Cierre de la fase A** (coordinador, copia exacta de `b91fb7a` —incluye la fase D—, clúster temporal 55499, Go 8183,
+vista previa 1421, pantalla desbloqueada): formato, metadatos, `go vet` (también `GOOS=windows`), Go unitarias con
+`-race`, integración de `administration`, `tsc`, Vitest (78 archivos, 773 pruebas), `npm run build` y `cargo test` (42
+
+- 1 ignorada) aprobados; **Playwright completo (la fase A cambió el puente de las pruebas): Chromium 21/21 y WebKit
+  21/21**, con `workflow-stage9f-zz-test-data` al final.
+
+**Cierre de la fase E** (coordinador, copia exacta de `afcd61c` —incluye las fases D y A—, clúster temporal 55499, Go
+8189, vista previa 1427, pantalla desbloqueada): formato, metadatos, `go vet` (también `GOOS=windows`), Go unitarias
+con `-race`, integración de `operations`, `reports` y `reports/operational`, `tsc`, Vitest (79 archivos, 777 pruebas),
+`npm run build` y `cargo test` (42 + 1 ignorada) aprobados; Playwright de `restaurant`, `workflow-stage9d-accounts`,
+`workflow-stage9d-cancel-account` y `workflow-stage9f-cancel-units` juntas: **Chromium 4/4 y WebKit 4/4**.
+
+## Revisión independiente
+
+Un agente de solo lectura, por partes, a medida que se confirman las fases. Informes en el directorio temporal de la
+sesión (`review_1.md`, …).
+
+- **Parte 1** (`b8d707b..afcd61c`: fases D, A y E): sin hallazgos críticos ni altos. Comprobado: «Quitar datos de
+  prueba» no puede borrar operación (ninguna llave foránea en cascada; los bloqueos se leen de `pg_constraint`, también
+  las compuestas), firmas exactas, respaldo antes de borrar con el plan recalculado bajo los locks exclusivos y el mismo
+  `plan_id`, `pg_dump` con argumentos fijos y la contraseña solo en el entorno, modo de pruebas rechazado en `Validate`
+  y en Windows contra la carpeta conocida del sistema, 410 de `void` antes de permisos y lock, autorización de
+  supervisor antes de escribir y sin autoautorización. Hallazgos: **M1** (medio, confirmado con una prueba): quitar un
+  producto o categoría de prueba lo sacaba en silencio de las promociones del restaurante; **B1**: una ruta de un
+  producto del restaurante con solo estaciones de prueba aparecía como «Datos de prueba»; **B2**: un reenvío de la misma
+  operación en curso podía crear otro respaldo o responder 409, y el fallo tras el plazo no se auditaba; **B3**
+  (confirmado): la huella idempotente solo excluía la clave exacta `authorization.password` (con otras mayúsculas, Go
+  la aceptaba y la huella dependía de la contraseña); **B4**: la descripción del permiso `accounts.manage` seguía
+  hablando de cancelar con motivo libre; **B5**: limpieza frágil del `finally` de la prueba de humo de Windows y sin
+  prueba del rechazo de `requireTestServer`. Correcciones: ver «Correcciones de la revisión».
+
+### Correcciones de la revisión independiente, parte 1 (M1, B1, B2, B3 y B5)
+
+Un agente en su propio worktree desde `afcd61c`, sin migración. B4 (texto del permiso `accounts.manage`) queda para la
+0022 de la fase B.
+
+- **M1 · Promociones del restaurante** (`backend/internal/maintenance/plan.go`, `references.go`, `apply.go`):
+  `catalog_promotion_products` y `catalog_promotion_categories` salieron de las referencias que el plan maneja por su
+  cuenta, así que cuentan como registro relacionado: un producto o una categoría de prueba que participa en una
+  promoción se **desactiva** (el producto además se archiva) en lugar de borrarse, y la promoción no cambia
+  (participantes, estado y revisión). El motivo nombra la promoción («Participa en la promoción «…», que no cambia. Se
+  desactiva y se archiva.»; con otros registros, después de «Ya tiene registros: …»). `apply.go` ya no borra
+  participantes de promociones.
+- **B1 · Ruta de un producto o una categoría del restaurante** (`plan.go`): Go la sigue eliminando cuando todas sus
+  estaciones son de prueba (una ruta sin estaciones mandaría a ningún lado; sin ruta, el producto usa la de su
+  categoría o la cocina avisa «Sin ruta de preparación»), pero ya no se presenta como dato de prueba: va en «Se
+  desvinculará» con «Solo enviaba a estaciones de prueba («…»); se quita: sus productos sin ruta propia quedarán sin
+  ruta de preparación hasta que le asignes otra.» (para un producto: «el producto usará la ruta de su categoría o
+  quedará sin ruta de preparación hasta que le asignes otra.»). La de un producto de prueba o de una categoría de prueba
+  que no se conserva sigue en «Se eliminará» («Todas sus estaciones son de prueba.», en el mismo lugar de antes).
+- **B2 · Reenvío y auditoría del fallo** (`backend/internal/administration/maintenance.go`, `service.go`): una sola
+  eliminación a la vez en el servidor (turno con un canal de capacidad 1 que respeta el plazo de la petición); dentro de
+  la transacción de solo lectura, con los locks compartidos, se busca la respuesta guardada de la misma `operation_id`
+  **antes** de comparar el plan y de respaldar. Un reenvío mientras la primera respalda espera y recibe la respuesta
+  guardada, sin otro respaldo ni `TEST_DATA_CHANGED`. La búsqueda dentro de la transacción exclusiva se conserva. El
+  intento fallido se audita con `context.WithoutCancel` y un plazo propio de 10 s (y, si ni así, queda en la bitácora).
+- **B3 · Huella sin la contraseña con cualquier capitalización** (`backend/internal/operations/handler.go`):
+  `withoutAuthorizationPasswords` quita, en cualquier nivel del cuerpo, las claves `password` de todo objeto
+  `authorization` comparando con `strings.EqualFold` (el mismo plegado de `encoding/json`, incluida la «ſ»). Se eligió
+  quitar en lugar de rechazar claves no canónicas: no cambia el contrato y cubre cualquier forma que `decode` acepte.
+  **Cobros tiene el mismo patrón** (`backend/internal/payments/handler.go`, `requestFingerprint`, solo
+  `fields["authorization"]` y `"password"` exactos): no se tocó (lo corrige la fase B).
+- **B5 · Limpieza de la prueba de humo** (`scripts/windows/installed-smoke.ps1`, UTF-8 con BOM conservado): cada paso
+  del `finally` va en `CleanupStep` (su propio `try/catch`): variables, cierre de la ventana, espera de la aplicación
+  abierta (`WaitForExit`, también si `Get-CimInstance` falla), procesos restantes, carpeta temporal y credencial; lo que
+  no se pudo limpiar se informa al final y la prueba termina con error. `cmdkey` con error solo avisa (la credencial no
+  existe si la prueba falló antes de configurar la terminal). **No verificado en Windows** (en la Mac no hay
+  PowerShell, ni siquiera para analizar la sintaxis).
+- **Prueba del rechazo de `requireTestServer`**: se exportó de `desktop/e2e/native-driver.ts` (sin cambiar su
+  comportamiento) y `desktop/src/testing/requireTestServer.test.ts` lo importa con `ADEL_BROWSER_SERVER_URL` hacia un
+  servidor HTTP simulado en un puerto libre de 127.0.0.1: rechaza `/version` sin `test_mode`, con `false`, `"true"`,
+  `1`, `null`, una respuesta 500 y una que no es JSON; acepta solo `test_mode: true`. Va en `src/` porque `npm test`
+  solo corre `src` y un `*.test.ts` dentro de `e2e/` lo tomaría Playwright.
+- **Pruebas nuevas o ajustadas**: `test_data_acceptance_test.go` (la ruta de «Platillos» pasa a `unlink` con su
+  motivo; subpruebas `9F_revision_promocion_del_restaurante_no_se_toca`,
+  `9F_revision_reenvio_concurrente_sin_otro_respaldo` y
+  `9F_revision_respaldo_fallido_se_audita_aunque_venza_el_plazo`; `recordingBackup` con candado y un gancho `during`),
+  `acceptance_test.go` y `delegation_acceptance_test.go` (`send`: la petición sin comprobar el resultado, usable desde
+  otra goroutine y con el contexto que se elija), `maintenance/reasons_test.go`,
+  `operations/authorization_fingerprint_test.go` y `desktop/src/pages/maintenance.test.tsx` (la ruta en «Se
+  desvinculará»).
+- **Documentación**: `API_CONTRACTS.md` (Mantenimiento: promociones, ruta del restaurante, turno y reenvío, auditoría
+  del fallo; fase E: la huella sin distinguir mayúsculas) y `docs/KITCHEN_AND_PRINTING.md`.
+
+#### Pruebas (copia aislada `$SCR/fix1/repo`, clúster 55499, Go 8190 y vista previa 1428)
+
+- `gofmt -l` limpio; `go vet ./...`, `go vet -tags=integration` de `administration`, `operations` y `maintenance`, y
+  `GOOS=windows GOARCH=amd64 go build ./...`, `go vet ./...` y `go vet -tags=integration` de esos tres paquetes:
+  aprobados.
+- `go test -race -count=1 ./internal/maintenance ./internal/operations ./internal/administration`: `ok` en los tres.
+- Integración de `administration` (`-race`): `ok` (72.7 s), 47 subpruebas aprobadas, incluidas las tres nuevas; **1
+  omitida**: `9F_respaldo_real_con_pg_dump` (sin cambios), porque las herramientas de esta sesión no dejaron pasar la
+  contraseña del clúster temporal en la URL (se usó `PGPASSFILE` y `ADEL_PG_BIN` inexistente): la valida la corrida del
+  coordinador. Contraprueba en la copia: con el `plan.go` anterior falla la subprueba de la ruta («se elimina:
+  [route:Ruta de la categoría «Platillos»]»); con el `maintenance.go` anterior fallan las dos de B2 («el reenvío creó
+  otro respaldo: 2 respaldos» y «el intento fallido no quedó en el registro de movimientos al vencer el plazo»).
+- Integración de `operations` (`-race`): `ok` (281 s), 263 subpruebas aprobadas y 2 omitidas por diseño
+  (`inventory_b_measure_release` y `TestControlledCUPSPrinter`, opcionales).
+- `npx tsc --noEmit` aprobado; `npm test`: 80 archivos y 781 pruebas aprobadas; `npm run build` aprobado.
+- Playwright con el filtro `workflow-stage9f-` (base nueva por motor: `cancel-units`, `topbar-map` y `zz-test-data`):
+  Chromium 3/3 y WebKit 3/3 (pantalla desbloqueada). En la base de WebKit, la auditoría de lo quitado lista «Ruta de la
+  categoría «Platillos»» en `unlinked` (la categoría es del catálogo mínimo, no de prueba). No se tocó el puente
+  (`api.rs`); la corrida completa queda para el coordinador.
+- **No verificado**: `installed-smoke.ps1` en Windows y las pruebas de Go ejecutadas en Windows (solo compilación y
+  `go vet` cruzados).

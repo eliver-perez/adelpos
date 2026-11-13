@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,7 +17,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/events"
@@ -25,16 +28,34 @@ import (
 
 // recordingBackup sustituye al respaldo real: cuenta las llamadas y falla a pedido.
 type recordingBackup struct {
+	mutex sync.Mutex
 	calls int
 	fail  bool
+	// during, si existe, se ejecuta una sola vez dentro del siguiente respaldo (revisión independiente de
+	// la 9F: un reenvío mientras se respalda y un plazo que vence durante el respaldo).
+	during func()
 }
 
 func (backup *recordingBackup) Backup(context.Context) (string, error) {
+	backup.mutex.Lock()
 	backup.calls++
-	if backup.fail {
+	calls, fail, during := backup.calls, backup.fail, backup.during
+	backup.during = nil
+	backup.mutex.Unlock()
+	if during != nil {
+		during()
+	}
+	if fail {
 		return "", errors.New("disco lleno (simulado)")
 	}
-	return fmt.Sprintf("adel_pos_test_respaldo-20261113T000000Z-%06d.dump", backup.calls), nil
+	return fmt.Sprintf("adel_pos_test_respaldo-20261113T000000Z-%06d.dump", calls), nil
+}
+
+// count devuelve cuántos respaldos se pidieron (también con peticiones en otra goroutine).
+func (backup *recordingBackup) count() int {
+	backup.mutex.Lock()
+	defer backup.mutex.Unlock()
+	return backup.calls
 }
 
 // labels resume una lista de la vista previa como «tipo:nombre».
@@ -295,7 +316,10 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 			t.Fatal(err)
 		}
 		value := preview(env.admin)
-		if !slices.Equal(labels(value.Remove), []string{"route:Ruta de la categoría «Platillos»"}) {
+		// La ruta de «Platillos» solo enviaba a estaciones de prueba, pero la categoría es del restaurante
+		// (tiene «Tacos de la casa»): no es un dato de prueba y se presenta en «Se desvinculará» (revisión
+		// independiente de la 9F, B1). Go la elimina igual.
+		if len(value.Remove) != 0 {
 			t.Fatalf("se elimina: %v", labels(value.Remove))
 		}
 		if !slices.Equal(labels(value.Deactivate), []string{
@@ -312,9 +336,14 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 			t.Fatalf("motivos: %+v", value.Deactivate)
 		}
 		if !slices.Equal(labels(value.Unlink), []string{
-			"route:Ruta del producto «Tacos de la casa»", "setting:Estaciones de la terminal «" + terminalName + "»",
+			"route:Ruta de la categoría «Platillos»", "route:Ruta del producto «Tacos de la casa»",
+			"setting:Estaciones de la terminal «" + terminalName + "»",
 		}) {
 			t.Fatalf("se desvincula: %v", labels(value.Unlink))
+		}
+		if value.Unlink[0].Reason != "Solo enviaba a estaciones de prueba («Cocina caliente» y «Freidoras»); se quita: "+
+			"sus productos sin ruta propia quedarán sin ruta de preparación hasta que le asignes otra." {
+			t.Fatalf("motivo de la ruta del restaurante: %+v", value.Unlink[0])
 		}
 		if !slices.Equal(labels(value.Keep), []string{"category:Platillos"}) ||
 			value.Keep[0].Reason != "Tiene otros productos del restaurante, como «Tacos de la casa»." {
@@ -372,6 +401,146 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		if env.scalar(t, "SELECT count(*) FROM app.catalog_categories WHERE id=$1", category) != 1 ||
 			env.scalar(t, "SELECT count(*) FROM app.catalog_products WHERE code='FILETE-VENDIDO-9F'") != 1 {
 			t.Fatal("se tocó la categoría del restaurante o el producto vendido")
+		}
+	})
+
+	// Revisión independiente de la 9F (M1): un producto o una categoría de prueba que participa en una
+	// promoción del restaurante se desactiva en lugar de borrarse; la vista previa nombra la promoción y la
+	// promoción queda igual (con sus participantes, activa, con la misma revisión y se puede volver a
+	// guardar). Antes, la promoción perdía su único producto y ya no se podía guardar.
+	t.Run("9F_revision_promocion_del_restaurante_no_se_toca", func(t *testing.T) {
+		testCategory := catalog("catalog/categories", map[string]any{"name": "Platillos", "active": true, "color": "#d64545"})
+		steak := catalog("catalog/products", map[string]any{
+			"name": "Filete de prueba", "active": true, "category_id": testCategory, "code": "FILETE", "kind": "product", "base_price": "150",
+		})
+		promotion := func(name string, participants map[string]any) string {
+			body := map[string]any{
+				"name": name, "active": true, "kind": "percent", "percent": "10", "special_price": "0",
+				"buy_quantity": 2, "pay_quantity": 1, "minimum_quantity": 1,
+			}
+			maps.Copy(body, participants)
+			return catalog("catalog/promotions", body)
+		}
+		byProduct := promotion("Promoción del restaurante 9F", map[string]any{"product_ids": []string{steak}})
+		byCategory := promotion("Promoción por categoría 9F", map[string]any{"category_ids": []string{testCategory}})
+		revisions := func() []int {
+			return []int{
+				env.scalar(t, "SELECT revision FROM app.catalog_promotions WHERE id=$1 AND active", byProduct),
+				env.scalar(t, "SELECT revision FROM app.catalog_promotions WHERE id=$1 AND active", byCategory),
+			}
+		}
+		before := revisions()
+
+		value := preview(env.admin)
+		if len(value.Remove) != 0 || len(value.Unlink) != 0 || len(value.Keep) != 0 ||
+			!slices.Equal(labels(value.Deactivate), []string{"product:Filete de prueba", "category:Platillos"}) {
+			t.Fatalf("vista previa: %+v", value)
+		}
+		productReason := "Participa en la promoción «Promoción del restaurante 9F», que no cambia. Se desactiva y se archiva."
+		categoryReason := "Participa en la promoción «Promoción por categoría 9F», que no cambia."
+		if value.Deactivate[0].Reason != productReason || value.Deactivate[1].Reason != categoryReason {
+			t.Fatalf("los motivos deben nombrar la promoción: %+v", value.Deactivate)
+		}
+		removed(remove(events.NewID(), value.PlanID, 200))
+
+		if env.scalar(t, "SELECT count(*) FROM app.catalog_products WHERE id=$1 AND NOT active AND archived", steak) != 1 ||
+			env.scalar(t, "SELECT count(*) FROM app.catalog_categories WHERE id=$1 AND NOT active", testCategory) != 1 {
+			t.Fatal("el producto y la categoría de prueba debían quedar desactivados")
+		}
+		productParticipants := env.scalar(t, `SELECT count(*) FROM app.catalog_promotion_products
+            WHERE promotion_id=$1 AND product_id=$2`, byProduct, steak)
+		categoryParticipants := env.scalar(t, `SELECT count(*) FROM app.catalog_promotion_categories
+            WHERE promotion_id=$1 AND category_id=$2`, byCategory, testCategory)
+		if productParticipants != 1 || categoryParticipants != 1 || !slices.Equal(revisions(), before) {
+			t.Fatal("quitar datos de prueba modificó una promoción del restaurante")
+		}
+		// La promoción sigue siendo válida: se puede volver a guardar tal como está.
+		var current map[string]any
+		if err := json.Unmarshal(env.call(env.admin, "GET", "catalog/promotions/"+byProduct, nil, 200), &current); err != nil {
+			t.Fatal(err)
+		}
+		current["name"] = "Promoción del restaurante 9F renombrada"
+		env.call(env.admin, "PATCH", "catalog/promotions/"+byProduct, current, 200)
+		if !preview(env.admin).Empty() {
+			t.Fatal("lo desactivado volvió a aparecer")
+		}
+	})
+
+	// Revisión independiente de la 9F (B2): la terminal reenvía la misma operación mientras la primera
+	// todavía respalda. El reenvío espera, recibe la respuesta guardada y no crea otro respaldo (antes podía
+	// respaldar de nuevo o responder TEST_DATA_CHANGED, «no se quitó nada», aunque sí se quitó).
+	t.Run("9F_revision_reenvio_concurrente_sin_otro_respaldo", func(t *testing.T) {
+		testPrinter := printer("Destino controlado 9B", "Agente de aceptación no disponible")
+		value := preview(env.admin)
+		if !slices.Equal(labels(value.Remove), []string{"printer:Destino controlado 9B"}) {
+			t.Fatalf("vista previa: %+v", value)
+		}
+		before := backups.count()
+		operationID := events.NewID()
+		body := map[string]any{"operation_id": operationID, "plan_id": value.PlanID}
+		retried := make(chan *httptest.ResponseRecorder, 1)
+		backups.mutex.Lock()
+		backups.during = func() {
+			go func() {
+				retried <- env.send(context.Background(), env.admin, "POST", "maintenance/test-data/remove", body)
+			}()
+			// Tiempo para que el reenvío pase la autenticación y espere su turno mientras se respalda.
+			time.Sleep(500 * time.Millisecond)
+		}
+		backups.mutex.Unlock()
+		first := removed(remove(operationID, value.PlanID, 200))
+		retry := <-retried
+		if retry.Code != 200 {
+			t.Fatalf("el reenvío respondió %d: %s", retry.Code, retry.Body.String())
+		}
+		second := removed(retry.Body.Bytes())
+		if second.Backup != first.Backup || !slices.Equal(labels(second.Removed), labels(first.Removed)) {
+			t.Fatalf("el reenvío no devolvió la respuesta guardada: %+v / %+v", first, second)
+		}
+		if backups.count() != before+1 {
+			t.Fatalf("el reenvío creó otro respaldo: %d respaldos", backups.count()-before)
+		}
+		if env.scalar(t, "SELECT count(*) FROM app.kitchen_printers WHERE id=$1", testPrinter) != 0 ||
+			env.scalar(t, `SELECT count(*) FROM app.audit_events WHERE action='maintenance.test_data_removed' AND success
+            AND after_state->>'backup'=$1`, first.Backup) != 1 {
+			t.Fatal("la operación no se aplicó o quedó auditada dos veces")
+		}
+	})
+
+	// Revisión independiente de la 9F (B2): si el plazo de la petición vence durante el respaldo y el
+	// respaldo falla, el intento fallido queda igual en el registro de movimientos.
+	t.Run("9F_revision_respaldo_fallido_se_audita_aunque_venza_el_plazo", func(t *testing.T) {
+		testPrinter := printer("Destino controlado 9B", "Agente de aceptación no disponible")
+		value := preview(env.admin)
+		failedAttempts := func() int {
+			return env.scalar(t, `SELECT count(*) FROM app.audit_events WHERE action='maintenance.test_data_removed' AND NOT success
+            AND after_state->>'backup'='failed'`)
+		}
+		before := failedAttempts()
+		requestContext, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		backups.mutex.Lock()
+		backups.fail = true
+		backups.during = cancel
+		backups.mutex.Unlock()
+		response := env.send(requestContext, env.admin, "POST", "maintenance/test-data/remove",
+			map[string]any{"operation_id": events.NewID(), "plan_id": value.PlanID})
+		backups.mutex.Lock()
+		backups.fail = false
+		backups.mutex.Unlock()
+		if response.Code == 200 {
+			t.Fatal("con el respaldo fallido no se debía quitar nada")
+		}
+		if failedAttempts() != before+1 {
+			t.Fatal("el intento fallido no quedó en el registro de movimientos al vencer el plazo")
+		}
+		if env.scalar(t, "SELECT count(*) FROM app.kitchen_printers WHERE id=$1", testPrinter) != 1 {
+			t.Fatal("se quitaron datos aunque el respaldo falló")
+		}
+		// Se deja la base sin datos de prueba para las pruebas siguientes.
+		removed(remove(events.NewID(), preview(env.admin).PlanID, 200))
+		if !preview(env.admin).Empty() {
+			t.Fatal("quedaron datos de prueba")
 		}
 	})
 

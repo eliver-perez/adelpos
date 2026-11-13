@@ -2959,10 +2959,17 @@ signatures.go`, cada una con su archivo): impresoras «Destino controlado E2E» 
   `agent` y destino «Agente de aceptación no disponible»; estaciones «Cocina caliente» y «Freidoras» **solo con una de
   esas impresoras**; producto «Filete de prueba» con código `FILETE` y tipo `product`; categoría «Platillos» con color
   `#d64545` **solo si contiene un producto de prueba**. Rutas: se elimina la ruta cuyas estaciones son todas de prueba
-  (o la de un producto o categoría de prueba que se elimina); en las demás solo se quitan las estaciones de prueba.
+  (o la de un producto o categoría de prueba que se elimina); en las demás solo se quitan las estaciones de prueba. La
+  ruta de un producto o una categoría **del restaurante** cuyas estaciones son todas de prueba también se elimina (una
+  ruta sin estaciones enviaría a ningún lado), pero no es un dato de prueba: va en `unlink` con el motivo «Solo enviaba
+  a estaciones de prueba («…»); se quita: …» (el producto usa la ruta de su categoría o, sin ella, la cocina avisa «Sin
+  ruta de preparación»).
 - Decisión: un dato sin registros relacionados se elimina; con registros (trabajos de impresión, tareas de cocina,
-  acuses, avisos, ventas, cuentas abiertas, recetas, combos o cualquier otra llave foránea que se agregue después) se
-  **desactiva** (el producto además se archiva); ya inactivo y sin nada que desvincular no aparece. Se **conserva** sin
+  acuses, avisos, ventas, cuentas abiertas, recetas, combos, **promociones del restaurante** o cualquier otra llave
+  foránea que se agregue después) se **desactiva** (el producto además se archiva); ya inactivo y sin nada que
+  desvincular no aparece. Un producto o una categoría de prueba que participa en una promoción se desactiva y la
+  promoción no cambia (participantes, estado y revisión); el motivo la nombra («Participa en la promoción «…», que no
+  cambia.»). Se **conserva** sin
   cambios la impresora de prueba que usa una estación del restaurante y la categoría con otros productos o con una
   ruta que incluye estaciones del restaurante. Se **desvincula** la configuración que apunta a lo de prueba: impresora
   de tickets de Cobros, cajón de cada caja (queda desactivado), impresora de respaldo de otras impresoras, estaciones
@@ -2970,14 +2977,18 @@ signatures.go`, cada una con su archivo): impresoras «Destino controlado E2E» 
   inventario, cuentas, documentos ni auditoría.
 - Quitar: la transacción de autenticación solo autoriza, valida y comprueba la idempotencia (la misma operación del
   mismo actor y terminal devuelve la respuesta guardada sin otro respaldo; con otro `plan_id`, 409
-  `IDEMPOTENCY_CONFLICT`). Después, si el plan vigente no es el revisado: 409 `TEST_DATA_CHANGED` sin quitar nada; si no
+  `IDEMPOTENCY_CONFLICT`). Después, una sola eliminación a la vez en el servidor: un reenvío de la misma operación
+  mientras la primera sigue en curso espera su turno y, con los locks compartidos y **antes** de comparar el plan y de
+  respaldar, vuelve a buscar la respuesta guardada (no crea otro respaldo ni responde `TEST_DATA_CHANGED` si la primera
+  sí quitó). Si el plan vigente no es el revisado: 409 `TEST_DATA_CHANGED` sin quitar nada; si no
   hay nada que quitar, responde sin respaldo. Si no: **respaldo previo** (macOS y desarrollo: `pg_dump --format=custom
 --no-owner --no-acl` con la conexión de la configuración y la contraseña solo en el entorno del proceso hijo,
   `<base>-<AAAAMMDDTHHMMSSZ>-<6 hex>.dump` con permisos 0600 en `backup_directory` o en `backups/` junto a la carpeta de
   la configuración, comprobado con `pg_restore --list`; instalación de Windows: el respaldo de `internal/standalone` con
   la etiqueta `antes-de-quitar-datos-de-prueba`). Si el respaldo falla: 503 `BACKUP_FAILED` («No se pudo crear el
   respaldo de la base de datos; no se quitó ningún dato de prueba.») y auditoría `maintenance.test_data_removed` con
-  `success=false`. Si quedó bien: una transacción con 7820148305, 7820148304 y 7820148308 exclusivos recalcula el plan
+  `success=false` (con un plazo propio de 10 s, también si el de la petición ya venció). Si quedó bien: una
+  transacción con 7820148305, 7820148304 y 7820148308 exclusivos recalcula el plan
   (409 `TEST_DATA_CHANGED` si cambió), lo aplica, audita `maintenance.test_data_removed` con la lista y el nombre del
   respaldo, publica `kitchen.printers.changed`, `kitchen.stations.changed`, `kitchen.routes.changed`,
   `kitchen.access.changed`, `payments.settings.changed` (ámbito `configuration`), `cash.settings.changed` (ámbito
@@ -3032,6 +3043,9 @@ AUTHORIZATION_INSUFFICIENT` («El supervisor indicado no tiene permiso para canc
   `supervisor`, `version_id`, `quantity` y `amount`. Quien hizo la operación es el autor del evento. La contraseña nunca
   entra en la huella idempotente, la respuesta guardada, los eventos ni la auditoría: un reintento con el mismo
   `operation_id` sin la contraseña recupera el resultado ya confirmado; con otros datos, `409 IDEMPOTENCY_CONFLICT`.
+  Como Go acepta las claves sin distinguir mayúsculas, la huella de `restaurant/*` quita la contraseña de cualquier
+  objeto `authorization` sin distinguirlas (`Authorization`, `Password`, `PASSWORD`…), en cualquier nivel del cuerpo
+  (revisión independiente de la 9F, B3).
 - **Campos nuevos de lectura** (los calcula Go; React no los deduce):
 
 | Campo                                 | Dónde                        | Significado                                                                                                       |

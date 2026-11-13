@@ -115,6 +115,55 @@ func operationsReason(tables []string) string {
 	return "Ya tiene registros: " + spanishList(names) + "."
 }
 
+// relatedReason explica por qué un producto o una categoría de prueba se desactiva. Si participa en
+// promociones del restaurante (promotionTable, con la columna column hacia el dato) las nombra y dice
+// que no cambian; los demás registros se explican con operationsReason. promotionTable y column son
+// valores fijos de este paquete, nunca del cliente.
+func (builder *planBuilder) relatedReason(blocking []string, promotionTable, column, id string) (string, error) {
+	others := []string{}
+	promoted := false
+	for _, table := range blocking {
+		if table == promotionTable {
+			promoted = true
+			continue
+		}
+		others = append(others, table)
+	}
+	sentences := []string{}
+	if len(others) > 0 {
+		sentences = append(sentences, operationsReason(others))
+	}
+	if promoted {
+		rows, err := builder.tx.Query(builder.ctx, `SELECT promotion.name FROM `+
+			pgx.Identifier{"app", promotionTable}.Sanitize()+` participant
+            JOIN app.catalog_promotions promotion ON promotion.id = participant.promotion_id
+            WHERE participant.`+pgx.Identifier{column}.Sanitize()+` = $1::uuid
+            ORDER BY promotion.name, promotion.id`, id)
+		if err != nil {
+			return "", err
+		}
+		names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return "", err
+		}
+		sentences = append(sentences, promotionSentence(names))
+	}
+	return strings.Join(sentences, " "), nil
+}
+
+// promotionSentence: «Participa en la promoción «2×1», que no cambia.» o, con varias, «Participa en las
+// promociones «A» y «B», que no cambian.»
+func promotionSentence(names []string) string {
+	quoted := []string{}
+	for _, name := range names {
+		quoted = append(quoted, "«"+name+"»")
+	}
+	if len(quoted) == 1 {
+		return "Participa en la promoción " + quoted[0] + ", que no cambia."
+	}
+	return "Participa en las promociones " + spanishList(quoted) + ", que no cambian."
+}
+
 // spanishList une palabras como en español: «a», «a y b», «a, b y c».
 func spanishList(words []string) string {
 	if len(words) <= 1 {

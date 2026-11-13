@@ -28,6 +28,9 @@ import (
 // transacción que quita los datos. El puente nativo espera un poco más (api.rs).
 const maintenanceTimeout = 120 * time.Second
 
+// removalAuditTimeout es el plazo propio para auditar un intento fallido después del plazo de la petición.
+const removalAuditTimeout = 10 * time.Second
+
 const maintenanceRemoveRoute = "maintenance/test-data/remove"
 
 var planIDPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -141,10 +144,23 @@ func testDataChanged() error {
 
 // removeTestData completa la operación fuera de la transacción de autenticación: plan vigente, respaldo
 // previo y, solo si el respaldo quedó bien, la transacción que quita los datos.
+//
+// Revisión independiente de la 9F (B2): una sola eliminación a la vez en este servidor, de modo que el
+// reenvío de la misma operación (una terminal que perdió la conexión mientras la primera respaldaba)
+// espera a que la primera termine y, antes de comparar el plan y de respaldar, encuentra su respuesta
+// guardada: no crea otro respaldo ni responde TEST_DATA_CHANGED («no se quitó nada») cuando sí se quitó.
 func (service *Service) removeTestData(ctx context.Context, pending *testDataRemoval) (any, error) {
-	current, err := service.currentTestDataPlan(ctx)
+	release, err := service.waitRemovalTurn(ctx)
 	if err != nil {
 		return nil, err
+	}
+	defer release()
+	current, stored, err := service.currentTestDataPlan(ctx, pending)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return stored, nil
 	}
 	if current.PlanID != pending.planID {
 		return nil, testDataChanged()
@@ -164,7 +180,8 @@ func (service *Service) removeTestData(ctx context.Context, pending *testDataRem
 	if err := maintenanceLocks(ctx, tx, false); err != nil {
 		return nil, err
 	}
-	// Una repetición concurrente de la misma operación espera el lock y recibe la respuesta guardada.
+	// Otro servidor sobre la misma base (no es una instalación prevista) no comparte el turno: la
+	// respuesta guardada se vuelve a buscar con los locks exclusivos.
 	stored, found, err := replayRemoval(ctx, tx, pending)
 	if err != nil || found {
 		return stored, err
@@ -207,17 +224,46 @@ func (service *Service) removeTestData(ctx context.Context, pending *testDataRem
 	return json.RawMessage(encoded), nil
 }
 
-// currentTestDataPlan calcula el plan vigente en una transacción corta de solo lectura.
-func (service *Service) currentTestDataPlan(ctx context.Context) (*maintenance.Plan, error) {
+// waitRemovalTurn espera el turno de «Quitar datos de prueba» en este servidor (o a que venza el plazo de
+// la petición) y devuelve la función que lo libera.
+func (service *Service) waitRemovalTurn(ctx context.Context) (func(), error) {
+	service.removalOnce.Do(func() {
+		service.removalTurn = make(chan struct{}, 1)
+	})
+	select {
+	case service.removalTurn <- struct{}{}:
+		return func() {
+			<-service.removalTurn
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// currentTestDataPlan calcula el plan vigente en una transacción corta de solo lectura. Antes, con los
+// locks compartidos (que esperan a una eliminación en curso), busca la respuesta guardada de la misma
+// operación: si existe, la devuelve (stored) con el plan nulo, sin calcularlo.
+func (service *Service) currentTestDataPlan(
+	ctx context.Context,
+	pending *testDataRemoval,
+) (*maintenance.Plan, json.RawMessage, error) {
 	tx, err := service.Pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer tx.Rollback(context.Background())
 	if err := maintenanceLocks(ctx, tx, true); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return maintenance.Build(ctx, tx)
+	stored, found, err := replayRemoval(ctx, tx, pending)
+	if err != nil {
+		return nil, nil, err
+	}
+	if found {
+		return nil, stored, nil
+	}
+	plan, err := maintenance.Build(ctx, tx)
+	return plan, nil, err
 }
 
 // backupBeforeRemoval crea el respaldo previo (D2). Si no se puede, audita el intento fallido en una
@@ -240,18 +286,26 @@ func (service *Service) backupBeforeRemoval(ctx context.Context, principal Princ
 	return name, nil
 }
 
+// auditRemovalFailure registra el intento fallido. Usa un contexto sin la cancelación de la petición
+// (con un plazo corto propio): si el respaldo agotó el plazo de 120 s, el intento queda registrado igual
+// (revisión independiente de la 9F, B2). Si ni así se puede registrar, queda en la bitácora.
 func (service *Service) auditRemovalFailure(ctx context.Context, principal Principal, failure *Fault) error {
-	tx, err := service.Pool.Begin(ctx)
+	auditContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), removalAuditTimeout)
+	defer cancel()
+	tx, err := service.Pool.Begin(auditContext)
 	if err != nil {
+		service.logWarning("test_data_failure_audit_failed", "reason", err.Error())
 		return failure
 	}
 	defer tx.Rollback(context.Background())
 	details := map[string]string{"backup": "failed"}
-	if err := audit(ctx, tx, principal, "maintenance.test_data_removed", "maintenance", nil, nil, details, false); err != nil {
+	err = audit(auditContext, tx, principal, "maintenance.test_data_removed", "maintenance", nil, nil, details, false)
+	if err != nil {
+		service.logWarning("test_data_failure_audit_failed", "reason", err.Error())
 		return failure
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return failure
+	if err := tx.Commit(auditContext); err != nil {
+		service.logWarning("test_data_failure_audit_failed", "reason", err.Error())
 	}
 	return failure
 }

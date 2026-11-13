@@ -23,10 +23,10 @@ const withTestData: TestDataPreview = {
   plan_id: planID,
   remove: [
     {
-      kind: 'route',
-      id: '00000000-0000-4000-8000-0000000009f1',
-      name: 'Ruta de la categoría «Platillos»',
-      reason: 'Todas sus estaciones son de prueba.',
+      kind: 'product',
+      id: '00000000-0000-4000-8000-0000000009f5',
+      name: 'Filete de prueba',
+      reason: 'Producto de prueba (código FILETE).',
     },
   ],
   deactivate: [
@@ -44,6 +44,15 @@ const withTestData: TestDataPreview = {
     },
   ],
   unlink: [
+    {
+      // Revisión de la 9F (B1): la ruta de una categoría del restaurante que solo enviaba a estaciones de
+      // prueba no es un dato de prueba; Go la presenta aquí con su explicación.
+      kind: 'route',
+      id: '00000000-0000-4000-8000-0000000009f1',
+      name: 'Ruta de la categoría «Platillos»',
+      reason:
+        'Solo enviaba a estaciones de prueba («Cocina caliente»); se quita: sus productos sin ruta propia quedarán sin ruta de preparación hasta que le asignes otra.',
+    },
     {
       kind: 'setting',
       id: 'receipt:00000000-0000-4000-8000-0000000009f2',
@@ -121,14 +130,15 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
     expect(screen.queryByRole('button', { name: 'Quitar datos de prueba' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
     const removeList = await screen.findByRole('list', { name: 'Se eliminará' });
-    expect(removeList.textContent).toContain('Ruta de preparación');
-    expect(removeList.textContent).toContain('Ruta de la categoría «Platillos»');
+    expect(removeList.textContent).toContain('Filete de prueba');
     const deactivate = screen.getByRole('list', { name: 'Se desactivará' });
     expect(within(deactivate).getAllByRole('listitem')).toHaveLength(2);
     expect(deactivate.textContent).toContain('Ya tiene registros: trabajos de impresión.');
-    expect(screen.getByRole('list', { name: 'Se desvinculará' }).textContent).toContain(
-      'Impresora de tickets de Cobros',
-    );
+    const unlink = screen.getByRole('list', { name: 'Se desvinculará' });
+    expect(unlink.textContent).toContain('Impresora de tickets de Cobros');
+    expect(unlink.textContent).toContain('Ruta de preparación');
+    expect(unlink.textContent).toContain('Ruta de la categoría «Platillos»');
+    expect(unlink.textContent).toContain('Solo enviaba a estaciones de prueba');
     expect(screen.getByRole('list', { name: 'Se conserva' }).textContent).toContain(
       'Tiene otros productos del restaurante',
     );
@@ -152,7 +162,7 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
     expect(dialog.className).toContain('dialog-panel-danger');
     expect(dialog.textContent).toContain('Primero se crea un respaldo de la base de datos');
     expect(dialog.textContent).toContain(
-      '1 dato se elimina, 2 datos se desactivan, 1 ajuste se desvincula',
+      '1 dato se elimina, 2 datos se desactivan, 2 ajustes se desvinculan',
     );
     expect(dialog.textContent).toContain('no se tocan');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Conservar' }));
@@ -171,7 +181,7 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
     const notice = await screen.findByRole('status', { name: 'Operación completada' });
     expect(notice.textContent).toContain('Datos de prueba quitados.');
     expect(notice.textContent).toContain(
-      '1 dato eliminado, 2 datos desactivados, 1 ajuste desvinculado.',
+      '1 dato eliminado, 2 datos desactivados, 2 ajustes desvinculados.',
     );
     expect(notice.textContent).toContain('Respaldo previo: adel_pos-20261113T183005Z-0a1b2c.dump');
     expect(notice.textContent).not.toMatch(/[/\\]/);

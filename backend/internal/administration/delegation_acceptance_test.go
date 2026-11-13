@@ -5,6 +5,7 @@ package administration_test
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,9 +16,11 @@ type administrationCall func(actor terminal, method, route string, body any, exp
 
 // delegationEnvironment reúne el estado compartido de la aceptación de etapa 2.
 type delegationEnvironment struct {
-	ctx             context.Context
-	pool            *pgxpool.Pool
-	call            administrationCall
+	ctx  context.Context
+	pool *pgxpool.Pool
+	call administrationCall
+	// send hace la petición sin comprobar el resultado (etapa 9F: reenvío concurrente desde otra goroutine).
+	send            func(context.Context, terminal, string, string, any) *httptest.ResponseRecorder
 	text            func(json.RawMessage, string) string
 	device          terminal
 	admin           terminal

@@ -66,6 +66,19 @@ function TestProcesses {
     }
 }
 
+# Limpieza final (revisión independiente de la 9F, B5): cada paso en su propio try/catch. Con
+# $ErrorActionPreference = 'Stop', un fallo (por ejemplo, de Get-CimInstance) interrumpiría los pasos
+# siguientes y quedarían la carpeta temporal (clúster y secretos de la prueba) y la credencial de prueba.
+# Lo que no se pudo limpiar se anota aquí, se informa al final y la prueba termina con error.
+$CleanupFailures = New-Object System.Collections.Generic.List[string]
+function CleanupStep([string]$Description, [scriptblock]$Step) {
+    try {
+        & $Step | Out-Null
+    } catch {
+        $CleanupFailures.Add("$Description ($($_.Exception.Message))")
+    }
+}
+
 $app = $null
 $exitCode = 1
 $saved = @{}
@@ -111,39 +124,68 @@ try {
         Pop-Location
     }
 } finally {
-    foreach ($name in $saved.Keys) {
-        [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+    CleanupStep 'restaurar las variables de entorno de esta consola' {
+        foreach ($name in $saved.Keys) {
+            [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+        }
+        Remove-Item Env:\ADEL_INSTALLED_CDP -ErrorAction SilentlyContinue
     }
-    Remove-Item Env:\ADEL_INSTALLED_CDP -ErrorAction SilentlyContinue
     # Cierre ordenado (como el botón cerrar): la aplicación cierra la entrada de Go y Go detiene PostgreSQL.
-    if ($app -and -not $app.HasExited) {
-        $null = $app.CloseMainWindow()
+    CleanupStep 'pedir el cierre de la aplicación de prueba' {
+        if ($app -and -not $app.HasExited) {
+            $null = $app.CloseMainWindow()
+        }
     }
-    $watch = [Diagnostics.Stopwatch]::StartNew()
-    while ((TestProcesses) -and $watch.Elapsed.TotalSeconds -lt 60) {
-        Start-Sleep -Milliseconds 500
+    # Espera a la aplicación abierta aquí aunque después no se pueda consultar la lista de procesos.
+    CleanupStep 'esperar el cierre de la aplicación de prueba' {
+        if ($app -and -not $app.HasExited) {
+            $null = $app.WaitForExit(60000)
+        }
     }
-    $left = @(TestProcesses)
-    if ($left.Count -gt 0) {
-        Write-Warning "Quedaron $($left.Count) procesos de la prueba; se detienen."
-        $left | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-        Start-Sleep -Seconds 2
-    }
-    # Carpeta temporal (clúster, configuración, respaldos y bitácoras de la prueba).
-    for ($attempt = 0; $attempt -lt 5 -and (Test-Path $TestRoot); $attempt++) {
-        Remove-Item -Recurse -Force $TestRoot -ErrorAction SilentlyContinue
-        if (Test-Path $TestRoot) {
+    CleanupStep 'cerrar los procesos de la prueba (servidor y PostgreSQL de la carpeta temporal)' {
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        while ((TestProcesses) -and $watch.Elapsed.TotalSeconds -lt 60) {
+            Start-Sleep -Milliseconds 500
+        }
+        $left = @(TestProcesses)
+        if ($left.Count -gt 0) {
+            Write-Warning "Quedaron $($left.Count) procesos de la prueba; se detienen."
+            $left | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
             Start-Sleep -Seconds 2
         }
     }
-    if (Test-Path $TestRoot) {
-        Write-Warning "No se pudo borrar la carpeta temporal $TestRoot; bórrala a mano."
-        $exitCode = 1
+    # Carpeta temporal (clúster, configuración, respaldos y bitácoras de la prueba).
+    CleanupStep "borrar la carpeta temporal $TestRoot (bórrala a mano)" {
+        for ($attempt = 0; $attempt -lt 5 -and (Test-Path $TestRoot); $attempt++) {
+            Remove-Item -Recurse -Force $TestRoot -ErrorAction SilentlyContinue
+            if (Test-Path $TestRoot) {
+                Start-Sleep -Seconds 2
+            }
+        }
+        if (Test-Path $TestRoot) {
+            throw 'la carpeta sigue ahí'
+        }
     }
-    # Credencial de la terminal de prueba (la real, con el perfil «main», no se toca).
-    & cmdkey "/delete:$CredentialTarget" | Out-Null
-    if (-not $realClusterRunning -and (Test-Path (Join-Path $RealDataDir 'postgres\postmaster.pid'))) {
-        Write-Warning 'El clúster de la instalación real quedó en marcha: revisa que nada haya usado los datos reales.'
+    # Credencial de la terminal de prueba (la real, con el perfil «main», no se toca). cmdkey termina con
+    # error si la credencial no existe (la prueba falló antes de configurar la terminal): solo se avisa.
+    CleanupStep "borrar la credencial de prueba $CredentialTarget (cmdkey /delete)" {
+        & cmdkey "/delete:$CredentialTarget" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "cmdkey no borró la credencial de prueba $CredentialTarget (código $LASTEXITCODE); si existe, bórrala a mano."
+        }
+    }
+    try {
+        if (-not $realClusterRunning -and (Test-Path (Join-Path $RealDataDir 'postgres\postmaster.pid'))) {
+            Write-Warning 'El clúster de la instalación real quedó en marcha: revisa que nada haya usado los datos reales.'
+            $exitCode = 1
+        }
+    } catch {
+        $CleanupFailures.Add("comprobar el clúster de la instalación real ($($_.Exception.Message))")
+    }
+    foreach ($failure in $CleanupFailures) {
+        Write-Warning "No se pudo ${failure}."
+    }
+    if ($CleanupFailures.Count -gt 0) {
         $exitCode = 1
     }
 }
