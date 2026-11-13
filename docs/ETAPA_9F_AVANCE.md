@@ -151,3 +151,86 @@ la sesión (`phase0_report.md`); aquí, lo que pide §2 y las decisiones del coo
   es menor que el objetivo) y rojo al pasar el objetivo.
 - **D8 · Ruta `void`.** Se retira (responde `410 ROUTE_RETIRED`); solo la usaban pruebas.
 - **D9 · Barra compacta.** Se verifica además a 1200 px (la ventana de unos 1500 px de Windows al 125 %).
+
+## Fase D · Ajustes de interfaz (barra superior compacta y leyenda del mapa)
+
+Un agente, solo interfaz (React, CSS, pruebas y documentación; sin Go, Rust ni migraciones), sobre `b8d707b`.
+
+### Barra superior compacta (§6.1, decisión D9)
+
+- **Isotipo de la marca**: `components/BrandLogo.tsx` muestra en la barra compacta (debajo de 1280 px) el isotipo «AE»
+  `desktop/src/assets/adel-pos-isotipo.png` (128 × 128, 13 KB), generado con `sips -z 128 128` desde
+  `desktop/src-tauri/icons/icon.png` (el mismo del instalador, con su fondo blanco, su marco azul y las esquinas
+  transparentes: se lee igual en tema claro y oscuro), con texto alternativo «AD-EL POS» y 40 × 40 px en la barra. Se
+  retiraron la «A·» provisional (`.brand-mark`) y sus tres tokens (`--brand-mark-*`). `assets/brand/` no cambió.
+- **Contorno de foco del logotipo**: reproducido en Chromium (el motor de WebView2): tras un clic el botón conservaba el
+  foco y la tecla siguiente (Escape, una flecha, ⌘2) o el cierre de la paleta (que devuelve el foco al control anterior)
+  le encendía `:focus-visible`; en WebKit no ocurre (los botones no toman el foco con el clic). `navigation/TopBar.tsx`
+  (`goHome`) suelta el foco cuando la pulsación viene del dedo o del ratón (`event.detail > 0`); con Intro o Espacio
+  (`detail = 0`) el foco y el contorno se quedan. Solo el logotipo (lo que pide §6.1).
+- **Caja** (`pages/cash/CashShortcut.tsx`): el estado va en texto completo y en texto corto
+  (`shortcutStateShortLabels`: «Abierto», «En arqueo», «Cerrado», «Consultando…»); en la compacta se ve el corto. La
+  ayuda emergente (`title`) está siempre, también sin atajo: «Caja · Turno abierto · Ir a Caja: ⌘4».
+- **«En línea»** (`navigation/ServerStatus.tsx` y estilos): conserva su texto en la compacta; la ayuda emergente empieza
+  por el estado («En línea: El equipo servidor responde…», «Sin conexión: No hay comunicación…»).
+- **Usuario**: en la compacta vuelve a verse su nombre y rol; si no caben, solo él se acorta con puntos suspensivos.
+- **Debajo de 1150 px** (fuera de los anchos verificados; decisión menor): el turno y «En línea» quedan como punto de
+  color con su ayuda emergente y el usuario como icono, como la compacta anterior, para no desbordar a 1024 px. Medido:
+  sin desbordes a 1024, 1100, 1149, 1150, 1180, 1200 y 1279 px, en línea y sin conexión, en ambos motores.
+- `styles.css`: solo reglas de la barra (`.cash-shortcut-state-short`, `@media (max-width: 1279px)` y la nueva
+  `@media (max-width: 1149px)`), los tokens de la «A·» y la regla de la marca a 720 px (`display: block` para la
+  imagen).
+
+### Leyenda del mapa (§6.2)
+
+- `styles.css` (`.map-legend*`): sin `overflow-x: auto` ni `white-space: nowrap` en el contenedor; los dos grupos
+  (estados y datos de cada mesa) se acomodan en dos renglones con `flex-wrap: wrap` y cada estado conserva junta su
+  muestra, su icono y su texto (`white-space: nowrap` en `.map-legend-state`). `TableMap.tsx` no cambió. A 1200 px la
+  leyenda ocupa dos renglones; a 1280 px y más, uno. Antes, a 1200 px, se desbordaba 64 px con barra horizontal.
+
+### Error intermitente «The provided value is non-finite» (WebKit)
+
+No se reprodujo en ninguna corrida de esta fase (WebKit sin errores de página en `workflow-stage9d-topbar-tables` ni en
+la nueva). En `TableMap.tsx` y la barra todos los valores que llegan a las API del DOM son finitos por construcción
+(`fitTables` devuelve `null` sin mesas o sin espacio; `scrollLeft`/`scrollTop` salen de diferencias de coordenadas del
+puntero; `scrollTo` con ceros). Ya se había visto en la 9A en `restaurant.spec.ts`, antes del mapa con escala, así que
+no parece venir del mapa. Origen sin identificar; no se persiguió más.
+
+### Pruebas
+
+Copia aislada del worktree (`sync_tree.sh`), Go temporal en 8185 y vista previa en 1423 contra el clúster temporal
+55499; sin cambios en Go ni en Rust (no aplican `go vet`, `go test` ni `cargo test`).
+
+- `npx tsc --noEmit`: sin errores. `npm test` (`vitest run src`): **77 archivos, 766 pruebas aprobadas**, con
+  `navigation/navigation.test.tsx` («barra compacta (etapa 9F)»: isotipo con «AD-EL POS» y sin la «A·»; estado corto
+  de Caja en sus tres estados con la ayuda emergente; «En línea» y «Sin conexión» con texto y ayuda que empieza por el
+  estado; el logotipo suelta el foco con `detail = 1` y lo conserva con `detail = 0`; la prueba de la 9D de Caja en
+  dos renglones, adaptada al texto completo y corto), el nuevo `src/stage9fLayout.test.ts` (5: reglas de la compacta y
+  de debajo de 1150 px, sin `.brand-mark`, PNG de 128 × 128, leyenda con `flex-wrap: wrap` sin `overflow-x`) y
+  `src/stage9dLayout.test.ts` (la prueba de la leyenda «en una sola línea» pasa a «sin desplazamiento horizontal»).
+  `npm run build`: aprobado (el isotipo sale como recurso de 13.25 kB). Prettier: sin diferencias.
+- Playwright nuevo `e2e/workflow-stage9f-topbar-map.spec.ts`, con una usuaria de rol administrador y nombre largo:
+  barra a 1200, 1280, 1440, 1500 y 1920 px en ambos temas (sin desplazamiento horizontal en la página ni en la barra;
+  cada botón dentro de la ventana, de al menos 44 × 44 px y sin nada encima; isotipo de 40 px cargado en la compacta y
+  logotipo completo en las demás; «Caja Abierto» o «Caja Turno abierto» visibles; «En línea» visible con su ayuda;
+  nombre visible y, si se corta, con puntos suspensivos); foco del logotipo a 1200 px (tras un clic no queda enfocado
+  ni con contorno después de Escape, una flecha, ⌘2 y la paleta; con Mayúsculas+Tab —Opción en WebKit— llega con
+  `:focus-visible` y contorno sólido, e Intro vuelve al inicio conservándolos); «Sin conexión» a 1200 px en ambos temas;
+  leyenda sin desplazamiento horizontal en los cinco anchos y ambos temas, cada estado completo con su icono, dos
+  renglones a 1200 px y uno a 1920 px. **Chromium 1/1 y WebKit 1/1**.
+- Controles negativos (en la copia): sin el `blur` del logotipo la prueba falla en Chromium («focused: true» tras el
+  clic); con la leyenda de la 9D falla a 1200 px («la leyenda se desplaza de lado», 64 px).
+- Especificaciones existentes, juntas sobre una base por motor (`restaurant.spec`, `workflow-stage9c-navigation`,
+  `workflow-stage9d-colors`, `workflow-stage9d-topbar-tables` y la nueva): **Chromium 5/5 y WebKit 5/5**, sin errores de
+  página. `workflow-stage9c-keyboard` sola falló en ambos motores por la limitación conocida del filtro (base nueva sin
+  la ruta de cocina: «Enviado · sin confirmar en cocina» en lugar de «En cocina»); junto con `restaurant.spec`:
+  **Chromium 2/2 y WebKit 2/2**.
+- Exploración (no entregada): sin desbordes a 1024, 1100, 1149, 1150, 1180, 1200 y 1279 px, en línea y sin conexión,
+  en ambos motores. La corrida completa queda para el coordinador.
+- Sin verificar: Windows/WebView2 real al 125 % (la reproducción del foco se hizo con Chromium de Playwright, el mismo
+  motor), la ventana nativa y una pantalla táctil física.
+
+### Documentación
+
+`CLAUDE.md` §11–12 («Marca» y «Barra superior, Mesas y cuentas») y `docs/NAVIGATION_AND_SHORTCUTS.md` (párrafo de la
+9F, barra compacta, Caja, estado del servidor y pruebas).

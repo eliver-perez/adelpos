@@ -368,7 +368,9 @@ describe('indicador de Caja en la barra', () => {
     const status = lines.children[1]!;
     expect(status.className).toBe('cash-shortcut-status');
     expect(status.querySelector('.cash-shortcut-indicator')).not.toBeNull();
-    expect(status.textContent).toBe('Turno abierto');
+    // Desde la 9F el estado va completo y corto; los estilos eligen cuál se ve según el ancho.
+    expect(status.querySelector('.cash-shortcut-state-full')!.textContent).toBe('Turno abierto');
+    expect(status.querySelector('.cash-shortcut-state-short')!.textContent).toBe('Abierto');
     expect(button.className).toContain('cash-shortcut-open');
   });
 
@@ -381,6 +383,68 @@ describe('indicador de Caja en la barra', () => {
     expect(within(menu).getByRole('button', { name: 'Abrir turno' })).toBeTruthy();
     fireEvent.click(within(menu).getByRole('button', { name: 'Ir a Caja' }));
     expect(onNavigate).toHaveBeenCalledWith('cash');
+  });
+});
+
+// Etapa 9F (§6.1): barra compacta. Qué se ve en cada ancho lo deciden los estilos (jsdom no los
+// aplica; ver stage9fLayout.test.ts y workflow-stage9f-topbar-map.spec.ts); aquí, el contenido.
+describe('barra compacta (etapa 9F)', () => {
+  it('el logotipo compacto es el isotipo de la marca, sin la «A·» provisional', () => {
+    renderBar(waiter);
+    const logo = screen.getByRole('button', { name: 'AD-EL POS · Ir al inicio (Mesas)' });
+    const isotype = logo.querySelector('img.brand-logo-compact');
+    expect(isotype).not.toBeNull();
+    expect(isotype!.getAttribute('alt')).toBe('AD-EL POS');
+    expect(isotype!.getAttribute('src')).toContain('adel-pos-isotipo');
+    expect(logo.querySelector('.brand-mark')).toBeNull();
+    expect(logo.textContent).toBe('');
+  });
+
+  it('Caja conserva el estado corto del turno: «Abierto», «En arqueo» y «Cerrado»', async () => {
+    const cases = [
+      { shift: shiftOf(), full: 'Turno abierto', short: 'Abierto' },
+      { shift: closingShift(), full: 'En arqueo', short: 'En arqueo' },
+      { shift: null, full: 'Sin turno', short: 'Cerrado' },
+    ];
+    for (const entry of cases) {
+      renderBar(cashier, { shift: entry.shift });
+      const button = await screen.findByRole('button', { name: `Caja · ${entry.full}` });
+      expect(button.querySelector('.cash-shortcut-state-full')!.textContent).toBe(entry.full);
+      expect(button.querySelector('.cash-shortcut-state-short')!.textContent).toBe(entry.short);
+      // La ayuda emergente nombra siempre el estado completo.
+      expect(button.getAttribute('title')).toMatch(new RegExp(`^Caja · ${entry.full}`));
+      cleanup();
+    }
+  });
+
+  it('«En línea» lleva su texto y una ayuda emergente que empieza por el estado', () => {
+    renderBar(waiter);
+    const online = screen.getByRole('status', { name: 'Servidor: En línea' });
+    expect(online.querySelector('.server-status-text')!.textContent).toBe('En línea');
+    expect(online.getAttribute('title')).toBe(
+      'En línea: El equipo servidor responde y los cambios llegan al momento.',
+    );
+    cleanup();
+    renderBar(waiter, { server: 'offline' });
+    const offline = screen.getByRole('status', { name: 'Servidor: Sin conexión' });
+    expect(offline.querySelector('.server-status-text')!.textContent).toBe('Sin conexión');
+    expect(offline.getAttribute('title')).toMatch(/^Sin conexión: No hay comunicación/);
+  });
+
+  it('tocar el logotipo vuelve al inicio sin dejarle el foco; con el teclado lo conserva', () => {
+    const onNavigate = renderBar(administrator);
+    const logo = screen.getByRole('button', { name: 'AD-EL POS · Ir al inicio (Mesas)' });
+    // Con el dedo o el ratón (detail ≥ 1) el botón suelta el foco: la siguiente tecla ya no puede
+    // encenderle el contorno de :focus-visible.
+    logo.focus();
+    fireEvent.click(logo, { detail: 1 });
+    expect(onNavigate).toHaveBeenLastCalledWith('restaurant');
+    expect(document.activeElement).not.toBe(logo);
+    // Con Intro o Espacio (detail = 0) el foco se queda en el logotipo, con su contorno.
+    logo.focus();
+    fireEvent.click(logo, { detail: 0 });
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(logo);
   });
 });
 

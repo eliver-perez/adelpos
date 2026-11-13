@@ -66,11 +66,12 @@ describe('Mesas (§3)', () => {
     expect(rule('.table-map-operation .table-map-viewport')).toContain('overflow: auto;');
   });
 
-  it('leyenda en una sola línea dentro del marco del mapa', () => {
+  // Desde la etapa 9F (§6.2) la leyenda ya no se queda en una sola línea con desplazamiento
+  // horizontal: se acomoda en dos renglones (ver stage9fLayout.test.ts).
+  it('leyenda dentro del marco del mapa, sin desplazamiento horizontal', () => {
     const legend = rule('.map-legend');
-    expect(legend).toContain('flex-wrap: nowrap;');
-    expect(legend).toContain('white-space: nowrap;');
-    expect(rule('.map-legend-states')).toContain('flex-wrap: nowrap;');
+    expect(legend).toContain('border-top: 1px solid var(--border);');
+    expect(legend).not.toContain('overflow-x: auto;');
   });
 
   it('«Cobrar» fuera de la captura con contorno azul, sin relleno', () => {
