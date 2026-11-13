@@ -18,6 +18,11 @@ el estado del servidor dice «Sin conexión» en lugar de «Fuera de línea», l
 secciones no cambian. Desde la fase D, «Cuenta sin mesa» y «Nuevo pedido para llevar» (botones, menú nativo y paleta) abren la captura sin
 crear nada: la cuenta nace al guardar el primer producto; las pestañas de Mesas miden 44 px.
 
+**Etapa 9F** (fase D; avance en [ETAPA_9F_AVANCE.md](ETAPA_9F_AVANCE.md)): la barra compacta (debajo de 1280 px, por
+ejemplo con la ventana sin maximizar a unos 1500 px en Windows al 125 %) muestra el isotipo «AE» de la marca, el estado
+corto del turno en Caja, «En línea» con su texto y el nombre del usuario; el logotipo ya no se queda con el contorno de
+foco después de tocarlo; y la leyenda del mapa de mesas se acomoda en dos renglones en lugar de desplazarse de lado.
+
 La primera parte es para el personal del restaurante; la segunda, para quien desarrolle.
 
 ## Contenido
@@ -65,7 +70,13 @@ derecha:
 - Temas claro y oscuro; desde la etapa 9D con el azul de la marca (la sección activa con fondo azul muy claro y borde azul).
 - De 1280 a 1599 px la barra reduce sus rellenos para que quepan las cuatro secciones del mismo ancho, Caja en dos
   renglones y «Sin conexión»; si un nombre de usuario muy largo aún no cabe, solo él se acorta con puntos suspensivos (el
-  nombre completo sigue en la descripción del botón). Debajo de 1280 px sigue la barra compacta de la 9C.
+  nombre completo sigue en la descripción del botón). Debajo de 1280 px va la **barra compacta**; desde la etapa 9F
+  muestra el isotipo «AE» de la marca (el mismo del ícono del instalador), Caja con el estado corto del turno
+  («Abierto», «En arqueo» o «Cerrado»), «En línea» con su texto y el nombre del usuario, que es lo único que se acorta
+  con puntos suspensivos. Debajo de 1150 px el turno y «En línea» quedan como un punto de color con su ayuda emergente
+  y el usuario como icono. Se verificó a 1200, 1280, 1440, 1500 y 1920 px.
+- Tocar el logotipo (o hacer clic en él) vuelve al inicio y no le deja el contorno de foco; el contorno solo aparece al
+  llegar a él con el teclado (Tab), como en cualquier botón.
 
 ## Caja
 
@@ -78,7 +89,9 @@ estado del turno de la caja asignada a esta terminal:
 | Ámbar | «En arqueo»     | El cierre está en curso: la caja se pausa.      |
 | Gris  | «Sin turno»     | No hay turno abierto (se captura, no se cobra). |
 
-(En la 9C «Turno abierto» era verde.) Mientras llega el turno dice «Consultando…». Al tocarlo se abre el **menú rápido de la etapa 7.1**, alineado con el borde derecho del botón, con las mismas hojas de siempre: Ingreso, Retiro, Gasto, Abrir
+(En la 9C «Turno abierto» era verde.) Mientras llega el turno dice «Consultando…». En la barra compacta (debajo de
+1280 px, desde la etapa 9F) el estado va abreviado: «Abierto», «En arqueo» o «Cerrado»; al dejar el dedo o el puntero
+sobre el botón, la ayuda emergente dice el estado completo. Al tocarlo se abre el **menú rápido de la etapa 7.1**, alineado con el borde derecho del botón, con las mismas hojas de siempre: Ingreso, Retiro, Gasto, Abrir
 cajón, Corte parcial, Abrir turno (solo sin turno) e Ir a Caja. Cada opción aparece solo con su permiso; Ingreso,
 Retiro, Gasto y Corte parcial requieren un turno abierto. Nada se registra desde el menú: cada hoja pide los datos y la
 confirmación de siempre.
@@ -98,8 +111,9 @@ Sustituye a los textos «Sesión verificada · En tiempo real»:
 | **Sin conexión** | No hay comunicación con el equipo servidor. Se reintenta solo; espera a que vuelva la conexión para guardar cambios.        |
 
 Colores desde la etapa 9D: «En línea» azul, «Reconectando» ámbar y «Sin conexión» rojo (hasta la 9C se llamaba «Fuera de
-línea»). Desde la 9D «En línea» se ve con su texto también a 1280 px (antes era solo un punto de color); reconectando o
-sin conexión, el texto queda siempre a la vista. Sin conexión, Mesas, Cuentas, Para llevar y la captura muestran
+línea»). Desde la 9D «En línea» se ve con su texto también a 1280 px (antes era solo un punto de color) y desde la 9F
+también en la barra compacta hasta 1150 px; más angosto queda el punto, con una ayuda emergente que empieza por el
+estado («En línea: …»). Reconectando o sin conexión, el texto queda siempre a la vista. Sin conexión, Mesas, Cuentas, Para llevar y la captura muestran
 **«Reintentar»**, que vuelve a consultar la sesión y los datos. El estado sale de dos fuentes reales: la
 consulta de la sesión cada 5 segundos y el canal de eventos (solo para quien lo recibe; sin canal, con la sesión
 verificada, el estado es «En línea»).
@@ -485,6 +499,15 @@ Una operación nueva del puente (como `menu_subscribe`) se agrega a `build.rs`, 
   `workflow-stage9d-topbar-tables.spec.ts` (orden, mismo ancho, alturas de 52–56 px y ningún texto cortado ni
   desbordamiento a 1280 × 720 y 1920 × 1080 en ambos temas, menú de Caja dentro de la ventana, «Sin conexión» simulado
   rechazando peticiones en el puente); `e2e/navigation.ts` busca Caja en toda la barra.
+- **Etapa 9F** (fase D): `navigation/navigation.test.tsx` («barra compacta»: isotipo con su texto alternativo y sin la
+  «A·», estado corto de Caja en sus tres estados con la ayuda emergente, «En línea» con texto y ayuda que empieza por el
+  estado, el logotipo suelta el foco con el puntero y lo conserva con el teclado), `src/stage9fLayout.test.ts` (reglas de
+  la compacta y de debajo de 1150 px, isotipo de 128 px, leyenda en dos renglones sin `overflow-x`) y Playwright
+  `workflow-stage9f-topbar-map.spec.ts` (la barra a 1200, 1280, 1440, 1500 y 1920 px en ambos temas con un nombre de
+  usuario largo: sin desplazamiento horizontal, botones visibles y tocables de al menos 44 px, isotipo, estado del turno
+  y «En línea» legibles, nombre con puntos suspensivos; «Sin conexión» a 1200 px; el foco del logotipo tras un clic, con
+  Escape, una flecha, ⌘2 y la paleta, y con el teclado; la leyenda sin desplazamiento horizontal en los cinco anchos, en
+  dos renglones a 1200 px y en uno a 1920 px).
 
 ## Lo que falta comprobar
 

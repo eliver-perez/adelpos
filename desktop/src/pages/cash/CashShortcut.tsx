@@ -33,6 +33,15 @@ export const shortcutStateLabels: Record<ShortcutState, string> = {
   unknown: 'Consultando el turno',
 };
 
+// Etapa 9F (§6.1): estado corto del turno para la barra compacta (debajo de 1280 px), donde Caja ya
+// no pierde el estado. El texto completo sigue en el nombre accesible y en la ayuda emergente.
+export const shortcutStateShortLabels: Record<ShortcutState, string> = {
+  open: 'Abierto',
+  closing: 'En arqueo',
+  none: 'Cerrado',
+  unknown: 'Consultando…',
+};
+
 const sheetTitles: Record<CashSheet, string> = {
   income: 'Ingreso de efectivo',
   withdrawal: 'Retiro de efectivo',
@@ -254,7 +263,9 @@ export function CashShortcut({
   const status = shortcutStateLabels[shortcut.state];
   const options = shortcutOptions(shortcut, can);
   // Etapa 9C: el atajo de «Ir a Caja» en la descripción del botón (el botón abre el menú rápido).
+  // Desde la 9F la ayuda emergente con el estado del turno está siempre, también sin atajo.
   const goHint = shortcutHint('view.cash');
+  const title = goHint ? `Caja · ${status} · Ir a Caja: ${goHint.label}` : `Caja · ${status}`;
 
   function choose(option: ShortcutOption) {
     if (option.id === 'cash') {
@@ -277,7 +288,7 @@ export function CashShortcut({
         type="button"
         className={buttonClass}
         aria-label={`Caja · ${status}`}
-        title={goHint ? `Caja · ${status} · Ir a Caja: ${goHint.label}` : undefined}
+        title={title}
         aria-expanded={menuOpen}
         aria-controls={menuID}
         aria-current={active ? 'page' : undefined}
@@ -287,13 +298,20 @@ export function CashShortcut({
         <Icon name="cash" size={20} />
         {placement === 'bar' ? (
           // Etapa 9D (§2): en la barra superior, dos renglones: «Caja» y debajo el estado del turno
-          // con su indicador (azul abierto, ámbar en arqueo y gris sin turno).
+          // con su indicador (azul abierto, ámbar en arqueo y gris sin turno). Etapa 9F (§6.1): el
+          // estado va en texto completo y en texto corto; los estilos muestran el corto en la barra
+          // compacta (debajo de 1280 px).
           <span className="cash-shortcut-lines">
             <span className="cash-shortcut-name">Caja</span>
             <span className="cash-shortcut-status">
               <span className="cash-shortcut-indicator" aria-hidden="true" />
               <span className="cash-shortcut-state">
-                {shortcut.state === 'unknown' ? 'Consultando…' : status}
+                <span className="cash-shortcut-state-full">
+                  {shortcut.state === 'unknown' ? 'Consultando…' : status}
+                </span>
+                <span className="cash-shortcut-state-short">
+                  {shortcutStateShortLabels[shortcut.state]}
+                </span>
               </span>
             </span>
           </span>

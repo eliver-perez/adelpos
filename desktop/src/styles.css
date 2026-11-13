@@ -204,10 +204,6 @@
   --chart-axis: #c5ced9;
   --chart-label: #fff;
   --chart-label-dark: #0b0b0b;
-  /* Marca compacta de la barra (debajo de 1280 px): «A·» en los azules de la marca. */
-  --brand-mark-bg: var(--brand-blue-pressed);
-  --brand-mark-text: #fff;
-  --brand-mark-dot: var(--brand-blue-light);
   /* Papel simulado (diseñador de documentos e identidad del establecimiento): siempre claro, como
      el papel, en ambos temas. */
   --paper-bg: #fffef8;
@@ -277,7 +273,6 @@
   --chart-previous: #5f6d80;
   --chart-grid: #26303c;
   --chart-axis: #3d4a5a;
-  --brand-mark-bg: var(--brand-blue);
 }
 body {
   margin: 0;
@@ -313,24 +308,6 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-.brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 11px;
-  background: var(--brand-mark-bg);
-  color: var(--brand-mark-text);
-  display: grid;
-  align-content: center;
-  justify-content: center;
-  grid-auto-flow: column;
-  font-size: 23px;
-  font-weight: 600;
-  letter-spacing: -3px;
-  padding-right: 3px;
-}
-.brand-mark span {
-  color: var(--brand-mark-dot);
 }
 .brand-logo {
   display: inline-flex;
@@ -1064,7 +1041,7 @@ summary {
     display: none;
   }
   .brand-logo .brand-logo-compact {
-    display: grid;
+    display: block;
   }
   .catalog-editor .form-grid {
     grid-template-columns: minmax(0, 1fr);
@@ -1734,19 +1711,21 @@ summary {
   padding: 24px;
   font-size: 12px;
 }
-/* Etapa 9D (§3.2): la leyenda va dentro del marco del mapa, en una sola línea. */
+/* Etapa 9D (§3.2): la leyenda va dentro del marco del mapa, en una línea cuando cabe. Etapa 9F
+   (§6.2): en ventanas angostas ya no se desplaza de lado (antes, en una sola línea con
+   `overflow-x: auto`, mostraba una barra horizontal): se acomoda en dos renglones (primero pasan
+   al segundo los datos de cada mesa y, si aun así no caben, también los últimos estados); cada
+   estado conserva junta su muestra, su icono y su texto. */
 .map-legend {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
+  gap: 4px 14px;
   min-width: 0;
   padding: 6px 10px;
   border-top: 1px solid var(--border);
   background: var(--panel);
   font-size: 10px;
-  white-space: nowrap;
-  overflow-x: auto;
   flex-shrink: 0;
 }
 .map-legend span {
@@ -1757,9 +1736,10 @@ summary {
 /* Leyenda con los cinco estados de mesa: muestra, icono y texto. */
 .map-legend-states {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: 4px 12px;
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1770,6 +1750,7 @@ summary {
   align-items: center;
   gap: 5px;
   color: var(--text);
+  white-space: nowrap;
 }
 .legend-swatch {
   width: 18px;
@@ -8065,6 +8046,11 @@ th[aria-sort='descending'] {
 .cash-shortcut-bar .cash-shortcut-unknown .cash-shortcut-state {
   color: var(--muted);
 }
+/* Etapa 9F (§6.1): el estado corto del turno («Abierto», «En arqueo», «Cerrado») solo se ve en la
+   barra compacta (debajo de 1280 px); el completo, en las demás. */
+.cash-shortcut-state-short {
+  display: none;
+}
 /* Caja está a la derecha: su menú rápido se alinea con el borde derecho del botón. */
 .cash-shortcut-bar .cash-shortcut-menu {
   left: auto;
@@ -8274,22 +8260,37 @@ th[aria-sort='descending'] {
     display: inline-block;
   }
 }
-/* Debajo de 1280 × 720 (fuera del diseño mínimo) la barra superior se compacta para no desbordar:
-   la marca abreviada, el usuario como icono y menos relleno. */
+/* Barra compacta debajo de 1280 px (etapa 9F, §6.1; se observó con la ventana sin maximizar, unos
+   1500 px de Windows al 125 %, ≈ 1200 px de la página): el isotipo «AE» de la marca en lugar del
+   logotipo completo, Caja con el estado corto del turno («Abierto», «En arqueo», «Cerrado»), «En
+   línea» con su texto y el nombre del usuario, que es lo único que se acorta (con puntos
+   suspensivos) si falta espacio; los botones con menos relleno. Hasta la 9E aquí iba la «A·»
+   provisional, sin el estado del turno, «En línea» como punto suelto y el usuario como icono. */
 @media (max-width: 1279px) {
   .topbar-logo .brand-logo {
-    width: 38px;
+    width: 40px;
   }
   .topbar-logo .brand-logo .brand-logo-light,
   :root[data-theme='dark'] .topbar-logo .brand-logo .brand-logo-dark {
     display: none;
   }
   .topbar-logo .brand-logo .brand-logo-compact {
-    display: grid;
+    display: block;
   }
   .app-topbar .topbar-button {
     padding: 0 10px;
   }
+  .cash-shortcut-bar .cash-shortcut-state-full {
+    display: none;
+  }
+  .cash-shortcut-bar .cash-shortcut-state-short {
+    display: inline;
+  }
+}
+/* Debajo de 1150 px (fuera de los anchos verificados) esos textos ya no caben: el turno y «En línea»
+   quedan como punto de color con su ayuda emergente (que empieza por el estado) y su nombre
+   accesible, y el usuario como icono, como en la barra compacta anterior. */
+@media (max-width: 1149px) {
   .app-topbar .user-menu-identity,
   .app-topbar .server-status-online .server-status-text,
   .cash-shortcut-bar .cash-shortcut-state {

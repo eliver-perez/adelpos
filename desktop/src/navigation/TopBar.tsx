@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { BrandLogo } from '../components/BrandLogo';
 import { Icon } from '../components/Icon';
 import { WindowControls } from '../components/WindowControls';
@@ -52,7 +52,11 @@ function SectionButton({
 // estado del turno, con el menú rápido de la 7.1), el estado del servidor, el menú del usuario y
 // pantalla completa. Cada usuario ve solo lo que su rol permite; sin opciones de administración no
 // hay botón Administración. Toda navegación pasa por onNavigate (el requestScreen de App). Los
-// atajos no cambian: ⌘/Ctrl + 1–4 siguen siendo Mesas, Para llevar, Cocina y Caja.
+// atajos no cambian: ⌘/Ctrl + 1–4 siguen siendo Mesas, Para llevar, Cocina y Caja. Debajo de
+// 1280 px la barra se compacta solo con estilos (etapa 9F, §6.1): isotipo de la marca, estado corto
+// del turno («Abierto», «En arqueo», «Cerrado»), «En línea» con su texto y el nombre del usuario
+// acortado con puntos suspensivos; debajo de 1150 px, el turno y «En línea» como punto de color con
+// su ayuda emergente y el usuario como icono.
 export function TopBar({
   permissions,
   highlight,
@@ -77,13 +81,27 @@ export function TopBar({
   const sectionsLeft = operation.filter((entry) => entry.id !== 'cash');
   const cash = operation.find((entry) => entry.id === 'cash');
   const administration = canOpen('administration', permissions);
+
+  // Etapa 9F (§6.1): el logotipo solo muestra el contorno de foco al navegar con el teclado. En
+  // Chromium (WebView2 en Windows) el botón conservaba el foco después de tocarlo o de hacer clic, y
+  // la siguiente tecla (Escape, una flecha o un atajo como ⌘2) le encendía :focus-visible aunque ya
+  // se hubiera vuelto al inicio; lo mismo al cerrar la paleta, que devuelve el foco al control
+  // anterior. Con el dedo o el ratón (detail > 0) el foco se suelta al volver al inicio; con Intro o
+  // Espacio (detail = 0) se queda y el contorno se ve como siempre.
+  function goHome(event: MouseEvent<HTMLButtonElement>) {
+    if (event.detail > 0) {
+      event.currentTarget.blur();
+    }
+    onNavigate(home);
+  }
+
   return (
     <header className="app-topbar">
       <button
         type="button"
         className="topbar-logo"
         aria-label={`AD-EL POS · Ir al inicio (${sectionByID(home).label})`}
-        onClick={() => onNavigate(home)}
+        onClick={goHome}
       >
         <BrandLogo />
       </button>
