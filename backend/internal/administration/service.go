@@ -45,6 +45,10 @@ type Service struct {
 	reportsOnce sync.Once
 	streamMutex sync.Mutex
 	streams     map[string]int
+	// removalTurn deja una sola eliminación de datos de prueba a la vez en este servidor (etapa 9F,
+	// maintenance.go); se crea al primer uso.
+	removalOnce sync.Once
+	removalTurn chan struct{}
 }
 
 type Request struct {

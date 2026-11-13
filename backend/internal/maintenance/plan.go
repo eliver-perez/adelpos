@@ -61,19 +61,31 @@ type Plan struct {
 	deactivateStations []string
 	deleteRoutes       []string
 	// Rutas que se conservan, sin sus estaciones de prueba.
-	trimmedRoutes        []string
+	trimmedRoutes []string
+	// Rutas cuyas estaciones son todas de prueba: se eliminan, pero se presentan según su dueño (ver
+	// presentStationOnlyRoutes); stationRoutesAt es dónde van en «Se eliminará».
+	stationOnlyRoutes    []routeRow
+	stationRoutesAt      int
 	deleteProducts       []string
 	deactivateProducts   []string
 	deleteCategories     []string
 	deactivateCategories []string
-	receiptPrinter       bool
-	drawerRegisters      []string
-	fallbackPrinters     []string
-	deviceLinks          bool
+	// Categorías de prueba que no se conservan (se eliminan, se desactivan o ya estaban inactivas).
+	testCategories   []string
+	receiptPrinter   bool
+	drawerRegisters  []string
+	fallbackPrinters []string
+	deviceLinks      bool
 }
 
 // Referencias que el plan maneja por su cuenta: configuración que se borra junto con el dato o que se
 // desvincula. Cualquier otra referencia cuenta como registro relacionado y el dato se desactiva.
+//
+// Las promociones (catalog_promotion_products y catalog_promotion_categories) no están aquí a propósito
+// (revisión independiente de la 9F, M1): son del restaurante. Un producto o una categoría de prueba que
+// participa en una promoción se desactiva (el producto además se archiva) en lugar de borrarse, y la
+// promoción no se toca; si se borrara, la promoción perdería un participante sin que nadie lo viera y,
+// si era el único, quedaría activa sin participantes y ya no se podría volver a guardar.
 var (
 	stationHandled = map[reference]bool{
 		{table: "kitchen_route_stations", column: "station_id"}:       true,
@@ -91,7 +103,6 @@ var (
 		{table: "catalog_product_ingredients", column: "product_id"}: true,
 		{table: "catalog_product_groups", column: "product_id"}:      true,
 		{table: "catalog_price_entries", column: "product_id"}:       true,
-		{table: "catalog_promotion_products", column: "product_id"}:  true,
 		{table: "kitchen_routes", column: "product_id"}:              true,
 	}
 	variantHandled = map[reference]bool{
@@ -101,8 +112,13 @@ var (
 		{table: "catalog_products", column: "category_id"}:             true,
 		{table: "kitchen_routes", column: "category_id"}:               true,
 		{table: "catalog_category_quick_notes", column: "category_id"}: true,
-		{table: "catalog_promotion_categories", column: "category_id"}: true,
 	}
+)
+
+// Tablas de las promociones del restaurante en las que participa un producto o una categoría.
+const (
+	promotionProducts   = "catalog_promotion_products"
+	promotionCategories = "catalog_promotion_categories"
 )
 
 type planBuilder struct {
@@ -159,7 +175,9 @@ type productRow struct {
 
 // Orden de las decisiones: estaciones → rutas → productos → categorías → impresoras → terminales. Cada
 // paso depende de lo que decidió el anterior (una impresora no se borra si una estación de prueba se
-// conserva desactivada; una categoría no se borra si conserva un producto de prueba con ventas).
+// conserva desactivada; una categoría no se borra si conserva un producto de prueba con ventas). Las
+// rutas que solo enviaban a estaciones de prueba se presentan después de decidir productos y
+// categorías, porque dónde se muestran depende de si su dueño es de prueba.
 func (builder *planBuilder) build() error {
 	printers, err := builder.testPrinters()
 	if err != nil {
@@ -189,6 +207,7 @@ func (builder *planBuilder) build() error {
 	if err := builder.decideCategories(products); err != nil {
 		return err
 	}
+	builder.presentStationOnlyRoutes(products)
 	if err := builder.decidePrinters(printers, stations); err != nil {
 		return err
 	}
@@ -262,6 +281,7 @@ func (builder *planBuilder) decideStations(stations []stationRow) error {
 type routeRow struct {
 	ID           string
 	ProductRoute bool
+	OwnerID      string
 	Owner        string
 	StationIDs   []string
 	StationNames []string
@@ -275,13 +295,18 @@ func routeLabel(productRoute bool, owner string) string {
 }
 
 // decideStationRoutes: una ruta cuyas estaciones son todas de prueba se elimina (solo podía enviar a un
-// destino de prueba); una ruta con estaciones del restaurante se conserva sin las de prueba.
+// destino de prueba y una ruta sin estaciones mandaría en silencio a ningún lado); una ruta con
+// estaciones del restaurante se conserva sin las de prueba. Las que se eliminan se anotan primero en
+// «Se desvinculará», como configuración del restaurante, y presentStationOnlyRoutes pasa a «Se
+// eliminará» las de un producto o una categoría de prueba.
 func (builder *planBuilder) decideStationRoutes() error {
 	plan := builder.plan
+	plan.stationRoutesAt = len(plan.Remove)
 	if len(plan.testStations) == 0 {
 		return nil
 	}
-	rows, err := builder.tx.Query(builder.ctx, `SELECT r.id::text, r.product_id IS NOT NULL, coalesce(p.name, c.name, ''),
+	rows, err := builder.tx.Query(builder.ctx, `SELECT r.id::text, r.product_id IS NOT NULL,
+            coalesce(r.product_id, r.category_id)::text, coalesce(p.name, c.name, ''),
             array_agg(rs.station_id::text ORDER BY st.name, rs.station_id), array_agg(st.name ORDER BY st.name, rs.station_id)
         FROM app.kitchen_routes r
         JOIN app.kitchen_route_stations rs ON rs.route_id = r.id
@@ -290,7 +315,7 @@ func (builder *planBuilder) decideStationRoutes() error {
         LEFT JOIN app.catalog_categories c ON c.id = r.category_id
         GROUP BY r.id, p.name, c.name
         HAVING bool_or(rs.station_id::text = ANY($1::text[]))
-        ORDER BY 3, 1`, list(plan.testStations))
+        ORDER BY 4, 1`, list(plan.testStations))
 	if err != nil {
 		return err
 	}
@@ -308,11 +333,12 @@ func (builder *planBuilder) decideStationRoutes() error {
 		}
 		if allTest {
 			plan.deleteRoutes = append(plan.deleteRoutes, route.ID)
-			plan.Remove = append(plan.Remove, Entry{
+			plan.stationOnlyRoutes = append(plan.stationOnlyRoutes, route)
+			plan.Unlink = append(plan.Unlink, Entry{
 				Kind:   KindRoute,
 				ID:     route.ID,
 				Name:   label,
-				Reason: "Todas sus estaciones son de prueba.",
+				Reason: restaurantRouteReason(route),
 			})
 			continue
 		}
@@ -332,6 +358,51 @@ func (builder *planBuilder) decideStationRoutes() error {
 	return nil
 }
 
+// restaurantRouteReason explica qué pasa con la ruta de un producto o una categoría del restaurante que
+// solo enviaba a estaciones de prueba (revisión independiente de la 9F, B1): Go la elimina, así que el
+// producto usa la ruta de su categoría (la de producto prevalece) o, sin ella, la cocina avisa «Sin ruta
+// de preparación» en lugar de enviar a ningún lado.
+func restaurantRouteReason(route routeRow) string {
+	stations := []string{}
+	for _, name := range route.StationNames {
+		stations = append(stations, "«"+name+"»")
+	}
+	sentStations := fmt.Sprintf("Solo enviaba a estaciones de prueba (%s); se quita: ", spanishList(stations))
+	if route.ProductRoute {
+		return sentStations + "el producto usará la ruta de su categoría o quedará sin ruta de preparación " +
+			"hasta que le asignes otra."
+	}
+	return sentStations + "sus productos sin ruta propia quedarán sin ruta de preparación hasta que le asignes otra."
+}
+
+// presentStationOnlyRoutes coloca las rutas que solo enviaban a estaciones de prueba: la de un producto
+// de prueba o de una categoría de prueba que no se conserva pasa a «Se eliminará» (en el lugar que les
+// tocaba, después de las estaciones); la de un producto o una categoría del restaurante se queda en «Se
+// desvinculará» con su explicación, porque no es un dato de prueba. En ambos casos Go elimina la ruta.
+func (builder *planBuilder) presentStationOnlyRoutes(products []productRow) {
+	plan := builder.plan
+	testOwners := slices.Clone(plan.testCategories)
+	for _, product := range products {
+		testOwners = append(testOwners, product.ID)
+	}
+	removed := []Entry{}
+	for _, route := range plan.stationOnlyRoutes {
+		if !slices.Contains(testOwners, route.OwnerID) {
+			continue
+		}
+		plan.Unlink = slices.DeleteFunc(plan.Unlink, func(entry Entry) bool {
+			return entry.Kind == KindRoute && entry.ID == route.ID
+		})
+		removed = append(removed, Entry{
+			Kind:   KindRoute,
+			ID:     route.ID,
+			Name:   routeLabel(route.ProductRoute, route.Owner),
+			Reason: "Todas sus estaciones son de prueba.",
+		})
+	}
+	plan.Remove = slices.Insert(plan.Remove, plan.stationRoutesAt, removed...)
+}
+
 func (builder *planBuilder) testProducts() ([]productRow, error) {
 	names, codes, kinds := []string{}, []string{}, []string{}
 	for _, signature := range TestProducts {
@@ -349,8 +420,9 @@ func (builder *planBuilder) testProducts() ([]productRow, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[productRow])
 }
 
-// decideProducts: un producto de prueba vendido (o en una cuenta abierta, una receta, un combo…) se
-// desactiva y se archiva; si no, se elimina con su configuración de catálogo y su ruta de preparación.
+// decideProducts: un producto de prueba vendido (o en una cuenta abierta, una receta, un combo, una
+// promoción…) se desactiva y se archiva; si no, se elimina con su configuración de catálogo y su ruta de
+// preparación.
 func (builder *planBuilder) decideProducts(products []productRow) error {
 	plan := builder.plan
 	for _, product := range products {
@@ -371,12 +443,16 @@ func (builder *planBuilder) decideProducts(products []productRow) error {
 		}
 		if len(blocking) > 0 {
 			if product.Active || !product.Archived {
+				reason, err := builder.relatedReason(blocking, promotionProducts, "product_id", product.ID)
+				if err != nil {
+					return err
+				}
 				plan.deactivateProducts = append(plan.deactivateProducts, product.ID)
 				plan.Deactivate = append(plan.Deactivate, Entry{
 					Kind:   KindProduct,
 					ID:     product.ID,
 					Name:   product.Name,
-					Reason: operationsReason(blocking) + " Se desactiva y se archiva.",
+					Reason: reason + " Se desactiva y se archiva.",
 				})
 			}
 			continue
@@ -442,7 +518,7 @@ type categoryRow struct {
 
 // decideCategories: solo cuenta una categoría con la firma que además contiene un producto de prueba. Se
 // conserva si tiene otros productos o si su ruta incluye estaciones del restaurante; se desactiva si
-// conserva productos de prueba con operaciones; si no, se elimina.
+// conserva productos de prueba con operaciones o participa en una promoción; si no, se elimina.
 func (builder *planBuilder) decideCategories(products []productRow) error {
 	plan := builder.plan
 	productIDs := []string{}
@@ -491,6 +567,7 @@ func (builder *planBuilder) decideCategories(products []productRow) error {
 			plan.Keep = append(plan.Keep, entry)
 			continue
 		}
+		plan.testCategories = append(plan.testCategories, category.ID)
 		blocking, err := builder.references.blocking("catalog_categories", category.ID, categoryHandled)
 		if err != nil {
 			return err
@@ -505,7 +582,10 @@ func (builder *planBuilder) decideCategories(products []productRow) error {
 			if category.Active {
 				entry.Reason = "Conserva productos de prueba con registros."
 				if len(blocking) > 0 {
-					entry.Reason = operationsReason(blocking)
+					entry.Reason, err = builder.relatedReason(blocking, promotionCategories, "category_id", category.ID)
+					if err != nil {
+						return err
+					}
 				}
 				plan.deactivateCategories = append(plan.deactivateCategories, category.ID)
 				plan.Deactivate = append(plan.Deactivate, entry)

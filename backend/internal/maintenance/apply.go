@@ -28,7 +28,8 @@ type statement struct {
 // plan dentro de ella. Primero desvincula la configuración, después elimina o desactiva en el orden que
 // exigen las llaves foráneas (rutas → estaciones → productos → categorías → impresoras) y al final
 // publica los eventos de configuración para que las pantallas abiertas vuelvan a consultar. Nunca toca
-// ventas, pagos, cortes, movimientos de inventario, cuentas, documentos ni auditoría.
+// ventas, pagos, cortes, movimientos de inventario, cuentas, documentos, promociones ni auditoría (un
+// producto o una categoría que participa en una promoción se desactiva en lugar de borrarse).
 func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, error) {
 	result := Result{
 		Removed:     plan.Remove,
@@ -65,8 +66,6 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
 		{`UPDATE app.kitchen_stations SET active = false, revision = revision + 1, updated_at = now()
             WHERE id::text = ANY($1::text[])`, []any{list(plan.deactivateStations)}},
 		// Productos: su configuración de catálogo se elimina con ellos.
-		{`DELETE FROM app.catalog_promotion_products WHERE product_id::text = ANY($1::text[])`,
-			[]any{list(plan.deleteProducts)}},
 		{`DELETE FROM app.catalog_price_entries WHERE product_id::text = ANY($1::text[])`,
 			[]any{list(plan.deleteProducts)}},
 		{`DELETE FROM app.catalog_group_defaults WHERE product_id::text = ANY($1::text[])`,
@@ -79,10 +78,8 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
 		{`DELETE FROM app.catalog_products WHERE id::text = ANY($1::text[])`, []any{list(plan.deleteProducts)}},
 		{`UPDATE app.catalog_products SET active = false, archived = true, revision = revision + 1, updated_at = now()
             WHERE id::text = ANY($1::text[])`, []any{list(plan.deactivateProducts)}},
-		// Categorías: sus indicaciones rápidas y promociones por categoría se eliminan con ellas.
+		// Categorías: sus indicaciones rápidas se eliminan con ellas.
 		{`DELETE FROM app.catalog_category_quick_notes WHERE category_id::text = ANY($1::text[])`,
-			[]any{list(plan.deleteCategories)}},
-		{`DELETE FROM app.catalog_promotion_categories WHERE category_id::text = ANY($1::text[])`,
 			[]any{list(plan.deleteCategories)}},
 		{`DELETE FROM app.catalog_categories WHERE id::text = ANY($1::text[])`, []any{list(plan.deleteCategories)}},
 		{`UPDATE app.catalog_categories SET active = false, revision = revision + 1, updated_at = now()
