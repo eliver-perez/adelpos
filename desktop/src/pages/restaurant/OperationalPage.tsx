@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import type {
   OperationCommandHandlers,
@@ -197,7 +197,10 @@ export function OperationalPage({
     bill.account.state === 'open' &&
     !isPendingAccount(bill.account) &&
     bill.account.confirmed_quantity > 0;
-  useEffect(() => {
+  // El contexto de los atajos, la paleta y el menú se informa antes de pintar (etapa 9E): con un
+  // efecto normal, App lo recibía un instante después de dibujarse el panel de la mesa, y un atajo
+  // pulsado en ese instante (Ctrl+N justo al elegir la mesa) veía todavía «sin mesa elegida».
+  useLayoutEffect(() => {
     onCommandState?.({
       active,
       view,
@@ -447,8 +450,10 @@ export function OperationalPage({
     back,
   };
   // Las funciones cambian en cada render (cierran sobre el estado vigente): se publican después de
-  // cada render y se retiran al desmontar la pantalla.
-  useEffect(() => {
+  // cada render y se retiran al desmontar la pantalla. Se publican antes de pintar (etapa 9E): con
+  // un efecto normal, un Escape pulsado justo después de cerrar la precuenta usaba todavía la
+  // función del render anterior, que la daba por abierta, y no salía de la captura.
+  useLayoutEffect(() => {
     if (commandHandlers) {
       commandHandlers.current = handlers;
     }

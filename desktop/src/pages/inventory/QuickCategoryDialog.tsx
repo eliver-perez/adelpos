@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { trapFocus } from '../../components/ConfirmDialog';
 import { Field } from '../../components/Forms';
@@ -35,7 +35,9 @@ export function QuickCategoryDialog({
   const [saving, setSaving] = useState(false);
   const existing = categories.find((category) => comparable(category.name) === comparable(name));
 
-  useEffect(() => {
+  // El foco entra antes de pintar (etapa 9E, como «Acerca de» en la 9D): con un efecto normal,
+  // un Escape pulsado justo al aparecer el diálogo llegaba fuera de él y no lo cerraba.
+  useLayoutEffect(() => {
     // El foco va al nombre; al cerrar vuelve al selector de categoría.
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     input.current?.focus();

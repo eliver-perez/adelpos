@@ -278,41 +278,41 @@ No existen rutas de cobro o entrega. `payment_state:not_recorded` y `delivery_st
 
 Prefijo `/api/v1/kitchen`. Todos los UUID se validan; las escrituras conservan `operation_id` y recuperan el resultado solo para el mismo actor, terminal, ruta y cuerpo. PATCH/PUT y acciones sobre entidades existentes usan revisión. Conflictos responden 409; no se regeneran UUID después de una respuesta incierta. No hay DELETE ni URL o comando arbitrario desde React.
 
-| Método     | Sufijo                                  | Permiso                                                                                 |
-| ---------- | --------------------------------------- | --------------------------------------------------------------------------------------- |
-| GET / POST | `/stations`                             | `kitchen.stations.read` / `kitchen.stations.manage`                                     |
-| PATCH      | `/stations/{id}`                        | `kitchen.stations.manage`; tiempos requieren también `kitchen.timing.manage`            |
-| GET        | `/outputs`                              | `kitchen.stations.manage`; destinos sin configuración técnica completa                  |
-| GET / PUT  | `/access`                               | `kitchen.stations.manage`                                                               |
-| GET / POST | `/printers`                             | `kitchen.printers.manage`                                                               |
-| PATCH      | `/printers/{id}`                        | `kitchen.printers.manage`                                                               |
-| GET        | `/discovery`                            | `kitchen.printers.manage`; consulta CUPS real del servidor                              |
-| GET        | `/targets`                              | `kitchen.routing.manage`; categorías/productos sin precios                              |
-| GET / POST | `/routes`                               | `kitchen.routing.manage`                                                                |
-| PATCH      | `/routes/{id}`                          | `kitchen.routing.manage`                                                                |
-| GET        | `/settings`                             | `kitchen.stations.read`, `kitchen.formats.manage` o `kitchen.timing.manage`             |
-| PUT        | `/settings`                             | `kitchen.formats.manage`; cambios de tiempos/seguimiento exigen `kitchen.timing.manage` |
-| PUT        | `/timing`                               | `kitchen.timing.manage`                                                                 |
-| GET        | `/board`, `/releases`, `/releases/{id}` | `kitchen.states.read` y alcance de estación                                             |
-| POST       | `/releases/{id}/release`                | `kitchen.release`; adelantada requiere `kitchen.release_early`                          |
-| POST       | `/releases/{id}/schedule`               | `kitchen.timing.manage`                                                                 |
-| POST       | `/changes/{id}/retry`                   | `kitchen.release`                                                                       |
-| POST       | `/states`                               | `kitchen.states.manage` y alcance por cada estación afectada                            |
-| GET        | `/tickets`, `/tickets/{id}`             | `kitchen.tickets.read` y alcance de estación                                            |
-| POST       | `/tickets/{id}/ack`                     | `kitchen.kds.ack` y alcance de estación                                                 |
-| GET        | `/jobs`, `/jobs/{id}`                   | `kitchen.queue.read` y `kitchen.stations.all`                                           |
-| POST       | `/jobs/{id}/retry`                      | `kitchen.queue.retry` y `kitchen.stations.all`                                          |
-| POST       | `/jobs/{id}/resolve`                    | `kitchen.queue.resolve` y `kitchen.stations.all`                                        |
-| POST       | `/reprint`                              | `kitchen.reprint` y `kitchen.stations.all`                                              |
-| POST       | `/test-print`                           | `kitchen.printers.test`                                                                 |
-| GET        | `/history`                              | `kitchen.history.read` y `kitchen.stations.all`                                         |
+| Método     | Sufijo                                  | Permiso                                                                                                                    |
+| ---------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| GET / POST | `/stations`                             | `kitchen.stations.read` / `kitchen.stations.manage`                                                                        |
+| PATCH      | `/stations/{id}`                        | `kitchen.stations.manage`; tiempos requieren también `kitchen.timing.manage`                                               |
+| GET        | `/outputs`                              | `kitchen.stations.manage`; destinos sin configuración técnica completa                                                     |
+| GET / PUT  | `/access`                               | `kitchen.stations.manage`                                                                                                  |
+| GET / POST | `/printers`                             | `kitchen.printers.manage`                                                                                                  |
+| PATCH      | `/printers/{id}`                        | `kitchen.printers.manage`                                                                                                  |
+| GET        | `/discovery`                            | `kitchen.printers.manage`; consulta CUPS real del servidor (en Windows, desde la 9E, las impresoras instaladas en Windows) |
+| GET        | `/targets`                              | `kitchen.routing.manage`; categorías/productos sin precios                                                                 |
+| GET / POST | `/routes`                               | `kitchen.routing.manage`                                                                                                   |
+| PATCH      | `/routes/{id}`                          | `kitchen.routing.manage`                                                                                                   |
+| GET        | `/settings`                             | `kitchen.stations.read`, `kitchen.formats.manage` o `kitchen.timing.manage`                                                |
+| PUT        | `/settings`                             | `kitchen.formats.manage`; cambios de tiempos/seguimiento exigen `kitchen.timing.manage`                                    |
+| PUT        | `/timing`                               | `kitchen.timing.manage`                                                                                                    |
+| GET        | `/board`, `/releases`, `/releases/{id}` | `kitchen.states.read` y alcance de estación                                                                                |
+| POST       | `/releases/{id}/release`                | `kitchen.release`; adelantada requiere `kitchen.release_early`                                                             |
+| POST       | `/releases/{id}/schedule`               | `kitchen.timing.manage`                                                                                                    |
+| POST       | `/changes/{id}/retry`                   | `kitchen.release`                                                                                                          |
+| POST       | `/states`                               | `kitchen.states.manage` y alcance por cada estación afectada                                                               |
+| GET        | `/tickets`, `/tickets/{id}`             | `kitchen.tickets.read` y alcance de estación                                                                               |
+| POST       | `/tickets/{id}/ack`                     | `kitchen.kds.ack` y alcance de estación                                                                                    |
+| GET        | `/jobs`, `/jobs/{id}`                   | `kitchen.queue.read` y `kitchen.stations.all`                                                                              |
+| POST       | `/jobs/{id}/retry`                      | `kitchen.queue.retry` y `kitchen.stations.all`                                                                             |
+| POST       | `/jobs/{id}/resolve`                    | `kitchen.queue.resolve` y `kitchen.stations.all`                                                                           |
+| POST       | `/reprint`                              | `kitchen.reprint` y `kitchen.stations.all`                                                                                 |
+| POST       | `/test-print`                           | `kitchen.printers.test`                                                                                                    |
+| GET        | `/history`                              | `kitchen.history.read` y `kitchen.stations.all`                                                                            |
 
 El alcance global `kitchen.stations.all` se comprueba además del permiso funcional. Las consultas y acciones sobre liberaciones/cambios pendientes completos también lo exigen. Sin él, las tareas/documentos operativos y eventos se filtran por `kitchen_device_stations`; no basta conocer UUID. El listado de configuración de estaciones conserva su permiso específico. Cambiar un destino durante una resolución o reimpresión exige también `kitchen.printers.manage`. Los veinte permisos nuevos solo se asignan inicialmente al administrador.
 
 ### Configuración
 
 - Estación: `{name,description,active,sort_order,reception,printer_id,target_minutes,warning_minutes,overdue_minutes,grouping,tracking}` y `position:{after}` opcional (etapa 6.1, misma regla del catálogo; historial `station.reordered`). Recepción `printer|kds|both`; agrupación `inherit|independent|unified`; seguimiento `inherit|item|order`. PATCH lleva `id` y `revision`.
-- Impresora: `{name,transport,destination,port,paper_width,copies,supports_cut,cut,cutter_option,active,fallback_id}`. Transporte `cups|escpos_tcp|agent`; papel 58/80 mm, copias 1–3, puerto 9100–9109. CUPS utiliza nombre de cola; TCP una IP privada explícita; agente todavía no implementado. El respaldo es opcional y no puede formar ciclos. PATCH conserva identidad/revisión.
+- Impresora: `{name,transport,destination,port,paper_width,copies,supports_cut,cut,cutter_option,active,fallback_id}`. Transporte `cups|escpos_tcp|agent`; papel 58/80 mm, copias 1–3, puerto 9100–9109. CUPS utiliza nombre de cola (desde la etapa 9E, con el servidor en Windows, `cups` significa «cola de impresión del equipo» y el destino es el nombre de la impresora instalada en Windows; ver «Etapa 9E»); TCP una IP privada explícita; agente todavía no implementado. El respaldo es opcional y no puede formar ciclos. PATCH conserva identidad/revisión.
 - Ruta: exactamente uno de `category_id|product_id`, `mode:prepare|none`, `station_ids`. Preparación exige estaciones activas no repetidas; exención explícita usa lista vacía. PATCH conserva `id/revision`; producto prevalece sobre categoría.
 - Acceso: `{device_id,station_ids,expected_station_ids,operation_id}`. La lista esperada del último GET permite rechazar una edición concurrente. Solo dispositivos autorizados existentes.
 - Formato/política: `{grouping,tracking,automatic_release,lead_minutes,show_prices,show_notes,show_establishment,text_size,line_spacing,quantity_style,revision,operation_id}`. Agrupación `independent|unified`, seguimiento `item|order`, anticipación 0–1440, texto `normal|large`, separación 1–3, cantidad `prefix|multiplier`. PUT `/timing` recibe únicamente automatismo, anticipación, seguimiento, revisión y UUID.
@@ -2873,3 +2873,53 @@ identificador), `settings_long_open_hours` (GET) y `save_settings_long_open_hour
 de la lista (la prueba exige que no tenga ruta) y del tipo de operaciones de `services/api.ts`; Go conserva
 `POST restaurant/accounts/{id}/void` por compatibilidad. `export.rs` agrega `sales.cancellations_by_reason` a
 `EXPORTABLE_REPORTS`. Sin operaciones nativas nuevas.
+
+## Etapa 9E · Windows (sin rutas nuevas; esquema 21)
+
+Sin migraciones, rutas, permisos ni operaciones nuevas del puente (`api.rs` solo cambia el mensaje de conexión, que en
+la instalación de Windows dice que el equipo se está preparando mientras arranca el servidor local). Lo que cambia
+depende del sistema donde corre Go; en macOS los contratos siguen idénticos.
+
+### Cola de impresión del equipo en Windows (transporte `cups`)
+
+El valor guardado `cups` significa «cola de impresión del equipo servidor». Con Go en Windows es la impresora
+instalada en Windows y recibe **ESC/POS en modo RAW** por el administrador de impresión (`winspool.drv`:
+`OpenPrinter`, `StartDocPrinter` con tipo `RAW`, `WritePrinter`, `EndDocPrinter`; `AbortPrinter` si falla). En macOS
+sigue siendo CUPS.
+
+- `GET kitchen/discovery` lista las impresoras instaladas en Windows (`EnumPrinters`) con la misma forma
+  `{queue, status, options}`; `status` resume en español el puerto, el controlador y si AD-EL POS puede usarla.
+  Si Windows no responde: `503 SPOOLER_UNAVAILABLE` («No se pudieron consultar las impresoras instaladas en Windows en
+  el equipo servidor.»). En macOS sigue `503 CUPS_UNAVAILABLE`.
+- Antes de cada envío la impresora se consulta (solo lectura). Se aceptan puertos USB, COM, LPT y TCP/IP estándar
+  (`connection`: `usb`, `serial`, `parallel`, `socket`). Se rechazan, sin enviar nada y con el motivo, las impresoras
+  de otro equipo, de red compartida, de Escritorio remoto o de la nube, las virtuales (PDF, XPS, OneNote, fax),
+  `FILE:`, `PORTPROMPT:`, `NUL:`, los puertos WSD y los monitores desconocidos.
+- Los bytes son los de ESC/POS por red: texto con el codificador de siempre, documentos con formato o logotipo con
+  `documents.EncodeESCPos` y el pulso del cajón con los mismos bytes. La marca `accepts_escpos` no aplica en Windows
+  (la interfaz la oculta y no hay camino de texto: una impresora que no recibe los datos sin alterar no recibe
+  documentos).
+- Resultados de la cola sin cambio de reglas: `error` si no se envió nada; `uncertain` (nunca se reintenta solo) si
+  falló después de empezar el documento; `submitted` con «Aceptado por la cola de impresión de Windows; no confirma
+  salida física de papel.».
+- `GET documents/printers`: con la cola de Windows, `format`/`logo` usan `queue_raw` (`supported`), `queue_not_raw`
+  (`unsupported`, «La impresora no recibe los comandos ESC/POS sin alterar: AD-EL POS no le envía documentos. …»),
+  `queue_unavailable` y `queue_timeout` («Windows no respondió a tiempo: …»); `escpos_disabled` no se usa.
+- `GET payments/cash/drawers`: `printers[].connection` y `reason` salen de la misma consulta; una impresora desactivada
+  dice «Impresora desactivada; no se consultó en Windows.». `DRAWER_QUEUE_NOT_RAW` y `DRAWER_QUEUE_UNAVAILABLE` se
+  conservan con los motivos de Windows.
+
+### SSE (`GET events`) al apagar el servidor
+
+Desde la 9E los flujos SSE terminan en cuanto el servidor empieza a apagarse (`Service.Stopping`), en lugar de esperar
+a que agote los 5 s de `Shutdown`: el cierre con un flujo abierto termina en ≈ 1 s y con código 0. El cliente ve el
+fin del flujo como siempre y reconecta con `Last-Event-ID` cuando el servidor vuelve.
+
+### Comandos nuevos del servidor (línea de comandos, no HTTP)
+
+| Comando                                                          | Sistema      | Qué hace                                                                                                                                                          |
+| ---------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stop --pid N`                                                   | Windows      | Activa el evento de parada con nombre del servidor N tras comprobar que es el mismo programa (equivalente de `SIGTERM`). En macOS no hace nada.                   |
+| `host --data-dir D --pg-bin B [--watch-stdin] [--log-file F]`    | solo Windows | Servidor de la instalación: bloqueo de la carpeta, clúster propio, rol, base, respaldo antes de migrar sobre datos, migraciones, `serve` y parada de PostgreSQL.  |
+| `backup [--pause]`, `restore-check --file F`, `restore --file F` | solo Windows | Respaldo y ensayo con los `pg_dump`/`pg_restore` incluidos; `restore` exige la aplicación cerrada, un archivo de `backups` y crea antes un respaldo de seguridad. |
+| `--log-file F` (cualquier comando)                               | ambos        | Bitácora JSON en archivo (rotación simple a 20 MiB) en lugar de la salida estándar.                                                                               |

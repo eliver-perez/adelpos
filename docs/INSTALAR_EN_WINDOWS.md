@@ -11,9 +11,16 @@ En la computadora donde se preparó, el instalador está en:
 C:\Users\Expediente\Documents\ADEL POS\desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_0.9.4_x64-setup.exe
 ```
 
-Es un solo archivo. Para llevarlo a otra computadora, cópialo a una memoria USB (o envíalo por una carpeta
-compartida) y ábrelo desde ahí en la otra computadora. No necesita Internet: incluye todo lo que usa (también
+Es un solo archivo de **36.7 MB**. Para llevarlo a otra computadora, cópialo a una memoria USB (o envíalo por una
+carpeta compartida) y ábrelo desde ahí en la otra computadora. No necesita Internet: incluye todo lo que usa (también
 la base de datos), y si la computadora no tiene el componente WebView2 de Microsoft, lo instala él mismo.
+
+Si quieres comprobar que la copia llegó completa, abre PowerShell en la carpeta del archivo y escribe
+`Get-FileHash ".\AD-EL POS_0.9.4_x64-setup.exe"`: debe mostrar
+`365C6A91C265284C8AC30F3DC752AAF6C2118D99D263B8A5C40B21DDF4EEDA84`.
+
+En la computadora donde se preparó, AD-EL POS **ya está instalado** con un restaurante de prueba («Fonda Doña
+Ñeli», usuario **admin** y contraseña **admin**) para que lo revises.
 
 ## 2. Cómo instalarlo
 
@@ -26,6 +33,9 @@ la base de datos), y si la computadora no tiene el componente WebView2 de Micros
    la pantalla dice que se está preparando y continúa sola.
 5. Sigue el asistente inicial (nombre del restaurante, zona horaria y nombre de la terminal). Después entra con
    el usuario **admin** y la contraseña **admin**, y cámbiala en «Cambiar contraseña».
+6. AD-EL POS abre en pantalla completa. Para cerrarlo, toca el botón de pantalla completa de la barra superior
+   (o presiona F11) y cierra la ventana con la equis, o presiona **Alt+F4**. Al cerrarlo se detiene también su
+   base de datos; la próxima vez abre en unos segundos.
 
 ## 3. Si Windows pide permiso de red
 
@@ -71,3 +81,4 @@ Esto no se pudo comprobar automáticamente en la computadora de pruebas:
 - [ ] **Pantalla completa**: entrar y salir con el botón de la barra y con F11; cerrar en modo ventana y volver
       a abrir (debe recordar tamaño y posición).
 - [ ] **Dos terminales**, si aplica: todavía no está preparado en Windows (ver punto 3).
+- [ ] **Windows 10**, si alguna computadora del restaurante lo usa: solo se probó en Windows 11.

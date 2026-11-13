@@ -580,8 +580,10 @@ async function runBrowser(engine) {
     if (!ready) {
       fail('El servidor temporal no quedó listo');
     }
+    // Los argumentos extra (por ejemplo, el nombre de una especificación) van antes de --project:
+    // Playwright acepta varios valores después de --project y los tomaría como nombres de proyecto.
     const extra = process.argv.slice(3);
-    run(process.execPath, [NPM_CLI, 'run', 'test:browser', '--', '--project', engine, ...extra], {
+    run(process.execPath, [NPM_CLI, 'run', 'test:browser', '--', ...extra, '--project', engine], {
       cwd: path.join(ROOT, 'desktop'),
       env: {
         ...process.env,

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { useId, useLayoutEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { trapFocus } from '../../components/ConfirmDialog';
 import { Icon } from '../../components/Icon';
@@ -25,7 +25,9 @@ export function ModalPanel({
   const titleID = useId();
   const panel = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // El foco entra antes de pintar (etapa 9E, como «Acerca de» en la 9D): con un efecto normal,
+  // un Escape pulsado justo al aparecer el diálogo llegaba fuera de él y no lo cerraba.
+  useLayoutEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     // El foco va al primer campo; si no hay campos, al primer botón (cerrar).
     const field = panel.current?.querySelector<HTMLElement>(

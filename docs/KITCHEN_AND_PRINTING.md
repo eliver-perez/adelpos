@@ -325,3 +325,40 @@ encabezado de la cuenta, a «Pendiente de liberación · revisar cocina» (`prep
   cambio);
 - «Preparación y comandas» (detalle de la cuenta) muestra cada advertencia distinta una sola vez, con «(×N)» si se
   registró por varias unidades (Go sigue registrando una por unidad).
+
+## Cola de impresión de Windows · etapa 9E
+
+Con el servidor Go en Windows, el transporte guardado como `cups` significa **«cola de impresión del equipo»**: la
+impresora instalada en Windows (USB, puerto serie o paralelo, o «Puerto TCP/IP estándar») recibe **ESC/POS en modo
+RAW** por el administrador de impresión de Windows. Sin migración ni valor nuevo en la base: solo cambia qué hace el
+equipo servidor con ese valor. En macOS todo sigue igual (CUPS).
+
+- **Dónde vive**: `kitchen/system_queue.go` elige la cola del sistema (`system_queue_unix.go` → CUPS,
+  `system_queue_windows.go` → Windows); `kitchen/windows_queue.go` tiene la lógica pura (qué impresoras se aceptan,
+  resultados, resumen en español) y `kitchen/winspool_windows.go` las llamadas a `winspool.drv`, cargada solo desde
+  System32: `EnumPrinters`, `GetPrinter`, `EnumPorts`, `OpenPrinter`, `StartDocPrinter` (tipo `RAW`), `StartPagePrinter`,
+  `WritePrinter`, `EndPagePrinter`, `EndDocPrinter` y `AbortPrinter`. Las pruebas con los programas de CUPS simulados
+  siguen ejercitando CUPS en los dos sistemas; las que sustituyen el administrador de Windows, siempre Windows.
+- **Consulta previa, solo lectura**, antes de configurar el cajón, en la vista previa del diseñador y antes de cada envío.
+  Se aceptan puertos USB, COM, LPT y TCP/IP estándar. Se rechazan, sin enviar nada y con el motivo: impresoras de otro
+  equipo o compartidas, de Escritorio remoto o de la nube, virtuales (Microsoft Print to PDF, XPS, OneNote, fax),
+  `FILE:`, `PORTPROMPT:`, `NUL:`, puertos WSD y monitores de puerto desconocidos.
+- **Mismos bytes que ESC/POS por red**: texto con el codificador CP850 de siempre, documentos con formato o logotipo con
+  `documents.EncodeESCPos` y el pulso del cajón con `DrawerPulseBytes`. La marca «Esta impresora entiende ESC/POS
+  (formato y logotipo)» no aplica en Windows (se oculta), y tampoco la opción de corte de CUPS: el corte va en los
+  bytes ESC/POS como en una impresora de red.
+- **Resultados** (reglas de la cola sin cambio): `error` confirmado si nada se envió (impresora inexistente, rechazada o
+  sin permiso); `uncertain` si falló después de abrir el documento (nunca se reintenta solo ni pasa al respaldo);
+  `submitted` con «Aceptado por la cola de impresión de Windows; no confirma salida física de papel.». El cajón conserva
+  las reglas de la etapa 7: solo efectivo físico, sin reintentos y «Comando de apertura enviado».
+- **Configuración**: «Consultar impresoras del equipo servidor» lista las impresoras instaladas en Windows con su
+  puerto, controlador y si AD-EL POS puede usarlas («Usar esta impresora»); si Windows no responde,
+  `503 SPOOLER_UNAVAILABLE`. Los textos de la interfaz dicen «Impresora instalada en Windows» solo en Windows
+  (`isWindows()` de `commands/platform.ts`); en macOS quedan idénticos.
+- **ESC/POS por red** no depende del sistema y funciona igual en Windows.
+
+**Verificación**: pruebas unitarias de la lógica pura y del despacho por sistema, prueba en Windows de la consulta real
+(`EnumPrinters`) que confirma que «Microsoft Print to PDF», la única impresora del equipo de pruebas, se rechaza como
+virtual, y aceptación PostgreSQL de `designer`, `payments` y `operations`. **Pendiente en hardware**: ningún trabajo ni
+pulso se envió a una impresora USB real; papel, logotipo, corte y cajón por USB en Windows son prueba física del
+propietario (lista en [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md)).

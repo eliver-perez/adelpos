@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9D
+# Arquitectura · Etapa 9E
 
 ## Responsabilidades
 
@@ -12,7 +12,7 @@ flowchart LR
 
 Go es autoridad para configuración persistente, identidad, sesiones, permisos, terminales y auditoría. Rust conserva credenciales duraderas en el almacén seguro del sistema, valida el destino y ejecuta únicamente rutas API enumeradas. React presenta formularios, recoge credenciales transitorias de acceso y refleja las decisiones del servidor. Ningún código de escritorio accede a PostgreSQL.
 
-Tauri no inicia ni detiene Go o PostgreSQL. Los modos `server-terminal`, `terminal-only` y `server-only` conservan los límites de la etapa 1. Todas las funciones usan la misma aplicación de escritorio; su disponibilidad depende de permisos.
+En macOS y en desarrollo, Tauri no inicia ni detiene Go o PostgreSQL; desde la etapa 9E, solo la instalación de Windows los lanza y los detiene con la aplicación (ver «Windows · etapa 9E»). El almacén seguro es Keychain en macOS y el Administrador de credenciales en Windows. Los modos `server-terminal`, `terminal-only` y `server-only` conservan los límites de la etapa 1. Todas las funciones usan la misma aplicación de escritorio; su disponibilidad depende de permisos.
 
 ## Organización del backend
 
@@ -265,8 +265,8 @@ sistema (sin ⌘W), Ver, Caja y Ayuda. Las opciones propias son la lista cerrada
 negocio ni conoce rutas: envía `{action}` a React por un `Channel` (operación cerrada `menu_subscribe`) y React informa qué
 opciones habilitar (`menu_set_state`, que rechaza identificadores fuera de la lista). Solo «Salir» lo atiende Rust
 (`app.exit(0)`), sin detener Go ni PostgreSQL. Ambas operaciones están en `build.rs`, `permissions/diagnostics.toml` y
-`generate_handler!`, con pruebas Rust y simuladas en `e2e/native-driver.ts`. Diseñado para Windows; no compilado ni
-probado allí.
+`generate_handler!`, con pruebas Rust y simuladas en `e2e/native-driver.ts`. En Windows se compiló y se probó en la
+etapa 9E y se omite (ver «Windows · etapa 9E»).
 
 **Selector y selector de hora.** `components/Select.tsx` (`Select` y `MultiSelect`, con `SelectPopup.tsx`,
 `selectHooks.ts` y la lógica pura `selectModel.ts`) es propio, sin dependencia: patrón ARIA combobox con la lista en un
@@ -347,3 +347,56 @@ mesa» generaliza la cuenta pendiente de la 7.1 en el motor del borrador (`draft
 (`quickOpen`) se retiró. `NavigationValue.requestScreen` devuelve `Promise<boolean>` y las acciones que cambian de
 sección (paleta, menú nativo y resumen de Mesas) abren la captura solo cuando la pantalla la recibió. El menú por
 producto (`BillLines.tsx`) es una capa más para el teclado (`.capture-line-menu` en `commands/keyboard.ts`).
+
+## Windows · etapa 9E
+
+La 9E no cambia reglas de negocio, contratos HTTP ni el esquema: agrega las piezas propias de Windows, siempre detrás de
+condiciones por plataforma (`//go:build windows`/`!windows`, `#[cfg(target_os = …)]`, `isWindows()` en la interfaz).
+Detalle en [docs/ETAPA_9E_AVANCE.md](docs/ETAPA_9E_AVANCE.md) y [docs/NOTAS_WINDOWS.md](docs/NOTAS_WINDOWS.md).
+
+```mermaid
+flowchart LR
+    A[ad-el-pos-desktop.exe] -->|lanza oculto, stdin en tubería| H[ad-el-pos-server host]
+    A -->|HTTP JSON v1 127.0.0.1:8181| H
+    A --> C[Administrador de credenciales]
+    H -->|initdb, pg_ctl| P[(PostgreSQL 18.6 incluido, 127.0.0.1:55432)]
+    H -->|winspool.drv, RAW| W[Impresora instalada en Windows]
+    H -->|ESC/POS TCP| N[Impresora de red]
+```
+
+**Excepción a «Tauri no inicia ni detiene Go o PostgreSQL», solo en la instalación de Windows.** Si junto al ejecutable
+están `ad-el-pos-server.exe` y `postgresql\bin` (es decir, en la instalación, no en `tauri dev`), `server_host.rs` revisa
+cada medio segundo `127.0.0.1:8181` y, si nadie responde, lanza `host --data-dir %LOCALAPPDATA%\AD-EL POS --pg-bin …
+--watch-stdin` sin ventana (`CREATE_NO_WINDOW`) y sin heredar tuberías; relanza con espera creciente (1, 2, 4… hasta
+30 s). Al cerrar la aplicación cierra la entrada estándar y espera hasta 25 s; si la aplicación termina mal, Windows
+cierra la tubería y Go se apaga igual. `host` (paquete `internal/standalone`) toma un bloqueo exclusivo de la carpeta de
+datos (`host.lock`), le fija la ACL privada, crea el clúster la primera vez con los binarios incluidos (por la ruta corta
+8.3 si la carpeta del programa tiene acentos), arranca o adopta PostgreSQL, borra un `postmaster.pid` huérfano, crea el
+rol y la base, escribe `server.json` y el token del asistente, respalda antes de migrar una base con datos, migra, sirve
+con la misma función que `serve` y al terminar detiene HTTP, los trabajadores y PostgreSQL (`pg_ctl stop -m fast`). No
+hay servicio de Windows: Go y PostgreSQL viven mientras la aplicación está abierta. En macOS nada cambia.
+
+**Apagado sin `SIGTERM`.** En Windows cada servidor crea un evento con nombre ligado a su PID y `stop --pid N` lo activa
+tras comprobar que el proceso es el mismo programa (`stop_windows.go`). Los flujos SSE terminan en cuanto empieza el
+apagado (`Service.Stopping`, cerrado desde `RegisterOnShutdown`), en ambos sistemas.
+
+**Secretos y archivos privados.** `vault.rs` usa el backend `windows-native` de `keyring` (Administrador de credenciales)
+con el mismo servicio y cuenta que en macOS. Los archivos y carpetas privados reciben una ACL propia sin herencia
+(`internal/fileacl`), porque los bits 0600 no protegen en Windows.
+
+**Cola de impresión del equipo.** El transporte guardado `cups` es la cola de impresión del equipo servidor:
+`system_queue_unix.go` la resuelve a CUPS y `system_queue_windows.go` al administrador de impresión de Windows
+(`winspool_windows.go`, cargado solo desde System32), con la lógica pura en `windows_queue.go`: inspección previa de solo
+lectura, ESC/POS RAW con los mismos bytes que la red y las reglas de siempre de la cola (`error`, `uncertain` sin
+reintento, `submitted` sin confirmar papel). Pagos y la cola no cambian.
+
+**Ventana y menú.** `window_state.rs` (solo Windows) recuerda tamaño, posición y maximización en modo ventana; la
+aplicación sigue abriendo en pantalla completa. El menú nativo se omite en Windows (`with_native_menu`); sus dos
+operaciones del puente siguen respondiendo y los atajos con Ctrl y la paleta los atiende React.
+
+**Empaquetado.** `tauri.windows-installer.conf.json` se combina solo al empaquetar (destino `nsis`, servidor como
+binario externo, PostgreSQL como recurso, WebView2 incluido, español). La plantilla NSIS propia
+(`src-tauri/windows/installer.nsi`, copia de la de Tauri 2.12.4 con dos cambios marcados) instala por usuario en
+`%LOCALAPPDATA%\Programs\AD-EL POS` y espera a que Go y PostgreSQL terminen antes de reemplazar o borrar archivos;
+`hooks.nsh` agrega los accesos «Crear respaldo» y «Respaldos» y nunca borra la carpeta de datos.
+`scripts/build-windows.ps1` arma todo con un solo comando.

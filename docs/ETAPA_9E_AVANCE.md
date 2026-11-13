@@ -509,7 +509,8 @@ Se quitó la instalación de prueba anterior (`Prueba José Ñandú`) y sus dato
 `scripts\build-windows.ps1` (incluye la corrección de acentos):
 
 - **`desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_0.9.4_x64-setup.exe`**, **36.7 MB** (38 465 086 bytes),
-  SHA-256 `e04c87b8c61e5c3ed736dc9a068ed3739189fc3b6b7bca2bc21f144439c43674`, sin firma.
+  SHA-256 `e04c87b8c61e5c3ed736dc9a068ed3739189fc3b6b7bca2bc21f144439c43674`, sin firma (sustituido en la fase F por
+  el instalador con las correcciones de la regresión; ver «Fase F»).
 
 **Usuario con acentos (§5.6), simulado sin crear cuentas de Windows**: instalación en silencio con
 `/D=%TEMP%\adel9e-acentos\Programa José Ñandú\AD-EL POS` (8.8 s) y la aplicación abierta con `LOCALAPPDATA` en
@@ -536,3 +537,120 @@ no lo verá mientras instale siempre en la carpeta predeterminada.
 procesos restantes; menú Inicio con los 3 accesos y acceso en el escritorio. Al volver a abrirla, la sesión volvió
 del Administrador de credenciales y mostró «Salón principal» con Mesa 1 y Mesa 2. **Queda instalada y lista** (cerrada)
 para el propietario.
+
+## Fase F · Regresión completa, documentación y entrega (12/11/2026)
+
+### Regresión completa en Windows
+
+Sobre el código de la fase E (`32b6ee5`) y, después de las correcciones de abajo, sobre el código final, con la
+aplicación instalada cerrada y el clúster de desarrollo en marcha:
+
+| Suite                                                                       | Resultado                                                                                                                                                                                                                                    |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev.ps1 test`                                                              | **aprobada** antes y después de las correcciones (1–2 min): Prettier, `sync --check`, `go test ./...`, `go vet`, Vitest **757/757** en 76 archivos, `npm run build` y `cargo test --locked` **46** (1 ignorada a propósito: el almacén real) |
+| `go test -count=1 ./...` (sin caché)                                        | **25 paquetes aprobados** (12 s)                                                                                                                                                                                                             |
+| `dev.ps1 test-integration` (PostgreSQL 18.6)                                | **9 paquetes aprobados** (4.1 min); solo se omiten las pruebas opcionales de hardware (`TestControlledCUPSPrinter`) y de volumen                                                                                                             |
+| `internal/standalone` y `cmd/ad-el-pos-server` con `ADEL_STANDALONE_PG_BIN` | **aprobadas**: `TestClusterLifecycleWithBundledPostgreSQL` (carpeta con acentos, 15.5 s) y `TestMigrateWithBackupProtectsExistingData` (24 s)                                                                                                |
+| `cargo test --locked -- --ignored`                                          | **aprobada**: credencial temporal escrita, leída y borrada en el Administrador de credenciales real; no quedó ninguna                                                                                                                        |
+| `dev.ps1 test-browser` Chromium                                             | **19 de 19** en las tres corridas completas (8.3, 7.5 y 7.5 min; la última sobre el código final)                                                                                                                                            |
+| `dev.ps1 test-browser` WebKit                                               | **19 de 19** en la corrida final (8.0 min), tras las correcciones de abajo (antes: 12 de 19 en la primera)                                                                                                                                   |
+| `scripts\build-windows.ps1`                                                 | **aprobado** dos veces; el definitivo, sobre el código final (ver «Entrega»)                                                                                                                                                                 |
+
+La primera corrida de `dev.ps1 test` se detuvo en el formato porque `API_CONTRACTS.md` ya tenía la sección nueva sin
+alinear (Prettier); se reformateó y la segunda corrida aprobó completa.
+
+**Playwright WebKit en Windows corrió por primera vez completo y encontró lo siguiente.** La primera corrida dio 12
+aprobadas y 7 fallidas, pero solo la primera falla era propia: al fallar una prueba, Playwright reinicia el trabajador
+y el puente simulado pierde su estado («La aceptación debe comenzar con una base sin configurar»), así que las
+siguientes fallan en cascada en ≈ 0.2 s, como en las primeras corridas de WebKit de la 9D. Cada corrección dejó correr
+especificaciones que antes no llegaban a ejecutarse. Clasificación y corrección:
+
+1. **Prueba dependiente de macOS** (`workflow-stage9c-keyboard`). El WebKit de Playwright en Windows informa
+   `navigator.platform = "Win32"`, pero un agente de usuario de Mac («Macintosh»), así que la aplicación y la prueba
+   usan ⌘ para sus atajos (correcto y coherente), mientras que la edición de texto la resuelve el sistema anfitrión:
+   `Meta+A` no selecciona en Windows y el acceso quedó con «adminadmin» (comprobado con una página mínima:
+   `Control+A` sí selecciona y `Tab` mueve el foco). La prueba usa ahora `ControlOrMeta+a` para seleccionar todo (⌘
+   en la Mac, como antes). No afecta a la aplicación real: WebView2 se anuncia como «Windows NT».
+2. **Carrera real de la interfaz, en cualquier sistema: el contexto de los atajos.** ⌘N justo después de elegir la
+   mesa en la paleta respondió «Elige la mesa en el mapa…» con el panel de la mesa ya dibujado: `OperationalPage`
+   informaba el contexto de los atajos con un efecto normal, que llega a `App` después de pintar, y el atajo pulsado
+   en ese instante veía el contexto anterior. Ahora lo informa con `useLayoutEffect` (antes de pintar). Un humano
+   difícilmente pulsa tan rápido; un lector de códigos o la automatización sí.
+3. **La misma carrera en los diálogos.** La hoja «Ingreso de efectivo» abierta desde el menú no se cerró con un Escape
+   pulsado al aparecer, porque atiende Escape dentro de sí y llevaba el foco hacia sí con un efecto normal. Es lo que
+   la 9D ya corrigió en «Acerca de» y «Atajos de teclado»; ahora también llevan el foco antes de pintar
+   (`useLayoutEffect`) la hoja de Caja (`SheetFrame`), `ConfirmDialog`, `ChoiceDialog`, `ModalPanel` (Documentos),
+   `QuickCategoryDialog` (Inventarios) y la paleta de comandos. Sin cambios visibles: el foco inicial y su devolución
+   al cerrar son los mismos.
+4. **Y en las funciones de la operación.** Tras cerrar la precuenta con Escape, un segundo Escape inmediato no salía
+   de la captura, porque `OperationalPage` publicaba sus funciones (`back`, `newTableAccount`…) con un efecto después
+   de cada render y el atajo usaba la del render anterior (con la precuenta «abierta»). Ahora se publican también con
+   `useLayoutEffect`. El resto del contexto del registro de acciones (`screen`, `cashOptions`) ya salía del render de
+   `App`, así que eran los únicos dos puntos.
+5. **Foco tras elegir una mesa del buscador** (`workflow-stage9c-tables-time`). El mosaico de la mesa elegida no
+   recibía el foco. Instrumentando la prueba (eventos de puntero, `focus` y `querySelector`) se vio que el mapa se
+   dibuja una vez con el área anterior antes de mostrar la nueva y el efecto de `TableMap` gastaba ahí su único
+   intento (el mosaico aún no existía); en Chromium ese render ya trae el área nueva. Sin los cambios de
+   `OperationalPage` también fallaba (no lo introdujo la 9E). Ahora el efecto espera al render que ya muestra el área
+   de la mesa y entonces enfoca una sola vez.
+6. **Carrera de la prueba** (`takeaway-quick-notes`, falló en 2 de 5 corridas de WebKit: una vez faltaba la categoría
+   recién creada en la captura y otra la indicación rápida «Queso extra»). La prueba creaba el catálogo con el puente
+   justo después de iniciar sesión en la pantalla; los cambios de catálogo no publican eventos en tiempo real (por
+   diseño, la captura vuelve a consultarlo cada 15 s), así que si la captura ya lo había consultado no veía lo nuevo
+   en los 10 s de espera. Ahora prepara el catálogo antes de abrir la aplicación, como la especificación de teclado.
+   No cambia el producto.
+7. **`dev.ps1 test-browser <filtro>`** pasaba los argumentos extra después de `--project <motor>` y Playwright los
+   tomaba como nombres de proyecto; ahora van antes. Nota: una especificación sola corre sobre una base nueva sin lo
+   que dejan las anteriores (por ejemplo, la ruta de cocina) y `--repeat-each` no aplica (el puente exige una base sin
+   configurar), así que la validación es la corrida completa.
+
+Además, una corrida de WebKit falló en `restaurant.spec` (el clic en «Arqueo y cierre» no abrió su panel), que pasó en
+todas las demás; no pasa por lo corregido y no se reprodujo: se clasifica como intermitente de WebKit en este equipo
+(la 9D registró en la Mac fallos del mismo tipo en esta suite, como un clic en «Administración» que no navegó). Con
+todo corregido, la corrida final aprobó **19 de 19 en Chromium y 19 de 19 en WebKit**, después de `dev.ps1 test`
+aprobada sobre el mismo código.
+
+### Para no romper macOS
+
+- **Condiciones por plataforma**: se revisaron los 77 archivos de código que cambian respecto a `main`. Todo
+  `internal/standalone` lleva `//go:build windows`; `host`, `backup`, `restore-check` y `restore` viven en
+  `host_windows.go` (con `host_other.go` fuera de Windows); parada, consola, ACL y cola de impresión tienen su variante
+  por sistema; el código compartido de cocina solo entra a Windows por `windowsSpooler()`, que fuera de Windows
+  devuelve CUPS. En Rust, `server_host::start` devuelve `None` fuera de Windows y `window_state`, el menú omitido y el
+  texto del almacén van con `#[cfg(target_os = …)]`. En la interfaz, los textos de impresión dependen de `isWindows()`
+  (en macOS idénticos, `printersWindows.test.tsx`). Cambios compartidos a propósito, porque corrigen defectos en ambos
+  sistemas: cierre de SSE al apagar, `canvasStyle` del mapa de mesas, icono (`icon.icns`) y `database.MigrationStatus`
+  (solo lectura).
+- **Go para macOS**: `GOOS=darwin GOARCH=arm64 go build ./...` y `go vet ./...` aprobados.
+- **Rust para macOS**: `cargo check --locked` y `cargo check --locked --tests` con `--target aarch64-apple-darwin`
+  aprobados, **0 errores y 0 avisos**, con el compilador y el archivador sustitutos fuera del repositorio (descritos en
+  `DEVELOPMENT_WINDOWS.md`, «Comprobar macOS desde Windows»).
+- **La próxima sesión en la Mac debe ejecutar allí la regresión completa** (`./scripts/dev.sh test`,
+  `test-integration` y `test-browser`, con `-race`) y `build-macos` antes de instalar la 0.9.4: la comprobación desde
+  Windows solo cubre la compilación. La instalación real de la Mac sigue en 0.9.3 y esquema 21 (la 0.9.4 no trae
+  migraciones).
+
+### Documentación
+
+`CLAUDE.md` (0.9.4, arquitectura con la excepción de Windows, estructura, comandos y carpetas de Windows,
+precauciones de prueba, decisiones de la 9E, compatibilidad y diferencias por plataforma, riesgos), `README.md`,
+`ARCHITECTURE.md` («Windows · etapa 9E»), `API_CONTRACTS.md` (cola de impresión de Windows y `503 SPOOLER_UNAVAILABLE`,
+SSE al apagar, comandos nuevos del servidor), `docs/KITCHEN_AND_PRINTING.md` («Cola de impresión de Windows»),
+`docs/NOTAS_WINDOWS.md` (sección 0 con el estado de cada punto), `docs/DEPENDENCIES.md`, `DEVELOPMENT_WINDOWS.md`
+(pruebas sobre la aplicación instalada y comprobación de macOS), `docs/INSTALAR_EN_WINDOWS.md` (tamaño, huella SHA-256,
+cómo cerrar la aplicación y Windows 10 en la lista de pruebas), `NEXT_STEPS_FOR_SOL.md`, `docs/VERIFICATION.md` (resumen
+de la 9E) y `docs/VERIFICATION_STAGE9E.md` (detalle).
+
+### Entrega
+
+- Instalador definitivo (recompilado con las correcciones de esta fase e instalado encima del de la fase E, con
+  `verify-installed.ps1`): `desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_0.9.4_x64-setup.exe`, 36.7 MB
+  (38 472 613 bytes), SHA-256 `365c6a91c265284c8ac30f3dc752aaf6c2118d99d263b8a5c40b21ddf4eeda84`; instalación en
+  silencio en 5.6 s, 0 ventanas de consola, cierre ordenado en 1.1 s sin procesos ni `postmaster.pid`.
+- Arranque con datos: ventana 2.4 s, servidor 2.5 s (primer arranque: unos 15 s); memoria con la aplicación abierta
+  ≈ 745 MB de conjunto de trabajo (≈ 388 MB privados: WebView2 180, servidor 123, PostgreSQL 78, aplicación 7).
+- AD-EL POS queda **instalado y cerrado** en este equipo con «Fonda Doña Ñeli» (admin/admin).
+- **Limitaciones**: sin hardware (pantalla táctil, impresoras de red y USB, cajón, papel), sin Windows 10, sin dos
+  terminales (LAN no preparada en Windows) ni una cuenta de Windows con acentos real; Go y PostgreSQL solo corren con
+  la aplicación abierta (sin servicio de Windows). Para la versión comercial faltan firma digital, actualizaciones
+  automáticas y licencias (etapa 10).

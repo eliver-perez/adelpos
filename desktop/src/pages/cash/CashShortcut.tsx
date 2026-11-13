@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { trapFocus } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
@@ -379,7 +379,9 @@ function SheetFrame({
 }) {
   const panel = useRef<HTMLElement>(null);
 
-  useEffect(() => {
+  // El foco entra antes de pintar (etapa 9E, como «Acerca de» en la 9D): con un efecto normal,
+  // un Escape pulsado justo al aparecer el diálogo llegaba fuera de él y no lo cerraba.
+  useLayoutEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     panel.current?.focus();
     return () => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { Icon } from './Icon';
 
@@ -77,7 +77,9 @@ export function ConfirmDialog({
   const panel = useRef<HTMLDivElement>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  // El foco entra antes de pintar (etapa 9E, como «Acerca de» en la 9D): con un efecto normal,
+  // un Escape pulsado justo al aparecer el diálogo llegaba fuera de él y no lo cerraba.
+  useLayoutEffect(() => {
     // El foco inicial va a la opción que no descarta nada; al cerrar vuelve a donde estaba.
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     cancelButton.current?.focus();
@@ -177,7 +179,9 @@ export function ChoiceDialog({
   const panel = useRef<HTMLDivElement>(null);
   const firstChoice = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  // El foco entra antes de pintar (etapa 9E, como «Acerca de» en la 9D): con un efecto normal,
+  // un Escape pulsado justo al aparecer el diálogo llegaba fuera de él y no lo cerraba.
+  useLayoutEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     firstChoice.current?.focus();
     return () => {
