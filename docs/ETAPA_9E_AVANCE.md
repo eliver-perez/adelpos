@@ -459,3 +459,61 @@ Go; Tauri descargó NSIS 3.13, `nsis_tauri_utils` 0.5.3 con su hash y el instala
 - **`desktop\src-tauri\target\release\bundle\nsis\AD-EL POS_0.9.4_x64-setup.exe`**
 - **36.6 MB** (38 412 295 bytes), SHA-256 `a975ef448a7148edb5855e50d53af6a2709a77c88d37e7179bff158bf617e8fe`
 - Sin firma digital (es normal el aviso de SmartScreen).
+
+## Fase E · Instalación real y pruebas (12/11/2026, en curso)
+
+Herramientas: `scripts/windows/verify-installed.ps1` (instalación en silencio, arranque, ventanas de consola,
+memoria, cierre ordenado, desinstalación con datos conservados; informe JSON) y `scripts/windows/installed-smoke.ps1`
+con `desktop/e2e-installed/` y `desktop/playwright.installed.config.ts` (Playwright conectado por CDP al WebView2 de
+la aplicación **instalada**; `save-dialog.ps1` contesta el diálogo nativo «Guardar reporte» con mensajes de Win32).
+
+Hecho y aprobado con el instalador 0.9.4:
+
+1. **Instalación limpia** (en silencio, 5.8 s): ventana en 2.4 s, servidor listo en 14 s (crea el clúster y aplica
+   21 migraciones), **0 ventanas de consola**, «Aplicaciones instaladas» con AD-EL POS 0.9.4, menú Inicio con los
+   3 accesos y acceso en el escritorio, datos en `%LOCALAPPDATA%\AD-EL POS` con ACL privada.
+2. **Prueba de humo, 8 pasos** sobre la aplicación instalada: asistente inicial («Fonda Doña Ñeli») y admin/admin;
+   catálogo, cocina, impresora de tickets y pago en dólares; área y 2 mesas; captura en mesa, envío a cocina, turno
+   con dólar a $18.50, abono en efectivo con cambio, precuenta, descuento y tarjeta; para llevar con pesos y dólares;
+   cancelación con motivo; corte parcial y cierre de turno; «Ventas por día» exportado a PDF y Excel con el diálogo
+   nativo. PDF abierto en Edge y Excel revisado: acentos y «ñ» correctos, logotipo de AD-EL POS en el encabezado,
+   venta neta $285.00 (la cuenta cancelada no cuenta).
+3. **Persistencia**: cerrar y abrir; la sesión vuelve del Administrador de credenciales y los datos siguen.
+   Arranque con datos: ventana 1.8 s, servidor 1.6 s. Memoria con la aplicación abierta ≈ 750 MB de conjunto de
+   trabajo (≈ 390 MB privados: WebView2 178, servidor 122, PostgreSQL 85, aplicación 6.5).
+4. **Respaldo y restauración** en la instalación (comando del acceso «Crear respaldo»): respaldo con la aplicación
+   abierta, ensayo con 134 tablas idénticas, negativa a restaurar con la aplicación abierta y restauración real
+   (una categoría creada después del respaldo desapareció; se creó el respaldo de seguridad previo).
+5. **Actualización**: instalador de prueba 0.9.5 encima de la 0.9.4 con la aplicación abierta (se cierra, espera a
+   Go y PostgreSQL, conserva datos, una sola entrada en Aplicaciones) y regreso a 0.9.4.
+6. **Desinstalación**: quita programa, menú Inicio y entrada; conserva base, configuración, respaldos y credencial.
+
+Defectos reales de Windows encontrados en esta fase y corregidos (con pruebas):
+
+- Mapa de mesas que oscilaba sin fin con la pantalla al 125 % (barras que ocupan espacio y medidas redondeadas):
+  `canvasStyle` en `TableMap.tsx`.
+- El cierre de Go esperaba 5 s con un flujo SSE abierto y salía con error: los flujos terminan al empezar el
+  apagado (`Service.Stopping`); cierre ahora en ≈ 1 s.
+- `dev.ps1 db-start` se quedaba esperando si su salida se canalizaba: `pg_ctl` se lanza sin heredar la tubería.
+- **Usuario con acentos**: con la carpeta del programa con acentos (por ejemplo `C:\Users\José\…`) `initdb` fallaba
+  («invalid byte sequence for encoding UTF8»), porque escribe la ruta de `share` en una sentencia SQL con la
+  codificación de Windows. Los programas de PostgreSQL se ejecutan ahora por la ruta corta 8.3 (ASCII); sin nombres
+  cortos se explica el problema. Probado con PostgreSQL copiado a «Programa José Ñandú» y datos en «Datos José
+  Ñandú» (`TestClusterLifecycleWithBundledPostgreSQL` y `TestToolsRunFromAnASCIIPathWhenTheProgramFolderHasAccents`).
+- Icono: el de la etapa 1 era una «A» verde provisional; ahora es el símbolo de la marca (Windows y macOS).
+- Respaldo antes de migrar sobre datos existentes: `TestMigrateWithBackupProtectsExistingData` (PostgreSQL real).
+
+### Pendiente para reanudar
+
+1. Quitar la instalación de prueba con acentos: `"%LOCALAPPDATA%\Programs\Prueba José Ñandú\AD-EL POS\uninstall.exe" /S`
+   y borrar `%TEMP%\adel9e` (datos de prueba).
+2. `scripts\build-windows.ps1` (incluye la corrección de acentos), repetir la instalación en la carpeta con acentos
+   y la aplicación con `LOCALAPPDATA` apuntando a una carpeta con acentos; después desinstalarla.
+3. Instalar el instalador final en la carpeta predeterminada: los datos de «Fonda Doña Ñeli» siguen en
+   `%LOCALAPPDATA%\AD-EL POS` y la aplicación debe abrir con ellos (queda instalada y lista para el propietario).
+4. Fase F: regresión completa (`dev.ps1 test`, `test-integration`, `test-browser` con Chromium y WebKit,
+   `GOOS=darwin go build`, `cargo check --target aarch64-apple-darwin` con el compilador sustituto descrito en C2),
+   `CLAUDE.md` (0.9.4, compilar en Windows, carpetas y diferencias por plataforma), `docs/INSTALAR_EN_WINDOWS.md`
+   (borrador ya escrito: revisar ruta, tamaño y SHA-256 finales), `NOTAS_WINDOWS.md`, `KITCHEN_AND_PRINTING.md` y
+   `API_CONTRACTS.md` (impresión por la cola de Windows, `503 SPOOLER_UNAVAILABLE`), commit, fusión en `main` y push
+   de `main` y `etapa-9e-windows`. Anotar que la próxima sesión en la Mac debe correr la regresión completa allí.

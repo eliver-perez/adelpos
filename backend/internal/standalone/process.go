@@ -95,6 +95,38 @@ func canonicalPath(path string) string {
 	return filepath.Join(canonicalPath(parent), filepath.Base(absolute))
 }
 
+// isASCII indica si una ruta solo tiene caracteres ASCII.
+func isASCII(path string) bool {
+	for index := 0; index < len(path); index++ {
+		if path[index] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// asciiPath devuelve la ruta corta de Windows (8.3) de una carpeta existente con caracteres fuera de
+// ASCII; si la ruta ya es ASCII, o el volumen no tiene nombres cortos, la devuelve sin cambio.
+func asciiPath(path string) string {
+	if isASCII(path) {
+		return path
+	}
+	source, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return path
+	}
+	buffer := make([]uint16, windows.MAX_LONG_PATH)
+	size, err := windows.GetShortPathName(source, &buffer[0], uint32(len(buffer)))
+	if err != nil || size == 0 || int(size) > len(buffer) {
+		return path
+	}
+	short := windows.UTF16ToString(buffer[:size])
+	if !isASCII(short) {
+		return path
+	}
+	return short
+}
+
 func longPathName(path string) (string, bool) {
 	source, err := windows.UTF16PtrFromString(path)
 	if err != nil {

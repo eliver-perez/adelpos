@@ -78,6 +78,10 @@ func (cluster *Cluster) Ensure(ctx context.Context) error {
 	if _, err := os.Stat(cluster.layout.tool("initdb")); err != nil {
 		return errors.New("faltan los binarios de PostgreSQL de la instalación; reinstala AD-EL POS")
 	}
+	// Sin nombres cortos de Windows, una carpeta del programa con acentos impide crear la base (ver tool).
+	if !isASCII(cluster.layout.tool("initdb")) {
+		return errors.New("la carpeta donde está instalado AD-EL POS tiene acentos u otros caracteres que la base de datos no admite al crearse; instálalo en una carpeta sin ellos")
+	}
 	owned, err := cluster.checkOwner()
 	if err != nil {
 		return err

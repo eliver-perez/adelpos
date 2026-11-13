@@ -115,6 +115,11 @@ func (layout Layout) lockFile() string {
 	return filepath.Join(layout.DataDir, "host.lock")
 }
 
+// tool es la ruta de un programa de PostgreSQL. PostgreSQL deduce su carpeta share de la ruta con que se
+// ejecuta y, al crear el clúster, initdb escribe esa ruta dentro de una sentencia SQL en la codificación
+// de Windows: con acentos (un usuario «José» instala en C:\Users\José\…) la base UTF-8 la rechaza y el
+// clúster no se crea. Por eso los programas se ejecutan por la ruta corta de Windows (8.3, siempre en
+// ASCII) cuando la carpeta tiene caracteres fuera de ASCII. La carpeta de datos sí admite acentos.
 func (layout Layout) tool(name string) string {
-	return filepath.Join(layout.PGBin, name+".exe")
+	return filepath.Join(asciiPath(layout.PGBin), name+".exe")
 }
