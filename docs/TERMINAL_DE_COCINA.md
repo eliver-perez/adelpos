@@ -52,7 +52,9 @@ Con solo permisos de cocina, la barra superior de ese usuario muestra únicament
 2. En **Cocina › Estaciones › Terminales de cocina**, elige la terminal y sus **estaciones que muestra**: todas
    (la opción predeterminada) o solo las de esa área.
 3. En el mismo lugar puedes activar el **aviso sonoro al llegar una comanda nueva** (desactivado por omisión).
-   Suena una vez por pedido nuevo de las estaciones que se ven; no suena al abrir la pantalla.
+   Suena una vez por pedido nuevo de las estaciones que se ven; no suena al abrir la pantalla. La pantalla no puede
+   reproducir sonido hasta que alguien la toca: el sonido se activa con el primer toque y, si no puede sonar, la
+   pantalla lo avisa.
 
 ## Qué se ve en la terminal
 

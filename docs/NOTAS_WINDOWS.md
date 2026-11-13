@@ -1,6 +1,7 @@
 # Notas para Windows · AD-EL POS
 
-Punto de partida para preparar el instalador de Windows 11 (hecho en la etapa 9E: ver la sección 0). Recoge cómo se
+Punto de partida para preparar el instalador de Windows 11 (hecho en la etapa 9E: ver la sección 0; lo que la etapa
+9F, desarrollada en la Mac, deja por verificar en Windows está en la sección 6). Recoge cómo se
 empaqueta y se ejecuta hoy AD-EL POS en macOS y qué partes dependen de macOS, con el archivo y la línea de cada una.
 Se escribió en la Fase 0 de la etapa 9D (versión 0.9.2, esquema 20) leyendo el código; **nada se compiló ni se probó en
 Windows**. Lo marcado «por comprobar» es una expectativa razonable, no un hecho verificado.
@@ -304,3 +305,131 @@ nativas, permisos de Tauri ni textos con «macOS», «CUPS» o «Llavero».
   de supervisor es la de los cobros (Go), sin nada del sistema.
 - **Exportación de los reportes nuevos** («Cuentas canceladas» y «Cancelaciones por motivo»): por la misma operación
   `export_report` y el diálogo de `tauri-plugin-dialog` (ver 2.10); sin cambios de plataforma.
+
+## 6. Etapa 9F: qué verificar en Windows
+
+La 9F (versión 0.9.5, esquema 22, migración `0022_printing_and_kitchen_stations.sql`) se desarrolló y se probó en la Mac
+([ETAPA_9F_AVANCE.md](ETAPA_9F_AVANCE.md) y [VERIFICATION_STAGE9F.md](VERIFICATION_STAGE9F.md)). **Nada de la 9F se
+ejecutó en Windows**: en cada fase con cambios de Go se compiló y se revisó el código para Windows
+(`GOOS=windows GOARCH=amd64 go build ./...` y `go vet ./...`, también con `-tags=integration`), pero las pruebas que
+solo existen en Windows (`internal/standalone/testmode_test.go`) solo compilaron y `installed-smoke.ps1` ni siquiera se
+pudo analizar (en la Mac no hay PowerShell). Tampoco se generó el instalador 0.9.5. Lo propio de cada sistema sigue
+detrás de condiciones por plataforma. Lista para la próxima sesión en Windows, en este orden:
+
+1. **Suites en Windows** (`scripts\dev.ps1`): `test`, `test-integration` y `test-browser` con Chromium y WebKit.
+   `scripts\windows\dev.mjs` escribe ahora `test_mode: true` y `backup_directory` en la configuración temporal de
+   Playwright y el puente de las pruebas se niega a correr sin `test_mode`: comprobar que `test-browser` arranca y que
+   `workflow-stage9f-zz-test-data` corre al final. Ejecutar también `go test ./internal/standalone` (incluye
+   `testmode_test.go`) y comprobar que la subprueba `9F_respaldo_real_con_pg_dump` de `administration` encuentra
+   `pg_dump` (`ADEL_PG_BIN`) y no se omite.
+2. **`host` con `ADEL_TEST_MODE`** (`internal/standalone/testmode.go` y `cmd/ad-el-pos-server/host_windows.go`):
+   - Con `ADEL_TEST_MODE=1`, `host`, `backup`, `restore-check` y `restore` deben negarse a usar
+     `%LOCALAPPDATA%\AD-EL POS`, también si la variable `LOCALAPPDATA` apunta a otro lugar (se compara con la carpeta
+     conocida del sistema, `FOLDERID_LocalAppData`, no con la variable) y con otra forma de escribir la misma ruta.
+   - Con otra carpeta, `host` arranca y `GET /api/v1/version` informa `test_mode: true`; con la variable vacía o
+     ausente nada cambia; con otro valor, error.
+   - `server_host.rs` no limpia el entorno del proceso hijo: la variable puesta al abrir `ad-el-pos-desktop.exe` debe
+     llegar al `host`.
+3. **Prueba de humo con carpeta temporal** (`scripts\windows\installed-smoke.ps1`, UTF-8 con BOM, y
+   `desktop\e2e-installed\installed-smoke.spec.ts`):
+   - Se niega si la aplicación real está abierta o si los puertos 8181, 55432 o 9222 están ocupados.
+   - Abre la aplicación instalada con `LOCALAPPDATA` temporal, `ADEL_TERMINAL_CONFIG` con un perfil propio
+     (`humo-<12 hex>`) y `ADEL_TEST_MODE=1`; la prueba exige `test_mode: true` antes del primer paso.
+   - Al terminar, también si falla: cierra la aplicación en orden (fuerza lo que quede tras 60 s), borra la carpeta
+     temporal y la credencial `http://127.0.0.1:8181|humo-….local.adel.pos.dev` (comprobar con `cmdkey /list`), avisa
+     si el clúster real quedó en marcha e informa lo que no pudo limpiar.
+   - Después, `%LOCALAPPDATA%\AD-EL POS` debe seguir igual (sin establecimiento, impresoras ni ventas nuevas) y la
+     aplicación real debe abrir con su sesión de siempre.
+   - Usa como impresora de tickets la de la aceptación («Tickets controlados E2E», cola del equipo
+     `ADEL_E2E_SIN_IMPRESORA`, que no existe): comprobar que la etiqueta de ese destino en Windows se reconoce (se
+     escribió con una expresión regular, sin ejecutarse).
+4. **Actualizar la instalación de la 9E a la 0.9.5** (`scripts\build-windows.ps1` y el instalador encima de la 0.9.4):
+   antes, revisar los roles propios que tengan «Actualizar preparación» (`kitchen.states.manage`), por el cambio de
+   significado de las estaciones por terminal (punto 9). El `host` debe respaldar antes de migrar
+   (`…-antes-de-migrar.dump`) y aplicar la 0022; después, `api/v1/version` con 0.9.5 y esquema 22, los datos intactos y
+   las impresoras que ya existían con corte total y, si ya cortaban, avance «Como hasta ahora» (los bytes de siempre).
+5. **«Quitar datos de prueba» sobre la instalación de Windows de la 9E** (Administración › Sistema › Mantenimiento; la
+   ejecuta el propietario, con la 0.9.5 instalada):
+   - **Qué revisa**: solo lo que coincide con una firma exacta de `backend/internal/maintenance/signatures.go`. En esa
+     instalación, la impresora «Destino controlado E2E» (tipo agente, destino «Agente de aceptación no disponible»), las
+     estaciones «Cocina caliente» y «Freidoras» que solo usan esa impresora, el producto «Filete de prueba» (`FILETE`),
+     la categoría «Platillos» que lo contiene y la ruta de «Platillos» a esas dos estaciones.
+   - **Qué hará**: lo que ya tiene registros relacionados (las ventas del filete, las tareas de cocina, los trabajos de
+     impresión) **se desactiva** en lugar de borrarse (el producto además se archiva); lo que no tiene registros se
+     elimina; se **desvinculan** la impresora de tickets de Cobros (que era ese destino) y lo que apunte a esos datos
+     (cajón, impresora de respaldo, estaciones por terminal y por usuario). La vista previa dice qué se elimina, qué se
+     desactiva, qué se desvincula y qué se conserva, con el motivo de cada uno: revisarla antes de confirmar.
+   - **Qué conservará**: el establecimiento «Fonda Doña Ñeli», los usuarios, el área «Salón principal» con «Mesa 1» y
+     «Mesa 2», «Pago en dólares» y toda la operación de la prueba de humo (turno, cobros en efectivo, dólares y tarjeta,
+     descuento, cancelación, corte parcial y cierre): ventas, pagos, cortes y movimientos de inventario nunca cambian.
+   - **No deja la instalación «limpia»**: seguirá teniendo el establecimiento de prueba y su operación. Lo limpio es
+     reinstalar con otra carpeta de datos (decisión D1 del avance); el procedimiento para hacerlo en Windows conservando
+     el respaldo de la instalación de prueba no está escrito ni probado.
+   - Antes de quitar nada se crea un respaldo con la etiqueta `antes-de-quitar-datos-de-prueba` (`standalone.Backup`):
+     comprobar que aparece en «Respaldos de AD-EL POS» y que el aviso final nombra el respaldo.
+6. **Aviso sin impresora válida**:
+   - Mientras la impresora de tickets siga siendo el destino de prueba (tipo agente), imprimir una precuenta debe avisar
+     en el momento («Esta impresora todavía no puede usarse para imprimir.») sin encolar nada, con «Configurar
+     impresora» (lleva a Cobros › Políticas de cobro) y «Reintentar»; sin impresora de tickets, «No hay impresora
+     configurada para precuentas.». Antes de la 9F salía «Requiere intervención. Se resuelve en Cocina → Cola de
+     impresión».
+   - Un cobro sin impresora válida se registra igual y su resultado explica por qué no salió el ticket, con los mismos
+     botones; lo mismo los documentos de Caja.
+   - Al elegir la impresora de tickets ya no se admiten impresoras de tipo agente ni inactivas.
+7. **Cola de impresión** en WebView2, al 100 % y al 125 %: lista con altura limitada y desplazamiento propio; «Consultar
+   trabajo e intentos» muestra el detalle a la vista junto a la lista; sin la referencia técnica suelta (el «.15150») ni
+   el texto del agente; los repetidos agrupados con «×N»; un trabajo en error se reintenta con un toque y sin motivo, y
+   reimprimir lo que ya salió pide motivo. Con una impresora USB apagada, el aviso debe decirlo en palabras sencillas.
+8. **Corte de papel por la cola de Windows (RAW)**, con una impresora real (en la computadora de la 9E solo había
+   «Microsoft Print to PDF», que se rechaza como virtual; los bytes por la cola de Windows solo se probaron con el
+   administrador de impresión simulado):
+   - Impresora de 80 mm **con cortador**: «Cortar el papel al terminar» con corte total y parcial y 0, 4 y 8 renglones
+     de avance, con «Imprimir prueba de ancho» (también corta, con la configuración guardada); después un ticket, una
+     precuenta, una comanda, un aviso de cancelación y un corte de caja: el corte no debe caer sobre el texto.
+   - Impresora **sin cortador** (o de 58 mm): con el corte activado no debe imprimir caracteres extraños al final (la
+     mayoría ignora `GS V`); si los imprime, anotar el modelo y desactivar el corte.
+   - Una impresora nueva de 80 mm empieza con el corte activado y 4 renglones; una de 58 mm, sin corte.
+   - Lo mismo por ESC/POS en red, si hay una impresora de red.
+9. **Estaciones por terminal y por usuario** (Cocina › Estaciones › Terminales de cocina y Personal › Usuarios ›
+   Estaciones de cocina; guía en [TERMINAL_DE_COCINA.md](TERMINAL_DE_COCINA.md)):
+   - **Cambio de significado**: hasta la 9E, una terminal sin estaciones asignadas negaba Cocina a quien no tenía
+     «Operar todas las estaciones del establecimiento» (`kitchen.stations.all`); desde la 9F, una terminal sin selección
+     muestra todas, y quien tiene ese permiso queda limitado a las estaciones de su terminal en Preparación y en los
+     cambios de estado (liberar a mano, programar, la cola, la reimpresión y el historial siguen con el permiso). Por eso
+     conviene revisar los roles propios con «Actualizar preparación» antes de instalar (punto 4). Go rechaza una lista
+     de estaciones vacía sin «todas».
+   - Con la única terminal de Windows (varias terminales por red no están preparadas allí): con pantalla inicial
+     «Cocina», abre en Preparación; con dos de tres estaciones en la terminal y una cocinera con una, ella ve solo la
+     intersección; sin estaciones en común, el aviso en lugar de una pantalla vacía; su barra solo tiene Cocina y su
+     menú.
+   - Modo cocina en WebView2 a 1280 × 720, al 125 % y en pantalla completa: tarjetas grandes, botones de 64 px, ámbar
+     con «Por vencer» y rojo con «Atrasada», sin «Actualizar».
+   - Una cocinera sin `kitchen.stations.read` ve los cambios de su alcance con el sondeo de 5 s (no verificado en
+     ningún sistema). Dos terminales de cocina a la vez no se pueden probar en Windows hoy.
+10. **Sonido en WebView2**: activar «Aviso sonoro al llegar una comanda nueva» y, con Preparación abierta, hacer que
+    llegue una comanda nueva (por ejemplo, un pedido programado que se libera solo): dos tonos cortos (Web Audio, sin
+    archivos). WebView2, como WebKit, no reproduce sonido antes de que el usuario toque la pantalla: el sonido se activa
+    con el primer toque y la pantalla avisa si no puede sonar; comprobar las dos cosas y que no suena al abrir la
+    pantalla ni al cambiar de filtro. No se verificó en ningún equipo real.
+11. **Barra compacta al 125 % con WebView2**: ventana de unos 1500 px al 125 % (≈ 1200 px de página), donde se observó
+    el problema:
+    - Isotipo «AE» nítido (40 px a partir de un PNG de 128 px) en lugar de la «A»; Caja con «Abierto», «En arqueo» o
+      «Cerrado»; «En línea» con su texto; solo el nombre del usuario se acorta, con puntos suspensivos; sin
+      desplazamiento horizontal; ayudas emergentes de Caja y del estado del servidor.
+    - **Foco del logotipo**: tocar o hacer clic en el logotipo y después pulsar Escape, una flecha o Ctrl+2, o abrir y
+      cerrar la paleta (Ctrl+K): no debe aparecer el contorno de foco; con Tab sí, e Intro vuelve al inicio. La
+      reproducción se hizo con el Chromium de Playwright (el motor de WebView2), no con WebView2.
+    - Leyenda del mapa de Mesas en dos renglones, sin barra horizontal.
+    - Repetir a 1280, 1440 y 1920 px de página con Segoe UI (las medidas de la Mac usaron sus fuentes).
+12. **Nombre de la precuenta**: en Administración › Documentos, elegir «Ticket de venta» y después «Cuenta»: botones del
+    panel de mesa, la captura y el cobro, los avisos, la paleta (Ctrl+K) y el encabezado impreso. En Windows no hay menú
+    nativo, así que el texto de «Imprimir precuenta» del menú no aplica.
+13. **Cancelar unidades con supervisor y ruta `void` retirada**: no dependen del sistema; basta con la corrida de
+    `test-browser` del punto 1.
+14. **Impresora de tickets que no existe en Windows**: elegir en Cobros una impresora de la cola del equipo cuyo nombre
+    no esté instalado en Windows y pedir una precuenta: Go debe detectar `ERROR_INVALID_PRINTER_NAME` (solo compilado en
+    la 9F) y el aviso debe decir «No se encontró la impresora …» con «Configurar impresora» y «Reintentar» (no «no
+    responde»). Tras corregirla en Cobros, «Reintentar» debe imprimir en la impresora vigente.
+15. **Estaciones por terminal desde un cliente anterior**: `PUT kitchen/access` con una lista vacía sin «todas» responde
+    `422 KITCHEN_ACCESS_ALL_REQUIRED` (la aplicación 0.9.5 siempre envía la marca); comprobarlo con la corrida de
+    `test-integration` del punto 1.
