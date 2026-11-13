@@ -8,7 +8,7 @@ Versión 0.4.0, esquema 4. Continúa el catálogo y la seguridad existentes. `in
 2. En **Mesas**, tocar una mesa en el mapa abre su **panel lateral** a la derecha (ver [Flujo rápido](#flujo-rápido-de-mesas-y-para-llevar--etapa-62)). Desde la etapa 7.1, en una mesa libre **Capturar** entra a la captura sin crear todavía la cuenta (Go la crea con el primer producto, ver [Mesas · etapa 7.1](#mesas--etapa-71)); una ocupada muestra su cuenta y **Capturar** entra a la captura táctil. Una mesa admite varias cuentas (**Nueva cuenta**). **Cuentas** permite localizar cuentas de salón, incluidas las que no tienen mesa (**Cuenta sin mesa** abre una sin formulario).
 3. Capturar en la pantalla táctil (ver [Captura táctil](#captura-táctil--etapa-61)): categoría a la izquierda, producto al centro (un toque lo agrega) y la cuenta a la derecha con el total calculado por Go. Los productos con elecciones obligatorias abren su personalización en el mismo panel central.
 4. Los productos nuevos se guardan solos en el borrador persistido (etiqueta **Nuevo**). **Enviar a cocina** es la acción explícita que confirma: registra un lote con sus precios, promociones y configuración histórica. Agregar productos después crea otro lote al enviarlos.
-5. **Modificar** una partida enviada abre la misma personalización en el panel central y exige motivo. **Cancelar unidades** permite retirar una cantidad entera, con motivo e historial. El mesero necesita los permisos correspondientes; no se exige un supervisor universal.
+5. **Modificar** una partida enviada abre la misma personalización en el panel central y exige motivo. **Cancelar unidades** permite retirar una cantidad entera, con motivo e historial. El mesero necesita los permisos correspondientes; no se exige un supervisor universal. Desde la etapa 9F, sin el permiso «Cancelar partidas o cantidades confirmadas», cancelar unidades o reducir la cantidad de lo enviado pide la autorización puntual de un supervisor (ver [Cancelar unidades con autorización · etapa 9F](#cancelar-unidades-con-autorización-y-ruta-antigua-de-anulación--etapa-9f)).
 
 Una personalización abierta en el panel central se conserva al cambiar de cuenta o de vista interna: el aviso **Selección sin guardar conservada** permite retomarla o descartarla expresamente. **Volver** la descarta (pide confirmación si hubo cambios). Una recarga o cierre completo del proceso descarta esa selección aún no agregada; el borrador persistido permanece en PostgreSQL.
 
@@ -286,3 +286,32 @@ de cobro ni las acciones del panel de mesa; solo su presentación y lo que dice 
   de Playwright), ventana nativa e impresión real del aviso de cancelación.
 - Con la creación diferida, «Datos del pedido» solo está disponible después del primer producto, y los toques de una
   cuenta pendiente aún no guardados (≤ 700 ms) se pierden si se cierra el proceso, como en la 7.1.
+
+## Cancelar unidades con autorización y ruta antigua de anulación · etapa 9F
+
+Fase E de la etapa 9F (§7 de [etapas/ETAPA_9F.md](etapas/ETAPA_9F.md)), sin migración. Contratos en
+[API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9F · ruta antigua de anulación retirada y autorización para cancelar
+unidades»).
+
+- **Mismo criterio que «Cancelar cuenta»**: «Cancelar unidades» y reducir la cantidad de una partida ya enviada desde
+  «Modificar» proceden con el permiso propio «Cancelar partidas o cantidades confirmadas» (`orders.cancel`); sin él,
+  con la autorización puntual de un supervisor que lo tenga, el mismo formulario de los descuentos y de «Cancelar
+  cuenta» (usuario y contraseña, sin iniciar sesión, con el límite de intentos del acceso y nunca la misma persona).
+- **Quién la ve**: «Cancelar unidades» aparece en el menú del producto a quien tiene `orders.cancel` o puede abrir
+  cuentas (`accounts.open`), que así puede pedir la autorización; «Modificar» sigue con `orders.edit`.
+- **Go decide**: cada cuenta abierta trae `cancel_units_requires_authorization` y el panel «Cancelar unidades» pide al
+  supervisor desde el principio; en «Modificar», la previsualización de Go dice si la modificación reduce unidades y hace
+  falta supervisor, y el formulario aparece solo entonces (cambiar solo la preparación no lo pide). Un rechazo de Go por la
+  autorización (otra terminal cambió los permisos, contraseña incorrecta, supervisor sin el permiso o el mismo usuario)
+  se explica en el formulario. La contraseña sale del formulario al enviar y el almacén de operaciones pendientes no la
+  guarda: «Recuperar resultado» repite la operación sin ella y, si no llegó a registrarse, pide repetir la autorización.
+- **Qué se registra**: quién canceló o redujo (autor del evento) y quién autorizó (`authorized_by`,
+  `authorized_by_username` y `authorized_by_name` en `item.cancelled`/`item.modified`, y la auditoría
+  `restaurant.supervisor_authorized`). El historial de la cuenta muestra «Autorizó: <nombre>» o «con su propio permiso»
+  (nada en los registros anteriores) y la confirmación roja dice «Autoriza: <usuario>».
+- **Reportes**: «Modificaciones de cantidades» y «Productos cancelados» tienen la columna «Autorizó» (también en PDF y
+  Excel) y «Actividad por empleado» cuenta esas autorizaciones del supervisor ([REPORTS.md](REPORTS.md)).
+- **Ruta antigua de anulación retirada**: `POST restaurant/accounts/{id}/void` (cuentas vacías con motivo libre) responde
+  `410 ROUTE_RETIRED` sin tocar nada, para que ningún cliente, tampoco la futura aplicación Android, cancele sin motivo
+  del catálogo ni autorización. Una cuenta vacía se descarta y una con productos se cancela con su motivo.
+- **Sin verificar**: pantalla táctil física, la ventana nativa y Windows.

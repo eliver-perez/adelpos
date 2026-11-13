@@ -95,6 +95,8 @@ func (handler *service) decorateAccount(account *Account) error {
 		}
 		account.CancelRequiresAuthorization = !handler.request.Actor.Can(cancelPermission)
 	}
+	// Etapa 9F (§7.2): «Cancelar unidades» pide supervisor a quien no tiene orders.cancel.
+	account.CancelUnitsRequiresAuthorization = account.State == "open" && !handler.request.Actor.Can(unitsCancelPermission)
 	return nil
 }
 
@@ -296,7 +298,7 @@ func (handler *service) accounts(parts []string) (any, error) {
 		return handler.transfer(id, parts[2] == "split")
 	case "merge":
 		return handler.merge(id)
-	case "move", "assign", "void":
+	case "move", "assign":
 		return handler.accountAction(id, parts[2])
 	case "release":
 		return handler.releaseAccount(id)

@@ -59,11 +59,10 @@ func TestStage9DCancelledAccountsReports(t *testing.T) {
 	// C: una ensalada (50) cancelada con «Otro» y su descripción.
 	other := fixture.account(t, "Pedido de prueba", "dine_in", nil, line(fixture.salad, 1))
 	cancel(fixture.admin, other, "Otro", "Capturado en la mesa equivocada", nil)
-	// D: anulación con la forma anterior (motivo libre).
+	// D: anulación con la forma anterior (motivo libre), retirada en la etapa 9F: dato heredado
+	// insertado en la base de la prueba como lo dejaba esa ruta.
 	legacy := decode[operations.Bill](t, fixture.mutate(t, "POST", "restaurant/accounts", map[string]any{"name": "Anulada antes", "mode": "dine_in"}, 200))
-	fixture.mutate(t, "POST", "restaurant/accounts/"+legacy.Account.ID+"/void", map[string]any{
-		"revision": legacy.Account.Revision, "reason": "Cliente se fue sin consumir",
-	}, 200)
+	fixture.legacyVoid(t, legacy.Account.ID, "Cliente se fue sin consumir")
 	// E y F: una cuenta vacía liberada y una descartada con su borrador; no son cancelaciones.
 	released := decode[operations.Bill](t, fixture.mutate(t, "POST", "restaurant/accounts", map[string]any{
 		"mode": "dine_in", "table_id": fixture.secondTable.ID}, 200))
@@ -210,6 +209,20 @@ func TestStage9DCancelledAccountsReports(t *testing.T) {
 		}
 		if burgers != 1 {
 			t.Fatalf("Se esperaba una partida de hamburguesas: %d", burgers)
+		}
+		// Etapa 9F: «Autorizó» de cada partida es quien autorizó cancelar su cuenta (vacía con el permiso
+		// propio), en «Modificaciones de cantidades» y en «Productos cancelados».
+		for _, report := range []reportResult{changes, cancelled} {
+			for _, row := range report.Rows {
+				expected := ""
+				if text(row["folio"]) == text(takeaway.Account.Folio) {
+					expected = "Prueba supervisor_rep9d"
+				}
+				if text(row["authorized_by"]) != expected {
+					t.Fatalf("%s: «Autorizó» de la cuenta %s = %q, se esperaba %q", report.Report.ID, text(row["folio"]),
+						text(row["authorized_by"]), expected)
+				}
+			}
 		}
 		activity := fixture.report(t, fixture.admin, "employees.activity", "")
 		supervisor := find(t, activity, "user", "Prueba supervisor_rep9d")

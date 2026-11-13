@@ -62,6 +62,15 @@ function AccountCancelled({ event, after }: { event: HistoryEvent; after: Record
   );
 }
 
+// Etapa 9F (§7.2): «Cancelar unidades» y la reducción desde «Modificar» guardan quién autorizó (null si
+// bastó el permiso propio). Los eventos anteriores no tienen el dato y no muestran nada.
+function UnitsAuthorization({ after }: { after: RecordValue }) {
+  if (!('authorized_by' in after)) {
+    return null;
+  }
+  return <p>Autorizó: {supervisorName(after) || 'con su propio permiso'}</p>;
+}
+
 export function HistoryDetails({ event }: { event: HistoryEvent }) {
   const before = record(event.payload.before);
   const after = record(event.payload.after);
@@ -88,6 +97,7 @@ export function HistoryDetails({ event }: { event: HistoryEvent }) {
       {typeof totals.total === 'string' && <p>Importe histórico: {formatMoney(totals.total)}</p>}
       {event.kind === 'item.modified' && (
         <>
+          <UnitsAuthorization after={after} />
           <h4>Antes</h4>
           <PreparationChange value={before} />
           <h4>Después</h4>
@@ -110,6 +120,7 @@ export function HistoryDetails({ event }: { event: HistoryEvent }) {
       )}
       {event.kind === 'item.cancelled' && (
         <div className="form-stack">
+          <UnitsAuthorization after={after} />
           <PreparationChange value={before} />
           <p>La cancelación conserva el historial. No registra una devolución de dinero.</p>
         </div>

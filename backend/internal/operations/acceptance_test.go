@@ -196,10 +196,18 @@ func TestRestaurantAcceptance(t *testing.T) {
 	})
 
 	t.Run("mesa histórica desactivada sin eliminar cuentas", func(t *testing.T) {
+		// La cuenta dividida quedó vacía al transferir sus unidades. Hasta la etapa 9E se anulaba con la
+		// ruta void (retirada en la 9F, §7.1): ahora se descarta, sin motivo, y queda igual en voided.
 		split := fixture.refresh(t, fixture.splitAccount.Account.ID)
-		fixture.mutate(t, "POST", "restaurant/accounts/"+split.Account.ID+"/void", map[string]any{
-			"revision": split.Account.Revision, "reason": "Cuenta vacía tras transferencia",
-		}, 200)
+		if !split.Account.Discardable {
+			t.Fatalf("La cuenta vacía tras transferir debía poder descartarse: %+v", split.Account)
+		}
+		discarded := decodeResponse[operations.Bill](t, fixture.mutate(t, "POST", "restaurant/accounts/"+split.Account.ID+"/discard", map[string]any{
+			"revision": split.Account.Revision,
+		}, 200))
+		if discarded.Account.State != "voided" {
+			t.Fatalf("La cuenta descartada debía quedar anulada: %s", discarded.Account.State)
+		}
 		fixture.table.Active = false
 		fixture.table = decodeResponse[operations.Table](t, fixture.mutate(t, "PATCH", "restaurant/tables/"+fixture.table.ID, fixture.table, 200))
 		fixture.refresh(t, fixture.account.Account.ID)

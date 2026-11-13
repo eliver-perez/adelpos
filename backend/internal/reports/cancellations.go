@@ -15,7 +15,9 @@ import "context"
 //   - Una partida se reduce o se cancela después de confirmarse con «Cancelar» (item.cancelled), al
 //     modificarla con menos unidades (item.modified con cancelled_unit_ids) o al cancelar su cuenta
 //     (account.cancelled, con las partidas en before.lines). Cada evento guarda las unidades de antes
-//     con sus importes, las que se retiraron, el motivo y el autor.
+//     con sus importes, las que se retiraron, el motivo y el autor. Desde la etapa 9F los tres guardan
+//     además quién autorizó (after.authorized_by, null si bastó el permiso propio); los eventos
+//     item.cancelled e item.modified anteriores no lo tienen y su «Autorizó» queda vacía.
 // Una cuenta cancelada nunca es venta: no se cierra, de modo que no tiene reconocimientos en
 // sales_recognitions. Los reportes usan el permiso de «Productos cancelados» (reports.sales.read) y no
 // toman locks: solo leen.
@@ -27,9 +29,15 @@ const changesDateBasis = "Fecha de la cancelación o modificación de la partida
 // legacyCancelReason agrupa en el total por motivo las cancelaciones anteriores, de motivo libre.
 const legacyCancelReason = "Cancelaciones anteriores con motivo libre"
 
-// changesAuthorizationNote explica por qué «Modificaciones de cantidades» no tiene «Autorizó».
-const changesAuthorizationNote = "No hay columna «Autorizó»: cancelar o reducir una partida no pide la autorización de otra persona " +
-	"(basta el permiso de quien lo hace). Quién autorizó la cancelación de una cuenta completa está en «Cuentas canceladas»."
+// changesAuthorizationNote explica de dónde sale «Autorizó» en los reportes de unidades canceladas
+// (etapa 9F, §7.2).
+const changesAuthorizationNote = "«Autorizó» es la persona que dio su autorización porque quien canceló o redujo no tenía permiso " +
+	"para hacerlo; queda vacía si bastó su propio permiso y en los registros anteriores, cuando no se pedía autorización."
+
+// unitsAuthorizedDescription describe la columna «Autorizó» de los reportes de unidades canceladas.
+const unitsAuthorizedDescription = "Supervisor que autorizó la cancelación o la reducción porque quien la hizo no tenía el permiso " +
+	"«Cancelar partidas o cantidades confirmadas» (en una cuenta cancelada, quien autorizó cancelarla); vacía si bastó su permiso " +
+	"y en los registros anteriores, cuando no se pedía autorización."
 
 // placeSQL es la mesa (salón) o el origen (para llevar) de una cuenta con la mesa actual.
 const placeSQL = "CASE WHEN a.mode='dine_in' THEN coalesce(place.name,'Sin mesa') ELSE a.origin END"
@@ -174,7 +182,7 @@ func init() {
 	register(Definition{
 		ID: "products.quantity_changes", Group: "products", Title: "Modificaciones de cantidades",
 		Description: "Partidas confirmadas cuya cantidad se redujo o que se cancelaron (también al cancelar su cuenta): cantidad " +
-			"anterior y nueva, diferencia en unidades e importe, quién, motivo y fecha.",
+			"anterior y nueva, diferencia en unidades e importe, quién, quién lo autorizó, motivo y fecha.",
 		Permissions: []string{PermissionSales}, DateBasis: changesDateBasis,
 		Filters: []Filter{filterProduct(), filterMode(), filterUser("Usuario que modificó")},
 		Columns: []Column{dateTimeColumn("changed_at", "Fecha"), codeColumn("folio", "Folio"), textColumn("product", "Producto"),
@@ -186,7 +194,9 @@ func init() {
 			described(countColumn("difference", "Diferencia (unidades)"), "Cantidad nueva − cantidad anterior."),
 			described(moneyColumn("amount_difference", "Diferencia (importe)"),
 				"Importe de las unidades retiradas, con signo negativo (el que tenían al confirmarse, con sus promociones)."),
-			textColumn("changed_by", "Modificó"), textColumn("reason", "Motivo"),
+			textColumn("changed_by", "Modificó"),
+			described(textColumn("authorized_by", "Autorizó"), unitsAuthorizedDescription),
+			textColumn("reason", "Motivo"),
 			optional(textColumn("action", "Acción")), optional(textColumn("terminal", "Terminal")),
 			optional(textColumn("mode", "Modalidad")), optional(textColumn("place", "Mesa u origen")),
 			optional(described(countColumn("released_units", "Ya liberadas a cocina"),
@@ -210,6 +220,9 @@ func init() {
 // en lugar de inventarse; la diferencia y el importe salen siempre del evento. La cancelación de una
 // cuenta (account.cancelled, etapa 9D) retira todas sus partidas en un solo evento: guarda cada partida
 // con sus unidades en before.lines y se reporta un renglón por partida («Partida cancelada»).
+//
+// «Autorizó» (etapa 9F) es el supervisor de after.authorized_by con su nombre visible actual, como
+// «Cuentas canceladas»; vacía si bastó el permiso propio y en los eventos anteriores, que no lo guardan.
 func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
 	list := conditions{}
 	list.when(query, "product_id", "c.product_id = @product_id::text")
@@ -227,6 +240,7 @@ func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
             WHERE u.state='cancelled' AND `+inPeriod("u.cancelled_at")+`
         ), changes AS (
             SELECT e.created_at,e.account_id,e.kind,e.author_id,e.device_id,e.operation_id,
+                e.payload->'after'->>'authorized_by' AS authorized_by,
                 coalesce(e.payload->'after'->>'reason','') AS reason,
                 coalesce(e.payload->'before'->'quote_line'->>'name','') AS product,
                 e.payload->'before'->'request'->>'product_id' AS product_id,
@@ -237,6 +251,7 @@ func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
             FROM removed r JOIN app.restaurant_events e ON e.id=r.id WHERE e.kind<>'account.cancelled'
             UNION ALL
             SELECT e.created_at,e.account_id,e.kind,e.author_id,e.device_id,e.operation_id,
+                e.payload->'after'->>'authorized_by',
                 coalesce(e.payload->'after'->>'reason',''),
                 coalesce(line.value->'quote_line'->>'name',''),
                 line.value->'request'->>'product_id',
@@ -267,13 +282,14 @@ func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
                 ELSE 'Cantidad reducida' END AS change,
             c.previous_quantity::bigint AS previous_quantity,(c.previous_quantity - c.removed)::bigint AS new_quantity,
             (-c.removed)::bigint AS difference,-c.removed_amount AS amount_difference,
-            author.display_name AS changed_by,c.reason,
+            author.display_name AS changed_by,coalesce(approver.display_name,'') AS authorized_by,c.reason,
             CASE c.kind WHEN 'item.cancelled' THEN 'Cancelación' WHEN 'account.cancelled' THEN 'Cancelación de la cuenta'
                 ELSE 'Modificación de la partida' END AS action,
             coalesce(device.name,'') AS terminal,`+modeSQL+` AS mode,`+placeSQL+` AS place,c.released_units::bigint AS released_units
         FROM measured c
         JOIN app.restaurant_accounts a ON a.id=c.account_id
         JOIN app.users author ON author.id=c.author_id
+        LEFT JOIN app.users approver ON approver.id=c.authorized_by::uuid
         LEFT JOIN app.devices device ON device.id=c.device_id
         LEFT JOIN app.restaurant_tables place ON place.id=a.table_id
         WHERE c.removed > 0`+list.sql(), query.Args())

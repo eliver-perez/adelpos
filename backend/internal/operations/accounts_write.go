@@ -4,8 +4,6 @@ import (
 	"reflect"
 	"strings"
 	"time"
-
-	"local/ad-el-pos/server/internal/payments"
 )
 
 func (handler *service) validateAccountInput(input *AccountInput, previous *Account) (*time.Time, error) {
@@ -272,6 +270,10 @@ func (handler *service) updateAccount(id string) (any, error) {
 	return saved, handler.event(id, nil, "account.updated", account, saved.Account)
 }
 
+// accountAction mueve una cuenta a otra mesa o cambia su responsable. La anulación anterior con
+// motivo libre (void) se retiró en la etapa 9F: Handle la responde con 410 ROUTE_RETIRED antes de
+// llegar aquí. El campo reason se sigue aceptando (y guardando en el evento) como antes, aunque
+// mover y asignar no lo exigen.
 func (handler *service) accountAction(id, action string) (any, error) {
 	var input struct {
 		Mutation
@@ -304,19 +306,6 @@ func (handler *service) accountAction(id, action string) (any, error) {
 		if err := handler.validateAssignee(input.AssignedUserID); err != nil {
 			return nil, err
 		}
-	case "void":
-		// Forma anterior (etapas 4–9C) de cancelar una cuenta vacía con motivo libre, que se conserva por
-		// compatibilidad; desde la etapa 9D la interfaz usa «Cancelar cuenta» (cancel-account) y
-		// «Descartar» (discard).
-		if account.ConfirmedQuantity > 0 || account.DraftQuantity > 0 {
-			return nil, invalid("La cuenta conserva productos activos o borradores. Resuélvelos antes de cancelarla.")
-		}
-		if len(strings.TrimSpace(input.Reason)) < 5 || len(input.Reason) > 500 {
-			return nil, invalid("Indica un motivo de cancelación de entre 5 y 500 caracteres.")
-		}
-		if err := payments.RequireNoNetFinance(handler.ctx, handler.tx, id); err != nil {
-			return nil, err
-		}
 	}
 	// Cambiar de mesa conserva un nombre capturado; la referencia neutra sigue a la mesa nueva.
 	name := account.Name
@@ -334,8 +323,6 @@ func (handler *service) accountAction(id, action string) (any, error) {
 		_, err = handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET table_id=$1,name=$2 WHERE id=$3", input.TableID, name, id)
 	case "assign":
 		_, err = handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET assigned_user_id=$1 WHERE id=$2", input.AssignedUserID, id)
-	case "void":
-		_, err = handler.tx.Exec(handler.ctx, "UPDATE app.restaurant_accounts SET state='voided' WHERE id=$1", id)
 	}
 	if err != nil {
 		return nil, err

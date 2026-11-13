@@ -3,15 +3,18 @@ import { Accordion } from '../../../components/Accordion';
 import { Notice } from '../../../components/Forms';
 import { IconLabel } from '../../../components/Icon';
 import { QuantityStepper } from '../../../components/QuantityStepper';
+import { SupervisorAuthorization } from '../../../components/SupervisorAuthorization';
 import { TextField } from '../../../components/catalog/EditorFields';
 import { QuoteBreakdown } from '../../../components/catalog/QuoteBreakdown';
 import { originalCustomization } from '../../../components/catalog/customizationRules';
+import { useSupervisorAuthorization } from '../../../hooks/useSupervisorAuthorization';
 import { api } from '../../../services/api';
 import type { Lookups, Quote } from '../../../services/catalog';
 import { formatMoney } from '../../../services/money';
 import { notifyError, notifySuccess } from '../../../services/notify';
 import { isPendingAccount } from '../../../services/restaurant';
 import type { Bill, DraftItem, EditorState, OrderQuote } from '../../../services/restaurant';
+import { cancelUnitsAuthorizationText } from '../CancelItem';
 import type { ExecuteMutation } from '../OperationsAdmin';
 import { uncertainError } from './draftSync';
 import { TouchCustomizer } from './TouchCustomizer';
@@ -56,6 +59,7 @@ async function pendingPreview(
     quote,
     combined: { subtotal: quote.subtotal, discount: quote.discount, total: quote.total },
     pricing_policy: '',
+    cancel_units_requires_authorization: false,
   };
 }
 
@@ -64,6 +68,11 @@ async function pendingPreview(
 // partida confirmada); el total del botón principal es el de esa cotización. Un error al cotizar
 // queda en el panel (impide confirmar); el resultado de confirmar una modificación se avisa con el
 // sistema único de mensajes.
+//
+// Etapa 9F (§7.2): reducir la cantidad de una partida ya enviada sigue la regla de «Cancelar
+// unidades». La previsualización de Go dice si hará falta un supervisor
+// (`cancel_units_requires_authorization`); entonces el panel pide su autorización, que se envía solo
+// al confirmar (nunca en la previsualización) y cuya contraseña sale del formulario al enviar.
 export function CustomizationPanel({
   editor,
   onChange,
@@ -110,6 +119,10 @@ export function CustomizationPanel({
   );
   const productName =
     lookups.products.find((entry) => entry.id === editor.line.product_id)?.name ?? 'Producto';
+  // Mientras Go recalcula (sin previsualización) se conserva lo último que dijo (null).
+  const auth = useSupervisorAuthorization(
+    confirmed ? (preview ? preview.cancel_units_requires_authorization === true : null) : false,
+  );
 
   useEffect(() => {
     let current = true;
@@ -166,17 +179,30 @@ export function CustomizationPanel({
   }
 
   async function confirmEdit() {
-    if (!preview || !ready) return;
+    if (!preview || !ready || !auth.ready) return;
+    const body: Record<string, unknown> = {
+      ...(JSON.parse(requestKey) as Record<string, unknown>),
+      expected_fingerprint: preview.fingerprint,
+    };
+    // La autorización del supervisor (si Go la pidió) va solo en la confirmación. Si ya no hace falta
+    // (se restauró la cantidad), lo escrito en el formulario oculto también se descarta.
+    const authorization = auth.take();
+    if (authorization) {
+      body.authorization = authorization;
+    } else if (!auth.visible) {
+      auth.reset();
+    }
     try {
       await execute('restaurant_edit', {
         id: editor.accountID,
-        body: {
-          ...(JSON.parse(requestKey) as Record<string, unknown>),
-          expected_fingerprint: preview.fingerprint,
-        },
+        body,
       });
       notifySuccess(`Modificación confirmada: ${productName}`);
     } catch (problem) {
+      // Un rechazo de la autorización se explica en su formulario.
+      if (auth.handleError(problem)) {
+        return;
+      }
       // Un resultado incierto queda en «Recuperar resultado» de la página.
       if (!uncertainError(problem)) {
         notifyError(problem, 'No se pudo modificar.');
@@ -239,6 +265,13 @@ export function CustomizationPanel({
               onChange={(reason) => onChange({ ...editor, reason })}
             />
           )}
+          {confirmed && (
+            <SupervisorAuthorization
+              auth={auth}
+              disabled={busy}
+              description={cancelUnitsAuthorizationText}
+            />
+          )}
           {preview?.quote && (
             <Accordion
               title="Desglose del precio"
@@ -281,7 +314,9 @@ export function CustomizationPanel({
         <button
           type="button"
           className="primary-button capture-add"
-          disabled={busy || !ready || (confirmed && editor.reason.trim().length < 5)}
+          disabled={
+            busy || !ready || (confirmed && (editor.reason.trim().length < 5 || !auth.ready))
+          }
           onClick={() => (confirmed ? void confirmEdit() : onSave())}
         >
           <IconLabel icon={confirmed || editor.kind === 'draft' ? 'check' : 'plus'}>

@@ -413,10 +413,20 @@ func testPayments(t *testing.T, base *restaurantFixture) {
 		if grown.Account.Finance.Total != "195.00" || grown.Account.Finance.Balance != "55.00" || grown.Account.Finance.Paid != "140.00" {
 			t.Fatal("Agregar productos después de un pago alteró los pagos")
 		}
-		// Anular una cuenta con pagos vigentes se rechaza aunque no tuviera productos.
-		fixture.mutate(t, "POST", "restaurant/accounts/"+grown.Account.ID+"/void", map[string]any{
-			"revision": grown.Account.Revision, "reason": "No debe anularse con pagos",
-		}, 400)
+		// Cancelar una cuenta con pagos vigentes se rechaza: primero la devolución. Hasta la etapa 9E se
+		// comprobaba con la anulación anterior (void, retirada en la 9F); ahora con «Cancelar cuenta».
+		var reasonID string
+		for _, reason := range decodeResponse[[]operations.CancelReason](t, fixture.adminCall(t, "GET", "restaurant/cancel-reasons", nil, 200)) {
+			if reason.Name == "Error de captura" {
+				reasonID = reason.ID
+			}
+		}
+		rejected := fixture.mutate(t, "POST", "restaurant/accounts/"+grown.Account.ID+"/cancel-account", map[string]any{
+			"revision": grown.Account.Revision, "reason_id": reasonID,
+		}, 409)
+		if code := errorCode(t, rejected); code != "ACCOUNT_HAS_PAYMENTS" {
+			t.Fatalf("Cancelar una cuenta con pagos: %s", code)
+		}
 	})
 
 	t.Run("61_62_63_idempotencia_y_doble_clic", func(t *testing.T) {

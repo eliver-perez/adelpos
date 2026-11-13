@@ -142,6 +142,10 @@ type Account struct {
 	CancelBlocker               string `json:"cancel_blocker"`
 	CancelRequiresAuthorization bool   `json:"cancel_requires_authorization"`
 	LongOpen                    bool   `json:"long_open"`
+	// CancelUnitsRequiresAuthorization (etapa 9F, §7.2): la cuenta está abierta y el usuario que lee
+	// no tiene orders.cancel, así que «Cancelar unidades» pedirá la autorización de un supervisor. Para
+	// reducir la cantidad desde «Modificar», lo dice la previsualización (edit-preview).
+	CancelUnitsRequiresAuthorization bool `json:"cancel_units_requires_authorization"`
 }
 
 type Totals struct {
@@ -187,6 +191,10 @@ type QuoteResult struct {
 	Quote         *catalog.Quote `json:"quote"`
 	Combined      Totals         `json:"combined"`
 	PricingPolicy string         `json:"pricing_policy"`
+	// CancelUnitsRequiresAuthorization (etapa 9F, solo en edit-preview): la modificación reduce la
+	// cantidad de una partida ya enviada y el usuario no tiene orders.cancel, así que «edit» pedirá la
+	// autorización de un supervisor. Falso en las demás cotizaciones.
+	CancelUnitsRequiresAuthorization bool `json:"cancel_units_requires_authorization"`
 }
 
 type Selection struct {
@@ -208,6 +216,9 @@ type EditInput struct {
 	Line                catalog.LineRequest `json:"line"`
 	ExpectedFingerprint string              `json:"expected_fingerprint"`
 	Reason              string              `json:"reason"`
+	// Authorization (etapa 9F) es la autorización de un supervisor para reducir la cantidad sin
+	// orders.cancel; se ignora si basta el permiso propio o si la modificación no reduce.
+	Authorization *payments.AuthorizationInput `json:"authorization"`
 }
 
 type Unit struct {
