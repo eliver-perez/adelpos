@@ -61,6 +61,27 @@ func TestSamePathAcceptsShortAndLongForms(t *testing.T) {
 	}
 }
 
+func TestToolsRunFromAnASCIIPathWhenTheProgramFolderHasAccents(t *testing.T) {
+	folder := filepath.Join(t.TempDir(), "Programas José Ñandú", "postgresql", "bin")
+	if err := os.MkdirAll(folder, 0700); err != nil {
+		t.Fatal(err)
+	}
+	short := asciiPath(folder)
+	if short == folder {
+		t.Skip("el volumen no genera nombres cortos")
+	}
+	if !isASCII(short) || !samePath(short, folder) {
+		t.Fatalf("la ruta corta debe ser ASCII y la misma carpeta: %s", short)
+	}
+	layout := Layout{PGBin: folder}
+	if !isASCII(layout.tool("initdb")) {
+		t.Fatalf("initdb debe ejecutarse por una ruta ASCII: %s", layout.tool("initdb"))
+	}
+	if ascii := filepath.Join(t.TempDir(), "sin acentos"); asciiPath(ascii) != ascii {
+		t.Fatal("una ruta ASCII no debe cambiar")
+	}
+}
+
 func TestServerConfigIsValidLoopbackDevelopment(t *testing.T) {
 	cfg := serverConfig("adel_pos", "secreto-de-prueba", ClusterPort)
 	if err := cfg.Validate(); err != nil {
