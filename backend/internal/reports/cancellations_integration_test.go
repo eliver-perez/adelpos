@@ -21,9 +21,12 @@ import (
 // cuenta vacía liberada ya no aparece, porque no es una cancelación) y «Modificaciones de
 // cantidades» (cancelaciones y modificaciones que reducen una partida ya confirmada) con sus
 // totales, filtros, permisos y exportaciones PDF y Excel; y la referencia del comprobante como
-// columna opcional de «Devoluciones» y «Correcciones de pagos». «Modificaciones de cantidades» no
-// tiene columna «Autorizó»: ese dato no existe. Con ADEL_REPORTS_MEASURE=1 mide además los dos
-// reportes con un año de volumen sintético. Las cancelaciones de la 9D se prueban en
+// columna opcional de «Devoluciones» y «Correcciones de pagos». Desde la etapa 9F «Modificaciones de
+// cantidades» tiene «Autorizó», vacía aquí porque el administrador cancela con su propio permiso (la
+// autorización de un supervisor se prueba en operations, stage9f_cancel_units_test.go). La anulación
+// anterior con motivo libre se retiró en la 9F: la cuenta anulada se deja como la dejaba esa ruta,
+// directamente en la base (legacyVoid, dato anterior a la 9F). Con ADEL_REPORTS_MEASURE=1 mide además
+// los dos reportes con un año de volumen sintético. Las cancelaciones de la 9D se prueban en
 // stage9d_cancellations_integration_test.go.
 //
 // Como la prueba de exportaciones, usa su propia base desde cero y la deja vacía al terminar.
@@ -56,7 +59,8 @@ func TestStage9CCancellationReports(t *testing.T) {
 	}
 
 	// Cuenta anulada: 3 hamburguesas (120) y 2 refrescos (25); se cancela una hamburguesa, la partida
-	// se modifica de 2 a 1, se cancelan los refrescos y la última hamburguesa y después se anula.
+	// se modifica de 2 a 1, se cancelan los refrescos y la última hamburguesa y después se anula con la
+	// forma anterior a la etapa 9F (dato heredado, insertado en la base de la prueba).
 	voided := fixture.account(t, "Mesa que se fue", "dine_in", &fixture.table, line(fixture.burger, 3), line(fixture.soda, 2))
 	cancel(voided, fixture.burger, 1, "Cliente cambió de opinión")
 	current := fixture.refresh(t, voided.Account.ID)
@@ -70,8 +74,7 @@ func TestStage9CCancellationReports(t *testing.T) {
 	fixture.mutate(t, "POST", route(voided, "edit"), edit, 200)
 	cancel(voided, fixture.soda, 2, "Refrescos no servidos")
 	cancel(voided, fixture.burger, 1, "Se retiró la orden")
-	current = fixture.refresh(t, voided.Account.ID)
-	fixture.mutate(t, "POST", route(voided, "void"), map[string]any{"revision": current.Account.Revision, "reason": "Cliente se fue sin consumir"}, 200)
+	fixture.legacyVoid(t, voided.Account.ID, "Cliente se fue sin consumir")
 	// Cuenta vacía liberada en la terraza.
 	empty := decode[operations.Bill](t, fixture.mutate(t, "POST", "restaurant/accounts", map[string]any{
 		"name": "Mesa liberada", "mode": "dine_in", "table_id": fixture.secondTable.ID,
@@ -193,7 +196,8 @@ func TestStage9CCancellationReports(t *testing.T) {
 		if len(sorted.Rows) != 2 || sorted.Page.TotalRows != 5 || text(sorted.Totals["amount_difference"]) != "-460.00" {
 			t.Fatalf("Orden y página con los totales completos: %+v", sorted)
 		}
-		assertNoAuthorizationColumn(t, result)
+		// Etapa 9F: «Autorizó» existe y queda vacía, porque el administrador canceló con su permiso.
+		assertEmptyAuthorizationColumn(t, result)
 	})
 
 	t.Run("referencia del comprobante en devoluciones y correcciones", func(t *testing.T) {
@@ -289,13 +293,20 @@ func TestStage9CCancellationReports(t *testing.T) {
 	}
 }
 
-// assertNoAuthorizationColumn comprueba que el reporte no tiene una columna «Autorizó»: AD-EL POS no
-// pide la autorización de otra persona para cancelar ni reducir una partida.
-func assertNoAuthorizationColumn(t *testing.T, result reportResult) {
+// assertEmptyAuthorizationColumn comprueba que el reporte tiene la columna «Autorizó» (etapa 9F) y que
+// está vacía en todos sus renglones: quien canceló o redujo tenía su propio permiso.
+func assertEmptyAuthorizationColumn(t *testing.T, result reportResult) {
 	t.Helper()
+	found := false
 	for _, column := range result.Columns {
-		if strings.Contains(column.Key, "authoriz") {
-			t.Fatalf("%s no debe tener una columna de autorización: %s", result.Report.ID, column.Key)
+		found = found || (column.Key == "authorized_by" && column.Label == "Autorizó")
+	}
+	if !found {
+		t.Fatalf("%s debe tener la columna «Autorizó»", result.Report.ID)
+	}
+	for _, row := range result.Rows {
+		if text(row["authorized_by"]) != "" {
+			t.Fatalf("%s: «Autorizó» debía quedar vacía con el permiso propio: %+v", result.Report.ID, row)
 		}
 	}
 }

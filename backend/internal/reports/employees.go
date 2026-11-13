@@ -14,7 +14,8 @@ import (
 //   - cobró, devolvió y corrigió: quien registró el pago o la devolución (sin turnos en arqueo y, como
 //     los reportes de cobros y de caja, solo de los turnos que el usuario puede consultar en Caja);
 //   - aplicó descuentos o cortesías y autorizó como supervisor: los ajustes vigentes y las
-//     autorizaciones puntuales (desde la etapa 9D también las de «Cancelar cuenta»);
+//     autorizaciones puntuales (desde la etapa 9D también las de «Cancelar cuenta» y desde la 9F las
+//     de «Cancelar unidades» y las reducciones desde «Modificar», after.authorized_by de sus eventos);
 //   - movimientos de caja: quien registró la operación de efectivo (sin turnos en arqueo y con el
 //     mismo alcance de Caja).
 // Las cifras de venta (reconocimientos), confirmaciones, cancelaciones, descuentos y autorizaciones
@@ -44,7 +45,9 @@ func init() {
 			described(countColumn("discounts", "Descuentos aplicados"), "Descuentos vigentes que aplicó."),
 			described(moneyColumn("discount_amount", "Importe descontado"), "Importe de esos descuentos."),
 			optional(countColumn("courtesies", "Cortesías aplicadas")), optional(moneyColumn("courtesy_amount", "Importe de cortesías")),
-			described(countColumn("authorizations", "Autorizaciones como supervisor"), "Descuentos, cortesías, devoluciones, correcciones, cancelaciones de ajustes y cancelaciones de cuentas que autorizó."),
+			described(countColumn("authorizations", "Autorizaciones como supervisor"),
+				"Descuentos, cortesías, devoluciones, correcciones, cancelaciones de ajustes, cancelaciones de cuentas y "+
+					"cancelaciones o reducciones de unidades que autorizó."),
 			described(countColumn("refunds", "Devoluciones"), "Devoluciones de dinero que registró."),
 			moneyColumn("refunded", "Importe devuelto"),
 			described(countColumn("cash_operations", "Movimientos de caja"),
@@ -153,6 +156,10 @@ func employeeActivityQuery(ctx context.Context, query *Query) (*Dataset, error) 
                 UNION ALL
                 SELECT ac.authorized_by FROM app.account_cancellations ac
                 WHERE ac.authorized_by IS NOT NULL AND `+inPeriod("ac.created_at")+`
+                UNION ALL
+                SELECT (e.payload->'after'->>'authorized_by')::uuid FROM app.restaurant_events e
+                WHERE e.kind IN ('item.cancelled','item.modified') AND e.payload->'after'->>'authorized_by' IS NOT NULL
+                    AND `+inPeriod("e.created_at")+`
             ) granted GROUP BY 1
         ),
         cash AS (

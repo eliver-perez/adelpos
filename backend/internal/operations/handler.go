@@ -12,8 +12,26 @@ import (
 	"local/ad-el-pos/server/internal/events"
 )
 
+// retiredVoidMessage explica a cualquier cliente que la anulación anterior ya no existe y qué usar.
+const retiredVoidMessage = "Esta forma de cancelar cuentas ya no existe. Usa «Cancelar cuenta», con su motivo y, si hace falta, " +
+	"la autorización de un supervisor, o «Descartar cuenta vacía» si la cuenta no tiene productos enviados."
+
+// retiredRoute reconoce las rutas retiradas. Etapa 9F (§7.1, decisión D8 del coordinador): la
+// anulación anterior con motivo libre (POST restaurant/accounts/{id}/void, etapas 4–9C) ya no tenía
+// cliente en la aplicación y permitía anular sin motivo del catálogo ni autorización; redirigirla a
+// «Cancelar cuenta» casi nunca procedería (solo aceptaba cuentas sin productos activos, que «Cancelar
+// cuenta» rechaza como descartables), así que se retira.
+func retiredRoute(method string, parts []string) bool {
+	return method == "POST" && len(parts) == 3 && parts[0] == "accounts" && parts[2] == "void"
+}
+
 func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, error) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(request.Route, "restaurant/"), "/"), "/")
+	// Una ruta retirada responde 410 antes de comprobar permisos, tomar el lock o leer la cuenta: no
+	// escribe nada (tampoco una denegación en la auditoría) y la transacción se revierte.
+	if retiredRoute(request.Method, parts) {
+		return nil, &Error{Status: 410, Code: "ROUTE_RETIRED", Message: retiredVoidMessage}
+	}
 	permission := routePermission(request.Method, parts)
 	if permission == "" {
 		return nil, &Error{Status: 404, Code: "NOT_FOUND", Message: "La ruta operativa no existe."}
@@ -123,9 +141,22 @@ func (handler *service) authorizeRoute(parts []string) error {
 		switch parts[2] {
 		case "draft", "preview", "draft-preview", "confirm", "edit-preview", "edit":
 			return handler.request.Actor.Require("catalog.read", "catalog.prices.read")
+		case "cancel":
+			return handler.requireUnitsCancelRoute()
 		}
 	}
 	return nil
+}
+
+// requireUnitsCancelRoute es el permiso de la ruta de «Cancelar unidades» (etapa 9F, §7.2): quien
+// tiene orders.cancel cancela con su permiso, como antes; sin él, basta poder abrir cuentas
+// (accounts.open, el mismo umbral de «Cancelar cuenta») para pedir la autorización de un supervisor,
+// que la ruta decide antes de escribir (cancellations.go).
+func (handler *service) requireUnitsCancelRoute() error {
+	if handler.request.Actor.Can(unitsCancelPermission) {
+		return nil
+	}
+	return handler.request.Actor.Require("accounts.open")
 }
 
 func routePermission(method string, parts []string) string {
@@ -210,9 +241,11 @@ func routePermission(method string, parts []string) string {
 			return map[string]string{
 				"draft-preview": "orders.capture",
 				"confirm":       "orders.confirm", "edit-preview": "orders.edit", "edit": "orders.edit",
-				"cancel": "orders.cancel", "split": "accounts.split", "transfer": "accounts.transfer_items",
+				// Etapa 9F: «Cancelar unidades» ya no exige orders.cancel en la ruta (sin él procede con
+				// supervisor); authorizeRoute pide además orders.cancel o accounts.open.
+				"cancel": "accounts.read", "split": "accounts.split", "transfer": "accounts.transfer_items",
 				"merge": "accounts.merge", "move": "accounts.move", "assign": "accounts.transfer",
-				"void": "accounts.manage", "release": "accounts.open",
+				"release": "accounts.open",
 				// Etapa 9D: descartar una cuenta vacía (sin motivo) y cancelar una cuenta con motivo. La
 				// cancelación no puede exigir accounts.cancel aquí: sin él procede con la autorización de un
 				// supervisor, que la ruta decide antes de escribir (account_cancellation.go).

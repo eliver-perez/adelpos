@@ -199,13 +199,16 @@ func init() {
 	})
 	register(Definition{
 		ID: "products.cancelled", Group: "products", Title: "Productos cancelados",
-		Description: "Unidades confirmadas que se cancelaron (también al cancelar su cuenta), con la fecha de cancelación, el motivo y " +
-			"quién canceló.",
+		Description: "Unidades confirmadas que se cancelaron (también al cancelar su cuenta), con la fecha de cancelación, el motivo, " +
+			"quién canceló y quién lo autorizó.",
 		Permissions: []string{PermissionSales}, DateBasis: "Fecha de cancelación de la unidad, con la hora de inicio del día.",
 		Filters: []Filter{filterProduct(), filterMode()},
 		Columns: []Column{dateTimeColumn("cancelled_at", "Cancelación"), codeColumn("folio", "Folio"), textColumn("product", "Producto"),
 			countColumn("quantity", "Cantidad"), moneyColumn("amount", "Importe"), textColumn("reason", "Motivo"),
-			textColumn("cancelled_by", "Canceló"), textColumn("released", "Liberada a cocina")},
+			textColumn("cancelled_by", "Canceló"),
+			// Etapa 9F (§7.2): el supervisor que autorizó, como en «Modificaciones de cantidades».
+			described(textColumn("authorized_by", "Autorizó"), unitsAuthorizedDescription),
+			textColumn("released", "Liberada a cocina")},
 		DefaultSort: Sort{Key: "cancelled_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			list := conditions{inPeriod("u.cancelled_at"), "u.state = 'cancelled'"}
@@ -215,19 +218,22 @@ func init() {
                     1::bigint AS quantity,u.total AS amount,
                     CASE WHEN event.kind='account.cancelled' THEN 'Cuenta cancelada: '||coalesce(event.reason,'')
                         ELSE coalesce(event.reason,'') END AS reason,coalesce(author.display_name,'') AS cancelled_by,
+                    coalesce(approver.display_name,'') AS authorized_by,
                     CASE WHEN EXISTS(SELECT FROM app.kitchen_unit_releases k WHERE k.unit_id=u.id) THEN 'Sí' ELSE 'No' END AS released
                 FROM app.restaurant_item_units u
                 JOIN app.restaurant_item_versions v ON v.id=u.version_id
                 JOIN app.restaurant_items i ON i.id=u.item_id
                 JOIN app.restaurant_accounts a ON a.id=u.account_id
                 LEFT JOIN LATERAL (
-                    SELECT e.kind,e.payload->'after'->>'reason' AS reason,e.author_id FROM app.restaurant_events e
+                    SELECT e.kind,e.payload->'after'->>'reason' AS reason,e.author_id,
+                        e.payload->'after'->>'authorized_by' AS authorized_by FROM app.restaurant_events e
                     WHERE e.account_id=u.account_id AND e.kind IN ('item.cancelled','item.modified','account.cancelled')
                         AND (coalesce(e.payload->'after'->'unit_ids','[]'::jsonb) ? u.id::text
                             OR coalesce(e.payload->'after'->'cancelled_unit_ids','[]'::jsonb) ? u.id::text)
                     ORDER BY e.sequence DESC LIMIT 1
                 ) event ON true
                 LEFT JOIN app.users author ON author.id=event.author_id
+                LEFT JOIN app.users approver ON approver.id=event.authorized_by::uuid
                 WHERE true`+list.sql(), query.Args())
 			if err != nil {
 				return nil, err

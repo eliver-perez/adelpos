@@ -9,6 +9,10 @@ import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { TableMap } from '../../components/restaurant/TableMap';
 import { useRestaurantWorkspace } from '../../hooks/useRestaurantWorkspace';
+import {
+  isAuthorizationProblem,
+  repeatAuthorizationMessage,
+} from '../../hooks/useSupervisorAuthorization';
 import { useNavigation } from '../../navigation/NavigationContext';
 import type { RestaurantView, WorkspacePanel } from '../../hooks/useRestaurantWorkspace';
 import { notifyError, notifySuccess } from '../../services/notify';
@@ -468,11 +472,18 @@ export function OperationalPage({
   );
 
   // «Recuperar resultado» repite la misma operación con su operation_id. Si Go la confirma se
-  // avisa; si la rechaza, el error permanece; si sigue sin respuesta, el panel continúa.
+  // avisa; si la rechaza, el error permanece; si sigue sin respuesta, el panel continúa. Una operación
+  // con autorización de supervisor se repite sin su contraseña (no se conserva): si no llegó a
+  // registrarse, Go la rechaza por la autorización y se pide repetirla (etapa 9F, «Cancelar unidades»).
   async function recoverOperation() {
+    const authorized = typeof mutation.pending?.body.authorization === 'object';
     const problem = await mutation.retry();
     if (!problem) {
       notifySuccess('Resultado recuperado: la operación quedó registrada.');
+      return;
+    }
+    if (authorized && isAuthorizationProblem(problem)) {
+      notifyError(repeatAuthorizationMessage);
       return;
     }
     if (!uncertainError(problem)) {

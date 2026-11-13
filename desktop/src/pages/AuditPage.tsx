@@ -19,6 +19,7 @@ const actorKinds: Record<string, string> = {
 // su catálogo y umbral. Se muestra sobre el código, que sigue siendo el que se filtra.
 const actionLabels: Record<string, string> = {
   'restaurant.account.cancelled': 'Cuenta cancelada',
+  // Registros anteriores a la etapa 9F: la ruta de esta anulación se retiró.
   'restaurant.account.void': 'Cuenta vacía cancelada con motivo libre',
   'restaurant.account.discarded': 'Cuenta vacía descartada',
   'restaurant.account.released': 'Cuenta vacía liberada',

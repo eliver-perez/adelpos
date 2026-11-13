@@ -202,6 +202,9 @@ let replays: Map<string, unknown>;
 let saves: { id: string; body: { revision: number; items: DraftItem[] } }[];
 let confirms: { id: string; body: Record<string, unknown> }[];
 let cancels: { id: string; body: Record<string, unknown> }[];
+// Etapa 9F: previsualizaciones y confirmaciones de «Modificar» de una partida enviada.
+let editPreviews: Record<string, unknown>[];
+let edits: { id: string; body: Record<string, unknown> }[];
 let holdSaves: boolean;
 let heldSaves: (() => void)[];
 let quoteChanged: boolean;
@@ -554,6 +557,20 @@ function respond(
       state!.revision += 1;
       return bill(state!);
     }
+    case 'restaurant_edit_preview': {
+      // Como Go (etapa 9F): reducir la partida pide supervisor a este usuario simulado.
+      editPreviews.push(body!);
+      const line = body!.line as DraftItem;
+      return {
+        ...quote(state!, [{ ...line, id: 'edicion' }], body!.revision as number),
+        cancel_units_requires_authorization: line.quantity < 2,
+      };
+    }
+    case 'restaurant_edit': {
+      edits.push({ id: id!, body: body! });
+      state!.revision += 1;
+      return bill(state!);
+    }
     case 'restaurant_history':
       return { items: [], page: 1, total: 0 };
     case 'catalog_lookups':
@@ -614,6 +631,8 @@ beforeEach(() => {
   replays = new Map();
   confirms = [];
   cancels = [];
+  editPreviews = [];
+  edits = [];
   holdSaves = false;
   heldSaves = [];
   quoteChanged = false;
@@ -1043,6 +1062,72 @@ describe('captura táctil de pedidos', () => {
     );
     const notice = await screen.findByRole('status', { name: 'Operación completada' });
     expect(notice.textContent).toContain('Cancelación registrada: 2 unidades de Filete de prueba');
+  });
+
+  it('reducir desde «Modificar» pide al supervisor cuando Go lo indica (etapa 9F)', async () => {
+    const item: DraftItem = {
+      id: 'draft-enviado',
+      product_id: ids.steak,
+      variant_id: null,
+      quantity: 2,
+      customization: emptyCustomization(),
+    };
+    accounts[ids.first]!.lines = [
+      {
+        preparation_state: 'released',
+        version_id: 'version-0',
+        item_id: 'item-0',
+        original_order_id: 'order',
+        version: 1,
+        state: 'active',
+        quantity: 2,
+        request: item,
+        quote_line: quoteLine(item),
+        totals: { subtotal: lineTotal(item), discount: '0.00', total: lineTotal(item) },
+        created_at: '2026-11-08T19:00:00Z',
+      },
+    ];
+    accounts[ids.first]!.confirmedTotal = '281.10';
+    const bill = await openFirstAccount();
+    const line = await within(bill).findByRole('article', { name: '2 × Filete de prueba' });
+    fireEvent.click(within(line).getByRole('button', { name: 'Acciones de 2 × Filete de prueba' }));
+    fireEvent.click(within(line).getByRole('button', { name: 'Modificar' }));
+    const panel = await screen.findByRole('region', { name: 'Personalizar Filete de prueba' });
+    fireEvent.change(within(panel).getByLabelText('Motivo de modificación'), {
+      target: { value: 'Solo quería uno' },
+    });
+    const confirmButton = () =>
+      within(panel).getByRole('button', { name: /^Confirmar modificación/ }) as HTMLButtonElement;
+    // Sin reducir, Go no pide supervisor.
+    await waitFor(() => expect(confirmButton().disabled).toBe(false));
+    expect(within(panel).queryByRole('group', { name: 'Autorización de supervisor' })).toBeNull();
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'Quitar una unidad de Filete de prueba' }),
+    );
+    const group = await within(panel).findByRole('group', { name: 'Autorización de supervisor' });
+    expect(group.textContent).toContain('«Cancelar partidas o cantidades confirmadas»');
+    await waitFor(() => expect(editPreviews.length).toBeGreaterThanOrEqual(2));
+    expect(confirmButton().disabled).toBe(true);
+    fireEvent.change(within(group).getByLabelText('Usuario del supervisor'), {
+      target: { value: 'admin' },
+    });
+    fireEvent.change(within(group).getByLabelText('Contraseña del supervisor'), {
+      target: { value: 'clave-del-supervisor' },
+    });
+    await waitFor(() => expect(confirmButton().disabled).toBe(false));
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(edits).toHaveLength(1));
+    expect(edits[0]!.body).toEqual(
+      expect.objectContaining({
+        revision: 4,
+        version_id: 'version-0',
+        reason: 'Solo quería uno',
+        line: expect.objectContaining({ quantity: 1 }),
+        authorization: { username: 'admin', password: 'clave-del-supervisor' },
+      }),
+    );
+    // La previsualización nunca lleva la autorización ni la contraseña.
+    expect(editPreviews.every((entry) => !('authorization' in entry))).toBe(true);
   });
 
   it('las acciones secundarias son botones y «Más…» reúne las demás', async () => {

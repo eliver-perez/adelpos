@@ -363,3 +363,111 @@ propietario). La Mac no tiene datos de prueba (Fase 0): no se ejecutó en la ins
 sin la ruta de «Platillos» y con las estaciones y los destinos de aceptación desactivados. Una especificación que se
 ordene después (por ejemplo `workflow-stage9f-topbar-*`) no debe depender de ellos; si alguna lo hace, conviene que esta
 corra al final.
+
+## Fase E · Pendientes técnicos (ruta antigua de anulación y autorización para cancelar unidades)
+
+Un agente sobre `f56fcd9`, en su propio worktree (Go, React, documentación y pruebas; **sin migración**). Pruebas en una
+copia aislada con el clúster temporal 55499, Go temporal en 8187 y vista previa en 1425.
+
+### Ruta antigua de anulación retirada (§7.1, decisión D8)
+
+- `operations/handler.go`: `POST restaurant/accounts/{id}/void` responde **`410 ROUTE_RETIRED`** («Esta forma de
+  cancelar cuentas ya no existe. Usa «Cancelar cuenta», con su motivo y, si hace falta, la autorización de un
+  supervisor, o «Descartar cuenta vacía»…») **antes** de comprobar permisos, tomar el lock o leer la cuenta: no escribe
+  nada (ni operación idempotente, evento, auditoría, tiempo real ni la denegación) y la transacción se revierte. Se
+  quitaron `void` de `routePermission`, del despacho (`accounts_read.go`) y de `accountAction` (`accounts_write.go`;
+  mover y asignar siguen aceptando `reason` como antes). No estaba en el puente ni en la interfaz (`api.rs` solo cambia
+  sus comentarios; la prueba de Rust que exige que `restaurant_void` no tenga ruta sigue igual).
+- Las cuatro pruebas que la usaban: `operations/acceptance_test.go` descarta la cuenta dividida vacía (`discard`,
+  comprobando `discardable`); `operations/payments_acceptance_test.go` intenta `cancel-account` y espera
+  `409 ACCOUNT_HAS_PAYMENTS`; `reports/cancellations_integration_test.go` y
+  `reports/stage9d_cancellations_integration_test.go` crean la anulación heredada directamente en su base con
+  `legacyVoid` (`reports/fixture_integration_test.go`: cuenta en `voided`, operación idempotente, evento `account.void`
+  con el motivo y acuse de cocina, en una transacción; documentado como dato anterior a la 9F).
+- **Pendiente para una migración** (no se escribió): la descripción de `accounts.manage` en `app.permissions` («Editar
+  datos de cuentas y cancelar cuentas vacías con motivo libre», de la 0021) sigue mencionando la anulación retirada;
+  `ensureFoundations` no reescribe descripciones, así que solo la cambia una migración. Si la 0022 existe, propuesta:
+  `UPDATE app.permissions SET description='Editar datos de cuentas' WHERE key='accounts.manage'`, el mismo texto en
+  `operations/context.go` y en `administration/long_open_hours_acceptance_test.go` (que hoy fija el texto actual).
+
+### Autorización para cancelar unidades (§7.2)
+
+- **Go** (`operations/supervisor_approval.go`, nuevo): `approveWithSupervisor(regla, autorización)` generaliza el
+  `approveCancellation` de «Cancelar cuenta» (permiso propio o autorizador de `administration/supervisor.go`, sin
+  autoautorización, `AUTHORIZATION_REQUIRED/INSUFFICIENT`, `SELF_AUTHORIZATION`); `authorizationFields` y
+  `auditSupervisor` comunes.
+  - `cancellations.go` («Cancelar unidades»): acepta `authorization`; con `orders.cancel` basta el permiso propio; sin
+    él, supervisor con `orders.cancel`, después de validar motivo, revisión, cantidad y unidades libres y **antes de la
+    primera escritura**. El permiso de la ruta baja: `accounts.read` y (`orders.cancel` **o** `accounts.open`) —decisión
+    menor: así nadie que tenía `orders.cancel` sin `accounts.open` pierde el permiso propio—.
+  - `amendments.go` («Modificar» que reduce): ya no exige `orders.cancel`; `edit` pide la autorización solo si la
+    modificación deja menos unidades (después de la huella, antes de escribir).
+  - Se registran quién lo hizo (autor del evento) y quién autorizó: `after.authorized_by`, `authorized_by_username` y
+    `authorized_by_name` en `item.cancelled`/`item.modified` (null si bastó el permiso; sin columna nueva), la auditoría
+    del evento con lo mismo y `restaurant.supervisor_authorized` con `scope` `item_cancel` o `item_modify`. La
+    contraseña queda fuera de la huella (la de siempre) y de todo registro.
+  - Go informa `cancel_units_requires_authorization` en cada cuenta abierta y en la respuesta de `edit-preview` (en las
+    demás cotizaciones, `false`).
+- **Interfaz**: `pages/restaurant/CancelItem.tsx` y la personalización de «Modificar» (`capture/CustomizationPanel.tsx`)
+  muestran `components/SupervisorAuthorization.tsx` cuando Go lo indica o lo pide con un error
+  (`useSupervisorAuthorization`, contraseña fuera del formulario al enviar); la confirmación roja dice «Autoriza:
+  <usuario>». «Cancelar unidades» aparece con `orders.cancel` o `accounts.open` (`capture/BillLines.tsx`). «Recuperar
+  resultado» (`OperationalPage.tsx`) pide repetir la autorización si el reintento sin contraseña vuelve con un error de
+  autorización. El historial (`components/restaurant/HistoryDetails.tsx`) muestra «Autorizó: <nombre>» o «con su propio
+  permiso» en las cancelaciones y reducciones nuevas. Tipos en `services/restaurant.ts` (`CancelUnitsInput`).
+- **Reportes**: «Modificaciones de cantidades» (`reports/cancellations.go`) tiene la columna **«Autorizó»** después de
+  «Modificó» (nombre visible actual del supervisor; en las partidas de una cuenta cancelada, quien autorizó cancelarla;
+  vacía si bastó el permiso y en los registros anteriores), también en PDF y Excel; la nota que decía que no había
+  «Autorizó» se reemplazó. Revisados los demás: «Cuentas canceladas» ya la tenía (sin cambio); **«Productos
+  cancelados»** (`reports/products.go`) también la recibe, después de «Canceló», y «Actividad por empleado»
+  (`reports/employees.go`) cuenta esas autorizaciones en «Autorizaciones como supervisor». Sin filtros nuevos; 95
+  reportes.
+
+### Pruebas
+
+Copia aislada (`rsync` del worktree), clúster 55499, Go 8187 y vista previa 1425; pantalla desbloqueada.
+
+- `gofmt`, `go vet ./...` y `go vet -tags=integration ./...`: sin hallazgos. `GOOS=windows GOARCH=amd64 go build ./...`
+  y `go vet ./...`: aprobados.
+- `go test -race` (unitarias): `operations`, `reports` y `administration` `ok`.
+- Integración PostgreSQL con `-race`: `operations` **ok (291.4 s)**, con la nueva `stage9f_cancel_units_test.go`
+  (`TestStage9FCancelUnitsAndRetiredVoid`, 5 de 5 subpruebas: ruta retirada con 410 y conteos de operaciones, auditoría,
+  eventos y tiempo real sin cambio, con y sin permisos y con una cuenta inexistente; con el permiso propio; sin permiso
+  —usuario sin `accounts.open` 403, cantidad imposible 400 sin contar intento, sin autorización, autoautorización,
+  contraseña incorrecta con el intento contado y supervisor sin el permiso, sin cambiar la cuenta—, con supervisor,
+  evento y auditoría, reintento con la misma operación sin contraseña y `IDEMPOTENCY_CONFLICT` con otros datos, la
+  contraseña en ningún registro; reducción desde «Modificar» con la previsualización que lo informa, rechazos,
+  supervisor y modificación sin reducir sin autorización; «Autorizó» en ambos reportes y 2 autorizaciones en la
+  actividad) y las aceptaciones ajustadas; `reports` **ok (130.2 s)**, con las pruebas de la 9C («Autorizó» vacía con el
+  permiso propio) y de la 9D («Autorizó» con el supervisor de la cuenta cancelada en ambos reportes). **Control
+  negativo** (en la copia): sin el 410 y con la regla de autorización cambiada, la prueba nueva falla en 3 de 5
+  subpruebas.
+- `npx tsc --noEmit`: sin errores. `npm test`: **78 archivos, 770 pruebas aprobadas**, con el nuevo
+  `pages/restaurant/cancelItem.test.tsx` (3: permiso propio sin autorización; supervisor pedido por Go con el envío
+  bloqueado hasta usuario y contraseña, «Autoriza: admin» y contraseña borrada; un `AUTHORIZATION_REQUIRED` y un
+  `AUTHORIZATION_INVALID` de Go mostrados en el formulario y el tercer envío con la autorización) y una prueba nueva en
+  `capture/capture.test.tsx` (reducir desde «Modificar» muestra el formulario cuando la previsualización lo pide y la
+  autorización va solo en la confirmación).
+- `cargo fmt --check` y `cargo test --locked --offline`: **41 aprobadas, 1 ignorada**.
+- Playwright nuevo `e2e/workflow-stage9f-cancel-units.spec.ts` (cajero sin `orders.cancel` cancela una unidad desde el
+  menú del producto con la autorización del administrador; la ruta `void` responde 410 sin tocar la cuenta; el historial
+  dice quién canceló y quién autorizó; «Modificaciones de cantidades» y «Productos cancelados» con «Autorizó» en
+  pantalla y la primera exportada a PDF y Excel; capturas a 1280 × 720 y 1920 × 1080 en ambos temas sin desbordes):
+  **Chromium 1/1 y WebKit 1/1** (cada uno solo, sobre una base nueva).
+- Especificaciones existentes que dependen de lo cambiado, juntas sobre una base por motor (`restaurant.spec`, con
+  «Modificar» y «Cancelar unidades» del administrador; `workflow-stage9d-accounts`, menú por producto;
+  `workflow-stage9d-cancel-account`, «Cancelar cuenta» con supervisor y reportes) y la nueva: **Chromium 4/4 y WebKit
+  4/4**, sin errores de página. Tras un último ajuste menor en `CustomizationPanel.tsx` (descartar lo escrito en el
+  formulario de autorización oculto) se repitieron `restaurant.spec` y la nueva: **Chromium 2/2 y WebKit 2/2**.
+- `npm run build`: correcto (aviso de tamaño de fragmentos ya conocido). Prettier: sin diferencias en los archivos
+  tocados.
+- Sin verificar: Windows/WebView2, la ventana nativa y una pantalla táctil física. La corrida completa de Playwright
+  queda para el coordinador.
+
+### Documentación
+
+`API_CONTRACTS.md` (tabla de rutas, `void` retirada, nota del puente y sección nueva «Etapa 9F · ruta antigua de
+anulación retirada y autorización para cancelar unidades»), `docs/RESTAURANT_OPERATIONS.md` (recorrido y sección nueva),
+`docs/REPORTS.md` (párrafo 9F, «Autorizó», empleados, pruebas y limitaciones), `CLAUDE.md` (§11–12: campo calculado por
+Go; §15: nota de la 9C, la ruta `void` retirada y un apartado «Etapa 9F, fase E») y `AGENTS.md` (las dos reglas que
+decían que no había «Autorizó» y que `void` seguía en Go).

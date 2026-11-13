@@ -48,8 +48,10 @@ var Permissions = []Permission{
 	{"restaurant.settings.manage", "Configurar umbrales del tablero para llevar"},
 	{"accounts.read", "Consultar cuentas e importes"},
 	{"accounts.open", "Abrir cuentas"},
-	// Etapa 9D: «Cancelar cuenta» tiene permiso propio (sin él, autorización de supervisor) y la ruta
-	// anterior de anulación de cuentas vacías queda con accounts.manage por compatibilidad.
+	// Etapa 9D: «Cancelar cuenta» tiene permiso propio (sin él, autorización de supervisor). La ruta
+	// anterior de anulación de cuentas vacías con accounts.manage se retiró en la etapa 9F (410
+	// ROUTE_RETIRED); la descripción guardada en app.permissions la fijó la migración 0021 y solo una
+	// migración la cambia (ensureFoundations no reescribe descripciones), así que aquí se conserva igual.
 	{"accounts.manage", "Editar datos de cuentas y cancelar cuentas vacías con motivo libre"},
 	{"accounts.cancel", "Cancelar cuentas"},
 	{"accounts.split", "Dividir cuentas"},
@@ -60,6 +62,8 @@ var Permissions = []Permission{
 	{"orders.capture", "Capturar y editar borradores de pedidos"},
 	{"orders.confirm", "Confirmar pedidos"},
 	{"orders.edit", "Modificar partidas confirmadas sin aprobación adicional"},
+	// Etapa 9F: sin orders.cancel, cancelar o reducir unidades enviadas procede con la autorización de
+	// un supervisor que lo tenga.
 	{"orders.cancel", "Cancelar partidas o cantidades confirmadas"},
 	{"orders.price_list.manage", "Seleccionar listas de precios para nuevas capturas"},
 	{"orders.history.read", "Consultar historial de pedidos y cuentas"},

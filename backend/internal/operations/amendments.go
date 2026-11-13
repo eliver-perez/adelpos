@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"local/ad-el-pos/server/internal/catalog"
+	"local/ad-el-pos/server/internal/payments"
 )
 
 type versionRecord struct {
@@ -25,6 +26,10 @@ type editCalculation struct {
 	Previous *versionRecord
 	Units    []Unit
 	Preserve bool
+	// Reduces indica que la modificación deja menos unidades de las que tenía la partida: retira
+	// unidades ya enviadas y, desde la etapa 9F, sigue la regla de «Cancelar unidades» (orders.cancel
+	// o la autorización de un supervisor).
+	Reduces bool
 }
 
 func (handler *service) heldUnits(accountID, versionID string) ([]Unit, error) {
@@ -198,11 +203,9 @@ func (handler *service) calculateEdit(account *Account, input EditInput) (*editC
 	if err := handler.requireUnitsFree(units); err != nil {
 		return nil, err
 	}
-	if input.Line.Quantity < len(units) {
-		if err := handler.request.Actor.Require("orders.cancel"); err != nil {
-			return nil, err
-		}
-	}
+	// Etapa 9F (§7.2): reducir la cantidad ya no exige orders.cancel aquí. La previsualización calcula
+	// e informa si hará falta un supervisor; «edit» la pide antes de escribir (approveWithSupervisor).
+	reduces := input.Line.Quantity < len(units)
 	previous, err := readOne[versionRecord](handler.ctx, handler.tx, "SELECT to_jsonb(v) FROM app.restaurant_item_versions v WHERE id=$1", input.VersionID)
 	if err != nil {
 		return nil, err
@@ -210,7 +213,7 @@ func (handler *service) calculateEdit(account *Account, input EditInput) (*editC
 	if previous.Request.ProductID != input.Line.ProductID {
 		return nil, invalid("Una modificación conserva la identidad del producto; captura otro producto como partida nueva.")
 	}
-	calculation := &editCalculation{Previous: previous, Units: units}
+	calculation := &editCalculation{Previous: previous, Units: units, Reduces: reduces}
 	calculation.Preserve = sameRecipe(previous.Request, input.Line) && input.Line.Quantity <= len(units)
 	var quote *catalog.Quote
 	policy := "El aumento de cantidad o cambio de personalización recalcula esta partida con reglas vigentes. Las demás partidas conservan sus precios."
@@ -254,6 +257,7 @@ func (handler *service) calculateEdit(account *Account, input EditInput) (*editC
 	calculation.Result = &QuoteResult{
 		AccountID: account.ID, Revision: account.Revision, Quote: quote, Fingerprint: fingerprint,
 		Combined: addTotals(remaining, quoteTotals(quote)), PricingPolicy: policy,
+		CancelUnitsRequiresAuthorization: reduces && !handler.request.Actor.Can(unitsCancelPermission),
 	}
 	return calculation, nil
 }
@@ -293,6 +297,20 @@ func (handler *service) edit(id string) (any, error) {
 	if calculation.Result.Fingerprint != input.ExpectedFingerprint {
 		return nil, quoteChanged()
 	}
+	// Reducir unidades ya enviadas: el permiso propio o un supervisor, antes de la primera escritura
+	// (etapa 9F). Sin reducción no se pide ni se registra autorización.
+	var supervisor *payments.Supervisor
+	if calculation.Reduces {
+		supervisor, err = handler.approveWithSupervisor(unitsCancelRule, input.Authorization)
+		if err != nil {
+			return nil, err
+		}
+	}
+	authorization, err := handler.authorizationFields(supervisor)
+	if err != nil {
+		return nil, err
+	}
+	// Desde aquí se escribe.
 	if err := handler.touch(id, input.Revision); err != nil {
 		return nil, err
 	}
@@ -302,6 +320,17 @@ func (handler *service) edit(id string) (any, error) {
 	}
 	if err := handler.requireAccountCovered(id); err != nil {
 		return nil, err
+	}
+	if calculation.Reduces {
+		for key, value := range authorization {
+			change[key] = value
+		}
+		reducedUnits := calculation.Units[input.Line.Quantity:]
+		if err := handler.auditSupervisor(id, supervisor, "item_modify", map[string]any{
+			"version_id": input.VersionID, "quantity": len(reducedUnits), "amount": unitTotals(reducedUnits).Total,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if err := handler.event(id, nil, "item.modified", map[string]any{
 		"version_id": input.VersionID,

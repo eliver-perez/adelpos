@@ -183,34 +183,34 @@ Reglas, ejemplos y límites operativos: [CATALOG.md](docs/CATALOG.md).
 
 Todas las rutas bajo `/api/v1/restaurant` requieren sesión y terminal vigentes. Toda ruta de cuenta exige `accounts.read`; los permisos de la tabla se agregan a este requisito. Para cuentas `takeaway`, consultar requiere `takeaway.read` y escribir requiere `takeaway.manage`. El listado filtra las modalidades que el usuario puede consultar. `overview` exige también `restaurant.areas.read`.
 
-| Método      | Ruta bajo `/restaurant`        | Permiso específico                                            |
-| ----------- | ------------------------------ | ------------------------------------------------------------- |
-| GET         | `/overview`                    | `restaurant.tables.read` y `restaurant.areas.read`            |
-| GET / POST  | `/areas`                       | `restaurant.areas.read` / `restaurant.areas.manage`           |
-| PATCH       | `/areas/{id}`                  | `restaurant.areas.manage`                                     |
-| GET / POST  | `/tables`                      | `restaurant.tables.read` / `restaurant.tables.manage`         |
-| PATCH       | `/tables/{id}`                 | `restaurant.tables.manage`                                    |
-| POST        | `/tables/{id}/service`         | `restaurant.tables.manage` (etapa 7.1)                        |
-| PUT         | `/layout`                      | `restaurant.tables.manage`                                    |
-| GET / PUT   | `/settings`                    | `accounts.read` / `restaurant.settings.manage`                |
-| GET         | `/staff`                       | `accounts.transfer`                                           |
-| GET / POST  | `/accounts`                    | `accounts.read` / `accounts.open`                             |
-| GET / PATCH | `/accounts/{id}`               | `accounts.read` / `accounts.manage`                           |
-| PUT         | `/accounts/{id}/draft`         | `orders.capture`                                              |
-| POST        | `/accounts/{id}/draft-preview` | `orders.capture`; solo calcula                                |
-| GET         | `/accounts/{id}/preview`       | `accounts.read`; calcula borrador guardado                    |
-| POST        | `/accounts/{id}/confirm`       | `orders.confirm`                                              |
-| POST        | `/accounts/{id}/edit-preview`  | `orders.edit`; solo calcula                                   |
-| POST        | `/accounts/{id}/edit`          | `orders.edit`; reducir unidades exige también `orders.cancel` |
-| POST        | `/accounts/{id}/cancel`        | `orders.cancel`                                               |
-| POST        | `/accounts/{id}/split`         | `accounts.split` y `accounts.open`                            |
-| POST        | `/accounts/{id}/transfer`      | `accounts.transfer_items`                                     |
-| POST        | `/accounts/{id}/merge`         | `accounts.merge`                                              |
-| POST        | `/accounts/{id}/move`          | `accounts.move`                                               |
-| POST        | `/accounts/{id}/assign`        | `accounts.transfer`                                           |
-| POST        | `/accounts/{id}/void`          | `accounts.manage`                                             |
-| POST        | `/accounts/{id}/release`       | `accounts.open` (etapa 7.1)                                   |
-| GET         | `/accounts/{id}/history`       | `orders.history.read`                                         |
+| Método      | Ruta bajo `/restaurant`        | Permiso específico                                                                  |
+| ----------- | ------------------------------ | ----------------------------------------------------------------------------------- |
+| GET         | `/overview`                    | `restaurant.tables.read` y `restaurant.areas.read`                                  |
+| GET / POST  | `/areas`                       | `restaurant.areas.read` / `restaurant.areas.manage`                                 |
+| PATCH       | `/areas/{id}`                  | `restaurant.areas.manage`                                                           |
+| GET / POST  | `/tables`                      | `restaurant.tables.read` / `restaurant.tables.manage`                               |
+| PATCH       | `/tables/{id}`                 | `restaurant.tables.manage`                                                          |
+| POST        | `/tables/{id}/service`         | `restaurant.tables.manage` (etapa 7.1)                                              |
+| PUT         | `/layout`                      | `restaurant.tables.manage`                                                          |
+| GET / PUT   | `/settings`                    | `accounts.read` / `restaurant.settings.manage`                                      |
+| GET         | `/staff`                       | `accounts.transfer`                                                                 |
+| GET / POST  | `/accounts`                    | `accounts.read` / `accounts.open`                                                   |
+| GET / PATCH | `/accounts/{id}`               | `accounts.read` / `accounts.manage`                                                 |
+| PUT         | `/accounts/{id}/draft`         | `orders.capture`                                                                    |
+| POST        | `/accounts/{id}/draft-preview` | `orders.capture`; solo calcula                                                      |
+| GET         | `/accounts/{id}/preview`       | `accounts.read`; calcula borrador guardado                                          |
+| POST        | `/accounts/{id}/confirm`       | `orders.confirm`                                                                    |
+| POST        | `/accounts/{id}/edit-preview`  | `orders.edit`; solo calcula                                                         |
+| POST        | `/accounts/{id}/edit`          | `orders.edit`; reducir unidades exige `orders.cancel` o, desde la 9F, un supervisor |
+| POST        | `/accounts/{id}/cancel`        | `orders.cancel` o, desde la 9F, `accounts.open` con un supervisor                   |
+| POST        | `/accounts/{id}/split`         | `accounts.split` y `accounts.open`                                                  |
+| POST        | `/accounts/{id}/transfer`      | `accounts.transfer_items`                                                           |
+| POST        | `/accounts/{id}/merge`         | `accounts.merge`                                                                    |
+| POST        | `/accounts/{id}/move`          | `accounts.move`                                                                     |
+| POST        | `/accounts/{id}/assign`        | `accounts.transfer`                                                                 |
+| POST        | `/accounts/{id}/void`          | retirada en la etapa 9F: `410 ROUTE_RETIRED`                                        |
+| POST        | `/accounts/{id}/release`       | `accounts.open` (etapa 7.1)                                                         |
+| GET         | `/accounts/{id}/history`       | `orders.history.read`                                                               |
 
 Rutas de la etapa 9D (esquema 21; contratos en «Etapa 9D»):
 
@@ -221,9 +221,10 @@ Rutas de la etapa 9D (esquema 21; contratos en «Etapa 9D»):
 | POST       | `/accounts/{id}/discard`        | `accounts.open`                                                             |
 | POST       | `/accounts/{id}/cancel-account` | `accounts.open`; `accounts.cancel` o supervisor, decidido dentro de la ruta |
 
-Desde la 9D, `POST /accounts/{id}/void` queda solo por compatibilidad: el puente ya no tiene su operación.
+Desde la 9D el puente ya no tiene la operación de `POST /accounts/{id}/void`, y desde la 9F Go la retiró: responde
+`410 ROUTE_RETIRED` sin escribir nada (ver «Etapa 9F · ruta antigua de anulación retirada»).
 
-Guardar/cotizar borrador, confirmar y editar exige además `catalog.read` y `catalog.prices.read`. Seleccionar otra lista requiere `orders.price_list.manage`. El PATCH de cuenta verifica también `accounts.move` o `accounts.transfer` si cambian esos campos. Un mesero autorizado no necesita otra credencial de supervisor para editar/cancelar.
+Guardar/cotizar borrador, confirmar y editar exige además `catalog.read` y `catalog.prices.read`. Seleccionar otra lista requiere `orders.price_list.manage`. El PATCH de cuenta verifica también `accounts.move` o `accounts.transfer` si cambian esos campos. Un mesero con `orders.edit` y `orders.cancel` no necesita otra credencial de supervisor para editar/cancelar; sin `orders.cancel`, desde la etapa 9F cancelar o reducir unidades pide la autorización puntual de un supervisor.
 
 Las escrituras llevan `operation_id` UUID. Actualizar exige `revision`; transferir/combinar exige también `target_revision`. GET y POST de previsualización no llevan UUID ni persisten cambios. Repetir exactamente una escritura del mismo actor/terminal devuelve el resultado original. `REVISION_CONFLICT`, `QUOTE_CHANGED` e `IDEMPOTENCY_CONFLICT` responden 409 y conservan el estado previo. No hay DELETE. Cuerpos hasta 2 MiB y respuestas nativas hasta 2 MiB.
 
@@ -270,7 +271,7 @@ Editar envía `{operation_id,revision,version_id,line,reason,expected_fingerprin
 
 Dividir recibe `{operation_id,revision,selections:[{version_id,quantity}],new_account:{name}}`. Transferir recibe esas selecciones y `target_account_id`, `target_revision`. Combinar recibe revisiones y cuenta destino sin selecciones. Las tres responden `{source,target}` con cuentas completas. Las cantidades son unidades comerciales enteras; no se recalculan ni se clonan sus importes. La cuenta nueva de división hereda contexto comercial y responsable.
 
-Mover recibe `{operation_id,revision,table_id}` con null para retirar mesa. Asignar recibe `{operation_id,revision,assigned_user_id}`. Anular cuenta vacía recibe `{operation_id,revision,reason}` (desde la etapa 9D solo por compatibilidad: la aplicación usa «Descartar» y «Cancelar cuenta» y el puente ya no tiene la operación `restaurant_void`). Las respuestas son cuentas completas y todas las acciones se auditan transaccionalmente.
+Mover recibe `{operation_id,revision,table_id}` con null para retirar mesa. Asignar recibe `{operation_id,revision,assigned_user_id}`. Anular cuenta vacía recibía `{operation_id,revision,reason}`: desde la etapa 9D la aplicación usa «Descartar» y «Cancelar cuenta» (el puente ya no tiene `restaurant_void`) y desde la 9F la ruta responde `410 ROUTE_RETIRED`. Las respuestas son cuentas completas y todas las acciones se auditan transaccionalmente.
 
 No existen rutas de cobro o entrega. `payment_state:not_recorded` y `delivery_state:not_delivered` siguen independientes de preparación. La etapa 5 integra liberaciones, documentos, impresión y eventos conforme a los contratos siguientes.
 
@@ -2600,7 +2601,8 @@ llevan un campo nuevo:
 Registro cerrado de 92 a **94 reportes**, ambos en `EXPORTABLE_REPORTS` de `export.rs`; sin filtros nuevos (la lista
 blanca `reports_*` de `api.rs` no cambió). Permisos: `reports.read` + `reports.sales.read` (como «Productos cancelados»).
 Ninguno tiene columna «Autorizó»: AD-EL POS no pide la autorización de otra persona para anular una cuenta ni para
-reducir o cancelar cantidades.
+reducir o cancelar cantidades (desde la 9D «Cuentas canceladas» la tiene, y desde la 9F también «Modificaciones de
+cantidades» y «Productos cancelados»).
 
 | Reporte                                                                      | Fecha                                                                   | Filtros                                                                                                                          | Columnas                                                                                                                                                                                                                                                                                                                                              |
 | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2870,8 +2872,8 @@ Siete operaciones nuevas en la lista cerrada, con la prueba `stage9d_account_can
 `restaurant_cancel_account` (POST, con identificador), `restaurant_discard_account` (POST, con identificador),
 `restaurant_cancel_reasons` (GET), `restaurant_create_cancel_reason` (POST), `restaurant_save_cancel_reason` (PATCH, con
 identificador), `settings_long_open_hours` (GET) y `save_settings_long_open_hours` (PUT). **`restaurant_void` se retiró**
-de la lista (la prueba exige que no tenga ruta) y del tipo de operaciones de `services/api.ts`; Go conserva
-`POST restaurant/accounts/{id}/void` por compatibilidad. `export.rs` agrega `sales.cancellations_by_reason` a
+de la lista (la prueba exige que no tenga ruta) y del tipo de operaciones de `services/api.ts`; Go conservó
+`POST restaurant/accounts/{id}/void` por compatibilidad hasta la etapa 9F, que la retiró (`410 ROUTE_RETIRED`). `export.rs` agrega `sales.cancellations_by_reason` a
 `EXPORTABLE_REPORTS`. Sin operaciones nativas nuevas.
 
 ## Etapa 9E · Windows (sin rutas nuevas; esquema 21)
@@ -2983,3 +2985,64 @@ signatures.go`, cada una con su archivo): impresoras «Destino controlado E2E» 
 - Respuesta: `{removed, deactivated, unlinked, kept: Entry[], backup}` (`backup` = solo el nombre del archivo, vacío si
   no había nada que quitar). Tiempo de respuesta de `maintenance/*`: 120 s (el puente espera 130 s).
 - Puente nativo (lista cerrada de `api.rs`): `maintenance_test_data` (GET) y `maintenance_remove_test_data` (POST).
+
+## Etapa 9F · ruta antigua de anulación retirada y autorización para cancelar unidades (fase E, sin migración)
+
+Sin migración, permisos ni operaciones nuevas del puente (`restaurant_cancel` y `restaurant_edit` ya existían). Detalle
+operativo en [RESTAURANT_OPERATIONS.md](docs/RESTAURANT_OPERATIONS.md) y de los reportes en [REPORTS.md](docs/REPORTS.md).
+
+### Ruta antigua de anulación retirada (`POST restaurant/accounts/{id}/void`)
+
+Decisión D8 del coordinador (§7.1): la ruta se **retira**, no se redirige («Cancelar cuenta» rechaza como descartables
+justo las cuentas que esta ruta aceptaba). Cualquier `POST restaurant/accounts/{id}/void` responde **`410
+ROUTE_RETIRED`** («Esta forma de cancelar cuentas ya no existe. Usa «Cancelar cuenta», con su motivo y, si hace falta,
+la autorización de un supervisor, o «Descartar cuenta vacía» si la cuenta no tiene productos enviados.») **antes** de
+comprobar permisos, tomar el lock o leer la cuenta: no escribe nada (ni operación idempotente, ni evento, ni auditoría,
+ni la denegación) y la transacción se revierte. Ningún cliente, tampoco la futura aplicación Android, puede cancelar sin
+motivo ni autorización. Los eventos `account.void` y la auditoría `restaurant.account.void` anteriores se conservan y
+«Cuentas canceladas» los sigue mostrando como «Cancelación anterior con motivo libre». La descripción de
+`accounts.manage` en la base («… y cancelar cuentas vacías con motivo libre», de la 0021) solo la cambia una migración.
+
+### Autorización para cancelar unidades (`cancel` y la reducción con `edit`)
+
+Mismo criterio de «Cancelar cuenta» (9D): con `orders.cancel` basta el permiso propio; sin él, la autorización puntual
+de un supervisor que lo tenga, con el autorizador de `administration/supervisor.go` (sin sesión, con el límite de intentos
+del inicio de sesión, sin autoautorización) y siempre **antes de la primera escritura**.
+
+| Ruta (`/restaurant`)               | Permiso de la ruta                                                                    | Cuerpo                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| POST `/accounts/{id}/cancel`       | `accounts.read` y (`orders.cancel` o `accounts.open`); para llevar, `takeaway.manage` | `{operation_id, revision, version_id, quantity, reason, authorization?: {username, password}}`            |
+| POST `/accounts/{id}/edit`         | `orders.edit` (sin cambio)                                                            | `{operation_id, revision, version_id, line, reason, expected_fingerprint, authorization?}`                |
+| POST `/accounts/{id}/edit-preview` | `orders.edit` (sin cambio); solo calcula                                              | el de siempre (acepta `authorization`, que ignora); responde además `cancel_units_requires_authorization` |
+
+- **Orden de comprobación** de `cancel`: permiso de la ruta, motivo (5–500), revisión, partida y cantidad, unidades sin
+  pago ni descuento (`UNIT_HAS_PAYMENT`/`UNIT_HAS_DISCOUNT`), **autorización**; solo entonces se escribe. En `edit`: lo de
+  siempre, la huella (`QUOTE_CHANGED`) y, si la modificación deja menos unidades de las que tenía la partida, la
+  autorización. Una modificación que no reduce no pide ni registra autorización.
+- **Rechazos** (los mismos códigos de «Cancelar cuenta»): sin permiso ni autorización `403 AUTHORIZATION_REQUIRED`
+  («Cancelar o reducir unidades enviadas a cocina requiere la autorización de un supervisor con permiso para cancelar
+  partidas.»); el mismo usuario `403 SELF_AUTHORIZATION`; usuario o contraseña incorrectos `401 AUTHORIZATION_INVALID`
+  (cuenta en el límite de intentos) o `429 AUTHORIZATION_THROTTLED`; un supervisor sin `orders.cancel` `403
+AUTHORIZATION_INSUFFICIENT` («El supervisor indicado no tiene permiso para cancelar partidas o cantidades.»); sin
+  `orders.cancel` ni `accounts.open`, `403 PERMISSION_DENIED`. Con el permiso propio, una autorización enviada se ignora.
+- **Qué se registra**: el evento `item.cancelled` (o `item.modified` de una reducción) agrega a `after`
+  `authorized_by` (UUID del supervisor), `authorized_by_username` y `authorized_by_name` (nombre visible), los tres en
+  `null` si bastó el permiso propio; la auditoría `restaurant.item.cancelled`/`restaurant.item.modified` lleva lo mismo y la
+  autorización se audita aparte como `restaurant.supervisor_authorized` con `scope` `item_cancel` o `item_modify`,
+  `supervisor`, `version_id`, `quantity` y `amount`. Quien hizo la operación es el autor del evento. La contraseña nunca
+  entra en la huella idempotente, la respuesta guardada, los eventos ni la auditoría: un reintento con el mismo
+  `operation_id` sin la contraseña recupera el resultado ya confirmado; con otros datos, `409 IDEMPOTENCY_CONFLICT`.
+- **Campos nuevos de lectura** (los calcula Go; React no los deduce):
+
+| Campo                                 | Dónde                        | Significado                                                                                                       |
+| ------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `cancel_units_requires_authorization` | cada cuenta (`account`)      | La cuenta está abierta y quien lee no tiene `orders.cancel`: «Cancelar unidades» pedirá supervisor.               |
+| `cancel_units_requires_authorization` | respuesta de cada cotización | Solo en `edit-preview`: la modificación reduce unidades y quien la pide no tiene `orders.cancel`; si no, `false`. |
+
+### Reportes (`reports/run`, `reports/export`)
+
+`products.quantity_changes` «Modificaciones de cantidades» agrega la columna **`authorized_by` «Autorizó»** (después de
+«Modificó») y `products.cancelled` «Productos cancelados» también (después de «Canceló»): el nombre visible actual del
+supervisor de `after.authorized_by`; en las partidas de una cuenta cancelada, quien autorizó cancelarla; vacía si bastó el
+permiso propio y en los registros anteriores a la 9F. Sale igual en PDF y Excel. `employees.activity` cuenta en
+«Autorizaciones como supervisor» también las cancelaciones y reducciones de unidades. Sin filtros nuevos.

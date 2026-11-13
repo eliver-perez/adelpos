@@ -138,6 +138,9 @@ export interface Account {
   cancel_requires_authorization: boolean;
   // Lleva abierta más horas que el umbral del establecimiento (§3.4).
   long_open: boolean;
+  // Etapa 9F (§7.2): el usuario no tiene «Cancelar partidas o cantidades confirmadas», así que
+  // «Cancelar unidades» pedirá la autorización de un supervisor. Lo decide Go en cada cuenta abierta.
+  cancel_units_requires_authorization: boolean;
 }
 
 export type CancelBlocker = '' | 'payments' | 'adjustments';
@@ -237,6 +240,16 @@ export interface CancelAccountInput {
   authorization?: AuthorizationInput;
 }
 
+// Cuerpo de «Cancelar unidades» (etapa 9F). Como en «Cancelar cuenta», la autorización solo se envía
+// si Go la pide (`cancel_units_requires_authorization` o el error AUTHORIZATION_REQUIRED).
+export interface CancelUnitsInput {
+  revision: number;
+  version_id: string;
+  quantity: number;
+  reason: string;
+  authorization?: AuthorizationInput;
+}
+
 // Umbral de cuenta abierta por mucho tiempo («Funciones del establecimiento», etapa 9D).
 export interface LongOpenHoursSettings {
   long_open_hours: number;
@@ -289,6 +302,9 @@ export interface OrderQuote {
   quote: Quote | null;
   combined: Totals;
   pricing_policy: string;
+  // Etapa 9F (§7.2), en `edit-preview`: la modificación reduce unidades ya enviadas y el usuario no
+  // tiene «Cancelar partidas», así que confirmarla pedirá la autorización de un supervisor.
+  cancel_units_requires_authorization?: boolean;
 }
 
 export interface HistoryEvent {
@@ -434,6 +450,7 @@ export function pendingAccountBill({
       cancel_blocker: '',
       cancel_requires_authorization: false,
       long_open: false,
+      cancel_units_requires_authorization: false,
     },
     draft: [],
     lines: [],
@@ -592,6 +609,7 @@ export const eventLabels: Record<string, string> = {
   'account.updated': 'Datos actualizados',
   'account.move': 'Cambio de mesa',
   'account.assign': 'Cambio de responsable',
+  // Eventos anteriores a la etapa 9F: la ruta de esta anulación con motivo libre se retiró.
   'account.void': 'Cuenta vacía cancelada',
   'account.released': 'Cuenta vacía liberada',
   'account.discarded': 'Cuenta vacía descartada',

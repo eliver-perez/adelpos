@@ -34,6 +34,13 @@ cantidades» y «Actividad por empleado» incluyen las cuentas canceladas. La in
 columnas y filtros vienen de Go. Contratos en [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9D»); evidencia en
 [VERIFICATION_STAGE9D.md](VERIFICATION_STAGE9D.md).
 
+**Etapa 9F, fase E** (sin migración): sin `orders.cancel`, «Cancelar unidades» y reducir cantidades desde «Modificar»
+piden la autorización de un supervisor y el evento guarda quién autorizó. Por eso «Modificaciones de cantidades» y
+«Productos cancelados» tienen la columna **«Autorizó»** (vacía si bastó el permiso propio y en los registros anteriores,
+también en PDF y Excel) y «Actividad por empleado» cuenta esas autorizaciones. La ruta antigua de anulación se retiró;
+sus registros anteriores siguen en «Cuentas canceladas». Registro sin cambios (95 reportes). Contratos en
+[API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9F»).
+
 ## Contenido
 
 - [Principios](#principios)
@@ -428,8 +435,11 @@ la mesa y el área son las actuales de la cuenta.
   terminal, modalidad, mesa u origen y unidades ya liberadas a cocina). La cantidad anterior de una modificación sale de
   su evento; la de una cancelación, de la respuesta idempotente de esa misma operación más lo retirado; si faltara, queda
   vacía. Filtros: producto, modalidad y usuario.
-- «Modificaciones de cantidades» no tiene «Autorizó»: cancelar o reducir una partida no pide autorización de otra persona
-  (basta `orders.cancel` de quien lo hace); lo dice en una nota. Desde la etapa 9D incluye las partidas de las cuentas
+- **«Autorizó»** (etapa 9F): en la 9C «Modificaciones de cantidades» no tenía la columna, porque cancelar o reducir una
+  partida no pedía autorización de otra persona. Desde la 9F, sin `orders.cancel` se pide la de un supervisor y el
+  evento la guarda (`after.authorized_by`): la columna «Autorizó», después de «Modificó» (y en «Productos cancelados»,
+  después de «Canceló»), muestra su nombre visible actual; en las partidas de una cuenta cancelada, quien autorizó
+  cancelarla; vacía si bastó el permiso propio y en los registros anteriores (no se inventa). Lo explica una nota. Desde la etapa 9D incluye las partidas de las cuentas
   canceladas (un renglón por partida, acción «Cancelación de la cuenta»), igual que «Productos cancelados» (motivo
   «Cuenta cancelada: …»). En la 9C tampoco «Cuentas anuladas» tenía «Autorizó»; desde la 9D sí, para las cancelaciones
   nuevas.
@@ -578,8 +588,9 @@ registradas**:
 - **Se reporta**: quién confirmó (las unidades creadas en la transacción de su confirmación; las agregadas después por una
   modificación no cuentan), quién canceló, el responsable de la cuenta al cerrar (la venta se atribuye solo a él: nunca
   dos veces), quién cobró (sin turnos en arqueo), quién aplicó descuentos y cortesías, quién autorizó como supervisor
-  (desde la etapa 9D también las cancelaciones de cuentas; las unidades de una cuenta cancelada cuentan como canceladas
-  por quien la canceló), quién devolvió y quién registró movimientos de caja.
+  (desde la etapa 9D también las cancelaciones de cuentas y desde la 9F las cancelaciones y reducciones de unidades; las
+  unidades de una cuenta cancelada cuentan como canceladas por quien la canceló), quién devolvió y quién registró
+  movimientos de caja.
 - **No se reporta**: quién capturó (el borrador se borra al confirmar y no se conserva), estadísticas de productividad,
   costos ni el esperado de caja.
 
@@ -838,6 +849,13 @@ Detalle de lo ejecutado en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
   9C ajustada (`kind` responde 400); la lista del puente sigue igual al registro. Playwright
   `workflow-stage9d-cancel-account.spec.ts` consulta ambos reportes en pantalla y los exporta a PDF y Excel por la
   operación cerrada simulada. Detalle en [VERIFICATION_STAGE9D.md](VERIFICATION_STAGE9D.md).
+- **Etapa 9F, fase E**: integración `operations/stage9f_cancel_units_test.go` (`TestStage9FCancelUnitsAndRetiredVoid`:
+  «Autorizó» con el supervisor en «Modificaciones de cantidades» —cancelación y reducción desde «Modificar»— y en
+  «Productos cancelados», vacía con el permiso propio, y las autorizaciones en «Actividad por empleado»); las pruebas de
+  la 9C y la 9D comprueban «Autorizó» vacía con el permiso propio y con el supervisor de la cuenta cancelada, y crean la
+  anulación anterior a la 9F directamente en su base (`legacyVoid`). Playwright
+  `workflow-stage9f-cancel-units.spec.ts` consulta «Modificaciones de cantidades» y «Productos cancelados» con «Autorizó»
+  y exporta el primero a PDF y Excel.
 - **Rust**: `report_routes_are_closed_read_only_and_keyed` (`api.rs`) y las pruebas de `export.rs` (lista cerrada,
   parámetros en lista blanca, tipo y firma antes del diálogo, nombres saneados, escritura atómica, cancelación sin
   escribir, una exportación a la vez y ventana sin permisos de diálogo ni de archivos).
@@ -932,6 +950,8 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
 - **Reportes de la 9D**: «Cuentas canceladas» y «Cancelaciones por motivo» suman lo que seguía activo al cancelar (las
   unidades canceladas antes una por una solo están en «Productos cancelados»); las anulaciones anteriores a la 9D no
   tienen «Autorizó» ni motivo del catálogo. La 0021 se aplicó a la instalación real el 12/11/2026.
+- **«Autorizó» de unidades (9F)**: las cancelaciones y reducciones de unidades anteriores a la 9F no lo tienen (quedan
+  vacías); el nombre es el visible actual del supervisor, como en «Cuentas canceladas».
 - **Reportes de la 9C**: «Cuentas anuladas» (desde la 9D, «Cuentas canceladas») muestra la mesa y el área actuales de la cuenta; si la respuesta idempotente
   de una cancelación no tuviera las partidas, la cantidad anterior y la nueva quedan vacías (la diferencia y el importe
   salen siempre del evento).

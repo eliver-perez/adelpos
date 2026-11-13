@@ -31,8 +31,9 @@ import (
 //
 // Permiso: con accounts.cancel basta el propio; sin él, la autorización puntual de un supervisor que
 // lo tenga, con el mismo mecanismo de los descuentos (validada antes de escribir, sin sesión, con el
-// límite de intentos del inicio de sesión y sin autoautorización). La contraseña nunca forma parte de
-// la huella idempotente (requestFingerprint) ni de la auditoría.
+// límite de intentos del inicio de sesión y sin autoautorización; supervisor_approval.go, compartido
+// desde la etapa 9F con «Cancelar unidades»). La contraseña nunca forma parte de la huella
+// idempotente (requestFingerprint) ni de la auditoría.
 
 // cancelPermission es el permiso propio para cancelar cuentas.
 const cancelPermission = "accounts.cancel"
@@ -98,40 +99,6 @@ func (handler *service) resolveCancelReason(reasonID, text string) (*CancelReaso
 		return reason, nil, nil
 	}
 	return reason, &description, nil
-}
-
-// approveCancellation decide, antes de cualquier escritura, si el usuario cancela con su propio
-// permiso o si hace falta una autorización de supervisor válida. Devuelve el supervisor que autorizó
-// o nil si bastó el permiso propio (una autorización enviada en ese caso se ignora).
-func (handler *service) approveCancellation(input *payments.AuthorizationInput) (*payments.Supervisor, error) {
-	if handler.request.Actor.Can(cancelPermission) {
-		return nil, nil
-	}
-	if input == nil || strings.TrimSpace(input.Username) == "" {
-		return nil, &Error{
-			Status:  403,
-			Code:    "AUTHORIZATION_REQUIRED",
-			Message: "Cancelar una cuenta requiere la autorización de un supervisor con permiso para cancelar cuentas.",
-		}
-	}
-	if handler.request.Authorize == nil {
-		return nil, &Error{Status: 403, Code: "PERMISSION_DENIED", Message: "No tienes permiso para esta operación del restaurante."}
-	}
-	supervisor, err := handler.request.Authorize(handler.ctx, handler.tx, input.Username, input.Password)
-	if err != nil {
-		return nil, err
-	}
-	if supervisor.UserID == handler.request.Actor.UserID {
-		return nil, &Error{Status: 403, Code: "SELF_AUTHORIZATION", Message: "No puedes autorizar tu propia operación."}
-	}
-	if !supervisor.Can(cancelPermission) {
-		return nil, &Error{
-			Status:  403,
-			Code:    "AUTHORIZATION_INSUFFICIENT",
-			Message: "El supervisor indicado no tiene permiso para cancelar cuentas.",
-		}
-	}
-	return supervisor, nil
 }
 
 // activeUnits lee las unidades activas de la cuenta en el orden de sus partidas.

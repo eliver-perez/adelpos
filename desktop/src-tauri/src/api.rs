@@ -375,7 +375,7 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         ),
         // Etapa 9D: la anulación anterior con motivo libre (restaurant/accounts/{id}/void) ya no tiene
         // operación en el puente: «Cancelar cuenta» la sustituye con motivo del catálogo y supervisor.
-        // Go conserva la ruta por compatibilidad, pero ningún cliente de la aplicación la alcanza.
+        // Desde la etapa 9F Go también la retiró (responde 410 ROUTE_RETIRED sin escribir nada).
         // Etapa 7.1: «Liberar mesa» anula sin motivo una cuenta vacía.
         "restaurant_release_account" => (
             Method::POST,
@@ -2108,7 +2108,7 @@ mod tests {
             );
         }
         // La anulación anterior con motivo libre ya no se alcanza desde la aplicación (revisión
-        // independiente 9D, B4); tampoco hay rutas para borrar motivos.
+        // independiente 9D, B4; Go la retiró en la 9F); tampoco hay rutas para borrar motivos.
         assert!(route("restaurant_void", Some(identifier)).is_err());
         assert!(route("restaurant_void", None).is_err());
         assert!(route("restaurant_delete_cancel_reason", Some(identifier)).is_err());

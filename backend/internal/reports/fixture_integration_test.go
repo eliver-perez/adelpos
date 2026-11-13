@@ -316,6 +316,54 @@ func (fixture *reportsFixture) versionOf(t *testing.T, accountID string, product
 	return ""
 }
 
+// legacyVoid deja una cuenta abierta sin productos activos como la dejaba la anulación anterior con
+// motivo libre (POST restaurant/accounts/{id}/void, etapas 4–9E), que la etapa 9F retiró (responde
+// 410 ROUTE_RETIRED). Es un dato anterior a la 9F que los reportes siguen leyendo: la cuenta en
+// voided y su evento account.void con el motivo, de la terminal del administrador, con la operación
+// idempotente y el acuse de cocina que escribía la ruta. Se inserta directamente en la base de la
+// prueba, en una sola transacción.
+func (fixture *reportsFixture) legacyVoid(t *testing.T, accountID, reason string) {
+	t.Helper()
+	transaction, err := fixture.pool.Begin(fixture.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transaction.Rollback(context.Background())
+	operationID, eventID := randomID(), randomID()
+	var adminID string
+	if err := transaction.QueryRow(fixture.ctx, "SELECT id::text FROM app.users WHERE username='admin'").Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
+            VALUES ($1,$2,$3,$4,'anulacion-anterior-a-la-9f','{}'::jsonb)`,
+			[]any{operationID, adminID, fixture.admin.deviceID, "POST restaurant/accounts/" + accountID + "/void"}},
+		{`UPDATE app.restaurant_accounts SET state='voided',revision=revision+1,updated_at=now()
+            WHERE id=$1 AND state='open' AND NOT EXISTS(SELECT FROM app.restaurant_item_units u WHERE u.account_id=$1 AND u.state='active')`,
+			[]any{accountID}},
+		{`INSERT INTO app.restaurant_events(id,account_id,operation_id,kind,payload,author_id,device_id)
+            VALUES ($1,$2,$3,'account.void',jsonb_build_object('before','{}'::jsonb,'after',jsonb_build_object('reason',$4::text)),$5,$6)`,
+			[]any{eventID, accountID, operationID, reason, adminID, fixture.admin.deviceID}},
+		{"INSERT INTO app.kitchen_event_receipts(event_id,result) VALUES ($1,'integrated')", []any{eventID}},
+	}
+	for index, step := range steps {
+		result, err := transaction.Exec(fixture.ctx, step.query, step.args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.RowsAffected() != 1 {
+			t.Fatalf("Anulación anterior, paso %d: %d renglones (la cuenta debía estar abierta y sin productos activos)", index+1,
+				result.RowsAffected())
+		}
+	}
+	if err := transaction.Commit(fixture.ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // staff crea un usuario con un rol de permisos exactos en una terminal propia sin caja.
 func (fixture *reportsFixture) staff(t *testing.T, username string, permissions ...string) terminal {
 	t.Helper()
@@ -366,8 +414,9 @@ type reportResult struct {
 		} `json:"warnings"`
 	} `json:"meta"`
 	Columns []struct {
-		Key  string `json:"key"`
-		Type string `json:"type"`
+		Key   string `json:"key"`
+		Label string `json:"label"`
+		Type  string `json:"type"`
 	} `json:"columns"`
 	Rows    []map[string]any `json:"rows"`
 	Totals  map[string]any   `json:"totals"`
