@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { IconLabel } from '../../components/Icon';
+import { ReprintReason } from '../../components/ReprintReason';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { APIError } from '../../services/api';
 import { cashDocumentKindLabels, cashJobLabels, previewCashDocument } from '../../services/cash';
@@ -12,6 +13,12 @@ import type {
 } from '../../services/cash';
 import { permissionName } from '../../services/payments';
 import { countLabel } from '../../services/plural';
+import {
+  notifyPrinterRejection,
+  printProblemHint,
+  printProblemMessage,
+  retryableProblem,
+} from '../../services/printProblems';
 import {
   renderCurrentConfirmation,
   renderCurrentLabel,
@@ -54,6 +61,13 @@ export function documentOptions(
   return {
     print,
     reprint,
+    // Etapa 9F (§4.2): un documento que nunca salió en papel se reintenta sin motivo con el permiso de
+    // imprimir documentos de caja (Go valida además el turno y el esperado).
+    retry:
+      !!document &&
+      retryableProblem(document.job_state) &&
+      can('cash.reports.print') &&
+      !expectedBlocked,
     // Etapa 9B: otra representación con la plantilla activa, con el mismo permiso de reimprimir
     // más documents.history.render_current (Go valida además el turno y el esperado).
     renderCurrent: reprint && can(renderCurrentPermission),
@@ -102,6 +116,8 @@ export function CashDocumentActions({
   const document = documentFor(documents.data?.documents ?? [], source);
   const options = documentOptions(can, document);
   const { confirm, dialog } = useConfirmDialog();
+  const [askingReason, setAskingReason] = useState(false);
+  const attention = !!document && !!document.job_problem;
 
   async function togglePreview() {
     if (preview) {
@@ -131,22 +147,45 @@ export function CashDocumentActions({
       await mutation.execute<PrintOutcome>(operation, { id: source.id, body: {} });
       void documents.reload();
     } catch (problem) {
-      mutation.reportFailure(problem, 'No se pudo enviar el documento a imprimir.');
+      // Etapa 9F (§4.1): sin impresora válida, «Configurar impresora» y «Reintentar» en el aviso.
+      if (!notifyPrinterRejection(problem, () => void print(), 'printer-missing:cash')) {
+        mutation.reportFailure(problem, 'No se pudo enviar el documento a imprimir.');
+      }
     }
   }
 
-  async function reprint() {
+  // Reimprimir un documento que ya salió pide motivo (etapa 9F, decisión D3).
+  async function reprint(reason: string) {
     if (!document || mutation.isPending()) {
       return;
     }
     try {
       await mutation.execute<PrintOutcome>('payments_reprint_cash_document', {
         id: document.id,
-        body: {},
+        body: { reason },
       });
+      setAskingReason(false);
       void documents.reload();
     } catch (problem) {
       mutation.reportFailure(problem, 'No se pudo enviar el documento a reimprimir.');
+    }
+  }
+
+  // Reintentar un documento que nunca salió en papel: un toque, sin motivo.
+  async function retryPrint() {
+    if (!document || mutation.isPending()) {
+      return;
+    }
+    try {
+      await mutation.execute<PrintOutcome>('payments_retry_cash_document', {
+        id: document.id,
+        body: { job_id: document.job_id ?? '' },
+      });
+      void documents.reload();
+    } catch (problem) {
+      if (!notifyPrinterRejection(problem, () => void retryPrint(), 'printer-missing:cash')) {
+        mutation.reportFailure(problem, 'No se pudo reintentar la impresión del documento.');
+      }
     }
   }
 
@@ -172,6 +211,12 @@ export function CashDocumentActions({
     <div className="cash-document" aria-label="Documento de caja">
       {dialog}
       {document && <p className="muted text-xs">{documentSummary(document)}</p>}
+      {attention && document && (
+        <p className="checkout-result-warning">
+          {printProblemMessage(document.job_problem, document.printer_name, 'cash')}{' '}
+          {printProblemHint(document.job_problem, document.printer_name)}
+        </p>
+      )}
       <div className="button-row">
         <button
           type="button"
@@ -192,12 +237,22 @@ export function CashDocumentActions({
             <IconLabel icon="printer">Imprimir</IconLabel>
           </button>
         )}
-        {options.reprint && (
+        {options.retry && (
           <button
             type="button"
             className="secondary-button"
             disabled={mutation.locked}
-            onClick={() => void reprint()}
+            onClick={() => void retryPrint()}
+          >
+            <IconLabel icon="printer">Reintentar</IconLabel>
+          </button>
+        )}
+        {options.reprint && !askingReason && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={mutation.locked}
+            onClick={() => setAskingReason(true)}
           >
             <IconLabel icon="printer">Reimprimir</IconLabel>
           </button>
@@ -213,6 +268,14 @@ export function CashDocumentActions({
           </button>
         )}
       </div>
+      {options.reprint && askingReason && document && (
+        <ReprintReason
+          subject={`del ${cashDocumentKindLabels[document.kind].toLowerCase()}`}
+          busy={mutation.locked}
+          onSubmit={(reason) => void reprint(reason)}
+          onCancel={() => setAskingReason(false)}
+        />
+      )}
       {options.expectedBlocked && (
         <p className="muted text-xs">
           Este documento incluye el efectivo esperado: reimprimirlo requiere el permiso «

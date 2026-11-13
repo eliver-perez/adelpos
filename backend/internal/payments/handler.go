@@ -167,13 +167,35 @@ func requestFingerprint(request Request) (string, error) {
 	if err := decoder.Decode(&value); err != nil {
 		return "", invalid("La operación no contiene JSON válido.")
 	}
-	if fields, ok := value.(map[string]any); ok {
-		if authorization, ok := fields["authorization"].(map[string]any); ok {
-			delete(authorization, "password")
-		}
-	}
+	withoutAuthorizationPasswords(value)
 	digest := sha256.Sum256([]byte(request.Method + " " + request.Route + "\n" + string(jsonValue(value))))
 	return fmt.Sprintf("%x", digest), nil
+}
+
+// withoutAuthorizationPasswords quita la contraseña de cada objeto de autorización del cuerpo, en
+// cualquier nivel. decode (encoding/json) acepta las claves sin distinguir mayúsculas («Authorization»,
+// «PASSWORD»…), así que aquí también se comparan sin distinguirlas (strings.EqualFold sigue el mismo
+// plegado de Unicode); si no, un cliente que escribiera «Password» dejaría en la huella de
+// restaurant_operations un derivado de la contraseña del supervisor (etapa 9F, como la corrección B3 de
+// operations/handler.go). El contrato no cambia: la autorización se sigue leyendo del mismo cuerpo.
+func withoutAuthorizationPasswords(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			if authorization, ok := child.(map[string]any); ok && strings.EqualFold(key, "authorization") {
+				for field := range authorization {
+					if strings.EqualFold(field, "password") {
+						delete(authorization, field)
+					}
+				}
+			}
+			withoutAuthorizationPasswords(child)
+		}
+	case []any:
+		for _, child := range typed {
+			withoutAuthorizationPasswords(child)
+		}
+	}
 }
 
 func (handler *service) replay(fingerprint string) (any, bool, error) {

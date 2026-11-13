@@ -17,6 +17,8 @@ type Error struct {
 	Status  int
 	Code    string
 	Message string
+	// Details son datos públicos opcionales del rechazo (etapa 9F: la impresora que no puede imprimir).
+	Details any
 }
 
 func (problem *Error) Error() string {

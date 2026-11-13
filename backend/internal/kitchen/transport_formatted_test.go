@@ -51,7 +51,7 @@ func TestFormattedDocumentThroughRawCUPS(t *testing.T) {
 	if lp.program != "/usr/bin/lp" || strings.Join(lp.arguments[:8], "\x00") != strings.Join(expected, "\x00") {
 		t.Fatalf("Argumentos de lp incorrectos: %q", lp.arguments)
 	}
-	if !bytes.Equal(lp.pulse, documents.EncodeESCPos(job.Layout, job.Rasters, true)) {
+	if !bytes.Equal(lp.pulse, documents.EncodeESCPos(job.Layout, job.Rasters, legacyFullCut)) {
 		t.Fatalf("El archivo raw no contiene los bytes ESC/POS del layout: % x", lp.pulse)
 	}
 	if !bytes.Contains(lp.pulse, []byte{0x1d, 0x76, 0x30, 0x00, 0x02, 0x00, 0x02, 0x00, 0xff, 0x00, 0x0f, 0xf0}) {
@@ -127,7 +127,7 @@ func TestFormattedDocumentThroughESCPos(t *testing.T) {
 	job.PrinterSnapshot.Port = listener.Addr().(*net.TCPAddr).Port
 	outcome := submitESCPosFormatted(t, job)
 	data := <-received
-	single := documents.EncodeESCPos(job.Layout, nil, true)
+	single := documents.EncodeESCPos(job.Layout, nil, legacyFullCut)
 	if outcome.State != "submitted" || !bytes.Equal(data, append(append([]byte{}, single...), single...)) {
 		t.Fatalf("Los bytes ESC/POS con atributos no se entregaron dos veces: %+v % x", outcome, data)
 	}

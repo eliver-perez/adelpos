@@ -1,3 +1,4 @@
+import { usePrecheckName } from '../../../services/documentNames';
 import { IconLabel } from '../../../components/Icon';
 import { shortcutProps } from '../../../commands/hints';
 import { usePendingEntry } from '../../../hooks/pendingOperations';
@@ -210,6 +211,8 @@ export function BillFooter({
   onCheckout: () => void;
   emphasis?: 'capture' | 'overview';
 }) {
+  // Etapa 9F (§4.5): el nombre visible de la precuenta que eligió el restaurante.
+  const precheck = usePrecheckName();
   const writable =
     account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
   const newUnits = draftUnits(localDraft);
@@ -286,10 +289,10 @@ export function BillFooter({
             type="button"
             className="secondary-button"
             disabled={blocked || !secondary.precheckReady}
-            {...shortcutProps('file.print_precheck', 'Precuenta')}
+            {...shortcutProps('file.print_precheck', precheck.label)}
             onClick={() => onAction('precheck')}
           >
-            <IconLabel icon="receipt">Precuenta</IconLabel>
+            <IconLabel icon="receipt">{precheck.label}</IconLabel>
           </button>
         )}
         <MoreActions actions={more} disabled={blocked} onAction={onAction} />

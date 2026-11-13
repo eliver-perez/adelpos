@@ -2,6 +2,7 @@ import { ProductDetails } from '../catalog/QuoteBreakdown';
 import type { ProductBreakdown } from '../../services/catalog';
 import { formatMoney } from '../../services/money';
 import type { HistoryEvent } from '../../services/restaurant';
+import { tableField } from '../../services/restaurant';
 
 type RecordValue = Record<string, unknown>;
 
@@ -89,7 +90,7 @@ export function HistoryDetails({ event }: { event: HistoryEvent }) {
       {typeof account.customer_name === 'string' && account.customer_name && (
         <p>Cliente: {account.customer_name}</p>
       )}
-      {typeof account.table_name === 'string' && <p>Mesa: {account.table_name}</p>}
+      {typeof account.table_name === 'string' && <p>{tableField(account.table_name)}</p>}
       {typeof account.assigned_name === 'string' && <p>Responsable: {account.assigned_name}</p>}
       {typeof account.notes === 'string' && account.notes && <p>Observaciones: {account.notes}</p>}
       {units !== null && <p>Unidades conservadas en la operación: {units}</p>}

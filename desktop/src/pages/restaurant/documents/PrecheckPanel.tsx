@@ -2,8 +2,9 @@ import { Notice } from '../../../components/Forms';
 import { IconLabel } from '../../../components/Icon';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import { useRestaurantMutation } from '../../../hooks/useRestaurantMutation';
-import { APIError } from '../../../services/api';
-import { notifyError, notifySuccess, notifyWarning } from '../../../services/notify';
+import { precheckName, usePrecheckName } from '../../../services/documentNames';
+import type { PrecheckName } from '../../../services/documentNames';
+import { notifySuccess, notifyWarning } from '../../../services/notify';
 import {
   documentJobLabels,
   documentsPendingKey,
@@ -13,32 +14,36 @@ import {
   printAttentionStates,
 } from '../../../services/payments';
 import type { CommercialDocument, PrintingResult } from '../../../services/payments';
+import { notifyPrinterRejection } from '../../../services/printProblems';
 import type { Bill } from '../../../services/restaurant';
 import { UncertainOperation } from '../checkout/UncertainOperation';
 import { notifyActionError } from '../checkout/actionErrors';
 
-const missingPrinter =
-  'No hay impresora de tickets configurada. Configúrala en Cobros → Políticas de cobro.';
+// Primera letra en mayúscula («La precuenta», «El ticket de venta»).
+function capitalized(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 // Resultado de la impresión como aviso: «enviada», nunca «impresa». Un trabajo que exige atención
-// (sin impresora disponible, incierto…) se avisa como advertencia que dura más.
-function notifyPrintResult(result: PrintingResult) {
+// (incierto…) se avisa como advertencia que dura más; si no sale en papel, la lista de documentos de
+// la cuenta lo explica y ofrece «Reintentar» (etapa 9F).
+function notifyPrintResult(result: PrintingResult, name: PrecheckName) {
   const status = result.status ?? '';
   const label = documentJobLabels[status] ?? 'Solicitud registrada';
   if (printAttentionStates.includes(status)) {
-    notifyWarning(`Precuenta: ${label}. Se resuelve en Cocina → Cola de impresión.`);
+    notifyWarning(`${name.label}: ${label}. Revísalo en los documentos de la cuenta.`);
     return;
   }
-  notifySuccess(`Precuenta enviada a la cola de impresión: ${label}.`);
+  notifySuccess(`${name.label} ${name.sent} a la cola de impresión: ${label}.`);
 }
 
-// Sin impresora de tickets se explica dónde configurarla; los demás rechazos son los de Go.
-function notifyPrintFailure(problem: unknown) {
-  if (problem instanceof APIError && problem.code === 'PRINTER_NOT_CONFIGURED') {
-    notifyError(missingPrinter);
+// Sin una impresora válida (etapa 9F, decisión D4) el aviso dice qué pasa y ofrece «Configurar
+// impresora» y «Reintentar»; los demás rechazos son los de Go.
+function notifyPrintFailure(problem: unknown, name: PrecheckName, retry: () => void) {
+  if (notifyPrinterRejection(problem, retry, 'printer-missing:precheck')) {
     return;
   }
-  notifyActionError(problem, 'No se pudo enviar la precuenta a imprimir.');
+  notifyActionError(problem, `No se pudo enviar ${name.withArticle} a imprimir.`);
 }
 
 // Precuenta integrada en la operación: vista previa del documento que entrega Go (texto de 42
@@ -60,8 +65,9 @@ export function PrecheckPanel({
     enabled: active,
     interval: 30000,
   });
+  const name = usePrecheckName();
   const mutation = useRestaurantMutation((_operation, value) => {
-    notifyPrintResult(value as PrintingResult);
+    notifyPrintResult(value as PrintingResult, precheckName());
     window.dispatchEvent(new CustomEvent('adel-server-change'));
   }, documentsPendingKey(accountID));
   const locked = mutation.busy || !!mutation.pending;
@@ -74,28 +80,30 @@ export function PrecheckPanel({
     try {
       await mutation.execute('payments_print_precheck', { id: accountID, body: {} });
     } catch (problem) {
-      notifyPrintFailure(problem);
+      notifyPrintFailure(problem, precheckName(), () => void print());
     }
   }
 
   async function retry() {
     const problem = await mutation.retry();
     if (problem) {
-      notifyPrintFailure(problem);
+      notifyPrintFailure(problem, precheckName(), () => void print());
     }
   }
 
   return (
-    <section className="operation-inline-panel precheck-panel" aria-label="Precuenta">
+    <section className="operation-inline-panel precheck-panel" aria-label={name.label}>
       <div className="section-heading">
-        <h2>Precuenta · #{bill.account.folio}</h2>
+        <h2>
+          {name.label} · #{bill.account.folio}
+        </h2>
         <button type="button" className="secondary-button" onClick={onClose}>
           <IconLabel icon="back">Volver</IconLabel>
         </button>
       </div>
       <p className="muted text-sm">
-        La precuenta solo informa el consumo: no registra venta, pago ni documento y no es un
-        comprobante fiscal (CFDI).
+        {capitalized(name.withArticle)} solo informa el consumo: no registra venta, pago ni
+        documento y no es un comprobante fiscal (CFDI).
       </p>
       <Notice>{document.error}</Notice>
       {mutation.pending && mutation.uncertain && (
@@ -107,7 +115,7 @@ export function PrecheckPanel({
           onConsult={() => window.dispatchEvent(new CustomEvent('adel-server-change'))}
         />
       )}
-      {!data && !document.error && <p className="muted">Preparando la precuenta…</p>}
+      {!data && !document.error && <p className="muted">Preparando {name.withArticle}…</p>}
       {data && (
         <div className="precheck-layout">
           <dl className="checkout-figures precheck-summary">
@@ -140,7 +148,7 @@ export function PrecheckPanel({
           </dl>
           <pre
             className="kitchen-document commercial-document"
-            aria-label="Vista previa de la precuenta"
+            aria-label={`Vista previa ${name.ofWithArticle}`}
           >
             {data.content}
           </pre>
@@ -155,7 +163,7 @@ export function PrecheckPanel({
             onClick={() => void print()}
           >
             <IconLabel icon="printer">
-              {mutation.busy ? 'Enviando precuenta…' : 'Imprimir precuenta'}
+              {mutation.busy ? `Enviando ${name.lower}…` : `Imprimir ${name.lower}`}
             </IconLabel>
           </button>
         </div>

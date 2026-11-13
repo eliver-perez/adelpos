@@ -22,6 +22,7 @@ import type {
   RestaurantSettings,
 } from '../../services/restaurant';
 import { Select } from '../../components/Select';
+import { tableField } from '../../services/restaurant';
 
 // Borrador local del área: la posición elegida solo viaja al guardar.
 type AreaDraft = Area & { position?: Position };
@@ -249,7 +250,7 @@ export function OperationsAdmin({
         </Accordion>
       )}
       {table && (
-        <Accordion title={table.id ? `Mesa: ${table.name}` : 'Nueva mesa'} defaultOpen>
+        <Accordion title={table.id ? tableField(table.name) : 'Nueva mesa'} defaultOpen>
           <Form
             disabled={busy}
             label="Guardar mesa"

@@ -101,7 +101,7 @@ func testStage9BLogo(t *testing.T, fixture *stage9BFixture) {
 			t.Fatalf("El trabajador cargó los bits guardados: %+v", raster)
 		}
 		// Primera franja de GS v 0 (a lo más 128 filas de 72 bytes) con los bits guardados.
-		encoded := documents.EncodeESCPos(received.Layout, received.Rasters, false)
+		encoded := documents.EncodeESCPos(received.Layout, received.Rasters, documents.NoPaperCut)
 		rows := min(raster.HeightDots, 128)
 		band := append([]byte{0x1d, 0x76, 0x30, 0x00, 72, 0, byte(rows), 0}, raster.Bits[:rows*72]...)
 		if !bytes.Contains(encoded, band) || len(documents.MissingRasters(received.Layout, received.Rasters)) != 0 {
@@ -136,7 +136,7 @@ func testStage9BLogo(t *testing.T, fixture *stage9BFixture) {
 		current := fixture.identityView(t)
 		fixture.mutate(t, "POST", "documents/identity/logo/remove", map[string]any{"revision": current.Revision}, 200)
 		second := reprint("Copia tras retirar el logotipo")
-		if !bytes.Equal(documents.EncodeESCPos(second.Layout, second.Rasters, false), documents.EncodeESCPos(first.Layout, first.Rasters, false)) {
+		if !bytes.Equal(documents.EncodeESCPos(second.Layout, second.Rasters, documents.NoPaperCut), documents.EncodeESCPos(first.Layout, first.Rasters, documents.NoPaperCut)) {
 			t.Fatal("Retirar el logotipo no cambia la copia de una comanda ya emitida")
 		}
 	})

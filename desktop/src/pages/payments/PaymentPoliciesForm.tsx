@@ -3,6 +3,9 @@ import { Field, Form, Notice } from '../../components/Forms';
 import { Check, ReferenceField } from '../../components/catalog/EditorFields';
 import { useResource } from '../../hooks/useResource';
 import { acceptAmountText, toWireAmount } from '../../services/amountInput';
+import { Select } from '../../components/Select';
+import { precheckNameOptions, precheckNames } from '../../services/documentNames';
+import type { PrecheckNameKey } from '../../services/documentNames';
 import type { Printer } from '../../services/kitchen';
 import { permissionName } from '../../services/payments';
 import type { PaymentSettings, SettingsInput } from '../../services/payments';
@@ -16,7 +19,8 @@ function sameValues(left: Policies, right: Policies) {
     left.shared_shifts === right.shared_shifts &&
     left.print_receipt_default === right.print_receipt_default &&
     left.receipt_printer_id === right.receipt_printer_id &&
-    left.threshold === right.threshold
+    left.threshold === right.threshold &&
+    left.precheck_name === right.precheck_name
   );
 }
 
@@ -27,11 +31,13 @@ function initialPolicies(settings: PaymentSettings) {
     print_receipt_default: settings.print_receipt_default,
     receipt_printer_id: settings.receipt_printer_id,
     threshold: settings.refund_authorization_threshold ?? '',
+    precheck_name: settings.precheck_name ?? 'precheck',
   };
 }
 
-// Políticas de cobro: turno compartido, impresión predeterminada, impresora y umbral de
-// autorización de devoluciones. La revisión de partida evita sobrescribir cambios ajenos.
+// Políticas de cobro: turno compartido, impresión predeterminada, impresora, nombre visible de la
+// precuenta (etapa 9F, §4.5) y umbral de autorización de devoluciones. La revisión de partida evita
+// sobrescribir cambios ajenos.
 export function PaymentPoliciesForm({
   settings,
   can,
@@ -100,6 +106,7 @@ export function PaymentPoliciesForm({
             print_receipt_default: value.print_receipt_default,
             receipt_printer_id: value.receipt_printer_id,
             refund_authorization_threshold: threshold === '' ? null : threshold,
+            precheck_name: value.precheck_name,
           };
           const saved = await execute<PaymentSettings>('payments_save_settings', {
             body: { ...body },
@@ -152,6 +159,17 @@ export function PaymentPoliciesForm({
               <input readOnly value={settings.receipt_printer_name ?? 'Sin asignar'} />
             </Field>
           )}
+          <Field
+            label="Nombre de la precuenta"
+            hint={`Así se llama en los botones, en los avisos y en el encabezado impreso (${precheckNames[value.precheck_name].printed}). Es el mismo documento previo al cobro; no es un comprobante fiscal.`}
+          >
+            <Select<PrecheckNameKey>
+              value={value.precheck_name}
+              options={precheckNameOptions}
+              disabled={!editable}
+              onChange={(precheck_name) => setValue({ ...value, precheck_name })}
+            />
+          </Field>
         </div>
         <Notice>{printers.error}</Notice>
       </Form>

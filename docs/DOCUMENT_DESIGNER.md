@@ -744,3 +744,23 @@ instalación de este Mac se aplicaron así el 11 de noviembre de 2026 (registro 
 identidad vacía y sin logotipo: ningún documento cambia hasta que el restaurante lo decida. La 0020 de la etapa 9C (columnas por
 impresora) se aplica con el mismo procedimiento y la misma autorización; al aplicarla, todas las impresoras quedan con
 el predeterminado (NULL) y ningún documento cambia.
+
+## Etapa 9F · nombre de la precuenta, «Mesa» sin repetir y corte de papel
+
+- **Encabezado de la precuenta**: el título predeterminado sale del nombre visible elegido en Cobros › Políticas de
+  cobro: «PRECUENTA» (predeterminado), «TICKET DE VENTA» o «CUENTA» (`CommercialData.Title`, guardado con el documento
+  como `title`; vacío con «Precuenta»). Un título propio de la plantilla lo sigue sustituyendo. Con «Precuenta» la salida
+  es idéntica byte a byte a la anterior; las plantillas predeterminadas no cambian. El editor sigue llamando
+  «Precuenta» al tipo de documento y «Ticket de venta» al ticket de pago (nombres de la 9B); con el nombre «Ticket de
+  venta» elegido para la precuenta, la plantilla que se edita es la del tipo «Precuenta».
+- **«Mesa» sin repetir** (§4.6): la precuenta y el ticket componían el contexto «Mesa » + nombre de la mesa e
+  imprimían «Mesa Mesa 1» con mesas llamadas «Mesa 1». Ahora no se antepone «Mesa» si el nombre ya empieza con esa
+  palabra (sin distinguir mayúsculas ni acentos, solo como palabra completa: `documents.TableContext`). La corrección es
+  del dato, antes de la plantilla: las predeterminadas siguen idénticas byte a byte y las pruebas de equivalencia contra
+  las copias de las plantillas antiguas no cambian (reciben el contexto ya armado). Los documentos ya emitidos conservan
+  su texto al reimprimirse. En una plantilla propia, el campo «Mesa» con la etiqueta «Mesa:» imprime solo el nombre si
+  ya incluye la palabra («Mesa 1», no «Mesa: Mesa 1»); con otra etiqueta o un nombre como «Terraza» no cambia. Pruebas:
+  `documents/table_names_test.go`, la integración `9F_mesa_sin_repetir` y la tarjeta de Preparación en Vitest.
+- **Corte de papel**: el final de los documentos con formato (`EncodeESCPos`) usa el corte de la impresora
+  (`PaperCut`): sin corte, los tres saltos de siempre; con corte, los renglones de avance elegidos y `GS V 0` o `GS V 1`.
+  La IR no cambia.

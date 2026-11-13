@@ -404,6 +404,9 @@ func documentTitle(kind Kind, block Block, data Data) string {
 			return custom
 		}
 		if kind == KindPrecheck {
+			if data.Commercial != nil && data.Commercial.Title != "" {
+				return data.Commercial.Title
+			}
 			return "PRECUENTA"
 		}
 		return "TICKET DE PAGO"
@@ -436,6 +439,17 @@ func CashTitle(kind Kind, sequence int) string {
 	return "COMPROBANTE DE GASTO"
 }
 
+// repeatsTableWord indica que la etiqueta «Mesa:» repetiría la palabra del nombre de la mesa («Mesa: Mesa
+// 1», etapa 9F, §4.6): en ese caso se imprime solo el nombre. Con otra etiqueta o un nombre sin la palabra
+// («Mesa: Terraza»), el campo no cambia. Las plantillas predeterminadas no usan este campo.
+func repeatsTableWord(item FieldItem, value string) bool {
+	if item.Key != "table" || !TableNameIncludesWord(value) {
+		return false
+	}
+	label := foldAccents(strings.ToLower(strings.TrimSpace(item.Label)))
+	return label == "mesa" || label == "mesa:"
+}
+
 // renderField imprime un campo de datos en línea («Etiqueta valor · valor») o como renglón
 // etiqueta-valor. Con OmitEmpty, un renglón sin ningún valor no se imprime.
 func renderField(kind Kind, options *FieldOptions, data Data, w *writer) {
@@ -446,7 +460,7 @@ func renderField(kind Kind, options *FieldOptions, data Data, w *writer) {
 		if present {
 			anyValue = true
 		}
-		if item.Label == "" {
+		if item.Label == "" || repeatsTableWord(item, value) {
 			parts = append(parts, value)
 		} else {
 			parts = append(parts, item.Label+" "+value)

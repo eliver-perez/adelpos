@@ -268,6 +268,8 @@ describe('menú nativo simulado', () => {
     await waitFor(() =>
       expect(native.invoke).toHaveBeenCalledWith('menu_set_state', {
         enabled: expect.arrayContaining(['view.tables', 'view.kitchen', 'cash.income']),
+        // Etapa 9F (§4.5): el nombre visible de la precuenta viaja con el estado del menú.
+        precheckName: 'precheck',
       }),
     );
     const state = native.invoke.mock.calls.find(([command]) => command === 'menu_set_state');

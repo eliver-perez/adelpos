@@ -1,3 +1,4 @@
+import { usePrecheckName } from '../../services/documentNames';
 import { Notice } from '../../components/Forms';
 import { Icon, IconLabel } from '../../components/Icon';
 import { tableStateIcons } from '../../components/restaurant/tableStateIcons';
@@ -177,6 +178,8 @@ export function TablePanel({
   // Umbral de cuenta abierta por mucho tiempo (settings.long_open_hours de Go), para el texto.
   longOpenHours?: number;
 }) {
+  // Etapa 9F (§4.5): el nombre visible de la precuenta que eligió el restaurante.
+  const precheck = usePrecheckName();
   const open = accounts ?? [];
   const occupied = open.length > 0;
   // El estado lo calcula Go; si el mapa aún no refleja una cuenta recién abierta, se muestra ocupada.
@@ -312,7 +315,7 @@ export function TablePanel({
               )}
               {can('payments.read') && (
                 <button type="button" className="secondary-button" disabled>
-                  <IconLabel icon="receipt">Precuenta</IconLabel>
+                  <IconLabel icon="receipt">{precheck.label}</IconLabel>
                 </button>
               )}
               {can('accounts.split') && (
@@ -403,10 +406,10 @@ export function TablePanel({
                     type="button"
                     className="secondary-button"
                     disabled={blocked || account.confirmed_quantity === 0}
-                    {...shortcutProps('file.print_precheck', 'Precuenta')}
+                    {...shortcutProps('file.print_precheck', precheck.label)}
                     onClick={() => onAction('precheck')}
                   >
-                    <IconLabel icon="receipt">Precuenta</IconLabel>
+                    <IconLabel icon="receipt">{precheck.label}</IconLabel>
                   </button>
                 )}
                 {writable && can('accounts.split') && (

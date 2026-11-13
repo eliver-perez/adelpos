@@ -90,6 +90,7 @@ export async function installDriver(page: Page) {
   let menuChannel: number | null = null;
   let menuIndex = 0;
   let menuEnabled = new Set<string>(['view.fullscreen', 'help.shortcuts', 'help.about']);
+  let menuPrecheckName = 'precheck';
   let streamGeneration = 0;
   const streams = new Map<number, AbortController>();
   page.on('close', () => {
@@ -420,7 +421,19 @@ export async function installDriver(page: Page) {
         if (enabled.some((id) => typeof id !== 'string' || !menuActions.has(id))) {
           return { __bridgeRejection: 'Opción de menú no reconocida.' };
         }
+        // Etapa 9F (§4.5): el nombre visible de la precuenta, de la misma lista cerrada que menu.rs.
+        const precheckName = args.precheckName;
+        if (
+          precheckName !== undefined &&
+          precheckName !== null &&
+          !['precheck', 'sales_ticket', 'bill'].includes(String(precheckName))
+        ) {
+          return { __bridgeRejection: 'Nombre de la precuenta no reconocido.' };
+        }
         menuEnabled = new Set(enabled as string[]);
+        if (typeof precheckName === 'string') {
+          menuPrecheckName = precheckName;
+        }
         return;
       }
       if (command === 'authentication_state')
@@ -508,5 +521,9 @@ export async function installDriver(page: Page) {
   function menuState() {
     return [...menuEnabled].sort();
   }
-  return { request, nextSaveDialog, exports, clickMenu, menuState, menuActions };
+  // Clave del nombre de la precuenta que la interfaz informó al menú nativo (etapa 9F).
+  function menuPrecheck() {
+    return menuPrecheckName;
+  }
+  return { request, nextSaveDialog, exports, clickMenu, menuState, menuPrecheck, menuActions };
 }

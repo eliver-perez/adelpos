@@ -35,7 +35,7 @@ const (
 // submitFormatted entrega un documento con atributos según el transporte de su impresora.
 func (transport HostTransport) submitFormatted(ctx context.Context, job PrintJob) Outcome {
 	printer := job.PrinterSnapshot
-	cut := printer.Cut && printer.SupportsCut
+	cut := printer.PaperCut()
 	rasters, note := printableRasters(job)
 	switch printer.Transport {
 	case "escpos_tcp":
@@ -69,7 +69,7 @@ func (transport HostTransport) submitFormatted(ctx context.Context, job PrintJob
 		outcome.Message += note
 		return outcome
 	}
-	return Outcome{State: "intervention", Message: "El destino requiere un agente de impresión futuro."}
+	return Outcome{State: "intervention", Code: ProblemUnsupported, Message: unsupportedPrinterMessage}
 }
 
 // printableRasters devuelve los bits de las imágenes que la impresora del trabajo puede imprimir y

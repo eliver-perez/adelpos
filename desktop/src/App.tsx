@@ -45,6 +45,9 @@ import { barHighlight, canOpen, resolveHome } from './navigation/sections';
 import type { ScreenID } from './navigation/sections';
 import { dismissNotice, notifyError, notifySuccess, notifyWarning } from './services/notify';
 import { savePreferences } from './services/preferences';
+import { setPrecheckName } from './services/documentNames';
+import { registerPrinterSetup } from './services/printProblems';
+import { requestPaymentPolicies } from './pages/payments/policiesRequest';
 
 const connectionNoticeID = 'connection';
 
@@ -127,6 +130,33 @@ function ApplicationContent() {
     logout,
     toggleTheme,
   });
+
+  // Etapa 9F (§4.5): el nombre visible de la precuenta llega con la sesión y lo leen los botones, los
+  // avisos, la paleta y el menú nativo.
+  const precheckNameKey = identity?.establishment.precheck_name;
+  useEffect(() => {
+    setPrecheckName(precheckNameKey);
+  }, [precheckNameKey]);
+
+  // Etapa 9F (§4.1): «Configurar impresora» de los avisos sin impresora lleva a Cobros › Políticas de
+  // cobro con el único requestScreen, solo si el usuario puede elegir allí la impresora de tickets.
+  const requestScreenRef = useRef(requestScreen);
+  requestScreenRef.current = requestScreen;
+  const printerSetupAllowed =
+    canOpen('payments', permissions) &&
+    permissions.includes('payments.settings.manage') &&
+    permissions.includes('kitchen.printers.manage');
+  useEffect(() => {
+    registerPrinterSetup(
+      printerSetupAllowed
+        ? () => {
+            requestPaymentPolicies();
+            void requestScreenRef.current('payments');
+          }
+        : null,
+    );
+    return () => registerPrinterSetup(null);
+  }, [printerSetupAllowed]);
 
   const setTail = useCallback((owner: ScreenID, label: string | null) => {
     setTailState((current) => {

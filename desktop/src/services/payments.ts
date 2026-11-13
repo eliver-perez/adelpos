@@ -1,3 +1,5 @@
+import { precheckName } from './documentNames';
+import type { PrecheckNameKey } from './documentNames';
 import { api } from './api';
 import type { CashLimitWarning, DrawerOutcome } from './cash';
 import type { Operation } from './api';
@@ -50,6 +52,8 @@ export interface PaymentSettings {
   receipt_printer_id: string | null;
   receipt_printer_name: string | null;
   refund_authorization_threshold: string | null;
+  // Nombre visible del documento previo al cobro (etapa 9F, §4.5; services/documentNames.ts).
+  precheck_name: PrecheckNameKey;
   // Rango del tipo de cambio (MXN por USD) y porcentaje de diferencia que exige confirmación.
   usd_rate_min: string;
   usd_rate_max: string;
@@ -71,6 +75,7 @@ export interface SettingsInput {
   print_receipt_default: boolean;
   receipt_printer_id: string | null;
   refund_authorization_threshold: string | null;
+  precheck_name: PrecheckNameKey;
 }
 
 export interface TaxInput {
@@ -194,6 +199,8 @@ export interface DocumentRecord {
   created_at: string;
   job_id: string | null;
   job_state: string | null;
+  // Clave del problema del último trabajo si exige atención (etapa 9F; services/printProblems.ts).
+  job_problem?: string | null;
   printer_name: string | null;
   copies: number;
 }
@@ -321,6 +328,10 @@ export interface PrintingResult {
   job_id?: string;
   ticket_id?: string;
   message?: string;
+  // Etapa 9F (decisión D4): por qué no se encoló el ticket de pago (sin impresora de tickets, desactivada
+  // o de otra terminal) y la impresora configurada.
+  problem?: 'missing' | 'inactive' | 'unsupported';
+  printer_name?: string;
 }
 
 export interface PaymentResult {
@@ -681,7 +692,10 @@ export function documentsPendingKey(accountID: string) {
 
 export const documentKindLabels: Record<string, string> = {
   receipt: 'Ticket de pago',
-  precheck: 'Precuenta',
+  // Etapa 9F (§4.5): el nombre visible que eligió el restaurante.
+  get precheck() {
+    return precheckName().label;
+  },
 };
 
 // Estados del trabajo de impresión explicados al cajero; submitted significa aceptado por la
@@ -697,7 +711,7 @@ export const printStatusLabels: Record<string, string> = {
   not_configured: 'Sin impresora configurada',
 };
 
-// Estados que se resuelven en Cocina → Cola de impresión.
+// Estados que exigen atención: la impresión no salió (error, intervención) o no se sabe (incierto).
 export const printAttentionStates = ['error', 'uncertain', 'intervention'];
 
 // Estado del último trabajo de un documento (ticket o precuenta) en la lista de documentos.
@@ -712,14 +726,15 @@ export const documentJobLabels: Record<string, string> = {
 };
 
 // Explica el resultado de una impresión solicitada. Nunca se presenta como fallo del pago: el
-// trabajo queda en la cola durable y se resuelve en Cocina.
+// trabajo queda en la cola durable. Sin impresora válida (etapa 9F) se usa el texto de Go, que dice
+// por qué; el aviso ofrece «Configurar impresora» y «Reintentar».
 export function printingMessage(printing: PrintingResult | null | undefined, subject = 'pago') {
   if (!printing || !printing.requested || !printing.status) {
     return '';
   }
   const status = printing.status;
   if (status === 'not_configured') {
-    return `Sin impresora configurada: el ${subject} quedó registrado.`;
+    return printing.message || `Sin impresora configurada: el ${subject} quedó registrado.`;
   }
   if (status === 'pending' || status === 'processing') {
     return 'Impresión pendiente: el documento está en la cola de impresión.';
@@ -730,7 +745,7 @@ export function printingMessage(printing: PrintingResult | null | undefined, sub
   if (status === 'cancelled') {
     return `Impresión cancelada; el ${subject} quedó registrado.`;
   }
-  return `${printStatusLabels[status] ?? 'Impresión no confirmada'}: el ${subject} quedó registrado. Revísalo en Cocina → Cola de impresión.`;
+  return `${printStatusLabels[status] ?? 'Impresión no confirmada'}: el ${subject} quedó registrado. Reinténtala desde los documentos de la cuenta.`;
 }
 
 export const paymentStateBadges: Record<PaymentState, string> = {
@@ -796,6 +811,8 @@ export const financialOperationLabels: Partial<Record<Operation, string>> = {
   payments_deliver: 'de la entrega del pedido',
   payments_print_precheck: 'de la impresión de la precuenta',
   payments_reprint: 'de la copia del documento',
+  payments_retry_document: 'del reintento de impresión',
+  payments_print_receipt: 'de la impresión del ticket de pago',
   payments_open_shift: 'de la apertura del turno',
   payments_shift_usd_rate: 'de la captura del tipo de cambio',
 };

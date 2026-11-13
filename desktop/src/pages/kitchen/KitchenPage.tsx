@@ -212,7 +212,7 @@ const historyLabels: Record<string, string> = {
   'change.retried': 'Modificación pendiente revisada',
   'kds.acknowledged': 'Recepción en pantalla de cocina confirmada',
   'print.test_requested': 'Prueba de impresión solicitada',
-  'print.submitted': 'Documento aceptado por el transporte',
+  'print.submitted': 'Documento enviado a la impresora',
   'print.error': 'Error de impresión confirmado',
   'print.intervention': 'Impresión requiere intervención',
   'print.uncertain': 'Resultado de impresión incierto',

@@ -329,9 +329,11 @@ func accountRevision(t *testing.T, fixture *restaurantFixture, accountID string)
 
 func testStage9APrecheck(t *testing.T, fixture *restaurantFixture, base *paymentsFixture) {
 	fries := catalog.LineRequest{ProductID: fixture.fries.ID, Quantity: 1}
-	// Impresora de tickets sin hardware: la precuenta queda en la cola, nunca se envía.
+	// Impresora de tickets sin hardware (una cola del equipo que no existe; estas pruebas no ejecutan el
+	// trabajador): la precuenta queda en la cola, nunca se envía. Desde la etapa 9F una impresora de otra
+	// terminal («agent») ya no es válida para precuentas.
 	printer := decodeResponse[kitchen.Printer](t, fixture.mutate(t, "POST", "kitchen/printers", kitchen.Printer{
-		Name: "Precuentas 9A", Transport: "agent", Destination: "Agente de aceptación no disponible", Active: true, PaperWidth: 80, Copies: 1,
+		Name: "Precuentas 9A", Transport: "cups", Destination: "ADEL_TEST_PRECHECK_9A", Active: true, PaperWidth: 80, Copies: 1,
 	}, 200))
 	base.receiptSettings(t, printer.ID, false)
 	// Terminal propia que modifica las cuentas en las carreras: captura, datos y cargos.

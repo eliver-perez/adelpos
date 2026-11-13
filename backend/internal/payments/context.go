@@ -129,6 +129,9 @@ type Error struct {
 	// 7.1): administration deshace todo lo escrito y confirma solo ese registro, con
 	// success=false, como la denegación de un permiso. Nunca se publica en la respuesta.
 	Rejection *Rejection
+	// Details son datos públicos opcionales del rechazo (etapa 9F: qué documento no tiene una impresora
+	// válida y por qué), publicados en error.details.
+	Details any
 }
 
 // Rejection es la auditoría de un rechazo que debe sobrevivir al rollback de la operación. Sus

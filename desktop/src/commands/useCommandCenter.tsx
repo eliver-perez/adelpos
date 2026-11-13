@@ -5,6 +5,7 @@ import { toggleWindowFullscreen } from '../components/WindowControls';
 import { sectionByID } from '../navigation/sections';
 import type { ScreenID } from '../navigation/sections';
 import type { CashSheet } from '../pages/cash/CashShortcut';
+import { usePrecheckName } from '../services/documentNames';
 import { notifyInfo } from '../services/notify';
 import { actionByID, actionEnabled, actions, commandEntries, enabledMenuActions } from './actions';
 import type { CashOptionState, CommandContext, CommandEntry, CommandRuntime } from './actions';
@@ -297,9 +298,10 @@ export function useCommandCenter(options: CommandCenterOptions): { overlay: Reac
   // Estado del menú nativo: se informa solo cuando cambia.
   const context = contextOf(options);
   const enabledKey = enabledMenuActions(context).join(',');
+  const precheckKey = usePrecheckName().key;
   useEffect(() => {
-    reportNativeMenuState(enabledKey ? enabledKey.split(',') : []);
-  }, [enabledKey]);
+    reportNativeMenuState(enabledKey ? enabledKey.split(',') : [], precheckKey);
+  }, [enabledKey, precheckKey]);
 
   let overlay: ReactNode = null;
   if (palette && options.authenticated) {

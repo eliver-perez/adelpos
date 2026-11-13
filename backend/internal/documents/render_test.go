@@ -190,7 +190,7 @@ func TestEncodeESCPosWithAttributes(t *testing.T) {
 		{Text: "b\x1b", Size: SizeDoubleHeight},
 	}}
 	rasters := map[string]*Raster{"r": {WidthDots: 9, HeightDots: 1, Bits: []byte{0xff, 0x80}}}
-	got := EncodeESCPos(layout, rasters, true)
+	got := EncodeESCPos(layout, rasters, legacyFullCut)
 	want := []byte{0x1b, 0x40, 0x1b, 0x74, 0x02,
 		0x1d, 0x21, 0x11, 0x1b, 0x45, 0x01, 0xb5, 0x1b, 0x45, 0x00, 0x1d, 0x21, 0x00, '\n',
 		0x1d, 0x76, 0x30, 0x00, 0x02, 0x00, 0x01, 0x00, 0xff, 0x80,
@@ -201,7 +201,7 @@ func TestEncodeESCPosWithAttributes(t *testing.T) {
 	}
 	layout.TextSize = TextSizeLarge
 	layout.TrailingNewline = true
-	large := EncodeESCPos(layout, nil, false)
+	large := EncodeESCPos(layout, nil, NoPaperCut)
 	if !bytes.Contains(large, []byte{0x1d, 0x21, 0x11, 0x1b, 0x45, 0x00, 'b'}) || bytes.Contains(large, []byte{0x1d, 0x76}) ||
 		!bytes.HasSuffix(large, []byte{0x1d, 0x21, 0x00, '\n', '\n', '\n', '\n'}) {
 		t.Fatalf("El texto grande o la imagen sin bits no se codificaron como se espera: % x", large)
@@ -245,7 +245,7 @@ func TestUserTextWithControlsIsSanitized(t *testing.T) {
 		t.Fatalf("La observación conservó controles:\n%q", layout.Text())
 	}
 	layout.Lines[0].Bold = true
-	encoded := EncodeESCPos(layout, nil, true)
+	encoded := EncodeESCPos(layout, nil, legacyFullCut)
 	if bytes.Count(encoded, []byte{0x1d, 0x56}) != 1 || bytes.Count(encoded, []byte{0x1b, 0x40}) != 1 || bytes.Contains(encoded, []byte{0x1b, 0x70}) {
 		t.Fatal("Los bytes ESC/POS contienen comandos que no genera el controlador")
 	}

@@ -19,24 +19,25 @@ const toneLabels: Record<NoticeTone, string> = {
 };
 
 // Contenido de un aviso. Lo dibuja Sonner dentro de su pila, pero el marcado y el estilo son
-// propios: tokens del tema, texto legible en pantalla táctil, botón de cierre de 44 px y la acción
-// opcional. Los errores se anuncian como alerta; los demás, como estado.
+// propios: tokens del tema, texto legible en pantalla táctil, botón de cierre de 44 px y las acciones
+// opcionales (desde la etapa 9F pueden ser varias, una debajo de otra). Los errores se anuncian como
+// alerta; los demás, como estado. Cada acción cierra el aviso.
 export function AppToast({
   toastID,
   tone,
   message,
   description,
-  action,
+  actions = [],
   code,
 }: {
   toastID: string | number;
   tone: NoticeTone;
   message: string;
   description?: string;
-  action?: {
+  actions?: {
     label: string;
     onClick: () => void;
-  };
+  }[];
   code?: string;
 }) {
   return (
@@ -52,17 +53,22 @@ export function AppToast({
         <p className="app-toast-message">{message}</p>
         {description && <p className="app-toast-description">{description}</p>}
       </div>
-      {action && (
-        <button
-          type="button"
-          className="app-toast-action"
-          onClick={() => {
-            action.onClick();
-            toast.dismiss(toastID);
-          }}
-        >
-          {action.label}
-        </button>
+      {actions.length > 0 && (
+        <div className="app-toast-actions">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              className="app-toast-action"
+              onClick={() => {
+                action.onClick();
+                toast.dismiss(toastID);
+              }}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
       )}
       <button
         type="button"

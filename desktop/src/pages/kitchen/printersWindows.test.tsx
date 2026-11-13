@@ -35,6 +35,8 @@ const saved: Printer = {
   copies: 1,
   supports_cut: true,
   cut: true,
+  cut_mode: 'full',
+  cut_feed_lines: 4,
   cutter_option: '',
   accepts_escpos: false,
   columns: null,
@@ -137,7 +139,7 @@ describe('impresoras en Windows', () => {
     );
     expect(
       screen.getByText(
-        'Aceptado por la cola de impresión de Windows o por la conexión de red no confirma que salió papel. Los resultados inciertos no se reenvían automáticamente.',
+        '«Enviado a la impresora» significa que la cola de impresión de Windows o la impresora de red lo aceptó; no confirma que salió papel. Si no se sabe si salió, no se reenvía solo.',
       ),
     ).toBeTruthy();
     const usb = { id: 'p1', name: 'Caja', transport: 'cups', active: true, compatible: true };

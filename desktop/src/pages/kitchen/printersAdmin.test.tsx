@@ -102,6 +102,8 @@ const savedPrinter = (overrides: Partial<Printer> = {}): Printer => ({
   copies: 1,
   supports_cut: false,
   cut: false,
+  cut_mode: 'full',
+  cut_feed_lines: 3,
   cutter_option: '',
   accepts_escpos: false,
   columns: null,

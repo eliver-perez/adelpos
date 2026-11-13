@@ -19,7 +19,7 @@ func CommercialData(document *CommercialDocument) documents.CommercialData {
 	}
 	identity.Name = document.Establishment
 	data := documents.CommercialData{
-		Kind: documents.Kind(document.Kind), Folio: document.Folio, AccountName: document.AccountName, Context: document.Context,
+		Kind: documents.Kind(document.Kind), Title: document.Title, Folio: document.Folio, AccountName: document.AccountName, Context: document.Context,
 		LocalTime: document.LocalTime, Cashier: document.Cashier, Total: document.Total, USDTotal: document.USDTotal,
 		USDRate: document.USDRate, Paid: document.Paid, Tips: document.Tips, Balance: document.Balance, Identity: identity,
 		Lines:       make([]documents.CommercialLine, 0, len(document.Lines)),

@@ -3,7 +3,7 @@ import { Accordion } from '../../components/Accordion';
 import { Field, Form, Notice } from '../../components/Forms';
 import { Check, IntegerField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { preparationLabels, zonedInput } from '../../services/kitchen';
+import { preparationLabels, taskContext, zonedInput } from '../../services/kitchen';
 import type { Board, ExecuteKitchen, Release, Task } from '../../services/kitchen';
 import { notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
@@ -232,9 +232,7 @@ export function PreparationBoard({
                 <strong>{task.station_name}</strong>
                 <span className="kitchen-state-label">{preparationLabels[task.state]}</span>
               </div>
-              <p>
-                #{task.folio} · {task.account_name} · {task.table_name ?? 'Sin mesa'}
-              </p>
+              <p>{taskContext(task)}</p>
               <h3>
                 {tasks.length} × {task.instructions.name}
               </h3>

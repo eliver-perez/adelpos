@@ -240,10 +240,19 @@ describe('impresión y reimpresión según permisos', () => {
     expect(screen.queryByRole('button', { name: 'Imprimir' })).toBeNull();
     expect(screen.getByText(/Enviado a la impresora/)).toBeTruthy();
     fireEvent.click(reprint);
+    // Etapa 9F (decisión D3): el documento ya salió, así que reimprimirlo pide motivo.
+    const reason = screen.getByRole('form', { name: 'Reimpresión con motivo' });
+    fireEvent.change(within(reason).getByLabelText('Motivo de la reimpresión'), {
+      target: { value: 'Copia para el encargado' },
+    });
+    fireEvent.click(within(reason).getByRole('button', { name: 'Reimprimir' }));
     // El resultado de reimprimir es un aviso de confirmación, fuera del panel.
     const reprinted = await screen.findByRole('status', { name: 'Operación completada' });
     expect(reprinted.textContent).toContain('Documento enviado a la cola de impresión.');
     expect(sent('payments_reprint_cash_document')[0]?.resourceId).toBe('documento-1');
+    expect(sent('payments_reprint_cash_document')[0]?.body).toMatchObject({
+      reason: 'Copia para el encargado',
+    });
     cleanup();
 
     renderActions((permission) => permission !== 'cash.reports.reprint', [documentOf()]);

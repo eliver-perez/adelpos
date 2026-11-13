@@ -35,14 +35,49 @@ function checkoutStatus(page: Page) {
   return page.locator('.checkout-status');
 }
 
-// Configura la impresora de tickets en Cobros → Políticas con el destino controlado de la
+// Impresora de tickets de la aceptación (etapa 9F, decisión D4): desde la 9F una impresora de otra
+// terminal («Destino controlado E2E») ya no sirve para precuentas ni tickets, así que se registra una
+// cola del equipo que no existe en ningún equipo («ADEL_E2E_SIN_IMPRESORA»; en Windows, una impresora
+// instalada con ese nombre). Es una impresora válida que nunca imprime: cada trabajo termina en error
+// confirmado sin enviar nada, nunca hacia una impresora o cola real. Su firma está en
+// backend/internal/maintenance/signatures.go.
+export const receiptPrinterName = 'Tickets controlados E2E';
+export const receiptPrinterQueue = 'ADEL_E2E_SIN_IMPRESORA';
+
+async function registerReceiptPrinter(page: Page) {
+  await openSection(page, 'Cocina');
+  await page.getByRole('button', { name: 'Impresoras', exact: true }).click();
+  await page.getByRole('button', { name: 'Registrar impresora', exact: true }).click();
+  await page.getByLabel('Nombre descriptivo de impresora').fill(receiptPrinterName);
+  await chooseOption(page.getByRole('combobox', { name: 'Transporte de impresión', exact: true }), {
+    value: 'cups',
+  });
+  // macOS la llama «Nombre de cola CUPS»; Windows, «Nombre de la impresora en Windows».
+  await page
+    .getByRole('textbox', { name: /^(Nombre de cola CUPS|Nombre de la impresora en Windows)$/ })
+    .fill('ADEL_E2E_SIN_IMPRESORA');
+  // configureKitchen acaba de guardar otra impresora: un aviso idéntico la sustituiría y reiniciaría su
+  // tiempo (restaurant.spec.ts comprueba que cada éxito se cierre a sus 4 s), así que se espera a que
+  // se cierre antes de guardar.
+  await expect(notice(page, 'Impresora guardada.')).toHaveCount(0, { timeout: 10000 });
+  await page.getByRole('button', { name: 'Guardar impresora', exact: true }).click();
+  await expect(
+    page.getByRole('button', {
+      name: `Enviar una impresión de prueba a ${receiptPrinterName}`,
+      exact: true,
+    }),
+  ).toBeVisible();
+}
+
+// Configura la impresora de tickets en Cobros → Políticas con la impresora de tickets de la
 // aceptación (sin hardware). El ticket queda en la cola durable con su estado real.
 export async function configureReceiptPrinter(page: Page) {
+  await registerReceiptPrinter(page);
   await openAdministration(page, 'Cobros');
   await page.getByRole('button', { name: /Políticas de cobro/ }).click();
   await chooseOption(
     page.getByRole('combobox', { name: /Impresora de tickets/ }),
-    'Destino controlado E2E',
+    'Tickets controlados E2E',
   );
   await page.getByRole('button', { name: 'Guardar políticas', exact: true }).click();
   await expectSelectValue(page.getByRole('combobox', { name: /Impresora de tickets/ }), /.+/);
@@ -129,8 +164,8 @@ export async function checkDineInPayment(page: Page) {
   await expect(preview).toContainText('US$');
   const precheck = page.getByRole('region', { name: 'Precuenta' });
   await precheck.getByRole('button', { name: 'Imprimir precuenta', exact: true }).click();
-  // El destino de aceptación no tiene hardware: el trabajo queda en la cola con su estado real.
-  // El envío se confirma con un aviso del sistema único de mensajes.
+  // La impresora de tickets de la aceptación no tiene hardware: el trabajo queda en la cola con su
+  // estado real. El envío se confirma con un aviso del sistema único de mensajes.
   await expect(notice(page, /Precuenta.*(cola|Cola) de impresión/)).toBeVisible();
   await precheck.getByRole('button', { name: 'Volver', exact: true }).click();
 

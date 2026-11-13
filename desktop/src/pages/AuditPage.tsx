@@ -31,6 +31,19 @@ const actionLabels: Record<string, string> = {
   'inventory.cancellation_preclassified': 'Cancelación preclasificada como merma',
   // Etapa 9F: «Quitar datos de prueba» (también el intento sin respaldo, con resultado fallido).
   'maintenance.test_data_removed': 'Datos de prueba quitados',
+  // Etapa 9F (fase B): impresoras (corte de papel incluido), reintentos sin motivo y reimpresiones con
+  // motivo, y la configuración de cobro que guarda el nombre de la precuenta.
+  'kitchen.printer.saved': 'Impresora guardada',
+  'kitchen.print.retry': 'Reintento de impresión',
+  'kitchen.print.resolve': 'Resultado de impresión resuelto',
+  'kitchen.print.reprinted': 'Copia adicional solicitada',
+  'payments.settings_changed': 'Políticas de cobro cambiadas',
+  'payments.precheck_printed': 'Precuenta impresa',
+  'payments.receipt_printed': 'Ticket de pago impreso después del pago',
+  'payments.document_retried': 'Reintento de impresión de un documento',
+  'payments.document_reprinted': 'Reimpresión de un documento',
+  'cash.document_retried': 'Reintento de impresión de un documento de caja',
+  'cash.document_reprinted': 'Reimpresión de un documento de caja',
 };
 
 export function AuditPage() {

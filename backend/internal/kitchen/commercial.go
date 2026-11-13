@@ -95,6 +95,37 @@ func EnqueueCommercial(ctx context.Context, tx pgx.Tx, input CommercialPrint) (*
 	return job, ticketID, handler.history("print."+input.Kind+"_requested", &job.ID, nil, job)
 }
 
+// Impresora válida para precuentas, tickets y documentos de caja (etapa 9F, §4.1, decisión D4): configurada,
+// activa y con un transporte que ya imprime (no la impresora de otra terminal, «agent»). Sin ella, el módulo
+// de pagos avisa en el momento con «Configurar impresora» y no encola un trabajo que no podría salir.
+
+// PrinterProblem devuelve por qué una impresora no puede imprimir esos documentos: ProblemInactive o
+// ProblemUnsupported; vacío si puede.
+func PrinterProblem(printer *Printer) string {
+	if !printer.Active {
+		return ProblemInactive
+	}
+	if printer.Transport == "agent" {
+		return ProblemUnsupported
+	}
+	return ""
+}
+
+// UnavailablePrinterError es el rechazo 409 PRINTER_UNAVAILABLE de una impresora que no puede imprimir, con
+// el motivo y su nombre en los detalles públicos.
+func UnavailablePrinterError(problem, name string) error {
+	return &Error{Status: 409, Code: "PRINTER_UNAVAILABLE", Message: UnavailablePrinterMessage(problem, name),
+		Details: map[string]string{"problem": problem, "printer_name": name}}
+}
+
+// UnavailablePrinterMessage es el texto del motivo para el restaurante.
+func UnavailablePrinterMessage(problem, name string) string {
+	if problem == ProblemInactive {
+		return inactivePrinterMessage(name)
+	}
+	return unsupportedPrinterMessage
+}
+
 // RenderedPrint es una muestra del diseñador o un histórico impreso con la plantilla vigente (etapa
 // 9B). Printer, si existe, es la fotografía de la impresora del documento original y prevalece
 // sobre PrinterID (la impresora vigente elegida para una muestra).
@@ -143,7 +174,12 @@ func EnqueueRendered(ctx context.Context, tx pgx.Tx, input RenderedPrint) (*Prin
 // ReprintCommercial solicita otra copia idéntica de un documento comercial. Como en las comandas,
 // se rechaza mientras exista otra copia pendiente o sin resolver del documento, exacta o con la
 // plantilla vigente.
-func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, actorID, deviceID string) (*PrintJob, error) {
+func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, reason, operationID, actorID, deviceID string) (*PrintJob, error) {
+	// Etapa 9F (decisión D3): reimprimir un documento que ya salió (o se canceló) pide motivo, como la
+	// copia adicional de la cola; queda en el historial del trabajo y en la auditoría de quien lo pide.
+	if err := validReason(reason); err != nil {
+		return nil, err
+	}
 	var kind string
 	if err := tx.QueryRow(ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", ticketID).Scan(&kind); err != nil {
 		return nil, err
@@ -170,7 +206,7 @@ func ReprintCommercial(ctx context.Context, tx pgx.Tx, ticketID, operationID, ac
 	if err != nil {
 		return nil, err
 	}
-	return job, handler.history("print.reprinted", &job.ID, nil, job)
+	return job, handler.history("print.reprinted", &job.ID, nil, map[string]any{"job": job, "reason": reason})
 }
 
 // DrawerPulse es la orden de apertura del cajón: el pin del conector (0 = pin 2, 1 = pin 5). El

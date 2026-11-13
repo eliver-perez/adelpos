@@ -18,6 +18,9 @@ type Settings struct {
 	ReceiptPrinterID             *string  `json:"receipt_printer_id"`
 	ReceiptPrinterName           *string  `json:"receipt_printer_name"`
 	RefundAuthorizationThreshold *string  `json:"refund_authorization_threshold"`
+	// PrecheckName es el nombre visible del documento previo al cobro (etapa 9F, §4.5): precheck
+	// («Precuenta»), sales_ticket («Ticket de venta») o bill («Cuenta»).
+	PrecheckName string `json:"precheck_name"`
 	// Rango aceptable del tipo de cambio (MXN por USD) y diferencia contra el turno anterior que
 	// exige confirmación. Solo se aplican con la función usd_cash activa.
 	USDRateMin          string    `json:"usd_rate_min"`
@@ -32,11 +35,11 @@ func (handler *service) settings() (*Settings, error) {
 	var rate int
 	err := handler.tx.QueryRow(handler.ctx, `SELECT s.tax_rate,s.shared_shifts,s.print_receipt_default,s.receipt_printer_id,p.name,
         s.refund_authorization_threshold::text,s.usd_rate_min::text,s.usd_rate_max::text,s.usd_rate_alert_percent::text,
-        s.revision,s.updated_at
+        s.precheck_name,s.revision,s.updated_at
         FROM app.payment_settings s LEFT JOIN app.kitchen_printers p ON p.id=s.receipt_printer_id`).Scan(
 		&rate, &settings.SharedShifts, &settings.PrintReceiptDefault, &settings.ReceiptPrinterID, &settings.ReceiptPrinterName,
 		&settings.RefundAuthorizationThreshold, &settings.USDRateMin, &settings.USDRateMax, &settings.USDRateAlertPercent,
-		&settings.Revision, &settings.UpdatedAt)
+		&settings.PrecheckName, &settings.Revision, &settings.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -57,9 +60,14 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 		PrintReceiptDefault          bool    `json:"print_receipt_default"`
 		ReceiptPrinterID             *string `json:"receipt_printer_id"`
 		RefundAuthorizationThreshold *string `json:"refund_authorization_threshold"`
+		// Opcional (etapa 9F): un cliente anterior que no lo envía conserva el nombre guardado.
+		PrecheckName *string `json:"precheck_name"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
+	}
+	if input.PrecheckName != nil && !ValidPrecheckName(*input.PrecheckName) {
+		return nil, invalid("Elige el nombre de la precuenta: Precuenta, Ticket de venta o Cuenta.")
 	}
 	previous, err := handler.settings()
 	if err != nil {
@@ -89,9 +97,13 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 			return nil, invalid("La impresora de tickets no existe.")
 		}
 	}
+	precheckName := previous.PrecheckName
+	if input.PrecheckName != nil {
+		precheckName = *input.PrecheckName
+	}
 	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.payment_settings SET shared_shifts=$1,print_receipt_default=$2,
-        receipt_printer_id=$3,refund_authorization_threshold=$4::numeric,revision=revision+1,updated_at=now()`,
-		input.SharedShifts, input.PrintReceiptDefault, input.ReceiptPrinterID, threshold)
+        receipt_printer_id=$3,refund_authorization_threshold=$4::numeric,precheck_name=$5,revision=revision+1,updated_at=now()`,
+		input.SharedShifts, input.PrintReceiptDefault, input.ReceiptPrinterID, threshold, precheckName)
 	if err != nil {
 		return nil, err
 	}

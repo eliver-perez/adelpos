@@ -478,6 +478,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             Method::POST,
             format!("payments/cash-documents/{identifier}/reprint"),
         ),
+        // Etapa 9F (§4.2): reintentar sin motivo un documento de caja que nunca salió en papel.
+        "payments_retry_cash_document" => (
+            Method::POST,
+            format!("payments/cash-documents/{identifier}/retry"),
+        ),
         "payments_shift_documents" => (
             Method::GET,
             format!("payments/shifts/{identifier}/documents"),
@@ -553,6 +558,16 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "payments_reprint" => (
             Method::POST,
             format!("payments/accounts/{identifier}/documents/reprint"),
+        ),
+        // Etapa 9F (§4.1 y §4.2): reintentar sin motivo una precuenta o un ticket que nunca salió en
+        // papel e imprimir el ticket de un pago que no se imprimió por falta de impresora.
+        "payments_retry_document" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/documents/retry"),
+        ),
+        "payments_print_receipt" => (
+            Method::POST,
+            format!("payments/accounts/{identifier}/documents/receipt"),
         ),
         // Etapa 9B: ticket, precuenta o documento de caja histórico con la plantilla vigente.
         "payments_rerender" => (
@@ -2141,6 +2156,33 @@ mod tests {
             );
         }
         assert!(route("maintenance_backup", None).is_err());
+    }
+
+    #[test]
+    fn printing_retry_routes_need_one_identifier() {
+        // Etapa 9F: reintentar un documento desde su aviso e imprimir el ticket de un pago.
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        for (operation, path) in [
+            (
+                "payments_retry_document",
+                format!("payments/accounts/{identifier}/documents/retry"),
+            ),
+            (
+                "payments_print_receipt",
+                format!("payments/accounts/{identifier}/documents/receipt"),
+            ),
+            (
+                "payments_retry_cash_document",
+                format!("payments/cash-documents/{identifier}/retry"),
+            ),
+        ] {
+            assert_eq!(
+                route(operation, Some(identifier)).unwrap(),
+                (Method::POST, path)
+            );
+            assert!(route(operation, Some("../../kitchen/jobs")).is_err());
+            assert!(route(operation, None).is_err());
+        }
     }
 
     #[test]

@@ -599,6 +599,7 @@ func testPayments(t *testing.T, base *restaurantFixture) {
 
 	testPaymentAdjustments(t, fixture)
 	testPaymentDocuments(t, fixture)
+	testPrintingStage9F(t, fixture)
 	testProductTaxRates(t, fixture)
 	testPaymentsUSD(t, fixture)
 	testCashShifts(t, fixture)

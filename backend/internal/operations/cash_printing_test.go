@@ -299,7 +299,7 @@ func testCashReprints(t *testing.T, fixture *printingFixture) {
 		voucher := fixture.documents["withdrawal"]
 		route := "payments/cash-documents/" + voucher.DocumentID + "/reprint"
 		// Con el trabajo original pendiente no se generan copias descontroladas.
-		fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": randomID()}, 400)
+		fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 400)
 		if jobs := fixture.processOnly(t, voucher.JobID, "submitted"); len(jobs) != 1 || jobs[0].ID != voucher.JobID {
 			t.Fatalf("El adaptador controlado no recibió el comprobante: %+v", jobs)
 		}
@@ -316,8 +316,8 @@ func testCashReprints(t *testing.T, fixture *printingFixture) {
 			t.Fatal(err)
 		}
 		operationID := randomID()
-		first := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": operationID}, 200))
-		again := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": operationID}, 200))
+		first := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": operationID, "reason": "Copia para el encargado"}, 200))
+		again := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": operationID, "reason": "Copia para el encargado"}, 200))
 		if first.JobID == "" || first.JobID != again.JobID || first.Status != "pending" {
 			t.Fatalf("La reimpresión no es idempotente: %+v / %+v", first, again)
 		}
@@ -327,7 +327,7 @@ func testCashReprints(t *testing.T, fixture *printingFixture) {
 		if fixture.jobContent(t, first.JobID) != fixture.jobContent(t, voucher.JobID) {
 			t.Fatal("La copia no conserva el contenido del original")
 		}
-		if errorCode(t, fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": randomID()}, 409)) != "PRINT_COPY_PENDING" {
+		if errorCode(t, fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 409)) != "PRINT_COPY_PENDING" {
 			t.Fatal("Se aceptó otra copia con una pendiente")
 		}
 		for index, query := range financial {
@@ -354,8 +354,8 @@ func testCashReprints(t *testing.T, fixture *printingFixture) {
 		visible := fixture.documents["partial_visible"]
 		route := "payments/cash-documents/" + visible.DocumentID + "/reprint"
 		fixture.processOnly(t, visible.JobID, "submitted")
-		fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": randomID()}, 403)
-		copy := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.supervisor, "POST", route, map[string]any{"operation_id": randomID()}, 200))
+		fixture.call(t, fixture.cashier, "POST", route, map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 403)
+		copy := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.supervisor, "POST", route, map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 200))
 		if !copy.IncludesExpected || copy.JobID == visible.JobID {
 			t.Fatalf("La reimpresión del corte con esperado es incoherente: %+v", copy)
 		}
@@ -836,7 +836,7 @@ func testFinalCutPrinting(t *testing.T, fixture *printingFixture) {
 			t.Fatalf("La vista previa del corte definitivo sin permiso es incorrecta:\n%s", preview.Content)
 		}
 		fixture.processOnly(t, printed.JobID, "submitted")
-		fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+printed.DocumentID+"/reprint", map[string]any{"operation_id": randomID()}, 403)
+		fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+printed.DocumentID+"/reprint", map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 403)
 		// Apertura, conteo, cierre y comentario del turno también publicaron su evento de caja.
 		fixture.shiftCall(t, fixture.admin, "POST", shiftID, "closure/comments", map[string]any{"comment": "Revisado sin observaciones"}, 200)
 		for _, kind := range []string{"cash.shift.opened", "cash.closing.count_saved", "cash.shift.closed", "cash.closure.commented"} {

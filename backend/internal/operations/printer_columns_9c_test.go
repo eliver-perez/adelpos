@@ -203,7 +203,7 @@ func testStage9CPrinterColumns(t *testing.T, fixture *stage9BFixture) {
 		fixture.settle(t, precheck.JobID)
 		tickets = fixture.saveColumns(t, tickets, 58, nil, 200)
 		copied := decodeResponse[printingResult](t, fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/reprint",
-			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 200))
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "Copia para el cliente"}, 200))
 		if fixture.job(t, copied.JobID).content != original.content {
 			t.Fatal("La reimpresión de la precuenta no conservó sus 32 columnas")
 		}

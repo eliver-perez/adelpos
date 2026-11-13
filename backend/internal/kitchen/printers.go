@@ -1,6 +1,7 @@
 package kitchen
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"regexp"
@@ -32,6 +33,9 @@ func validatePrinter(printer *Printer) error {
 	if !slices.Contains([]int{58, 80}, printer.PaperWidth) || printer.Copies < 1 || printer.Copies > 3 ||
 		printer.Port < 9100 || printer.Port > 9109 || (printer.Cut && !printer.SupportsCut) {
 		return invalid("Revisa papel (58/80 mm), copias (1–3), puerto (9100–9109) y capacidad de corte.")
+	}
+	if err := validatePaperCut(*printer); err != nil {
+		return err
 	}
 	// Columnas de texto (etapa 9C, §5.3): lista cerrada por papel. Cambiar el papel sin elegir de
 	// nuevo unas columnas válidas se rechaza con el motivo; el predeterminado se guarda como NULL.
@@ -80,6 +84,84 @@ func validatePrinter(printer *Printer) error {
 		}
 	}
 	return nil
+}
+
+// Tipos de corte de papel (etapa 9F, §4.4): la lista cerrada de Go y del CHECK de la 0022.
+const (
+	CutFull    = "full"
+	CutPartial = "partial"
+)
+
+// validatePaperCut valida el tipo de corte y los renglones de avance. Vacíos (una fotografía anterior a
+// la 9F o un cliente que no los envía) son válidos: el corte es total con los tres saltos de siempre.
+func validatePaperCut(printer Printer) error {
+	if printer.CutMode != "" && printer.CutMode != CutFull && printer.CutMode != CutPartial {
+		return invalid("Elige corte total o parcial.")
+	}
+	if printer.CutFeedLines != nil && (*printer.CutFeedLines < 0 || *printer.CutFeedLines > documents.MaxCutFeedLines) {
+		return invalid("Los renglones de avance antes del corte van de 0 a 8.")
+	}
+	return nil
+}
+
+// PaperCut es el final de cada documento de la impresora: con «Cortar el papel al terminar», sus renglones
+// de avance y el corte total o parcial; sin corte, los tres saltos de siempre. Una fotografía anterior a
+// la etapa 9F (sin tipo ni avance) corta como entonces: total y con tres saltos.
+func (printer Printer) PaperCut() documents.PaperCut {
+	feed := documents.LegacyCutFeedLines
+	if printer.CutFeedLines != nil {
+		feed = *printer.CutFeedLines
+	}
+	return documents.PaperCut{
+		Enabled:   printer.Cut && printer.SupportsCut,
+		Partial:   printer.CutMode == CutPartial,
+		FeedLines: feed,
+	}
+}
+
+// presentFields lee qué campos trae el cuerpo JSON: un cliente anterior a la etapa 9F no envía el tipo de
+// corte ni el avance, y una impresora nueva sin «cut» recibe el corte predeterminado de su papel.
+func presentFields(body []byte) map[string]bool {
+	var raw map[string]json.RawMessage
+	present := map[string]bool{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return present
+	}
+	for key := range raw {
+		present[key] = true
+	}
+	return present
+}
+
+// applyCutDefaults completa el corte de papel antes de validar (etapa 9F, decisión D5):
+//   - una impresora nueva sin «cut» corta al terminar si su papel es de 80 mm (las de 58 mm muchas veces no
+//     tienen cortador); sin tipo, corte total; sin avance, 4 renglones;
+//   - al editar, lo que el cliente no envía conserva lo guardado (compatibilidad de la API);
+//   - supports_cut sigue a cut: ya no hacen falta dos casillas para cortar.
+func applyCutDefaults(printer *Printer, before *Printer, present map[string]bool) {
+	if before == nil {
+		if !present["cut"] {
+			printer.Cut = printer.PaperWidth == 80 || printer.PaperWidth == 0
+		}
+		if printer.CutMode == "" {
+			printer.CutMode = CutFull
+		}
+		if printer.CutFeedLines == nil {
+			feed := documents.DefaultCutFeedLines
+			printer.CutFeedLines = &feed
+		}
+	} else {
+		if !present["cut"] {
+			printer.Cut = before.Cut
+		}
+		if printer.CutMode == "" {
+			printer.CutMode = before.CutMode
+		}
+		if printer.CutFeedLines == nil {
+			printer.CutFeedLines = before.CutFeedLines
+		}
+	}
+	printer.SupportsCut = printer.Cut
 }
 
 // validateCUPSQueue valida el destino de una impresora en una cola CUPS: el nombre de la cola
@@ -135,6 +217,15 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 		return nil, err
 	}
 	printer := input.Printer
+	var before *Printer
+	if len(parts) == 2 {
+		var err error
+		before, err = one[Printer](handler.ctx, handler.tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", parts[1])
+		if err != nil {
+			return nil, err
+		}
+	}
+	applyCutDefaults(&printer, before, presentFields(handler.request.Body))
 	if err := validatePrinter(&printer); err != nil {
 		return nil, err
 	}
@@ -153,34 +244,30 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 			return nil, invalid("Los destinos de respaldo no pueden formar ciclos.")
 		}
 	}
-	var before *Printer
 	if len(parts) == 1 {
 		if printer.ID != "" || printer.Revision != 0 {
 			return nil, invalid("La impresora nueva no reutiliza identidad ni revisión.")
 		}
 		printer.ID = events.NewID()
 		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_printers(id,name,transport,destination,port,paper_width,
-            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos,"columns")
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos,"columns",cut_mode,cut_feed_lines)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 			printer.ID, printer.Name, printer.Transport, printer.Destination, printer.Port, printer.PaperWidth, printer.Copies,
-			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos, printer.Columns)
+			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos, printer.Columns,
+			printer.CutMode, printer.CutFeedLines)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		var err error
-		before, err = one[Printer](handler.ctx, handler.tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", parts[1])
-		if err != nil {
-			return nil, err
-		}
 		if printer.ID != parts[1] || printer.Revision != before.Revision {
 			return nil, conflict()
 		}
-		_, err = handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_printers SET name=$1,transport=$2,destination=$3,port=$4,
+		_, err := handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_printers SET name=$1,transport=$2,destination=$3,port=$4,
             paper_width=$5,copies=$6,supports_cut=$7,cut=$8,cutter_option=$9,active=$10,fallback_id=$11,accepts_escpos=$12,
-            "columns"=$13,revision=revision+1,updated_at=now() WHERE id=$14`, printer.Name, printer.Transport, printer.Destination,
-			printer.Port, printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active,
-			printer.FallbackID, printer.AcceptsESCPos, printer.Columns, printer.ID)
+            "columns"=$13,cut_mode=$14,cut_feed_lines=$15,revision=revision+1,updated_at=now() WHERE id=$16`, printer.Name,
+			printer.Transport, printer.Destination, printer.Port, printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut,
+			printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos, printer.Columns, printer.CutMode,
+			printer.CutFeedLines, printer.ID)
 		if err != nil {
 			return nil, err
 		}

@@ -49,7 +49,11 @@ type DocumentPayment struct {
 // USDRate son el total equivalente en dólares (etapa 7.1, informativo): solo con usd_cash activa y
 // tipo de cambio del turno disponible; nil en otro caso. No alteran ningún importe.
 type CommercialDocument struct {
-	Kind          string               `json:"kind"`
+	Kind string `json:"kind"`
+	// Title es el encabezado impreso de una precuenta con otro nombre visible (etapa 9F, §4.5: «TICKET DE
+	// VENTA» o «CUENTA»); vacío con «Precuenta», como los documentos anteriores. Se guarda con el
+	// documento: su reimpresión conserva el nombre con el que se emitió.
+	Title         string               `json:"title,omitempty"`
 	Establishment string               `json:"establishment"`
 	Folio         int64                `json:"folio"`
 	AccountName   string               `json:"account_name"`
@@ -95,11 +99,20 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 	if finance.Mode == "dine_in" {
 		context = "Salón"
 		if finance.TableName != nil {
-			context = "Mesa " + *finance.TableName
+			// Etapa 9F (§4.6): «Mesa 1», nunca «Mesa Mesa 1».
+			context = documents.TableContext(*finance.TableName)
 		}
 	}
+	title := ""
+	if kind == "precheck" {
+		settings, err := handler.settings()
+		if err != nil {
+			return nil, nil, err
+		}
+		title = printedPrecheckTitle(settings.PrecheckName)
+	}
 	document := &CommercialDocument{
-		Kind: kind, Establishment: establishment, Folio: finance.Folio, AccountName: finance.Name, Context: context,
+		Kind: kind, Title: title, Establishment: establishment, Folio: finance.Folio, AccountName: finance.Name, Context: context,
 		IssuedAt: issued, LocalTime: issued.In(location).Format("02/01/2006 15:04"), Cashier: cashier,
 		Lines: []DocumentLine{}, Adjustments: []DocumentAdjustment{}, Tax: finance.Tax, TaxBase: finance.TaxBase,
 		TaxTotal: finance.TaxTotal, Total: finance.Total, Payments: []DocumentPayment{}, Paid: finance.Paid,
@@ -209,29 +222,31 @@ func (handler *service) requirePrintPermission(print *bool) error {
 	return nil
 }
 
-// enqueueDocument encola un documento comercial en la impresora de tickets configurada.
+// enqueueDocument encola un documento comercial en la impresora de tickets configurada. Sin una impresora
+// válida (etapa 9F, decisión D4) no se encola nada: la precuenta se rechaza con el motivo y el ticket de
+// pago responde not_configured con el motivo, sin hacer fallar el pago.
 func (handler *service) enqueueDocument(finance *Finance, kind string, payment *PaymentRecord) (map[string]any, error) {
-	settings, err := handler.settings()
+	printer, problem, err := handler.receiptPrinter()
 	if err != nil {
 		return nil, err
 	}
-	if settings.ReceiptPrinterID == nil {
-		return map[string]any{"requested": true, "status": "not_configured",
-			"message": "No hay impresora de tickets configurada; el pago quedó registrado."}, nil
+	if problem != "" {
+		if kind == "precheck" {
+			return nil, handler.printerUnavailableError(documentPrecheck, problem, printer)
+		}
+		outcome := handler.unavailableOutcome(documentReceipt, problem, printer, "el pago")
+		return map[string]any{"requested": true, "status": outcome.Status, "problem": outcome.Problem,
+			"printer_name": outcome.PrinterName, "message": outcome.Message}, nil
 	}
 	// El documento se renderiza con el papel y las columnas de la impresora de tickets (etapa 9C);
 	// con las predeterminadas, exactamente como antes.
-	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *settings.ReceiptPrinterID)
-	if err != nil {
-		return nil, err
-	}
 	document, layout, err := handler.buildDocument(finance, kind, payment, printer.RenderOptions())
 	if err != nil {
 		return nil, err
 	}
 	job, ticketID, err := kitchen.EnqueueCommercial(handler.ctx, handler.tx, kitchen.CommercialPrint{
 		Kind: kind, Document: document, Content: document.Content, Layout: layout, TemplateVersionID: document.TemplateVersionID,
-		PrinterID:   *settings.ReceiptPrinterID,
+		PrinterID:   printer.ID,
 		OperationID: handler.operationID, ActorID: handler.request.Actor.UserID, DeviceID: handler.request.Actor.DeviceID,
 	})
 	if err != nil {
@@ -310,20 +325,19 @@ func (handler *service) printPrecheck(parts []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if result["status"] == "not_configured" {
-		return nil, conflict("PRINTER_NOT_CONFIGURED", "No hay impresora de tickets configurada en Cobros.")
-	}
 	if err := events.Append(handler.ctx, handler.tx, "payments.document.printed", handler.scope(finance), &finance.AccountID, nil); err != nil {
 		return nil, err
 	}
 	return result, handler.audit(handler.ctx, handler.tx, "payments.precheck_printed", "account", &finance.AccountID, nil, result)
 }
 
-// reprintDocument solicita otra copia idéntica de un ticket o precuenta, sin duplicar el pago.
+// reprintDocument solicita otra copia idéntica de un ticket o precuenta, sin duplicar el pago. Desde la
+// etapa 9F (decisión D3) pide motivo: el documento ya salió (o se canceló) y la copia es adicional.
 func (handler *service) reprintDocument(parts []string) (any, error) {
 	var input struct {
 		OperationID string `json:"operation_id"`
 		TicketID    string `json:"ticket_id"`
+		Reason      string `json:"reason"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
@@ -339,24 +353,29 @@ func (handler *service) reprintDocument(parts []string) (any, error) {
 	if !found {
 		return nil, notFound("El documento no pertenece a esta cuenta.")
 	}
-	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, input.TicketID, handler.operationID, handler.request.Actor.UserID, handler.request.Actor.DeviceID)
+	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, input.TicketID, input.Reason, handler.operationID,
+		handler.request.Actor.UserID, handler.request.Actor.DeviceID)
 	if err != nil {
 		return nil, err
 	}
 	accountID := parts[1]
-	if err := handler.audit(handler.ctx, handler.tx, "payments.document_reprinted", "account", &accountID, nil, map[string]string{"ticket_id": input.TicketID, "job_id": job.ID}); err != nil {
+	if err := handler.audit(handler.ctx, handler.tx, "payments.document_reprinted", "account", &accountID, nil,
+		map[string]string{"ticket_id": input.TicketID, "job_id": job.ID, "reason": input.Reason}); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": job.State, "job_id": job.ID, "ticket_id": input.TicketID}, nil
 }
 
 type DocumentRecord struct {
-	TicketID    string    `json:"ticket_id"`
-	Kind        string    `json:"kind"`
-	PaymentID   *string   `json:"payment_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	JobID       *string   `json:"job_id"`
-	JobState    *string   `json:"job_state"`
-	PrinterName *string   `json:"printer_name"`
-	Copies      int       `json:"copies"`
+	TicketID  string    `json:"ticket_id"`
+	Kind      string    `json:"kind"`
+	PaymentID *string   `json:"payment_id"`
+	CreatedAt time.Time `json:"created_at"`
+	JobID     *string   `json:"job_id"`
+	JobState  *string   `json:"job_state"`
+	// JobProblem es la clave del problema del último trabajo si exige atención (etapa 9F,
+	// kitchen/print_problems.go): la interfaz explica qué pasó y ofrece «Reintentar».
+	JobProblem  *string `json:"job_problem"`
+	PrinterName *string `json:"printer_name"`
+	Copies      int     `json:"copies"`
 }

@@ -205,9 +205,19 @@ func (handler *service) enqueueContent(ticketID string, printer Printer, origina
 func (handler *service) enqueueJob(ticketID string, printer Printer, originalID *string, content string, layout *documents.Layout) (*PrintJob, error) {
 	state := "pending"
 	message := ""
+	var result any
+	// Una impresora desactivada o de otra terminal (agente) no puede imprimir: el trabajo queda en
+	// «Requiere intervención» con el motivo en palabras del restaurante (etapa 9F, §4.3). Las precuentas,
+	// los tickets y los documentos de caja ya no llegan aquí con esas impresoras (decisión D4).
 	if !printer.Active || printer.Transport == "agent" {
 		state = "intervention"
-		message = "El destino está inactivo o requiere un agente de impresión aún no implementado."
+		code := ProblemUnsupported
+		message = unsupportedPrinterMessage
+		if !printer.Active {
+			code = ProblemInactive
+			message = inactivePrinterMessage(printer.Name)
+		}
+		result = Outcome{State: state, Code: code, Message: message}
 	}
 	jobID := events.NewID()
 	var operationID *string
@@ -218,9 +228,13 @@ func (handler *service) enqueueJob(ticketID string, printer Printer, originalID 
 	if layout != nil {
 		storedLayout = encoded(layout)
 	}
+	var storedResult []byte
+	if result != nil {
+		storedResult = encoded(result)
+	}
 	_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_print_jobs(id,ticket_id,printer_id,operation_id,original_job_id,
-        printer_snapshot,content,state,last_error,layout) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, jobID, ticketID, printer.ID,
-		operationID, originalID, encoded(printer), content, state, message, storedLayout)
+        printer_snapshot,content,state,last_error,layout,result) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,coalesce($11,'{}'::jsonb))`, jobID, ticketID,
+		printer.ID, operationID, originalID, encoded(printer), content, state, message, storedLayout, storedResult)
 	if err != nil {
 		return nil, err
 	}
