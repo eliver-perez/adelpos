@@ -224,7 +224,7 @@ func TestWindowsQueueFormattedDocumentAlwaysESCPos(t *testing.T) {
 	if outcome.State != "submitted" || strings.Contains(outcome.Message, "logotipo") || strings.Contains(outcome.Message, "sin formato") {
 		t.Fatalf("El documento con formato quedó mal registrado: %+v", outcome)
 	}
-	single := documents.EncodeESCPos(job.Layout, job.Rasters, true)
+	single := documents.EncodeESCPos(job.Layout, job.Rasters, legacyFullCut)
 	if !bytes.Equal(spooler.written, append(append([]byte{}, single...), single...)) {
 		t.Fatalf("No se entregaron los bytes ESC/POS del layout dos veces: % x", spooler.written)
 	}
@@ -238,7 +238,7 @@ func TestWindowsQueueFormattedDocumentAlwaysESCPos(t *testing.T) {
 	if withoutLogo.State != "submitted" || !strings.HasSuffix(withoutLogo.Message, missingLogoNote) {
 		t.Fatalf("Sin los bits del logotipo no se avisó: %+v", withoutLogo)
 	}
-	if !bytes.Contains(missing.written, documents.EncodeESCPos(job.Layout, nil, true)) {
+	if !bytes.Contains(missing.written, documents.EncodeESCPos(job.Layout, nil, legacyFullCut)) {
 		t.Fatal("Sin logotipo no se entregó el resto del documento")
 	}
 }

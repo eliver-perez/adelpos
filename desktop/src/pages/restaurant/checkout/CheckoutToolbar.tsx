@@ -1,3 +1,4 @@
+import { usePrecheckName } from '../../../services/documentNames';
 import { IconLabel } from '../../../components/Icon';
 import { SegmentedControl } from '../../../components/SegmentedControl';
 import type { Bill } from '../../../services/restaurant';
@@ -21,6 +22,8 @@ export function CheckoutToolbar({
   onMode: (mode: CheckoutMode) => void;
   onShortcut: (shortcut: CheckoutShortcut) => void;
 }) {
+  // Etapa 9F (§4.5): el nombre visible de la precuenta que eligió el restaurante.
+  const precheck = usePrecheckName();
   const account = bill.account;
   const writable =
     account.state === 'open' && (account.mode !== 'takeaway' || can('takeaway.manage'));
@@ -46,7 +49,7 @@ export function CheckoutToolbar({
       )}
       {can('payments.read') && account.confirmed_quantity > 0 && (
         <button type="button" className="secondary-button" onClick={() => onShortcut('precheck')}>
-          <IconLabel icon="receipt">Precuenta</IconLabel>
+          <IconLabel icon="receipt">{precheck.label}</IconLabel>
         </button>
       )}
       {adjustmentsAvailable(account, can) && (

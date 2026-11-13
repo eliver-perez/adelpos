@@ -9,7 +9,9 @@ import { notice } from './notices';
 // la base de cada motor y varias esperan folios y configuraciones de una instalación recién creada.
 //
 // Etapa 9B, fase C: editor visual de documentos contra Go y PostgreSQL reales. Antes de editar se
-// cobra un ticket (por la API) que queda en la cola con el destino controlado «agent». Después, en
+// cobra un ticket (por la API) que queda en la cola de la impresora de tickets de la aceptación (desde
+// la etapa 9F, una cola del equipo que no existe: el destino «agent» ya no sirve para tickets y las
+// muestras siguen yendo a él). Después, en
 // la interfaz: abrir Documentos, duplicar el ticket predeterminado, agregar un texto fijo, cambiar
 // su alineación y tamaño, ver la vista previa a 58 y 80 mm, guardar la versión 2, activarla,
 // imprimir una muestra en el destino controlado (nunca CUPS ni TCP reales) y ver su estado,
@@ -23,6 +25,9 @@ type Driver = Awaited<ReturnType<typeof installDriver>>;
 const fixedText = 'GRACIAS 9B';
 const templateName = 'Ticket de la casa 9B';
 const printerName = 'Destino controlado 9B';
+// Etapa 9F (decisión D4): impresora de tickets válida que nunca imprime (cola inexistente); su firma está
+// en backend/internal/maintenance/signatures.go.
+const receiptPrinterName = 'Tickets controlados 9B';
 const customer = 'Cliente diseñador 9B';
 
 async function call(driver: Driver, method: string, route: string, body?: unknown) {
@@ -86,31 +91,50 @@ async function checkLayout(page: Page, testInfo: TestInfo, name: string) {
   await setTheme(page, 'light');
 }
 
-// Espera a que un trabajo de la cola deje de estar pendiente (el destino «agent» queda en
-// intervención: no hay hardware).
+// Espera a que un trabajo de la cola llegue a un estado que ya no cambia solo: el destino «agent» queda
+// en intervención y la cola inexistente, en error tras los tres intentos automáticos (unos 6 s), de modo
+// que resolverlo después no compite con el trabajador.
 async function settledJob(driver: Driver, jobID: string) {
-  let job: { id: string; state: string; revision: number } | null = null;
+  let job: { id: string; state: string; revision: number; attempts: number } | null = null;
   await expect
     .poll(
       async () => {
         job = (await call(driver, 'GET', `kitchen/jobs/${jobID}`)).job;
+        if (job!.state === 'error' && job!.attempts < 3) {
+          return 'reintentándose';
+        }
         return job!.state;
       },
-      { timeout: 20000 },
+      { timeout: 30000 },
     )
-    .not.toMatch(/^(pending|processing)$/);
+    .not.toMatch(/^(pending|processing|reintentándose)$/);
   return job!;
 }
 
-// Precondición por la API: impresora de tickets en el destino controlado, turno abierto y un
-// pedido para llevar con un abono en efectivo, cuyo ticket queda en la cola antes de editar.
+// Precondición por la API: el destino controlado de las muestras, la impresora de tickets de la
+// aceptación, turno abierto y un pedido para llevar con un abono en efectivo, cuyo ticket queda en la
+// cola antes de editar.
 async function paidTicket(driver: Driver) {
-  const printer = await call(driver, 'POST', 'kitchen/printers', {
+  await call(driver, 'POST', 'kitchen/printers', {
     operation_id: randomUUID(),
     name: printerName,
     transport: 'agent',
     destination: 'Agente de aceptación no disponible',
     port: 0,
+    paper_width: 80,
+    copies: 1,
+    supports_cut: false,
+    cut: false,
+    cutter_option: '',
+    active: true,
+    fallback_id: null,
+  });
+  const tickets = await call(driver, 'POST', 'kitchen/printers', {
+    operation_id: randomUUID(),
+    name: receiptPrinterName,
+    transport: 'cups',
+    destination: 'ADEL_E2E_SIN_IMPRESORA',
+    port: 9100,
     paper_width: 80,
     copies: 1,
     supports_cut: false,
@@ -125,7 +149,7 @@ async function paidTicket(driver: Driver) {
     revision: settings.revision,
     shared_shifts: settings.shared_shifts,
     print_receipt_default: true,
-    receipt_printer_id: printer.id,
+    receipt_printer_id: tickets.id,
     refund_authorization_threshold: settings.refund_authorization_threshold,
   });
   const current = await call(driver, 'GET', 'payments/shifts/current');
@@ -186,8 +210,8 @@ async function paidTicket(driver: Driver) {
     (document) => document.kind === 'receipt',
   );
   expect(receipt, JSON.stringify(after.documents)).toBeTruthy();
-  // El destino controlado no tiene hardware: el trabajo queda en intervención y se cancela
-  // administrativamente para poder reimprimirlo (como en la cola real).
+  // La impresora de tickets de la aceptación no tiene hardware: el trabajo termina en error y se
+  // cancela administrativamente para poder reimprimirlo (como en la cola real).
   const job = await settledJob(driver, receipt!.job_id);
   if (job.state !== 'cancelled' && job.state !== 'submitted') {
     await call(driver, 'POST', `kitchen/jobs/${job.id}/resolve`, {
@@ -385,10 +409,12 @@ test('diseñador 9B: duplicar, editar, vista previa 58/80, guardar, activar, mue
     {
       operation_id: randomUUID(),
       ticket_id: sale.ticketID,
+      // Etapa 9F (decisión D3): reimprimir un documento que ya salió pide motivo.
+      reason: 'Copia de la aceptación del diseñador',
     },
   );
   expect(reprint.status, JSON.stringify(reprint)).toBeTruthy();
-  // La copia exacta también queda en intervención (destino controlado sin hardware). La reimpresión y
+  // La copia exacta también termina sin imprimirse (impresora sin hardware). La reimpresión y
   // la impresión con la plantilla vigente se bloquean entre sí mientras haya una copia sin resolver,
   // así que se cancela administrativamente antes de pedir la otra acción (como en la cola real).
   const copy = await settledJob(driver, reprint.job_id as string);

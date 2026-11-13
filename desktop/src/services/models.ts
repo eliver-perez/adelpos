@@ -19,7 +19,8 @@ export interface Identity {
   user: User & { permissions: string[]; support: boolean; session_id: string; device_id: string };
   preferences: Preferences;
   terminal: Device;
-  establishment: Pick<Settings, 'name' | 'timezone' | 'currency'>;
+  // Desde la etapa 9F incluye el nombre visible de la precuenta (services/documentNames.ts).
+  establishment: Pick<Settings, 'name' | 'timezone' | 'currency'> & { precheck_name?: string };
 }
 
 export interface Role {

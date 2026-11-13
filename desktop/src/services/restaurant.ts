@@ -471,6 +471,19 @@ export function serverDateTime(value: string, timezone: string) {
 // cuentas, Para llevar, «Abierta hace…» y Cocina. Menos de una hora en minutos («45 min»), menos
 // de un día en horas y minutos («5 h 12 min») y, desde 24 horas, en días y horas («3 d 14 h»,
 // etapa 9D §3.4). Siempre hacia abajo: nunca muestra más tiempo del transcurrido.
+// «Mesa» sin repetir (etapa 9F, §4.6): el restaurante suele llamar a sus mesas «Mesa 1», «Mesa 2»…; un
+// nombre que ya empieza con la palabra «Mesa» (sin distinguir mayúsculas ni acentos, y solo como palabra
+// completa) no se vuelve a anteponer. La misma regla que documents.TableNameIncludesWord en Go.
+export function tableNameIncludesWord(name: string) {
+  const folded = name.trim().normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  return /^mesa(?!\p{L})/u.test(folded);
+}
+
+// «Mesa: Terraza», pero «Mesa 1» en lugar de «Mesa: Mesa 1».
+export function tableField(name: string) {
+  return tableNameIncludesWord(name) ? name : `Mesa: ${name}`;
+}
+
 export function elapsedTime(seconds: number) {
   const minutes = Math.floor(Math.max(0, seconds) / 60);
   if (minutes < 60) {

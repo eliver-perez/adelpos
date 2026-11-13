@@ -1,4 +1,5 @@
 import type { Operation } from './api';
+import { precheckName } from './documentNames';
 
 export interface Printer {
   id: string;
@@ -8,9 +9,15 @@ export interface Printer {
   port: number;
   paper_width: number;
   copies: number;
+  // Desde la etapa 9F Go guarda supports_cut igual a cut: «Cortar el papel al terminar» es una sola
+  // casilla. Se conserva por compatibilidad de la API.
   supports_cut: boolean;
   cut: boolean;
   cutter_option: string;
+  // Tipo de corte y renglones de avance antes del corte (etapa 9F, §4.4; lista cerrada 0–8). Una
+  // impresora nueva sin ellos recibe corte total y 4 renglones.
+  cut_mode: 'full' | 'partial';
+  cut_feed_lines: number;
   // Solo en CUPS: la impresora entiende ESC/POS y recibe formato y logotipo si su cola admite datos
   // raw (etapa 9B). Desactivada por omisión; ESC/POS por red ya los recibe.
   accepts_escpos: boolean;
@@ -24,6 +31,16 @@ export interface Printer {
 
 // Columnas de texto que admite cada ancho de papel: el predeterminado primero (lista cerrada de Go,
 // documents.ColumnChoices). Solo sirve para ofrecer las opciones; Go decide y valida.
+// Renglones de avance antes del corte (etapa 9F, §4.4): lista cerrada de Go y del CHECK de la 0022.
+export const cutFeedLineChoices = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+export const defaultCutFeedLines = 4;
+
+// Corte predeterminado de una impresora nueva: activado en 80 mm y desactivado en 58 mm (muchas no
+// tienen cortador; el propietario lo activa si la suya lo tiene).
+export function defaultCutFor(paperWidth: number) {
+  return paperWidth === 80;
+}
+
 export const printerColumnChoices: Record<number, [number, number]> = {
   80: [42, 48],
   58: [30, 32],
@@ -169,7 +186,49 @@ export interface PrintJob {
   transport_reference: string;
   revision: number;
   created_at: string;
+  // Etapa 9F (§4.3): tipo de documento, su folio o título y la clave del problema si exige atención,
+  // para explicar y agrupar los trabajos en la cola sin datos internos.
+  ticket_kind?: string;
+  folio?: number | null;
+  document_title?: string | null;
+  problem?: string | null;
 }
+
+// Intento de envío de un trabajo, con el resultado guardado por el trabajador (code desde la 9F).
+export interface PrintAttempt {
+  id: string;
+  attempt: number;
+  outcome: string | null;
+  detail: string | null;
+  started_at: string;
+  result?: { code?: string; reference?: string } | null;
+}
+
+// Folio, cuenta y mesa de una tarjeta de Preparación (etapa 9F, §4.6): «#7 · Mesa 2 · Mesa 2» repetía la
+// mesa cuando la cuenta lleva su nombre (la referencia neutra de la 6.2); en ese caso se muestra una vez.
+export function taskContext(task: Pick<Task, 'folio' | 'account_name' | 'table_name'>) {
+  if (task.table_name && task.table_name.trim() === task.account_name.trim()) {
+    return `#${task.folio} · ${task.account_name}`;
+  }
+  return `#${task.folio} · ${task.account_name} · ${task.table_name ?? 'Sin mesa'}`;
+}
+
+// Nombre del documento de un trabajo de la cola, para el restaurante.
+export const jobDocumentLabels: Record<string, string> = {
+  normal: 'Comanda',
+  modification: 'Aviso de modificación',
+  cancellation: 'Aviso de cancelación',
+  test: 'Prueba de impresión',
+  receipt: 'Ticket de pago',
+  get precheck() {
+    return precheckName().label;
+  },
+  cash_report: 'Corte de caja',
+  cash_voucher: 'Comprobante de caja',
+  cash_drawer: 'Apertura del cajón',
+  document_sample: 'Muestra de documento',
+  document_rerender: 'Documento con la plantilla vigente',
+};
 
 export interface TicketSummary {
   id: string;
@@ -222,14 +281,18 @@ export const ticketKindLabels: Record<TicketSummary['kind'], string> = {
   cancellation: 'CANCELACIÓN',
   test: 'Prueba autorizada',
   receipt: 'Ticket de pago',
-  precheck: 'Precuenta',
+  get precheck() {
+    return precheckName().label;
+  },
 };
 
+// Estados de un trabajo en palabras del restaurante (etapa 9F, §4.3): también los de cada intento,
+// que antes se mostraban en inglés («submitted», «intervention»).
 export const jobLabels: Record<PrintJob['state'], string> = {
   pending: 'Pendiente',
   processing: 'En proceso',
-  submitted: 'Aceptado por el transporte',
-  error: 'Error confirmado antes del envío',
+  submitted: 'Enviado a la impresora',
+  error: 'No se pudo imprimir',
   uncertain: 'Resultado incierto · requiere revisión',
   cancelled: 'Cancelado administrativamente',
   intervention: 'Requiere intervención',

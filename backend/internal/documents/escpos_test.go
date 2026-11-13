@@ -34,7 +34,7 @@ func TestLogoAfterLastTextLineStartsOnEmptyLine(t *testing.T) {
 		t.Fatal("La última línea del ticket debía ser el logotipo, sin salto final del documento")
 	}
 	rasters := map[string]*Raster{"r80": {WidthDots: 8, HeightDots: 2, Bits: []byte{0xff, 0x81}}}
-	encoded := EncodeESCPos(layout, rasters, true)
+	encoded := EncodeESCPos(layout, rasters, legacyFullCut)
 	index := bytes.Index(encoded, rasterCommand)
 	if index < 0 {
 		t.Fatal("Los bytes no contienen GS v 0")
@@ -76,17 +76,17 @@ func TestImageLinesAlwaysStartOnEmptyLine(t *testing.T) {
 	want = append(append(want, text('b')...), '\n')
 	want = append(want, command...)
 	want = append(want, '\n', '\n', '\n')
-	if got := EncodeESCPos(layout, rasters, false); !bytes.Equal(got, want) {
+	if got := EncodeESCPos(layout, rasters, NoPaperCut); !bytes.Equal(got, want) {
 		t.Fatalf("Bytes ESC/POS incorrectos:\n% x\n% x", got, want)
 	}
 	layout.TrailingNewline = true
-	if got := EncodeESCPos(layout, rasters, false); !bytes.Equal(got, want) {
+	if got := EncodeESCPos(layout, rasters, NoPaperCut); !bytes.Equal(got, want) {
 		t.Fatalf("Con el salto final del documento, la imagen no debe duplicar el salto:\n% x\n% x", got, want)
 	}
 	// Sin imagen al final, la última línea conserva la regla anterior (sin salto propio).
 	layout.TrailingNewline = false
 	layout.Lines = layout.Lines[:4]
-	plainEnd := EncodeESCPos(layout, rasters, false)
+	plainEnd := EncodeESCPos(layout, rasters, NoPaperCut)
 	if !bytes.HasSuffix(plainEnd, append(text('b'), '\n', '\n', '\n')) {
 		t.Fatalf("La última línea de texto cambió: % x", plainEnd)
 	}

@@ -136,7 +136,11 @@ type KitchenQuickNote struct {
 
 // CommercialData son los datos de una precuenta o ticket de pago (no es un CFDI).
 type CommercialData struct {
-	Kind        Kind                   `json:"kind"`
+	Kind Kind `json:"kind"`
+	// Title es el encabezado impreso de la precuenta cuando el establecimiento eligió otro nombre visible
+	// (etapa 9F, §4.5: «TICKET DE VENTA» o «CUENTA»). Vacío, el de siempre («PRECUENTA»); un título propio
+	// de la plantilla lo sigue sustituyendo.
+	Title       string                 `json:"title,omitempty"`
 	Folio       int64                  `json:"folio"`
 	AccountName string                 `json:"account_name"`
 	Context     string                 `json:"context"`

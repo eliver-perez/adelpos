@@ -26,7 +26,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 			})
 		var problem *kitchen.Error
 		if errors.As(err, &problem) {
-			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message, Details: problem.Details}
 		}
 		return result, err
 	}
@@ -74,7 +74,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		}
 		var kitchenProblem *kitchen.Error
 		if errors.As(err, &kitchenProblem) {
-			return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message}
+			return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message, Details: kitchenProblem.Details}
 		}
 		return result, err
 	}
@@ -93,7 +93,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		}
 		var kitchenProblem *kitchen.Error
 		if errors.As(err, &kitchenProblem) {
-			return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message}
+			return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message, Details: kitchenProblem.Details}
 		}
 		return result, err
 	}
@@ -206,7 +206,7 @@ func handleDesigner(ctx context.Context, tx pgx.Tx, request Request, principal P
 	}
 	var kitchenProblem *kitchen.Error
 	if errors.As(err, &kitchenProblem) {
-		return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message}
+		return nil, &Fault{Status: kitchenProblem.Status, Code: kitchenProblem.Code, Message: kitchenProblem.Message, Details: kitchenProblem.Details}
 	}
 	var paymentProblem *payments.Error
 	if errors.As(err, &paymentProblem) {
@@ -218,7 +218,7 @@ func handleDesigner(ctx context.Context, tx pgx.Tx, request Request, principal P
 // paymentFault traduce un error financiero a su respuesta pública. Si el rechazo pide su propia
 // auditoría (etapa 7.1), runProtected revierte la operación y confirma solo ese registro.
 func paymentFault(problem *payments.Error) *Fault {
-	fault := &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message}
+	fault := &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message, Details: problem.Details}
 	if problem.Rejection != nil {
 		entityID := problem.Rejection.EntityID
 		fault.Rejection = &RejectionAudit{
@@ -242,7 +242,10 @@ func currentIdentity(ctx context.Context, tx pgx.Tx, principal Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	establishment, err := object(ctx, tx, "SELECT name,timezone,currency FROM app.establishment")
+	// Etapa 9F (§4.5): el nombre visible de la precuenta lo leen todos los usuarios con la sesión, porque
+	// aparece en botones, avisos y el menú de quien no puede consultar la configuración de cobro.
+	establishment, err := object(ctx, tx, `SELECT e.name,e.timezone,e.currency,s.precheck_name
+        FROM app.establishment e CROSS JOIN app.payment_settings s`)
 	if err != nil {
 		return nil, err
 	}

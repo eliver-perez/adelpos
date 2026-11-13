@@ -578,3 +578,160 @@ Un agente en su propio worktree desde `afcd61c`, sin migración. B4 (texto del p
   (`api.rs`); la corrida completa queda para el coordinador.
 - **No verificado**: `installed-smoke.ps1` en Windows y las pruebas de Go ejecutadas en Windows (solo compilación y
   `go vet` cruzados).
+
+**Cierre de las correcciones de la parte 1** (coordinador, copia exacta de `e20d006`, clúster temporal 55499, Go 8183,
+vista previa 1421, pantalla desbloqueada): formato, metadatos, `go vet` (también `GOOS=windows`), Go unitarias con
+`-race`, integración de `administration` y `operations`, `tsc`, Vitest (80 archivos, 781 pruebas), `npm run build` y
+`cargo test` (42 + 1 ignorada) aprobados; **Playwright completo: Chromium 22/22 y WebKit 22/22**. La subprueba
+`9F_respaldo_real_con_pg_dump` (respaldo real con el `pg_dump` de Homebrew), que el agente no pudo ejecutar en su
+entorno, se ejecutó aparte con `-v` y **aprobó** (no se omitió).
+
+## Fase B · Impresión (aviso sin impresora, reintento, cola, corte, nombre de la precuenta y «Mesa»)
+
+Un agente en su propio worktree (desde `b91fb7a`), con la migración de la etapa. Decisiones D3, D4 y D5.
+
+### Migración y versión
+
+- `backend/migrations/0022_printing_and_kitchen_stations.sql` (la única de la etapa; encabezado general y sección «Fase
+  B»; la fase C agrega la suya): `kitchen_printers.cut_mode` (`full`/`partial`) y `cut_feed_lines` (0–8) con CHECK con
+  nombre (las impresoras existentes quedan con corte total y 3 renglones, los bytes de siempre; el valor por omisión de
+  las nuevas es 4) y `payment_settings.precheck_name` (`precheck`/`sales_ticket`/`bill`, «Precuenta» por omisión). No
+  modifica filas operativas ni fotografías de trabajos.
+- `config/product.json`: versión **0.9.5** y `schema_version` **22**; `node scripts/sync-metadata.mjs` (metadatos
+  generados, `package.json`, `Cargo.toml`, `tauri.conf.json`) y la versión propia en `package-lock.json` y `Cargo.lock`,
+  como en las subidas anteriores (sin tocar dependencias).
+- `internal/database/stage9d_cancellation_upgrade_test.go` aplica exactamente hasta la 0021 (ya no fija el esquema 21
+  del producto) y `stage9f_printing_upgrade_test.go` sube 21 → 22 con impresoras, un trabajo con su fotografía anterior
+  y la configuración de cobro: nada cambia, los CHECK rechazan lo que está fuera de la lista y la 0022 es repetible.
+
+### §4.1 Sin impresora válida (D4)
+
+- Go (`payments/document_printing.go`, `documents.go`, `cash_documents.go`; `kitchen.PrinterProblem`): impresora válida
+  = configurada, activa y no `agent`. Precuenta e «Imprimir después» de caja: 409 `PRINTER_NOT_CONFIGURED` /
+  `PRINTER_UNAVAILABLE` **antes de encolar**, con `details {document, problem, printer_name}` y el texto «No hay
+  impresora configurada para precuentas.» (con el nombre visible), «La impresora X está desactivada.» o «Esta impresora
+  todavía no puede usarse para imprimir.». Ticket de pago y documentos al registrar: `not_configured` con `problem`,
+  `printer_name` y el motivo; el pago u operación quedan registrados. Ruta nueva
+  `POST payments/accounts/{id}/documents/ receipt` (`payments.tickets.print`): imprime el ticket de un pago que no lo
+  tiene («Reintentar» del aviso; 409 `DOCUMENT_EXISTS` si ya existe). Los `Details` de `payments.Error` y
+  `kitchen.Error` se publican en `error.details`.
+- Interfaz: `services/printProblems.ts` y `services/notify.ts` (avisos con varias acciones; `AppToast` las muestra una
+  debajo de otra): «Configurar impresora» (lleva con `requestScreen` a Cobros con «Políticas de cobro» desplegada y a la
+  vista, `pages/payments/policiesRequest.ts`; solo si el usuario tiene `payments.settings.manage` y
+  `kitchen.printers.manage`, si no el aviso dice a quién pedirlo) y «Reintentar» en el mismo aviso, en la precuenta,
+  «Imprimir» de documentos de caja y el ticket de pago (`checkout/ReceiptRecovery.tsx` en el resultado del cobro). Se
+  quitó «Se resuelve en Cocina → Cola de impresión» de la precuenta, los documentos de la cuenta y los mensajes de
+  cobro; las muestras del diseñador (solo administradores) conservan su referencia a la cola.
+- Comandas sin cambio de comportamiento; con impresora de otra terminal, el motivo dice «Esta impresora todavía no puede
+  usarse para imprimir.».
+
+### §4.2 Reintentos (D3)
+
+- `kitchen/queue_actions.go`: el motivo de `retry` es opcional (si se envía, 5–500); `resolve` y la copia adicional lo
+  siguen exigiendo. `kitchen.RetryDocument` y las rutas `POST payments/accounts/{id}/documents/retry`
+  (`payments.tickets.print`) y `POST payments/cash-documents/{id}/retry` (`cash.reports.print`, con las reglas de
+  consulta del turno y del esperado): un toque, sin motivo y sin `kitchen.stations.all`, solo el trabajo más reciente
+  del documento en `error`/`intervention`; 409 `PRINT_NOT_FAILED`, `PRINT_UNCERTAIN`, `PRINT_JOB_SUPERSEDED` o
+  `PRINTER_UNAVAILABLE`; auditados (`payments.document_retried`, `cash.document_retried`).
+- Reimprimir precuenta/ticket y documentos de caja pide motivo (5–500), que queda en la auditoría y en el historial del
+  trabajo (`print.reprinted`); `components/ReprintReason.tsx` lo pide en línea en los documentos de la cuenta y de Caja.
+- Qué pasó, en palabras sencillas: `Outcome.code` (`unreachable`, `inactive`, `unsupported`, `setup`, `uncertain`;
+  `kitchen/print_problems.go`), guardado en el resultado del trabajo y de cada intento y expuesto como `problem` /
+  `job_problem`. La lista de documentos explica el problema («La impresora de caja no responde.») con «Reintentar» y,
+  cuando un documento que veía en camino falla, avisa una vez (aviso que se cierra solo) con «Reintentar». Cada aviso
+  sin impresora lleva un id nuevo y retira el anterior del mismo documento: en WebKit, un aviso con el mismo id que se
+  volvía a mostrar durante la animación de salida del anterior (al tocar «Reintentar») quedaba retirado.
+
+### §4.3 «Cola de impresión»
+
+`pages/kitchen/PrintQueue.tsx`: lista con altura limitada y desplazamiento propio; el detalle aparece a la vista junto a
+la lista (fijo al desplazarse; en angosto, debajo con desplazamiento hasta él); cada trabajo dice el documento
+(«Precuenta · #12»), la impresora, el estado y qué pasó, sin la referencia técnica del transporte ni estados en inglés
+(también en los intentos); la referencia y los mensajes técnicos quedan en «Información para soporte». Los repetidos se
+agrupan con «×N» (precuentas de una cuenta y copias o reintentos de un documento, seguidos, con la misma impresora y
+estado), con la paginación de Go. «Reintentar» es un toque. Go agrega `ticket_kind`, `folio`, `document_title` y
+`problem` a la lista y al detalle.
+
+### §4.4 Corte de papel (D5)
+
+- `documents.PaperCut` (`Ending`): sin corte, `\n\n\n` como siempre; con corte, N saltos y `GS V 0`/`GS V 1`. Lo usan el
+  texto plano (`kitchen.ESCPosBytes`) y el ESC/POS con formato (`documents.EncodeESCPos`), por red, Windows RAW y CUPS
+  raw. Por CUPS de texto: la opción del controlador si está configurada; sin ella, se imprime sin corte (antes «Requiere
+  intervención»). Una fotografía anterior (sin los campos) corta como antes.
+- Al guardar, Go fija `supports_cut = cut`; en impresoras nuevas sin `cut`, corte en 80 mm y no en 58 mm; sin tipo,
+  total; sin avance, 4; al editar, lo que no se envía se conserva. Interfaz (`PrintersAdmin.tsx`): «Cortar el papel al
+  terminar», «Tipo de corte» (Total/Parcial) y «Renglones de avance antes del corte» (`Select` 0–8), con la explicación
+  y «Imprimir prueba de ancho» (también corta). «Registro de movimientos» nombra «Impresora guardada» y las acciones
+  nuevas.
+
+### §4.5 Nombre de la precuenta
+
+`payment_settings.precheck_name` en Cobros › Políticas de cobro («Nombre de la precuenta», `payments.settings.manage`,
+auditado con las políticas); `GET auth/me` lo informa en `establishment.precheck_name` y `services/documentNames.ts` lo
+reparte: botones del panel de mesa, la captura y el cobro, la precuenta, avisos, documentos, la cola, la paleta
+(`commands/actions.ts`) y el menú nativo (`menu_set_state` acepta `precheckName` de la lista cerrada y cambia solo el
+texto de «Imprimir precuenta»; `native-driver.ts` lo simula). Encabezado impreso «TICKET DE VENTA»/«CUENTA» guardado con
+el documento; con «Precuenta», idéntico. Decisión menor: el diseñador sigue llamando «Ticket de venta» al ticket de pago
+(nombre de la 9B); está documentado en `docs/DOCUMENT_DESIGNER.md`.
+
+### §4.6 «Mesa» sin repetir
+
+`documents.TableContext` (precuenta y ticket: «Mesa 1», no «Mesa Mesa 1»; sin distinguir mayúsculas ni acentos, solo
+como palabra), el campo «Mesa:» de una plantilla propia, `kitchen.taskContext` en la tarjeta de Preparación (solo esa
+línea de `PreparationBoard.tsx`), `HistoryDetails` y el título de la mesa en «Áreas y distribución». Plantillas
+predeterminadas idénticas.
+
+### Encargo del coordinador: huella de cobros
+
+`payments/handler.go` (`withoutAuthorizationPasswords`): la huella idempotente quita la contraseña de toda autorización
+en cualquier nivel del cuerpo, comparando las claves con `strings.EqualFold`, como la corrección B3 de `operations`;
+prueba `payments/authorization_fingerprint_test.go`.
+
+### Pruebas de aceptación y datos de prueba
+
+- `desktop/e2e/payments-flow.ts` registra «Tickets controlados E2E» (cola del equipo `ADEL_E2E_SIN_IMPRESORA`, que no
+  existe: error confirmado sin enviar nada) y la elige como impresora de tickets; `workflow-stage9b-designer.spec.ts`
+  usa «Tickets controlados 9B» igual para el ticket (las muestras siguen yendo al destino «agent») y espera el error
+  final antes de cancelar; la reimpresión lleva motivo. Firmas nuevas en `maintenance/signatures.go` (con su archivo) y
+  `signatures_test.go` acepta los dos destinos de aceptación. La prueba de humo de Windows usa el mismo ayudante (la
+  etiqueta del destino en Windows se reconoce).
+- Nueva `desktop/e2e/workflow-stage9f-printing.spec.ts`.
+
+### Pruebas (copia aislada, clúster 55499, Go 8186 y vista previa 1424)
+
+13/11/2026, sobre copias del worktree idénticas al parche (comprobado con `diff -rq`); pantalla desbloqueada.
+
+| Suite                                                                            | Resultado                                                                 |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Prettier (`--check .`), `gofmt -l`, `cargo fmt --check`, `sync-metadata --check` | sin diferencias                                                           |
+| `go vet` (normal y `-tags=integration`)                                          | aprobado                                                                  |
+| `GOOS=windows`: `go build ./...` y `go vet` (y `-tags=integration`)              | aprobado (solo compila; no hay Windows en esta sesión)                    |
+| Go unitarias con `-race` (`./...`)                                               | 23 paquetes `ok` (bytes de corte, `PaperCut`, «Mesa», huella de cobros)   |
+| Integración `internal/database` con `-race`                                      | `ok` (7.8 s; nueva `TestStage9FPrintingUpgrade` y la 9D ajustada)         |
+| Integración `internal/operations` con `-race`                                    | `ok` (270.5 s; `testPrintingStage9F` con 5 subpruebas)                    |
+| Integración `internal/administration` con `-race`                                | `ok` (69.3 s; «Quitar datos de prueba» con las firmas nuevas)             |
+| Integración `internal/designer` e `internal/identity` con `-race`                | `ok` (21.2 s y 18.6 s)                                                    |
+| `tsc --noEmit`                                                                   | sin errores                                                               |
+| Vitest (`npm test`)                                                              | 79 archivos, 785 pruebas (nuevo `pages/kitchen/printingStage9f.test.tsx`) |
+| `npm run build`                                                                  | correcto (aviso de tamaño de fragmentos ya conocido)                      |
+| `cargo test --locked --offline`                                                  | 44 aprobadas, 1 ignorada (nuevas: rutas de reintento y nombre en el menú) |
+| Playwright `workflow-stage9f-printing` sola, base nueva                          | Chromium 1/1 y WebKit 1/1                                                 |
+| Playwright corrida completa Chromium                                             | 22 de 22 (8.0 min)                                                        |
+| Playwright corrida completa WebKit                                               | 22 de 22 (8.3 min)                                                        |
+
+Durante las corridas completas se corrigieron dos fallas propias: `restaurant.spec.ts` comprobaba que cada aviso de
+éxito se cierre a sus 4 s y el ayudante nuevo guardaba una segunda impresora con el mismo aviso «Impresora guardada.»
+(ahora espera a que se cierre el anterior), y en WebKit el aviso sin impresora que se volvía a mostrar tras «Reintentar»
+quedaba retirado por reutilizar el mismo id (ahora cada aviso lleva uno nuevo). Una corrida completa de Chromium quedó
+invalidada porque el equipo entró en reposo por batería baja (11:19–12:37) y se repitió. La integración de `designer` e
+`identity` se corrió antes de los últimos cambios de `payments` (huella) y de las firmas de `maintenance`, que no les
+afectan; `operations`, `administration` y `database` corrieron sobre el `backend` final.
+
+**No verificado**: Windows (la prueba de humo instalada usa el mismo ayudante de impresora de tickets; la etiqueta del
+destino en Windows se reconoce por expresión regular, sin ejecutarse), el menú nativo real con el nombre de la precuenta
+(Rust lo cambia con `set_text`; solo se probó la lista cerrada y la simulación del puente), y el corte en papel (total,
+parcial y avance, con y sin cortador, por red, USB en Windows y CUPS): prueba física del propietario.
+
+**Para el coordinador**: el parche aplica limpio sobre `b91fb7a`; sobre `e20d006` solo `API_CONTRACTS.md` entra en
+conflicto (ambos agregan una sección al final). `workflow-stage9f-zz-test-data` aprobó en ambas corridas completas con
+las impresoras de tickets nuevas como datos de prueba.

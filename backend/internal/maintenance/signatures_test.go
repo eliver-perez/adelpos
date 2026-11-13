@@ -36,7 +36,9 @@ func TestSignaturesMatchTheirTestFiles(t *testing.T) {
 		t.Fatal("la lista cerrada de firmas está incompleta")
 	}
 	for _, printer := range TestPrinters {
-		if printer.Transport != "agent" || printer.Destination != acceptanceDestination {
+		agent := printer.Transport == "agent" && printer.Destination == acceptanceDestination
+		missingQueue := printer.Transport == "cups" && printer.Destination == acceptanceQueue
+		if !agent && !missingQueue {
 			t.Errorf("la impresora %q no es un destino de aceptación", printer.Name)
 		}
 		requireLiterals(t, printer.Source, printer.Name, printer.Transport, printer.Destination)

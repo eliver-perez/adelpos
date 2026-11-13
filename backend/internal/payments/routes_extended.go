@@ -14,6 +14,12 @@ func extendedRoute(method, action string) *route {
 		return &route{"payments.tickets.print", false, (*service).printPrecheck}
 	case "documents/reprint":
 		return &route{"payments.tickets.reprint", false, (*service).reprintDocument}
+	case "documents/retry":
+		// Etapa 9F (§4.2): reintentar sin motivo una precuenta o un ticket que nunca salió en papel.
+		return &route{"payments.tickets.print", false, (*service).retryDocument}
+	case "documents/receipt":
+		// Etapa 9F (§4.1): imprimir el ticket de un pago que no se imprimió por falta de impresora.
+		return &route{"payments.tickets.print", false, (*service).printReceipt}
 	case "documents/rerender":
 		// Etapa 9B: impresión con la plantilla vigente; exige además documents.history.render_current.
 		return &route{"payments.tickets.reprint", false, (*service).rerenderDocument}

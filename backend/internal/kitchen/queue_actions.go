@@ -1,8 +1,11 @@
 package kitchen
 
 import (
+	"context"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
@@ -32,8 +35,13 @@ func (handler *service) jobAction(id, action string) (any, error) {
 	if job.State == "processing" {
 		return nil, invalid("El transporte está en proceso. Espera su resultado o la reconciliación de su lease.")
 	}
-	if len(strings.TrimSpace(input.Reason)) < 5 || len(input.Reason) > 500 {
-		return nil, invalid("Indica un motivo de entre 5 y 500 caracteres.")
+	// Etapa 9F (decisión D3): reintentar un trabajo que nunca salió en papel (error confirmado o en
+	// intervención) es un toque, sin motivo; si se escribe uno, se valida y se guarda. Resolver un
+	// resultado incierto (que pudo haber salido) sigue exigiendo motivo.
+	if action != "retry" || input.Reason != "" {
+		if err := validReason(input.Reason); err != nil {
+			return nil, err
+		}
 	}
 	var ticketKind string
 	if err := handler.tx.QueryRow(handler.ctx, "SELECT kind FROM app.kitchen_tickets WHERE id=$1", job.TicketID).Scan(&ticketKind); err != nil {
@@ -96,6 +104,87 @@ func (handler *service) jobAction(id, action string) (any, error) {
 	job.Content = ""
 	job.Layout = nil
 	return saved, handler.history("print."+action, &id, job, saved)
+}
+
+// validReason exige un motivo de entre 5 y 500 caracteres.
+func validReason(reason string) error {
+	if len(strings.TrimSpace(reason)) < 5 || len(reason) > 500 {
+		return invalid("Indica un motivo de entre 5 y 500 caracteres.")
+	}
+	return nil
+}
+
+// DocumentRetry es el reintento de un documento comercial o de caja desde su propio aviso (etapa 9F,
+// §4.2): lo pide el módulo de pagos, que ya validó el permiso de imprimir ese documento y que el trabajo
+// le pertenece. Reason es opcional.
+type DocumentRetry struct {
+	JobID       string
+	TicketID    string
+	Reason      string
+	OperationID string
+	ActorID     string
+	DeviceID    string
+}
+
+// RetryDocument vuelve a poner en la cola un trabajo de una precuenta, un ticket o un documento de caja que
+// nunca salió en papel (error confirmado o en intervención), con la misma impresora y sin motivo, como
+// «Reintentar» de la cola. Debe ser el trabajo más reciente de su documento; una impresora que ya no puede
+// imprimir (desactivada o de otra terminal) responde PRINTER_UNAVAILABLE para que la persona la configure.
+// Un resultado incierto nunca se reintenta desde aquí: se resuelve en la cola.
+func RetryDocument(ctx context.Context, tx pgx.Tx, input DocumentRetry) (*PrintJob, error) {
+	if err := validID(input.JobID); err != nil {
+		return nil, err
+	}
+	if input.Reason != "" {
+		if err := validReason(input.Reason); err != nil {
+			return nil, err
+		}
+	}
+	job, err := one[PrintJob](ctx, tx, "SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j WHERE id=$1 FOR UPDATE", input.JobID)
+	if err != nil {
+		return nil, err
+	}
+	var kind string
+	var latest bool
+	if err := tx.QueryRow(ctx, `SELECT t.kind, NOT EXISTS(SELECT FROM app.kitchen_print_jobs later WHERE later.ticket_id=t.id
+        AND (later.created_at,later.id)>($2::timestamptz,$1::uuid)) FROM app.kitchen_tickets t WHERE t.id=$3`,
+		job.ID, job.CreatedAt, job.TicketID).Scan(&kind, &latest); err != nil {
+		return nil, err
+	}
+	if job.TicketID != input.TicketID || !isCommercialKind(kind) || isDesignerKind(kind) {
+		return nil, invalid("El trabajo no pertenece a este documento.")
+	}
+	if !latest {
+		return nil, &Error{Status: 409, Code: "PRINT_JOB_SUPERSEDED", Message: "El documento ya tiene una impresión más reciente; revisa su estado actual."}
+	}
+	if job.State != "error" && job.State != "intervention" {
+		if job.State == "uncertain" {
+			return nil, &Error{Status: 409, Code: "PRINT_UNCERTAIN", Message: "No se sabe si el documento salió en papel: revisa la impresora y resuélvelo en Cocina › Cola de impresión."}
+		}
+		return nil, &Error{Status: 409, Code: "PRINT_NOT_FAILED", Message: "El documento no tiene una impresión fallida que reintentar."}
+	}
+	current, err := one[Printer](ctx, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", job.PrinterID)
+	if err != nil {
+		return nil, err
+	}
+	if problem := PrinterProblem(current); problem != "" {
+		return nil, UnavailablePrinterError(problem, current.Name)
+	}
+	handler := service{ctx: ctx, tx: tx, operationID: input.OperationID, request: Request{Actor: Actor{UserID: input.ActorID, DeviceID: input.DeviceID}}}
+	_, err = tx.Exec(ctx, `UPDATE app.kitchen_print_jobs SET state='pending',next_attempt_at=now(),last_error=$1,result=$2,
+        revision=revision+1,updated_at=now() WHERE id=$3`, input.Reason,
+		encoded(map[string]string{"decision": "send", "actor": input.ActorID, "origin": "document"}), job.ID)
+	if err != nil {
+		return nil, err
+	}
+	saved, err := one[PrintJob](ctx, tx, "SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j WHERE id=$1", job.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := events.Append(ctx, tx, "printing.queued", "printing", &job.ID, nil); err != nil {
+		return nil, err
+	}
+	return saved, handler.history("print.retry", &job.ID, job, saved)
 }
 
 func (handler *service) reprint() (any, error) {

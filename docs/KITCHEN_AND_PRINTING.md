@@ -383,3 +383,73 @@ equipo servidor con ese valor. En macOS todo sigue igual (CUPS).
 virtual, y aceptación PostgreSQL de `designer`, `payments` y `operations`. **Pendiente en hardware**: ningún trabajo ni
 pulso se envió a una impresora USB real; papel, logotipo, corte y cajón por USB en Windows son prueba física del
 propietario (lista en [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md)).
+
+## Impresión · etapa 9F (fase B)
+
+### Sin impresora válida, aviso en el momento
+
+Precuentas, tickets de pago y documentos de caja usan la «Impresora de tickets» de Cobros › Políticas de cobro. Desde la
+9F (decisión D4) solo sirve si está configurada, activa y no es de otra terminal; si no, Go avisa **antes de encolar**
+(no queda un trabajo fallido en la cola) y la interfaz lo dice al momento: «No hay impresora configurada para
+precuentas» (con el nombre visible de la precuenta), con **«Configurar impresora»** (lleva con el único `requestScreen`
+a Administración › Cobros con «Políticas de cobro» desplegada; solo si el usuario puede elegir la impresora, si no el
+aviso dice a quién pedirlo) y **«Reintentar»** en el mismo aviso. El ticket de pago nunca hace fallar el pago: el
+resultado del cobro dice por qué no se imprimió y ofrece los mismos dos botones («Reintentar» imprime el ticket de ese
+pago). Las comandas no cambian: una impresora inactiva bloquea la liberación y una de otra terminal deja la comanda en
+«Requiere intervención», ahora con «Esta impresora todavía no puede usarse para imprimir.».
+
+### Reintentar sin motivo, reimprimir con motivo
+
+- Lo que **nunca salió en papel** (error confirmado o en intervención) se reintenta con un toque, sin motivo: desde la
+  cola («Reintentar», `kitchen.queue.retry`) y desde el propio documento (documentos de la cuenta y de Caja, con el
+  permiso de imprimirlo: `payments.tickets.print` o `cash.reports.print`, sin necesitar la cola de cocina). El aviso
+  dice qué pasó en palabras del restaurante, derivado de la clave del intento (`unreachable`: «La impresora de caja no
+  responde» o «La impresora … está apagada o sin conexión»; `inactive`: «La impresora … está desactivada»;
+  `unsupported`: «Esta impresora todavía no puede usarse para imprimir»; `setup`: «… necesita que se revise su
+  configuración»). Cuando un documento que la pantalla veía en camino a la impresora falla, aparece además un aviso
+  que se cierra solo con «Reintentar».
+- Lo que **pudo haber salido** (`uncertain`) sigue exigiendo decisión con motivo en la cola.
+- **Reimprimir** lo que ya salió (o se canceló) pide motivo de 5 a 500 caracteres en cocina (como antes), en las
+  precuentas y tickets y en los documentos de caja; el motivo queda en el Registro de movimientos y en el historial del
+  trabajo.
+
+### Pantalla «Cola de impresión»
+
+La lista tiene altura limitada y desplazamiento propio; «Consultar trabajo e intentos» abre el detalle a la vista junto
+a la lista (fijo al desplazarse; en pantallas angostas debajo, con desplazamiento hasta él). Cada trabajo dice qué
+documento es («Precuenta · #12», «Comanda · #7»), su impresora, su estado y qué pasó, sin la referencia técnica del
+sistema de impresión ni estados en inglés; esos datos quedan en «Información para soporte» del detalle. Los trabajos
+repetidos de lo mismo (las precuentas de una cuenta, las copias y reintentos de un documento, seguidos en la página, con
+la misma impresora y el mismo estado) se agrupan con «×N» y «Ver los N trabajos»; la paginación de Go no cambia.
+
+### Corte de papel (decisión D5)
+
+Por impresora, en «Corte de papel y respaldo»: **«Cortar el papel al terminar»** (una sola casilla; Go guarda
+`supports_cut = cut`), **tipo de corte** total o parcial y **«Renglones de avance antes del corte»** (lista cerrada 0–8,
+4 en impresoras nuevas). Activado por omisión en impresoras **nuevas** de 80 mm y desactivado en las de 58 mm (muchas
+no tienen cortador); las impresoras existentes conservan su papel (corte total con 3 renglones, los bytes de siempre).
+Cambiarlo exige `kitchen.printers.manage` y queda en el Registro de movimientos («Impresora guardada»).
+
+Bytes al final de **cada documento** (tickets, precuentas, comandas, avisos, cortes y comprobantes de caja, prueba de
+ancho y prueba técnica; nunca el pulso del cajón): con corte, N saltos de renglón y `GS V 0` (total) o `GS V 1`
+(parcial); **sin corte, los tres saltos de siempre, byte a byte iguales a la 9E**. Es el mismo final en el texto plano
+(`kitchen.ESCPosBytes`) y en el ESC/POS con formato (`documents.EncodeESCPos`, `PaperCut.Ending`), por red, por la cola
+de Windows (RAW) y por CUPS raw con «Esta impresora entiende ESC/POS». **Por CUPS de texto** no se pueden enviar
+comandos ESC/POS: el corte lo hace el controlador con «Opción de corte anunciada por CUPS» si está configurada; sin
+ella, el documento **se imprime sin corte** (antes quedaba en «Requiere intervención», y una preferencia de papel
+detenía la impresión).
+
+**Impresoras sin cortador**: la mayoría ignora `GS V`, así que activar el corte no causa problemas; si una imprime
+caracteres extraños al final, desactívalo. Para probarlo, «Imprimir prueba de ancho» también corta con la
+configuración elegida (guárdala antes de probar).
+
+### Datos de prueba de la aceptación
+
+Desde la 9F las pruebas de navegador usan como impresora de tickets «Tickets controlados E2E» (`payments-flow.ts`) y
+«Tickets controlados 9B» (`workflow-stage9b-designer.spec.ts`): una cola del equipo que no existe en ningún equipo
+(`ADEL_E2E_SIN_IMPRESORA`), válida para precuentas y tickets pero que nunca imprime (cada trabajo termina en error
+confirmado sin enviar nada). Sus firmas están en `backend/internal/maintenance/signatures.go`, de modo que «Quitar datos
+de prueba» también las reconoce.
+
+**Pendiente en hardware**: el corte total y parcial y el avance en papel, en una impresora con y sin cortador, por red,
+USB en Windows y CUPS, son prueba física del propietario.

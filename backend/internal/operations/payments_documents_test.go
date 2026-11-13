@@ -114,13 +114,13 @@ func testPaymentDocuments(t *testing.T, fixture *paymentsFixture) {
 	t.Run("55_reimpresion_sin_duplicar_cobros", func(t *testing.T) {
 		accountID := fixture.registers["receipt_account"]
 		ticketID := fixture.registers["receipt_ticket"]
-		fixture.post(t, fixture.admin, accountID, "documents/reprint", map[string]any{"ticket_id": ticketID}, 400)
+		fixture.post(t, fixture.admin, accountID, "documents/reprint", map[string]any{"ticket_id": ticketID, "reason": "Copia para el cliente"}, 400)
 		if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.kitchen_print_jobs SET state='submitted' WHERE id=$1", fixture.registers["receipt_job"]); err != nil {
 			t.Fatal(err)
 		}
 		paymentsBefore := fixture.countRows(t, "SELECT count(*) FROM app.payments")
-		copy := decodeResponse[printingResult](t, fixture.post(t, fixture.admin, accountID, "documents/reprint", map[string]any{"ticket_id": ticketID}, 200))
-		fixture.post(t, fixture.admin, accountID, "documents/reprint", map[string]any{"ticket_id": ticketID}, 409)
+		copy := decodeResponse[printingResult](t, fixture.post(t, fixture.admin, accountID, "documents/reprint", map[string]any{"ticket_id": ticketID, "reason": "Copia para el cliente"}, 200))
+		fixture.post(t, fixture.admin, accountID, "documents/reprint", map[string]any{"ticket_id": ticketID, "reason": "Copia para el cliente"}, 409)
 		var original, duplicate string
 		if err := fixture.pool.QueryRow(fixture.ctx, `SELECT (SELECT content FROM app.kitchen_print_jobs WHERE id=$1),
             (SELECT content FROM app.kitchen_print_jobs WHERE id=$2)`, fixture.registers["receipt_job"], copy.JobID).Scan(&original, &duplicate); err != nil {

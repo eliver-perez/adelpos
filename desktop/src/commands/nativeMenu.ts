@@ -43,13 +43,14 @@ export function listenNativeMenu(onAction: (action: string) => void): () => void
   };
 }
 
-// El centro de comandos lo llama solo cuando cambia el conjunto habilitado.
-export function reportNativeMenuState(enabled: string[]) {
+// El centro de comandos lo llama solo cuando cambia el conjunto habilitado o el nombre visible de la
+// precuenta (etapa 9F, §4.5: clave de la lista cerrada; Rust cambia el texto de «Imprimir precuenta»).
+export function reportNativeMenuState(enabled: string[], precheckName?: string) {
   if (!isTauri()) {
     return;
   }
   Promise.resolve()
-    .then(() => invoke('menu_set_state', { enabled }))
+    .then(() => invoke('menu_set_state', { enabled, precheckName }))
     .catch(() => {
       // Sin puente nativo (pruebas) o con un identificador rechazado: el menú conserva su estado.
     });

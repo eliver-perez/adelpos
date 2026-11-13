@@ -14,6 +14,7 @@ import {
 } from '../../../services/payments';
 import { DeliveryIcon, PrinterIcon, ToggleButton } from '../../../components/ToggleButton';
 import { DrawerNotice } from '../../cash/CashNotices';
+import { ReceiptRecovery } from './ReceiptRecovery';
 import type {
   ChangeCurrency,
   Finance,
@@ -95,7 +96,9 @@ export function RecordedPayment({
   const payment = result.payment;
   const printing = printingMessage(result.printing);
   const printingAttention =
-    !!result.printing?.status && printAttentionStates.includes(result.printing.status);
+    !!result.printing?.status &&
+    (printAttentionStates.includes(result.printing.status) ||
+      result.printing.status === 'not_configured');
   return (
     <div className="checkout-result" role="status">
       <strong>
@@ -133,6 +136,9 @@ export function RecordedPayment({
         <p className={printingAttention ? 'checkout-result-warning' : 'checkout-result-flag'}>
           {printing}
         </p>
+      )}
+      {result.printing?.status === 'not_configured' && payment && (
+        <ReceiptRecovery accountID={result.finance.account_id} paymentID={payment.id} />
       )}
       <DrawerNotice outcome={result.drawer} />
     </div>

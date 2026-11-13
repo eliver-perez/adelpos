@@ -10,6 +10,9 @@ import {
 } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import {
+  cutFeedLineChoices,
+  defaultCutFeedLines,
+  defaultCutFor,
   printerColumnChoices,
   printerColumns,
   type ExecuteKitchen,
@@ -20,6 +23,8 @@ import { notifySuccess } from '../../services/notify';
 import { Select } from '../../components/Select';
 import { isWindows } from '../../commands/platform';
 
+// Impresora nueva (etapa 9F, decisión D5): en 80 mm corta el papel al terminar, corte total con 4
+// renglones de avance; al elegir 58 mm el corte se desactiva hasta que el propietario lo active.
 const emptyPrinter = (): Printer => ({
   id: '',
   name: '',
@@ -28,8 +33,10 @@ const emptyPrinter = (): Printer => ({
   port: 9100,
   paper_width: 80,
   copies: 1,
-  supports_cut: false,
-  cut: false,
+  supports_cut: defaultCutFor(80),
+  cut: defaultCutFor(80),
+  cut_mode: 'full',
+  cut_feed_lines: defaultCutFeedLines,
   cutter_option: '',
   accepts_escpos: false,
   columns: null,
@@ -52,7 +59,15 @@ export function PrintersAdmin({
     'kitchen_discovery',
     { interval: 60000 },
   );
-  const [value, setValue] = useState<Printer | null>(null);
+  const [value, setValueState] = useState<Printer | null>(null);
+  // El corte de una impresora nueva sigue a su papel hasta que la persona lo elige.
+  const [cutChosen, setCutChosen] = useState(false);
+  const setValue = (next: Printer | null) => {
+    if (!next || next.id !== value?.id || (!next.id && !value)) {
+      setCutChosen(false);
+    }
+    setValueState(next);
+  };
   const current = printers.data?.find((entry) => entry.id === value?.id);
   const stale = !!value?.id && current?.revision !== value.revision;
   // Etapa 9E: en Windows la cola de impresión del equipo es la de las impresoras instaladas en
@@ -285,11 +300,20 @@ export function PrintersAdmin({
                     { value: '80', label: '80 mm' },
                     { value: '58', label: '58 mm' },
                   ]}
-                  onChange={(width) =>
+                  onChange={(width) => {
                     // Cada papel tiene su propia lista de columnas: al cambiarlo vuelven al
-                    // predeterminado del papel nuevo (Go rechaza una combinación inválida).
-                    setValue({ ...value, paper_width: Number(width), columns: null })
-                  }
+                    // predeterminado del papel nuevo (Go rechaza una combinación inválida). En una
+                    // impresora nueva, el corte sigue al papel mientras no se haya elegido.
+                    const paper = Number(width);
+                    const cut = !value.id && !cutChosen ? defaultCutFor(paper) : value.cut;
+                    setValueState({
+                      ...value,
+                      paper_width: paper,
+                      columns: null,
+                      cut,
+                      supports_cut: cut,
+                    });
+                  }}
                 />
               </Field>
               <IntegerField
@@ -309,28 +333,78 @@ export function PrintersAdmin({
               onChange={(columns) => setValue({ ...value, columns })}
             />
             <Accordion
-              title="Corte y respaldo"
-              summary="Solo capacidades confirmadas del modelo y del controlador"
+              title="Corte de papel y respaldo"
+              summary={
+                value.cut
+                  ? `Corta al terminar · ${value.cut_mode === 'partial' ? 'parcial' : 'total'} · ${value.cut_feed_lines} renglones de avance`
+                  : 'Sin corte al terminar'
+              }
+              defaultOpen={!value.id}
             >
               <Check
-                label="El modelo y su controlador admiten corte"
-                value={value.supports_cut}
-                onChange={(supports_cut) =>
-                  setValue({ ...value, supports_cut, cut: supports_cut && value.cut })
-                }
-              />
-              <Check
-                label="Solicitar corte por documento"
+                label="Cortar el papel al terminar"
                 value={value.cut}
-                onChange={(cut) => setValue({ ...value, cut })}
+                onChange={(cut) => {
+                  setCutChosen(true);
+                  // Una sola casilla (etapa 9F): Go guarda «el modelo admite corte» igual a ésta.
+                  setValueState({ ...value, cut, supports_cut: cut });
+                }}
               />
+              {value.cut && (
+                <>
+                  <div className="field">
+                    <span>Tipo de corte</span>
+                    <SegmentedControl
+                      label="Tipo de corte"
+                      value={value.cut_mode}
+                      options={[
+                        { value: 'full', label: 'Total' },
+                        { value: 'partial', label: 'Parcial' },
+                      ]}
+                      onChange={(cut_mode) =>
+                        setValueState({ ...value, cut_mode: cut_mode as Printer['cut_mode'] })
+                      }
+                    />
+                  </div>
+                  <Field label="Renglones de avance antes del corte">
+                    <Select
+                      value={String(value.cut_feed_lines)}
+                      options={cutFeedLineChoices.map((lines) => ({
+                        value: String(lines),
+                        label:
+                          lines === defaultCutFeedLines
+                            ? `${lines} (predeterminado)`
+                            : String(lines),
+                      }))}
+                      onChange={(lines) =>
+                        setValueState({ ...value, cut_feed_lines: Number(lines) })
+                      }
+                    />
+                  </Field>
+                </>
+              )}
+              <p className="muted text-sm">
+                Al final de cada documento (tickets, precuentas, comandas, avisos y cortes de caja)
+                la impresora avanza los renglones elegidos para que el corte no caiga sobre el texto
+                y corta: total separa el papel; parcial deja una pequeña unión. La mayoría de las
+                impresoras sin cortador ignoran la orden de corte; pruébalo con «Imprimir prueba de
+                ancho», que también corta. Las de 58 mm muchas veces no tienen cortador: por eso el
+                corte empieza desactivado en ese papel.
+              </p>
               {/* En Windows el corte es el comando ESC/POS de la impresora, no una opción de CUPS. */}
               {value.transport === 'cups' && value.cut && !windows && (
-                <TextField
-                  label="Opción de corte anunciada por CUPS"
-                  value={value.cutter_option}
-                  onChange={(cutter_option) => setValue({ ...value, cutter_option })}
-                />
+                <>
+                  <TextField
+                    label="Opción de corte anunciada por CUPS"
+                    value={value.cutter_option}
+                    onChange={(cutter_option) => setValueState({ ...value, cutter_option })}
+                  />
+                  <p className="muted text-sm">
+                    En una cola de macOS que no recibe los comandos de la impresora («Esta impresora
+                    entiende ESC/POS» desactivada), el corte lo hace su controlador con esta opción.
+                    Sin ella, el documento se imprime sin corte.
+                  </p>
+                </>
               )}
               <ReferenceField
                 optional

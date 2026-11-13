@@ -372,6 +372,10 @@ export interface PrintOutcome {
   job_id?: string;
   includes_expected: boolean;
   message?: string;
+  // Etapa 9F (decisión D4): por qué no se encoló (sin impresora de tickets, desactivada o de otra
+  // terminal) y la impresora configurada.
+  problem?: 'missing' | 'inactive' | 'unsupported';
+  printer_name?: string;
 }
 
 // Estado de un comando de apertura del cajón. status es el del trabajo en la cola o disabled,
@@ -407,6 +411,8 @@ export interface CashDocumentRecord {
   created_at: string;
   job_id: string | null;
   job_state: string | null;
+  // Clave del problema del último trabajo si exige atención (etapa 9F; services/printProblems.ts).
+  job_problem?: string | null;
   printer_name: string | null;
   copies: number;
 }
@@ -597,6 +603,7 @@ export const cashOperationLabels: Partial<Record<Operation, string>> = {
   payments_print_cash_report: 'de la impresión del corte',
   payments_print_cash_operation: 'de la impresión del comprobante',
   payments_reprint_cash_document: 'de la reimpresión del documento',
+  payments_retry_cash_document: 'del reintento de impresión del documento',
   payments_open_drawer: 'del comando de apertura del cajón',
   payments_test_cash_drawer: 'de la prueba de apertura del cajón',
 };
@@ -629,7 +636,11 @@ export function cashPrintMessage(outcome: PrintOutcome | null | undefined, subje
   }
   switch (outcome.status) {
     case 'not_configured':
-      return `Sin impresora de tickets configurada: ${subject} quedó registrado sin imprimir.`;
+      // Etapa 9F: Go dice por qué (sin impresora de tickets, desactivada o de otra terminal).
+      return (
+        outcome.message ||
+        `Sin impresora de tickets configurada: ${subject} quedó registrado sin imprimir.`
+      );
     case 'failed':
       return `No se pudo enviar el documento a la cola: ${subject} quedó registrado. Imprímelo después desde Caja.`;
     case 'pending':
@@ -640,7 +651,7 @@ export function cashPrintMessage(outcome: PrintOutcome | null | undefined, subje
     case 'cancelled':
       return `Impresión cancelada; ${subject} quedó registrado.`;
   }
-  return `${cashJobLabels[outcome.status] ?? 'Impresión no confirmada'}: ${subject} quedó registrado. Revisa el trabajo en la cola de impresión.`;
+  return `${cashJobLabels[outcome.status] ?? 'Impresión no confirmada'}: ${subject} quedó registrado. Reinténtalo desde el documento en Caja.`;
 }
 
 export const printAttentionStatuses = [

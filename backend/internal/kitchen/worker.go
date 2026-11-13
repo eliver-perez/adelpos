@@ -230,7 +230,7 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 	checkError := owned.Connection.QueryRow(attemptContext, `SELECT p.active AND NOT EXISTS(
 		SELECT FROM app.kitchen_tickets t JOIN app.kitchen_stations s ON s.id=ANY(t.station_ids)
 		WHERE t.id=$2 AND NOT s.active) FROM app.kitchen_printers p WHERE p.id=$1`, owned.Job.PrinterID, owned.Job.TicketID).Scan(&active)
-	outcome := Outcome{State: "intervention", Message: "La impresora o una estación fue desactivada; el documento permanece en cola."}
+	outcome := Outcome{State: "intervention", Code: ProblemInactive, Message: "La impresora o una estación fue desactivada; el documento permanece en cola."}
 	if checkError != nil {
 		outcome = Outcome{State: "error", Message: "No se pudo validar el destino; no se envió el documento."}
 	}
@@ -239,6 +239,8 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 		outcome = transport.Submit(attemptContext, owned.Job)
 	}
 	cancel()
+	// Etapa 9F: todo resultado que exige atención lleva la clave de su problema para la interfaz.
+	outcome = outcomeWithCode(outcome)
 	// Se intenta guardar el resultado aun durante SIGTERM; si PostgreSQL falla, la lease
 	// queda para reconciliación conservadora y nunca para reenvío automático ciego.
 	storeContext, done := context.WithTimeout(context.Background(), 4*time.Second)

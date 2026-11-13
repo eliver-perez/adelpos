@@ -375,12 +375,12 @@ func testStage9BCommercial(t *testing.T, fixture *stage9BFixture) {
 		precheckVersion := fixture.customize(t, documents.KindPrecheck, "Precuenta con aviso", addFooter("PRECUENTA 9B"))
 		before := fixture.writeCounts(t)
 		copied := decodeResponse[printingResult](t, fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/reprint",
-			map[string]any{"operation_id": randomID(), "ticket_id": receipt.TicketID}, 200))
+			map[string]any{"operation_id": randomID(), "ticket_id": receipt.TicketID, "reason": "Copia para el cliente"}, 200))
 		if fixture.job(t, copied.JobID).content != fixture.job(t, receipt.JobID).content {
 			t.Fatal("La reimpresión del ticket no es idéntica al original")
 		}
 		precheckCopy := decodeResponse[printingResult](t, fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/reprint",
-			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 200))
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "Copia para el cliente"}, 200))
 		if copy := fixture.job(t, precheckCopy.JobID); copy.content != fixture.job(t, precheck.JobID).content || strings.Contains(copy.content, "PRECUENTA 9B") {
 			t.Fatal("La reimpresión de la precuenta no es idéntica al original")
 		}
@@ -411,7 +411,7 @@ func testStage9BCommercial(t *testing.T, fixture *stage9BFixture) {
 		}
 		// Y con la impresión con la plantilla vigente sin resolver no se acepta la copia exacta.
 		blocked = fixture.call(t, fixture.cashier, "POST", "payments/accounts/"+bill.Account.ID+"/documents/reprint",
-			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID}, 409)
+			map[string]any{"operation_id": randomID(), "ticket_id": precheck.TicketID, "reason": "Copia para el cliente"}, 409)
 		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
 			t.Fatal("La copia exacta no se bloqueó con una impresión con la plantilla vigente pendiente")
 		}
@@ -478,12 +478,12 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 		fixture.customize(t, documents.KindCashPartialCut, "Corte con título", setTitle("CORTE 9B", false))
 		before := fixture.writeCounts(t)
 		copied := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/reprint",
-			map[string]any{"operation_id": randomID()}, 200))
+			map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 200))
 		if fixture.job(t, copied.JobID).content != fixture.job(t, voucher.JobID).content {
 			t.Fatal("La reimpresión del comprobante no es idéntica al original")
 		}
 		cutCopy := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+visibleCut.DocumentID+"/reprint",
-			map[string]any{"operation_id": randomID()}, 200))
+			map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 200))
 		if fixture.job(t, cutCopy.JobID).content != fixture.job(t, visibleCut.JobID).content {
 			t.Fatal("La reimpresión del corte no es idéntica al original")
 		}
@@ -503,7 +503,7 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 			t.Fatalf("El comprobante no se imprimió con la plantilla vigente:\n%s", job.content)
 		}
 		blocked = fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+voucher.DocumentID+"/reprint",
-			map[string]any{"operation_id": randomID()}, 409)
+			map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 409)
 		if errorCode(t, blocked) != "PRINT_COPY_PENDING" {
 			t.Fatal("La copia exacta de caja no se bloqueó con una impresión con la plantilla vigente pendiente")
 		}
@@ -627,7 +627,7 @@ func testStage9BCash(t *testing.T, fixture *stage9BFixture) {
 			t.Fatal("Un documento sin datos estructurados se imprimió con la plantilla vigente")
 		}
 		copied := decodeResponse[payments.PrintOutcome](t, fixture.call(t, fixture.cashier, "POST", "payments/cash-documents/"+hiddenCut.DocumentID+"/reprint",
-			map[string]any{"operation_id": randomID()}, 200))
+			map[string]any{"operation_id": randomID(), "reason": "Copia para el encargado"}, 200))
 		if fixture.job(t, copied.JobID).content != fixture.job(t, hiddenCut.JobID).content {
 			t.Fatal("La reimpresión exacta del documento anterior cambió")
 		}

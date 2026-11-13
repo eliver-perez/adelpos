@@ -22,6 +22,8 @@ type Outcome struct {
 	Message           string `json:"message"`
 	Accepted          bool   `json:"accepted"`
 	PhysicalConfirmed bool   `json:"physical_confirmed"`
+	// Code es la clave del problema (etapa 9F, print_problems.go); vacía en un envío aceptado.
+	Code string `json:"code,omitempty"`
 }
 type Transport interface {
 	Submit(context.Context, PrintJob) Outcome
@@ -81,7 +83,7 @@ func discoverCUPSPrinters(ctx context.Context) ([]DiscoveredPrinter, error) {
 
 func (transport HostTransport) Submit(ctx context.Context, job PrintJob) Outcome {
 	if err := validatePrinter(&job.PrinterSnapshot); err != nil {
-		return Outcome{State: "intervention", Message: "El destino guardado requiere revisión."}
+		return Outcome{State: "intervention", Code: ProblemSetup, Message: "El destino guardado requiere revisión."}
 	}
 	if job.DrawerPulse != nil {
 		return transport.submitDrawerPulse(ctx, job)
@@ -101,7 +103,7 @@ func (transport HostTransport) Submit(ctx context.Context, job PrintJob) Outcome
 	case "escpos_tcp":
 		return submitESCPos(ctx, job)
 	default:
-		return Outcome{State: "intervention", Message: "El destino requiere un agente de impresión futuro."}
+		return Outcome{State: "intervention", Code: ProblemUnsupported, Message: unsupportedPrinterMessage}
 	}
 }
 
@@ -112,10 +114,10 @@ func submitCUPS(ctx context.Context, job PrintJob) Outcome {
 	if err := probe.Run(); err != nil {
 		return Outcome{State: "error", Message: "No se pudo consultar la cola CUPS del servidor; no se envió el documento."}
 	}
-	if printer.Cut {
-		if printer.CutterOption == "" {
-			return Outcome{State: "intervention", Message: "Configura la opción de corte que anuncia el controlador CUPS."}
-		}
+	// Por CUPS de texto no se pueden enviar comandos ESC/POS: el corte es la opción del controlador. Sin
+	// opción configurada el documento se imprime sin corte (etapa 9F, decisión D5); antes quedaba en
+	// «Requiere intervención» y la impresión no salía por una preferencia de papel.
+	if printer.Cut && printer.CutterOption != "" {
 		key, value, _ := strings.Cut(printer.CutterOption, "=")
 		output, err := exec.CommandContext(ctx, "/usr/bin/lpoptions", "-p", printer.Destination, "-l").Output()
 		supported := false
@@ -176,7 +178,7 @@ func cupsTextArguments(job PrintJob, filename string) []string {
 	height := max(60, min(2000, (strings.Count(job.Content, "\n")+4)*lineMillimeters))
 	arguments = append(arguments, "-o", "cpi="+textDensity(printer, cpi), "-o", fmt.Sprintf("media=Custom.%dx%dmm", printer.PaperWidth, height),
 		"-o", "page-left=0", "-o", "page-right=0", "-o", "page-top=0", "-o", "page-bottom=0")
-	if printer.Cut {
+	if printer.Cut && printer.CutterOption != "" {
 		arguments = append(arguments, "-o", printer.CutterOption)
 	}
 	return append(arguments, filename)
@@ -223,11 +225,9 @@ func ESCPosBytes(content string, printer Printer, textSize ...string) []byte {
 		result = append(result, 0x1d, 0x21, 0x11)
 	}
 	result = append(result, characters...)
-	result = append(result, '\n', '\n', '\n')
-	if printer.Cut && printer.SupportsCut {
-		result = append(result, 0x1d, 0x56, 0x00)
-	}
-	return result
+	// Final del documento (etapa 9F, §4.4): sin corte, los tres saltos de siempre; con corte, los
+	// renglones de avance de la impresora y GS V 0 (total) o GS V 1 (parcial).
+	return append(result, printer.PaperCut().Ending()...)
 }
 
 func submitESCPos(ctx context.Context, job PrintJob) Outcome {

@@ -6,6 +6,7 @@ import {
 } from '../../services/cash';
 import type { CashLimitWarning, DrawerOutcome, PrintOutcome } from '../../services/cash';
 import { notifySuccess, notifyWarning } from '../../services/notify';
+import { notifyPrinterUnavailable } from '../../services/printProblems';
 
 // Aviso del tope de caja (fase C). Solo se muestra si Go lo entregó: la función está activa, quien
 // consulta puede ver el efectivo esperado y el turno no está en arqueo. La interfaz nunca compara
@@ -69,9 +70,19 @@ export const sentStatuses = ['pending', 'processing', 'submitted'];
 // Resultado de una impresión de caja pedida como acción propia (imprimir o reimprimir un documento,
 // imprimir un corte): se avisa con el sistema único de mensajes, con el mismo texto que el
 // resultado en pantalla. Si no se envió, el aviso permanece porque exige revisar la impresión.
-export function notifyPrintOutcome(outcome: PrintOutcome | null | undefined, subject: string) {
+export function notifyPrintOutcome(
+  outcome: PrintOutcome | null | undefined,
+  subject: string,
+  retry?: () => void,
+) {
   const message = cashPrintMessage(outcome, subject);
   if (!message) {
+    return;
+  }
+  // Etapa 9F (§4.1): sin impresora válida, el aviso ofrece «Configurar impresora» y, si se puede,
+  // «Reintentar» (imprimir el documento después, desde Caja).
+  if (outcome?.status === 'not_configured') {
+    notifyPrinterUnavailable(message, retry, 'printer-missing:cash');
     return;
   }
   if (!sentStatuses.includes(outcome?.status ?? '')) {

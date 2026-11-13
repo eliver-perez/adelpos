@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Accordion } from '../../components/Accordion';
 import { Notice, PageTitle } from '../../components/Forms';
 import { useResource } from '../../hooks/useResource';
@@ -16,6 +17,7 @@ import { CancelReasonsAdmin } from './CancelReasonsAdmin';
 import { DiscountReasonsAdmin } from './DiscountReasonsAdmin';
 import { MethodsAdmin } from './MethodsAdmin';
 import { PaymentPoliciesForm } from './PaymentPoliciesForm';
+import { takePaymentPoliciesRequest } from './policiesRequest';
 import { ShiftOverview } from './ShiftOverview';
 import { TaxRateSection } from './TaxRateSection';
 import { USDSettingsSection } from './USDSettingsSection';
@@ -63,6 +65,16 @@ export function PaymentsAdminPage({
     }
   };
   const busy = mutation.busy || mutation.uncertain;
+  // Etapa 9F (§4.1): «Configurar impresora» abre esta página con «Políticas de cobro» desplegada y a la
+  // vista, donde se elige la impresora de tickets.
+  const [policiesRequested] = useState(takePaymentPoliciesRequest);
+  const policies = useRef<HTMLDivElement>(null);
+  const policiesReady = !!settings.data;
+  useEffect(() => {
+    if (policiesRequested && policiesReady) {
+      policies.current?.scrollIntoView?.({ block: 'start' });
+    }
+  }, [policiesRequested, policiesReady]);
 
   // Reintento del cambio incierto: su resultado definitivo se avisa como el de cualquier acción.
   async function retry() {
@@ -189,20 +201,23 @@ export function PaymentsAdminPage({
               )}
             </Accordion>
           )}
-          <Accordion
-            title="Políticas de cobro"
-            summary="Turno compartido, impresión de ticket, impresora y devoluciones"
-          >
-            <Notice>{settings.error}</Notice>
-            {settings.data && (
-              <PaymentPoliciesForm
-                settings={settings.data}
-                can={can}
-                execute={execute}
-                busy={busy}
-              />
-            )}
-          </Accordion>
+          <div ref={policies} className="payments-policies-anchor">
+            <Accordion
+              title="Políticas de cobro"
+              summary="Turno compartido, impresión de ticket, impresora, nombre de la precuenta y devoluciones"
+              defaultOpen={policiesRequested}
+            >
+              <Notice>{settings.error}</Notice>
+              {settings.data && (
+                <PaymentPoliciesForm
+                  settings={settings.data}
+                  can={can}
+                  execute={execute}
+                  busy={busy}
+                />
+              )}
+            </Accordion>
+          </div>
         </>
       )}
       <Accordion title="Turno actual" summary="Caja de esta terminal, movimientos y totales">

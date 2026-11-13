@@ -12,7 +12,9 @@
 //! registro de acciones que la paleta y los atajos, es decir, con la misma función que el botón de
 //! la interfaz. React informa qué opciones están habilitadas según los permisos y el contexto con
 //! otra operación cerrada (`menu_set_state`). La única opción que atiende Rust es «Salir»: cierra
-//! esta aplicación sin detener Go ni PostgreSQL, que funcionan sin ventana.
+//! esta aplicación sin detener Go ni PostgreSQL, que funcionan sin ventana. Desde la etapa 9F
+//! `menu_set_state` recibe además, opcional, el nombre visible de la precuenta (clave de una lista
+//! cerrada) y cambia solo el texto de «Imprimir precuenta»; no abre rutas nuevas.
 //!
 //! El puente de pruebas de Playwright (`desktop/e2e/native-driver.ts`) y una prueba de Vitest leen
 //! `MENU_ACTIONS` de este archivo con expresiones regulares: cada entrada conserva la forma
@@ -365,6 +367,17 @@ pub fn validate_enabled(enabled: &[String]) -> Result<HashSet<&'static str>, Str
     Ok(accepted)
 }
 
+/// Texto de «Imprimir precuenta» según el nombre visible del documento previo al cobro (etapa 9F,
+/// §4.5): la misma lista cerrada de Go (`payments.PrecheckNames`). Cualquier otra clave se rechaza.
+pub fn precheck_menu_label(name: &str) -> Option<&'static str> {
+    match name {
+        "precheck" => Some("Imprimir precuenta"),
+        "sales_ticket" => Some("Imprimir ticket de venta"),
+        "bill" => Some("Imprimir cuenta"),
+        _ => None,
+    }
+}
+
 /// Mensaje que recibe React por el canal del menú.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct MenuMessage {
@@ -498,10 +511,21 @@ pub fn menu_subscribe(
 }
 
 /// Operación cerrada: React informa qué opciones propias están habilitadas (las demás se
-/// deshabilitan). Un identificador fuera de la lista cerrada rechaza todo el estado.
+/// deshabilitan) y, desde la etapa 9F, el nombre visible de la precuenta. Un identificador o un
+/// nombre fuera de su lista cerrada rechaza todo el estado.
 #[tauri::command]
-pub fn menu_set_state(state: State<'_, MenuState>, enabled: Vec<String>) -> Result<(), String> {
+pub fn menu_set_state(
+    state: State<'_, MenuState>,
+    enabled: Vec<String>,
+    precheck_name: Option<String>,
+) -> Result<(), String> {
     let accepted = validate_enabled(&enabled)?;
+    let precheck_label = match precheck_name.as_deref() {
+        Some(name) => {
+            Some(precheck_menu_label(name).ok_or("Nombre de la precuenta no reconocido.")?)
+        }
+        None => None,
+    };
     let items = state
         .items
         .lock()
@@ -511,6 +535,12 @@ pub fn menu_set_state(state: State<'_, MenuState>, enabled: Vec<String>) -> Resu
         for item in entries {
             item.set_enabled(on)
                 .map_err(|_| "No se pudo actualizar el menú.")?;
+            if *id == "file.print_precheck" {
+                if let Some(label) = precheck_label {
+                    item.set_text(label)
+                        .map_err(|_| "No se pudo actualizar el menú.")?;
+                }
+            }
         }
     }
     Ok(())
@@ -768,6 +798,24 @@ mod tests {
         })
         .unwrap();
         assert_eq!(message, serde_json::json!({"action": "view.palette"}));
+    }
+
+    #[test]
+    fn precheck_label_follows_the_closed_list() {
+        assert_eq!(precheck_menu_label("precheck"), Some("Imprimir precuenta"));
+        assert_eq!(
+            precheck_menu_label("sales_ticket"),
+            Some("Imprimir ticket de venta")
+        );
+        assert_eq!(precheck_menu_label("bill"), Some("Imprimir cuenta"));
+        assert_eq!(precheck_menu_label("Imprimir precuenta"), None);
+        assert_eq!(precheck_menu_label(""), None);
+        // La opción conserva su texto predeterminado en la lista cerrada (lo comparan Vitest y
+        // Playwright).
+        assert_eq!(
+            action_by_id("file.print_precheck").unwrap().label,
+            "Imprimir precuenta"
+        );
     }
 
     #[test]

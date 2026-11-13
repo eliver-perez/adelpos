@@ -3060,3 +3060,89 @@ AUTHORIZATION_INSUFFICIENT` («El supervisor indicado no tiene permiso para canc
 supervisor de `after.authorized_by`; en las partidas de una cuenta cancelada, quien autorizó cancelarla; vacía si bastó el
 permiso propio y en los registros anteriores a la 9F. Sale igual en PDF y Excel. `employees.activity` cuenta en
 «Autorizaciones como supervisor» también las cancelaciones y reducciones de unidades. Sin filtros nuevos.
+
+## Etapa 9F · impresión (fase B, esquema 22)
+
+Migración `0022_printing_and_kitchen_stations.sql` (sección «Fase B»; la fase C agrega la suya al mismo archivo). Sin
+permisos nuevos. Detalle funcional en [docs/KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md),
+[docs/PAYMENTS_AND_REFUNDS.md](docs/PAYMENTS_AND_REFUNDS.md) y [docs/DOCUMENT_DESIGNER.md](docs/DOCUMENT_DESIGNER.md).
+
+### Impresoras: corte de papel (`kitchen/printers`)
+
+- Campos nuevos de `Printer`: `cut_mode` (`full` | `partial`) y `cut_feed_lines` (entero de la lista cerrada 0–8).
+  CHECK `kitchen_printers_cut_mode_check` y `kitchen_printers_cut_feed_lines_check`; las impresoras existentes quedan
+  con `full` y 3 (los bytes de siempre); el valor por omisión de la columna para las nuevas es 4.
+- Al guardar (`POST`/`PATCH`, `kitchen.printers.manage`, auditado como `kitchen.printer.saved`): `supports_cut` se
+  guarda **igual a `cut`** (la casilla «el modelo admite corte» ya no existe en la interfaz; el CHECK
+  `NOT cut OR supports_cut` de la 0005 sigue vigente). Compatibilidad: en una impresora **nueva**, si el cuerpo no trae
+  `cut`, corta con papel de 80 mm y no corta con 58 mm; sin `cut_mode`, `full`; sin `cut_feed_lines` (o `null`), 4. Al
+  editar, un campo que el cliente no envía conserva lo guardado. Fuera de la lista: 400 `KITCHEN_VALIDATION`.
+- Las fotografías de impresora guardadas en trabajos anteriores (sin los campos) se imprimen y reimprimen como antes:
+  corte total con 3 saltos si tenían `cut`.
+
+### Rechazos sin impresora válida (decisión D4)
+
+Una impresora sirve para precuentas, tickets de pago y documentos de caja si está configurada en Cobros, activa y no es
+de otra terminal (`agent`). Si no, Go responde **antes de encolar** (no se crea trabajo ni documento):
+
+| Ruta                                                                  | Respuesta                                                                              |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `POST payments/accounts/{id}/precheck/print`                          | 409 `PRINTER_NOT_CONFIGURED` o `PRINTER_UNAVAILABLE`                                   |
+| `POST payments/accounts/{id}/payments` con `print`                    | 200; `printing: {requested, status: "not_configured", problem, printer_name, message}` |
+| Operaciones de caja, cortes y cierre con `print`                      | 200; `printing` igual (`PrintOutcome.problem`, `printer_name`)                         |
+| `POST payments/cash-reports/{id}/print`, `cash-operations/{id}/print` | 409 `PRINTER_NOT_CONFIGURED` o `PRINTER_UNAVAILABLE`                                   |
+| `POST payments/accounts/{id}/documents/receipt`                       | 409 igual                                                                              |
+
+`error.details = {document: "precheck" | "receipt" | "cash_document", problem: "missing" | "inactive" |
+"unsupported", printer_name?}`. Mensajes: «No hay impresora configurada para precuentas.» (con el nombre visible:
+«…para tickets de venta.»), «No hay impresora configurada para tickets de pago.», «…para los documentos de caja.»,
+«La impresora X está desactivada.», «Esta impresora todavía no puede usarse para imprimir.». Las comandas no cambian:
+una impresora inactiva bloquea la liberación como antes y la de otra terminal deja el trabajo en «Requiere
+intervención», ahora con el texto «Esta impresora todavía no puede usarse para imprimir.» (antes «El destino está
+inactivo o requiere un agente de impresión aún no implementado»).
+
+### Rutas nuevas
+
+| Método | Ruta                                       | Permiso                  | Cuerpo                               |
+| ------ | ------------------------------------------ | ------------------------ | ------------------------------------ |
+| POST   | `payments/accounts/{id}/documents/retry`   | `payments.tickets.print` | `{operation_id, ticket_id, job_id?}` |
+| POST   | `payments/accounts/{id}/documents/receipt` | `payments.tickets.print` | `{operation_id, payment_id}`         |
+| POST   | `payments/cash-documents/{id}/retry`       | `cash.reports.print`     | `{operation_id, job_id?}`            |
+
+- **Reintentar** (decisión D3): vuelve a `pending` el trabajo más reciente del documento (o el indicado) si está en
+  `error` o `intervention`, con la misma impresora y **sin motivo**; no exige `kitchen.stations.all`. Respuesta
+  `{status, job_id, ticket_id}` (caja: `PrintOutcome`). Rechazos: 404 si el documento no es de esa cuenta; 409
+  `PRINT_NOT_FAILED` (nada que reintentar), `PRINT_UNCERTAIN` (pudo haber salido: se resuelve en la cola),
+  `PRINT_JOB_SUPERSEDED` (hay una impresión más reciente) y `PRINTER_UNAVAILABLE` (la impresora ya no puede imprimir).
+  Caja aplica además las reglas de consulta del turno y del efectivo esperado. Auditoría `payments.document_retried` /
+  `cash.document_retried`; historial del trabajo `print.retry`.
+- **Ticket de un pago después**: imprime el ticket de un pago de la cuenta que no lo tiene (el «Reintentar» del aviso
+  de un ticket que no se imprimió por falta de impresora). 409 `DOCUMENT_EXISTS` si ya existe (se reimprime con su
+  motivo). Auditoría `payments.receipt_printed`.
+
+### Cambios de contrato
+
+- `POST kitchen/jobs/{id}/retry`: `reason` **opcional** (si se envía, 5–500). `resolve` y `POST kitchen/reprint` lo
+  siguen exigiendo.
+- `POST payments/accounts/{id}/documents/reprint` y `POST payments/cash-documents/{id}/reprint`: **`reason`
+  obligatorio** (5–500, 400 `KITCHEN_VALIDATION` si falta); queda en la auditoría (`payments.document_reprinted`,
+  `cash.document_reprinted`) y en el historial del trabajo (`print.reprinted`).
+- Resultados del transporte y trabajos: `Outcome.code` (clave del problema: `unreachable`, `inactive`,
+  `unsupported`, `setup`, `uncertain`), guardada en `kitchen_print_jobs.result` y en cada intento. Lecturas:
+  `GET kitchen/jobs` y `GET kitchen/jobs/{id}` agregan `ticket_kind`, `folio`, `document_title` y `problem`; los
+  documentos de la cuenta (`documents[]` de `GET payments/accounts/{id}`) y de caja agregan `job_problem`.
+- `payment_settings.precheck_name` (`precheck` | `sales_ticket` | `bill`, CHECK `payment_settings_precheck_name_check`):
+  `GET payments/settings` lo informa; `PUT payments/settings` lo acepta opcional (sin él, se conserva; fuera de la lista,
+  400), con `payments.settings.manage` y la auditoría `payments.settings_changed` de siempre. `GET auth/me` lo informa en
+  `establishment.precheck_name` para todo usuario. La precuenta guarda `title` («TICKET DE VENTA» o «CUENTA»; vacío con
+  «Precuenta», idéntica a la anterior) y lo imprime como encabezado; una plantilla con título propio lo sigue
+  sustituyendo.
+- Contexto de la precuenta y del ticket: «Mesa X» sin repetir «Mesa» si el nombre de la mesa ya la incluye.
+- Huella idempotente de cobros (`payments/handler.go`): quita la contraseña de toda autorización en cualquier nivel del
+  cuerpo comparando las claves sin distinguir mayúsculas (como `operations`); el contrato no cambia.
+
+### Puente nativo
+
+- Lista cerrada de `api.rs`: `payments_retry_document`, `payments_print_receipt` y `payments_retry_cash_document`.
+- `menu_set_state` acepta además `precheckName` opcional (lista cerrada `precheck`, `sales_ticket`, `bill`; otro valor
+  rechaza el estado) y cambia solo el texto de «Imprimir precuenta». Sin rutas nuevas.

@@ -42,6 +42,10 @@ type PrintOutcome struct {
 	JobID            string `json:"job_id,omitempty"`
 	IncludesExpected bool   `json:"includes_expected"`
 	Message          string `json:"message,omitempty"`
+	// Problem y PrinterName explican un documento no encolado por falta de impresora válida (etapa
+	// 9F, decisión D4): missing, inactive o unsupported, y la impresora de tickets de Cobros.
+	Problem     string `json:"problem,omitempty"`
+	PrinterName string `json:"printer_name,omitempty"`
 }
 
 // CashDocumentRecord es un documento de caja registrado con el estado de su último trabajo.
@@ -57,8 +61,10 @@ type CashDocumentRecord struct {
 	CreatedAt        time.Time `json:"created_at"`
 	JobID            *string   `json:"job_id"`
 	JobState         *string   `json:"job_state"`
-	PrinterName      *string   `json:"printer_name"`
-	Copies           int       `json:"copies"`
+	// JobProblem es la clave del problema del último trabajo si exige atención (etapa 9F).
+	JobProblem  *string `json:"job_problem"`
+	PrinterName *string `json:"printer_name"`
+	Copies      int     `json:"copies"`
 }
 
 // CashDocumentPreview es la vista previa de un documento de caja renderizada por Go.
@@ -182,19 +188,16 @@ func (handler *service) renderCashSource(source cashDocumentSource, width docume
 // cashPrinter devuelve la impresora de tickets configurada en Cobros (el mismo criterio de los
 // documentos comerciales de la etapa 6) y su ancho: papel y, desde la etapa 9C, columnas (80 mm con
 // las predeterminadas si no hay una configurada).
-func (handler *service) cashPrinter() (*string, documents.RenderOptions, error) {
-	settings, err := handler.settings()
+// Desde la etapa 9F también devuelve por qué no puede imprimir (missing, inactive o unsupported).
+func (handler *service) cashPrinter() (*kitchen.Printer, string, documents.RenderOptions, error) {
+	printer, problem, err := handler.receiptPrinter()
 	if err != nil {
-		return nil, documents.RenderOptions{}, err
+		return nil, "", documents.RenderOptions{}, err
 	}
-	if settings.ReceiptPrinterID == nil {
-		return nil, documents.RenderOptions{PaperWidth: 80}, nil
+	if printer == nil {
+		return nil, problem, documents.RenderOptions{PaperWidth: 80}, nil
 	}
-	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *settings.ReceiptPrinterID)
-	if err != nil {
-		return nil, documents.RenderOptions{}, err
-	}
-	return settings.ReceiptPrinterID, printer.RenderOptions(), nil
+	return printer, problem, printer.RenderOptions(), nil
 }
 
 // existingDocument devuelve el documento ya registrado de un corte o de una operación.
@@ -283,15 +286,16 @@ func (handler *service) printAfterRecording(source cashDocumentSource, subject s
 	// También la consulta de la impresora va dentro del punto de guardado: un error de PostgreSQL
 	// fuera de él abortaría la transacción completa y, con ella, la operación o el cierre.
 	outcome, err := handler.withSavepoint(func(scoped *service) (any, error) {
-		printerID, width, err := scoped.cashPrinter()
+		printer, problem, width, err := scoped.cashPrinter()
 		if err != nil {
 			return nil, err
 		}
-		if printerID == nil {
-			return PrintOutcome{Requested: true, Status: "not_configured", Message: "No hay impresora de tickets configurada en Cobros; " +
-				subject + " quedó registrado."}, nil
+		// Sin impresora válida (etapa 9F, decisión D4) no se encola: la operación ya quedó registrada y
+		// el documento se imprime después desde Caja, una vez configurada.
+		if problem != "" {
+			return scoped.unavailableOutcome(documentCash, problem, printer, subject), nil
 		}
-		return scoped.enqueueCashDocument(source, *printerID, width)
+		return scoped.enqueueCashDocument(source, printer.ID, width)
 	})
 	if err != nil {
 		return PrintOutcome{Requested: true, Status: "failed", Message: "No se pudo encolar el documento; " + subject +
@@ -359,7 +363,7 @@ func (handler *service) operationSource(operationID string) (cashDocumentSource,
 // previewSource renderiza la vista previa sin escribir: los mismos datos, permisos y plantilla
 // que la impresión, con el ancho de la impresora de tickets (80 mm si no hay una configurada).
 func (handler *service) previewSource(source cashDocumentSource) (any, error) {
-	_, width, err := handler.cashPrinter()
+	_, _, width, err := handler.cashPrinter()
 	if err != nil {
 		return nil, err
 	}
@@ -434,14 +438,14 @@ func (handler *service) printLater(source cashDocumentSource) (any, error) {
 	if existing != nil {
 		return nil, conflict("CASH_DOCUMENT_EXISTS", "Este documento ya se imprimió. Para otra copia usa «Reimprimir».")
 	}
-	printerID, width, err := handler.cashPrinter()
+	printer, problem, width, err := handler.cashPrinter()
 	if err != nil {
 		return nil, err
 	}
-	if printerID == nil {
-		return nil, conflict("PRINTER_NOT_CONFIGURED", "No hay impresora de tickets configurada en Cobros.")
+	if problem != "" {
+		return nil, handler.printerUnavailableError(documentCash, problem, printer)
 	}
-	outcome, err := handler.enqueueCashDocument(source, *printerID, width)
+	outcome, err := handler.enqueueCashDocument(source, printer.ID, width)
 	if err != nil {
 		return nil, err
 	}
@@ -453,33 +457,21 @@ func (handler *service) printLater(source cashDocumentSource) (any, error) {
 // reprintCashDocument solicita otra copia idéntica de un documento de caja, sin crear movimientos
 // ni volver a cerrar el turno. Un documento con el efectivo esperado exige poder consultarlo y no
 // se reimprime durante el arqueo de cierre.
+// Desde la etapa 9F (decisión D3) pide motivo, que queda en la auditoría y en el historial del trabajo.
 func (handler *service) reprintCashDocument(parts []string) (any, error) {
-	if err := decodeOperationOnly(handler.request.Body); err != nil {
+	var input struct {
+		OperationID string `json:"operation_id"`
+		Reason      string `json:"reason"`
+	}
+	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
-	documents, err := handler.listCashDocuments("d.id=$1", parts[1])
+	document, shift, err := handler.printableCashDocument(parts[1], "se reimprime")
 	if err != nil {
 		return nil, err
 	}
-	if len(documents) == 0 {
-		return nil, notFound("El documento de caja no existe.")
-	}
-	document := documents[0]
-	shift, err := handler.readableShift(document.ShiftID)
-	if err != nil {
-		return nil, err
-	}
-	if document.IncludesExpected {
-		if err := handler.request.Actor.Require(permissionExpectedRead); err != nil {
-			return nil, err
-		}
-		if shift.State == shiftClosing {
-			return nil, conflict("SHIFT_CLOSING", "El documento contiene el efectivo esperado y "+shift.RegisterName+
-				" está en arqueo de cierre: se reimprime cuando termine el arqueo.")
-		}
-	}
-	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, document.TicketID, handler.operationID, handler.request.Actor.UserID,
-		handler.request.Actor.DeviceID)
+	job, err := kitchen.ReprintCommercial(handler.ctx, handler.tx, document.TicketID, input.Reason, handler.operationID,
+		handler.request.Actor.UserID, handler.request.Actor.DeviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,6 +483,64 @@ func (handler *service) reprintCashDocument(parts []string) (any, error) {
 		IncludesExpected: document.IncludesExpected, Message: job.LastError,
 	}
 	return result, handler.audit(handler.ctx, handler.tx, "cash.document_reprinted", "cash_shift", &shift.ID, nil, map[string]any{
+		"document_id": document.ID, "kind": document.Kind, "job_id": job.ID, "reason": input.Reason,
+	})
+}
+
+// printableCashDocument lee un documento de caja con las reglas de consulta de su turno. Un documento con
+// el efectivo esperado exige poder consultarlo y no se imprime durante el arqueo de cierre.
+func (handler *service) printableCashDocument(documentID, action string) (CashDocumentRecord, *Shift, error) {
+	documents, err := handler.listCashDocuments("d.id=$1", documentID)
+	if err != nil {
+		return CashDocumentRecord{}, nil, err
+	}
+	if len(documents) == 0 {
+		return CashDocumentRecord{}, nil, notFound("El documento de caja no existe.")
+	}
+	document := documents[0]
+	shift, err := handler.readableShift(document.ShiftID)
+	if err != nil {
+		return CashDocumentRecord{}, nil, err
+	}
+	if document.IncludesExpected {
+		if err := handler.request.Actor.Require(permissionExpectedRead); err != nil {
+			return CashDocumentRecord{}, nil, err
+		}
+		if shift.State == shiftClosing {
+			return CashDocumentRecord{}, nil, conflict("SHIFT_CLOSING", "El documento contiene el efectivo esperado y "+shift.RegisterName+
+				" está en arqueo de cierre: "+action+" cuando termine el arqueo.")
+		}
+	}
+	return document, shift, nil
+}
+
+// retryCashDocument vuelve a enviar a la impresora un documento de caja que nunca salió en papel (POST
+// payments/cash-documents/{id}/retry, etapa 9F): un toque, sin motivo, con el permiso de imprimir
+// documentos de caja y las reglas de consulta de su turno.
+func (handler *service) retryCashDocument(parts []string) (any, error) {
+	var input struct {
+		OperationID string `json:"operation_id"`
+		JobID       string `json:"job_id"`
+	}
+	if err := decode(handler.request.Body, &input); err != nil {
+		return nil, err
+	}
+	document, shift, err := handler.printableCashDocument(parts[1], "se imprime")
+	if err != nil {
+		return nil, err
+	}
+	job, err := handler.retryJob(document.TicketID, input.JobID)
+	if err != nil {
+		return nil, err
+	}
+	if err := events.Append(handler.ctx, handler.tx, "cash.document.printed", cashScope, &shift.ID, nil); err != nil {
+		return nil, err
+	}
+	result := PrintOutcome{
+		Requested: true, Status: job.State, DocumentID: document.ID, TicketID: document.TicketID, JobID: job.ID,
+		IncludesExpected: document.IncludesExpected, Message: job.LastError,
+	}
+	return result, handler.audit(handler.ctx, handler.tx, "cash.document_retried", "cash_shift", &shift.ID, nil, map[string]any{
 		"document_id": document.ID, "kind": document.Kind, "job_id": job.ID,
 	})
 }
@@ -508,12 +558,15 @@ func (handler *service) shiftDocuments(parts []string) (any, error) {
 	return map[string]any{"shift_id": shift.ID, "documents": documents}, nil
 }
 
-const cashDocumentQuery = `SELECT d.id,d.kind,d.shift_id,d.report_id,d.cash_operation_id,d.ticket_id,d.includes_expected,
-    u.display_name,d.created_at,latest.id,latest.state,latest.printer_name,
+var cashDocumentQuery = `SELECT d.id,d.kind,d.shift_id,d.report_id,d.cash_operation_id,d.ticket_id,d.includes_expected,
+    u.display_name,d.created_at,latest.id,latest.state,latest.problem,latest.printer_name,
     (SELECT count(*) FROM app.kitchen_print_jobs j WHERE j.ticket_id=d.ticket_id)::int
     FROM app.cash_documents d JOIN app.users u ON u.id=d.created_by
-    LEFT JOIN LATERAL (SELECT j.id,j.state,p.name AS printer_name FROM app.kitchen_print_jobs j
+    LEFT JOIN LATERAL (SELECT j.id,j.state,` + jobProblemColumn + ` AS problem,p.name AS printer_name FROM app.kitchen_print_jobs j
         JOIN app.kitchen_printers p ON p.id=j.printer_id WHERE j.ticket_id=d.ticket_id ORDER BY j.created_at DESC,j.id DESC LIMIT 1) latest ON true`
+
+// jobProblemColumn es la clave del problema del trabajo (alias j, etapa 9F).
+var jobProblemColumn = kitchen.JobProblemSQL("j")
 
 // listCashDocuments devuelve los documentos que cumplen la condición, en orden cronológico.
 func (handler *service) listCashDocuments(where string, argument any) ([]CashDocumentRecord, error) {
@@ -530,7 +583,7 @@ func scanCashDocuments(rows pgx.Rows) ([]CashDocumentRecord, error) {
 	for rows.Next() {
 		var item CashDocumentRecord
 		if err := rows.Scan(&item.ID, &item.Kind, &item.ShiftID, &item.ReportID, &item.CashOperationID, &item.TicketID,
-			&item.IncludesExpected, &item.CreatedByName, &item.CreatedAt, &item.JobID, &item.JobState, &item.PrinterName,
+			&item.IncludesExpected, &item.CreatedByName, &item.CreatedAt, &item.JobID, &item.JobState, &item.JobProblem, &item.PrinterName,
 			&item.Copies); err != nil {
 			return nil, err
 		}

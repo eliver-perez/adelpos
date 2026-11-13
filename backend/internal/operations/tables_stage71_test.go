@@ -156,9 +156,11 @@ func testTablesStage71(t *testing.T, fixture *restaurantFixture) {
 		"accounts.read", "accounts.open", "accounts.manage", "orders.capture", "orders.confirm", "orders.cancel",
 		"restaurant.tables.read", "restaurant.areas.read", "catalog.read", "catalog.prices.read",
 	}, "")
-	// Impresora de tickets sin hardware: la precuenta queda en la cola en intervención, nunca se envía.
+	// Impresora de tickets sin hardware (una cola del equipo que no existe; estas pruebas no ejecutan el
+	// trabajador): la precuenta queda en la cola, nunca se envía. Desde la etapa 9F una impresora de otra
+	// terminal («agent») ya no es válida para precuentas.
 	printer := decodeResponse[kitchen.Printer](t, fixture.mutate(t, "POST", "kitchen/printers", kitchen.Printer{
-		Name: "Precuentas de mesas 7.1", Transport: "agent", Destination: "Agente de aceptación no disponible", Active: true, PaperWidth: 80, Copies: 1,
+		Name: "Precuentas de mesas 7.1", Transport: "cups", Destination: "ADEL_TEST_PRECHECK_71", Active: true, PaperWidth: 80, Copies: 1,
 	}, 200))
 	base.receiptSettings(t, printer.ID, false)
 	printPrecheck := func(t *testing.T, accountID string) {

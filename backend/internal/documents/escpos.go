@@ -1,6 +1,7 @@
 package documents
 
 import (
+	"bytes"
 	"context"
 
 	"golang.org/x/text/encoding/charmap"
@@ -44,14 +45,14 @@ func sizeCommand(size string) byte {
 // EncodeESCPos codifica un layout para una impresora ESC/POS: ESC @ y ESC t 2 (CP850); por línea de
 // texto, GS ! n y ESC E n con el reinicio al final de la línea, el texto y el salto; por línea de
 // imagen, GS v 0 con los bits que entregue rasters (una imagen sin bits se omite). Con el texto
-// grande de Cocina cada línea va a doble tamaño, como antes de la 9B. Al final, tres saltos y el
-// corte GS V 0 si cut lo pide.
+// grande de Cocina cada línea va a doble tamaño, como antes de la 9B. Al final, el cierre del
+// documento según el corte de la impresora (PaperCut.Ending): sin corte, los tres saltos de siempre.
 //
 // GS v 0 se ejecuta al inicio de una línea, con el búfer de impresión vacío (muchas impresoras
 // ignoran la imagen o la mezclan con el texto si no). Por eso, si una imagen sigue a la última
 // línea de texto y esa línea quedó sin salto (tickets, precuentas y documentos de caja no terminan
 // con salto), el salto se emite antes de la imagen. El texto del documento (Text) no cambia.
-func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut bool) []byte {
+func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut PaperCut) []byte {
 	result := []byte{0x1b, 0x40, 0x1b, 0x74, 0x02}
 	lastText := -1
 	for index, line := range layout.Lines {
@@ -90,11 +91,47 @@ func EncodeESCPos(layout *Layout, rasters map[string]*Raster, cut bool) []byte {
 			lineOpen = true
 		}
 	}
-	result = append(result, '\n', '\n', '\n')
-	if cut {
-		result = append(result, 0x1d, 0x56, 0x00)
+	return append(result, cut.Ending()...)
+}
+
+// Corte de papel (etapa 9F, §4.4, decisión D5). Cada impresora decide si corta al terminar, el tipo de
+// corte y cuántos renglones avanza antes de cortar, para que la cuchilla no caiga sobre el texto.
+const (
+	// LegacyCutFeedLines son los saltos que llevaba siempre el final de un documento hasta la etapa 9E. Son
+	// los de un documento sin corte y los de las fotografías de impresora anteriores a la 9F (sin el
+	// campo), de modo que su reimpresión sale idéntica.
+	LegacyCutFeedLines = 3
+	// DefaultCutFeedLines son los renglones de avance de una impresora nueva.
+	DefaultCutFeedLines = 4
+	// MaxCutFeedLines es el máximo de la lista cerrada de renglones de avance (0 a 8).
+	MaxCutFeedLines = 8
+)
+
+// PaperCut es el final de un documento ESC/POS: con Enabled, FeedLines saltos de renglón y el corte
+// GS V 0 (total) o GS V 1 (parcial, Partial); sin corte, los tres saltos de siempre, byte a byte
+// iguales a los de la etapa 9E. La mayoría de las impresoras sin cortador ignoran GS V.
+type PaperCut struct {
+	Enabled   bool
+	Partial   bool
+	FeedLines int
+}
+
+// NoPaperCut es el final de un documento sin corte.
+var NoPaperCut = PaperCut{}
+
+// Ending devuelve los bytes que cierran el documento. Nunca forma parte del pulso del cajón, que no
+// imprime ni corta.
+func (cut PaperCut) Ending() []byte {
+	if !cut.Enabled {
+		return []byte{'\n', '\n', '\n'}
 	}
-	return result
+	feed := min(max(cut.FeedLines, 0), MaxCutFeedLines)
+	mode := byte(0x00)
+	if cut.Partial {
+		mode = 0x01
+	}
+	ending := bytes.Repeat([]byte{'\n'}, feed)
+	return append(ending, 0x1d, 0x56, mode)
 }
 
 // encodeCP850 limpia el texto y lo codifica en CP850; un carácter sin equivalente se imprime «?».

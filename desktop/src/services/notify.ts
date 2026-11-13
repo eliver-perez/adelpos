@@ -29,6 +29,9 @@ export interface NotifyOptions {
   description?: string;
   // Acción opcional, por ejemplo «Imprimir comprobante».
   action?: NotifyAction;
+  // Varias acciones (etapa 9F: «Configurar impresora» y «Reintentar» en el mismo aviso). Se muestran
+  // después de `action`, en su orden.
+  actions?: NotifyAction[];
   // Identificador estable: un aviso nuevo con el mismo id sustituye al anterior.
   id?: string;
   // Fuerza que el aviso permanezca hasta que se cierre.
@@ -57,7 +60,7 @@ function show(tone: NoticeTone, message: string, options: NotifyOptions = {}, co
         tone,
         message,
         description: options.description,
-        action: options.action,
+        actions: [...(options.action ? [options.action] : []), ...(options.actions ?? [])],
         code,
       }),
     {

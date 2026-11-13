@@ -163,6 +163,8 @@ export type Operation =
   | 'payments_precheck'
   | 'payments_print_precheck'
   | 'payments_reprint'
+  | 'payments_retry_document'
+  | 'payments_print_receipt'
   // Administración de caja (etapa 7, fase A): contratos para las pantallas de la fase B.
   | 'payments_shifts'
   | 'payments_cash_catalog'
@@ -200,6 +202,7 @@ export type Operation =
   | 'payments_cash_operation_preview'
   | 'payments_print_cash_operation'
   | 'payments_reprint_cash_document'
+  | 'payments_retry_cash_document'
   | 'payments_shift_documents'
   // Etapa 7.1 (fase C): «Probar apertura» del cajón e intentos rechazados por efectivo insuficiente.
   | 'payments_test_cash_drawer'

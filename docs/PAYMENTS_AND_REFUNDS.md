@@ -230,3 +230,28 @@ Aceptación PostgreSQL en `backend/internal/operations/payments_acceptance_test.
 Etapa 7.1 (fase D): `operations/stage71_phase_d_test.go`, encadenada al final de `TestRestaurantAcceptance` con caja, cajero y turno propios: siembra y orden de los motivos; descuento y cortesía con motivo (`reason_id` guardado y auditado); «Otro» sin descripción, motivo inexistente o inválido rechazados sin registros; compatibilidad sin `reason_id`; motivo inactivo rechazado y desactivación sin alterar lo registrado; administración con y sin permiso, idempotente, auditada, con orden y al menos un motivo activo; motivo en la precuenta, el ticket impreso y el historial; total en dólares en la precuenta y el ticket con la función activa y tipo de cambio, y ausente sin la función, sin tipo de cambio o sin turno en la caja de la terminal. Unitarias de la plantilla en `payments/documents_test.go`. Actualización desde el esquema 8 en `database/existing_install_test.go`.
 
 Etapa 9A (parte A1): `operations/stage9a_test.go`, encadenada al final de `TestRestaurantAcceptance`: la precuenta guarda la revisión y el número de ajustes; un cargo y su cancelación la invalidan sin cambiar la revisión de la cuenta; dos carreras controladas (un borrador y un cargo que inician su transacción antes que la impresión y esperan el lock 7820148305 detrás de ella) dejan la precuenta obsoleta aunque la regla anterior por marcas de tiempo la habría mostrado vigente; las precuentas históricas (sin revisión) siguen la regla anterior; los tickets no guardan revisión. Además, el precio reducido por complementos con IVA propio del 8 %, la promoción y el descuento manual posterior sin doble descuento. Actualización desde el esquema 14 y restricción de la 0015 en `database/stage9a_catalog_precheck_upgrade_test.go`.
+
+## Impresora válida, reintentos y nombre de la precuenta · etapa 9F
+
+- **Impresora válida** (decisión D4): la impresora de tickets de Cobros debe estar configurada, activa y no ser de otra
+  terminal. Sin ella, imprimir la precuenta responde 409 (`PRINTER_NOT_CONFIGURED` o `PRINTER_UNAVAILABLE`, con
+  `details.document` y `details.problem`) sin encolar nada, y el ticket de un pago responde `not_configured` con el
+  motivo (`problem`, `printer_name`, `message`): **el pago queda registrado**. La interfaz avisa al momento con
+  «Configurar impresora» y «Reintentar»; para el ticket, «Reintentar» llama a `POST …/documents/receipt` con el pago,
+  que imprime su ticket una sola vez (después se reimprime con motivo).
+- **Reintentar** una precuenta o un ticket que nunca salió en papel: `POST …/documents/retry` con
+  `payments.tickets.print`, sin motivo y sin el permiso de la cola de cocina (la lista de documentos de la cuenta lo
+  ofrece con la explicación de qué pasó). Un resultado incierto se resuelve en Cocina › Cola de impresión.
+- **Reimprimir** (`POST …/documents/reprint`) pide motivo de 5 a 500 caracteres desde la 9F; queda en la auditoría
+  `payments.document_reprinted` y en el historial del trabajo.
+- **Nombre visible de la precuenta** (§4.5): en Cobros › Políticas de cobro, «Nombre de la precuenta»: «Precuenta»
+  (predeterminado), «Ticket de venta» (como llamaba el sistema anterior al documento que entregaba antes de cobrar) o
+  «Cuenta». Lo cambia quien tiene `payments.settings.manage`, se audita con las políticas y lo leen todos los usuarios
+  con la sesión. Se usa en los botones, avisos, la paleta, el menú nativo y el encabezado impreso («TICKET DE VENTA»,
+  «CUENTA»); internamente es la misma precuenta con las mismas reglas y la leyenda de que no es un comprobante fiscal se
+  conserva. Con «Precuenta» la salida es idéntica a la anterior. El documento guarda el nombre con el que se emitió: su
+  reimpresión lo conserva.
+- **«Mesa» sin repetir**: el contexto de la precuenta y del ticket es «Mesa 4», pero «Mesa 1» (no «Mesa Mesa 1») cuando
+  la mesa ya se llama así (sin distinguir mayúsculas ni acentos; «Mesón 3» sigue siendo «Mesa Mesón 3»).
+- **Huella idempotente**: la de los cobros ya no depende de la contraseña de la autorización de un supervisor, la escriba
+  el cliente con las mayúsculas que sea, en cualquier nivel del cuerpo.

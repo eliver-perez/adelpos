@@ -347,17 +347,25 @@ func (handler *service) readJobs(parts []string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		job, err := one[map[string]any](handler.ctx, handler.tx, "SELECT to_jsonb(j)-'content'-'layout' FROM app.kitchen_print_jobs j WHERE id=$1", parts[1])
+		job, err := one[map[string]any](handler.ctx, handler.tx, jobListQuery+" WHERE j.id=$1", parts[1])
 		return map[string]any{"job": job, "attempts": attempts}, err
 	}
 	page, err := handler.page()
 	if err != nil {
 		return nil, err
 	}
-	return many[map[string]any](handler.ctx, handler.tx, `SELECT (to_jsonb(j)-'content'-'layout')||jsonb_build_object('printer_name',p.name)
-        FROM app.kitchen_print_jobs j JOIN app.kitchen_printers p ON p.id=j.printer_id
-        WHERE ($1='' OR j.state=$1) ORDER BY j.created_at DESC,j.id DESC LIMIT 100 OFFSET $2`, handler.request.Query.Get("state"), (page-1)*100)
+	return many[map[string]any](handler.ctx, handler.tx, jobListQuery+` WHERE ($1='' OR j.state=$1)
+        ORDER BY j.created_at DESC,j.id DESC LIMIT 100 OFFSET $2`, handler.request.Query.Get("state"), (page-1)*100)
 }
+
+// jobListQuery es un trabajo de la cola con lo que la pantalla necesita para explicarlo y agruparlo (etapa
+// 9F, §4.3): el nombre de la impresora, el tipo de documento, su folio o título y la clave del problema si
+// exige atención. Nunca el contenido ni el layout.
+var jobListQuery = `SELECT (to_jsonb(j)-'content'-'layout')||jsonb_build_object('printer_name',p.name,
+        'ticket_kind',t.kind,'folio',coalesce(t.document->'context'->'folio',t.document->'folio'),
+        'document_title',t.document->>'title','problem',` + JobProblemSQL("j") + `)
+        FROM app.kitchen_print_jobs j JOIN app.kitchen_printers p ON p.id=j.printer_id
+        JOIN app.kitchen_tickets t ON t.id=j.ticket_id`
 
 func (handler *service) ackTicket(id string) (any, error) {
 	var input struct {

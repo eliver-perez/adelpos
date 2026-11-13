@@ -13,6 +13,8 @@ import type {
   PaymentSettings,
 } from '../../../services/payments';
 import type { Account, Bill } from '../../../services/restaurant';
+import { setPrecheckName } from '../../../services/documentNames';
+import { registerPrinterSetup } from '../../../services/printProblems';
 import { CheckoutPanel } from '../checkout/CheckoutPanel';
 import { DocumentList } from './DocumentList';
 import { PrecheckPanel } from './PrecheckPanel';
@@ -194,6 +196,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  registerPrinterSetup(null);
+  setPrecheckName('precheck');
 });
 
 function bill(): Bill {
@@ -409,21 +413,70 @@ describe('precuenta y documentos', () => {
     expect(operations.every((operation) => operation === 'payments_precheck')).toBe(true);
   });
 
-  it('explica PRINTER_NOT_CONFIGURED al imprimir la precuenta', async () => {
+  // Etapa 9F (§4.1, decisión D4): sin impresora válida el aviso llega en el momento, con «Configurar
+  // impresora» (solo si el usuario puede elegirla) y «Reintentar» en el mismo aviso.
+  it('explica PRINTER_NOT_CONFIGURED con «Configurar impresora» y «Reintentar»', async () => {
+    const openSetup = vi.fn();
+    registerPrinterSetup(openSetup);
     writeHandler = () => ({
       status: 409,
       body: {
         error: {
           code: 'PRINTER_NOT_CONFIGURED',
-          message: 'No hay impresora de tickets configurada en Cobros.',
+          message: 'No hay impresora configurada para precuentas.',
+          details: { document: 'precheck', problem: 'missing' },
         },
       },
     });
     renderPrecheck();
     await screen.findByLabelText('Vista previa de la precuenta');
     fireEvent.click(screen.getByRole('button', { name: 'Imprimir precuenta' }));
-    await screen.findByText(/Configúrala en Cobros → Políticas de cobro/);
-    expect(requests('payments_print_precheck')).toHaveLength(1);
+    const notice = (
+      await screen.findByText('No hay impresora configurada para precuentas.')
+    ).closest('.app-toast') as HTMLElement;
+    expect(notice.textContent).not.toContain('Cola de impresión');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(requests('payments_print_precheck')).toHaveLength(2));
+    // El reintento que vuelve a fallar muestra un aviso nuevo (el anterior se retira).
+    const again = (await screen.findAllByText('No hay impresora configurada para precuentas.'))
+      .at(-1)!
+      .closest('.app-toast') as HTMLElement;
+    fireEvent.click(within(again).getByRole('button', { name: 'Configurar impresora' }));
+    expect(openSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin permiso para elegir la impresora, el aviso dice a quién pedirla', async () => {
+    writeHandler = () => ({
+      status: 409,
+      body: {
+        error: {
+          code: 'PRINTER_UNAVAILABLE',
+          message: 'La impresora Tickets está desactivada.',
+          details: { document: 'precheck', problem: 'inactive', printer_name: 'Tickets' },
+        },
+      },
+    });
+    renderPrecheck();
+    await screen.findByLabelText('Vista previa de la precuenta');
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir precuenta' }));
+    const notice = (await screen.findByText('La impresora Tickets está desactivada.')).closest(
+      '.app-toast',
+    ) as HTMLElement;
+    expect(notice.textContent).toContain('Pide a quien administra Cobros');
+    expect(within(notice).queryByRole('button', { name: 'Configurar impresora' })).toBeNull();
+    expect(within(notice).getByRole('button', { name: 'Reintentar' })).toBeTruthy();
+  });
+
+  // Etapa 9F (§4.5): el nombre visible de la precuenta en el panel, el botón y el aviso.
+  it('usa el nombre visible que eligió el restaurante', async () => {
+    setPrecheckName('sales_ticket');
+    writeHandler = () => ({ status: 200, body: { requested: true, status: 'pending' } });
+    renderPrecheck();
+    await screen.findByLabelText('Vista previa del ticket de venta');
+    expect(screen.getByRole('region', { name: 'Ticket de venta' })).toBeTruthy();
+    expect(screen.getByText(/El ticket de venta solo informa el consumo/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Imprimir ticket de venta' }));
+    await screen.findByText(/Ticket de venta enviado a la cola de impresión/);
   });
 
   it('muestra PRINT_COPY_PENDING al pedir otra copia', async () => {
@@ -449,7 +502,81 @@ describe('precuenta y documentos', () => {
     expect(screen.getByText('Ticket de pago')).toBeTruthy();
     expect(screen.getByText('Enviado a la impresora')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Reimprimir ticket de pago' }));
+    // Etapa 9F (decisión D3): reimprimir algo que ya salió pide motivo (5 a 500 caracteres).
+    const form = screen.getByRole('form', { name: 'Reimpresión con motivo' });
+    const send = within(form).getByRole('button', { name: 'Reimprimir' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.change(within(form).getByLabelText('Motivo de la reimpresión'), {
+      target: { value: 'El cliente pidió otra copia' },
+    });
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
     await screen.findByText('Ya existe otra copia sin resolver de este documento.');
-    expect(lastBody<{ ticket_id: string }>('payments_reprint').ticket_id).toBe(ticketID);
+    const body = lastBody<{ ticket_id: string; reason: string }>('payments_reprint');
+    expect(body.ticket_id).toBe(ticketID);
+    expect(body.reason).toBe('El cliente pidió otra copia');
+  });
+
+  // Etapa 9F (§4.2): una impresión que nunca salió en papel se explica en palabras sencillas y se
+  // reintenta con un toque, sin motivo.
+  it('reintenta sin motivo un documento que no salió y explica qué pasó', async () => {
+    writeHandler = () => ({
+      status: 200,
+      body: { status: 'pending', job_id: 'job', ticket_id: ticketID },
+    });
+    const failed = {
+      ...finance().documents[0]!,
+      job_state: 'error',
+      job_problem: 'unreachable',
+      printer_name: 'Caja térmica',
+    };
+    render(
+      <PendingOperationsProvider>
+        <DocumentList
+          accountID={accountID}
+          documents={[failed]}
+          timezone="America/Monterrey"
+          can={() => true}
+        />
+      </PendingOperationsProvider>,
+    );
+    const list = screen.getByRole('region', { name: 'Documentos de la cuenta' });
+    expect(list.textContent).toContain('La impresora de caja no responde.');
+    expect(list.textContent).not.toContain('Cola de impresión');
+    fireEvent.click(within(list).getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(requests('payments_retry_document')).toHaveLength(1));
+    const body = lastBody<{ ticket_id: string; job_id: string; reason?: string }>(
+      'payments_retry_document',
+    );
+    expect(body.ticket_id).toBe(ticketID);
+    expect(body.job_id).toBe('job');
+    expect(body.reason).toBeUndefined();
+    await screen.findByText(/Reintento enviado a la impresora/);
+  });
+
+  // Cuando un documento en camino a la impresora falla, el aviso llega en el momento con «Reintentar».
+  it('avisa en el momento cuando la impresión pasa a error', async () => {
+    writeHandler = () => ({
+      status: 200,
+      body: { status: 'pending', job_id: 'job', ticket_id: ticketID },
+    });
+    const pending = { ...finance().documents[0]!, job_state: 'pending' };
+    const view = (documents: (typeof pending)[]) => (
+      <PendingOperationsProvider>
+        <DocumentList
+          accountID={accountID}
+          documents={documents}
+          timezone="America/Monterrey"
+          can={() => true}
+        />
+      </PendingOperationsProvider>
+    );
+    const { rerender } = render(view([pending]));
+    rerender(view([{ ...pending, job_state: 'error', job_problem: 'unreachable' }]));
+    const notice = (
+      await screen.findByText('Ticket de pago: La impresora de caja no responde.')
+    ).closest('.app-toast') as HTMLElement;
+    fireEvent.click(within(notice).getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(requests('payments_retry_document')).toHaveLength(1));
   });
 });

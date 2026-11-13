@@ -48,10 +48,15 @@ type CategorySignature struct {
 // que todo lo que se les envía queda en «Requiere intervención» y nunca sale en papel.
 const acceptanceDestination = "Agente de aceptación no disponible"
 
+// acceptanceQueue es la cola del equipo de las impresoras de tickets de aceptación (etapa 9F, decisión
+// D4: una impresora de otra terminal ya no sirve para precuentas ni tickets). Ninguna cola de CUPS ni
+// impresora de Windows se llama así: lo que se les envía termina en error confirmado sin enviar nada.
+const acceptanceQueue = "ADEL_E2E_SIN_IMPRESORA"
+
 var TestPrinters = []PrinterSignature{
 	// desktop/e2e/kitchen-flow.ts (configureKitchen): la usan restaurant.spec.ts y la prueba de humo de la
-	// aplicación instalada en Windows (desktop/e2e-installed/installed-smoke.spec.ts), que además la eligió
-	// como impresora de tickets de Cobros (desktop/e2e/payments-flow.ts, configureReceiptPrinter).
+	// aplicación instalada en Windows (desktop/e2e-installed/installed-smoke.spec.ts), que hasta la etapa 9E
+	// además la eligió como impresora de tickets de Cobros (desktop/e2e/payments-flow.ts).
 	{
 		Name:        "Destino controlado E2E",
 		Transport:   "agent",
@@ -64,6 +69,22 @@ var TestPrinters = []PrinterSignature{
 		Name:        "Destino controlado 9B",
 		Transport:   "agent",
 		Destination: acceptanceDestination,
+		Source:      "desktop/e2e/workflow-stage9b-designer.spec.ts",
+	},
+	// desktop/e2e/payments-flow.ts (configureReceiptPrinter, etapa 9F): impresora de tickets válida que no
+	// imprime nada real; la usan restaurant.spec.ts y la prueba de humo de Windows.
+	{
+		Name:        "Tickets controlados E2E",
+		Transport:   "cups",
+		Destination: acceptanceQueue,
+		Source:      "desktop/e2e/payments-flow.ts",
+	},
+	// desktop/e2e/workflow-stage9b-designer.spec.ts (paidTicket, etapa 9F): la impresora de tickets del
+	// cobro que se reimprime, creada por la API.
+	{
+		Name:        "Tickets controlados 9B",
+		Transport:   "cups",
+		Destination: acceptanceQueue,
 		Source:      "desktop/e2e/workflow-stage9b-designer.spec.ts",
 	},
 }

@@ -97,10 +97,11 @@ func testStage71PhaseD(t *testing.T, base *restaurantFixture) {
 	fixture.shiftID = decodeResponse[payments.Shift](t, base.call(t, fixture.cashier, "POST", "payments/shifts", map[string]any{
 		"operation_id": randomID(), "opening_float": "0",
 	}, 200)).ID
-	// Impresora de tickets sin hardware (agente no disponible): los documentos quedan en la cola y
-	// nunca se envían a una impresora real.
+	// Impresora de tickets sin hardware (una cola del equipo que no existe; estas pruebas no ejecutan el
+	// trabajador): los documentos quedan en la cola y nunca se envían a una impresora real. Desde la etapa
+	// 9F una impresora de otra terminal («agent») ya no es válida para precuentas ni tickets.
 	fixture.printer = decodeResponse[kitchen.Printer](t, base.mutate(t, "POST", "kitchen/printers", kitchen.Printer{
-		Name: "Tickets de la fase D", Transport: "agent", Destination: "Agente de aceptación no disponible", Active: true, PaperWidth: 80, Copies: 1,
+		Name: "Tickets de la fase D", Transport: "cups", Destination: "ADEL_TEST_PHASE_D", Active: true, PaperWidth: 80, Copies: 1,
 	}, 200))
 	payment.receiptSettings(t, fixture.printer.ID, false)
 

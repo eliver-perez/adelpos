@@ -25,16 +25,24 @@ type Settings struct {
 }
 
 type Printer struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Transport    string `json:"transport"`
-	Destination  string `json:"destination"`
-	Port         int    `json:"port"`
-	PaperWidth   int    `json:"paper_width"`
-	Copies       int    `json:"copies"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Transport   string `json:"transport"`
+	Destination string `json:"destination"`
+	Port        int    `json:"port"`
+	PaperWidth  int    `json:"paper_width"`
+	Copies      int    `json:"copies"`
+	// SupportsCut se conserva por compatibilidad (CHECK NOT cut OR supports_cut de la 0005): desde la etapa
+	// 9F Go la guarda igual a Cut, de modo que «Cortar el papel al terminar» es una sola casilla.
 	SupportsCut  bool   `json:"supports_cut"`
 	Cut          bool   `json:"cut"`
 	CutterOption string `json:"cutter_option"`
+	// CutMode es el tipo de corte (etapa 9F, §4.4): «full» (GS V 0) o «partial» (GS V 1). Vacío en las
+	// fotografías de impresora anteriores a la 9F, que cortan como entonces (total).
+	CutMode string `json:"cut_mode"`
+	// CutFeedLines son los renglones de avance antes del corte (lista cerrada de 0 a 8). nil en las
+	// fotografías anteriores a la 9F, que conservan los tres saltos de siempre.
+	CutFeedLines *int `json:"cut_feed_lines"`
 	// AcceptsESCPos marca una impresora CUPS que entiende ESC/POS (etapa 9B): solo entonces, y si su
 	// cola admite datos raw, recibe documentos con negrita, tamaños o logotipo. Desactivada por
 	// omisión; en ESC/POS por red no aplica (siempre recibe ESC/POS).

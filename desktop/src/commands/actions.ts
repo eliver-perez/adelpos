@@ -6,6 +6,7 @@ import type {
   OperationCommandState,
   OperationTable,
 } from './operationBridge';
+import { precheckName } from '../services/documentNames';
 import { fullscreenShortcut, modShortcut } from './platform';
 import type { Shortcut } from './platform';
 
@@ -238,11 +239,19 @@ export const actions: ActionDefinition[] = [
   },
   {
     id: 'file.print_precheck',
-    label: 'Imprimir precuenta',
+    // Etapa 9F (§4.5): con el nombre visible que eligió el restaurante («Imprimir ticket de venta»);
+    // el menú nativo recibe el mismo nombre por menu_set_state.
+    get label() {
+      return `Imprimir ${precheckName().lower}`;
+    },
     group: 'file',
-    keywords: ['precuenta', 'imprimir', 'cuenta'],
+    get keywords() {
+      return ['precuenta', 'imprimir', 'cuenta', 'ticket de venta', precheckName().lower];
+    },
     shortcut: modShortcut('p'),
-    description: 'Abre la precuenta de la cuenta a la vista para revisarla e imprimirla.',
+    get description() {
+      return `Abre ${precheckName().withArticle} de la cuenta a la vista para revisarla e imprimirla.`;
+    },
     visible: (context) =>
       context.authenticated && has(context, 'payments.read') && context.operation !== null,
     enabled: (context) =>

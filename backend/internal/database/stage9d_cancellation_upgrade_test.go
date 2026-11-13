@@ -46,13 +46,19 @@ func TestStage9DAccountCancellationUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := expected[len(expected)-1].Version; last != 21 || product.Read().SchemaVersion != 21 {
-		t.Fatalf("se esperaba el esquema 21 en la última migración (%d) y en el producto (%d)", last, product.Read().SchemaVersion)
+	// Desde la etapa 9F la última migración es posterior a la 0021: la prueba aplica exactamente hasta la
+	// 0021 para comprobar solo su efecto.
+	if last := expected[len(expected)-1].Version; last < 21 || last != product.Read().SchemaVersion {
+		t.Fatalf("la última migración (%d) no coincide con el esquema del producto (%d)", last, product.Read().SchemaVersion)
 	}
 	schema20 := fstest.MapFS{}
+	schema21 := fstest.MapFS{}
 	for _, migration := range expected {
 		if migration.Version <= 20 {
 			schema20[migration.Name] = &fstest.MapFile{Data: []byte(migration.SQL)}
+		}
+		if migration.Version <= 21 {
+			schema21[migration.Name] = &fstest.MapFile{Data: []byte(migration.SQL)}
 		}
 	}
 	if n, err := Apply(ctx, pool, schema20); err != nil || n != 20 {
@@ -62,10 +68,10 @@ func TestStage9DAccountCancellationUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := stage9DSnapshot(ctx, t, pool)
-	if n, err := Migrate(ctx, pool); err != nil || n != 1 {
+	if n, err := Apply(ctx, pool, schema21); err != nil || n != 1 {
 		t.Fatalf("la 0021 no se aplicó sobre el esquema 20: %d %v", n, err)
 	}
-	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
+	if n, err := Apply(ctx, pool, schema21); err != nil || n != 0 {
 		t.Fatal("la 0021 no es repetible")
 	}
 	if after := stage9DSnapshot(ctx, t, pool); after != before {
