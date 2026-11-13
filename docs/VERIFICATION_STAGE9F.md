@@ -188,8 +188,58 @@ No se afirma ninguna de estas:
 
 ## Regresión final
 
-PENDIENTE_REGRESION_FINAL
+Ejecutada el 13/11/2026 por el coordinador con un script, sobre una copia exacta de `2b26439` (`git archive`), con el
+clúster PostgreSQL temporal 55499, Go temporal en 8183 y vista previa en 1421; la pantalla del equipo estuvo
+desbloqueada antes y después de Playwright. 1802 s.
+
+| Suite                                    | Resultado                                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato (Prettier, `gofmt`, `cargo fmt`) | aprobado                                                                                                                                                                                          |
+| Metadatos (`sync-metadata --check`)      | aprobado                                                                                                                                                                                          |
+| `go vet` (normal y `-tags=integration`)  | aprobado                                                                                                                                                                                          |
+| `GOOS=windows go build ./...` y `go vet` | aprobado                                                                                                                                                                                          |
+| Go unitarias con `-race`                 | 24 paquetes `ok` (con `maintenance` y `stationscope`, nuevos)                                                                                                                                     |
+| Integración PostgreSQL con `-race`       | 9 de 9: `database` 8.2 s, `administration` 84.5 s, `catalog` 8.9 s, `operations` 281.9 s, `payments` 2.4 s, `reports` 121.0 s, `reports/operational` 40.4 s, `designer` 20.2 s, `identity` 17.8 s |
+| `tsc --noEmit`                           | sin errores                                                                                                                                                                                       |
+| Vitest (`npm test`)                      | 86 archivos, 821 pruebas aprobadas                                                                                                                                                                |
+| `npm run build`                          | correcto (aviso de tamaño de fragmentos ya conocido)                                                                                                                                              |
+| `cargo test --locked --offline`          | 45 aprobadas, 1 ignorada                                                                                                                                                                          |
+| Playwright Chromium                      | 24 de 24 (8.7 min)                                                                                                                                                                                |
+| Playwright WebKit                        | 24 de 24 (8.8 min)                                                                                                                                                                                |
+| `.app` (`tauri build --bundles app`)     | 0.9.5, Mach-O arm64, 13.56 MiB                                                                                                                                                                    |
+
+Sin fallos ni repeticiones; el error intermitente de WebKit de la Fase 0-R no apareció. **Rust para Windows**: el
+destino `x86_64-pc-windows-msvc` no está instalado en la Mac (y `cargo check` para MSVC exige además el compilador de
+recursos y un compilador C de Windows), así que se revisó a mano: ningún cambio de Rust de la 9F (`api.rs`, `menu.rs`,
+`server_host.rs` y la versión) está dentro de bloques condicionales por plataforma, de modo que el mismo código compila
+en ambos sistemas (`menu_set_state` sigue registrado en Windows, donde el menú nativo se omite). Las mediciones de
+volumen y la impresión física no corren por omisión (por diseño).
 
 ## Instalación real
 
-PENDIENTE_INSTALACION_0022
+Sobre `2b26439` con el árbol limpio, después de la regresión final aprobada, según la regla de autonomía de
+`CLAUDE.md` §0 (13/11/2026):
+
+1. **Estado previo** (servidor 0.9.4, esquema 21): comprobación de solo lectura (transacción `read_only`, solo conteos
+   y nombres de configuración): migraciones 1–21, 134 tablas, 154 permisos, cuentas `closed:2, open:7, voided:1`, 15
+   unidades, 2 pagos, turnos `closed:1, open:1`, 5 operaciones de caja, 0 movimientos de inventario, 150 eventos de
+   auditoría, 9 reconocimientos de venta, sin impresoras, estaciones ni rutas, **0 turnos en arqueo y 0 trabajos de
+   impresión sin terminar**, y ningún rol que opere cocina sin `kitchen.stations.all` (el cambio de significado de las
+   estaciones por terminal no afecta a esta instalación). Repetida justo antes de detener el servidor: idéntica.
+2. **Respaldo** `backups/adel_pos-20261113T211630Z-a3fceb.dump` (674 917 bytes, catálogo legible).
+3. **Ensayo de restauración**: «Restauración completa verificada: 134 tablas con conteos idénticos».
+4. **Servidor detenido** de forma ordenada (`server-stop`).
+5. **Migración**: `./scripts/dev.sh migrate` → `applied:1`; repetición → `applied:0`.
+6. **Servidor 0.9.5 iniciado** (`server-start`): readiness 200; `api/v1/version` → **0.9.5 / esquema 22**,
+   `test_mode: false`.
+7. **Comprobación posterior** de solo lectura, comparada con la previa: solo cambian las migraciones (1–22), las tablas
+   (135: `kitchen_user_stations`), las columnas nuevas (`kitchen_printers.cut_mode` y `cut_feed_lines`,
+   `payment_settings.precheck_name` = `precheck`, `devices.kitchen_all_stations` = verdadero y
+   `kitchen_sound_alert`, `users.kitchen_all_stations` = verdadero en los 2 usuarios) y las descripciones de
+   `accounts.manage` («Editar datos de cuentas») y `kitchen.stations.manage` («Administrar estaciones y las estaciones
+   que muestra cada terminal»). Cuentas, unidades, pagos, caja, cocina, inventario, catálogo, plantillas, auditoría y
+   ventas: **idénticos**. Ningún dato de operación se borró ni se reescribió. No había datos de prueba que quitar.
+8. **Aplicación**: `./scripts/dev.sh build-macos` → `AD-EL POS.app` 0.9.5 (13.56 MiB); `./scripts/dev.sh open-app` → la
+   aplicación 0.9.5 quedó abierta y conectada (la 0.9.4 ya no estaba abierta).
+9. **Fusión**: `etapa-9f` se fusiona en `main` y se envía a `origin` al cerrar esta sección (resultado en la entrega
+   final).

@@ -20,7 +20,8 @@ Evidencia detallada: [VERIFICATION_STAGE9F.md](VERIFICATION_STAGE9F.md). Evidenc
 - **macOS**: la 0.9.4 de la 9E aprobó la regresión completa en la Mac (Fase 0-R) y se instaló en la instalación real el
   13/11/2026, sin migraciones. La 0.9.5 se desarrolló y se probó en la Mac en copias aisladas, con un clúster PostgreSQL
   temporal.
-- **Instalación de la 0022 y la 0.9.5**: PENDIENTE_INSTALACION_0022.
+- **Instalación de la 0022 y la 0.9.5**: aplicadas a la instalación real el 13/11/2026 (respaldo `backups/adel_pos-20261113T211630Z-a3fceb.dump` con restauración verificada: 134 tablas idénticas; `migrate` `applied:1` y repetición `applied:0`; readiness 200 con esquema compatible; servidor y `.app` 0.9.5); detalle en
+  [ETAPA_9F_AVANCE.md](ETAPA_9F_AVANCE.md), «Fase F».
 - **Windows**: nada de la 9F se ejecutó en Windows; solo se compiló y se revisó Go con `GOOS=windows`.
 
 ## Qué está verificado
@@ -50,7 +51,32 @@ el error intermitente de WebKit «The provided value is non-finite», de origen 
 
 ## Regresión final
 
-PENDIENTE_REGRESION_FINAL
+Ejecutada el 13/11/2026 por el coordinador con un script, sobre una copia exacta de `2b26439` (`git archive`), con el
+clúster PostgreSQL temporal 55499, Go temporal en 8183 y vista previa en 1421; la pantalla del equipo estuvo
+desbloqueada antes y después de Playwright. 1802 s.
+
+| Suite                                    | Resultado                                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato (Prettier, `gofmt`, `cargo fmt`) | aprobado                                                                                                                                                                                          |
+| Metadatos (`sync-metadata --check`)      | aprobado                                                                                                                                                                                          |
+| `go vet` (normal y `-tags=integration`)  | aprobado                                                                                                                                                                                          |
+| `GOOS=windows go build ./...` y `go vet` | aprobado                                                                                                                                                                                          |
+| Go unitarias con `-race`                 | 24 paquetes `ok` (con `maintenance` y `stationscope`, nuevos)                                                                                                                                     |
+| Integración PostgreSQL con `-race`       | 9 de 9: `database` 8.2 s, `administration` 84.5 s, `catalog` 8.9 s, `operations` 281.9 s, `payments` 2.4 s, `reports` 121.0 s, `reports/operational` 40.4 s, `designer` 20.2 s, `identity` 17.8 s |
+| `tsc --noEmit`                           | sin errores                                                                                                                                                                                       |
+| Vitest (`npm test`)                      | 86 archivos, 821 pruebas aprobadas                                                                                                                                                                |
+| `npm run build`                          | correcto (aviso de tamaño de fragmentos ya conocido)                                                                                                                                              |
+| `cargo test --locked --offline`          | 45 aprobadas, 1 ignorada                                                                                                                                                                          |
+| Playwright Chromium                      | 24 de 24 (8.7 min)                                                                                                                                                                                |
+| Playwright WebKit                        | 24 de 24 (8.8 min)                                                                                                                                                                                |
+| `.app` (`tauri build --bundles app`)     | 0.9.5, Mach-O arm64, 13.56 MiB                                                                                                                                                                    |
+
+Sin fallos ni repeticiones; el error intermitente de WebKit de la Fase 0-R no apareció. **Rust para Windows**: el
+destino `x86_64-pc-windows-msvc` no está instalado en la Mac (y `cargo check` para MSVC exige además el compilador de
+recursos y un compilador C de Windows), así que se revisó a mano: ningún cambio de Rust de la 9F (`api.rs`, `menu.rs`,
+`server_host.rs` y la versión) está dentro de bloques condicionales por plataforma, de modo que el mismo código compila
+en ambos sistemas (`menu_set_state` sigue registrado en Windows, donde el menú nativo se omite). Las mediciones de
+volumen y la impresión física no corren por omisión (por diseño).
 
 ## Repetir las comprobaciones
 
