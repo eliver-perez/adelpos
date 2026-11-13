@@ -374,7 +374,14 @@ function ApplicationContent() {
           />
         );
       case 'kitchen':
-        return <KitchenPage can={can} timezone={identity.establishment.timezone} />;
+        return (
+          <KitchenPage
+            can={can}
+            timezone={identity.establishment.timezone}
+            connectionLost={server === 'offline'}
+            onRetryConnection={() => void session.refresh()}
+          />
+        );
       case 'catalog':
         return <CatalogPage can={can} />;
       case 'users':

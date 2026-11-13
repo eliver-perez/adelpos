@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/stationscope"
 	"net/http"
 	"slices"
 	"strconv"
@@ -31,21 +32,24 @@ func (service *Service) eventSnapshot(ctx context.Context, tx pgx.Tx, request Re
 		after = parsed
 	}
 	stationID := request.Query.Get("station_id")
-	if stationID != "" {
-		if !identifierPattern.MatchString(stationID) {
-			return nil, invalid("La estación no es válida.")
-		}
-		if !slices.Contains(principal.Permissions, "kitchen.stations.all") {
-			var allowed bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.kitchen_device_stations WHERE device_id=$1 AND station_id=$2)`, principal.DeviceID, stationID).Scan(&allowed); err != nil {
-				return nil, err
-			}
-			if !allowed {
-				return nil, denied()
-			}
-		}
+	if stationID != "" && !identifierPattern.MatchString(stationID) {
+		return nil, invalid("La estación no es válida.")
 	}
-	return events.Read(ctx, tx, after, principal.Permissions, principal.DeviceID, stationID)
+	// Estaciones de cocina cuyos eventos recibe (etapa 9F, decisión D6): con kitchen.stations.all todas,
+	// como la cola y el historial; sin él, las visibles en esta terminal para el usuario (las de la
+	// terminal intersectadas con las que atiende). Se recalcula en cada lectura del canal.
+	scope := stationscope.Everything()
+	if !slices.Contains(principal.Permissions, "kitchen.stations.all") {
+		visible, err := stationscope.Load(ctx, tx, principal.DeviceID, principal.UserID, false)
+		if err != nil {
+			return nil, err
+		}
+		scope = visible
+	}
+	if stationID != "" && !scope.Allows(stationID) {
+		return nil, denied()
+	}
+	return events.Read(ctx, tx, after, principal.Permissions, scope, stationID)
 }
 
 func (service *Service) serveEvents(writer http.ResponseWriter, request *http.Request, local bool) {

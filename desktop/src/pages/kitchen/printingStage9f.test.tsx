@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actionByID } from '../../commands/actions';
 import { precheckName, setPrecheckName } from '../../services/documentNames';
 import type { Printer, PrintJob } from '../../services/kitchen';
-import { taskContext } from '../../services/kitchen';
 import { printProblemMessage } from '../../services/printProblems';
 import { tableField, tableNameIncludesWord } from '../../services/restaurant';
 import { chooseValue } from '../../testing/select';
@@ -223,15 +222,8 @@ describe('textos de impresión y «Mesa» sin repetir (§4.2 y §4.6)', () => {
   });
 
   it('no repite «Mesa» en Preparación ni en los detalles', () => {
-    expect(taskContext({ folio: 2, account_name: 'Mesa 2', table_name: 'Mesa 2' })).toBe(
-      '#2 · Mesa 2',
-    );
-    expect(taskContext({ folio: 3, account_name: 'Cumpleaños', table_name: 'Mesa 2' })).toBe(
-      '#3 · Cumpleaños · Mesa 2',
-    );
-    expect(taskContext({ folio: 4, account_name: 'Cuenta', table_name: null })).toBe(
-      '#4 · Cuenta · Sin mesa',
-    );
+    // La tarjeta de Preparación usa accountContext (pages/kitchen/preparationModel.ts, fase C), con su
+    // propia prueba en preparationModel.test.ts.
     expect(tableNameIncludesWord('MÉSA 1')).toBe(true);
     expect(tableNameIncludesWord('Mesanine')).toBe(false);
     expect(tableField('Mesa 1')).toBe('Mesa 1');

@@ -51,6 +51,9 @@ export type Operation =
   | 'save_user_permissions'
   | 'user_preferences'
   | 'save_user_preferences'
+  // Etapa 9F: «Estaciones que puede atender» del usuario.
+  | 'user_kitchen_stations'
+  | 'save_user_kitchen_stations'
   | 'roles'
   | 'create_role'
   | 'update_role'

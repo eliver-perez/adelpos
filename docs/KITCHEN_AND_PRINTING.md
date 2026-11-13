@@ -10,7 +10,7 @@ Abrir **Cocina y preparación** con permisos administrativos. No se crean estaci
 2. En **Estaciones**, crear nombre, descripción, orden, estado, tiempos objetivo/advertencia/atraso y recepción por impresora, KDS o ambos. Varias estaciones pueden seleccionar la misma impresora.
 3. En **Enrutamiento**, asignar categoría y, si procede, una excepción por producto. Un producto puede llegar a varias estaciones. Seleccionar explícitamente **Sin preparación** para artículos que no deban generar trabajo.
 4. En **Comandas y tiempos**, elegir documentos independientes o unificados, seguimiento por partida o pedido, formato y política de programación. Una estación puede sobrescribir agrupación y seguimiento.
-5. En Estaciones, limitar las terminales a sus estaciones. Un usuario sin `kitchen.stations.all` solo puede consultar/operar el trabajo asignado a su dispositivo; además necesita cada permiso funcional. El listado administrativo de configuración conserva su propio permiso.
+5. En Estaciones › Terminales de cocina, elegir las estaciones que muestra cada terminal (todas por omisión) y su aviso sonoro; en Personal › Usuarios › Estaciones de cocina, las que atiende cada usuario (todas por omisión). Desde la etapa 9F en Preparación se ve la intersección (ver «Cocina por estaciones y terminal de cocina · etapa 9F»); además cada usuario necesita cada permiso funcional. El listado administrativo de configuración conserva su propio permiso.
 
 La primera configuración no altera contraseñas, catálogo, cuentas históricas ni credenciales del Llavero. Los veinte permisos nuevos se conceden inicialmente al rol administrador. Los otros roles necesitan asignación explícita. La identidad reservada `sa` conserva su política anterior.
 
@@ -26,7 +26,7 @@ Lo que ya quedó en una instalación se quita en **Administración › Sistema �
 (`settings.manage`): «Revisar datos de prueba» muestra lo que se elimina, lo que se desactiva porque ya tiene
 operaciones registradas (trabajos de impresión, tareas de cocina, ventas) o participa en una promoción del restaurante
 (la promoción no cambia), la configuración que se desvincula (impresora de tickets de Cobros, cajón, impresora de
-respaldo, estaciones por terminal y rutas; la ruta de un producto o una categoría del restaurante que solo enviaba a
+respaldo, estaciones por terminal y, desde la fase C, por usuario, y rutas; la ruta de un producto o una categoría del restaurante que solo enviaba a
 estaciones de prueba se quita y aparece aquí, no como dato de prueba) y lo que se conserva, cada uno con su motivo.
 Solo se reconocen las firmas exactas de los archivos de prueba (nombre más atributos, lista cerrada en
 `backend/internal/maintenance/signatures.go`): una estación «Cocina caliente» con otra impresora, o una categoría
@@ -112,7 +112,7 @@ Una copia adicional usa un trabajo nuevo enlazado al original. Solo se solicita 
 
 Una cuenta está lista cuando todas sus tareas activas de todas las estaciones están listas. La recepción KDS, aceptación de impresión, pago y entrega son estados diferentes. Una exención explícita sin preparación no crea tareas ficticias. Las cuentas y partidas del restaurante y para llevar muestran los estados calculados por Go; **Preparación y comandas** abre el detalle de la cuenta.
 
-**Comandas** consulta documentos históricos y recepción KDS pendiente; **Cola de impresión** consulta trabajos e intentos; **Historial** muestra cambios y responsables. Las vistas globales de cola/historial exigen `kitchen.stations.all`, además del permiso específico. Los documentos de un cliente restringido solo incluyen sus secciones y ocultan dinero salvo configuración y permiso de precios.
+**Comandas** consulta documentos históricos y recepción KDS pendiente; **Cola de impresión** consulta trabajos e intentos; **Historial** muestra cambios y responsables. Las vistas globales de cola/historial exigen `kitchen.stations.all`, además del permiso específico. Los documentos de un cliente restringido solo incluyen sus secciones y ocultan dinero salvo configuración y permiso de precios. Desde la etapa 9F Preparación es el modo cocina de la terminal: solo las estaciones visibles (terminal ∩ usuario), tarjetas grandes con color por tiempo, sin «Actualizar» y con aviso sonoro opcional (ver «Cocina por estaciones y terminal de cocina · etapa 9F»).
 
 ## Eventos autenticados y futuro KDS
 
@@ -120,7 +120,7 @@ Se implementó **SSE**, equivalente funcional para este flujo, en lugar de WebSo
 
 `GET /api/v1/events` usa cabeceras de sesión y dispositivo; Rust abre la conexión y entrega mensajes mediante `tauri::ipc::Channel`. Nunca pasa tokens al WebView. Se comprueban sesión, dispositivo y permisos durante el flujo, aproximadamente cada 750 ms. Límite dos conexiones por dispositivo, duración 30 segundos con reconexión, escrituras acotadas y frames nativos hasta 256 KiB.
 
-El outbox PostgreSQL se escribe dentro de la transacción de negocio. Una secuencia durable con lock de publicación impide saltar commits pendientes. Cada evento tiene UUID, versión 1, secuencia, tipo, ámbito, agregado opcional, estación e instante. Solo contiene referencias de invalidación, no nombres de clientes, precios o credenciales. Ámbitos `restaurant`, `takeaway`, `kitchen`, `printing`, `configuration`; se filtran por permisos y estación del dispositivo.
+El outbox PostgreSQL se escribe dentro de la transacción de negocio. Una secuencia durable con lock de publicación impide saltar commits pendientes. Cada evento tiene UUID, versión 1, secuencia, tipo, ámbito, agregado opcional, estación e instante. Solo contiene referencias de invalidación, no nombres de clientes, precios o credenciales. Ámbitos `restaurant`, `takeaway`, `kitchen`, `printing`, `configuration`; se filtran por permisos y estación (desde la etapa 9F, las estaciones visibles en la terminal para el usuario; con `kitchen.stations.all`, todas).
 
 El cliente envía `after` o `Last-Event-ID`. Se devuelven lotes hasta 200 eventos y cursor, avanzando también sobre entradas filtradas. La ventana lógica de replay es de 5000 secuencias; un cursor inválido/antiguo devuelve `reset:true`. React deduplica UUID y vuelve a consultar estado autoritativo en reconexión/reset/eventos, sin reemplazar formularios locales. El sondeo existente queda activo como recuperación. Una sesión revocada deja de recibir datos autorizados. No hay persistencia offline de esta suscripción.
 
@@ -453,3 +453,53 @@ de prueba» también las reconoce.
 
 **Pendiente en hardware**: el corte total y parcial y el avance en papel, en una impresora con y sin cortador, por red,
 USB en Windows y CUPS, son prueba física del propietario.
+
+## Cocina por estaciones y terminal de cocina · etapa 9F
+
+Fase C de la etapa 9F (§5, decisiones D6 y D7 del coordinador). Guía para el propietario:
+[TERMINAL_DE_COCINA.md](TERMINAL_DE_COCINA.md). Migración: sección «Fase C» de la 0022 (esquema 22).
+
+- **Estaciones que muestra esta terminal** (`kitchen_device_stations`, antes ámbito de autorización): marca
+  `devices.kitchen_all_stations` («todas», la predeterminada, incluidas las estaciones que se creen después) o una
+  selección de 1 a 100 estaciones existentes. La 0022 dejó con su selección (marca en falso) a las terminales que ya
+  tenían filas y en «todas» a las demás. Se configura en **Cocina › Estaciones › Terminales de cocina**
+  (`PUT kitchen/access`, `kitchen.stations.manage`, historial auditado `station.access.saved`), junto a las
+  estaciones; la pantalla de inicio sigue en Sistema › Terminales, que remite allí. Se eligió ese lugar porque la
+  ruta, el permiso y la auditoría ya existían y porque elegir estaciones exige consultarlas.
+- **Estaciones que puede atender** cada usuario: marca `users.kitchen_all_stations` (todas por omisión) o una selección
+  en `kitchen_user_stations`. Pestaña **Estaciones de cocina** de Personal › Usuarios (`GET` con `users.read`, `PUT`
+  con `users.manage`; nadie cambia las propias ni las de un usuario con más permisos; auditada
+  `user.kitchen_stations_changed`). Quien tiene `kitchen.stations.all` atiende siempre todas (la pestaña lo dice).
+- **Se ve la intersección** (paquete neutral `internal/stationscope`, una sola regla para cocina, eventos y
+  administración): estaciones de la terminal ∩ estaciones del usuario. Rige Preparación (`GET kitchen/board`, que
+  además informa `station_scope` y `sound_alert`), los cambios de estado (`POST kitchen/states`: una tarea de una
+  estación no visible responde `403 STATION_SCOPE_DENIED` sin cambiar nada), los acuses de recepción y el filtro por
+  estación. Las **comandas guardadas** (lista, detalle, vista previa de la cola y del diseñador) y el **tiempo real**
+  usan la intersección para quien no tiene `kitchen.stations.all` y todas para quien lo tiene, porque la cola, la
+  reimpresión y el historial son administrativos. Liberar a mano, programar, la cola y el historial siguen exigiendo
+  `kitchen.stations.all`. Sin estaciones en común, Go lo informa (`station_scope.common = false`, con los nombres) y
+  la pantalla muestra un aviso en lugar de una pantalla vacía.
+- **Un producto en varias estaciones** (§5.3): un producto simple con una ruta a dos estaciones llega **completo** a
+  ambas (los «4 filetes» de la prueba de Windows eran esa configuración); un **combo** reparte sus componentes por sus
+  rutas: cada estación recibe solo su parte, «Marcar producto listo» marca solo esa tarea y la partida (también en la
+  cuenta) queda lista cuando todas sus tareas lo están. Era el comportamiento previo; lo confirma
+  `TestStage9FKitchenStations` (`operations`). Los **complementos** de un grupo (por ejemplo, papas como guarnición
+  de una hamburguesa) **no se reparten**: viajan como opción de su producto a la estación de ese producto aunque estén
+  ligados a un producto con otra ruta (la misma prueba lo comprueba). Repartirlos cambiaría las reglas de enrutamiento
+  y no se implementó.
+- **Modo cocina de Preparación** (`pages/kitchen/PreparationBoard.tsx`, `PreparationTaskCard.tsx` y las reglas puras
+  de `preparationModel.ts`): tarjetas con letra grande, la parte de la estación a la vista (no plegada), «#folio ·
+  cuenta · mesa» sin repetir la mesa cuando la cuenta se llama igual (sin distinguir mayúsculas ni acentos), botones de
+  64 px, más antiguos primero (orden de Go), color por tiempo contra el objetivo de la estación (D7): normal, **ámbar**
+  desde la advertencia (o el 75 % del objetivo si la advertencia no es menor) con «Por vencer» y **rojo** al pasar el
+  objetivo con «Atrasada», solo con tokens (`--warning*`, `--danger*`). El atraso (`overdue_minutes`) ya no colorea.
+  Sin «Actualizar» (sondeo de 5 s y tiempo real); «Reintentar» solo con «Sin conexión».
+- **Aviso sonoro** (`devices.kitchen_sound_alert`, desactivado por omisión): dos tonos cortos generados con Web Audio
+  (`services/kitchenSound.ts`, sin archivos ni red) cuando aparece en Preparación una liberación nueva y reciente de
+  las estaciones visibles; no suena al abrir la pantalla, al cambiar de filtro o página ni por cambios de estado.
+- **Quitar datos de prueba** (fase A) desvincula también las estaciones de prueba de los usuarios
+  («Estaciones que atiende «…»»); el usuario conserva su marca de selección (no se le amplía a «todas»).
+
+**Verificación**: integración PostgreSQL (`operations`, `administration`, `database`), Vitest y
+`workflow-stage9f-kitchen-stations.spec.ts` (Chromium y WebKit). **Pendiente**: pantalla táctil física, sonido en el
+equipo real y dos terminales a la vez.

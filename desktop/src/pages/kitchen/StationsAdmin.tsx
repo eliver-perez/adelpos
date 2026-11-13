@@ -11,7 +11,8 @@ import { PositionField } from '../../components/PositionField';
 import { useLiveResource } from '../../hooks/useLiveResource';
 import { positionPayload } from '../../services/positions';
 import type { Position } from '../../services/catalog';
-import type { DeviceScope, ExecuteKitchen, Station } from '../../services/kitchen';
+import type { ExecuteKitchen, Station } from '../../services/kitchen';
+import { TerminalStations } from './TerminalStations';
 import { Select } from '../../components/Select';
 
 // Borrador local de la estación: la posición elegida solo viaja al guardar.
@@ -84,7 +85,7 @@ export function StationsAdmin({
           <p className="muted">Crea las estaciones reales del restaurante y configura sus rutas.</p>
         )}
         {can('kitchen.stations.manage') && stations.data && (
-          <DeviceStations stations={stations.data} execute={execute} busy={busy} />
+          <TerminalStations stations={stations.data} execute={execute} busy={busy} />
         )}
       </section>
       {selected && (
@@ -228,6 +229,11 @@ export function StationsAdmin({
                   onChange={(overdue_minutes) => setSelected({ ...selected, overdue_minutes })}
                 />
               </fieldset>
+              {/* Etapa 9F (decisión D7): colores de las tarjetas de Preparación. */}
+              <p className="muted text-sm">
+                En Preparación la tarjeta se pone ámbar desde la advertencia (o al 75 % del objetivo
+                si la advertencia no es menor que el objetivo) y roja al pasar el objetivo.
+              </p>
             </Accordion>
             <Check
               label="Estación activa"
@@ -238,74 +244,5 @@ export function StationsAdmin({
         </section>
       )}
     </div>
-  );
-}
-
-function DeviceStations({
-  stations,
-  execute,
-  busy,
-}: {
-  stations: Station[];
-  execute: ExecuteKitchen;
-  busy: boolean;
-}) {
-  const resource = useLiveResource<DeviceScope[]>('kitchen_access');
-  const [selected, setSelected] = useState<DeviceScope | null>(null);
-  const [expected, setExpected] = useState<string[]>([]);
-  return (
-    <Accordion
-      title="Estaciones de cada terminal"
-      summary="Las terminales sin permiso global solo operan sus estaciones asignadas"
-    >
-      <Notice>{resource.error}</Notice>
-      <ReferenceField
-        optional
-        label="Terminal para asignar estaciones"
-        value={selected?.device_id ?? ''}
-        options={(resource.data ?? []).map((device) => ({
-          id: device.device_id,
-          name: device.device_name,
-        }))}
-        onChange={(id) => {
-          const device = resource.data?.find((entry) => entry.device_id === id) ?? null;
-          setSelected(device);
-          setExpected(device?.station_ids ?? []);
-        }}
-      />
-      {selected && (
-        <Form
-          disabled={busy}
-          label="Guardar estaciones de terminal"
-          successMessage="Estaciones de la terminal guardadas."
-          onSave={async () => {
-            await execute('kitchen_save_access', {
-              body: {
-                device_id: selected.device_id,
-                station_ids: selected.station_ids,
-                expected_station_ids: expected,
-              },
-            });
-            setExpected(selected.station_ids);
-          }}
-        >
-          {stations.map((station) => (
-            <Check
-              key={station.id}
-              label={station.name}
-              value={selected.station_ids.includes(station.id)}
-              onChange={(checked) =>
-                setSelected({
-                  ...selected,
-                  station_ids: checked
-                    ? [...selected.station_ids, station.id]
-                    : selected.station_ids.filter((id) => id !== station.id),
-                })
-              }
-            />
-          ))}
-        </Form>
-      )}
-    </Accordion>
   );
 }

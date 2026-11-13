@@ -1,24 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Accordion } from '../../components/Accordion';
-import { Field, Form, Notice } from '../../components/Forms';
-import { Check, IntegerField } from '../../components/catalog/EditorFields';
+import { Field, Notice } from '../../components/Forms';
+import { IconLabel } from '../../components/Icon';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { preparationLabels, taskContext, zonedInput } from '../../services/kitchen';
 import type { Board, ExecuteKitchen, Release, Task } from '../../services/kitchen';
+import { playArrivalChime } from '../../services/kitchenSound';
 import { notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
-import { elapsedTime, serverDateTime } from '../../services/restaurant';
+import { serverDateTime } from '../../services/restaurant';
 import { Select } from '../../components/Select';
-import { DateTimeField } from '../../components/TimeField';
+import { PreparationTaskCard } from './PreparationTaskCard';
+import { ScheduleEditor } from './ScheduleEditor';
+import { newArrivals, noCommonStationsMessage } from './preparationModel';
 
+// Preparación en modo cocina (etapa 9F, §5.4): tarjetas legibles a distancia con botones grandes, color
+// por tiempo contra el objetivo (con texto), más antiguas primero, solo las estaciones visibles en esta
+// terminal para el usuario (Go calcula la intersección) y aviso sonoro opcional de la terminal. La
+// pantalla se actualiza sola (sondeo de 5 s y eventos en tiempo real): no tiene «Actualizar» y
+// «Reintentar» solo aparece cuando la barra indica «Sin conexión», como Mesas.
 export function PreparationBoard({
   can,
   execute,
   busy,
+  connectionLost = false,
+  onRetry,
 }: {
   can: (key: string) => boolean;
   execute: ExecuteKitchen;
   busy: boolean;
+  connectionLost?: boolean;
+  onRetry?: () => void;
 }) {
   const [station, setStation] = useState('');
   const [state, setState] = useState('');
@@ -29,11 +40,15 @@ export function PreparationBoard({
     query: { station_id: station, state, page: String(page) },
   });
   const board = resource.data;
+  useArrivalChime(board, `${station}|${state}|${page}`);
   const grouped = new Map<string, Task[]>();
   for (const task of board?.tasks ?? []) {
     const key = `${task.release_id}/${task.station_id}/${task.instructions.item_id}/${task.instructions.version_id}/${task.state}`;
     grouped.set(key, [...(grouped.get(key) ?? []), task]);
   }
+  // Sin estaciones en común entre la terminal y el usuario, Go lo informa: se explica en lugar de
+  // mostrar una pantalla vacía. Solo cuenta lo que Go dice expresamente (common: false).
+  const noCommonStations = board?.station_scope?.common === false;
 
   async function advance(tasks: Task[], next: 'preparing' | 'ready') {
     const first = tasks[0];
@@ -65,14 +80,20 @@ export function PreparationBoard({
     }
   }
 
+  // «Reintentar» vuelve a consultar el servidor y la preparación.
+  function retry() {
+    onRetry?.();
+    void resource.reload();
+  }
+
   return (
-    <div className="form-stack">
+    <div className="form-stack kitchen-board">
       <div className="kitchen-filters">
         <Field label="Estación de preparación">
           <Select
             value={station}
             options={[
-              { value: '', label: 'Todas las estaciones autorizadas' },
+              { value: '', label: 'Todas mis estaciones' },
               ...(board?.stations ?? []).map((entry) => ({ value: entry.id, label: entry.name })),
             ]}
             onChange={(next) => {
@@ -95,113 +116,32 @@ export function PreparationBoard({
             }}
           />
         </Field>
-        <button className="secondary-button" onClick={() => void resource.reload()}>
-          Actualizar preparación
-        </button>
+        {connectionLost && (
+          <button className="secondary-button kitchen-retry" onClick={retry}>
+            <IconLabel icon="refresh">Reintentar</IconLabel>
+          </button>
+        )}
       </div>
       <Notice>{resource.error}</Notice>
-      {board && (board.releases.length > 0 || board.pending_changes.length > 0) && (
-        <Accordion
-          title="Pendientes de liberación y avisos"
-          summary={`${countLabel(board.releases.length, 'pedido', 'pedidos')} · ${countLabel(
-            board.pending_changes.length,
-            'cambio por revisar',
-            'cambios por revisar',
-          )}`}
-          defaultOpen
+      {board && noCommonStations && (
+        <section
+          className="kitchen-scope-notice"
+          role="status"
+          aria-label="Sin estaciones en común"
         >
-          <div className="kitchen-board-grid">
-            {board.releases.map((release) => {
-              const early =
-                !!release.due_at &&
-                new Date(release.due_at).getTime() > new Date(board.server_time).getTime();
-              return (
-                <article className="kitchen-preparation-card" key={release.id}>
-                  <strong>
-                    #{release.folio} · {release.account_name}
-                  </strong>
-                  <p>
-                    {release.state === 'blocked'
-                      ? 'Bloqueado por configuración'
-                      : release.state === 'scheduled'
-                        ? 'Programado'
-                        : 'Pendiente de liberación'}
-                  </p>
-                  {release.scheduled_at && (
-                    <p className="muted">
-                      Programado: {serverDateTime(release.scheduled_at, board.timezone)}
-                    </p>
-                  )}
-                  {release.due_at && (
-                    <p>
-                      Libera {release.automatic ? 'automáticamente' : 'manualmente'}:{' '}
-                      {serverDateTime(release.due_at, board.timezone)}
-                    </p>
-                  )}
-                  {release.warnings.map((warning, index) => (
-                    <Notice key={index}>{warning}</Notice>
-                  ))}
-                  <div className="button-row">
-                    {can('kitchen.release') && can('kitchen.stations.all') && (
-                      <button
-                        className="primary-button"
-                        disabled={busy || (early && !can('kitchen.release_early'))}
-                        onClick={() =>
-                          void execute('kitchen_release', {
-                            id: release.id,
-                            body: { revision: release.revision },
-                          })
-                            .then(() =>
-                              notifySuccess(`Pedido #${release.folio} liberado a preparación`),
-                            )
-                            .catch(() => undefined)
-                        }
-                      >
-                        {early ? 'Liberar anticipadamente' : 'Liberar a preparación'}
-                      </button>
-                    )}
-                    {can('kitchen.timing.manage') && can('kitchen.stations.all') && (
-                      <button className="secondary-button" onClick={() => setSchedule(release)}>
-                        Ajustar programación
-                      </button>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-            {board.pending_changes.map((change) => (
-              <article className="kitchen-preparation-card" key={change.event_id}>
-                {/* Etapa 9D: «Cancelar cuenta» (account.cancelled) también es una cancelación. */}
-                <strong>
-                  Aviso de{' '}
-                  {change.kind === 'item.cancelled' || change.kind === 'account.cancelled'
-                    ? 'cancelación'
-                    : 'modificación'}{' '}
-                  pendiente
-                </strong>
-                {change.warnings.map((warning, index) => (
-                  <Notice key={index}>{warning}</Notice>
-                ))}
-                {can('kitchen.release') && can('kitchen.stations.all') && (
-                  <button
-                    className="secondary-button"
-                    disabled={busy || changing}
-                    onClick={() =>
-                      void execute('kitchen_retry_change', {
-                        id: change.event_id,
-                        body: { revision: change.revision },
-                      })
-                        .then(() => notifySuccess('Destinos revisados y aviso generado'))
-                        .catch(() => undefined)
-                    }
-                  >
-                    Revisar destinos y generar aviso
-                  </button>
-                )}
-              </article>
-            ))}
-          </div>
-        </Accordion>
+          <strong>Sin estaciones en común</strong>
+          <p>{noCommonStationsMessage(board.station_scope)}</p>
+        </section>
+      )}
+      {board && (board.releases.length > 0 || board.pending_changes.length > 0) && (
+        <PendingReleases
+          board={board}
+          can={can}
+          execute={execute}
+          busy={busy}
+          changing={changing}
+          onSchedule={setSchedule}
+        />
       )}
       {schedule && board && (
         <ScheduleEditor
@@ -214,182 +154,195 @@ export function PreparationBoard({
           onClose={() => setSchedule(null)}
         />
       )}
-      <div className="section-heading">
-        <h2>Preparación por estación</h2>
-        <span className="muted text-sm">Más antiguos primero</span>
-      </div>
-      <div className="kitchen-board-grid">
-        {Array.from(grouped.entries()).map(([key, tasks]) => {
-          const task = tasks[0]!;
-          const late = task.elapsed_seconds >= task.overdue_minutes * 60;
-          const warning = task.elapsed_seconds >= task.warning_minutes * 60;
-          return (
-            <article
-              className={`kitchen-preparation-card ${late ? 'kitchen-late' : warning ? 'kitchen-warning' : ''}`}
-              key={key}
+      {!noCommonStations && (
+        <>
+          <div className="section-heading">
+            <h2>Preparación por estación</h2>
+            <span className="muted text-sm">Más antiguos primero</span>
+          </div>
+          <div className="kitchen-board-grid kitchen-task-grid">
+            {Array.from(grouped.entries()).map(([key, tasks]) => (
+              <PreparationTaskCard
+                key={key}
+                tasks={tasks}
+                canManage={can('kitchen.states.manage')}
+                disabled={busy || changing}
+                onAdvance={(next) => void advance(tasks, next)}
+              />
+            ))}
+          </div>
+          {board?.tasks.length === 0 && (
+            <div className="panel">
+              <p className="muted">No hay unidades de preparación en este filtro.</p>
+            </div>
+          )}
+          <div className="button-row">
+            <button
+              className="secondary-button"
+              disabled={page === 1}
+              onClick={() => setPage(page - 1)}
             >
-              <div className="section-heading">
-                <strong>{task.station_name}</strong>
-                <span className="kitchen-state-label">{preparationLabels[task.state]}</span>
-              </div>
-              <p>{taskContext(task)}</p>
-              <h3>
-                {tasks.length} × {task.instructions.name}
-              </h3>
-              <p className="muted">
-                {elapsedTime(task.elapsed_seconds)} · objetivo {task.target_minutes} min
-              </p>
-              {task.instructions.notes && (
-                <p className="kitchen-preparation-note">{task.instructions.notes}</p>
-              )}
-              <Accordion
-                title="Instrucciones y variantes"
-                summary={countLabel(
-                  task.instructions.parts.length,
-                  'componente de preparación',
-                  'componentes de preparación',
-                )}
-              >
-                {task.instructions.parts.map((part) => (
-                  <div key={part.path}>
-                    <strong>
-                      {part.quantity} × {part.name}
-                      {part.variant ? ` · ${part.variant}` : ''}
-                    </strong>
-                    {part.notes && <p>{part.notes}</p>}
-                  </div>
-                ))}
-                <p className="muted text-sm">
-                  Consulta Comandas para el documento completo con ingredientes y complementos.
-                </p>
-              </Accordion>
-              {task.state !== 'ready' &&
-                task.state !== 'cancelled' &&
-                can('kitchen.states.manage') && (
-                  <div className="button-row">
-                    {task.state === 'released' && (
-                      <button
-                        className="secondary-button"
-                        disabled={busy || changing}
-                        onClick={() => void advance(tasks, 'preparing')}
-                      >
-                        {task.tracking === 'order' ? 'Pedido en preparación' : 'En preparación'}
-                      </button>
-                    )}
-                    <button
-                      className="primary-button"
-                      disabled={busy || changing}
-                      onClick={() => void advance(tasks, 'ready')}
-                    >
-                      {task.tracking === 'order'
-                        ? 'Pedido listo en estación'
-                        : 'Marcar producto listo'}
-                    </button>
-                  </div>
-                )}
-            </article>
-          );
-        })}
-      </div>
-      {board?.tasks.length === 0 && (
-        <div className="panel">
-          <p className="muted">No hay unidades de preparación en este filtro.</p>
-        </div>
+              Anteriores
+            </button>
+            <span>Página {page}</span>
+            <button
+              className="secondary-button"
+              disabled={(board?.tasks.length ?? 0) < 250}
+              onClick={() => setPage(page + 1)}
+            >
+              Siguientes
+            </button>
+          </div>
+        </>
       )}
-      <div className="button-row">
-        <button
-          className="secondary-button"
-          disabled={page === 1}
-          onClick={() => setPage(page - 1)}
-        >
-          Anteriores
-        </button>
-        <span>Página {page}</span>
-        <button
-          className="secondary-button"
-          disabled={(board?.tasks.length ?? 0) < 250}
-          onClick={() => setPage(page + 1)}
-        >
-          Siguientes
-        </button>
-      </div>
     </div>
   );
 }
 
-function ScheduleEditor({
-  release,
-  current,
-  timezone,
+// Pedidos pendientes de liberación y avisos de modificación o cancelación por revisar. Son
+// administrativos: Go solo los entrega con kitchen.stations.all, sin depender de la terminal.
+function PendingReleases({
+  board,
+  can,
   execute,
   busy,
-  onClose,
+  changing,
+  onSchedule,
 }: {
-  release: Release;
-  current?: Release;
-  timezone: string;
+  board: Board;
+  can: (key: string) => boolean;
   execute: ExecuteKitchen;
   busy: boolean;
-  onClose: () => void;
+  changing: boolean;
+  onSchedule: (release: Release) => void;
 }) {
-  const [date, setDate] = useState(zonedInput(release.scheduled_at, timezone));
-  const [automatic, setAutomatic] = useState(release.automatic);
-  const [lead, setLead] = useState(release.lead_minutes);
   return (
-    <section className="panel form-stack">
-      <div className="section-heading">
-        <h2>Programación de preparación · #{release.folio}</h2>
-        <button className="secondary-button" onClick={onClose}>
-          Cerrar programación
-        </button>
+    <Accordion
+      title="Pendientes de liberación y avisos"
+      summary={`${countLabel(board.releases.length, 'pedido', 'pedidos')} · ${countLabel(
+        board.pending_changes.length,
+        'cambio por revisar',
+        'cambios por revisar',
+      )}`}
+      defaultOpen
+    >
+      <div className="kitchen-board-grid">
+        {board.releases.map((release) => {
+          const early =
+            !!release.due_at &&
+            new Date(release.due_at).getTime() > new Date(board.server_time).getTime();
+          return (
+            <article className="kitchen-preparation-card" key={release.id}>
+              <strong>
+                #{release.folio} · {release.account_name}
+              </strong>
+              <p>
+                {release.state === 'blocked'
+                  ? 'Bloqueado por configuración'
+                  : release.state === 'scheduled'
+                    ? 'Programado'
+                    : 'Pendiente de liberación'}
+              </p>
+              {release.scheduled_at && (
+                <p className="muted">
+                  Programado: {serverDateTime(release.scheduled_at, board.timezone)}
+                </p>
+              )}
+              {release.due_at && (
+                <p>
+                  Libera {release.automatic ? 'automáticamente' : 'manualmente'}:{' '}
+                  {serverDateTime(release.due_at, board.timezone)}
+                </p>
+              )}
+              {release.warnings.map((warning, index) => (
+                <Notice key={index}>{warning}</Notice>
+              ))}
+              <div className="button-row">
+                {can('kitchen.release') && can('kitchen.stations.all') && (
+                  <button
+                    className="primary-button"
+                    disabled={busy || (early && !can('kitchen.release_early'))}
+                    onClick={() =>
+                      void execute('kitchen_release', {
+                        id: release.id,
+                        body: { revision: release.revision },
+                      })
+                        .then(() =>
+                          notifySuccess(`Pedido #${release.folio} liberado a preparación`),
+                        )
+                        .catch(() => undefined)
+                    }
+                  >
+                    {early ? 'Liberar anticipadamente' : 'Liberar a preparación'}
+                  </button>
+                )}
+                {can('kitchen.timing.manage') && can('kitchen.stations.all') && (
+                  <button className="secondary-button" onClick={() => onSchedule(release)}>
+                    Ajustar programación
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
+        {board.pending_changes.map((change) => (
+          <article className="kitchen-preparation-card" key={change.event_id}>
+            {/* Etapa 9D: «Cancelar cuenta» (account.cancelled) también es una cancelación. */}
+            <strong>
+              Aviso de{' '}
+              {change.kind === 'item.cancelled' || change.kind === 'account.cancelled'
+                ? 'cancelación'
+                : 'modificación'}{' '}
+              pendiente
+            </strong>
+            {change.warnings.map((warning, index) => (
+              <Notice key={index}>{warning}</Notice>
+            ))}
+            {can('kitchen.release') && can('kitchen.stations.all') && (
+              <button
+                className="secondary-button"
+                disabled={busy || changing}
+                onClick={() =>
+                  void execute('kitchen_retry_change', {
+                    id: change.event_id,
+                    body: { revision: change.revision },
+                  })
+                    .then(() => notifySuccess('Destinos revisados y aviso generado'))
+                    .catch(() => undefined)
+                }
+              >
+                Revisar destinos y generar aviso
+              </button>
+            )}
+          </article>
+        ))}
       </div>
-      <Notice>
-        {current?.revision !== release.revision &&
-          'El pedido cambió. Reabre la programación para revisar su estado vigente.'}
-      </Notice>
-      <Form
-        disabled={busy || current?.revision !== release.revision}
-        label="Guardar programación"
-        successMessage={`Programación del pedido #${release.folio} guardada.`}
-        onSave={async () => {
-          await execute('kitchen_schedule', {
-            id: release.id,
-            body: {
-              revision: release.revision,
-              scheduled_local: date,
-              automatic,
-              lead_minutes: lead,
-            },
-          });
-          onClose();
-        }}
-      >
-        {/* Etapa 9C (§2.1): fecha dd/mm/aaaa y hora con el selector, de 5 en 5. Go recibe el mismo
-            «AAAA-MM-DDTHH:MM» en la zona del establecimiento. */}
-        <DateTimeField
-          label="Fecha y hora programada"
-          hint="En la zona horaria del restaurante."
-          required
-          value={date}
-          onChange={setDate}
-        />
-        <IntegerField
-          label="Anticipación en minutos"
-          min={0}
-          max={1440}
-          value={lead}
-          onChange={setLead}
-        />
-        <Check
-          label="Liberar a cocina automáticamente a su hora"
-          value={automatic}
-          onChange={setAutomatic}
-        />
-        <p className="muted">
-          Esta operación ajusta preparación; conserva cantidades, precios y la hora comercial del
-          pedido.
-        </p>
-      </Form>
-    </section>
+    </Accordion>
   );
+}
+
+// Aviso sonoro opcional de la terminal (etapa 9F): suena cuando llega una comanda nueva de las
+// estaciones visibles. Lo que ya estaba al abrir la pantalla o al cambiar de filtro, página o estaciones
+// visibles es la base y no suena; tampoco los cambios de estado de tareas ya vistas ni, sin el aviso
+// activado en la terminal, nada.
+function useArrivalChime(board: Board | null, filterKey: string) {
+  const seen = useRef<{ key: string; releases: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!board) {
+      return;
+    }
+    const key = `${filterKey}|${JSON.stringify(board.station_scope)}`;
+    const current = seen.current;
+    if (!current || current.key !== key || current.releases.size > 5000) {
+      seen.current = { key, releases: new Set(board.tasks.map((task) => task.release_id)) };
+      return;
+    }
+    const arrivals = newArrivals(current.releases, board.tasks);
+    for (const task of board.tasks) {
+      current.releases.add(task.release_id);
+    }
+    if (board.sound_alert && arrivals.size > 0) {
+      void playArrivalChime();
+    }
+  }, [board, filterKey]);
 }

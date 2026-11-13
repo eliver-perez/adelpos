@@ -18,9 +18,15 @@ import { StationsAdmin } from './StationsAdmin';
 export function KitchenPage({
   can,
   timezone,
+  connectionLost = false,
+  onRetryConnection,
 }: {
   can: (key: string) => boolean;
   timezone: string;
+  // Etapa 9F (§5.4): Preparación se actualiza sola; «Reintentar» solo cuando la barra indica «Sin
+  // conexión» (como Mesas desde la 9D).
+  connectionLost?: boolean;
+  onRetryConnection?: () => void;
 }) {
   const [view, setView] = useState('preparation');
   const [queueVersion, setQueueVersion] = useState(0);
@@ -115,7 +121,15 @@ export function KitchenPage({
           </button>
         </div>
       )}
-      {selected === 'preparation' && <PreparationBoard can={can} execute={execute} busy={busy} />}
+      {selected === 'preparation' && (
+        <PreparationBoard
+          can={can}
+          execute={execute}
+          busy={busy}
+          connectionLost={connectionLost}
+          onRetry={onRetryConnection}
+        />
+      )}
       {selected === 'tickets' && <KitchenTickets timezone={timezone} />}
       {selected === 'queue' && (
         <PrintQueue
@@ -200,7 +214,7 @@ function KitchenHistory({ timezone }: { timezone: string }) {
 
 const historyLabels: Record<string, string> = {
   'station.saved': 'Estación guardada',
-  'station.access.saved': 'Acceso de terminal actualizado',
+  'station.access.saved': 'Estaciones de la terminal actualizadas',
   'printer.saved': 'Impresora guardada',
   'route.saved': 'Enrutamiento guardado',
   'settings.saved': 'Formato de comandas actualizado',

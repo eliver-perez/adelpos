@@ -34,7 +34,10 @@ func (handler *service) read(parts []string) (any, error) {
 	case "settings":
 		return handler.settings()
 	case "access":
+		// Etapa 9F: por terminal, si muestra todas las estaciones o su selección, el aviso sonoro y su
+		// pantalla de inicio (para recordar que una terminal de cocina abre en Cocina).
 		return many[map[string]any](handler.ctx, handler.tx, `SELECT jsonb_build_object('device_id',d.id,'device_name',d.name,
+            'home_screen',d.home_screen,'all_stations',d.kitchen_all_stations,'sound_alert',d.kitchen_sound_alert,
             'station_ids',coalesce((SELECT jsonb_agg(station_id ORDER BY station_id) FROM app.kitchen_device_stations a WHERE a.device_id=d.id),'[]'))
             FROM app.devices d WHERE revoked_at IS NULL ORDER BY d.name`)
 	case "releases":
@@ -86,7 +89,15 @@ func (handler *service) page() (int, error) {
 	return page, nil
 }
 
+// board es la pantalla de Preparación. Desde la etapa 9F muestra solo las estaciones visibles en esta
+// terminal para el usuario (intersección de las de la terminal y las del usuario) e informa la
+// intersección (station_scope) para que, sin estaciones en común, la interfaz lo explique en lugar de
+// mostrar una pantalla vacía, y el aviso sonoro de la terminal (sound_alert).
 func (handler *service) board() (any, error) {
+	scope, err := handler.stationScope()
+	if err != nil {
+		return nil, err
+	}
 	stationID := handler.request.Query.Get("station_id")
 	if stationID != "" {
 		if err := handler.stationAccess(stationID); err != nil {
@@ -103,7 +114,6 @@ func (handler *service) board() (any, error) {
 			return nil, err
 		}
 	}
-	all := handler.request.Actor.Can("kitchen.stations.all")
 	tasks, err := many[map[string]any](handler.ctx, handler.tx, `SELECT to_jsonb(t)||jsonb_build_object(
         'state',CASE WHEN u.state='cancelled' THEN 'cancelled' ELSE t.state END,
         'folio',a.folio,'account_name',a.name,'table_name',p.name,'station_name',s.name,
@@ -114,11 +124,11 @@ func (handler *service) board() (any, error) {
         JOIN app.restaurant_accounts a ON a.id=u.account_id LEFT JOIN app.restaurant_tables p ON p.id=a.table_id
         JOIN app.kitchen_stations s ON s.id=t.station_id JOIN app.kitchen_releases r ON r.id=t.release_id
         CROSS JOIN app.kitchen_settings cfg WHERE ($1='' OR t.station_id::text=$1)
-        AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations ds WHERE ds.device_id=$3 AND ds.station_id=t.station_id))
+        AND ($2 OR t.station_id = ANY($3::uuid[]))
         AND ($6='' OR u.account_id::text=$6)
         AND ($4='all' OR ($4='ready' AND t.state='ready' AND u.state='active')
             OR ($4='' AND t.state IN ('released','preparing') AND u.state='active'))
-        ORDER BY t.released_at,t.id LIMIT 250 OFFSET $5`, stationID, all, handler.request.Actor.DeviceID,
+        ORDER BY t.released_at,t.id LIMIT 250 OFFSET $5`, stationID, scope.All, scope.IDs(),
 		handler.request.Query.Get("state"), (page-1)*250, accountID)
 	if err != nil {
 		return nil, err
@@ -134,6 +144,9 @@ func (handler *service) board() (any, error) {
 			}
 		}
 	}
+	// Liberaciones y avisos pendientes son administrativos: siguen con kitchen.stations.all, sin
+	// depender de las estaciones de la terminal.
+	all := handler.request.Actor.Can("kitchen.stations.all")
 	releases := []map[string]any{}
 	pendingChanges := []map[string]any{}
 	if all {
@@ -149,8 +162,8 @@ func (handler *service) board() (any, error) {
 			return nil, err
 		}
 	}
-	stations, err := many[Station](handler.ctx, handler.tx, `SELECT to_jsonb(s) FROM app.kitchen_stations s WHERE $1 OR EXISTS(
-        SELECT FROM app.kitchen_device_stations d WHERE d.device_id=$2 AND d.station_id=s.id) ORDER BY sort_order,name`, all, handler.request.Actor.DeviceID)
+	stations, err := many[Station](handler.ctx, handler.tx, `SELECT to_jsonb(s) FROM app.kitchen_stations s
+        WHERE $1 OR s.id = ANY($2::uuid[]) ORDER BY sort_order,name`, scope.All, scope.IDs())
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +171,14 @@ func (handler *service) board() (any, error) {
 	if err := handler.tx.QueryRow(handler.ctx, "SELECT timezone FROM app.establishment").Scan(&timezone); err != nil {
 		return nil, err
 	}
+	var soundAlert bool
+	if err := handler.tx.QueryRow(handler.ctx, `SELECT coalesce((SELECT kitchen_sound_alert FROM app.devices
+        WHERE id::text=$1),false)`, handler.request.Actor.DeviceID).Scan(&soundAlert); err != nil {
+		return nil, err
+	}
 	return map[string]any{"tasks": tasks, "releases": releases, "pending_changes": pendingChanges,
-		"stations": stations, "server_time": time.Now().UTC(), "timezone": timezone, "page": page}, nil
+		"stations": stations, "server_time": time.Now().UTC(), "timezone": timezone, "page": page,
+		"station_scope": scope.Summary(), "sound_alert": soundAlert}, nil
 }
 
 func (handler *service) authorizeResource(parts []string) error {
@@ -211,7 +230,7 @@ func (handler *service) filteredDocument(id string) (*Document, error) {
 	}
 	visible := []Section{}
 	for _, section := range document.Sections {
-		if err := handler.stationAccess(section.Station.ID); err == nil {
+		if err := handler.documentStationAccess(section.Station.ID); err == nil {
 			if !handler.request.Actor.Can("catalog.prices.read") {
 				for index := range section.Items {
 					clearInstructionPrices(&section.Items[index])
@@ -322,19 +341,23 @@ func (handler *service) readTickets(parts []string) (any, error) {
 	}
 	station := handler.request.Query.Get("station_id")
 	if station != "" {
-		if err := handler.stationAccess(station); err != nil {
+		if err := handler.documentStationAccess(station); err != nil {
 			return nil, err
 		}
+	}
+	scope, err := handler.documentScope()
+	if err != nil {
+		return nil, err
 	}
 	rows, err := many[map[string]any](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',t.id,'kind',t.kind,
         'created_at',t.created_at,'release_id',t.release_id,'folio',t.document->'context'->'folio',
         'pending_kds',EXISTS(SELECT FROM jsonb_array_elements(t.document->'sections') section
             WHERE section->'station'->>'reception' IN ('kds','both')
-            AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations a WHERE a.device_id=$3 AND a.station_id=(section->'station'->>'id')::uuid))
+            AND ($2 OR (section->'station'->>'id')::uuid = ANY($3::uuid[]))
             AND NOT EXISTS(SELECT FROM app.kitchen_kds_receipts k WHERE k.ticket_id=t.id AND k.station_id=(section->'station'->>'id')::uuid)))
         FROM app.kitchen_tickets t WHERE t.kind NOT IN (`+renderedKinds+`) AND ($1='' OR NULLIF($1,'')::uuid=ANY(station_ids))
-        AND ($2 OR EXISTS(SELECT FROM app.kitchen_device_stations d WHERE d.device_id=$3 AND d.station_id=ANY(t.station_ids)))
-        ORDER BY created_at DESC,id DESC LIMIT 100 OFFSET $4`, station, handler.request.Actor.Can("kitchen.stations.all"), handler.request.Actor.DeviceID, (page-1)*100)
+        AND ($2 OR t.station_ids && $3::uuid[])
+        ORDER BY created_at DESC,id DESC LIMIT 100 OFFSET $4`, station, scope.All, scope.IDs(), (page-1)*100)
 	return rows, err
 }
 

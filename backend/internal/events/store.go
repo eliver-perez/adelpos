@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"local/ad-el-pos/server/internal/stationscope"
 )
 
 type Change struct {
@@ -47,7 +49,10 @@ func Append(ctx context.Context, tx pgx.Tx, kind, scope string, aggregateID, sta
 	return err
 }
 
-func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, deviceID, stationFilter string) (*Batch, error) {
+// Read entrega los eventos posteriores al cursor que la persona puede recibir. stations son las estaciones
+// de cocina que puede ver (etapa 9F: en la terminal, intersectadas con las que atiende el usuario; con
+// kitchen.stations.all, todas): un evento de una estación fuera de ellas no se entrega.
+func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, stations *stationscope.Scope, stationFilter string) (*Batch, error) {
 	var head, oldest int64
 	if err := tx.QueryRow(ctx, "SELECT coalesce(max(sequence),0),coalesce(min(sequence),0) FROM app.realtime_events").Scan(&head, &oldest); err != nil {
 		return nil, err
@@ -59,18 +64,14 @@ func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, dev
 		return batch, nil
 	}
 	allStations := slices.Contains(permissions, "kitchen.stations.all")
-	rows, err := tx.Query(ctx, `SELECT to_jsonb(e),
-        (e.station_id IS NULL OR $3 OR EXISTS(SELECT FROM app.kitchen_device_stations d
-            WHERE d.device_id=$2 AND d.station_id=e.station_id)) AS station_allowed
-        FROM app.realtime_events e WHERE sequence>$1 ORDER BY sequence LIMIT 200`, after, deviceID, allStations)
+	rows, err := tx.Query(ctx, `SELECT to_jsonb(e) FROM app.realtime_events e WHERE sequence>$1 ORDER BY sequence LIMIT 200`, after)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var encoded []byte
-		var stationAllowed bool
-		if err := rows.Scan(&encoded, &stationAllowed); err != nil {
+		if err := rows.Scan(&encoded); err != nil {
 			return nil, err
 		}
 		var event Change
@@ -84,6 +85,7 @@ func Read(ctx context.Context, tx pgx.Tx, after int64, permissions []string, dev
 		if !allStations && event.StationID == nil && (event.Scope == "kitchen" || event.Scope == "printing") {
 			continue
 		}
+		stationAllowed := event.StationID == nil || stations.Allows(*event.StationID)
 		if !stationAllowed || !allowed(event.Scope, permissions) {
 			continue
 		}

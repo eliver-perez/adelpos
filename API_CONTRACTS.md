@@ -308,14 +308,14 @@ Prefijo `/api/v1/kitchen`. Todos los UUID se validan; las escrituras conservan `
 | POST       | `/test-print`                           | `kitchen.printers.test`                                                                                                    |
 | GET        | `/history`                              | `kitchen.history.read` y `kitchen.stations.all`                                                                            |
 
-El alcance global `kitchen.stations.all` se comprueba además del permiso funcional. Las consultas y acciones sobre liberaciones/cambios pendientes completos también lo exigen. Sin él, las tareas/documentos operativos y eventos se filtran por `kitchen_device_stations`; no basta conocer UUID. El listado de configuración de estaciones conserva su permiso específico. Cambiar un destino durante una resolución o reimpresión exige también `kitchen.printers.manage`. Los veinte permisos nuevos solo se asignan inicialmente al administrador.
+El alcance global `kitchen.stations.all` se comprueba además del permiso funcional. Las consultas y acciones sobre liberaciones/cambios pendientes completos también lo exigen. Sin él, las tareas/documentos operativos y eventos se filtran por las estaciones visibles (desde la etapa 9F, las de la terminal intersectadas con las del usuario; ver «Etapa 9F · cocina por estaciones»); no basta conocer UUID. El listado de configuración de estaciones conserva su permiso específico. Cambiar un destino durante una resolución o reimpresión exige también `kitchen.printers.manage`. Los veinte permisos nuevos solo se asignan inicialmente al administrador.
 
 ### Configuración
 
 - Estación: `{name,description,active,sort_order,reception,printer_id,target_minutes,warning_minutes,overdue_minutes,grouping,tracking}` y `position:{after}` opcional (etapa 6.1, misma regla del catálogo; historial `station.reordered`). Recepción `printer|kds|both`; agrupación `inherit|independent|unified`; seguimiento `inherit|item|order`. PATCH lleva `id` y `revision`.
 - Impresora: `{name,transport,destination,port,paper_width,copies,supports_cut,cut,cutter_option,active,fallback_id}`. Transporte `cups|escpos_tcp|agent`; papel 58/80 mm, copias 1–3, puerto 9100–9109. CUPS utiliza nombre de cola (desde la etapa 9E, con el servidor en Windows, `cups` significa «cola de impresión del equipo» y el destino es el nombre de la impresora instalada en Windows; ver «Etapa 9E»); TCP una IP privada explícita; agente todavía no implementado. El respaldo es opcional y no puede formar ciclos. PATCH conserva identidad/revisión.
 - Ruta: exactamente uno de `category_id|product_id`, `mode:prepare|none`, `station_ids`. Preparación exige estaciones activas no repetidas; exención explícita usa lista vacía. PATCH conserva `id/revision`; producto prevalece sobre categoría.
-- Acceso: `{device_id,station_ids,expected_station_ids,operation_id}`. La lista esperada del último GET permite rechazar una edición concurrente. Solo dispositivos autorizados existentes.
+- Acceso: `{device_id,station_ids,expected_station_ids,operation_id}` y, desde la etapa 9F, `all_stations`, `sound_alert` y `expected_all_stations` opcionales (ver «Etapa 9F · cocina por estaciones»). La lista esperada del último GET permite rechazar una edición concurrente. Solo dispositivos autorizados existentes.
 - Formato/política: `{grouping,tracking,automatic_release,lead_minutes,show_prices,show_notes,show_establishment,text_size,line_spacing,quantity_style,revision,operation_id}`. Agrupación `independent|unified`, seguimiento `item|order`, anticipación 0–1440, texto `normal|large`, separación 1–3, cantidad `prefix|multiplier`. PUT `/timing` recibe únicamente automatismo, anticipación, seguimiento, revisión y UUID.
 
 ### Preparación y documentos
@@ -3146,3 +3146,77 @@ inactivo o requiere un agente de impresión aún no implementado»).
 - Lista cerrada de `api.rs`: `payments_retry_document`, `payments_print_receipt` y `payments_retry_cash_document`.
 - `menu_set_state` acepta además `precheckName` opcional (lista cerrada `precheck`, `sales_ticket`, `bill`; otro valor
   rechaza el estado) y cambia solo el texto de «Imprimir precuenta». Sin rutas nuevas.
+
+## Etapa 9F · cocina por estaciones y terminal de cocina (fase C, esquema 22)
+
+Decisiones D6 y D7 del coordinador. Migración: sección «Fase C» de la 0022 (columnas `devices.kitchen_all_stations` y
+`devices.kitchen_sound_alert`, columna `users.kitchen_all_stations`, tabla `kitchen_user_stations` y la descripción
+«Editar datos de cuentas» de `accounts.manage`, encargo de la fase E). Sin permisos nuevos. Detalle en
+[KITCHEN_AND_PRINTING.md](docs/KITCHEN_AND_PRINTING.md) y guía en [TERMINAL_DE_COCINA.md](docs/TERMINAL_DE_COCINA.md).
+
+### Estaciones visibles
+
+Las estaciones visibles son las de la terminal (todas o su selección) intersectadas con las del usuario (todas, su
+selección o, con `kitchen.stations.all`, siempre todas). Antes de la 9F, `kitchen_device_stations` era el ámbito de quien
+no tenía `kitchen.stations.all` (vacío = ninguna) y se ignoraba para quien lo tenía.
+
+| Consulta o acción                                                        | Alcance                                                               |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `GET kitchen/board` (tareas y `stations`), `station_id`                  | Estaciones visibles, para todos                                       |
+| `POST kitchen/states` (tareas o pedido con `station_id`)                 | Estaciones visibles: una tarea de otra `403 STATION_SCOPE_DENIED`     |
+| `POST kitchen/tickets/{id}/ack`                                          | La estación del acuse debe ser visible                                |
+| `GET kitchen/tickets`, `GET kitchen/tickets/{id}`, recientes y diseñador | Con `kitchen.stations.all`, todas; sin él, las visibles               |
+| `GET events`, `GET events/snapshot` (`station_id`)                       | Con `kitchen.stations.all`, todas; sin él, las visibles (`403` fuera) |
+| Liberar, programar, cambios pendientes, cola, reimpresión e historial    | `kitchen.stations.all` (sin cambio), sin depender de la terminal      |
+
+`STATION_SCOPE_DENIED` dice ahora «Esta estación no se muestra en esta terminal o tu usuario no la atiende.».
+
+`GET kitchen/board` agrega:
+
+```json
+{
+  "station_scope": {
+    "common": true,
+    "all": false,
+    "terminal_all": false,
+    "terminal_stations": ["Freidora", "Plancha"],
+    "user_all": false,
+    "user_all_by_permission": false,
+    "user_stations": ["Freidora"]
+  },
+  "sound_alert": false
+}
+```
+
+`common: false` = la terminal y el usuario no tienen estaciones en común (tareas y `stations` vacías); los nombres van
+en el orden de Cocina y solo los de una selección (con `terminal_all`/`user_all`, la lista va vacía).
+`user_all_by_permission` indica `kitchen.stations.all`. `sound_alert` es el aviso sonoro de la terminal que consulta.
+
+### Terminal (`GET`/`PUT kitchen/access`, `kitchen.stations.manage`)
+
+Cada terminal autorizada agrega `home_screen`, `all_stations` y `sound_alert` a `{device_id, device_name, station_ids}`.
+`PUT` recibe `{operation_id, device_id, all_stations?, station_ids, sound_alert?, expected_all_stations?,
+expected_station_ids}`: sin `all_stations`, una lista vacía es «todas» y una con estaciones es la selección (forma
+anterior); con «todas» la lista va vacía y sin ella lleva de 1 a 100 estaciones existentes sin repetir (`400
+KITCHEN_VALIDATION`); sin `sound_alert` se conserva. La selección esperada (y la marca, si se envía) distinta de la
+vigente responde `409 REVISION_CONFLICT`. Responde `{device_id, all_stations, station_ids, sound_alert}` y lo audita en
+el historial de cocina como `station.access.saved` (antes y después).
+
+### Usuario (`users/{id}/kitchen-stations`)
+
+| Método | Permiso        | Cuerpo / respuesta                                                                                     |
+| ------ | -------------- | ------------------------------------------------------------------------------------------------------ |
+| GET    | `users.read`   | `{user_id, all_stations, station_ids, all_by_permission, stations:[{id, name, active}]}`               |
+| PUT    | `users.manage` | `{all_stations, station_ids, expected_all_stations, expected_station_ids}` → la misma forma que el GET |
+
+Mismas reglas de la selección que la terminal (`400 VALIDATION_ERROR`; campos desconocidos rechazados). Delegación de
+siempre: nadie cambia sus propias estaciones ni las de un usuario con permisos que no tiene (`403 PERMISSION_DENIED`),
+el usuario reservado `sa` no se consulta ni se cambia, la selección esperada distinta de la vigente responde `409
+REVISION_CONFLICT`, se audita `user.kitchen_stations_changed` (antes y después, solo identificadores) en la misma
+transacción y se publica `kitchen.access.changed` (ámbito `configuration`, sin contenido). `all_by_permission` indica
+que el usuario atiende todas por `kitchen.stations.all` aunque tenga una selección guardada.
+
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+Operaciones nuevas `user_kitchen_stations` (`GET users/{id}/kitchen-stations`) y `save_user_kitchen_stations`
+(`PUT users/{id}/kitchen-stations`), con identificador validado. `kitchen_access` y `kitchen_save_access` no cambian.

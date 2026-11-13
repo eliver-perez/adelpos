@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/stationscope"
 )
 
 type Error struct {
@@ -63,6 +64,9 @@ type service struct {
 	request     Request
 	audit       Audit
 	operationID string
+	// scope son las estaciones visibles en la terminal para el usuario (etapa 9F); se lee una sola
+	// vez por operación.
+	scope *stationscope.Scope
 }
 
 var identifierPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -129,21 +133,64 @@ func (handler *service) history(kind string, id *string, before, after any) erro
 	}
 	return nil
 }
+
+// stationScope devuelve las estaciones que se ven en esta terminal (etapa 9F, decisión D6): las que
+// muestra la terminal intersectadas con las que atiende el usuario (con kitchen.stations.all, todas las
+// de la terminal). Rige la preparación, sus cambios de estado y los acuses de recepción.
+func (handler *service) stationScope() (*stationscope.Scope, error) {
+	if handler.scope != nil {
+		return handler.scope, nil
+	}
+	actor := handler.request.Actor
+	scope, err := stationscope.Load(handler.ctx, handler.tx, actor.DeviceID, actor.UserID, actor.Can("kitchen.stations.all"))
+	if err != nil {
+		return nil, err
+	}
+	handler.scope = scope
+	return scope, nil
+}
+
+// documentScope es el alcance de las comandas guardadas (lista, detalle y vista previa de la cola): con
+// kitchen.stations.all todas, porque la cola, la reimpresión y el historial son administrativos y no
+// dependen de la terminal; sin él, las estaciones visibles.
+func (handler *service) documentScope() (*stationscope.Scope, error) {
+	if handler.request.Actor.Can("kitchen.stations.all") {
+		return stationscope.Everything(), nil
+	}
+	return handler.stationScope()
+}
+
+// stationAccess exige que la estación sea visible en esta terminal para el usuario.
 func (handler *service) stationAccess(id string) error {
 	if err := validID(id); err != nil {
 		return err
 	}
-	if handler.request.Actor.Can("kitchen.stations.all") {
-		return nil
-	}
-	var allowed bool
-	err := handler.tx.QueryRow(handler.ctx, `SELECT EXISTS(SELECT FROM app.kitchen_device_stations
-        WHERE device_id=$1 AND station_id=$2)`, handler.request.Actor.DeviceID, id).Scan(&allowed)
+	scope, err := handler.stationScope()
 	if err != nil {
 		return err
 	}
-	if !allowed {
-		return &Error{Status: 403, Code: "STATION_SCOPE_DENIED", Message: "Esta terminal no está autorizada para esa estación."}
+	if !scope.Allows(id) {
+		return stationDenied()
 	}
 	return nil
+}
+
+// documentStationAccess exige que la sección de una comanda pertenezca al alcance de las comandas.
+func (handler *service) documentStationAccess(id string) error {
+	if err := validID(id); err != nil {
+		return err
+	}
+	scope, err := handler.documentScope()
+	if err != nil {
+		return err
+	}
+	if !scope.Allows(id) {
+		return stationDenied()
+	}
+	return nil
+}
+
+// stationDenied es el rechazo de una estación que no se ve en esta terminal o que el usuario no atiende.
+func stationDenied() error {
+	return &Error{Status: 403, Code: "STATION_SCOPE_DENIED", Message: "Esta estación no se muestra en esta terminal o tu usuario no la atiende."}
 }

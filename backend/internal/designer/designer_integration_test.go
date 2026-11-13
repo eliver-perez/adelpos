@@ -23,6 +23,7 @@ import (
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/events"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/stationscope"
 )
 
 // Aceptación del diseñador de documentos (etapa 9B, fase A) contra PostgreSQL: plantillas del
@@ -528,11 +529,11 @@ func testValidationPermissionsAndIdempotency(t *testing.T, value *fixture) {
 	if err := tx.QueryRow(value.ctx, "SELECT max(sequence)-1 FROM app.realtime_events WHERE scope='documents'").Scan(&cursor); err != nil {
 		t.Fatal(err)
 	}
-	visible, err := events.Read(value.ctx, tx, cursor, []string{documents.PermissionTemplatesRead}, reader.deviceID, "")
+	visible, err := events.Read(value.ctx, tx, cursor, []string{documents.PermissionTemplatesRead}, stationscope.Everything(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hidden, err := events.Read(value.ctx, tx, cursor, []string{"settings.read"}, nobody.deviceID, "")
+	hidden, err := events.Read(value.ctx, tx, cursor, []string{"settings.read"}, stationscope.Everything(), "")
 	if err != nil {
 		t.Fatal(err)
 	}

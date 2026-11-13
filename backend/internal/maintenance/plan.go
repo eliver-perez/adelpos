@@ -76,6 +76,8 @@ type Plan struct {
 	drawerRegisters  []string
 	fallbackPrinters []string
 	deviceLinks      bool
+	// userLinks: algún usuario atendía una estación de prueba (etapa 9F, «Estaciones que puede atender»).
+	userLinks bool
 }
 
 // Referencias que el plan maneja por su cuenta: configuración que se borra junto con el dato o que se
@@ -90,6 +92,7 @@ var (
 	stationHandled = map[reference]bool{
 		{table: "kitchen_route_stations", column: "station_id"}:       true,
 		{table: "kitchen_device_stations", column: "station_id"}:      true,
+		{table: "kitchen_user_stations", column: "station_id"}:        true,
 		{table: "inventory_station_warehouses", column: "station_id"}: true,
 	}
 	printerHandled = map[reference]bool{
@@ -211,7 +214,10 @@ func (builder *planBuilder) build() error {
 	if err := builder.decidePrinters(printers, stations); err != nil {
 		return err
 	}
-	return builder.decideDeviceLinks()
+	if err := builder.decideDeviceLinks(); err != nil {
+		return err
+	}
+	return builder.decideUserLinks()
 }
 
 func (builder *planBuilder) testPrinters() ([]printerRow, error) {
@@ -756,6 +762,41 @@ func (builder *planBuilder) decideDeviceLinks() error {
 			Kind:   KindSetting,
 			ID:     "terminal:" + deviceID + ":" + stationID,
 			Name:   fmt.Sprintf("Estaciones de la terminal «%s»", deviceName),
+			Reason: fmt.Sprintf("Se quita la estación de prueba «%s».", stationName),
+		})
+	}
+	return rows.Err()
+}
+
+// decideUserLinks quita las estaciones de prueba de las estaciones que atiende cada usuario (etapa 9F). Es
+// configuración, no operación: la estación de prueba se puede eliminar igual. Un usuario que se quede sin
+// estaciones conserva su marca de selección y no ve ninguna hasta que se le asignen otras (nunca se le
+// amplía el alcance a «todas» sin que nadie lo decida).
+func (builder *planBuilder) decideUserLinks() error {
+	plan := builder.plan
+	if len(plan.testStations) == 0 {
+		return nil
+	}
+	rows, err := builder.tx.Query(builder.ctx, `SELECT u.id::text, u.display_name, s.id::text, s.name
+        FROM app.kitchen_user_stations us
+        JOIN app.users u ON u.id = us.user_id
+        JOIN app.kitchen_stations s ON s.id = us.station_id
+        WHERE us.station_id::text = ANY($1::text[])
+        ORDER BY u.display_name, u.id, s.name, s.id`, list(plan.testStations))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var userID, userName, stationID, stationName string
+		if err := rows.Scan(&userID, &userName, &stationID, &stationName); err != nil {
+			return err
+		}
+		plan.userLinks = true
+		plan.Unlink = append(plan.Unlink, Entry{
+			Kind:   KindSetting,
+			ID:     "user:" + userID + ":" + stationID,
+			Name:   fmt.Sprintf("Estaciones que atiende «%s»", userName),
 			Reason: fmt.Sprintf("Se quita la estación de prueba «%s».", stationName),
 		})
 	}

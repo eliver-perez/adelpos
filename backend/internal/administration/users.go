@@ -25,6 +25,10 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 	if len(parts) == 3 && parts[2] == "preferences" {
 		return preferences(ctx, tx, request, principal, parts[1], true)
 	}
+	// Etapa 9F: «Estaciones que puede atender» (user_stations.go).
+	if len(parts) == 3 && parts[2] == "kitchen-stations" {
+		return userKitchenStations(ctx, tx, request, principal, parts[1])
+	}
 	if request.Method == "GET" && len(parts) == 1 {
 		if err := principal.require("users.read"); err != nil {
 			return nil, err

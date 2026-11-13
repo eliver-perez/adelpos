@@ -52,7 +52,7 @@ var Permissions = []Permission{
 	// anterior de anulación de cuentas vacías con accounts.manage se retiró en la etapa 9F (410
 	// ROUTE_RETIRED); la descripción guardada en app.permissions la fijó la migración 0021 y solo una
 	// migración la cambia (ensureFoundations no reescribe descripciones), así que aquí se conserva igual.
-	{"accounts.manage", "Editar datos de cuentas y cancelar cuentas vacías con motivo libre"},
+	{"accounts.manage", "Editar datos de cuentas"},
 	{"accounts.cancel", "Cancelar cuentas"},
 	{"accounts.split", "Dividir cuentas"},
 	{"accounts.merge", "Combinar cuentas compatibles"},

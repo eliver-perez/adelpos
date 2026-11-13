@@ -279,6 +279,12 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		kitchen("POST", "kitchen/routes", map[string]any{"category_id": category, "mode": "prepare", "station_ids": []string{hot, fryers}})
 		tacosRoute := kitchen("POST", "kitchen/routes", map[string]any{"product_id": tacos, "mode": "prepare", "station_ids": []string{fryers, realStation}})
 		kitchen("PUT", "kitchen/access", map[string]any{"device_id": env.device.id, "station_ids": []string{hot}, "expected_station_ids": []string{}})
+		// Etapa 9F, fase C: un usuario de cocina que atiende la estación de prueba (configuración, no
+		// operación): la estación se desvincula de él en lugar de impedir quitarla.
+		cookID, _ := env.createUser(t, "cocina_datos_9f", env.createRole(t, "Cocina datos 9F", "kitchen.states.read"))
+		env.call(env.admin, "PUT", "users/"+cookID+"/kitchen-stations", map[string]any{
+			"all_stations": false, "station_ids": []string{hot}, "expected_all_stations": true, "expected_station_ids": []string{},
+		}, 200)
 		steak := catalog("catalog/products", map[string]any{
 			"name": "Filete de prueba", "active": true, "category_id": category, "code": "FILETE", "kind": "product", "base_price": "150",
 		})
@@ -338,8 +344,12 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		if !slices.Equal(labels(value.Unlink), []string{
 			"route:Ruta de la categoría «Platillos»", "route:Ruta del producto «Tacos de la casa»",
 			"setting:Estaciones de la terminal «" + terminalName + "»",
+			"setting:Estaciones que atiende «Prueba cocina_datos_9f»",
 		}) {
 			t.Fatalf("se desvincula: %v", labels(value.Unlink))
+		}
+		if value.Unlink[3].Reason != "Se quita la estación de prueba «Cocina caliente»." {
+			t.Fatalf("motivo del usuario: %+v", value.Unlink[3])
 		}
 		if value.Unlink[0].Reason != "Solo enviaba a estaciones de prueba («Cocina caliente» y «Freidoras»); se quita: "+
 			"sus productos sin ruta propia quedarán sin ruta de preparación hasta que le asignes otra." {
@@ -366,8 +376,13 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		if env.scalar(t, "SELECT count(*) FROM app.kitchen_routes WHERE category_id=$1", category) != 0 ||
 			env.scalar(t, "SELECT count(*) FROM app.kitchen_route_stations WHERE route_id=$1", tacosRoute) != 1 ||
 			env.scalar(t, "SELECT count(*) FROM app.kitchen_route_stations WHERE route_id=$1 AND station_id=$2", tacosRoute, realStation) != 1 ||
-			env.scalar(t, "SELECT count(*) FROM app.kitchen_device_stations WHERE station_id = ANY($1::uuid[])", []string{hot, fryers}) != 0 {
-			t.Fatal("las rutas o las estaciones por terminal siguen apuntando a estaciones de prueba")
+			env.scalar(t, "SELECT count(*) FROM app.kitchen_device_stations WHERE station_id = ANY($1::uuid[])", []string{hot, fryers}) != 0 ||
+			env.scalar(t, "SELECT count(*) FROM app.kitchen_user_stations WHERE station_id = ANY($1::uuid[])", []string{hot, fryers}) != 0 {
+			t.Fatal("las rutas o las estaciones por terminal o por usuario siguen apuntando a estaciones de prueba")
+		}
+		// El usuario conserva su marca de selección (no se le amplía a «todas» sin que nadie lo decida).
+		if env.scalar(t, "SELECT count(*) FROM app.users WHERE id=$1 AND NOT kitchen_all_stations", cookID) != 1 {
+			t.Fatal("quitar datos de prueba cambió la marca de estaciones del usuario")
 		}
 		if env.scalar(t, "SELECT count(*) FROM app.catalog_categories WHERE id=$1 AND active", category) != 1 {
 			t.Fatal("se tocó la categoría con productos del restaurante")
