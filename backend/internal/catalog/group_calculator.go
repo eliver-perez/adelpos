@@ -186,7 +186,11 @@ func (engine *calculator) selectedOptionAvailable(option GroupOption) error {
 			engine.location,
 			engine.override,
 		); reason != "" {
-			return unavailable(reason)
+			// Un complemento que es un producto agotado (etapa 9G) no se puede elegir.
+			if isSoldOutReason(reason) {
+				return soldOut(product.ID, "El complemento «"+product.Name+"» está agotado. Elige otro complemento.")
+			}
+			return unavailableProduct(product.ID, reason)
 		}
 	}
 	return nil

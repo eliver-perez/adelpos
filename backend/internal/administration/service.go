@@ -61,6 +61,8 @@ type Request struct {
 	SessionToken      string
 	ProvisioningToken string
 	Local             bool
+	// IfNoneMatch es la cabecera del mismo nombre (etapa 9G): la imagen binaria del catálogo responde 304 si coincide.
+	IfNoneMatch string
 }
 
 type Fault struct {
