@@ -415,6 +415,8 @@ export interface CashDocumentRecord {
   job_problem?: string | null;
   printer_name: string | null;
   copies: number;
+  // Etapa 9G (fase E): la terminal de la impresora USB de otra terminal («La Caja 2 está desconectada»).
+  terminal_name?: string | null;
 }
 
 // Vista previa renderizada por Go con la misma plantilla y los mismos permisos que la impresión.
@@ -456,6 +458,8 @@ export interface DrawerPrinter {
   compatible: boolean;
   connection?: string;
   reason?: string;
+  // Etapa 9G (fase E): la terminal que tiene conectada una impresora USB de otra terminal.
+  terminal_name?: string;
 }
 
 // Conexión de la impresora del cajón tal como la describe la configuración.
@@ -472,7 +476,8 @@ export function drawerConnectionLabel(printer: DrawerPrinter) {
     const connection = printer.connection ? drawerConnectionNames[printer.connection] : '';
     return connection ? `CUPS · ${connection}` : 'CUPS';
   }
-  return 'Agente de impresión';
+  // Etapa 9G (fase E): la impresora USB de una terminal abre el cajón por medio de su agente.
+  return printer.terminal_name ? `USB de ${printer.terminal_name}` : 'Otra terminal sin elegir';
 }
 
 // Puertos de una impresora instalada en Windows que entregan los datos sin convertir.

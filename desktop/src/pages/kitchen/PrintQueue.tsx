@@ -4,7 +4,12 @@ import { Field, Form, Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
 import { ReferenceField, TextField } from '../../components/catalog/EditorFields';
 import { useLiveResource } from '../../hooks/useLiveResource';
-import { jobDocumentLabels, jobLabels, ticketKindLabels } from '../../services/kitchen';
+import {
+  jobDocumentLabels,
+  jobLabels,
+  printerLabel,
+  ticketKindLabels,
+} from '../../services/kitchen';
 import type {
   ExecuteKitchen,
   Printer,
@@ -224,7 +229,7 @@ function JobCard({
 }) {
   const job = group.jobs[0]!;
   const count = group.jobs.length;
-  const problem = printProblemMessage(job.problem, job.printer_name);
+  const problem = printProblemMessage(job.problem, job.printer_name, 'other', job.terminal_name);
   return (
     <article
       className={`kitchen-job kitchen-job-${job.state} ${selectedID && group.jobs.some((entry) => entry.id === selectedID) ? 'kitchen-job-selected' : ''}`}
@@ -239,7 +244,8 @@ function JobCard({
         <span className="kitchen-state-label">{jobLabels[job.state]}</span>
       </div>
       <p className="muted text-sm">
-        {job.printer_name} · {serverDateTime(job.created_at, timezone)} ·{' '}
+        {printerLabel({ name: job.printer_name, terminal_name: job.terminal_name })} ·{' '}
+        {serverDateTime(job.created_at, timezone)} ·{' '}
         {job.attempts === 1 ? '1 intento' : `${job.attempts} intentos`}
       </p>
       {problem && (
@@ -371,7 +377,12 @@ function JobEditor({
       </p>
       {current.problem && (
         <p>
-          {printProblemMessage(current.problem, current.printer_name)}{' '}
+          {printProblemMessage(
+            current.problem,
+            current.printer_name,
+            'other',
+            current.terminal_name,
+          )}{' '}
           {printProblemHint(current.problem, current.printer_name)}
         </p>
       )}
@@ -443,7 +454,10 @@ function JobEditor({
               optional
               label="Enviar a otra impresora (vacío: la misma)"
               value={printerID}
-              options={printers.data ?? []}
+              options={(printers.data ?? []).map((printer) => ({
+                ...printer,
+                name: printerLabel(printer),
+              }))}
               onChange={setPrinterID}
             />
           )}

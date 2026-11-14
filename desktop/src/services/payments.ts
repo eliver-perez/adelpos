@@ -61,6 +61,18 @@ export interface PaymentSettings {
   usd_rate_alert_percent: string;
   revision: number;
   updated_at: string;
+  // Impresora de tickets de cada caja (etapa 9G, fase E, D10): sin una propia, la caja usa la general.
+  register_printers?: RegisterPrinter[];
+}
+
+// Impresora de tickets propia de una caja, con la terminal donde está conectada si es la USB de una terminal.
+export interface RegisterPrinter {
+  register_id: string;
+  register_name: string;
+  register_active: boolean;
+  printer_id: string | null;
+  printer_name: string | null;
+  terminal_name: string | null;
 }
 
 export interface USDSettingsInput {
@@ -76,6 +88,8 @@ export interface SettingsInput {
   print_receipt_default: boolean;
   receipt_printer_id: string | null;
   refund_authorization_threshold: string | null;
+  // Etapa 9G (fase E, D10): impresora de tickets por caja (null: la general). Sin el campo, no cambia.
+  register_printers?: { register_id: string; printer_id: string | null }[];
 }
 
 export interface TaxInput {
@@ -203,6 +217,8 @@ export interface DocumentRecord {
   job_problem?: string | null;
   printer_name: string | null;
   copies: number;
+  // Etapa 9G (fase E): la terminal de la impresora USB de otra terminal («La Caja 2 está desconectada»).
+  terminal_name?: string | null;
 }
 
 // Estado financiero completo y autoritativo de una cuenta (GET payments/accounts/{id}).

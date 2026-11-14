@@ -9322,3 +9322,40 @@ th[aria-sort='descending'] {
 .connection-lost-retry {
   font-size: 13px;
 }
+
+/* Etapa 9G (fase E): impresoras de la computadora de una terminal en Sistema › Terminales. Solo tokens: el azul de
+   «En línea» para la impresora que se puede usar. */
+.device-local-printers {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.device-local-printers h3 {
+  font-size: 15px;
+  font-weight: 700;
+}
+.device-local-printer-list {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+.device-local-printer-list li {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+  font-size: 14px;
+}
+.device-printer-usable {
+  color: var(--status-online);
+  font-weight: 600;
+}
+.register-printers {
+  display: grid;
+  gap: 8px;
+}
+.register-printers legend {
+  font-size: 15px;
+  font-weight: 700;
+}

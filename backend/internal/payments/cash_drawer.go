@@ -377,9 +377,10 @@ func drawerProtocolUnsupported(name, transport string) error {
 	// Etapa 9G (fase E): la impresora de otra terminal sí abre el cajón cuando tiene su terminal elegida.
 	if transport == "agent" {
 		return &Error{
-			Status:  400,
-			Code:    "DRAWER_PROTOCOL_UNSUPPORTED",
-			Message: "La impresora " + name + " no tiene una terminal asignada. Elige en Cocina › Impresoras en qué terminal está conectada.",
+			Status: 400,
+			Code:   "DRAWER_PROTOCOL_UNSUPPORTED",
+			Message: "La impresora " + name + " no tiene una terminal asignada, así que no puede entregar el comando ESC/POS de apertura. " +
+				"Elige en Cocina › Impresoras en qué terminal está conectada.",
 		}
 	}
 	return &Error{
