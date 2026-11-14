@@ -251,8 +251,9 @@ detiene; la aplicación solo crea o quita el archivo de habilitación al cambiar
 Mantenimiento hace que launchd lo relance. Estado: Mantenimiento › «Servicio del servidor»; sin ventana:
 `launchctl print system/local.adel.pos.server` y `logs/server.log` (solo lectura).
 
-**Hasta que el propietario instale el `.pkg` y se pasen los datos, la instalación real de este Mac sigue siendo la de
-`.local` con `dev.sh`** (secciones anteriores). El paso es una parada con el propietario (ventana de la contraseña de
+**Desde el 14/11/2026 la instalación real es el servicio** (LaunchDaemon `local.adel.pos.server`, datos en `/Library/Application Support/AD-EL POS`, aplicación en `/Applications`): el propietario instaló el `.pkg` 0.10.0, los datos de `.local` se pasaron con `adopt-legacy` (142 tablas con conteos idénticos; después, 143 tablas y 950 filas idénticas en la base del servicio), el servicio corre con PostgreSQL de Homebrew en 55432 y Go en `127.0.0.1:8181` y en la red (8443, anunciado en la red local), y «Reiniciar» de Mantenimiento quedó verificado. `.local` queda detenido como copia histórica (no borrar). Pendiente: reiniciar la Mac para comprobar el arranque sin iniciar sesión.
+
+El paso fue una parada con el propietario (ventana de la contraseña de
 administrador, aviso «Elementos en segundo plano añadidos», posible diálogo del Llavero y reinicio) y sigue el
 procedimiento del avance (Fase A, «Procedimiento para la Fase G»):
 
@@ -270,11 +271,7 @@ procedimiento del avance (Fase A, «Procedimiento para la Fase G»):
 8. Verificar `health/ready` y `version`, Mantenimiento › «Servicio del servidor», cerrar la ventana (el servidor sigue),
    «Reiniciar» y reiniciar la Mac sin iniciar sesión.
 
-**Estado (14/11/2026)**: la 0023 y la 0.10.0 ya se aplicaron a la instalación de `.local` (respaldo
-`backups/adel_pos-20261114T060151Z-ec289c.dump`); instalar el `.pkg` y pasar los datos queda pendiente del propietario. Como la aplicación
-0.10.0 ya guardó su modalidad, para habilitar el servidor en el paso 7 se deja marcada «Servidor del restaurante» al
-volver a ejecutar el instalador después de pasar los datos, o se quita `connection.json` antes de abrir la aplicación
-instalada.
+**Estado (14/11/2026)**: hecho. Ajustes de la Fase G al procedimiento: PostgreSQL lanzado por launchd sin `LANG` ni `LC_*` se negaba a arrancar («postmaster became multithreaded during startup»): `standalone` le da `LC_ALL=C` (`1e8c544`, con prueba de regresión) y se reinstaló el `.pkg` con «Servidor del restaurante»; y como la aplicación 0.10.0 ya había guardado su modalidad, se apartó `connection.json` (`connection.json.antes-del-servicio`) para que la aplicación instalada volviera a preguntarla. Para actualizar el servicio en las etapas siguientes: `./scripts/dev.sh build-macos-pkg` e instalar el `.pkg` con «Servidor del restaurante» marcada (ventana de contraseña de administrador: parada con el propietario); el `host` respalda (`…-antes-de-migrar.dump`) y migra solo al arrancar. Comprobaciones de solo lectura: con la `admin-password` de la carpeta del servicio (superusuario `adel_admin`), nunca con `dev.sh`.
 
 **Después de pasar los datos** el servicio es la instalación real: **no usar** `dev.sh db-start`, `server-start`,
 `server`, `migrate`, `backup`, `restore-check.py`, `test-integration` ni `test-browser` con ella (actúan sobre la base
