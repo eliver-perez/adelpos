@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/product"
 )
 
@@ -12,8 +13,8 @@ import (
 // administrador (settings.manage):
 //
 //   - GET maintenance/service: si el servidor corre como servicio del sistema, su modalidad, desde cuándo
-//     está activo, las terminales conectadas (vistas en los últimos minutos) y el último respaldo (lo
-//     agrega la fase F).
+//     está activo, las terminales conectadas (vistas en los últimos minutos) y el último respaldo (fase F:
+//     si fue correcto y dónde está).
 //   - POST maintenance/service/restart: responde y después termina el servidor en orden (Go y
 //     PostgreSQL); launchd lo vuelve a lanzar porque el archivo de habilitación sigue existiendo. No pide
 //     la contraseña de administrador del sistema. Solo existe cuando el servidor es un servicio
@@ -60,9 +61,9 @@ type serviceStatusResponse struct {
 	UptimeSeconds    int64            `json:"uptime_seconds"`
 	ServerVersion    string           `json:"server_version"`
 	Terminals        serviceTerminals `json:"terminals"`
-	// LastBackup es el último respaldo automático: la fase F de la etapa 9G lo llena; hasta entonces es
-	// null y la pantalla lo dice sin inventar un dato.
-	LastBackup any `json:"last_backup"`
+	// LastBackup es el último respaldo que hizo el servidor (automático o «Respaldar ahora»; etapa 9G, fase F): si
+	// fue correcto y dónde está. null si todavía no hay ninguno.
+	LastBackup *backupschedule.RunView `json:"last_backup"`
 }
 
 func (service *Service) serviceRoutes(ctx context.Context, tx pgx.Tx, request Request, principal Principal, route string) (any, error) {
@@ -98,6 +99,10 @@ func (service *Service) serviceStatus(ctx context.Context, tx pgx.Tx, principal 
 	if err != nil {
 		return nil, err
 	}
+	lastBackup, err := backupschedule.LastBackup(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	return serviceStatusResponse{
 		Managed:          status.Managed,
 		RestartAvailable: status.Managed && status.ServiceEnabled,
@@ -107,7 +112,7 @@ func (service *Service) serviceStatus(ctx context.Context, tx pgx.Tx, principal 
 		UptimeSeconds:    int64(time.Since(status.StartedAt).Seconds()),
 		ServerVersion:    product.Read().Version,
 		Terminals:        terminals,
-		LastBackup:       nil,
+		LastBackup:       lastBackup,
 	}, nil
 }
 

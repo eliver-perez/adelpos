@@ -75,6 +75,8 @@ func TestStage9GAndroidUpgrade(t *testing.T) {
 	checkStage9GPermission(ctx, t, pool)
 	checkStage9GCatalogScope(ctx, t, pool)
 	checkStage9GCatalogVersion(ctx, t, pool)
+	// Fase F: respaldos programados (stage9g_backups_upgrade_test.go).
+	checkStage9GBackups(ctx, t, pool)
 }
 
 // Un catálogo con una presentación, la configuración de cobro, el administrador y un supervisor, una cuenta abierta
