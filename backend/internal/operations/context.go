@@ -21,6 +21,17 @@ type Error struct {
 	// Details acompaña al error con datos públicos que la terminal necesita para decidir (por
 	// ejemplo, las cuentas que otra terminal abrió en la mesa). Nunca lleva secretos.
 	Details any
+	// Rejection pide conservar en el Registro de movimientos la auditoría del rechazo aunque la operación se
+	// revierta (etapa 9G: el pedido capturado sin conexión que requiere confirmación). Nunca se publica.
+	Rejection *Rejection
+}
+
+// Rejection es la auditoría (success=false) de un rechazo que se conserva.
+type Rejection struct {
+	Action   string
+	Entity   string
+	EntityID *string
+	Details  any
 }
 
 func (problem *Error) Error() string {

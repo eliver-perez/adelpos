@@ -141,7 +141,10 @@ func (engine *calculator) product(id string, variantID *string, customization Cu
 		location,
 		override,
 	); reason != "" {
-		return nil, nil, unavailable(product.Name + ": " + reason)
+		if isSoldOutReason(reason) {
+			return nil, nil, soldOut(product.ID, product.Name+" está agotado. Elige otro producto.")
+		}
+		return nil, nil, unavailableProduct(product.ID, product.Name+": "+reason)
 	}
 	base, origin, err := effectivePrice(
 

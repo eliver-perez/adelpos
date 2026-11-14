@@ -91,7 +91,8 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err != nil {
 		return nil, err
 	}
-	if parts[0] != "accounts" {
+	// El pedido capturado sin conexión (etapa 9G) publica los eventos de su cuenta, como la confirmación.
+	if parts[0] != "accounts" && parts[0] != "offline-orders" {
 		if err := events.Append(ctx, tx, "restaurant."+parts[0]+".changed", "restaurant", nil, nil); err != nil {
 			return nil, err
 		}
@@ -100,6 +101,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 }
 
 func (handler *service) authorizeRoute(parts []string) error {
+	// Etapa 9G (§5.5): el pedido capturado sin conexión guarda y confirma en una sola operación, así que exige lo
+	// mismo que capturar y confirmar; abrir la cuenta de una mesa exige además accounts.open (offline_orders.go).
+	if parts[0] == "offline-orders" {
+		return handler.request.Actor.Require("accounts.read", "orders.capture", "catalog.read", "catalog.prices.read")
+	}
 	if parts[0] != "accounts" {
 		return nil
 	}
@@ -211,6 +217,11 @@ func routePermission(method string, parts []string) string {
 			}
 			if method == "POST" {
 				return "accounts.open"
+			}
+		// Etapa 9G (§5.5): pedido capturado sin conexión por la futura aplicación Android.
+		case "offline-orders":
+			if method == "POST" {
+				return "orders.confirm"
 			}
 		}
 	}
@@ -336,6 +347,8 @@ func (handler *service) dispatch(parts []string) (any, error) {
 		return handler.accounts(parts)
 	case "cancel-reasons":
 		return handler.cancelReasons(parts)
+	case "offline-orders":
+		return handler.offlineOrder()
 	}
 	return nil, invalid("Operación no implementada.")
 }

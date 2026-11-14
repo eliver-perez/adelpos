@@ -51,6 +51,11 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "terminal/preferences" && request.Method == "PUT" {
 		return terminalPreferences(ctx, tx, request, principal)
 	}
+	// Recuperación del estado al reconectar (etapa 9G, §5.6; recovery.go). Va antes del prefijo restaurant/ porque
+	// responde con la sesión aunque el usuario ya no pueda consultar cuentas.
+	if request.Method == "GET" && route == "restaurant/state" {
+		return recoveryState(ctx, tx, principal)
+	}
 	if strings.HasPrefix(route, "restaurant/") {
 		// Desde la etapa 9D la operación recibe el autorizador de supervisor, como los cobros, para
 		// «Cancelar cuenta» sin el permiso propio.
@@ -63,7 +68,7 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 		})
 		var problem *operations.Error
 		if errors.As(err, &problem) {
-			return nil, &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message, Details: problem.Details}
+			return nil, operationFault(problem)
 		}
 		var catalogProblem *catalog.Error
 		if errors.As(err, &catalogProblem) {
@@ -103,7 +108,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if strings.HasPrefix(route, "catalog/") {
 		result, err := catalog.Handle(ctx, tx, catalog.Request{
 			Method: request.Method, Route: route, Query: request.Query, Body: request.Body,
-			Actor: catalog.Actor{Permissions: principal.Permissions},
+			// Etapa 9G: «Agotado» guarda su clave de operación con el usuario y la terminal; la imagen binaria
+			// responde 304 con If-None-Match.
+			Actor:       catalog.Actor{Permissions: principal.Permissions, UserID: principal.UserID, DeviceID: principal.DeviceID},
+			IfNoneMatch: request.IfNoneMatch,
 		}, func(ctx context.Context, tx pgx.Tx, action, entity string, id *string, before, after any) error {
 			return audit(ctx, tx, principal, action, entity, id, before, after, true)
 		})
@@ -216,6 +224,22 @@ func handleDesigner(ctx context.Context, tx pgx.Tx, request Request, principal P
 		return nil, paymentFault(paymentProblem)
 	}
 	return result, err
+}
+
+// operationFault traduce un error de la operación del restaurante. Desde la etapa 9G un rechazo puede pedir su propia
+// auditoría (el pedido capturado sin conexión que requiere confirmación): se revierte la operación y se confirma
+// solo ese registro, como en los cobros.
+func operationFault(problem *operations.Error) *Fault {
+	fault := &Fault{Status: problem.Status, Code: problem.Code, Message: problem.Message, Details: problem.Details}
+	if problem.Rejection != nil {
+		fault.Rejection = &RejectionAudit{
+			Action:   problem.Rejection.Action,
+			Entity:   problem.Rejection.Entity,
+			EntityID: problem.Rejection.EntityID,
+			Details:  problem.Rejection.Details,
+		}
+	}
+	return fault
 }
 
 // paymentFault traduce un error financiero a su respuesta pública. Si el rechazo pide su propia

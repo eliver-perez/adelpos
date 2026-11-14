@@ -6,5 +6,7 @@
   "database_name": "adel_pos",
   "bundle_id": "local.adel.pos.dev",
   "api_version": "v1",
-  "schema_version": 22
+  "schema_version": 23,
+  "min_client_version": "0.9.5",
+  "min_server_version": "0.9.5"
 }

@@ -78,6 +78,7 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		SessionToken:      strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "),
 		ProvisioningToken: request.Header.Get("X-Provisioning-Token"),
 		Local:             local,
+		IfNoneMatch:       request.Header.Get("If-None-Match"),
 	})
 	if err == nil {
 		result, err = service.completeDeferred(ctx, result)
@@ -88,6 +89,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	// Un reporte exportado se envía como archivo binario, no como JSON.
 	if writeExport(writer, result) {
+		return
+	}
+	// La imagen del catálogo (etapa 9G) también: binaria, con su etiqueta de caché (binary.go).
+	if writeBinary(writer, result) {
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
