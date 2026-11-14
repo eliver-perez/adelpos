@@ -16,3 +16,11 @@ func requirePrivateKey(t *testing.T, filename string) {
 		t.Fatal("La clave privada no tiene permisos privados: " + err.Error())
 	}
 }
+
+// requirePrivateFolder comprueba en Windows la ACL privada de la carpeta de la identidad (etapa 9G).
+func requirePrivateFolder(t *testing.T, directory string) {
+	t.Helper()
+	if err := fileacl.RequirePrivate(directory); err != nil {
+		t.Fatal("La carpeta de la identidad no es privada: " + err.Error())
+	}
+}

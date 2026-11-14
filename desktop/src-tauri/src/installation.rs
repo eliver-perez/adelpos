@@ -194,6 +194,10 @@ pub struct InstallationState {
     pub service_enabled: bool,
     /// Sin servidor en esta modalidad, pero la carpeta conserva la base de cuando lo era.
     pub server_data_kept: bool,
+    /// Etapa 9G (fase B): terminal emparejada con la computadora principal y el nombre del restaurante
+    /// que informó el servidor al emparejarse.
+    pub paired: bool,
+    pub server_name: Option<String>,
 }
 
 pub fn state_of(context: &Context, config: &ConnectionConfig) -> InstallationState {
@@ -209,6 +213,8 @@ pub fn state_of(context: &Context, config: &ConnectionConfig) -> InstallationSta
         service_installed: installed,
         service_enabled: enabled,
         server_data_kept: !includes_server(&config.installation_mode) && has_data,
+        paired: config.paired(),
+        server_name: config.server_name.clone(),
     }
 }
 
@@ -221,13 +227,22 @@ pub fn connection_for(mode: &str, current: &ConnectionConfig) -> Result<Connecti
     if includes_server(mode) {
         next.server_url = LOCAL_SERVER_URL.to_string();
         next.ca_certificate = None;
+        clear_pairing(&mut next);
     } else if current.installation_mode != "terminal-only" {
         next.server_url = String::new();
         next.ca_certificate = None;
+        clear_pairing(&mut next);
     }
     // Se valida con las mismas reglas que al leer el archivo.
     let text = serde_json::to_string(&next).map_err(|_| "No se pudo preparar la conexión.")?;
     parse_config(&text)
+}
+
+/// Una computadora con servidor se conecta a sí misma: deja de usar el servidor emparejado (etapa 9G).
+fn clear_pairing(config: &mut ConnectionConfig) {
+    config.server_id = None;
+    config.server_fingerprint = None;
+    config.server_name = None;
 }
 
 /// Escribe el archivo de conexión (0600 en macOS, reemplazo atómico).
@@ -380,6 +395,26 @@ mod tests {
         assert_eq!(back.server_url, LOCAL_SERVER_URL);
     }
 
+    // Etapa 9G, fase B: al pasar a una modalidad con servidor se deja el servidor emparejado; seguir como
+    // terminal lo conserva.
+    #[test]
+    fn server_modes_forget_the_paired_server() {
+        let text = serde_json::json!({
+            "installation_mode": "terminal-only",
+            "server_url": "https://192.168.1.20:8443",
+            "server_id": "11111111-2222-4333-8444-555555555555",
+            "server_fingerprint": "ab".repeat(32),
+            "server_name": "Fonda",
+        })
+        .to_string();
+        let paired = parse_config(&text).unwrap();
+        let kept = connection_for("terminal-only", &paired).unwrap();
+        assert!(kept.paired());
+        let server = connection_for("server-terminal", &paired).unwrap();
+        assert!(!server.paired() && server.server_name.is_none());
+        assert_eq!(server.server_url, LOCAL_SERVER_URL);
+    }
+
     #[test]
     fn apply_writes_the_mode_and_the_enable_file_without_touching_data() {
         let root = temporary("apply");
@@ -451,6 +486,8 @@ mod tests {
                 service_installed: true,
                 service_enabled: false,
                 server_data_kept: true,
+                paired: false,
+                server_name: None,
             }
         );
         let server = change_mode(&context, &next, "server-terminal").unwrap();

@@ -19,10 +19,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/licensing"
+	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/product"
 	"local/ad-el-pos/server/internal/standalone"
 )
@@ -106,5 +108,8 @@ func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout,
 	}
 	logger.Info("host_ready", "duration_ms", time.Since(started).Milliseconds())
 	backups := installationBackup{layout: layout, database: cfg.Database}
-	return serveHTTP(ctx, logger, cfg, pool, newApplication(pool, layout.ConfigFile(), backups, logger), testMode)
+	// Etapa 9G, fase B: la identidad del servidor se crea en la carpeta de datos, pero en Windows todavía
+	// no hay escucha de red (servicio, modalidad y regla del firewall son de la Fase W).
+	network := networkOptions{IdentityDir: filepath.Join(layout.DataDir, localsetup.IdentityFolder)}
+	return serveHTTP(ctx, logger, cfg, pool, newApplication(pool, layout.ConfigFile(), backups, logger), testMode, network)
 }
