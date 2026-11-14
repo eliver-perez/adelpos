@@ -327,7 +327,14 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	} else {
 		close(discoveryDone)
 	}
-	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone; <-backupDone; <-discoveryDone }()
+	defer func() {
+		stopWorker()
+		<-workerDone
+		<-inventoryDone
+		<-soldOutDone
+		<-backupDone
+		<-discoveryDone
+	}()
 	stopped := make(chan error, 2)
 	go func() {
 		if cfg.TLSCertificate != "" {
