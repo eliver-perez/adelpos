@@ -1,4 +1,5 @@
 import { api } from './api';
+import type { BackupRun } from './backups';
 import { countLabel } from './plural';
 
 // Servicio del servidor (etapa 9G, fase A): estado y reinicio, en Mantenimiento y en la pantalla de
@@ -18,8 +19,8 @@ export interface ServiceStatus {
     connected: number;
     registered: number;
   };
-  // Último respaldo automático: la fase F lo llena; mientras tanto llega vacío.
-  last_backup: unknown;
+  // Último respaldo que hizo el servidor (automático o «Respaldar ahora»; fase F): si fue correcto y dónde está.
+  last_backup: BackupRun | null;
 }
 
 export function readServiceStatus() {

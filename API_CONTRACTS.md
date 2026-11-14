@@ -3287,7 +3287,8 @@ server_version, terminals: {connected, registered}, last_backup}`. `managed` ind
   `managed` y archivo de habilitación presente. `installation_mode` es la modalidad del lado del servidor
   (`installation-mode.json` de la carpeta de datos; sin archivo cuenta como `server-terminal`). `terminals` cuenta las
   terminales no revocadas **sin la que pregunta**: `registered` todas y `connected` las que hicieron alguna petición en
-  los últimos 2 minutos (`devices.last_seen_at`). `last_backup` es `null` hasta la fase F (respaldos programados).
+  los últimos 2 minutos (`devices.last_seen_at`). `last_backup` es el último respaldo del servidor (fase F, ver
+  «Etapa 9G · respaldos programados»; `null` si todavía no hay ninguno).
 - `POST …/restart` se autoriza y audita (`maintenance.service_restarted`, «Servidor reiniciado» en el Registro de
   movimientos) en la transacción de autenticación; ya confirmada, programa el cierre ordenado (Go y después PostgreSQL) a
   los 300 ms y responde `{restarting: true}`; launchd vuelve a lanzar el servidor porque el archivo de habilitación
@@ -3346,3 +3347,57 @@ Decisiones D8, D9 y D12 del coordinador. Contrato OpenAPI 3.1 de la API para cli
 Puente nativo (`desktop/src-tauri/src/api.rs`): operaciones nuevas `version` (`GET version`) y `catalog_product_sold_out`
 (`POST catalog/products/{id}/sold-out`, con identificador validado); Rust envía `X-Client-Version` (la versión de
 `Cargo.toml`) y `X-Client-Kind: desktop` en `api_request`, el canal de eventos y la exportación de reportes.
+
+## Etapa 9G · respaldos programados (fase F, esquema 23)
+
+Todas con `settings.manage` (Sistema › Mantenimiento). No son de la API de clientes (Android): no van en
+`internal/apicontract/openapi.json` ni en `docs/API_V1.md`. Tiempo de respuesta de `maintenance/*` (120 s).
+
+| Método | Ruta                                     | Cuerpo / requisito                                                                                            |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/backups`                   | Configuración, próximo respaldo, último respaldo, aviso y los últimos 20 respaldos.                           |
+| GET    | `/maintenance/backups/status`            | `{last_backup, alert, running}` (aviso de la pantalla de inicio y estado del sistema).                        |
+| PUT    | `/maintenance/backups/settings`          | `{enabled, time: "HH:MM" \| null, keep: 1–365}` (los tres obligatorios; `null` = la hora de inicio del día).  |
+| PUT    | `/maintenance/backups/directory`         | `{directory}`: solo desde una conexión local (`403 LOCAL_REQUIRED`); no está en la lista cerrada de `api.rs`. |
+| POST   | `/maintenance/backups/directory/default` | Cuerpo vacío o `{}`: vuelve a la carpeta predeterminada.                                                      |
+| POST   | `/maintenance/backups/run`               | `{operation_id}` (UUID): «Respaldar ahora», idempotente.                                                      |
+
+- **Estado** (`GET maintenance/backups`): `{settings: {enabled, time, effective_time, business_day_cutoff, keep,
+directory, default_directory}, next_run_at, pending, running, last_backup, last_success, alert, runs,
+directory_change_available}`. Una carpeta es `{custom, path, folder_name, volume_name, available}` (`available` solo
+  comprueba que exista; `path` es para «Información para soporte»). `next_run_at` es `null` con el respaldo automático
+  desactivado; `pending` dice que el respaldo del último instante programado todavía no se hace (se hará en minutos);
+  `directory_change_available` = la petición llega de la propia computadora.
+- **Respaldo** (`RunView`, también `last_backup` de `GET maintenance/service`): `{id, kind: automatic|manual, status:
+running|succeeded|failed, started_at, finished_at, file_name, size_bytes, location: default|custom|"", folder_name,
+volume_name, directory, used_default_directory, fallback_reason: ""|missing|not_directory|not_writable, verified,
+failure_reason: ""|directory_unavailable|dump_failed|verify_failed|interrupted, removed, available?}`. Correcto implica
+  verificado (`pg_restore --list` con los datos de `public.schema_migrations`).
+- **Aviso** (`alert`): `{kind: failed|fallback, reason, since, failures}` o `null`. `failed`: el último respaldo terminado
+  falló (desde `since`, `failures` intentos); `fallback`: el último fue correcto pero en la predeterminada porque la
+  carpeta elegida (la misma que sigue configurada) no estaba disponible. Desaparece con un respaldo correcto posterior.
+- **Configuración**: `400 VALIDATION_ERROR` con un campo que falta, una hora fuera de `HH:MM` (también `""`) o fuera de
+  1–365; un guardado sin cambios no se audita. Auditoría `maintenance.backup_settings_changed` (antes y después).
+- **Carpeta**: Go valida ruta absoluta sin caracteres de control (≤ 1024), existente, carpeta, con permiso de escritura
+  (crea y borra un archivo de prueba) y que no sea una carpeta de datos de PostgreSQL (`PG_VERSION`):
+  `400 BACKUP_DIRECTORY_INVALID` con el motivo en palabras del restaurante. Nunca crea la carpeta. Elegir la
+  predeterminada equivale a volver a ella. Auditoría `maintenance.backup_directory_changed` (`{directory}` antes y
+  después, `null` = predeterminada).
+- **«Respaldar ahora»**: la autenticación busca la clave (`backup_runs.operation_id`); repetida por el mismo usuario y
+  terminal devuelve `{run}` sin respaldar otra vez; de otro usuario o terminal, `409 IDEMPOTENCY_CONFLICT`. Si no existe,
+  después de confirmar la autenticación toma el lock 7820148309 (`pg_try_advisory_lock`; ocupado → `409
+BACKUP_IN_PROGRESS`), registra la ejecución y respalda en segundo plano por el mismo camino del automático; la
+  respuesta espera el resultado hasta 5 s antes del plazo de la petición y si no, devuelve la ejecución `running`. Se
+  audita al terminar (`maintenance.backup_created`, `success` según el resultado, entidad `backup` con el id de la
+  ejecución). Sin el respaldo de la instalación configurado: `503 BACKUPS_UNAVAILABLE`.
+
+### Puente nativo
+
+- Operaciones nuevas en `desktop/src-tauri/src/api.rs`: `maintenance_backups`, `maintenance_backups_status`,
+  `maintenance_save_backup_settings`, `maintenance_backup_default_directory` y `maintenance_backup_now` (tiempo de
+  espera de 130 s, como «Quitar datos de prueba»).
+- Comando Tauri nuevo `choose_backup_directory` (`src-tauri/src/backup_folder.rs`, simulado en `e2e/native-driver.ts`):
+  sin argumentos; solo con el servidor local (`127.0.0.1`, `localhost` o `::1`), abre el diálogo nativo de carpeta
+  (`tauri-plugin-dialog` desde Rust; la ventana sigue sin permisos `dialog:*`) y envía la carpeta elegida a `PUT
+maintenance/backups/directory`. Responde `{status: 200, body: {result: "cancelled"}}`, `{status: 200, body: {result:
+"saved", state}}` o el rechazo de Go como `api_request`.

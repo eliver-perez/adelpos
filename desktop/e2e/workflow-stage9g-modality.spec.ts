@@ -75,7 +75,10 @@ test('modalidad de la computadora: primer arranque, Mantenimiento, «Solo servid
   await expect(
     page.getByText(/terminales? conectadas? de|Todavía no hay otras terminales/),
   ).toBeVisible();
-  await expect(page.getByText('Sin registro')).toBeVisible();
+  // Etapa 9G (fase F): el último respaldo lo informa el servidor; puede haber ya respaldos (de
+  // workflow-stage9g-backups o del respaldo automático diario del servidor temporal).
+  await expect(page.getByText('Último respaldo', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^(Sin registro|Correcto|Falló|En curso)$/)).toBeVisible();
 
   // Antes de iniciar sesión, «Solo servidor» muestra el estado y el acceso a Administración.
   await page.getByRole('button', { name: /^Menú del usuario/ }).click();

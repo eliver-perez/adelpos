@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import type { Page } from '@playwright/test';
 
 // Servidor Go temporal de la aceptación. Por omisión el puerto 8183; ADEL_BROWSER_SERVER_URL permite
@@ -232,6 +233,34 @@ export async function installDriver(page: Page) {
   }
   function nextSaveDialog(choice: 'save' | 'cancel') {
     saveDialogChoices.push(choice);
+  }
+  // Etapa 9G (fase F): carpeta de los respaldos. Simula la operación cerrada choose_backup_directory de
+  // src-tauri/src/backup_folder.rs: solo con el servidor de la propia computadora; la prueba decide qué devuelve el
+  // diálogo nativo de carpeta (nextBackupFolder con una ruta absoluta o «cancel»; sin respuesta, se cancela) y el
+  // puente envía a Go esa ruta con PUT maintenance/backups/directory, que no está en la lista cerrada de api.rs: el
+  // navegador nunca envía una ruta.
+  const backupFolderChoices: string[] = [];
+  async function chooseBackupDirectory() {
+    if (!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(serverURL)) {
+      throw new Error(
+        'La carpeta de los respaldos solo se puede elegir en la computadora principal.',
+      );
+    }
+    const choice = backupFolderChoices.shift() ?? 'cancel';
+    if (choice === 'cancel') {
+      return { status: 200, body: { result: 'cancelled' } };
+    }
+    if (!isAbsolute(choice)) {
+      throw new Error('Elige una carpeta de esta computadora.');
+    }
+    const response = await request('PUT', 'maintenance/backups/directory', { directory: choice });
+    if (response.status !== 200) {
+      return response;
+    }
+    return { status: 200, body: { result: 'saved', state: response.body } };
+  }
+  function nextBackupFolder(choice: string) {
+    backupFolderChoices.push(choice);
   }
   async function request(method: string, route: string, body?: unknown) {
     const response = await fetch(`${serverURL}/api/v1/${route}`, {
@@ -517,6 +546,13 @@ export async function installDriver(page: Page) {
           return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
         }
       }
+      if (command === 'choose_backup_directory') {
+        try {
+          return await chooseBackupDirectory();
+        } catch (error) {
+          return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
+        }
+      }
       if (command !== 'api_request') throw new Error('Comando de prueba no autorizado');
       const operation = String(args.operation);
       const entry = routes.get(operation);
@@ -590,6 +626,7 @@ export async function installDriver(page: Page) {
   return {
     request,
     nextSaveDialog,
+    nextBackupFolder,
     exports,
     clickMenu,
     menuState,
