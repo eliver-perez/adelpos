@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/lanlistener"
 	"local/ad-el-pos/server/internal/product"
 )
 
@@ -93,6 +94,51 @@ func TestClientVersionCheck(t *testing.T) {
 	kinds, _ := version["client_kinds"].([]any)
 	if len(kinds) != 2 {
 		t.Fatalf("tipos de cliente: %v", version["client_kinds"])
+	}
+}
+
+// Etapa 9G, fase C: por la escucha de red la versión del cliente es obligatoria (426 sin ella); las rutas técnicas
+// siguen respondiendo y por la escucha local nada cambia.
+func TestClientVersionIsRequiredOverTheNetwork(t *testing.T) {
+	h := handler(database.Health{Postgres: "available", Schema: "compatible"})
+	metadata := product.Read()
+	request := func(route string, network bool, headers map[string]string) (int, map[string]any) {
+		r := httptest.NewRequest("GET", route, nil)
+		if network {
+			r = r.WithContext(lanlistener.WithNetwork(r.Context()))
+		}
+		for key, value := range headers {
+			r.Header.Set(key, value)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+	for _, route := range []string{"/api/v1/catalog/sync", "/api/v1/pairing/requests", "/api/v1/events"} {
+		status, body := request(route, true, map[string]string{ClientKindHeader: "android"})
+		if status != 426 {
+			t.Fatalf("%s sin versión por la red: %d %v", route, status, body)
+		}
+		problem := body["error"].(map[string]any)
+		details := problem["details"].(map[string]any)
+		if problem["code"] != "CLIENT_UPDATE_REQUIRED" || details["min_client_version"] != metadata.MinClientVersion {
+			t.Fatalf("rechazo sin versión: %v", body)
+		}
+		// Por la escucha local sin cabecera se sigue aceptando (aquí, sin aplicación: 404, o 501 sin eventos).
+		if status, _ := request(route, false, nil); status == 426 || status == 400 {
+			t.Fatalf("%s sin versión por la escucha local: %d", route, status)
+		}
+	}
+	current := map[string]string{ClientVersionHeader: metadata.Version, ClientKindHeader: "desktop"}
+	if status, _ := request("/api/v1/catalog/sync", true, current); status != 404 {
+		t.Fatalf("cliente vigente por la red: %d", status)
+	}
+	for _, route := range []string{"/api/v1/version", "/api/v1/health/live", "/api/v1/health/ready", "/api/v1/openapi.json"} {
+		if status, _ := request(route, true, nil); status != 200 {
+			t.Fatalf("%s por la red sin versión: %d", route, status)
+		}
 	}
 }
 

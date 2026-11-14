@@ -22,6 +22,7 @@ import (
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/discovery"
 	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/identity"
 	"local/ad-el-pos/server/internal/inventory"
@@ -182,6 +183,24 @@ func loadIdentity(logger *slog.Logger, application *administration.Service, dire
 	return loaded, nil
 }
 
+// discoverySource calcula el anuncio del servidor en la red local (etapa 9G, fase C): «establecimiento —
+// computadora», el puerto de la escucha HTTPS y el TXT con el server_id y la huella corta.
+func discoverySource(application *administration.Service, serverIdentity localsetup.ServerIdentity, port int) discovery.Source {
+	return func(ctx context.Context) (discovery.Announcement, error) {
+		queryContext, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		name, err := application.EstablishmentName(queryContext)
+		if err != nil {
+			return discovery.Announcement{}, errors.New("no se pudo leer el nombre del establecimiento")
+		}
+		return discovery.Announcement{
+			Instance: discovery.InstanceName(name, discovery.ComputerName(ctx)),
+			Port:     port,
+			TXT:      discovery.TXTRecords(serverIdentity.ServerID, serverIdentity.Fingerprint, port),
+		}, nil
+	}
+}
+
 // newApplication arma el servicio de administración que comparten serve y el modo host de Windows. El
 // token de aprovisionamiento vive junto al archivo de configuración.
 func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.Backuper, logger *slog.Logger) *administration.Service {
@@ -292,7 +311,23 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 			(&backupschedule.Worker{Runner: application.ScheduledBackups}).Run(workerContext)
 		}
 	}()
-	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone; <-backupDone }()
+	// Etapa 9G, fase C (§4.1): anuncio en la red local (mDNS/DNS-SD) mientras la escucha de red está activa;
+	// nunca en el modo de pruebas (la prueba del anuncio vive en internal/discovery, acotada). Se retira al
+	// apagar el servidor.
+	discoveryDone := make(chan struct{})
+	if networkServer != nil && !testMode {
+		announcer := &discovery.Announcer{
+			Source: discoverySource(application, serverIdentity, application.NetworkPort),
+			Logger: logger,
+		}
+		go func() {
+			defer close(discoveryDone)
+			announcer.Run(workerContext)
+		}()
+	} else {
+		close(discoveryDone)
+	}
+	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone; <-backupDone; <-discoveryDone }()
 	stopped := make(chan error, 2)
 	go func() {
 		if cfg.TLSCertificate != "" {

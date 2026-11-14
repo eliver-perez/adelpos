@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -31,6 +32,7 @@ import (
 	"local/ad-el-pos/server/internal/apicontract"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/product"
 )
 
@@ -52,6 +54,8 @@ type contractClient struct {
 	session  string
 	version  string
 	covered  map[string][]int
+	// fingerprint es la huella SPKI del certificado del servidor (etapa 9G, fase C: emparejamiento).
+	fingerprint [32]byte
 }
 
 func contractID() string {
@@ -187,6 +191,12 @@ func TestContractV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := &administration.Service{Pool: pool, ProvisioningFile: filename}
+	// Identidad del servidor para el emparejamiento (etapa 9G, fase C: rutas pairing/* del contrato).
+	serverIdentity, err := localsetup.EnsureIdentity(filepath.Join(t.TempDir(), localsetup.IdentityFolder))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.Identity = &administration.ServerIdentity{ServerID: serverIdentity.ServerID, Fingerprint: serverIdentity.Fingerprint}
 	handler := httpapi.New(func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)
@@ -194,7 +204,8 @@ func TestContractV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, covered: map[string][]int{}}
+	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, covered: map[string][]int{},
+		fingerprint: serverIdentity.Fingerprint}
 	// Asistente inicial: la terminal principal y el administrador.
 	setup := httptest.NewRequest("POST", "/api/v1/setup", strings.NewReader(`{"name":"Contrato v1","timezone":"America/Monterrey",
         "currency":"MXN","theme":"light","terminal_name":"Terminal de contrato"}`))
@@ -353,5 +364,54 @@ func contractScenario(t *testing.T, client *contractClient) {
 	if accounts, _ := state["accounts"].([]any); len(accounts) < 2 {
 		t.Fatalf("el estado no trae las cuentas abiertas: %v", state["accounts"])
 	}
+	contractPairing(t, client)
 	client.call("POST", "/auth/logout", nil, nil, 200)
+}
+
+// contractPairing es el emparejamiento de un teléfono Android (etapa 9G, fases B y C): pide el código con el
+// compromiso de su número, lo revela, cambia su nombre, espera la aprobación (que se hace en la computadora
+// principal, fuera del contrato) y reclama su credencial una sola vez; otra solicitud se cancela.
+func contractPairing(t *testing.T, client *contractClient) {
+	nonce := make([]byte, 32)
+	_, _ = rand.Read(nonce)
+	created := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
+		"name": "Mesero contrato", "device_kind": "android", "os": "Android 15", "app_version": client.version,
+		"commitment": administration.PairingCommitment(nonce),
+	}, nil, 200).Body.Bytes())
+	requestID := created["request_id"]
+	secret := map[string]string{"X-Pairing-Secret": created["pairing_secret"]}
+	client.call("POST", "/pairing/requests/"+requestID+"/reveal", map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret, 200)
+	client.call("POST", "/pairing/requests/"+requestID+"/name", map[string]string{"name": "Mesero Ana contrato"}, secret, 200)
+	state := decodeContract[map[string]string](t, client.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes())
+	if state["state"] != "pending" || state["name"] != "Mesero Ana contrato" {
+		t.Fatalf("solicitud pendiente: %v", state)
+	}
+	// El teléfono deriva el código con la huella que vio en el intercambio TLS; el administrador lo escribe.
+	serverNonce, err := hex.DecodeString(created["server_nonce"])
+	if err != nil || len(serverNonce) != 32 {
+		t.Fatalf("número del servidor: %q", created["server_nonce"])
+	}
+	code, err := administration.PairingCode(client.fingerprint, nonce, serverNonce, requestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.setup("POST", "/devices/pairing-requests/"+requestID+"/approve", map[string]string{"code": code}, 200)
+	if approved := decodeContract[map[string]string](t, client.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes()); approved["state"] != "approved" {
+		t.Fatalf("solicitud aprobada: %v", approved)
+	}
+	claimed := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret, 200).Body.Bytes())
+	if claimed["name"] != "Mesero Ana contrato" || claimed["server_id"] != created["server_id"] {
+		t.Fatalf("credencial reclamada: %v", claimed)
+	}
+	again := httptest.NewRecorder()
+	client.handler.ServeHTTP(again, client.request(context.Background(), "POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret))
+	if again.Code != 409 || strings.Contains(again.Body.String(), "device_token") {
+		t.Fatalf("la credencial se entrega una sola vez: %d %s", again.Code, again.Body.String())
+	}
+	other := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
+		"name": "Mesero que se arrepiente", "device_kind": "android", "os": "Android 15", "app_version": client.version,
+		"commitment": administration.PairingCommitment(serverNonce),
+	}, nil, 200).Body.Bytes())
+	client.call("POST", "/pairing/requests/"+other["request_id"]+"/cancel", map[string]any{},
+		map[string]string{"X-Pairing-Secret": other["pairing_secret"]}, 200)
 }

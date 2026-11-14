@@ -7,6 +7,7 @@ import {
   pairingState,
   renamePairingRequest,
   requestPairingCode,
+  serverIdentifier,
   validPairingAddress,
 } from './pairing';
 import type { PairingSession } from './pairing';
@@ -104,7 +105,13 @@ export async function requireTestServer() {
   }
 }
 
-export async function installDriver(page: Page) {
+// Etapa 9G, fase C (§4.3): una segunda terminal en otro contexto del navegador usa su propia credencial de
+// dispositivo (enrolada por la prueba) en lugar de la terminal que configuró la base.
+export interface DriverOptions {
+  terminal?: { deviceID: string; deviceToken: string };
+}
+
+export async function installDriver(page: Page, options: DriverOptions = {}) {
   await requireTestServer();
   let fullscreen = true;
   const menuActions = readMenuActions();
@@ -145,6 +152,30 @@ export async function installDriver(page: Page) {
   // sustituye a la del puente (como el almacén seguro con la llave del servidor emparejado) y la
   // terminal queda emparejada.
   let pairingSession: PairingSession | null = null;
+  // Etapa 9G (fase C): búsqueda en la red simulada (discovery_search y pairing_start_found de discovery.rs y
+  // pairing.rs). «server» encuentra el servidor temporal con su identificador real; «none», nada; «blocked», la
+  // red no permite buscar. La lista conserva las «direcciones» del lado del puente, como Rust.
+  let discoveryMode: 'server' | 'none' | 'blocked' = 'server';
+  let discovered: { id: string; name: string; paired: boolean }[] = [];
+  function simulateDiscovery() {
+    if (discoveryMode === 'blocked') {
+      return {
+        __bridgeRejection:
+          'No se pudo buscar en la red local. Revisa que esta computadora esté conectada a la red del restaurante y que AD-EL POS tenga permiso de usar la red local; también puedes escribir la dirección.',
+      };
+    }
+    discovered =
+      discoveryMode === 'server'
+        ? [
+            {
+              id: serverIdentifier(),
+              name: 'Aceptación temporal — Computadora de pruebas',
+              paired: installation.paired,
+            },
+          ]
+        : [];
+    return discovered;
+  }
   function pairingView(session: PairingSession, state: string) {
     return {
       state,
@@ -155,12 +186,17 @@ export async function installDriver(page: Page) {
     };
   }
   async function simulatePairing(command: string, args: Record<string, unknown>) {
-    if (command === 'pairing_start') {
+    if (command === 'pairing_start' || command === 'pairing_start_found') {
       if (installation.mode !== 'terminal-only' || installation.paired) {
         return { __bridgeRejection: 'Esta terminal ya está emparejada con un servidor.' };
       }
       const name = String(args.name ?? '').trim();
-      if (!validPairingAddress(String(args.address ?? ''))) {
+      // Elegida de la búsqueda: solo un identificador de la última lista (React nunca manda una dirección).
+      if (command === 'pairing_start_found') {
+        if (!discovered.some((server) => server.id === String(args.serverId ?? ''))) {
+          return { __bridgeRejection: 'Esa computadora ya no aparece en la red. Vuelve a buscar.' };
+        }
+      } else if (!validPairingAddress(String(args.address ?? ''))) {
         return {
           __bridgeRejection:
             'La dirección debe ser de la red local del restaurante (por ejemplo 192.168.1.20 o caja.local).',
@@ -395,8 +431,13 @@ export async function installDriver(page: Page) {
     return { status: response.status, body: result };
   }
   const setup = await request('GET', 'setup/status');
-  const prepared = setup.body.configured ? preparedTerminals.get(provisioning) : undefined;
+  const prepared = setup.body.configured
+    ? (options.terminal ?? preparedTerminals.get(provisioning))
+    : undefined;
   if (!setup.body.configured) {
+    if (options.terminal) {
+      throw new Error('La segunda terminal necesita una base ya configurada');
+    }
     await request('POST', 'setup', {
       name: 'Aceptación temporal',
       timezone: 'America/Monterrey',
@@ -624,6 +665,7 @@ export async function installDriver(page: Page) {
         if (
           ![
             'pairing_start',
+            'pairing_start_found',
             'pairing_status',
             'pairing_rename',
             'pairing_cancel',
@@ -634,6 +676,7 @@ export async function installDriver(page: Page) {
         }
         return simulatePairing(command, args);
       }
+      if (command === 'discovery_search') return simulateDiscovery();
       if (command === 'installation_state') return installationState();
       if (command === 'set_installation_mode') {
         const mode = String(args.mode) as InstallationMode;
@@ -744,6 +787,10 @@ export async function installDriver(page: Page) {
   function setInstallation(next: { chosen?: boolean; mode?: InstallationMode; paired?: boolean }) {
     Object.assign(installation, next);
   }
+  // Etapa 9G (fase C): qué encuentra la búsqueda simulada en la red.
+  function setDiscovery(mode: 'server' | 'none' | 'blocked') {
+    discoveryMode = mode;
+  }
   return {
     request,
     nextSaveDialog,
@@ -754,5 +801,6 @@ export async function installDriver(page: Page) {
     menuPrecheck,
     menuActions,
     setInstallation,
+    setDiscovery,
   };
 }

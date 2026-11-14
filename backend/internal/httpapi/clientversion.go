@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"local/ad-el-pos/server/internal/lanlistener"
 )
 
 // Compatibilidad de clientes (etapa 9G, §5.1). Cada cliente de la API v1 (la aplicación de escritorio y, en su
@@ -13,9 +15,17 @@ import (
 // mensaje claro en lugar de errores raros; el cliente, a su vez, compara la versión del servidor que informa
 // /api/v1/version con la mínima que necesita (product.json, min_server_version) y avisa si el servidor es más viejo.
 //
-// Una petición sin X-Client-Version se acepta como «cliente sin identificar»: herramientas de diagnóstico (curl),
-// las pruebas automáticas y las aplicaciones anteriores a la 9G, que solo existen en la propia computadora
-// principal y se actualizan junto con el servidor. Toda aplicación desde la 9G envía siempre las dos cabeceras.
+// Por la escucha local (127.0.0.1) una petición sin X-Client-Version se acepta como «cliente sin identificar»:
+// herramientas de diagnóstico (curl), las pruebas automáticas y las aplicaciones anteriores a la 9G, que solo
+// existen en la propia computadora principal y se actualizan junto con el servidor. Toda aplicación desde la 9G
+// envía siempre las dos cabeceras.
+//
+// Etapa 9G, fase C (decisión que la fase D dejó abierta): **por la escucha de red la versión es obligatoria**.
+// Todo cliente que llega por la red es de la 9G o posterior (antes no había forma de conectarse por la red: el
+// emparejamiento es de la 9G) y la envía; exigirla ahí asegura que ninguna terminal ni la aplicación Android se
+// salte la comprobación de la versión mínima con solo omitir la cabecera, sin cambiar nada para la ventana de
+// la propia computadora ni para las herramientas locales. Sin ella la respuesta es la misma que a un cliente
+// viejo: 426 «Actualiza esta terminal». Las rutas técnicas (salud, versión y contrato) siguen sin pedirla.
 const (
 	ClientVersionHeader = "X-Client-Version"
 	ClientKindHeader    = "X-Client-Kind"
@@ -121,6 +131,18 @@ func checkClient(request *http.Request, minimum, serverVersion string) *clientPr
 	}
 	text := request.Header.Get(ClientVersionHeader)
 	if text == "" {
+		if lanlistener.FromNetwork(request) {
+			return &clientProblem{
+				status: 426,
+				code:   "CLIENT_UPDATE_REQUIRED",
+				message: "Actualiza esta terminal: el servidor del restaurante necesita una versión más reciente de " +
+					"AD-EL POS en este equipo.",
+				details: map[string]any{
+					"min_client_version": minimum,
+					"server_version":     serverVersion,
+				},
+			}
+		}
 		return nil
 	}
 	comparison, valid := CompareVersions(text, minimum)

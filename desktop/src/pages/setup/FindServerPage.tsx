@@ -19,6 +19,8 @@ import {
   startPairing,
 } from '../../services/pairing';
 import type { PairingView } from '../../services/pairing';
+import { discoverServers, discoveryError, startPairingFound } from '../../services/discovery';
+import type { DiscoveredServer } from '../../services/discovery';
 import { AccessFrame } from '../AccessPages';
 
 // «Buscar el servidor» de una terminal «Solo terminal» que todavía no se conecta a ninguno (etapa 9G,
@@ -30,8 +32,10 @@ import { AccessFrame } from '../AccessPages';
 // Administración › Sistema › Terminales. Aprobada, Rust guarda la credencial y el servidor emparejado y la
 // aplicación se reinicia con el acceso normal.
 //
-// PUNTO DE INTEGRACIÓN DE LA FASE C: la lista de servidores encontrados en la red (descubrimiento mDNS)
-// va arriba de la dirección escrita a mano y entra a la misma pantalla del código (startPairing).
+// Fase C (§4.1, D2): arriba, las computadoras principales encontradas en la red (búsqueda mDNS de Rust al abrir
+// la pantalla y con «Buscar otra vez»); se elige una y sigue el mismo código. React solo manda el identificador
+// del servidor elegido: la dirección la conserva Rust. La dirección escrita a mano sigue abajo para las redes
+// que bloquean la búsqueda.
 
 // Cada cuánto se consulta si la computadora principal ya aprobó el código.
 export const pairingPollMilliseconds = 2000;
@@ -233,9 +237,32 @@ export function FindServerPage({ state }: { state: InstallationState }) {
   const [address, setAddress] = useState('');
   const [name, setName] = useState(defaultTerminalName);
   const [pairing, setPairing] = useState<PairingView | null>(null);
+  const [servers, setServers] = useState<DiscoveredServer[]>([]);
+  const [searching, setSearching] = useState(true);
+  const [searchError, setSearchError] = useState('');
   const { confirm, dialog } = useConfirmDialog();
   // Estable entre renders: el aviso «Terminal emparejada» espera su plazo antes de reiniciar.
   const restart = useCallback(() => void restartApplication(), []);
+
+  // Búsqueda en la red local (Rust); al abrir la pantalla y al volver de un código cancelado o vencido.
+  const search = useCallback(async () => {
+    setSearching(true);
+    setSearchError('');
+    try {
+      setServers(await discoverServers());
+    } catch (problem) {
+      setServers([]);
+      setSearchError(discoveryError(problem));
+    } finally {
+      setSearching(false);
+    }
+  }, []);
+  const showingCode = pairing !== null;
+  useEffect(() => {
+    if (!showingCode) {
+      void search();
+    }
+  }, [showingCode, search]);
 
   async function useAsServer() {
     const confirmed = await confirm({
@@ -266,6 +293,18 @@ export function FindServerPage({ state }: { state: InstallationState }) {
     }
   }
 
+  async function requestFoundCode(server: DiscoveredServer) {
+    setSaving(true);
+    setError('');
+    try {
+      setPairing(await startPairingFound(server.id, name));
+    } catch (problem) {
+      setError(pairingError(problem));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function requestCode() {
     setSaving(true);
     setError('');
@@ -290,28 +329,7 @@ export function FindServerPage({ state }: { state: InstallationState }) {
           <p className="find-server-status" role="status">
             Esta terminal todavía no está conectada al servidor del restaurante.
           </p>
-          <p className="muted find-server-help">
-            Escribe la dirección de la computadora principal. La encuentras en esa computadora, en
-            Administración › Sistema › Terminales.
-          </p>
-          <form
-            className="find-server-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void requestCode();
-            }}
-          >
-            <Field label="Dirección de la computadora principal">
-              <input
-                required
-                autoComplete="off"
-                spellCheck={false}
-                placeholder="Por ejemplo 192.168.1.20"
-                maxLength={270}
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-              />
-            </Field>
+          <div className="find-server-form">
             <Field label="Nombre de esta terminal">
               <input
                 required
@@ -320,16 +338,88 @@ export function FindServerPage({ state }: { state: InstallationState }) {
                 onChange={(event) => setName(event.target.value)}
               />
             </Field>
-            <div className="button-row">
+          </div>
+          <section className="find-server-section" aria-labelledby="find-server-found-title">
+            <div className="find-server-section-header">
+              <h2 id="find-server-found-title">Computadoras principales en la red</h2>
               <button
-                type="submit"
-                className="primary-button"
-                disabled={saving || address.trim() === '' || name.trim() === ''}
+                type="button"
+                className="secondary-button"
+                disabled={searching || saving}
+                onClick={() => void search()}
               >
-                Pedir código
+                <IconLabel icon="refresh">Buscar otra vez</IconLabel>
               </button>
             </div>
-          </form>
+            {searching && (
+              <p className="muted find-server-searching" aria-live="polite">
+                Buscando la computadora principal en la red…
+              </p>
+            )}
+            {!searching && servers.length === 0 && !searchError && (
+              <p className="muted find-server-help">
+                No se encontró ninguna computadora principal en la red. Revisa que esté encendida y
+                conectada a la misma red, o escribe su dirección abajo.
+              </p>
+            )}
+            <Notice>{searchError}</Notice>
+            {servers.length > 0 && (
+              <ul className="find-server-list" aria-label="Computadoras encontradas">
+                {servers.map((server) => (
+                  <li key={server.id}>
+                    <button
+                      type="button"
+                      className="find-server-option"
+                      aria-label={`Pedir código a ${server.name}`}
+                      disabled={saving || name.trim() === ''}
+                      onClick={() => void requestFoundCode(server)}
+                    >
+                      <strong>{server.name}</strong>
+                      <span className="find-server-option-action">
+                        {server.paired ? 'Ya emparejada · Pedir código' : 'Pedir código'}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section className="find-server-section" aria-labelledby="find-server-address-title">
+            <h2 id="find-server-address-title">Escribir la dirección</h2>
+            <p className="muted find-server-help">
+              Si la red del restaurante no permite encontrarla, escribe la dirección de la
+              computadora principal. La encuentras en esa computadora, en Administración › Sistema ›
+              Terminales.
+            </p>
+            <form
+              className="find-server-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void requestCode();
+              }}
+            >
+              <Field label="Dirección de la computadora principal">
+                <input
+                  required
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="Por ejemplo 192.168.1.20"
+                  maxLength={270}
+                  value={address}
+                  onChange={(event) => setAddress(event.target.value)}
+                />
+              </Field>
+              <div className="button-row">
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={saving || address.trim() === '' || name.trim() === ''}
+                >
+                  Pedir código
+                </button>
+              </div>
+            </form>
+          </section>
           {state.server_data_kept && (
             <p className="muted find-server-help" role="note">
               Esta computadora fue el servidor del restaurante: sus datos se conservan y no se borró

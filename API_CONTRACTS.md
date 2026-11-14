@@ -3472,3 +3472,55 @@ BACKUP_IN_PROGRESS`), registra la ejecución y respalda en segundo plano por el 
   (`tauri-plugin-dialog` desde Rust; la ventana sigue sin permisos `dialog:*`) y envía la carpeta elegida a `PUT
 maintenance/backups/directory`. Responde `{status: 200, body: {result: "cancelled"}}`, `{status: 200, body: {result:
 "saved", state}}` o el rechazo de Go como `api_request`.
+
+## Etapa 9G · descubrimiento y comportamiento en red (fase C)
+
+Sin migración ni rutas HTTP nuevas. Guía para clientes: [docs/API_V1.md](docs/API_V1.md), «Encontrar el servidor y
+emparejarse»; el contrato OpenAPI documenta ahora las seis rutas `pairing/*` de la terminal que se empareja.
+
+### Anuncio en la red local (mDNS/DNS-SD, no HTTP)
+
+- Servicio `_adelpos._tcp`, dominio `local`, solo mientras la escucha HTTPS de red está activa (modalidad con
+  servidor) y nunca en el modo de pruebas. Lo publica el respondedor mDNS **del sistema** (macOS: Bonjour con
+  `/usr/bin/dns-sd -R` como proceso hijo; Windows, Fase W: `DnsServiceRegister` de dnsapi.dll); el servidor no abre
+  ningún socket en el puerto 5353 (`internal/discovery`).
+- Instancia: «establecimiento — computadora» (hasta 63 bytes UTF-8, sin partir caracteres; los puntos se quitan).
+  SRV con el puerto de la escucha HTTPS. TXT: `txtvers=1`, `server_id` (UUID), `api=v1`, `port`, `fp` (primeros 8
+  bytes de la huella SPKI en hexadecimal). El anuncio solo da la dirección: la confianza sigue siendo la huella
+  completa en el intercambio TLS.
+- Se vuelve a publicar si cambia el nombre del establecimiento (revisión cada minuto) o si el proceso del sistema
+  termina (espera creciente de 5 s a 1 min); se retira al apagar el servidor (despedida mDNS). Bitácora:
+  `discovery_started`, `discovery_registered`, `discovery_withdrawn`, `discovery_unavailable` (sistema sin
+  implementación) y `discovery_failed`.
+
+### Versión del cliente por la escucha de red
+
+- Por la escucha HTTPS de red, toda ruta de la aplicación (también `pairing/*` y `events`) exige
+  `X-Client-Version`: sin ella responde `426 CLIENT_UPDATE_REQUIRED` («Actualiza esta terminal…», con
+  `details.min_client_version` y `details.server_version`). `version`, `health/*` y `openapi.json` siguen sin
+  pedirla. Por la escucha local (127.0.0.1) no cambia nada: sin cabecera se acepta.
+
+### Puente nativo
+
+- `discovery_search` → `[{id, name, paired}]`: consulta mDNS de una sola vez (puerto efímero a
+  `224.0.0.251:5353`, 1.5 s y, si faltan registros, una segunda pregunta por SRV, TXT o A). Solo instancias completas
+  con `server_id` válido, `fp` de 16 hexadecimales y al menos una IPv4 de la red local. Las direcciones se quedan en
+  Rust. Error en español si la red no permite buscar (sin red o sin el permiso «Red local» de macOS).
+- `pairing_start_found {serverId, name}` → como `pairing_start`, con un servidor de la última búsqueda: prueba sus
+  direcciones, exige que el certificado que fija empiece con la huella anunciada y que el `server_id` de la
+  solicitud sea el anunciado.
+- Cambio de IP de una terminal emparejada: si una petición no logra conectar (error de conexión: no llegó al
+  servidor), Rust vuelve a buscar por `server_id` (una búsqueda a la vez y como máximo cada 10 s), prueba cada
+  dirección con la huella fijada completa y, si responde, la usa desde ese momento (API, SSE, exportaciones y estado
+  del sistema), la guarda como `server_url` en `connection.json` y repite la petición una sola vez. Mismo nombre o
+  `server_id` con otra huella: nunca. Sin encontrarlo: «No se encontró la computadora principal del restaurante en
+  la red…».
+- `Info.plist` de la aplicación: `NSLocalNetworkUsageDescription` y `NSBonjourServices` = `_adelpos._tcp`.
+
+### Conexión perdida en el escritorio
+
+- Con la sesión abierta y sin respuesta del servidor, la terminal muestra la capa «Sin conexión con el servidor»
+  debajo de la barra superior: el contenido queda montado e inerte (lo capturado y no guardado se conserva), la
+  sesión se reintenta sola cada 1, 2, 4, 8 y después 10 s («Reintentar» lo hace ya) y al volver se piden de nuevo
+  todas las consultas a la vista (`adel-server-change`, caja y el guardado incierto de la captura con su mismo
+  `operation_id`); el SSE reanuda con `after`.

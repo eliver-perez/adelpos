@@ -63,6 +63,10 @@ beforeEach(() => {
       if (command === 'restart_application') {
         return null;
       }
+      // Etapa 9G, fase C: «Buscar el servidor» busca en la red al abrirse.
+      if (command === 'discovery_search') {
+        return [];
+      }
       if (command !== 'api_request') {
         throw new Error(`Comando no esperado: ${command}`);
       }

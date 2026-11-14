@@ -27,6 +27,7 @@ import (
 	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/lanlistener"
 	"local/ad-el-pos/server/internal/localsetup"
+	"local/ad-el-pos/server/internal/product"
 )
 
 // pairingEndpoint es una de las dos escuchas reales del servidor en la prueba: la local (HTTP en loopback)
@@ -68,6 +69,10 @@ func (endpoint pairingEndpoint) send(t *testing.T, actor terminal, method, route
 		t.Fatal(err)
 	}
 	request.Header.Set("Content-Type", "application/json")
+	// Como Rust (pairing.rs y api.rs): toda terminal se identifica con su versión; por la escucha de red es
+	// obligatoria (etapa 9G, fase C).
+	request.Header.Set("X-Client-Version", product.Read().Version)
+	request.Header.Set("X-Client-Kind", "desktop")
 	if actor.id != "" {
 		request.Header.Set("X-Device-ID", actor.id)
 		request.Header.Set("X-Device-Token", actor.secret)
@@ -324,6 +329,30 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		// La terminal emparejada trabaja por la escucha de red con su credencial.
 		if reply := newcomer.endpoint.send(t, paired, "POST", "auth/login", nil, map[string]string{"username": "admin", "password": "incorrecta"}); reply.status != 401 || reply.code() != "INVALID_CREDENTIALS" {
 			t.Fatalf("la terminal emparejada llega al inicio de sesión: %d %s", reply.status, reply.code())
+		}
+	})
+
+	// Etapa 9G, fase C: por la escucha de red la versión del cliente es obligatoria (426); por la escucha local
+	// una herramienta sin cabeceras sigue entrando.
+	t.Run("stage9g_escucha_de_red_exige_la_version_del_cliente", func(t *testing.T) {
+		bare := func(endpoint pairingEndpoint) int {
+			request, err := http.NewRequest("POST", endpoint.base+"/api/v1/pairing/requests", strings.NewReader("{}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			response, err := endpoint.client.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			return response.StatusCode
+		}
+		if status := bare(adminOverNetwork); status != 426 {
+			t.Fatalf("sin versión por la red: %d", status)
+		}
+		if status := bare(local); status != 400 {
+			t.Fatalf("sin versión por la escucha local llega a la validación: %d", status)
 		}
 	})
 
@@ -599,6 +628,8 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		stream.Header.Set("X-Device-ID", user.id)
 		stream.Header.Set("X-Device-Token", user.secret)
 		stream.Header.Set("Authorization", "Bearer "+user.session)
+		stream.Header.Set("X-Client-Version", product.Read().Version)
+		stream.Header.Set("X-Client-Kind", "desktop")
 		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
 			MinVersion:         tls.VersionTLS12,
 			InsecureSkipVerify: true,
