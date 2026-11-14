@@ -99,7 +99,7 @@ func (service *Service) serviceStatus(ctx context.Context, tx pgx.Tx, principal 
 	if err != nil {
 		return nil, err
 	}
-	lastBackup, err := backupschedule.LastBackup(ctx, tx)
+	lastBackup, err := backupschedule.LastBackup(ctx, tx, time.Now())
 	if err != nil {
 		return nil, err
 	}

@@ -201,17 +201,13 @@ func dumpLegacy(ctx context.Context, layout Layout, database config.Database) (s
 	name := fmt.Sprintf("%s-%s-%s-instalacion-anterior.dump", database.Name, time.Now().UTC().Format("20060102T150405Z"), suffix)
 	filename := filepath.Join(layout.Backups(), name)
 	environment := legacyEnvironment(database)
-	output, err := runCaptured(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl", "--file", filename}, environment)
-	if err != nil {
-		_ = os.Remove(filename)
-		return "", fmt.Errorf("no se pudo respaldar la base anterior: %s", tail(output))
+	// El respaldo nace privado, sin seguir enlaces ni reemplazar un archivo (dumpToFile, revisión de la fase F).
+	if err := dumpToFile(ctx, layout, environment, filename); err != nil {
+		return "", fmt.Errorf("no se pudo respaldar la base anterior: %s", err.Error())
 	}
 	if _, err := runCaptured(ctx, layout.tool("pg_restore"), []string{"--list", filename}, environment); err != nil {
 		_ = os.Remove(filename)
 		return "", errors.New("el respaldo de la base anterior no se pudo leer; se descartó")
-	}
-	if err := privateFile(filename); err != nil {
-		return "", err
 	}
 	return filename, nil
 }

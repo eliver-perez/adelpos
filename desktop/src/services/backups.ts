@@ -39,7 +39,9 @@ export interface BackupRun {
 }
 
 export interface BackupAlert {
-  kind: 'failed' | 'fallback';
+  // failed: el último falló; overdue: activos y sin un respaldo correcto en más de un día (reason «stale» con el último
+  // correcto en since, o «never»); fallback: la carpeta elegida no estaba y se usó la predeterminada.
+  kind: 'failed' | 'overdue' | 'fallback';
   reason: string;
   since: string;
   failures: number;
@@ -251,6 +253,16 @@ export function alertMessage(alert: BackupAlert) {
     return {
       title: 'No se pudo crear el respaldo de la base de datos',
       description: `${failureLabel(alert.reason)}${repeated} Revisa los respaldos en Sistema › Mantenimiento o usa «Respaldar ahora».`,
+    };
+  }
+  if (alert.kind === 'overdue') {
+    const since =
+      alert.reason === 'stale'
+        ? `El último respaldo correcto es del ${backupDateTime(alert.since)}.`
+        : 'Todavía no hay ningún respaldo correcto.';
+    return {
+      title: 'No hay un respaldo reciente de la base de datos',
+      description: `${since} Revisa que la computadora principal esté encendida a la hora del respaldo y usa «Respaldar ahora» en Sistema › Mantenimiento.`,
     };
   }
   return {

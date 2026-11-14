@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/product"
 	"local/ad-el-pos/server/internal/standalone"
 )
@@ -122,6 +123,16 @@ func (backup installationBackup) Dump(ctx context.Context, filename string) erro
 func (backup installationBackup) Verify(ctx context.Context, filename string) error {
 	return standalone.VerifyFile(ctx, backup.layout, backup.database, filename)
 }
+
+// ProtectedDirectories es la carpeta de datos del servicio (base, secretos, identidad y bitácoras): ninguna carpeta
+// elegida para los respaldos puede estar dentro.
+func (backup installationBackup) ProtectedDirectories() []string {
+	return []string{backup.layout.DataDir}
+}
+
+// La comprobación en compilación de que el respaldo de la instalación sirve para los respaldos programados (sin ella,
+// newApplication no los activaría en el host).
+var _ maintenance.ScheduledBackuper = installationBackup{}
 
 // migrateWithBackup aplica las migraciones pendientes. Sobre una base que ya tiene datos (alguna migración
 // aplicada) primero crea un respaldo comprobado: nunca se migra la base del restaurante sin él.

@@ -43,6 +43,9 @@ type ScheduledBackuper interface {
 	Dump(ctx context.Context, filename string) error
 	// Verify lee el catálogo del respaldo con pg_restore --list y comprueba que sea de una base de AD-EL POS.
 	Verify(ctx context.Context, filename string) error
+	// ProtectedDirectories son las carpetas del servidor donde nunca se guardan respaldos elegidos (la carpeta de datos
+	// del servicio o la de la configuración con serve: secretos, identidad, bitácoras y la base).
+	ProtectedDirectories() []string
 }
 
 // verificationMarker es la entrada que todo respaldo de una base de AD-EL POS tiene en su catálogo: los datos de la
@@ -90,6 +93,8 @@ type DumpBackup struct {
 	PGBin string
 	// Directory es la carpeta de los respaldos.
 	Directory string
+	// ConfigDirectory es la carpeta de la configuración (.local en desarrollo): nunca se acepta como carpeta elegida.
+	ConfigDirectory string
 	// now fija la hora del nombre en las pruebas.
 	now func() time.Time
 }
@@ -98,10 +103,15 @@ type DumpBackup struct {
 // ADEL_PG_BIN o de Homebrew (como scripts/database.py), y carpeta de backup_directory o «backups» junto a
 // la carpeta de la configuración (.local/server.json → backups/).
 func NewDumpBackup(cfg config.Config, configFile string) *DumpBackup {
+	configDirectory, err := filepath.Abs(filepath.Dir(configFile))
+	if err != nil {
+		configDirectory = filepath.Dir(configFile)
+	}
 	return &DumpBackup{
-		Database:  cfg.Database,
-		PGBin:     postgresBin(cfg.PostgresBin),
-		Directory: backupDirectory(cfg.BackupDirectory, configFile),
+		Database:        cfg.Database,
+		PGBin:           postgresBin(cfg.PostgresBin),
+		Directory:       backupDirectory(cfg.BackupDirectory, configFile),
+		ConfigDirectory: configDirectory,
 	}
 }
 
@@ -173,10 +183,18 @@ func (backup *DumpBackup) DatabaseName() string {
 	return backup.Database.Name
 }
 
-// Dump crea el respaldo en filename (que no debe existir) con permisos 0600 desde el primer momento (ACL privada en
-// Windows). Si pg_dump falla o el archivo queda vacío, lo borra.
+// ProtectedDirectories es la carpeta de la configuración.
+func (backup *DumpBackup) ProtectedDirectories() []string {
+	if backup.ConfigDirectory == "" {
+		return nil
+	}
+	return []string{backup.ConfigDirectory}
+}
+
+// Dump crea el respaldo en filename (que no debe existir, ni como enlace) con permisos 0600 desde el primer byte (ACL
+// privada en Windows, fijada antes de escribir). Si pg_dump falla o el archivo queda vacío, lo borra.
 func (backup *DumpBackup) Dump(ctx context.Context, filename string) error {
-	output, err := os.OpenFile(filename, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	output, err := fileacl.CreatePrivate(filename)
 	if err != nil {
 		return errors.New("no se pudo crear el archivo de respaldo")
 	}
@@ -191,15 +209,10 @@ func (backup *DumpBackup) Dump(ctx context.Context, filename string) error {
 		_ = os.Remove(filename)
 		return fmt.Errorf("pg_dump no pudo crear el respaldo: %s", lastLines(dumpErrors.String()))
 	}
-	info, err := os.Stat(filename)
+	info, err := os.Lstat(filename)
 	if err != nil || info.Size() == 0 {
 		_ = os.Remove(filename)
 		return errors.New("el respaldo quedó vacío; se descartó")
-	}
-	// En Windows los bits 0600 no aplican: la ACL privada deja el archivo solo para el usuario.
-	if err := fileacl.Protect(filename); err != nil {
-		_ = os.Remove(filename)
-		return err
 	}
 	return nil
 }
@@ -258,3 +271,6 @@ func lastLines(output string) string {
 	}
 	return text
 }
+
+// DumpBackup sirve para los respaldos programados (comprobado al compilar).
+var _ ScheduledBackuper = (*DumpBackup)(nil)

@@ -14,6 +14,7 @@ type fakeTarget struct {
 	mutex       sync.Mutex
 	directory   string
 	database    string
+	protected   []string
 	failDump    bool
 	failVerify  bool
 	dumps       []string
@@ -32,6 +33,10 @@ func (target *fakeTarget) Backup(ctx context.Context) (string, error) {
 
 func (target *fakeTarget) DefaultDirectory() string {
 	return target.directory
+}
+
+func (target *fakeTarget) ProtectedDirectories() []string {
+	return target.protected
 }
 
 func (target *fakeTarget) DatabaseName() string {

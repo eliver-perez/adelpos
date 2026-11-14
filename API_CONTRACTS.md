@@ -3449,15 +3449,25 @@ running|succeeded|failed, started_at, finished_at, file_name, size_bytes, locati
 volume_name, directory, used_default_directory, fallback_reason: ""|missing|not_directory|not_writable, verified,
 failure_reason: ""|directory_unavailable|dump_failed|verify_failed|interrupted, removed, available?}`. Correcto implica
   verificado (`pg_restore --list` con los datos de `public.schema_migrations`).
-- **Aviso** (`alert`): `{kind: failed|fallback, reason, since, failures}` o `null`. `failed`: el último respaldo terminado
-  falló (desde `since`, `failures` intentos); `fallback`: el último fue correcto pero en la predeterminada porque la
-  carpeta elegida (la misma que sigue configurada) no estaba disponible. Desaparece con un respaldo correcto posterior.
+- **Aviso** (`alert`): `{kind: failed|overdue|fallback, reason, since, failures}` o `null`, en ese orden de prioridad.
+  `failed`: el último respaldo terminado falló (desde `since`, `failures` intentos); `overdue`: respaldos automáticos
+  activos, establecimiento configurado y sin un respaldo correcto en más de 26 h (contadas desde lo más reciente entre el
+  último correcto y la activación o configuración; `reason` `stale` con el último correcto en `since`, o `never`);
+  `fallback`: el último fue correcto pero en la predeterminada porque la carpeta elegida (la misma que sigue
+  configurada) no estaba disponible. Desaparece con un respaldo correcto posterior. «Último» es por el orden de registro
+  de la base (`backup_runs.seq`), y una ejecución que empezó más de 5 min «en el futuro» (reloj adelantado) no cuenta
+  como último respaldo ni como el del día.
+- **Archivos**: `<base>-<instalación>-<AAAAMMDDTHHMMSSZ>-<6 hex>-automatico|manual.dump` (`<instalación>`: 8 caracteres
+  del `server_id` o, sin identidad, de `backup_settings.installation_id`; `.partial` mientras se crea, registrado en
+  `backup_runs.partial_file`). La retención y la limpieza de restos solo tocan archivos regulares registrados por esta
+  instalación (nunca los de otra instalación en una carpeta compartida).
 - **Configuración**: `400 VALIDATION_ERROR` con un campo que falta, una hora fuera de `HH:MM` (también `""`) o fuera de
   1–365; un guardado sin cambios no se audita. Auditoría `maintenance.backup_settings_changed` (antes y después).
 - **Carpeta**: Go valida ruta absoluta sin caracteres de control (≤ 1024), existente, carpeta, con permiso de escritura
-  (crea y borra un archivo de prueba) y que no sea una carpeta de datos de PostgreSQL (`PG_VERSION`):
-  `400 BACKUP_DIRECTORY_INVALID` con el motivo en palabras del restaurante. Nunca crea la carpeta. Elegir la
-  predeterminada equivale a volver a ella. Auditoría `maintenance.backup_directory_changed` (`{directory}` antes y
+  (crea y borra un archivo de prueba), resuelve los enlaces y guarda la ruta real, que no puede estar dentro de una
+  carpeta de datos de PostgreSQL (ella o una superior con `PG_VERSION`) ni de la carpeta de datos del servicio (o la de
+  la configuración con `serve`): `400 BACKUP_DIRECTORY_INVALID` con el motivo en palabras del restaurante. Nunca crea la
+  carpeta. Elegir la predeterminada equivale a volver a ella. Auditoría `maintenance.backup_directory_changed` (`{directory}` antes y
   después, `null` = predeterminada).
 - **«Respaldar ahora»**: la autenticación busca la clave (`backup_runs.operation_id`); repetida por el mismo usuario y
   terminal devuelve `{run}` sin respaldar otra vez; de otro usuario o terminal, `409 IDEMPOTENCY_CONFLICT`. Si no existe,

@@ -15,7 +15,12 @@
 //     programado. Así, si la computadora estaba apagada a esa hora, el respaldo se hace al arrancar (después de la
 //     espera de arranque, StartupDelay), y si se cambia la hora a media jornada no se repite el respaldo de ese día.
 //   - Un intento fallido se reintenta después de RetryDelay, como máximo MaxAttempts intentos por instante
-//     programado; el aviso al administrador sigue hasta que haya un respaldo correcto posterior.
+//     programado (un intento interrumpido porque el servidor se detuvo se reintenta al volver, sin esperar); el aviso
+//     al administrador sigue hasta que haya un respaldo correcto posterior.
+//   - Un respaldo que empezó «en el futuro» (más de ClockTolerance; el reloj estaba adelantado) no cuenta como el del
+//     día ni como el último, y una fila «en curso» de más de StaleAfter es un resto que el trabajador cierra: ninguno
+//     detiene la programación. Si aun así no hay un respaldo correcto en más de OverdueAfter, se avisa («atrasado»).
+//   - La retención y la limpieza de restos solo tocan los archivos que esta instalación registró en app.backup_runs.
 //   - Solo hay un respaldo a la vez: el lock consultivo 7820148309 (pg_try_advisory_lock, de sesión) lo toma quien
 //     respalda; si está ocupado, el automático espera a la siguiente revisión y «Respaldar ahora» responde que ya hay
 //     uno en curso.
