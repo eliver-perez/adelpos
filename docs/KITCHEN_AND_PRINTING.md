@@ -93,7 +93,7 @@ Referencias oficiales: [lp](https://www.cups.org/doc/man-lp.html), [lpstat](http
 | `submitted`    | CUPS/TCP aceptó el envío, o un operador reconcilió aceptación conocida. No significa papel confirmado. |
 | `error`        | Fallo confirmado sin envío; reintento limitado o intervención.                                         |
 | `uncertain`    | Pudo haberse recibido. Revisar físicamente y resolver con motivo. Nunca reintentar automáticamente.    |
-| `intervention` | Destino desactivado, agente no implementado u otra condición que exige revisión.                       |
+| `intervention` | Destino desactivado, impresora de tipo agente sin terminal u otra condición que exige revisión.        |
 | `cancelled`    | El operador canceló este trabajo de impresión; no cancela el pedido.                                   |
 
 Dos trabajadores de impresión corren en Go. La selección utiliza `FOR UPDATE SKIP LOCKED`; un advisory lock de sesión por impresora permanece durante el transporte. Los trabajos de una misma impresora no se intercalan, incluso entre trabajadores de distintos procesos conectados a esa base. El intento y la lease de 60 segundos se confirman antes de cualquier envío externo. El transporte tiene límite de 12 segundos. No se conserva una transacción abierta durante la impresión.
@@ -148,7 +148,7 @@ La configuración usa las APIs oficiales de [Tauri](https://v2.tauri.app/referen
 
 Antes de aplicar a una instalación existente: respaldo custom, restauración completa en base temporal con comparación de todas las tablas, detener Go, migrar, verificar reaplicación sin cambios y reiniciar. No ejecutar setup de nuevo ni borrar `.local` o Keychain. La evidencia de instalación se registra por etapa.
 
-Quedan fuera: agente remoto, KDS independiente, Android, offline durable, facturación electrónica, diseñador arbitrario, servicio comercial de licencias e instaladores Windows. No se ha certificado cada modelo de impresora, corte físico, detección de papel, muchas terminales o resistencia a pérdida eléctrica. Deben medirse volumen, retención de eventos/auditoría y tamaño de snapshots antes de uso comercial; el replay acotado no elimina físicamente filas del outbox.
+Quedan fuera: KDS independiente (desde la 9F hay un KDS básico dentro del POS), Android, offline durable, facturación electrónica, diseñador arbitrario, servicio comercial de licencias e instaladores Windows. No se ha certificado cada modelo de impresora, corte físico, detección de papel, muchas terminales o resistencia a pérdida eléctrica. Deben medirse volumen, retención de eventos/auditoría y tamaño de snapshots antes de uso comercial; el replay acotado no elimina físicamente filas del outbox.
 
 ## Documentos comerciales · etapa 6
 
@@ -602,4 +602,5 @@ ejecutor simulado (argumentos separados, `lpstat`, reintentos sin duplicar), Vit
 `workflow-stage9g-print-agent.spec.ts` (Chromium y WebKit, agente simulado en el puente; su impresora de prueba,
 «Impresora USB 9G-E», usa la cola `ADEL_E2E_SIN_IMPRESORA`, que no existe en ninguna computadora, y tiene su firma en
 `maintenance/signatures.go`). **Pendiente en hardware**:
-papel, logotipo, corte y cajón reales por la impresora USB de otra terminal y la terminal Windows (Fase W).
+papel, logotipo, corte y cajón reales por la impresora USB de otra terminal y la terminal Windows (Fase W). Para el
+propietario: [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md), «Impresora USB conectada a una caja».
