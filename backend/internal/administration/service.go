@@ -47,6 +47,9 @@ type Service struct {
 	// Identity es la identidad del servidor para emparejar terminales (etapa 9G, fase B; pairing.go): su
 	// identificador y la huella SPKI del certificado de la escucha de red. Sin valor no se empareja.
 	Identity *ServerIdentity
+	// IdentityProblem explica (para la bitácora y Terminales) por qué no se cargó la identidad: el servidor
+	// sigue atendiendo a la propia computadora, sin escucha de red ni emparejamiento (revisión, hallazgo 4).
+	IdentityProblem string
 	// NetworkPort es el puerto de la escucha HTTPS de la red local (0: sin escucha de red, como «serve» de
 	// desarrollo sin network_listen_address o Windows hasta la Fase W). La computadora principal lo
 	// muestra en Terminales junto a sus direcciones para emparejar a mano.

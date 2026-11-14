@@ -223,6 +223,47 @@ describe('«Buscar el servidor»: dirección escrita a mano y código (etapa 9G,
     expect(calls('pairing_status').length).toBeGreaterThanOrEqual(2);
   });
 
+  // Hallazgo 3 de la revisión: una consulta lenta (el diálogo del Llavero al guardar la credencial) no se
+  // solapa con la siguiente, y un error no detiene la espera.
+  it('encadena las consultas: nunca dos a la vez y sigue esperando tras un error', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await requestCode();
+    await screen.findByLabelText(/Código de emparejamiento/);
+    let release: (value: PairingView) => void = () => undefined;
+    const slow = new Promise<PairingView>((resolve) => {
+      release = resolve;
+    });
+    let pending = 0;
+    native.invoke.mockImplementation(async (command: string) => {
+      if (command === 'pairing_status') {
+        pending += 1;
+        if (pending === 1) {
+          return slow;
+        }
+        if (pending === 2) {
+          throw 'No se pudo guardar la credencial en el almacén seguro del sistema.';
+        }
+        return { ...pairing, state: 'paired' };
+      }
+      return null;
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(pairingPollMilliseconds * 4);
+    });
+    expect(calls('pairing_status')).toHaveLength(1);
+    await act(async () => {
+      release({ ...pairing });
+      await vi.advanceTimersByTimeAsync(pairingPollMilliseconds);
+    });
+    expect(calls('pairing_status')).toHaveLength(2);
+    expect(await screen.findByText(/almacén seguro/)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(pairingPollMilliseconds);
+    });
+    expect(calls('pairing_status')).toHaveLength(3);
+    expect(screen.getByRole('status').textContent).toContain('Terminal emparejada');
+  });
+
   it('rechazada o vencida ofrece pedir otro código', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await requestCode();
@@ -302,6 +343,25 @@ describe('Sistema › Terminales con solicitudes, configuración y sesiones (eta
     expect(alert.textContent).toContain('no coincide');
     expect(alert.textContent).not.toContain('PAIRING_CODE_INVALID');
     expect(await screen.findByText('Quedan 4 intentos antes de rechazarla.')).toBeTruthy();
+  });
+
+  // Revisión de la fase B (hallazgos 1 y 4): la computadora principal ve las solicitudes abandonadas, el tope
+  // alcanzado y si no puede emparejar por la identidad.
+  it('avisa de solicitudes abandonadas, del tope y de la identidad que necesita revisión', async () => {
+    replies.devices_pairing_requests = pending({
+      requests: [],
+      recent_abandoned: 7,
+      limit_reached: true,
+      window_minutes: 10,
+      pairing_available: false,
+    });
+    render(<DevicesPage can={() => true} />);
+    const panel = await screen.findByRole('region', { name: 'Terminales nuevas' });
+    await waitFor(() => expect(panel.textContent).toContain('7 solicitudes canceladas'));
+    expect(panel.textContent).toContain('hacerse pasar por una terminal');
+    expect(panel.textContent).toContain('por ahora no se aceptan más solicitudes');
+    expect(within(panel).getByRole('alert').textContent).toContain('identidad necesita revisión');
+    expect(panel.textContent).not.toContain('todavía no recibe terminales de la red');
   });
 
   it('en otra terminal no se aprueba: lo explica y no pide el código', async () => {

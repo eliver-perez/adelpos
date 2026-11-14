@@ -379,9 +379,14 @@ func TestServiceHostOnMacOS(t *testing.T) {
 		t.Fatal("restaurar crea antes un respaldo de seguridad")
 	}
 
+	// Hallazgo 4 de la revisión: con la identidad dañada (falta identity.json) el servidor sigue atendiendo a la
+	// propia computadora, sin escucha de red y con el emparejamiento desactivado.
+	restoreIdentity := damageIdentity(t, layout)
 	// SIGTERM (launchd al detenerlo o al apagar) cierra Go y después PostgreSQL.
-	third := startServer(t, host...)
+	third := startServer(t, append(append([]string{}, host...), "--network-listen", hostNetworkListen)...)
 	waitReady(t, hostListen, third, layout.ServerLog())
+	checkWithoutIdentity(t, layout, hostListen, hostNetworkListen)
+	restoreIdentity()
 	if err := third.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}

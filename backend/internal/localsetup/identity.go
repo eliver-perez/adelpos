@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"local/ad-el-pos/server/internal/fileacl"
@@ -84,6 +85,9 @@ func EnsureIdentity(directory string) (ServerIdentity, error) {
 	if present == 3 {
 		return LoadIdentity(directory)
 	}
+	// La creación es atómica (carpeta temporal renombrada): una identidad incompleta solo puede venir de
+	// archivos borrados o cambiados a mano, y no se completa sola porque las terminales emparejadas dejarían de
+	// conectarse. El servidor sigue atendiendo a la propia computadora (main.go).
 	if present != 0 {
 		return ServerIdentity{}, errors.New("la identidad del servidor está incompleta; no se reemplazará automáticamente porque las terminales emparejadas dejarían de conectarse (revisión manual necesaria)")
 	}
@@ -147,18 +151,41 @@ func newServerID() (string, error) {
 	return fmt.Sprintf("%s-%s-%s-%s-%s", text[0:8], text[8:12], text[12:16], text[16:20], text[20:32]), nil
 }
 
-// createIdentity genera el identificador, la llave ECDSA P-256 y el certificado autofirmado. Los archivos se
-// crean con O_EXCL (nunca sobrescriben) y la llave privada con 0600.
+// createIdentity genera el identificador, la llave ECDSA P-256 y el certificado autofirmado. Los tres archivos se
+// escriben en una carpeta temporal junto a la definitiva (llave 0600, carpeta 0700) y la carpeta completa se
+// renombra al final: un corte en medio deja solo una carpeta temporal, que se descarta en el siguiente arranque,
+// nunca una identidad a medias (revisión independiente, hallazgo 4).
 func createIdentity(directory string) error {
-	if err := os.MkdirAll(directory, 0700); err != nil {
+	parent := filepath.Dir(directory)
+	if err := os.MkdirAll(parent, 0700); err != nil {
 		return errors.New("no se pudo crear la carpeta de la identidad del servidor")
 	}
-	if err := os.Chmod(directory, 0700); err != nil {
+	removeLeftovers(parent, filepath.Base(directory))
+	// La carpeta definitiva puede existir vacía (por ejemplo, creada a mano); con otro contenido no se toca.
+	if entries, err := os.ReadDir(directory); err == nil {
+		if len(entries) != 0 {
+			return errors.New("la carpeta de la identidad del servidor tiene otros archivos; revisión manual necesaria")
+		}
+		if err := os.Remove(directory); err != nil {
+			return errors.New("no se pudo preparar la carpeta de la identidad del servidor")
+		}
+	}
+	temporary, err := os.MkdirTemp(parent, "."+filepath.Base(directory)+"-")
+	if err != nil {
+		return errors.New("no se pudo crear la carpeta de la identidad del servidor")
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			_ = os.RemoveAll(temporary)
+		}
+	}()
+	if err := os.Chmod(temporary, 0700); err != nil {
 		return errors.New("no se pudo proteger la carpeta de la identidad del servidor")
 	}
 	// En Windows los bits 0700/0600 no protegen: la carpeta recibe una ACL privada que heredan los
 	// archivos (como las claves TLS de la etapa 9E). En macOS no hace nada más.
-	if err := fileacl.Protect(directory); err != nil {
+	if err := fileacl.Protect(temporary); err != nil {
 		return err
 	}
 	serverID, err := newServerID()
@@ -197,8 +224,6 @@ func createIdentity(directory string) error {
 	if err != nil {
 		return err
 	}
-	// La llave primero y el registro al final: si algo falla a medias queda una identidad incompleta, que
-	// EnsureIdentity no completa por su cuenta.
 	files := []struct {
 		name string
 		body []byte
@@ -208,11 +233,41 @@ func createIdentity(directory string) error {
 		{identityFile, append(record, '\n')},
 	}
 	for _, file := range files {
-		if err := writeExclusive(filepath.Join(directory, file.name), file.body); err != nil {
+		if err := writeExclusive(filepath.Join(temporary, file.name), file.body); err != nil {
 			return errors.New("no se pudo guardar la identidad del servidor")
 		}
 	}
+	syncDirectory(temporary)
+	if err := os.Rename(temporary, directory); err != nil {
+		return errors.New("no se pudo guardar la identidad del servidor")
+	}
+	complete = true
+	syncDirectory(parent)
 	return nil
+}
+
+// removeLeftovers descarta las carpetas temporales de una creación interrumpida (nunca la definitiva).
+func removeLeftovers(parent, base string) {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "."+base+"-") {
+			_ = os.RemoveAll(filepath.Join(parent, entry.Name()))
+		}
+	}
+}
+
+// syncDirectory pide al sistema que guarde en disco la lista de archivos de una carpeta (sin efecto donde no se
+// puede abrir una carpeta para ello).
+func syncDirectory(directory string) {
+	handle, err := os.Open(directory)
+	if err != nil {
+		return
+	}
+	_ = handle.Sync()
+	_ = handle.Close()
 }
 
 func writeExclusive(filename string, body []byte) error {

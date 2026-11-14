@@ -28,6 +28,11 @@ func sourceAddress(address net.IP) string {
 
 func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	host, _, _ := net.SplitHostPort(request.RemoteAddr)
+	// Una dirección de enlace local IPv6 llega con su zona (fe80::1%en0): sin quitarla no se reconocería el
+	// origen de una terminal de la red local (revisión de la fase B).
+	if zone := strings.IndexByte(host, '%'); zone >= 0 {
+		host = host[:zone]
+	}
 	address := net.ParseIP(host)
 	// Etapa 9G (D1): «local» es la escucha de loopback. Lo que llega por la escucha de red nunca es local,
 	// aunque la conexión venga de la propia computadora: así el asistente, el aprovisionamiento y la
