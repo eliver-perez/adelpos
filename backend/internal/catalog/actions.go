@@ -22,6 +22,10 @@ func productAvailabilityReason(product Product, category Category, now time.Time
 	if !category.Active {
 		return "La categoría está inactiva."
 	}
+	// «Agotado» (etapa 9G) es un hecho físico: ninguna excepción de disponibilidad lo pasa por alto.
+	if soldOutNow(product, now) {
+		return soldOutReason(product)
+	}
 	if !override {
 		if product.TemporaryUnavailable {
 			return "El producto no está disponible temporalmente."

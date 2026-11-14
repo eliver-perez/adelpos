@@ -111,7 +111,7 @@ describe('impresoras en Windows', () => {
     render(<PrintersAdmin can={() => true} execute={vi.fn() as never} busy={false} />);
     expect(
       screen.getByText(
-        'Se usan las impresoras instaladas en el equipo servidor (colas CUPS, el sistema de impresión de macOS) y las impresoras de tickets conectadas a la red. Una impresora conectada a otra terminal todavía no se puede usar: conéctala a la red o al equipo servidor.',
+        'Se usan las impresoras instaladas en el equipo servidor (colas CUPS, el sistema de impresión de macOS), las impresoras de tickets conectadas a la red y las impresoras USB conectadas a otra terminal, que imprime esa terminal mientras AD-EL POS está abierto en ella.',
       ),
     ).toBeTruthy();
     expect(await screen.findByText(/CUPS del equipo servidor · 80 mm/)).toBeTruthy();

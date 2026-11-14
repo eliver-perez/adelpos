@@ -135,13 +135,16 @@ func (worker *Worker) claim(ctx context.Context) (*ownedJob, error) {
 	defer tx.Rollback(context.Background())
 	// Un comando del cajón con error confirmado no se reintenta solo: un cajón que se abre minutos
 	// después, sin nadie que lo atienda, es un riesgo físico. Se resuelve desde la cola o se vuelve
-	// a abrir manualmente desde Caja, con su permiso y motivo.
+	// a abrir manualmente desde Caja, con su permiso y motivo. Desde la etapa 9G (fase E) los trabajos de
+	// la impresora de una terminal los reclama su agente (agent.go); aquí solo se recogen los que su agente
+	// dejó en proceso con la lease vencida, para dejarlos en «Resultado incierto».
 	candidates, err := many[PrintJob](ctx, tx, `SELECT to_jsonb(j)||jsonb_build_object(
 		'text_size',coalesce(t.document->>'text_size',t.document->'settings'->>'text_size'),
 		'ticket_kind',t.kind,
 		'drawer_pulse',CASE WHEN t.kind='cash_drawer' THEN t.document->'drawer_pulse' END)
 		FROM app.kitchen_print_jobs j JOIN app.kitchen_tickets t ON t.id=j.ticket_id
-        WHERE (j.state='pending' OR (j.state='error' AND j.attempts<3 AND j.next_attempt_at<=now() AND t.kind<>'cash_drawer')
+        WHERE ((j.state='pending' OR (j.state='error' AND j.attempts<3 AND j.next_attempt_at<=now() AND t.kind<>'cash_drawer'))
+        AND `+agentDeviceSQL("j")+` IS NULL
         OR (j.state='processing' AND j.lease_until<now())) ORDER BY j.created_at,j.id LIMIT 20 FOR UPDATE OF j SKIP LOCKED`)
 	if err != nil {
 		return nil, err
@@ -155,6 +158,13 @@ func (worker *Worker) claim(ctx context.Context) (*ownedJob, error) {
 			continue
 		}
 		heldPrinter = job.PrinterID
+		if job.State == "processing" && job.PrinterSnapshot.AgentPrinter() {
+			if err := expireAgentLease(ctx, tx, job.ID); err != nil {
+				return nil, err
+			}
+			err := tx.Commit(ctx)
+			return nil, err
+		}
 		if job.State == "processing" {
 			if _, err := tx.Exec(ctx, `UPDATE app.kitchen_print_jobs SET state='uncertain',lease_until=NULL,
                 last_error='El trabajador se interrumpió sin guardar resultado; revisar antes de autorizar otra copia.',
@@ -250,66 +260,82 @@ func (worker *Worker) PrintNext(ctx context.Context) (bool, error) {
 		return true, err
 	}
 	defer tx.Rollback(context.Background())
+	if err := storeOutcome(storeContext, tx, owned.Job, owned.AttemptID, outcome, ""); err != nil {
+		return true, err
+	}
+	return true, tx.Commit(storeContext)
+}
+
+// storeOutcome guarda el resultado de un intento con las reglas de siempre: estado del trabajo y del intento, espera
+// creciente para el reintento automático de un error confirmado, impresora de respaldo tras tres errores
+// confirmados seguidos (nunca para el cajón), historial y eventos. Lo usan el trabajador del servidor y, desde la
+// etapa 9G (fase E), el agente de impresión de una terminal (deviceID es su terminal, autor del historial).
+func storeOutcome(storeContext context.Context, tx pgx.Tx, job PrintJob, attemptID string, outcome Outcome, deviceID string) error {
+	outcome = outcomeWithCode(outcome)
 	state := outcome.State
 	if state != "submitted" && state != "error" && state != "uncertain" && state != "intervention" {
 		state = "uncertain"
 	}
-	_, err = tx.Exec(storeContext, `UPDATE app.kitchen_print_jobs SET state=$1,transport_reference=$2,last_error=$3,
+	_, err := tx.Exec(storeContext, `UPDATE app.kitchen_print_jobs SET state=$1,transport_reference=$2,last_error=$3,
         result=$4,lease_until=NULL,next_attempt_at=now()+make_interval(secs=>$5),revision=revision+1,updated_at=now()
-        WHERE id=$6 AND state='processing'`, state, outcome.Reference, outcome.Message, encoded(outcome), float64(int64(1)<<uint(min(owned.Job.Attempts, 3))), owned.Job.ID)
+        WHERE id=$6 AND state='processing'`, state, outcome.Reference, outcome.Message, encoded(outcome), float64(int64(1)<<uint(min(job.Attempts, 3))), job.ID)
 	if err != nil {
-		return true, err
+		return err
 	}
-	if _, err := tx.Exec(storeContext, `UPDATE app.kitchen_print_attempts SET finished_at=now(),outcome=$1,detail=$2,result=$3
-        WHERE id=$4`, state, outcome.Message, encoded(outcome), owned.AttemptID); err != nil {
-		return true, err
+	if _, err := tx.Exec(storeContext, `UPDATE app.kitchen_print_attempts SET finished_at=now(),outcome=$1,detail=$2,result=result||$3::jsonb
+        WHERE id=$4`, state, outcome.Message, encoded(outcome), attemptID); err != nil {
+		return err
 	}
 	confirmedFailures := false
 	// El comando del cajón nunca pasa a una impresora de respaldo: el cajón está conectado a una
 	// impresora concreta y otra no lo abriría.
-	if state == "error" && owned.Job.Attempts >= 3 && owned.Job.PrinterSnapshot.FallbackID != nil && owned.Job.DrawerPulse == nil {
+	if state == "error" && job.Attempts >= 3 && job.PrinterSnapshot.FallbackID != nil && job.DrawerPulse == nil {
 		// El respaldo exige tres fallos confirmados consecutivos sin envío. Un intento incierto o
 		// en intervención entre ellos (por ejemplo, antes de un envío autorizado manualmente)
 		// interrumpe la cuenta: el total de intentos no basta.
 		var trailingErrors int
 		err := tx.QueryRow(storeContext, `SELECT count(*) FILTER (WHERE outcome='error') FROM (
             SELECT outcome FROM app.kitchen_print_attempts WHERE job_id=$1 ORDER BY attempt DESC LIMIT 3) latest`,
-			owned.Job.ID).Scan(&trailingErrors)
+			job.ID).Scan(&trailingErrors)
 		if err != nil {
-			return true, err
+			return err
 		}
 		confirmedFailures = trailingErrors == 3
 	}
 	if confirmedFailures {
-		fallback, err := one[Printer](storeContext, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", owned.Job.PrinterSnapshot.FallbackID)
+		fallback, err := one[Printer](storeContext, tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", job.PrinterSnapshot.FallbackID)
 		if err != nil {
-			return true, err
+			return err
 		}
 		if fallback.Active {
 			// Solo un respaldo automático explícito y únicamente tras fallos previos al envío.
 			fallback.FallbackID = nil
 			if _, err := tx.Exec(storeContext, `UPDATE app.kitchen_print_jobs SET printer_id=$1,printer_snapshot=$2,
-                state='pending',next_attempt_at=now(),revision=revision+1 WHERE id=$3`, fallback.ID, encoded(fallback), owned.Job.ID); err != nil {
-				return true, err
+                state='pending',next_attempt_at=now(),revision=revision+1 WHERE id=$3`, fallback.ID, encoded(fallback), job.ID); err != nil {
+				return err
 			}
-			if err := systemHistory(storeContext, tx, "print.redirected", owned.Job.ID, map[string]string{
-				"from_printer": owned.Job.PrinterID, "to_printer": fallback.ID, "reason": "Respaldo configurado tras tres fallos confirmados sin envío."}); err != nil {
-				return true, err
+			if err := systemHistory(storeContext, tx, "print.redirected", job.ID, map[string]string{
+				"from_printer": job.PrinterID, "to_printer": fallback.ID, "reason": "Respaldo configurado tras tres fallos confirmados sin envío."}); err != nil {
+				return err
 			}
 		}
 	}
-	if err := systemHistory(storeContext, tx, "print."+state, owned.Job.ID, outcome); err != nil {
-		return true, err
+	if deviceID != "" {
+		if err := deviceHistory(storeContext, tx, "print."+state, job.ID, deviceID, outcome); err != nil {
+			return err
+		}
+	} else if err := systemHistory(storeContext, tx, "print."+state, job.ID, outcome); err != nil {
+		return err
 	}
-	if err := events.Append(storeContext, tx, "printing."+state, "printing", &owned.Job.ID, nil); err != nil {
-		return true, err
+	if err := events.Append(storeContext, tx, "printing."+state, "printing", &job.ID, nil); err != nil {
+		return err
 	}
 	// Los documentos y comandos de caja avisan también en el ámbito de caja, que reciben los
 	// cajeros sin acceso a la cola de cocina: así la pantalla de Caja refleja el estado del envío.
-	if isCashKind(owned.Job.TicketKind) {
-		if err := events.Append(storeContext, tx, "cash.print.updated", "cash", &owned.Job.ID, nil); err != nil {
-			return true, err
+	if isCashKind(job.TicketKind) {
+		if err := events.Append(storeContext, tx, "cash.print.updated", "cash", &job.ID, nil); err != nil {
+			return err
 		}
 	}
-	return true, tx.Commit(storeContext)
+	return nil
 }

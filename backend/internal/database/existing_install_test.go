@@ -812,10 +812,11 @@ func checkStage8ExistingData(ctx context.Context, t *testing.T, pool *pgxpool.Po
 	}
 	var permissionsAfter, cashierAfter, inventoryRole, events int
 	// Los permisos reports.* de la 0017 (etapa 9A) se comprueban en stage9a_reports_upgrade_test.go, los
-	// documents.* de la 0018 (etapa 9B), en stage9b_templates_upgrade_test.go y accounts.cancel de la
-	// 0021 (etapa 9D), en stage9d_cancellation_upgrade_test.go.
+	// documents.* de la 0018 (etapa 9B), en stage9b_templates_upgrade_test.go, accounts.cancel de la
+	// 0021 (etapa 9D), en stage9d_cancellation_upgrade_test.go y catalog.sold_out.manage de la 0023 (etapa 9G),
+	// en stage9g_android_upgrade_test.go.
 	if err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.permissions WHERE key NOT LIKE 'reports.%' AND key NOT LIKE 'documents.%'
-            AND key<>'accounts.cancel'),
+            AND key NOT IN ('accounts.cancel','catalog.sold_out.manage')),
         (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='cashier'),
         (SELECT count(*) FROM app.role_permissions p JOIN app.roles r ON r.id=p.role_id WHERE r.code='inventory'),
         (SELECT count(*) FROM app.realtime_events WHERE scope='cash')`).Scan(&permissionsAfter, &cashierAfter, &inventoryRole, &events); err != nil {

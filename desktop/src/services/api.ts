@@ -6,6 +6,8 @@ export type Operation =
   | 'kitchen_create_station'
   | 'kitchen_printers'
   | 'kitchen_create_printer'
+  // Etapa 9G (fase E): las terminales con las impresoras que informó cada una.
+  | 'kitchen_terminal_printers'
   | 'kitchen_discovery'
   | 'kitchen_routes'
   | 'kitchen_targets'
@@ -37,6 +39,8 @@ export type Operation =
   | 'kitchen_resolve_job'
   | 'restaurant_draft_preview'
   | 'setup_status'
+  // Etapa 9G (§5.1): versión del servidor, para avisar si es más viejo de lo que necesita la aplicación.
+  | 'version'
   | 'setup'
   | 'enroll'
   | 'enroll_local'
@@ -71,6 +75,16 @@ export type Operation =
   // Etapa 9F: «Quitar datos de prueba» en el Mantenimiento del administrador (services/maintenance.ts).
   | 'maintenance_test_data'
   | 'maintenance_remove_test_data'
+  // Etapa 9G (fase A): estado y reinicio del servicio del servidor (services/serverService.ts).
+  | 'maintenance_service'
+  | 'maintenance_service_restart'
+  // Etapa 9G (fase F): respaldos programados y «Respaldar ahora» (services/backups.ts). La carpeta se elige con
+  // el diálogo nativo (choose_backup_directory), nunca con una ruta enviada desde aquí.
+  | 'maintenance_backups'
+  | 'maintenance_backups_status'
+  | 'maintenance_save_backup_settings'
+  | 'maintenance_backup_default_directory'
+  | 'maintenance_backup_now'
   | 'reports_catalog'
   | 'reports_run'
   | 'reports_dashboard'
@@ -88,6 +102,12 @@ export type Operation =
   | 'invite_device'
   | 'update_device'
   | 'revoke_device'
+  // Etapa 9G (fase B): emparejamiento, configuración de una terminal y sesiones por tipo.
+  | 'devices_pairing_requests'
+  | 'approve_device_pairing'
+  | 'reject_device_pairing'
+  | 'device_configuration'
+  | 'devices_sessions_summary'
   | 'sessions'
   | 'revoke_session'
   | 'audit'
@@ -136,6 +156,8 @@ export type Operation =
   | 'catalog_configuration'
   | 'catalog_product_state'
   | 'catalog_product_availability'
+  // Etapa 9G (§5.4): «Agotado» y «Disponible otra vez» desde la captura.
+  | 'catalog_product_sold_out'
   | 'catalog_duplicate_product'
   | 'payments_settings'
   | 'payments_save_settings'
@@ -351,6 +373,10 @@ export type Operation =
   | 'payments_rerender'
   | 'payments_rerender_cash_document';
 
+// Evento de ventana con el que una operación rechazada por «Actualiza esta terminal» (426 CLIENT_UPDATE_REQUIRED)
+// avisa a la sesión (etapa 9G).
+export const clientUpdateEvent = 'adel-client-update-required';
+
 export class APIError extends Error {
   constructor(
     public code: string,
@@ -370,6 +396,8 @@ export interface LocalAuthentication {
   has_session: boolean;
   local_setup_available: boolean;
   local_enrollment_available: boolean;
+  // Etapa 9G (fase B): terminal emparejada con la computadora principal.
+  paired?: boolean;
 }
 
 export async function localAuthentication(): Promise<LocalAuthentication> {
@@ -429,6 +457,10 @@ export async function api<T>(
       error.code.startsWith('SESSION_') || error.code.startsWith('DEVICE_');
     if (response.status === 401 && invalidatesSession) {
       window.dispatchEvent(new CustomEvent('session-invalid', { detail: error }));
+    }
+    // Etapa 9G (§5.1): el servidor ya no acepta esta versión de la aplicación; useSession muestra el aviso.
+    if (response.status === 426 && error.code === 'CLIENT_UPDATE_REQUIRED') {
+      window.dispatchEvent(new CustomEvent(clientUpdateEvent, { detail: error }));
     }
     throw error;
   }

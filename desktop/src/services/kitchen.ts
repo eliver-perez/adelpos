@@ -29,6 +29,42 @@ export interface Printer {
   active: boolean;
   fallback_id: string | null;
   revision: number;
+  // Etapa 9G (fase E): la terminal que tiene conectada una impresora USB de otra terminal (transporte
+  // «agent»); su agente de impresión la imprime mientras la aplicación de esa terminal está abierta.
+  // Sin terminal (impresoras anteriores a la 9G), la impresora no puede imprimir.
+  agent_device_id?: string | null;
+  // Nombre de esa terminal, solo en las consultas (Go lo agrega para que se vea dónde sale el papel).
+  terminal_name?: string;
+}
+
+// Nombre de una impresora con la terminal donde está conectada («USB de caja · en Caja 2»), para elegirla
+// sabiendo dónde sale el papel (etapa 9G, fase E).
+export function printerLabel(printer: { name: string; terminal_name?: string | null }) {
+  const terminal = printer.terminal_name?.trim();
+  return terminal ? `${printer.name} · en ${terminal}` : printer.name;
+}
+
+// Impresora que informó la computadora de una terminal para su agente de impresión (etapa 9G, fase E): si
+// sirve para tickets lo decide Go con la regla del cajón por CUPS (usb, serie, paralelo o AppSocket, con
+// controlador) y, si no, explica por qué.
+export interface TerminalQueue {
+  queue: string;
+  model: string;
+  connection: string;
+  usable: boolean;
+  reason?: string;
+}
+
+// Impresoras de una terminal: las que informó su computadora y las de AD-EL POS conectadas a ella, con su
+// agente de impresión en línea o no (GET kitchen/terminal-printers y la configuración de la terminal).
+export interface TerminalPrinterSet {
+  device_id: string;
+  device_name: string;
+  agent_online: boolean;
+  agent_seen_at: string | null;
+  reported_at: string | null;
+  queues: TerminalQueue[];
+  printers: { id: string; name: string; destination: string; active: boolean }[];
 }
 
 // Columnas de texto que admite cada ancho de papel: el predeterminado primero (lista cerrada de Go,
@@ -222,6 +258,9 @@ export interface PrintJob {
   folio?: number | null;
   document_title?: string | null;
   problem?: string | null;
+  // Etapa 9G (fase E): la terminal de la impresora USB de otra terminal, para decir «La Caja 2 está
+  // desconectada» (problema agent_offline).
+  terminal_name?: string | null;
 }
 
 // Intento de envío de un trabajo, con el resultado guardado por el trabajador (code desde la 9F).

@@ -34,7 +34,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	if err != nil || !strings.HasPrefix(parsed.Path, "/adel_pos_test_") {
 		t.Fatal("Se requiere una base temporal exclusiva")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// Desde la etapa 9G (fase B) la aceptación incluye los límites del emparejamiento con miles de filas.
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -320,6 +321,10 @@ func TestStageTwoAcceptance(t *testing.T) {
 	testTestDataRemoval(t, environment)
 	// Etapa 9F, fase C: «Estaciones que puede atender» del usuario (kitchen_stations_acceptance_test.go).
 	testKitchenUserStations(t, environment)
+	// Etapa 9G, fase A: estado y reinicio del servicio del servidor (service_host_acceptance_test.go).
+	testServiceStatus(t, environment)
+	// Etapa 9G, fase B: emparejamiento con código, escucha de red y terminales (pairing_acceptance_test.go).
+	testPairingAndTerminals(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

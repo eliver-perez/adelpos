@@ -643,9 +643,11 @@ test('barra superior y Mesas (etapa 9D, fases B y C)', async ({ page }, testInfo
   await page.evaluate(() => {
     (window as unknown as { __adelOffline: boolean }).__adelOffline = true;
   });
-  await expect(reduced.getByRole('button', { name: 'Reintentar' })).toBeVisible({
-    timeout: 15000,
-  });
+  // Etapa 9G (fase C, D11): sin conexión, la capa «Sin conexión con el servidor» cubre la captura (también la
+  // barra reducida) y es la que ofrece «Reintentar»; la barra conserva Caja, el usuario y el estado.
+  const layer = page.getByRole('alertdialog', { name: 'Sin conexión con el servidor' });
+  await expect(layer).toBeVisible({ timeout: 15000 });
+  await expect(reduced.locator('.server-status-offline')).toBeVisible();
   const reducedCut = await reduced.evaluate((root) =>
     Array.from(root.querySelectorAll<HTMLElement>('.cash-shortcut button, .user-menu button'))
       .filter((element) => element.scrollWidth > element.clientWidth + 1)
@@ -655,10 +657,9 @@ test('barra superior y Mesas (etapa 9D, fases B y C)', async ({ page }, testInfo
   await page.evaluate(() => {
     (window as unknown as { __adelOffline: boolean }).__adelOffline = false;
   });
-  await reduced.getByRole('button', { name: 'Reintentar' }).click();
-  await expect(reduced.getByRole('button', { name: 'Reintentar' })).toHaveCount(0, {
-    timeout: 15000,
-  });
+  await layer.getByRole('button', { name: 'Reintentar', exact: true }).click();
+  await expect(layer).toHaveCount(0, { timeout: 15000 });
+  await expect(reduced.getByRole('button', { name: 'Reintentar' })).toHaveCount(0);
   await reduced.locator('.capture-topbar-back').click();
   await expect(panel).toBeVisible();
 

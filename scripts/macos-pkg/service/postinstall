@@ -1,0 +1,47 @@
+#!/bin/bash
+# Servicio del servidor (siempre se instala, al final): escribe el LaunchDaemon con la cuenta que instala y
+# lo carga con launchctl bootstrap. En «Solo terminal» (sin archivo de habilitación) el servidor termina
+# enseguida sin iniciar PostgreSQL ni Go; si después la aplicación cambia a una modalidad con servidor,
+# crea el archivo de habilitación y launchd lo lanza sin pedir la contraseña de administrador.
+set -euo pipefail
+# shellcheck source=../common.sh
+source "$(/usr/bin/dirname "$0")/common.sh"
+
+adel_prepare_data_dir
+if [ -z "$(adel_current_mode)" ]; then
+    adel_write_mode "terminal-only"
+fi
+if [ ! -x "$ADEL_SERVER" ]; then
+    adel_fail "no se encontró el servidor dentro de la aplicación instalada"
+fi
+
+template="$(/usr/bin/dirname "$0")/$ADEL_LABEL.plist"
+if [ ! -f "$template" ]; then
+    adel_fail "falta la plantilla del servicio en el paquete"
+fi
+staged="$(/usr/bin/mktemp "${TMPDIR:-/tmp}/adel-pos-service.XXXXXX")"
+trap '/bin/rm -f "$staged"' EXIT
+# Los valores no llevan «|», «&» ni «\»: la cuenta se validó y las rutas son fijas.
+/usr/bin/sed \
+    -e "s|__ADEL_USER__|$ADEL_USER|g" \
+    -e "s|__ADEL_SERVER__|$ADEL_SERVER|g" \
+    -e "s|__ADEL_DATA_DIR__|$ADEL_DATA_DIR|g" \
+    "$template" >"$staged"
+if /usr/bin/grep -q '__ADEL_' "$staged"; then
+    adel_fail "la plantilla del servicio tiene marcadores sin llenar"
+fi
+/usr/bin/plutil -lint "$staged" >/dev/null || adel_fail "el servicio generado no es válido"
+
+# Antes de reemplazar el plist, el servicio anterior queda descargado (también lo hizo el preinstall de la
+# aplicación).
+adel_stop_service
+/bin/mkdir -p "$(/usr/bin/dirname "$ADEL_DAEMON")"
+/bin/cp "$staged" "$ADEL_DAEMON"
+# launchd exige que el plist de un servicio del sistema sea de root y no se pueda escribir por otros.
+adel_chown root:wheel "$ADEL_DAEMON"
+/bin/chmod 0644 "$ADEL_DAEMON"
+
+"$ADEL_LAUNCHCTL" enable "system/$ADEL_LABEL" || true
+"$ADEL_LAUNCHCTL" bootstrap system "$ADEL_DAEMON" || adel_fail "no se pudo registrar el servicio del servidor"
+adel_log "servicio del servidor registrado ($(adel_current_mode))"
+exit 0

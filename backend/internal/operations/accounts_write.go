@@ -174,6 +174,10 @@ func (handler *service) openAccount() (any, error) {
 	if err := handler.validateDraftItems(id, input.Items); err != nil {
 		return nil, err
 	}
+	// Revisión de la fase D (hallazgo 3): tampoco se abre una cuenta con un producto agotado.
+	if err := handler.rejectSoldOutCapture(*input.PriceListID, input.Items, nil); err != nil {
+		return nil, err
+	}
 	if _, err := handler.insertAccountWithID(id, input.AccountInput, scheduled); err != nil {
 		return nil, err
 	}

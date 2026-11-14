@@ -103,6 +103,9 @@ func (handler *service) saveDraft(id string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := handler.rejectSoldOutCapture(account.PriceListID, input.Items, before); err != nil {
+		return nil, err
+	}
 	if err := handler.touch(id, input.Revision); err != nil {
 		return nil, err
 	}
@@ -131,6 +134,67 @@ func (handler *service) insertDraftItems(accountID string, items []DraftItem) er
 		}
 	}
 	return nil
+}
+
+// rejectSoldOutCapture rechaza al guardar el borrador las partidas nuevas que piden un producto agotado (revisión
+// independiente de la fase D, hallazgo 3). Solo revisa lo que se agrega: una partida nueva, una que cambió de
+// producto, presentación o personalización, o una a la que se le suben unidades. Una partida que ya estaba guardada y
+// se conserva igual o con menos unidades no se rechaza (su producto pudo agotarse después): así el mesero puede
+// quitarla o reducirla, y la confirmación sigue rechazando el producto agotado como siempre.
+func (handler *service) rejectSoldOutCapture(priceListID string, items []DraftItem, previous []DraftItem) error {
+	saved := map[string]DraftItem{}
+	for _, item := range previous {
+		saved[item.ID] = item
+	}
+	lines := []catalog.LineRequest{}
+	for _, item := range items {
+		before, exists := saved[item.ID]
+		if exists && sameDraftLine(before, item) && item.Quantity <= before.Quantity {
+			continue
+		}
+		lines = append(lines, item.LineRequest)
+	}
+	return catalog.RejectSoldOut(handler.ctx, handler.tx, &priceListID, lines)
+}
+
+// sameDraftLine compara producto, presentación y personalización de dos partidas, sin distinguir una lista vacía de
+// una ausente.
+func sameDraftLine(left, right DraftItem) bool {
+	if left.ProductID != right.ProductID {
+		return false
+	}
+	if (left.VariantID == nil) != (right.VariantID == nil) || (left.VariantID != nil && *left.VariantID != *right.VariantID) {
+		return false
+	}
+	return string(jsonValue(normalizedCustomization(left.Customization))) ==
+		string(jsonValue(normalizedCustomization(right.Customization)))
+}
+
+func normalizedCustomization(customization catalog.Customization) catalog.Customization {
+	if customization.Ingredients == nil {
+		customization.Ingredients = []catalog.IngredientSelection{}
+	}
+	if customization.Groups == nil {
+		customization.Groups = []catalog.GroupSelection{}
+	}
+	groups := make([]catalog.GroupSelection, 0, len(customization.Groups))
+	for _, group := range customization.Groups {
+		if group.Options == nil {
+			group.Options = []catalog.IncludedOption{}
+		}
+		groups = append(groups, group)
+	}
+	customization.Groups = groups
+	components := make([]catalog.ComponentSelection, 0, len(customization.Components))
+	for _, component := range customization.Components {
+		component.Customization = normalizedCustomization(component.Customization)
+		components = append(components, component)
+	}
+	customization.Components = components
+	if len(customization.QuickNotes) == 0 {
+		customization.QuickNotes = nil
+	}
+	return customization
 }
 
 func draftRequests(items []DraftItem) []catalog.LineRequest {

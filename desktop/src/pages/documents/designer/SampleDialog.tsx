@@ -24,7 +24,8 @@ import type { RunOperation } from './useOperations';
 const transportLabels: Record<PrinterCompatibility['transport'], string> = {
   cups: 'CUPS',
   escpos_tcp: 'ESC/POS por red',
-  agent: 'Agente de impresión',
+  // Etapa 9G (fase E): la impresora USB de una terminal, que imprime su agente.
+  agent: 'Impresora USB de una terminal',
 };
 
 // Transporte de la impresora como lo ve el restaurante. En Windows (etapa 9E) la cola del equipo es

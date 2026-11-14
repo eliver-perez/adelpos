@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Servicio del servidor de AD-EL POS en macOS (etapa 9G, fase A; decisión D3). Plantilla: el postinstall
+  del instalador (scripts/macos-pkg/service/postinstall) reemplaza los marcadores y la instala como
+  /Library/LaunchDaemons/local.adel.pos.server.plist (root:wheel, 0644).
+
+    __ADEL_USER__      cuenta del usuario que instala (PostgreSQL no arranca como root)
+    __ADEL_SERVER__    servidor dentro de la aplicación: /Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server
+    __ADEL_DATA_DIR__  carpeta de datos: /Library/Application Support/AD-EL POS (de esa cuenta, 0700)
+
+  - RunAtLoad: launchd lo lanza al cargar el servicio y al encender la computadora, sin iniciar sesión.
+  - KeepAlive / PathState: mientras exista el archivo de habilitación (service-enabled), launchd lo
+    vuelve a lanzar si termina (se cae, se reinicia desde Mantenimiento o se actualiza). Si el archivo no
+    existe («Solo terminal»), el servidor termina enseguida sin iniciar PostgreSQL ni Go y launchd no lo
+    relanza; cuando el archivo vuelve a aparecer, launchd lo lanza. Crear o quitar el archivo no pide la
+    contraseña de administrador.
+  - ThrottleInterval: como mínimo 10 s entre lanzamientos (también tras un fallo que se repite).
+  - ExitTimeOut: tiempo entre SIGTERM y SIGKILL al detenerlo o al apagar; alcanza para cerrar Go y
+    detener PostgreSQL en orden (pg_ctl stop -m fast).
+  - Umask 63 (077): todo lo que cree el servidor queda solo para su cuenta.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.adel.pos.server</string>
+  <key>UserName</key>
+  <string>__ADEL_USER__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__ADEL_SERVER__</string>
+    <string>host</string>
+    <string>--data-dir</string>
+    <string>__ADEL_DATA_DIR__</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__ADEL_DATA_DIR__</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>PathState</key>
+    <dict>
+      <key>__ADEL_DATA_DIR__/service-enabled</key>
+      <true/>
+    </dict>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ExitTimeOut</key>
+  <integer>90</integer>
+  <key>ProcessType</key>
+  <string>Standard</string>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>StandardOutPath</key>
+  <string>__ADEL_DATA_DIR__/logs/service.log</string>
+  <key>StandardErrorPath</key>
+  <string>__ADEL_DATA_DIR__/logs/service-error.log</string>
+</dict>
+</plist>

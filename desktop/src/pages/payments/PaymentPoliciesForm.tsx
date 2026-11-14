@@ -6,6 +6,7 @@ import { acceptAmountText, toWireAmount } from '../../services/amountInput';
 import { Select } from '../../components/Select';
 import type { SelectOption } from '../../components/selectModel';
 import { precheckNames } from '../../services/documentNames';
+import { printerLabel } from '../../services/kitchen';
 import type { Printer } from '../../services/kitchen';
 import { permissionName } from '../../services/payments';
 import type { PaymentSettings, SettingsInput } from '../../services/payments';
@@ -19,8 +20,23 @@ function sameValues(left: Policies, right: Policies) {
     left.shared_shifts === right.shared_shifts &&
     left.print_receipt_default === right.print_receipt_default &&
     left.receipt_printer_id === right.receipt_printer_id &&
-    left.threshold === right.threshold
+    left.threshold === right.threshold &&
+    sameRegisterPrinters(left.register_printers, right.register_printers)
   );
+}
+
+function sameRegisterPrinters(left: Record<string, string>, right: Record<string, string>) {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((key) => (left[key] ?? '') === (right[key] ?? ''));
+}
+
+// Impresora de tickets elegida para cada caja (etapa 9G, fase E, D10): vacío = la impresora general.
+function initialRegisterPrinters(settings: PaymentSettings) {
+  const chosen: Record<string, string> = {};
+  for (const register of settings.register_printers ?? []) {
+    chosen[register.register_id] = register.printer_id ?? '';
+  }
+  return chosen;
 }
 
 function initialPolicies(settings: PaymentSettings) {
@@ -30,25 +46,27 @@ function initialPolicies(settings: PaymentSettings) {
     print_receipt_default: settings.print_receipt_default,
     receipt_printer_id: settings.receipt_printer_id,
     threshold: settings.refund_authorization_threshold ?? '',
+    register_printers: initialRegisterPrinters(settings),
   };
 }
 
 // Impresoras que se ofrecen como impresora de tickets (revisión 9F, B3): solo las que pueden imprimir
-// precuentas, tickets y documentos de caja (decisión D4). Las desactivadas y las de otra terminal se
-// muestran deshabilitadas con el motivo; la que ya estaba elegida se conserva visible aunque haya dejado
-// de servir (Go permite guardar lo demás sin cambiarla).
-export function receiptPrinterOptions(printers: Printer[]): SelectOption[] {
-  const options: SelectOption[] = [{ value: '', label: 'Sin asignar' }];
+// precuentas, tickets y documentos de caja (decisión D4). Las desactivadas y las de otra terminal sin terminal
+// elegida se muestran deshabilitadas con el motivo; la que ya estaba elegida se conserva visible aunque haya
+// dejado de servir (Go permite guardar lo demás sin cambiarla). Desde la etapa 9G (fase E) la impresora USB de
+// una terminal sirve y dice en qué terminal está.
+export function receiptPrinterOptions(printers: Printer[], empty = 'Sin asignar'): SelectOption[] {
+  const options: SelectOption[] = [{ value: '', label: empty }];
   for (const printer of printers) {
     let reason = '';
-    if (printer.transport === 'agent') {
+    if (printer.transport === 'agent' && !printer.agent_device_id) {
       reason = 'Esta impresora todavía no puede usarse para imprimir';
     } else if (!printer.active) {
       reason = 'desactivada';
     }
     options.push({
       value: printer.id,
-      label: printer.name,
+      label: printerLabel(printer),
       description: reason || undefined,
       disabled: reason !== '',
     });
@@ -123,6 +141,12 @@ export function PaymentPoliciesForm({
             receipt_printer_id: value.receipt_printer_id,
             refund_authorization_threshold: threshold === '' ? null : threshold,
           };
+          // Etapa 9G (fase E): la impresora de tickets de cada caja solo se envía si se puede elegir.
+          if (printersAllowed) {
+            body.register_printers = Object.entries(value.register_printers).map(
+              ([register_id, printer_id]) => ({ register_id, printer_id: printer_id || null }),
+            );
+          }
           const saved = await execute<PaymentSettings>('payments_save_settings', {
             body: { ...body },
           });
@@ -179,11 +203,85 @@ export function PaymentPoliciesForm({
             </Field>
           )}
         </div>
+        <RegisterPrinters
+          settings={settings}
+          chosen={value.register_printers}
+          printers={printers.data ?? []}
+          editable={printersAllowed}
+          onChange={(register_printers) => setValue({ ...value, register_printers })}
+        />
         <p className="muted text-sm">
           {`Nombre de la precuenta: «${(precheckNames[settings.precheck_name] ?? precheckNames.precheck).label}». Se elige en Administración › Documentos, en «Identidad del establecimiento».`}
         </p>
         <Notice>{printers.error}</Notice>
       </Form>
     </div>
+  );
+}
+
+// Impresora de tickets por caja (etapa 9G, fase E, D10): cada caja puede tener su propia impresora de
+// precuentas, tickets de pago y documentos de caja (por ejemplo, la USB de la Caja 2, que imprime esa terminal);
+// sin una propia, la caja usa la impresora de tickets general. Los documentos salen en la de la caja de la
+// terminal que los pide.
+function RegisterPrinters({
+  settings,
+  chosen,
+  printers,
+  editable,
+  onChange,
+}: {
+  settings: PaymentSettings;
+  chosen: Record<string, string>;
+  printers: Printer[];
+  editable: boolean;
+  onChange: (next: Record<string, string>) => void;
+}) {
+  const registers = settings.register_printers ?? [];
+  if (registers.length === 0) {
+    return null;
+  }
+  const options = receiptPrinterOptions(printers, 'Usar la impresora de tickets general');
+  return (
+    <fieldset className="register-printers">
+      <legend>Impresora de tickets por caja</legend>
+      <p className="muted text-sm">
+        Cada caja puede imprimir en su propia impresora, por ejemplo la impresora USB conectada a la
+        terminal de esa caja. Sin una propia, usa la impresora de tickets general.
+      </p>
+      <div className="form-grid">
+        {registers.map((register) =>
+          editable ? (
+            <Field
+              key={register.register_id}
+              label={`Impresora propia de ${register.register_name}`}
+            >
+              <Select
+                value={chosen[register.register_id] ?? ''}
+                placeholder="Usar la impresora de tickets general"
+                options={options}
+                onChange={(id) => onChange({ ...chosen, [register.register_id]: id })}
+              />
+            </Field>
+          ) : (
+            <Field
+              key={register.register_id}
+              label={`Impresora propia de ${register.register_name}`}
+            >
+              <input
+                readOnly
+                value={
+                  register.printer_name
+                    ? printerLabel({
+                        name: register.printer_name,
+                        terminal_name: register.terminal_name,
+                      })
+                    : 'La impresora de tickets general'
+                }
+              />
+            </Field>
+          ),
+        )}
+      </div>
+    </fieldset>
   );
 }

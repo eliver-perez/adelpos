@@ -18,7 +18,7 @@ Verificado durante la entrega del 7 de noviembre de 2026. Se consultó documenta
 | reqwest                | 0.12.28                  | HTTP nativo restringido para destinos configurables sin abrir CSP; TLS Rustls, sin proxy automático; [documentación](https://docs.rs/reqwest/0.12.28/reqwest/).                 |
 | Vitest                 | 5.1.0                    | Pruebas del contrato/servicio frontend; [guía](https://vitest.dev/guide/).                                                                                                      |
 
-Go estándar cubre HTTP, JSON, logs, configuración, señales y hashing. Las dependencias directas del backend son pgx, decimal, x/crypto, x/term, x/text y, desde la etapa 9A, excelize, fpdf y x/image (fuentes y, desde la etapa 9B, también el escalado del logotipo), detalladas por etapa a continuación. No hay Redis, broker, Docker, ORM, servicio cloud ni framework Go adicional. Rust y paquetes npm son herramientas de compilación; no deben instalarse en cada terminal comercial. Python 3 y Bash se usan únicamente en scripts de desarrollo macOS.
+Go estándar cubre HTTP, JSON, logs, configuración, señales y hashing. Las dependencias directas del backend son pgx, decimal, x/crypto, x/term, x/text y, desde la etapa 9A, excelize, fpdf y x/image (fuentes y, desde la etapa 9B, también el escalado del logotipo), desde la 9E x/sys y desde la 9G x/net, detalladas por etapa a continuación. No hay Redis, broker, Docker, ORM, servicio cloud ni framework Go adicional. Rust y paquetes npm son herramientas de compilación; no deben instalarse en cada terminal comercial. Python 3 y Bash se usan únicamente en scripts de desarrollo macOS.
 
 Otras referencias: [pg_dump y respaldo](https://www.postgresql.org/docs/18/backup-dump.html), [bundle macOS Tauri](https://v2.tauri.app/distribute/macos-application-bundle/), [launchd de Apple](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html).
 
@@ -195,3 +195,35 @@ Lo que incluye el instalador además del código del proyecto: los binarios de P
 licencia), el runtime de Visual C++ (`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll`) copiado de la carpeta
 `VC\Redist\MSVC` de Build Tools (redistribuible de Microsoft), y el instalador de arranque de WebView2. La CLI de Tauri
 2.12.4 descarga al empaquetar NSIS 3.13 y `nsis_tauri_utils` 0.5.3 (comprobado con su hash).
+
+## Etapa 9G
+
+**Sin descargas**: ningún módulo, crate ni paquete npm nuevo entró a los lockfiles. Tres dependencias que ya estaban
+fijadas pasan a ser directas (comprobado con `git diff` desde `main` 0.9.5: solo cambian `backend/go.mod`,
+`desktop/src-tauri/Cargo.toml` y la lista de dependencias del paquete raíz en `Cargo.lock`; `go.sum`, `package.json` y
+`package-lock.json` sin cambios de dependencias). Todo compila y se prueba con `GOPROXY=off` y `cargo … --locked
+--offline`.
+
+| Dependencia        | Versión | Antes                                                   | Para qué en la 9G                                                                                                                                                         |
+| ------------------ | ------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `golang.org/x/net` | 0.60.0  | Indirecta de `excelize` (en `go.sum` y en la caché)     | `dns/dnsmessage` en el cliente DNS-SD de las pruebas de `internal/discovery` (BSD-3-Clause). El servidor no abre ningún socket mDNS propio.                               |
+| `rustls` (Rust)    | 0.23.46 | Transitiva de `reqwest` (en `Cargo.lock` y el registro) | Verificador TLS propio con la huella SPKI fijada (`pairing.rs`), sin las opciones por omisión (que traerían `aws-lc-rs`): `ring`, `std` y `tls12`, como lo usa `reqwest`. |
+| `sha2` (Rust)      | 0.10.9  | Transitiva (en `Cargo.lock` y el registro)              | Huella SPKI, compromiso y código del emparejamiento.                                                                                                                      |
+
+Lo demás de la etapa se hizo con lo que ya había:
+
+- **Anuncio mDNS/DNS-SD**: el Bonjour del sistema con `/usr/bin/dns-sd -R` como proceso hijo (macOS); en Windows, en la
+  Fase W, `DnsServiceRegister` de `dnsapi.dll`, que ya cubren `golang.org/x/sys` y los crates `windows`. Sin
+  respondedor mDNS propio.
+- **Búsqueda mDNS en la terminal** (`discovery.rs`): `std::net::UdpSocket` y un lector propio de mensajes DNS; no hay
+  ningún crate de mDNS en `Cargo.lock`.
+- **Servicio e instalador de macOS**: herramientas del sistema (`pkgbuild`, `productbuild`, `codesign`, `plutil`,
+  `launchctl`) y la CLI de Tauri ya fijada (`tauri.macos-pkg.conf.json`). No se usó `SMAppService` (no hay crate de
+  ServiceManagement en caché y la aplicación está firmada ad hoc). **PostgreSQL 18 no va en el `.pkg`**: el servicio usa
+  el de Homebrew de la computadora; incluirlo exige descargar binarios y queda para la distribución de la etapa 10.
+- **Contrato OpenAPI** (`internal/apicontract`): documento JSON (no hay biblioteca YAML ni de OpenAPI en caché) y un
+  validador propio de un subconjunto de JSON Schema, sin dependencias.
+- **Diálogo de carpeta de respaldos**: `tauri-plugin-dialog` 2.8.3 (ya fijado en la 9A), solo desde Rust.
+- **Agente de impresión** (`print_agent.rs`): `/usr/bin/lpstat`, `/usr/bin/lpoptions` y `/usr/bin/lp` del sistema;
+  base64 y UUID propios y el aleatorio de `ring`/`rustls`. **Respaldos programados**: `pg_dump`/`pg_restore` de la
+  instalación de PostgreSQL, como los respaldos anteriores.

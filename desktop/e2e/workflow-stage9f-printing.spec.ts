@@ -15,7 +15,7 @@ import { chooseOption } from './select';
 // de la aceptación (payments-flow.ts): una cola del equipo que no existe, de modo que nada sale en papel.
 //
 // El nombre «workflow-stage9f-printing» la ordena después de las especificaciones anteriores y antes de
-// «workflow-stage9f-zz-test-data», que quita los datos de prueba al final.
+// «workflow-zz-test-data», que quita los datos de prueba al final.
 
 type Driver = Awaited<ReturnType<typeof installDriver>>;
 

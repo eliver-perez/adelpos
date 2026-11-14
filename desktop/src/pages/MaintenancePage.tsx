@@ -13,6 +13,8 @@ import {
 import type { TestDataEntry, TestDataPreview, TestDataResult } from '../services/maintenance';
 import { errorMessage, notifyError, notifySuccess } from '../services/notify';
 import { countLabel } from '../services/plural';
+import { BackupSection } from './maintenance/BackupSection';
+import { ModalitySection, ServiceSection } from './maintenance/ServerSections';
 
 // Mantenimiento del administrador (etapa 9F, §3): «Quitar datos de prueba». La lista la arma Go con la
 // firma exacta de cada archivo de prueba; la pantalla solo la muestra, pide la confirmación y avisa el
@@ -164,6 +166,10 @@ export function MaintenancePage() {
         title="Mantenimiento"
         description="Tareas del administrador para conservar en orden los datos del restaurante."
       />
+      {/* Etapa 9G (fase A): servicio del servidor y modalidad de esta computadora; (fase F) respaldos. */}
+      <ServiceSection />
+      <BackupSection />
+      <ModalitySection />
       <section
         className="surface panel maintenance-panel"
         aria-labelledby="maintenance-test-data-title"

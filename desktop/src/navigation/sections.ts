@@ -31,6 +31,7 @@ export type ScreenID =
   | 'audit'
   | 'maintenance'
   | 'status'
+  | 'server-status'
   | 'preferences'
   | 'password';
 
@@ -63,6 +64,8 @@ export interface SectionEntry {
   hiddenTile?: boolean;
   // Valor de devices.home_screen que abre esta sección.
   home?: TerminalHome;
+  // Solo existe en la modalidad «Solo servidor» (etapa 9G): la paleta no la ofrece en las demás.
+  serverOnly?: boolean;
 }
 
 export const sections: SectionEntry[] = [
@@ -249,7 +252,8 @@ export const sections: SectionEntry[] = [
     group: 'administration',
     parent: 'system',
     permission: 'settings.manage',
-    description: 'Quitar los datos que dejaron las pruebas automáticas, con un respaldo previo.',
+    description:
+      'Servicio del servidor, respaldos, modalidad de esta computadora y datos de prueba (con un respaldo previo).',
   },
   {
     // §4.1: «Estado del sistema» ya no es una sección ni el inicio; se abre con «Ver estado del
@@ -261,6 +265,15 @@ export const sections: SectionEntry[] = [
     parent: 'settings',
     permission: 'settings.read',
     hiddenTile: true,
+  },
+  {
+    // Etapa 9G (§2.3): pantalla de estado de la modalidad «Solo servidor» (servidor activo, terminales
+    // conectadas y último respaldo). Es el inicio en esa modalidad y no existe en las demás.
+    id: 'server-status',
+    label: 'Estado del servidor',
+    icon: 'server',
+    group: 'personal',
+    serverOnly: true,
   },
   {
     id: 'preferences',

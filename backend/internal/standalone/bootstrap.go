@@ -1,5 +1,3 @@
-//go:build windows
-
 package standalone
 
 import (
@@ -43,7 +41,7 @@ func Prepare(ctx context.Context, cluster *Cluster, databaseName string) (config
 	return cfg, nil
 }
 
-// serverConfig es la configuración de desarrollo de la instalación de prueba: la 9E no requiere licencias
+// serverConfig es la configuración de desarrollo de la instalación: hasta la etapa 10 no hay licencias
 // (licensing solo admite development) y todo escucha en loopback. Los orígenes son los del WebView de
 // Tauri en Windows y macOS.
 func serverConfig(databaseName, password string, port int) config.Config {
@@ -76,7 +74,9 @@ func ensureConfig(layout Layout, databaseName string) error {
 	if err != nil {
 		return err
 	}
-	body, err := json.MarshalIndent(serverConfig(databaseName, password, layout.Port), "", "  ")
+	cfg := serverConfig(databaseName, password, layout.Port)
+	cfg.ListenAddress = layout.serverAddress()
+	body, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}

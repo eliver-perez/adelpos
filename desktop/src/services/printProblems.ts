@@ -10,8 +10,31 @@ import type { NotifyAction } from './notify';
 // «not_found» (revisión 9F, B4): la impresora o su cola no existe en el equipo servidor (cola CUPS
 // desconocida, impresora no instalada o renombrada en Windows); a diferencia de «no responde», reintentar no
 // lo resuelve y el aviso ofrece «Configurar impresora».
+//
+// «agent_offline» (etapa 9G, fase E): la impresora es la USB de otra terminal y esa terminal está apagada, sin red
+// o con la aplicación cerrada; el trabajo espera y se imprime solo cuando la terminal vuelve.
 export type PrintProblem =
-  'unreachable' | 'not_found' | 'inactive' | 'unsupported' | 'setup' | 'uncertain';
+  | 'unreachable'
+  | 'not_found'
+  | 'inactive'
+  | 'unsupported'
+  | 'setup'
+  | 'uncertain'
+  | 'agent_offline';
+
+// Sujeto de la frase de una terminal: «La Caja 2» si su nombre ya dice que es una caja o una terminal, y si no
+// «La terminal Mostrador», para que la frase siempre concuerde («está desconectada»).
+export function terminalSubject(terminalName?: string | null) {
+  const name = terminalName?.trim();
+  if (!name) {
+    return 'La terminal de esta impresora';
+  }
+  const lower = name.toLocaleLowerCase('es');
+  if (lower.startsWith('caja') || lower.startsWith('terminal') || lower.startsWith('computadora')) {
+    return `La ${name}`;
+  }
+  return `La terminal ${name}`;
+}
 
 // Qué impresora: la de caja (precuentas, tickets y documentos de caja, la «Impresora de tickets» de
 // Cobros) o cualquier otra (comandas, pruebas y muestras, por su nombre).
@@ -27,8 +50,11 @@ export function printProblemMessage(
   problem: string | null | undefined,
   printerName?: string | null,
   role: PrinterRole = 'other',
+  terminalName?: string | null,
 ): string {
   switch (problem) {
+    case 'agent_offline':
+      return `${terminalSubject(terminalName)} está desconectada.`;
     case 'unreachable':
       return role === 'cash'
         ? 'La impresora de caja no responde.'
@@ -53,6 +79,8 @@ export function printProblemMessage(
 export function printProblemHint(problem: string | null | undefined, printerName?: string | null) {
   const name = printerName?.trim();
   switch (problem) {
+    case 'agent_offline':
+      return 'Se imprimirá sola cuando esa terminal esté encendida, con AD-EL POS abierto y conectada; no hace falta reintentar.';
     case 'unreachable':
       return `Revisa que ${name ? `la impresora ${name}` : 'la impresora'} esté encendida, con papel y conectada, y toca «Reintentar».`;
     case 'uncertain':

@@ -66,6 +66,14 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if removal, ok := result.(*testDataRemoval); ok {
 		return service.removeTestData(ctx, removal)
 	}
+	// Reinicio del servicio (etapa 9G, fase A): se programa ya auditado (service_host.go).
+	if _, ok := result.(*serviceRestart); ok {
+		return service.completeRestart()
+	}
+	// «Respaldar ahora» (etapa 9G, fase F): el respaldo corre después de confirmar la autenticación (backups.go).
+	if pending, ok := result.(*backupNow); ok {
+		return service.runBackupNow(ctx, pending)
+	}
 	pending, ok := result.(*reportPlan)
 	if !ok {
 		return result, nil

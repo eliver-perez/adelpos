@@ -1,10 +1,10 @@
-# Desarrollo macOS · Etapa 7
+# Desarrollo macOS · Etapa 9G
 
 ## Entorno preparado
 
 Mac Apple Silicon arm64, macOS 26.5.2 y Command Line Tools. Herramientas locales: Go 1.27.3, Node 24.22.2 y Rust 1.99.1 en `.tools`. `scripts/dev.sh` selecciona sus rutas y cachés sin sustituir Go/Node globales. PostgreSQL 18.6 está instalado por Homebrew; el proyecto utiliza exclusivamente `.local/postgres`, puerto 55432, autenticación SCRAM y rol `adel_app` sin privilegios de superusuario.
 
-No se inicia el clúster predeterminado de Homebrew, no se sustituyen bases ajenas y no hay launchd instalado. Tras reiniciar macOS se deben iniciar PostgreSQL y Go explícitamente. La ejecución local no necesita Internet; descargar dependencias sí.
+No se inicia el clúster predeterminado de Homebrew y no se sustituyen bases ajenas. En desarrollo (y en la instalación real hasta pasar sus datos al servicio de la etapa 9G) no hay launchd instalado: tras reiniciar macOS se deben iniciar PostgreSQL y Go explícitamente. Desde la 9G la computadora principal instalada con el `.pkg` tiene el servidor como servicio del sistema (ver «Servidor del restaurante como servicio · etapa 9G» al final). La ejecución local no necesita Internet; descargar dependencias sí.
 
 ## Preparación en otro Mac
 
@@ -80,11 +80,13 @@ ADEL_TERMINAL_CONFIG="$PWD/.local/terminal-second.json" \
   "desktop/src-tauri/target/release/bundle/macos/AD-EL POS.app/Contents/MacOS/ad-el-pos-desktop"
 ```
 
-En la primera ventana: Terminales → Autorizar otra terminal. Introducir el código y un nombre en la segunda ventana antes de diez minutos. Luego iniciar sesión. El código no crea una sesión automáticamente. Si se usa admin en la segunda, se invalida la sesión admin anterior; la primera ventana lo informa en su siguiente comprobación y sus operaciones ya son rechazadas por Go.
+En la primera ventana: Terminales → Código para esta computadora (hasta la 9F, «Autorizar otra terminal»; desde la 9G el código de 43 caracteres solo sirve en la propia computadora, que es el caso de un segundo perfil en el mismo Mac; una terminal de otra computadora se empareja con el código de 6 dígitos). Introducir el código y un nombre en la segunda ventana antes de diez minutos. Luego iniciar sesión. El código no crea una sesión automáticamente. Si se usa admin en la segunda, se invalida la sesión admin anterior; la primera ventana lo informa en su siguiente comprobación y sus operaciones ya son rechazadas por Go.
 
 `credential_namespace` debe diferir entre terminales lógicas en un mismo usuario OS. Cambiarlo selecciona otra identidad local; no autoriza nada por sí mismo. No copiar secretos del Keychain entre equipos. La segunda terminal no necesita Go ni PostgreSQL locales.
 
-## LAN con TLS
+## LAN con TLS (camino anterior a la etapa 9G)
+
+Desde la etapa 9G las terminales de otra computadora se **emparejan con código** contra la escucha HTTPS `:8443` del servicio, con el certificado propio del servidor fijado por huella (ver la sección de la 9G y [docs/INSTALAR_EN_RED.md](docs/INSTALAR_EN_RED.md)). Lo que sigue (`tls-init`, IP fija, `allow_lan`, CA copiada a la terminal) se conserva sin cambios y sin uso.
 
 La URL HTTP solo admite loopback. Para LAN utilizar una IP privada específica y HTTPS. Generación local de certificados, sin modificar confianza global:
 
@@ -136,7 +138,7 @@ El `.app` ARM64 declara macOS 14 mínimo; solo se probó macOS 26.5.2. No se gen
 
 Antes de migraciones sobre información importante, respaldar y restaurar en una base temporal distinta. `backup` genera pg_dump custom y comprueba el catálogo con pg_restore --list; no sustituye probar una restauración completa. Nunca editar checksums ni migraciones aplicadas para ocultar una incompatibilidad.
 
-La plantilla launchd no está instalada. Un LaunchAgent depende de la sesión; para servicio comercial sin login se diseñará un LaunchDaemon con usuario y directorios propios. No iniciar simultáneamente launchd y server-start en el mismo puerto.
+Hasta la etapa 9F la plantilla launchd no se instalaba. Desde la 9G el `.pkg` instala el LaunchDaemon `local.adel.pos.server` (sección de la 9G). No iniciar simultáneamente el servicio y `server-start` en el mismo puerto: tras pasar los datos al servicio, los comandos de `dev.sh` que actúan sobre la base ya no son la instalación real.
 
 Errores habituales: servidor desconectado → revisar status/log y URL; DB no disponible → db-start/puerto 55432; esquema incompatible → migrate con el binario correcto; credencial inválida → login o nueva autorización de terminal; fallo de Keychain → revisar acceso OS, sin borrar datos; fallo TLS → CA/SAN/fecha/IP correctos, sin desactivar validación. Un entorno aislado de agente puede necesitar permiso para puertos, memoria compartida y apertura de la aplicación.
 
@@ -221,3 +223,77 @@ relleno inicial reconoce las cuentas ya cerradas y los 10 permisos `reports.*` s
 `applied:0`, readiness 200, `/api/v1/version` 0.9.0 y esquema 17, 127 tablas en `app`, conteos de datos existentes sin
 cambio, relleno de las 2 cuentas cerradas (9 renglones, $695.00) y servidor y `.app` 0.9.0. El recorrido en la ventana
 nativa no se verificó.
+
+## Servidor del restaurante como servicio · etapa 9G
+
+Decisiones D3, D4 y D14 de [docs/ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md); guía para el propietario en
+[docs/INSTALAR_EN_RED.md](docs/INSTALAR_EN_RED.md).
+
+**Instalador.** `./scripts/dev.sh build-macos-pkg [--reuse-app]` compila la aplicación con el servidor dentro
+(`desktop/src-tauri/tauri.macos-pkg.conf.json`: `Contents/MacOS/ad-el-pos-server`), firma ad hoc la copia como paquete
+completo, la verifica con `codesign --verify --deep --strict` y arma
+`desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_<versión>.pkg` con `pkgbuild` y `productbuild`
+(`scripts/macos-pkg/`). **No instala nada.** Tres paquetes: la aplicación en `/Applications` (siempre, no reubicable;
+`preinstall` detiene el servicio anterior), «Servidor del restaurante» (marcada por omisión: exige PostgreSQL 18 de
+Homebrew, crea la carpeta de datos de la cuenta que instala, guarda la modalidad y crea el archivo de habilitación;
+desmarcarla es «Solo terminal») y el servicio (siempre, invisible: escribe el plist con la cuenta de la consola, lo
+valida con `plutil` y lo carga con `launchctl bootstrap system`). Los scripts se prueban sin root con
+`scripts/macos-pkg/test-scripts.sh` (`ADEL_PKG_TEST_ROOT` y `ADEL_PKG_TEST_LAUNCHCTL`). Sin firma de desarrollador ni
+notarización; la arquitectura del instalador es la compilada (arm64).
+
+**Servicio.** El LaunchDaemon `local.adel.pos.server` (plantilla `ops/launchd/local.adel.pos.server.plist`) corre
+`ad-el-pos-server host --data-dir "/Library/Application Support/AD-EL POS"` con la cuenta de quien instaló,
+`RunAtLoad`, `KeepAlive` → `PathState` del archivo `service-enabled`, `ThrottleInterval` 10, `ExitTimeOut` 90, `Umask`
+077 y bitácoras en `logs/`. El `host` no hace nada sin el archivo de habilitación o en «Solo terminal»; si no, toma
+`host.lock`, crea o adopta el clúster propio (127.0.0.1:55432, PostgreSQL de Homebrew), respalda antes de migrar, migra,
+sirve en `127.0.0.1:8181` y en `:8443` (escucha HTTPS de la red local) y se anuncia en la red. Cerrar la ventana no lo
+detiene; la aplicación solo crea o quita el archivo de habilitación al cambiar la modalidad, y «Reiniciar» de
+Mantenimiento hace que launchd lo relance. Estado: Mantenimiento › «Servicio del servidor»; sin ventana:
+`launchctl print system/local.adel.pos.server` y `logs/server.log` (solo lectura).
+
+**Hasta que el propietario instale el `.pkg` y se pasen los datos, la instalación real de este Mac sigue siendo la de
+`.local` con `dev.sh`** (secciones anteriores). El paso es una parada con el propietario (ventana de la contraseña de
+administrador, aviso «Elementos en segundo plano añadidos», posible diálogo del Llavero y reinicio) y sigue el
+procedimiento del avance (Fase A, «Procedimiento para la Fase G»):
+
+1. `./scripts/dev.sh build-macos-pkg` (anotar el SHA-256).
+2. `./scripts/dev.sh backup` y `python3 scripts/restore-check.py backups/<archivo>`, con la comprobación de solo lectura.
+3. `./scripts/dev.sh server-stop` (PostgreSQL de `.local` sigue en marcha) y cerrar la aplicación anterior.
+4. Instalar el `.pkg` **desmarcando «Servidor del restaurante»** (solo esta primera vez, para que el servicio no cree
+   una base vacía).
+5. `"/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server" adopt-legacy --from-config "<repositorio>/.local/server.json"`
+   (sin `sudo`): respaldo, clúster nuevo en un puerto temporal, restauración y conteos idénticos de todas las tablas
+   (`legacy-adopted.json`). Nunca modifica `.local`.
+6. `./scripts/dev.sh db-stop`.
+7. Abrir la aplicación instalada y elegir «Servidor y terminal»: launchd lanza el servicio, que respalda antes de migrar,
+   aplica las migraciones pendientes (la 0023, si no se aplicó antes) y sirve.
+8. Verificar `health/ready` y `version`, Mantenimiento › «Servicio del servidor», cerrar la ventana (el servidor sigue),
+   «Reiniciar» y reiniciar la Mac sin iniciar sesión.
+
+**Estado (14/11/2026)**: la 0023 y la 0.10.0 ya se aplicaron a la instalación de `.local` (respaldo
+`backups/adel_pos-20261114T060151Z-ec289c.dump`); instalar el `.pkg` y pasar los datos queda pendiente del propietario. Como la aplicación
+0.10.0 ya guardó su modalidad, para habilitar el servidor en el paso 7 se deja marcada «Servidor del restaurante» al
+volver a ejecutar el instalador después de pasar los datos, o se quita `connection.json` antes de abrir la aplicación
+instalada.
+
+**Después de pasar los datos** el servicio es la instalación real: **no usar** `dev.sh db-start`, `server-start`,
+`server`, `migrate`, `backup`, `restore-check.py`, `test-integration` ni `test-browser` con ella (actúan sobre la base
+de `.local`, que queda como copia histórica, o necesitan su clúster en 55432, que ahora es el del servicio); para probar,
+el procedimiento aislado de `CLAUDE.md` §6. Comandos del servidor instalado:
+
+```bash
+SERVER="/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server"
+"$SERVER" backup                          # respaldo en /Library/Application Support/AD-EL POS/backups
+"$SERVER" restore-check --file <respaldo> # ensayo en una base temporal
+"$SERVER" restore --file <respaldo>       # pausa el servicio, respaldo de seguridad, restaura y lo reanuda
+```
+
+Además del respaldo manual, el servidor hace un **respaldo automático diario** (Mantenimiento › Respaldos; también con
+`serve`, en `backup_directory` o `backups/` junto a la configuración). Desinstalar el servicio, si hiciera falta (pide
+contraseña; lo hace el propietario): `sudo launchctl bootout system/local.adel.pos.server` y borrar
+`/Library/LaunchDaemons/local.adel.pos.server.plist`; los datos se conservan.
+
+**Red en desarrollo.** Con `serve`, la escucha de red solo se abre con `"network_listen_address": ":8443"` en
+`.local/server.json` (nunca en los ejemplos de `config/`, que copian las pruebas); la identidad del servidor de
+desarrollo vive en `.local/identity`. El permiso «Red local» de macOS se pide a la aplicación al buscar o conectarse a
+un servidor de la red (con firma ad hoc puede volver a pedirse en cada compilación); el anuncio lo hace mDNSResponder.

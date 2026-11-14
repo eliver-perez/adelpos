@@ -71,8 +71,11 @@ type Plan struct {
 	deleteCategories     []string
 	deactivateCategories []string
 	// Categorías de prueba que no se conservan (se eliminan, se desactivan o ya estaban inactivas).
-	testCategories   []string
-	receiptPrinter   bool
+	testCategories []string
+	receiptPrinter bool
+	// registerReceipts son las cajas cuya impresora de tickets propia era de prueba (etapa 9G, fase E, D10): vuelven a
+	// la impresora de tickets general.
+	registerReceipts []string
 	drawerRegisters  []string
 	fallbackPrinters []string
 	deviceLinks      bool
@@ -103,6 +106,8 @@ var (
 		{table: "kitchen_stations", column: "printer_id"}:         true,
 		{table: "payment_settings", column: "receipt_printer_id"}: true,
 		{table: "cash_drawer_settings", column: "printer_id"}:     true,
+		// Etapa 9G (fase E): impresora de tickets propia de una caja.
+		{table: "register_receipt_printers", column: "printer_id"}: true,
 	}
 	productHandled = map[reference]bool{
 		{table: "catalog_variants", column: "product_id"}:            true,
@@ -690,7 +695,26 @@ func (builder *planBuilder) decidePrinterSettings(printer printerRow) error {
 			Reason: fmt.Sprintf("Era «%s»; queda sin impresora de tickets hasta que elijas una.", printer.Name),
 		})
 	}
-	rows, err := builder.tx.Query(builder.ctx, `SELECT r.id::text, r.name FROM app.cash_drawer_settings d
+	// Etapa 9G (fase E, D10): una caja cuya impresora de tickets propia es de prueba vuelve a la general.
+	rows, err := builder.tx.Query(builder.ctx, `SELECT r.id::text, r.name FROM app.register_receipt_printers rp
+        JOIN app.registers r ON r.id = rp.register_id WHERE rp.printer_id = $1::uuid ORDER BY r.name, r.id`, printer.ID)
+	if err != nil {
+		return err
+	}
+	receipts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[namedRow])
+	if err != nil {
+		return err
+	}
+	for _, register := range receipts {
+		plan.registerReceipts = append(plan.registerReceipts, register.ID)
+		plan.Unlink = append(plan.Unlink, Entry{
+			Kind:   KindSetting,
+			ID:     "register-receipt:" + register.ID,
+			Name:   fmt.Sprintf("Impresora de tickets de «%s»", register.Name),
+			Reason: fmt.Sprintf("Era «%s»; la caja vuelve a la impresora de tickets general.", printer.Name),
+		})
+	}
+	rows, err = builder.tx.Query(builder.ctx, `SELECT r.id::text, r.name FROM app.cash_drawer_settings d
         JOIN app.registers r ON r.id = d.register_id WHERE d.printer_id = $1::uuid ORDER BY r.name, r.id`, printer.ID)
 	if err != nil {
 		return err

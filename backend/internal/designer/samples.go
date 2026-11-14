@@ -93,6 +93,8 @@ const (
 	compatibilityUnavailable = "queue_unavailable"
 	compatibilityTimeout     = "queue_timeout"
 	compatibilityAgent       = "agent"
+	// compatibilityTerminal: la impresora USB de una terminal recibe ESC/POS sin alterar por su agente (etapa 9G).
+	compatibilityTerminal = "terminal_agent"
 )
 
 // PrinterCompatibility es una impresora activa con lo que puede imprimir del diseñador. Columns son
@@ -172,7 +174,13 @@ func printerCompatibility(ctx context.Context, inspector kitchen.QueueInspector,
 		}
 		return cupsCompatibility(ctx, inspector, printer)
 	}
-	return Compatibility{Status: "unsupported", Code: compatibilityAgent, Reason: "El agente de impresión aún no existe."}
+	// Etapa 9G (fase E): la impresora USB de una terminal recibe los mismos bytes ESC/POS que una impresora de red,
+	// por la cola de esa computadora en modo raw (su cola se eligió entre las que admiten datos sin convertir).
+	if printer.AgentPrinter() {
+		return Compatibility{Status: "supported", Code: compatibilityTerminal,
+			Reason: "La impresora recibe los comandos ESC/POS sin alterar por medio de su terminal; el resultado en papel es una prueba física pendiente."}
+	}
+	return Compatibility{Status: "unsupported", Code: compatibilityAgent, Reason: "Esta impresora no tiene una terminal asignada."}
 }
 
 // windowsQueueCompatibility aplica la regla de la cola de impresión de Windows (etapa 9E): la

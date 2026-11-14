@@ -272,3 +272,23 @@ Etapa 9A (parte A1): `operations/stage9a_test.go`, encadenada al final de `TestR
   la mesa ya se llama así (sin distinguir mayúsculas ni acentos; «Mesón 3» sigue siendo «Mesa Mesón 3»).
 - **Huella idempotente**: la de los cobros ya no depende de la contraseña de la autorización de un supervisor, la escriba
   el cliente con las mayúsculas que sea, en cualquier nivel del cuerpo.
+
+## Impresora de tickets por caja · etapa 9G
+
+Fase E de la etapa 9G (decisión D10; detalle en [KITCHEN_AND_PRINTING.md](KITCHEN_AND_PRINTING.md), «Impresión con
+varias terminales»). Migración: sección E de la 0023 (`register_receipt_printers`).
+
+- En **Cobros › Políticas de cobro**, «Impresora de tickets por caja» elige para cada caja una «Impresora propia de
+  <caja>» o «Usar la impresora de tickets general» (por omisión). `GET/PUT payments/settings` con `register_printers`
+  (sin el campo no cambia nada; `null` = la general), misma validación que la impresora general y auditoría en
+  `payments.settings_changed`.
+- Precuentas, tickets de pago, documentos de caja y sus reintentos y reimpresiones salen en la impresora propia **de la
+  caja de la terminal que los pide** («el papel sale donde estás»); una terminal sin caja o una caja sin impresora
+  propia usa la general, como antes.
+- **La impresora USB de una terminal ya es válida** para tickets y para el cajón (en la 9F una impresora de tipo
+  agente se rechazaba); una de tipo agente **sin** terminal sigue sin poder elegirse
+  (`422 RECEIPT_PRINTER_UNAVAILABLE`). Si esa terminal está apagada, el documento espera y la lista de documentos de la
+  cuenta y los de Caja dicen «La Caja 2 está desconectada.» (`job_problem: "agent_offline"`, con `terminal_name`), sin
+  «Reintentar»: sale solo al volver.
+- «Quitar datos de prueba» devuelve a la general una caja cuya impresora propia era de prueba.
+- **Sin verificar**: papel, logotipo y cajón reales por la USB de otra terminal.

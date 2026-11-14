@@ -1,0 +1,10 @@
+#!/bin/bash
+# Paquete de la aplicación (siempre se instala): antes de reemplazar AD-EL POS.app se detiene el servicio
+# anterior, que ejecuta el servidor de dentro de la aplicación. Go se cierra en orden y detiene PostgreSQL;
+# los datos no se tocan. El postinstall del paquete del servicio lo vuelve a cargar.
+set -euo pipefail
+# shellcheck source=../common.sh
+source "$(/usr/bin/dirname "$0")/common.sh"
+
+adel_stop_service
+exit 0

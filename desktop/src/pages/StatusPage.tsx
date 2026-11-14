@@ -2,6 +2,10 @@ import { Accordion } from '../components/Accordion';
 import { PageTitle } from '../components/Forms';
 import { StatusCard } from '../components/StatusCard';
 import { useConnection } from '../hooks/useConnection';
+import { useLiveResource } from '../hooks/useLiveResource';
+import { lastBackupCard } from '../services/backups';
+import type { BackupSummary } from '../services/backups';
+import { modeLabels } from '../services/installation';
 import { plainStatus } from '../services/systemStatus';
 import type { CheckState } from '../services/systemStatus';
 import product from '../generated/product.json';
@@ -11,6 +15,29 @@ const cardState: Record<CheckState, 'good' | 'warning' | 'neutral'> = {
   problem: 'warning',
   pending: 'neutral',
 };
+
+// Último respaldo del servidor (etapa 9G, fase F).
+function BackupStatusCard() {
+  const summary = useLiveResource<BackupSummary>('maintenance_backups_status', {
+    interval: 30000,
+  });
+  const card = summary.data
+    ? lastBackupCard(summary.data.last_backup)
+    : {
+        value: summary.error ? 'Sin respuesta' : 'Comprobando…',
+        description: 'El respaldo diario de la base de datos.',
+        state: 'neutral' as const,
+      };
+  return (
+    <StatusCard
+      icon="database"
+      label="Último respaldo"
+      value={card.value}
+      description={card.description}
+      state={card.state}
+    />
+  );
+}
 
 // Estado del sistema (etapa 9C, §4.1): ya no es una sección del menú ni la primera pantalla; se abre
 // con «Ver estado del sistema» en Sistema → Configuración y, antes de iniciar sesión, desde el
@@ -46,7 +73,9 @@ export function StatusPage({ support = false }: { support?: boolean }) {
         <strong>{status.summary}</strong>
         {status.advice && <p>Qué hacer: {status.advice}</p>}
       </div>
-      <div className="my-6 grid gap-4 sm:grid-cols-3">
+      <div
+        className={`my-6 grid gap-4 ${support ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-3'}`}
+      >
         <StatusCard
           icon="server"
           label="Servidor"
@@ -86,6 +115,9 @@ export function StatusPage({ support = false }: { support?: boolean }) {
           }
           state={cardState[status.versionMatches]}
         />
+        {/* Etapa 9G (fase F): último respaldo, si fue correcto y dónde está (solo para quien administra la
+            configuración, como «Información para soporte»). */}
+        {support && <BackupStatusCard />}
       </div>
       {support && (
         <Accordion
@@ -104,17 +136,11 @@ export function StatusPage({ support = false }: { support?: boolean }) {
             </div>
             <div className="detail-row">
               <dt>Servidor</dt>
-              <dd className="font-mono">{config?.server_url ?? 'Sin configurar'}</dd>
+              <dd className="font-mono">{config?.server_url || 'Sin configurar'}</dd>
             </div>
             <div className="detail-row">
               <dt>Instalación</dt>
-              <dd>
-                {config
-                  ? config.installation_mode === 'terminal-only'
-                    ? 'Solo terminal'
-                    : 'Servidor + terminal'
-                  : 'Sin verificar'}
-              </dd>
+              <dd>{config ? modeLabels[config.installation_mode] : 'Sin verificar'}</dd>
             </div>
             <div className="detail-row">
               <dt>Aplicación</dt>
