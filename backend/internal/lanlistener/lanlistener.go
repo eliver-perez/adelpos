@@ -38,6 +38,12 @@ func FromNetwork(request *http.Request) bool {
 	return marked
 }
 
+// WithNetwork marca un contexto como «llegó por la escucha de red». Lo usa la propia escucha (Listen) y las
+// pruebas de las rutas que se comportan distinto por la red (etapa 9G, fase C: versión del cliente obligatoria).
+func WithNetwork(ctx context.Context) context.Context {
+	return context.WithValue(ctx, networkKey{}, true)
+}
+
 // AllowedPeer indica si una dirección de origen puede conectarse: loopback, privada (RFC 1918 y ULA
 // fc00::/7) o de enlace local (169.254.0.0/16 y fe80::/10). Las direcciones IPv4 mapeadas en IPv6 se
 // evalúan como IPv4. Todo lo demás (Internet, CGNAT 100.64.0.0/10, multidifusión, sin especificar) no.
@@ -113,7 +119,7 @@ func Listen(address string, certificate tls.Certificate, handler http.Handler) (
 		return nil, errors.New("no se pudo abrir la escucha segura de la red local; compruebe que el puerto esté libre")
 	}
 	marked := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		handler.ServeHTTP(writer, request.WithContext(context.WithValue(request.Context(), networkKey{}, true)))
+		handler.ServeHTTP(writer, request.WithContext(WithNetwork(request.Context())))
 	})
 	server := &http.Server{
 		Handler:           marked,
