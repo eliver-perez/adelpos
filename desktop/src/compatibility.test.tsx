@@ -4,6 +4,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import product from './generated/product.json';
+import { serverTerminalInstallation } from './testing/installation';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -30,6 +31,9 @@ beforeEach(() => {
     }
     if (command === 'connection_config') {
       return { installation_mode: 'server-terminal', server_url: 'http://127.0.0.1:8181' };
+    }
+    if (command === 'installation_state') {
+      return serverTerminalInstallation;
     }
     if (command === 'server_snapshot') {
       return {
