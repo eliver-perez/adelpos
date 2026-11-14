@@ -9322,3 +9322,15 @@ th[aria-sort='descending'] {
 .connection-lost-retry {
   font-size: 13px;
 }
+
+/* Revisión de la fase B (9G): avisos de Terminales (identidad dañada, tope de solicitudes, solicitudes abandonadas). */
+.pairing-alert {
+  padding: 10px 14px;
+  border: 1px solid var(--warning-mark);
+  border-radius: 10px;
+  background: var(--warning-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}

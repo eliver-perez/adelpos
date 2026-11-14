@@ -41,15 +41,22 @@ import (
 //  4. T consulta el estado con su secreto y, aprobada la solicitud, reclama una sola vez su credencial de
 //     dispositivo (POST pairing/requests/{id}/claim), que Rust guarda en el almacén seguro.
 //
-// Por qué el compromiso impide que un intermediario M ajuste los números: M está entre T y S y tiene dos
-// códigos que igualar, el que T calcula con la huella de M (código_T = H(F_M ‖ nT ‖ nS' ‖ id')) y el que S
-// calcula con la suya (código_S = H(F_S ‖ nT' ‖ nS ‖ id)). Sin compromiso, M esperaría a conocer nT y nS y
-// probaría valores de nS' (un millón de intentos bastan) hasta que los dos códigos coincidieran. Con el
-// compromiso: T no revela nT hasta haber recibido nS', así que M elige nS' sin conocer nT, y S no entrega nS
-// hasta haber recibido el compromiso de nT', así que M fija nT' sin conocer nS. Cuando M conoce código_S
-// ya no puede cambiar nada que afecte a código_T, que sigue dependiendo de nT, desconocido para M al elegir
-// nS': su probabilidad de acertar es una en un millón por solicitud, y cada solicitud admite 5 códigos
-// escritos y vence en 5 minutos.
+// Qué protege el compromiso y qué no (revisión independiente, hallazgo 1). M está entre T y S y debe igualar
+// dos códigos: el que T calcula con la huella de M (código_T = H(F_M ‖ nT ‖ nS' ‖ id')) y el que S calcula con
+// la suya (código_S = H(F_S ‖ nT' ‖ nS ‖ id)). El compromiso impide ajustar los números dentro de una misma
+// solicitud: T no revela nT hasta recibir nS', así que M fija nS' sin conocer nT; y S no entrega nS hasta
+// recibir el compromiso de nT'. Pero en cuanto T revela nT, código_T queda fijo y M lo conoce, y M sí puede
+// abrir muchas solicitudes en S: cada una le da un nS nuevo con el que calcula sin conexión el código_S que
+// esperaría S, y si no coincide la abandona (la cancela o la deja vencer) y prueba otra. Cada solicitud es un
+// intento con probabilidad 1/10⁶, así que la seguridad real la da cuántas solicitudes acepta S: hay un
+// tope global de pairingGlobalLimit solicitudes creadas por ventana de pairingWindow, sin importar su estado
+// ni su origen (las canceladas y rechazadas siguen contando), además del límite por grupo de origen (la IPv4,
+// el /64 de una IPv6 y todo el enlace local como un solo grupo). Con 30 cada 10 minutos, M tiene como máximo
+// 30 intentos por cada 10 minutos que el administrador tarde en escribir el código: probabilidad ≤ 3×10⁻⁵ por
+// ventana (antes del tope, unas 3 000 pruebas en 3 s, del orden de 1–5 % por emparejamiento). Además, cada
+// intento abandonado queda a la vista: Terminales muestra en la computadora principal cuántas solicitudes se
+// cancelaron, rechazaron o vencieron sin aprobarse en la última ventana y si se alcanzó el tope (y el Registro de
+// movimientos lo anota una vez por ventana).
 
 const (
 	// pairingLifetime: el código vence a los 5 minutos (D5); aprobada la solicitud, la terminal tiene
@@ -57,10 +64,12 @@ const (
 	pairingLifetime = 5 * time.Minute
 	// pairingAttempts: 5 códigos incorrectos rechazan la solicitud.
 	pairingAttempts = 5
-	// Límite de solicitudes por dirección de origen y de solicitudes abiertas en todo el servidor.
+	// Límites (hallazgo 1 de la revisión): en cada ventana de 10 minutos, 5 solicitudes por grupo de origen y
+	// 30 en total, cuente su estado lo que cuente. pairingRetention: el trabajador de limpieza borra por lotes
+	// las de más de 7 días (pairing_cleanup.go).
 	pairingPerSource       = 5
-	pairingSourceWindow    = 10 * time.Minute
-	pairingOpenLimit       = 20
+	pairingWindow          = 10 * time.Minute
+	pairingGlobalLimit     = 30
 	pairingRetention       = 7 * 24 * time.Hour
 	pairingCodeDigits      = 6
 	pairingCodeModulus     = 1000000
@@ -164,7 +173,7 @@ const pairingStateSQL = `CASE WHEN r.state IN ('pending','approved') AND r.expir
 // pairing/requests y pairing/requests/{id}[/reveal|/claim|/cancel|/name].
 func (service *Service) pairingPublic(ctx context.Context, tx pgx.Tx, request Request, route string) (any, error) {
 	if service.Identity == nil {
-		return nil, pairingFault(503, "PAIRING_UNAVAILABLE", "Este servidor todavía no puede emparejar terminales.")
+		return nil, pairingUnavailable(service)
 	}
 	parts := strings.Split(route, "/")
 	if len(parts) < 2 || parts[1] != "requests" {
@@ -233,27 +242,26 @@ func (service *Service) createPairingRequest(ctx context.Context, tx pgx.Tx, req
 	if err != nil {
 		return nil, err
 	}
-	// Las solicitudes se crean de una en una: así los límites por origen y de solicitudes abiertas se
-	// cuentan sin carreras. Es una operación poco frecuente y la transacción es corta.
+	// Las solicitudes se crean de una en una: así los límites se cuentan sin carreras. Es una operación poco
+	// frecuente y la transacción es corta: los dos conteos recorren solo la ventana (índices por created_at y
+	// por grupo de origen), acotada por el propio tope global.
 	if _, err := tx.Exec(ctx, "LOCK TABLE app.device_pairing_requests IN SHARE ROW EXCLUSIVE MODE"); err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM app.device_pairing_requests WHERE created_at < now() - $1::interval", pairingRetention.String()); err != nil {
-		return nil, err
-	}
-	var recent, open int
+	group := SourceGroup(source)
+	var recentGroup, recentAll int
 	err = tx.QueryRow(ctx, `SELECT
-            count(*) FILTER (WHERE source_address = $1::inet AND created_at > now() - $2::interval),
-            count(*) FILTER (WHERE state IN ('pending','approved') AND expires_at > now())
-        FROM app.device_pairing_requests`, source.String(), pairingSourceWindow.String()).Scan(&recent, &open)
+            (SELECT count(*) FROM app.device_pairing_requests WHERE source_group = $1 AND created_at > now() - $2::interval),
+            (SELECT count(*) FROM app.device_pairing_requests WHERE created_at > now() - $2::interval)`,
+		group, pairingWindow.String()).Scan(&recentGroup, &recentAll)
 	if err != nil {
 		return nil, err
 	}
-	if recent >= pairingPerSource {
-		return nil, pairingFault(429, "PAIRING_RATE_LIMITED", "Esta terminal ya pidió varios códigos. Espera unos minutos antes de intentarlo de nuevo.")
+	if recentAll >= pairingGlobalLimit {
+		return nil, pairingLimitReached(ctx, tx)
 	}
-	if open >= pairingOpenLimit {
-		return nil, pairingFault(429, "PAIRING_BUSY", "Hay demasiadas solicitudes de terminales pendientes. Revísalas en la computadora principal e inténtalo más tarde.")
+	if recentGroup >= pairingPerSource {
+		return nil, pairingFault(429, "PAIRING_RATE_LIMITED", "Esta terminal ya pidió varios códigos. Espera unos minutos antes de intentarlo de nuevo.")
 	}
 	serverNonce := make([]byte, 32)
 	if _, err := rand.Read(serverNonce); err != nil {
@@ -262,17 +270,14 @@ func (service *Service) createPairingRequest(ctx context.Context, tx pgx.Tx, req
 	secret := NewToken()
 	expires := time.Now().Add(pairingLifetime)
 	var requestID string
+	// La creación no se audita (una terminal que pide y cancela sin revelar su número no deja movimientos):
+	// el Registro de movimientos anota la solicitud cuando la terminal revela su número y puede aprobarse.
 	err = tx.QueryRow(ctx, `INSERT INTO app.device_pairing_requests(proposed_name,device_kind,os,app_version,source_address,
-            secret_hash,terminal_commitment,server_nonce,server_fingerprint,expires_at)
-        VALUES ($1,$2,$3,$4,$5::inet,$6,$7,$8,$9,$10) RETURNING id`,
-		name, input.DeviceKind, system, version, source.String(), TokenHash(secret), input.Commitment,
+            source_group,secret_hash,terminal_commitment,server_nonce,server_fingerprint,expires_at)
+        VALUES ($1,$2,$3,$4,$5::inet,$6,$7,$8,$9,$10,$11) RETURNING id`,
+		name, input.DeviceKind, system, version, source.String(), group, TokenHash(secret), input.Commitment,
 		hex.EncodeToString(serverNonce), hex.EncodeToString(service.Identity.Fingerprint[:]), expires).Scan(&requestID)
 	if err != nil {
-		return nil, err
-	}
-	if err := auditPairing(ctx, tx, "device.pairing_requested", requestID, map[string]any{
-		"name": name, "device_kind": input.DeviceKind, "os": system, "app_version": version,
-	}); err != nil {
 		return nil, err
 	}
 	return map[string]any{
@@ -284,6 +289,56 @@ func (service *Service) createPairingRequest(ctx context.Context, tx pgx.Tx, req
 		"server_name":    establishment,
 		"name":           name,
 	}, nil
+}
+
+// SourceGroup es el grupo de origen del límite por terminal: la IPv4 exacta, el prefijo /64 de una IPv6 (una
+// terminal puede tomar cualquier dirección de su /64) y todo el enlace local (169.254.0.0/16 y fe80::/10) como un
+// solo grupo, porque ahí cada equipo elige direcciones a voluntad.
+func SourceGroup(address net.IP) string {
+	if v4 := address.To4(); v4 != nil {
+		if v4.IsLinkLocalUnicast() {
+			return "link-local"
+		}
+		return "v4:" + v4.String()
+	}
+	if address.IsLinkLocalUnicast() {
+		return "link-local"
+	}
+	prefix := address.Mask(net.CIDRMask(64, 128))
+	return "v6:" + prefix.String() + "/64"
+}
+
+// pairingLimitReached responde que se alcanzó el tope global. La primera vez en cada ventana lo anota en el
+// Registro de movimientos (un solo movimiento por ventana, aunque se insista), y esa anotación se conserva.
+func pairingLimitReached(ctx context.Context, tx pgx.Tx) error {
+	fault := &Fault{
+		Status:  429,
+		Code:    "PAIRING_LIMIT_REACHED",
+		Message: "Se pidieron demasiados códigos de terminal en los últimos minutos. Espera unos 10 minutos y vuelve a intentarlo; si nadie del restaurante los pidió, avisa al administrador.",
+	}
+	var noted bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT FROM app.audit_events
+        WHERE action = 'device.pairing_limit_reached' AND occurred_at > now() - $1::interval)`, pairingWindow.String()).Scan(&noted)
+	if err != nil {
+		return err
+	}
+	if !noted {
+		if err := auditAs(ctx, tx, "terminal_nueva", "pairing", nil, "device.pairing_limit_reached", "device_pairing_request", nil,
+			map[string]int{"limit": pairingGlobalLimit, "window_minutes": int(pairingWindow / time.Minute)}, false); err != nil {
+			return err
+		}
+		fault.Commit = true
+	}
+	return fault
+}
+
+// pairingUnavailable explica por qué no se empareja: sin identidad cargada (dañada o incompleta) el servidor
+// sigue atendiendo a la propia computadora, pero no a terminales nuevas.
+func pairingUnavailable(service *Service) error {
+	if service.IdentityProblem != "" {
+		return pairingFault(503, "PAIRING_UNAVAILABLE", "Este servidor no puede emparejar terminales porque su identidad necesita revisión de soporte.")
+	}
+	return pairingFault(503, "PAIRING_UNAVAILABLE", "Este servidor todavía no puede emparejar terminales.")
 }
 
 // auditPairing registra un movimiento de una terminal que todavía no tiene identidad (la solicitud de
@@ -415,6 +470,12 @@ func revealPairing(ctx context.Context, tx pgx.Tx, request Request, requestID st
 		requestID, input.TerminalNonce); err != nil {
 		return nil, err
 	}
+	// Desde aquí la solicitud se puede aprobar: queda en el Registro de movimientos.
+	if err := auditPairing(ctx, tx, "device.pairing_requested", requestID, map[string]any{
+		"name": row.name, "device_kind": row.kind, "os": row.system, "app_version": row.version,
+	}); err != nil {
+		return nil, err
+	}
 	return map[string]any{"state": "pending", "expires_at": row.expiresAt}, nil
 }
 
@@ -453,8 +514,12 @@ func cancelPairing(ctx context.Context, tx pgx.Tx, request Request, requestID st
 	if _, err := tx.Exec(ctx, "UPDATE app.device_pairing_requests SET state='cancelled', decided_at=now() WHERE id=$1", requestID); err != nil {
 		return nil, err
 	}
-	if err := auditPairing(ctx, tx, "device.pairing_cancelled", requestID, nil); err != nil {
-		return nil, err
+	// Una solicitud cancelada antes de revelar el número no se auditó al crearse y tampoco se audita ahora
+	// (sigue contando para los límites y para el aviso de Terminales).
+	if row.revealedAlready {
+		if err := auditPairing(ctx, tx, "device.pairing_cancelled", requestID, nil); err != nil {
+			return nil, err
+		}
 	}
 	return map[string]any{"state": "cancelled"}, nil
 }
@@ -525,7 +590,24 @@ func (service *Service) pairingAdministration(ctx context.Context, tx pgx.Tx, re
 		}
 		// La aprobación solo se acepta en la computadora principal: la interfaz de otra terminal muestra
 		// las solicitudes sin el campo del código.
-		result := map[string]any{"requests": requests, "approve_here": request.Local}
+		// Indicio de un intento de suplantación (hallazgo 1): solicitudes de la última ventana que se cancelaron,
+		// se rechazaron o vencieron sin aprobarse, y si se alcanzó el tope global.
+		var abandoned, recentAll int
+		err = tx.QueryRow(ctx, `SELECT
+                count(*) FILTER (WHERE state IN ('cancelled','rejected') OR (state IN ('pending','approved') AND expires_at <= now())),
+                count(*)
+            FROM app.device_pairing_requests WHERE created_at > now() - $1::interval`, pairingWindow.String()).Scan(&abandoned, &recentAll)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]any{
+			"requests":          requests,
+			"approve_here":      request.Local,
+			"recent_abandoned":  abandoned,
+			"limit_reached":     recentAll >= pairingGlobalLimit,
+			"window_minutes":    int(pairingWindow / time.Minute),
+			"pairing_available": service.Identity != nil,
+		}
 		if request.Local {
 			// La computadora principal muestra cómo escribir su dirección en una terminal nueva (la
 			// búsqueda automática en la red es de la fase C).

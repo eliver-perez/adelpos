@@ -230,9 +230,14 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	probe := func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}
-	serverIdentity, err := loadIdentity(logger, application, network.IdentityDir)
-	if err != nil {
-		return err
+	// Sin identidad (dañada o incompleta) la computadora principal sigue vendiendo: se atiende la escucha local,
+	// sin escucha de red y con el emparejamiento desactivado (503 claro), y se avisa en la bitácora y en
+	// Terminales (revisión independiente, hallazgo 4). launchd no entra en un ciclo de relanzamientos.
+	serverIdentity, identityErr := loadIdentity(logger, application, network.IdentityDir)
+	if identityErr != nil {
+		application.Identity = nil
+		application.IdentityProblem = identityErr.Error()
+		logger.Error("server_identity_unavailable", "reason", identityErr.Error(), "network_listen_disabled", network.Address != "")
 	}
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
@@ -255,7 +260,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	// Etapa 9G (D1): escucha HTTPS de la red local con el certificado propio, solo para orígenes de la red
 	// local; lo que llega por ella nunca es «local» (lanlistener.FromNetwork).
 	var networkServer *lanlistener.Server
-	if network.Address != "" {
+	if network.Address != "" && identityErr == nil {
 		networkServer, err = lanlistener.Listen(network.Address, serverIdentity.Certificate, handler)
 		if err != nil {
 			listener.Close()
@@ -327,6 +332,12 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	} else {
 		close(discoveryDone)
 	}
+	// Limpieza por lotes de las solicitudes de emparejamiento antiguas (etapa 9G, fase B; hallazgo 2 de la revisión).
+	pairingCleanupDone := make(chan struct{})
+	go func() {
+		defer close(pairingCleanupDone)
+		(&administration.PairingCleaner{Pool: pool, Logger: logger}).Run(workerContext)
+	}()
 	defer func() {
 		stopWorker()
 		<-workerDone
@@ -334,6 +345,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-soldOutDone
 		<-backupDone
 		<-discoveryDone
+		<-pairingCleanupDone
 	}()
 	stopped := make(chan error, 2)
 	go func() {

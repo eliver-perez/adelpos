@@ -18,7 +18,7 @@ mod window_state;
 
 use connection::{load_config, ConnectionConfig};
 use serde::Serialize;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{Manager, RunEvent, State};
@@ -42,6 +42,8 @@ pub struct TerminalState {
     // Etapa 9G (fase C): dirección vigente del servidor (cambia sola si el servidor emparejado aparece en otra
     // dirección de la red) y los servidores de la última búsqueda (discovery.rs).
     locator: Arc<discovery::ServerLocator>,
+    // Una sola consulta de estado del emparejamiento a la vez (pairing_status).
+    pairing_busy: AtomicBool,
 }
 
 impl TerminalState {
@@ -292,6 +294,7 @@ fn main() {
                 pin,
                 pairing: Mutex::new(None),
                 locator,
+                pairing_busy: AtomicBool::new(false),
             });
             window_check::start(app.handle().clone());
             // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
@@ -336,12 +339,12 @@ fn main() {
 }
 
 #[cfg(test)]
-mod startup_tests {
+pub(crate) mod startup_tests {
     use super::*;
 
-    #[test]
-    fn pending_secure_storage_does_not_supply_empty_credentials() {
-        let state = TerminalState {
+    /// Estado de la terminal sin configuración ni almacén seguro (también para las pruebas de pairing.rs).
+    pub(crate) fn test_state() -> TerminalState {
+        TerminalState {
             config: Err("Prueba sin configuración".into()),
             client: Err("Prueba sin HTTP".into()),
             vault: Arc::new(OnceLock::new()),
@@ -356,11 +359,17 @@ mod startup_tests {
             },
             pin: None,
             pairing: Mutex::new(None),
+            pairing_busy: AtomicBool::new(false),
             locator: Arc::new(discovery::ServerLocator::new(
                 &Err("Prueba sin configuración".into()),
                 None,
             )),
-        };
+        }
+    }
+
+    #[test]
+    fn pending_secure_storage_does_not_supply_empty_credentials() {
+        let state = test_state();
         assert!(state
             .vault()
             .err()

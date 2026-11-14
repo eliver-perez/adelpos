@@ -100,3 +100,54 @@ func TestDamagedOrIncompleteIdentityIsNeverReplaced(t *testing.T) {
 		t.Fatal("una llave ajena debe rechazarse")
 	}
 }
+
+// Hallazgo 4 de la revisión: la identidad se crea en una carpeta temporal que se renombra al final; lo que deja
+// una creación interrumpida (la carpeta temporal) se descarta y no impide crearla.
+func TestIdentityCreationIsAtomic(t *testing.T) {
+	parent := t.TempDir()
+	directory := filepath.Join(parent, IdentityFolder)
+	interrupted := filepath.Join(parent, "."+IdentityFolder+"-123456")
+	if err := os.MkdirAll(interrupted, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(interrupted, privateKeyFile), []byte("a medias"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Una carpeta definitiva vacía (creada a mano) tampoco estorba.
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := EnsureIdentity(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(interrupted); !os.IsNotExist(err) {
+		t.Fatal("la carpeta temporal de una creación interrumpida se descarta")
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != IdentityFolder {
+		t.Fatalf("solo queda la carpeta definitiva: %v", entries)
+	}
+	requirePrivateFolder(t, directory)
+	reloaded, err := LoadIdentity(directory)
+	if err != nil || reloaded.ServerID != identity.ServerID {
+		t.Fatal("la identidad creada se vuelve a cargar")
+	}
+	// Una carpeta con otros archivos no se toca.
+	foreign := filepath.Join(t.TempDir(), IdentityFolder)
+	if err := os.MkdirAll(foreign, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(foreign, "notas.txt"), []byte("de otra persona"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureIdentity(foreign); err == nil {
+		t.Fatal("una carpeta con otros archivos no se usa")
+	}
+	if body, err := os.ReadFile(filepath.Join(foreign, "notas.txt")); err != nil || string(body) != "de otra persona" {
+		t.Fatal("los archivos ajenos se conservan")
+	}
+}

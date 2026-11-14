@@ -62,13 +62,17 @@ function PairingCodePanel({
   const [error, setError] = useState('');
   const waiting = view.state === 'pending';
 
-  // Mientras espera, consulta el estado; aprobado, Rust ya guardó la credencial y la conexión.
+  // Mientras espera, consulta el estado; aprobado, Rust ya guardó la credencial y la conexión. Las consultas
+  // se encadenan: la siguiente se programa cuando termina la anterior, nunca dos a la vez (revisión, hallazgo
+  // 3: guardar la credencial puede esperar el diálogo del Llavero). Un error no detiene la espera: Rust
+  // conserva la credencial reclamada y la siguiente consulta vuelve a intentar guardarla.
   useEffect(() => {
     if (!waiting) {
       return;
     }
     let active = true;
-    const timer = window.setInterval(() => {
+    let timer: number | undefined;
+    const poll = () => {
       readPairing()
         .then((next) => {
           if (active) {
@@ -80,11 +84,17 @@ function PairingCodePanel({
           if (active) {
             setError(pairingError(problem, 'No se pudo consultar la computadora principal.'));
           }
+        })
+        .finally(() => {
+          if (active) {
+            timer = window.setTimeout(poll, pairingPollMilliseconds);
+          }
         });
-    }, pairingPollMilliseconds);
+    };
+    timer = window.setTimeout(poll, pairingPollMilliseconds);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
   }, [waiting, onChange]);
 
