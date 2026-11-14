@@ -6,7 +6,8 @@
 # 1. Sincroniza los metadatos de config/product.json.
 # 2. Compila el servidor Go como binario externo de Tauri (Contents/MacOS/ad-el-pos-server dentro de la
 #    aplicación) y la aplicación con desktop/src-tauri/tauri.macos-pkg.conf.json. Con --reuse-app usa la
-#    aplicación ya compilada si trae el servidor (para repetir solo el empaquetado).
+#    aplicación ya compilada si trae el servidor (para repetir solo el empaquetado). La copia que va en el
+#    instalador se firma ad hoc como paquete completo y se comprueba con codesign --verify.
 # 3. Arma tres paquetes con pkgbuild: la aplicación (no reubicable, a /Applications, con un preinstall
 #    que detiene el servicio anterior), «Servidor del restaurante» (sin contenido; crea la carpeta de datos
 #    y el archivo de habilitación) y el servicio (sin contenido; escribe el LaunchDaemon y lo registra).
@@ -39,7 +40,7 @@ step() {
     echo "== $*"
 }
 
-for tool in pkgbuild productbuild plutil codesign shasum; do
+for tool in pkgbuild productbuild plutil codesign shasum lipo; do
     command -v "$tool" >/dev/null || {
         echo "Falta $tool (Command Line Tools de Xcode)." >&2
         exit 1
@@ -70,7 +71,6 @@ if [ ! -x "$app/Contents/MacOS/$server_binary" ]; then
     echo "La aplicación no trae el servidor en Contents/MacOS/$server_binary." >&2
     exit 1
 fi
-codesign --verify --deep --strict "$app"
 "$app/Contents/MacOS/$server_binary" version
 
 step "Paquetes"
@@ -90,6 +90,11 @@ for script in "$stage"/scripts-*/*install "$stage"/scripts-*/common.sh; do
 done
 plutil -lint "$stage/scripts-service/local.adel.pos.server.plist" >/dev/null
 ditto "$app" "$stage/root/Applications/$name.app"
+# Tauri deja la aplicación sin firma de paquete (solo la firma ad hoc del enlazador en cada ejecutable). La
+# copia que va en el instalador se firma ad hoc como paquete completo (aplicación y servidor) y se comprueba:
+# así ningún archivo del paquete cambia sin que se note. No hay firma de desarrollador (etapa 10).
+codesign --force --deep --sign - "$stage/root/Applications/$name.app"
+codesign --verify --deep --strict "$stage/root/Applications/$name.app"
 
 # La aplicación no se reubica: si existe otra copia con el mismo identificador en otra carpeta, el
 # Instalador la actualizaría allí y el servicio buscaría el servidor en /Applications.
@@ -109,7 +114,9 @@ pkgbuild --nopayload --scripts "$stage/scripts-service" --identifier local.adel.
     --version "$version" "$stage/packages/service.pkg"
 
 step "Instalador"
-sed "s/__VERSION__/$version/g" scripts/macos-pkg/Distribution.xml >"$stage/Distribution.xml"
+architecture="$(lipo -archs "$app/Contents/MacOS/$server_binary")"
+sed -e "s/__VERSION__/$version/g" -e "s/__ARCH__/${architecture// /,}/g" scripts/macos-pkg/Distribution.xml \
+    >"$stage/Distribution.xml"
 cp scripts/macos-pkg/welcome.html "$stage/resources/welcome.html"
 mkdir -p "$output_dir"
 result="$output_dir/${name}_${version}.pkg"
