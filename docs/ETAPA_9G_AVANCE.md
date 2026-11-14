@@ -1942,6 +1942,224 @@ Copia exacta de `65bb484`: Go unitarias con `-race`, integración de los 13 paqu
 14 de 14 en Chromium y 14 de 14 en WebKit), además de formato, `sync`, `vet`, `GOOS=windows`, `tsc` y Vitest: todo
 aprobado.
 
+## Fase E · Impresión con varias terminales
+
+Un agente, en su propio árbol de trabajo (`etapa-9g-e`, creada desde la fusión de A, D, B, F y C en `65bb484`), en
+paralelo con las correcciones de la revisión de la fase B. 13/11/2026. Decisiones del coordinador D10 y D13. Sección
+E de la `0023` (esquema 23, sin cambiar `config/product.json`). Pruebas en copias aisladas: clúster temporal 55499, Go
+temporal 8190 (Playwright), vista previa 1428, Rust en `cache/cargo-E`. **Nunca se imprimió en una impresora real**:
+el agente de Rust se probó con un ejecutor simulado de `lpstat`/`lpoptions`/`lp`, el de Playwright es un `lp`
+simulado en el puente y la cola de las pruebas es `ADEL_E2E_SIN_IMPRESORA`, que no existe en ninguna computadora.
+
+Commits: `6731013` (Go, migración y Rust con sus pruebas), `47e4d29` (interfaz, puente, Vitest y Playwright) y
+`0e13097` (contrato, guía de cocina y el agente espera la credencial).
+
+### Qué cambió
+
+**Migración `0023`, sección «Fase E»** (al final, después de la F)
+
+- `kitchen_printers.agent_device_id` → `devices` (FK con nombre) con `CHECK (agent_device_id IS NULL OR transport =
+'agent')` e índice parcial: una impresora `agent` con terminal es la impresora USB de esa terminal; `destination` es
+  el nombre de su cola en esa computadora. Las `agent` existentes (sin terminal, como «Destino controlado E2E») siguen
+  válidas y sin imprimir.
+- `devices.print_agent_seen_at` (última consulta del agente) y `devices.local_printers_reported_at`.
+- `device_local_printers (device_id, queue)`: cola (patrón de Go), modelo (≤ 120), conexión (solo el esquema de
+  `device-uri`, `^[a-z0-9+.-]{0,20}$`, nunca la dirección ni el número de serie) y `printer_type` de CUPS.
+- `register_receipt_printers (register_id PK, printer_id NOT NULL)`: impresora de tickets propia de una caja (D10).
+- Probada de 22 a 23 con una impresora de red y una `agent` sin terminal existentes (`checkStage9GPrintAgent` desde
+  `TestStage9GAndroidUpgrade`: dos líneas agregadas a la prueba de D).
+
+**Servidor Go**
+
+- `kitchen/agent.go` (nuevo): `HandleAgent` con tres rutas solo para el agente:
+  `PUT print-agent/printers` (reemplaza la lista de la terminal; audita `device.local_printers_reported` y publica
+  `devices.printers.changed` solo si cambió), `POST print-agent/jobs/claim` (`claim_id`; la misma clave con la lease
+  vigente devuelve el mismo intento; antes recoge los procesos vencidos de esa terminal; un trabajo por impresora a la
+  vez con `pg_try_advisory_xact_lock(hashtextextended(impresora, 7820148307))` y «nadie en proceso»; mismos reintentos
+  automáticos que el servidor, nunca el cajón; impresora o estación desactivada o fotografía inválida → intervención;
+  entrega `{id, attempt_id, queue, title, data (base64), size, drawer, lease_until}`) y
+  `POST print-agent/jobs/{id}/result` (`{attempt_id, outcome, code?, reference?, detail?}` con lista cerrada; repetido
+  responde lo guardado; distinto, `409 PRINT_RESULT_CONFLICT`; lease vencida: `200 {recorded: false, reason:
+"lease_expired"}`, trabajo incierto e historial `print.agent_late_result`). `AgentJobBytes` = los bytes de una
+  impresora de red: pulso del cajón, `documents.EncodeESCPos` de la IR o `ESCPosBytes` del texto, con el final de
+  papel de la impresora y las copias repetidas. `TerminalPrinters` (terminales con lo que informaron y sus impresoras
+  de AD-EL POS) y `checkAgentPrinter` (al elegir terminal o cola: terminal existente y no revocada, cola informada y
+  que sirve).
+- `kitchen/worker.go`: el trabajador del servidor **nunca** toma un trabajo cuya fotografía es de una terminal; solo
+  deja incierto el que su agente dejó en proceso con la lease vencida (`expireAgentLease`, «La terminal no informó el
+  resultado a tiempo…»). El guardado del resultado pasa a `storeOutcome` (mismo código para el servidor y el agente:
+  estados, espera creciente, respaldo tras tres errores confirmados, historial —con la terminal como autora en el
+  agente— y eventos); el `result` del intento se combina con lo que ya tenía.
+- `kitchen/print_problems.go`: problema `agent_offline` («La Caja 2 está desconectada»): trabajo `pending`,
+  `processing` o `error` con reintentos pendientes de una terminal sin consultas en `AgentOfflineSeconds` (30 s) o
+  revocada; `JobTerminalSQL` da el nombre de la terminal. Lo usan la cola, los documentos de la cuenta (`finance.go`,
+  con `attempts` y `printer_snapshot` en su consulta lateral) y los de caja.
+- `kitchen/cups_raw.go`: la regla de datos raw se separa en `rawQueueVerdict` (una sola regla) con dos textos:
+  `EvaluateRawQueue` (cajón por CUPS del servidor, textos idénticos) y `EvaluateTerminalQueue` (impresoras de una
+  terminal, en palabras del restaurante).
+- `kitchen/printers.go`, `models.go`, `reads.go`, `handler.go`, `documents.go`, `commercial.go`: `Printer.AgentDeviceID`
+  (y `TerminalName` solo en consultas); validación (cola con el patrón de Go, sin opción de corte CUPS ni marca
+  ESC/POS); guardar con la terminal; `printerListQuery` con `terminal_name` en `kitchen/printers`, `kitchen/outputs` y
+  la cola; `GET kitchen/terminal-printers` (`kitchen.printers.manage`); un trabajo para la impresora de una terminal
+  queda `pending` (el de una `agent` sin terminal, en intervención como antes); `PrinterProblem` acepta la impresora
+  de una terminal para tickets y `CompatibleDrawerPrinter` para el cajón.
+- `administration/service.go` + `print_agent.go` (nuevo): `print-agent/*` después de `authenticateDevice` y antes de
+  la sesión (el agente imprime aunque nadie haya iniciado sesión); auditoría con la terminal como autora.
+  `devices.go`: `GET devices/{id}/configuration` llena `printers` y agrega `local_printers` (el hueco de la fase B).
+- `payments`: `receiptPrinter` usa la impresora propia de la caja de la terminal que pide el documento y, sin ella, la
+  general (precuentas, tickets, documentos de caja, reintentos, reimpresiones y el aviso inmediato de la 9F);
+  `GET/PUT payments/settings` con `register_printers` (misma validación que la general, `usablePrinter`; auditado en
+  `payments.settings_changed`); el cajón acepta la impresora de una terminal (`drawerConfig.agentDevice`,
+  `DrawerPrinter.TerminalName`, compatible sin consultar CUPS del servidor); `DocumentRecord`/`CashDocumentRecord`
+  con `terminal_name`. Mensaje de una `agent` sin terminal para el cajón: «…no tiene una terminal asignada, así que
+  no puede entregar el comando ESC/POS de apertura…».
+- `designer/samples.go`: la impresora de una terminal es compatible con formato y logotipo (`terminal_agent`).
+- `maintenance`: firma «Impresora USB 9G-E» (`agent` + `ADEL_E2E_SIN_IMPRESORA`,
+  `workflow-stage9g-print-agent.spec.ts`; la prueba de firmas admite `agent` con esa cola);
+  `register_receipt_printers` es configuración que se desvincula («Impresora de tickets de «Caja X»: vuelve a la
+  general»).
+
+**Escritorio (Rust)**
+
+- `print_agent.rs` (nuevo), arrancado en `main.rs` (`print_agent::start`, no arranca en Windows) y despertado por
+  `realtime.rs` con cada mensaje del canal (`nudge`). Espera a que la terminal tenga credencial; informa sus
+  impresoras al abrir y cada 5 min (`/usr/bin/lpstat -a` y `/usr/bin/lpoptions -p <cola>`, solo lecturas, 3 s cada
+  una; sin impresoras, lista vacía; sin respuesta, no informa); consulta cada 3 s; entrega cada trabajo con
+  `/usr/bin/lpstat -p <cola>` y `/usr/bin/lp -d <cola> -o raw -n 1 -t <título> <archivo>` (argumentos separados,
+  `LC_ALL=C`, archivo `create_new` 0600 en la carpeta temporal que se borra, 12 s): referencia «cola-n» → aceptado;
+  `lpstat -p` falla → `not_found`; no responde o `lp` no arranca → `unreachable`; `lp` empezó sin referencia, con
+  error o sin terminar → incierto. Reclamo y resultado sin respuesta se repiten igual; recuerda los intentos ya
+  entregados (128) para no imprimir dos veces el mismo. Sin crates nuevos (base64 y UUID propios; aleatorio de
+  `rustls`/`ring`), sin comandos de Tauri nuevos (sin cambios en `build.rs` ni permisos). Credencial de la terminal sin
+  sesión, `X-Client-Version` (obligatoria por la red) y relocalización del servidor como las demás peticiones.
+- `api.rs`: operación `kitchen_terminal_printers`; prueba de que `print-agent/` no está en la lista de React.
+
+**Escritorio (React)**
+
+- `PrintersAdmin.tsx`: «Impresora USB de una terminal»: «Terminal donde está conectada» (Conectada/Desconectada) y
+  «Impresora de esa terminal» (las que no sirven, deshabilitadas con el motivo; sin lista, «…todavía no informó sus
+  impresoras»); sin terminal, «Nombre de la impresora en la terminal» y el aviso de que no imprime. La lista dice
+  «Impresora USB de Caja 2». Texto de la página actualizado (ya no dice «todavía no se puede usar»).
+- `services/kitchen.ts`: `printerLabel` («USB de caja · en Caja 2»), usado al elegir impresora en estaciones,
+  respaldo, reenvío desde la cola, tickets por caja; `TerminalPrinterSet`/`TerminalQueue`.
+- `DevicesPage.tsx`: «Impresoras de esta terminal» con sus impresoras y la sección «Impresoras de la computadora»
+  (conectada o no, cuándo informó, cuál se puede usar y por qué no).
+- `PaymentPoliciesForm.tsx`: «Impresora de tickets por caja» con «Impresora propia de <caja>» («Usar la impresora de
+  tickets general» por omisión); `receiptPrinterOptions` acepta la de una terminal.
+- `printProblems.ts`: `agent_offline` («La Caja 2 está desconectada.», «La terminal Mostrador está desconectada.» si el
+  nombre no empieza por Caja/Terminal/Computadora) y su ayuda («Se imprimirá sola… no hace falta reintentar»);
+  `PrintQueue.tsx`, `DocumentList.tsx` (también con el documento pendiente) y `CashDocumentActions.tsx` con la
+  terminal. `cash.ts` («USB de Caja 2» en el cajón), `SampleDialog.tsx`, estilos al final de `styles.css` (tokens).
+
+**Puente y pruebas de navegador**
+
+- `native-driver.ts`: `printAgent.report`, `printAgent.run({outcome, code})` y `printAgent.calls` (agente simulado con
+  la credencial de esa terminal, `lp` simulado que registra los argumentos de Rust).
+- `e2e/workflow-stage9g-print-agent.spec.ts` (nueva). `kitchen-flow.ts`: el campo de la impresora sin terminal se
+  llama «Nombre de la impresora en la terminal» (antes «Referencia del destino remoto»; los datos creados no cambian).
+
+### Decisiones tomadas en la fase
+
+1. **Una `agent` sin terminal sigue existiendo** (instalaciones anteriores, destinos de aceptación de las pruebas,
+   Windows de la 9E): sus trabajos quedan en intervención con «Esta impresora todavía no puede usarse para imprimir.»
+   como en la 9F. Por eso el CHECK es «solo una `agent` tiene terminal», no «toda `agent` tiene terminal».
+2. **Rutas del agente sin sesión** (`print-agent/*`, solo credencial de la terminal): el agente debe imprimir aunque
+   la caja esté en la pantalla de acceso (D13: «mientras la aplicación está abierta»). Cada terminal solo ve lo suyo.
+3. **La fotografía decide qué agente reclama** (`printer_snapshot.agent_device_id`), como el trabajador del servidor
+   usa la fotografía; «Reintentar» toma la configuración vigente (revisión 9F, M2).
+4. **«Desconectada» = 30 s sin consultas del agente** (`print_agent_seen_at`), no los 2 min de «En línea» de
+   Terminales (cualquier petición): el agente consulta cada 3 s, y una terminal que hace peticiones sin agente (una
+   versión anterior, Android) no imprime. Terminales muestra ambos («En línea» en la tabla; «Conectada/Desconectada»
+   en «Impresoras de la computadora»).
+5. **Resultado con la lease vencida = 200 `recorded: false`** (no 409): así se confirma en la base el paso a
+   «incierto» y el informe tardío en el historial (un error de cocina no puede pedir confirmar la transacción).
+6. **Copias en los bytes** y `lp -n 1`: el agente envía un solo trabajo con todas las copias (como ESC/POS por red).
+7. **Impresora de tickets de la caja de la terminal que pide el documento** (no la de la caja del turno): «el papel
+   sale donde estás»; una terminal sin caja o una caja sin impresora propia usa la general.
+8. **La cola se elige de lo que informó la terminal y se comprueba al elegirla o cambiarla**, no al editar otros datos
+   (como la impresora de tickets en la revisión B3 de la 9F); Go conserva la regla y la interfaz solo la presenta.
+9. **Sin OpenAPI**: las rutas del agente son exclusivas del escritorio y las de administración son de su interfaz; la
+   aplicación Android no imprime por agente (sus documentos salen en la impresora que elige Go).
+10. **Etiquetas de la caja propia «Impresora propia de <caja>»**: «Impresora de tickets de …» chocaba con el
+    selector `/Impresora de tickets/` de `payments-flow.ts` y `workflow-stage9f-printing`.
+
+### Pruebas ejecutadas (aisladas)
+
+13/11/2026 en `wt/E` con `iso.sh` (Go 8190, vista previa 1428, Rust en `cache/cargo-E`); pantalla desbloqueada
+(`CGSSessionScreenIsLocked` ausente).
+
+| Suite                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Resultado                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `format` (Prettier, gofmt, cargo fmt; `docs/etapas/*.md` con el mismo md5 antes y después)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | aprobado (11 s)                                                                                                         |
+| `sync`, `vet` (normal e `integration`), `win` (`GOOS=windows` build y vet)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | aprobados                                                                                                               |
+| Go unitarias con `-race` (`go test ./...`; nuevas en `kitchen/agent_test.go`: validación de la impresora de una terminal, bytes del agente iguales a los de red y del pulso, resultados con la lista cerrada, regla de colas sin términos técnicos, problema `agent_offline`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | aprobado (21 s)                                                                                                         |
+| Integración `./internal/operations` `TestStage9GPrintAgent` (nueva): informe de impresoras solo propio, sin credencial 401, lista inválida 400, auditoría solo al cambiar; impresora de terminal elegida solo de lo informado (ipp y no informada, 400); terminal desconectada con `agent_offline` y nombre; el servidor no toma el trabajo; la otra terminal no lo reclama ni lo confirma (404); reclamo con bytes ESC/POS de Go, reclamo repetido = mismo intento, un trabajo por impresora; aceptado, repetido y en conflicto (409); error confirmado con reintento a su turno; incierto que nadie reenvía; resultado con lease vencida y lease recogida por el servidor; desconectada y de vuelta; cajón por agente con el pulso exacto y sin reintento del error; impresora de tickets por caja (Sur → USB, Norte → general, agente sin terminal 422, auditoría, documento con `agent_offline` y terminal) | aprobado (16 s)                                                                                                         |
+| Integración `./internal/operations` completa (con el ajuste del mensaje del cajón; la primera corrida falló en `C37` porque el mensaje nuevo no decía «ESC/POS»)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | aprobado (321 s)                                                                                                        |
+| Integración `./internal/database` (`TestStage9GAndroidUpgrade` con la sección E), `./internal/administration`, `./internal/payments`, `./internal/designer`, `./internal/apicontract`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | aprobados (10, 117, 3, 23 y 9 s)                                                                                        |
+| `cargo test --locked --offline` (8 nuevas en `print_agent.rs`: lectura de `lpstat -a` traducido y de `lpoptions`, argumentos separados y sistema vacío, `lp -o raw` sin intérprete y archivo borrado, reglas de resultado y colas peligrosas que nunca llegan a `lp`, base64/UUID/referencia, reintentos sin imprimir dos veces el mismo intento, trabajo dañado, informe como lo espera Go; y la ruta nueva en `api.rs`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 88 aprobadas, 3 ignoradas                                                                                               |
+| `tsc --noEmit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | sin errores                                                                                                             |
+| Vitest (`npm test`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 94 archivos, 880 pruebas (nuevas: `pages/stage9gPrintAgent.test.tsx` ×7; `printersWindows.test.tsx` con el texto nuevo) |
+| Playwright Chromium: `restaurant`, `workflow-stage9b-designer`, `workflow-stage9f-kitchen-stations`, `workflow-stage9f-printing`, `workflow-stage9g-terminals` ×2, `workflow-stage9g-print-agent`, `workflow-zz-test-data`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 8 de 8 (2.8 min)                                                                                                        |
+| Playwright WebKit (las mismas)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 8 de 8 (2.8 min)                                                                                                        |
+| `workflow-stage9g-print-agent` repetida tras los últimos ajustes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Chromium 1/1, WebKit 1/1                                                                                                |
+
+No se ejecutó la suite `app` (compilación `release` de Tauri): no hay comandos ni permisos nuevos y `cargo build`
+compila el agente sin advertencias. No hay `rustup` con el destino de Windows en esta Mac: la compilación de
+`print_agent.rs` para Windows (solo `cfg!`/`#[cfg]` triviales) queda para la Fase W.
+
+### No verificado y lo que queda
+
+- **Hardware (propietario)**: papel, logotipo, corte y cajón reales por una impresora USB conectada a otra Mac
+  (agente real con `lp -o raw`); qué hace una impresora real con el pulso por `lp -o raw` desde la terminal; un trabajo
+  grande con logotipo (los bytes viajan en base64, límite 4 MB).
+- **Fase W (Windows)**: el agente no arranca en Windows. Punto de integración: `print_agent.rs` — `local_printers`
+  (EnumPrinters con su puerto y la regla de `kitchen/windows_queue.go`: USB, COM, LPT, TCP/IP estándar; nunca
+  virtuales, de otro equipo ni WSD) y `deliver` (StartDocPrinter tipo `RAW` + WritePrinter, con los mismos
+  resultados: no se abrió → error, falló después de abrir → incierto); quitar el `cfg!(target_os = "windows")` de
+  `start`. Probar Mac servidor + Windows terminal con su USB y al revés (§8.2, «a su USB si la hay»).
+- **Carga (Fase W)**: cada terminal abierta consulta cada 3 s (una transacción con dos `UPDATE` de `devices`);
+  medir con varias terminales junto al SSE.
+- **Fase G**: guía `docs/INSTALAR_EN_RED.md` («Impresora USB en una caja»: conectarla e instalarla en esa
+  computadora con su controlador, abrir AD-EL POS, registrarla en Cocina › Impresoras eligiendo la terminal; si la
+  caja está apagada, lo pendiente sale al encenderla); CLAUDE.md §15 y §19.
+
+### Para la fusión (coordinador)
+
+- `0023`: la sección E va al final (después de la F); no toca D, B ni F.
+- Zonas compartidas (cambios acotados): `administration/service.go` (bloque `print-agent/` después de `auth/login`),
+  `administration/devices.go` (`deviceConfiguration`), `api.rs` (una operación y una prueba), `main.rs` (`mod
+print_agent` y `print_agent::start`), `realtime.rs` (una línea), `native-driver.ts` (`randomUUID` y el bloque
+  `printAgent` antes del `return`), `DevicesPage.tsx` (panel de configuración), `styles.css` (al final),
+  `API_CONTRACTS.md` (al final), `database/stage9g_android_upgrade_test.go` (dos llamadas).
+
+### Para CLAUDE.md
+
+- §3 Arquitectura: agente de impresión de la terminal (`print_agent.rs`): impresoras USB de otra computadora con el
+  transporte `agent` + `agent_device_id`; rutas `print-agent/*` solo con la credencial de la terminal (sin sesión);
+  la cola durable de siempre con su lease; el trabajador de Go nunca envía un trabajo de una terminal. Lock
+  7820148307 también en el reclamo del agente (transaccional, misma finalidad: un trabajo por impresora).
+- §6 Pruebas: `TestStage9GPrintAgent` (`operations`); `printAgent.report/run/calls` del puente; la impresora de
+  prueba «Impresora USB 9G-E» (`agent` + `ADEL_E2E_SIN_IMPRESORA`) con su firma; el agente de Rust solo con
+  `CommandRunner` simulado (nunca `lp` real).
+- §7 Seguridad: el agente ejecuta solo `/usr/bin/lpstat`, `/usr/bin/lpoptions` y `/usr/bin/lp` con argumentos
+  separados y la cola validada con el patrón de Go; la conexión informada es solo el esquema de `device-uri`.
+- §15 «Cocina»: impresora USB de una terminal (D13), «La Caja 2 está desconectada» (`agent_offline`, 30 s sin
+  consultas del agente), impresora de tickets por caja con respaldo en la general (D10), Terminales con las impresoras
+  de la computadora y el nombre de la terminal al asignar impresoras.
+- Reglas permanentes propuestas: toda lista para elegir impresora usa `printerLabel` (dónde sale el papel); una
+  impresora de terminal solo se elige de lo que esa terminal informó; ningún resultado del agente se acepta con la
+  lease vencida.
+- §19 Riesgos: el agente no existe todavía en Windows (Fase W); «Desconectada» (30 s del agente) y «En línea» (2 min,
+  cualquier petición) son señales distintas; la carga de las consultas cada 3 s está sin medir.
+
+**Fusión y verificación del coordinador** (13/11/2026): la rama `etapa-9g-e` salió de `65bb484` (antes de las
+correcciones de B y F); se fusionó en `39b8b0c` con un solo conflicto de estilos agregados por ambas ramas (la sección E
+de la 0023 quedó al final, después de la F, sin conflicto). Copia exacta de `39b8b0c`: formato, `sync`, `vet`,
+`GOOS=windows`, `tsc`, Vitest, Go unitarias con `-race`, integración de los 13 paquetes (`operations` 329 s),
+`cargo test` (89 aprobadas, 3 ignoradas) y Playwright (`restaurant`, `workflow-stage9b-designer`,
+`workflow-stage9f-kitchen-stations`, `workflow-stage9f-printing`, las siete `workflow-stage9g-*` y
+`workflow-zz-test-data`: 13 de 13 en Chromium y 13 de 13 en WebKit): todo aprobado.
+
 ## Revisión independiente (emparejamiento y cifrado, idempotencia y pedidos sin conexión, respaldos)
 
 Un solo agente de solo lectura, en tres partes, sobre copias exactas; las correcciones las hicieron los agentes de cada
@@ -2032,3 +2250,198 @@ prueba del SSE usa su propio contexto.
 de la escucha de red en `lanlistener.go`, estado del emparejamiento junto a la búsqueda en `main.rs` y estilos). Copia
 exacta de `6e92f7a`: formato, `sync`, `vet`, `GOOS=windows`, `tsc`, Vitest, Go unitarias con `-race`, integración de los
 13 paquetes, `cargo test` (81 aprobadas, 3 ignoradas) y Playwright 14 de 14 en Chromium y en WebKit: todo aprobado.
+
+### Partes 2 y 3 · Idempotencia y pedidos sin conexión (Fase D) y respaldos programados (Fase F), sobre `b84415c`
+
+El mismo agente de solo lectura, con una prueba desechable propia de `backupschedule` contra el clúster aislado.
+
+| Gravedad | Fase | Hallazgo                                                                                                                                                                                                                                                                                            | Estado                                  |
+| -------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Medio    | D    | «Solo cambios desde X» perdía los productos archivados cuando cambiaba una lista de precios o la tasa general de IVA (la rama «todos los productos» del delta conservaba el filtro `NOT p.archived`; `catalog/sync.go`).                                                                            | confirmado por lectura                  |
+| Bajo     | D    | Una base restaurada reutilizaba números de versión del catálogo (la secuencia vuelve con el respaldo): un cliente al día podía no recibir cambios nuevos.                                                                                                                                           | plausible                               |
+| Bajo     | D    | El borrador aceptaba productos agotados (la confirmación sí los rechazaba; ya pasaba con «Pausar»).                                                                                                                                                                                                 | confirmado por lectura                  |
+| Bajo     | D    | El reenvío confirmado de un pedido sin conexión recibía `IDEMPOTENCY_CONFLICT` sin el resultado si antes había entrado una repetición tardía del original.                                                                                                                                          | plausible                               |
+| Bajo     | D    | «Agotado» de un componente o complemento no se reflejaba en la descarga de los combos y grupos que lo contienen (solo presentación: Go rechaza al recibir).                                                                                                                                         | confirmado por lectura                  |
+| Medio    | F    | La retención y la limpieza de `.partial` solo miraban el patrón de nombre (la base se llama igual en todas las instalaciones) y ordenaban por nombre: en una carpeta compartida (USB, NAS, `serve` y servicio) borraban respaldos ajenos, su `.partial` en curso y hasta el respaldo recién creado. | confirmado (reproducido)                |
+| Medio    | F    | En el servicio de macOS el respaldo se creaba con `pg_dump --file` (0644 por la umask de launchd, sin `O_EXCL`, siguiendo enlaces) y solo pasaba a 0600 al terminar.                                                                                                                                | confirmado por lectura                  |
+| Medio    | F    | Sin aviso si el respaldo automático deja de intentarse: una ejecución fechada en el futuro (reloj adelantado y corregido) satisfacía todos los días siguientes; un fallo nuevo quedaba detrás de un éxito futuro; una fila `running` huérfana.                                                      | confirmado (reloj); lo demás, plausible |
+| Bajo     | F    | La validación de la carpeta no revisaba las antecesoras (subcarpetas de los datos de PostgreSQL o del servicio) ni resolvía enlaces simbólicos.                                                                                                                                                     | plausible                               |
+
+Revisado sin hallazgos (D): la clave se busca bajo el lock exclusivo antes de cualquier efecto y es la llave primaria de
+`restaurant_operations` (un uso simultáneo entre módulos aborta con 23505); huella con método, ruta y cuerpo canónico;
+el pedido sin conexión valida y acepta en una transacción con 7820148305 exclusivo y 7820148304 compartido, siempre con
+precios del servidor, y la confirmación exige la versión vigente y cubrir cada cambio; versión del catálogo monótona en
+orden de confirmación; orden de locks consistente; «Agotado» cumplido en vista previa, confirmación, edición y pedido sin
+conexión, con vencimiento por el corte; `restaurant/state` con los mismos permisos de las listas; el contrato falla ante
+rupturas. (F): programación con zona, corte y cambio de horario; lock 7820148309 en conexión propia que siempre se
+suelta; un respaldo no verificado no cuenta ni dispara la retención; la carpeta solo se elige desde la computadora
+principal y Go la valida; la contraseña solo en `PGPASSWORD`; aviso persistente; «Respaldar ahora» idempotente.
+
+Pendiente de la computadora real: un `LaunchDaemon` sin permiso de privacidad para «Volúmenes extraíbles» puede recibir
+`EPERM` al escribir en una USB (la prueba de escritura la rechazaría como «sin permiso»): comprobar en la Fase G.
+
+### Correcciones de la parte 3 (Fase F)
+
+Un agente (14/11/2026), en el árbol `$SCR/wt/FF` (rama `etapa-9g-ffix`, desde `etapa-9g-merge` en `6e92f7a`, con A, D,
+B, C, F y las correcciones de B), en paralelo con la Fase E. La 0023 todavía no se aplicó a ninguna instalación: se
+editó solo su sección F (la E no se tocó). Commit: `3948fdc`. Pruebas aisladas: clúster 55499, Go 8187, vista previa
+1425, `TMPDIR=$SCR/tmp-F`.
+
+Cada hallazgo se comprobó primero en el código.
+
+#### 1. MEDIO · Retención y limpieza de `.partial` sin distinguir la instalación
+
+- **Comprobado**: `Retain` y `CleanPartials` (`files.go`) decidían qué era «propio» solo por el patrón
+  `<base>-<fecha>-<hex>-automatico.dump`, y la base se llama igual en todas las instalaciones; se ordenaba por el
+  nombre (hora UTC de quien lo creó). Con archivos ajenos de fechas posteriores en una carpeta compartida, se borraba
+  lo propio, incluso el respaldo recién hecho.
+- **Corrección**:
+  - La retención (`runner.retain`) solo considera lo registrado en `backup_runs`: `kind='automatic'`,
+    `status='succeeded'`, misma carpeta, `removed_at IS NULL`, `seq` menor que el recién hecho (nunca el actual),
+    ordenado por `seq` (columna nueva `GENERATED ALWAYS AS IDENTITY`). `toRemove` es la decisión pura.
+  - Borra con `removeRegular`: solo archivos regulares, nunca enlaces ni carpetas. Un archivo que ya no está se anota
+    como borrado.
+  - El archivo temporal se registra antes de crearse (`partial_file` y `directory` en la fila en curso; restricción
+    `backup_runs_partial_running_check`). Al recuperar una ejecución interrumpida (`markInterrupted`, siempre con el
+    lock) se borra exactamente ese archivo y nada más. Desapareció la limpieza por patrón.
+  - Nombre `<base>-<instalación>-<fecha>-<hex>-<etiqueta>.dump`. `<instalación>` son 8 caracteres hexadecimales del
+    `server_id` de la identidad de la Fase B (`main.go` lo fija en el ejecutor antes de arrancar el trabajador) o, sin
+    identidad, de `backup_settings.installation_id` (columna nueva, `gen_random_uuid()`).
+  - Tras un fallo de `Dump`, el ejecutor ya no borra el nombre (podía ser un archivo ajeno): `Dump` limpia lo que
+    crea.
+- **Prueba**: `TestSharedFolderKeepsOtherInstallationsFiles`, el caso del revisor como prueba de integración.
+  - Carpeta compartida con dos automáticos de «otra instalación» con fechas de 2030, uno con el formato anterior sin
+    identificador, un `.partial` ajeno y un manual ajeno; `keep=2`; cuatro días de respaldos.
+  - Resultado: nunca se borra un ajeno ni el recién hecho, quedan exactamente dos propios y se anotan dos borrados.
+    Sin identidad, el nombre lleva el `installation_id`.
+- **Otras pruebas**:
+  - `fila_en_curso_huerfana`: se borra el `.partial` propio registrado y se conserva el ajeno del mismo formato.
+  - Unitarias `TestToRemove` y `TestRemoveRegular`: enlace, carpeta y nombres con `..` o barras rechazados.
+
+#### 2. MEDIO · Respaldo legible para otros y sin `O_EXCL` en el servicio
+
+- **Comprobado**:
+  - `standalone.DumpFile`, y también `dumpLegacy` de `adopt-legacy`, usaban `pg_dump --file`. Eso crea el archivo con
+    la máscara del proceso, sigue enlaces, trunca y solo al final pasa a 0600. Lo usaban el respaldo manual, el de
+    antes de migrar, el de seguridad de `restore` y los programados del `host`.
+  - El plist ya fija `Umask` 63 (077): en el servicio el archivo ya nacía 0600. Desde una consola (umask 022) nacía
+    0644 hasta el `chmod` final.
+- **Corrección**:
+  - `fileacl.CreatePrivate`. En macOS y Unix: `O_WRONLY|O_CREATE|O_EXCL|O_NOFOLLOW`, 0600 desde el primer byte. En
+    Windows: `O_EXCL` y la ACL privada antes de escribir.
+  - `standalone.dumpToFile`: `pg_dump` escribe en su salida estándar hacia ese archivo, con la salida de error aparte.
+    Lo usan `DumpFile` (y por él `Backup`: manual, antes de migrar y seguridad de `restore`) y `dumpLegacy`.
+  - `maintenance.DumpBackup.Dump` (`serve`) también usa `CreatePrivate` en lugar de `OpenFile` más `Protect` al final.
+  - El plist no necesitó cambios.
+- **Prueba**:
+  - `TestCreatePrivateIsPrivateExclusiveAndDoesNotFollowLinks` (máscara 0, archivo existente, enlace y enlace
+    colgante sin crear su destino).
+  - `TestDumpFileIsPrivateFromTheFirstByte`: un `pg_dump` simulado lee los permisos del archivo antes de escribir y ve
+    `-rw-------` con la máscara 022; tampoco reemplaza un respaldo existente ni sigue un enlace (el archivo apuntado
+    queda intacto).
+  - `TestServiceHostOnMacOS` ejercita los respaldos reales del `host`: `backup`, antes de migrar, `restore` con
+    respaldo de seguridad y `adopt-legacy`.
+
+#### 3. MEDIO · Sin aviso si el respaldo deja de intentarse
+
+- **Comprobado**:
+  - `slotHistory` contaba `started_at >= slot` sin límite superior, así que un respaldo «del futuro» detenía los días
+    siguientes.
+  - `lastRun` ordenaba por `started_at`.
+  - Una fila `running` que `finish()` no pudo cerrar bloqueaba `Due` y la pantalla decía «en curso».
+  - Un `Plan` que fallaba siempre solo quedaba en la bitácora.
+- **Corrección**:
+  - **Reloj adelantado**: `slotHistory` y `lastRun` ignoran `started_at > ahora + 5 min` (`ClockTolerance`).
+  - **Orden**: por `seq` en `lastRun`, la lista y el conteo de fallos desde el último correcto.
+  - **Filas huérfanas**:
+    - Una fila en curso de más de `StaleAfter` (30 + 5 min) no cuenta como en curso ni detiene `Due`.
+    - En cada revisión, si hay filas en curso y el lock está libre, el trabajador las cierra como `interrupted`; con el
+      lock tomado ningún respaldo vive, así que toda fila en curso es un resto.
+    - Al arrancar sigue la recuperación de siempre.
+    - Un intento interrumpido cuenta para el máximo de 3, pero no hace esperar la hora de reintento.
+  - **Aviso nuevo `overdue`** («No hay un respaldo reciente de la base de datos»):
+    - Cuándo: respaldos activos, establecimiento configurado y sin respaldo correcto en más de 26 h
+      (`OverdueAfter`), contadas desde lo más reciente entre el último correcto y la activación
+      (`backup_settings.enabled_at`, nueva; se renueva al reactivar) o la configuración del establecimiento.
+    - `reason`: `stale`, con la fecha del último correcto, o `never`.
+    - Prioridad: el fallo primero, luego el atraso, luego la carpeta no disponible.
+    - Se ve en la pantalla de inicio con el mismo estilo rojo que el fallo, y en Mantenimiento y en «Solo servidor».
+    - Si `Plan` falla siempre, este aviso lo cubre.
+- **Prueba**:
+  - `TestClockAheadAndOverdueAlert`:
+    - Un respaldo con el reloj 5 días adelantado; al corregirlo (27 h después de configurar) hay aviso `overdue/never`,
+      el respaldo «del futuro» no es el último y la programación vuelve a tocar.
+    - Un fallo posterior se avisa como `failed` aunque haya un éxito con fecha futura; un correcto quita el aviso.
+    - 30 h después hay `overdue/stale` con la fecha del último correcto.
+    - Desactivados no avisan; al reactivar se mide desde entonces.
+  - `fila_en_curso_huerfana`: una fila en curso huérfana no bloquea el día; la revisión la cierra y respalda.
+  - Unitarias `TestAlertFor` (fallo, reciente, atrasado, recién activados, nunca, desactivados, sin establecimiento,
+    carpeta) y `TestLatestPast`.
+  - Vitest: textos del aviso atrasado y su estilo.
+
+#### 4. BAJO · Validación de la carpeta
+
+- **Comprobado**: solo se rechazaba la carpeta que tenía `PG_VERSION` ella misma, no `pg_wal`, `base` ni la carpeta
+  del servicio (`identity/`, `logs/`); los enlaces se guardaban sin resolver.
+- **Corrección**:
+  - `ValidateDirectory(directory, protected)` resuelve con `EvalSymlinks` y guarda la ruta real.
+  - Rechaza cualquier carpeta con `PG_VERSION` en ella o en una superior (`postgres_data`).
+  - Rechaza cualquier carpeta dentro de las protegidas (`server_data`, «Esa carpeta guarda los datos del servidor de
+    AD-EL POS; elige otra para los respaldos.»).
+  - `ScheduledBackuper.ProtectedDirectories()`: la carpeta de datos del servicio (`installationBackup`, ahora con una
+    aserción en compilación) o la carpeta de la configuración con `serve` (`DumpBackup.ConfigDirectory`).
+  - Elegir la predeterminada sigue siendo volver a ella.
+- **Prueba**:
+  - `TestValidateDirectory`: `pg_wal`, otra carpeta de datos de PostgreSQL, la carpeta del servidor, `identity`,
+    `logs`, enlaces hacia ellos (rechazados) y un enlace hacia la USB (guardado resuelto).
+  - `TestStage9GBackupRoutes`: las mismas por HTTP; un enlace a la carpeta ya elegida no cambia nada ni se audita.
+  - Playwright: elegir la carpeta del servidor temporal se rechaza. La carpeta «USB» de la prueba pasó fuera de ella.
+
+#### 5. Para la Fase G (sin poder probarlo aquí) · USB y privacidad de macOS
+
+Un `LaunchDaemon` no recibe la ventana de permiso de privacidad de macOS. Al escribir en una USB o un disco externo
+(«Volúmenes extraíbles») o en una carpeta de red puede recibir `EPERM`. Qué verá el restaurante:
+
+- Al **elegir** la carpeta en Mantenimiento: «El servidor no puede guardar archivos en esa carpeta. Elige otra o revisa
+  sus permisos.», porque Go prueba a escribir con la cuenta del servicio. No se guarda nada.
+- Si el permiso se pierde **después**: el respaldo queda en la carpeta predeterminada y aparece el aviso «La carpeta de
+  los respaldos no estaba disponible… no permite guardar archivos» en la pantalla de inicio.
+- Qué hacer:
+  - En la computadora principal, Ajustes del Sistema › Privacidad y seguridad › **Acceso total al disco** › «+» y
+    agregar `/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server` (con ⌘⇧G para escribir la ruta); activarlo.
+  - Reiniciar el servicio desde Mantenimiento («Reiniciar») y volver a elegir la carpeta.
+  - Con firma ad hoc, el permiso puede tener que darse otra vez tras instalar una versión nueva.
+  - Comprobarlo en la Fase G con una USB real antes de anotarlo en `docs/INSTALAR_EN_RED.md`.
+
+#### Pruebas ejecutadas
+
+Sobre el commit `3948fdc`, con la pantalla desbloqueada (`CGSSessionScreenIsLocked` ausente):
+
+| Suite                                                                                                                                   | Resultado                                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `format` (`docs/etapas` con el mismo md5), `sync`, `vet` (normal e `integration`), `win` (`GOOS=windows` build y vet)                   | aprobado                                                                                                     |
+| Go unitarias con `-race` (`go test ./...`)                                                                                              | aprobado (17 s); nuevas o cambiadas en `backupschedule`, `fileacl` y `standalone`                            |
+| Integración `./internal/backupschedule`                                                                                                 | aprobado, 10 s (incluido el respaldo real con `pg_dump`/`pg_restore` contra 55499 y las tres pruebas nuevas) |
+| Integración `./internal/administration` (todo el paquete, `TestStageTwoAcceptance` incluida)                                            | aprobado, 121 s                                                                                              |
+| Integración `./internal/database` (`checkStage9GBackups` con las columnas nuevas y 3 rechazos más de `partial_file`)                    | aprobado, 12 s                                                                                               |
+| Integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS`: `backup`, antes de migrar, `restore` y `adopt-legacy` con `dumpToFile`) | aprobado, 47 s                                                                                               |
+| `tsc --noEmit` / Vitest                                                                                                                 | sin errores / 93 archivos, 876 pruebas (13 en `stage9gBackups.test.tsx`)                                     |
+| Playwright `restaurant`, `workflow-stage9g-backups`, `workflow-zz-test-data`                                                            | Chromium 3/3 (1.5 min), WebKit 3/3 (1.5 min)                                                                 |
+| `cargo`                                                                                                                                 | no se ejecutó: no se tocó Rust                                                                               |
+
+#### Para el revisor y para CLAUDE.md
+
+- 0023, sección F: `backup_settings.enabled_at` e `installation_id`; `backup_runs.seq` (identidad) y `partial_file`;
+  índices `backup_runs_running_idx (seq)` y `backup_runs_retention_idx`.
+- Regla de respaldos (§15): la retención y la limpieza de restos solo tocan archivos registrados por esta instalación
+  en `backup_runs`, y los nombres llevan el identificador de la instalación. Todo respaldo nace con
+  `fileacl.CreatePrivate`. Ejecuciones «del futuro» ignoradas, orden por `seq`, aviso `overdue` a las 26 h. La carpeta
+  elegida se guarda resuelta y fuera de los datos de PostgreSQL y del servidor.
+- Fase W: verificar `fileacl.CreatePrivate` en Windows (la ACL con el archivo abierto, `pg_dump` a la salida estándar
+  en binario) y una USB FAT o exFAT (sin ACL, ya anotado en F).
+- Fase G: el permiso «Acceso total al disco» del servicio para una USB (punto 5).
+
+**Fusión y verificación del coordinador**: la rama `etapa-9g-ffix` salió de `6e92f7a`; se fusionó sin conflictos en
+`dc638d1`. Copia exacta: formato, `sync`, `vet`, `GOOS=windows`, Go unitarias con `-race`, integración de los 13
+paquetes, `tsc`, Vitest y Playwright (`restaurant`, `workflow-stage9f-printing`, las seis `workflow-stage9g-*` y
+`workflow-zz-test-data`: 10 de 10 en Chromium y 10 de 10 en WebKit): todo aprobado.
