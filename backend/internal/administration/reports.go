@@ -70,6 +70,10 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if _, ok := result.(*serviceRestart); ok {
 		return service.completeRestart()
 	}
+	// «Respaldar ahora» (etapa 9G, fase F): el respaldo corre después de confirmar la autenticación (backups.go).
+	if pending, ok := result.(*backupNow); ok {
+		return service.runBackupNow(ctx, pending)
+	}
 	pending, ok := result.(*reportPlan)
 	if !ok {
 		return result, nil

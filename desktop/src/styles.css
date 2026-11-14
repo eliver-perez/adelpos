@@ -9125,3 +9125,104 @@ th[aria-sort='descending'] {
   gap: 8px;
   white-space: nowrap;
 }
+
+/* Etapa 9G (fase F): respaldos programados en Mantenimiento y aviso persistente de la pantalla de inicio. Solo
+   tokens de la paleta: ámbar para la carpeta no disponible (advertencia) y rojo para el respaldo que falló (error). */
+.backup-warning {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border: 1px solid var(--warning);
+  border-radius: 12px;
+  background: var(--warning-soft);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+.backup-warning p {
+  margin-top: 4px;
+  color: var(--muted);
+  max-width: 880px;
+  line-height: 1.5;
+}
+.backup-warning-failed {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.operation-mode .backup-warning {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+.maintenance-panel .backup-warning {
+  margin-bottom: 16px;
+}
+.backup-summary p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.backup-summary {
+  margin-bottom: 16px;
+}
+.backup-schedule {
+  display: grid;
+  gap: 16px;
+  max-width: 560px;
+}
+.backup-folder,
+.backup-runs {
+  margin-top: 24px;
+}
+.backup-folder h3,
+.backup-runs h3 {
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: 8px;
+}
+.backup-folder p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+.backup-folder-missing {
+  color: var(--warning-mark);
+}
+.backup-now {
+  margin-top: 16px;
+}
+.backup-run-list {
+  display: grid;
+  gap: 8px;
+}
+.backup-run {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.backup-run-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+}
+.backup-run-kind {
+  color: var(--muted);
+}
+.backup-run-result-succeeded {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.backup-run-result-failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+.backup-run-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}

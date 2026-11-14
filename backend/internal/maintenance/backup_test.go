@@ -196,3 +196,82 @@ func TestOperationsReasonUsesRestaurantWords(t *testing.T) {
 		t.Fatal("el motivo contiene nombres técnicos")
 	}
 }
+
+// Etapa 9G, fase F: los respaldos programados crean el archivo en la ruta que se indica (Dump, privado y sin restos
+// si falla) y lo verifican aparte (Verify): pg_restore --list debe leerlo y su catálogo debe traer los datos de la
+// tabla de migraciones; un archivo legible de otra base no se acepta.
+func TestDumpAndVerifyForScheduledBackups(t *testing.T) {
+	bin, _ := fakeTools(t)
+	listing := `#!/bin/sh
+if [ -n "$FAKE_RESTORE_FAIL" ]; then
+  echo "archivo dañado" >&2
+  exit 1
+fi
+head -c 5 "$2" | grep -q PGDMP || exit 1
+echo ";"
+echo "; Archive created at 2026-11-14 05:00:00 CST"
+if [ -z "$FAKE_RESTORE_FOREIGN" ]; then
+  echo "3848; 0 817680 TABLE DATA public schema_migrations adel_app"
+fi
+echo "3849; 0 817689 TABLE DATA app accounts adel_app"
+`
+	if err := os.WriteFile(filepath.Join(bin, "pg_restore"), []byte(listing), 0700); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	backup := testBackup(bin, filepath.Join(directory, "predeterminada"))
+	var scheduled ScheduledBackuper = backup
+	if scheduled.DefaultDirectory() != filepath.Join(directory, "predeterminada") || scheduled.DatabaseName() != "adel_pos_test_respaldo" {
+		t.Fatal("carpeta o base del respaldo programado")
+	}
+	filename := filepath.Join(directory, "otra-carpeta.dump.partial")
+	if err := scheduled.Dump(context.Background(), filename); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filename)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("respaldo privado: %v", err)
+	}
+	if err := scheduled.Verify(context.Background(), filename); err != nil {
+		t.Fatalf("verificación: %v", err)
+	}
+	t.Setenv("FAKE_RESTORE_FOREIGN", "1")
+	if err := scheduled.Verify(context.Background(), filename); err == nil {
+		t.Fatal("se aceptó un respaldo sin los datos de AD-EL POS")
+	}
+	t.Setenv("FAKE_RESTORE_FOREIGN", "")
+	t.Setenv("FAKE_RESTORE_FAIL", "1")
+	if err := scheduled.Verify(context.Background(), filename); err == nil {
+		t.Fatal("se aceptó un respaldo ilegible")
+	}
+	// Verify no borra el archivo: lo decide quien verifica.
+	if _, err := os.Stat(filename); err != nil {
+		t.Fatal("la verificación borró el archivo")
+	}
+	t.Setenv("FAKE_DUMP_FAIL", "1")
+	failed := filepath.Join(directory, "fallido.dump.partial")
+	if err := scheduled.Dump(context.Background(), failed); err == nil {
+		t.Fatal("pg_dump fallido no dio error")
+	}
+	if _, err := os.Stat(failed); err == nil {
+		t.Fatal("quedó el archivo del pg_dump fallido")
+	}
+	// Un archivo que ya existe no se sobrescribe.
+	if err := scheduled.Dump(context.Background(), filename); err == nil {
+		t.Fatal("se sobrescribió un archivo existente")
+	}
+}
+
+func TestCheckListing(t *testing.T) {
+	if err := CheckListing("3848; 0 817680 TABLE DATA public schema_migrations adel_app\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckListing("3848; 0 817680 TABLE DATA public schema_migrations"); err != nil {
+		t.Fatal("sin dueño al final del renglón")
+	}
+	for _, foreign := range []string{"", "3848; 0 1 TABLE DATA public schema_migrations_old x", "TABLE public schema_migrations x"} {
+		if err := CheckListing(foreign); err == nil {
+			t.Fatalf("se aceptó %q", foreign)
+		}
+	}
+}

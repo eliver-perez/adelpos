@@ -112,6 +112,15 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9G, fase A: estado y reinicio del servicio del servidor (settings.manage).
         "maintenance_service" => Some((Method::GET, "maintenance/service")),
         "maintenance_service_restart" => Some((Method::POST, "maintenance/service/restart")),
+        // Etapa 9G, fase F: respaldos programados y «Respaldar ahora» (settings.manage). La carpeta de los respaldos no
+        // está aquí: solo la envía backup_folder.rs con la ruta que devuelve el diálogo nativo.
+        "maintenance_backups" => Some((Method::GET, "maintenance/backups")),
+        "maintenance_backups_status" => Some((Method::GET, "maintenance/backups/status")),
+        "maintenance_save_backup_settings" => Some((Method::PUT, "maintenance/backups/settings")),
+        "maintenance_backup_default_directory" => {
+            Some((Method::POST, "maintenance/backups/directory/default"))
+        }
+        "maintenance_backup_now" => Some((Method::POST, "maintenance/backups/run")),
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
@@ -837,7 +846,8 @@ pub async fn api_request(
     if operation.starts_with("reports_") {
         request = request.timeout(Duration::from_secs(REPORT_TIMEOUT_SECONDS));
     }
-    if operation == "maintenance_remove_test_data" {
+    // «Respaldar ahora» (etapa 9G, fase F) espera el respaldo en Go hasta 115 s, como «Quitar datos de prueba».
+    if operation == "maintenance_remove_test_data" || operation == "maintenance_backup_now" {
         request = request.timeout(Duration::from_secs(MAINTENANCE_TIMEOUT_SECONDS));
     }
     if let Some(body) = body {
@@ -2302,6 +2312,52 @@ mod tests {
         );
         assert!(route("maintenance_service_stop", None).is_err());
         assert!(route("maintenance_service_mode", None).is_err());
+    }
+
+    #[test]
+    fn stage9g_backup_routes_are_fixed_and_never_carry_a_folder() {
+        for (operation, method, path) in [
+            ("maintenance_backups", Method::GET, "maintenance/backups"),
+            (
+                "maintenance_backups_status",
+                Method::GET,
+                "maintenance/backups/status",
+            ),
+            (
+                "maintenance_save_backup_settings",
+                Method::PUT,
+                "maintenance/backups/settings",
+            ),
+            (
+                "maintenance_backup_default_directory",
+                Method::POST,
+                "maintenance/backups/directory/default",
+            ),
+            (
+                "maintenance_backup_now",
+                Method::POST,
+                "maintenance/backups/run",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+            assert_eq!(
+                route(operation, Some("../../directory")).unwrap().1,
+                path.to_string()
+            );
+        }
+        // La ruta que guarda una carpeta no está en la lista cerrada de la interfaz: React no puede enviar una ruta.
+        for operation in [
+            "maintenance_backup_directory",
+            "maintenance_save_backup_directory",
+            "maintenance_backups_directory",
+        ] {
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
+        let source = include_str!("api.rs");
+        let table = &source
+            [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];
+        let forbidden = ["\"maintenance/backups/", "directory\")"].concat();
+        assert!(!table.contains(&forbidden));
     }
 
     #[test]
