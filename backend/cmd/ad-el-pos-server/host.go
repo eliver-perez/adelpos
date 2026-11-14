@@ -32,6 +32,9 @@ type hostOptions struct {
 	listen string
 	// fromConfig es el server.json de la instalación anterior que adopt-legacy copia (macOS).
 	fromConfig string
+	// networkListen (etapa 9G, fase B) es la escucha HTTPS de la red local del servicio de macOS: vacía =
+	// :8443 (salvo en modo de pruebas, donde vacía = sin escucha), «off» = sin escucha.
+	networkListen string
 }
 
 // hostLayout arma las rutas de la instalación con los indicadores.

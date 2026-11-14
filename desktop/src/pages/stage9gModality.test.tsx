@@ -186,7 +186,11 @@ describe('Buscar el servidor', () => {
         }}
       />,
     );
-    expect(screen.queryByRole('button')).toBeNull();
+    // Desde la fase B la pantalla pide el código del emparejamiento («Pedir código»); lo que no se
+    // ofrece es volver a ser servidor.
+    expect(
+      screen.queryByRole('button', { name: 'Usar esta computadora como servidor' }),
+    ).toBeNull();
   });
 });
 

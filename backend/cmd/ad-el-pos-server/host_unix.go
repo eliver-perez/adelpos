@@ -23,13 +23,17 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
 
 	"local/ad-el-pos/server/internal/administration"
+	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
+	"local/ad-el-pos/server/internal/lanlistener"
 	"local/ad-el-pos/server/internal/licensing"
+	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/product"
 	"local/ad-el-pos/server/internal/standalone"
 )
@@ -66,14 +70,37 @@ func runHostCommand(ctx context.Context, logger *slog.Logger, command string, op
 	}
 	switch command {
 	case "host":
-		return runHost(ctx, logger, layout, logToFile, testMode)
+		network, err := hostNetworkAddress(options.networkListen, testMode)
+		if err != nil {
+			return err
+		}
+		return runHost(ctx, logger, layout, logToFile, testMode, network)
 	case "adopt-legacy":
 		return runAdoptLegacy(ctx, logger, layout, options, logToFile)
 	}
 	return runConsoleMaintenance(ctx, logger, command, layout, options, logToFile)
 }
 
-func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout, logToFile bool, testMode bool) error {
+// hostNetworkAddress decide la escucha HTTPS de la red local del servicio (etapa 9G, D1): el servicio solo
+// sirve con una modalidad con servidor, así que la abre siempre en :8443 (todas las interfaces). «off» la
+// apaga y una dirección explícita la sustituye (pruebas). En modo de pruebas (ADEL_TEST_MODE=1) sin dirección
+// explícita no se abre: una prueba nunca ocupa el 8443 real por omisión.
+func hostNetworkAddress(flag string, testMode bool) (string, error) {
+	switch {
+	case flag == "off":
+		return "", nil
+	case flag != "":
+		if err := config.CheckNetworkAddress(flag, standalone.ServerAddress); err != nil {
+			return "", err
+		}
+		return flag, nil
+	case testMode:
+		return "", nil
+	}
+	return lanlistener.DefaultAddress, nil
+}
+
+func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout, logToFile bool, testMode bool, networkAddress string) error {
 	// El servicio no tiene consola: su bitácora va a la carpeta de datos (launchd guarda aparte la
 	// salida estándar en logs/service.log para los fallos anteriores a este punto).
 	if !logToFile {
@@ -144,7 +171,9 @@ func runHost(ctx context.Context, logger *slog.Logger, layout standalone.Layout,
 	backups := installationBackup{layout: layout, database: cfg.Database}
 	application := newApplication(pool, layout.ConfigFile(), backups, logger)
 	application.Host = control
-	return serveHTTP(serving, logger, cfg, pool, application, testMode)
+	// La identidad del servidor (certificado propio y server_id) vive en la carpeta de datos del servicio.
+	network := networkOptions{Address: networkAddress, IdentityDir: filepath.Join(layout.DataDir, localsetup.IdentityFolder)}
+	return serveHTTP(serving, logger, cfg, pool, application, testMode, network)
 }
 
 // portInUse indica si algo escucha en el puerto de loopback.

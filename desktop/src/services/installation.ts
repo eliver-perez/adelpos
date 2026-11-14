@@ -43,6 +43,9 @@ export interface InstallationState {
   service_enabled: boolean;
   // Sin servidor en esta modalidad, pero la computadora conserva la base de cuando lo era.
   server_data_kept: boolean;
+  // Etapa 9G (fase B): terminal emparejada y el nombre del restaurante que informó su servidor.
+  paired?: boolean;
+  server_name?: string | null;
 }
 
 export function includesServer(mode: InstallationMode) {

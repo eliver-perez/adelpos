@@ -64,6 +64,60 @@ export interface Device {
   home_screen?: TerminalHome;
   last_seen_at?: string;
   revoked_at?: string | null;
+  // Etapa 9G (fase B): tipo de dispositivo, sistema y versión de la aplicación que informó al
+  // emparejarse, cuándo se emparejó, si está en línea (petición reciente) y el usuario con sesión activa.
+  kind?: DeviceKind;
+  os?: string;
+  app_version?: string;
+  paired_at?: string | null;
+  online?: boolean;
+  current_user?: string | null;
+}
+
+// Tipos de dispositivo (etapa 9G, decisión D9): lista cerrada de Go.
+export type DeviceKind = 'desktop' | 'android' | 'kitchen';
+
+// Solicitud pendiente de una terminal nueva (etapa 9G, §3.2). El código no viaja: el administrador
+// escribe el que muestra la terminal.
+export interface PairingRequest {
+  id: string;
+  name: string;
+  device_kind: DeviceKind;
+  os: string;
+  app_version: string;
+  created_at: string;
+  expires_at: string;
+  // La terminal ya envió su parte del código.
+  ready: boolean;
+  attempts_left: number;
+}
+
+export interface PairingRequests {
+  requests: PairingRequest[];
+  // Solo en la computadora principal se aprueban las terminales.
+  approve_here: boolean;
+  // Solo en la computadora principal: si recibe terminales de la red y cómo escribir su dirección.
+  network?: {
+    available: boolean;
+    port: number;
+    addresses: string[];
+  };
+}
+
+// Sesiones activas por tipo de dispositivo (etapa 9G, §3.4): solo se cuentan, no se limita nada.
+export interface SessionsSummary {
+  by_kind: Record<DeviceKind, number>;
+  total: number;
+  limited: boolean;
+}
+
+// Configuración de una terminal (etapa 9G, §3.3). Las impresoras de la terminal llegan con la fase E.
+export interface DeviceConfiguration {
+  device: Device;
+  kitchen_all_stations: boolean;
+  kitchen_sound_alert: boolean;
+  kitchen_stations: { id: string; name: string; active: boolean }[];
+  printers: { id: string; name: string }[];
 }
 
 export interface Session {
