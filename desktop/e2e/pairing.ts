@@ -18,6 +18,18 @@ export function serverFingerprint(): Buffer {
   return createHash('sha256').update(spki).digest();
 }
 
+// Etapa 9G, fase C: identificador del servidor temporal (identity.json junto a su certificado), el que anunciaría
+// en la red; la búsqueda simulada del puente lo entrega como lo haría Rust.
+export function serverIdentifier(): string {
+  const directory = dirname(process.env.ADEL_BROWSER_PROVISIONING!);
+  const identity = JSON.parse(
+    readFileSync(join(directory, 'identity', 'identity.json'), 'utf8'),
+  ) as {
+    server_id: string;
+  };
+  return identity.server_id;
+}
+
 export function pairingCode(
   fingerprint: Buffer,
   terminalNonce: Buffer,
