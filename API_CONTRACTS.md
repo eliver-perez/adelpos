@@ -3524,3 +3524,66 @@ emparejarse»; el contrato OpenAPI documenta ahora las seis rutas `pairing/*` de
   sesión se reintenta sola cada 1, 2, 4, 8 y después 10 s («Reintentar» lo hace ya) y al volver se piden de nuevo
   todas las consultas a la vista (`adel-server-change`, caja y el guardado incierto de la captura con su mismo
   `operation_id`); el SSE reanuda con `after`.
+
+## Etapa 9G · impresión con varias terminales (fase E, esquema 23)
+
+Decisiones D10 y D13 de [docs/ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md). Sección E de la `0023`. Sin permisos
+nuevos. Las impresoras de red y las del equipo servidor las sigue usando el trabajador de Go. Una impresora con el
+transporte `agent` y su terminal (`agent_device_id`) es la **impresora USB de esa terminal**: `destination` es el
+nombre de su cola en esa computadora y la imprime el **agente de impresión** de la aplicación de escritorio mientras
+está abierta (`desktop/src-tauri/src/print_agent.rs`). Una `agent` sin terminal (anterior a la 9G, destinos de
+aceptación) sigue sin imprimir: sus trabajos quedan en `intervention` con `unsupported`.
+
+### Rutas del agente de impresión (solo credencial de la terminal, sin sesión)
+
+`X-Device-ID` + `X-Device-Token` (sin `Authorization`): el agente trabaja aunque nadie haya iniciado sesión. Terminal
+revocada o desconocida: `401 DEVICE_REVOKED|DEVICE_REQUIRED`. Cada terminal solo informa sus impresoras y solo reclama
+y confirma los trabajos cuya fotografía de impresora es suya (`printer_snapshot.agent_device_id`); otro trabajo
+responde `404 PRINT_JOB_NOT_FOUND` sin decir si existe. Cada reclamo y cada resultado actualizan
+`devices.print_agent_seen_at`.
+
+| Método y ruta                       | Cuerpo                                                                                                                                                                 | Respuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUT print-agent/printers`          | `{printers: [{queue, model (≤120), connection (esquema de device-uri, ^[a-z0-9+.-]{0,20}$), printer_type}]}` (0–64, colas únicas con el patrón de Go)                  | `{printers: [{queue, model, connection, usable, reason?}]}`: reemplaza la lista de la terminal; `usable` lo decide Go con la regla del cajón por CUPS (usb, serial, parallel o socket; ni clase, ni remota, ni AirPrint). Auditoría `device.local_printers_reported` (autor: la terminal) y evento `devices.printers.changed` solo si la lista cambió.                                                                                                                                                                                                                                                                 |
+| `POST print-agent/jobs/claim`       | `{claim_id}` (UUID nuevo por reclamo; se repite igual si no llegó la respuesta)                                                                                        | `{job: null}` o `{job: {id, attempt_id, queue, title ("ADEL-<id>" o "ADEL-cajon-<id>"), data (base64 de los bytes ESC/POS exactos, todas las copias), size, drawer, lease_until}}`. El intento y la lease de 60 s se confirman antes de responder; la misma `claim_id` con la lease vigente devuelve el mismo intento. Un trabajo por impresora a la vez (lock 7820148307 de la transacción), en orden de llegada; reintento automático de errores como el servidor (3, espera creciente, nunca el cajón). Impresora o estación desactivada, o fotografía inválida: el trabajo queda en `intervention` sin entregarse. |
+| `POST print-agent/jobs/{id}/result` | `{attempt_id, outcome: submitted\|error\|uncertain, code? (error: not_found\|unreachable\|setup), reference? (submitted: "<cola>-<n>"), detail? (≤300, para soporte)}` | `{state, recorded: true}`. Repetir el mismo resultado responde lo guardado; otro resultado para un intento ya terminado `409 PRINT_RESULT_CONFLICT`. Con la lease vencida: `{state: "uncertain", recorded: false, reason: "lease_expired"}`, el trabajo queda incierto y el informe tardío en el historial (`print.agent_late_result`). Mensajes de Go: «Aceptado por la cola de impresión de <terminal>; no confirma salida física de papel.» (cajón: «…no confirma que el cajón se abrió.»).                                                                                                                         |
+
+Reglas de siempre: `submitted` = aceptado por la cola de la computadora, nunca papel; `uncertain` nunca se reenvía solo
+y se resuelve en la cola; un intento sin resultado al vencer su lease pasa a `uncertain` (lo recoge el trabajador del
+servidor o el siguiente reclamo del agente) con «La terminal no informó el resultado a tiempo…». Tres errores
+confirmados seguidos pasan a la impresora de respaldo configurada (nunca el cajón). El trabajador del servidor nunca
+envía un trabajo de la impresora de una terminal.
+
+### Rutas con sesión
+
+| Método y ruta                                                 | Permiso                    | Cambio                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET kitchen/terminal-printers`                               | `kitchen.printers.manage`  | Nueva: `[{device_id, device_name, agent_online (consulta del agente en los últimos 30 s), agent_seen_at, reported_at, queues: [{queue, model, connection, usable, reason?}], printers: [{id, name, destination, active}]}]` de las terminales no revocadas.                          |
+| `POST/PATCH kitchen/printers`                                 | `kitchen.printers.manage`  | `agent_device_id` (solo con `transport: "agent"`). Al elegir la terminal o cambiar la cola, la cola debe ser una que informó esa terminal y que sirva (400 con el motivo); terminal revocada o inexistente, 400. Sin opción de corte CUPS ni `accepts_escpos`.                       |
+| `GET kitchen/printers`, `kitchen/outputs`                     | sin cambio                 | Agregan `terminal_name` (vacío o nulo si no es de una terminal).                                                                                                                                                                                                                     |
+| `GET kitchen/jobs`, `kitchen/jobs/{id}`                       | sin cambio                 | Agregan `terminal_name`. `problem` nuevo `agent_offline` para un trabajo `pending`, `processing` o `error` que todavía se reintentará cuya terminal no consultó en 30 s (o está revocada): «La Caja 2 está desconectada».                                                            |
+| `GET payments/settings`                                       | sin cambio                 | Agrega `register_printers: [{register_id, register_name, register_active, printer_id, printer_name, terminal_name}]` (cajas activas o con impresora propia).                                                                                                                         |
+| `PUT payments/settings`                                       | `payments.settings.manage` | Acepta `register_printers: [{register_id, printer_id\|null}]` (sin el campo no cambia; null = usar la general). Misma validación que la impresora general (`422 RECEIPT_PRINTER_UNAVAILABLE` con una desactivada o de agente sin terminal); auditado en `payments.settings_changed`. |
+| `GET payments/accounts/{id}` (documentos), documentos de caja | sin cambio                 | `documents[].terminal_name` y `job_problem: "agent_offline"`.                                                                                                                                                                                                                        |
+| `GET payments/cash/drawers`                                   | sin cambio                 | `printers[].terminal_name`; la impresora de una terminal es compatible con el cajón (`connection: "terminal"`).                                                                                                                                                                      |
+| `GET devices/{id}/configuration`                              | sin cambio                 | `printers: [{id, name, destination, active}]` (las de AD-EL POS conectadas a la terminal) y `local_printers: {agent_online, agent_seen_at, reported_at, queues}`.                                                                                                                    |
+| `GET documents/printers`                                      | sin cambio                 | La impresora de una terminal es `supported` (`terminal_agent`); una de agente sin terminal sigue `unsupported` (`agent`).                                                                                                                                                            |
+
+**Impresora de tickets por caja (D10)**: precuentas, tickets de pago, documentos de caja y sus reintentos y
+reimpresiones salen en la impresora propia de la caja de la terminal que los pide (`register_receipt_printers`); sin
+una propia, en la general (`payment_settings.receipt_printer_id`), como antes. La impresora USB de una terminal ya es
+válida para tickets y para el cajón (antes se rechazaba).
+
+### Puente nativo
+
+- Operación nueva en `api.rs`: `kitchen_terminal_printers`. Las rutas `print-agent/*` **no** están en la lista cerrada
+  de React: solo las usa `print_agent.rs` con la credencial de la terminal.
+- `print_agent.rs` arranca con la aplicación (no en Windows hasta la Fase W), informa las impresoras al abrir y cada 5
+  minutos (`lpstat -a` y `lpoptions -p <cola>`, solo lecturas), consulta cada 3 s (y al llegar cualquier evento del
+  canal en tiempo real) y entrega cada trabajo con `lpstat -p <cola>` y `lp -d <cola> -o raw -n 1 -t <título>
+<archivo>` (argumentos separados, archivo privado 0600 que se borra). Sin comandos de Tauri nuevos; el puente de
+  Playwright simula el agente (`printAgent.report`, `printAgent.run` y `printAgent.calls`).
+- **Contrato v1 (OpenAPI)**: estas rutas no se agregan a `openapi.json`/`docs/API_V1.md`. El agente es exclusivo del
+  escritorio (impresoras USB de una computadora con su aplicación abierta) y las rutas de administración son de la
+  interfaz de escritorio; la aplicación Android de meseros no imprime por agente: sus documentos salen en la
+  impresora que elige Go (la de la caja de esa terminal o la general).

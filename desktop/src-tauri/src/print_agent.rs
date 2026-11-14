@@ -711,6 +711,24 @@ struct TerminalServer {
     app: AppHandle,
 }
 
+impl TerminalServer {
+    /// La terminal ya tiene su credencial (enrolada o emparejada) y una conexión configurada. Mientras no (almacén
+    /// seguro esperando el permiso del sistema, terminal sin servidor o emparejándose), el agente no consulta nada.
+    fn ready(&self) -> bool {
+        let state = self.app.state::<TerminalState>();
+        if state.client.is_err() {
+            return false;
+        }
+        state
+            .vault()
+            .and_then(|vault| vault.read())
+            .map(|credentials| {
+                credentials.device_id.is_some() && credentials.device_token.is_some()
+            })
+            .unwrap_or(false)
+    }
+}
+
 impl AgentServer for TerminalServer {
     async fn call(&self, method: &'static str, path: &str, body: Value) -> Result<Value, Failure> {
         let state = self.app.state::<TerminalState>();
@@ -785,6 +803,10 @@ async fn run<R: CommandRunner + 'static>(app: AppHandle, runner: R) {
     let mut offline_delay = Duration::from_secs(1);
     let folder = std::env::temp_dir();
     loop {
+        if !server.ready() {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            continue;
+        }
         if reported.is_none_or(|at| at.elapsed() >= REPORT_EVERY) {
             let reader = runner.clone();
             let printers =
