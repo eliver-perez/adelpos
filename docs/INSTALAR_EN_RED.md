@@ -24,7 +24,6 @@ Elige una computadora que pueda quedarse encendida durante el servicio (puede se
 1. **Antes de instalar**, soporte deja instalado en esa Mac el programa de base de datos que usa AD-EL POS
    (PostgreSQL 18). Si falta, el instalador lo avisa y no instala nada.
 2. Copia el instalador `AD-EL POS_0.10.0.pkg` a la Mac y haz doble clic en él.
-   <!-- PENDIENTE-COORDINADOR: tamaño del .pkg 0.10.0 y su SHA-256 cuando se compile en la Fase G. -->
    Si macOS avisa que no puede comprobar el instalador (no está firmado; es normal en esta versión), abre
    **Ajustes del Sistema › Privacidad y seguridad** y toca **«Abrir de todos modos»**.
 3. En **Tipo de instalación** deja marcada la opción **«Servidor del restaurante»** y toca **Instalar**.
@@ -119,8 +118,7 @@ Revisa en este orden:
    automática.
 5. Si la computadora principal tiene activado el **firewall de macOS** (Ajustes del Sistema › Red › Firewall), debe
    permitir las conexiones entrantes de AD-EL POS.
-   <!-- PENDIENTE-COORDINADOR: el firewall de la Mac de pruebas está desactivado; confirmar con la instalación real si
-   hace falta este paso y cómo se ve el aviso. -->
+   (Este paso todavía no se comprobó: en la Mac de pruebas el firewall está desactivado.)
 
 Otros avisos que puedes ver en una terminal:
 
@@ -169,8 +167,7 @@ revisa al crearse.
   total al disco**, toca **«+»**, agrega `/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server` (en la ventana
   para elegir, ⌘⇧G permite escribir esa ruta) y actívalo; después, en Mantenimiento, **«Reiniciar»** el servicio y
   vuelve a elegir la carpeta. Tras instalar una versión nueva puede hacer falta darlo otra vez.
-  <!-- PENDIENTE-COORDINADOR: este paso viene de la corrección de la Fase F y todavía no se comprobó con una USB real;
-  confirmarlo (o corregirlo) en la instalación real antes de dar la guía por definitiva. -->
+  (Este paso todavía no se comprobó con una USB real.)
 - **Si la USB no está conectada** a la hora del respaldo, se guarda en la carpeta predeterminada y aparece un aviso en
   la pantalla de inicio del administrador. Si un respaldo **falla**, o si pasa más de un día sin un respaldo correcto
   («No hay un respaldo reciente de la base de datos»), el aviso dice qué pasó y sigue hasta que haya un respaldo

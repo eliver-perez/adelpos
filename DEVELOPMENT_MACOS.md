@@ -270,8 +270,11 @@ procedimiento del avance (Fase A, «Procedimiento para la Fase G»):
 8. Verificar `health/ready` y `version`, Mantenimiento › «Servicio del servidor», cerrar la ventana (el servidor sigue),
    «Reiniciar» y reiniciar la Mac sin iniciar sesión.
 
-<!-- PENDIENTE-COORDINADOR: resultado del procedimiento en la instalación real (fecha, respaldo, SHA-256 del .pkg,
-conteos, versión 0.10.0 / esquema 23). -->
+**Estado (14/11/2026)**: la 0023 y la 0.10.0 ya se aplicaron a la instalación de `.local` (respaldo
+`backups/adel_pos-20261114T060151Z-ec289c.dump`); instalar el `.pkg` y pasar los datos queda pendiente del propietario. Como la aplicación
+0.10.0 ya guardó su modalidad, para habilitar el servidor en el paso 7 se deja marcada «Servidor del restaurante» al
+volver a ejecutar el instalador después de pasar los datos, o se quita `connection.json` antes de abrir la aplicación
+instalada.
 
 **Después de pasar los datos** el servicio es la instalación real: **no usar** `dev.sh db-start`, `server-start`,
 `server`, `migrate`, `backup`, `restore-check.py`, `test-integration` ni `test-browser` con ella (actúan sobre la base
