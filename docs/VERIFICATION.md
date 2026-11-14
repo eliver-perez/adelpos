@@ -17,13 +17,12 @@ Windows: [NOTAS_WINDOWS.md](NOTAS_WINDOWS.md) («Etapa 9G: qué hacer en la Fase
 - **Código**: fases 0, A, D, B, F, C y E y las correcciones de las tres partes de la revisión independiente (fases B, D y
   F), cada una en su rama y fusionadas por el coordinador en `etapa-9g` (creada desde `main`, 0.9.5 con la 9F), con sus
   pruebas según el avance; fase G con la regresión final, la documentación, la instalación y la fusión en `main`.
-  <!-- PENDIENTE-COORDINADOR: confirmar la fusión de las correcciones de D (e9d35fc) y el cierre de las fusiones de E y
-  de las correcciones de F. -->
+  Las correcciones de D (`e9d35fc`, `9eb8a49`) se fusionaron en `792e877`; las fusiones de E y de las correcciones de F
+  se cerraron en `39b8b0c` y `dc638d1` con sus suites aprobadas.
 - **macOS**: todo se probó en la Mac en copias aisladas (clúster PostgreSQL temporal, Go temporal en modo de pruebas,
   carpetas «del sistema» temporales). Nada se instaló: el `.pkg` solo se compiló y se examinó.
-- **Instalación real**: <!-- PENDIENTE-COORDINADOR: resultado de la instalación del .pkg 0.10.0, el paso de datos y
-  la 0023 en la instalación real (Fase G, con el propietario). --> pendiente al escribir este documento; hasta entonces
-  la instalación real sigue siendo la 0.9.5 de `.local` con `dev.sh`.
+- **Instalación real**: la 0023 y la 0.10.0 se aplicaron a la instalación real de `.local` el 14/11/2026 según la regla de autonomía de §0 (respaldo `backups/adel_pos-20261114T060151Z-ec289c.dump` con restauración verificada: 135 tablas idénticas; `migrate` `applied:1` y repetición `applied:0`; readiness 200 con esquema compatible; servidor y `.app` 0.10.0; datos de operación idénticos; registro en [docs/ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md), «Fase G · Instalación real»). El `.pkg`, el paso de datos al servicio y su comprobación quedan pendientes del
+  propietario (contraseña de administrador); hasta entonces la instalación real es la de `.local` con `dev.sh`.
 - **Windows**: nada de la 9G se ejecutó en Windows; solo se compiló y se revisó Go con `GOOS=windows`. El servicio de
   Windows, el instalador para todo el equipo y las pruebas cruzadas son la Fase W.
 
@@ -61,10 +60,12 @@ existe); y todo Windows (Fase W). Detalle en [VERIFICATION_STAGE9G.md](VERIFICAT
 
 ## Regresión final
 
-<!-- PENDIENTE-COORDINADOR: tabla de la regresión final de la Fase G (la misma de VERIFICATION_STAGE9G.md). -->
-
-Pendiente al escribir este documento. La regresión final de la etapa anterior está en
-[VERIFICATION_STAGE9F.md](VERIFICATION_STAGE9F.md), «Regresión final».
+Copia exacta de `c4cc94d` (`git archive`; después solo cambió Markdown), clúster temporal 55499, Go temporal 8183 y vista previa
+1421, 13–14/11/2026, 1757 s, todo aprobado: formato, `sync --check`, `go vet` (normal e `integration`), `GOOS=windows` build y vet,
+Go unitarias con `-race` (31 paquetes), integración PostgreSQL 13 de 13 (`operations` 327 s, `reports` 130 s, `administration` 117 s),
+`tsc`, Vitest (94 archivos, 883 pruebas), `npm run build`, `cargo test` (89 aprobadas, 3 ignoradas), Playwright Chromium 32 de 32 y
+WebKit 32 de 32 (todas las especificaciones; pantalla desbloqueada durante Playwright, bloqueada al terminar) y `.app` 0.10.0
+(arm64, 14.02 MiB, con las claves de «Red local» en `Info.plist`). Detalle en [ETAPA_9G_AVANCE.md](ETAPA_9G_AVANCE.md), «Fase G».
 
 ## Repetir las comprobaciones
 

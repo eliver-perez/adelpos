@@ -2591,3 +2591,39 @@ cambió Markdown: documentación y `eb7ab4a`, con formato y prueba de contrato a
 La pantalla de la Mac estaba desbloqueada al empezar y quedó bloqueada al terminar (después de Playwright, que aprobó en
 ambos motores). Rust para Windows no se compiló (el destino MSVC no está instalado en la Mac): lo nuevo de Rust propio de
 Windows queda detrás de `#[cfg]` y se compila en la Fase W.
+
+### Instalación real (regla de autonomía de §0)
+
+Sobre `4687930` con el árbol limpio, después de la regresión final aprobada (14/11/2026). La instalación real sigue
+siendo la de `.local` (servidor `serve` y PostgreSQL 55432 del proyecto): pasarla al servicio exige instalar el `.pkg`
+con la contraseña de administrador, que es una parada del §0 de la especificación (abajo).
+
+1. **Estado previo** (servidor 0.9.5, esquema 22), comprobación de solo lectura con un script del directorio temporal
+   (`default_transaction_read_only=on`, solo conteos): migraciones 1–22, 136 tablas (con `schema_migrations`), 937 filas,
+   154 permisos, cuentas `closed:2, open:7, voided:1`, turnos `closed:1, open:1`, **0 turnos en arqueo, 0 trabajos de
+   impresión sin terminar**, 1 terminal activa y 0 sesiones activas. Repetida justo antes de detener el servidor:
+   idéntica.
+2. **Respaldo** `backups/adel_pos-20261114T060151Z-ec289c.dump` (677 970 bytes, catálogo legible).
+3. **Ensayo de restauración**: «Restauración completa verificada: 135 tablas con conteos idénticos».
+4. **Servidor detenido** de forma ordenada (`server-stop`).
+5. **Migración**: `./scripts/dev.sh migrate` → `applied:1`; repetición → `applied:0`.
+6. **Servidor 0.10.0 iniciado** (`server-start`): readiness 200; `api/v1/version` → **0.10.0 / esquema 23**,
+   `test_mode: false`, `min_client_version` 0.10.0; identidad del servidor creada en `.local/identity`; solo escucha en
+   `127.0.0.1:8181` (sin `network_listen_address`: sin escucha de red ni anuncio, como corresponde a `serve`).
+7. **Comprobación posterior** de solo lectura, comparada con la previa: solo cambian las migraciones (1–23), las tablas
+   nuevas de la 0023 (`backup_runs` 0, `backup_settings` 1, `catalog_change_log` 0, `catalog_epoch` 1,
+   `device_local_printers` 0, `device_pairing_requests` 0, `register_receipt_printers` 0), `permissions` 154 → 155 y
+   `role_permissions` 160 → 161 (`catalog.sold_out.manage` al administrador). Cuentas, pagos, caja, cocina, inventario,
+   catálogo, auditoría y ventas: **idénticos**. Ningún dato de operación se borró ni se reescribió.
+8. **Aplicación**: `./scripts/dev.sh build-macos` → `AD-EL POS.app` 0.10.0 (13.98 MiB); `./scripts/dev.sh open-app` →
+   la aplicación 0.10.0 quedó abierta. Como aún no existe `connection.json`, al abrirla pregunta «¿Cómo se usará esta
+   computadora?» con **«Servidor y terminal»** sugerida (sin servicio instalado guarda solo la conexión local, como hasta
+   la 9F).
+
+**Pendiente del propietario (parada del §0 de la especificación)**: instalar el `.pkg` 0.10.0 (ventana de contraseña de
+administrador del Instalador y aviso «Elementos en segundo plano añadidos»), pasar los datos de `.local` a
+`/Library/Application Support/AD-EL POS` con `adopt-legacy`, y comprobar que el servicio sigue al cerrar la ventana y que
+arranca sin iniciar sesión (reiniciar la Mac, otra parada). Ajuste al procedimiento de la Fase A: como la aplicación
+0.10.0 ya guarda su modalidad en `connection.json`, la elección del primer arranque no vuelve a aparecer; para habilitar
+el servidor después de pasar los datos se quita ese archivo antes de abrir la aplicación instalada (o se vuelve a
+ejecutar el instalador con «Servidor del restaurante»).
