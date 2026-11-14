@@ -186,6 +186,7 @@ export function CaptureScreen({
                   enabled={captureEnabled}
                   active={active}
                   writable={writable && !blocked}
+                  canMarkSoldOut={can('catalog.sold_out.manage') && can('catalog.read')}
                   onAdd={(product) => workspace.addProduct(product)}
                   onCustomize={(product) => workspace.startEditor(product, 'new')}
                 />

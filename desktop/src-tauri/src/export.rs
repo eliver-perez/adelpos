@@ -511,11 +511,11 @@ pub async fn export_report(
     let vault = state.vault()?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
     let mut credentials = vault.read()?;
-    let mut request = client
-        .get(format!("{}/api/v1/{path}", config.server_url))
-        .timeout(Duration::from_secs(EXPORT_TIMEOUT_SECONDS))
-        .query(&query)
-        .query(&[("format", format.code())]);
+    let mut request =
+        crate::api::with_client_headers(client.get(format!("{}/api/v1/{path}", config.server_url)))
+            .timeout(Duration::from_secs(EXPORT_TIMEOUT_SECONDS))
+            .query(&query)
+            .query(&[("format", format.code())]);
     if let (Some(id), Some(token)) = (&credentials.device_id, &credentials.device_token) {
         request = request
             .header("X-Device-ID", id)

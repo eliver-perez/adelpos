@@ -10,11 +10,32 @@ import (
 	"slices"
 	"time"
 
+	"local/ad-el-pos/server/internal/apicontract"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/product"
 )
 
 type Probe func(context.Context) database.Health
+
+// capabilities son las funciones que anuncia /api/v1/version. Un cliente comprueba las que necesita en lugar de
+// suponerlas por la versión; desde la etapa 9G se agregan las de la API para Android.
+var capabilities = []string{
+	"technical-health",
+	"identity-administration",
+	"catalog-administration",
+	"exact-price-preview",
+	"restaurant-operations",
+	"kitchen-preparation",
+	"persistent-print-queue",
+	"authenticated-sse-v1",
+	"client-version-check",
+	"openapi-v1",
+	"catalog-sync-v1",
+	"catalog-image-content",
+	"catalog-sold-out",
+	"offline-orders-v1",
+	"state-recovery-v1",
+}
 
 type ErrorBody struct {
 	Code      string `json:"code"`
@@ -60,10 +81,22 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			"api_version":            metadata.APIVersion,
 			"schema_version":         metadata.SchemaVersion,
 			"supported_api_versions": []string{metadata.APIVersion},
-			"capabilities":           []string{"technical-health", "identity-administration", "catalog-administration", "exact-price-preview", "restaurant-operations", "kitchen-preparation", "persistent-print-queue", "authenticated-sse-v1"},
+			"capabilities":           capabilities,
 			"events_available":       len(application) > 0,
 			"test_mode":              options.TestMode,
+			// Etapa 9G (§5.1): la versión más antigua de la aplicación que acepta este servidor, los tipos de
+			// cliente que conoce y dónde está el contrato OpenAPI de la API v1.
+			"min_client_version": metadata.MinClientVersion,
+			"client_kinds":       ClientKinds,
+			"openapi_path":       "/api/v1/openapi.json",
 		})
+	})
+	// Contrato OpenAPI 3.1 de la API v1 para los clientes (etapa 9G, §5.1): el mismo documento que comprueban las
+	// pruebas de contrato y que usará la etapa de Android.
+	mux.HandleFunc("/api/v1/openapi.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(apicontract.Document())
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		if len(application) > 0 {
@@ -114,10 +147,16 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			tracked.WriteHeader(204)
 			return
 		}
-		technicalRoute := slices.Contains([]string{"/api/v1/health/live", "/api/v1/health/ready", "/api/v1/version", "/api/v1/events"}, r.URL.Path)
+		technicalRoute := slices.Contains([]string{"/api/v1/health/live", "/api/v1/health/ready", "/api/v1/version", "/api/v1/events", "/api/v1/openapi.json"}, r.URL.Path)
 		if r.Method != http.MethodGet && (technicalRoute || len(application) == 0) {
 			w.Header().Set("Allow", "GET, OPTIONS")
 			fail(tracked, r, 405, "METHOD_NOT_ALLOWED", "Método no permitido.")
+			return
+		}
+		// Un cliente que se identifica con una versión anterior a la mínima recibe «Actualiza esta terminal»
+		// antes de llegar a la aplicación (etapa 9G, §5.1; clientversion.go).
+		if problem := checkClient(r, metadata.MinClientVersion, metadata.Version); problem != nil {
+			failWithDetails(tracked, r, problem.status, problem.code, problem.message, problem.details)
 			return
 		}
 		mux.ServeHTTP(tracked, r)
@@ -146,4 +185,19 @@ func respond(w http.ResponseWriter, status int, body any) {
 func fail(w http.ResponseWriter, r *http.Request, status int, code, message string) {
 	id, _ := r.Context().Value(contextKey{}).(string)
 	respond(w, status, map[string]any{"error": ErrorBody{code, message, id}})
+}
+
+// failWithDetails es fail con datos públicos del rechazo en error.details (versión del cliente y la mínima).
+func failWithDetails(w http.ResponseWriter, r *http.Request, status int, code, message string, details map[string]any) {
+	if details == nil {
+		fail(w, r, status, code, message)
+		return
+	}
+	id, _ := r.Context().Value(contextKey{}).(string)
+	respond(w, status, map[string]any{"error": map[string]any{
+		"code":       code,
+		"message":    message,
+		"request_id": id,
+		"details":    details,
+	}})
 }

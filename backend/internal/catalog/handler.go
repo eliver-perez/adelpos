@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"local/ad-el-pos/server/internal/events"
 )
 
 var writePermissions = map[string]string{
@@ -35,6 +37,29 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	// Un snapshot de cálculo no mezcla revisiones mientras otra terminal edita relaciones.
 	if _, err := tx.Exec(ctx, lock); err != nil {
 		return nil, err
+	}
+	result, err := route(ctx, tx, request, parts, audit)
+	if err != nil || readOnly || publishesOwnEvent(parts) {
+		return result, err
+	}
+	// Etapa 9G (decisión D8): el catálogo publica eventos en tiempo real. Toda escritura correcta avisa a las
+	// terminales que vuelvan a consultar el catálogo (ámbito «catalog»), sin contenido ni precios.
+	if err := events.Append(ctx, tx, "catalog.changed", "catalog", nil, nil); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// publishesOwnEvent indica las escrituras que publican su propio evento: «Agotado» avisa con el producto.
+func publishesOwnEvent(parts []string) bool {
+	return len(parts) == 3 && parts[0] == "products" && parts[2] == "sold-out"
+}
+
+// route despacha la ruta del catálogo con el lock ya tomado.
+func route(ctx context.Context, tx pgx.Tx, request Request, parts []string, audit Audit) (any, error) {
+	// Etapa 9G (§5.3): descarga del catálogo completo o de los cambios desde una versión (sync.go).
+	if len(parts) == 1 && parts[0] == "sync" && request.Method == "GET" {
+		return catalogSync(ctx, tx, request)
 	}
 	if len(parts) == 1 && parts[0] == "preview" && request.Method == "POST" {
 		if err := request.Actor.Require("catalog.prices.read"); err != nil {
@@ -111,6 +136,9 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 				parts[1],
 				audit,
 			)
+		// Etapa 9G (§5.4): «Agotado» y «Disponible otra vez» desde la captura (soldout.go).
+		case "sold-out":
+			return productSoldOut(ctx, tx, request, parts[1], audit)
 		}
 	}
 	if err := request.Actor.Require(writePermissions[resource]); err != nil {
@@ -367,6 +395,11 @@ func listPage(ctx context.Context, tx pgx.Tx, resource string, request Request) 
 			reason := productAvailabilityReason(*product, *categoryDoc.(*Category), now, location, false)
 			value["available_now"] = reason == ""
 			value["availability_reason"] = reason
+			// «Agotado» (etapa 9G): la captura lo marca y ofrece «Disponible otra vez» a quien puede cambiarlo.
+			state := soldOutState(*product, now)
+			value["sold_out"] = state.SoldOut
+			value["sold_out_indefinite"] = state.Indefinite
+			value["sold_out_until"] = state.SoldOutUntil
 			if priceList != nil {
 				price, origin, problem := effectivePrice(*product, nil, *priceList, now, location, false)
 				if !priceList.Active {

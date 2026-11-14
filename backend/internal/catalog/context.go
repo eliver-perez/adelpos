@@ -17,6 +17,10 @@ type Error struct {
 	Status  int
 	Code    string
 	Message string
+	// ProductID es el producto que no se pudo calcular (agotado o no disponible), cuando se conoce. No se
+	// publica: lo usa la validación de los pedidos capturados sin conexión (etapa 9G, §5.5) para distinguir el
+	// producto de la partida de un complemento o un componente de combo.
+	ProductID string
 }
 
 func (problem *Error) Error() string {
@@ -37,6 +41,17 @@ func conflict() error {
 
 func unavailable(message string) error {
 	return &Error{Status: 409, Code: "PRODUCT_UNAVAILABLE", Message: message}
+}
+
+// unavailableProduct es unavailable con el producto que lo causó.
+func unavailableProduct(productID, message string) error {
+	return &Error{Status: 409, Code: "PRODUCT_UNAVAILABLE", Message: message, ProductID: productID}
+}
+
+// soldOut es el rechazo de un producto agotado (etapa 9G, §5.4): no se puede capturar ni confirmar hasta que
+// alguien lo marque como disponible otra vez o empiece el día comercial siguiente.
+func soldOut(productID, message string) error {
+	return &Error{Status: 409, Code: "PRODUCT_SOLD_OUT", Message: message, ProductID: productID}
 }
 
 type Permission struct {
@@ -60,10 +75,18 @@ var Permissions = []Permission{
 	{"catalog.availability.manage", "Modificar disponibilidad y horarios"},
 	{"catalog.availability.override", "Autorizar excepciones de disponibilidad en previsualización"},
 	{"catalog.images.manage", "Administrar imágenes del catálogo"},
+	// Etapa 9G (§5.4, decisión D8): «Agotado» y «Disponible otra vez» desde la captura. Es distinto de
+	// catalog.availability.manage («Pausar» y horarios), que no cambia. La migración 0023 lo concede solo al
+	// administrador, con esta misma descripción.
+	{"catalog.sold_out.manage", "Marcar productos como agotados y disponibles otra vez desde la captura"},
 }
 
 type Actor struct {
 	Permissions []string
+	// UserID y DeviceID identifican a quien marca «Agotado» (etapa 9G): su clave de operación se guarda con el
+	// usuario y la terminal, como en pedidos y cobros.
+	UserID   string
+	DeviceID string
 }
 
 func (actor Actor) Can(permission string) bool {
@@ -87,6 +110,9 @@ type Request struct {
 	Query  url.Values
 	Body   json.RawMessage
 	Actor  Actor
+	// IfNoneMatch es la cabecera del mismo nombre: la imagen binaria responde «sin cambios» si coincide con su
+	// etiqueta (etapa 9G, §5.3).
+	IfNoneMatch string
 }
 
 type Audit func(context.Context, pgx.Tx, string, string, *string, any, any) error

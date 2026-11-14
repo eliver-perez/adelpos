@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/administration"
+	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
@@ -209,7 +210,14 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(inventoryDone)
 		(&inventory.Worker{Pool: pool, Logger: logger}).Run(workerContext)
 	}()
-	defer func() { stopWorker(); <-workerDone; <-inventoryDone }()
+	// Trabajador de «Agotado» (etapa 9G, §5.4): devuelve a «disponible» los productos agotados al empezar el día
+	// comercial siguiente y avisa a las terminales.
+	soldOutDone := make(chan struct{})
+	go func() {
+		defer close(soldOutDone)
+		(&catalog.SoldOutWorker{Pool: pool, Logger: logger}).Run(workerContext)
+	}()
+	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone }()
 	stopped := make(chan error, 1)
 	go func() {
 		if cfg.TLSCertificate != "" {

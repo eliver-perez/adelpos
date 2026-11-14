@@ -3,10 +3,14 @@ import { CatalogImage } from '../../../components/catalog/EditorFields';
 import { Notice } from '../../../components/Forms';
 import { Icon } from '../../../components/Icon';
 import { shortcutHint } from '../../../commands/hints';
+import { SegmentedControl } from '../../../components/SegmentedControl';
 import { ToggleButton } from '../../../components/ToggleButton';
 import { useLiveResource } from '../../../hooks/useLiveResource';
 import type { Lookups } from '../../../services/catalog';
 import { formatMoney } from '../../../services/money';
+import { notifyError, notifySuccess } from '../../../services/notify';
+import { setSoldOut, soldOutDurations, soldOutMessage } from '../../../services/soldOut';
+import type { SoldOutDuration } from '../../../services/soldOut';
 import type { Account } from '../../../services/restaurant';
 import { categoryStyle } from './CategoryColumn';
 import { productSelectable, requiresChoices } from './captureRules';
@@ -38,6 +42,7 @@ export function ProductGrid({
   enabled,
   active,
   writable,
+  canMarkSoldOut = false,
   onAdd,
   onCustomize,
 }: {
@@ -51,11 +56,19 @@ export function ProductGrid({
   enabled: boolean;
   active: boolean;
   writable: boolean;
+  // Etapa 9G (§5.4): quien tiene catalog.sold_out.manage marca productos como agotados desde aquí.
+  canMarkSoldOut?: boolean;
   onAdd: (product: CaptureProduct) => void;
   onCustomize: (product: CaptureProduct) => void;
 }) {
   const [page, setPage] = useState(1);
   useEffect(() => setPage(1), [categoryID]);
+  // «Marcar agotados»: mientras está activo, tocar un producto lo marca como agotado (o disponible otra vez) en
+  // lugar de agregarlo a la cuenta, con la duración elegida.
+  const [soldOutMode, setSoldOutMode] = useState(false);
+  const [soldOutDuration, setSoldOutDuration] = useState<SoldOutDuration>('today');
+  const [pendingSoldOut, setPendingSoldOut] = useState<string | null>(null);
+  const markingSoldOut = soldOutMode && canMarkSoldOut;
   const searching = search.trim().length > 0;
   const query: Record<string, string> = {
     page: String(page),
@@ -78,6 +91,21 @@ export function ProductGrid({
   const colors = new Map(lookups?.categories.map((entry) => [entry.id, entry.color]) ?? []);
   const groups = lookups?.groups ?? [];
 
+  // Un toque cambia «Agotado» del producto. Las demás terminales se enteran por el evento del catálogo; esta
+  // vuelve a consultar el listado al momento.
+  async function toggleSoldOut(product: CaptureProduct) {
+    setPendingSoldOut(product.id);
+    try {
+      const state = await setSoldOut(product.id, !product.sold_out, soldOutDuration);
+      notifySuccess(soldOutMessage(state));
+      await products.reload();
+    } catch (error) {
+      notifyError(error, 'No se pudo cambiar el producto. Inténtalo de nuevo.');
+    } finally {
+      setPendingSoldOut(null);
+    }
+  }
+
   return (
     <section className="capture-products" aria-label="Productos">
       <div className="capture-products-toolbar">
@@ -97,7 +125,21 @@ export function ProductGrid({
           />
         </label>
         <ToggleButton label="Mostrar imágenes" pressed={showImages} onChange={onShowImages} />
+        {canMarkSoldOut && (
+          <ToggleButton label="Marcar agotados" pressed={soldOutMode} onChange={setSoldOutMode} />
+        )}
       </div>
+      {markingSoldOut && (
+        <div className="capture-sold-out-bar" role="status">
+          <span>Toca un producto para marcarlo como agotado o como disponible otra vez.</span>
+          <SegmentedControl
+            label="Duración de «Agotado»"
+            value={soldOutDuration}
+            options={soldOutDurations}
+            onChange={setSoldOutDuration}
+          />
+        </div>
+      )}
       <Notice>{products.error}</Notice>
       {!enabled && <p className="muted">La captura requiere permisos de catálogo y precios.</p>}
       {enabled && !searching && !categoryID && (
@@ -110,17 +152,31 @@ export function ProductGrid({
         {products.data?.items.map((product) => {
           const selectable = productSelectable(product) && writable && !products.error;
           const needsChoices = requiresChoices(product, groups);
+          const soldOutLabel = product.sold_out
+            ? `Disponible otra vez: ${product.name}`
+            : `Marcar como agotado: ${product.name}`;
           return (
             <div
-              className={`capture-product ${showImages && product.image_id ? 'capture-product-with-image' : ''}`}
+              className={`capture-product ${showImages && product.image_id ? 'capture-product-with-image' : ''} ${product.sold_out ? 'capture-product-sold-out' : ''}`}
               key={product.id}
               style={categoryStyle(colors.get(product.category_id))}
             >
               <button
                 type="button"
                 className="capture-product-main"
-                disabled={!selectable}
-                onClick={() => (needsChoices ? onCustomize(product) : onAdd(product))}
+                aria-label={markingSoldOut ? soldOutLabel : undefined}
+                disabled={markingSoldOut ? pendingSoldOut !== null : !selectable}
+                onClick={() => {
+                  if (markingSoldOut) {
+                    void toggleSoldOut(product);
+                    return;
+                  }
+                  if (needsChoices) {
+                    onCustomize(product);
+                    return;
+                  }
+                  onAdd(product);
+                }}
               >
                 <span className="capture-product-stripe" aria-hidden="true" />
                 {showImages && product.image_id && (
@@ -128,12 +184,24 @@ export function ProductGrid({
                 )}
                 <strong className="capture-product-name">{product.name}</strong>{' '}
                 <span className="capture-product-price">{priceLabel(product)}</span>{' '}
-                {needsChoices && <span className="capture-product-tag">Opciones</span>}
-                {!product.available_now && (
+                {needsChoices && !markingSoldOut && (
+                  <span className="capture-product-tag">Opciones</span>
+                )}
+                {product.sold_out && (
+                  <span className="capture-product-tag capture-product-sold-out-tag">
+                    {product.sold_out_indefinite ? 'Agotado hasta nuevo aviso' : 'Agotado'}
+                  </span>
+                )}
+                {!product.available_now && !product.sold_out && (
                   <span className="product-unavailable">{product.availability_reason}</span>
                 )}
+                {markingSoldOut && (
+                  <span className="capture-product-sold-out-action">
+                    {product.sold_out ? 'Disponible otra vez' : 'Marcar agotado'}
+                  </span>
+                )}
               </button>
-              {selectable && !needsChoices && (
+              {selectable && !needsChoices && !markingSoldOut && (
                 <button
                   type="button"
                   className="capture-product-customize"

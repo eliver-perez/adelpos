@@ -10,13 +10,65 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"local/ad-el-pos/server/internal/logoraster"
 )
 
+// Binary es una respuesta binaria del catálogo: el contenido de una imagen con su etiqueta de caché (etapa 9G,
+// §5.3). administration la escribe tal cual, sin JSON. NotModified indica que el cliente ya tiene esa versión
+// (If-None-Match coincide) y se responde 304 sin contenido.
+type Binary struct {
+	ContentType  string
+	ETag         string
+	CacheControl string
+	Content      []byte
+	NotModified  bool
+}
+
+// imageContent atiende GET catalog/images/{id}/content: la imagen tal cual, para que los clientes la guarden en su
+// caché en lugar de recibirla en base64 dentro del JSON. La identidad de una imagen nunca cambia de contenido (una
+// imagen nueva tiene otro id), así que la etiqueta es su checksum y la caché puede ser larga.
+func imageContent(ctx context.Context, tx pgx.Tx, request Request, id string) (any, error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	var checksum, mime string
+	if err := tx.QueryRow(ctx, "SELECT checksum,media_type FROM app.catalog_images WHERE id=$1", id).Scan(&checksum, &mime); err != nil {
+		return nil, err
+	}
+	result := &Binary{
+		ContentType:  mime,
+		ETag:         `"` + checksum + `"`,
+		CacheControl: "private, max-age=31536000, immutable",
+	}
+	if etagMatches(request.IfNoneMatch, result.ETag) {
+		result.NotModified = true
+		return result, nil
+	}
+	if err := tx.QueryRow(ctx, "SELECT content FROM app.catalog_images WHERE id=$1", id).Scan(&result.Content); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// etagMatches compara If-None-Match (una lista separada por comas, «*» o etiquetas débiles W/"…") con la etiqueta.
+func etagMatches(header, etag string) bool {
+	for _, candidate := range strings.Split(header, ",") {
+		candidate = strings.TrimPrefix(strings.TrimSpace(candidate), "W/")
+		if candidate == "*" || candidate == etag {
+			return true
+		}
+	}
+	return false
+}
+
 func images(ctx context.Context, tx pgx.Tx, request Request, parts []string, audit Audit) (any, error) {
+	if request.Method == "GET" && len(parts) == 3 && parts[2] == "content" {
+		return imageContent(ctx, tx, request, parts[1])
+	}
 	if request.Method == "GET" && len(parts) == 2 {
 		if err := validateID(parts[1]); err != nil {
 			return nil, err
