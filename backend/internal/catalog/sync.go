@@ -25,8 +25,12 @@ import (
 //     usa para mostrar y el servidor decide al recibir el pedido.
 //   - Los productos archivados no van en la descarga completa; en la de cambios llegan con archived = true, y los
 //     registros borrados, en deleted. El cliente los quita.
-//   - Si cambió la lista predeterminada o la tasa general de IVA, la descarga de cambios incluye todos los productos;
-//     si cambió una categoría, también sus productos (su disponibilidad depende de ella).
+//   - Si cambió la lista predeterminada o la tasa general de IVA, la descarga de cambios incluye todos los productos
+//     vigentes y, además, los archivados que cambiaron (revisión de la fase D, hallazgo 1); si cambió una categoría,
+//     también sus productos (su disponibilidad depende de ella). Un producto que cambió (agotado, inactivo, en otra
+//     categoría…) trae también los combos que lo usan y los grupos cuyos complementos lo usan, con la disponibilidad
+//     de cada componente y opción (hallazgo 5, sync_dependents.go).
+//   - La descarga de cambios exige la época de la anterior (catalog_epoch); con otra época se entrega todo.
 //   - Las imágenes no viajan en la descarga: solo su referencia (id y checksum). Se descargan aparte con
 //     GET catalog/images/{id}/content, con caché por ETag.
 //   - Requiere catalog.read y catalog.prices.read. Lee con el lock del catálogo compartido (Catalog.Handle), así que
@@ -34,6 +38,22 @@ import (
 
 // taxEntityID es el identificador fijo con que la bitácora anota los cambios de la tasa general de IVA.
 const taxEntityID = "00000000-0000-0000-0000-000000000000"
+
+// Epoch devuelve la época del catálogo (revisión de la fase D, hallazgo 2): un identificador que cambia cuando la base
+// deja de ser la misma línea de tiempo aunque los números de versión se repitan. Combina el identificador guardado
+// en app.catalog_epoch (0023) con la identidad de la base (su OID) y del clúster (system_identifier): restaurar un
+// respaldo crea la base de nuevo (DROP/CREATE en el comando restore) o la lleva a otro clúster, así que la época
+// cambia sola, sin depender de que cada procedimiento de restauración se acuerde de cambiarla. Mover los datos a
+// otro clúster (la carpeta del sistema de la fase A) también la cambia: los clientes descargan todo una vez.
+func Epoch(ctx context.Context, tx pgx.Tx) (string, error) {
+	var epoch string
+	err := tx.QueryRow(ctx, `SELECT md5(e.epoch::text||':'||d.oid::text||':'||s.system_identifier::text)::uuid::text
+        FROM app.catalog_epoch e
+        CROSS JOIN pg_database d
+        CROSS JOIN pg_control_system() s
+        WHERE d.datname=current_database()`).Scan(&epoch)
+	return epoch, err
+}
 
 // Version devuelve la versión vigente del catálogo descargable. Toma el lock del catálogo compartido para no leer
 // una versión mayor mientras otra transacción con un número menor sigue sin confirmarse.
@@ -80,12 +100,16 @@ func readChanges(ctx context.Context, tx pgx.Tx, since int64) (syncChanges, erro
 	return changes, rows.Err()
 }
 
-// catalogSync atiende GET catalog/sync[?since=X].
+// catalogSync atiende GET catalog/sync[?since=X&epoch=E].
 func catalogSync(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	if err := request.Actor.Require("catalog.prices.read"); err != nil {
 		return nil, err
 	}
 	version, err := currentVersion(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	epoch, err := Epoch(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -96,10 +120,21 @@ func catalogSync(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		if err != nil || since < 0 {
 			return nil, invalid("La versión de partida debe ser un entero no negativo.")
 		}
+		// Revisión de la fase D (hallazgo 2): la descarga de cambios exige la época de la descarga anterior. Una
+		// base restaurada vuelve a dar los números de versión que siguieron al respaldo, así que una versión igual
+		// no basta: con otra época, el cliente tiene una línea de tiempo que ya no existe y se le entrega todo.
+		clientEpoch := request.Query.Get("epoch")
+		if since > 0 && clientEpoch == "" {
+			return nil, invalid("La descarga de cambios requiere la época del catálogo (catalog_epoch) de la descarga anterior.")
+		}
+		if clientEpoch != "" && !idPattern.MatchString(clientEpoch) {
+			return nil, invalid("La época del catálogo no es válida.")
+		}
 		// Desde 0 no hay bitácora suficiente (lo anterior a la 0023 no se anotó); una versión mayor que la vigente
-		// viene de otro servidor o de una base restaurada: en ambos casos se entrega todo y el cliente reemplaza.
-		full = since == 0 || since > version
-		reset = since > version
+		// o de otra época viene de otro servidor o de una base restaurada: se entrega todo y el cliente reemplaza.
+		stale := since > 0 && (since > version || clientEpoch != epoch)
+		full = since == 0 || stale
+		reset = stale
 	}
 	location, err := restaurantLocation(ctx, tx)
 	if err != nil {
@@ -116,6 +151,7 @@ func catalogSync(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	now := time.Now()
 	result := map[string]any{
 		"catalog_version": version,
+		"catalog_epoch":   epoch,
 		"since":           since,
 		"full":            full,
 		"reset":           reset,
@@ -125,100 +161,73 @@ func catalogSync(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		"price_list":      map[string]any{"id": list.ID, "name": list.Name, "revision": list.Revision},
 		"deleted":         []map[string]string{},
 	}
-	var changes syncChanges
+	plan := syncPlan{full: true}
 	if !full {
-		if changes, err = readChanges(ctx, tx, since); err != nil {
+		changes, err := readChanges(ctx, tx, since)
+		if err != nil {
 			return nil, err
 		}
 		result["deleted"] = changes.deleted
-	}
-	selection := func(entity string) []string {
-		if full {
-			return nil
+		if plan, err = planDelta(ctx, tx, changes); err != nil {
+			return nil, err
 		}
-		ids := changes.changed[entity]
-		if ids == nil {
-			return []string{}
-		}
-		return ids
 	}
-	categories, err := syncDocuments(ctx, tx, "categories", selection("category"), "")
+	availability, err := loadSyncAvailability(ctx, tx, now, location)
 	if err != nil {
 		return nil, err
 	}
-	categoryViews, categoryByID := []any{}, map[string]Category{}
+	categories, err := syncDocuments(ctx, tx, "categories", plan.selection("category"), "")
+	if err != nil {
+		return nil, err
+	}
+	categoryViews := []any{}
+	images := map[string]bool{}
 	for _, document := range categories {
 		category := *document.(*Category)
-		categoryByID[category.ID] = category
 		view := RedactPrices(category, request.Actor).(map[string]any)
 		view["available_now"] = category.Active && scheduleAvailable(category.Availability, now, location)
 		categoryViews = append(categoryViews, view)
-	}
-	result["categories"] = categoryViews
-	productIDs := selection("product")
-	if !full {
-		productIDs = slices.Clone(productIDs)
-		if len(changes.changed["price_list"]) > 0 || len(changes.changed["tax"]) > 0 {
-			// La lista predeterminada o la tasa general cambiaron: todos los precios o tasas pueden cambiar.
-			productIDs = nil
-		} else if ids := changes.changed["category"]; len(ids) > 0 {
-			extra, err := productsOfCategories(ctx, tx, ids)
-			if err != nil {
-				return nil, err
-			}
-			productIDs = append(productIDs, extra...)
+		if category.ImageID != nil {
+			images[*category.ImageID] = true
 		}
 	}
-	// En la descarga completa no van los archivados; en la de cambios sí, para que el cliente los quite.
-	archivedFilter := "NOT p.archived"
-	if !full && productIDs != nil {
-		archivedFilter = ""
-	}
-	products, err := syncDocuments(ctx, tx, "products", productIDs, archivedFilter)
+	result["categories"] = categoryViews
+	products, err := plan.products(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 	productViews := []any{}
-	images := map[string]bool{}
 	for _, document := range products {
 		product := *document.(*Product)
-		category, exists := categoryByID[product.CategoryID]
-		if !exists {
-			categoryDocument, err := readDocument(ctx, tx, "categories", product.CategoryID)
-			if err != nil {
-				return nil, err
-			}
-			category = *categoryDocument.(*Category)
-			categoryByID[category.ID] = category
-		}
-		productViews = append(productViews, syncProductView(product, category, list, taxRate, now, location, request.Actor))
+		view := syncProductView(product, availability.category(product.CategoryID), list, taxRate, now, location, request.Actor)
+		availability.annotateCombo(view, product)
+		productViews = append(productViews, view)
 		if product.ImageID != nil {
 			images[*product.ImageID] = true
 		}
 	}
 	result["products"] = productViews
-	for _, category := range categoryViews {
-		if id, ok := category.(map[string]any)["image_id"].(string); ok && id != "" {
-			images[id] = true
-		}
-	}
 	for _, entity := range []struct{ resource, name, key string }{
 		{"ingredients", "ingredient", "ingredients"},
 		{"complements", "complement", "complements"},
 		{"portions", "portion", "portions"},
 		{"groups", "group", "groups"},
 	} {
-		documents, err := syncDocuments(ctx, tx, entity.resource, selection(entity.name), "")
+		documents, err := syncDocuments(ctx, tx, entity.resource, plan.selection(entity.name), "")
 		if err != nil {
 			return nil, err
 		}
-		result[entity.key] = RedactPrices(documents, request.Actor)
+		views := RedactPrices(documents, request.Actor)
+		if entity.resource == "groups" {
+			availability.annotateGroups(views)
+		}
+		result[entity.key] = views
 	}
 	notes, err := listQuickNotes(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	if wanted := selection("quick_note"); wanted != nil {
+	if wanted := plan.selection("quick_note"); wanted != nil {
 		filtered := []CategoryQuickNote{}
 		for _, note := range notes {
 			if slices.Contains(wanted, note.ID) {
@@ -228,7 +237,7 @@ func catalogSync(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		notes = filtered
 	}
 	result["quick_notes"] = notes
-	for _, id := range selection("image") {
+	for _, id := range plan.selection("image") {
 		images[id] = true
 	}
 	references, err := imageReferences(ctx, tx, images)

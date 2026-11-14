@@ -213,6 +213,9 @@ func TestStage9GCatalog(t *testing.T) {
 	t.Run("imagen binaria con ETag", func(t *testing.T) {
 		testStage9GImageContent(t, fixture)
 	})
+	t.Run("revisión: época, archivados con lista o IVA, combos y complementos con un componente agotado", func(t *testing.T) {
+		testStage9GSyncReview(t, fixture)
+	})
 }
 
 func testStage9GSoldOut(t *testing.T, fixture *stage9GCatalog) {
@@ -370,6 +373,8 @@ func testStage9GSoldOutReset(t *testing.T, fixture *stage9GCatalog) {
 
 type stage9GSync struct {
 	CatalogVersion int64               `json:"catalog_version"`
+	CatalogEpoch   string              `json:"catalog_epoch"`
+	PriceList      map[string]any      `json:"price_list"`
 	Full           bool                `json:"full"`
 	Reset          bool                `json:"reset"`
 	TaxRate        int                 `json:"tax_rate"`
@@ -409,7 +414,7 @@ func testStage9GSync(t *testing.T, fixture *stage9GCatalog) {
 	}
 	// Sin cambios: nada que descargar.
 	empty := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
-		fmt.Sprintf("catalog/sync?since=%d", full.CatalogVersion), nil, 200))
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", full.CatalogVersion, full.CatalogEpoch), nil, 200))
 	if empty.Full || empty.CatalogVersion != full.CatalogVersion || len(empty.Products) != 0 || len(empty.Deleted) != 0 {
 		t.Fatalf("descarga sin cambios: %+v", empty)
 	}
@@ -418,7 +423,7 @@ func testStage9GSync(t *testing.T, fixture *stage9GCatalog) {
 	burgerDocument.BasePrice = "130"
 	fixture.call(t, fixture.admin, "PATCH", "catalog/products/"+fixture.burger.ID, burgerDocument, 200)
 	priced := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
-		fmt.Sprintf("catalog/sync?since=%d", full.CatalogVersion), nil, 200))
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", full.CatalogVersion, full.CatalogEpoch), nil, 200))
 	if priced.Full || priced.CatalogVersion <= full.CatalogVersion || len(priced.Products) != 1 || priced.Products[0]["price"] != "130.00" ||
 		len(priced.Categories) != 0 {
 		t.Fatalf("descarga del cambio de precio: versión %d, productos %v", priced.CatalogVersion, priced.Products)
@@ -427,7 +432,7 @@ func testStage9GSync(t *testing.T, fixture *stage9GCatalog) {
 	fixture.call(t, fixture.admin, "POST", "catalog/products/"+fixture.plate.ID+"/sold-out",
 		map[string]any{"operation_id": stage9GID(), "sold_out": true}, 200)
 	soldOut := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
-		fmt.Sprintf("catalog/sync?since=%d", priced.CatalogVersion), nil, 200))
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", priced.CatalogVersion, priced.CatalogEpoch), nil, 200))
 	if len(soldOut.Products) != 1 || soldOut.Products[0]["sold_out"] != true || soldOut.Products[0]["available_now"] != false {
 		t.Fatalf("descarga del agotado: %v", soldOut.Products)
 	}
@@ -443,7 +448,7 @@ func testStage9GSync(t *testing.T, fixture *stage9GCatalog) {
 		t.Fatal(err)
 	}
 	removals := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
-		fmt.Sprintf("catalog/sync?since=%d", soldOut.CatalogVersion), nil, 200))
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", soldOut.CatalogVersion, soldOut.CatalogEpoch), nil, 200))
 	if len(removals.Products) != 1 || removals.Products[0]["archived"] != true || len(removals.Deleted) != 1 ||
 		removals.Deleted[0]["id"] != temporary.ID || removals.Deleted[0]["entity"] != "product" {
 		t.Fatalf("bajas: productos %v, borrados %v", productNames(removals.Products), removals.Deleted)
@@ -457,13 +462,13 @@ func testStage9GSync(t *testing.T, fixture *stage9GCatalog) {
 	category.Description = "Cambio 9G"
 	fixture.call(t, fixture.admin, "PATCH", "catalog/categories/"+fixture.category.ID, category, 200)
 	byCategory := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
-		fmt.Sprintf("catalog/sync?since=%d", again.CatalogVersion), nil, 200))
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", again.CatalogVersion, again.CatalogEpoch), nil, 200))
 	if len(byCategory.Categories) != 1 || len(byCategory.Products) != 3 {
 		t.Fatalf("cambio de categoría: categorías %d, productos %v", len(byCategory.Categories), productNames(byCategory.Products))
 	}
 	// Una versión mayor que la vigente (otro servidor o base restaurada) entrega todo; una inválida se rechaza.
 	future := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
-		fmt.Sprintf("catalog/sync?since=%d", byCategory.CatalogVersion+100), nil, 200))
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", byCategory.CatalogVersion+100, byCategory.CatalogEpoch), nil, 200))
 	if !future.Full || !future.Reset || len(future.Products) != 2 {
 		t.Fatalf("versión mayor que la vigente: %+v", future)
 	}
@@ -514,5 +519,126 @@ func testStage9GImageContent(t *testing.T, fixture *stage9GCatalog) {
 	full := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET", "catalog/sync", nil, 200))
 	if len(full.Images) != 1 || full.Images[0]["id"] != id || full.Images[0]["checksum"] == "" || `"`+fmt.Sprint(full.Images[0]["checksum"])+`"` != etag {
 		t.Fatalf("referencias de imágenes: %v", full.Images)
+	}
+}
+
+// syncSince descarga los cambios desde una descarga anterior, con su versión y su época.
+func (fixture *stage9GCatalog) syncSince(t *testing.T, previous stage9GSync) stage9GSync {
+	t.Helper()
+	return stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", previous.CatalogVersion, previous.CatalogEpoch), nil, 200))
+}
+
+func findSynced(t *testing.T, records []map[string]any, id string) map[string]any {
+	t.Helper()
+	for _, record := range records {
+		if record["id"] == id {
+			return record
+		}
+	}
+	return nil
+}
+
+// Revisión independiente de la fase D: hallazgo 2 (época), hallazgo 5 (un producto agotado que es componente de un
+// combo o complemento de un grupo trae al combo y al grupo con su disponibilidad) y hallazgo 1 (un producto archivado
+// después de la versión X llega aunque también cambie la lista predeterminada o la tasa general de IVA).
+func testStage9GSyncReview(t *testing.T, fixture *stage9GCatalog) {
+	combo := stage9GDecode[catalog.Product](t, fixture.call(t, fixture.admin, "POST", "catalog/products", catalog.Product{
+		Metadata: catalog.Metadata{Name: "Combo 9G", Active: true}, CategoryID: fixture.category.ID, Code: "COMBO-9G", Kind: "combo",
+		BasePrice: "150",
+		Slots: []catalog.ComboSlot{{
+			Name: "Papas del combo", MinQuantity: 1, MaxQuantity: 1, IncludedQuantity: 1, DefaultQuantity: 1,
+			DefaultProductID: fixture.fries.ID,
+			Options:          []catalog.ComboOption{{ProductID: fixture.fries.ID, SubstitutionPrice: "0"}},
+		}},
+	}, 200))
+	base := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET", "catalog/sync", nil, 200))
+	if len(base.CatalogEpoch) != 36 {
+		t.Fatalf("época del catálogo: %q", base.CatalogEpoch)
+	}
+	syncedCombo := findSynced(t, base.Products, combo.ID)
+	if syncedCombo == nil || syncedCombo["available_now"] != true {
+		t.Fatalf("combo en la descarga completa: %v", syncedCombo)
+	}
+
+	// Hallazgo 2: la descarga de cambios exige la época; con otra época (otra base o una restaurada) se entrega todo.
+	fixture.call(t, fixture.cashier, "GET", fmt.Sprintf("catalog/sync?since=%d", base.CatalogVersion), nil, 400)
+	fixture.call(t, fixture.cashier, "GET", fmt.Sprintf("catalog/sync?since=%d&epoch=otra", base.CatalogVersion), nil, 400)
+	foreign := stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET",
+		fmt.Sprintf("catalog/sync?since=%d&epoch=%s", base.CatalogVersion, stage9GID()), nil, 200))
+	if !foreign.Full || !foreign.Reset || len(foreign.Products) != len(base.Products) || foreign.CatalogEpoch != base.CatalogEpoch {
+		t.Fatalf("otra época: full %v reset %v productos %d", foreign.Full, foreign.Reset, len(foreign.Products))
+	}
+	if same := fixture.syncSince(t, base); same.Full || same.Reset || len(same.Products) != 0 {
+		t.Fatalf("misma época sin cambios: %+v", same)
+	}
+
+	// Hallazgo 5: las papas agotadas llegan con el combo que las ofrece (no disponible: su ranura obligatoria no
+	// tiene otra opción) y con el grupo cuyo complemento son las papas.
+	fixture.call(t, fixture.admin, "POST", "catalog/products/"+fixture.fries.ID+"/sold-out",
+		map[string]any{"operation_id": stage9GID(), "sold_out": true}, 200)
+	soldOut := fixture.syncSince(t, base)
+	syncedCombo = findSynced(t, soldOut.Products, combo.ID)
+	if findSynced(t, soldOut.Products, fixture.fries.ID) == nil || syncedCombo == nil || len(soldOut.Products) != 2 {
+		t.Fatalf("el agotado de un componente no trae al combo: %v", productNames(soldOut.Products))
+	}
+	slots, _ := syncedCombo["slots"].([]any)
+	option := slots[0].(map[string]any)["options"].([]any)[0].(map[string]any)
+	if syncedCombo["available_now"] != false || !strings.Contains(fmt.Sprint(syncedCombo["availability_reason"]), "Papas del combo") ||
+		option["sold_out"] != true || option["available_now"] != false {
+		t.Fatalf("combo con su componente agotado: %v", syncedCombo)
+	}
+	group := findSynced(t, soldOut.Groups, fixture.group.ID)
+	if group == nil {
+		t.Fatalf("el agotado de un complemento no trae a su grupo: %v", soldOut.Groups)
+	}
+	groupOption := group["options"].([]any)[0].(map[string]any)
+	if groupOption["sold_out"] != true || groupOption["available_now"] != false {
+		t.Fatalf("opción del grupo con el complemento agotado: %v", groupOption)
+	}
+	if fullCombo := findSynced(t, stage9GDecode[stage9GSync](t, fixture.call(t, fixture.cashier, "GET", "catalog/sync", nil, 200)).Products,
+		combo.ID); fullCombo == nil || fullCombo["available_now"] != false {
+		t.Fatalf("la descarga completa no marca el combo: %v", fullCombo)
+	}
+	fixture.call(t, fixture.admin, "POST", "catalog/products/"+fixture.fries.ID+"/sold-out",
+		map[string]any{"operation_id": stage9GID(), "sold_out": false}, 200)
+	available := fixture.syncSince(t, soldOut)
+	if syncedCombo = findSynced(t, available.Products, combo.ID); syncedCombo == nil || syncedCombo["available_now"] != true {
+		t.Fatalf("el combo no vuelve a estar disponible: %v", syncedCombo)
+	}
+
+	// Hallazgo 1: se archiva la hamburguesa y después se guarda la lista predeterminada; la descarga de cambios trae
+	// todos los productos vigentes y también la hamburguesa archivada (antes se perdía).
+	burger := stage9GDecode[catalog.Product](t, fixture.call(t, fixture.admin, "GET", "catalog/products/"+fixture.burger.ID, nil, 200))
+	fixture.call(t, fixture.admin, "PATCH", "catalog/products/"+fixture.burger.ID+"/state",
+		map[string]any{"revision": burger.Revision, "active": false, "archived": true}, 200)
+	listID := fmt.Sprint(available.PriceList["id"])
+	list := stage9GDecode[catalog.PriceList](t, fixture.call(t, fixture.admin, "GET", "catalog/price-lists/"+listID, nil, 200))
+	fixture.call(t, fixture.admin, "PATCH", "catalog/price-lists/"+listID, list, 200)
+	priced := fixture.syncSince(t, available)
+	if archived := findSynced(t, priced.Products, fixture.burger.ID); archived == nil || archived["archived"] != true || priced.Full {
+		t.Fatalf("lista guardada después de archivar: %v", productNames(priced.Products))
+	}
+	if findSynced(t, priced.Products, combo.ID) == nil || findSynced(t, priced.Products, fixture.fries.ID) == nil {
+		t.Fatalf("con la lista cambiada deben llegar todos los productos vigentes: %v", productNames(priced.Products))
+	}
+	// Lo mismo con la tasa general de IVA, en el otro orden: primero el IVA y después el archivado.
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.payment_settings SET tax_rate=8"); err != nil {
+		t.Fatal(err)
+	}
+	comboDocument := stage9GDecode[catalog.Product](t, fixture.call(t, fixture.admin, "GET", "catalog/products/"+combo.ID, nil, 200))
+	fixture.call(t, fixture.admin, "PATCH", "catalog/products/"+combo.ID+"/state",
+		map[string]any{"revision": comboDocument.Revision, "active": false, "archived": true}, 200)
+	taxed := fixture.syncSince(t, priced)
+	archivedCombo := findSynced(t, taxed.Products, combo.ID)
+	if taxed.TaxRate != 8 || archivedCombo == nil || archivedCombo["archived"] != true ||
+		findSynced(t, taxed.Products, fixture.fries.ID)["effective_tax_rate"] != float64(8) {
+		t.Fatalf("IVA cambiado y combo archivado: %d %v", taxed.TaxRate, productNames(taxed.Products))
+	}
+	if findSynced(t, taxed.Products, fixture.burger.ID) != nil {
+		t.Fatal("un archivado que no cambió después de la versión pedida no debe volver a llegar")
+	}
+	if _, err := fixture.pool.Exec(fixture.ctx, "UPDATE app.payment_settings SET tax_rate=16"); err != nil {
+		t.Fatal(err)
 	}
 }

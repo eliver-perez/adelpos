@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/standalone"
@@ -322,6 +323,8 @@ func TestServiceHostOnMacOS(t *testing.T) {
 		t.Fatalf("el segundo servidor debe explicar el bloqueo: %s", log)
 	}
 
+	// Época del catálogo antes del respaldo (revisión de la fase D, hallazgo 2).
+	epochBefore, storedBefore := catalogEpoch(t, layout)
 	// Respaldo y ensayo de restauración con el servicio en marcha (usan su PostgreSQL).
 	output, code := runServer(t, append([]string{"backup"}, common...)...)
 	if code != 0 || !strings.Contains(output, "Respaldo creado y comprobado") {
@@ -385,6 +388,11 @@ func TestServiceHostOnMacOS(t *testing.T) {
 	// SIGTERM (launchd al detenerlo o al apagar) cierra Go y después PostgreSQL.
 	third := startServer(t, append(append([]string{}, host...), "--network-listen", hostNetworkListen)...)
 	waitReady(t, hostListen, third, layout.ServerLog())
+	// La base restaurada conserva el identificador guardado, pero su época cambió sola: un cliente con el catálogo de
+	// antes de restaurar descarga todo en lugar de recibir versiones repetidas con otro contenido.
+	if epochAfter, storedAfter := catalogEpoch(t, layout); storedAfter != storedBefore || epochAfter == epochBefore {
+		t.Fatalf("época del catálogo después de restaurar: guardada %s→%s, época %s→%s", storedBefore, storedAfter, epochBefore, epochAfter)
+	}
 	checkWithoutIdentity(t, layout, hostListen, hostNetworkListen)
 	restoreIdentity()
 	if err := third.cmd.Process.Signal(syscall.SIGTERM); err != nil {
@@ -559,4 +567,35 @@ func testAdoptLegacy(t *testing.T, root, pgBin, dsn string) {
 	if code := adopted.waitExit(t); code != 0 {
 		t.Fatalf("SIGTERM termina sin error: %d", code)
 	}
+}
+
+// catalogEpoch lee de la base del servicio la época del catálogo (catalog.Epoch) y el identificador guardado en
+// app.catalog_epoch (revisión de la fase D, hallazgo 2).
+func catalogEpoch(t *testing.T, layout standalone.Layout) (string, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cfg, err := config.Load(layout.ConfigFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := database.Open(ctx, cfg.Database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	epoch, err := catalog.Epoch(ctx, tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := tx.QueryRow(ctx, "SELECT epoch::text FROM app.catalog_epoch").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	return epoch, stored
 }
