@@ -54,10 +54,7 @@ export async function pairingCall(
   secret?: string,
   body?: unknown,
 ): Promise<Reply> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Client-Kind': 'desktop',
-  };
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (secret) {
     headers['X-Pairing-Secret'] = secret;
   }
