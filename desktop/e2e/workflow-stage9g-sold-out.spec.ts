@@ -282,6 +282,12 @@ test('«Agotado» desde la captura con un toque, en tiempo real entre terminales
   expect(rejected.body.error.code).toBe('PRODUCT_SOLD_OUT');
   expect(rejected.body.error.message).toContain('Malteada 9G está agotado');
 
+  // 5 bis. La limonada se agrega a la cuenta (su primer producto la abre).
+  await page.getByRole('button', { name: /^Limonada 9G/ }).click();
+  const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
+  await expect(bill.getByRole('article', { name: '1 × Limonada 9G' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Mesa G1 · Cuenta #/ })).toBeVisible();
+
   // 6. Otra terminal marca la limonada agotada hasta nuevo aviso: la captura lo muestra por el evento del catálogo,
   // antes del sondeo de 10 s del listado.
   const marked = await other.send('POST', `catalog/products/${lemonade.id}/sold-out`, {
@@ -294,6 +300,22 @@ test('«Agotado» desde la captura con un toque, en tiempo real entre terminales
   const lemonadeTile = page.getByRole('button', { name: /^Limonada 9G/ });
   await expect(lemonadeTile).toContainText('Agotado hasta nuevo aviso', { timeout: 6000 });
   await expect(lemonadeTile).toBeDisabled();
+
+  // 6 bis (revisión de la fase D, hallazgo 3): la limonada que ya estaba en el borrador se conserva y la cuenta avisa
+  // que está agotada (el cálculo de Go). Agregarle otra unidad ya no se guarda: Go rechaza el borrador y la cuenta lo
+  // dice también. Al quitar la unidad de más, el borrador se guarda igual que antes.
+  const soldOutNotice = bill.getByText('Limonada 9G está agotado');
+  await expect(soldOutNotice).toHaveCount(1);
+  await bill
+    .getByRole('button', { name: 'Agregar una unidad de Limonada 9G', exact: true })
+    .click();
+  await expect(bill.getByRole('article', { name: '2 × Limonada 9G' })).toBeVisible();
+  await expect(soldOutNotice).toHaveCount(2);
+  await expect(bill.getByRole('status').filter({ hasText: 'Por guardar…' })).toBeVisible();
+  await bill.getByRole('button', { name: 'Quitar una unidad de Limonada 9G', exact: true }).click();
+  await expect(bill.getByRole('article', { name: '1 × Limonada 9G' })).toBeVisible();
+  await expect(bill.getByRole('status').filter({ hasText: /^Guardado$/ })).toBeVisible();
+  await expect(soldOutNotice).toHaveCount(1);
 
   // 7. «Disponible otra vez» con un toque: también llega a la otra terminal.
   await mode.click();

@@ -181,6 +181,14 @@ func checkStage9GPermission(ctx context.Context, t *testing.T, pool *pgxpool.Poo
 
 func checkStage9GCatalogScope(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
+	// Época del catálogo (revisión de la fase D, hallazgo 2): una sola fila con su identificador.
+	var epochs int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM app.catalog_epoch WHERE epoch IS NOT NULL").Scan(&epochs); err != nil || epochs != 1 {
+		t.Fatalf("época del catálogo: %d %v", epochs, err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO app.catalog_epoch(singleton) VALUES (false)"); err == nil {
+		t.Fatal("la época del catálogo admitió una segunda fila")
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO app.realtime_events(id,kind,scope)
         VALUES ('00000000-0000-4000-8000-0000000000e1','catalog.changed','catalog')`); err != nil {
 		t.Fatalf("el ámbito catalog no se admite: %v", err)

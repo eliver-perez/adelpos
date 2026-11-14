@@ -176,6 +176,12 @@ func TestStage9GOfflineOrdersAndIdempotency(t *testing.T) {
 	t.Run("forma, permisos y versión del pedido sin conexión", func(t *testing.T) {
 		testStage9GOfflineValidation(t, fixture)
 	})
+	t.Run("revisión: reenvío confirmado después de una repetición tardía que ya entró", func(t *testing.T) {
+		testStage9GOfflineLateRepeat(t, fixture)
+	})
+	t.Run("revisión: el borrador no acepta productos agotados", func(t *testing.T) {
+		testStage9GDraftSoldOut(t, fixture)
+	})
 	t.Run("recuperación del estado con permiso y terminal revocados", func(t *testing.T) {
 		testStage9GRecovery(t, fixture)
 	})
@@ -369,13 +375,126 @@ func testStage9GOfflinePriceChange(t *testing.T, fixture *stage9GFixture) {
 	if accepted, _ := audited["accepted_changes"].([]any); len(accepted) != 1 {
 		t.Fatalf("la auditoría no guarda los cambios aceptados: %v", audited)
 	}
-	// El primer envío sin confirmación, si llega tarde con la misma clave, ya no crea otro pedido.
+	// El primer envío sin confirmación, si llega tarde con la misma clave, ya no crea otro pedido: recibe el resultado
+	// que sí entró (revisión de la fase D, hallazgo 4).
 	delete(body, "confirmation")
-	if code, response := fixture.raw(fixture.waiter, "POST", "restaurant/offline-orders", body); code != 409 ||
-		!bytes.Contains(response, []byte("IDEMPOTENCY_CONFLICT")) {
+	code, response = fixture.raw(fixture.waiter, "POST", "restaurant/offline-orders", body)
+	late := decodeResponse[alreadyAccepted](t, response)
+	if code != 409 || late.Error.Code != "OFFLINE_ORDER_ALREADY_ACCEPTED" || late.Error.Details.Result.OrderID != accepted.OrderID {
 		t.Fatalf("el envío tardío sin confirmación: %d %s", code, response)
 	}
 	fixture.product = fixture.setPrice(t, fixture.product, "150")
+}
+
+// alreadyAccepted es el rechazo de un reenvío con la clave de un pedido sin conexión que ya entró con otro contenido.
+type alreadyAccepted struct {
+	Error struct {
+		Code    string `json:"code"`
+		Details struct {
+			Status string                        `json:"status"`
+			Result operations.OfflineOrderResult `json:"result"`
+		} `json:"details"`
+	} `json:"error"`
+}
+
+// Revisión de la fase D, hallazgo 4: el original se rechaza por precio (sin guardar la clave), el precio vuelve, entra
+// una repetición tardía del original y después llega el reenvío con la confirmación del mesero: no se registra otra
+// vez y recibe el pedido que sí entró. Otro usuario con la misma clave no ve ese resultado.
+func testStage9GOfflineLateRepeat(t *testing.T, fixture *stage9GFixture) {
+	accountID := decodeResponse[operations.OfflineOrderResult](t, fixture.call(t, fixture.waiter, "POST", "restaurant/offline-orders",
+		offlineBody(randomID(), fixture.catalogVersion(t), map[string]any{"table_id": fixture.third.ID},
+			offlineItem(fixture.fries.ID, 1, "40.00")), 200)).AccountID
+	fixture.product = fixture.setPrice(t, fixture.product, "175")
+	key := randomID()
+	body := offlineBody(key, fixture.catalogVersion(t), map[string]any{"account_id": accountID}, offlineItem(fixture.product.ID, 1, "150.00"))
+	code, response := fixture.raw(fixture.waiter, "POST", "restaurant/offline-orders", body)
+	rejection := decodeResponse[offlineRejection](t, response)
+	if code != 409 || rejection.Error.Code != "ORDER_REQUIRES_CONFIRMATION" {
+		t.Fatalf("original con otro precio: %d %s", code, response)
+	}
+	fixture.product = fixture.setPrice(t, fixture.product, "150")
+	accepted := decodeResponse[operations.OfflineOrderResult](t, fixture.call(t, fixture.waiter, "POST", "restaurant/offline-orders", body, 200))
+	confirmed := map[string]any{}
+	for name, value := range body {
+		confirmed[name] = value
+	}
+	confirmed["confirmation"] = map[string]any{"catalog_version": rejection.Error.Details.CatalogVersion, "changes": rejection.Error.Details.Changes}
+	code, response = fixture.raw(fixture.waiter, "POST", "restaurant/offline-orders", confirmed)
+	late := decodeResponse[alreadyAccepted](t, response)
+	result := late.Error.Details.Result
+	if code != 409 || late.Error.Code != "OFFLINE_ORDER_ALREADY_ACCEPTED" || late.Error.Details.Status != "already_accepted" ||
+		result.OrderID != accepted.OrderID || result.AccountID != accountID || result.Status != "accepted" {
+		t.Fatalf("reenvío confirmado después de la repetición tardía: %d %s", code, response)
+	}
+	if orders := fixture.scalar(t, "SELECT count(*) FROM app.restaurant_orders WHERE operation_id=$1", key); orders != 1 {
+		t.Fatalf("el pedido entró %d veces", orders)
+	}
+	// La misma clave desde otro usuario y otra terminal: el conflicto de siempre, sin el pedido de nadie.
+	code, response = fixture.raw(fixture.admin, "POST", "restaurant/offline-orders", confirmed)
+	if code != 409 || !bytes.Contains(response, []byte("IDEMPOTENCY_CONFLICT")) || bytes.Contains(response, []byte(accepted.OrderID)) {
+		t.Fatalf("la misma clave desde otra terminal: %d %s", code, response)
+	}
+}
+
+// Revisión de la fase D, hallazgo 3: un producto agotado no se puede capturar, tampoco al guardar el borrador o al
+// abrir una cuenta con su primer producto (ni como componente de un combo); una partida ya guardada cuyo producto se
+// agotó después se puede conservar o reducir, pero no aumentar.
+func testStage9GDraftSoldOut(t *testing.T, fixture *stage9GFixture) {
+	empty := catalog.Customization{Ingredients: []catalog.IngredientSelection{}, Groups: []catalog.GroupSelection{}, Components: []catalog.ComponentSelection{}}
+	fries := operations.DraftItem{ID: randomID(), LineRequest: catalog.LineRequest{ProductID: fixture.fries.ID, Quantity: 2, Customization: empty}}
+	opened := decodeResponse[operations.Bill](t, fixture.call(t, fixture.waiter, "POST", "restaurant/accounts", map[string]any{
+		"operation_id": randomID(), "mode": "dine_in", "items": []operations.DraftItem{fries},
+	}, 200))
+	route := "restaurant/accounts/" + opened.Account.ID + "/draft"
+	fixture.adminCall(t, "POST", "catalog/products/"+fixture.fries.ID+"/sold-out", map[string]any{"operation_id": randomID(), "sold_out": true}, 200)
+	steak := operations.DraftItem{ID: randomID(), LineRequest: catalog.LineRequest{ProductID: fixture.product.ID, Quantity: 1, Customization: empty}}
+	accounts := fixture.scalar(t, "SELECT count(*) FROM app.restaurant_accounts")
+	// Abrir otra cuenta con las papas agotadas: nada se crea.
+	code, response := fixture.raw(fixture.waiter, "POST", "restaurant/accounts", map[string]any{
+		"operation_id": randomID(), "mode": "dine_in",
+		"items": []operations.DraftItem{{ID: randomID(), LineRequest: catalog.LineRequest{ProductID: fixture.fries.ID, Quantity: 1, Customization: empty}}},
+	})
+	if code != 409 || !bytes.Contains(response, []byte("PRODUCT_SOLD_OUT")) || fixture.scalar(t, "SELECT count(*) FROM app.restaurant_accounts") != accounts {
+		t.Fatalf("abrir una cuenta con un producto agotado: %d %s", code, response)
+	}
+	// La partida guardada se conserva igual al agregar otro producto, y se puede reducir.
+	bill := fixture.refresh(t, opened.Account.ID)
+	bill = decodeResponse[operations.Bill](t, fixture.call(t, fixture.waiter, "PUT", route, map[string]any{
+		"operation_id": randomID(), "revision": bill.Account.Revision, "items": []operations.DraftItem{fries, steak},
+	}, 200))
+	reduced := fries
+	reduced.Quantity = 1
+	bill = decodeResponse[operations.Bill](t, fixture.call(t, fixture.waiter, "PUT", route, map[string]any{
+		"operation_id": randomID(), "revision": bill.Account.Revision, "items": []operations.DraftItem{reduced, steak},
+	}, 200))
+	// Aumentarla, agregar otra partida del producto agotado o un combo con las papas: 409 con el mismo error claro.
+	more := fries
+	more.Quantity = 3
+	another := operations.DraftItem{ID: randomID(), LineRequest: catalog.LineRequest{ProductID: fixture.fries.ID, Quantity: 1, Customization: empty}}
+	combo := operations.DraftItem{ID: randomID(), LineRequest: catalog.LineRequest{ProductID: fixture.combo.ID, Quantity: 1,
+		Customization: catalog.Customization{Components: []catalog.ComponentSelection{{
+			SlotID: fixture.combo.Slots[0].ID, ProductID: fixture.fries.ID, Quantity: 1,
+		}}}}}
+	for name, items := range map[string][]operations.DraftItem{
+		"aumentar":     {more, steak},
+		"otra partida": {reduced, steak, another},
+		"combo":        {reduced, steak, combo},
+	} {
+		code, response := fixture.raw(fixture.waiter, "PUT", route, map[string]any{
+			"operation_id": randomID(), "revision": bill.Account.Revision, "items": items,
+		})
+		if code != 409 || !bytes.Contains(response, []byte("PRODUCT_SOLD_OUT")) || !bytes.Contains(response, []byte("Papas producto está agotado")) {
+			t.Fatalf("%s con el producto agotado: %d %s", name, code, response)
+		}
+	}
+	if current := fixture.refresh(t, opened.Account.ID); current.Account.Revision != bill.Account.Revision || len(current.Draft) != 2 {
+		t.Fatal("un borrador rechazado cambió la cuenta")
+	}
+	// Con las papas disponibles otra vez, se guarda.
+	fixture.adminCall(t, "POST", "catalog/products/"+fixture.fries.ID+"/sold-out", map[string]any{"operation_id": randomID(), "sold_out": false}, 200)
+	fixture.call(t, fixture.waiter, "PUT", route, map[string]any{
+		"operation_id": randomID(), "revision": bill.Account.Revision, "items": []operations.DraftItem{more, steak, combo},
+	}, 200)
 }
 
 func testStage9GOfflineUnavailable(t *testing.T, fixture *stage9GFixture) {

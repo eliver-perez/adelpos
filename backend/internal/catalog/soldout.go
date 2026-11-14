@@ -288,3 +288,61 @@ func ResetExpiredSoldOut(ctx context.Context, pool Database, now time.Time) (int
 	}
 	return len(resets), tx.Commit(ctx)
 }
+
+// RejectSoldOut rechaza con 409 PRODUCT_SOLD_OUT las partidas que piden un producto agotado: el suyo, el de un
+// componente de combo (también el predeterminado) o el de un complemento elegido (revisión independiente de la fase D,
+// hallazgo 3: «un producto agotado no se puede capturar», también al guardar el borrador). Usa el motor de cálculo con
+// la excepción de disponibilidad (que nunca pasa por alto «Agotado»), así que solo puede fallar por agotado o por un
+// error de forma; cualquier otro rechazo del catálogo se ignora aquí porque la cotización y la confirmación lo siguen
+// diciendo como siempre. Toma el lock del catálogo compartido, como QuoteForOrder.
+func RejectSoldOut(ctx context.Context, tx pgx.Tx, priceListID *string, lines []LineRequest) error {
+	if len(lines) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared(7820148304)"); err != nil {
+		return err
+	}
+	location, err := restaurantLocation(ctx, tx)
+	if err != nil {
+		return err
+	}
+	check := func(group []LineRequest) (*Error, error) {
+		request := PreviewRequest{PriceListID: priceListID, Lines: group}
+		snapshot, err := loadSnapshot(ctx, tx, request)
+		var problem *Error
+		if errors.As(err, &problem) || errors.Is(err, pgx.ErrNoRows) {
+			// El producto o su forma se validan aparte (validateDraftItems y la cotización).
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		request.OverrideAvailability = true
+		_, err = Calculate(snapshot, request, time.Now(), location)
+		if errors.As(err, &problem) {
+			return problem, nil
+		}
+		return nil, nil
+	}
+	problem, err := check(lines)
+	if err != nil {
+		return err
+	}
+	if problem == nil {
+		return nil
+	}
+	if problem.Code == "PRODUCT_SOLD_OUT" {
+		return problem
+	}
+	// Otro rechazo pudo ocultar un agotado de una partida posterior: se revisa cada partida por separado.
+	for _, line := range lines {
+		problem, err := check([]LineRequest{line})
+		if err != nil {
+			return err
+		}
+		if problem != nil && problem.Code == "PRODUCT_SOLD_OUT" {
+			return problem
+		}
+	}
+	return nil
+}

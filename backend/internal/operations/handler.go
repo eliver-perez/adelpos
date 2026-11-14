@@ -308,17 +308,32 @@ func withoutAuthorizationPasswords(value any) {
 }
 
 func (handler *service) replay(fingerprint string) (any, bool, error) {
-	var actorID, deviceID, previousFingerprint string
+	var actorID, deviceID, previousFingerprint, route string
 	var result json.RawMessage
-	err := handler.tx.QueryRow(handler.ctx, `SELECT actor_id,device_id,fingerprint,response
-        FROM app.restaurant_operations WHERE id=$1`, handler.operationID).Scan(&actorID, &deviceID, &previousFingerprint, &result)
+	err := handler.tx.QueryRow(handler.ctx, `SELECT actor_id,device_id,fingerprint,route,response
+        FROM app.restaurant_operations WHERE id=$1`, handler.operationID).Scan(&actorID, &deviceID, &previousFingerprint, &route, &result)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	if actorID != handler.request.Actor.UserID || deviceID != handler.request.Actor.DeviceID || previousFingerprint != fingerprint {
+	sameSender := actorID == handler.request.Actor.UserID && deviceID == handler.request.Actor.DeviceID
+	current := handler.request.Method + " " + handler.request.Route
+	if sameSender && previousFingerprint != fingerprint && route == current && current == "POST restaurant/offline-orders" {
+		// Revisión de la fase D (hallazgo 4): la clave de un pedido capturado sin conexión ya se guardó con otro
+		// contenido del mismo usuario y la misma terminal (por ejemplo, entró una repetición tardía del envío
+		// original y después llega el reenvío con la confirmación del mesero). No se repite, pero el teléfono recibe
+		// el resultado que sí entró para no volver a capturarlo con otra clave. Solo con el mismo remitente: a otro
+		// usuario u otra terminal no se le muestra el pedido de nadie.
+		return nil, false, &Error{
+			Status:  409,
+			Code:    "OFFLINE_ORDER_ALREADY_ACCEPTED",
+			Message: "Este pedido ya había entrado con otra versión del envío y no se volvió a registrar. Revisa la cuenta antes de capturarlo de nuevo.",
+			Details: map[string]any{"status": "already_accepted", "result": result},
+		}
+	}
+	if !sameSender || previousFingerprint != fingerprint {
 		return nil, false, &Error{
 			Status:  409,
 			Code:    "IDEMPOTENCY_CONFLICT",
