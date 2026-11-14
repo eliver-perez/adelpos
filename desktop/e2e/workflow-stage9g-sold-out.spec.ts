@@ -37,7 +37,7 @@ class OtherTerminal {
   private sessionToken = '';
 
   async enroll(code: string) {
-    const enrolled = await this.send('POST', 'devices/enroll', { code, name: 'Caja 2 9G' });
+    const enrolled = await this.send('POST', 'devices/enroll', { code, name: 'Barra de agotados 9G' });
     expect(enrolled.status).toBe(200);
     this.deviceID = enrolled.body.device_id;
     this.deviceToken = enrolled.body.device_token;
