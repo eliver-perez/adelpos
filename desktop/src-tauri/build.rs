@@ -15,6 +15,7 @@ fn main() {
             "installation_state",
             "set_installation_mode",
             "restart_application",
+            "choose_backup_directory",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

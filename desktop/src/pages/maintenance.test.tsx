@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canOpen, tilesOf } from '../navigation/sections';
 import type { TestDataPreview, TestDataResult } from '../services/maintenance';
+import { backupState } from '../testing/backups';
 import { serverTerminalInstallation } from '../testing/installation';
 import { MaintenancePage } from './MaintenancePage';
 
@@ -92,6 +93,10 @@ const result: TestDataResult = {
 function stage9gReply(command: string, operation?: string) {
   if (command === 'installation_state') {
     return serverTerminalInstallation;
+  }
+  // Etapa 9G (fase F): la sección «Respaldos» (stage9gBackups.test.tsx).
+  if (command === 'api_request' && operation === 'maintenance_backups') {
+    return { status: 200, body: backupState() };
   }
   if (command === 'api_request' && operation === 'maintenance_service') {
     return {

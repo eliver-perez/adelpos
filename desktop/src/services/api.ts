@@ -76,6 +76,13 @@ export type Operation =
   // Etapa 9G (fase A): estado y reinicio del servicio del servidor (services/serverService.ts).
   | 'maintenance_service'
   | 'maintenance_service_restart'
+  // Etapa 9G (fase F): respaldos programados y «Respaldar ahora» (services/backups.ts). La carpeta se elige con
+  // el diálogo nativo (choose_backup_directory), nunca con una ruta enviada desde aquí.
+  | 'maintenance_backups'
+  | 'maintenance_backups_status'
+  | 'maintenance_save_backup_settings'
+  | 'maintenance_backup_default_directory'
+  | 'maintenance_backup_now'
   | 'reports_catalog'
   | 'reports_run'
   | 'reports_dashboard'

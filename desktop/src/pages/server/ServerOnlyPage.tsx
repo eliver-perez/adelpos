@@ -11,14 +11,16 @@ import type { ServerState } from '../../navigation/serverState';
 import type { ScreenID } from '../../navigation/sections';
 import { connectionConfig, getDiagnostics } from '../../services/diagnostics';
 import type { Diagnostics } from '../../services/diagnostics';
+import { lastBackupCard } from '../../services/backups';
 import { terminalsLabel, uptimeLabel } from '../../services/serverService';
 import type { ServiceStatus } from '../../services/serverService';
 import { AccessFrame } from '../AccessPages';
+import { BackupAlertBanner } from '../maintenance/BackupAlert';
 
 // Modalidad «Solo servidor» (etapa 9G, §2.3): una computadora apartada que guarda los datos y atiende a
 // las terminales. No abre la interfaz de venta: muestra una pantalla de estado pequeña y, a quien lo
 // administra, el acceso a Administración. Go calcula las terminales conectadas (última petición en los
-// últimos 2 minutos); el último respaldo lo agrega la fase F (mientras tanto, «Sin registro»).
+// últimos 2 minutos) y el último respaldo (fase F: si fue correcto y dónde está, con el aviso si falló).
 
 // Estado del servidor visible antes de iniciar sesión (solo lo que dicen las consultas públicas de salud).
 export function ServerOnlyAccess({ onLogin }: { onLogin: () => void }) {
@@ -131,23 +133,31 @@ export function ServerOnlyPage({
   canManage,
   canAdminister,
   onAdministration,
+  onMaintenance,
 }: {
-  // settings.manage: ver las terminales conectadas y el servicio (Go vuelve a exigirlo).
+  // settings.manage: ver las terminales conectadas, el servicio y los respaldos (Go vuelve a exigirlo).
   canManage: boolean;
   canAdminister: boolean;
   onAdministration: () => void;
+  // Abre Sistema › Mantenimiento desde el aviso de respaldos.
+  onMaintenance?: () => void;
 }) {
   const status = useLiveResource<ServiceStatus>('maintenance_service', {
     enabled: canManage,
     interval: 15000,
   });
   const data = status.data;
+  // Etapa 9G, fase F: el último respaldo (si fue correcto y dónde está) y el aviso si falló.
+  const backup = data
+    ? lastBackupCard(data.last_backup)
+    : { value: '—', description: '', state: 'neutral' as const };
   return (
     <>
       <PageTitle
         title="Servidor del restaurante"
         description="Esta computadora guarda los datos del restaurante y atiende a las terminales. En ella no se vende."
       />
+      {canManage && <BackupAlertBanner onOpen={canAdminister ? onMaintenance : undefined} />}
       <div className="server-only-cards">
         <StatusCard
           icon="server"
@@ -176,9 +186,13 @@ export function ServerOnlyPage({
         <StatusCard
           icon="database"
           label="Último respaldo"
-          value="Sin registro"
-          state="neutral"
-          description="Aquí aparecerá el último respaldo automático de la base de datos."
+          value={backup.value}
+          state={backup.state}
+          description={
+            canManage
+              ? backup.description
+              : 'Los respaldos los revisa quien administra la configuración.'
+          }
         />
       </div>
       <Notice>{status.error}</Notice>

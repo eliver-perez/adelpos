@@ -253,7 +253,7 @@ export const sections: SectionEntry[] = [
     parent: 'system',
     permission: 'settings.manage',
     description:
-      'Servicio del servidor, modalidad de esta computadora y datos de prueba (con un respaldo previo).',
+      'Servicio del servidor, respaldos, modalidad de esta computadora y datos de prueba (con un respaldo previo).',
   },
   {
     // §4.1: «Estado del sistema» ya no es una sección ni el inicio; se abre con «Ver estado del

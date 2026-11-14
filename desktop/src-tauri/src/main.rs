@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+// Etapa 9G, fase F: carpeta de los respaldos con el diálogo nativo (solo en la computadora principal).
+mod backup_folder;
 mod connection;
 mod export;
 mod installation;
@@ -268,6 +270,7 @@ fn main() {
             installation::installation_state,
             installation::set_installation_mode,
             installation::restart_application,
+            backup_folder::choose_backup_directory,
         ])
         .build(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio")
