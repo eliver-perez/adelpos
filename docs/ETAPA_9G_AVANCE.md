@@ -1690,3 +1690,345 @@ formato de la prueba de «Agotado» renombrada en la fusión anterior (`b84415c`
 `designer`, `catalog`, `identity`, `database`, `apicontract`, `backupschedule` y `payments`), Vitest, `cargo test` y
 Playwright (`restaurant`, `table-price-decrease`, `takeaway-quick-notes`, `workflow-stage9c-navigation`, las cinco
 `workflow-stage9g-*` y `workflow-zz-test-data`: 10 de 10 en Chromium y 10 de 10 en WebKit): todo aprobado.
+
+## Fase C · Descubrimiento del servidor y comportamiento en red
+
+Un agente, en su propio árbol de trabajo (`etapa-9g-c`, creada desde la fusión de A, D y B en `bf6fa95`, más
+`5d4fa94`: el arreglo del coordinador de la prueba de «Agotado»), en paralelo con la Fase F. 13/11/2026. **Sin
+migración** (la 0023 no tiene sección C). Decisiones del coordinador D1, D2, D6 y D11. Pruebas en copias aisladas:
+clúster temporal 55499, Go temporal 8188 (Playwright), vista previa 1426, Rust en `cache/cargo-C`; las pruebas TLS
+de Rust en puertos efímeros de 127.0.0.1. Los anuncios de prueba en la red local duran unos segundos, con nombres
+únicos «AD-EL POS prueba <hex>» y puertos 8201/8202 sin escucha. **Nunca se abrió el 8443 real, no se usó el
+Keychain real ni la instalación real.**
+
+Commits: `62b6400` (Go, contrato, Rust e `Info.plist`) y `43e714f` (interfaz, puente y Playwright). La
+`workflow-stage9g-sold-out.spec.ts` del arreglo del coordinador (`5d4fa94`) quedó sin formato Prettier (una línea
+larga); `scripts/dev.sh format` la partió en el segundo commit (solo formato, el contenido no cambió).
+
+### Qué cambió
+
+**Servidor Go**
+
+- `internal/discovery` (nuevo): anuncio del servidor en la red local por mDNS/DNS-SD como `_adelpos._tcp`.
+  - `discovery.go`: `InstanceName` («Fonda Doña Ñeli — Mac de caja»: establecimiento y computadora; quita
+    controles y puntos, junta espacios, cabe en una etiqueta DNS de 63 bytes UTF-8 sin partir caracteres: si no
+    cabe, la computadora se acorta a 24 bytes y el establecimiento ocupa el resto), `TXTRecords` (`txtvers=1`,
+    `server_id`, `api=v1`, `port`, `fp` = primeros 8 bytes de la huella SPKI en hexadecimal) y `Announcer.Run`, que
+    mantiene el anuncio: lo vuelve a publicar si cambia el nombre (revisión cada minuto) o si la publicación del
+    sistema termina sola (espera creciente de 5 s a 1 min), lo retira al terminar el contexto y, en un sistema sin
+    implementación, lo informa una vez (`discovery_unavailable`) y termina sin error.
+  - `announce_darwin.go`: Bonjour del sistema con `/usr/bin/dns-sd -R <instancia> _adelpos._tcp local <puerto>
+<TXT…>` como proceso hijo (argumentos separados, sin intérprete de órdenes); se detiene con SIGTERM (3 s y
+    después SIGKILL) para que mDNSResponder despida el registro. Lee la salida solo para la bitácora
+    (`discovery_registered`, `discovery_name_conflict`). `announce_other.go`: «no disponible» fuera de macOS, con
+    el punto de integración de Windows anotado.
+  - `computer*.go`: nombre de la computadora (macOS: `scutil --get ComputerName`, con acentos; si no, el nombre de
+    red sin `.local`).
+- `cmd/ad-el-pos-server/main.go`: en `serveHTTP`, **solo con la escucha de red abierta y fuera del modo de
+  pruebas**, arranca el anuncio con `discoverySource` (nombre del establecimiento de la base, computadora, puerto de
+  la escucha HTTPS y TXT con la identidad de B) y lo espera al apagar junto a los trabajadores.
+  `administration/discovery.go`: `EstablishmentName` (sin establecimiento todavía: "").
+- `internal/httpapi/clientversion.go` + `internal/lanlistener` (`WithNetwork`, exportado para las pruebas): **por la
+  escucha de red `X-Client-Version` es obligatoria** (decisión de la fase, abajo): sin ella, 426
+  `CLIENT_UPDATE_REQUIRED` con `min_client_version` y `server_version`. Por la escucha local nada cambia.
+- `go.mod`: `golang.org/x/net v0.60.0` pasa a directa (ya estaba en `go.sum` y en la caché; sin descargas) por el
+  cliente DNS-SD de las pruebas (`dns/dnsmessage`).
+- `scripts/database.py`: `./internal/discovery` en la tupla de integración.
+
+**Contrato v1** (`internal/apicontract/openapi.json`, `docs/API_V1.md`, `contract_integration_test.go`)
+
+- Seis operaciones nuevas de la terminal que se empareja (las que usará Android), etiqueta «Emparejamiento», sin
+  seguridad de dispositivo y con el parámetro `X-Pairing-Secret`: `createPairingRequest` (`POST pairing/requests`),
+  `revealPairingNonce`, `getPairingRequest`, `renamePairingRequest`, `cancelPairingRequest` y
+  `claimPairingCredential`. `ClientVersion` explica que por la escucha de red es obligatoria. Las rutas de
+  administración de B (`devices/pairing-requests*`, `devices/sessions-summary`, `devices/{id}/configuration`) no
+  entran: no son de clientes.
+- `contractPairing` en el recorrido: un «Mesero contrato» Android pide el código con el compromiso, revela, cambia
+  su nombre, consulta, la computadora principal aprueba con el código derivado (`administration.PairingCode` con la
+  huella de una identidad temporal), reclama una sola vez (el segundo reclamo, 409 sin token) y otra solicitud se
+  cancela. 26 operaciones recorridas.
+- `docs/API_V1.md`: filas de la tabla, sección «Encontrar el servidor y emparejarse (fases B y C)» (mDNS, TXT,
+  huella, código, cambio de IP) y la regla de `X-Client-Version` por la red. `API_CONTRACTS.md`: bloque «Etapa 9G ·
+  descubrimiento y comportamiento en red (fase C)».
+
+**Escritorio (Rust)**
+
+- `discovery.rs` (nuevo): consulta mDNS de una sola vez con `std::net::UdpSocket` (puerto efímero →
+  `224.0.0.251:5353`, se repite a la mitad de 1.5 s y, si faltan registros, una segunda pregunta por SRV, TXT o A),
+  lector propio de mensajes DNS (nombres comprimidos con saltos solo hacia atrás y como máximo 16, límite de 255
+  bytes, paquetes cortados sin pánico), `collect` (solo instancias completas con `server_id` UUID en minúsculas,
+  `fp` de 16 hexadecimales, puerto y al menos una IPv4 de la red local; las repetidas por `server_id` juntan
+  direcciones). `ServerLocator` en `TerminalState`: dirección vigente del servidor (`RwLock`), última búsqueda
+  (React solo recibe `{id, name, paired}`) y **cambio de IP**: `relocate` (una búsqueda a la vez con un `Mutex`
+  asíncrono y como máximo cada 10 s) → `candidates` (mismo `server_id` y misma huella corta, distinta de la que
+  falló) → `probe` (`GET /api/v1/health/live` con `PinnedVerifier::pinned` de la huella completa) → `move_to`
+  (valida con `check_paired`, guarda `server_url` en `connection.json` y cambia la dirección vigente). Comando
+  `discovery_search`.
+- `api.rs`: la petición se arma con la dirección vigente; con un **error de conexión** (no llegó al servidor) se
+  intenta `relocate` y, si encontró el servidor, se repite la petición una sola vez en la dirección nueva
+  (`discovery::rebase`). `realtime.rs` lee la dirección en cada intento y llama a `relocate` al fallar la conexión
+  (el cursor se conserva). `export.rs` y `server_snapshot` usan la dirección vigente.
+- `pairing.rs`: `pairing_start_found {serverId, name}` (servidor elegido de la búsqueda: prueba sus direcciones;
+  antes de pedir nada fija el certificado con `GET version` y exige que su huella empiece como la anunciada, y
+  después que el `server_id` de la solicitud sea el anunciado); `request_pairing` recibe esa expectativa;
+  `SERVER_NOT_FOUND_MESSAGE` para `connection_error` de una terminal emparejada que no encuentra su servidor.
+- `Info.plist` (nuevo, junto a `tauri.conf.json`; Tauri 2 lo combina con el del paquete y lo incrusta en las
+  compilaciones de desarrollo): `NSLocalNetworkUsageDescription` («AD-EL POS busca y se conecta a la computadora
+  principal del restaurante en la red local para tomar pedidos, cobrar y enviar las comandas a cocina.») y
+  `NSBonjourServices` = `_adelpos._tcp`.
+- `build.rs`, `permissions/diagnostics.toml` y `main.rs`: los dos comandos nuevos.
+
+**Escritorio (React)**
+
+- `pages/setup/FindServerPage.tsx`: el nombre de la terminal arriba; «Computadoras principales en la red» (busca al
+  abrir y al volver de un código cancelado; «Buscar otra vez»; cada servidor es un botón grande «Pedir código a
+  <nombre>»; sin resultados o sin permiso de red lo explica) y debajo «Escribir la dirección» (la de B, para redes
+  que bloquean la búsqueda). `services/discovery.ts`.
+- `navigation/ConnectionLostLayer.tsx` (nuevo) + `App.tsx`: con la sesión abierta y sin servidor, la capa «Sin
+  conexión con el servidor» empieza debajo de la barra superior (que sigue a la vista con «Sin conexión»), el
+  `main` queda `inert` (sin clics ni teclado, **montado** con lo capturado), dice cuándo es el próximo intento y
+  ofrece «Reintentar»; el foco pasa a ese botón. En la captura la barra reducida es parte del contenido y queda
+  cubierta. Al volver la conexión, `services/reconnection.ts` → `announceReconnection` pide de nuevo todas las
+  consultas a la vista (`adel-server-change`, caja y `adel-connection-restored`, con el que `useRestaurantWorkspace`
+  recupera el guardado incierto de la captura con su mismo `operation_id`). Los «Reintentar» propios de Mesas,
+  Cocina y la barra de la captura ya no se pasan desde `App.tsx` (la capa los sustituye; los componentes los
+  conservan para su uso aislado). El aviso persistente de la 9D se conserva.
+- `hooks/useSession.ts`: sin conexión, la sesión se reintenta con espera creciente 1, 2, 4, 8 y después cada 10 s
+  (`reconnectDelays`) y expone `retryAt`; en línea, cada 5 s como siempre.
+- `styles.css`: bloque al final, solo tokens.
+
+**Pruebas y puente**
+
+- Go: `discovery_test.go` (nombres con acentos y largos, TXT, `Announcer` con un registrador simulado: cambio de
+  nombre, publicación que termina sola, apagado y sistema sin implementación), `browse_test.go` (cliente DNS-SD de
+  las pruebas con `dnsmessage`: consulta, respuesta tipo mDNSResponder con nombre con acentos, rechazo de otra
+  consulta, paquetes cortados) y `announce_darwin_integration_test.go` (`integration`, macOS: **anuncio real y
+  búsqueda acotados**; `TestHoldAnnouncementForLiveSearch` solo con `ADEL_DISCOVERY_HOLD_SERVER_ID`, para la prueba
+  en vivo de Rust). `httpapi/clientversion_test.go` (por la red sin versión: 426; por la local: pasa).
+  `administration/pairing_acceptance_test.go`: el ayudante y el SSE envían las cabeceras de cliente como Rust y una
+  subprueba comprueba el 426 por la escucha de red real. `operations/stage9g_two_terminals_test.go` (nuevo, ver
+  «Pruebas»).
+- Rust: 8 pruebas nuevas en `discovery.rs` (incluida la de huella correcta e incorrecta con dos servidores TLS
+  reales en 127.0.0.1) y una ignorada en vivo.
+- Vitest: `pages/stage9gDiscovery.test.tsx` (4), `App.test.tsx` (capa «Sin conexión»), mocks de
+  `stage9gPairing`/`stage9gModality` con `discovery_search`.
+- `e2e/native-driver.ts`: `installDriver(page, { terminal })` (segunda terminal con su propia credencial),
+  simulación de `discovery_search` (`setDiscovery('server'|'none'|'blocked')`, con el `server_id` real del Go
+  temporal leído de `identity/identity.json` por `e2e/pairing.ts`) y de `pairing_start_found`.
+  `e2e/workflow-stage9g-two-terminals.spec.ts` (nuevo, 2 pruebas). `workflow-stage9d-topbar-tables.spec.ts`, paso
+  10: sin conexión en la captura comprueba la capa y su «Reintentar» (la barra reducida ya no tiene el suyo).
+
+### Decisiones tomadas en la fase
+
+1. **Anuncio con el respondedor mDNS del sistema, no uno propio.** Un respondedor propio en Go tendría que abrir un
+   segundo socket en el puerto 5353: Go lo abre en `0.0.0.0:5353` (lo hace así aunque se pida el grupo
+   multicast) con `SO_REUSEPORT`, y los datagramas **unicast** a ese puerto llegan a uno solo de los sockets (en BSD,
+   según el orden interno del núcleo; no se comprobó en esta Mac), así que podría quitarle respuestas a mDNSResponder (AirPrint y el resto de Bonjour en la computadora
+   principal). Con `dns-sd -R` no hay segundo socket y el sistema resuelve nombres repetidos, varias interfaces,
+   IPv6, el cambio de IP de la propia computadora y la despedida; además el permiso «Red local» no aplica (anuncia
+   mDNSResponder). Riesgos aceptados: `dns-sd` es una herramienta «para uso interactivo» (solo se usan sus
+   argumentos; la salida solo va a la bitácora) y un proceso hijo que hay que vigilar (se relanza solo; si launchd
+   detiene el servicio termina el grupo de procesos, así que no queda un anuncio huérfano; con `serve` de desarrollo
+   un SIGKILL del servidor sí lo dejaría vivo hasta cerrarlo). Comprobado en esta Mac: mDNSResponder contesta la
+   consulta de una sola vez por unicast con PTR, SRV, TXT, AAAA y A. **Windows (Fase W)**: el mismo `Announcer`
+   con `announce_windows.go` sobre `DnsServiceRegister`/`DnsServiceDeRegister` de dnsapi.dll (Windows 10+), sin
+   socket propio; hasta entonces el servidor de Windows no se anuncia y las terminales escriben la dirección.
+2. **`X-Client-Version` obligatoria solo por la escucha de red** (D la dejó a B; B no la tomó): todo cliente que
+   llega por la red es de la 9G o posterior (antes no había forma de conectarse por la red), así ninguna terminal ni
+   Android se salta la versión mínima con solo omitir la cabecera; la ventana de la propia computadora, las
+   herramientas y las pruebas locales no cambian. Respuesta: la de un cliente viejo (426, «Actualiza esta
+   terminal»).
+3. **El TXT no es una prueba de identidad**: la huella corta solo descarta pronto; la terminal siempre comprueba la
+   huella completa en el intercambio TLS (`PinnedVerifier`), también al emparejarse con un servidor de la lista.
+4. **Cambio de IP solo con error de conexión** y repetición única: la petición no llegó al servidor, así que
+   repetirla no duplica nada (las escrituras llevan además su `operation_id`). Un tiempo de espera o un error de
+   respuesta no disparan la búsqueda. La búsqueda bloquea esa petición ≈ 1.5–2.3 s una vez cada 10 s como máximo.
+5. **La capa deja la barra superior usable** (navegación, usuario, pantalla completa: nada de eso escribe en el
+   servidor) y cubre todo lo demás; en la captura cubre también la barra reducida. El aviso persistente de la 9D se
+   conserva (dice el motivo que da Rust); la capa es el bloqueo.
+6. Espera creciente de la sesión **hasta 10 s** (no 15 como el SSE): al volver la red la terminal se recupera en
+   menos de 10 s sin tocar nada (las especificaciones de la 9D/9F esperan 15 s al estado «En línea»).
+7. Nombres de instancia sin puntos («S.A.» → «SA»): `dnsmessage` y otros clientes rechazan una etiqueta con puntos.
+
+### Pruebas ejecutadas (aisladas)
+
+13/11/2026, en `wt/C` con `iso.sh` (clúster 55499, Go 8188, vista previa 1426, Rust en `cache/cargo-C`). Pantalla
+del equipo desbloqueada (`CGSSessionScreenIsLocked` ausente).
+
+| Suite                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Resultado                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `format` (Prettier, `gofmt`, `cargo fmt`; `docs/etapas/*.md` con el mismo md5 antes y después)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | aprobado (10 s)                                                                                              |
+| `sync`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | aprobado                                                                                                     |
+| `vet` (normal e `integration`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | aprobado                                                                                                     |
+| `win` (`GOOS=windows` build, vet y vet `integration`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | aprobado                                                                                                     |
+| Go unitarias con `-race` (`go test ./...`): `discovery` (nombres con acentos y largos, TXT, `Announcer`, cliente DNS-SD de las pruebas), `httpapi` (versión obligatoria por la red)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | aprobado (16 s)                                                                                              |
+| Integración `./internal/discovery` (`TestAnnounceAndFindOnTheLocalNetwork`): anuncio real con Bonjour del sistema y nombre único «AD-EL POS prueba <hex> — Ñeli», encontrado por la consulta de una sola vez con su puerto, TXT y una IPv4 de la red local; al apagar se retira y no queda ningún `dns-sd`                                                                                                                                                                                                                                                                                                                                                                                                                                       | aprobado (5 s)                                                                                               |
+| Integración `./internal/operations` (`TestStage9GTwoTerminals`, base propia): dos cajas con su terminal, usuario y caja: turnos propios con el evento en la otra y sin poder arquear el ajeno; mesa ocupada vista por la otra (SSE + `restaurant/state`) y `TABLE_HAS_ACCOUNT` con la cuenta; la misma cuenta: 409 `ACCOUNT_CONFLICT` «…otra terminal…», vista actualizada y dos confirmaciones simultáneas con un solo envío (3 unidades, no 6); preparación lista desde la otra (evento y estado) y revisión vieja rechazada; cobro que cierra la cuenta y libera la mesa en la otra, efectivo solo en su caja; arqueo que pausa solo su caja (la otra cobra; la pausada no) y tope de 100 comparado por caja (aviso solo en la que lo supera) | aprobado (13 s)                                                                                              |
+| Integración `./internal/apicontract` (`TestContractV1`, 26 operaciones con las seis de emparejamiento)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | aprobado (7 s)                                                                                               |
+| Integración `./internal/administration` (`TestStageTwoAcceptance` con `testPairingAndTerminals` y la subprueba nueva del 426 por la escucha de red real)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | aprobado (97 s)                                                                                              |
+| Integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS`: el `host` en modo de pruebas con `--network-listen 127.0.0.1:8196`, sin anuncio)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | aprobado (42 s)                                                                                              |
+| `cargo test --locked --offline` (8 nuevas: consulta, respuesta con acentos y un punto dentro del nombre, paquetes ajenos o cortados y puntero en ciclo, preguntas de seguimiento, selección por `server_id` y huella corta, **huella correcta e incorrecta con dos servidores TLS reales**, cambio de dirección que reescribe `connection.json` y rechaza una IP pública, lista para React sin direcciones)                                                                                                                                                                                                                                                                                                                                      | 75 aprobadas, 3 ignoradas (Keychain real y las dos en vivo)                                                  |
+| Prueba en vivo Rust ↔ Go (`dtools-C/live-discovery-C.sh`): Go mantiene 12 s un anuncio «AD-EL POS prueba Rust <id> — Ñeli» y la búsqueda real de `discovery.rs` lo encuentra con su `server_id`, puerto 8202 y 2 IPv4; al terminar no queda ningún `dns-sd`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | aprobado                                                                                                     |
+| Sondeo previo (Python, acotado a 3 s con un tipo de prueba): mDNSResponder contesta la consulta de una sola vez por unicast desde el puerto 5353 con el mismo identificador, PTR en respuestas y SRV, TXT, AAAA y A en adicionales (TTL 10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | comprobado                                                                                                   |
+| `tsc --noEmit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | sin errores                                                                                                  |
+| Vitest (`npm test`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 92 archivos, 861 pruebas (nuevas: `stage9gDiscovery.test.tsx` ×4 y la capa «Sin conexión» en `App.test.tsx`) |
+| Suite `app` (`tauri build --bundles app`, 97 s): `Contents/Info.plist` del `.app` con `NSLocalNetworkUsageDescription` (el texto en español) y `NSBonjourServices` = `["_adelpos._tcp"]`; `plutil -lint` correcto                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | aprobado                                                                                                     |
+| Playwright Chromium: `restaurant`, `workflow-stage9d-colors`, `workflow-stage9d-topbar-tables`, `workflow-stage9f-kitchen-stations`, `workflow-stage9f-topbar-map`, `workflow-stage9g-modality`, `workflow-stage9g-terminals` ×2, `workflow-stage9g-two-terminals` ×2 y `workflow-zz-test-data`                                                                                                                                                                                                                                                                                                                                                                                                                                                  | 11 de 11 (3.2 min)                                                                                           |
+| Playwright WebKit (las mismas)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | 11 de 11 (3.1 min)                                                                                           |
+
+La especificación nueva también pasó sola en Chromium antes del ajuste final de la espera (2 de 2, 23 s).
+
+### No verificado y lo que queda para otras fases
+
+- **Fase W (otra computadora real)**, pasos sugeridos:
+  1. Mac como servidor (`host` con la escucha `:8443`), Windows como terminal: en Windows «Buscar el servidor» debe
+     listar «<establecimiento> — <computadora>» sin escribir nada (comprobar con `dns-sd -B _adelpos._tcp` en la
+     Mac que el anuncio existe; si no aparece en Windows, revisar el firewall de Windows para UDP 5353 entrante en
+     redes privadas). Emparejar eligiéndolo de la lista.
+  2. **Cambio de IP real**: con la terminal emparejada, cambiar la IP de la Mac (renovar la concesión DHCP en
+     Ajustes › Red › Detalles › TCP/IP › «Renovar concesión DHCP» o reservar otra IP en el módem; **parada**: es
+     configuración de red) y comprobar que la terminal sigue sola (la primera operación tarda ≈ 2 s) y que
+     `connection.json` de la terminal tiene la dirección nueva. Probar también con otro servidor AD-EL POS en la red
+     con el mismo nombre: nunca debe aceptarse.
+  3. **Apagar la red de verdad** (desconectar el cable o el Wi-Fi de la terminal): la capa «Sin conexión» aparece en
+     ≤ 5 s, lo capturado se conserva, al volver se guarda solo; probar también apagar la Mac y encenderla.
+  4. Windows como servidor: implementar `announce_windows.go` (`DnsServiceRegister`) y probar que una Mac lo
+     encuentra; comprobar si el respondedor de Windows y la regla del firewall necesitan algo más.
+- **Permiso «Red local» de macOS** en la aplicación instalada: al buscar por primera vez debe aparecer el aviso con
+  el texto del Info.plist (verificado que las claves están en el `.app` compilado; con firma ad hoc puede volver a
+  pedirse en cada compilación). Si se niega, la búsqueda falla con el aviso en español y la dirección escrita a mano
+  tampoco conectará (el permiso cubre también las conexiones a la red local).
+- **Exención del servicio**: el anuncio lo hace mDNSResponder, así que el permiso «Red local» no aplica al
+  LaunchDaemon; la escucha 8443 del servicio sí recibe conexiones de la red (Fase G: comprobar con la instalación
+  real).
+- Solo IPv4 en la búsqueda de la terminal (las direcciones IPv6 del anuncio se ignoran) y solo por la interfaz de
+  salida predeterminada del multicast (`std::net::UdpSocket` no elige interfaz): en una computadora con varias redes
+  podría no encontrar el servidor de la otra red; queda la dirección escrita a mano.
+- **Guía (Fase G)**: `docs/INSTALAR_EN_RED.md` debe recomendar asignar una IP fija a la computadora principal en el
+  módem (§4.1), explicar el aviso «Red local» de macOS y qué hacer si la red bloquea la búsqueda.
+
+### Para CLAUDE.md
+
+- §3 Arquitectura: el servidor se anuncia en la red local (`internal/discovery`, `_adelpos._tcp`, TXT con
+  `server_id`, `api`, `port` y `fp`) con el respondedor mDNS del sistema (macOS: `dns-sd -R` hijo del servidor;
+  Windows: pendiente, `DnsServiceRegister`), solo con la escucha de red y nunca en modo de pruebas. La terminal
+  busca con `discovery.rs` (consulta de una sola vez, sin crates) y, emparejada, vuelve a encontrar su servidor por
+  `server_id` + huella si cambia de IP (`ServerLocator`: dirección vigente en `TerminalState`, que usan `api.rs`,
+  `realtime.rs`, `export.rs` y `server_snapshot`).
+- §6 Pruebas: `./internal/discovery` en la tupla (prueba acotada del anuncio real con nombre único; necesita macOS y
+  red); `TestStage9GTwoTerminals` en `operations`; `installDriver(page, { terminal })` para una segunda terminal en
+  otro contexto y `setDiscovery` en el puente; la búsqueda real de Rust se prueba a mano con
+  `dtools-C/live-discovery-C.sh` (Go mantiene un anuncio 12 s). **Al nombrar datos de prueba, evitar prefijos que
+  filtran otras especificaciones** (p. ej. «Caja 2»): la fase C usa «9G-C».
+- §7 Seguridad: por la escucha de red `X-Client-Version` es obligatoria (426 sin ella); el anuncio mDNS nunca se usa
+  para confiar (la huella completa sí); una terminal emparejada solo cambia de dirección hacia un servidor con la
+  huella fijada y la guarda como última dirección.
+- §11–12: la capa «Sin conexión con el servidor» (`navigation/ConnectionLostLayer.tsx`) bloquea con `inert` el
+  `main` debajo de la barra superior y conserva lo capturado; al reconectar `announceReconnection` vuelve a pedir
+  todo lo visible. Regla propuesta: **ninguna pantalla nueva pone su propio «Reintentar» de conexión**; la capa es
+  el único lugar.
+- §15: «Buscar el servidor» con la lista de computadoras encontradas y la dirección escrita a mano; reconexión con
+  espera creciente (1, 2, 4, 8 y 10 s); `Info.plist` con `NSLocalNetworkUsageDescription` y `NSBonjourServices`.
+- §19 Riesgos: `dns-sd` es una herramienta interactiva (formato no garantizado; solo se usan sus argumentos); un
+  `serve` de desarrollo matado con SIGKILL deja su `dns-sd` vivo; la búsqueda es solo IPv4 y por la interfaz
+  predeterminada; el permiso «Red local» de macOS es necesario para buscar y para conectarse.
+
+**Fusión y verificación del coordinador** (13/11/2026): la rama `etapa-9g-c` salió de la fusión de A, D y B, antes de la
+F. Se fusionó en `146ffc2` (conflictos solo de bloques agregados por ambas: trabajadores de `main.go` —con `gofmt` en
+`65bb484`—, comandos de `build.rs`, `main.rs` y `diagnostics.toml`, tupla de integración, estilos y `API_CONTRACTS.md`).
+Copia exacta de `65bb484`: Go unitarias con `-race`, integración de los 13 paquetes de la tupla (con `discovery`),
+`cargo test` y Playwright (`restaurant`, `table-price-decrease`, `takeaway-quick-notes`, `workflow-stage9c-navigation`,
+`workflow-stage9d-topbar-tables`, `workflow-stage9f-printing`, las seis `workflow-stage9g-*` y `workflow-zz-test-data`:
+14 de 14 en Chromium y 14 de 14 en WebKit), además de formato, `sync`, `vet`, `GOOS=windows`, `tsc` y Vitest: todo
+aprobado.
+
+## Revisión independiente (emparejamiento y cifrado, idempotencia y pedidos sin conexión, respaldos)
+
+Un solo agente de solo lectura, en tres partes, sobre copias exactas; las correcciones las hicieron los agentes de cada
+fase en ramas nuevas y el coordinador las fusionó y verificó.
+
+### Parte 1 · Emparejamiento y cifrado (Fase B), sobre `b84415c`
+
+Un agente de solo lectura, con una prueba desechable propia contra el clúster aislado (fuera del repositorio).
+
+| Gravedad | Hallazgo                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Estado                                                           |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Alto     | **Un intermediario podía «moler» solicitudes**: abrir solicitudes en el servidor eligiendo su número comprometido, calcular sin conexión el código que esperaría el servidor y cancelar las que no coincidían con el código fijo de la terminal interceptada, hasta igualarlo. El límite por origen contaba la IP exacta (la escucha acepta cualquier `fe80::/10` o ULA) y el cupo de 20 abiertas no contaba canceladas ni rechazadas: 3 000 de 3 000 creaciones y cancelaciones aceptadas en 3,3 s, ≈1–5 % de éxito por emparejamiento en lugar de 1 en 10⁶ (`pairing.go`, `lanlistener.go`). | confirmado (el ritmo y el desvío); el ataque completo, plausible |
+| Medio    | **Llenar la base desde la red sin credencial**: cada creación y cancelación dejaba una fila (7 días) y dos movimientos de auditoría permanentes; el conteo recorría la tabla completa y el borrado de antiguas no tenía índice, todo bajo `LOCK TABLE` dentro de la transacción de 10 s.                                                                                                                                                                                                                                                                                                       | confirmado (crecimiento y recorrido); llenar el disco, plausible |
+| Bajo     | Consultas de estado simultáneas (`setInterval` sin esperar y `pairing_status` sin serializar): la terminal podía decir «pide otro código» ya emparejada y dejar un dispositivo huérfano.                                                                                                                                                                                                                                                                                                                                                                                                       | plausible                                                        |
+| Bajo     | Una identidad incompleta (corte entre escribir la llave e `identity.json`) impedía arrancar todo el servidor, también la venta local.                                                                                                                                                                                                                                                                                                                                                                                                                                                          | plausible                                                        |
+| Bajo     | El filtro por ULA aceptaba nodos de VPN superpuestas (Tailscale `fd7a:115c:a1e0::/48`, ZeroTier) fuera del restaurante.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | confirmado por lectura; impacto plausible                        |
+
+Revisado sin hallazgos: derivación idéntica del código en Go, Rust y el puente; orden del compromiso; comparaciones en
+tiempo constante; vencimiento e intentos bajo `FOR UPDATE`; rutas locales (`loopback && !FromNetwork`, marca puesta por la
+propia escucha de red); filtro de orígenes (IPv4 mapeada, CGNAT, multidifusión, 6to4); entrega única de la credencial
+(token de 256 bits, solo SHA-256 en la base, nunca llega a React); verificador `rustls` (huella SPKI, firma TLS 1.2 y 1.3,
+sin reanudación, proxy ni redirecciones, en todos los clientes de Rust); revocación (peticiones y SSE); secretos fuera de
+React, auditoría y bitácoras; restricciones de la sección B; apertura de la escucha de red solo con modalidad con
+servidor.
+
+### Correcciones de la parte 1 (Fase B)
+
+Un agente, en el árbol nuevo `$SCR/wt/BF` (rama `etapa-9g-bfix`, desde la punta de `etapa-9g` en `1ba4833`, con A, D,
+B y F ya fusionadas). 13–14/11/2026. La 0023 aún no se aplicó a ninguna instalación: se editó su sección B. Mismo
+aislamiento que la fase B (clúster 55499, Go temporal 8186, vista previa 1424, Rust en `cache/cargo-B`, escucha HTTPS
+de prueba en `127.0.0.1:8196`/`8197` y puertos efímeros); nada de la instalación real ni del Keychain real.
+
+| #         | Hallazgo (verificado en el código)                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Corrección                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Prueba                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 · ALTO  | **Intermediario que muele solicitudes.** Cierto: una vez que T revela nT, el código de T queda fijo y lo conoce M; M podía abrir solicitudes en S sin límite real (el límite por origen contaba la IP exacta y el enlace local/ULA da direcciones ilimitadas; el cupo de 20 no contaba canceladas ni rechazadas), calcular sin conexión el código de cada una y cancelar las que no coincidían. El comentario de `pairing.go` y el avance afirmaban «1 en 10⁶ por solicitud», engañoso. | **Tope global** de 30 solicitudes **creadas** cada 10 minutos, sin importar estado ni origen (canceladas y rechazadas siguen contando), `429 PAIRING_LIMIT_REACHED` con un mensaje claro para la terminal y un solo movimiento `device.pairing_limit_reached` por ventana. Límite por **grupo de origen** (`SourceGroup`: IPv4 exacta, /64 de IPv6, todo el enlace local IPv4 e IPv6 como un grupo; columna `source_group`). Terminales muestra en la computadora principal cuántas solicitudes se cancelaron, rechazaron o vencieron sin aprobarse en la ventana (indicio de un intento) y si se alcanzó el tope. Comentario de `pairing.go` y texto del avance corregidos: la probabilidad queda acotada por el tope (≤ 30 intentos por cada 10 minutos que tarde el administrador: ≤ 3×10⁻⁵ por ventana) y cada intento queda a la vista. | Integración `stage9g_tope_global_contra_un_intermediario_que_muele_solicitudes`: 12 crear+cancelar desde `fe80::` distintos → 5 aceptadas; 7 desde un mismo /64 → 5; 60 desde IPv4 y /64 distintos → exactamente 30 aceptadas en total y 40 `PAIRING_LIMIT_REACHED`; una terminal legítima también espera; un solo movimiento del tope y ninguno de las cancelaciones; Terminales informa 30 abandonadas y el tope; pasada la ventana se vuelve a pedir código. Unitaria `TestSourceGroups`; Vitest de los avisos. |
+| 2 · MEDIO | **Llenar la base desde la red.** Cierto: cada crear+cancelar dejaba fila y dos movimientos permanentes; el conteo recorría toda la tabla (dos `FILTER` sin `WHERE`) y el `DELETE` por `created_at` no tenía índice, todo con la tabla bloqueada dentro de la transacción de 10 s.                                                                                                                                                                                                       | El tope global acota las filas. Conteos con `WHERE created_at > now() - ventana` sobre los índices nuevos `(created_at)` y `(source_group, created_at)`. Sin `DELETE` en la petición: trabajador `PairingCleaner` (al arrancar y cada hora) que borra por lotes de 500 con su propia sentencia (`CleanPairingRequests`). La creación ya no se audita; `device.pairing_requested` se anota al **revelar** (cuando la solicitud puede aprobarse) y la cancelación solo si ya estaba revelada.                                                                                                                                                                                                                                                                                                                                                  | Integración `stage9g_conteos_con_indices_y_limpieza_por_lotes`: con 20 000 filas antiguas, `EXPLAIN` de los dos conteos usa índice y sin `Seq Scan`; crear una solicitud tarda < 2 s; la limpieza borra las 20 000 y conserva la reciente. Aserciones de auditoría al revelar y en el compromiso falso.                                                                                                                                                                                                            |
+| 3 · BAJO  | **Consultas de estado simultáneas.** Cierto: `setInterval` en React sin esperar y `pairing_status` sin serializar; una consulta lenta (diálogo del Llavero) hacía que la siguiente recibiera `claimed` y la pantalla dijera «pide otro código».                                                                                                                                                                                                                                         | Rust: una sola consulta en curso (`pairing_busy`, turno que se libera también con error); otra simultánea responde «en espera» sin llamar al servidor. La credencial reclamada se conserva en la sesión antes de guardarla: si el almacén seguro falla, la siguiente consulta reintenta guardarla sin reclamar otra vez (no queda un dispositivo huérfano). React: consultas encadenadas con `setTimeout` al terminar cada una; un error no detiene la espera.                                                                                                                                                                                                                                                                                                                                                                               | Rust `only_one_status_query_runs_at_a_time` (en curso → «en espera» sin red; el turno se libera con error). Vitest `encadena las consultas…`: una consulta lenta no se solapa con otras en 4 intervalos, un error de guardado se muestra y la siguiente empareja.                                                                                                                                                                                                                                                  |
+| 4 · BAJO  | **Identidad incompleta impedía arrancar.** Cierto: un corte entre la llave e `identity.json` dejaba la identidad incompleta para siempre y `serveHTTP` terminaba con error (launchd en bucle, sin vender).                                                                                                                                                                                                                                                                              | Creación **atómica**: los tres archivos en una carpeta temporal junto a la definitiva, `fsync` y `rename` de la carpeta; las temporales de un intento interrumpido se descartan; una carpeta vacía se acepta y una con otros archivos no se toca. Si aun así la identidad no carga (archivos cambiados a mano), el servidor **sigue atendiendo la escucha local**: sin escucha de red, `pairing/*` responde `503 PAIRING_UNAVAILABLE` («…su identidad necesita revisión de soporte»), `server_identity_unavailable` en la bitácora y aviso en Terminales (`pairing_available: false`).                                                                                                                                                                                                                                                       | Unitaria `TestIdentityCreationIsAtomic`. Integración del `host` real: con `identity.json` apartado el servicio queda listo, la bitácora lo explica (`network_listen_disabled`), el 8196 no se abre y el emparejamiento responde 503 con el mensaje; después se repone. Vitest del aviso.                                                                                                                                                                                                                           |
+| 5 · BAJO  | **VPN con ULA.** Cierto: se aceptaba cualquier ULA/privada/enlace local, también la de un túnel (Tailscale `fd7a:115c:a1e0::/48`, ZeroTier).                                                                                                                                                                                                                                                                                                                                            | Solo loopback u orígenes de clase aceptable **dentro de la subred de una interfaz activa que no sea punto a punto** (`net.FlagPointToPoint`), evaluado al aceptar con la lista de interfaces releída cada 30 s y, si un origen no coincide, como mucho cada 2 s (DHCP). Riesgo que queda (documentado en `lanlistener.go`, el avance y `API_CONTRACTS.md`): una VPN que se presenta como interfaz normal con una subred privada.                                                                                                                                                                                                                                                                                                                                                                                                             | Unitarias con interfaces simuladas: red de otra LAN, red y ULA de un túnel punto a punto, Internet y CGNAT rechazados; misma red, enlace local y ULA de la Wi-Fi aceptados; relectura a los 2 s/30 s; error al leer interfaces → solo loopback; `SystemNetworks` sin loopback.                                                                                                                                                                                                                                     |
+| extra     | Al probar el punto 1 apareció un defecto: el origen de una terminal de **enlace local IPv6** llega con zona (`fe80::1%en0`) y `net.ParseIP` la rechazaba (`PAIRING_SOURCE_UNKNOWN`): una terminal así no podía emparejarse.                                                                                                                                                                                                                                                             | `http.go` quita la zona antes de leer la IP de origen.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Cubierto por la prueba del tope (orígenes `[fe80::x%en0]`).                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+Además: el plazo de `TestStageTwoAcceptance` pasa de 90 a 180 s (la aceptación ahora inserta miles de filas) y la
+prueba del SSE usa su propio contexto.
+
+**Archivos**: `backend/internal/administration/pairing.go` (comentario del protocolo, límites, `SourceGroup`,
+`pairingLimitReached`, `pairingUnavailable`, auditoría al revelar, contadores de la lista), `pairing_cleanup.go`
+(nuevo), `http.go` (zona IPv6), `service.go` (`IdentityProblem`), `internal/lanlistener/lanlistener.go` (`peerFilter`,
+`SystemNetworks`; `Filter` recibe las interfaces), `internal/localsetup/identity.go` (creación atómica),
+`cmd/ad-el-pos-server/main.go` (identidad tolerante y trabajador de limpieza), sección B de la `0023` (`source_group` e
+índices), `desktop/src-tauri/src/pairing.rs` y `main.rs` (`pairing_busy`, credencial reclamada conservada,
+`startup_tests::test_state`), `FindServerPage.tsx` (consultas encadenadas), `DevicesPage.tsx`, `models.ts` y
+`styles.css` (avisos), pruebas en `pairing_acceptance_test.go`, `pairing_test.go`, `lanlistener_test.go`,
+`identity_test.go`, `host_unix_*integration_test.go`, `stage9gPairing.test.tsx`; `API_CONTRACTS.md` y el avance.
+
+#### Pruebas ejecutadas (aisladas)
+
+| Suite                                                                                                          | Resultado                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `format` (`docs/etapas` intacto por md5), `sync`, `vet`, `win`                                                 | aprobados                                                                                                              |
+| Go unitarias `-race` (`go test ./...`)                                                                         | aprobado (16 s)                                                                                                        |
+| Integración `./internal/administration` (`TestStageTwoAcceptance` con las dos pruebas nuevas)                  | aprobado (116 s)                                                                                                       |
+| Integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS` con la identidad dañada)                        | aprobado (46 s)                                                                                                        |
+| `cargo test --locked --offline`                                                                                | 73 aprobadas, 2 ignoradas                                                                                              |
+| Prueba en vivo Rust → Go (`dtools/live-pairing-BF.sh`, escucha de red real con el filtro nuevo desde loopback) | aprobada: misma huella que `openssl`, HTTP 400, TLS 1.1 rechazado, código de Rust igual al derivado de los datos de Go |
+| `tsc`                                                                                                          | sin errores                                                                                                            |
+| Vitest                                                                                                         | 92 archivos, 870 pruebas                                                                                               |
+| Playwright `restaurant`, `workflow-stage9g-terminals` (2), `workflow-zz-test-data`                             | Chromium 4/4 (1.7 min), WebKit 4/4 (1.6 min, pantalla desbloqueada)                                                    |
+
+#### Lo que queda
+
+- Fase W/G: el filtro por subred se probó con interfaces simuladas y desde loopback; con otra computadora real falta
+  comprobar una terminal en la Wi-Fi (aceptada) y otra por una VPN de túnel (rechazada).
+- Con el tope global, un atacante en la LAN puede impedir emparejar durante 10 minutos (riesgo aceptado y visible en
+  Terminales y en el Registro de movimientos).
+
+#### Para CLAUDE.md
+
+- §7: el emparejamiento tiene un tope global de 30 solicitudes cada 10 minutos (contando canceladas y rechazadas) y 5
+  por grupo de origen (IPv4, /64 de IPv6, enlace local); es lo que acota a un intermediario, no el compromiso solo.
+  La escucha de red acepta solo orígenes dentro de la subred de una interfaz local que no sea punto a punto.
+- §3: sin identidad cargable el servidor sigue atendiendo la escucha local sin red ni emparejamiento (503); la identidad
+  se crea con una carpeta temporal renombrada; `PairingCleaner` borra por lotes las solicitudes de más de 7 días.
+- Regla permanente propuesta: toda tabla que se llena desde rutas sin credencial lleva un tope global por ventana,
+  conteos por índice y limpieza fuera de la petición.
+
+**Fusión y verificación del coordinador**: la rama `etapa-9g-bfix` salió de `1ba4833` (sin la Fase C). Se fusionó en
+`6e92f7a` (conflictos: limpieza de solicitudes junto al anuncio en la red en `main.go`, filtro por subred junto a la marca
+de la escucha de red en `lanlistener.go`, estado del emparejamiento junto a la búsqueda en `main.rs` y estilos). Copia
+exacta de `6e92f7a`: formato, `sync`, `vet`, `GOOS=windows`, `tsc`, Vitest, Go unitarias con `-race`, integración de los
+13 paquetes, `cargo test` (81 aprobadas, 3 ignoradas) y Playwright 14 de 14 en Chromium y en WebKit: todo aprobado.
