@@ -9,6 +9,21 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// CreatePrivate crea un archivo nuevo solo para la cuenta que ejecuta el servidor (etapa 9G, respaldos): falla si el
+// nombre ya existe (también un enlace: CREATE_NEW no lo sigue) y fija la ACL privada antes de escribir nada en él.
+func CreatePrivate(path string) (*os.File, error) {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err := Protect(path); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, err
+	}
+	return file, nil
+}
+
 // Protect fija la ACL privada en un archivo o una carpeta. En una carpeta las entradas se heredan a todo
 // lo que se cree dentro (OI: archivos, CI: subcarpetas).
 func Protect(path string) error {

@@ -21,8 +21,9 @@ import (
 //   - PUT maintenance/backups/settings {enabled, time, keep}: activo, hora (null = la «Hora de inicio del día») y
 //     cuántos respaldos automáticos conservar. Auditada.
 //   - PUT maintenance/backups/directory {directory}: la carpeta que devolvió el diálogo nativo de la computadora
-//     principal. Solo desde una conexión local; Go valida que sea una ruta absoluta, existente y con permiso de
-//     escritura para el servidor. Auditada. No está en la lista cerrada de operaciones de la interfaz: solo la llama
+//     principal. Solo desde una conexión local; Go valida que sea una ruta absoluta, existente, con permiso de
+//     escritura para el servidor y fuera de los datos del servidor y de PostgreSQL, y guarda la ruta real (sin
+//     enlaces). Auditada. No está en la lista cerrada de operaciones de la interfaz: solo la llama
 //     Rust (backup_folder.rs) con la ruta que eligió el administrador en el diálogo.
 //   - POST maintenance/backups/directory/default: vuelve a la carpeta predeterminada. Auditada.
 //   - POST maintenance/backups/run {operation_id}: «Respaldar ahora» por el mismo camino del automático. Una clave
@@ -65,7 +66,7 @@ func (service *Service) backupRoutes(ctx context.Context, tx pgx.Tx, request Req
 	case "GET maintenance/backups":
 		return runner.State(ctx, tx, request.Local)
 	case "GET maintenance/backups/status":
-		return backupschedule.SummaryOf(ctx, tx)
+		return runner.Summary(ctx, tx)
 	case "PUT maintenance/backups/settings":
 		return saveBackupSettings(ctx, tx, request, principal, runner)
 	case "PUT maintenance/backups/directory":
@@ -161,6 +162,7 @@ var directoryMessages = map[string]string{
 	backupschedule.ReasonNotWritable:  "El servidor no puede guardar archivos en esa carpeta. Elige otra o revisa sus permisos.",
 	backupschedule.ReasonRelative:     "Elige una carpeta de esta computadora.",
 	backupschedule.ReasonPostgresData: "Esa carpeta guarda la base de datos; elige otra para los respaldos.",
+	backupschedule.ReasonServerData:   "Esa carpeta guarda los datos del servidor de AD-EL POS; elige otra para los respaldos.",
 	backupschedule.ReasonInvalid:      "Elige una carpeta de esta computadora.",
 }
 
@@ -190,7 +192,7 @@ func saveBackupDirectory(ctx context.Context, tx pgx.Tx, request Request, princi
 	if filepath.IsAbs(input.Directory) && backupschedule.SameDirectory(input.Directory, runner.Target.DefaultDirectory()) {
 		return changeBackupDirectory(ctx, tx, request, principal, runner, "")
 	}
-	directory, err := backupschedule.ValidateDirectory(input.Directory)
+	directory, err := backupschedule.ValidateDirectory(input.Directory, runner.Target.ProtectedDirectories())
 	var problem *backupschedule.DirectoryError
 	if errors.As(err, &problem) {
 		return nil, &Fault{Status: 400, Code: "BACKUP_DIRECTORY_INVALID", Message: directoryMessages[problem.Reason]}

@@ -46,6 +46,10 @@ type Runner struct {
 	Now func() time.Time
 	// RunTimeout es el plazo de cada respaldo; cero usa DefaultRunTimeout.
 	RunTimeout time.Duration
+	// InstallationID es el server_id de la identidad del servidor (fase B), con el que se nombran sus respaldos; sin
+	// identidad se usa el installation_id de backup_settings. Se fija antes de arrancar el trabajador y de atender
+	// peticiones.
+	InstallationID string
 
 	// starting serializa el comienzo de «Respaldar ahora» en este servidor: un reenvío de la misma clave encuentra la
 	// ejecución que dejó el primero en lugar de responder que hay otro respaldo en curso.
@@ -159,15 +163,49 @@ func (runner *Runner) RecoverInterrupted(ctx context.Context) error {
 	return runner.markInterrupted(ctx)
 }
 
-// markInterrupted cierra como fallidas («interrupted») las ejecuciones en curso. Exige el lock tomado.
+// markInterrupted cierra como fallidas («interrupted») las ejecuciones en curso y borra exactamente el archivo
+// temporal que cada una registró (si sigue ahí y es un archivo regular). Exige el lock tomado: entonces ningún respaldo
+// está en curso en ningún servidor sobre esta base, así que toda fila en curso es un resto. Nunca toca otros archivos.
 func (runner *Runner) markInterrupted(ctx context.Context) error {
-	tag, err := runner.Pool.Exec(ctx, `UPDATE app.backup_runs
-        SET status = 'failed', finished_at = greatest($1::timestamptz, started_at), failure_reason = 'interrupted'
-        WHERE status = 'running'`, runner.now())
-	if err == nil && tag.RowsAffected() > 0 {
-		runner.logWarning("backup_interrupted_recorded", "runs", tag.RowsAffected())
+	rows, err := runner.Pool.Query(ctx, `SELECT id::text, coalesce(directory, ''), coalesce(partial_file, '')
+        FROM app.backup_runs WHERE status = 'running'`)
+	if err != nil {
+		return err
 	}
-	return err
+	type leftover struct {
+		id, directory, partial string
+	}
+	leftovers := []leftover{}
+	for rows.Next() {
+		var item leftover
+		if err := rows.Scan(&item.id, &item.directory, &item.partial); err != nil {
+			rows.Close()
+			return err
+		}
+		leftovers = append(leftovers, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, item := range leftovers {
+		if item.partial != "" && item.directory != "" {
+			if _, err := removeRegular(item.directory, item.partial); err != nil {
+				runner.logWarning("backup_partial_not_removed", "directory", item.directory, "file", item.partial, "reason", err.Error())
+			}
+		}
+		_, err := runner.Pool.Exec(ctx, `UPDATE app.backup_runs
+            SET status = 'failed', finished_at = greatest($2::timestamptz, started_at), failure_reason = 'interrupted',
+                partial_file = NULL
+            WHERE id = $1 AND status = 'running'`, item.id, runner.now())
+		if err != nil {
+			return err
+		}
+	}
+	if len(leftovers) > 0 {
+		runner.logWarning("backup_interrupted_recorded", "runs", len(leftovers))
+	}
+	return nil
 }
 
 // insertRun registra el comienzo de una ejecución.
@@ -192,11 +230,12 @@ func (runner *Runner) RunScheduled(ctx context.Context, slot time.Time) (*Run, e
 	if err := runner.markInterrupted(ctx); err != nil {
 		return nil, err
 	}
-	history, err := slotHistory(ctx, runner.Pool, slot)
+	now := runner.now()
+	history, err := slotHistory(ctx, runner.Pool, slot, now)
 	if err != nil {
 		return nil, err
 	}
-	if !Due(runner.now(), history) {
+	if !Due(now, history) {
 		return nil, nil
 	}
 	settings, err := LoadSettings(ctx, runner.Pool)
@@ -376,22 +415,35 @@ func (runner *Runner) produce(ctx context.Context, run Run, settings Settings) o
 		return result
 	}
 	database := runner.Target.DatabaseName()
-	CleanPartials(directory, database)
+	tag, err := runner.installationTag(ctx)
+	if err != nil {
+		runner.logWarning("backup_installation_unknown", "reason", err.Error())
+		result.failure = FailureDump
+		return result
+	}
 	suffix := make([]byte, 3)
 	if _, err := rand.Read(suffix); err != nil {
 		result.failure = FailureDump
 		return result
 	}
-	name := FileName(database, run.Kind, runner.now(), hex.EncodeToString(suffix))
+	name := FileName(database, tag, run.Kind, runner.now(), hex.EncodeToString(suffix))
 	final := filepath.Join(directory, name)
 	partial := final + partialSuffix
+	// El archivo temporal queda registrado antes de crearlo: si el servidor se detiene a media copia, la siguiente
+	// recuperación borra exactamente ese archivo (y ningún otro de la carpeta).
+	if err := runner.recordPartial(run.ID, directory, name+partialSuffix); err != nil {
+		runner.logWarning("backup_partial_not_recorded", "reason", err.Error())
+		result.failure = FailureDump
+		return result
+	}
+	// Dump crea el archivo nuevo (sin seguir enlaces ni reemplazar uno existente) y lo borra si falla: aquí no se borra
+	// nada, porque un fallo al crearlo puede deberse a que ese nombre ya era de otro archivo.
 	if err := runner.Target.Dump(ctx, partial); err != nil {
-		_ = os.Remove(partial)
 		runner.logWarning("backup_dump_failed", "reason", err.Error())
 		result.failure = interruptedOr(ctx, FailureDump)
 		return result
 	}
-	info, err := os.Stat(partial)
+	info, err := os.Lstat(partial)
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 		_ = os.Remove(partial)
 		result.failure = FailureDump
@@ -429,7 +481,7 @@ func (runner *Runner) finish(run Run, result outcome) Run {
 	final, err := scanRun(runner.Pool.QueryRow(ctx, `UPDATE app.backup_runs SET
             status = $2, finished_at = greatest($3::timestamptz, started_at), directory = $4,
             used_default_directory = $5, fallback_reason = $6, file_name = $7, size_bytes = $8, verified = $9,
-            failure_reason = $10
+            failure_reason = $10, partial_file = NULL
         WHERE id = $1 AND status = 'running'
         RETURNING `+runColumns,
 		run.ID, status, runner.now(), nullable(result.directory), result.usedDefault, nullable(result.fallbackReason),
@@ -445,21 +497,96 @@ func (runner *Runner) finish(run Run, result outcome) Run {
 	return final
 }
 
-// retain conserva los últimos keep respaldos automáticos de la carpeta donde quedó el respaldo y anota en el registro
-// los que borró.
-func (runner *Runner) retain(run Run, keep int) {
-	removed, err := Retain(run.Directory, runner.Target.DatabaseName(), keep)
+// recordPartial anota la carpeta y el archivo temporal de la ejecución en curso.
+func (runner *Runner) recordPartial(id, directory, partial string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), finishTimeout)
+	defer cancel()
+	tag, err := runner.Pool.Exec(ctx, `UPDATE app.backup_runs SET directory = $2, partial_file = $3
+        WHERE id = $1 AND status = 'running'`, id, directory, partial)
 	if err != nil {
-		runner.logWarning("backup_retention_incomplete", "directory", run.Directory, "reason", err.Error())
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errors.New("la ejecución ya no está en curso")
+	}
+	return nil
+}
+
+// installationTag es el identificador de esta instalación en el nombre de sus respaldos: el server_id de la identidad
+// o, sin ella, el installation_id de backup_settings.
+func (runner *Runner) installationTag(ctx context.Context) (string, error) {
+	if tag := InstallationTag(runner.InstallationID); tag != "" {
+		return tag, nil
+	}
+	settings, err := LoadSettings(ctx, runner.Pool)
+	if err != nil {
+		return "", err
+	}
+	if tag := InstallationTag(settings.InstallationID); tag != "" {
+		return tag, nil
+	}
+	return "", errors.New("la instalación no tiene identificador")
+}
+
+// retentionRow es un respaldo automático registrado que la retención puede borrar.
+type retentionRow struct {
+	ID       string
+	FileName string
+}
+
+// toRemove elige, de los respaldos automáticos anteriores de la misma carpeta ordenados del más reciente al más viejo
+// (por el registro de la base), los que sobran: el recién hecho cuenta como uno de los keep.
+func toRemove(older []retentionRow, keep int) []retentionRow {
+	kept := keep - 1
+	if kept < 0 {
+		kept = 0
+	}
+	if len(older) <= kept {
+		return nil
+	}
+	return older[kept:]
+}
+
+// retain conserva los últimos keep respaldos automáticos de esta instalación en la carpeta donde quedó el respaldo:
+// solo los registrados en app.backup_runs (automáticos, correctos, de la misma carpeta y sin borrar), en el orden en
+// que se registraron y nunca el que se acaba de hacer. Un archivo que ya no está se anota como borrado; uno que dejó
+// de ser un archivo regular (un enlace o una carpeta con ese nombre) no se toca. Los respaldos de otra instalación en
+// la misma carpeta, los manuales y cualquier otro archivo nunca se borran.
+func (runner *Runner) retain(run Run, keep int) {
+	ctx, cancel := context.WithTimeout(context.Background(), finishTimeout)
+	defer cancel()
+	rows, err := runner.Pool.Query(ctx, `SELECT id::text, file_name FROM app.backup_runs
+        WHERE kind = 'automatic' AND status = 'succeeded' AND removed_at IS NULL AND directory = $1 AND seq < $2
+        ORDER BY seq DESC`, run.Directory, run.Seq)
+	if err != nil {
+		runner.logWarning("backup_retention_unavailable", "reason", err.Error())
+		return
+	}
+	older := []retentionRow{}
+	for rows.Next() {
+		var row retentionRow
+		if err := rows.Scan(&row.ID, &row.FileName); err != nil {
+			rows.Close()
+			runner.logWarning("backup_retention_unavailable", "reason", err.Error())
+			return
+		}
+		older = append(older, row)
+	}
+	rows.Close()
+	removed := []string{}
+	for _, row := range toRemove(older, keep) {
+		gone, err := removeRegular(run.Directory, row.FileName)
+		if err != nil {
+			runner.logWarning("backup_retention_skipped", "directory", run.Directory, "file", row.FileName, "reason", err.Error())
+		}
+		if gone {
+			removed = append(removed, row.ID)
+		}
 	}
 	if len(removed) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), finishTimeout)
-	defer cancel()
-	_, err = runner.Pool.Exec(ctx, `UPDATE app.backup_runs SET removed_at = $3
-        WHERE status = 'succeeded' AND removed_at IS NULL AND directory = $1 AND file_name = ANY($2)`,
-		run.Directory, removed, runner.now())
+	_, err = runner.Pool.Exec(ctx, `UPDATE app.backup_runs SET removed_at = $2 WHERE id = ANY($1::uuid[])`, removed, runner.now())
 	if err != nil {
 		runner.logWarning("backup_retention_not_recorded", "reason", err.Error())
 	}

@@ -1,6 +1,7 @@
 package standalone
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/config"
+	"local/ad-el-pos/server/internal/fileacl"
 	"local/ad-el-pos/server/internal/maintenance"
 )
 
@@ -58,19 +60,38 @@ func Backup(ctx context.Context, layout Layout, database config.Database, label 
 	return filename, nil
 }
 
-// DumpFile crea el respaldo pg_dump (formato custom) de la base de la instalación en filename y lo deja privado
-// (0600 en macOS, ACL en Windows). Lo usan Backup y los respaldos programados (etapa 9G, fase F), que eligen la
+// DumpFile crea el respaldo pg_dump (formato custom) de la base de la instalación en filename. Lo usan Backup (manual,
+// antes de migrar y el respaldo de seguridad de restore) y los respaldos programados (etapa 9G, fase F), que eligen la
 // carpeta (la predeterminada, otro disco o una USB). Si algo falla, no deja el archivo.
 func DumpFile(ctx context.Context, layout Layout, database config.Database, filename string) error {
 	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
-	if output, err := runCaptured(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl", "--file", filename}, environment); err != nil {
-		_ = os.Remove(filename)
-		return fmt.Errorf("no se pudo crear el respaldo: %s", tail(output))
+	return dumpToFile(ctx, layout, environment, filename)
+}
+
+// dumpToFile ejecuta pg_dump con la salida en un archivo nuevo y privado desde el primer byte (revisión de la fase F):
+// se crea antes con fileacl.CreatePrivate (0600 sin importar la máscara del proceso, sin seguir enlaces ni reemplazar
+// un archivo existente; en Windows con la ACL privada antes de escribir) y pg_dump escribe en su salida estándar. Con
+// --file, pg_dump lo creaba con la máscara del proceso (0644 desde una consola), seguía enlaces y truncaba lo que
+// hubiera, y solo al final se dejaba privado. Si pg_dump falla o el archivo queda vacío, lo borra.
+func dumpToFile(ctx context.Context, layout Layout, environment []string, filename string) error {
+	output, err := fileacl.CreatePrivate(filename)
+	if err != nil {
+		return errors.New("no se pudo crear el archivo de respaldo")
 	}
-	// pg_dump crea el archivo con la máscara del proceso: se deja privado (0600 en macOS, ACL en Windows).
-	if err := privateFile(filename); err != nil {
+	dump := command(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl"}, environment)
+	dump.Stdout = output
+	var dumpErrors bytes.Buffer
+	dump.Stderr = &dumpErrors
+	runError := dump.Run()
+	closeError := output.Close()
+	if runError != nil || closeError != nil {
 		_ = os.Remove(filename)
-		return err
+		return fmt.Errorf("no se pudo crear el respaldo: %s", tail(dumpErrors.Bytes()))
+	}
+	info, err := os.Lstat(filename)
+	if err != nil || info.Size() == 0 {
+		_ = os.Remove(filename)
+		return errors.New("el respaldo quedó vacío; se descartó")
 	}
 	return nil
 }

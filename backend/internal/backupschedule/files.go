@@ -6,17 +6,20 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 	"unicode"
 )
 
-// Nombres de los archivos que crean los respaldos programados: <base>-<AAAAMMDDTHHMMSSZ>-<6 hex>-<etiqueta>.dump, el
-// mismo formato de los demás respaldos con una etiqueta propia. Mientras se crea y se verifica, el archivo lleva además
-// la terminación .partial: un respaldo a medias nunca tiene el nombre definitivo, así que la retención nunca lo cuenta.
+// Nombres de los archivos que crean los respaldos programados: <base>-<instalación>-<AAAAMMDDTHHMMSSZ>-<6 hex>-
+// <etiqueta>.dump. <instalación> son 8 caracteres hexadecimales del identificador de esta instalación (el server_id de
+// su identidad o, sin ella, el installation_id de backup_settings): en una carpeta compartida (una USB o una carpeta de
+// red que usan la Mac y la PC, o dos sucursales) cada quien reconoce los suyos a simple vista. Mientras se crea y se
+// verifica, el archivo lleva además la terminación .partial: un respaldo a medias nunca tiene el nombre definitivo.
+//
+// Qué archivos son «propios» no se decide por el nombre: la retención y la limpieza de restos solo tocan los archivos
+// registrados en app.backup_runs por esta instalación (runner.go).
 const (
 	automaticLabel = "automatico"
 	manualLabel    = "manual"
@@ -37,88 +40,65 @@ const (
 	// Solo al elegirla.
 	ReasonRelative     = "relative"
 	ReasonPostgresData = "postgres_data"
+	ReasonServerData   = "server_data"
 	ReasonInvalid      = "invalid"
 )
 
 // maxDirectoryLength es el largo máximo de la ruta de la carpeta (la misma restricción de backup_settings).
 const maxDirectoryLength = 1024
 
-// FileName arma el nombre de un respaldo programado de la base database.
-func FileName(database, kind string, instant time.Time, suffix string) string {
+// installationTagLength es cuántos caracteres del identificador de la instalación lleva el nombre.
+const installationTagLength = 8
+
+// InstallationTag convierte el identificador de la instalación (un UUID) en los 8 caracteres hexadecimales del nombre.
+// Un identificador sin suficientes caracteres hexadecimales da "" (el nombre no puede llevar otra cosa).
+func InstallationTag(identifier string) string {
+	tag := make([]byte, 0, installationTagLength)
+	for _, character := range strings.ToLower(identifier) {
+		if character == '-' {
+			continue
+		}
+		if !strings.ContainsRune("0123456789abcdef", character) {
+			return ""
+		}
+		tag = append(tag, byte(character))
+		if len(tag) == installationTagLength {
+			return string(tag)
+		}
+	}
+	return ""
+}
+
+// FileName arma el nombre de un respaldo programado de la base database hecho por la instalación tag.
+func FileName(database, tag, kind string, instant time.Time, suffix string) string {
 	label := automaticLabel
 	if kind == KindManual {
 		label = manualLabel
 	}
-	return fmt.Sprintf("%s-%s-%s-%s.dump", database, instant.UTC().Format("20060102T150405Z"), suffix, label)
+	return fmt.Sprintf("%s-%s-%s-%s-%s.dump", database, tag, instant.UTC().Format("20060102T150405Z"), suffix, label)
 }
 
-// automaticPattern reconoce exactamente los respaldos automáticos de la base: los únicos que borra la retención.
-func automaticPattern(database string) *regexp.Regexp {
-	return regexp.MustCompile(`^` + regexp.QuoteMeta(database) + `-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}-` + automaticLabel + `\.dump$`)
-}
-
-// partialPattern reconoce un respaldo programado que quedó a medias (el servidor se detuvo mientras respaldaba).
-func partialPattern(database string) *regexp.Regexp {
-	return regexp.MustCompile(`^` + regexp.QuoteMeta(database) + `-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}-(` + automaticLabel + `|` +
-		manualLabel + `)\.dump\.partial$`)
-}
-
-// regularFiles devuelve los archivos regulares de la carpeta cuyo nombre cumple el patrón, en orden de nombre (que es
-// el orden en que se crearon: la fecha va en el nombre, en UTC). Los enlaces y las carpetas nunca cuentan.
-func regularFiles(directory string, pattern *regexp.Regexp) ([]string, error) {
-	entries, err := os.ReadDir(directory)
+// removeRegular borra directory/name solo si es un archivo regular (nunca sigue un enlace ni borra una carpeta).
+// Devuelve true si el archivo ya no está (borrado o inexistente).
+func removeRegular(directory, name string) (bool, error) {
+	if name == "" || strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return false, errors.New("nombre de archivo no válido")
+	}
+	path := filepath.Join(directory, name)
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	names := []string{}
-	for _, entry := range entries {
-		if entry.Type().IsRegular() && pattern.MatchString(entry.Name()) {
-			names = append(names, entry.Name())
-		}
+	if !info.Mode().IsRegular() {
+		return false, errors.New("no es un archivo regular; no se borra")
 	}
-	sort.Strings(names)
-	return names, nil
-}
-
-// Retain borra los respaldos automáticos más viejos de la carpeta y conserva los keep más recientes. Solo toca
-// archivos regulares cuyo nombre es exactamente el de un respaldo automático de esta base: nunca los de «Respaldar
-// ahora», los de la línea de comandos, los de antes de migrar ni otros archivos. Devuelve los nombres que borró; si
-// uno no se pudo borrar, sigue con los demás y devuelve el primer error.
-func Retain(directory, database string, keep int) ([]string, error) {
-	if keep < 1 {
-		return nil, errors.New("hay que conservar al menos un respaldo")
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
 	}
-	names, err := regularFiles(directory, automaticPattern(database))
-	if err != nil {
-		return nil, err
-	}
-	if len(names) <= keep {
-		return nil, nil
-	}
-	removed := []string{}
-	var first error
-	for _, name := range names[:len(names)-keep] {
-		if err := os.Remove(filepath.Join(directory, name)); err != nil {
-			if first == nil {
-				first = err
-			}
-			continue
-		}
-		removed = append(removed, name)
-	}
-	return removed, first
-}
-
-// CleanPartials borra los respaldos programados que quedaron a medias en la carpeta. Solo se llama con el lock de los
-// respaldos tomado: entonces ningún respaldo está en curso y un .partial con el formato propio es un resto.
-func CleanPartials(directory, database string) {
-	names, err := regularFiles(directory, partialPattern(database))
-	if err != nil {
-		return
-	}
-	for _, name := range names {
-		_ = os.Remove(filepath.Join(directory, name))
-	}
+	return true, nil
 }
 
 // CheckDirectory comprueba que el servidor pueda guardar respaldos en la carpeta: que exista (un disco o una USB
@@ -176,9 +156,11 @@ func (problem *DirectoryError) Error() string {
 }
 
 // ValidateDirectory valida la carpeta que llega del diálogo nativo de la computadora principal: ruta absoluta sin
-// caracteres de control, existente, carpeta, con permiso de escritura para el servidor y que no sea la carpeta de
-// datos de PostgreSQL. Devuelve la ruta limpia.
-func ValidateDirectory(directory string) (string, error) {
+// caracteres de control, existente, carpeta y con permiso de escritura para el servidor. Se resuelven los enlaces y se
+// devuelve la ruta real (la que se guarda), que no puede estar dentro de una carpeta de datos de PostgreSQL (ella o
+// alguna superior tiene PG_VERSION: base, pg_wal…) ni dentro de las carpetas protegidas del servidor (la carpeta de
+// datos del servicio con su identidad y bitácoras, o la de la configuración con serve).
+func ValidateDirectory(directory string, protected []string) (string, error) {
 	if directory == "" || len(directory) > maxDirectoryLength {
 		return "", &DirectoryError{Reason: ReasonInvalid}
 	}
@@ -190,15 +172,67 @@ func ValidateDirectory(directory string) (string, error) {
 	if !filepath.IsAbs(directory) {
 		return "", &DirectoryError{Reason: ReasonRelative}
 	}
-	clean := filepath.Clean(directory)
-	if reason := CheckDirectory(clean); reason != "" {
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(directory))
+	if err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return "", &DirectoryError{Reason: ReasonNotWritable}
+		}
+		return "", &DirectoryError{Reason: ReasonMissing}
+	}
+	if len(resolved) > maxDirectoryLength {
+		return "", &DirectoryError{Reason: ReasonInvalid}
+	}
+	if reason := CheckDirectory(resolved); reason != "" {
 		return "", &DirectoryError{Reason: reason}
 	}
-	// La carpeta de datos de PostgreSQL (tiene PG_VERSION) no es lugar para respaldos.
-	if _, err := os.Stat(filepath.Join(clean, "PG_VERSION")); err == nil {
+	if insidePostgresData(resolved) {
 		return "", &DirectoryError{Reason: ReasonPostgresData}
 	}
-	return clean, nil
+	for _, folder := range protected {
+		if folder == "" {
+			continue
+		}
+		real := filepath.Clean(folder)
+		if evaluated, err := filepath.EvalSymlinks(real); err == nil {
+			real = evaluated
+		}
+		if Inside(resolved, real) {
+			return "", &DirectoryError{Reason: ReasonServerData}
+		}
+	}
+	return resolved, nil
+}
+
+// insidePostgresData indica si la carpeta o alguna superior es una carpeta de datos de PostgreSQL (tiene PG_VERSION).
+func insidePostgresData(directory string) bool {
+	current := directory
+	for {
+		if info, err := os.Stat(filepath.Join(current, "PG_VERSION")); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false
+		}
+		current = parent
+	}
+}
+
+// Inside indica si path es folder o está dentro de él (rutas limpias; sin distinguir mayúsculas en macOS y Windows,
+// cuyos sistemas de archivos habituales no las distinguen).
+func Inside(path, folder string) bool {
+	path = filepath.Clean(path)
+	folder = filepath.Clean(folder)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		path = strings.ToLower(path)
+		folder = strings.ToLower(folder)
+	}
+	relative, err := filepath.Rel(folder, path)
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) &&
+		!filepath.IsAbs(relative))
 }
 
 // Describe da el nombre visible de una carpeta: su último componente y, si está en otro disco (en macOS, bajo

@@ -63,6 +63,13 @@ func (worker *Worker) Run(ctx context.Context) {
 // Tick revisa una vez si toca el respaldo automático y, si toca, lo hace.
 func (worker *Worker) Tick(ctx context.Context) {
 	runner := worker.Runner
+	// Una fila «en curso» sin un respaldo vivo (el servidor se detuvo o no pudo registrar el resultado) se cierra como
+	// interrumpida en cuanto el lock está libre: así no deja la programación ni la pantalla detenidas.
+	if running, err := anyRunning(ctx, runner.Pool); err == nil && running {
+		if err := runner.RecoverInterrupted(ctx); err != nil && ctx.Err() == nil {
+			runner.logWarning("backup_recovery_unavailable", "reason", err.Error())
+		}
+	}
 	plan, err := runner.Plan(ctx, runner.Pool)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -125,7 +132,7 @@ func (runner *Runner) Plan(ctx context.Context, querier Querier) (Plan, error) {
 	if !configured || !settings.Enabled {
 		return plan, nil
 	}
-	history, err := slotHistory(ctx, querier, plan.Slot)
+	history, err := slotHistory(ctx, querier, plan.Slot, now)
 	if err != nil {
 		return Plan{}, err
 	}

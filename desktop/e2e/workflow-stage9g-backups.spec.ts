@@ -27,7 +27,10 @@ import { openAdministration, topBar } from './navigation';
 const serverDirectory = dirname(process.env.ADEL_BROWSER_PROVISIONING!);
 const defaultFolder = join(serverDirectory, 'backups');
 const asideFolder = join(serverDirectory, 'backups-apartada');
-const chosenFolder = join(serverDirectory, 'usb-respaldos', 'Respaldos');
+// La carpeta elegida está fuera de la carpeta del servidor temporal (su configuración, que el servidor protege: la
+// revisión de la fase F rechaza elegir una carpeta dentro de los datos del servidor).
+const usbFolder = `${serverDirectory}-usb`;
+const chosenFolder = join(usbFolder, 'Respaldos');
 
 function backupsSection(page: Page) {
   return page.getByRole('region', { name: 'Respaldos' });
@@ -85,7 +88,7 @@ function restoreDefaultFolder() {
 
 test.afterAll(() => {
   restoreDefaultFolder();
-  rmSync(join(serverDirectory, 'usb-respaldos'), { recursive: true, force: true });
+  rmSync(usbFolder, { recursive: true, force: true });
 });
 
 test('respaldos: configuración, carpeta, «Respaldar ahora» y aviso de fallo en la pantalla de inicio (etapa 9G, fase F)', async ({
@@ -138,6 +141,10 @@ test('respaldos: configuración, carpeta, «Respaldar ahora» y aviso de fallo e
   driver.nextBackupFolder(join(serverDirectory, 'no-existe'));
   await section.getByRole('button', { name: 'Elegir carpeta', exact: true }).click();
   await closeNotice(page, /No se encontró esa carpeta/);
+  // Tampoco una carpeta dentro de los datos del servidor.
+  driver.nextBackupFolder(serverDirectory);
+  await section.getByRole('button', { name: 'Elegir carpeta', exact: true }).click();
+  await closeNotice(page, /Esa carpeta guarda los datos del servidor/);
   await expect(section).toContainText('Se guardan en la carpeta «Respaldos».');
 
   // 3. «Respaldar ahora» con el respaldo real: queda en la carpeta elegida, revisado y en la lista.
@@ -150,7 +157,7 @@ test('respaldos: configuración, carpeta, «Respaldar ahora» y aviso de fallo e
 
   // 4. La carpeta elegida desaparece (se desconectó la USB): el respaldo queda en la predeterminada y se avisa en
   //    Mantenimiento y en la pantalla de inicio.
-  rmSync(join(serverDirectory, 'usb-respaldos'), { recursive: true, force: true });
+  rmSync(usbFolder, { recursive: true, force: true });
   latest = await backupNow(page);
   await expect(latest).toContainText('Correcto y revisado');
   await expect(latest).toContainText('En la carpeta predeterminada');

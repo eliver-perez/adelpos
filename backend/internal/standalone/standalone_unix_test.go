@@ -3,11 +3,13 @@
 package standalone
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"local/ad-el-pos/server/internal/config"
@@ -279,5 +281,63 @@ func TestFreePortSkipsBusyPorts(t *testing.T) {
 	port, err := freePort(55514)
 	if err != nil || port <= 55514 || port > 55554 {
 		t.Fatalf("puerto temporal inesperado: %d %v", port, err)
+	}
+}
+
+// Revisión de la fase F (hallazgo 2): el respaldo de la instalación (manual, antes de migrar, el de seguridad de
+// restore, adopt-legacy y los programados) nace privado: 0600 desde el primer byte que escribe pg_dump aunque la máscara
+// de la consola sea 022, sin seguir un enlace ni reemplazar un archivo existente.
+func TestDumpFileIsPrivateFromTheFirstByte(t *testing.T) {
+	bin := t.TempDir()
+	observed := filepath.Join(t.TempDir(), "permisos")
+	// pg_dump simulado: anota los permisos del archivo del respaldo (que ya existe: es su salida estándar) antes de
+	// escribir el primer byte.
+	script := "#!/bin/sh\nls -l \"$FAKE_TARGET\" | cut -c1-10 > \"$FAKE_OBSERVED\"\nprintf 'PGDMP-respaldo'\n"
+	if err := os.WriteFile(filepath.Join(bin, "pg_dump"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_OBSERVED", observed)
+	previous := syscall.Umask(0o022)
+	defer syscall.Umask(previous)
+	layout := Layout{DataDir: t.TempDir(), PGBin: bin, Port: ClusterPort}
+	database := config.Database{Name: "adel_pos", User: "adel_app", Password: "secreto"}
+	directory := t.TempDir()
+	filename := filepath.Join(directory, "adel_pos-respaldo.dump")
+	t.Setenv("FAKE_TARGET", filename)
+	if err := DumpFile(context.Background(), layout, database, filename); err != nil {
+		t.Fatal(err)
+	}
+	mode, err := os.ReadFile(observed)
+	if err != nil || strings.TrimSpace(string(mode)) != "-rw-------" {
+		t.Fatalf("permisos mientras pg_dump escribía: %q %v", mode, err)
+	}
+	info, err := os.Stat(filename)
+	if err != nil || info.Mode().Perm() != 0600 {
+		t.Fatalf("permisos del respaldo: %v %v", info.Mode().Perm(), err)
+	}
+	// Un archivo existente no se reemplaza ni se trunca.
+	if err := DumpFile(context.Background(), layout, database, filename); err == nil {
+		t.Fatal("se reemplazó un respaldo existente")
+	}
+	if content, _ := os.ReadFile(filename); string(content) != "PGDMP-respaldo" {
+		t.Fatal("se modificó el respaldo existente")
+	}
+	// Un enlace con el nombre del respaldo no se sigue: el archivo al que apunta queda intacto.
+	victim := filepath.Join(t.TempDir(), "server.json")
+	if err := os.WriteFile(victim, []byte("intacto"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, "enlace.dump")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := DumpFile(context.Background(), layout, database, link); err == nil {
+		t.Fatal("se siguió un enlace")
+	}
+	if content, _ := os.ReadFile(victim); string(content) != "intacto" {
+		t.Fatal("se escribió en el archivo al que apuntaba el enlace")
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatal("se borró el enlace ajeno")
 	}
 }

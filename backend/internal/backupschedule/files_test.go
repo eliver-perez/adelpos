@@ -1,7 +1,6 @@
 package backupschedule
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -30,96 +29,97 @@ func names(t *testing.T, directory string) []string {
 	return result
 }
 
-func TestFileNames(t *testing.T) {
-	instant := time.Date(2026, 11, 14, 11, 0, 5, 0, time.UTC)
-	if name := FileName("adel_pos", KindAutomatic, instant, "a1b2c3"); name != "adel_pos-20261114T110005Z-a1b2c3-automatico.dump" {
-		t.Fatalf("automático: %s", name)
-	}
-	if name := FileName("adel_pos", KindManual, instant, "a1b2c3"); name != "adel_pos-20261114T110005Z-a1b2c3-manual.dump" {
-		t.Fatalf("manual: %s", name)
-	}
-	if !automaticPattern("adel_pos").MatchString(FileName("adel_pos", KindAutomatic, instant, "a1b2c3")) {
-		t.Fatal("el patrón no reconoce el nombre automático")
-	}
-}
-
-// La retención conserva los N automáticos más recientes y solo borra archivos regulares con el nombre exacto de un
-// respaldo automático de esta base: nunca manuales, de la línea de comandos, de antes de migrar, de otra base, a
-// medias, enlaces, carpetas ni otros archivos.
-func TestRetainOnlyRemovesOwnAutomaticFiles(t *testing.T) {
-	directory := t.TempDir()
-	automatic := []string{
-		"adel_pos-20261110T110000Z-aaaaaa-automatico.dump",
-		"adel_pos-20261111T110000Z-bbbbbb-automatico.dump",
-		"adel_pos-20261112T110000Z-cccccc-automatico.dump",
-		"adel_pos-20261113T110000Z-dddddd-automatico.dump",
-		"adel_pos-20261114T110000Z-eeeeee-automatico.dump",
-	}
-	others := []string{
-		"adel_pos-20261101T110000Z-ffffff-manual.dump",
-		"adel_pos-20261101T110000Z-ffffff.dump",
-		"adel_pos-20261101T110000Z-ffffff-antes-de-migrar.dump",
-		"adel_pos-20261101T110000Z-ffffff-antes-de-quitar-datos-de-prueba.dump",
-		"otra_base-20261101T110000Z-ffffff-automatico.dump",
-		"adel_pos_test-20261101T110000Z-ffffff-automatico.dump",
-		"adel_pos-20261101T110000Z-ffffff-automatico.dump.partial",
-		"adel_pos-20261101T110000Z-FFFFFF-automatico.dump",
-		"adel_pos-20261101T110000Z-ffffff-automatico.dump.bak",
-		"copia adel_pos-20261101T110000Z-ffffff-automatico.dump",
-		"notas.txt",
-	}
-	for _, name := range append(slices.Clone(automatic), others...) {
-		touch(t, directory, name)
-	}
-	// Una carpeta y un enlace con el nombre de un respaldo automático viejo tampoco se tocan.
-	if err := os.Mkdir(filepath.Join(directory, "adel_pos-20261001T110000Z-111111-automatico.dump"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if runtime.GOOS != "windows" {
-		target := filepath.Join(t.TempDir(), "fuera.dump")
-		touch(t, filepath.Dir(target), filepath.Base(target))
-		if err := os.Symlink(target, filepath.Join(directory, "adel_pos-20261002T110000Z-222222-automatico.dump")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	removed, err := Retain(directory, "adel_pos", 3)
+// realPath es la ruta sin enlaces (en macOS la carpeta temporal puede estar detrás de uno).
+func realPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(removed, automatic[:2]) {
-		t.Fatalf("borrados: %v", removed)
+	return resolved
+}
+
+// El nombre lleva la base, la instalación (8 caracteres hexadecimales de su identificador), la fecha UTC, el sufijo y
+// la etiqueta.
+func TestFileNames(t *testing.T) {
+	instant := time.Date(2026, 11, 14, 11, 0, 5, 0, time.UTC)
+	if name := FileName("adel_pos", "3f2a9c1b", KindAutomatic, instant, "a1b2c3"); name != "adel_pos-3f2a9c1b-20261114T110005Z-a1b2c3-automatico.dump" {
+		t.Fatalf("automático: %s", name)
 	}
-	left := names(t, directory)
-	for _, name := range append(slices.Clone(automatic[2:]), others...) {
-		if !slices.Contains(left, name) {
-			t.Fatalf("se borró %s", name)
+	if name := FileName("adel_pos", "3f2a9c1b", KindManual, instant, "a1b2c3"); name != "adel_pos-3f2a9c1b-20261114T110005Z-a1b2c3-manual.dump" {
+		t.Fatalf("manual: %s", name)
+	}
+	if tag := InstallationTag("3F2A9C1B-0d4e-4f5a-8b6c-7d8e9f0a1b2c"); tag != "3f2a9c1b" {
+		t.Fatalf("identificador de la instalación: %q", tag)
+	}
+	for _, invalid := range []string{"", "3f2a", "3f2a9c1g-0000", "../../etc"} {
+		if tag := InstallationTag(invalid); tag != "" {
+			t.Fatalf("identificador aceptado: %q → %q", invalid, tag)
 		}
-	}
-	for _, name := range automatic[:2] {
-		if slices.Contains(left, name) {
-			t.Fatalf("no se borró %s", name)
-		}
-	}
-	// Con menos archivos que el límite no se borra nada.
-	again, err := Retain(directory, "adel_pos", 30)
-	if err != nil || len(again) != 0 {
-		t.Fatalf("retención con límite mayor: %v %v", again, err)
-	}
-	if _, err := Retain(directory, "adel_pos", 0); err == nil {
-		t.Fatal("se aceptó conservar cero respaldos")
 	}
 }
 
-func TestCleanPartialsOnlyRemovesOwnLeftovers(t *testing.T) {
+// La retención elige, de los anteriores de la misma carpeta (del más reciente al más viejo según el registro), los que
+// sobran contando el recién hecho como uno de los conservados.
+func TestToRemove(t *testing.T) {
+	older := []retentionRow{{ID: "4"}, {ID: "3"}, {ID: "2"}, {ID: "1"}}
+	ids := func(rows []retentionRow) []string {
+		result := []string{}
+		for _, row := range rows {
+			result = append(result, row.ID)
+		}
+		return result
+	}
+	if got := ids(toRemove(older, 3)); !slices.Equal(got, []string{"2", "1"}) {
+		t.Fatalf("conservar 3: %v", got)
+	}
+	if got := ids(toRemove(older, 1)); !slices.Equal(got, []string{"4", "3", "2", "1"}) {
+		t.Fatalf("conservar 1: %v", got)
+	}
+	if got := toRemove(older, 30); len(got) != 0 {
+		t.Fatalf("conservar 30: %v", got)
+	}
+	if got := toRemove(nil, 2); len(got) != 0 {
+		t.Fatal("sin anteriores")
+	}
+}
+
+// removeRegular solo borra archivos regulares: nunca sigue un enlace ni borra una carpeta; un archivo que ya no está
+// cuenta como borrado.
+func TestRemoveRegular(t *testing.T) {
 	directory := t.TempDir()
-	touch(t, directory, "adel_pos-20261114T110000Z-aaaaaa-automatico.dump.partial")
-	touch(t, directory, "adel_pos-20261114T110000Z-bbbbbb-manual.dump.partial")
-	touch(t, directory, "adel_pos-20261114T110000Z-cccccc-automatico.dump")
-	touch(t, directory, "otro.dump.partial")
-	CleanPartials(directory, "adel_pos")
-	left := names(t, directory)
-	if !slices.Equal(left, []string{"adel_pos-20261114T110000Z-cccccc-automatico.dump", "otro.dump.partial"}) {
-		t.Fatalf("quedaron: %v", left)
+	touch(t, directory, "propio.dump")
+	if gone, err := removeRegular(directory, "propio.dump"); !gone || err != nil {
+		t.Fatalf("archivo propio: %v %v", gone, err)
+	}
+	if gone, err := removeRegular(directory, "propio.dump"); !gone || err != nil {
+		t.Fatalf("archivo que ya no está: %v %v", gone, err)
+	}
+	victim := filepath.Join(t.TempDir(), "ajeno.dump")
+	if err := os.WriteFile(victim, []byte("ajeno"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(victim, filepath.Join(directory, "enlace.dump")); err != nil {
+			t.Fatal(err)
+		}
+		if gone, err := removeRegular(directory, "enlace.dump"); gone || err == nil {
+			t.Fatal("se borró un enlace")
+		}
+		if _, err := os.Stat(victim); err != nil {
+			t.Fatal("se borró el destino del enlace")
+		}
+	}
+	if err := os.Mkdir(filepath.Join(directory, "carpeta.dump"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if gone, err := removeRegular(directory, "carpeta.dump"); gone || err == nil {
+		t.Fatal("se borró una carpeta")
+	}
+	for _, invalid := range []string{"", ".", "..", "../ajeno.dump", "a/b.dump"} {
+		if gone, err := removeRegular(directory, invalid); gone || err == nil {
+			t.Fatalf("nombre aceptado: %q", invalid)
+		}
 	}
 }
 
@@ -156,31 +156,86 @@ func TestCheckDirectory(t *testing.T) {
 	}
 }
 
+// La carpeta elegida se guarda resuelta (sin enlaces) y no puede estar dentro de una carpeta de datos de PostgreSQL ni
+// de las carpetas protegidas del servidor, ni llegar a ellas por un enlace.
 func TestValidateDirectory(t *testing.T) {
-	directory := t.TempDir()
-	clean, err := ValidateDirectory(directory + string(filepath.Separator) + ".")
-	if err != nil || clean != directory {
-		t.Fatalf("carpeta válida: %q %v", clean, err)
-	}
-	postgres := filepath.Join(directory, "postgres")
-	if err := os.Mkdir(postgres, 0700); err != nil {
+	root := realPath(t, t.TempDir())
+	usb := filepath.Join(root, "usb", "Respaldos")
+	if err := os.MkdirAll(usb, 0700); err != nil {
 		t.Fatal(err)
 	}
+	server := filepath.Join(root, "AD-EL POS")
+	postgres := filepath.Join(server, "postgres")
+	for _, folder := range []string{filepath.Join(server, "identity"), filepath.Join(server, "logs"), filepath.Join(postgres, "pg_wal")} {
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	touch(t, postgres, "PG_VERSION")
+	external := filepath.Join(root, "otro-cluster", "base")
+	if err := os.MkdirAll(external, 0700); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, filepath.Dir(external), "PG_VERSION")
+	protected := []string{server}
+	clean, err := ValidateDirectory(usb+string(filepath.Separator)+".", protected)
+	if err != nil || clean != usb {
+		t.Fatalf("carpeta válida: %q %v", clean, err)
+	}
 	cases := map[string]string{
-		"":                                    ReasonInvalid,
-		"respaldos":                           ReasonRelative,
-		"./respaldos":                         ReasonRelative,
-		filepath.Join(directory, "no-existe"): ReasonMissing,
-		directory + "/linea\nnueva":           ReasonInvalid,
-		postgres:                              ReasonPostgresData,
+		"":                                ReasonInvalid,
+		"respaldos":                       ReasonRelative,
+		"./respaldos":                     ReasonRelative,
+		filepath.Join(root, "no-existe"):  ReasonMissing,
+		root + "/linea\nnueva":            ReasonInvalid,
+		postgres:                          ReasonPostgresData,
+		filepath.Join(postgres, "pg_wal"): ReasonPostgresData,
+		external:                          ReasonPostgresData,
+		server:                            ReasonServerData,
+		filepath.Join(server, "identity"): ReasonServerData,
+		filepath.Join(server, "logs"):     ReasonServerData,
 		string(make([]byte, maxDirectoryLength+1)): ReasonInvalid,
 	}
+	if runtime.GOOS != "windows" {
+		// Un enlace hacia los datos del servidor no los vuelve aceptables, y uno hacia la USB se guarda resuelto.
+		toServer := filepath.Join(root, "atajo-servidor")
+		if err := os.Symlink(filepath.Join(server, "logs"), toServer); err != nil {
+			t.Fatal(err)
+		}
+		cases[toServer] = ReasonServerData
+		toPostgres := filepath.Join(root, "atajo-base")
+		if err := os.Symlink(filepath.Join(postgres, "pg_wal"), toPostgres); err != nil {
+			t.Fatal(err)
+		}
+		cases[toPostgres] = ReasonPostgresData
+		toUSB := filepath.Join(root, "atajo-usb")
+		if err := os.Symlink(usb, toUSB); err != nil {
+			t.Fatal(err)
+		}
+		if resolved, err := ValidateDirectory(toUSB, protected); err != nil || resolved != usb {
+			t.Fatalf("enlace a la USB: %q %v", resolved, err)
+		}
+	}
 	for input, reason := range cases {
-		_, err := ValidateDirectory(input)
+		_, err := ValidateDirectory(input, protected)
 		problem, ok := err.(*DirectoryError)
 		if !ok || problem.Reason != reason {
 			t.Fatalf("%q: %v, esperado %s", input, err, reason)
+		}
+	}
+}
+
+func TestInside(t *testing.T) {
+	separator := string(filepath.Separator)
+	base := separator + filepath.Join("datos", "AD-EL POS")
+	for _, inside := range []string{base, filepath.Join(base, "logs"), filepath.Join(base, "postgres", "pg_wal")} {
+		if !Inside(inside, base) {
+			t.Fatalf("%s está dentro de %s", inside, base)
+		}
+	}
+	for _, outside := range []string{separator + "datos", base + " 2", filepath.Join(separator+"datos", "otra"), separator + filepath.Join("..datos")} {
+		if Inside(outside, base) {
+			t.Fatalf("%s no está dentro de %s", outside, base)
 		}
 	}
 }
@@ -242,81 +297,78 @@ func TestChooseDirectoryFallsBackToDefault(t *testing.T) {
 	}
 }
 
-// Fallo de verificación: el respaldo que no se puede leer no se conserva (ni con su nombre definitivo ni a medias) y
-// el resultado es «verify_failed»; un respaldo correcto queda verificado con su nombre definitivo.
-func TestProduceVerifiesBeforeKeepingTheFile(t *testing.T) {
-	root := t.TempDir()
-	target := newFakeTarget(filepath.Join(root, "respaldos"))
-	runner := &Runner{Target: target, Now: func() time.Time {
-		return time.Date(2026, 11, 14, 11, 0, 0, 0, time.UTC)
-	}}
-	result := runner.produce(context.Background(), Run{Kind: KindAutomatic}, Settings{Keep: 30})
-	if result.failure != "" || !result.verified || result.size == 0 {
-		t.Fatalf("respaldo correcto: %+v", result)
+// El aviso: un fallo avisa hasta un respaldo correcto posterior; activos y sin respaldo correcto en más de un día y
+// dos horas, «atrasado» (también si nunca hubo uno); un respaldo en la predeterminada porque la elegida no estaba avisa
+// mientras esa siga siendo la carpeta configurada.
+func TestAlertFor(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	started := now.Add(-time.Hour)
+	first := now.Add(-24 * time.Hour)
+	failed := &Run{Status: StatusFailed, FailureReason: FailureVerify, StartedAt: started}
+	base := alertInput{Now: now, Enabled: true, Configured: true, Expected: now.Add(-72 * time.Hour)}
+	recent := &Run{Status: StatusSucceeded, StartedAt: now.Add(-20 * time.Hour)}
+	old := &Run{Status: StatusSucceeded, StartedAt: now.Add(-27 * time.Hour)}
+
+	input := base
+	input.Last, input.LastSuccess, input.Failures, input.FirstFailure = failed, recent, 2, first
+	if alert := alertFor(input); alert == nil || alert.Kind != "failed" || alert.Reason != FailureVerify || alert.Failures != 2 ||
+		!alert.Since.Equal(first) {
+		t.Fatalf("fallo: %+v", alert)
 	}
-	if !automaticPattern(target.database).MatchString(result.fileName) {
-		t.Fatalf("nombre: %s", result.fileName)
+	input = base
+	input.Last, input.LastSuccess = recent, recent
+	if alert := alertFor(input); alert != nil {
+		t.Fatalf("respaldo correcto reciente: %+v", alert)
 	}
-	if left := names(t, target.directory); !slices.Equal(left, []string{result.fileName}) {
-		t.Fatalf("archivos: %v", left)
+	input.Last, input.LastSuccess = old, old
+	if alert := alertFor(input); alert == nil || alert.Kind != "overdue" || alert.Reason != "stale" || !alert.Since.Equal(old.StartedAt) {
+		t.Fatalf("atrasado: %+v", alert)
 	}
-	if !slices.Contains(target.verified, result.fileName+partialSuffix) {
-		t.Fatalf("se verificó antes de darle su nombre definitivo: %v", target.verified)
+	// Recién activados (o recién configurado el establecimiento): se mide desde entonces.
+	input.Expected = now.Add(-2 * time.Hour)
+	if alert := alertFor(input); alert != nil {
+		t.Fatalf("recién activados: %+v", alert)
 	}
-	target.set(func(target *fakeTarget) {
-		target.failVerify = true
-	})
-	failed := runner.produce(context.Background(), Run{Kind: KindManual}, Settings{Keep: 30})
-	if failed.failure != FailureVerify || failed.verified || failed.fileName != "" {
-		t.Fatalf("verificación fallida: %+v", failed)
+	input = base
+	if alert := alertFor(input); alert == nil || alert.Kind != "overdue" || alert.Reason != "never" {
+		t.Fatalf("nunca hubo un respaldo: %+v", alert)
 	}
-	if left := names(t, target.directory); !slices.Equal(left, []string{result.fileName}) {
-		t.Fatalf("quedó el respaldo que no se pudo verificar: %v", left)
+	input.Enabled = false
+	if alert := alertFor(input); alert != nil {
+		t.Fatalf("desactivados no avisan atraso: %+v", alert)
 	}
-	target.set(func(target *fakeTarget) {
-		target.failVerify = false
-		target.failDump = true
-	})
-	if dump := runner.produce(context.Background(), Run{Kind: KindManual}, Settings{Keep: 30}); dump.failure != FailureDump {
-		t.Fatalf("pg_dump fallido: %+v", dump)
+	input = base
+	input.Configured = false
+	if alert := alertFor(input); alert != nil {
+		t.Fatalf("sin establecimiento: %+v", alert)
 	}
-	// Interrumpido: el contexto del trabajador se canceló (el servidor se apaga).
-	target.set(func(target *fakeTarget) {
-		target.failDump = false
-		target.block = make(chan struct{})
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if interrupted := runner.produce(ctx, Run{Kind: KindAutomatic}, Settings{Keep: 30}); interrupted.failure != FailureInterrupted {
-		t.Fatalf("interrumpido: %+v", interrupted)
+	fallback := &Run{Status: StatusSucceeded, StartedAt: started, UsedDefault: true, FallbackReason: ReasonMissing,
+		RequestedDirectory: "/Volumes/USB/Respaldos"}
+	input = base
+	input.Last, input.LastSuccess, input.ConfiguredDirectory = fallback, fallback, "/Volumes/USB/Respaldos"
+	if alert := alertFor(input); alert == nil || alert.Kind != "fallback" {
+		t.Fatalf("predeterminada por falta de la elegida: %+v", alert)
 	}
-	if left := names(t, target.directory); len(left) != 1 {
-		t.Fatalf("quedaron restos: %v", left)
+	input.ConfiguredDirectory = ""
+	if alert := alertFor(input); alert != nil {
+		t.Fatalf("se volvió a la predeterminada: %+v", alert)
+	}
+	input.ConfiguredDirectory = "/Volumes/OTRA"
+	if alert := alertFor(input); alert != nil {
+		t.Fatalf("se eligió otra carpeta: %+v", alert)
 	}
 }
 
-// El aviso: un fallo avisa hasta que haya un respaldo correcto posterior; un respaldo en la predeterminada porque la
-// elegida no estaba avisa mientras esa siga siendo la carpeta configurada.
-func TestAlertFor(t *testing.T) {
-	started := time.Date(2026, 11, 14, 11, 0, 0, 0, time.UTC)
-	first := started.Add(-24 * time.Hour)
-	failed := Run{Status: StatusFailed, FailureReason: FailureVerify, StartedAt: started}
-	alert := alertFor(failed, 2, first, "")
-	if alert == nil || alert.Kind != "failed" || alert.Reason != FailureVerify || alert.Failures != 2 || !alert.Since.Equal(first) {
-		t.Fatalf("fallo: %+v", alert)
+// latestPast descarta los instantes «del futuro» (un reloj que estuvo adelantado).
+func TestLatestPast(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	if got := latestPast(now, now.Add(-2*time.Hour), now.Add(5*24*time.Hour), time.Time{}); !got.Equal(now.Add(-2 * time.Hour)) {
+		t.Fatalf("instante del futuro: %v", got)
 	}
-	fallback := Run{Status: StatusSucceeded, StartedAt: started, UsedDefault: true, FallbackReason: ReasonMissing,
-		RequestedDirectory: "/Volumes/USB/Respaldos"}
-	if alert := alertFor(fallback, 0, time.Time{}, "/Volumes/USB/Respaldos"); alert == nil || alert.Kind != "fallback" {
-		t.Fatalf("predeterminada por falta de la elegida: %+v", alert)
+	if got := latestPast(now, now.Add(time.Minute)); !got.Equal(now.Add(time.Minute)) {
+		t.Fatal("dentro de la tolerancia del reloj")
 	}
-	if alert := alertFor(fallback, 0, time.Time{}, ""); alert != nil {
-		t.Fatalf("se volvió a la predeterminada: %+v", alert)
-	}
-	if alert := alertFor(fallback, 0, time.Time{}, "/Volumes/OTRA"); alert != nil {
-		t.Fatalf("se eligió otra carpeta: %+v", alert)
-	}
-	if alert := alertFor(Run{Status: StatusSucceeded, StartedAt: started}, 0, time.Time{}, ""); alert != nil {
-		t.Fatalf("respaldo correcto: %+v", alert)
+	if got := latestPast(now); !got.IsZero() {
+		t.Fatal("sin instantes")
 	}
 }

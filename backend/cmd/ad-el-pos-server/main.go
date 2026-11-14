@@ -239,6 +239,11 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		application.IdentityProblem = identityErr.Error()
 		logger.Error("server_identity_unavailable", "reason", identityErr.Error(), "network_listen_disabled", network.Address != "")
 	}
+	// Los respaldos programados llevan el server_id en su nombre (sin identidad, el installation_id de la base). Se fija
+	// antes de arrancar el trabajador y de atender peticiones.
+	if application.ScheduledBackups != nil && identityErr == nil {
+		application.ScheduledBackups.InstallationID = serverIdentity.ServerID
+	}
 	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
 		return err
 	}
