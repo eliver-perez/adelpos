@@ -1,7 +1,11 @@
 // Package catalog administra el catálogo y centraliza sus cálculos comerciales exactos.
 package catalog
 
-import "local/ad-el-pos/server/internal/ordering"
+import (
+	"time"
+
+	"local/ad-el-pos/server/internal/ordering"
+)
 
 type Metadata struct {
 	ID          string `json:"id"`
@@ -154,6 +158,12 @@ type Product struct {
 	Slots                []ComboSlot         `json:"slots"`
 	// Position coloca el producto entre los de su categoría (combos incluidos); solo de entrada.
 	Position *ordering.Position `json:"position,omitempty"`
+	// SoldOutAt, SoldOutUntil y SoldOutBy son «Agotado» (etapa 9G, §5.4): cuándo y quién lo marcó y hasta cuándo
+	// (nil = hasta nuevo aviso). Solo se cambian con POST catalog/products/{id}/sold-out; el editor del producto
+	// los ignora al guardar. Se omiten si nunca se marcó o ya se limpió.
+	SoldOutAt    *time.Time `json:"sold_out_at,omitempty"`
+	SoldOutUntil *time.Time `json:"sold_out_until,omitempty"`
+	SoldOutBy    *string    `json:"sold_out_by,omitempty"`
 }
 
 type PriceEntry struct {

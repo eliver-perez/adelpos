@@ -17,6 +17,11 @@ type Metadata struct {
 	BundleID      string `json:"bundle_id"`
 	APIVersion    string `json:"api_version"`
 	SchemaVersion int    `json:"schema_version"`
+	// MinClientVersion es la versión más antigua de la aplicación (escritorio o Android) que acepta este
+	// servidor y MinServerVersion la más antigua del servidor que necesita esta aplicación (etapa 9G, §5.1).
+	// Suben junto con version cuando un cambio de la API v1 lo exige.
+	MinClientVersion string `json:"min_client_version"`
+	MinServerVersion string `json:"min_server_version"`
 }
 
 func Read() Metadata {

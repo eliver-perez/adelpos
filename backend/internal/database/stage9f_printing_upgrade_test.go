@@ -46,8 +46,10 @@ func TestStage9FPrintingUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := expected[len(expected)-1].Version; last != 22 || product.Read().SchemaVersion != 22 {
-		t.Fatalf("se esperaba el esquema 22 en la última migración (%d) y en el producto (%d)", last, product.Read().SchemaVersion)
+	// Desde la etapa 9G la última migración es posterior a la 0022: se migra desde el esquema 21 hasta la última y se
+	// comprueba solo el efecto de la 0022 (las secciones de la 0023 no tocan impresoras, cocina ni cobros).
+	if last := expected[len(expected)-1].Version; last < 22 || last != product.Read().SchemaVersion {
+		t.Fatalf("la última migración (%d) no coincide con el esquema del producto (%d)", last, product.Read().SchemaVersion)
 	}
 	schema21 := fstest.MapFS{}
 	for _, migration := range expected {
@@ -62,7 +64,7 @@ func TestStage9FPrintingUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := stage9FSnapshot(ctx, t, pool)
-	if n, err := Migrate(ctx, pool); err != nil || n != 1 {
+	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-21 {
 		t.Fatalf("la 0022 no se aplicó sobre el esquema 21: %d %v", n, err)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != 0 {

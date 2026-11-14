@@ -67,14 +67,15 @@ pub fn events_start(
                 break;
             };
             // El destino y las credenciales se obtienen únicamente del perfil nativo.
-            let mut request = client
-                .get(format!("{}/api/v1/events", config.server_url))
-                .header("X-Device-ID", device)
-                .header("X-Device-Token", secret)
-                .bearer_auth(session)
-                .header("Accept", "text/event-stream")
-                .query(&[("after", cursor.to_string())])
-                .timeout(Duration::from_secs(40));
+            let mut request = crate::api::with_client_headers(
+                client.get(format!("{}/api/v1/events", config.server_url)),
+            )
+            .header("X-Device-ID", device)
+            .header("X-Device-Token", secret)
+            .bearer_auth(session)
+            .header("Accept", "text/event-stream")
+            .query(&[("after", cursor.to_string())])
+            .timeout(Duration::from_secs(40));
             if let Some(station) = &station_id {
                 request = request.query(&[("station_id", station)]);
             }

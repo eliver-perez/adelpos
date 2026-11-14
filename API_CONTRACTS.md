@@ -3320,3 +3320,29 @@ rechaza la carpeta real del servicio antes de abrir o crear nada.
   emparejado, dirección vacía); `restart_application` (sin argumentos) reinicia la aplicación.
 - `connection.json` admite ahora `server-only` y, solo en `terminal-only` sin certificado, `server_url` vacío (terminal
   sin servidor: no se abre el Keychain ni se hace ninguna petición).
+
+## Etapa 9G · API v1 para clientes y preparación para Android (fase D, esquema 23)
+
+Decisiones D8, D9 y D12 del coordinador. Contrato OpenAPI 3.1 de la API para clientes en
+[`backend/internal/apicontract/openapi.json`](backend/internal/apicontract/openapi.json) (publicado en
+`GET /api/v1/openapi.json`) y explicación completa en [docs/API_V1.md](docs/API_V1.md). Migración: sección «Fase D» de la
+0023 (columnas `catalog_products.sold_out_at`, `sold_out_until` y `sold_out_by` con CHECK con nombre, permiso
+`catalog.sold_out.manage` solo al administrador, ámbito `catalog` en `realtime_events_scope_check`, secuencia
+`catalog_version_seq`, tabla `catalog_change_log` y sus disparadores, y el comentario de conservación de
+`restaurant_operations`).
+
+| Ruta                                  | Contrato                                                                                                                           |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `GET version`                         | Agrega `min_client_version`, `client_kinds` y `openapi_path`, y las funciones `client-version-check`, `catalog-sync-v1`, etc.      |
+| Cualquier ruta de la aplicación       | Con `X-Client-Version` anterior a la mínima: `426 CLIENT_UPDATE_REQUIRED` (sin la cabecera se acepta); cabecera inválida: 400      |
+| `GET catalog/sync[?since=X]`          | Catálogo descargable completo o por cambios (`catalog.read` y `catalog.prices.read`)                                               |
+| `GET catalog/images/{id}/content`     | Imagen binaria con `ETag` y caché larga; `If-None-Match` → 304                                                                     |
+| `POST catalog/products/{id}/sold-out` | «Agotado» / «Disponible otra vez» (`catalog.sold_out.manage`, `operation_id`); un producto agotado responde `409 PRODUCT_SOLD_OUT` |
+| `GET catalog/products`                | Cada producto agrega `sold_out`, `sold_out_indefinite` y `sold_out_until`                                                          |
+| Escrituras de `catalog/*`             | Publican el evento `catalog.changed` (ámbito `catalog`, con `catalog.read`)                                                        |
+| `POST restaurant/offline-orders`      | Pedido capturado sin conexión: 200 aceptado o `409 ORDER_REQUIRES_CONFIRMATION` con los cambios                                    |
+| `GET restaurant/state`                | Recuperación del estado: sesión y permisos vigentes, versión del catálogo, mesas y cuentas abiertas                                |
+
+Puente nativo (`desktop/src-tauri/src/api.rs`): operaciones nuevas `version` (`GET version`) y `catalog_product_sold_out`
+(`POST catalog/products/{id}/sold-out`, con identificador validado); Rust envía `X-Client-Version` (la versión de
+`Cargo.toml`) y `X-Client-Kind: desktop` en `api_request`, el canal de eventos y la exportación de reportes.

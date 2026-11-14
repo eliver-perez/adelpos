@@ -6,6 +6,18 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use tauri::State;
 
+// Identificación del cliente (etapa 9G, §5.1): cada petición a Go lleva la versión de la aplicación y su tipo. Go
+// responde 426 CLIENT_UPDATE_REQUIRED («Actualiza esta terminal») a una versión anterior a la mínima que acepta.
+pub(crate) const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const CLIENT_KIND: &str = "desktop";
+
+// with_client_headers agrega las cabeceras de identificación del cliente a una petición.
+pub(crate) fn with_client_headers(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request
+        .header("X-Client-Version", CLIENT_VERSION)
+        .header("X-Client-Kind", CLIENT_KIND)
+}
+
 // Tiempo de respuesta de las consultas de reportes (Go responde en hasta 40 s).
 const REPORT_TIMEOUT_SECONDS: u64 = 45;
 // Tiempo de respuesta de «Quitar datos de prueba» (etapa 9F): Go crea antes un respaldo completo de la
@@ -70,6 +82,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "kitchen_rerender" => Some((Method::POST, "kitchen/print-jobs/rerender")),
 
         "setup_status" => Some((Method::GET, "setup/status")),
+        // Etapa 9G (§5.1): versión del servidor para avisar si es más viejo de lo que necesita la aplicación.
+        "version" => Some((Method::GET, "version")),
         "setup" => Some((Method::POST, "setup")),
         "enroll" => Some((Method::POST, "devices/enroll")),
         "enroll_local" => Some((Method::POST, "devices/enroll")),
@@ -318,6 +332,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_duplicate_product" => (
             Method::POST,
             format!("catalog/products/{identifier}/duplicate"),
+        ),
+        // Etapa 9G (§5.4): «Agotado» y «Disponible otra vez» desde la captura.
+        "catalog_product_sold_out" => (
+            Method::POST,
+            format!("catalog/products/{identifier}/sold-out"),
         ),
         "restaurant_save_area" => (Method::PATCH, format!("restaurant/areas/{identifier}")),
         "restaurant_save_table" => (Method::PATCH, format!("restaurant/tables/{identifier}")),
@@ -759,7 +778,8 @@ pub async fn api_request(
     let client = state.client.as_ref().map_err(Clone::clone)?;
     let mut credentials = vault.read()?;
     let (method, path) = route(&operation, resource_id.as_deref())?;
-    let mut request = client.request(method, format!("{}/api/v1/{path}", config.server_url));
+    let mut request =
+        with_client_headers(client.request(method, format!("{}/api/v1/{path}", config.server_url)));
     if let (Some(id), Some(token)) = (&credentials.device_id, &credentials.device_token) {
         request = request
             .header("X-Device-ID", id)
@@ -1338,6 +1358,39 @@ mod tests {
         assert!(route("catalog_save_groups", None).is_err());
         assert!(route("catalog_delete_everything", Some(identifier)).is_err());
         assert!(route("catalog_image", Some("../../../../private/secrets")).is_err());
+    }
+
+    #[test]
+    fn stage9g_version_and_sold_out_routes_are_closed() {
+        let identifier = "00000000-0000-0000-0000-000000000001";
+        assert_eq!(
+            route("version", None).unwrap(),
+            (Method::GET, "version".to_string())
+        );
+        assert_eq!(
+            route("catalog_product_sold_out", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("catalog/products/{identifier}/sold-out")
+            )
+        );
+        assert!(route("catalog_product_sold_out", None).is_err());
+        assert!(route("catalog_product_sold_out", Some("../sync")).is_err());
+        // La descarga del catálogo y el pedido sin conexión son de la aplicación Android, no del escritorio.
+        assert!(route("catalog_sync", None).is_err());
+        assert!(route("restaurant_offline_order", None).is_err());
+    }
+
+    #[test]
+    fn client_identifies_its_version_and_kind() {
+        assert_eq!(CLIENT_VERSION, env!("CARGO_PKG_VERSION"));
+        assert_eq!(CLIENT_KIND, "desktop");
+        let request =
+            with_client_headers(reqwest::Client::new().get("http://127.0.0.1:8181/api/v1/auth/me"))
+                .build()
+                .unwrap();
+        assert_eq!(request.headers()["X-Client-Version"], CLIENT_VERSION);
+        assert_eq!(request.headers()["X-Client-Kind"], "desktop");
     }
 
     #[test]

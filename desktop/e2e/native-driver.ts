@@ -5,6 +5,17 @@ import type { Page } from '@playwright/test';
 // ejecutar dos aceptaciones aisladas a la vez con servidores temporales en otros puertos locales.
 const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
 
+// Etapa 9G (§5.1): el puente se identifica como lo hace Rust (with_client_headers de api.rs): la versión de la
+// aplicación (la de config/product.json, que sync-metadata copia a Cargo.toml) y el tipo de cliente.
+const clientHeaders = {
+  'X-Client-Version': (
+    JSON.parse(readFileSync(new URL('../src/generated/product.json', import.meta.url), 'utf8')) as {
+      version: string;
+    }
+  ).version,
+  'X-Client-Kind': 'desktop',
+};
+
 // Terminal temporal que este mismo proceso de Playwright configuró, por token de aprovisionamiento.
 // La aceptación corre con un solo worker: cuando varias especificaciones comparten la base temporal
 // (por ejemplo restaurant.spec.ts e inventory.spec.ts en la corrida completa), la primera configura
@@ -185,6 +196,7 @@ export async function installDriver(page: Page) {
       `${serverURL}/api/v1/reports/export/${report}?${new URLSearchParams({ ...query, format })}`,
       {
         headers: {
+          ...clientHeaders,
           'X-Device-ID': deviceID,
           'X-Device-Token': deviceToken,
           Authorization: `Bearer ${sessionToken}`,
@@ -225,6 +237,7 @@ export async function installDriver(page: Page) {
     const response = await fetch(`${serverURL}/api/v1/${route}`, {
       method,
       headers: {
+        ...clientHeaders,
         'Content-Type': 'application/json',
         'X-Provisioning-Token': provisioning,
         'X-Device-ID': deviceID,
@@ -371,6 +384,7 @@ export async function installDriver(page: Page) {
       while (!controller.signal.aborted && !page.isClosed()) {
         const response = await fetch(`${serverURL}/api/v1/events?after=${cursor}`, {
           headers: {
+            ...clientHeaders,
             'X-Device-ID': deviceID,
             'X-Device-Token': deviceToken,
             Authorization: `Bearer ${sessionToken}`,
