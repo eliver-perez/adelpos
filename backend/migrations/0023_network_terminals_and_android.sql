@@ -224,7 +224,11 @@ ALTER TABLE app.devices
 --    un administrador, por 5 códigos incorrectos o porque el número revelado no correspondía al compromiso) y cancelled
 --    (la terminal canceló). Una solicitud pendiente o aprobada cuyo expires_at pasó está vencida (Go lo calcula al leer):
 --    vence a los 5 minutos y, aprobada, la terminal tiene otros 5 para recoger su credencial. source_address es la IP de
---    origen (límite de solicitudes por origen). Las solicitudes de más de 7 días se borran al crear otra.
+--    origen y source_group su grupo para el límite por origen (la IPv4 exacta, el prefijo /64 de una IPv6 y todo el enlace
+--    local como un solo grupo: una terminal no puede multiplicar sus orígenes). Además hay un tope global de solicitudes
+--    creadas por ventana, sin importar estado ni origen: las canceladas y rechazadas siguen contando, para que un
+--    intermediario no pueda probar números sin límite (revisión independiente, hallazgo 1). Los conteos usan los índices
+--    por created_at; un trabajador del servidor borra por lotes las solicitudes de más de 7 días.
 CREATE TABLE app.device_pairing_requests (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     proposed_name text NOT NULL
@@ -236,6 +240,8 @@ CREATE TABLE app.device_pairing_requests (
     app_version text NOT NULL
         CONSTRAINT device_pairing_requests_app_version_check CHECK (length(app_version) BETWEEN 1 AND 40),
     source_address inet NOT NULL,
+    source_group text NOT NULL
+        CONSTRAINT device_pairing_requests_source_group_check CHECK (length(source_group) BETWEEN 1 AND 64),
     secret_hash text NOT NULL
         CONSTRAINT device_pairing_requests_secret_hash_key UNIQUE
         CONSTRAINT device_pairing_requests_secret_hash_check CHECK (secret_hash ~ '^[0-9a-f]{64}$'),
@@ -273,9 +279,8 @@ CREATE TABLE app.device_pairing_requests (
         state NOT IN ('approved', 'claimed') OR (approved_name IS NOT NULL AND terminal_nonce IS NOT NULL)
     )
 );
-CREATE INDEX device_pairing_requests_source_idx ON app.device_pairing_requests (source_address, created_at DESC);
-CREATE INDEX device_pairing_requests_open_idx ON app.device_pairing_requests (created_at)
-    WHERE state IN ('pending', 'approved');
+CREATE INDEX device_pairing_requests_source_idx ON app.device_pairing_requests (source_group, created_at);
+CREATE INDEX device_pairing_requests_created_idx ON app.device_pairing_requests (created_at);
 
 -- =====================================================================================================================
 -- Fase F · Respaldos programados (§7 de la especificación, decisiones D7 y D12)

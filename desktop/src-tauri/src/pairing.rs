@@ -350,6 +350,25 @@ pub struct PairingSession {
     code: String,
     name: String,
     expires_at: String,
+    /// Credencial ya reclamada que todavía no se pudo guardar (por ejemplo, porque el diálogo del Llavero se
+    /// rechazó): la siguiente consulta vuelve a intentar guardarla sin reclamar otra vez (revisión, hallazgo 3).
+    claimed: Option<ClaimedCredential>,
+}
+
+#[derive(Clone)]
+struct ClaimedCredential {
+    device_id: String,
+    device_token: String,
+    name: String,
+}
+
+/// Turno de la única consulta de estado en curso: al terminar (también con error) se libera.
+struct StatusTurn<'a>(&'a AtomicBool);
+
+impl Drop for StatusTurn<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Lo que ve React de la sesión: el código, el nombre, el estado y el nombre del restaurante.
@@ -485,6 +504,7 @@ pub async fn request_pairing(base: &str, name: &str) -> Result<PairingSession, S
         code,
         name: text(&created, "name"),
         expires_at: text(&created, "expires_at"),
+        claimed: None,
     })
 }
 
@@ -581,62 +601,92 @@ pub async fn pairing_start(
 
 /// Consulta el estado; aprobada la solicitud, reclama la credencial (una sola vez), la guarda en el
 /// almacén seguro y escribe la conexión. Después React reinicia la aplicación.
+///
+/// Una sola consulta a la vez (revisión independiente, hallazgo 3): si otra sigue en curso —por ejemplo,
+/// esperando el diálogo del Llavero al guardar la credencial—, esta responde «en espera» sin llamar al
+/// servidor, en lugar de recibir «ya reclamada» y dar el emparejamiento por perdido. Si guardar falla, la
+/// credencial reclamada se conserva en la sesión y la siguiente consulta vuelve a intentarlo.
 #[tauri::command]
 pub async fn pairing_status(state: State<'_, TerminalState>) -> Result<PairingView, String> {
-    let session = session_of(&state)?;
-    let (status, value) = call(
-        &session.client,
-        reqwest::Method::GET,
-        format!(
-            "{}/api/v1/pairing/requests/{}",
-            session.base, session.request_id
-        ),
-        Some(&session.secret),
-        None,
-    )
-    .await?;
-    if status != 200 {
-        return Err(server_message(&value));
-    }
-    let current = text(&value, "state");
-    if current != "approved" {
-        return Ok(session.view(&current));
-    }
-    let (status, claimed) = call(
-        &session.client,
-        reqwest::Method::POST,
-        format!(
-            "{}/api/v1/pairing/requests/{}/claim",
-            session.base, session.request_id
-        ),
-        Some(&session.secret),
-        Some(serde_json::json!({})),
-    )
-    .await?;
-    if status != 200 {
-        store_session(&state, None)?;
-        return Err(server_message(&claimed));
-    }
-    let device_id = text(&claimed, "device_id");
-    let device_token = text(&claimed, "device_token");
-    if !valid_identifier(&device_id)
-        || device_token.len() != 43
-        || text(&claimed, "server_id") != session.server_id
+    status_of(&state).await
+}
+
+async fn status_of(state: &TerminalState) -> Result<PairingView, String> {
+    if state
+        .pairing_busy
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
     {
-        store_session(&state, None)?;
-        return Err(
-            "El servidor no entregó una autorización válida. Vuelve a emparejar esta terminal."
-                .into(),
-        );
+        return Ok(session_of(state)?.view("pending"));
     }
-    let config = terminal_config(&state)?;
+    let _turn = StatusTurn(&state.pairing_busy);
+    let mut session = session_of(state)?;
+    if session.claimed.is_none() {
+        let (status, value) = call(
+            &session.client,
+            reqwest::Method::GET,
+            format!(
+                "{}/api/v1/pairing/requests/{}",
+                session.base, session.request_id
+            ),
+            Some(&session.secret),
+            None,
+        )
+        .await?;
+        if status != 200 {
+            return Err(server_message(&value));
+        }
+        let current = text(&value, "state");
+        if current != "approved" {
+            return Ok(session.view(&current));
+        }
+        let (status, claimed) = call(
+            &session.client,
+            reqwest::Method::POST,
+            format!(
+                "{}/api/v1/pairing/requests/{}/claim",
+                session.base, session.request_id
+            ),
+            Some(&session.secret),
+            Some(serde_json::json!({})),
+        )
+        .await?;
+        if status != 200 {
+            store_session(state, None)?;
+            return Err(server_message(&claimed));
+        }
+        let device_id = text(&claimed, "device_id");
+        let device_token = text(&claimed, "device_token");
+        if !valid_identifier(&device_id)
+            || device_token.len() != 43
+            || text(&claimed, "server_id") != session.server_id
+        {
+            store_session(state, None)?;
+            return Err(
+                "El servidor no entregó una autorización válida. Vuelve a emparejar esta terminal."
+                    .into(),
+            );
+        }
+        session.claimed = Some(ClaimedCredential {
+            device_id,
+            device_token,
+            name: text(&claimed, "name"),
+        });
+        // Se conserva antes de guardar: si el almacén seguro falla, la siguiente consulta reintenta.
+        store_session(state, Some(session.clone()))?;
+    }
+    let credential = session
+        .claimed
+        .clone()
+        .ok_or("No se pudo emparejar esta terminal.")?;
+    let config = terminal_config(state)?;
     let filename = state
         .installation
         .connection_file
         .clone()
         .ok_or("No se encontró dónde guardar la conexión de esta terminal.")?;
     let mut paired = session.clone();
-    paired.name = text(&claimed, "name");
+    paired.name = credential.name.clone();
     let next = paired_connection(&config, &paired)?;
     // Primero la credencial (almacén seguro) y después la conexión: sin credencial guardada la terminal
     // sigue buscando servidor en lugar de quedar emparejada sin poder entrar.
@@ -645,12 +695,12 @@ pub async fn pairing_status(state: State<'_, TerminalState>) -> Result<PairingVi
         &config.credential_namespace,
     )?;
     vault.save(Credentials {
-        device_id: Some(device_id),
-        device_token: Some(device_token),
+        device_id: Some(credential.device_id),
+        device_token: Some(credential.device_token),
         session_token: None,
     })?;
     save_connection(&filename, &next)?;
-    store_session(&state, None)?;
+    store_session(state, None)?;
     Ok(paired.view("paired"))
 }
 
@@ -979,6 +1029,7 @@ mod tests {
             code: "123456".into(),
             name: "Caja 2".into(),
             expires_at: "2026-11-13T20:00:00Z".into(),
+            claimed: None,
         }
     }
 
@@ -1061,6 +1112,38 @@ mod tests {
             assert!(refused.is_err(), "otra huella no conecta");
             assert!(wrong.identity_changed());
         });
+    }
+
+    // Hallazgo 3 de la revisión: una sola consulta de estado a la vez. Mientras otra está en curso (por ejemplo,
+    // esperando el diálogo del Llavero), la siguiente responde «en espera» sin llamar al servidor; al terminar,
+    // también con error, el turno se libera.
+    #[test]
+    fn only_one_status_query_runs_at_a_time() {
+        let state = crate::startup_tests::test_state();
+        let mut session = sample_session();
+        // Una dirección a la que nunca se llega: si la consulta saliera a la red, fallaría.
+        session.base = "https://192.0.2.1:9".into();
+        store_session(&state, Some(session)).unwrap();
+        state.pairing_busy.store(true, Ordering::SeqCst);
+        let view = tauri::async_runtime::block_on(status_of(&state)).unwrap();
+        assert_eq!(view.state, "pending");
+        assert_eq!(view.code, "123456");
+        assert!(
+            state.pairing_busy.load(Ordering::SeqCst),
+            "no libera el turno ajeno"
+        );
+        state.pairing_busy.store(false, Ordering::SeqCst);
+        store_session(&state, None).unwrap();
+        assert!(tauri::async_runtime::block_on(status_of(&state)).is_err());
+        assert!(
+            !state.pairing_busy.load(Ordering::SeqCst),
+            "el turno se libera también con error"
+        );
+        {
+            let _turn = StatusTurn(&state.pairing_busy);
+            state.pairing_busy.store(true, Ordering::SeqCst);
+        }
+        assert!(!state.pairing_busy.load(Ordering::SeqCst));
     }
 
     #[test]

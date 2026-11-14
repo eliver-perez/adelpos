@@ -96,6 +96,13 @@ export interface PairingRequests {
   requests: PairingRequest[];
   // Solo en la computadora principal se aprueban las terminales.
   approve_here: boolean;
+  // Revisión de la fase B: solicitudes canceladas, rechazadas o vencidas sin aprobarse en la última ventana (indicio
+  // de un intento de suplantar a una terminal), si se alcanzó el tope de solicitudes y si se puede emparejar
+  // (sin identidad cargada, no).
+  recent_abandoned?: number;
+  limit_reached?: boolean;
+  window_minutes?: number;
+  pairing_available?: boolean;
   // Solo en la computadora principal: si recibe terminales de la red y cómo escribir su dirección.
   network?: {
     available: boolean;

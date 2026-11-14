@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -45,6 +46,10 @@ type pairingReply struct {
 func (reply pairingReply) text(key string) string {
 	value, _ := reply.body[key].(string)
 	return value
+}
+
+func (reply pairingReply) raw2() string {
+	return string(reply.raw)
 }
 
 func (reply pairingReply) code() string {
@@ -310,8 +315,8 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		if err != nil || kind != "desktop" || system != "macOS" || version != "0.10.0" || fingerprint != identity.FingerprintHex() || pairedAt == nil {
 			t.Fatalf("datos de la terminal emparejada: %v %s %s %s %s", err, kind, system, version, fingerprint)
 		}
-		if countAudit("device.pairing_approved", newcomer.requestID) != 1 {
-			t.Fatal("la aprobación se audita")
+		if countAudit("device.pairing_approved", newcomer.requestID) != 1 || countAudit("device.pairing_requested", newcomer.requestID) != 1 {
+			t.Fatal("la solicitud revelada y su aprobación se auditan")
 		}
 		var approverDevice, approver string
 		if err := env.pool.QueryRow(env.ctx, `SELECT device_id::text, actor_id::text FROM app.audit_events
@@ -449,6 +454,9 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		if newcomer.status(t) != "rejected" {
 			t.Fatal("la solicitud queda rechazada")
 		}
+		if countAudit("device.pairing_requested", newcomer.requestID) != 0 || countAudit("device.pairing_rejected", newcomer.requestID) != 1 {
+			t.Fatal("sin revelar su número la solicitud no se anota como pedida; el rechazo sí")
+		}
 		// Sin el secreto de la solicitud no se consulta ni se reclama nada.
 		stranger := newcomer.endpoint.send(t, terminal0, "GET", "pairing/requests/"+newcomer.requestID, map[string]string{"X-Pairing-Secret": strings.Repeat("x", 43)}, nil)
 		if stranger.status != 404 {
@@ -504,6 +512,164 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		if _, err := env.pool.Exec(env.ctx, "UPDATE app.device_pairing_requests SET state='cancelled' WHERE state='pending'"); err != nil {
 			t.Fatal(err)
 		}
+	})
+
+	// fromSource hace la petición dentro del proceso con el origen elegido y TLS (como si llegara de otro equipo
+	// por la escucha de red): sirve para probar los límites con muchas direcciones distintas.
+	fromSource := func(source, method, route, secret string, body any) pairingReply {
+		t.Helper()
+		encoded, _ := json.Marshal(body)
+		request := httptest.NewRequest(method, "/api/v1/"+route, bytes.NewReader(encoded))
+		request.RemoteAddr = source
+		request.TLS = &tls.ConnectionState{Version: tls.VersionTLS13}
+		request.Header.Set("Content-Type", "application/json")
+		if secret != "" {
+			request.Header.Set("X-Pairing-Secret", secret)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		reply := pairingReply{status: response.Code, raw: response.Body.Bytes()}
+		_ = json.Unmarshal(reply.raw, &reply.body)
+		return reply
+	}
+	createAndCancel := func(source string) pairingReply {
+		t.Helper()
+		nonce := make([]byte, 32)
+		_, _ = rand.Read(nonce)
+		created := fromSource(source, "POST", "pairing/requests", "", map[string]string{
+			"name": "Intermediario", "device_kind": "desktop", "os": "macOS", "app_version": "0.10.0",
+			"commitment": administration.PairingCommitment(nonce),
+		})
+		if created.status == 200 {
+			cancelled := fromSource(source, "POST", "pairing/requests/"+created.text("request_id")+"/cancel", created.text("pairing_secret"), map[string]any{})
+			if cancelled.status != 200 || cancelled.text("state") != "cancelled" {
+				t.Fatalf("cancelar: %d %s", cancelled.status, cancelled.raw)
+			}
+		}
+		return created
+	}
+
+	t.Run("stage9g_tope_global_contra_un_intermediario_que_muele_solicitudes", func(t *testing.T) {
+		forgetRecentRequests()
+		auditsBefore := env.scalar(t, "SELECT count(*) FROM app.audit_events WHERE action LIKE 'device.pairing%'")
+		// Todo el enlace local es un solo grupo de origen: direcciones fe80:: distintas no multiplican el límite.
+		accepted := 0
+		for index := 1; index <= 12; index++ {
+			reply := createAndCancel(fmt.Sprintf("[fe80::%x%%en0]:5000", index))
+			if reply.status == 200 {
+				accepted++
+			} else if reply.status != 429 || reply.code() != "PAIRING_RATE_LIMITED" {
+				t.Fatalf("enlace local %d: %d %s", index, reply.status, reply.raw)
+			}
+		}
+		if accepted != 5 {
+			t.Fatalf("el enlace local cuenta como un solo origen: %d aceptadas", accepted)
+		}
+		// Lo mismo con un /64 de IPv6: cualquier dirección del prefijo es el mismo origen.
+		for index := 1; index <= 7; index++ {
+			reply := createAndCancel(fmt.Sprintf("[fd12:3456:789a:1::%x]:5000", index))
+			if reply.status == 200 {
+				accepted++
+			}
+		}
+		if accepted != 10 {
+			t.Fatalf("un /64 cuenta como un solo origen: %d aceptadas en total", accepted)
+		}
+		// Con orígenes distintos (IPv4 y /64 diferentes), el tope global corta a las 30 solicitudes de la ventana,
+		// aunque todas se hayan cancelado.
+		limited := 0
+		for index := 1; index <= 60; index++ {
+			source := fmt.Sprintf("192.168.%d.%d:5000", index/200, index%200+1)
+			if index%2 == 0 {
+				source = fmt.Sprintf("[fd12:3456:%x::1]:5000", index)
+			}
+			reply := createAndCancel(source)
+			switch {
+			case reply.status == 200:
+				accepted++
+			case reply.status == 429 && reply.code() == "PAIRING_LIMIT_REACHED":
+				limited++
+				if !strings.Contains(reply.raw2(), "demasiados códigos") {
+					t.Fatalf("mensaje claro para la terminal: %s", reply.raw)
+				}
+			default:
+				t.Fatalf("origen %s: %d %s", source, reply.status, reply.raw)
+			}
+		}
+		if accepted != 30 || limited != 40 {
+			t.Fatalf("tope global: %d aceptadas y %d limitadas (se esperaban 30 y 40)", accepted, limited)
+		}
+		// Ninguna solicitud cancelada antes de revelar deja movimientos; el tope se anota una sola vez.
+		if env.scalar(t, "SELECT count(*) FROM app.audit_events WHERE action LIKE 'device.pairing%'") != auditsBefore+1 ||
+			env.scalar(t, "SELECT count(*) FROM app.audit_events WHERE action='device.pairing_limit_reached'") != 1 {
+			t.Fatal("las cancelaciones sin revelar no se auditan y el tope se anota una vez por ventana")
+		}
+		// La computadora principal lo ve: solicitudes abandonadas y tope alcanzado.
+		listed := local.send(t, env.admin, "GET", "devices/pairing-requests", nil, nil)
+		if listed.body["recent_abandoned"] != float64(30) || listed.body["limit_reached"] != true || listed.body["window_minutes"] != float64(10) {
+			t.Fatalf("indicio del intento en Terminales: %s", listed.raw)
+		}
+		// Ni una terminal legítima entra mientras dure la ventana; pasada la ventana, sí.
+		if reply := newPairingTerminal(t, networkBase).start(t, "Caja legítima"); reply.status != 429 || reply.code() != "PAIRING_LIMIT_REACHED" {
+			t.Fatalf("el tope es global: %d %s", reply.status, reply.code())
+		}
+		forgetRecentRequests()
+		if reply := newPairingTerminal(t, networkBase).start(t, "Caja legítima"); reply.status != 200 {
+			t.Fatalf("pasada la ventana se vuelve a pedir código: %d %s", reply.status, reply.code())
+		}
+		forgetRecentRequests()
+	})
+
+	t.Run("stage9g_conteos_con_indices_y_limpieza_por_lotes", func(t *testing.T) {
+		forgetRecentRequests()
+		// 20 000 solicitudes antiguas (8 días) y unas recientes, como dejaría un ataque sostenido sin tope.
+		_, err := env.pool.Exec(env.ctx, `INSERT INTO app.device_pairing_requests(proposed_name,device_kind,os,app_version,
+                source_address,source_group,secret_hash,terminal_commitment,server_nonce,server_fingerprint,state,created_at,expires_at,decided_at)
+            SELECT 'Antigua','desktop','macOS','0.10.0','192.168.1.9','v4:192.168.1.9',
+                encode(sha256(('secreto-' || n)::bytea),'hex'),repeat('a',64),repeat('b',64),repeat('c',64),'cancelled',
+                now() - interval '8 days' - n * interval '1 second', now() - interval '8 days', now() - interval '8 days'
+            FROM generate_series(1,20000) n`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := env.pool.Exec(env.ctx, "ANALYZE app.device_pairing_requests"); err != nil {
+			t.Fatal(err)
+		}
+		for _, query := range []string{
+			"SELECT count(*) FROM app.device_pairing_requests WHERE created_at > now() - interval '10 minutes'",
+			"SELECT count(*) FROM app.device_pairing_requests WHERE source_group = 'v4:192.168.1.9' AND created_at > now() - interval '10 minutes'",
+		} {
+			rows, err := env.pool.Query(env.ctx, "EXPLAIN "+query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := ""
+			for rows.Next() {
+				var line string
+				_ = rows.Scan(&line)
+				plan += line + "\n"
+			}
+			rows.Close()
+			if !strings.Contains(plan, "Index") || strings.Contains(plan, "Seq Scan") {
+				t.Fatalf("el conteo de la ventana usa un índice:\n%s", plan)
+			}
+		}
+		started := time.Now()
+		if reply := newPairingTerminal(t, networkBase).start(t, "Caja con historial"); reply.status != 200 {
+			t.Fatalf("crear con muchas filas antiguas: %d %s", reply.status, reply.code())
+		}
+		if elapsed := time.Since(started); elapsed > 2*time.Second {
+			t.Fatalf("crear una solicitud no depende de las filas antiguas: %s", elapsed)
+		}
+		removed, err := administration.CleanPairingRequests(env.ctx, env.pool)
+		if err != nil || removed < 20000 {
+			t.Fatalf("la limpieza por lotes borra las de más de 7 días: %d %v", removed, err)
+		}
+		if env.scalar(t, "SELECT count(*) FROM app.device_pairing_requests WHERE created_at < now() - interval '7 days'") != 0 ||
+			env.scalar(t, "SELECT count(*) FROM app.device_pairing_requests WHERE proposed_name='Caja con historial'") != 1 {
+			t.Fatal("la limpieza conserva las recientes")
+		}
+		forgetRecentRequests()
 	})
 
 	var user terminal
@@ -590,7 +756,7 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 	})
 
 	t.Run("stage9g_revocacion_inmediata_corta_el_sse", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(env.ctx, 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		stream, err := http.NewRequestWithContext(ctx, "GET", networkBase+"/api/v1/events", nil)
 		if err != nil {

@@ -34,7 +34,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	if err != nil || !strings.HasPrefix(parsed.Path, "/adel_pos_test_") {
 		t.Fatal("Se requiere una base temporal exclusiva")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	// Desde la etapa 9G (fase B) la aceptación incluye los límites del emparejamiento con miles de filas.
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
