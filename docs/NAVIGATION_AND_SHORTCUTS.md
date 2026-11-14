@@ -31,6 +31,7 @@ La primera parte es para el personal del restaurante; la segunda, para quien des
   [Estado del servidor](#estado-del-servidor) · [Menú del usuario](#menú-del-usuario) ·
   [Pantalla completa](#pantalla-completa) · [La barra durante la captura](#la-barra-durante-la-captura) ·
   [Administración](#administración) · [Pantalla de inicio de la terminal](#pantalla-de-inicio-de-la-terminal) ·
+  [Computadora principal, terminales y «Sin conexión»](#computadora-principal-terminales-y-sin-conexión-etapa-9g) ·
   [El selector](#el-selector-listas-desplegables) · [Selector de hora](#selector-de-hora) ·
   [Menú de la aplicación](#menú-de-la-aplicación) · [Atajos de teclado](#atajos-de-teclado) ·
   [Paleta de comandos](#paleta-de-comandos)
@@ -113,8 +114,9 @@ Sustituye a los textos «Sesión verificada · En tiempo real»:
 Colores desde la etapa 9D: «En línea» azul, «Reconectando» ámbar y «Sin conexión» rojo (hasta la 9C se llamaba «Fuera de
 línea»). Desde la 9D «En línea» se ve con su texto también a 1280 px (antes era solo un punto de color) y desde la 9F
 también en la barra compacta hasta 1150 px; más angosto queda el punto, con una ayuda emergente que empieza por el
-estado («En línea: …»). Reconectando o sin conexión, el texto queda siempre a la vista. Sin conexión, Mesas, Cuentas, Para llevar y la captura muestran
-**«Reintentar»**, que vuelve a consultar la sesión y los datos. El estado sale de dos fuentes reales: la
+estado («En línea: …»). Reconectando o sin conexión, el texto queda siempre a la vista. Hasta la 9F, sin conexión, Mesas, Cuentas, Para llevar y
+la captura mostraban su propio **«Reintentar»**; desde la 9G lo sustituye la capa «Sin conexión con el servidor» (ver
+[Computadora principal, terminales y «Sin conexión»](#computadora-principal-terminales-y-sin-conexión-etapa-9g)). El estado sale de dos fuentes reales: la
 consulta de la sesión cada 5 segundos y el canal de eventos (solo para quien lo recibe; sin canal, con la sesión
 verificada, el estado es «En línea»).
 
@@ -199,6 +201,48 @@ Cada terminal tiene su pantalla de inicio: **Mesas** (por omisión), **Para llev
 - Si el usuario no puede ver esa sección, abre la primera de la barra que sí puede ver; si no ve ninguna,
   Administración, y si tampoco, Mis preferencias. **Nunca abre en «Estado del sistema».**
 - La «Pantalla inicial» que antes se guardaba por usuario ya no decide nada (el servidor la conserva sin usarla).
+
+## Computadora principal, terminales y «Sin conexión» (etapa 9G)
+
+Guía de instalación para el propietario: [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
+
+- **Primer arranque** (macOS): «¿Cómo se usará esta computadora?» con tres opciones grandes: **Servidor y terminal**,
+  **Solo servidor** y **Solo terminal**. Se puede cambiar después en **Administración › Sistema › Mantenimiento ›
+  «Modalidad de esta computadora»**, con una confirmación que explica que la base de datos se conserva; la aplicación
+  se reinicia.
+- **«Buscar el servidor»** (una terminal sin servidor): nombre de la terminal, «Computadoras principales en la red»
+  (cada una es un botón «Pedir código a …»; «Buscar otra vez»), «Escribir la dirección» y, después, el **código de 6
+  dígitos en grande** con lo que falta para que venza. Una terminal revocada o cuyo servidor cambió de identidad ve
+  «Esta terminal necesita emparejarse de nuevo» con «Emparejar de nuevo».
+- **«Solo servidor»**: antes de iniciar sesión, «Servidor del restaurante» con el estado y «Entrar a Administración»;
+  después, una barra reducida («Estado del servidor», «Administración» si se puede abrir, estado de la conexión,
+  usuario y pantalla completa) sin Mesas, Para llevar, Cocina ni Caja, sin atajos de venta ni paleta. La pantalla de
+  estado muestra si el servidor funciona y desde cuándo, las terminales conectadas, el último respaldo y «Abrir
+  Administración».
+- **«Sin conexión con el servidor»**: con la sesión abierta y sin servidor, una capa cubre todo lo que está debajo de la
+  barra superior (la barra sigue usable: navegar, usuario y pantalla completa no escriben en el servidor; en la captura
+  también queda cubierta la barra reducida). Lo capturado no se pierde: la pantalla queda montada debajo, sin clics ni
+  teclado. Dice cuándo es el próximo intento (1, 2, 4, 8 y después cada 10 s) y «Reintentar» lo hace ya (tiene el
+  foco). Al volver, la terminal vuelve a consultar todo lo que está a la vista.
+- **Sistema › Terminales**: «Terminales nuevas» (en la computadora principal se escribe el código que muestra la
+  terminal y se aprueba o se rechaza; desde otra terminal solo se ven), «Sesiones activas por tipo de terminal» (solo
+  se cuentan), la lista con tipo, sistema, usuario actual y «En línea»/«Desconectada»/«Revocada», «Ver configuración»
+  (con las impresoras de la terminal) y «Revocar». «Autorizar otra terminal» se llama ahora «Código para esta
+  computadora».
+- **Sistema › Mantenimiento**: «Servicio del servidor» (con «Reiniciar» cuando el servidor es un servicio de la
+  computadora), «Respaldos» y «Modalidad de esta computadora». El aviso de un respaldo fallido o atrasado aparece en la
+  pantalla de inicio de la terminal a quien administra el sistema, con «Ver respaldos».
+- **«Agotado»** en la captura: «Marcar agotados» (con su permiso) abre una barra con «Solo por hoy» / «Hasta nuevo
+  aviso» y cada toque marca o devuelve un producto; el producto agotado queda marcado y no se puede elegir.
+- **«Actualiza esta terminal» / «Actualiza el servidor»**: cuando las versiones no se entienden, en lugar de errores,
+  con «Volver a comprobar» y «Ver estado del sistema».
+
+Para desarrollar: la pantalla `server-status` se declara en `navigation/sections.ts` solo para «Solo servidor»
+(`serverOnly`; la paleta no la ofrece en otras modalidades y `requestScreen` rechaza ahí las secciones de operación).
+La capa es `navigation/ConnectionLostLayer.tsx` y la reconexión `services/reconnection.ts` (`announceReconnection`).
+**Ninguna pantalla nueva pone su propio «Reintentar» de conexión.** Los comandos nuevos de Tauri de estas pantallas
+(`installation_state`, `set_installation_mode`, `restart_application`, `pairing_*`, `pairing_start_found`,
+`discovery_search`, `choose_backup_directory`) se simulan en `e2e/native-driver.ts`.
 
 ## El selector (listas desplegables)
 

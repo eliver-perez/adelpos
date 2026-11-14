@@ -143,6 +143,40 @@ Cada edición envía el documento completo y su `revision`. Una revisión obsole
 
 Límites operativos actuales: 20 líneas/1000 unidades por previsualización, ocho niveles y 1000 nodos de expansión, 200 productos cargados por selección; 100 presentaciones/ingredientes y 30 grupos/componentes por producto; 100 opciones por grupo, 30 alternativas por componente, 100 tramos; listas hasta 5000 entradas por edición. Los selectores cargan hasta 5000 productos y las respuestas nativas tienen límite de 2 MiB. No se ha validado carga comercial de gran catálogo o muchas terminales; antes de superar esos límites, implementar selectores remotos y medición de rendimiento.
 
+## «Agotado» y catálogo descargable · etapa 9G
+
+Fase D de la etapa 9G (decisión D8; contrato en [API_V1.md](API_V1.md) y rutas en
+[API_CONTRACTS.md](../API_CONTRACTS.md), «Etapa 9G · API v1 para clientes»). Migración: sección D de la 0023.
+
+- **«Agotado»** es distinto de «Pausar» (`temporary_unavailable`, con `catalog.availability.manage`, que no cambia):
+  se marca desde la captura con un toque («Marcar agotados» → «Solo por hoy» o «Hasta nuevo aviso») con el permiso
+  nuevo `catalog.sold_out.manage` (solo al administrador; se asigna a los roles desde Personal), por
+  `POST catalog/products/{id}/sold-out` con `operation_id` (idempotente con `internal/idempotency`, lock 7820148304
+  exclusivo). Se guarda en `catalog_products.sold_out_at`, `sold_out_until` (fin del día comercial, calculado al
+  marcarlo con la «Hora de inicio del día»; `NULL` = hasta nuevo aviso) y `sold_out_by`; no cambia la revisión del
+  producto. Auditoría `catalog.product.sold_out` y, cuando el corte lo devuelve, `catalog.product.sold_out_reset`
+  (autor: proceso; `catalog.SoldOutWorker` revisa cada 30 s, y la lectura ya ignora una marca vencida).
+- **Un producto agotado no se puede capturar**: `409 PRODUCT_SOLD_OUT` en la vista previa, el borrador y la apertura
+  de una cuenta (lo que se agrega; una partida ya guardada se conserva o se reduce), la confirmación, la edición y el
+  pedido sin conexión, también cuando es complemento de otro producto o componente de un combo. Ninguna excepción de
+  disponibilidad lo pasa por alto. Los complementos que son ingredientes y las porciones no se agotan desde la
+  captura: se desactivan en Catálogo.
+- **Tiempo real**: desde la 9G toda escritura correcta del catálogo publica `catalog.changed` (ámbito `catalog`, con
+  `catalog.read`; quien vuelva a definir `realtime_events_scope_check` debe conservarlo), así que «Agotado» y cualquier
+  cambio llegan al momento a todas las terminales (antes la captura los volvía a consultar cada 15 s).
+- **Versión del catálogo**: un número por transacción (`catalog_version_seq`) que anotan disparadores en
+  `catalog_change_log` (entidad, id, último número, borrado) para las 19 tablas del catálogo y la tasa general de IVA
+  (`payment_settings.tax_rate`); el disparador toma 7820148304 (reentrante). **Época** (`app.catalog_epoch` combinada
+  con la base y el clúster): cambia sola al restaurar un respaldo con `restore` o al pasar los datos a otro clúster,
+  porque entonces los números se repiten con otro contenido.
+- **Catálogo descargable** (`GET catalog/sync`, con `catalog.read` y `catalog.prices.read`): completo (sin archivados) o
+  «solo cambios desde X» con `epoch` obligatoria (cambiados, archivados que cambiaron, borrados; una categoría trae sus
+  productos; la lista predeterminada o el IVA general traen todos; un producto que cambió trae los combos y grupos que
+  lo contienen, con `available_now` y `sold_out` por opción). Con otra época o una versión futura entrega todo con
+  `reset: true` y el cliente reemplaza lo guardado. Precios de la lista predeterminada con la misma función del cálculo;
+  sin promociones (las aplica el servidor al confirmar). Imágenes aparte: `GET catalog/images/{id}/content` binaria con
+  `ETag` y 304.
+
 ## Marca
 
 Los originales están en `assets/brand/adel-pos-tema-claro.png` y `adel-pos-tema-oscuro.png`. `BrandLogo` los incorpora localmente en acceso y navegación, cambia por tema, conserva transparencia/proporción y usa el icono compacto en espacios estrechos. No se modificaron los PNG originales ni se confunden con el logotipo futuro del restaurante.
