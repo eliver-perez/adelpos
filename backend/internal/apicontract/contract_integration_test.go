@@ -284,7 +284,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	// Catálogo descargable completo, por cambios, imágenes y productos de la captura.
 	full := decodeContract[map[string]any](t, client.call("GET", "/catalog/sync", nil, nil, 200).Body.Bytes())
 	version := int64(full["catalog_version"].(float64))
-	client.call("GET", fmt.Sprintf("/catalog/sync?since=%d", version), nil, nil, 200)
+	epoch := fmt.Sprint(full["catalog_epoch"])
+	client.call("GET", fmt.Sprintf("/catalog/sync?since=%d&epoch=%s", version, epoch), nil, nil, 200)
 	defaultList := full["price_list"].(map[string]any)["id"]
 	client.call("GET", fmt.Sprintf("/catalog/products?category_id=%s&price_list_id=%s", category["id"], defaultList), nil, nil, 200)
 	client.call("GET", "/catalog/images/"+imageID, nil, nil, 200)
@@ -294,7 +295,7 @@ func contractScenario(t *testing.T, client *contractClient) {
 	// «Agotado» y «Disponible otra vez».
 	client.call("POST", fmt.Sprintf("/catalog/products/%s/sold-out", fries["id"]),
 		map[string]any{"operation_id": contractID(), "sold_out": true, "indefinite": true}, nil, 200)
-	client.call("GET", fmt.Sprintf("/catalog/sync?since=%d", version), nil, nil, 200)
+	client.call("GET", fmt.Sprintf("/catalog/sync?since=%d&epoch=%s", version, epoch), nil, nil, 200)
 	client.call("POST", fmt.Sprintf("/catalog/products/%s/sold-out", fries["id"]),
 		map[string]any{"operation_id": contractID(), "sold_out": false}, nil, 200)
 
@@ -337,7 +338,15 @@ func contractScenario(t *testing.T, client *contractClient) {
 	rejection := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", stale, nil, 409).Body.Bytes())
 	details := rejection["error"].(map[string]any)["details"].(map[string]any)
 	stale["confirmation"] = map[string]any{"catalog_version": details["catalog_version"], "changes": details["changes"]}
-	client.call("POST", "/restaurant/offline-orders", stale, nil, 200)
+	accepted := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", stale, nil, 200).Body.Bytes())
+	// El envío original que llega tarde con la misma clave recibe el pedido que ya entró (revisión de la fase D).
+	delete(stale, "confirmation")
+	late := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", stale, nil, 409).Body.Bytes())
+	lateError := late["error"].(map[string]any)
+	if lateError["code"] != "OFFLINE_ORDER_ALREADY_ACCEPTED" ||
+		lateError["details"].(map[string]any)["result"].(map[string]any)["order_id"] != accepted["order_id"] {
+		t.Fatalf("envío tardío del pedido ya aceptado: %v", late)
+	}
 
 	// Eventos en tiempo real: el primer mensaje del flujo cumple EventBatch.
 	streamContext, stop := context.WithTimeout(context.Background(), 400*time.Millisecond)
