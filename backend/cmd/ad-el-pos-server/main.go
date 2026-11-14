@@ -48,14 +48,19 @@ func run(logger *slog.Logger) error {
 	lanIP := flags.String("lan-ip", "", "IP privada opcional para el certificado TLS local")
 	pid := flags.Int("pid", 0, "PID del servidor que «stop» debe detener (solo Windows)")
 	logFile := flags.String("log-file", "", "archivo de bitácora JSON en lugar de la salida estándar")
-	// Instalación de Windows (etapa 9E): carpeta de datos, binarios de PostgreSQL incluidos, vigilancia de
-	// la aplicación que lanzó el servidor y respaldo que se restaura. Fuera de Windows no se usan.
+	// Comandos de la instalación (Windows desde la etapa 9E, macOS desde la 9G): carpeta de datos, binarios
+	// de PostgreSQL, vigilancia de la aplicación que lanzó el servidor (solo Windows), respaldo que se
+	// restaura y, en macOS, la configuración de la instalación anterior que adopt-legacy copia. --pg-port y
+	// --listen solo los usan las pruebas, con una carpeta de datos nueva.
 	host := hostOptions{}
-	flags.StringVar(&host.dataDir, "data-dir", "", "carpeta de datos de la instalación de Windows")
-	flags.StringVar(&host.pgBin, "pg-bin", "", "carpeta de los binarios de PostgreSQL incluidos")
+	flags.StringVar(&host.dataDir, "data-dir", "", "carpeta de datos de la instalación")
+	flags.StringVar(&host.pgBin, "pg-bin", "", "carpeta de los binarios de PostgreSQL")
 	flags.BoolVar(&host.watchStdin, "watch-stdin", false, "detenerse cuando se cierre la entrada estándar")
 	flags.StringVar(&host.file, "file", "", "respaldo que se comprueba o restaura")
 	flags.BoolVar(&host.pause, "pause", false, "esperar Entrar antes de cerrar la ventana")
+	flags.IntVar(&host.pgPort, "pg-port", 0, "puerto de PostgreSQL de una carpeta de datos nueva (pruebas)")
+	flags.StringVar(&host.listen, "listen", "", "dirección de Go de una carpeta de datos nueva (pruebas)")
+	flags.StringVar(&host.fromConfig, "from-config", "", "server.json de la instalación anterior (adopt-legacy)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -79,7 +84,8 @@ func run(logger *slog.Logger) error {
 	if command == "stop" {
 		return stopProcess(*pid)
 	}
-	// Etapa 9E: comandos de la instalación de Windows (host, backup, restore-check, restore).
+	// Comandos de la instalación: host, backup, restore-check y restore (Windows desde la etapa 9E, macOS
+	// desde la 9G) y adopt-legacy (macOS). Con SIGTERM o SIGINT se detienen en orden.
 	if hostCommands[command] {
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
@@ -160,7 +166,8 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 }
 
 // serveHTTP sirve la API con los trabajadores de impresión e inventario hasta que se cancela el contexto
-// (SIGTERM en macOS; evento de parada o cierre de la aplicación en Windows) y cierra en orden. testMode
+// (SIGTERM en macOS, también el servicio al reiniciarse o al dejar de ser servidor; evento de parada o
+// cierre de la aplicación en Windows) y cierra en orden. testMode
 // lo informa /api/v1/version (etapa 9F): test_mode de la configuración o ADEL_TEST_MODE en el host.
 func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool *pgxpool.Pool, application *administration.Service, testMode bool) error {
 	probe := func(ctx context.Context) database.Health {

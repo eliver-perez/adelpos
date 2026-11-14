@@ -1,0 +1,12 @@
+#!/bin/bash
+# Opción «Servidor del restaurante»: el servidor usa el PostgreSQL 18 instalado en la computadora
+# (decisión D3; incluirlo en el paquete queda para la distribución de la etapa 10). Sin él no se instala
+# la opción, para no dejar un servicio que falla al arrancar.
+set -euo pipefail
+# shellcheck source=../common.sh
+source "$(/usr/bin/dirname "$0")/common.sh"
+
+if ! adel_find_postgres >/dev/null; then
+    adel_fail "falta PostgreSQL 18 en esta computadora (Homebrew: brew install postgresql@18); instálalo y vuelve a abrir el instalador, o desmarca «Servidor del restaurante» para instalar solo la terminal"
+fi
+exit 0

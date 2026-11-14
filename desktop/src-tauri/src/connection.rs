@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, net::IpAddr, path::PathBuf};
 
+/// Destino y modalidad de esta terminal. Desde la etapa 9G (fase A) la modalidad es una de las tres de
+/// §2.3 (`server-terminal`, `server-only` y `terminal-only`) y la escribe solo Rust al elegirla
+/// (installation.rs). Una terminal «Solo terminal» que todavía no se conecta a un servidor guarda la
+/// dirección vacía: no se hace ninguna petición hasta que se empareje (fases B y C).
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectionConfig {
@@ -8,8 +12,15 @@ pub struct ConnectionConfig {
     pub server_url: String,
     #[serde(default = "default_namespace")]
     pub credential_namespace: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ca_certificate: Option<String>,
+}
+
+impl ConnectionConfig {
+    /// Una terminal «Solo terminal» sin servidor todavía.
+    pub fn awaiting_server(&self) -> bool {
+        self.server_url.is_empty()
+    }
 }
 
 fn default_namespace() -> String {
@@ -21,9 +32,19 @@ pub fn parse_config(text: &str) -> Result<ConnectionConfig, String> {
         .map_err(|_| "El archivo de conexión no tiene un formato válido.".to_string())?;
     if !matches!(
         config.installation_mode.as_str(),
-        "server-terminal" | "terminal-only"
+        "server-terminal" | "server-only" | "terminal-only"
     ) {
-        return Err("El escritorio requiere server-terminal o terminal-only.".into());
+        return Err("El escritorio requiere server-terminal, server-only o terminal-only.".into());
+    }
+    if config.credential_namespace.is_empty() || config.credential_namespace.len() > 80 {
+        return Err("El perfil de credenciales requiere entre 1 y 80 caracteres.".into());
+    }
+    // Solo una terminal que todavía no se conecta a un servidor puede no tener dirección.
+    if config.server_url.is_empty() {
+        if config.installation_mode != "terminal-only" || config.ca_certificate.is_some() {
+            return Err("La dirección del servidor es obligatoria.".into());
+        }
+        return Ok(config);
     }
     let url =
         reqwest::Url::parse(&config.server_url).map_err(|_| "Dirección del servidor inválida.")?;
@@ -53,9 +74,6 @@ pub fn parse_config(text: &str) -> Result<ConnectionConfig, String> {
         if url.scheme() == "http" && !ip.is_loopback() {
             return Err("Las conexiones LAN requieren HTTPS y un certificado verificado.".into());
         }
-    }
-    if config.credential_namespace.is_empty() || config.credential_namespace.len() > 80 {
-        return Err("El perfil de credenciales requiere entre 1 y 80 caracteres.".into());
     }
     config.server_url = url.as_str().trim_end_matches('/').to_string();
     Ok(config)
@@ -108,11 +126,34 @@ mod tests {
         }
     }
     #[test]
-    fn rejects_server_only_and_unknown_fields() {
-        assert!(parse_config(
-            r#"{"installation_mode":"server-only","server_url":"http://localhost"}"#
-        )
-        .is_err());
+    fn rejects_unknown_modes_and_fields() {
+        assert!(
+            parse_config(r#"{"installation_mode":"server","server_url":"http://localhost"}"#)
+                .is_err()
+        );
         assert!(parse_config(r#"{"installation_mode":"terminal-only","server_url":"http://localhost","password":"secret"}"#).is_err());
+    }
+
+    // Etapa 9G, fase A: las tres modalidades; la dirección vacía solo para una terminal sin servidor.
+    #[test]
+    fn accepts_the_three_modes_and_an_unpaired_terminal() {
+        for mode in ["server-terminal", "server-only", "terminal-only"] {
+            let text = serde_json::json!({"installation_mode": mode, "server_url": "http://127.0.0.1:8181"});
+            let config = parse_config(&text.to_string()).unwrap();
+            assert_eq!(config.installation_mode, mode);
+            assert!(!config.awaiting_server());
+        }
+        let unpaired =
+            parse_config(r#"{"installation_mode":"terminal-only","server_url":""}"#).unwrap();
+        assert!(unpaired.awaiting_server());
+        assert_eq!(unpaired.credential_namespace, "main");
+        for text in [
+            r#"{"installation_mode":"server-terminal","server_url":""}"#,
+            r#"{"installation_mode":"server-only","server_url":""}"#,
+            r#"{"installation_mode":"terminal-only","server_url":"","ca_certificate":"/tmp/ca.pem"}"#,
+            r#"{"installation_mode":"terminal-only","server_url":"","credential_namespace":""}"#,
+        ] {
+            assert!(parse_config(text).is_err(), "{text}");
+        }
     }
 }

@@ -320,6 +320,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	testTestDataRemoval(t, environment)
 	// Etapa 9F, fase C: «Estaciones que puede atender» del usuario (kitchen_stations_acceptance_test.go).
 	testKitchenUserStations(t, environment)
+	// Etapa 9G, fase A: estado y reinicio del servicio del servidor (service_host_acceptance_test.go).
+	testServiceStatus(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

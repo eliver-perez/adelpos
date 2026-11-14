@@ -1,5 +1,3 @@
-//go:build windows
-
 package standalone
 
 import (
@@ -15,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/config"
-	"local/ad-el-pos/server/internal/fileacl"
 )
 
 // databaseEnvironment son las variables de libpq para los programas de PostgreSQL: la contraseña viaja
@@ -58,7 +55,8 @@ func Backup(ctx context.Context, layout Layout, database config.Database, label 
 		_ = os.Remove(filename)
 		return "", errors.New("el respaldo no se pudo leer; se descartó")
 	}
-	if err := fileacl.Protect(filename); err != nil {
+	// pg_dump crea el archivo con la máscara del proceso: se deja privado (0600 en macOS, ACL en Windows).
+	if err := privateFile(filename); err != nil {
 		return "", err
 	}
 	return filename, nil
@@ -78,6 +76,12 @@ func tableCounts(ctx context.Context, layout Layout, database string) (map[strin
 		return nil, err
 	}
 	defer connection.Close(context.Background())
+	return countTables(ctx, connection)
+}
+
+// countTables cuenta las filas de todas las tablas del esquema app con una conexión abierta (la del
+// superusuario de la instalación o, al pasar los datos de una instalación anterior, la de su rol).
+func countTables(ctx context.Context, connection *pgx.Conn) (map[string]int, error) {
 	rows, err := connection.Query(ctx, "SELECT tablename FROM pg_tables WHERE schemaname = 'app' ORDER BY tablename")
 	if err != nil {
 		return nil, errors.New("no se pudieron listar las tablas")

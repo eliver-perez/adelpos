@@ -21,6 +21,7 @@ import {
 import type { RecordedRequest, Responder } from './inventoryTestData';
 import { navigationMap, openInventorySection } from './inventoryNavigationTestUtils';
 import { chooseValue } from '../../testing/select';
+import { serverTerminalInstallation } from '../../testing/installation';
 
 // Solo con inventory.read: el resumen, el catálogo sin proveedores, los ajustes y la configuración
 // sin parámetros (etapa 9A, navegación agrupada).
@@ -110,6 +111,9 @@ describe('navegación de Inventarios', () => {
       }
       if (command === 'connection_config') {
         return { installation_mode: 'server-terminal', server_url: 'http://127.0.0.1:8181' };
+      }
+      if (command === 'installation_state') {
+        return serverTerminalInstallation;
       }
       if (command === 'server_snapshot') {
         return {

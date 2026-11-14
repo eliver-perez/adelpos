@@ -95,6 +95,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9F: «Quitar datos de prueba» en el Mantenimiento del administrador (settings.manage).
         "maintenance_test_data" => Some((Method::GET, "maintenance/test-data")),
         "maintenance_remove_test_data" => Some((Method::POST, "maintenance/test-data/remove")),
+        // Etapa 9G, fase A: estado y reinicio del servicio del servidor (settings.manage).
+        "maintenance_service" => Some((Method::GET, "maintenance/service")),
+        "maintenance_service_restart" => Some((Method::POST, "maintenance/service/restart")),
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
@@ -2176,6 +2179,20 @@ mod tests {
             );
         }
         assert!(route("maintenance_backup", None).is_err());
+    }
+
+    #[test]
+    fn stage9g_service_routes_are_fixed() {
+        assert_eq!(
+            route("maintenance_service", None).unwrap(),
+            (Method::GET, "maintenance/service".to_string())
+        );
+        assert_eq!(
+            route("maintenance_service_restart", Some("x")).unwrap(),
+            (Method::POST, "maintenance/service/restart".to_string())
+        );
+        assert!(route("maintenance_service_stop", None).is_err());
+        assert!(route("maintenance_service_mode", None).is_err());
     }
 
     #[test]

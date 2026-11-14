@@ -3,6 +3,7 @@
 mod api;
 mod connection;
 mod export;
+mod installation;
 mod menu;
 mod realtime;
 mod server_host;
@@ -28,6 +29,8 @@ pub struct TerminalState {
     events_generation: Arc<AtomicU64>,
     // Servidor local de la instalación de Windows (etapa 9E); siempre None en macOS.
     host: Option<server_host::ServerHost>,
+    // Modalidad de la computadora y servicio del servidor (etapa 9G, fase A; installation.rs).
+    installation: installation::Context,
 }
 
 impl TerminalState {
@@ -40,13 +43,22 @@ impl TerminalState {
     }
 
     /// Token del asistente inicial: el de ADEL_PROVISIONING_FILE (macOS y desarrollo) o, en la
-    /// instalación de Windows, el que el servidor local deja en la carpeta de datos (etapa 9E).
+    /// instalación de Windows, el que el servidor local deja en la carpeta de datos (etapa 9E); desde la
+    /// 9G también el del servicio de macOS (installation.rs).
     pub fn provisioning_token(&self) -> Option<String> {
-        self.provisioning_token.clone().or_else(|| {
-            self.host
-                .as_ref()
-                .and_then(|host| host.provisioning_token())
-        })
+        self.provisioning_token
+            .clone()
+            .or_else(|| {
+                self.host
+                    .as_ref()
+                    .and_then(|host| host.provisioning_token())
+            })
+            .or_else(|| {
+                self.config
+                    .as_ref()
+                    .ok()
+                    .and_then(|config| self.installation.provisioning_token(config))
+            })
     }
 
     /// Explicación de una petición sin respuesta: la general o, mientras el servidor local de Windows
@@ -71,6 +83,9 @@ const STORAGE_PENDING_MESSAGE: &str =
     "Esperando autorización del almacén seguro del sistema. Revisa el aviso de Windows.";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const STORAGE_PENDING_MESSAGE: &str = "Esperando autorización del almacén seguro del sistema.";
+
+/// Una terminal «Solo terminal» que todavía no se conecta a ningún servidor (etapa 9G).
+const AWAITING_SERVER_MESSAGE: &str = "Esta terminal todavía no está conectada a un servidor.";
 
 #[derive(Serialize)]
 pub struct HTTPResult {
@@ -192,6 +207,7 @@ fn main() {
     with_native_menu(builder)
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
+            let installation = installation::Context::detect(app.path().app_config_dir().ok());
             let client = config.as_ref().map_err(Clone::clone).and_then(client);
             let vault = Arc::new(OnceLock::new());
             let pending_vault = Arc::clone(&vault);
@@ -202,7 +218,13 @@ fn main() {
                 let opened = vault_config
                     .as_ref()
                     .map_err(Clone::clone)
-                    .and_then(|value| Vault::open(&value.server_url, &value.credential_namespace));
+                    .and_then(|value| {
+                        // Etapa 9G: una terminal «Solo terminal» sin servidor todavía no tiene credencial.
+                        if value.awaiting_server() {
+                            return Err(AWAITING_SERVER_MESSAGE.to_string());
+                        }
+                        Vault::open(&value.server_url, &value.credential_namespace)
+                    });
                 let _ = pending_vault.set(opened);
             });
             let provisioning_token = std::env::var_os("ADEL_PROVISIONING_FILE")
@@ -223,6 +245,7 @@ fn main() {
                 enrollment_code,
                 events_generation: Arc::new(AtomicU64::new(0)),
                 host,
+                installation,
             });
             window_check::start(app.handle().clone());
             // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
@@ -242,6 +265,9 @@ fn main() {
             export::export_report,
             menu::menu_subscribe,
             menu::menu_set_state,
+            installation::installation_state,
+            installation::set_installation_mode,
+            installation::restart_application,
         ])
         .build(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio")
@@ -269,6 +295,11 @@ mod startup_tests {
             enrollment_code: None,
             events_generation: Arc::new(AtomicU64::new(0)),
             host: None,
+            installation: installation::Context {
+                connection_file: None,
+                chosen: true,
+                service: None,
+            },
         };
         assert!(state
             .vault()

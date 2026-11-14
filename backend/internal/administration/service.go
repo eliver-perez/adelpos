@@ -40,6 +40,9 @@ type Service struct {
 	// configuración en serve y el respaldo de la instalación en el host de Windows. Sin valor no se
 	// quita nada (las pruebas inyectan uno controlado).
 	Backups maintenance.Backuper
+	// Host informa el estado del servicio del sistema y permite reiniciarlo (etapa 9G, fase A;
+	// service_host.go). Sin valor (serve y pruebas), el servidor no es un servicio administrado.
+	Host HostControl
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once

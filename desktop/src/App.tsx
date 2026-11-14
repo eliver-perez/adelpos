@@ -41,8 +41,13 @@ import { serverState } from './navigation/serverState';
 import { TileScreen } from './navigation/TileScreen';
 import { TopBar } from './navigation/TopBar';
 import { UserMenu } from './navigation/UserMenu';
-import { barHighlight, canOpen, resolveHome } from './navigation/sections';
+import { barHighlight, canOpen, resolveHome, sectionByID } from './navigation/sections';
 import type { ScreenID } from './navigation/sections';
+import { installationError, readInstallation } from './services/installation';
+import type { InstallationState } from './services/installation';
+import { ModalityChoicePage } from './pages/setup/ModalityChoicePage';
+import { FindServerPage } from './pages/setup/FindServerPage';
+import { ServerOnlyAccess, ServerOnlyBar, ServerOnlyPage } from './pages/server/ServerOnlyPage';
 import { dismissNotice, notifyError, notifySuccess, notifyWarning } from './services/notify';
 import { savePreferences } from './services/preferences';
 import { setPrecheckName } from './services/documentNames';
@@ -56,10 +61,66 @@ export function App() {
   // el operation_id de un cobro o una operación de cocina sin resultado confirmado.
   return (
     <PendingOperationsProvider>
-      <ApplicationContent />
+      <InstallationGate />
       <AppToaster />
     </PendingOperationsProvider>
   );
+}
+
+// Etapa 9G (§2.3): antes de conectarse se resuelve la modalidad de esta computadora. Sin elegirla (primer
+// arranque en macOS) se pregunta; «Solo terminal» sin servidor pasa a «Buscar el servidor» (las fases B
+// y C agregan ahí la búsqueda y el emparejamiento); con servidor se conecta al de esta computadora y
+// «Solo servidor» muestra la pantalla de estado en lugar de la interfaz de venta.
+function InstallationGate() {
+  const [state, setState] = useState<InstallationState | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    readInstallation()
+      .then((value) => {
+        if (active) {
+          setState(value);
+        }
+      })
+      .catch((problem: unknown) => {
+        if (active) {
+          setError(installationError(problem));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  if (error) {
+    return (
+      <AccessShell overlay={null}>
+        <AccessFrame
+          title="Revisa la instalación"
+          description="No se pudo leer cómo se usa esta computadora."
+        >
+          <Notice>{error}</Notice>
+        </AccessFrame>
+      </AccessShell>
+    );
+  }
+  if (!state) {
+    return null;
+  }
+  if (!state.chosen) {
+    return (
+      <AccessShell overlay={null}>
+        <ModalityChoicePage state={state} />
+      </AccessShell>
+    );
+  }
+  if (state.mode === 'terminal-only' && !state.server_configured) {
+    return (
+      <AccessShell overlay={null}>
+        <FindServerPage state={state} />
+      </AccessShell>
+    );
+  }
+  return <ApplicationContent serverOnly={state.mode === 'server-only'} />;
 }
 
 // Pantallas de acceso y del asistente: sin barra superior, con el control de pantalla completa fijo
@@ -79,10 +140,14 @@ function isOperation(screen: ScreenID) {
   return screen === 'restaurant' || screen === 'takeaway';
 }
 
-function ApplicationContent() {
+function ApplicationContent({ serverOnly }: { serverOnly: boolean }) {
   const session = useSession();
-  // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal.
-  const [screen, setScreen] = useState<ScreenID>('restaurant');
+  // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal (en «Solo servidor»,
+  // el estado del servidor).
+  const [screen, setScreen] = useState<ScreenID>(serverOnly ? 'server-status' : 'restaurant');
+  // «Solo servidor» (etapa 9G): antes de iniciar sesión se ve el estado del servidor; el acceso aparece
+  // al pedir «Entrar a Administración».
+  const [serverLogin, setServerLogin] = useState(false);
   // Cada elección de Mesas o Para llevar en la barra vuelve a la vista de esa sección.
   const [operationRequest, setOperationRequest] = useState(0);
   // Vista operativa visible y captura abierta (las informa OperationalPage).
@@ -102,11 +167,13 @@ function ApplicationContent() {
   const operationMode = isOperation(screen);
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const authenticated = session.phase === 'authenticated';
-  const home = resolveHome(identity?.terminal.home_screen, permissions);
+  const home = serverOnly
+    ? 'server-status'
+    : resolveHome(identity?.terminal.home_screen, permissions);
   // Atajo «Caja» de la barra superior (etapa 9C): el gancho y la hoja de la 7.1 suben aquí para
   // que el botón Caja muestre el turno en todas las pantallas con una sola consulta.
   const cashShortcut = useCashShortcut({
-    active: authenticated && !!identity,
+    active: authenticated && !!identity && !serverOnly,
     can,
     onOpenCash: () => void requestScreen('cash'),
   });
@@ -117,12 +184,13 @@ function ApplicationContent() {
         disabled: option.disabled,
       }))
     : [];
-  // Menú nativo, atajos y paleta (etapa 9C, fase C): ejecutan las mismas funciones de los botones.
+  // Menú nativo, atajos y paleta (etapa 9C, fase C): ejecutan las mismas funciones de los botones. En
+  // «Solo servidor» no hay interfaz de venta: los atajos de las secciones y la paleta no se ofrecen.
   const commands = useCommandCenter({
-    authenticated: authenticated && !!identity,
+    authenticated: authenticated && !!identity && !serverOnly,
     permissions,
-    screen: authenticated && identity ? screen : null,
-    operation: can('accounts.read') ? operationCommands : null,
+    screen: authenticated && identity && !serverOnly ? screen : null,
+    operation: can('accounts.read') && !serverOnly ? operationCommands : null,
     operationHandlers,
     cashOptions,
     requestScreen,
@@ -196,17 +264,19 @@ function ApplicationContent() {
       return;
     }
     document.documentElement.dataset.theme = identity.preferences.theme;
-    const start = resolveHome(identity.terminal.home_screen, identity.user.permissions);
+    const start = serverOnly
+      ? 'server-status'
+      : resolveHome(identity.terminal.home_screen, identity.user.permissions);
     if (initializedUser.current !== identity.user.id) {
       initializedUser.current = identity.user.id;
       setScreen(start);
       setOperationRequest((current) => current + 1);
       return;
     }
-    if (!canOpen(screen, identity.user.permissions)) {
+    if (!canOpen(screen, identity.user.permissions) || (serverOnly && isOperation(screen))) {
       setScreen(start);
     }
-  }, [identity, screen]);
+  }, [identity, screen, serverOnly]);
 
   // Navegación pedida por la persona: si una pantalla tiene cambios sin guardar (editor de
   // plantillas, etapa 9B), se confirma antes de salir de ella.
@@ -229,6 +299,10 @@ function ApplicationContent() {
   // y los atajos. Sin cambios pendientes la navegación es inmediata; con ellos espera la
   // confirmación. Devuelve si se navegó (las acciones que siguen en la pantalla nueva lo esperan).
   async function requestScreen(next: ScreenID): Promise<boolean> {
+    // «Solo servidor» no abre la interfaz de venta (Mesas, Para llevar, Cocina ni Caja).
+    if (serverOnly && sectionByID(next).group === 'operation') {
+      return false;
+    }
     const go = () => {
       setScreen(next);
       if (isOperation(next)) {
@@ -252,6 +326,7 @@ function ApplicationContent() {
     }
     try {
       await session.logout();
+      setServerLogin(false);
     } catch (error) {
       notifyError(error, 'No se pudo cerrar la sesión.');
     }
@@ -344,6 +419,13 @@ function ApplicationContent() {
           refresh={session.refresh}
           localAvailable={session.local?.local_enrollment_available}
         />
+      </AccessShell>
+    );
+  }
+  if (serverOnly && session.phase === 'login' && !serverLogin) {
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <ServerOnlyAccess onLogin={() => setServerLogin(true)} />
       </AccessShell>
     );
   }
@@ -474,6 +556,43 @@ function ApplicationContent() {
     />
   );
   const navigation: NavigationValue = { screen, home, requestScreen, setTail };
+
+  // «Solo servidor» (etapa 9G, §2.3): barra reducida, pantalla de estado y, para quien la puede abrir,
+  // Administración; nunca la interfaz de venta.
+  if (serverOnly) {
+    return (
+      <NavigationContext.Provider value={navigation}>
+        <div className="app-shell min-h-screen server-only-shell">
+          <ServerOnlyBar
+            screen={screen}
+            canAdminister={canOpen('administration', identity.user.permissions)}
+            server={server}
+            userMenu={userMenu(false)}
+            onNavigate={(next) => void requestScreen(next)}
+          />
+          <main className="admin-main">
+            <Breadcrumb
+              screen={screen}
+              tail={tail?.screen === screen ? tail.label : null}
+              onNavigate={requestScreen}
+            />
+            {screen === 'server-status' ? (
+              <ServerOnlyPage
+                canManage={can('settings.manage')}
+                canAdminister={canOpen('administration', identity.user.permissions)}
+                onAdministration={() => void requestScreen('administration')}
+              />
+            ) : (
+              content()
+            )}
+          </main>
+          <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
+          {commands.overlay}
+          {leaveDialog}
+        </div>
+      </NavigationContext.Provider>
+    );
+  }
 
   return (
     <NavigationContext.Provider value={navigation}>

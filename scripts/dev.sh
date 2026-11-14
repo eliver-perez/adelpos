@@ -79,6 +79,11 @@ case "${1:-help}" in
         cd desktop
         exec npm run tauri -- build --bundles app
         ;;
+    build-macos-pkg)
+        # Etapa 9G: instalador .pkg con el servidor como servicio (no instala nada; ver el script).
+        shift
+        exec scripts/build-macos-pkg.sh "$@"
+        ;;
     test)
         "$PROJECT_ROOT/scripts/dev.sh" format-check
         node scripts/sync-metadata.mjs --check

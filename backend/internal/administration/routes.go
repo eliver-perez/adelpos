@@ -140,6 +140,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if strings.HasPrefix(route, "reports/") {
 		return handleReports(ctx, tx, request, principal, route)
 	}
+	// Estado y reinicio del servicio del servidor (etapa 9G, fase A; service_host.go).
+	if route == "maintenance/service" || strings.HasPrefix(route, "maintenance/service/") {
+		return service.serviceRoutes(ctx, tx, request, principal, route)
+	}
 	// Mantenimiento del administrador (etapa 9F): «Quitar datos de prueba» (maintenance.go).
 	if strings.HasPrefix(route, "maintenance/") {
 		return service.maintenanceRoutes(ctx, tx, request, principal, route)
