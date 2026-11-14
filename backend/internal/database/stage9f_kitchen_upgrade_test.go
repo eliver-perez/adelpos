@@ -48,8 +48,10 @@ func TestStage9FKitchenStationsUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := expected[len(expected)-1].Version; last != 22 || product.Read().SchemaVersion != 22 {
-		t.Fatalf("se esperaba el esquema 22 en la última migración (%d) y en el producto (%d)", last, product.Read().SchemaVersion)
+	// Desde la etapa 9G la última migración es posterior a la 0022: se migra desde el esquema 21 hasta la última y se
+	// comprueba solo el efecto de la 0022 (las secciones de la 0023 no tocan impresoras, cocina ni cobros).
+	if last := expected[len(expected)-1].Version; last < 22 || last != product.Read().SchemaVersion {
+		t.Fatalf("la última migración (%d) no coincide con el esquema del producto (%d)", last, product.Read().SchemaVersion)
 	}
 	schema21 := fstest.MapFS{}
 	for _, migration := range expected {

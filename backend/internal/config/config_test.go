@@ -202,3 +202,29 @@ func TestBackupPathsMustBeAbsolute(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Etapa 9G, fase B (D1): la escucha HTTPS de la red local es opcional y solo admite todas las interfaces,
+// loopback o una IP privada, con un puerto distinto del de la escucha local.
+func TestNetworkListenAddress(t *testing.T) {
+	for _, address := range []string{"", ":8443", "0.0.0.0:8443", "[::]:8443", "127.0.0.1:0", "192.168.1.20:8443", "[fd00::5]:8443"} {
+		config := validConfig()
+		config.NetworkListenAddress = address
+		if err := config.Validate(); err != nil {
+			t.Errorf("%q debe aceptarse: %v", address, err)
+		}
+	}
+	for _, address := range []string{"8443", "8.8.8.8:8443", "servidor.local:8443", ":99999", ":abc", "127.0.0.1:8181", ":8181", "[2001:db8::1]:8443"} {
+		config := validConfig()
+		config.NetworkListenAddress = address
+		if err := config.Validate(); err == nil {
+			t.Errorf("%q debe rechazarse", address)
+		}
+	}
+	body, err := json.Marshal(validConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "network_listen_address") {
+		t.Fatal("sin escucha de red el archivo no cambia")
+	}
+}
