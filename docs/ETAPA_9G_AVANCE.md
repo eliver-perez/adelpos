@@ -2280,6 +2280,102 @@ principal y Go la valida; la contraseña solo en `PGPASSWORD`; aviso persistente
 Pendiente de la computadora real: un `LaunchDaemon` sin permiso de privacidad para «Volúmenes extraíbles» puede recibir
 `EPERM` al escribir en una USB (la prueba de escritura la rechazaría como «sin permiso»): comprobar en la Fase G.
 
+### Correcciones de la parte 2 (Fase D)
+
+Un agente (13/11/2026), en el árbol `$SCR/wt/DF`, rama `etapa-9g-dfix` desde la punta de `etapa-9g-merge` (`dc638d1`).
+Commits `e9d35fc` (correcciones) y `9eb8a49` (especificación de Playwright). Se editó solo la sección D de la 0023 (no aplicada aún en ninguna instalación); las secciones B y F
+quedan intactas. Cada hallazgo se verificó en el código antes de corregirlo; los cinco se confirmaron.
+
+#### Hallazgo → corrección → prueba
+
+1. **MEDIO · «Solo cambios desde X» perdía productos archivados** (`catalog/sync.go`). Confirmado: con `price_list` o
+   `tax` en la bitácora, la rama «todos los productos» filtraba `NOT p.archived` y un producto archivado después de X
+   no llegaba ni con `archived` ni en `deleted`.
+   **Corrección**: el plan de la descarga (`catalog/sync_dependents.go`, `syncPlan.products`) entrega en esa rama los
+   productos vigentes **más** los archivados que cambiaron después de X.
+   **Prueba** (`catalog/stage9g_test.go`, subprueba de revisión): se archiva la hamburguesa y después se guarda la lista
+   predeterminada → llega con `archived: true` junto con todos los vigentes. En el otro orden, primero se cambia el IVA
+   general (8 %) y después se archiva el combo → llega archivado, con la tasa nueva en los vigentes. Un archivado que
+   no cambió después de X no vuelve a llegar.
+2. **BAJO · Una base restaurada reutilizaba versiones** (`catalog_version_seq`). Confirmado: tras restaurar, los
+   números que siguieron al respaldo se repiten con otro contenido.
+   **Corrección**: **época del catálogo**. La 0023 (sección D) crea `app.catalog_epoch` (una fila con un UUID) y
+   `catalog.Epoch` la combina con el OID de la base y el `system_identifier` del clúster
+   (`md5(…)::uuid`). Restaurar con el comando `restore` (DROP/CREATE de la base) o pasar los datos a otro clúster (la
+   adopción de la fase A) la cambia **sola**, sin depender de que cada procedimiento de restauración se acuerde de
+   regenerarla: me pareció más seguro que cambiar el UUID en cada comando de restauración, que olvidaría un
+   procedimiento manual que recree la base. `catalog/sync` devuelve `catalog_epoch`, **exige `epoch` cuando `since` > 0**
+   (400 sin ella) y, con otra época, entrega todo con `reset: true`; `restaurant/state` también la devuelve.
+   `docs/API_V1.md` explica qué hace el cliente: guardar versión y época y, con `reset`, reemplazar todo lo guardado.
+   Límite conocido: una restauración que no recree la base (por ejemplo, `pg_restore --clean` sobre la misma) no la
+   cambia; ningún procedimiento del proyecto lo hace.
+   **Pruebas**: `catalog/stage9g_test.go` (sin época → 400; época inválida → 400; otra época → todo con `reset`; misma
+   época → solo cambios) y **restauración real** en `cmd/ad-el-pos-server/host_unix_integration_test.go`
+   (`TestServiceHostOnMacOS`): la época leída antes del respaldo cambia después de `restore`, y el UUID guardado se
+   conserva. `database/stage9g_android_upgrade_test.go`: la tabla nace con una sola fila.
+3. **BAJO · El borrador aceptaba productos agotados** (`operations/drafts.go`). Confirmado: `PUT …/draft` y abrir una
+   cuenta con `items` no ejecutan el motor.
+   **Corrección**: `catalog.RejectSoldOut` (motor con la excepción de disponibilidad, que nunca pasa por alto
+   «Agotado») y `operations.rejectSoldOutCapture` en `saveDraft` y `openAccount`: solo revisan lo que se agrega (partida
+   nueva, con otro producto, presentación o personalización, o con más unidades). Una partida ya guardada que se agotó
+   después se conserva igual o con menos unidades (el mesero puede quitarla; la confirmación la sigue rechazando). Otros
+   rechazos del catálogo se ignoran aquí (los dicen la cotización y la confirmación, como antes). La edición de partidas
+   confirmadas no cambia.
+   **Pruebas**: `operations/stage9g_offline_test.go` (abrir cuenta con un agotado → 409 sin crear nada; conservar y
+   reducir → 200; aumentar, otra partida del agotado y combo con el componente agotado → 409 «Papas producto está
+   agotado» sin cambiar la cuenta; disponible otra vez → se guarda) y Playwright `workflow-stage9g-sold-out.spec.ts`:
+   con la limonada en la cuenta, otra terminal la agota y la cuenta ya avisa (cálculo de Go); «Agregar una unidad» no se
+   guarda (segundo aviso igual, del borrador rechazado, y «Por guardar…»); al quitar la unidad de más queda «Guardado»
+   con un solo aviso. Nota: el aviso del borrador rechazado y el del cálculo dicen lo mismo («Limonada 9G está agotado.
+   Elige otro producto.»); no hizo falta cambiar la interfaz.
+4. **BAJO · Reenvío confirmado con `IDEMPOTENCY_CONFLICT` sin resultado** (`operations/handler.go`). Confirmado.
+   **Corrección**: en `replay`, si la clave de `POST restaurant/offline-orders` ya está guardada **por el mismo usuario y
+   la misma terminal** con otro contenido, 409 **`OFFLINE_ORDER_ALREADY_ACCEPTED`** con `details.status:
+"already_accepted"` y `details.result` (la respuesta guardada: `order_id`, `account_id`, cuenta completa). Otro
+   remitente sigue recibiendo `IDEMPOTENCY_CONFLICT` sin datos. Contrato: esquema `OfflineOrderAlreadyAccepted` en el 409
+   de `submitOfflineOrder`; `docs/API_V1.md` (doble envío y tabla de errores).
+   **Pruebas**: `operations/stage9g_offline_test.go` reproduce el caso exacto (original rechazado por precio → el precio
+   vuelve → la repetición tardía entra → el reenvío confirmado recibe el pedido que entró; un solo pedido; otro usuario
+   recibe el conflicto sin el pedido) y el envío tardío del original después de la confirmación. `TestContractV1`
+   valida la respuesta contra el contrato.
+5. **BAJO · «Agotado» no se reflejaba en combos ni grupos** (`sync.go`). Confirmado.
+   **Corrección**: la descarga de cambios agrega, con las relaciones vigentes, los combos que ofrecen un producto que
+   cambió (también como predeterminado, y combos de combos) y los grupos cuyos complementos son ese producto o cuyos
+   complementos, porciones o ingredientes cambiaron. Cada opción de ranura de combo y de grupo lleva `available_now` y
+   `sold_out` (mismas reglas que el cálculo), y un combo cuya ranura obligatoria se queda sin opciones disponibles sale
+   con `available_now: false` y su motivo. Se resolvió **al leer** a partir de lo que anotó la bitácora (la versión ya
+   sube con el producto agotado) en lugar de anotar combos y grupos en los disparadores: cubre cualquier causa
+   (agotado, desactivación, categoría, complemento) sin que los disparadores conozcan las relaciones.
+   **Prueba** (`catalog/stage9g_test.go`): combo con ranura obligatoria de papas y grupo con el complemento papas; al
+   agotar las papas, la descarga de cambios trae papas y combo (no disponible, opción `sold_out`) y el grupo (opción no
+   disponible y agotada), y la descarga completa marca el combo; al reactivarlas, el combo vuelve a estar disponible.
+
+#### Pruebas ejecutadas (13/11/2026, árbol DF, clúster 55499, Go 8185, vista previa 1423)
+
+| Suite                                                                                                 | Resultado                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `format`, `sync`, `vet`, `win` (`GOOS=windows` build y vet)                                           | aprobado                                                                                                                                                                       |
+| Go unitarias con `-race`                                                                              | aprobado (16 s), incluidas las del contrato                                                                                                                                    |
+| Integración con `-race`                                                                               | `apicontract` 10 s, `database` 15 s, `catalog` 22 s, `cmd/ad-el-pos-server` 45 s (restauración real con la época), `administration` 120 s, `operations` 316 s: todas aprobadas |
+| Playwright `restaurant.spec.ts`, `workflow-stage9g-sold-out.spec.ts`, `workflow-zz-test-data.spec.ts` | Chromium 3/3 (1.6 min), WebKit 3/3 (1.6 min); pantalla desbloqueada                                                                                                            |
+
+La primera corrida de Playwright falló en la especificación de «Agotado» porque esperaba que el aviso desapareciera al
+quitar la unidad de más; el aviso que quedaba era el del cálculo (correcto: la limonada sigue agotada en el borrador). Se
+ajustó la especificación para distinguir los dos avisos; `workflow-zz-test-data` falló en esa corrida solo en cascada
+(el puente exige una base sin configurar después de un fallo) y aprobó en la siguiente. No se tocó la interfaz (sin
+`tsc`/Vitest nuevos: los archivos de `desktop/src` no cambiaron).
+
+#### Para el coordinador y CLAUDE.md
+
+- `catalog/sync` exige `epoch` con `since` > 0 (cambio del contrato antes de que exista ningún cliente Android).
+- Código nuevo de error `OFFLINE_ORDER_ALREADY_ACCEPTED` (409).
+- `RejectSoldOut` toma el lock 7820148304 compartido después de 7820148305 (orden de siempre).
+- Fase G: en `docs/INSTALAR_EN_RED.md`, al explicar la restauración, decir que después las terminales y teléfonos
+  vuelven a descargar el catálogo completo por sí solos (época nueva).
+
+**Fusión y verificación del coordinador**: la rama `etapa-9g-dfix` salió de `dc638d1` (sin la Fase E); se fusionó sin
+conflictos en `792e877` y quedó cubierta por la regresión final de la Fase G (abajo).
+
 ### Correcciones de la parte 3 (Fase F)
 
 Un agente (14/11/2026), en el árbol `$SCR/wt/FF` (rama `etapa-9g-ffix`, desde `etapa-9g-merge` en `6e92f7a`, con A, D,
@@ -2445,3 +2541,53 @@ Sobre el commit `3948fdc`, con la pantalla desbloqueada (`CGSSessionScreenIsLock
 `dc638d1`. Copia exacta: formato, `sync`, `vet`, `GOOS=windows`, Go unitarias con `-race`, integración de los 13
 paquetes, `tsc`, Vitest y Playwright (`restaurant`, `workflow-stage9f-printing`, las seis `workflow-stage9g-*` y
 `workflow-zz-test-data`: 10 de 10 en Chromium y 10 de 10 en WebKit): todo aprobado.
+
+## Fase G · Versión, documentación, regresión final, instalación y fusión
+
+### Versión 0.10.0
+
+`c4cc94d`: `config/product.json` → versión **0.10.0** y, como pidió la Fase D, `min_client_version` y
+`min_server_version` también **0.10.0** (el escritorio 0.10.0 usa rutas que un servidor 0.9.5 no tiene, y un cliente
+0.10.0 es el primero que se identifica); `scripts/dev.sh sync` y la versión de la raíz en `Cargo.lock` y
+`package-lock.json` (como en la 9F). Esquema 23 (`0023_network_terminals_and_android.sql`, secciones D, B, F y E).
+
+### Documentación
+
+Un agente, solo Markdown (`dc5fe19`, fusionado en `d9e1f1a`): `CLAUDE.md` (versión y esquema, arquitectura servidor y
+terminales, modalidades, emparejamiento y cifrado —D1 sustituye la regla de `0.0.0.0`—, idempotencia y pedidos sin
+conexión, agente de impresión, respaldos, lock 7820148309, estructura, comandos, pruebas seguras, reglas permanentes de la
+9G, §13–14, §15 «Etapa 9G», §16, §17 y §19), `docs/INSTALAR_EN_RED.md` (nuevo, para el propietario),
+`docs/VERIFICATION_STAGE9G.md` (nuevo) y el índice de `docs/VERIFICATION.md`, `docs/NOTAS_WINDOWS.md` («Etapa 9G: qué hacer
+en la Fase W»), `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, `NEXT_STEPS_FOR_SOL.md`, `DEVELOPMENT_MACOS.md`,
+`docs/DEPENDENCIES.md` y las guías de catálogo, operación, cobros, navegación e impresión; `docs/API_V1.md` lo escribió la
+Fase D. Al agente, el sistema de permisos le bloqueó una edición de `API_CONTRACTS.md` (se le había pedido no tocar el
+contrato); el coordinador corrigió después cuatro incoherencias de documentación que señaló (`eb7ab4a`: identidad que ya
+no impide vender, época del catálogo, pedido sin conexión ya aceptado y borrador sin agotados, cabecera de versión
+obligatoria por la red, impresoras de la terminal y `PAIRING_LIMIT_REACHED` en `API_V1.md`), sin cambiar el contrato
+(prueba de contrato aprobada).
+
+### Regresión final
+
+Ejecutada por el coordinador con el arnés aislado sobre una copia exacta de `c4cc94d` (`git archive`; después solo
+cambió Markdown: documentación y `eb7ab4a`, con formato y prueba de contrato aprobados), clúster PostgreSQL temporal
+55499, Go temporal en 8183 y vista previa en 1421, 13–14/11/2026: **1757 s, todo aprobado**.
+
+| Suite                                                      | Resultado                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato (Prettier, `gofmt`, `cargo fmt`)                   | aprobado                                                                                                                                                                                                                                                                    |
+| Metadatos (`sync-metadata --check`)                        | aprobado                                                                                                                                                                                                                                                                    |
+| `go vet` (normal e `integration`)                          | aprobado                                                                                                                                                                                                                                                                    |
+| `GOOS=windows GOARCH=amd64` build, vet y vet `integration` | aprobado                                                                                                                                                                                                                                                                    |
+| Go unitarias con `-race`                                   | 31 paquetes `ok` (nuevos: `lanlistener`, `discovery`, `backupschedule`, `apicontract`)                                                                                                                                                                                      |
+| Integración PostgreSQL con `-race`                         | 13 de 13: `operations` 327 s, `reports` 130 s, `administration` 117 s, `reports/operational` 44 s, `cmd/ad-el-pos-server` 42 s, `designer` 24 s, `catalog` 23 s, `identity` 20 s, `database` 11 s, `backupschedule` 9 s, `apicontract` 9 s, `discovery` 5 s, `payments` 3 s |
+| `tsc --noEmit`                                             | sin errores                                                                                                                                                                                                                                                                 |
+| Vitest (`npm test`)                                        | 94 archivos, 883 pruebas aprobadas                                                                                                                                                                                                                                          |
+| `npm run build`                                            | correcto                                                                                                                                                                                                                                                                    |
+| `cargo test --locked --offline`                            | 89 aprobadas, 3 ignoradas                                                                                                                                                                                                                                                   |
+| Playwright Chromium (todas las especificaciones)           | 32 de 32 (9.9 min)                                                                                                                                                                                                                                                          |
+| Playwright WebKit (todas las especificaciones)             | 32 de 32 (9.8 min)                                                                                                                                                                                                                                                          |
+| `.app` (`tauri build --bundles app`)                       | 0.10.0, Mach-O arm64, 14.02 MiB, `Info.plist` con `NSLocalNetworkUsageDescription` y `NSBonjourServices`                                                                                                                                                                    |
+
+La pantalla de la Mac estaba desbloqueada al empezar y quedó bloqueada al terminar (después de Playwright, que aprobó en
+ambos motores). Rust para Windows no se compiló (el destino MSVC no está instalado en la Mac): lo nuevo de Rust propio de
+Windows queda detrás de `#[cfg]` y se compila en la Fase W.
