@@ -20,6 +20,7 @@ fn main() {
             "pairing_rename",
             "pairing_cancel",
             "pairing_forget",
+            "choose_backup_directory",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/maintenance"
@@ -50,6 +51,10 @@ type Service struct {
 	// desarrollo sin network_listen_address o Windows hasta la Fase W). La computadora principal lo
 	// muestra en Terminales junto a sus direcciones para emparejar a mano.
 	NetworkPort int
+	// ScheduledBackups hace los respaldos programados y «Respaldar ahora» (etapa 9G, fase F; backups.go). El
+	// trabajador diario de main.go usa el mismo. Sin valor (pruebas que no lo necesitan), las rutas de respaldos
+	// responden 503.
+	ScheduledBackups *backupschedule.Runner
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once

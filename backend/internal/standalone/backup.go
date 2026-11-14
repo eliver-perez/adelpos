@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/config"
+	"local/ad-el-pos/server/internal/maintenance"
 )
 
 // databaseEnvironment son las variables de libpq para los programas de PostgreSQL: la contraseña viaja
@@ -46,20 +47,43 @@ func Backup(ctx context.Context, layout Layout, database config.Database, label 
 		name += "-" + label
 	}
 	filename := filepath.Join(layout.Backups(), name+".dump")
-	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
-	if output, err := runCaptured(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl", "--file", filename}, environment); err != nil {
-		_ = os.Remove(filename)
-		return "", fmt.Errorf("no se pudo crear el respaldo: %s", tail(output))
+	if err := DumpFile(ctx, layout, database, filename); err != nil {
+		return "", err
 	}
+	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
 	if _, err := runCaptured(ctx, layout.tool("pg_restore"), []string{"--list", filename}, environment); err != nil {
 		_ = os.Remove(filename)
 		return "", errors.New("el respaldo no se pudo leer; se descartó")
 	}
+	return filename, nil
+}
+
+// DumpFile crea el respaldo pg_dump (formato custom) de la base de la instalación en filename y lo deja privado
+// (0600 en macOS, ACL en Windows). Lo usan Backup y los respaldos programados (etapa 9G, fase F), que eligen la
+// carpeta (la predeterminada, otro disco o una USB). Si algo falla, no deja el archivo.
+func DumpFile(ctx context.Context, layout Layout, database config.Database, filename string) error {
+	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
+	if output, err := runCaptured(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl", "--file", filename}, environment); err != nil {
+		_ = os.Remove(filename)
+		return fmt.Errorf("no se pudo crear el respaldo: %s", tail(output))
+	}
 	// pg_dump crea el archivo con la máscara del proceso: se deja privado (0600 en macOS, ACL en Windows).
 	if err := privateFile(filename); err != nil {
-		return "", err
+		_ = os.Remove(filename)
+		return err
 	}
-	return filename, nil
+	return nil
+}
+
+// VerifyFile lee el catálogo de un respaldo con el pg_restore de la instalación y exige los datos de la tabla de
+// migraciones (maintenance.CheckListing), como los respaldos programados de serve. No borra el archivo.
+func VerifyFile(ctx context.Context, layout Layout, database config.Database, filename string) error {
+	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
+	output, err := runCaptured(ctx, layout.tool("pg_restore"), []string{"--list", filename}, environment)
+	if err != nil {
+		return fmt.Errorf("el respaldo no se pudo leer: %s", tail(output))
+	}
+	return maintenance.CheckListing(string(output))
 }
 
 // RestoreReport es el resultado del ensayo de restauración: tablas del esquema app con su conteo.

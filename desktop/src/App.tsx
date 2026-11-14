@@ -49,6 +49,7 @@ import type { InstallationState } from './services/installation';
 import { ModalityChoicePage } from './pages/setup/ModalityChoicePage';
 import { FindServerPage } from './pages/setup/FindServerPage';
 import { ServerOnlyAccess, ServerOnlyBar, ServerOnlyPage } from './pages/server/ServerOnlyPage';
+import { BackupAlertBanner } from './pages/maintenance/BackupAlert';
 import { dismissNotice, notifyError, notifySuccess, notifyWarning } from './services/notify';
 import { savePreferences } from './services/preferences';
 import { setPrecheckName } from './services/documentNames';
@@ -628,6 +629,7 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
                 canManage={can('settings.manage')}
                 canAdminister={canOpen('administration', identity.user.permissions)}
                 onAdministration={() => void requestScreen('administration')}
+                onMaintenance={() => void requestScreen('maintenance')}
               />
             ) : (
               content()
@@ -672,6 +674,11 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
                 Cambiar contraseña
               </button>
             </div>
+          )}
+          {/* Etapa 9G (fase F): aviso persistente de respaldos en la pantalla de inicio, para quien
+              administra la configuración, hasta que haya un respaldo correcto posterior. */}
+          {can('settings.manage') && screen === home && !reducedBar && (
+            <BackupAlertBanner onOpen={() => void requestScreen('maintenance')} />
           )}
           <Breadcrumb
             screen={screen}

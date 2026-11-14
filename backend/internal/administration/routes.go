@@ -152,6 +152,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "maintenance/service" || strings.HasPrefix(route, "maintenance/service/") {
 		return service.serviceRoutes(ctx, tx, request, principal, route)
 	}
+	// Respaldos programados y «Respaldar ahora» (etapa 9G, fase F; backups.go).
+	if route == "maintenance/backups" || strings.HasPrefix(route, "maintenance/backups/") {
+		return service.backupRoutes(ctx, tx, request, principal, route)
+	}
 	// Mantenimiento del administrador (etapa 9F): «Quitar datos de prueba» (maintenance.go).
 	if strings.HasPrefix(route, "maintenance/") {
 		return service.maintenanceRoutes(ctx, tx, request, principal, route)

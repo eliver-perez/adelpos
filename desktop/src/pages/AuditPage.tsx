@@ -45,6 +45,10 @@ const actionLabels: Record<string, string> = {
   'device.paired': 'Terminal emparejada',
   'device.updated': 'Terminal modificada',
   'device.revoked': 'Terminal revocada',
+  // Etapa 9G (fase F): respaldos programados y «Respaldar ahora» (también el fallido, con resultado fallido).
+  'maintenance.backup_settings_changed': 'Respaldos automáticos cambiados',
+  'maintenance.backup_directory_changed': 'Carpeta de los respaldos cambiada',
+  'maintenance.backup_created': 'Respaldo manual creado',
   // Etapa 9F (fase B): impresoras (corte de papel incluido), reintentos sin motivo y reimpresiones con
   // motivo, y la configuración de cobro.
   'kitchen.printer.saved': 'Impresora guardada',
