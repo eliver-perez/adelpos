@@ -58,6 +58,19 @@ type Printer struct {
 	Active     bool    `json:"active"`
 	FallbackID *string `json:"fallback_id"`
 	Revision   int     `json:"revision"`
+	// AgentDeviceID es la terminal que tiene conectada una impresora «agent» (etapa 9G, fase E): mientras su
+	// aplicación está abierta, su agente de impresión reclama los trabajos de esta impresora y los imprime por la
+	// cola de esa computadora (Destination). nil en las demás impresoras y en las «agent» anteriores a la 9G, que
+	// siguen sin poder imprimir. Viaja en la fotografía de cada trabajo: decide qué agente lo reclama.
+	AgentDeviceID *string `json:"agent_device_id"`
+	// TerminalName es el nombre de esa terminal, solo en las consultas para la interfaz (nunca se guarda en la
+	// fotografía de un trabajo).
+	TerminalName string `json:"terminal_name,omitempty"`
+}
+
+// AgentPrinter indica una impresora USB de una terminal con su agente de impresión (etapa 9G, fase E).
+func (printer Printer) AgentPrinter() bool {
+	return printer.Transport == "agent" && printer.AgentDeviceID != nil && *printer.AgentDeviceID != ""
 }
 
 type Station struct {

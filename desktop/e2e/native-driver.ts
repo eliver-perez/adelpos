@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import type { Page } from '@playwright/test';
@@ -791,6 +792,97 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
   function setDiscovery(mode: 'server' | 'none' | 'blocked') {
     discoveryMode = mode;
   }
+  // Etapa 9G (fase E): agente de impresión simulado de esta terminal (src-tauri/src/print_agent.rs). Como Rust,
+  // usa solo la credencial de la terminal (sin sesión de usuario), informa las impresoras de su computadora
+  // (PUT print-agent/printers), reclama cada trabajo con una clave de reclamo nueva (POST print-agent/jobs/claim),
+  // lo «entrega» a un lp simulado que nunca imprime ni ejecuta nada (registra los mismos argumentos separados que
+  // Rust: -d cola -o raw -n 1 -t título archivo) y confirma el resultado que elige la prueba (POST
+  // print-agent/jobs/{id}/result). La aplicación real lo hace sola en segundo plano mientras está abierta; aquí la
+  // prueba decide cuándo: mientras no se ejecuta, la terminal está «desconectada» para la cola de impresión.
+  const printAgentCalls: string[][] = [];
+  let printAgentReference = 100;
+  async function agentRequest(method: string, route: string, body: unknown) {
+    const response = await fetch(`${serverURL}/api/v1/${route}`, {
+      method,
+      headers: {
+        ...clientHeaders,
+        'Content-Type': 'application/json',
+        'X-Device-ID': deviceID,
+        'X-Device-Token': deviceToken,
+      },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+  async function reportLocalPrinters(
+    printers: { queue: string; model: string; connection: string; printer_type: number | null }[],
+  ) {
+    const response = await agentRequest('PUT', 'print-agent/printers', { printers });
+    if (response.status !== 200) {
+      throw new Error(`Informe de impresoras rechazado: ${JSON.stringify(response.body)}`);
+    }
+    return response.body as { printers: { queue: string; usable: boolean; reason?: string }[] };
+  }
+  async function runPrintAgent(
+    result: { outcome: 'submitted' | 'error' | 'uncertain'; code?: string } = {
+      outcome: 'submitted',
+    },
+  ) {
+    const processed: { id: string; drawer: boolean; size: number; state: string }[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      const claimed = await agentRequest('POST', 'print-agent/jobs/claim', {
+        claim_id: randomUUID(),
+      });
+      if (claimed.status !== 200) {
+        throw new Error(`Reclamo rechazado: ${JSON.stringify(claimed.body)}`);
+      }
+      const job = claimed.body.job as {
+        id: string;
+        attempt_id: string;
+        queue: string;
+        title: string;
+        data: string;
+        drawer: boolean;
+      } | null;
+      if (!job) {
+        break;
+      }
+      const data = Buffer.from(job.data, 'base64');
+      printAgentCalls.push([
+        '-d',
+        job.queue,
+        '-o',
+        'raw',
+        '-n',
+        '1',
+        '-t',
+        job.title,
+        `adel-agent-${job.id}.bin`,
+      ]);
+      printAgentReference += 1;
+      const body =
+        result.outcome === 'submitted'
+          ? {
+              attempt_id: job.attempt_id,
+              outcome: 'submitted',
+              reference: `${job.queue}-${printAgentReference}`,
+            }
+          : result.outcome === 'error'
+            ? { attempt_id: job.attempt_id, outcome: 'error', code: result.code ?? 'unreachable' }
+            : { attempt_id: job.attempt_id, outcome: 'uncertain' };
+      const reported = await agentRequest('POST', `print-agent/jobs/${job.id}/result`, body);
+      if (reported.status !== 200) {
+        throw new Error(`Resultado rechazado: ${JSON.stringify(reported.body)}`);
+      }
+      processed.push({
+        id: job.id,
+        drawer: job.drawer,
+        size: data.length,
+        state: reported.body.state,
+      });
+    }
+    return processed;
+  }
   return {
     request,
     nextSaveDialog,
@@ -802,5 +894,6 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     menuActions,
     setInstallation,
     setDiscovery,
+    printAgent: { report: reportLocalPrinters, run: runPrintAgent, calls: printAgentCalls },
   };
 }

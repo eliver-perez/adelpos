@@ -61,6 +61,10 @@ func TestStage9GAndroidUpgrade(t *testing.T) {
 	if _, err := pool.Exec(ctx, stage9GExistingCatalog); err != nil {
 		t.Fatal(err)
 	}
+	// Fase E: impresoras anteriores a la 0023 (stage9g_print_agent_upgrade_test.go).
+	if _, err := pool.Exec(ctx, stage9GExistingPrinters); err != nil {
+		t.Fatal(err)
+	}
 	before := stage9GSnapshot(ctx, t, pool)
 	if n, err := Migrate(ctx, pool); err != nil || n != 1 {
 		t.Fatalf("la 0023 no se aplicó sobre el esquema 22: %d %v", n, err)
@@ -77,6 +81,8 @@ func TestStage9GAndroidUpgrade(t *testing.T) {
 	checkStage9GCatalogVersion(ctx, t, pool)
 	// Fase F: respaldos programados (stage9g_backups_upgrade_test.go).
 	checkStage9GBackups(ctx, t, pool)
+	// Fase E: impresión con varias terminales (stage9g_print_agent_upgrade_test.go).
+	checkStage9GPrintAgent(ctx, t, pool)
 }
 
 // Un catálogo con una presentación, la configuración de cobro, el administrador y un supervisor, una cuenta abierta

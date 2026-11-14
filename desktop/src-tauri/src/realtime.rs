@@ -115,6 +115,9 @@ pub fn events_start(
                                 if let Some(next) = message.get("cursor").and_then(Value::as_i64) {
                                     cursor = next;
                                 }
+                                // Etapa 9G (fase E): cualquier cambio puede traer un trabajo para las impresoras
+                                // de esta terminal; el agente lo revisa sin esperar su consulta de respaldo.
+                                crate::print_agent::nudge();
                                 if channel.send(message).is_err() {
                                     return;
                                 }

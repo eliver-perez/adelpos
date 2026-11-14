@@ -9,6 +9,7 @@ import {
 } from '../../components/catalog/EditorFields';
 import { PositionField } from '../../components/PositionField';
 import { useLiveResource } from '../../hooks/useLiveResource';
+import { printerLabel } from '../../services/kitchen';
 import { positionPayload } from '../../services/positions';
 import type { Position } from '../../services/catalog';
 import type { ExecuteKitchen, Station } from '../../services/kitchen';
@@ -44,9 +45,13 @@ export function StationsAdmin({
   busy: boolean;
 }) {
   const stations = useLiveResource<Station[]>('kitchen_stations');
-  const outputs = useLiveResource<{ id: string; name: string }[]>('kitchen_outputs', {
-    enabled: can('kitchen.stations.manage'),
-  });
+  // Etapa 9G (fase E): cada impresora dice en qué terminal está conectada, si es la USB de una terminal.
+  const outputs = useLiveResource<{ id: string; name: string; terminal_name?: string | null }[]>(
+    'kitchen_outputs',
+    {
+      enabled: can('kitchen.stations.manage'),
+    },
+  );
   const [selected, setSelected] = useState<StationDraft | null>(null);
   const current = stations.data?.find((station) => station.id === selected?.id);
   const stale = !!selected?.id && current?.revision !== selected.revision;
@@ -163,7 +168,10 @@ export function StationsAdmin({
               <ReferenceField
                 label="Impresora compartida o exclusiva"
                 value={selected.printer_id}
-                options={outputs.data ?? []}
+                options={(outputs.data ?? []).map((output) => ({
+                  ...output,
+                  name: printerLabel(output),
+                }))}
                 onChange={(printer_id) =>
                   setSelected({ ...selected, printer_id: printer_id || null })
                 }

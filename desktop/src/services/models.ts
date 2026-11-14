@@ -118,13 +118,27 @@ export interface SessionsSummary {
   limited: boolean;
 }
 
-// Configuración de una terminal (etapa 9G, §3.3). Las impresoras de la terminal llegan con la fase E.
+// Configuración de una terminal (etapa 9G, §3.3). Desde la fase E, sus impresoras: las de AD-EL POS conectadas a
+// ella (printers) y las que informó su computadora para su agente de impresión (local_printers; null si es una
+// terminal revocada).
 export interface DeviceConfiguration {
   device: Device;
   kitchen_all_stations: boolean;
   kitchen_sound_alert: boolean;
   kitchen_stations: { id: string; name: string; active: boolean }[];
-  printers: { id: string; name: string }[];
+  printers: { id: string; name: string; destination?: string; active?: boolean }[];
+  local_printers?: {
+    agent_online: boolean;
+    agent_seen_at: string | null;
+    reported_at: string | null;
+    queues: {
+      queue: string;
+      model: string;
+      connection: string;
+      usable: boolean;
+      reason?: string;
+    }[];
+  } | null;
 }
 
 export interface Session {
