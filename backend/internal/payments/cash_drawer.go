@@ -67,18 +67,21 @@ type DrawerSettings struct {
 
 // DrawerPrinter es una impresora candidata con su compatibilidad para el pulso del cajón. Para una
 // cola CUPS, Connection es la conexión que informa CUPS (usb, socket, ipp…) y Reason explica por
-// qué no admite datos raw; nunca se imprime nada para averiguarlo.
+// qué no admite datos raw; nunca se imprime nada para averiguarlo. TerminalName es la terminal que
+// tiene conectada una impresora USB de otra terminal (etapa 9G, fase E).
 type DrawerPrinter struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Transport  string `json:"transport"`
-	Active     bool   `json:"active"`
-	Compatible bool   `json:"compatible"`
-	Connection string `json:"connection,omitempty"`
-	Reason     string `json:"reason,omitempty"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Transport    string `json:"transport"`
+	Active       bool   `json:"active"`
+	Compatible   bool   `json:"compatible"`
+	Connection   string `json:"connection,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	TerminalName string `json:"terminal_name,omitempty"`
 }
 
-// drawerConfig es la configuración vigente del cajón de una caja con su impresora.
+// drawerConfig es la configuración vigente del cajón de una caja con su impresora (desde la etapa 9G, fase E, con
+// la terminal de una impresora USB conectada a otra terminal).
 type drawerConfig struct {
 	registerName string
 	printerID    *string
@@ -86,6 +89,7 @@ type drawerConfig struct {
 	transport    *string
 	destination  *string
 	active       *bool
+	agentDevice  *string
 	pin          int
 	enabled      bool
 	revision     int
@@ -94,12 +98,12 @@ type drawerConfig struct {
 // readDrawerConfig lee la configuración del cajón de una caja; sin fila, revisión 0 y desactivado.
 func (handler *service) readDrawerConfig(registerID string) (*drawerConfig, error) {
 	config := &drawerConfig{}
-	err := handler.tx.QueryRow(handler.ctx, `SELECT r.name,c.printer_id,p.name,p.transport,p.destination,p.active,coalesce(c.pulse_pin,0),
-        coalesce(c.enabled,false),coalesce(c.revision,0)
+	err := handler.tx.QueryRow(handler.ctx, `SELECT r.name,c.printer_id,p.name,p.transport,p.destination,p.active,p.agent_device_id::text,
+        coalesce(c.pulse_pin,0),coalesce(c.enabled,false),coalesce(c.revision,0)
         FROM app.registers r LEFT JOIN app.cash_drawer_settings c ON c.register_id=r.id
         LEFT JOIN app.kitchen_printers p ON p.id=c.printer_id WHERE r.id=$1`, registerID).Scan(&config.registerName,
-		&config.printerID, &config.printerName, &config.transport, &config.destination, &config.active, &config.pin,
-		&config.enabled, &config.revision)
+		&config.printerID, &config.printerName, &config.transport, &config.destination, &config.active, &config.agentDevice,
+		&config.pin, &config.enabled, &config.revision)
 	if isNoRows(err) {
 		return nil, notFound("La caja no existe.")
 	}
@@ -114,8 +118,8 @@ func drawerUnavailable(config *drawerConfig) string {
 	if config.active == nil || !*config.active {
 		return "La impresora del cajón de " + config.registerName + " está desactivada; no se envió el comando de apertura."
 	}
-	if !kitchen.CompatibleDrawerTransport(*config.transport) {
-		return "La impresora del cajón de " + config.registerName + " no usa ESC/POS por red ni una cola CUPS; no se envió el comando de apertura."
+	if !kitchen.CompatibleDrawerPrinter(*config.transport, config.agentDevice) {
+		return "La impresora del cajón de " + config.registerName + " no usa ESC/POS por red, una cola CUPS ni la impresora de una terminal; no se envió el comando de apertura."
 	}
 	return ""
 }
@@ -135,8 +139,15 @@ func (handler *service) queueInspector() kitchen.QueueInspector {
 const drawerProbeBudget = 4 * time.Second
 
 // drawerPrinterCompatibility completa la compatibilidad de una impresora para el pulso del cajón.
-// Una cola CUPS activa se consulta (solo lecturas); una desactivada no se consulta.
+// Una cola CUPS activa se consulta (solo lecturas); una desactivada no se consulta. La impresora de una terminal
+// (etapa 9G, fase E) es compatible: su cola se eligió entre las que informó la terminal con la misma regla de
+// datos raw y su agente envía el pulso tal cual.
 func drawerPrinterCompatibility(ctx context.Context, inspector kitchen.QueueInspector, item *DrawerPrinter, destination string) {
+	if item.Transport == "agent" && item.TerminalName != "" {
+		item.Compatible = true
+		item.Connection = "terminal"
+		return
+	}
 	switch item.Transport {
 	case "escpos_tcp":
 		item.Compatible = true
@@ -155,7 +166,7 @@ func drawerPrinterCompatibility(ctx context.Context, inspector kitchen.QueueInsp
 		item.Connection = capability.Connection
 		item.Reason = capability.Reason
 	default:
-		item.Reason = "El agente de impresión aún no existe: no puede entregar el comando del cajón."
+		item.Reason = "Esta impresora no tiene una terminal asignada: no puede entregar el comando del cajón."
 	}
 }
 
@@ -330,7 +341,8 @@ func (handler *service) listDrawerSettings(_ []string) (any, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	printerRows, err := handler.tx.Query(handler.ctx, "SELECT id,name,transport,destination,active FROM app.kitchen_printers ORDER BY name,id")
+	printerRows, err := handler.tx.Query(handler.ctx, `SELECT p.id,p.name,p.transport,p.destination,p.active,coalesce(d.name,'')
+        FROM app.kitchen_printers p LEFT JOIN app.devices d ON d.id=p.agent_device_id ORDER BY p.name,p.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +351,7 @@ func (handler *service) listDrawerSettings(_ []string) (any, error) {
 	for printerRows.Next() {
 		var item DrawerPrinter
 		var destination string
-		if err := printerRows.Scan(&item.ID, &item.Name, &item.Transport, &destination, &item.Active); err != nil {
+		if err := printerRows.Scan(&item.ID, &item.Name, &item.Transport, &destination, &item.Active, &item.TerminalName); err != nil {
 			printerRows.Close()
 			return nil, err
 		}
@@ -362,16 +374,19 @@ func (handler *service) listDrawerSettings(_ []string) (any, error) {
 
 // drawerProtocolUnsupported rechaza una impresora cuyo transporte no entrega el pulso sin alterar.
 func drawerProtocolUnsupported(name, transport string) error {
-	labels := map[string]string{"agent": "un agente de impresión"}
-	label := labels[transport]
-	if label == "" {
-		label = transport
+	// Etapa 9G (fase E): la impresora de otra terminal sí abre el cajón cuando tiene su terminal elegida.
+	if transport == "agent" {
+		return &Error{
+			Status:  400,
+			Code:    "DRAWER_PROTOCOL_UNSUPPORTED",
+			Message: "La impresora " + name + " no tiene una terminal asignada. Elige en Cocina › Impresoras en qué terminal está conectada.",
+		}
 	}
 	return &Error{
 		Status: 400,
 		Code:   "DRAWER_PROTOCOL_UNSUPPORTED",
-		Message: "La impresora " + name + " usa " + label + ", que no entrega el comando ESC/POS de apertura sin alterar. " +
-			"El cajón se abre con una impresora ESC/POS por red o con una cola CUPS que admita datos raw.",
+		Message: "La impresora " + name + " usa " + transport + ", que no entrega el comando ESC/POS de apertura sin alterar. " +
+			"El cajón se abre con una impresora ESC/POS por red, con una cola CUPS que admita datos raw o con la impresora USB de una terminal.",
 	}
 }
 
@@ -455,15 +470,16 @@ func (handler *service) saveDrawerSettings(parts []string) (any, error) {
 func (handler *service) requireDrawerPrinter(printerID string, probeQueue bool) error {
 	var name, transport, destination string
 	var active bool
-	err := handler.tx.QueryRow(handler.ctx, "SELECT name,transport,destination,active FROM app.kitchen_printers WHERE id=$1", printerID).Scan(
-		&name, &transport, &destination, &active)
+	var agentDevice *string
+	err := handler.tx.QueryRow(handler.ctx, "SELECT name,transport,destination,active,agent_device_id::text FROM app.kitchen_printers WHERE id=$1", printerID).Scan(
+		&name, &transport, &destination, &active, &agentDevice)
 	if isNoRows(err) {
 		return invalid("La impresora seleccionada no existe.")
 	}
 	if err != nil {
 		return err
 	}
-	if !kitchen.CompatibleDrawerTransport(transport) {
+	if !kitchen.CompatibleDrawerPrinter(transport, agentDevice) {
 		return drawerProtocolUnsupported(name, transport)
 	}
 	if !active {

@@ -186,43 +186,111 @@ var rawConnections = map[string]bool{"usb": true, "serial": true, "parallel": tr
 // CUPS convierte cada trabajo al formato que anuncia la impresora.
 var driverlessMarkers = []string{"airprint", "ipp everywhere", "driverless"}
 
-// EvaluateRawQueue decide, con los atributos que informa CUPS, si la cola entrega el pulso del
-// cajón sin convertirlo. El criterio es conservador: ante cualquier duda la cola no se usa y se
-// explica por qué.
-func EvaluateRawQueue(queue string, options map[string]string) QueueCapability {
-	capability := QueueCapability{Queue: queue, Checked: true, Model: cleanText(options["printer-make-and-model"])}
+// Veredictos de la regla única de datos raw (rawQueueVerdict): la usan el cajón por CUPS del equipo servidor
+// (EvaluateRawQueue, etapa 7.1) y las impresoras que informa cada terminal para su agente de impresión
+// (EvaluateTerminalQueue, etapa 9G), cada uno con sus textos.
+const (
+	rawUsable     = ""
+	rawNoDevice   = "no_device"
+	rawClass      = "class"
+	rawRemote     = "remote"
+	rawDriverless = "driverless"
+	rawConnection = "connection"
+)
+
+// rawQueueVerdict decide, con los atributos que informa CUPS, si la cola entrega los bytes sin convertirlos, y
+// devuelve la conexión (el esquema de device-uri). El criterio es conservador: ante cualquier duda la cola no se
+// usa.
+func rawQueueVerdict(options map[string]string) (string, string) {
 	uri := strings.TrimSpace(options["device-uri"])
 	if uri == "" {
-		capability.Reason = "CUPS no informa a qué dispositivo envía la cola " + queue +
-			"; no se puede asegurar que entregue el comando del cajón sin alterar."
-		return capability
+		return "", rawNoDevice
 	}
 	scheme, _, _ := strings.Cut(uri, ":")
 	scheme = strings.ToLower(strings.TrimSpace(scheme))
-	capability.Connection = cleanText(scheme)
+	connection := cleanText(scheme)
 	if kind, err := strconv.ParseInt(strings.TrimSpace(options["printer-type"]), 10, 64); err == nil {
 		if kind&cupsPrinterClass != 0 {
-			capability.Reason = "La cola " + queue + " es una clase de impresoras: el cajón está conectado a una impresora concreta."
-			return capability
+			return connection, rawClass
 		}
 		if kind&cupsPrinterRemote != 0 {
-			capability.Reason = "La cola " + queue + " pertenece a otro equipo: su CUPS podría convertir el comando del cajón."
-			return capability
+			return connection, rawRemote
 		}
 	}
 	model := strings.ToLower(options["printer-make-and-model"])
 	for _, marker := range driverlessMarkers {
 		if strings.Contains(model, marker) {
-			capability.Reason = "La cola " + queue + " es una impresora sin controlador (AirPrint o IPP Everywhere): " +
-				"CUPS convierte cada trabajo al formato de la impresora y no garantiza entregar el comando ESC/POS sin alterar."
-			return capability
+			return connection, rawDriverless
 		}
 	}
 	if !rawConnections[scheme] {
+		return connection, rawConnection
+	}
+	return connection, rawUsable
+}
+
+// EvaluateRawQueue decide, con los atributos que informa CUPS, si la cola entrega el pulso del
+// cajón sin convertirlo. El criterio es conservador: ante cualquier duda la cola no se usa y se
+// explica por qué.
+func EvaluateRawQueue(queue string, options map[string]string) QueueCapability {
+	capability := QueueCapability{Queue: queue, Checked: true, Model: cleanText(options["printer-make-and-model"])}
+	connection, verdict := rawQueueVerdict(options)
+	capability.Connection = connection
+	switch verdict {
+	case rawNoDevice:
+		capability.Reason = "CUPS no informa a qué dispositivo envía la cola " + queue +
+			"; no se puede asegurar que entregue el comando del cajón sin alterar."
+	case rawClass:
+		capability.Reason = "La cola " + queue + " es una clase de impresoras: el cajón está conectado a una impresora concreta."
+	case rawRemote:
+		capability.Reason = "La cola " + queue + " pertenece a otro equipo: su CUPS podría convertir el comando del cajón."
+	case rawDriverless:
+		capability.Reason = "La cola " + queue + " es una impresora sin controlador (AirPrint o IPP Everywhere): " +
+			"CUPS convierte cada trabajo al formato de la impresora y no garantiza entregar el comando ESC/POS sin alterar."
+	case rawConnection:
 		capability.Reason = "La cola " + queue + " se conecta por " + capability.Connection +
 			", que recibe documentos y no garantiza datos raw. Para una impresora de red usa la conexión ESC/POS por red."
-		return capability
+	default:
+		capability.Raw = true
 	}
-	capability.Raw = true
 	return capability
+}
+
+// TerminalQueue es una impresora que informó una terminal para su agente de impresión (etapa 9G, fase E), con si
+// AD-EL POS puede usarla para tickets, comandas y el cajón (Usable) y, si no, por qué en palabras del
+// restaurante.
+type TerminalQueue struct {
+	Queue      string `json:"queue"`
+	Model      string `json:"model"`
+	Connection string `json:"connection"`
+	Usable     bool   `json:"usable"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// EvaluateTerminalQueue aplica a una impresora informada por una terminal la misma regla del cajón por CUPS: su
+// agente le envía los bytes ESC/POS en modo raw, así que solo sirve una impresora concreta de esa computadora
+// conectada por USB, puerto serie o paralelo o AppSocket, con controlador.
+func EvaluateTerminalQueue(queue, connection, model string, printerType *int64) TerminalQueue {
+	options := map[string]string{"printer-make-and-model": model}
+	if connection != "" {
+		options["device-uri"] = connection + ":"
+	}
+	if printerType != nil {
+		options["printer-type"] = strconv.FormatInt(*printerType, 10)
+	}
+	_, verdict := rawQueueVerdict(options)
+	result := TerminalQueue{Queue: queue, Model: cleanText(model), Connection: connection, Usable: verdict == rawUsable}
+	switch verdict {
+	case rawNoDevice:
+		result.Reason = "La computadora no informa cómo está conectada esta impresora."
+	case rawClass:
+		result.Reason = "Es un grupo de impresoras, no una impresora concreta."
+	case rawRemote:
+		result.Reason = "Es una impresora compartida desde otra computadora."
+	case rawDriverless:
+		result.Reason = "Es una impresora de documentos (AirPrint): no recibe tickets."
+	case rawConnection:
+		result.Reason = "Está conectada por la red como impresora de documentos; para una impresora de tickets en la red usa «ESC/POS por red»."
+	}
+	return result
 }

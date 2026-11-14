@@ -293,6 +293,11 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	if route == "auth/login" && request.Method == "POST" {
 		return login(ctx, tx, request)
 	}
+	// Agente de impresión de la terminal (etapa 9G, fase E; print_agent.go): solo con la credencial de la terminal,
+	// sin sesión de usuario, porque imprime aunque nadie haya iniciado sesión en esa caja.
+	if strings.HasPrefix(route, "print-agent/") {
+		return service.printAgent(ctx, tx, request, route)
+	}
 	principal, err := authenticateSession(ctx, tx, request)
 	if err != nil {
 		return nil, err

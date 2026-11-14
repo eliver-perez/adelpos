@@ -9,6 +9,8 @@ mod export;
 mod installation;
 mod menu;
 mod pairing;
+// Etapa 9G, fase E: agente de impresión de las impresoras USB de esta terminal.
+mod print_agent;
 mod realtime;
 mod server_host;
 mod vault;
@@ -294,6 +296,8 @@ fn main() {
                 locator,
             });
             window_check::start(app.handle().clone());
+            // Etapa 9G (fase E, D13): mientras la aplicación está abierta, imprime los trabajos de sus impresoras USB.
+            print_agent::start(app.handle().clone());
             // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
             #[cfg(target_os = "windows")]
             window_state::start(app.handle());

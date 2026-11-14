@@ -87,6 +87,15 @@ var TestPrinters = []PrinterSignature{
 		Destination: acceptanceQueue,
 		Source:      "desktop/e2e/workflow-stage9b-designer.spec.ts",
 	},
+	// desktop/e2e/workflow-stage9g-print-agent.spec.ts (etapa 9G, fase E): la impresora USB de la terminal de
+	// prueba, con la misma cola inexistente como destino. Su agente es el simulado del puente de las pruebas; un
+	// agente real tampoco imprimiría nada (la cola no existe en ninguna computadora).
+	{
+		Name:        "Impresora USB 9G-E",
+		Transport:   "agent",
+		Destination: acceptanceQueue,
+		Source:      "desktop/e2e/workflow-stage9g-print-agent.spec.ts",
+	},
 }
 
 var TestStations = []StationSignature{

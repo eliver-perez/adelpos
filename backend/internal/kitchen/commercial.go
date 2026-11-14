@@ -96,8 +96,10 @@ func EnqueueCommercial(ctx context.Context, tx pgx.Tx, input CommercialPrint) (*
 }
 
 // Impresora válida para precuentas, tickets y documentos de caja (etapa 9F, §4.1, decisión D4): configurada,
-// activa y con un transporte que ya imprime (no la impresora de otra terminal, «agent»). Sin ella, el módulo
-// de pagos avisa en el momento con «Configurar impresora» y no encola un trabajo que no podría salir.
+// activa y con un transporte que ya imprime. Sin ella, el módulo de pagos avisa en el momento con «Configurar
+// impresora» y no encola un trabajo que no podría salir. Desde la etapa 9G (fase E) la impresora USB de una
+// terminal es válida (la imprime su agente; si la terminal está apagada, el trabajo espera); una «agent» sin
+// terminal elegida (anterior a la 9G) sigue sin serlo.
 
 // PrinterProblem devuelve por qué una impresora no puede imprimir esos documentos: ProblemInactive o
 // ProblemUnsupported; vacío si puede.
@@ -105,7 +107,7 @@ func PrinterProblem(printer *Printer) string {
 	if !printer.Active {
 		return ProblemInactive
 	}
-	if printer.Transport == "agent" {
+	if printer.Transport == "agent" && !printer.AgentPrinter() {
 		return ProblemUnsupported
 	}
 	return ""
@@ -263,10 +265,20 @@ type DrawerCommand struct {
 // CompatibleDrawerTransport indica si un transporte puede entregar los bytes ESC/POS del pulso sin
 // alterar: la conexión ESC/POS directa por red o, desde la etapa 7.1, una cola CUPS en modo raw.
 // Para CUPS no basta el transporte: la cola debe admitir datos raw (QueueInspector), lo que se
-// comprueba al configurar el cajón y otra vez antes de cada envío. El agente de impresión aún no
-// existe. No se asume que todo dispositivo admite el pulso.
+// comprueba al configurar el cajón y otra vez antes de cada envío. No se asume que todo dispositivo
+// admite el pulso. La impresora de una terminal se decide con CompatibleDrawerPrinter.
 func CompatibleDrawerTransport(transport string) bool {
 	return transport == "escpos_tcp" || transport == "cups"
+}
+
+// CompatibleDrawerPrinter es CompatibleDrawerTransport con la impresora completa: desde la etapa 9G (fase E) la
+// impresora USB de una terminal también abre el cajón de su caja (su agente envía el pulso por la cola de esa
+// computadora en modo raw); una «agent» sin terminal, no.
+func CompatibleDrawerPrinter(transport string, agentDeviceID *string) bool {
+	if transport == "agent" {
+		return agentDeviceID != nil && *agentDeviceID != ""
+	}
+	return CompatibleDrawerTransport(transport)
 }
 
 // EnqueueDrawerPulse guarda el comando de apertura del cajón y su trabajo en la transacción de la
@@ -281,8 +293,8 @@ func EnqueueDrawerPulse(ctx context.Context, tx pgx.Tx, command DrawerCommand) (
 	if !printer.Active {
 		return nil, "", &Error{Status: 409, Code: "DRAWER_UNAVAILABLE", Message: "La impresora del cajón está desactivada; no se envió el comando de apertura."}
 	}
-	if !CompatibleDrawerTransport(printer.Transport) {
-		return nil, "", &Error{Status: 409, Code: "DRAWER_PROTOCOL_UNSUPPORTED", Message: "La impresora del cajón no usa ESC/POS por red ni una cola CUPS; no se envió el comando de apertura."}
+	if !CompatibleDrawerPrinter(printer.Transport, printer.AgentDeviceID) {
+		return nil, "", &Error{Status: 409, Code: "DRAWER_PROTOCOL_UNSUPPORTED", Message: "La impresora del cajón no usa ESC/POS por red, una cola CUPS ni la impresora de una terminal; no se envió el comando de apertura."}
 	}
 	if command.Pin != 0 && command.Pin != 1 {
 		return nil, "", invalid("El pin del cajón debe ser 0 (conector 2) o 1 (conector 5).")
