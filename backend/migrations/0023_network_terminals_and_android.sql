@@ -72,6 +72,18 @@ CREATE TABLE app.catalog_change_log (
 );
 CREATE INDEX catalog_change_log_version_idx ON app.catalog_change_log (version);
 
+-- Época del catálogo (revisión de la fase D, hallazgo 2). Restaurar un respaldo devuelve la secuencia a su valor de
+-- entonces, así que los números de versión que siguieron se repiten con otro contenido. La descarga de cambios exige la
+-- época de la anterior y Go la calcula (catalog.Epoch) con este identificador, el OID de la base y el identificador
+-- del clúster: restaurar (el comando restore crea la base de nuevo) o pasar los datos a otro clúster la cambia sola, y
+-- el cliente con otra época descarga todo.
+CREATE TABLE app.catalog_epoch (
+    singleton boolean PRIMARY KEY DEFAULT true CONSTRAINT catalog_epoch_singleton_check CHECK (singleton),
+    epoch uuid NOT NULL DEFAULT gen_random_uuid(),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO app.catalog_epoch DEFAULT VALUES;
+
 -- catalog_record_change deja en la bitácora el registro afectado con el número de versión de la transacción. El
 -- número se guarda en una variable local de la transacción (adel.catalog_version) para que todos los renglones de la
 -- misma transacción compartan uno solo.

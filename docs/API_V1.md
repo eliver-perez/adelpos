@@ -110,7 +110,8 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
    consultar cuentas, para que el cliente sepa qué permisos perdió:
    - `user.permissions`: permisos vigentes (leídos de PostgreSQL en esa petición);
    - `terminal`: la terminal (una terminal revocada no llega aquí: 401 `DEVICE_REVOKED`);
-   - `catalog_version`: si es mayor que la del catálogo guardado, descargar los cambios;
+   - `catalog_version` y `catalog_epoch`: si la época es otra, descargar todo; si no y la versión es mayor que la del
+     catálogo guardado, descargar los cambios;
    - `tables` (con `restaurant.tables.read`) con su estado (`free`, `occupied`, `awaiting_payment`,
      `partial_payment`, `out_of_service`) y `accounts` (con `accounts.read`; las de para llevar con `takeaway.read`):
      cuentas abiertas con su **revisión** y sus estados de preparación, pago y entrega. Sin el permiso, la lista es
@@ -130,11 +131,19 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
 - **`getCatalogSync`** (`GET /catalog/sync`, con `catalog.read` y `catalog.prices.read`):
   - sin `since` (o `since=0`): **catálogo completo** (`full: true`): el cliente reemplaza lo guardado. No incluye
     productos archivados;
-  - `?since=X`: **solo los cambios** posteriores a la versión X (`full: false`): los registros cambiados de cada
-    lista, los productos archivados con `archived: true` y los registros borrados en `deleted` (`entity`, `id`). Si
-    cambió una categoría, llegan también sus productos; si cambió la lista predeterminada o la tasa general de IVA,
-    llegan todos los productos;
-  - una `since` mayor que la versión vigente (otro servidor o una base restaurada) entrega todo con `reset: true`.
+  - `?since=X&epoch=E`: **solo los cambios** posteriores a la versión X (`full: false`): los registros cambiados de
+    cada lista, los productos archivados con `archived: true` y los registros borrados en `deleted` (`entity`, `id`).
+    Si cambió una categoría, llegan también sus productos; si cambió la lista predeterminada o la tasa general de
+    IVA, llegan todos los productos vigentes **y los archivados que cambiaron**; un producto que cambió (por ejemplo,
+    agotado) trae también **los combos que lo ofrecen y los grupos cuyos complementos lo usan**, con la
+    disponibilidad de cada opción (`available_now`, `sold_out`) y el combo no disponible si una ranura obligatoria
+    se quedó sin opciones;
+  - **época** (`catalog_epoch`, en cada descarga y en `getRecoveryState`): cambia cuando la base se restaura de un
+    respaldo o pasa a otro clúster, porque entonces los números de versión se repiten con otro contenido. La descarga
+    de cambios exige `epoch` (sin ella, 400); con otra época, o con una `since` mayor que la versión vigente, se
+    entrega todo con `reset: true`. **El cliente guarda la versión y la época de cada descarga; con `reset: true`
+    borra lo guardado y lo reemplaza por la respuesta** (también sus imágenes en caché, que se vuelven a pedir con su
+    `ETag`).
 - **Precios con IVA**: `price` de cada producto y `effective_price` de cada presentación son los de la lista
   predeterminada, calculados por Go con las mismas reglas de la cotización (`catalog.Calculate`); `effective_tax_rate`
   es la tasa propia o la general. Si la lista no le da precio, `price` es `null` y `pricing_error` lo explica. Los
@@ -160,7 +169,9 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
   vigente (`SoldOutState`) con la versión nueva del catálogo; es idempotente, se registra en el Registro de movimientos
   y se avisa en tiempo real.
 - Un producto agotado **no se puede capturar ni confirmar**: 409 **`PRODUCT_SOLD_OUT`** («Hamburguesa está agotado…»),
-  tampoco como complemento de otro producto ni como componente de un combo. Ninguna excepción de disponibilidad lo pasa
+  tampoco como complemento de otro producto ni como componente de un combo, ni al guardar el borrador o abrir una
+  cuenta con él (una partida que ya estaba guardada cuando se agotó se puede conservar o reducir, pero no aumentar; la
+  confirmación la rechaza). Ninguna excepción de disponibilidad lo pasa
   por alto. Marcarlo no cambia la revisión del producto.
 - Aplica a **productos** (también a los que se usan como complemento o componente). Los complementos que son
   ingredientes y las porciones no se agotan desde la captura: se desactivan en Catálogo.
@@ -241,10 +252,12 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
   si esa es la versión vigente del catálogo y los cambios cubren todos los de ese momento; entra **siempre con los
   precios del servidor**. Una confirmación con un catálogo que ya cambió otra vez se rechaza de nuevo con los cambios
   actuales.
-- **Doble envío**: un pedido ya aceptado reenviado con la misma clave devuelve la misma respuesta; un envío con la
-  misma clave y otro contenido después de aceptado (por ejemplo, el primer envío sin confirmación que llegó tarde) es
-  `IDEMPOTENCY_CONFLICT`: nunca entra dos veces. Si el cliente recibe ese conflicto, consulta `getRecoveryState` o la
-  cuenta para ver el resultado.
+- **Doble envío**: un pedido ya aceptado reenviado con la misma clave devuelve la misma respuesta. Un envío con la
+  misma clave y otro contenido después de aceptado (por ejemplo, el original sin confirmación que llegó tarde y entró
+  porque el precio volvió, y después el reenvío con la confirmación) responde **409 `OFFLINE_ORDER_ALREADY_ACCEPTED`**
+  con `details.result`, el resultado que sí entró (`order_id`, `account_id`, cuenta completa): nunca entra dos veces y
+  **el teléfono no debe capturarlo de nuevo**; marca el pedido de su cola como aceptado con ese resultado. Desde otro
+  usuario u otra terminal, la misma clave es `IDEMPOTENCY_CONFLICT` sin datos.
 - **Registro de movimientos**: `restaurant.offline_order.accepted` (hora de captura, hora de llegada, versiones del
   catálogo y cambios aceptados) y, en cada rechazo, `restaurant.offline_order.requires_confirmation` (con los cambios);
   ambos con la clave de operación como identificador. La historia de la cuenta marca el pedido (`order.confirmed` con
@@ -252,18 +265,19 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
 
 ## Códigos de error más frecuentes
 
-| Código                                                   | Estado | Qué hacer                                                              |
-| -------------------------------------------------------- | ------ | ---------------------------------------------------------------------- |
-| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                               |
-| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                        |
-| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                   |
-| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                               |
-| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                        |
-| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                            |
-| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                      |
-| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                           |
-| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                              |
-| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo). |
-| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.          |
-| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.         |
-| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                    |
+| Código                                                   | Estado | Qué hacer                                                                       |
+| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------- |
+| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                        |
+| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                 |
+| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                            |
+| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                        |
+| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                 |
+| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                     |
+| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                               |
+| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                    |
+| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                       |
+| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).          |
+| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                   |
+| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                  |
+| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez. |
+| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                             |

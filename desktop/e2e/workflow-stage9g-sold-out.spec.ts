@@ -282,6 +282,12 @@ test('«Agotado» desde la captura con un toque, en tiempo real entre terminales
   expect(rejected.body.error.code).toBe('PRODUCT_SOLD_OUT');
   expect(rejected.body.error.message).toContain('Malteada 9G está agotado');
 
+  // 5 bis. La limonada se agrega a la cuenta (su primer producto la abre).
+  await page.getByRole('button', { name: /^Limonada 9G/ }).click();
+  const bill = page.getByRole('complementary', { name: 'Cuenta actual' });
+  await expect(bill.getByRole('article', { name: '1 × Limonada 9G' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^Mesa G1 · Cuenta #/ })).toBeVisible();
+
   // 6. Otra terminal marca la limonada agotada hasta nuevo aviso: la captura lo muestra por el evento del catálogo,
   // antes del sondeo de 10 s del listado.
   const marked = await other.send('POST', `catalog/products/${lemonade.id}/sold-out`, {
@@ -294,6 +300,16 @@ test('«Agotado» desde la captura con un toque, en tiempo real entre terminales
   const lemonadeTile = page.getByRole('button', { name: /^Limonada 9G/ });
   await expect(lemonadeTile).toContainText('Agotado hasta nuevo aviso', { timeout: 6000 });
   await expect(lemonadeTile).toBeDisabled();
+
+  // 6 bis (revisión de la fase D, hallazgo 3): la limonada que ya estaba en el borrador se conserva, pero agregarle
+  // otra unidad ya no se guarda: Go la rechaza y la cuenta lo dice. Al quitar la unidad de más, el borrador se guarda.
+  await bill
+    .getByRole('button', { name: 'Agregar una unidad de Limonada 9G', exact: true })
+    .click();
+  await expect(bill.getByText('Limonada 9G está agotado')).toBeVisible();
+  await bill.getByRole('button', { name: 'Quitar una unidad de Limonada 9G', exact: true }).click();
+  await expect(bill.getByText('Limonada 9G está agotado')).toHaveCount(0);
+  await expect(bill.getByRole('article', { name: '1 × Limonada 9G' })).toBeVisible();
 
   // 7. «Disponible otra vez» con un toque: también llega a la otra terminal.
   await mode.click();

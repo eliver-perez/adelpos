@@ -30,6 +30,12 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
+	// Con la época el cliente sabe si su catálogo guardado sigue siendo de esta línea de tiempo (revisión de la fase
+	// D, hallazgo 2): con otra época descarga todo.
+	epoch, err := catalog.Epoch(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	terminal, err := object(ctx, tx, "SELECT id,name,register_id,keyboard_mode,home_screen FROM app.devices WHERE id=$1", principal.DeviceID)
 	if err != nil {
 		return nil, err
@@ -37,6 +43,7 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 	return map[string]any{
 		"server_time":     time.Now().UTC(),
 		"catalog_version": version,
+		"catalog_epoch":   epoch,
 		"user":            principal,
 		"terminal":        terminal,
 		"tables":          restaurant.Tables,

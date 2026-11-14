@@ -329,7 +329,7 @@
       "get": {
         "operationId": "getCatalogSync",
         "summary": "Catálogo descargable por versión",
-        "description": "Sin since (o con 0): catálogo completo. Con since=X: solo los registros que cambiaron después de la versión X, con las bajas en deleted. Requiere catalog.read y catalog.prices.read. Los precios son los de la lista predeterminada calculados por Go; el cliente no calcula precios.",
+        "description": "Sin since (o con 0): catálogo completo. Con since=X: solo los registros que cambiaron después de la versión X, con las bajas en deleted. Requiere catalog.read y catalog.prices.read. Los precios son los de la lista predeterminada calculados por Go; el cliente no calcula precios. Con since mayor que 0 exige epoch (la catalog_epoch de la descarga anterior); con otra época responde todo con reset = true.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -344,6 +344,16 @@
             "schema": {
               "type": "integer",
               "minimum": 0
+            }
+          },
+          {
+            "name": "epoch",
+            "in": "query",
+            "required": false,
+            "description": "Época de la descarga anterior (catalog_epoch). Obligatoria con since mayor que 0.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
@@ -1105,13 +1115,16 @@
             }
           },
           "409": {
-            "description": "Requiere confirmación, o la clave ya se usó con otro contenido (IDEMPOTENCY_CONFLICT).",
+            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró con otro contenido del mismo usuario y terminal (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado); o la clave es de otro usuario o terminal (IDEMPOTENCY_CONFLICT).",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
                       "$ref": "#/components/schemas/OfflineOrderRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OfflineOrderAlreadyAccepted"
                     },
                     {
                       "$ref": "#/components/schemas/Error"
@@ -2209,6 +2222,14 @@
                         "items": {
                           "$ref": "#/components/schemas/Tier"
                         }
+                      },
+                      "available_now": {
+                        "type": "boolean",
+                        "description": "Solo en la descarga: la opción se puede elegir ahora."
+                      },
+                      "sold_out": {
+                        "type": "boolean",
+                        "description": "Solo en la descarga: su producto está agotado."
                       }
                     },
                     "required": ["product_id", "substitution_price"]
@@ -2459,6 +2480,14 @@
                         "items": {
                           "$ref": "#/components/schemas/Tier"
                         }
+                      },
+                      "available_now": {
+                        "type": "boolean",
+                        "description": "Solo en la descarga: la opción se puede elegir ahora."
+                      },
+                      "sold_out": {
+                        "type": "boolean",
+                        "description": "Solo en la descarga: su producto está agotado."
                       }
                     },
                     "required": ["product_id", "substitution_price"]
@@ -2735,6 +2764,14 @@
                         "items": {
                           "$ref": "#/components/schemas/Tier"
                         }
+                      },
+                      "available_now": {
+                        "type": "boolean",
+                        "description": "Solo en la descarga: la opción se puede elegir ahora."
+                      },
+                      "sold_out": {
+                        "type": "boolean",
+                        "description": "Solo en la descarga: su producto está agotado."
                       }
                     },
                     "required": ["product_id", "substitution_price"]
@@ -2846,6 +2883,14 @@
           },
           "portion_factor": {
             "type": "string"
+          },
+          "available_now": {
+            "type": "boolean",
+            "description": "Solo en la descarga: la opción se puede elegir ahora."
+          },
+          "sold_out": {
+            "type": "boolean",
+            "description": "Solo en la descarga: su producto está agotado."
           }
         },
         "required": ["id", "complement_id", "reference_value", "extra_price", "active"]
@@ -2936,6 +2981,11 @@
           "catalog_version": {
             "type": "integer",
             "minimum": 0
+          },
+          "catalog_epoch": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Época del catálogo: cambia si la base se restaura o pasa a otro clúster. La descarga de cambios exige la de la descarga anterior; si no coincide, se entrega todo con reset = true."
           },
           "since": {
             "type": "integer",
@@ -3144,6 +3194,7 @@
         },
         "required": [
           "catalog_version",
+          "catalog_epoch",
           "since",
           "full",
           "reset",
@@ -3161,7 +3212,7 @@
           "images",
           "deleted"
         ],
-        "description": "Catálogo descargable. full: catálogo completo (sustituye lo guardado); si no, solo lo que cambió después de since, con las bajas en deleted y los productos archivados con archived = true. reset: la versión pedida era mayor que la vigente (otro servidor o base restaurada) y se entrega todo."
+        "description": "Catálogo descargable. full: catálogo completo (sustituye lo guardado); si no, solo lo que cambió después de since, con las bajas en deleted y los productos archivados con archived = true. reset: la versión pedida era mayor que la vigente (otro servidor o base restaurada) y se entrega todo. reset también es verdadero si la época enviada no es la vigente (base restaurada): el cliente reemplaza todo lo guardado. Desde la revisión de la fase D, si cambió la lista predeterminada o la tasa general de IVA, la descarga de cambios trae todos los productos vigentes y los archivados que cambiaron; un producto que cambió trae los combos que lo ofrecen y los grupos cuyos complementos lo usan."
       },
       "SoldOutState": {
         "type": "object",
@@ -3724,6 +3775,10 @@
             "type": "integer",
             "minimum": 0
           },
+          "catalog_epoch": {
+            "type": "string",
+            "format": "uuid"
+          },
           "user": {
             "$ref": "#/components/schemas/Principal"
           },
@@ -3757,7 +3812,15 @@
             ]
           }
         },
-        "required": ["server_time", "catalog_version", "user", "terminal", "tables", "accounts"],
+        "required": [
+          "server_time",
+          "catalog_version",
+          "catalog_epoch",
+          "user",
+          "terminal",
+          "tables",
+          "accounts"
+        ],
         "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read (las cuentas para llevar exigen además takeaway.read)."
       },
       "OfflineItem": {
@@ -4080,6 +4143,40 @@
         },
         "required": ["cursor", "reset", "events"],
         "description": "Contenido (data) de cada mensaje «changes» del canal de eventos."
+      },
+      "OfflineOrderAlreadyAccepted": {
+        "type": "object",
+        "description": "La clave de este pedido ya se guardó con otro contenido del mismo usuario y la misma terminal (por ejemplo, entró una repetición tardía del envío original): no se registró otra vez y details.result es el resultado que sí entró. El teléfono no debe capturarlo de nuevo.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "OFFLINE_ORDER_ALREADY_ACCEPTED"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "already_accepted"
+                  },
+                  "result": {
+                    "$ref": "#/components/schemas/OfflineOrderResult"
+                  }
+                },
+                "required": ["status", "result"]
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"]
       }
     }
   }
