@@ -3,6 +3,7 @@ import { api, APIError } from '../services/api';
 import type { Operation } from '../services/api';
 import type { Lookups } from '../services/catalog';
 import { notifyError, notifyWarning } from '../services/notify';
+import { connectionRestoredEvent } from '../services/reconnection';
 import {
   emptyCustomization,
   normalizeSelection,
@@ -642,6 +643,15 @@ export function useRestaurantWorkspace(
   }
 
   const recoverDraft = useCallback(() => draft.engine.recover(), [draft.engine]);
+  // Etapa 9G (fase C, §4.2): al volver la conexión, el guardado que quedó incierto se recupera solo con la misma
+  // operación (mismo operation_id); sin nada incierto no hace nada.
+  useEffect(() => {
+    const restored = () => {
+      void draft.engine.recover();
+    };
+    window.addEventListener(connectionRestoredEvent, restored);
+    return () => window.removeEventListener(connectionRestoredEvent, restored);
+  }, [draft.engine]);
 
   return {
     view,

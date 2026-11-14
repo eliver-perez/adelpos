@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, APIError, clientUpdateEvent, localAuthentication } from '../services/api';
 import { clientUpdateRequired, serverOutdated } from '../services/compatibility';
 import type { LocalAuthentication } from '../services/api';
+import { reconnectDelay } from '../services/reconnection';
 import type { Identity } from '../services/models';
 
 // update-terminal y update-server (etapa 9G, §5.1): la aplicación o el servidor son demasiado viejos para trabajar
@@ -23,6 +24,10 @@ export function useSession() {
   const [local, setLocal] = useState<LocalAuthentication | null>(null);
   const [message, setMessage] = useState('');
   const [connectionError, setConnectionError] = useState('');
+  // Etapa 9G (fase C, D11): consultas fallidas seguidas sin conexión (la espera crece con ellas) y cuándo es el
+  // próximo intento automático, para la capa «Sin conexión con el servidor».
+  const [failures, setFailures] = useState(0);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
   const busy = useRef(false);
   const versionChecked = useRef(false);
 
@@ -60,6 +65,7 @@ export function useSession() {
         setPhase('authenticated');
       }
       setConnectionError('');
+      setFailures(0);
     } catch (error) {
       if (clientUpdateRequired(error)) {
         setConnectionError('');
@@ -73,6 +79,7 @@ export function useSession() {
       } else {
         versionChecked.current = false;
         setConnectionError(error instanceof Error ? error.message : 'No se pudo conectar.');
+        setFailures((count) => count + 1);
         const waitingForStorage =
           error instanceof APIError && error.code === 'SECURE_STORAGE_UNAVAILABLE';
         setPhase((current) => {
@@ -93,12 +100,22 @@ export function useSession() {
     if (phase === 'loading') {
       return;
     }
+    // Sin conexión (etapa 9G, D11): se reintenta sola con espera creciente (1, 2, 4, 8 y después cada 10 s).
+    if (connectionError) {
+      const delay = reconnectDelay(failures);
+      setRetryAt(Date.now() + delay);
+      const timer = window.setTimeout(() => {
+        void refresh();
+      }, delay);
+      return () => window.clearTimeout(timer);
+    }
+    setRetryAt(null);
     // La consulta periódica notifica reemplazos/revocaciones; Go rechaza la sesión inmediatamente.
     const timer = window.setInterval(() => {
       void refresh();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [phase, refresh]);
+  }, [phase, refresh, connectionError, failures]);
 
   // Cualquier operación rechazada con «Actualiza esta terminal» lleva a su aviso (services/api.ts lo anuncia).
   useEffect(() => {
@@ -124,5 +141,5 @@ export function useSession() {
     setPhase('login');
   }, []);
 
-  return { phase, identity, local, message, connectionError, refresh, logout };
+  return { phase, identity, local, message, connectionError, retryAt, refresh, logout };
 }

@@ -23,10 +23,12 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
 2. **Identificación del cliente**: cada petición lleva `X-Client-Version` (la versión de la aplicación,
    `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop` o `android`). Si la versión es anterior a
    `min_client_version`, las rutas de la aplicación responden **426 `CLIENT_UPDATE_REQUIRED`** («Actualiza esta
-   terminal») con `details.min_client_version`. Una petición sin `X-Client-Version` se acepta como «cliente sin
-   identificar» (herramientas, pruebas automáticas y aplicaciones anteriores a la 9G, que solo existen en la propia
-   computadora principal); toda aplicación desde la 9G envía siempre las dos cabeceras. Una versión o un tipo que el
-   servidor no reconoce es 400 (`CLIENT_VERSION_INVALID`, `CLIENT_KIND_INVALID`).
+   terminal») con `details.min_client_version`. **Por la escucha de red** (HTTPS, la única que usan las terminales y
+   el teléfono) `X-Client-Version` es **obligatoria**: sin ella la respuesta también es 426 (fase C; todo cliente que
+   llega por la red es de la 9G o posterior). Por la escucha local de la computadora principal una petición sin
+   `X-Client-Version` se acepta como «cliente sin identificar» (herramientas, pruebas automáticas y aplicaciones
+   anteriores a la 9G, que solo existen en esa computadora). Una versión o un tipo que el servidor no reconoce es 400
+   (`CLIENT_VERSION_INVALID`, `CLIENT_KIND_INVALID`).
 3. **Servidor más viejo que el cliente**: el cliente lee `GET /api/v1/version` (siempre responde, sin sesión ni
    cabeceras) y compara `server_version` con la versión mínima de servidor que necesita (en el escritorio,
    `min_server_version` de `config/product.json`); si es menor, avisa «Actualiza el servidor» en lugar de fallar en
@@ -66,9 +68,38 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
 | `previewDraft`           | `GET /restaurant/accounts/{id}/preview`  | Calcular el borrador y obtener su huella.                                      |
 | `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm` | Confirmar (enviar a cocina) el borrador.                                       |
 | `submitOfflineOrder`     | `POST /restaurant/offline-orders`        | Pedido capturado sin conexión (Android).                                       |
+| `createPairingRequest`   | `POST /pairing/requests`                 | Pedir un código de emparejamiento (sin credencial).                            |
+| `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`     | Revelar el número de la terminal después de recibir el del servidor.           |
+| `getPairingRequest`      | `GET /pairing/requests/{id}`             | Consultar si la computadora principal ya aprobó el código.                     |
+| `renamePairingRequest`   | `POST /pairing/requests/{id}/name`       | Corregir el nombre propuesto mientras espera.                                  |
+| `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`     | Dejar de esperar la aprobación.                                                |
+| `claimPairingCredential` | `POST /pairing/requests/{id}/claim`      | Recibir una sola vez la credencial de la terminal.                             |
 
-Las fases B (emparejamiento con código y conexión cifrada) y C (descubrimiento) de la 9G agregan sus rutas a este
-contrato.
+## Encontrar el servidor y emparejarse (fases B y C)
+
+1. **Buscar** (fase C): el servidor se anuncia en la red local por mDNS/DNS-SD como `_adelpos._tcp` (dominio
+   `local`). El nombre de la instancia es legible («Fonda Doña Ñeli — Mac de caja», hasta 63 bytes UTF-8) y el TXT
+   lleva `txtvers=1`, `server_id` (UUID), `api=v1`, `port` (el de la escucha HTTPS, 8443 por omisión) y `fp` (los
+   primeros 8 bytes de la huella SPKI en hexadecimal). El cliente hace una consulta PTR de una sola vez desde un puerto
+   efímero a `224.0.0.251:5353` y lee las respuestas unicast (PTR, y en los adicionales SRV, TXT y A); elige por
+   `server_id`, nunca por el nombre. Si la red bloquea el descubrimiento, el usuario escribe la dirección (IP privada o
+   nombre `.local`; el puerto por omisión es 8443). El anuncio no es una prueba de identidad: solo da la dirección.
+2. **Emparejar** (fase B): HTTPS a esa dirección. El cliente fija la huella SPKI (SHA-256 de la llave pública del
+   certificado) del primer certificado que ve, comprueba que su prefijo coincide con `fp` si vino de la búsqueda e
+   ignora nombre, IP, cadena y vigencia del certificado. `createPairingRequest` con el compromiso
+   `SHA-256(nT)` de su número aleatorio de 32 bytes → `server_nonce` (nS), `pairing_secret` (para las demás llamadas,
+   en `X-Pairing-Secret`) y vencimiento a 5 minutos. Después `revealPairingNonce` con nT. El código de 6 dígitos que
+   muestra el teléfono es `SHA-256(huella ‖ nT ‖ nS ‖ id de la solicitud en 16 bytes)`, primeros 8 bytes big-endian
+   módulo 10⁶ (vector de prueba en `administration/pairing_test.go`: `166101`).
+3. Un administrador escribe ese código en la computadora principal (Sistema › Terminales; solo ahí se aprueba). El
+   cliente consulta `getPairingRequest` cada 2 s; con `approved`, `claimPairingCredential` entrega una sola vez
+   `device_id` y `device_token`, que se guardan en el almacén seguro junto con `server_id` y la huella.
+4. **Desde entonces** el cliente solo se conecta a un servidor que presente esa huella. Si no logra conectar con la
+   última dirección (cambio de IP por DHCP), vuelve a buscar por `server_id`, se conecta a la dirección nueva
+   comprobando la huella completa (sin emparejarse de nuevo) y la guarda como última dirección. Un servidor con el
+   mismo nombre o `server_id` pero otra huella nunca se acepta. Errores del emparejamiento: `PAIRING_*` (por ejemplo
+   `PAIRING_EXPIRED`, `PAIRING_REJECTED`, `PAIRING_ALREADY_CLAIMED`, 429 `PAIRING_RATE_LIMITED`); detalle en
+   [API_CONTRACTS.md](../API_CONTRACTS.md), «Etapa 9G · emparejamiento de terminales».
 
 ## Sesión y recuperación del estado
 
@@ -225,6 +256,7 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
 | -------------------------------------------------------- | ------ | ---------------------------------------------------------------------- |
 | `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                               |
 | `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                        |
+| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                   |
 | `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                               |
 | `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                        |
 | `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                            |

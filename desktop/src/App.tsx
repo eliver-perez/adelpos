@@ -38,6 +38,8 @@ import { Breadcrumb } from './navigation/Breadcrumb';
 import { NavigationContext } from './navigation/NavigationContext';
 import type { NavigationValue } from './navigation/NavigationContext';
 import { ServerStatus } from './navigation/ServerStatus';
+import { ConnectionLostLayer } from './navigation/ConnectionLostLayer';
+import { announceReconnection } from './services/reconnection';
 import { serverState } from './navigation/serverState';
 import { TileScreen } from './navigation/TileScreen';
 import { TopBar } from './navigation/TopBar';
@@ -262,6 +264,26 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
       },
     );
   }, [authenticated, connectionError]);
+
+  // Etapa 9G (fase C, §4.2 y D11): sin conexión con una sesión abierta, la capa «Sin conexión con el servidor»
+  // bloquea las operaciones (el contenido queda inerte, montado y con lo capturado) y, al volver la conexión,
+  // todas las pantallas a la vista vuelven a consultar el estado vigente (no se depende de los eventos que se
+  // perdieron mientras tanto).
+  const connectionLost = authenticated && !!identity && connectionError !== '';
+  const wasConnectionLost = useRef(false);
+  useEffect(() => {
+    if (wasConnectionLost.current && !connectionLost) {
+      announceReconnection();
+    }
+    wasConnectionLost.current = connectionLost;
+  }, [connectionLost]);
+  const connectionLayer = connectionLost ? (
+    <ConnectionLostLayer
+      detail={connectionError}
+      retryAt={session.retryAt}
+      onRetry={() => void session.refresh()}
+    />
+  ) : null;
 
   // Inicio por terminal (§1.5 y §4.1): al iniciar sesión se abre la pantalla de la terminal (o la
   // primera sección permitida), nunca «Estado del sistema». Si la pantalla visible deja de estar
@@ -505,12 +527,8 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
         );
       case 'kitchen':
         return (
-          <KitchenPage
-            can={can}
-            timezone={identity.establishment.timezone}
-            connectionLost={server === 'offline'}
-            onRetryConnection={() => void session.refresh()}
-          />
+          // Sin conexión, la capa «Sin conexión con el servidor» ofrece «Reintentar» (etapa 9G, fase C).
+          <KitchenPage can={can} timezone={identity.establishment.timezone} />
         );
       case 'catalog':
         return <CatalogPage can={can} />;
@@ -618,7 +636,7 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
             userMenu={userMenu(false)}
             onNavigate={(next) => void requestScreen(next)}
           />
-          <main className="admin-main">
+          <main className="admin-main" inert={connectionLost}>
             <Breadcrumb
               screen={screen}
               tail={tail?.screen === screen ? tail.label : null}
@@ -638,6 +656,7 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
           <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
           {commands.overlay}
           {leaveDialog}
+          {connectionLayer}
         </div>
       </NavigationContext.Provider>
     );
@@ -662,7 +681,7 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
             userMenu={userMenu(false)}
           />
         )}
-        <main className="admin-main">
+        <main className="admin-main" inert={connectionLost}>
           {/* La recomendación no ocupa espacio de la captura (§1.2): reaparece al salir de ella. */}
           {identity.user.initial_password && !reducedBar && (
             <div className="password-warning" role="status">
@@ -709,8 +728,6 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
                     {userMenu(true)}
                   </>
                 }
-                connectionLost={server === 'offline'}
-                onRetryConnection={() => void session.refresh()}
               />
             </div>
           )}
@@ -723,6 +740,7 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
         <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
         {commands.overlay}
         {leaveDialog}
+        {connectionLayer}
       </div>
     </NavigationContext.Provider>
   );

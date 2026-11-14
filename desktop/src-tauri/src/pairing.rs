@@ -42,6 +42,12 @@ pub const DEFAULT_PORT: u16 = 8443;
 /// Aviso cuando el servidor presenta otro certificado que el fijado al emparejar.
 pub const IDENTITY_CHANGED_MESSAGE: &str = "El servidor cambió su identidad y esta terminal ya no puede comprobar que es el del restaurante: vuelve a emparejar esta terminal.";
 
+/// Etapa 9G (fase C): la terminal emparejada no encontró su servidor ni en la última dirección ni en la red.
+pub const SERVER_NOT_FOUND_MESSAGE: &str = "No se encontró la computadora principal del restaurante en la red. Revisa que esté encendida y conectada a la misma red que esta terminal; se vuelve a intentar sola.";
+
+/// Etapa 9G (fase C): la computadora encontrada en la red no respondió con la identidad que anunció.
+const FOUND_MISMATCH_MESSAGE: &str = "La computadora encontrada no respondió como la computadora principal que se anunció en la red. Vuelve a buscar o escribe su dirección.";
+
 const UNREACHABLE_MESSAGE: &str = "No se pudo conectar con la computadora principal en esa dirección. Revisa que esté encendida, en la misma red y que la dirección sea correcta.";
 const CLIENT_KIND: &str = "desktop";
 
@@ -427,10 +433,40 @@ fn text(value: &Value, key: &str) -> String {
         .to_string()
 }
 
-/// Pide el código: solicitud con el compromiso, número del servidor y revelación del número propio.
-pub async fn request_pairing(base: &str, name: &str) -> Result<PairingSession, String> {
+/// Lo que anunció en la red el servidor que se eligió de la lista (etapa 9G, fase C): su identificador y la huella
+/// corta. El emparejamiento exige que el servidor que responde sea ese.
+pub struct Announced<'a> {
+    pub server_id: &'a str,
+    pub fingerprint_prefix: &'a str,
+}
+
+/// Pide el código: solicitud con el compromiso, número del servidor y revelación del número propio. Con un
+/// servidor elegido de la búsqueda, antes de pedir nada comprueba que el certificado que fija tenga la huella que
+/// se anunció, y después que el identificador sea el mismo.
+pub async fn request_pairing(
+    base: &str,
+    name: &str,
+    announced: Option<Announced<'_>>,
+) -> Result<PairingSession, String> {
     let verifier = Arc::new(PinnedVerifier::first_seen());
     let client = pinned_client(Arc::clone(&verifier))?;
+    if let Some(expected) = &announced {
+        // La primera conexión de la sesión fija el certificado; su huella debe empezar como la anunciada.
+        call(
+            &client,
+            reqwest::Method::GET,
+            format!("{base}/api/v1/version"),
+            None,
+            None,
+        )
+        .await?;
+        let seen = verifier
+            .fingerprint()
+            .ok_or("No se pudo comprobar el certificado del servidor.")?;
+        if to_hex(&seen[..8]) != expected.fingerprint_prefix {
+            return Err(FOUND_MISMATCH_MESSAGE.into());
+        }
+    }
     let nonce = random_nonce()?;
     let (status, created) = call(
         &client,
@@ -460,6 +496,12 @@ pub async fn request_pairing(base: &str, name: &str) -> Result<PairingSession, S
     let server_id = text(&created, "server_id");
     if secret.len() != 43 || !valid_identifier(&server_id) || !valid_identifier(&request_id) {
         return Err("El servidor no respondió como la computadora principal de AD-EL POS.".into());
+    }
+    if announced
+        .as_ref()
+        .is_some_and(|expected| expected.server_id != server_id)
+    {
+        return Err(FOUND_MISMATCH_MESSAGE.into());
     }
     // El número propio se revela solo después de recibir el del servidor (compromiso previo).
     let (status, revealed) = call(
@@ -573,10 +615,46 @@ pub async fn pairing_start(
     }
     let base = normalize_address(&address)?;
     let name = valid_name(&name)?;
-    let session = request_pairing(&base, &name).await?;
+    let session = request_pairing(&base, &name, None).await?;
     let view = session.view("pending");
     store_session(&state, Some(session))?;
     Ok(view)
+}
+
+/// Etapa 9G (fase C, D2): pide el código a una computadora principal elegida de la lista de la búsqueda. React
+/// solo manda su identificador; la dirección la conserva Rust (`discovery::ServerLocator`) y se prueba cada una
+/// de las que anunció hasta que una responda con la identidad anunciada.
+#[tauri::command]
+pub async fn pairing_start_found(
+    state: State<'_, TerminalState>,
+    server_id: String,
+    name: String,
+) -> Result<PairingView, String> {
+    let config = terminal_config(&state)?;
+    if config.server_id.is_some() {
+        return Err("Esta terminal ya está emparejada con un servidor.".into());
+    }
+    let name = valid_name(&name)?;
+    let found = state
+        .locator
+        .found(&server_id)
+        .ok_or("Esa computadora ya no aparece en la red. Vuelve a buscar.")?;
+    let mut failure = UNREACHABLE_MESSAGE.to_string();
+    for base in found.bases() {
+        let announced = Announced {
+            server_id: &found.server_id,
+            fingerprint_prefix: &found.fingerprint_prefix,
+        };
+        match request_pairing(&base, &name, Some(announced)).await {
+            Ok(session) => {
+                let view = session.view("pending");
+                store_session(&state, Some(session))?;
+                return Ok(view);
+            }
+            Err(message) => failure = message,
+        }
+    }
+    Err(failure)
 }
 
 /// Consulta el estado; aprobada la solicitud, reclama la credencial (una sola vez), la guarda en el
@@ -1022,7 +1100,7 @@ mod tests {
         let expected =
             fingerprint_from_hex(&std::env::var("ADEL_PAIRING_TEST_FINGERPRINT").unwrap()).unwrap();
         tauri::async_runtime::block_on(async move {
-            let session = request_pairing(&base, "Caja Rust").await.unwrap();
+            let session = request_pairing(&base, "Caja Rust", None).await.unwrap();
             assert_eq!(
                 session.fingerprint, expected,
                 "la huella fijada es la del servidor"

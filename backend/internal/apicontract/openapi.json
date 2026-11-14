@@ -25,6 +25,9 @@
     },
     {
       "name": "Restaurante"
+    },
+    {
+      "name": "Emparejamiento"
     }
   ],
   "security": [
@@ -1134,6 +1137,450 @@
           }
         }
       }
+    },
+    "/pairing/requests": {
+      "post": {
+        "operationId": "createPairingRequest",
+        "summary": "Pedir un código de emparejamiento",
+        "description": "Primer paso para que una terminal nueva (escritorio o Android) se empareje con la computadora principal; no lleva credencial. La terminal se conecta por HTTPS a la escucha de red, fija la huella SPKI del certificado que ve (SHA-256 de la llave pública) y envía el compromiso SHA-256 de un número aleatorio de 32 bytes que todavía no revela. El servidor responde su propio número, el secreto de la solicitud (solo para esta terminal) y vence a los 5 minutos. Límite: 5 solicitudes por dirección de origen en 10 minutos y 20 abiertas en total (429). El código de 6 dígitos que se muestra en la terminal es SHA-256(huella ‖ número de la terminal ‖ número del servidor ‖ identificador de la solicitud en binario): primeros 8 bytes big-endian módulo 10⁶. Ver docs/API_V1.md, «Emparejamiento».",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": "Nombre propuesto («Caja 2», «Mesero Ana»)."
+                  },
+                  "device_kind": {
+                    "enum": ["desktop", "android", "kitchen"],
+                    "description": "Tipo de terminal: android para la aplicación de meseros."
+                  },
+                  "os": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "description": "Sistema («Android 15», «macOS»)."
+                  },
+                  "app_version": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "description": "Versión de la aplicación."
+                  },
+                  "commitment": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "SHA-256 del número aleatorio de la terminal (64 hexadecimales en minúsculas)."
+                  }
+                },
+                "required": ["name", "device_kind", "os", "app_version", "commitment"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Solicitud creada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "request_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "server_nonce": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$",
+                      "description": "Número aleatorio del servidor (32 bytes en hexadecimal)."
+                    },
+                    "pairing_secret": {
+                      "type": "string",
+                      "minLength": 43,
+                      "maxLength": 43
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "server_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "server_name": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "request_id",
+                    "server_nonce",
+                    "pairing_secret",
+                    "expires_at",
+                    "server_id",
+                    "server_name",
+                    "name"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Emparejamiento"],
+        "security": []
+      }
+    },
+    "/pairing/requests/{id}": {
+      "get": {
+        "operationId": "getPairingRequest",
+        "summary": "Consultar si la computadora principal aprobó el código",
+        "description": "La terminal consulta cada 2 segundos mientras muestra el código. approved: ya puede reclamar su credencial (tiene 5 minutos); rejected, expired o cancelled: pedir otro código.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PairingSecret"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado de la solicitud.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "enum": ["pending", "approved", "rejected", "expired", "cancelled", "claimed"]
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["state", "expires_at", "name"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Emparejamiento"],
+        "security": []
+      }
+    },
+    "/pairing/requests/{id}/reveal": {
+      "post": {
+        "operationId": "revealPairingNonce",
+        "summary": "Revelar el número de la terminal",
+        "description": "Segundo paso, después de recibir el número del servidor: la terminal revela su número y el servidor exige que su SHA-256 sea el compromiso (si no, rechaza la solicitud con PAIRING_COMMITMENT_MISMATCH). Desde aquí ambos lados pueden derivar el código y la computadora principal lo puede aprobar.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PairingSecret"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "terminal_nonce": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "Número de la terminal (32 bytes en hexadecimal)."
+                  }
+                },
+                "required": ["terminal_nonce"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Número aceptado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "enum": ["pending", "approved", "rejected", "expired", "cancelled", "claimed"]
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["state", "expires_at"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Emparejamiento"],
+        "security": []
+      }
+    },
+    "/pairing/requests/{id}/name": {
+      "post": {
+        "operationId": "renamePairingRequest",
+        "summary": "Cambiar el nombre propuesto",
+        "description": "Mientras la solicitud está pendiente, la terminal puede corregir su nombre. El administrador lo ve en Sistema › Terminales.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PairingSecret"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Nombre guardado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "enum": ["pending", "approved", "rejected", "expired", "cancelled", "claimed"]
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["state", "name"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Emparejamiento"],
+        "security": []
+      }
+    },
+    "/pairing/requests/{id}/cancel": {
+      "post": {
+        "operationId": "cancelPairingRequest",
+        "summary": "Cancelar la solicitud",
+        "description": "La terminal deja de esperar la aprobación. Una solicitud ya decidida responde su estado sin cambiarlo.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PairingSecret"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado final.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "enum": ["pending", "approved", "rejected", "expired", "cancelled", "claimed"]
+                    }
+                  },
+                  "required": ["state"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Emparejamiento"],
+        "security": []
+      }
+    },
+    "/pairing/requests/{id}/claim": {
+      "post": {
+        "operationId": "claimPairingCredential",
+        "summary": "Reclamar la credencial de la terminal",
+        "description": "Aprobada la solicitud, la terminal recibe **una sola vez** su credencial de dispositivo (X-Device-ID y X-Device-Token, 256 bits) por la misma conexión con la huella fijada, y la guarda en el almacén seguro del sistema. Otro reclamo, también simultáneo, recibe 409 PAIRING_ALREADY_CLAIMED sin token. Desde entonces la terminal solo se conecta a un servidor que presente esa huella, sirva en la dirección que sirva.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/PairingSecret"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credencial de la terminal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "device_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "device_token": {
+                      "type": "string",
+                      "minLength": 43,
+                      "maxLength": 43
+                    },
+                    "server_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "server_name": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["device_id", "device_token", "server_id", "server_name", "name"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Emparejamiento"],
+        "security": []
+      }
     }
   },
   "components": {
@@ -1161,7 +1608,7 @@
         "name": "X-Client-Version",
         "in": "header",
         "required": false,
-        "description": "Versión de la aplicación (MAJOR.MINOR.PATCH). Si es anterior a min_client_version, las rutas de la aplicación responden 426 CLIENT_UPDATE_REQUIRED. Sin ella la petición se acepta (herramientas y pruebas); toda aplicación desde la 9G la envía.",
+        "description": "Versión de la aplicación (MAJOR.MINOR.PATCH). Si es anterior a min_client_version, las rutas de la aplicación responden 426 CLIENT_UPDATE_REQUIRED. Por la escucha de red (HTTPS, la que usan las terminales y la aplicación Android) es obligatoria: sin ella también 426. Por la escucha local de la computadora principal se acepta sin ella (herramientas y pruebas); toda aplicación desde la 9G la envía.",
         "schema": {
           "type": "string",
           "pattern": "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
@@ -1174,6 +1621,17 @@
         "description": "Tipo de cliente.",
         "schema": {
           "enum": ["desktop", "android"]
+        }
+      },
+      "PairingSecret": {
+        "name": "X-Pairing-Secret",
+        "in": "header",
+        "required": true,
+        "description": "Secreto de la solicitud de emparejamiento (43 caracteres) que entregó createPairingRequest. Solo lo conoce la terminal que pidió el código; un identificador o un secreto incorrectos responden igual (404 PAIRING_NOT_FOUND).",
+        "schema": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 43
         }
       }
     },
