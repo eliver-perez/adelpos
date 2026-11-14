@@ -1407,3 +1407,277 @@ emparejamiento) y `cargo test` aprobados; Playwright falló solo en `workflow-st
 `server_id`) no viaja en los respaldos de la base (que pueden ir a una USB): restaurar en otra computadora genera otra
 identidad y obliga a emparejar de nuevo las terminales, como pide §3.1 ante un certificado distinto. Se documenta en
 `docs/INSTALAR_EN_RED.md`.
+
+## Fase F · Respaldos programados
+
+Un agente (13–14/11/2026), en su árbol de trabajo `etapa-9g-f` (desde la fusión de A y D, `72b81dc`, más la corrección
+del coordinador `67741a2` de `compatibility.test.tsx`), en paralelo con la Fase B. Decisiones del coordinador D7
+(restaurar sigue por línea de comandos) y D12 (una sola 0023 con una sección por fase). Pruebas en el clúster temporal
+55499, Go temporal 8187, vista previa 1425, Rust en `cache/cargo-F` y todas las carpetas «del sistema» y de respaldos
+dentro del directorio temporal (`TMPDIR=$SCR/tmp-F` para las pruebas de Go); nunca contra la instalación real.
+
+Commits: `7bf10ba` (servidor: migración, paquete, rutas, trabajador y pruebas de Go; el mensaje dice «1/3» por error,
+son dos) y `39a0390` (escritorio, puente nativo, pruebas de interfaz y de Playwright, contrato y formato).
+
+### Qué cambió
+
+**Migración `0023`, sección `-- Fase F`** (al final, sin tocar la D; transaccional, sin modificar filas existentes):
+
+1. `app.backup_settings` (una fila): `enabled` (true), `scheduled_time` (NULL = la «Hora de inicio del día»; sin
+   segundos), `keep_count` (30, de 1 a 365), `directory` (NULL = la predeterminada; 2–1024 caracteres sin controles),
+   `updated_by`, `updated_at`. Se inserta la fila con los valores por omisión.
+2. `app.backup_runs`: `kind` (`automatic` con `scheduled_for`; `manual` con `operation_id` único, `requested_by` y
+   `requested_device`), `status` (`running`/`succeeded`/`failed`), `started_at`, `finished_at`, `requested_directory`
+   (la carpeta configurada al empezar), `directory` (la usada), `used_default_directory` y `fallback_reason`
+   (`missing`/`not_directory`/`not_writable`, solo si había una carpeta elegida), `file_name` (sin barras), `size_bytes`
+   (> 0), `verified`, `failure_reason` (`directory_unavailable`/`dump_failed`/`verify_failed`/`interrupted`) y
+   `removed_at` (la retención borró el archivo). Restricciones con nombre que impiden registros incoherentes (correcto ⇒
+   verificado con archivo, tamaño y carpeta; fallido ⇒ sin archivo y con motivo; en curso ⇒ sin fin ni resultado; fin
+   ≥ inicio). Índices por `started_at` y parcial de las que siguen en curso.
+
+**Go**
+
+- `internal/backupschedule` (paquete nuevo, en la tupla de `scripts/database.py`; se llama así porque el `.gitignore`
+  ignora toda carpeta `backups/`):
+  - `schedule.go`: `LastSlot`/`NextSlot` (la hora configurada del día local en la zona del establecimiento con
+    `businessday.CutoffInstant`, la misma regla de cambio de horario que la «Hora de inicio del día»), `Due` (no hay un
+    automático correcto ni uno en curso desde el último instante programado, quedan intentos y pasó la espera) y la
+    explicación de toda la programación en el comentario del paquete.
+  - `files.go`: nombres `<base>-<AAAAMMDDTHHMMSSZ>-<6 hex>-automatico.dump` / `-manual.dump` (`.partial` mientras se
+    crea), `Retain` (solo archivos regulares con el nombre exacto de un automático de esta base), `CleanPartials`,
+    `CheckDirectory` (existe, es carpeta y acepta un archivo de prueba; nunca la crea), `CheckExists` (sin escribir,
+    para la pantalla), `ValidateDirectory` (ruta absoluta sin controles, existente, escribible y que no sea una carpeta
+    de datos de PostgreSQL), `Describe` (nombre visible de la carpeta y del disco: `/Volumes/<disco>` en macOS, la
+    unidad en Windows) y `SameDirectory`.
+  - `settings.go` (lectura y guardado de la configuración), `runs.go` (ejecuciones, `RunView`, `LastBackup`,
+    `FindOperation`, historial del instante programado y el aviso: `ComputeAlert` + `alertFor` puro), `state.go`
+    (sección de Mantenimiento y resumen), `runner.go` (el respaldo en sí, ver «Decisiones») y `worker.go` (trabajador y
+    `Plan`).
+- `internal/maintenance/backup.go`: interfaz `ScheduledBackuper` (extiende `Backuper` con `DefaultDirectory`,
+  `DatabaseName`, `Dump(ctx, archivo)` y `Verify(ctx, archivo)`), `CheckListing` (el catálogo de `pg_restore --list`
+  debe traer `TABLE DATA public schema_migrations`) y `DumpBackup` la implementa; `DumpBackup.Backup` reutiliza `Dump`
+  sin cambiar su comportamiento ni su comprobación.
+- `internal/standalone/backup.go`: `DumpFile` y `VerifyFile` con el `pg_dump`/`pg_restore` de la instalación;
+  `Backup` reutiliza `DumpFile` (el archivo a medias ahora también se borra si no se pueden ajustar sus permisos).
+- `cmd/ad-el-pos-server`: `installationBackup` (host de macOS y de Windows) implementa `ScheduledBackuper` con la
+  carpeta `backups` del servicio; `newApplication` crea `Service.ScheduledBackups` cuando el respaldo lo admite (con
+  `serve`, `DumpBackup` y `backup_directory` o `backups/` junto a la configuración) y `serveHTTP` arranca
+  `backupschedule.Worker` junto a los de cocina, inventario y «Agotado» (bloque acotado; espera su fin al apagar).
+- `internal/administration/backups.go` (rutas `maintenance/backups*`, bloque en `routes.go` antes del prefijo
+  `maintenance/`, caso `*backupNow` en `completeDeferred`, campo `Service.ScheduledBackups`) y `service_host.go`
+  (`last_backup` = `backupschedule.LastBackup`, `null` sin respaldos).
+
+**Escritorio**
+
+- Rust: `src/backup_folder.rs` (comando cerrado `choose_backup_directory`, registrado en `main.rs`, `build.rs` y
+  `permissions/diagnostics.toml`), cinco operaciones fijas en `api.rs` (`maintenance_backups`,
+  `maintenance_backups_status`, `maintenance_save_backup_settings`, `maintenance_backup_default_directory`,
+  `maintenance_backup_now` con 130 s de espera). La ruta que guarda una carpeta **no** está en la lista cerrada.
+- React: `services/backups.ts` (tipos, llamadas y todos los textos en palabras del restaurante),
+  `pages/maintenance/BackupSection.tsx` («Respaldos» en Mantenimiento, entre «Servicio del servidor» y «Modalidad»),
+  `pages/maintenance/BackupAlert.tsx` (aviso persistente), `App.tsx` (aviso en la pantalla de inicio, `onMaintenance`
+  de «Solo servidor»), `ServerOnlyPage.tsx` (tarjeta «Último respaldo» real y aviso), `StatusPage.tsx` (tarjeta «Último
+  respaldo» con `settings.manage`), `AuditPage.tsx` (tres acciones nuevas), `services/serverService.ts` (tipo de
+  `last_backup`), `navigation/sections.ts` (descripción de Mantenimiento), `styles.css` (bloque al final, solo tokens) y
+  `testing/backups.ts` (datos de prueba).
+- `e2e/native-driver.ts`: simula `choose_backup_directory` (solo con el servidor local; `nextBackupFolder(ruta |
+'cancel')`, sin respuesta se cancela; envía la ruta con `PUT maintenance/backups/directory`).
+- `API_CONTRACTS.md`: bloque «Etapa 9G · respaldos programados» al final y una frase del bloque de la fase A
+  (`last_backup`).
+
+### Decisiones tomadas en la fase
+
+1. **Hora y días**: el instante programado de cada día es la hora configurada (por omisión, la «Hora de inicio del día»,
+   que si cambia mueve también el respaldo) en la zona horaria del establecimiento. Cambio de horario como la «Hora de
+   inicio del día»: una hora inexistente (adelanto) pasa al primer instante después del salto; una que ocurre dos veces
+   (atraso) es la primera, y la segunda no repite el respaldo del día.
+2. **Computadora apagada a esa hora**: toca respaldar cuando no hay un respaldo **automático correcto que haya empezado
+   en o después del último instante programado**. Al arrancar, el trabajador espera **2 minutos** (que termine de
+   arrancar la computadora, se monte una USB y se reconecten las terminales) y hace el pendiente; después revisa cada 30
+   s. Cambiar la hora a media jornada no repite el respaldo del día (el de la mañana ya empezó después del instante
+   anterior). Activar los respaldos desactivados o terminar el asistente inicial hace el del día en la siguiente
+   revisión (una instalación nueva tiene su primer respaldo en cuanto se configura). Antes del asistente inicial no se
+   respalda.
+3. **Reintentos**: un automático fallido se reintenta a la hora, como máximo **3 intentos por instante programado**;
+   el aviso sigue hasta un respaldo correcto posterior. Una ejecución que quedó «en curso» porque el servidor se detuvo
+   se cierra como `interrupted` (al arrancar el trabajador o antes de cada respaldo, siempre con el lock tomado).
+4. **Lock 7820148309** (`pg_try_advisory_lock`, de sesión, en una conexión propia del pool que se conserva todo el
+   respaldo): un solo respaldo a la vez aunque dos servidores compartan la base; si está ocupado, el automático espera a
+   la siguiente revisión y «Respaldar ahora» responde `409 BACKUP_IN_PROGRESS`. **Orden**: se toma solo, sin ninguna
+   transacción abierta y nunca dentro de una que tenga otro lock; mientras se tiene únicamente se escriben
+   `backup_runs` y la auditoría de «Respaldar ahora» en transacciones cortas sin locks consultivos (`pg_dump` no toma
+   locks consultivos; sus `ACCESS SHARE` solo esperarían a un DDL). Si no se puede soltar, se cierra la conexión.
+5. **Cada respaldo se verifica antes de conservarlo**: se crea como `….dump.partial`, se verifica con `pg_restore
+--list` (y su catálogo debe traer los datos de `public.schema_migrations`: un archivo legible de otra base o vacía no
+   cuenta) y solo entonces recibe su nombre definitivo. Si falla, se borra (no sirve para restaurar) y queda
+   `verify_failed`. Así la retención nunca cuenta un respaldo a medias o sin verificar, y siempre queda al menos un
+   respaldo verificado (la retención solo corre después de uno correcto).
+6. **Retención**: después de cada automático correcto, en la carpeta donde quedó, se conservan los `keep` automáticos
+   más recientes (por el nombre, que lleva la fecha UTC) y se borran solo los archivos regulares con el nombre exacto de
+   un automático de esta base; nunca los de «Respaldar ahora», los de la línea de comandos, los de antes de migrar o de
+   «Quitar datos de prueba», los `.partial`, los enlaces, las carpetas ni otros archivos. Se anota `removed_at`.
+7. **Carpeta**: se elige solo en la computadora principal (Go exige la conexión local; Rust solo abre el diálogo con el
+   servidor local) y solo con el diálogo nativo; Go la vuelve a validar. **Nunca se crea**: si la USB no está, no se
+   crea una carpeta con su nombre en el disco. Si al respaldar no existe, no es carpeta o no acepta archivos, se usa la
+   predeterminada (que sí se crea, 0700) con el motivo, y se avisa. Elegir la predeterminada equivale a volver a ella.
+   La pantalla muestra el nombre de la carpeta y del disco; la ruta completa solo en «Información para soporte».
+8. **«Respaldar ahora»** usa el mismo camino (carpeta, verificación, registro) con la etiqueta `manual`; **no cuenta
+   para la retención** ni sustituye al automático del día. Idempotencia con `backup_runs.operation_id` (misma clave del
+   mismo usuario y terminal → la misma ejecución, en curso o terminada; de otro → `409 IDEMPOTENCY_CONFLICT`), sin
+   `restaurant_operations`. El respaldo corre en segundo plano con el contexto del trabajador (si la terminal se
+   desconecta, termina igual); la respuesta espera hasta 5 s antes del plazo de la petición y si no, devuelve «en
+   curso» (la pantalla consulta cada 3 s mientras hay uno). Se audita al terminar, correcto o no
+   (`maintenance.backup_created`).
+9. **Aviso al administrador**: con `settings.manage`, el permiso de Mantenimiento: quien puede cambiar la configuración
+   es quien puede corregir la carpeta o la hora, y el aviso le dice qué hacer. Dos tipos que calcula Go: `failed` (el
+   último respaldo terminado falló; dice desde cuándo y cuántos intentos) y `fallback` (el último fue correcto pero en
+   la predeterminada porque la carpeta elegida, la que sigue configurada, no estaba). No se puede cerrar: desaparece con
+   un respaldo correcto posterior (o, el de carpeta, al volver a la predeterminada o elegir otra). Se muestra en la
+   **pantalla de inicio de la terminal** (sea cual sea, solo cuando está en ella y fuera de la captura), dentro de
+   «Respaldos» y en la pantalla de «Solo servidor». Se consulta cada 60 s (y tras cada cambio de respaldos) en lugar
+   de un evento en tiempo real: un ámbito nuevo obligaba a redefinir `realtime_events_scope_check` en paralelo con la
+   Fase B; para un respaldo diario basta.
+10. **Respaldos de la línea de comandos** (`dev.sh backup`, `ad-el-pos-server backup`, antes de migrar) no cambian y no
+    se registran en `backup_runs` (pueden correr sin el servidor). La lista y el aviso son de los que hace el servidor.
+11. **Restaurar** no cambia (D7): la sección lo dice («pide ayuda a soporte: se hace desde la computadora principal con
+    el servidor detenido») y no hay restauración en la aplicación.
+12. **Contrato de la API (`internal/apicontract`)**: sus pruebas solo exigen que cada operación **documentada** esté en
+    `docs/API_V1.md` y se recorra; no obligan a documentar rutas nuevas. La regla propuesta en la D es para rutas de
+    **clientes** (Android); estas son de administración en la computadora principal (y la de la carpeta, solo local),
+    así que no se agregan al contrato y se documentan en `API_CONTRACTS.md`.
+13. Con `serve` (desarrollo y, hasta la Fase G, la instalación actual de la Mac si se arranca con este código) el
+    respaldo automático también corre y deja sus archivos en `backups/` junto a la carpeta de la configuración
+    (`backup_directory` en las pruebas): solo borra sus propios automáticos, nunca los respaldos que ya hay ahí.
+
+### Pruebas ejecutadas
+
+14/11/2026, en el árbol `etapa-9g-f` con el arnés `iso.sh` (clúster 55499, Go 8187, vista previa 1425, Rust en
+`cache/cargo-F`, `TMPDIR=$SCR/tmp-F`). Pantalla desbloqueada (`CGSSessionScreenIsLocked` ausente).
+
+| Suite                                                                                                                                                                                     | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `format` (Prettier, `gofmt`, `cargo fmt`), `sync --check`                                                                                                                                 | aprobado; `docs/etapas/*.md` con el mismo md5 antes y después de `dev.sh format`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `vet` (normal e `integration`) y `win` (`GOOS=windows` build, vet y vet `integration`)                                                                                                    | aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Go unitarias con `-race` (`go test ./...`)                                                                                                                                                | aprobado (15 s); nuevas: `backupschedule` (instante programado con la hora de inicio del día, fin de mes y año, zona del establecimiento, adelanto y atraso de horario en `America/Tijuana`, `Due`, nombres, retención que solo borra sus archivos —manuales, de la línea de comandos, de antes de migrar, de otra base, `.partial`, mayúsculas, enlaces y carpetas intactos—, restos a medias, carpeta disponible/inexistente/archivo/sin permiso sin crearla nunca, validación de la carpeta elegida, nombres visibles, carpeta no disponible → predeterminada, verificación antes del nombre definitivo, fallo de verificación/pg_dump/interrumpido sin restos y el aviso) y `maintenance` (`Dump`/`Verify` privados, archivo legible de otra base rechazado, `CheckListing`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Integración `./internal/backupschedule` (`-race`)                                                                                                                                         | aprobado, 7 s: trabajador con respaldo simulado (sin establecimiento no respalda; pendiente al arrancar; no repite al cambiar la hora; retención con archivos ajenos; USB desconectada → predeterminada con aviso y la carpeta sin crear, luego la USB vuelve y el aviso se va; fallo de verificación → aviso con reintento a la hora y desde cuándo, hasta un respaldo correcto; máximo 3 intentos; interrumpido; desactivados), trabajador real con esperas cortas (respalda lo pendiente una vez y, al apagarse a media copia, el manual queda `interrupted` y se espera), **lock 7820148309** (un segundo servidor con otro pool recibe ocupado para el automático y para «Respaldar ahora»; el lock se ve tomado y se suelta; 8 revisiones simultáneas desde dos servidores dejan un solo respaldo por instante), **«Respaldar ahora» idempotente** (6 envíos simultáneos con la misma clave: una ejecución, una copia, una auditoría; otro usuario u otra terminal → conflicto; no cuenta para el automático del día) y **respaldo real** con `pg_dump`/`pg_restore` de PostgreSQL 18 contra el clúster 55499 (archivo 0600 con `backup_runs` en su catálogo, automáticos en una carpeta elegida con retención de 2 que no toca el manual, carpeta que desaparece → predeterminada, verificación real) |
+| Integración `./internal/administration` (`-race`, toda la tupla del paquete)                                                                                                              | aprobado, 105 s: `TestStageTwoAcceptance` (con `last_backup` en `null` de la fase A) y `TestStage9GBackupRoutes` (403 sin `settings.manage`; estado inicial; 8 configuraciones inválidas; guardado auditado con antes y después y sin auditoría si no cambia; carpeta por la red → `403 LOCAL_REQUIRED` y `directory_change_available` falso; 5 carpetas inválidas sin crear ninguna; carpeta elegida auditada; elegir la predeterminada = volver a ella; «Respaldar ahora» con clave inválida, correcto y auditado, reenvío sin otra copia, otro usuario → 409; fallo de verificación → `failed`, auditoría fallida, aviso en `maintenance/backups/status` y `last_backup` fallido en `maintenance/service`; respaldo en curso → otro `409 BACKUP_IN_PROGRESS`, reenvío «en curso», respuesta «en curso» al vencer el plazo y auditoría al terminar después; un correcto posterior quita el aviso)                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Integración `./internal/database`                                                                                                                                                         | aprobado, 11 s (`TestStage9GAndroidUpgrade` con `checkStage9GBackups`: fila de configuración por omisión, registro vacío, 11 registros incoherentes rechazados y uno manual con predeterminada por falta de la elegida aceptado)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS`, con el trabajador de respaldos en el `host`)                                                                              | aprobado, 49 s                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `cargo test --locked --offline`                                                                                                                                                           | 61 aprobadas, 1 ignorada (nuevas: `backup_folder` —solo servidor local, solo rutas absolutas en texto, un diálogo a la vez, la ventana sigue sin permisos `dialog:*`/`fs:*`— y `api` —rutas fijas de respaldos y ninguna operación que guarde una carpeta—)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `tsc --noEmit` / Vitest (`npm test`)                                                                                                                                                      | sin errores / 91 archivos, 856 pruebas (12 nuevas en `stage9gBackups.test.tsx`: textos sin rutas, sección completa, guardado con `time: null` u otra hora, clave conservada ante una respuesta sin conexión y nueva después, carpeta con la operación nativa sin argumentos ni rutas, sin carpeta desde otra terminal, aviso con «Ver respaldos», «Solo servidor» y el aviso en la aplicación solo con `settings.manage` y solo en la pantalla de inicio; `maintenance.test.tsx` responde la sección nueva)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Playwright Chromium y WebKit (`restaurant`, `workflow-stage9c-navigation`, `workflow-stage9g-backups`, `workflow-stage9g-modality`, `workflow-stage9g-sold-out`, `workflow-zz-test-data`) | Chromium 6/6 (2.3 min), WebKit 6/6 (1.9 min)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Playwright final sobre el último commit (`workflow-stage9g-backups`, `workflow-stage9g-modality`, `workflow-zz-test-data`)                                                                | Chromium 3/3 (27 s), WebKit 3/3 (28 s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+`workflow-stage9g-backups.spec.ts`: desactiva el respaldo automático durante la prueba (y lo deja activo con 30 al
+final), cambia los conservados (auditado), cancela el diálogo, elige una carpeta, rechaza una inexistente, «Respaldar
+ahora» real queda en la carpeta elegida y revisado, la carpeta desaparece → respaldo en la predeterminada con aviso en
+Mantenimiento y en la pantalla de inicio, «Ver respaldos» lleva a Mantenimiento, la carpeta predeterminada se sustituye
+por un archivo → respaldo fallido con aviso en la pantalla de inicio (y no en otras pantallas) y, al devolverla, un
+respaldo correcto quita el aviso. `workflow-stage9g-modality.spec.ts` (fase A) ya no supone «Sin registro» en «Último
+respaldo» (puede haber respaldos de esta especificación o del automático del servidor temporal).
+
+### No verificado y lo que queda
+
+- El diálogo nativo de carpeta real (`blocking_pick_folder` sobre la ventana) solo se probó compilado y con la operación
+  simulada en Playwright; una USB real conectada y desconectada se simuló con carpetas que aparecen y desaparecen.
+- **Fase W (Windows)**: el host de Windows ya tiene los respaldos programados (usa el mismo `installationBackup`), pero
+  sin probar: (a) en una USB con FAT32/exFAT `fileacl.Protect` (ACL privada) fallará y el respaldo quedará `dump_failed`
+  en esa carpeta (decidir si en Windows se acepta sin ACL en una carpeta elegida o se usa la predeterminada); (b)
+  `pg_dump --file` con rutas no ASCII (la instalación usa rutas cortas 8.3 para los programas, no para el archivo); (c)
+  `Describe` muestra la unidad (`E:`) como disco; (d) el diálogo nativo de carpeta en Windows.
+- Un respaldo en una USB lo puede leer cualquiera que tenga la USB (FAT/exFAT no guarda permisos): decirlo en la guía.
+- `scripts/restore-check.py` compara conteos de todas las tablas: si un respaldo automático empieza entre `dev.sh
+backup` y la comprobación, `backup_runs` tendrá una fila más (falso «difieren»; repetir).
+
+### Para `docs/INSTALAR_EN_RED.md` (Fase G) · «Dónde están los respaldos y cómo cambiar su carpeta»
+
+> La computadora principal respalda sola la base de datos del restaurante **todos los días** a la «Hora de inicio del
+> día» (05:00 si no la cambiaste) y conserva los **últimos 30** respaldos automáticos; los más viejos se borran solos.
+> Si la computadora estaba apagada a esa hora, el respaldo se hace unos minutos después de encenderla. Cada respaldo se
+> revisa al crearse.
+>
+> **Dónde están**: en la carpeta predeterminada de la computadora principal (en la Mac,
+> `/Library/Application Support/AD-EL POS/backups`; en Windows, la carpeta `backups` de los datos de AD-EL POS), o en la
+> carpeta que elijas. En **Administración › Sistema › Mantenimiento › Respaldos** ves el último respaldo, si fue
+> correcto, dónde está y la lista de los más recientes (la ruta completa está en «Información para soporte»).
+>
+> **Cambiar la carpeta** (por ejemplo, a otro disco o a una USB): en la **computadora principal**, en
+> Mantenimiento › Respaldos, toca **«Elegir carpeta»** y elige la carpeta en la ventana que se abre. Desde otra terminal
+> no se puede. Para volver a la de siempre, **«Usar la carpeta predeterminada»**. Ahí mismo cambias la hora, cuántos
+> conservar o desactivas el respaldo automático.
+>
+> **Si la USB no está conectada** a la hora del respaldo, se guarda en la carpeta predeterminada y aparece un aviso en
+> la pantalla de inicio del administrador. Si un respaldo **falla**, el aviso dice qué pasó y sigue hasta que haya un
+> respaldo correcto; puedes tocar **«Respaldar ahora»** después de corregirlo.
+>
+> **Cuida la USB**: quien la tenga puede leer los datos del restaurante. Guárdala en un lugar seguro.
+>
+> **Restaurar un respaldo** no se hace desde la aplicación: pide ayuda a soporte. En la computadora principal, con una
+> ventana de Terminal, primero se ensaya (`".../ad-el-pos-server" restore-check --file <respaldo>`) y después se
+> restaura (`restore --file <respaldo>`), que pausa el servidor, guarda antes un respaldo del estado actual y lo vuelve a
+> arrancar. (En la Mac el programa está en `/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server`; el respaldo
+> debe estar en la carpeta de respaldos de AD-EL POS: copia ahí el de la USB si hace falta.)
+
+### Para el revisor independiente (respaldos)
+
+Archivos: `backend/internal/backupschedule/*.go` (sobre todo `runner.go`, `schedule.go`, `files.go`, `runs.go`),
+`backend/internal/administration/backups.go` (y el caso en `reports.go` → `completeDeferred`, el bloque de
+`routes.go`, `service_host.go`), `backend/internal/maintenance/backup.go` (`Dump`, `Verify`, `CheckListing`),
+`backend/internal/standalone/backup.go` (`DumpFile`, `VerifyFile`), `backend/cmd/ad-el-pos-server/host.go` y
+`main.go` (trabajador), la sección F de la 0023, `desktop/src-tauri/src/backup_folder.rs`, las operaciones de `api.rs`,
+`desktop/src/pages/maintenance/BackupSection.tsx`, `BackupAlert.tsx`, `services/backups.ts`, la simulación de
+`native-driver.ts` y las pruebas (`backupschedule/*_test.go`, `administration/backups_acceptance_test.go`,
+`database/stage9g_backups_upgrade_test.go`, `maintenance/backup_test.go`, `pages/stage9gBackups.test.tsx`,
+`e2e/workflow-stage9g-backups.spec.ts`).
+
+Reglas que conviene comprobar:
+
+1. La retención nunca borra un archivo que no sea un respaldo automático de esta base con su nombre exacto, ni un
+   enlace o carpeta, ni en otra carpeta que la del respaldo recién hecho; nunca corre después de un fallo; siempre queda
+   al menos un respaldo verificado.
+2. Ningún archivo sin verificar recibe el nombre definitivo; un fallo de creación o de verificación no deja archivos.
+3. Nunca se crea la carpeta elegida; sin ella se usa la predeterminada y se registra el motivo; la ruta que guarda Go
+   solo llega del diálogo nativo (Rust) por una conexión local y Go la valida.
+4. Nunca hay dos respaldos a la vez (lock 7820148309 de sesión con `pg_try_advisory_lock`, soltado siempre) y el lock no
+   se combina con otros.
+5. El instante programado y «toca respaldar» son correctos con la zona del establecimiento, el cambio de horario, la
+   computadora apagada, el cambio de hora y los reintentos (máximo 3, cada hora).
+6. «Respaldar ahora» es idempotente (misma clave → misma ejecución; otro usuario o terminal → 409) y se audita una vez,
+   también si la petición venció antes de terminar.
+7. El aviso aparece a quien tiene `settings.manage` (y solo a quien lo tiene: Go exige el permiso) y desaparece solo
+   con un respaldo correcto posterior; un registro «en curso» de un servidor detenido termina como `interrupted`.
+8. Ningún texto visible tiene rutas, nombres de programas ni términos técnicos fuera de «Información para soporte».
+
+### Para CLAUDE.md
+
+- Esquema 23 (0023, sección F): `backup_settings` y `backup_runs`.
+- §3 Composición: `maintenance/backups*` → `administration/backups.go` con el paquete `internal/backupschedule`
+  (trabajador `backupschedule.Worker` en `main.go`); `maintenance.ScheduledBackuper` (`DumpBackup` con `serve`,
+  `installationBackup` con `standalone.DumpFile`/`VerifyFile` en el host); comando Tauri `choose_backup_directory`
+  (`backup_folder.rs`).
+- §3 **Locks, fila nueva**: `7820148309 | Respaldos programados y «Respaldar ahora» (etapa 9G, internal/backupschedule):
+pg_try_advisory_lock de sesión en una conexión propia mientras dura el respaldo (uno a la vez, sin esperar); se toma
+solo, sin transacción abierta ni otros locks, y mientras se tiene solo se escriben backup_runs y la auditoría en
+transacciones cortas sin locks consultivos.`
+- §5: `dev.sh backup` y los comandos `backup`/`restore-check`/`restore` siguen igual; el servidor hace además un respaldo
+  automático diario (también con `serve`, en `backup_directory` o `backups/`).
+- §6: `./internal/backupschedule` en la tupla de integración (sus pruebas usan carpetas de `t.TempDir()`: correr con
+  `TMPDIR` dentro del directorio temporal de la sesión); el Go temporal de Playwright también hace su respaldo automático
+  diario (2 min después de arrancar, en su `backup_directory`); `workflow-stage9g-backups.spec.ts` aparta y devuelve la
+  carpeta predeterminada del servidor temporal para provocar un fallo.
+- §11–12 (regla permanente propuesta): «Un aviso que exige que el administrador corrija algo (como un respaldo
+  fallido) se muestra en la pantalla de inicio de la terminal mientras siga vigente y lo calcula Go».
+- §15: reglas de los respaldos programados (decisiones 1–13); auditoría nueva `maintenance.backup_settings_changed`,
+  `maintenance.backup_directory_changed` y `maintenance.backup_created`; sin permisos nuevos (`settings.manage`).
+- §19: diálogo de carpeta real, USB real y Windows sin verificar (ver «No verificado»).
+
+**Fusión con A, D y B y verificación del coordinador** (13/11/2026): la rama `etapa-9g-f` salió de la fusión de A y D,
+antes de la B. Se fusionó en `a7989e9` con conflictos solo de bloques agregados por ambas ramas (0023 —queda el
+encabezado y las secciones D, B y F, en ese orden—, trabajadores de `main.go`, campos de `Application`, comandos de
+`build.rs`, `main.rs` y `diagnostics.toml`, nombres del Registro de movimientos, estilos y `API_CONTRACTS.md`), más el
+formato de la prueba de «Agotado» renombrada en la fusión anterior (`b84415c`). Copia exacta de `b84415c`: formato,
+`sync`, `vet`, `GOOS=windows`, `tsc`, Go unitarias con `-race`, integración de los 12 paquetes de la tupla
+(`operations` 308 s, `reports` 130 s, `administration` 117 s, `reports/operational` 45 s, `cmd/ad-el-pos-server` 43 s,
+`designer`, `catalog`, `identity`, `database`, `apicontract`, `backupschedule` y `payments`), Vitest, `cargo test` y
+Playwright (`restaurant`, `table-price-decrease`, `takeaway-quick-notes`, `workflow-stage9c-navigation`, las cinco
+`workflow-stage9g-*` y `workflow-zz-test-data`: 10 de 10 en Chromium y 10 de 10 en WebKit): todo aprobado.
