@@ -1,1 +1,3628 @@
-{"openapi": "3.1.0", "info": {"title": "AD-EL POS API v1", "version": "v1"}, "paths": {}}
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AD-EL POS · API v1 para clientes",
+    "version": "v1",
+    "description": "Contrato de la API que usan la aplicación de escritorio y las terminales y que usará la aplicación Android de meseros (etapa 9G, §5). Go es la única autoridad de precios, impuestos, permisos y estados: ningún cliente calcula reglas de negocio. Dinero en cadenas decimales. Toda escritura de pedidos, cuentas, pagos y «Agotado» lleva operation_id (UUID que genera el cliente y conserva al reintentar). Explicación para la etapa de Android: docs/API_V1.md."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Versión"
+    },
+    {
+      "name": "Sesión"
+    },
+    {
+      "name": "Tiempo real"
+    },
+    {
+      "name": "Catálogo"
+    },
+    {
+      "name": "Restaurante"
+    }
+  ],
+  "security": [
+    {
+      "deviceId": [],
+      "deviceToken": [],
+      "session": []
+    }
+  ],
+  "paths": {
+    "/version": {
+      "get": {
+        "operationId": "getVersion",
+        "summary": "Versión del servidor y compatibilidad",
+        "description": "Responde siempre, sin sesión ni cabeceras de cliente: un cliente compara server_version con la versión mínima de servidor que necesita (si es menor, avisa «Actualiza el servidor») y sabe con min_client_version si él mismo debe actualizarse.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versión y compatibilidad.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionInfo"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Versión"],
+        "security": []
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "getReadiness",
+        "summary": "Servidor y base de datos listos",
+        "description": "200 si PostgreSQL está disponible y el esquema es compatible; 503 si no.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Listo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No listo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Versión"],
+        "security": []
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPI",
+        "summary": "Este contrato",
+        "description": "El documento OpenAPI 3.1 de la API v1 para clientes, el mismo que está en el repositorio.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contrato.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "openapi": {
+                      "const": "3.1.0"
+                    },
+                    "paths": {
+                      "type": "object"
+                    }
+                  },
+                  "required": ["openapi", "paths"]
+                }
+              }
+            }
+          }
+        },
+        "tags": ["Versión"],
+        "security": []
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Iniciar sesión en una terminal emparejada",
+        "description": "Requiere la credencial de la terminal. Una sola sesión activa por usuario: iniciar sesión en otra terminal cierra la anterior (SESSION_REPLACED). 5 fallos en 15 minutos por usuario y terminal bloquean 15 minutos (429). El token de sesión dura 12 horas y se guarda en el almacén seguro del sistema.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesión iniciada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session_token": {
+                      "type": "string",
+                      "minLength": 43,
+                      "maxLength": 43
+                    }
+                  },
+                  "required": ["session_token"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Sesión"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": ["username", "password"]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Cerrar la sesión",
+        "description": "Revoca la sesión de esta terminal.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesión cerrada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "const": true
+                    }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Sesión"]
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "getIdentity",
+        "summary": "Sesión, permisos y terminal",
+        "description": "El usuario con sus permisos vigentes, sus preferencias, la terminal y los datos del establecimiento.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Identidad.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Sesión"]
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Eventos en tiempo real (SSE)",
+        "description": "Flujo text/event-stream de mensajes «changes» (EventBatch) cada 750 ms; dura 30 s y el cliente se vuelve a conectar con ?after=<cursor> (o Last-Event-ID). Requiere events.read. Un evento solo dice qué cambió (tipo, ámbito y agregado): el cliente vuelve a consultar. Ámbito catalog desde la 9G (catalog.changed, catalog.product.sold_out, catalog.product.available).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "station_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Flujo de eventos; cada data es un EventBatch.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Tiempo real"]
+      }
+    },
+    "/catalog/sync": {
+      "get": {
+        "operationId": "getCatalogSync",
+        "summary": "Catálogo descargable por versión",
+        "description": "Sin since (o con 0): catálogo completo. Con since=X: solo los registros que cambiaron después de la versión X, con las bajas en deleted. Requiere catalog.read y catalog.prices.read. Los precios son los de la lista predeterminada calculados por Go; el cliente no calcula precios.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catálogo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogSync"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Catálogo"]
+      }
+    },
+    "/catalog/products": {
+      "get": {
+        "operationId": "listCatalogProducts",
+        "summary": "Productos para la captura",
+        "description": "Listado paginado con disponibilidad y «Agotado» de cada producto; con price_list_id (y catalog.prices.read), el precio efectivo de esa lista. Lo usa la captura del escritorio.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "active",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["true", "false"]
+            }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["true", "false", "all"]
+            }
+          },
+          {
+            "name": "price_list_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de productos.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CaptureProduct"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "page_size": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["items", "total", "page", "page_size"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Catálogo"]
+      }
+    },
+    "/catalog/images/{id}": {
+      "get": {
+        "operationId": "getCatalogImage",
+        "summary": "Imagen en JSON (base64)",
+        "description": "La imagen como data URI; la usa el escritorio. Para guardar imágenes en caché, usar /catalog/images/{id}/content.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Imagen.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "data_uri": {
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": "integer"
+                    },
+                    "height": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["id", "data_uri", "width", "height"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Catálogo"]
+      }
+    },
+    "/catalog/images/{id}/content": {
+      "get": {
+        "operationId": "getCatalogImageContent",
+        "summary": "Imagen binaria con caché",
+        "description": "El contenido PNG o JPEG con ETag (su checksum) y caché larga: el contenido de una imagen nunca cambia (una imagen nueva tiene otro id). Con If-None-Match igual a la etiqueta responde 304 sin contenido.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Imagen.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "El cliente ya tiene esta imagen."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Catálogo"]
+      }
+    },
+    "/catalog/products/{id}/sold-out": {
+      "post": {
+        "operationId": "setProductSoldOut",
+        "summary": "«Agotado» y «Disponible otra vez»",
+        "description": "Requiere catalog.sold_out.manage. sold_out true marca el producto como agotado hasta el inicio del día comercial siguiente (o hasta nuevo aviso con indefinite); false lo vuelve a «Disponible otra vez». Idempotente con operation_id. Se avisa en tiempo real (ámbito catalog) y se registra en el Registro de movimientos. Un producto agotado no se puede capturar: PRODUCT_SOLD_OUT.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado vigente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SoldOutState"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Catálogo"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sold_out": {
+                    "type": "boolean"
+                  },
+                  "indefinite": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["operation_id", "sold_out"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/restaurant/state": {
+      "get": {
+        "operationId": "getRecoveryState",
+        "summary": "Recuperación del estado al reconectar",
+        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryState"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/accounts": {
+      "get": {
+        "operationId": "listAccounts",
+        "summary": "Cuentas",
+        "description": "Cuentas paginadas (abiertas por omisión) con sus estados de preparación, pago y entrega. Requiere accounts.read.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["dine_in", "takeaway"]
+            }
+          },
+          {
+            "name": "table_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": ["open", "closed", "merged", "voided", "all"]
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Página de cuentas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Account"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "page_size": {
+                      "type": "integer"
+                    },
+                    "server_time": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "settings": {
+                      "type": "object"
+                    }
+                  },
+                  "required": ["items", "total", "page", "page_size", "server_time", "timezone"]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      },
+      "post": {
+        "operationId": "openAccount",
+        "summary": "Abrir una cuenta con su primer producto",
+        "description": "Crea la cuenta y su borrador inicial en una sola operación idempotente (accounts.open; con items, también orders.capture, catalog.read y catalog.prices.read). Con seen_account_ids responde 409 TABLE_HAS_ACCOUNT si la mesa tiene cuentas abiertas que la terminal no veía.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta abierta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "mode": {
+                    "enum": ["dine_in", "takeaway"]
+                  },
+                  "table_id": {
+                    "type": ["string", "null"],
+                    "format": "uuid"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "seen_account_ids": {
+                    "type": ["array", "null"],
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "items": {
+                    "type": ["array", "null"],
+                    "items": {
+                      "$ref": "#/components/schemas/DraftItem"
+                    },
+                    "maxItems": 20
+                  }
+                },
+                "required": ["operation_id", "mode"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/restaurant/accounts/{id}": {
+      "get": {
+        "operationId": "getAccount",
+        "summary": "Cuenta con su borrador y sus partidas",
+        "description": "La cuenta, su borrador y sus partidas confirmadas con su estado de preparación.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/accounts/{id}/draft": {
+      "put": {
+        "operationId": "saveDraft",
+        "summary": "Guardar el borrador",
+        "description": "Sustituye el borrador con la revisión vigente de la cuenta (409 ACCOUNT_CONFLICT si otra terminal la cambió). Idempotente con operation_id.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/DraftItem"
+                    },
+                    "maxItems": 20
+                  }
+                },
+                "required": ["operation_id", "revision", "items"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/restaurant/accounts/{id}/preview": {
+      "get": {
+        "operationId": "previewDraft",
+        "summary": "Calcular el borrador",
+        "description": "Cotiza el borrador guardado con los precios vigentes y devuelve la huella que exige la confirmación.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cálculo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/accounts/{id}/confirm": {
+      "post": {
+        "operationId": "confirmDraft",
+        "summary": "Confirmar (enviar) el borrador",
+        "description": "Confirma el borrador si la huella sigue siendo la del cálculo visto (409 QUOTE_CHANGED si cambió un precio o el borrador). Idempotente con operation_id; cocina recibe el pedido.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "expected_fingerprint": {
+                    "type": "string"
+                  }
+                },
+                "required": ["operation_id", "revision", "expected_fingerprint"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/restaurant/offline-orders": {
+      "post": {
+        "operationId": "submitOfflineOrder",
+        "summary": "Pedido capturado sin conexión",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pedido aceptado.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfflineOrderResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Requiere confirmación, o la clave ya se usó con otro contenido (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/OfflineOrderRejection"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OfflineOrderRequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "deviceId": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Device-ID",
+        "description": "Identificador de la terminal emparejada."
+      },
+      "deviceToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Device-Token",
+        "description": "Credencial de la terminal (256 bits)."
+      },
+      "session": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token de sesión de 43 caracteres."
+      }
+    },
+    "parameters": {
+      "ClientVersion": {
+        "name": "X-Client-Version",
+        "in": "header",
+        "required": false,
+        "description": "Versión de la aplicación (MAJOR.MINOR.PATCH). Si es anterior a min_client_version, las rutas de la aplicación responden 426 CLIENT_UPDATE_REQUIRED. Sin ella la petición se acepta (herramientas y pruebas); toda aplicación desde la 9G la envía.",
+        "schema": {
+          "type": "string",
+          "pattern": "^\\d{1,6}\\.\\d{1,6}\\.\\d{1,6}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+        }
+      },
+      "ClientKind": {
+        "name": "X-Client-Kind",
+        "in": "header",
+        "required": false,
+        "description": "Tipo de cliente.",
+        "schema": {
+          "enum": ["desktop", "android"]
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Money": {
+        "type": "string",
+        "format": "decimal",
+        "description": "Importe en pesos (MXN, IVA incluido) como cadena con dos decimales; nunca número de punto flotante."
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {}
+            },
+            "required": ["code", "message"]
+          }
+        },
+        "required": ["error"],
+        "description": "Error con un código estable y un mensaje para el usuario en español."
+      },
+      "VersionInfo": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "type": "string"
+          },
+          "server_version": {
+            "type": "string"
+          },
+          "api_version": {
+            "const": "v1"
+          },
+          "schema_version": {
+            "type": "integer"
+          },
+          "supported_api_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "events_available": {
+            "type": "boolean"
+          },
+          "test_mode": {
+            "type": "boolean"
+          },
+          "min_client_version": {
+            "type": "string"
+          },
+          "client_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "openapi_path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "product",
+          "server_version",
+          "api_version",
+          "schema_version",
+          "supported_api_versions",
+          "capabilities",
+          "min_client_version",
+          "client_kinds"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "enum": ["ready", "not_ready"]
+          },
+          "checks": {
+            "type": "object",
+            "properties": {
+              "postgres": {
+                "type": "string"
+              },
+              "schema": {
+                "type": "string"
+              }
+            },
+            "required": ["postgres", "schema"]
+          }
+        },
+        "required": ["status", "checks"]
+      },
+      "Principal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "role_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role_name": {
+            "type": "string"
+          },
+          "initial_password": {
+            "type": "boolean"
+          },
+          "support": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "role_name",
+          "session_id",
+          "device_id",
+          "permissions"
+        ],
+        "description": "Usuario de la sesión con sus permisos efectivos, leídos de PostgreSQL en cada petición."
+      },
+      "Terminal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "register_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "keyboard_mode": {
+            "type": "string"
+          },
+          "home_screen": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"]
+      },
+      "Identity": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/Principal"
+          },
+          "preferences": {
+            "type": "object",
+            "properties": {
+              "theme": {
+                "type": "string"
+              },
+              "home_screen": {
+                "type": "string"
+              }
+            },
+            "required": ["theme", "home_screen"]
+          },
+          "terminal": {
+            "$ref": "#/components/schemas/Terminal"
+          },
+          "establishment": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "currency": {
+                "const": "MXN"
+              },
+              "precheck_name": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "timezone", "currency", "precheck_name"]
+          }
+        },
+        "required": ["user", "preferences", "terminal", "establishment"]
+      },
+      "Schedule": {
+        "type": "object",
+        "properties": {
+          "starts_on": {
+            "type": "string",
+            "format": "date"
+          },
+          "ends_on": {
+            "type": "string",
+            "format": "date"
+          },
+          "days": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            }
+          },
+          "windows": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "start": {
+                  "type": "string"
+                },
+                "end": {
+                  "type": "string"
+                }
+              },
+              "required": ["start", "end"]
+            }
+          }
+        },
+        "description": "Horario de disponibilidad (días de 0 = domingo a 6 = sábado y ventanas HH:mm en la zona del establecimiento)."
+      },
+      "Tier": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "integer"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": ["from", "unit_price"]
+      },
+      "Category": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "color": {
+            "type": "string"
+          },
+          "image_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "available_now": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "revision",
+          "sort_order",
+          "color",
+          "image_id",
+          "availability"
+        ]
+      },
+      "Variant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": ["string", "null"]
+          },
+          "price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "effective_price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_origin": {
+            "type": ["string", "null"]
+          },
+          "pricing_error": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["id", "name", "code", "price", "active"]
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "category_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": ["string", "null"]
+          },
+          "kind": {
+            "enum": ["product", "combo"]
+          },
+          "base_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "tax_rate": {
+            "type": ["integer", "null"],
+            "enum": [0, 8, 16, null]
+          },
+          "price_can_decrease": {
+            "type": "boolean"
+          },
+          "image_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "temporary_unavailable": {
+            "type": "boolean"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Variant"
+            }
+          },
+          "ingredients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ingredient_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "included_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "removable": {
+                  "type": "boolean"
+                },
+                "addable": {
+                  "type": "boolean"
+                },
+                "max_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "extra_price": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "recipe_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ingredient_id",
+                "included_quantity",
+                "removable",
+                "addable",
+                "max_quantity",
+                "extra_price"
+              ]
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "min_quantity": {
+                  "type": ["string", "null"],
+                  "pattern": "^\\d+(\\.\\d{1,3})?$"
+                },
+                "max_quantity": {
+                  "type": ["string", "null"],
+                  "pattern": "^\\d+(\\.\\d{1,3})?$"
+                },
+                "included": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "option_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "quantity": {
+                        "type": "string",
+                        "pattern": "^\\d+(\\.\\d{1,3})?$",
+                        "description": "Cantidad decimal con hasta tres decimales."
+                      }
+                    },
+                    "required": ["option_id", "quantity"]
+                  }
+                }
+              },
+              "required": ["group_id", "included"]
+            }
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "min_quantity": {
+                  "type": "integer"
+                },
+                "max_quantity": {
+                  "type": "integer"
+                },
+                "included_quantity": {
+                  "type": "integer"
+                },
+                "default_quantity": {
+                  "type": "integer"
+                },
+                "default_product_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "product_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "substitution_price": {
+                        "$ref": "#/components/schemas/Money"
+                      },
+                      "tiers": {
+                        "type": ["array", "null"],
+                        "items": {
+                          "$ref": "#/components/schemas/Tier"
+                        }
+                      }
+                    },
+                    "required": ["product_id", "substitution_price"]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "min_quantity",
+                "max_quantity",
+                "default_product_id",
+                "options"
+              ]
+            }
+          },
+          "sold_out_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sold_out_until": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "available_now": {
+            "type": "boolean"
+          },
+          "availability_reason": {
+            "type": "string"
+          },
+          "sold_out": {
+            "type": "boolean"
+          },
+          "sold_out_indefinite": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "revision",
+          "category_id",
+          "code",
+          "kind",
+          "base_price",
+          "archived",
+          "temporary_unavailable",
+          "variants",
+          "ingredients",
+          "groups",
+          "slots"
+        ],
+        "description": "Documento del producto del catálogo."
+      },
+      "SyncProduct": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "category_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": ["string", "null"]
+          },
+          "kind": {
+            "enum": ["product", "combo"]
+          },
+          "base_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "tax_rate": {
+            "type": ["integer", "null"],
+            "enum": [0, 8, 16, null]
+          },
+          "price_can_decrease": {
+            "type": "boolean"
+          },
+          "image_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "temporary_unavailable": {
+            "type": "boolean"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Variant"
+            }
+          },
+          "ingredients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ingredient_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "included_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "removable": {
+                  "type": "boolean"
+                },
+                "addable": {
+                  "type": "boolean"
+                },
+                "max_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "extra_price": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "recipe_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ingredient_id",
+                "included_quantity",
+                "removable",
+                "addable",
+                "max_quantity",
+                "extra_price"
+              ]
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "min_quantity": {
+                  "type": ["string", "null"],
+                  "pattern": "^\\d+(\\.\\d{1,3})?$"
+                },
+                "max_quantity": {
+                  "type": ["string", "null"],
+                  "pattern": "^\\d+(\\.\\d{1,3})?$"
+                },
+                "included": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "option_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "quantity": {
+                        "type": "string",
+                        "pattern": "^\\d+(\\.\\d{1,3})?$",
+                        "description": "Cantidad decimal con hasta tres decimales."
+                      }
+                    },
+                    "required": ["option_id", "quantity"]
+                  }
+                }
+              },
+              "required": ["group_id", "included"]
+            }
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "min_quantity": {
+                  "type": "integer"
+                },
+                "max_quantity": {
+                  "type": "integer"
+                },
+                "included_quantity": {
+                  "type": "integer"
+                },
+                "default_quantity": {
+                  "type": "integer"
+                },
+                "default_product_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "product_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "substitution_price": {
+                        "$ref": "#/components/schemas/Money"
+                      },
+                      "tiers": {
+                        "type": ["array", "null"],
+                        "items": {
+                          "$ref": "#/components/schemas/Tier"
+                        }
+                      }
+                    },
+                    "required": ["product_id", "substitution_price"]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "min_quantity",
+                "max_quantity",
+                "default_product_id",
+                "options"
+              ]
+            }
+          },
+          "sold_out_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sold_out_until": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "available_now": {
+            "type": "boolean"
+          },
+          "availability_reason": {
+            "type": "string"
+          },
+          "sold_out": {
+            "type": "boolean"
+          },
+          "sold_out_indefinite": {
+            "type": "boolean"
+          },
+          "effective_tax_rate": {
+            "enum": [0, 8, 16]
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_origin": {
+            "type": ["string", "null"]
+          },
+          "pricing_error": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "revision",
+          "category_id",
+          "code",
+          "kind",
+          "base_price",
+          "archived",
+          "temporary_unavailable",
+          "variants",
+          "ingredients",
+          "groups",
+          "slots",
+          "available_now",
+          "availability_reason",
+          "sold_out",
+          "sold_out_indefinite",
+          "sold_out_until",
+          "effective_tax_rate",
+          "price"
+        ],
+        "description": "Producto de la descarga: el documento con el precio de la lista predeterminada (price, y effective_price en cada presentación), la tasa de IVA efectiva y la disponibilidad al momento de la descarga (available_now, sold_out). Si la lista no le da precio, price es null y pricing_error explica por qué."
+      },
+      "CaptureProduct": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "category_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string"
+          },
+          "barcode": {
+            "type": ["string", "null"]
+          },
+          "kind": {
+            "enum": ["product", "combo"]
+          },
+          "base_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "tax_rate": {
+            "type": ["integer", "null"],
+            "enum": [0, 8, 16, null]
+          },
+          "price_can_decrease": {
+            "type": "boolean"
+          },
+          "image_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "temporary_unavailable": {
+            "type": "boolean"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "variants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Variant"
+            }
+          },
+          "ingredients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ingredient_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "included_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "removable": {
+                  "type": "boolean"
+                },
+                "addable": {
+                  "type": "boolean"
+                },
+                "max_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "extra_price": {
+                  "$ref": "#/components/schemas/Money"
+                },
+                "recipe_quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ingredient_id",
+                "included_quantity",
+                "removable",
+                "addable",
+                "max_quantity",
+                "extra_price"
+              ]
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "group_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "min_quantity": {
+                  "type": ["string", "null"],
+                  "pattern": "^\\d+(\\.\\d{1,3})?$"
+                },
+                "max_quantity": {
+                  "type": ["string", "null"],
+                  "pattern": "^\\d+(\\.\\d{1,3})?$"
+                },
+                "included": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "option_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "quantity": {
+                        "type": "string",
+                        "pattern": "^\\d+(\\.\\d{1,3})?$",
+                        "description": "Cantidad decimal con hasta tres decimales."
+                      }
+                    },
+                    "required": ["option_id", "quantity"]
+                  }
+                }
+              },
+              "required": ["group_id", "included"]
+            }
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "min_quantity": {
+                  "type": "integer"
+                },
+                "max_quantity": {
+                  "type": "integer"
+                },
+                "included_quantity": {
+                  "type": "integer"
+                },
+                "default_quantity": {
+                  "type": "integer"
+                },
+                "default_product_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "options": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "product_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "substitution_price": {
+                        "$ref": "#/components/schemas/Money"
+                      },
+                      "tiers": {
+                        "type": ["array", "null"],
+                        "items": {
+                          "$ref": "#/components/schemas/Tier"
+                        }
+                      }
+                    },
+                    "required": ["product_id", "substitution_price"]
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "min_quantity",
+                "max_quantity",
+                "default_product_id",
+                "options"
+              ]
+            }
+          },
+          "sold_out_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sold_out_until": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "available_now": {
+            "type": "boolean"
+          },
+          "availability_reason": {
+            "type": "string"
+          },
+          "sold_out": {
+            "type": "boolean"
+          },
+          "sold_out_indefinite": {
+            "type": "boolean"
+          },
+          "effective_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "price_origin": {
+            "type": "string"
+          },
+          "pricing_error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "revision",
+          "category_id",
+          "code",
+          "kind",
+          "base_price",
+          "archived",
+          "temporary_unavailable",
+          "variants",
+          "ingredients",
+          "groups",
+          "slots",
+          "available_now",
+          "availability_reason",
+          "sold_out",
+          "sold_out_indefinite",
+          "sold_out_until"
+        ],
+        "description": "Producto del listado de captura: el documento con su disponibilidad, «Agotado» y, con price_list_id, el precio efectivo de esa lista."
+      },
+      "GroupOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "complement_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "portion_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "reference_value": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "extra_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "max_quantity": {
+            "type": ["string", "null"],
+            "pattern": "^\\d+(\\.\\d{1,3})?$"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "tiers": {
+            "type": ["array", "null"],
+            "items": {
+              "$ref": "#/components/schemas/Tier"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "portion_name": {
+            "type": "string"
+          },
+          "portion_factor": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "complement_id", "reference_value", "extra_price", "active"]
+      },
+      "OptionGroup": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "pricing_mode": {
+            "enum": ["value", "quantity"]
+          },
+          "min_quantity": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,3})?$",
+            "description": "Cantidad decimal con hasta tres decimales."
+          },
+          "max_quantity": {
+            "type": ["string", "null"],
+            "pattern": "^\\d+(\\.\\d{1,3})?$"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupOption"
+            }
+          }
+        },
+        "required": ["id", "name", "active", "revision", "pricing_mode", "min_quantity", "options"]
+      },
+      "QuickNote": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "category_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          },
+          "effect": {
+            "enum": ["none", "omit", "normal", "extra"]
+          },
+          "ingredient_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "ingredient_name": {
+            "type": ["string", "null"]
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["id", "category_id", "text", "effect", "active", "sort_order"]
+      },
+      "CatalogSync": {
+        "type": "object",
+        "properties": {
+          "catalog_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "since": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "full": {
+            "type": "boolean"
+          },
+          "reset": {
+            "type": "boolean"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "tax_rate": {
+            "enum": [0, 8, 16]
+          },
+          "price_list": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              }
+            },
+            "required": ["id", "name", "revision"]
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            }
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SyncProduct"
+            }
+          },
+          "ingredients": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "type": "integer"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "name", "active", "revision", "unit"]
+            }
+          },
+          "complements": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "type": "integer"
+                },
+                "product_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                },
+                "ingredient_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                }
+              },
+              "required": ["id", "name", "active", "revision"]
+            }
+          },
+          "portions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "active": {
+                  "type": "boolean"
+                },
+                "revision": {
+                  "type": "integer"
+                },
+                "factor": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "name", "active", "revision", "factor"]
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OptionGroup"
+            }
+          },
+          "quick_notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuickNote"
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "media_type": {
+                  "enum": ["image/png", "image/jpeg"]
+                },
+                "width": {
+                  "type": "integer"
+                },
+                "height": {
+                  "type": "integer"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "checksum": {
+                  "type": "string"
+                }
+              },
+              "required": ["id", "media_type", "width", "height", "size", "checksum"]
+            }
+          },
+          "deleted": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entity": {
+                  "enum": [
+                    "category",
+                    "product",
+                    "ingredient",
+                    "complement",
+                    "portion",
+                    "group",
+                    "price_list",
+                    "quick_note",
+                    "image",
+                    "tax"
+                  ]
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "required": ["entity", "id"]
+            }
+          }
+        },
+        "required": [
+          "catalog_version",
+          "since",
+          "full",
+          "reset",
+          "generated_at",
+          "timezone",
+          "tax_rate",
+          "price_list",
+          "categories",
+          "products",
+          "ingredients",
+          "complements",
+          "portions",
+          "groups",
+          "quick_notes",
+          "images",
+          "deleted"
+        ],
+        "description": "Catálogo descargable. full: catálogo completo (sustituye lo guardado); si no, solo lo que cambió después de since, con las bajas en deleted y los productos archivados con archived = true. reset: la versión pedida era mayor que la vigente (otro servidor o base restaurada) y se entrega todo."
+      },
+      "SoldOutState": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sold_out": {
+            "type": "boolean"
+          },
+          "indefinite": {
+            "type": "boolean"
+          },
+          "sold_out_at": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "sold_out_until": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "catalog_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "product_id",
+          "name",
+          "sold_out",
+          "indefinite",
+          "sold_out_at",
+          "sold_out_until",
+          "catalog_version"
+        ],
+        "description": "Estado de «Agotado» de un producto. sold_out_until es el inicio del día comercial siguiente (null = hasta nuevo aviso o no agotado)."
+      },
+      "Customization": {
+        "type": "object",
+        "properties": {
+          "ingredients": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "ingredient_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "quantity": {
+                  "type": "string",
+                  "pattern": "^\\d+(\\.\\d{1,3})?$",
+                  "description": "Cantidad decimal con hasta tres decimales."
+                }
+              },
+              "required": ["ingredient_id", "quantity"]
+            }
+          },
+          "groups": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "group_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "options": {
+                  "type": ["array", "null"],
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "option_id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "quantity": {
+                        "type": "string",
+                        "pattern": "^\\d+(\\.\\d{1,3})?$",
+                        "description": "Cantidad decimal con hasta tres decimales."
+                      }
+                    },
+                    "required": ["option_id", "quantity"]
+                  }
+                }
+              },
+              "required": ["group_id"]
+            }
+          },
+          "components": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "slot_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "product_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "variant_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "customization": {
+                  "$ref": "#/components/schemas/Customization"
+                }
+              },
+              "required": ["slot_id", "product_id", "quantity"]
+            }
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "quick_notes": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "properties": {
+                "note_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": ["note_id", "text"]
+            }
+          }
+        },
+        "description": "Personalización de una partida: ingredientes, opciones de grupos, componentes de combo y observaciones."
+      },
+      "LineRequest": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "customization": {
+            "$ref": "#/components/schemas/Customization"
+          }
+        },
+        "required": ["product_id", "quantity", "customization"]
+      },
+      "DraftItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "product_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "customization": {
+            "$ref": "#/components/schemas/Customization"
+          }
+        },
+        "required": ["id", "product_id", "quantity", "customization"],
+        "description": "Partida del borrador: identificador estable que genera el cliente y lo que se pidió."
+      },
+      "QuoteLine": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "base_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "unit_price": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": [
+          "product_id",
+          "name",
+          "unit_price",
+          "quantity",
+          "subtotal",
+          "discount",
+          "total"
+        ],
+        "description": "Partida calculada por Go (catalog.Calculate): precio por unidad con su personalización, subtotal, descuento de promociones y total. Lleva además el desglose completo."
+      },
+      "Quote": {
+        "type": "object",
+        "properties": {
+          "calculated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "price_list_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price_list_revision": {
+            "type": "integer"
+          },
+          "price_list_name": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteLine"
+            }
+          },
+          "promotions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": ["calculated_at", "price_list_id", "lines", "subtotal", "discount", "total"]
+      },
+      "Totals": {
+        "type": "object",
+        "properties": {
+          "subtotal": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "discount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "total": {
+            "$ref": "#/components/schemas/Money"
+          }
+        },
+        "required": ["subtotal", "discount", "total"]
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "folio": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": ["dine_in", "takeaway"]
+          },
+          "state": {
+            "type": "string"
+          },
+          "table_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "table_name": {
+            "type": ["string", "null"]
+          },
+          "price_list_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assigned_user_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "preparation_state": {
+            "type": "string"
+          },
+          "payment_state": {
+            "type": "string"
+          },
+          "delivery_state": {
+            "type": "string"
+          },
+          "confirmed_quantity": {
+            "type": "integer"
+          },
+          "draft_quantity": {
+            "type": "integer"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
+          }
+        },
+        "required": [
+          "id",
+          "folio",
+          "name",
+          "mode",
+          "state",
+          "table_id",
+          "revision",
+          "created_at",
+          "updated_at",
+          "preparation_state",
+          "payment_state",
+          "delivery_state",
+          "confirmed_quantity",
+          "draft_quantity",
+          "totals"
+        ],
+        "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go."
+      },
+      "Table": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "area_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "out_of_service": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "account_count": {
+            "type": "integer"
+          },
+          "state": {
+            "enum": ["free", "occupied", "awaiting_payment", "partial_payment", "out_of_service"]
+          },
+          "occupied_since": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "balance": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "long_open": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "area_id",
+          "name",
+          "active",
+          "out_of_service",
+          "revision",
+          "account_count",
+          "state",
+          "balance"
+        ]
+      },
+      "ConfirmedLine": {
+        "type": "object",
+        "properties": {
+          "preparation_state": {
+            "type": "string"
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "item_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "original_order_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "request": {
+            "$ref": "#/components/schemas/LineRequest"
+          },
+          "quote_line": {
+            "$ref": "#/components/schemas/QuoteLine"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "preparation_state",
+          "version_id",
+          "item_id",
+          "state",
+          "quantity",
+          "request",
+          "quote_line",
+          "totals"
+        ],
+        "description": "Partida confirmada (enviada) con su estado de preparación."
+      },
+      "Bill": {
+        "type": "object",
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Account"
+          },
+          "draft": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftItem"
+            }
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfirmedLine"
+            }
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "timezone": {
+            "type": "string"
+          },
+          "cancellation": {
+            "type": ["object", "null"]
+          }
+        },
+        "required": ["account", "draft", "lines", "server_time", "timezone"],
+        "description": "Cuenta con su borrador y sus partidas confirmadas."
+      },
+      "QuoteResult": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "combined": {
+            "$ref": "#/components/schemas/Totals"
+          },
+          "pricing_policy": {
+            "type": "string"
+          }
+        },
+        "required": ["account_id", "revision", "fingerprint", "quote", "combined"],
+        "description": "Cálculo del borrador. fingerprint es la huella que exige la confirmación (expected_fingerprint); vacía si no hay borrador."
+      },
+      "RecoveryState": {
+        "type": "object",
+        "properties": {
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "catalog_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "user": {
+            "$ref": "#/components/schemas/Principal"
+          },
+          "terminal": {
+            "$ref": "#/components/schemas/Terminal"
+          },
+          "tables": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Table"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accounts": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["server_time", "catalog_version", "user", "terminal", "tables", "accounts"],
+        "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read (las cuentas para llevar exigen además takeaway.read)."
+      },
+      "OfflineItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "product_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "customization": {
+            "$ref": "#/components/schemas/Customization"
+          },
+          "seen_unit_price": {
+            "type": "string",
+            "pattern": "^\\d+(\\.\\d{1,2})?$"
+          }
+        },
+        "required": ["id", "product_id", "quantity", "customization", "seen_unit_price"]
+      },
+      "OfflineOrderRequest": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalog_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "destination": {
+            "type": "object",
+            "properties": {
+              "account_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "table_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "seen_account_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "maxItems": 100
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 100
+              }
+            },
+            "description": "Una cuenta abierta (account_id) o una mesa donde abrir una cuenta nueva (table_id, con las cuentas que el mesero veía abiertas en ella)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfflineItem"
+            },
+            "minItems": 1,
+            "maxItems": 20
+          },
+          "confirmation": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "catalog_version": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/OfflineChange"
+                    },
+                    "maxItems": 100
+                  }
+                },
+                "required": ["catalog_version", "changes"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["operation_id", "catalog_version", "captured_at", "destination", "items"]
+      },
+      "OfflineChange": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "price_changed",
+              "product_sold_out",
+              "product_unavailable",
+              "product_removed",
+              "complement_unavailable",
+              "item_unavailable",
+              "item_invalid",
+              "account_closed",
+              "table_unavailable",
+              "table_has_account"
+            ]
+          },
+          "item_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "product_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          },
+          "product_name": {
+            "type": "string"
+          },
+          "before": {
+            "type": ["string", "null"]
+          },
+          "now": {
+            "type": ["string", "null"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "acceptable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "item_id",
+          "product_id",
+          "product_name",
+          "before",
+          "now",
+          "message",
+          "acceptable"
+        ],
+        "description": "Cambio entre lo que vio el mesero y el estado vigente: producto, antes, ahora y motivo. acceptable indica si basta la confirmación del mesero (precio, mesa con otra cuenta) o si hay que corregir el pedido."
+      },
+      "OfflineOrderResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "const": "accepted"
+          },
+          "operation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "catalog_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "captured_catalog_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "captured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "accepted_changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OfflineChange"
+            }
+          },
+          "bill": {
+            "$ref": "#/components/schemas/Bill"
+          }
+        },
+        "required": [
+          "status",
+          "operation_id",
+          "order_id",
+          "account_id",
+          "catalog_version",
+          "captured_catalog_version",
+          "captured_at",
+          "received_at",
+          "accepted_changes",
+          "bill"
+        ]
+      },
+      "OfflineOrderRejection": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "ORDER_REQUIRES_CONFIRMATION"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "const": "requires_confirmation"
+                  },
+                  "catalog_version": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "captured_catalog_version": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "requires_changes": {
+                    "type": "boolean"
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/OfflineChange"
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "status",
+                  "catalog_version",
+                  "captured_catalog_version",
+                  "requires_changes",
+                  "changes"
+                ]
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"],
+        "description": "El pedido no se aceptó: cambios que el mesero debe ver. requires_changes indica que hay que corregir el pedido (no basta confirmar)."
+      },
+      "EventBatch": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "integer"
+          },
+          "reset": {
+            "type": "boolean"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sequence": {
+                  "type": "integer"
+                },
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string"
+                },
+                "station_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                },
+                "aggregate_id": {
+                  "type": ["string", "null"],
+                  "format": "uuid"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": ["sequence", "id", "version", "kind", "scope"]
+            }
+          }
+        },
+        "required": ["cursor", "reset", "events"],
+        "description": "Contenido (data) de cada mensaje «changes» del canal de eventos."
+      }
+    }
+  }
+}

@@ -121,10 +121,14 @@ func (contract *Contract) Match(method, path string) (*Operation, bool) {
 	return nil, false
 }
 
-// ResponseSchema devuelve el esquema JSON documentado para un estado de la operación, o nil si la respuesta no
-// lleva JSON (por ejemplo, una imagen o 304). ok es falso si el estado no está documentado.
+// ResponseSchema devuelve el esquema JSON documentado para un estado de la operación (o su respuesta «default»), o
+// nil si la respuesta no lleva JSON (por ejemplo, una imagen o 304). documented es falso si el estado no está
+// documentado ni hay «default».
 func (contract *Contract) ResponseSchema(operation *Operation, status int) (any, bool, error) {
 	response, exists := operation.Responses[strconv.Itoa(status)]
+	if !exists {
+		response, exists = operation.Responses["default"]
+	}
 	if !exists {
 		return nil, false, nil
 	}
@@ -139,6 +143,45 @@ func (contract *Contract) ResponseSchema(operation *Operation, status int) (any,
 		return nil, true, nil
 	}
 	return media["schema"], true, nil
+}
+
+// MediaTypes devuelve los tipos de contenido documentados para un estado (sin «default»).
+func (contract *Contract) MediaTypes(operation *Operation, status int) ([]string, error) {
+	response, exists := operation.Responses[strconv.Itoa(status)]
+	if !exists {
+		return nil, nil
+	}
+	resolved, err := contract.resolve(response)
+	if err != nil {
+		return nil, err
+	}
+	object, _ := resolved.(map[string]any)
+	content, _ := object["content"].(map[string]any)
+	types := []string{}
+	for name := range content {
+		types = append(types, name)
+	}
+	sort.Strings(types)
+	return types, nil
+}
+
+// RequestSchema devuelve el esquema JSON del cuerpo de la operación, o nil si no lleva cuerpo.
+func (contract *Contract) RequestSchema(operation *Operation) (any, error) {
+	paths, _ := contract.Raw["paths"].(map[string]any)
+	item, _ := paths[operation.Path].(map[string]any)
+	raw, _ := item[strings.ToLower(operation.Method)].(map[string]any)
+	body, exists := raw["requestBody"]
+	if !exists {
+		return nil, nil
+	}
+	resolved, err := contract.resolve(body)
+	if err != nil {
+		return nil, err
+	}
+	object, _ := resolved.(map[string]any)
+	content, _ := object["content"].(map[string]any)
+	media, _ := content["application/json"].(map[string]any)
+	return media["schema"], nil
 }
 
 // resolve sigue una referencia local «#/components/…».
