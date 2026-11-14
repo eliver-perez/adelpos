@@ -277,6 +277,32 @@ func TestHasDataDetectsAnExistingInstallation(t *testing.T) {
 	}
 }
 
+// Fase G de la etapa 9G: launchd arranca el servicio sin LANG ni LC_*, y así PostgreSQL de macOS no arranca
+// («postmaster became multithreaded during startup»). Todo programa de PostgreSQL recibe LC_ALL=C, también si la
+// consola tiene otro idioma, y las PG* heredadas siguen fuera.
+func TestCommandGivesPostgreSQLTheCLocale(t *testing.T) {
+	for _, inherited := range []string{"", "es_MX.UTF-8"} {
+		t.Setenv("LANG", inherited)
+		t.Setenv("LC_ALL", inherited)
+		t.Setenv("PGHOST", "otra-computadora")
+		cmd := command(context.Background(), "/bin/true", nil, []string{"PGPASSWORD=secreto"})
+		effective := map[string]string{}
+		for _, variable := range cmd.Env {
+			name, value, _ := strings.Cut(variable, "=")
+			effective[name] = value
+		}
+		if effective["LC_ALL"] != "C" {
+			t.Fatalf("LC_ALL = %q con la consola en %q; se esperaba C", effective["LC_ALL"], inherited)
+		}
+		if _, found := effective["PGHOST"]; found {
+			t.Fatal("se heredó PGHOST")
+		}
+		if effective["PGPASSWORD"] != "secreto" {
+			t.Fatal("se perdió una variable de la llamada")
+		}
+	}
+}
+
 func TestFreePortSkipsBusyPorts(t *testing.T) {
 	port, err := freePort(55514)
 	if err != nil || port <= 55514 || port > 55554 {
