@@ -1071,3 +1071,339 @@ fusionó en `72b81dc` (conflictos solo en `API_CONTRACTS.md` —se conservan amb
 Vitest: `compatibility.test.tsx` (de D) no simulaba `installation_state` (de A) y la aplicación se quedaba en la elección
 de modalidad. Corregido en `67741a2` (4 renglones en la prueba, sin cambios de producto) y repetido: formato, `tsc` y
 Vitest aprobados.
+
+## Fase B · Emparejamiento de terminales y conexión cifrada
+
+Un agente, en su propio árbol de trabajo (`etapa-9g-b`, creada desde `etapa-9g-a` en `aa748b7`), en paralelo con la
+Fase D. 13/11/2026. Sección B de la `0023` y `schema_version` 23 (D pone lo mismo). Pruebas en copias aisladas: clúster
+temporal 55499, Go temporal 8186 (Playwright y la prueba en vivo), vista previa 1424, Rust en `cache/cargo-B`, escucha
+HTTPS de prueba en `127.0.0.1:8196` (prueba del `host`), `127.0.0.1:8197` (prueba en vivo de Rust contra Go) y puertos
+efímeros `127.0.0.1:0` (pruebas de Go). **Nunca se abrió el 8443 real, no se usó el Keychain real ni la instalación real.**
+
+Commits: `7cb3231` (Go y Rust: identidad, escucha de red, emparejamiento, verificador), `e487660` (interfaz, puente,
+Vitest, Playwright, contrato en `API_CONTRACTS.md` y escucha de red en la prueba del `host`) y `5b9cb88` (ajuste del
+ayudante de Playwright).
+
+### Qué cambió
+
+**Servidor Go**
+
+- `internal/localsetup/identity.go` (nuevo): identidad del servidor en la carpeta `identity/` junto a `server.json`
+  (servicio: `/Library/Application Support/AD-EL POS/identity`; `serve`: `.local/identity`; Windows:
+  `%LOCALAPPDATA%\AD-EL POS\identity`): `identity.json` (`server_id` UUID v4 y fecha), `server-cert.pem` (ECDSA P-256
+  autofirmado, 30 años, CN «AD-EL POS <server_id>», sin nombres ni IPs: no se usan para confiar) y `server-key.pem`
+  (0600; carpeta 0700 y ACL privada en Windows con `fileacl`). Se crea al primer arranque con `O_EXCL`; **nunca se
+  reemplaza sola**: incompleta, ilegible o con una llave que no corresponde, el servidor no arranca («revisión manual
+  necesaria»), porque regenerarla obligaría a emparejar de nuevo todas las terminales. `SPKIFingerprint` = SHA-256 de
+  `RawSubjectPublicKeyInfo`.
+- `internal/lanlistener` (nuevo): escucha HTTPS de la red local. `AllowedPeer`: loopback, `IsPrivate` (RFC 1918 y ULA
+  fc00::/7) y enlace local (169.254/16, fe80::/10), IPv4 mapeada evaluada como IPv4; todo lo demás (Internet, CGNAT
+  100.64/10, multidifusión, sin especificar) se **cierra al aceptarlo, antes del intercambio TLS**. TLS ≥ 1.2 con el
+  certificado de la identidad, mismos plazos que la escucha local y bitácora de errores TLS descartada (exploradores de
+  puertos). **Toda petición que llega por ella queda marcada en su contexto** (`lanlistener.FromNetwork`): el cliente no
+  puede falsificarlo.
+- `internal/config`: `network_listen_address` opcional (`omitempty`; vacía = sin escucha de red, los archivos existentes
+  no cambian): `:puerto`, `0.0.0.0`/`[::]`, loopback o IP privada; nunca IP pública, nombre ni el puerto de
+  `listen_address` en todas las interfaces (`CheckNetworkAddress`). Lo de `tls-init`, `tls_certificate` y la escucha LAN
+  de `listen_address` (IP fija, `allow_lan`, `development`) **se conserva sin cambios** como camino anterior.
+- `cmd/ad-el-pos-server`: `serveHTTP` recibe `networkOptions` (carpeta de la identidad y dirección de red), carga o crea
+  la identidad (`server_identity_ready` con `server_id` y huella en la bitácora), abre las dos escuchas y las cierra en
+  orden juntas (si una falla, la otra no queda sola). `serve`: identidad junto a la configuración y escucha solo con
+  `network_listen_address`. `host` (macOS): **`:8443` siempre** (el servicio solo sirve con una modalidad con servidor);
+  `--network-listen D|off` para pruebas; con `ADEL_TEST_MODE=1` sin el indicador **no se abre** (ninguna prueba ocupa el
+  8443 real por omisión). `host` de Windows: identidad sí, escucha de red no (Fase W). `Service.NetworkPort` se fija
+  antes de atender.
+- `internal/administration`:
+  - `http.go`: **`local = origen loopback && !FromNetwork`** (antes solo la IP). `SourceAddress` (IP de origen) y
+    `PairingSecret` (`X-Pairing-Secret`) en `Request`.
+  - `service.go`: `Identity` y `NetworkPort` en `Service`; `pairing/*` público antes de autenticar el dispositivo;
+    **`devices/enroll` solo local** (`403 ENROLLMENT_LOCAL_ONLY`; ver decisión 1).
+  - `pairing.go` (nuevo): protocolo, derivación del código, límites, auditoría, solicitudes en Terminales con las
+    direcciones de la computadora principal (`localAddresses`: IPv4 privadas y nombre `.local`).
+  - `devices.go`: `devicesQuery` (auditoría) con `kind`, `os`, `app_version`, `paired_at`; `deviceListQuery` además
+    con `online` (petición en los últimos 2 min, como el conteo de la fase A) y `"current_user"` (sesión vigente más
+    reciente, nunca `sa`); `GET devices/{id}/configuration`; `sessionsSummary`.
+  - `routes.go`: un bloque antes de la comprobación de identificadores para `devices/pairing-requests*` y
+    `devices/sessions-summary`.
+- `migrations/0023_network_terminals_and_android.sql`: encabezado común (el mismo texto que el de D) y **solo la
+  sección `-- Fase B`**: columnas de `devices` (`kind` con CHECK desktop/android/kitchen, `os`, `app_version`,
+  `paired_at`, `server_fingerprint`) y tabla `device_pairing_requests` con restricciones con nombre (estados, intentos
+  0–5, motivo de rechazo solo al rechazar, revelación coherente, reclamo con terminal, aprobación con nombre) e índices
+  por origen y abiertas. `config/product.json` → `schema_version: 23`; `stage9f_kitchen_upgrade_test.go` y
+  `stage9f_printing_upgrade_test.go` con **el mismo cambio que hizo D** (fusión limpia).
+
+**Escritorio (Rust)**
+
+- `Cargo.toml`: `rustls = "=0.23.46"` (sin las opciones por omisión, que traerían `aws-lc-rs`; con `ring`, `std` y
+  `tls12`, como lo usa reqwest) y `sha2 = "=0.10.9"`. **Ambas ya estaban en `Cargo.lock` y en el registro local**: el
+  único cambio del `Cargo.lock` es la lista de dependencias del paquete raíz (`cargo metadata --offline`, sin descargas);
+  todo compila y prueba con `--locked --offline`.
+- `pairing.rs` (nuevo): `PinnedVerifier` (`ServerCertVerifier`): compara la huella SPKI del certificado e **ignora
+  nombre, IP, cadena y vigencia**, y verifica la firma del intercambio TLS 1.2/1.3 con esa llave
+  (`rustls::crypto::verify_tls1x_signature`); en una sesión de emparejamiento fija el primer certificado de la sesión y
+  exige el mismo en las siguientes conexiones. Cliente TLS sin reanudación de sesiones (cada conexión vuelve a
+  comprobar la llave). `normalize_address` (D2): HTTPS a IPv4 privada o de enlace local, IPv6 ULA o de enlace local o
+  nombre `.local`; nunca loopback, IP pública ni otro nombre; puerto 8443 si no se indica. Comandos `pairing_start`,
+  `pairing_status` (reclama la credencial, la guarda en el almacén seguro y después escribe `connection.json`),
+  `pairing_rename`, `pairing_cancel` y `pairing_forget`. El secreto de la solicitud y los números nunca llegan a React.
+- `connection.rs`: `server_id`, `server_fingerprint`, `server_name` (solo Rust; lista cerrada `check_paired`:
+  «Solo terminal», HTTPS a la red local, UUID y huella válidos, sin CA); `credential_server()` =
+  `adel-server:{server_id}` para una terminal emparejada y la dirección como siempre si no (la credencial
+  `http://127.0.0.1:8181|main` **no cambia**).
+- `main.rs`: cliente con la huella fijada si la conexión la tiene; `connection_error()` devuelve «El servidor cambió su
+  identidad y esta terminal ya no puede comprobar que es el del restaurante: vuelve a emparejar esta terminal.» cuando
+  el verificador vio otro certificado. `installation.rs`: `paired`/`server_name` en el estado y una modalidad con
+  servidor olvida el servidor emparejado. `api.rs`: operaciones nuevas y `paired` en `authentication_state`. `build.rs` y
+  `permissions/diagnostics.toml`: los cinco comandos. `src/testdata/`: dos certificados ECDSA P-256 de prueba con su
+  llave (hexadecimal; solo pruebas).
+
+**Escritorio (React)**
+
+- `pages/setup/FindServerPage.tsx` (punto de integración de la fase A): dirección escrita a mano y nombre («Caja 2»,
+  editable) → «Pedir código» → **código grande en dos grupos** (`481 926`), restaurante, nombre con «Cambiar nombre»,
+  vencimiento en cuenta regresiva y estado (esperando, emparejada → la aplicación se reinicia, rechazada, vencida,
+  cancelada) con «Pedir otro código» y «Cancelar». Marca el punto de integración de la fase C (lista de servidores
+  encontrados arriba de la dirección).
+- `pages/DevicesPage.tsx`: «Terminales nuevas» (consulta cada 3 s; nombre, tipo, sistema, versión y hora; en la
+  computadora principal el campo «Código que muestra …» con «Aprobar» y «Rechazar» con confirmación, intentos que
+  quedan y la dirección de esta computadora para escribirla en la terminal; en otra terminal «se aprueban en la
+  computadora principal»); «Sesiones activas por tipo de terminal» («Solo se cuentan; todavía no se limita ninguna»);
+  tabla con tipo y sistema, usuario actual y «En línea»/«Desconectada»/«Revocada» (se refresca cada 5 s); «Ver
+  configuración» (tipo, sistema, emparejada, pantalla inicial, caja, teclado, estaciones de Cocina, aviso sonoro e
+  «Impresoras de esta terminal: Sin impresoras propias», hueco de la fase E); revocar dice que habrá que emparejarla de
+  nuevo. «Autorizar otra terminal» pasa a «Código para esta computadora» (decisión 1).
+- `pages/setup/RepairTerminal.tsx` + `App.tsx`: una terminal emparejada revocada ve «Esta terminal necesita
+  emparejarse de nuevo»; sin conexión (p. ej. el servidor cambió de identidad) ofrece «Emparejar de nuevo»; ambos con
+  confirmación, `pairing_forget` y reinicio a «Buscar el servidor».
+- `services/pairing.ts`, `models.ts`, `api.ts`, `installation.ts`; etiquetas del Registro de movimientos
+  (`AuditPage.tsx`); estilos al final de `styles.css`, solo tokens.
+
+**Puente y pruebas de navegador**
+
+- `e2e/pairing.ts` (nuevo): la terminal nueva simulada por la API de Go (compromiso, número, revelación y código como
+  Rust; la huella sale de `identity/server-cert.pem` junto a la configuración del Go temporal porque las pruebas no
+  abren la escucha de red) y la misma lista cerrada de direcciones.
+- `e2e/native-driver.ts`: simula los cinco comandos `pairing_*` contra Go (aprobada, la credencial reclamada sustituye
+  a la del puente y la terminal queda emparejada), `paired`/`server_name` en `installation_state`, `paired` en
+  `authentication_state` y, como Rust, `401 DEVICE_REVOKED|DEVICE_REQUIRED` borra la credencial del puente.
+- `e2e/workflow-stage9g-terminals.spec.ts` (nuevo, 2 pruebas).
+
+### Protocolo exacto (para el revisor independiente)
+
+Terminal T (Rust), servidor S (Go). F = SHA-256 del SPKI del certificado de S. Números de 32 bytes del generador seguro
+(`ring` en Rust, `crypto/rand` en Go), en hexadecimal minúsculo en el JSON.
+
+1. T valida la dirección propuesta (D2) y abre una sesión TLS con `PinnedVerifier::first_seen()`: acepta el primer
+   certificado, guarda su huella F_T y exige esa misma llave en toda la sesión (verificando siempre la firma del
+   intercambio).
+2. T → S `POST /api/v1/pairing/requests` `{name, device_kind:"desktop", os, app_version, commitment: hex(SHA-256(nT))}`.
+   S (con la tabla bloqueada en `SHARE ROW EXCLUSIVE`: límites sin carreras) valida, aplica 5 por origen/10 min y 20
+   abiertas, genera nS y un secreto de 256 bits (guarda solo su SHA-256, el compromiso, nS y su huella F_S) y responde
+   `{request_id, server_nonce: nS, pairing_secret, expires_at (+5 min), server_id, server_name, name}`.
+3. T → S `POST …/{id}/reveal` (`X-Pairing-Secret`) `{terminal_nonce: nT}`. S exige `SHA-256(nT) = commitment` (si no,
+   la rechaza con motivo `commitment`) y guarda nT.
+4. Ambos: `código = SHA-256(F ‖ nT ‖ nS ‖ id[16 bytes]) → u64 big-endian de los primeros 8 bytes mod 10⁶`, 6 dígitos.
+   T usa F_T; S usa la F_S guardada en la solicitud **y exige que siga siendo la huella vigente**.
+5. En la computadora principal, un usuario con `devices.manage` escribe el código: `POST
+devices/pairing-requests/{id}/approve {code}` **solo por la escucha local** (`request.Local`; por la red, aunque
+   venga de 127.0.0.1: `403 PAIRING_LOCAL_ONLY` + `access.denied`). Comparación en tiempo constante; incorrecto: +1
+   intento (se confirma aunque la petición falle) y al quinto la solicitud queda rechazada. Correcto: `approved`, y la
+   terminal tiene 5 minutos más para reclamar.
+6. T consulta `GET …/{id}` cada 2 s con su secreto y, aprobada, `POST …/{id}/claim`: con la fila bloqueada, S crea la
+   terminal con un token nuevo de 256 bits (solo su SHA-256 en la base), marca la solicitud `claimed` y responde **una
+   sola vez** `{device_id, device_token, server_id, server_name, name}`; cualquier otro reclamo (también simultáneo):
+   `409 PAIRING_ALREADY_CLAIMED` sin token.
+7. T guarda la credencial en el almacén seguro (`adel-server:{server_id}|{perfil}`) y **después** `connection.json`
+   (`terminal-only`, `server_url` https, `server_id`, `server_fingerprint` = F_T, `server_name`). Desde entonces el
+   cliente usa `PinnedVerifier::pinned(F_T)` (también el SSE y el estado del sistema).
+
+**Por qué el compromiso impide que un intermediario ajuste los números.** M está entre T y S y debe lograr que
+coincidan dos códigos: el que T calcula con la huella de M, `H(F_M ‖ nT ‖ nS' ‖ id')`, y el que S calcula con la suya,
+`H(F_S ‖ nT' ‖ nS ‖ id)`. Sin compromiso, M esperaría a conocer nT y nS y probaría valores de nS' (un millón de intentos
+bastan) hasta igualarlos. Con el compromiso, T no revela nT hasta haber recibido nS', de modo que M fija nS' sin conocer
+nT; y S no entrega nS hasta haber recibido el compromiso de nT', de modo que M fija nT' sin conocer nS. Cuando M conoce
+el código de S ya no puede cambiar nada que afecte al de T, que sigue dependiendo de nT, desconocido al elegir nS': su
+probabilidad es 1 en 10⁶ por solicitud, con 5 códigos escritos como máximo y 5 minutos de vida.
+
+### Amenazas consideradas
+
+| Amenaza                                                                        | Defensa                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Intermediario durante el emparejamiento (otro certificado)                     | Código ligado a F y a los dos números con compromiso: códigos distintos; el administrador escribe el código que ve en la terminal.                                                                                                                                   |
+| Intermediario que cambia de certificado a mitad de la sesión de emparejamiento | La sesión fija el primer certificado y exige el mismo después (prueba `a_pairing_session_pins_the_first_certificate`).                                                                                                                                               |
+| Servidor falso o certificado cambiado después de emparejar                     | Verificador por huella: no se conecta y avisa «vuelve a emparejar»; nunca acepta cualquier certificado. Copiar el certificado sin la llave privada no basta: se verifica la firma del intercambio.                                                                   |
+| Cambio de IP por DHCP                                                          | La confianza es la llave, no el nombre ni la IP (prueba con nombres/IP distintos). La re-búsqueda por `server_id` + huella es de la fase C.                                                                                                                          |
+| Aprobar desde otra computadora (o por la IP de la propia)                      | `local` depende de la escucha de loopback; por la escucha de red nunca, aunque el origen sea 127.0.0.1 (prueba real con las dos escuchas).                                                                                                                           |
+| Terminal intrusa en la red                                                     | Sin acceso a la computadora principal no hay aprobación; el código de 43 caracteres tampoco sirve por la red (`ENROLLMENT_LOCAL_ONLY`).                                                                                                                              |
+| Adivinar el código                                                             | 5 intentos por solicitud; 10⁶ combinaciones; vence a los 5 minutos; límite por origen.                                                                                                                                                                               |
+| Inundar de solicitudes                                                         | 5 por origen en 10 min y 20 abiertas en total (`429`); se borran las de más de 7 días. Riesgo aceptado: un atacante en la LAN puede llenar el cupo abierto durante 5 minutos.                                                                                        |
+| Robar o repetir la credencial                                                  | Se entrega una sola vez (fila bloqueada), por la conexión fijada; en la base solo SHA-256; nunca llega a React (la recibe Rust).                                                                                                                                     |
+| Consultar o cancelar solicitudes ajenas                                        | Secreto de 256 bits por solicitud (comparación de su SHA-256 en tiempo constante); id o secreto incorrectos responden igual (404).                                                                                                                                   |
+| Orígenes fuera de la red local                                                 | Se cierran al aceptarlos, antes de TLS. HTTP por la escucha de red: 400 del servidor TLS; la escucha local sigue solo en 127.0.0.1.                                                                                                                                  |
+| Degradar TLS                                                                   | Mínimo TLS 1.2 en Go (TLS 1.1 rechazado, comprobado con `curl --tls-max 1.1`); Rust solo 1.2/1.3 y sin reanudación.                                                                                                                                                  |
+| Llave del servidor                                                             | 0600 en carpeta 0700 de la cuenta del servicio (ACL en Windows); nunca se registra ni se muestra; la huella sí (pública).                                                                                                                                            |
+| Revocación                                                                     | Cada petición y cada lectura del SSE (750 ms) revalidan el dispositivo: el flujo se corta con `DEVICE_REVOKED` en menos de 3 s (prueba de integración por HTTPS real y Playwright < 8 s).                                                                            |
+| Página web maliciosa en la LAN                                                 | Sin credencial no hay nada que hacer salvo pedir un código; el prevuelo CORS solo admite `GET` de orígenes exactos; el navegador rechaza el certificado autofirmado. Sin cambio para la escucha local (riesgo previo de reasociación DNS a 127.0.0.1 sin variación). |
+
+Archivos para el revisor: `backend/internal/administration/pairing.go` (+ `http.go`, `service.go`, `devices.go`,
+`routes.go`), `backend/internal/lanlistener/lanlistener.go`, `backend/internal/localsetup/identity.go`,
+`backend/cmd/ad-el-pos-server/main.go` (`serveHTTP`, `loadIdentity`) y `host_unix.go` (`hostNetworkAddress`),
+`backend/migrations/0023_…sql` (sección B), `desktop/src-tauri/src/pairing.rs`, `connection.rs` (`check_paired`),
+`main.rs` (`client`, `connection_error`), y las pruebas `administration/pairing_test.go`,
+`pairing_acceptance_test.go`, `lanlistener_test.go`, `identity_test.go`, `cmd/…/host_unix_network_integration_test.go`
+y las de `pairing.rs`.
+
+### Decisiones tomadas en la fase
+
+1. **`devices/enroll` solo en la propia computadora** (§0-B: «ninguna terminal se conecta sin emparejarse»): el código
+   de 43 caracteres solo sirve para volver a autorizar la ventana de la computadora principal (u otro perfil local);
+   el botón «Autorizar otra terminal» pasa a «Código para esta computadora». Las pruebas de integración que enrolan lo
+   hacen por loopback y no cambian.
+2. La identidad vive junto a `server.json` (la carpeta del servicio en macOS), dura 30 años y **nunca se regenera
+   sola**. Los respaldos `pg_dump` no la incluyen (ver Fase F/G).
+3. La escucha de red del servicio es siempre `:8443`; en `serve` es opcional por configuración; en modo de pruebas el
+   `host` no la abre sin indicarla.
+4. Derivación exacta del código (8 bytes big-endian mod 10⁶; sesgo despreciable) con un vector común en Go, Rust y el
+   puente (`166101`).
+5. La terminal se crea **al reclamar**, no al aprobar (así ningún token queda guardado en claro esperando); aprobada,
+   hay 5 minutos para reclamar.
+6. La aprobación admite cambiar el nombre (`name` opcional), pero la interfaz aprueba con el propuesto (se renombra
+   después con «Editar»); la terminal puede cambiarlo mientras espera (`POST …/name`).
+7. Auditoría de la solicitud con autor `pairing` («Terminal por emparejar»); la aprobación, los códigos incorrectos y
+   el rechazo con el usuario y la terminal del administrador; el emparejamiento con la terminal nueva como autor.
+8. Tipo de dispositivo: hoy toda terminal emparejada es `desktop`; una terminal de escritorio con inicio en Cocina
+   cuenta como escritorio en el conteo de sesiones (el tipo `kitchen` queda para un dispositivo de cocina dedicado). D
+   usa `X-Client-Kind` ∈ {desktop, android} para la versión de la aplicación, que es otra cosa.
+9. La computadora principal muestra en Terminales su dirección (IPv4 privadas y nombre `.local`) **solo por la escucha
+   local** y solo para escribirla en una terminal nueva: es la excepción necesaria al «sin direcciones en la interfaz»
+   mientras no exista la búsqueda automática (fase C).
+10. Volver a emparejar (`pairing_forget`) solo quita el servidor de `connection.json`; la credencial anterior queda sin
+    uso en el almacén seguro (no se borra: evita otra autorización del Llavero y no se pierde nada si fue un error).
+11. Una dirección con `:443` explícito se normaliza al 8443 (el analizador de URL omite el puerto por omisión de HTTPS);
+    sin importancia práctica.
+
+### Pruebas ejecutadas (aisladas)
+
+| Suite                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Resultado                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format` (Prettier, gofmt, cargo fmt; `docs/etapas` intacto por md5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | aprobado                                                                                                                                          |
+| `sync`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | aprobado                                                                                                                                          |
+| `vet` (normal e `integration`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | aprobado                                                                                                                                          |
+| `win` (`GOOS=windows` build, vet y vet `integration`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | aprobado                                                                                                                                          |
+| Go unitarias con `-race` (`go test ./...`): derivación y vector del código, compromiso, etiquetas; filtro de orígenes, escucha TLS 1.2 marcada; identidad (creación, recarga, nunca reemplazada); `network_listen_address`; `hostNetworkAddress`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | aprobado (15 s)                                                                                                                                   |
+| Integración `./internal/administration` (`TestStageTwoAcceptance` → `testPairingAndTerminals`, escuchas reales HTTP local y HTTPS de red): código correcto, sin revelar, incorrecto ×4 con intentos que quedan, quinto rechaza, vencido (pendiente y aprobado sin reclamar), aprobación/rechazo/asistente/`enroll` rechazados por la escucha de red desde 127.0.0.1 con `access.denied`, compromiso falso, secreto ajeno, 4 reclamos simultáneos → 1 credencial, límite por origen, lista con tipo/sistema/en línea/usuario actual, configuración, auditoría con usuario y terminal, conteo por tipo (Android aparte, sin permiso 403), revocación con el SSE por HTTPS cortado < 3 s y `DEVICE_REVOKED` después | aprobado (108 s)                                                                                                                                  |
+| Integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS` + `checkServiceNetwork`): el `host` real con `--network-listen 127.0.0.1:8196` crea la identidad en la carpeta del servicio (0700/0600), presenta ese certificado por HTTPS, no atiende HTTP sin cifrar y lo informa en la bitácora; en modo de pruebas sin el indicador no abre escucha de red                                                                                                                                                                                                                                                                                                                                                   | aprobado (46 s)                                                                                                                                   |
+| `cargo test --locked --offline` (verificador con intercambio TLS completo en memoria: huella correcta con nombres/IP distintos, certificado cambiado rechazado y avisado, sesión que fija el primero, llave ajena; vector del código; direcciones; conexión emparejada; rutas)                                                                                                                                                                                                                                                                                                                                                                                                                                   | 65 aprobadas, 2 ignoradas (Keychain real y la prueba en vivo)                                                                                     |
+| Prueba en vivo Rust → Go (`dtools/live-pairing-B.sh`, ignorada en la suite): Go temporal con `network_listen_address 127.0.0.1:8197`; huella de la bitácora = huella de `openssl`; HTTP por la escucha de red → 400; TLS 1.1 rechazado; `request_pairing` real (reqwest + rustls + verificador) fija la huella del servidor, la otra huella no conecta y el código de Rust coincide con el que se deriva de los datos guardados por Go                                                                                                                                                                                                                                                                           | aprobado                                                                                                                                          |
+| `tsc --noEmit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | sin errores                                                                                                                                       |
+| Vitest (`npm test`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 88 archivos, 847 pruebas (12 nuevas en `pages/stage9gPairing.test.tsx`; `stage9gModality.test.tsx` ajustada: la pantalla ya tiene «Pedir código») |
+| Playwright Chromium (`restaurant`, `workflow-stage9c-navigation`, `workflow-stage9f-kitchen-stations`, `workflow-stage9g-modality`, `workflow-stage9g-terminals` ×2, `workflow-zz-test-data`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | 7 de 7 (2.2 min)                                                                                                                                  |
+| Playwright WebKit (las mismas, pantalla desbloqueada)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 7 de 7 (2.2 min)                                                                                                                                  |
+| `workflow-stage9g-terminals` repetida tras el último ajuste                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Chromium 2/2, WebKit 2/2                                                                                                                          |
+
+No se ejecutó la suite `app` (compilación `release` de Tauri): `cargo test` ya compila los comandos, `build.rs` y los
+permisos.
+
+### No verificado y lo que queda para otras fases
+
+- **Fase W (otra computadora real)**: emparejar de verdad Mac ↔ Windows por la red (escucha 8443 de la Mac con su
+  certificado, código, revocación con la otra computadora); la ventana de permiso **«Red local»** de macOS 15+ al
+  conectarse la terminal a una IP de la LAN (falta `NSLocalNetworkUsageDescription`, previsto en la fase C; con firma
+  ad hoc puede volver a pedirse en cada compilación); el firewall de macOS está desactivado en esta Mac (si se activa, el
+  servicio necesitaría permiso de conexiones entrantes); Windows: escucha 8443 en el `host` de Windows + regla del
+  firewall solo redes privadas (**parada**), compilar `pairing.rs` para Windows (solo difiere por `cfg!`) y el
+  Administrador de credenciales con la cuenta `adel-server:…`.
+- **Keychain real** con la cuenta nueva `adel-server:{server_id}|main` (las pruebas de Rust no escriben en Keychain): en la
+  Fase G/W la primera terminal emparejada mostrará el diálogo del Llavero.
+- **Fase C**: la lista de servidores encontrados va arriba de la dirección en `FindServerPage.tsx` (punto marcado) y
+  entra a `startPairing`; para el cambio de IP basta reescribir `server_url` en `connection.json` (Rust) al encontrar el
+  mismo `server_id` con la misma huella (`PinnedVerifier` no depende de la dirección); el TXT de mDNS puede llevar
+  `server_id` (`Service.Identity`) y la huella corta; `NetworkPort` dice si hay escucha de red.
+- **Fase E**: `printers` de `GET devices/{id}/configuration` y la línea «Impresoras de esta terminal».
+- **Fase F/G**: la carpeta `identity/` no va en los respaldos `pg_dump`; restaurar en otra computadora crea otra
+  identidad y obliga a emparejar de nuevo las terminales (documentarlo en `INSTALAR_EN_RED.md` o respaldar también la
+  carpeta: decisión de F).
+- **Fase G**: revisor independiente; actualizar `CLAUDE.md` §7 (D1); `docs/INSTALAR_EN_RED.md` (dónde ver la dirección:
+  Sistema › Terminales en la computadora principal; cómo revocar). Para probar la red en desarrollo: agregar
+  `"network_listen_address": ":8443"` a `.local/server.json` (no al ejemplo: las pruebas lo copian).
+
+### Rutas nuevas para el contrato OpenAPI (Fase D)
+
+| Método | Ruta (`/api/v1/…`)                      | Autenticación / permiso                              | Cuerpo                                             | Respuesta 200                                                                                                                                                |
+| ------ | --------------------------------------- | ---------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| POST   | `pairing/requests`                      | ninguna (terminal sin credencial; límite por origen) | `{name, device_kind, os, app_version, commitment}` | `{request_id, server_nonce, pairing_secret, expires_at, server_id, server_name, name}`                                                                       |
+| POST   | `pairing/requests/{id}/reveal`          | `X-Pairing-Secret`                                   | `{terminal_nonce}`                                 | `{state, expires_at}`                                                                                                                                        |
+| GET    | `pairing/requests/{id}`                 | `X-Pairing-Secret`                                   | —                                                  | `{state, expires_at, name}`                                                                                                                                  |
+| POST   | `pairing/requests/{id}/claim`           | `X-Pairing-Secret`                                   | `{}`                                               | `{device_id, device_token, server_id, server_name, name}` (una sola vez)                                                                                     |
+| POST   | `pairing/requests/{id}/name`            | `X-Pairing-Secret`                                   | `{name}`                                           | `{state, name}`                                                                                                                                              |
+| POST   | `pairing/requests/{id}/cancel`          | `X-Pairing-Secret`                                   | `{}`                                               | `{state}`                                                                                                                                                    |
+| GET    | `devices/pairing-requests`              | sesión + `devices.read`                              | —                                                  | `{requests: [{id, name, device_kind, os, app_version, created_at, expires_at, ready, attempts_left}], approve_here, network?: {available, port, addresses}}` |
+| POST   | `devices/pairing-requests/{id}/approve` | sesión + `devices.manage` + escucha local            | `{code, name?}`                                    | `{state: "approved", name}`                                                                                                                                  |
+| POST   | `devices/pairing-requests/{id}/reject`  | sesión + `devices.manage` + escucha local            | `{}`                                               | `{state: "rejected"}`                                                                                                                                        |
+| GET    | `devices/sessions-summary`              | sesión + `devices.read`                              | —                                                  | `{by_kind: {desktop, android, kitchen}, total, limited}`                                                                                                     |
+| GET    | `devices/{id}/configuration`            | sesión + `devices.read`                              | —                                                  | `{device, kitchen_all_stations, kitchen_sound_alert, kitchen_stations, printers}`                                                                            |
+
+Errores (formato `{error: {code, message, request_id, details?}}`): `PAIRING_UNAVAILABLE` 503, `PAIRING_NOT_FOUND` 404,
+`SETUP_REQUIRED` 409, `PAIRING_RATE_LIMITED`/`PAIRING_BUSY` 429, `PAIRING_SOURCE_UNKNOWN` 400,
+`PAIRING_COMMITMENT_MISMATCH` 400, `PAIRING_ALREADY_REVEALED`/`PAIRING_NOT_READY`/`PAIRING_NOT_APPROVED`/
+`PAIRING_ALREADY_APPROVED`/`PAIRING_ALREADY_CLAIMED`/`PAIRING_EXPIRED`/`PAIRING_REJECTED`/`PAIRING_CANCELLED`/
+`PAIRING_NOT_PENDING`/`PAIRING_IDENTITY_CHANGED`/`PAIRING_ATTEMPTS_EXCEEDED` 409, `PAIRING_CODE_INVALID` 400 (con
+`details.attempts_left`), `PAIRING_LOCAL_ONLY` 403, `ENROLLMENT_LOCAL_ONLY` 403. `GET devices` agrega `kind`, `os`,
+`app_version`, `paired_at`, `online` y `current_user`. Detalle completo en `API_CONTRACTS.md`, bloque «Etapa 9G ·
+emparejamiento de terminales y conexión cifrada (fase B)».
+
+### Para la fusión (coordinador)
+
+- `0023`: ambos ramas crean el archivo con el mismo encabezado; unir encabezado + sección D + sección B (B no toca
+  `realtime_events_scope_check`).
+- `config/product.json` y los dos `product.json`/`metadata.json` generados: tomar los de D (schema 23 + versiones
+  mínimas). `stage9f_*_upgrade_test.go`: cambio idéntico en ambas ramas.
+- Conflictos pequeños esperables (mismas zonas): `administration/http.go` (literal `Request`), `service.go` (campos),
+  `routes.go` (bloque antes de `parts :=`), `api.rs` (operaciones), `native-driver.ts` (`request()`: cabeceras de D y
+  borrado de credencial de B), `App.tsx`, `AuditPage.tsx` (etiquetas). Tras unir, `pairing.rs` envía ya
+  `X-Client-Version`/`X-Client-Kind` por su cuenta (podría usar `with_client_headers` de D).
+- Agregar las rutas de la tabla anterior a `openapi.json` y `docs/API_V1.md` (pruebas de contrato de D).
+
+### Para CLAUDE.md
+
+- §3 Arquitectura: dos escuchas: HTTP `127.0.0.1:8181` (la ventana de la propia computadora) y, en el servicio, HTTPS
+  `:8443` en todas las interfaces solo para orígenes loopback/RFC 1918/enlace local/ULA (`internal/lanlistener`;
+  `serve` con `network_listen_address`). «Local» = escucha de loopback, nunca la de red aunque venga de 127.0.0.1.
+  Identidad propia del servidor en `identity/` junto a `server.json` (ECDSA P-256, 30 años, `server_id`), que nunca se
+  regenera sola. Terminales emparejadas: `connection.json` con `server_id`, `server_fingerprint`, `server_name`; TLS con
+  huella SPKI fijada (`pairing.rs`, `rustls` sin `aws-lc-rs`), credencial `adel-server:{server_id}|{perfil}`.
+- §6 Pruebas: `testPairingAndTerminals` (desde `TestStageTwoAcceptance`) usa las dos escuchas reales en puertos
+  efímeros; la prueba del `host` abre la escucha de red en `127.0.0.1:8196`; `e2e/pairing.ts` simula la terminal nueva
+  (huella del certificado del Go temporal); el puente simula `pairing_*` y borra su credencial con `DEVICE_REVOKED`;
+  prueba en vivo de Rust contra Go (`live_pairing_against_a_temporary_go_server`, ignorada) con
+  `ADEL_PAIRING_TEST_BASE`/`ADEL_PAIRING_TEST_FINGERPRINT`.
+- §7 Seguridad: sustituir «No escuchar en `0.0.0.0`» por la regla de D1 (escucha HTTPS de red con filtro de orígenes);
+  ninguna terminal se registra sin emparejarse (código de 6 dígitos ligado a la huella y a dos números con compromiso,
+  aprobado solo en la computadora principal, 5 intentos, 5 minutos, límite por origen); `devices/enroll` solo local;
+  nunca aceptar otro certificado en silencio.
+- §15: Sistema › Terminales con «Terminales nuevas», tipo y sistema, usuario actual, en línea, «Ver configuración» y
+  sesiones activas por tipo (solo se cuentan, D9); auditoría `device.pairing_*` y `device.paired`; sin permisos nuevos.
+- Reglas permanentes propuestas: toda petición que dependa de «la propia computadora» usa `Request.Local` (nunca la IP
+  sola); el secreto de una solicitud de emparejamiento y la credencial de dispositivo solo los ve Rust; la identidad del
+  servidor nunca se reemplaza automáticamente.
+- §19 Riesgos: la identidad no viaja en los respaldos (restaurar en otra computadora = emparejar de nuevo); permiso
+  «Red local» de macOS y firewall pendientes de verificar en la computadora real; el cupo de 20 solicitudes abiertas
+  puede llenarse desde la LAN durante 5 minutos.
+
+**Fusión con A y D y verificación del coordinador** (13/11/2026): la rama `etapa-9g-b` salió de la Fase A, antes de la D.
+Se fusionó en `bf6fa95` con conflictos en la 0023 (archivo creado por las dos ramas: queda el encabezado, la sección D y
+después la sección B; la B no toca `realtime_events_scope_check`), `config/product.json` y sus copias generadas (se
+conservan `min_client_version` y `min_server_version` de D), `main.go` (trabajador de «Agotado» y canal para las dos
+escuchas), `http.go` y `service.go` (campos de la petición de ambas fases) y `API_CONTRACTS.md` (ambos bloques). Copia
+exacta de la fusión: Go unitarias con `-race`, integración de los 11 paquetes de la tupla (`administration` 106 s con el
+emparejamiento) y `cargo test` aprobados; Playwright falló solo en `workflow-stage9g-terminals` (y en cascada
+`workflow-zz-test-data`) porque la prueba de «Agotado» de D enrolaba una terminal «Caja 2 9G» que el filtro
+`hasText: 'Caja 2'` también encontraba. Corregido en `c502706` (la terminal de esa prueba se llama «Barra de agotados
+9G»; sin cambios de producto) y repetido: `restaurant`, `workflow-stage9g-modality`, `workflow-stage9g-sold-out`,
+`workflow-stage9g-terminals` (2) y `workflow-zz-test-data`, 6 de 6 en Chromium y 6 de 6 en WebKit. Formato, `sync`,
+`vet`, `GOOS=windows`, `tsc` y Vitest también aprobados sobre la fusión.
+
+**Decisión del coordinador D15 · Identidad del servidor y respaldos**: la carpeta `identity/` (certificado, llave privada y
+`server_id`) no viaja en los respaldos de la base (que pueden ir a una USB): restaurar en otra computadora genera otra
+identidad y obliga a emparejar de nuevo las terminales, como pide §3.1 ante un certificado distinto. Se documenta en
+`docs/INSTALAR_EN_RED.md`.
