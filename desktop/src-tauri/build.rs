@@ -20,6 +20,8 @@ fn main() {
             "pairing_rename",
             "pairing_cancel",
             "pairing_forget",
+            "pairing_start_found",
+            "discovery_search",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

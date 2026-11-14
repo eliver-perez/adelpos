@@ -2,6 +2,7 @@
 
 mod api;
 mod connection;
+mod discovery;
 mod export;
 mod installation;
 mod menu;
@@ -36,6 +37,9 @@ pub struct TerminalState {
     // cambió de identidad) y el emparejamiento en curso (pairing.rs).
     pin: Option<Arc<pairing::PinnedVerifier>>,
     pairing: Mutex<Option<pairing::PairingSession>>,
+    // Etapa 9G (fase C): dirección vigente del servidor (cambia sola si el servidor emparejado aparece en otra
+    // dirección de la red) y los servidores de la última búsqueda (discovery.rs).
+    locator: Arc<discovery::ServerLocator>,
 }
 
 impl TerminalState {
@@ -72,6 +76,10 @@ impl TerminalState {
         // Etapa 9G: el servidor emparejado presentó otro certificado; nunca se acepta.
         if pairing::identity_changed(&self.pin) {
             return pairing::IDENTITY_CHANGED_MESSAGE.to_string();
+        }
+        // Etapa 9G (fase C): la terminal emparejada no encontró su servidor ni en la última dirección ni en la red.
+        if self.locator.paired_server().is_some() {
+            return pairing::SERVER_NOT_FOUND_MESSAGE.to_string();
         }
         self.host
             .as_ref()
@@ -157,9 +165,11 @@ async fn get(client: &reqwest::Client, base: &str, route: &str) -> Option<HTTPRe
 
 #[tauri::command]
 async fn server_snapshot(state: State<'_, TerminalState>) -> Result<Snapshot, String> {
-    let config = state.config.as_ref().map_err(Clone::clone)?;
+    state.config.as_ref().map_err(Clone::clone)?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
-    let live = get(client, &config.server_url, "health/live").await;
+    // Etapa 9G (fase C): la dirección vigente (la de connection.json o la nueva si el servidor cambió de IP).
+    let base = state.locator.base();
+    let live = get(client, &base, "health/live").await;
     if live.is_none() {
         return Ok(Snapshot {
             live,
@@ -167,8 +177,8 @@ async fn server_snapshot(state: State<'_, TerminalState>) -> Result<Snapshot, St
             version: None,
         });
     }
-    let ready = get(client, &config.server_url, "health/ready").await;
-    let version = get(client, &config.server_url, "version").await;
+    let ready = get(client, &base, "health/ready").await;
+    let version = get(client, &base, "version").await;
     Ok(Snapshot {
         live,
         ready,
@@ -232,6 +242,10 @@ fn main() {
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
             let installation = installation::Context::detect(app.path().app_config_dir().ok());
+            let locator = Arc::new(discovery::ServerLocator::new(
+                &config,
+                installation.connection_file.clone(),
+            ));
             let prepared = config.as_ref().map_err(Clone::clone).and_then(client);
             let pin = prepared.as_ref().ok().and_then(|(_, pin)| pin.clone());
             let client = prepared.map(|(client, _)| client);
@@ -275,6 +289,7 @@ fn main() {
                 installation,
                 pin,
                 pairing: Mutex::new(None),
+                locator,
             });
             window_check::start(app.handle().clone());
             // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
@@ -302,6 +317,8 @@ fn main() {
             pairing::pairing_rename,
             pairing::pairing_cancel,
             pairing::pairing_forget,
+            pairing::pairing_start_found,
+            discovery::discovery_search,
         ])
         .build(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio")
@@ -336,6 +353,10 @@ mod startup_tests {
             },
             pin: None,
             pairing: Mutex::new(None),
+            locator: Arc::new(discovery::ServerLocator::new(
+                &Err("Prueba sin configuración".into()),
+                None,
+            )),
         };
         assert!(state
             .vault()

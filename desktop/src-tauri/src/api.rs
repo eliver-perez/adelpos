@@ -794,13 +794,14 @@ pub async fn api_request(
     mut body: Option<Value>,
     query: Option<BTreeMap<String, String>>,
 ) -> Result<HTTPResult, String> {
-    let config = state.config.as_ref().map_err(Clone::clone)?;
+    state.config.as_ref().map_err(Clone::clone)?;
     let vault = state.vault()?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
     let mut credentials = vault.read()?;
     let (method, path) = route(&operation, resource_id.as_deref())?;
-    let mut request =
-        with_client_headers(client.request(method, format!("{}/api/v1/{path}", config.server_url)));
+    // Etapa 9G (fase C): dirección vigente del servidor (la de connection.json o la nueva tras un cambio de IP).
+    let base = state.locator.base();
+    let mut request = with_client_headers(client.request(method, format!("{base}/api/v1/{path}")));
     if let (Some(id), Some(token)) = (&credentials.device_id, &credentials.device_token) {
         request = request
             .header("X-Device-ID", id)
@@ -843,7 +844,32 @@ pub async fn api_request(
     if let Some(body) = body {
         request = request.json(&body);
     }
-    let mut response = request.send().await.map_err(|_| state.connection_error())?;
+    let built = request
+        .build()
+        .map_err(|_| "No se pudo preparar la petición.".to_string())?;
+    let again = built.try_clone();
+    let mut response = match client.execute(built).await {
+        Ok(response) => response,
+        Err(error) => {
+            // Etapa 9G (fase C, §4.1 y D6): una terminal emparejada que no logra conectar con la última dirección
+            // vuelve a buscar su servidor por server_id y, si lo encuentra con la misma huella en otra dirección,
+            // repite la petición allí una sola vez. Solo con un error de conexión: la petición no llegó al
+            // servidor, así que repetirla no duplica nada (las escrituras llevan además su operation_id).
+            let moved = if error.is_connect() {
+                state.locator.relocate(&base).await
+            } else {
+                None
+            };
+            let (Some(next), Some(mut retry)) = (moved, again) else {
+                return Err(state.connection_error());
+            };
+            crate::discovery::rebase(retry.url_mut(), &next)?;
+            client
+                .execute(retry)
+                .await
+                .map_err(|_| state.connection_error())?
+        }
+    };
     let status = response.status().as_u16();
     let mut bytes = Vec::new();
     while let Some(chunk) = response

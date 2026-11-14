@@ -44,8 +44,11 @@ pub fn events_start(
         crate::api::resource_id(Some(identifier))?;
     }
     state.vault()?;
-    let config = state.config.as_ref().map_err(Clone::clone)?.clone();
+    state.config.as_ref().map_err(Clone::clone)?;
     let client = state.client.as_ref().map_err(Clone::clone)?.clone();
+    // Etapa 9G (fase C): la dirección se lee en cada intento; si el servidor emparejado cambió de IP, el canal
+    // lo vuelve a encontrar (discovery.rs) y sigue desde el mismo cursor.
+    let locator = state.locator.clone();
     let vault = state.vault.clone();
     let generation = state.events_generation.clone();
     let subscription_id = generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -67,19 +70,25 @@ pub fn events_start(
                 break;
             };
             // El destino y las credenciales se obtienen únicamente del perfil nativo.
-            let mut request = crate::api::with_client_headers(
-                client.get(format!("{}/api/v1/events", config.server_url)),
-            )
-            .header("X-Device-ID", device)
-            .header("X-Device-Token", secret)
-            .bearer_auth(session)
-            .header("Accept", "text/event-stream")
-            .query(&[("after", cursor.to_string())])
-            .timeout(Duration::from_secs(40));
+            let base = locator.base();
+            let mut request =
+                crate::api::with_client_headers(client.get(format!("{base}/api/v1/events")))
+                    .header("X-Device-ID", device)
+                    .header("X-Device-Token", secret)
+                    .bearer_auth(session)
+                    .header("Accept", "text/event-stream")
+                    .query(&[("after", cursor.to_string())])
+                    .timeout(Duration::from_secs(40));
             if let Some(station) = &station_id {
                 request = request.query(&[("station_id", station)]);
             }
-            if let Ok(mut response) = request.send().await {
+            let sent = request.send().await;
+            if let Err(error) = &sent {
+                if error.is_connect() {
+                    let _ = locator.relocate(&base).await;
+                }
+            }
+            if let Ok(mut response) = sent {
                 if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
                     let _ = channel.send(
                         json!({"connection":"unauthorized","status":response.status().as_u16()}),
