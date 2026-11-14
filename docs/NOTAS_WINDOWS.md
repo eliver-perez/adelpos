@@ -319,7 +319,7 @@ detrás de condiciones por plataforma. Lista para la próxima sesión en Windows
 1. **Suites en Windows** (`scripts\dev.ps1`): `test`, `test-integration` y `test-browser` con Chromium y WebKit.
    `scripts\windows\dev.mjs` escribe ahora `test_mode: true` y `backup_directory` en la configuración temporal de
    Playwright y el puente de las pruebas se niega a correr sin `test_mode`: comprobar que `test-browser` arranca y que
-   `workflow-stage9f-zz-test-data` corre al final. Ejecutar también `go test ./internal/standalone` (incluye
+   `workflow-zz-test-data` corre al final. Ejecutar también `go test ./internal/standalone` (incluye
    `testmode_test.go`) y comprobar que la subprueba `9F_respaldo_real_con_pg_dump` de `administration` encuentra
    `pg_dump` (`ADEL_PG_BIN`) y no se omite.
 2. **`host` con `ADEL_TEST_MODE`** (`internal/standalone/testmode.go` y `cmd/ad-el-pos-server/host_windows.go`):
