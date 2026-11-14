@@ -20,6 +20,13 @@ import (
 // command prepara un programa de PostgreSQL con argumentos separados (nunca un shell con datos). Las
 // variables PG* heredadas se descartan para que no cambien el destino (PGHOST, PGOPTIONS, PGSERVICE…):
 // cada llamada indica las suyas, como el respaldo de internal/maintenance.
+//
+// Idioma: launchd arranca el servicio sin LANG ni LC_*, y entonces PostgreSQL de macOS pide el idioma del
+// sistema a CoreFoundation, que abre hilos, y postmaster se niega a arrancar («postmaster became
+// multithreaded during startup… Set the LC_ALL environment variable»; observado al instalar el servicio en
+// la Fase G de la etapa 9G). Por eso todo programa de PostgreSQL recibe LC_ALL=C, el mismo idioma con el que
+// se crea el clúster (--locale=C); va después de lo heredado para ganarle a cualquier LANG o LC_* de la
+// consola, y antes de las variables de la llamada.
 func command(ctx context.Context, program string, arguments []string, environment []string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, program, arguments...)
 	inherited := []string{}
@@ -28,6 +35,7 @@ func command(ctx context.Context, program string, arguments []string, environmen
 			inherited = append(inherited, variable)
 		}
 	}
+	inherited = append(inherited, "LC_ALL=C")
 	cmd.Env = append(inherited, environment...)
 	return cmd
 }

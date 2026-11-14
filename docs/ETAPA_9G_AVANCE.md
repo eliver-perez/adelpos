@@ -2620,10 +2620,54 @@ con la contraseña de administrador, que es una parada del §0 de la especificac
    computadora?» con **«Servidor y terminal»** sugerida (sin servicio instalado guarda solo la conexión local, como hasta
    la 9F).
 
-**Pendiente del propietario (parada del §0 de la especificación)**: instalar el `.pkg` 0.10.0 (ventana de contraseña de
-administrador del Instalador y aviso «Elementos en segundo plano añadidos»), pasar los datos de `.local` a
-`/Library/Application Support/AD-EL POS` con `adopt-legacy`, y comprobar que el servicio sigue al cerrar la ventana y que
-arranca sin iniciar sesión (reiniciar la Mac, otra parada). Ajuste al procedimiento de la Fase A: como la aplicación
-0.10.0 ya guarda su modalidad en `connection.json`, la elección del primer arranque no vuelve a aparecer; para habilitar
-el servidor después de pasar los datos se quita ese archivo antes de abrir la aplicación instalada (o se vuelve a
-ejecutar el instalador con «Servidor del restaurante»).
+### Paso al servicio de macOS (con el propietario, parada del §0 de la especificación)
+
+14/11/2026, con autorización expresa del propietario, que estuvo frente a la Mac (ventanas de contraseña de administrador).
+
+1. **Conteos de referencia** (solo lectura): 143 tablas y 950 filas (sobre la comprobación posterior a la migración, el
+   respaldo automático de la 0.10.0 —`backups/adel_pos-dbe345d4-20261114T060505Z-9143c7-automatico.dump`, 718 525 bytes,
+   verificado—, dos movimientos de auditoría, un evento y las 4 colas de impresión de la Mac que informó el agente de
+   impresión al abrir la aplicación). Respaldo `backups/adel_pos-20261114T061639Z-5c673e.dump` con restauración
+   verificada (142 tablas idénticas).
+2. **Aplicación cerrada y Go detenido** (`server-stop`); PostgreSQL de `.local` siguió en marcha para el paso de datos.
+3. **`.pkg` 0.10.0** (21 980 952 bytes, SHA-256 `2e9d5990e435bd33eaf23a0e4fd93e7aa303176ffb0e9b89b7308a443c9c2c20`):
+   el propietario lo instaló con «Servidor del restaurante» **desmarcada** (contraseña de administrador). Quedaron
+   `/Applications/AD-EL POS.app` 0.10.0, `/Library/LaunchDaemons/local.adel.pos.server.plist` (root:wheel) y
+   `/Library/Application Support/AD-EL POS` (de `eliver`, 0700) en «Solo terminal», con el servicio cargado e inactivo
+   (`host_disabled`). Queda comprobado el `postinstall` como root, que antes solo se había probado con un destino falso.
+4. **Paso de datos** (como `eliver`, sin `sudo`): `"/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server"
+adopt-legacy --from-config ".local/server.json"` → «Datos pasados y comprobados: 142 tablas con conteos idénticos»,
+   respaldo `adel_pos-20261114T062111Z-c183f8-instalacion-anterior.dump` en la carpeta del servicio, marcador
+   `legacy-adopted.json` con `counts_equal: true`; la instalación anterior no se modificó. Después `db-stop`: `.local`
+   queda detenido como copia histórica.
+5. **Habilitar el servidor**: como la aplicación 0.10.0 ya había guardado su modalidad, se apartó `connection.json`
+   (`connection.json.antes-del-servicio`, sin borrar) y el propietario eligió «Servidor y terminal» en la aplicación
+   instalada. launchd lanzó el servicio en cuanto apareció `service-enabled` (supuesto b de `PathState`: **verificado**),
+   pero **PostgreSQL no arrancó**: «FATAL: postmaster became multithreaded during startup — HINT: Set the LC_ALL
+   environment variable to a valid locale» (launchd no da `LANG` ni `LC_*`, y PostgreSQL de macOS pide entonces el idioma
+   a CoreFoundation, que abre hilos). Las pruebas no lo vieron porque heredaban el idioma de la consola. Se detuvo el
+   bucle de reintentos quitando `service-enabled` (sin `sudo`) y se reprodujo aislado (un clúster temporal con `env -i`
+   falla y con `LC_ALL=C` arranca).
+6. **Corrección** `1e8c544`: `standalone.command` (Unix) da `LC_ALL=C` a todo programa de PostgreSQL —el idioma con el
+   que se crea el clúster— después de lo heredado. Pruebas: unitaria nueva `TestCommandGivesPostgreSQLTheCLocale` y la
+   integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS`) **sin ninguna variable de idioma**: aprueba con la
+   corrección y **falla sin ella**; formato, `vet`, `GOOS=windows` y Go unitarias con `-race` aprobados.
+7. **`.pkg` corregido** (21 981 517 bytes, SHA-256 `3a75b705cfeedf6eed90bb9a316344b4fa9f9f5bc727fe8de8c903075252be2c`),
+   instalado por el propietario con «Servidor del restaurante» **marcada** (contraseña de administrador): el
+   `postinstall` creó `service-enabled` y conservó la modalidad «Servidor y terminal»; launchd lanzó el servicio
+   (`cluster_started` 192 ms, `host_ready` 245 ms, sin migraciones pendientes), con la identidad del servidor nueva en
+   `identity/`, Go en `127.0.0.1:8181` y `*:8443` y el anuncio `ADEL POS — Eliver’s MacBook Pro` registrado. Readiness 200,
+   0.10.0 / esquema 23, `test_mode: false`; procesos de `eliver` con padre launchd (PID 1), PostgreSQL con datos en
+   `/Library/Application Support/AD-EL POS/postgres`.
+8. **Comprobación de la base del servicio** (solo lectura, con su `admin-password`): 143 tablas y 950 filas, **idénticas**
+   a los conteos de referencia del paso 1.
+9. **Aplicación**: el propietario abrió la aplicación instalada, inició sesión y ve sus datos de siempre. El servidor no
+   depende de la ventana (lo lanza launchd). **«Reiniciar»** de Mantenimiento › «Servicio del servidor»:
+   `service_restart_requested` → `host_starting` → `host_ready` en menos de 1 s; la aplicación mostró «Sin conexión» un
+   momento y se reconectó sola.
+
+**Desde el 14/11/2026 la instalación real de la Mac es el servicio.** Ya no se usan con ella `dev.sh db-*`, `server*`,
+`migrate`, `backup`, `restore-check.py`, `test-integration` ni `test-browser`. Para actualizarla en las etapas siguientes
+se compila el `.pkg` y se instala con «Servidor del restaurante» marcada (contraseña de administrador: parada); el
+`host` respalda y migra solo. **Pendiente**: reiniciar la Mac para comprobar que el servicio arranca sin iniciar sesión
+(otra parada del §0).
