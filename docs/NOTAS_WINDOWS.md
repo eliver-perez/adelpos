@@ -1,7 +1,8 @@
 # Notas para Windows · AD-EL POS
 
 Punto de partida para preparar el instalador de Windows 11 (hecho en la etapa 9E: ver la sección 0; lo que la etapa
-9F, desarrollada en la Mac, deja por verificar en Windows está en la sección 6). Recoge cómo se
+9F, desarrollada en la Mac, deja por verificar en Windows está en la sección 6, y lo que la etapa 9G deja para su Fase W
+—servicio de Windows, instalador para todo el equipo, terminales en red y pruebas cruzadas— en la sección 7). Recoge cómo se
 empaqueta y se ejecuta hoy AD-EL POS en macOS y qué partes dependen de macOS, con el archivo y la línea de cada una.
 Se escribió en la Fase 0 de la etapa 9D (versión 0.9.2, esquema 20) leyendo el código; **nada se compiló ni se probó en
 Windows**. Lo marcado «por comprobar» es una expectativa razonable, no un hecho verificado.
@@ -226,14 +227,19 @@ en Windows.
 macOS: ninguno instalado (plantilla launchd sin instalar). Windows: PostgreSQL y Go como servicios con inicio
 automático, en ese orden (Go espera la base: readiness `health/ready`). La aplicación no debe iniciarlos (regla de
 arquitectura). Los trabajadores de impresión, el planificador de cocina y el de inventario viven dentro de Go
-(`main.go:130-145`) y corren aunque nadie abra la aplicación.
+(`main.go:130-145`) y corren aunque nadie abra la aplicación. **Desde la etapa 9G** macOS sí tiene servicio
+(LaunchDaemon `local.adel.pos.server` instalado por el `.pkg`, con el comando `host`); en Windows el servicio es de la
+Fase W (sección 7).
 
 ### 2.12 Red local y TLS
 
 `tls-init --lan-ip` crea la CA y el certificado en `.local/tls/` (`localsetup/tls.go`); la terminal remota confía solo
 en el `ca_certificate` de su `connection.json` (`main.rs:115-129`). En Windows falta: regla del Firewall para el puerto
 de Go en la red privada y ubicación de `ca.pem` en la terminal. Go rechaza escuchar en LAN fuera de desarrollo
-(`config.go:77`).
+(`config.go:77`). **Desde la etapa 9G** este camino queda como anterior: el servidor tiene su propia identidad
+(certificado ECDSA y `server_id`), una escucha HTTPS de red en `:8443` con filtro de orígenes (`internal/lanlistener`)
+y las terminales se emparejan con un código y fijan la huella del certificado (`pairing.rs`), sin CA que copiar. Lo que
+falta en Windows está en la sección 7.
 
 ### 2.13 Scripts, herramientas y pruebas
 
@@ -433,3 +439,93 @@ detrás de condiciones por plataforma. Lista para la próxima sesión en Windows
 15. **Estaciones por terminal desde un cliente anterior**: `PUT kitchen/access` con una lista vacía sin «todas» responde
     `422 KITCHEN_ACCESS_ALL_REQUIRED` (la aplicación 0.9.5 siempre envía la marca); comprobarlo con la corrida de
     `test-integration` del punto 1.
+
+## 7. Etapa 9G: qué hacer en la Fase W
+
+La parte Mac de la 9G (fases 0 a G; versión 0.10.0, esquema 23, migración `0023_network_terminals_and_android.sql`) se
+desarrolló y se probó en la Mac ([ETAPA_9G_AVANCE.md](ETAPA_9G_AVANCE.md) y
+[VERIFICATION_STAGE9G.md](VERIFICATION_STAGE9G.md)). **Nada de la 9G se ejecutó en Windows**: Go se compiló y se revisó
+con `GOOS=windows` (también con `-tags=integration`) en cada fase, pero Rust no se compiló para Windows (en la Mac no
+está el destino `x86_64-pc-windows-msvc`). Lo propio de cada sistema está detrás de `//go:build`, `#[cfg(...)]` o
+`isWindows()`, con los puntos de integración marcados en el código. La Fase W se ejecuta en la computadora con Windows
+11 con la especificación (§8 de [etapas/ETAPA_9G.md](etapas/ETAPA_9G.md)): `git pull`, leer el avance y seguir esta
+lista. Al terminar, actualizar esta sección, [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md) e
+[INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
+
+**Paradas (§0 de la especificación)**: crear la regla del firewall, cambiar la configuración de red o del router,
+instalar o registrar algo que pida permisos de administrador (avisar qué ventana aparecerá) y reiniciar Windows se
+consultan antes con el propietario.
+
+1. **Compilar y correr las suites** (`scripts\dev.ps1`): `test`, `test-integration` (la tupla ahora incluye
+   `./internal/apicontract`, `./internal/backupschedule`, `./cmd/ad-el-pos-server` y `./internal/discovery`; las
+   pruebas de integración de estos dos últimos llevan `!windows` y `darwin`, así que en Windows no se compilan y hay
+   que escribir las del servicio de Windows) y `test-browser` con
+   Chromium y WebKit (las especificaciones `workflow-stage9g-*` y `workflow-zz-test-data` al final). `cargo test`
+   compila por primera vez en Windows `installation.rs`, `pairing.rs`, `discovery.rs`, `print_agent.rs` y
+   `backup_folder.rs` (solo difieren por `cfg!`/`#[cfg]`).
+2. **Servidor como servicio de Windows** con el mismo `host` (`cmd/ad-el-pos-server/host_windows.go`): arranque
+   automático al encender, sin iniciar sesión, y reinicio si se cae. Falta: el control del administrador de servicios
+   (`HostControl`, que en macOS dice `managed` y permite «Reiniciar» desde Mantenimiento), la vigilancia de la modalidad
+   y del archivo de habilitación (`installation-mode.json` y `service-enabled`, `internal/standalone/mode.go`) y
+   `pauseServerForRestore` (hoy `restore` pide cerrar la aplicación; en macOS pausa y reanuda el servicio con el archivo
+   de habilitación).
+3. **Datos en `%ProgramData%\AD-EL POS\`** (`internal/standalone/layout_windows.go`, hoy `%LOCALAPPDATA%\AD-EL POS`,
+   que sigue siendo el de la instalación por usuario de la 9E con `server_host.rs`), con ACL privada (`fileacl`) y la
+   comprobación de `ADEL_TEST_MODE` contra la carpeta conocida nueva.
+4. **Instalador para todo el equipo** (`scripts\build-windows.ps1` y NSIS): en `Archivos de programa`, con permisos de
+   administrador, que pregunta la **modalidad** (Servidor y terminal, Solo servidor, Solo terminal; «Solo terminal» no
+   instala PostgreSQL ni el servicio) y registra el servicio. En Rust, `ServicePaths::system()` y `Context::detect` de
+   `installation.rs` para Windows (hoy `None`: `chosen` siempre `true` y `can_change` `false`), para que la elección
+   del primer arranque y «Cambiar la modalidad» de Mantenimiento funcionen igual que en macOS. `server_host.rs` solo
+   lanza el servidor en `server-terminal` (con `server-only` no lo haría) y con el servicio de Windows deja de hacer
+   falta lanzarlo desde la aplicación. Desinstalar conserva los datos.
+5. **Regla del firewall** para el puerto 8443 **solo en redes privadas**, cuando la modalidad incluye servidor
+   (**parada**). Comprobar también si el anuncio mDNS necesita algo más (UDP 5353 entrante en redes privadas).
+6. **Escucha de red en el `host` de Windows**: hoy crea la identidad (`identity/` con ACL privada) pero no abre la
+   escucha HTTPS `:8443` (`hostNetworkAddress` es de `host_unix.go`). Abrirla con la misma regla que en macOS (solo con
+   una modalidad con servidor; en modo de pruebas, solo con el indicador).
+7. **Pasar la instalación por usuario de la 9E** a la del equipo: el instalador nuevo detecta la instalación de
+   `%LOCALAPPDATA%\AD-EL POS`, la respalda y pasa los datos con `ad-el-pos-server adopt-legacy --from-config
+"%LOCALAPPDATA%\AD-EL POS\server.json"` (lee la base anterior con su propio rol, no la modifica, compara los conteos
+   de todas las tablas y deja `legacy-adopted.json`), verifica y solo entonces desinstala la versión por usuario. Nunca
+   borra los datos sin haber verificado la copia. La computadora de la 9E tiene el establecimiento de prueba «Fonda
+   Doña Ñeli»: sirve para ensayar este paso.
+8. **Anuncio en la red** (`internal/discovery`): `announce_windows.go` con `DnsServiceRegister` /
+   `DnsServiceDeRegister` de dnsapi.dll (Windows 10+), con el mismo `Announcer` y sin abrir un socket propio en el
+   puerto 5353 (`announce_other.go` tiene el punto de integración). Hasta entonces un servidor de Windows no se anuncia
+   y las terminales escriben su dirección.
+9. **Búsqueda desde una terminal de Windows** (`discovery.rs`, `std::net::UdpSocket` a `224.0.0.251:5353`): comprobar
+   que lista la Mac; si no, revisar el firewall de Windows para UDP 5353 entrante en redes privadas.
+10. **Emparejamiento y credencial en Windows**: `pairing.rs` en Windows y el Administrador de credenciales con la cuenta
+    nueva `adel-server:{server_id}|{perfil}`; emparejar de verdad Mac ↔ Windows con el código, revocar desde la otra
+    computadora y comprobar el filtro de orígenes con una terminal en la Wi-Fi (aceptada) y otra por una VPN de túnel
+    (rechazada).
+11. **Agente de impresión en Windows** (`print_agent.rs`, que hoy no arranca en Windows): `local_printers` con
+    `EnumPrinters` y la regla de `kitchen/windows_queue.go` (USB, COM, LPT y TCP/IP estándar; nunca virtuales, de otro
+    equipo ni WSD) y `deliver` con `StartDocPrinter` tipo `RAW` + `WritePrinter`, con los mismos resultados (no se pudo
+    abrir → error confirmado; falló después de abrir → incierto); después quitar el `cfg!(target_os = "windows")` de
+    `start`. Probar la USB de una terminal Windows con la Mac como servidor y al revés.
+12. **Respaldos programados en el `host` de Windows** (ya usan `installationBackup`, sin probar): `fileacl.CreatePrivate`
+    en Windows (ACL privada con el archivo abierto y `pg_dump` hacia la salida estándar en binario); una USB FAT32 o
+    exFAT, donde la ACL no se puede poner y el respaldo quedaría `dump_failed` (decidir si en una carpeta elegida se
+    acepta sin ACL o se usa la predeterminada); rutas con acentos; `Describe` muestra la unidad (`E:`) como disco; y el
+    diálogo nativo de carpeta (`choose_backup_directory`).
+13. **Pruebas cruzadas** (§8.2, con el propietario en la misma red y una lista clara de lo que hace en la Mac):
+    - Mac como servidor (servicio con la escucha `:8443`; `dns-sd -B _adelpos._tcp` en la Mac confirma el anuncio) y
+      Windows como terminal: búsqueda y emparejamiento con código; mesas, captura, envío a cocina y cobro desde
+      Windows con los cambios vistos al momento en la Mac y al revés; dos terminales en la misma cuenta; apagar la red
+      de la terminal (la capa «Sin conexión» en ≤ 5 s, lo capturado se conserva y se guarda al volver); revocar la
+      terminal; impresión a una impresora de red y a su USB si la hay.
+    - **Cambio de IP real** de la computadora principal (renovar la concesión DHCP o reservar otra IP en el módem:
+      **parada**, es configuración de red): la terminal debe seguir sola (la primera operación tarda ≈ 2 s) y guardar
+      la dirección nueva; otro servidor AD-EL POS con el mismo nombre en la red nunca debe aceptarse.
+    - Windows como servidor y Mac como terminal: lo mismo en sentido contrario.
+    - **Reinicio de la computadora principal** (avisar antes si es Windows): el servicio arranca solo y las terminales
+      se reconectan solas.
+    - **Prueba de carga moderada**: varias terminales y clientes tipo comandero por la API durante unos minutos;
+      registrar tiempos de respuesta y comprobar que no hay duplicados ni inconsistencias. Tener en cuenta que todas
+      las escrituras comparten el lock 7820148305, que cada flujo SSE consulta cada 750 ms y que cada agente de
+      impresión consulta cada 3 s.
+14. **Documentación**: el resultado de las pruebas cruzadas y de la carga, la migración de la instalación por usuario y
+    las limitaciones van al avance; actualizar `CLAUDE.md` (§3, §5, §17 y §19), esta sección,
+    [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md) e [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
