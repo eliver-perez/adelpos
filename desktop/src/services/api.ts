@@ -6,6 +6,8 @@ export type Operation =
   | 'kitchen_create_station'
   | 'kitchen_printers'
   | 'kitchen_create_printer'
+  // Etapa 9G (fase E): las terminales con las impresoras que informó cada una.
+  | 'kitchen_terminal_printers'
   | 'kitchen_discovery'
   | 'kitchen_routes'
   | 'kitchen_targets'

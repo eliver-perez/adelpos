@@ -14,7 +14,9 @@ export async function configureKitchen(page: Page) {
   await chooseOption(page.getByRole('combobox', { name: 'Transporte de impresión', exact: true }), {
     value: 'agent',
   });
-  await page.getByLabel('Referencia del destino remoto').fill('Agente de aceptación no disponible');
+  await page
+    .getByLabel('Nombre de la impresora en la terminal')
+    .fill('Agente de aceptación no disponible');
   await page.getByRole('button', { name: 'Guardar impresora', exact: true }).click();
   await expect(
     page.getByRole('button', {

@@ -319,21 +319,77 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
           </div>
           <div>
             <dt>Impresoras de esta terminal</dt>
-            {/* Fase E: impresoras USB conectadas a la terminal (agente de impresión). */}
+            {/* Etapa 9G (fase E): impresoras USB conectadas a la terminal, que imprime su agente. */}
             <dd>
               {value.printers.length > 0
-                ? value.printers.map((printer) => printer.name).join(', ')
+                ? value.printers
+                    .map((printer) =>
+                      printer.active === false ? `${printer.name} (desactivada)` : printer.name,
+                    )
+                    .join(', ')
                 : 'Sin impresoras propias'}
             </dd>
           </div>
         </dl>
       )}
+      {value && <LocalPrinters name={shown.name} local={value.local_printers ?? null} />}
       <p className="muted pairing-help">
         Las estaciones y el aviso sonoro se eligen en Cocina › Estaciones › Terminales de cocina.
       </p>
       <button className="secondary-button mt-4" onClick={onClose}>
         Cerrar configuración
       </button>
+    </section>
+  );
+}
+
+// Impresoras que informó la computadora de la terminal (etapa 9G, fase E): cuáles sirven para tickets, comandas y
+// el cajón (las decide Go) y si su agente de impresión está conectado. Se asignan en Cocina › Impresoras con
+// «Impresora USB de una terminal».
+function LocalPrinters({
+  name,
+  local,
+}: {
+  name: string;
+  local: NonNullable<DeviceConfiguration['local_printers']> | null;
+}) {
+  if (!local) {
+    return null;
+  }
+  return (
+    <section
+      className="device-local-printers"
+      aria-label={`Impresoras de la computadora de ${name}`}
+    >
+      <h3>Impresoras de la computadora</h3>
+      <p className="muted text-sm">
+        {local.agent_online
+          ? 'Conectada: imprime los trabajos de sus impresoras.'
+          : 'Desconectada: sus trabajos esperan hasta que AD-EL POS esté abierto en ella.'}{' '}
+        {local.reported_at
+          ? `Informó su lista: ${dateTime(local.reported_at)}`
+          : 'Todavía no informó sus impresoras.'}
+      </p>
+      {local.queues.length > 0 ? (
+        <ul className="device-local-printer-list">
+          {local.queues.map((queue) => (
+            <li key={queue.queue}>
+              <strong>{queue.queue}</strong>
+              {queue.model && <span className="muted"> · {queue.model}</span>}
+              <span className={queue.usable ? 'device-printer-usable' : 'muted'}>
+                {' '}
+                · {queue.usable ? 'Se puede usar' : `No se puede usar: ${queue.reason ?? ''}`}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        local.reported_at && <p className="muted text-sm">Su computadora no tiene impresoras.</p>
+      )}
+      <p className="muted pairing-help">
+        Para imprimir en una de ellas, regístrala en Cocina › Impresoras como «Impresora USB de una
+        terminal».
+      </p>
     </section>
   );
 }
