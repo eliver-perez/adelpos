@@ -14,6 +14,7 @@ import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/Acces
 import { AuditPage } from './pages/AuditPage';
 import { MaintenancePage } from './pages/MaintenancePage';
 import { DevicesPage } from './pages/DevicesPage';
+import { RepairTerminalPage, useRepairTerminal } from './pages/setup/RepairTerminal';
 import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
@@ -37,15 +38,24 @@ import { Breadcrumb } from './navigation/Breadcrumb';
 import { NavigationContext } from './navigation/NavigationContext';
 import type { NavigationValue } from './navigation/NavigationContext';
 import { ServerStatus } from './navigation/ServerStatus';
+import { ConnectionLostLayer } from './navigation/ConnectionLostLayer';
+import { announceReconnection } from './services/reconnection';
 import { serverState } from './navigation/serverState';
 import { TileScreen } from './navigation/TileScreen';
 import { TopBar } from './navigation/TopBar';
 import { UserMenu } from './navigation/UserMenu';
-import { barHighlight, canOpen, resolveHome } from './navigation/sections';
+import { barHighlight, canOpen, resolveHome, sectionByID } from './navigation/sections';
 import type { ScreenID } from './navigation/sections';
+import { installationError, readInstallation } from './services/installation';
+import type { InstallationState } from './services/installation';
+import { ModalityChoicePage } from './pages/setup/ModalityChoicePage';
+import { FindServerPage } from './pages/setup/FindServerPage';
+import { ServerOnlyAccess, ServerOnlyBar, ServerOnlyPage } from './pages/server/ServerOnlyPage';
+import { BackupAlertBanner } from './pages/maintenance/BackupAlert';
 import { dismissNotice, notifyError, notifySuccess, notifyWarning } from './services/notify';
 import { savePreferences } from './services/preferences';
 import { setPrecheckName } from './services/documentNames';
+import { compatibilityNotices } from './services/compatibility';
 import { registerPrinterSetup } from './services/printProblems';
 import { requestPaymentPolicies } from './pages/payments/policiesRequest';
 
@@ -56,9 +66,67 @@ export function App() {
   // el operation_id de un cobro o una operación de cocina sin resultado confirmado.
   return (
     <PendingOperationsProvider>
-      <ApplicationContent />
+      <InstallationGate />
       <AppToaster />
     </PendingOperationsProvider>
+  );
+}
+
+// Etapa 9G (§2.3): antes de conectarse se resuelve la modalidad de esta computadora. Sin elegirla (primer
+// arranque en macOS) se pregunta; «Solo terminal» sin servidor pasa a «Buscar el servidor» (las fases B
+// y C agregan ahí la búsqueda y el emparejamiento); con servidor se conecta al de esta computadora y
+// «Solo servidor» muestra la pantalla de estado en lugar de la interfaz de venta.
+function InstallationGate() {
+  const [state, setState] = useState<InstallationState | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let active = true;
+    readInstallation()
+      .then((value) => {
+        if (active) {
+          setState(value);
+        }
+      })
+      .catch((problem: unknown) => {
+        if (active) {
+          setError(installationError(problem));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  if (error) {
+    return (
+      <AccessShell overlay={null}>
+        <AccessFrame
+          title="Revisa la instalación"
+          description="No se pudo leer cómo se usa esta computadora."
+        >
+          <Notice>{error}</Notice>
+        </AccessFrame>
+      </AccessShell>
+    );
+  }
+  if (!state) {
+    return null;
+  }
+  if (!state.chosen) {
+    return (
+      <AccessShell overlay={null}>
+        <ModalityChoicePage state={state} />
+      </AccessShell>
+    );
+  }
+  if (state.mode === 'terminal-only' && !state.server_configured) {
+    return (
+      <AccessShell overlay={null}>
+        <FindServerPage state={state} />
+      </AccessShell>
+    );
+  }
+  return (
+    <ApplicationContent serverOnly={state.mode === 'server-only'} paired={state.paired ?? false} />
   );
 }
 
@@ -79,10 +147,17 @@ function isOperation(screen: ScreenID) {
   return screen === 'restaurant' || screen === 'takeaway';
 }
 
-function ApplicationContent() {
+// paired (etapa 9G, fase B): terminal emparejada con la computadora principal; si pierde su autorización
+// o el servidor cambia de identidad, se ofrece emparejarla de nuevo.
+function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paired: boolean }) {
   const session = useSession();
-  // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal.
-  const [screen, setScreen] = useState<ScreenID>('restaurant');
+  const repairTerminal = useRepairTerminal();
+  // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal (en «Solo servidor»,
+  // el estado del servidor).
+  const [screen, setScreen] = useState<ScreenID>(serverOnly ? 'server-status' : 'restaurant');
+  // «Solo servidor» (etapa 9G): antes de iniciar sesión se ve el estado del servidor; el acceso aparece
+  // al pedir «Entrar a Administración».
+  const [serverLogin, setServerLogin] = useState(false);
   // Cada elección de Mesas o Para llevar en la barra vuelve a la vista de esa sección.
   const [operationRequest, setOperationRequest] = useState(0);
   // Vista operativa visible y captura abierta (las informa OperationalPage).
@@ -102,11 +177,13 @@ function ApplicationContent() {
   const operationMode = isOperation(screen);
   const can = (permission: string) => identity?.user.permissions.includes(permission) ?? false;
   const authenticated = session.phase === 'authenticated';
-  const home = resolveHome(identity?.terminal.home_screen, permissions);
+  const home = serverOnly
+    ? 'server-status'
+    : resolveHome(identity?.terminal.home_screen, permissions);
   // Atajo «Caja» de la barra superior (etapa 9C): el gancho y la hoja de la 7.1 suben aquí para
   // que el botón Caja muestre el turno en todas las pantallas con una sola consulta.
   const cashShortcut = useCashShortcut({
-    active: authenticated && !!identity,
+    active: authenticated && !!identity && !serverOnly,
     can,
     onOpenCash: () => void requestScreen('cash'),
   });
@@ -117,12 +194,13 @@ function ApplicationContent() {
         disabled: option.disabled,
       }))
     : [];
-  // Menú nativo, atajos y paleta (etapa 9C, fase C): ejecutan las mismas funciones de los botones.
+  // Menú nativo, atajos y paleta (etapa 9C, fase C): ejecutan las mismas funciones de los botones. En
+  // «Solo servidor» no hay interfaz de venta: los atajos de las secciones y la paleta no se ofrecen.
   const commands = useCommandCenter({
-    authenticated: authenticated && !!identity,
+    authenticated: authenticated && !!identity && !serverOnly,
     permissions,
-    screen: authenticated && identity ? screen : null,
-    operation: can('accounts.read') ? operationCommands : null,
+    screen: authenticated && identity && !serverOnly ? screen : null,
+    operation: can('accounts.read') && !serverOnly ? operationCommands : null,
     operationHandlers,
     cashOptions,
     requestScreen,
@@ -187,6 +265,26 @@ function ApplicationContent() {
     );
   }, [authenticated, connectionError]);
 
+  // Etapa 9G (fase C, §4.2 y D11): sin conexión con una sesión abierta, la capa «Sin conexión con el servidor»
+  // bloquea las operaciones (el contenido queda inerte, montado y con lo capturado) y, al volver la conexión,
+  // todas las pantallas a la vista vuelven a consultar el estado vigente (no se depende de los eventos que se
+  // perdieron mientras tanto).
+  const connectionLost = authenticated && !!identity && connectionError !== '';
+  const wasConnectionLost = useRef(false);
+  useEffect(() => {
+    if (wasConnectionLost.current && !connectionLost) {
+      announceReconnection();
+    }
+    wasConnectionLost.current = connectionLost;
+  }, [connectionLost]);
+  const connectionLayer = connectionLost ? (
+    <ConnectionLostLayer
+      detail={connectionError}
+      retryAt={session.retryAt}
+      onRetry={() => void session.refresh()}
+    />
+  ) : null;
+
   // Inicio por terminal (§1.5 y §4.1): al iniciar sesión se abre la pantalla de la terminal (o la
   // primera sección permitida), nunca «Estado del sistema». Si la pantalla visible deja de estar
   // permitida, se vuelve al inicio.
@@ -196,17 +294,19 @@ function ApplicationContent() {
       return;
     }
     document.documentElement.dataset.theme = identity.preferences.theme;
-    const start = resolveHome(identity.terminal.home_screen, identity.user.permissions);
+    const start = serverOnly
+      ? 'server-status'
+      : resolveHome(identity.terminal.home_screen, identity.user.permissions);
     if (initializedUser.current !== identity.user.id) {
       initializedUser.current = identity.user.id;
       setScreen(start);
       setOperationRequest((current) => current + 1);
       return;
     }
-    if (!canOpen(screen, identity.user.permissions)) {
+    if (!canOpen(screen, identity.user.permissions) || (serverOnly && isOperation(screen))) {
       setScreen(start);
     }
-  }, [identity, screen]);
+  }, [identity, screen, serverOnly]);
 
   // Navegación pedida por la persona: si una pantalla tiene cambios sin guardar (editor de
   // plantillas, etapa 9B), se confirma antes de salir de ella.
@@ -229,6 +329,10 @@ function ApplicationContent() {
   // y los atajos. Sin cambios pendientes la navegación es inmediata; con ellos espera la
   // confirmación. Devuelve si se navegó (las acciones que siguen en la pantalla nueva lo esperan).
   async function requestScreen(next: ScreenID): Promise<boolean> {
+    // «Solo servidor» no abre la interfaz de venta (Mesas, Para llevar, Cocina ni Caja).
+    if (serverOnly && sectionByID(next).group === 'operation') {
+      return false;
+    }
     const go = () => {
       setScreen(next);
       if (isOperation(next)) {
@@ -252,6 +356,7 @@ function ApplicationContent() {
     }
     try {
       await session.logout();
+      setServerLogin(false);
     } catch (error) {
       notifyError(error, 'No se pudo cerrar la sesión.');
     }
@@ -314,6 +419,38 @@ function ApplicationContent() {
           }
         >
           <Notice>{session.connectionError}</Notice>
+          <Notice>{repairTerminal.error}</Notice>
+          <div className="button-row">
+            <button className="primary-button" onClick={() => void session.refresh()}>
+              Volver a comprobar
+            </button>
+            <button className="secondary-button" onClick={() => setTechnical(true)}>
+              Ver estado del sistema
+            </button>
+            {/* Etapa 9G: una terminal emparejada cuyo servidor cambió de identidad (o desapareció)
+                puede volver a emparejarse; nunca se acepta otro certificado en silencio. */}
+            {paired && session.phase === 'offline' && (
+              <button
+                className="secondary-button"
+                disabled={repairTerminal.busy}
+                onClick={() => void repairTerminal.repair()}
+              >
+                Emparejar de nuevo
+              </button>
+            )}
+          </div>
+          {repairTerminal.dialog}
+        </AccessFrame>
+      </AccessShell>
+    );
+  }
+  // Etapa 9G (§5.1): la aplicación o el servidor son demasiado viejos para trabajar juntos.
+  if (session.phase === 'update-terminal' || session.phase === 'update-server') {
+    const notice =
+      compatibilityNotices[session.phase === 'update-terminal' ? 'terminal' : 'server'];
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <AccessFrame title={notice.title} description={notice.description}>
           <div className="button-row">
             <button className="primary-button" onClick={() => void session.refresh()}>
               Volver a comprobar
@@ -336,6 +473,14 @@ function ApplicationContent() {
       </AccessShell>
     );
   }
+  // Etapa 9G: una terminal emparejada sin autorización (revocada) se empareja de nuevo con código.
+  if (session.phase === 'enroll' && (paired || session.local?.paired)) {
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <RepairTerminalPage message={session.message} />
+      </AccessShell>
+    );
+  }
   if (session.phase === 'enroll') {
     return (
       <AccessShell overlay={commands.overlay}>
@@ -344,6 +489,13 @@ function ApplicationContent() {
           refresh={session.refresh}
           localAvailable={session.local?.local_enrollment_available}
         />
+      </AccessShell>
+    );
+  }
+  if (serverOnly && session.phase === 'login' && !serverLogin) {
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <ServerOnlyAccess onLogin={() => setServerLogin(true)} />
       </AccessShell>
     );
   }
@@ -375,12 +527,8 @@ function ApplicationContent() {
         );
       case 'kitchen':
         return (
-          <KitchenPage
-            can={can}
-            timezone={identity.establishment.timezone}
-            connectionLost={server === 'offline'}
-            onRetryConnection={() => void session.refresh()}
-          />
+          // Sin conexión, la capa «Sin conexión con el servidor» ofrece «Reintentar» (etapa 9G, fase C).
+          <KitchenPage can={can} timezone={identity.establishment.timezone} />
         );
       case 'catalog':
         return <CatalogPage can={can} />;
@@ -475,6 +623,45 @@ function ApplicationContent() {
   );
   const navigation: NavigationValue = { screen, home, requestScreen, setTail };
 
+  // «Solo servidor» (etapa 9G, §2.3): barra reducida, pantalla de estado y, para quien la puede abrir,
+  // Administración; nunca la interfaz de venta.
+  if (serverOnly) {
+    return (
+      <NavigationContext.Provider value={navigation}>
+        <div className="app-shell min-h-screen server-only-shell">
+          <ServerOnlyBar
+            screen={screen}
+            canAdminister={canOpen('administration', identity.user.permissions)}
+            server={server}
+            userMenu={userMenu(false)}
+            onNavigate={(next) => void requestScreen(next)}
+          />
+          <main className="admin-main" inert={connectionLost}>
+            <Breadcrumb
+              screen={screen}
+              tail={tail?.screen === screen ? tail.label : null}
+              onNavigate={requestScreen}
+            />
+            {screen === 'server-status' ? (
+              <ServerOnlyPage
+                canManage={can('settings.manage')}
+                canAdminister={canOpen('administration', identity.user.permissions)}
+                onAdministration={() => void requestScreen('administration')}
+                onMaintenance={() => void requestScreen('maintenance')}
+              />
+            ) : (
+              content()
+            )}
+          </main>
+          <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
+          {commands.overlay}
+          {leaveDialog}
+          {connectionLayer}
+        </div>
+      </NavigationContext.Provider>
+    );
+  }
+
   return (
     <NavigationContext.Provider value={navigation}>
       <div
@@ -494,7 +681,7 @@ function ApplicationContent() {
             userMenu={userMenu(false)}
           />
         )}
-        <main className="admin-main">
+        <main className="admin-main" inert={connectionLost}>
           {/* La recomendación no ocupa espacio de la captura (§1.2): reaparece al salir de ella. */}
           {identity.user.initial_password && !reducedBar && (
             <div className="password-warning" role="status">
@@ -506,6 +693,11 @@ function ApplicationContent() {
                 Cambiar contraseña
               </button>
             </div>
+          )}
+          {/* Etapa 9G (fase F): aviso persistente de respaldos en la pantalla de inicio, para quien
+              administra la configuración, hasta que haya un respaldo correcto posterior. */}
+          {can('settings.manage') && screen === home && !reducedBar && (
+            <BackupAlertBanner onOpen={() => void requestScreen('maintenance')} />
           )}
           <Breadcrumb
             screen={screen}
@@ -536,8 +728,6 @@ function ApplicationContent() {
                     {userMenu(true)}
                   </>
                 }
-                connectionLost={server === 'offline'}
-                onRetryConnection={() => void session.refresh()}
               />
             </div>
           )}
@@ -550,6 +740,7 @@ function ApplicationContent() {
         <VirtualKeyboard mode={identity.terminal.keyboard_mode} />
         {commands.overlay}
         {leaveDialog}
+        {connectionLayer}
       </div>
     </NavigationContext.Provider>
   );

@@ -37,7 +37,8 @@ func TestSignaturesMatchTheirTestFiles(t *testing.T) {
 	}
 	for _, printer := range TestPrinters {
 		agent := printer.Transport == "agent" && printer.Destination == acceptanceDestination
-		missingQueue := printer.Transport == "cups" && printer.Destination == acceptanceQueue
+		// Etapa 9G (fase E): la impresora de una terminal de prueba usa la cola que no existe en ninguna computadora.
+		missingQueue := (printer.Transport == "cups" || printer.Transport == "agent") && printer.Destination == acceptanceQueue
 		if !agent && !missingQueue {
 			t.Errorf("la impresora %q no es un destino de aceptación", printer.Name)
 		}

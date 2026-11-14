@@ -39,32 +39,9 @@ func (handler *service) confirm(id string) (any, error) {
 	if err := handler.touch(id, input.Revision); err != nil {
 		return nil, err
 	}
-	orderID, err := handler.insertOrder(id, "confirmation", preview.Quote, snapshot)
+	orderID, confirmed, err := handler.confirmLines(id, items, preview.Quote, snapshot)
 	if err != nil {
 		return nil, err
-	}
-	confirmed := []map[string]any{}
-	for index, item := range items {
-		// Cada versión confirmada copia su tasa efectiva (la del producto o la general vigente); un
-		// cambio posterior de cualquiera de las dos no la altera.
-		taxRate, err := handler.effectiveTaxRate(item.ProductID)
-		if err != nil {
-			return nil, err
-		}
-		itemID, versionID := newID(), newID()
-		_, err = handler.tx.Exec(handler.ctx, "INSERT INTO app.restaurant_items(id,original_order_id,product_id) VALUES ($1,$2,$3)", itemID, orderID, item.ProductID)
-		if err != nil {
-			return nil, err
-		}
-		line := preview.Quote.Lines[index]
-		if err := handler.insertVersion(versionID, itemID, orderID, 1, item.LineRequest, line, taxRate); err != nil {
-			return nil, err
-		}
-		units, err := handler.insertUnits(id, itemID, versionID, line, 1)
-		if err != nil {
-			return nil, err
-		}
-		confirmed = append(confirmed, map[string]any{"item_id": itemID, "version_id": versionID, "unit_ids": units, "request": item.LineRequest, "quote_line": line})
 	}
 	if _, err := handler.tx.Exec(handler.ctx, "DELETE FROM app.restaurant_draft_items WHERE account_id=$1", id); err != nil {
 		return nil, err
@@ -75,6 +52,40 @@ func (handler *service) confirm(id string) (any, error) {
 		return nil, err
 	}
 	return handler.readBill(id)
+}
+
+// confirmLines registra el lote confirmado: el pedido con su snapshot, y por partida su versión con la tasa de IVA
+// efectiva y sus unidades. Lo comparten la confirmación del borrador y el pedido capturado sin conexión (etapa 9G),
+// que confirma sus propias partidas sin tocar el borrador de la cuenta.
+func (handler *service) confirmLines(accountID string, items []DraftItem, quote *catalog.Quote, snapshot catalog.Snapshot) (string, []map[string]any, error) {
+	orderID, err := handler.insertOrder(accountID, "confirmation", quote, snapshot)
+	if err != nil {
+		return "", nil, err
+	}
+	confirmed := []map[string]any{}
+	for index, item := range items {
+		// Cada versión confirmada copia su tasa efectiva (la del producto o la general vigente); un
+		// cambio posterior de cualquiera de las dos no la altera.
+		taxRate, err := handler.effectiveTaxRate(item.ProductID)
+		if err != nil {
+			return "", nil, err
+		}
+		itemID, versionID := newID(), newID()
+		_, err = handler.tx.Exec(handler.ctx, "INSERT INTO app.restaurant_items(id,original_order_id,product_id) VALUES ($1,$2,$3)", itemID, orderID, item.ProductID)
+		if err != nil {
+			return "", nil, err
+		}
+		line := quote.Lines[index]
+		if err := handler.insertVersion(versionID, itemID, orderID, 1, item.LineRequest, line, taxRate); err != nil {
+			return "", nil, err
+		}
+		units, err := handler.insertUnits(accountID, itemID, versionID, line, 1)
+		if err != nil {
+			return "", nil, err
+		}
+		confirmed = append(confirmed, map[string]any{"item_id": itemID, "version_id": versionID, "unit_ids": units, "request": item.LineRequest, "quote_line": line})
+	}
+	return orderID, confirmed, nil
 }
 
 func quoteChanged() error {

@@ -50,6 +50,12 @@ type Config struct {
 	// BackupDirectory es la carpeta opcional de esos respaldos. Sin valor: «backups» junto a la carpeta
 	// de la configuración (.local/server.json → backups/, como scripts/database.py backup).
 	BackupDirectory string `json:"backup_directory,omitempty"`
+	// NetworkListenAddress (etapa 9G, fase B; decisión D1) abre, además de listen_address, la escucha HTTPS
+	// de la red local para las terminales emparejadas: «:8443» (todas las interfaces), o una IP de loopback
+	// o privada con su puerto. Usa el certificado propio del servidor (carpeta identity junto a esta
+	// configuración) y solo acepta orígenes de la red local. Sin valor (omitempty) no hay escucha de red y
+	// los archivos existentes no cambian. El servicio de macOS la abre por su cuenta (host, puerto 8443).
+	NetworkListenAddress string `json:"network_listen_address,omitempty"`
 }
 
 func Load(filename string) (Config, error) {
@@ -98,6 +104,9 @@ func (c Config) Validate() error {
 	if err := c.checkTestMode(); err != nil {
 		return err
 	}
+	if err := CheckNetworkAddress(c.NetworkListenAddress, c.ListenAddress); err != nil {
+		return err
+	}
 	relativeBin := c.PostgresBin != "" && !filepath.IsAbs(c.PostgresBin)
 	relativeBackups := c.BackupDirectory != "" && !filepath.IsAbs(c.BackupDirectory)
 	if relativeBin || relativeBackups {
@@ -137,6 +146,36 @@ func (c Config) Validate() error {
 	localDB := dbIP != nil && dbIP.IsLoopback()
 	if db.SSLMode != "verify-full" && !(db.SSLMode == "disable" && localDB && c.Environment == "development") {
 		return errors.New("PostgreSQL requiere verify-full; disable solo se permite en loopback de desarrollo")
+	}
+	return nil
+}
+
+// CheckNetworkAddress valida la escucha HTTPS de la red local (etapa 9G, D1): vacía (sin escucha), o
+// puerto válido con todas las interfaces («:8443», «0.0.0.0:8443», «[::]:8443») o una IP de loopback o
+// privada. Nunca una IP pública, un nombre ni el mismo puerto de la escucha local.
+func CheckNetworkAddress(address, localAddress string) error {
+	if address == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return errors.New("network_listen_address debe contener IP:puerto o :puerto")
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil || number < 0 || number > 65535 {
+		return errors.New("network_listen_address requiere un puerto válido")
+	}
+	if host != "" {
+		ip := net.ParseIP(host)
+		if ip == nil || !(ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate()) {
+			return errors.New("network_listen_address solo admite todas las interfaces, loopback o una IP privada")
+		}
+	}
+	if number != 0 && address == localAddress {
+		return errors.New("network_listen_address debe ser distinta de listen_address")
+	}
+	if _, localPort, err := net.SplitHostPort(localAddress); err == nil && number != 0 && localPort == port && (host == "" || net.ParseIP(host).IsUnspecified()) {
+		return errors.New("network_listen_address no puede usar el puerto de listen_address en todas las interfaces")
 	}
 	return nil
 }

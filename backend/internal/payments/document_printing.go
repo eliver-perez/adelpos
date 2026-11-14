@@ -79,16 +79,32 @@ func printedPrecheckTitle(key string) string {
 }
 
 // receiptPrinter devuelve la impresora de tickets de Cobros y, si no puede imprimir, el motivo: missing (sin
-// configurar), inactive (desactivada) o unsupported (de otra terminal).
+// configurar), inactive (desactivada) o unsupported (de otra terminal sin terminal elegida).
+//
+// Etapa 9G (fase E, decisión D10): cada caja puede tener su propia impresora de tickets (por ejemplo, la USB de la
+// Caja 2 por medio de su agente). Precuentas, tickets de pago, documentos de caja y sus reintentos y reimpresiones
+// salen en la impresora de la caja de la terminal que los pide; si esa caja no tiene una propia (o la terminal no
+// tiene caja), en la impresora de tickets general, como hasta ahora.
 func (handler *service) receiptPrinter() (*kitchen.Printer, string, error) {
-	settings, err := handler.settings()
-	if err != nil {
+	var registerPrinter *string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT rp.printer_id::text FROM app.devices d
+        JOIN app.register_receipt_printers rp ON rp.register_id=d.register_id WHERE d.id=$1`,
+		handler.request.Actor.DeviceID).Scan(&registerPrinter)
+	if err != nil && !isNoRows(err) {
 		return nil, "", err
 	}
-	if settings.ReceiptPrinterID == nil {
+	printerID := registerPrinter
+	if printerID == nil {
+		settings, err := handler.settings()
+		if err != nil {
+			return nil, "", err
+		}
+		printerID = settings.ReceiptPrinterID
+	}
+	if printerID == nil {
 		return nil, printerMissing, nil
 	}
-	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *settings.ReceiptPrinterID)
+	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *printerID)
 	if err != nil {
 		return nil, "", err
 	}

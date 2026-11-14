@@ -15,3 +15,12 @@ func requirePrivateKey(t *testing.T, filename string) {
 		t.Fatal("La clave privada no tiene permisos privados")
 	}
 }
+
+// requirePrivateFolder comprueba los permisos 0700 de la carpeta de la identidad (etapa 9G).
+func requirePrivateFolder(t *testing.T, directory string) {
+	t.Helper()
+	info, err := os.Stat(directory)
+	if err != nil || info.Mode().Perm() != 0700 {
+		t.Fatal("La carpeta de la identidad no es privada")
+	}
+}

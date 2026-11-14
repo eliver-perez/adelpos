@@ -44,7 +44,12 @@ function documentSubject(document: DocumentRecord) {
 // Qué pasó con la impresión de un documento, en palabras del restaurante (etapa 9F, §4.2): la impresora
 // de caja es la que imprime precuentas y tickets.
 function problemText(document: DocumentRecord) {
-  return printProblemMessage(document.job_problem, document.printer_name, 'cash');
+  return printProblemMessage(
+    document.job_problem,
+    document.printer_name,
+    'cash',
+    document.terminal_name,
+  );
 }
 
 // Tickets y precuentas de la cuenta con el estado de su último trabajo de impresión. Reimprimir
@@ -203,7 +208,10 @@ export function DocumentList({
       <ol className="payment-history">
         {documents.map((document) => {
           const state = document.job_state ?? '';
-          const attention = printAttentionStates.includes(state);
+          // Etapa 9G (fase E): un documento que espera a la impresora de una terminal desconectada también lo
+          // dice («La Caja 2 está desconectada»), aunque siga pendiente.
+          const attention =
+            printAttentionStates.includes(state) || document.job_problem === 'agent_offline';
           const label = documentKindLabels[document.kind] ?? 'Documento';
           return (
             <li

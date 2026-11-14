@@ -1,0 +1,18 @@
+#!/bin/bash
+# Opción «Servidor del restaurante» (marcada por omisión): la computadora será servidor. Crea la carpeta de
+# datos de la cuenta que instala (0700), guarda la modalidad «Servidor y terminal» (o conserva «Solo
+# servidor» si ya estaba elegida) y crea el archivo de habilitación: launchd mantiene vivo el servidor
+# mientras exista (KeepAlive → PathState). No crea la base: la crea el propio servidor al arrancar.
+set -euo pipefail
+# shellcheck source=../common.sh
+source "$(/usr/bin/dirname "$0")/common.sh"
+
+adel_prepare_data_dir
+current="$(adel_current_mode)"
+if [ "$current" != "server-only" ]; then
+    adel_write_mode "server-terminal"
+fi
+adel_write_user_file "$ADEL_DATA_DIR/$ADEL_ENABLE_FILE" "1
+"
+adel_log "servidor del restaurante habilitado"
+exit 0

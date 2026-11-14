@@ -91,7 +91,8 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	if err != nil {
 		return nil, err
 	}
-	if parts[0] != "accounts" {
+	// El pedido capturado sin conexión (etapa 9G) publica los eventos de su cuenta, como la confirmación.
+	if parts[0] != "accounts" && parts[0] != "offline-orders" {
 		if err := events.Append(ctx, tx, "restaurant."+parts[0]+".changed", "restaurant", nil, nil); err != nil {
 			return nil, err
 		}
@@ -100,6 +101,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 }
 
 func (handler *service) authorizeRoute(parts []string) error {
+	// Etapa 9G (§5.5): el pedido capturado sin conexión guarda y confirma en una sola operación, así que exige lo
+	// mismo que capturar y confirmar; abrir la cuenta de una mesa exige además accounts.open (offline_orders.go).
+	if parts[0] == "offline-orders" {
+		return handler.request.Actor.Require("accounts.read", "orders.capture", "catalog.read", "catalog.prices.read")
+	}
 	if parts[0] != "accounts" {
 		return nil
 	}
@@ -212,6 +218,11 @@ func routePermission(method string, parts []string) string {
 			if method == "POST" {
 				return "accounts.open"
 			}
+		// Etapa 9G (§5.5): pedido capturado sin conexión por la futura aplicación Android.
+		case "offline-orders":
+			if method == "POST" {
+				return "orders.confirm"
+			}
 		}
 	}
 	// Etapa 7.1: poner fuera de servicio o habilitar una mesa desde la operación.
@@ -297,17 +308,32 @@ func withoutAuthorizationPasswords(value any) {
 }
 
 func (handler *service) replay(fingerprint string) (any, bool, error) {
-	var actorID, deviceID, previousFingerprint string
+	var actorID, deviceID, previousFingerprint, route string
 	var result json.RawMessage
-	err := handler.tx.QueryRow(handler.ctx, `SELECT actor_id,device_id,fingerprint,response
-        FROM app.restaurant_operations WHERE id=$1`, handler.operationID).Scan(&actorID, &deviceID, &previousFingerprint, &result)
+	err := handler.tx.QueryRow(handler.ctx, `SELECT actor_id,device_id,fingerprint,route,response
+        FROM app.restaurant_operations WHERE id=$1`, handler.operationID).Scan(&actorID, &deviceID, &previousFingerprint, &route, &result)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	if actorID != handler.request.Actor.UserID || deviceID != handler.request.Actor.DeviceID || previousFingerprint != fingerprint {
+	sameSender := actorID == handler.request.Actor.UserID && deviceID == handler.request.Actor.DeviceID
+	current := handler.request.Method + " " + handler.request.Route
+	if sameSender && previousFingerprint != fingerprint && route == current && current == "POST restaurant/offline-orders" {
+		// Revisión de la fase D (hallazgo 4): la clave de un pedido capturado sin conexión ya se guardó con otro
+		// contenido del mismo usuario y la misma terminal (por ejemplo, entró una repetición tardía del envío
+		// original y después llega el reenvío con la confirmación del mesero). No se repite, pero el teléfono recibe
+		// el resultado que sí entró para no volver a capturarlo con otra clave. Solo con el mismo remitente: a otro
+		// usuario u otra terminal no se le muestra el pedido de nadie.
+		return nil, false, &Error{
+			Status:  409,
+			Code:    "OFFLINE_ORDER_ALREADY_ACCEPTED",
+			Message: "Este pedido ya había entrado con otra versión del envío y no se volvió a registrar. Revisa la cuenta antes de capturarlo de nuevo.",
+			Details: map[string]any{"status": "already_accepted", "result": result},
+		}
+	}
+	if !sameSender || previousFingerprint != fingerprint {
 		return nil, false, &Error{
 			Status:  409,
 			Code:    "IDEMPOTENCY_CONFLICT",
@@ -336,6 +362,8 @@ func (handler *service) dispatch(parts []string) (any, error) {
 		return handler.accounts(parts)
 	case "cancel-reasons":
 		return handler.cancelReasons(parts)
+	case "offline-orders":
+		return handler.offlineOrder()
 	}
 	return nil, invalid("Operación no implementada.")
 }

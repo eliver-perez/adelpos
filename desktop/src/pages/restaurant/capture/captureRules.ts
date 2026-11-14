@@ -18,6 +18,10 @@ export interface CaptureProduct extends Product {
   effective_price?: string;
   price_origin?: string;
   pricing_error?: string;
+  // «Agotado» (etapa 9G): lo calcula Go con su reloj; indefinido = hasta nuevo aviso.
+  sold_out?: boolean;
+  sold_out_indefinite?: boolean;
+  sold_out_until?: string | null;
 }
 
 // Límites del borrador que Go aplica al guardar y confirmar; la interfaz los anticipa para avisar

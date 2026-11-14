@@ -1,9 +1,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+// Etapa 9G, fase F: carpeta de los respaldos con el diálogo nativo (solo en la computadora principal).
+mod backup_folder;
 mod connection;
+mod discovery;
 mod export;
+mod installation;
 mod menu;
+mod pairing;
+// Etapa 9G, fase E: agente de impresión de las impresoras USB de esta terminal.
+mod print_agent;
 mod realtime;
 mod server_host;
 mod vault;
@@ -13,8 +20,8 @@ mod window_state;
 
 use connection::{load_config, ConnectionConfig};
 use serde::Serialize;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{Manager, RunEvent, State};
 use vault::Vault;
@@ -28,6 +35,17 @@ pub struct TerminalState {
     events_generation: Arc<AtomicU64>,
     // Servidor local de la instalación de Windows (etapa 9E); siempre None en macOS.
     host: Option<server_host::ServerHost>,
+    // Modalidad de la computadora y servicio del servidor (etapa 9G, fase A; installation.rs).
+    installation: installation::Context,
+    // Etapa 9G (fase B): verificador con la huella fijada de una terminal emparejada (avisa si el servidor
+    // cambió de identidad) y el emparejamiento en curso (pairing.rs).
+    pin: Option<Arc<pairing::PinnedVerifier>>,
+    pairing: Mutex<Option<pairing::PairingSession>>,
+    // Etapa 9G (fase C): dirección vigente del servidor (cambia sola si el servidor emparejado aparece en otra
+    // dirección de la red) y los servidores de la última búsqueda (discovery.rs).
+    locator: Arc<discovery::ServerLocator>,
+    // Una sola consulta de estado del emparejamiento a la vez (pairing_status).
+    pairing_busy: AtomicBool,
 }
 
 impl TerminalState {
@@ -40,18 +58,35 @@ impl TerminalState {
     }
 
     /// Token del asistente inicial: el de ADEL_PROVISIONING_FILE (macOS y desarrollo) o, en la
-    /// instalación de Windows, el que el servidor local deja en la carpeta de datos (etapa 9E).
+    /// instalación de Windows, el que el servidor local deja en la carpeta de datos (etapa 9E); desde la
+    /// 9G también el del servicio de macOS (installation.rs).
     pub fn provisioning_token(&self) -> Option<String> {
-        self.provisioning_token.clone().or_else(|| {
-            self.host
-                .as_ref()
-                .and_then(|host| host.provisioning_token())
-        })
+        self.provisioning_token
+            .clone()
+            .or_else(|| {
+                self.host
+                    .as_ref()
+                    .and_then(|host| host.provisioning_token())
+            })
+            .or_else(|| {
+                self.config
+                    .as_ref()
+                    .ok()
+                    .and_then(|config| self.installation.provisioning_token(config))
+            })
     }
 
     /// Explicación de una petición sin respuesta: la general o, mientras el servidor local de Windows
     /// arranca, que el equipo se está preparando.
     pub fn connection_error(&self) -> String {
+        // Etapa 9G: el servidor emparejado presentó otro certificado; nunca se acepta.
+        if pairing::identity_changed(&self.pin) {
+            return pairing::IDENTITY_CHANGED_MESSAGE.to_string();
+        }
+        // Etapa 9G (fase C): la terminal emparejada no encontró su servidor ni en la última dirección ni en la red.
+        if self.locator.paired_server().is_some() {
+            return pairing::SERVER_NOT_FOUND_MESSAGE.to_string();
+        }
         self.host
             .as_ref()
             .and_then(|host| host.connection_message())
@@ -71,6 +106,9 @@ const STORAGE_PENDING_MESSAGE: &str =
     "Esperando autorización del almacén seguro del sistema. Revisa el aviso de Windows.";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const STORAGE_PENDING_MESSAGE: &str = "Esperando autorización del almacén seguro del sistema.";
+
+/// Una terminal «Solo terminal» que todavía no se conecta a ningún servidor (etapa 9G).
+const AWAITING_SERVER_MESSAGE: &str = "Esta terminal todavía no está conectada a un servidor.";
 
 #[derive(Serialize)]
 pub struct HTTPResult {
@@ -133,9 +171,11 @@ async fn get(client: &reqwest::Client, base: &str, route: &str) -> Option<HTTPRe
 
 #[tauri::command]
 async fn server_snapshot(state: State<'_, TerminalState>) -> Result<Snapshot, String> {
-    let config = state.config.as_ref().map_err(Clone::clone)?;
+    state.config.as_ref().map_err(Clone::clone)?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
-    let live = get(client, &config.server_url, "health/live").await;
+    // Etapa 9G (fase C): la dirección vigente (la de connection.json o la nueva si el servidor cambió de IP).
+    let base = state.locator.base();
+    let live = get(client, &base, "health/live").await;
     if live.is_none() {
         return Ok(Snapshot {
             live,
@@ -143,8 +183,8 @@ async fn server_snapshot(state: State<'_, TerminalState>) -> Result<Snapshot, St
             version: None,
         });
     }
-    let ready = get(client, &config.server_url, "health/ready").await;
-    let version = get(client, &config.server_url, "version").await;
+    let ready = get(client, &base, "health/ready").await;
+    let version = get(client, &base, "version").await;
     Ok(Snapshot {
         live,
         ready,
@@ -152,7 +192,22 @@ async fn server_snapshot(state: State<'_, TerminalState>) -> Result<Snapshot, St
     })
 }
 
-fn client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
+/// Cliente HTTP de la terminal: con un servidor emparejado, TLS con la huella fijada (etapa 9G, pairing.rs);
+/// si no, el de siempre (loopback o una CA local configurada).
+fn client(
+    config: &ConnectionConfig,
+) -> Result<(reqwest::Client, Option<Arc<pairing::PinnedVerifier>>), String> {
+    if let Some(fingerprint) = config.server_fingerprint.as_deref() {
+        let pinned = pairing::fingerprint_from_hex(fingerprint)
+            .ok_or("La conexión con el servidor emparejado no es válida.")?;
+        let verifier = Arc::new(pairing::PinnedVerifier::pinned(pinned));
+        let client = pairing::pinned_client(Arc::clone(&verifier))?;
+        return Ok((client, Some(verifier)));
+    }
+    unpinned_client(config).map(|client| (client, None))
+}
+
+fn unpinned_client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(12))
         .redirect(reqwest::redirect::Policy::none())
@@ -192,7 +247,14 @@ fn main() {
     with_native_menu(builder)
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
-            let client = config.as_ref().map_err(Clone::clone).and_then(client);
+            let installation = installation::Context::detect(app.path().app_config_dir().ok());
+            let locator = Arc::new(discovery::ServerLocator::new(
+                &config,
+                installation.connection_file.clone(),
+            ));
+            let prepared = config.as_ref().map_err(Clone::clone).and_then(client);
+            let pin = prepared.as_ref().ok().and_then(|(_, pin)| pin.clone());
+            let client = prepared.map(|(client, _)| client);
             let vault = Arc::new(OnceLock::new());
             let pending_vault = Arc::clone(&vault);
             let vault_config = config.clone();
@@ -202,7 +264,14 @@ fn main() {
                 let opened = vault_config
                     .as_ref()
                     .map_err(Clone::clone)
-                    .and_then(|value| Vault::open(&value.server_url, &value.credential_namespace));
+                    .and_then(|value| {
+                        // Etapa 9G: una terminal «Solo terminal» sin servidor todavía no tiene credencial.
+                        if value.awaiting_server() {
+                            return Err(AWAITING_SERVER_MESSAGE.to_string());
+                        }
+                        // Etapa 9G: la llave de un servidor emparejado es su identificador.
+                        Vault::open(&value.credential_server(), &value.credential_namespace)
+                    });
                 let _ = pending_vault.set(opened);
             });
             let provisioning_token = std::env::var_os("ADEL_PROVISIONING_FILE")
@@ -223,8 +292,15 @@ fn main() {
                 enrollment_code,
                 events_generation: Arc::new(AtomicU64::new(0)),
                 host,
+                installation,
+                pin,
+                pairing: Mutex::new(None),
+                locator,
+                pairing_busy: AtomicBool::new(false),
             });
             window_check::start(app.handle().clone());
+            // Etapa 9G (fase E, D13): mientras la aplicación está abierta, imprime los trabajos de sus impresoras USB.
+            print_agent::start(app.handle().clone());
             // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
             #[cfg(target_os = "windows")]
             window_state::start(app.handle());
@@ -242,6 +318,17 @@ fn main() {
             export::export_report,
             menu::menu_subscribe,
             menu::menu_set_state,
+            installation::installation_state,
+            installation::set_installation_mode,
+            installation::restart_application,
+            pairing::pairing_start,
+            pairing::pairing_status,
+            pairing::pairing_rename,
+            pairing::pairing_cancel,
+            pairing::pairing_forget,
+            backup_folder::choose_backup_directory,
+            pairing::pairing_start_found,
+            discovery::discovery_search,
         ])
         .build(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio")
@@ -256,12 +343,12 @@ fn main() {
 }
 
 #[cfg(test)]
-mod startup_tests {
+pub(crate) mod startup_tests {
     use super::*;
 
-    #[test]
-    fn pending_secure_storage_does_not_supply_empty_credentials() {
-        let state = TerminalState {
+    /// Estado de la terminal sin configuración ni almacén seguro (también para las pruebas de pairing.rs).
+    pub(crate) fn test_state() -> TerminalState {
+        TerminalState {
             config: Err("Prueba sin configuración".into()),
             client: Err("Prueba sin HTTP".into()),
             vault: Arc::new(OnceLock::new()),
@@ -269,7 +356,24 @@ mod startup_tests {
             enrollment_code: None,
             events_generation: Arc::new(AtomicU64::new(0)),
             host: None,
-        };
+            installation: installation::Context {
+                connection_file: None,
+                chosen: true,
+                service: None,
+            },
+            pin: None,
+            pairing: Mutex::new(None),
+            pairing_busy: AtomicBool::new(false),
+            locator: Arc::new(discovery::ServerLocator::new(
+                &Err("Prueba sin configuración".into()),
+                None,
+            )),
+        }
+    }
+
+    #[test]
+    fn pending_secure_storage_does_not_supply_empty_credentials() {
+        let state = test_state();
         assert!(state
             .vault()
             .err()

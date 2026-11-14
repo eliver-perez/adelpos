@@ -81,12 +81,14 @@ func TestStage9ACatalogAndPrecheckUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Foto de productos y documentos sin las columnas de la 0015 (antes no existen; después se
-	// excluyen para comparar todo lo demás).
+	// excluyen para comparar todo lo demás). Desde la etapa 9G también sin las de «Agotado» de la 0023, que
+	// comprueba stage9g_android_upgrade_test.go.
 	snapshot := func() string {
 		t.Helper()
 		var products, documents string
 		err := pool.QueryRow(ctx, `SELECT
-            (SELECT string_agg((to_jsonb(p) - 'price_can_decrease')::text,'|' ORDER BY p.id) FROM app.catalog_products p),
+            (SELECT string_agg((to_jsonb(p) - 'price_can_decrease' - 'sold_out_at' - 'sold_out_until' - 'sold_out_by')::text,'|'
+                ORDER BY p.id) FROM app.catalog_products p),
             (SELECT string_agg((to_jsonb(d) - 'account_revision' - 'adjustment_count')::text,'|' ORDER BY d.ticket_id)
                 FROM app.payment_documents d)`).Scan(&products, &documents)
 		if err != nil {

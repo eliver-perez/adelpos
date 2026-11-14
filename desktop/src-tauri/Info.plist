@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Etapa 9G, fase C: claves que Tauri 2 agrega al Info.plist de AD-EL POS.app (el empaquetador y tauri-codegen
+  combinan este archivo con el que generan). macOS 15 y posteriores piden permiso de «Red local» antes de que la
+  aplicación busque la computadora principal (mDNS, servicio _adelpos._tcp) o se conecte a ella por la red; el
+  texto es el que ve el propietario en ese aviso.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AD-EL POS busca y se conecta a la computadora principal del restaurante en la red local para tomar pedidos, cobrar y enviar las comandas a cocina.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_adelpos._tcp</string>
+	</array>
+</dict>
+</plist>

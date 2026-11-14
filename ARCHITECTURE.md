@@ -1,18 +1,20 @@
-# Arquitectura · Etapa 9F
+# Arquitectura · Etapa 9G
 
 ## Responsabilidades
 
 ```mermaid
 flowchart LR
     R[React / TypeScript] -->|Operaciones enumeradas por IPC| T[Tauri / Rust]
-    T -->|HTTP JSON v1, TLS en LAN| G[Go independiente]
+    T -->|HTTP JSON v1 en 127.0.0.1 o HTTPS con huella fijada en la red local| G[Go independiente]
     T --> K[Keychain del sistema]
+    T -->|lp / lpstat| I[Impresoras USB de la terminal]
     G -->|pgxpool| P[(PostgreSQL)]
+    L[launchd: servicio del sistema] -->|host| G
 ```
 
 Go es autoridad para configuración persistente, identidad, sesiones, permisos, terminales y auditoría. Rust conserva credenciales duraderas en el almacén seguro del sistema, valida el destino y ejecuta únicamente rutas API enumeradas. React presenta formularios, recoge credenciales transitorias de acceso y refleja las decisiones del servidor. Ningún código de escritorio accede a PostgreSQL.
 
-En macOS y en desarrollo, Tauri no inicia ni detiene Go o PostgreSQL; desde la etapa 9E, solo la instalación de Windows los lanza y los detiene con la aplicación (ver «Windows · etapa 9E»). El almacén seguro es Keychain en macOS y el Administrador de credenciales en Windows. Los modos `server-terminal`, `terminal-only` y `server-only` conservan los límites de la etapa 1. Todas las funciones usan la misma aplicación de escritorio; su disponibilidad depende de permisos.
+En macOS y en desarrollo, Tauri no inicia ni detiene Go o PostgreSQL; desde la etapa 9E, solo la instalación de Windows los lanza y los detiene con la aplicación (ver «Windows · etapa 9E»). Desde la etapa 9G, en macOS el servidor de la computadora principal es un servicio del sistema (`LaunchDaemon`) que arranca con la computadora, sin sesión, y la aplicación solo crea o quita su archivo de habilitación al cambiar la modalidad (ver «Servidor del restaurante, terminales en red y API para Android · etapa 9G»). El almacén seguro es Keychain en macOS y el Administrador de credenciales en Windows. Las modalidades `server-terminal`, `server-only` y `terminal-only` se eligen al instalar o en el primer arranque desde la 9G. Todas las funciones usan la misma aplicación de escritorio; su disponibilidad depende de permisos.
 
 ## Organización del backend
 
@@ -23,7 +25,7 @@ En macOS y en desarrollo, Tauri no inicia ni detiene Go o PostgreSQL; desde la e
 - `administration`: servicios con transacción por operación. Archivos por responsabilidad: autenticación, permisos, usuarios, roles, dispositivos, cajas, configuración, preferencias y auditoría.
 - `catalog`: documentos y relaciones del catálogo, revisión optimista, disponibilidad, imágenes y cálculo decimal puro. Recibe actor/auditoría desde administración; no importa administración ni depende del escritorio.
 - `operations`: áreas, mesas, cuentas, borradores, lotes confirmados, versiones, unidades comerciales y diario de cambios. Comparte transacción, permisos y auditoría con administración y reutiliza el motor de catálogo. Desde la etapa 9D recibe también el autorizador de supervisor (como `payments`) para «Cancelar cuenta» y administra el catálogo de motivos de cancelación.
-- `localsetup`: CA y certificado TLS locales; no modifica la confianza global del sistema.
+- `localsetup`: CA y certificado TLS locales; no modifica la confianza global del sistema. Desde la etapa 9G, la identidad propia del servidor (`identity.go`: `server_id`, certificado ECDSA P-256 autofirmado y su llave, creada de forma atómica y nunca reemplazada sola).
 - `licensing`: único límite de integración comercial. Desarrollo permitido, producción bloqueada hasta integrar el proveedor.
 - `kitchen`: rutas de preparación, liberaciones canónicas, tareas por estación, documentos históricos y cola de impresión. Dos trabajadores y un planificador Go independientes de Tauri.
 - `events`: outbox transaccional, secuencia durable, cursor/replay y ámbitos. Administración sirve SSE autenticado; Rust transmite invalidaciones a React mediante Channel.
@@ -36,6 +38,11 @@ En macOS y en desarrollo, Tauri no inicia ni detiene Go o PostgreSQL; desde la e
 - `identity` (etapa 9B): rutas `documents/identity*`, identidad documental combinada con `app.establishment`, logotipo con sus conversiones guardadas, fuente de bits para el trabajador de impresión y fuente del logotipo de los reportes (un `SELECT` en la transacción de solo lectura del reporte).
 - `logoraster` y `brand` (etapa 9B): puros; validación y conversión monocromática del logotipo y bytes `GS v 0`, y copia embebida de la marca de AD-EL POS para los reportes.
 - `maintenance` (etapa 9F): «Quitar datos de prueba». Firmas exactas de lo que crean las pruebas (lista cerrada, cada una con su archivo de prueba), plan de qué se elimina, desactiva, desvincula o conserva con los registros relacionados leídos de las llaves foráneas de PostgreSQL, aplicación en una transacción y respaldo previo con `pg_dump` (en el `host` de Windows, el de `standalone`). Lo llama `administration` (`maintenance.go`), que autoriza, respalda y aplica.
+- `lanlistener` (etapa 9G): escucha HTTPS de la red local con filtro de orígenes (loopback o privados, de enlace local o ULA dentro de la subred de una interfaz local que no sea punto a punto) y la marca `FromNetwork` en el contexto de cada petición.
+- `discovery` (etapa 9G): anuncio `_adelpos._tcp` con el respondedor mDNS del sistema (`dns-sd -R` en macOS; Windows en la Fase W), solo con la escucha de red y nunca en modo de pruebas.
+- `backupschedule` (etapa 9G): respaldos programados (programación, archivos, retención de lo registrado, ejecuciones, aviso y trabajador) sobre `maintenance.ScheduledBackuper`; lo llama `administration` (`backups.go`).
+- `apicontract` e `idempotency` (etapa 9G): contrato OpenAPI 3.1 de la API para clientes con su validador y su prueba de contrato, y la idempotencia sobre `restaurant_operations` para módulos sin una propia (como «Agotado»).
+- `standalone` (etapa 9E; desde la 9G también macOS): carpeta de datos, clúster propio, bloqueo, respaldo antes de migrar, respaldos, restauración, modalidad y habilitación, y paso de una instalación anterior (`adopt-legacy`); lo usa el comando `host`.
 - `stationscope` (etapa 9F): paquete neutral con la regla única de las estaciones que se ven en Cocina (estaciones de la terminal ∩ estaciones del usuario; con `kitchen.stations.all`, todas las del usuario). Lo usan `kitchen` (tablero, estados, acuses y comandas), `events` (`events.Read` recibe un `*stationscope.Scope`) y `administration` (SSE y estaciones por usuario).
 
 Las escrituras y sus eventos de auditoría se confirman en la misma transacción. Los fallos de autenticación y denegaciones relevantes se auditan deliberadamente aunque no se autorice la operación. Cada operación autenticada se ejecuta dentro de un savepoint (`administration.runProtected`): un 403 deshace todo lo que la operación hubiera escrito, aunque la verificación de permiso ocurriera después de una escritura, y solo se confirma la auditoría `access.denied`. Así la regla "toda autorización antes de la primera escritura" no depende de convención. Los errores públicos no incluyen SQL, hashes, DSN, secretos o detalles del driver.
@@ -60,7 +67,7 @@ El asistente requiere una autorización aleatoria generada en un archivo local 0
 
 Las terminales adicionales consumen códigos aleatorios de un solo uso, válidos diez minutos, emitidos por un usuario con `devices.manage`. Existe una recuperación local explícita por CLI para el propietario; queda auditada y tampoco autentica automáticamente un usuario. Nombre/UUID de terminal no sustituyen su secreto.
 
-HTTP solo está permitido en loopback. Escucha LAN: IP privada específica, allow_lan explícito, certificado TLS y perfil de desarrollo. El cliente exige HTTPS en LAN y verifica CA y hostname. Los certificados de desarrollo no se instalan globalmente; la CA pública se distribuye por un canal local verificado. Nunca se comparte su clave privada ni la clave del servidor. No hay descubrimiento ni exposición pública a Internet.
+HTTP solo está permitido en loopback. Desde la etapa 9G (decisión D1) la red local entra solo por la escucha HTTPS de red del servicio (`:8443`, todas las interfaces, con filtro de orígenes y TLS ≥ 1.2) y las terminales no se registran con códigos de invitación sino **emparejándose**: código de 6 dígitos ligado a la huella del certificado propio del servidor y a dos números con compromiso, aprobado solo en la computadora principal; la terminal fija esa huella y nunca acepta otro certificado. El camino anterior (IP privada específica, `allow_lan`, certificado de `tls-init` con CA en la terminal y perfil de desarrollo) se conserva sin uso. El servidor se anuncia en la red local por mDNS (solo da la dirección; la confianza es la huella). Nada se expone a Internet.
 
 Rust usa reqwest sin redirecciones ni proxy automático. La URL de conexión solo procede del archivo local, no de React. El puente admite una lista cerrada de operaciones, valida identificadores y restringe parámetros de consulta. La capability solo pertenece a la ventana local principal; CSP y acceso al sistema siguen restringidos.
 
@@ -78,9 +85,9 @@ El migrador conserva números, nombres y SHA-256; advisory lock y lote transacci
 
 ## Operación y extensiones
 
-La plantilla launchd sigue sin instalarse. LaunchAgent vive durante la sesión; un servicio comercial sin login requiere diseñar LaunchDaemon con usuario/permisos propios. Go tolera indisponibilidad PostgreSQL y gestiona SIGTERM. Windows Service, instaladores y pruebas Windows siguen pendientes.
+Desde la etapa 9G el `.pkg` instala el `LaunchDaemon` `local.adel.pos.server` (plantilla `ops/launchd/local.adel.pos.server.plist`), que corre con la cuenta de quien instaló y mantiene vivo el servidor mientras existe el archivo de habilitación. Go tolera indisponibilidad PostgreSQL y gestiona SIGTERM. El servicio de Windows y el instalador para todo el equipo son la Fase W de la 9G.
 
-La etapa 4 implementa UUID e idempotencia transaccional de operaciones del restaurante y un diario durable. La etapa 5 añade publicación/replay autenticado y ámbito por estación. Android y offline durable siguen pendientes. Siguen pendientes el proveedor comercial de licencias, sus firmas/caché y límites comerciales de concurrencia.
+La etapa 4 implementa UUID e idempotencia transaccional de operaciones del restaurante y un diario durable. La etapa 5 añade publicación/replay autenticado y ámbito por estación. La etapa 9G deja lista la parte del servidor para Android (contrato v1, catálogo descargable, pedidos sin conexión con confirmación); la aplicación Android y su captura sin conexión siguen pendientes. Siguen pendientes el proveedor comercial de licencias, sus firmas/caché y límites comerciales de concurrencia.
 
 `config/product.json` sigue siendo canónico; `sync-metadata.mjs` genera metadatos respetando Prettier. Ver [CODING_CONVENTIONS.md](docs/CODING_CONVENTIONS.md). Antes de distribuir: resolver bundle ID definitivo, firma/notarización, usuario DB runtime separado del migrador, backups/restauración y actualizaciones seguras.
 
@@ -475,3 +482,71 @@ nativas ni permisos de Tauri nuevos.
 `pages/UserKitchenStations.tsx` y la barra compacta (`BrandLogo` con `assets/adel-pos-isotipo.png`, `TopBar.goHome`,
 `CashShortcut` y `ServerStatus`). Las estaciones visibles y lo que permite cada cuenta los decide Go; los colores por
 tiempo salen de reglas puras sobre los tiempos y objetivos que entrega Go.
+
+## Servidor del restaurante, terminales en red y API para Android · etapa 9G
+
+**Alcance.** Una computadora principal por restaurante con el servidor como servicio y terminales que se conectan por
+la red local, más la parte del servidor que usará la aplicación Android. Paquetes Go nuevos `lanlistener`, `discovery`,
+`backupschedule`, `apicontract` e `idempotency`; `standalone` y el comando `host` pasan también a macOS. Un permiso nuevo
+(`catalog.sold_out.manage`), un lock nuevo (7820148309) y ninguna dependencia descargada (`x/net`, `rustls` y `sha2`
+pasan a directas). Una sola migración, `0023_network_terminals_and_android.sql`, con una sección por fase (D, B, F y E).
+Avance: [ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md); decisiones en `CLAUDE.md` §15, «Etapa 9G»; guía para el
+propietario: [INSTALAR_EN_RED.md](docs/INSTALAR_EN_RED.md); contrato para clientes: [API_V1.md](docs/API_V1.md).
+
+**Servicio y modalidades.** El `.pkg` (`scripts/build-macos-pkg.sh`) instala la aplicación en `/Applications` con el
+servidor dentro, el `LaunchDaemon` y, con la opción «Servidor del restaurante», la carpeta de datos
+`/Library/Application Support/AD-EL POS` (0700) de la cuenta que instaló. launchd lanza `ad-el-pos-server host`, que no
+hace nada sin el archivo de habilitación o en «Solo terminal»; si no, toma el bloqueo de la carpeta, crea o adopta su
+clúster PostgreSQL (el de Homebrew), respalda antes de migrar, migra y sirve, y se detiene en orden (conservando los
+datos) si la habilitación o la modalidad dejan de pedir servidor. La modalidad del lado del servidor vive en
+`installation-mode.json` y la de la terminal en `connection.json`, que solo escribe Rust (`installation.rs`); cambiarla
+nunca borra la base. «Reiniciar» (Mantenimiento) audita y hace que Go salga; launchd lo relanza. `restore` pausa y
+reanuda el servicio con el archivo de habilitación y `adopt-legacy` pasa una instalación anterior con conteos idénticos.
+
+**Escuchas, identidad y emparejamiento.** `serveHTTP` abre HTTP en `127.0.0.1:8181` y, en el servicio, HTTPS en
+`:8443` (`lanlistener`), y las cierra juntas. `administration` considera local solo lo que llega por la escucha de
+loopback (`Request.Local = loopback && !FromNetwork`): el asistente, `devices/enroll`, la aprobación de
+emparejamiento y la carpeta de respaldos nunca se aceptan por la red, y por la red `X-Client-Version` es obligatoria.
+`pairing.go` implementa el protocolo (compromiso, revelación, código derivado de la huella SPKI, aprobación con 5
+intentos y 5 minutos, reclamo único con la fila bloqueada), con un tope global de 30 solicitudes cada 10 minutos, 5 por
+grupo de origen, conteos por índice y `PairingCleaner`. En la terminal, `pairing.rs` valida la dirección, fija el primer
+certificado con `PinnedVerifier` (`rustls`, compara la huella e ignora nombre e IP) y guarda la credencial en el almacén
+seguro con la cuenta `adel-server:{server_id}|{perfil}` antes de escribir `connection.json`; desde entonces todos los
+clientes de Rust usan la huella fijada. Sin identidad cargable, el servidor sigue con la escucha local.
+
+**Descubrimiento y conexión perdida.** `discovery` mantiene el anuncio mientras exista la escucha de red;
+`discovery.rs` hace una consulta mDNS de una sola vez y, en una terminal emparejada, `ServerLocator` vuelve a buscar el
+mismo `server_id` con la misma huella cuando una petición no logra conectar, prueba la dirección con la huella completa,
+la guarda y repite la petición una sola vez. En React, la capa «Sin conexión con el servidor»
+(`navigation/ConnectionLostLayer.tsx`) deja el contenido montado e inerte, reintenta con espera creciente y, al volver,
+`services/reconnection.ts` vuelve a pedir todo lo visible; la consulta completa es la garantía y el SSE reanuda con
+`after`.
+
+**API v1 para clientes.** `httpapi` comprueba `X-Client-Version`/`X-Client-Kind` (426 con una versión anterior a
+`min_client_version`) y publica `openapi.json`. `catalog` agrega «Agotado» (`soldout.go`, con su trabajador del corte),
+la descarga por versión (`sync.go`, `sync_dependents.go`: número por transacción en `catalog_change_log` llenada por
+disparadores, época que cambia al restaurar, archivados, combos y grupos afectados) y las imágenes binarias con `ETag`.
+`operations` agrega el pedido capturado sin conexión (`offline_orders.go`: valida contra el catálogo vigente, responde
+la lista de cambios y acepta solo con la confirmación del mesero y la versión vigente, siempre con precios del
+servidor) y la recuperación del estado (`restaurant/state`). `apicontract` recorre cada operación documentada contra el
+servidor real y valida cuerpos y respuestas contra el esquema.
+
+**Impresión con varias terminales.** Una impresora `agent` con `agent_device_id` es la USB de esa terminal. El agente
+(`print_agent.rs`) informa sus colas, reclama de la misma cola durable con lease los trabajos cuya fotografía es suya
+(`kitchen/agent.go`, `print-agent/*` con la credencial de la terminal y sin sesión; lock 7820148307 de transacción por
+impresora), los entrega con `lp -o raw` y confirma el resultado con las reglas de siempre; el trabajador de Go nunca
+los toma y solo deja incierto lo que quedó en proceso con la lease vencida. `agent_offline` («La Caja 2 está
+desconectada») se calcula con 30 s sin consultas del agente. `payments` elige la impresora de tickets de la caja de la
+terminal que pide el documento y, sin ella, la general.
+
+**Respaldos programados.** `backupschedule.Worker` (en `main.go`) toma el lock 7820148309 de sesión en una conexión
+propia, decide si toca respaldar según el último instante programado, crea el respaldo con
+`maintenance.ScheduledBackuper` (`DumpBackup` con `serve`, `installationBackup` en el `host`) como archivo privado
+`.partial`, lo verifica con `pg_restore --list` antes de darle su nombre, aplica la retención solo a lo registrado por
+esta instalación y calcula el aviso (`failed`, `overdue`, `fallback`) que la interfaz muestra en la pantalla de inicio.
+La carpeta elegida solo llega del diálogo nativo (`backup_folder.rs`) por una conexión local.
+
+**Puente.** Operaciones nuevas en la lista cerrada de `api.rs` (servicio, emparejamiento y terminales, respaldos,
+versión, «Agotado» e impresoras de terminal) y comandos de Tauri nuevos (`installation_state`, `set_installation_mode`,
+`restart_application`, `pairing_*`, `pairing_start_found`, `discovery_search`, `choose_backup_directory`), todos
+simulados en `native-driver.ts`. Las rutas `print-agent/*` no están en la lista de React.

@@ -3270,3 +3270,338 @@ terminal» (en Go y con un `UPDATE` en la sección «Fase C» de la 0022), porqu
 
 Operaciones nuevas `user_kitchen_stations` (`GET users/{id}/kitchen-stations`) y `save_user_kitchen_stations`
 (`PUT users/{id}/kitchen-stations`), con identificador validado. `kitchen_access` y `kitchen_save_access` no cambian.
+
+## Etapa 9G · servidor como servicio de macOS y modalidades (fase A, sin migración)
+
+### Servicio del servidor (`maintenance/service`)
+
+| Método | Ruta                           | Requisito                                                                                      |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/service`         | `settings.manage`; estado del servicio y terminales conectadas.                                |
+| POST   | `/maintenance/service/restart` | `settings.manage`; cuerpo vacío o `{}` (campos desconocidos: `400`); solo servicio habilitado. |
+
+- `GET` responde `{managed, restart_available, installation_mode, service_enabled, started_at, uptime_seconds,
+server_version, terminals: {connected, registered}, last_backup}`. `managed` indica que el servidor lo lanzó y lo
+  mantiene vivo launchd (servicio `local.adel.pos.server`, proceso padre 1); con `serve` (desarrollo y pruebas) y en
+  Windows antes de la Fase W es `false`, `installation_mode` vacío y `service_enabled` `false`. `restart_available` =
+  `managed` y archivo de habilitación presente. `installation_mode` es la modalidad del lado del servidor
+  (`installation-mode.json` de la carpeta de datos; sin archivo cuenta como `server-terminal`). `terminals` cuenta las
+  terminales no revocadas **sin la que pregunta**: `registered` todas y `connected` las que hicieron alguna petición en
+  los últimos 2 minutos (`devices.last_seen_at`). `last_backup` es el último respaldo del servidor (fase F, ver
+  «Etapa 9G · respaldos programados»; `null` si todavía no hay ninguno).
+- `POST …/restart` se autoriza y audita (`maintenance.service_restarted`, «Servidor reiniciado» en el Registro de
+  movimientos) en la transacción de autenticación; ya confirmada, programa el cierre ordenado (Go y después PostgreSQL) a
+  los 300 ms y responde `{restarting: true}`; launchd vuelve a lanzar el servidor porque el archivo de habilitación
+  sigue existiendo (`ThrottleInterval` 10 s). Sin servicio administrado o sin habilitación: `409 SERVICE_NOT_MANAGED`
+  («Este servidor no está instalado como servicio de la computadora; no se puede reiniciar desde aquí.») sin auditar.
+  No pide la contraseña de administrador del sistema. Tiempo de respuesta de `maintenance/*` (120 s).
+
+### Comandos del servidor en macOS (línea de comandos, no HTTP)
+
+| Comando                                                              | Qué hace                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host [--data-dir D] [--pg-bin B]`                                   | Servidor del servicio (lo lanza launchd). Sin archivo de habilitación o en «Solo terminal» termina con código 0 sin iniciar nada. Si no: bloqueo `flock` de la carpeta, clúster propio con marcador, respaldo antes de migrar, migración y `serve`; deja de servir si se quita la habilitación; `SIGTERM`/`SIGINT` en orden. |
+| `backup`, `restore-check [--file F]`, `restore --file F`             | Como en Windows. Con el servicio en marcha, `backup` y `restore-check` usan su PostgreSQL; `restore` pausa el servicio (quita el archivo de habilitación y espera la carpeta), crea antes un respaldo de seguridad, restaura y vuelve a habilitarlo.                                                                         |
+| `adopt-legacy --from-config F [--data-dir D]`                        | Pasa los datos de una instalación anterior (su `server.json`) a la carpeta del servicio: conteos, `pg_dump` comprobado, clúster nuevo en un puerto temporal, `pg_restore`, conteos iguales de todas las tablas y marcador `legacy-adopted.json`. Nunca modifica la anterior; se niega si el destino tiene datos.             |
+| `--pg-port P`, `--listen IP:PUERTO` (con una carpeta de datos nueva) | Solo pruebas: puerto de PostgreSQL y dirección de Go que se escriben la primera vez (la instalación usa 55432 y `127.0.0.1:8181`).                                                                                                                                                                                           |
+
+Carpeta de datos: `--data-dir`, `ADEL_DATA_DIR` o `/Library/Application Support/AD-EL POS` (de la cuenta que instaló,
+0700). PostgreSQL: `--pg-bin`, `postgres_bin` de la configuración existente, `ADEL_PG_BIN` o Homebrew. `ADEL_TEST_MODE=1`
+rechaza la carpeta real del servicio antes de abrir o crear nada.
+
+### Puente nativo
+
+- Operaciones nuevas en `desktop/src-tauri/src/api.rs`: `maintenance_service` (`GET maintenance/service`) y
+  `maintenance_service_restart` (`POST maintenance/service/restart`).
+- Comandos de Tauri nuevos (lista cerrada, simulados en `desktop/e2e/native-driver.ts`): `installation_state` →
+  `{chosen, mode, server_configured, can_change, service_installed, service_enabled, server_data_kept}`;
+  `set_installation_mode {mode}` con `mode` ∈ {`server-terminal`, `server-only`, `terminal-only`} (otro valor se
+  rechaza): escribe la modalidad y crea o quita el archivo de habilitación en la carpeta del servicio (si está
+  instalado) y después `connection.json` (con servidor, `http://127.0.0.1:8181`; «Solo terminal» sin servidor
+  emparejado, dirección vacía); `restart_application` (sin argumentos) reinicia la aplicación.
+- `connection.json` admite ahora `server-only` y, solo en `terminal-only` sin certificado, `server_url` vacío (terminal
+  sin servidor: no se abre el Keychain ni se hace ninguna petición).
+
+## Etapa 9G · API v1 para clientes y preparación para Android (fase D, esquema 23)
+
+Decisiones D8, D9 y D12 del coordinador. Contrato OpenAPI 3.1 de la API para clientes en
+[`backend/internal/apicontract/openapi.json`](backend/internal/apicontract/openapi.json) (publicado en
+`GET /api/v1/openapi.json`) y explicación completa en [docs/API_V1.md](docs/API_V1.md). Migración: sección «Fase D» de la
+0023 (columnas `catalog_products.sold_out_at`, `sold_out_until` y `sold_out_by` con CHECK con nombre, permiso
+`catalog.sold_out.manage` solo al administrador, ámbito `catalog` en `realtime_events_scope_check`, secuencia
+`catalog_version_seq`, tabla `catalog_change_log` y sus disparadores, y el comentario de conservación de
+`restaurant_operations`).
+
+| Ruta                                                                          | Contrato                                                                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET version`                                                                 | Agrega `min_client_version`, `client_kinds` y `openapi_path`, y las funciones `client-version-check`, `catalog-sync-v1`, etc.                                                                                                              |
+| Cualquier ruta de la aplicación                                               | Con `X-Client-Version` anterior a la mínima: `426 CLIENT_UPDATE_REQUIRED`; sin la cabecera se acepta solo por la escucha local (por la de red, 426, fase C); cabecera inválida: 400                                                        |
+| `GET catalog/sync[?since=X&epoch=E]`                                          | Catálogo descargable completo o por cambios (`catalog.read` y `catalog.prices.read`); devuelve `catalog_epoch`; con `since` > 0 exige `epoch` (400 sin ella) y con otra época entrega todo con `reset: true` (correcciones de la revisión) |
+| `GET catalog/images/{id}/content`                                             | Imagen binaria con `ETag` y caché larga; `If-None-Match` → 304                                                                                                                                                                             |
+| `POST catalog/products/{id}/sold-out`                                         | «Agotado» / «Disponible otra vez» (`catalog.sold_out.manage`, `operation_id`); un producto agotado responde `409 PRODUCT_SOLD_OUT`                                                                                                         |
+| `GET catalog/products`                                                        | Cada producto agrega `sold_out`, `sold_out_indefinite` y `sold_out_until`                                                                                                                                                                  |
+| Escrituras de `catalog/*`                                                     | Publican el evento `catalog.changed` (ámbito `catalog`, con `catalog.read`)                                                                                                                                                                |
+| `POST restaurant/offline-orders`                                              | Pedido capturado sin conexión: 200 aceptado o `409 ORDER_REQUIRES_CONFIRMATION` con los cambios; si la misma clave ya entró con otro contenido del mismo usuario y terminal, `409 OFFLINE_ORDER_ALREADY_ACCEPTED` con `details.result`     |
+| `GET restaurant/state`                                                        | Recuperación del estado: sesión y permisos vigentes, versión y época del catálogo (`catalog_epoch`), mesas y cuentas abiertas                                                                                                              |
+| `PUT restaurant/accounts/{id}/draft` y `POST restaurant/accounts` con `items` | Un producto agotado que se agrega (también como componente o complemento) responde `409 PRODUCT_SOLD_OUT`; una partida guardada antes de agotarse se puede conservar o reducir (correcciones de la revisión)                               |
+
+Puente nativo (`desktop/src-tauri/src/api.rs`): operaciones nuevas `version` (`GET version`) y `catalog_product_sold_out`
+(`POST catalog/products/{id}/sold-out`, con identificador validado); Rust envía `X-Client-Version` (la versión de
+`Cargo.toml`) y `X-Client-Kind: desktop` en `api_request`, el canal de eventos y la exportación de reportes.
+
+## Etapa 9G · emparejamiento de terminales y conexión cifrada (fase B)
+
+Decisiones D1, D2, D5, D6 y D9 de [docs/ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md). Esquema 23 (sección B de la
+`0023`). Sin permisos nuevos: `devices.read` y `devices.manage`.
+
+### Escuchas e identidad del servidor
+
+- **HTTP local** en `listen_address` (`127.0.0.1:8181`) para la ventana de la propia computadora, como siempre.
+- **HTTPS de la red local** (`lanlistener`): el servicio de macOS la abre en `:8443` (todas las interfaces, IPv4 e
+  IPv6; `host --network-listen D|off` solo en pruebas; con `ADEL_TEST_MODE=1` sin el indicador no se abre); `serve`
+  solo con `network_listen_address` en la configuración (vacía por omisión; todas las interfaces, loopback o IP
+  privada, nunca el puerto de `listen_address`). Acepta solo loopback y orígenes RFC 1918, de enlace local o ULA **dentro de la
+  subred de una interfaz local que no sea punto a punto ni túnel** (lista de interfaces releída cada 30 s y, si un
+  origen no coincide, como mucho cada 2 s; los demás se cierran al aceptarlos, antes de TLS), TLS ≥ 1.2, mismas rutas, plazos y SSE que la escucha local. Windows no la
+  abre hasta la Fase W.
+- **«Local»** = la petición llegó por la escucha de loopback. Lo que llega por la escucha HTTPS de red **nunca** es
+  local, aunque venga de `127.0.0.1`: ahí se rechazan `POST setup` (403), `POST devices/enroll`
+  (`403 ENROLLMENT_LOCAL_ONLY`, también desde esta etapa para cualquier origen no local) y la aprobación o el rechazo
+  de una solicitud de emparejamiento (`403 PAIRING_LOCAL_ONLY`, auditado como `access.denied`).
+- **Identidad**: carpeta `identity/` junto a `server.json` (`/Library/Application Support/AD-EL POS/identity` en el
+  servicio, `.local/identity` en desarrollo): `identity.json` (`server_id`, UUID v4), `server-cert.pem` (ECDSA P-256
+  autofirmado, 30 años) y `server-key.pem` (0600; carpeta 0700; ACL privada en Windows). Se crea al primer arranque y
+  **nunca se reemplaza sola**: se crea en una carpeta temporal que se renombra al final (corrección de la revisión) y,
+  si aun así está incompleta o dañada, el servidor sigue vendiendo por la escucha local, sin escucha de red, y las rutas
+  `pairing/*` responden `503 PAIRING_UNAVAILABLE`. Huella = SHA-256 del SPKI en hexadecimal.
+
+### Rutas de la terminal que se empareja (sin credencial de dispositivo)
+
+Todas responden `503 PAIRING_UNAVAILABLE` sin identidad. Las de una solicitud exigen `X-Pairing-Secret` (43
+caracteres, entregado al crearla); id desconocido o secreto distinto → `404 PAIRING_NOT_FOUND`.
+
+| Método y ruta                       | Cuerpo                                                                                                                                      | Respuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST pairing/requests`             | `{name (1–80), device_kind (desktop\|android\|kitchen), os (1–80), app_version (1–40), commitment (SHA-256 hex del número de la terminal)}` | `{request_id, server_nonce (hex 32 bytes), pairing_secret, expires_at (+5 min), server_id, server_name, name}`. `409 SETUP_REQUIRED` sin establecimiento; `429 PAIRING_RATE_LIMITED` (5 por grupo de origen en 10 min: la IPv4, el /64 de una IPv6 y todo el enlace local como un solo grupo) o `429 PAIRING_LIMIT_REACHED` (tope global de 30 solicitudes creadas en 10 min, cualquiera que sea su estado u origen; la primera vez en cada ventana se anota `device.pairing_limit_reached`). |
+| `POST pairing/requests/{id}/reveal` | `{terminal_nonce (hex 32 bytes)}`                                                                                                           | `{state: "pending", expires_at}`. Si no corresponde al compromiso: `400 PAIRING_COMMITMENT_MISMATCH` y la solicitud queda rechazada. `409 PAIRING_ALREADY_REVEALED`, `PAIRING_EXPIRED`…                                                                                                                                                                                                                                                                                                       |
+| `GET pairing/requests/{id}`         | —                                                                                                                                           | `{state: pending\|approved\|claimed\|rejected\|cancelled\|expired, expires_at, name}`                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `POST pairing/requests/{id}/claim`  | `{}`                                                                                                                                        | Una sola vez: `{device_id, device_token, server_id, server_name, name}`. Después `409 PAIRING_ALREADY_CLAIMED` sin token; sin aprobar `409 PAIRING_NOT_APPROVED`; vencida `409 PAIRING_EXPIRED` (aprobada, 5 min para reclamar).                                                                                                                                                                                                                                                              |
+| `POST pairing/requests/{id}/name`   | `{name}`                                                                                                                                    | Solo pendiente: `{state, name}`                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `POST pairing/requests/{id}/cancel` | `{}`                                                                                                                                        | `{state: "cancelled"}` (o el estado final si ya terminó)                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+Código de 6 dígitos (no viaja ni se guarda): `SHA-256(huella SPKI ‖ nT ‖ nS ‖ id)` con los cuatro campos en binario
+(32 + 32 + 32 + 16 bytes), primeros 8 bytes big-endian módulo 10⁶, con ceros a la izquierda (`PairingCode` en
+`administration/pairing.go`, `pairing_code` en `pairing.rs`, vector de prueba común `166101`).
+
+### Rutas de administración (con sesión)
+
+| Método y ruta                                | Permiso                  | Cuerpo                    | Respuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------------------- | ------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET devices/pairing-requests`               | `devices.read`           | —                         | `{requests: [{id, name, device_kind, os, app_version, created_at, expires_at, ready, attempts_left}], approve_here, recent_abandoned, limit_reached, window_minutes, pairing_available}` (`recent_abandoned`: solicitudes de la última ventana canceladas, rechazadas o vencidas sin aprobarse; `pairing_available` falso si la identidad no se cargó); solo por la escucha local agrega `network: {available, port, addresses}` (IPv4 privadas y nombre `.local` para emparejar a mano). |
+| `POST devices/pairing-requests/{id}/approve` | `devices.manage` + local | `{code: "123456", name?}` | `{state: "approved", name}`. Código incorrecto: `400 PAIRING_CODE_INVALID` con `details.attempts_left` (se conserva el intento); al quinto `409 PAIRING_ATTEMPTS_EXCEEDED` y la solicitud queda rechazada; `409 PAIRING_NOT_READY` (sin revelar), `PAIRING_EXPIRED`, `PAIRING_REJECTED`…                                                                                                                                                                                                  |
+| `POST devices/pairing-requests/{id}/reject`  | `devices.manage` + local | `{}`                      | `{state: "rejected"}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `GET devices/sessions-summary`               | `devices.read`           | —                         | `{by_kind: {desktop, android, kitchen}, total, limited: false}`: sesiones vigentes de terminales no revocadas por tipo; no limita nada.                                                                                                                                                                                                                                                                                                                                                   |
+| `GET devices/{id}/configuration`             | `devices.read`           | —                         | `{device, kitchen_all_stations, kitchen_sound_alert, kitchen_stations: [{id, name, active}], printers, local_printers}` (impresoras de la terminal: ver la fase E).                                                                                                                                                                                                                                                                                                                       |
+
+`GET devices` agrega `kind`, `os`, `app_version`, `paired_at`, `online` (petición en los últimos 2 minutos, no revocada)
+y `current_user` (nombre del usuario con la sesión vigente más reciente en la terminal, nunca `sa`). Auditoría:
+`device.pairing_requested` (autor `pairing`, cuando la terminal revela su número y la solicitud puede aprobarse; crear
+o cancelar sin revelar no deja movimientos), `device.pairing_approved`, `device.pairing_code_failed` (`success=false`),
+`device.pairing_rejected`, `device.pairing_cancelled` (solo si ya estaba revelada), `device.pairing_limit_reached` (una
+vez por ventana) y `device.paired` (autor: la terminal nueva). Un trabajador del servidor borra por lotes las
+solicitudes de más de 7 días. Sin identidad cargada (dañada o incompleta) el servidor sigue atendiendo la escucha
+local, sin escucha de red, y las rutas `pairing/*` responden `503 PAIRING_UNAVAILABLE`.
+
+### Puente nativo y conexión de la terminal
+
+- Operaciones nuevas en `api.rs`: `devices_pairing_requests`, `devices_sessions_summary`, `device_configuration`,
+  `approve_device_pairing` y `reject_device_pairing`. `authentication_state` agrega `paired`; `installation_state`
+  agrega `paired` y `server_name`.
+- Comandos de Tauri nuevos (simulados en `native-driver.ts`): `pairing_start {address, name}` (Rust valida la dirección:
+  HTTPS a una IPv4 privada o de enlace local, IPv6 ULA o de enlace local, o un nombre `.local`; puerto 8443 si no se
+  indica), `pairing_status`, `pairing_rename {name}`, `pairing_cancel` y `pairing_forget`; devuelven
+  `{state, code, name, server_name, expires_at}` sin secretos.
+- `connection.json` de una terminal emparejada (solo Rust, lista cerrada): `installation_mode: "terminal-only"`,
+  `server_url` (última dirección, `https://…`), `server_id`, `server_fingerprint` (hex) y `server_name`; sin
+  `ca_certificate`. TLS con verificador propio (`rustls`): compara la huella SPKI e ignora nombre e IP, verifica la
+  firma del intercambio y no reanuda sesiones. Credencial en el almacén seguro con la cuenta
+  `adel-server:{server_id}|{perfil}`; la de la computadora principal (`http://127.0.0.1:8181|main`) no cambia.
+
+## Etapa 9G · respaldos programados (fase F, esquema 23)
+
+Todas con `settings.manage` (Sistema › Mantenimiento). No son de la API de clientes (Android): no van en
+`internal/apicontract/openapi.json` ni en `docs/API_V1.md`. Tiempo de respuesta de `maintenance/*` (120 s).
+
+| Método | Ruta                                     | Cuerpo / requisito                                                                                            |
+| ------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/backups`                   | Configuración, próximo respaldo, último respaldo, aviso y los últimos 20 respaldos.                           |
+| GET    | `/maintenance/backups/status`            | `{last_backup, alert, running}` (aviso de la pantalla de inicio y estado del sistema).                        |
+| PUT    | `/maintenance/backups/settings`          | `{enabled, time: "HH:MM" \| null, keep: 1–365}` (los tres obligatorios; `null` = la hora de inicio del día).  |
+| PUT    | `/maintenance/backups/directory`         | `{directory}`: solo desde una conexión local (`403 LOCAL_REQUIRED`); no está en la lista cerrada de `api.rs`. |
+| POST   | `/maintenance/backups/directory/default` | Cuerpo vacío o `{}`: vuelve a la carpeta predeterminada.                                                      |
+| POST   | `/maintenance/backups/run`               | `{operation_id}` (UUID): «Respaldar ahora», idempotente.                                                      |
+
+- **Estado** (`GET maintenance/backups`): `{settings: {enabled, time, effective_time, business_day_cutoff, keep,
+directory, default_directory}, next_run_at, pending, running, last_backup, last_success, alert, runs,
+directory_change_available}`. Una carpeta es `{custom, path, folder_name, volume_name, available}` (`available` solo
+  comprueba que exista; `path` es para «Información para soporte»). `next_run_at` es `null` con el respaldo automático
+  desactivado; `pending` dice que el respaldo del último instante programado todavía no se hace (se hará en minutos);
+  `directory_change_available` = la petición llega de la propia computadora.
+- **Respaldo** (`RunView`, también `last_backup` de `GET maintenance/service`): `{id, kind: automatic|manual, status:
+running|succeeded|failed, started_at, finished_at, file_name, size_bytes, location: default|custom|"", folder_name,
+volume_name, directory, used_default_directory, fallback_reason: ""|missing|not_directory|not_writable, verified,
+failure_reason: ""|directory_unavailable|dump_failed|verify_failed|interrupted, removed, available?}`. Correcto implica
+  verificado (`pg_restore --list` con los datos de `public.schema_migrations`).
+- **Aviso** (`alert`): `{kind: failed|overdue|fallback, reason, since, failures}` o `null`, en ese orden de prioridad.
+  `failed`: el último respaldo terminado falló (desde `since`, `failures` intentos); `overdue`: respaldos automáticos
+  activos, establecimiento configurado y sin un respaldo correcto en más de 26 h (contadas desde lo más reciente entre el
+  último correcto y la activación o configuración; `reason` `stale` con el último correcto en `since`, o `never`);
+  `fallback`: el último fue correcto pero en la predeterminada porque la carpeta elegida (la misma que sigue
+  configurada) no estaba disponible. Desaparece con un respaldo correcto posterior. «Último» es por el orden de registro
+  de la base (`backup_runs.seq`), y una ejecución que empezó más de 5 min «en el futuro» (reloj adelantado) no cuenta
+  como último respaldo ni como el del día.
+- **Archivos**: `<base>-<instalación>-<AAAAMMDDTHHMMSSZ>-<6 hex>-automatico|manual.dump` (`<instalación>`: 8 caracteres
+  del `server_id` o, sin identidad, de `backup_settings.installation_id`; `.partial` mientras se crea, registrado en
+  `backup_runs.partial_file`). La retención y la limpieza de restos solo tocan archivos regulares registrados por esta
+  instalación (nunca los de otra instalación en una carpeta compartida).
+- **Configuración**: `400 VALIDATION_ERROR` con un campo que falta, una hora fuera de `HH:MM` (también `""`) o fuera de
+  1–365; un guardado sin cambios no se audita. Auditoría `maintenance.backup_settings_changed` (antes y después).
+- **Carpeta**: Go valida ruta absoluta sin caracteres de control (≤ 1024), existente, carpeta, con permiso de escritura
+  (crea y borra un archivo de prueba), resuelve los enlaces y guarda la ruta real, que no puede estar dentro de una
+  carpeta de datos de PostgreSQL (ella o una superior con `PG_VERSION`) ni de la carpeta de datos del servicio (o la de
+  la configuración con `serve`): `400 BACKUP_DIRECTORY_INVALID` con el motivo en palabras del restaurante. Nunca crea la
+  carpeta. Elegir la predeterminada equivale a volver a ella. Auditoría `maintenance.backup_directory_changed` (`{directory}` antes y
+  después, `null` = predeterminada).
+- **«Respaldar ahora»**: la autenticación busca la clave (`backup_runs.operation_id`); repetida por el mismo usuario y
+  terminal devuelve `{run}` sin respaldar otra vez; de otro usuario o terminal, `409 IDEMPOTENCY_CONFLICT`. Si no existe,
+  después de confirmar la autenticación toma el lock 7820148309 (`pg_try_advisory_lock`; ocupado → `409
+BACKUP_IN_PROGRESS`), registra la ejecución y respalda en segundo plano por el mismo camino del automático; la
+  respuesta espera el resultado hasta 5 s antes del plazo de la petición y si no, devuelve la ejecución `running`. Se
+  audita al terminar (`maintenance.backup_created`, `success` según el resultado, entidad `backup` con el id de la
+  ejecución). Sin el respaldo de la instalación configurado: `503 BACKUPS_UNAVAILABLE`.
+
+### Puente nativo
+
+- Operaciones nuevas en `desktop/src-tauri/src/api.rs`: `maintenance_backups`, `maintenance_backups_status`,
+  `maintenance_save_backup_settings`, `maintenance_backup_default_directory` y `maintenance_backup_now` (tiempo de
+  espera de 130 s, como «Quitar datos de prueba»).
+- Comando Tauri nuevo `choose_backup_directory` (`src-tauri/src/backup_folder.rs`, simulado en `e2e/native-driver.ts`):
+  sin argumentos; solo con el servidor local (`127.0.0.1`, `localhost` o `::1`), abre el diálogo nativo de carpeta
+  (`tauri-plugin-dialog` desde Rust; la ventana sigue sin permisos `dialog:*`) y envía la carpeta elegida a `PUT
+maintenance/backups/directory`. Responde `{status: 200, body: {result: "cancelled"}}`, `{status: 200, body: {result:
+"saved", state}}` o el rechazo de Go como `api_request`.
+
+## Etapa 9G · descubrimiento y comportamiento en red (fase C)
+
+Sin migración ni rutas HTTP nuevas. Guía para clientes: [docs/API_V1.md](docs/API_V1.md), «Encontrar el servidor y
+emparejarse»; el contrato OpenAPI documenta ahora las seis rutas `pairing/*` de la terminal que se empareja.
+
+### Anuncio en la red local (mDNS/DNS-SD, no HTTP)
+
+- Servicio `_adelpos._tcp`, dominio `local`, solo mientras la escucha HTTPS de red está activa (modalidad con
+  servidor) y nunca en el modo de pruebas. Lo publica el respondedor mDNS **del sistema** (macOS: Bonjour con
+  `/usr/bin/dns-sd -R` como proceso hijo; Windows, Fase W: `DnsServiceRegister` de dnsapi.dll); el servidor no abre
+  ningún socket en el puerto 5353 (`internal/discovery`).
+- Instancia: «establecimiento — computadora» (hasta 63 bytes UTF-8, sin partir caracteres; los puntos se quitan).
+  SRV con el puerto de la escucha HTTPS. TXT: `txtvers=1`, `server_id` (UUID), `api=v1`, `port`, `fp` (primeros 8
+  bytes de la huella SPKI en hexadecimal). El anuncio solo da la dirección: la confianza sigue siendo la huella
+  completa en el intercambio TLS.
+- Se vuelve a publicar si cambia el nombre del establecimiento (revisión cada minuto) o si el proceso del sistema
+  termina (espera creciente de 5 s a 1 min); se retira al apagar el servidor (despedida mDNS). Bitácora:
+  `discovery_started`, `discovery_registered`, `discovery_withdrawn`, `discovery_unavailable` (sistema sin
+  implementación) y `discovery_failed`.
+
+### Versión del cliente por la escucha de red
+
+- Por la escucha HTTPS de red, toda ruta de la aplicación (también `pairing/*` y `events`) exige
+  `X-Client-Version`: sin ella responde `426 CLIENT_UPDATE_REQUIRED` («Actualiza esta terminal…», con
+  `details.min_client_version` y `details.server_version`). `version`, `health/*` y `openapi.json` siguen sin
+  pedirla. Por la escucha local (127.0.0.1) no cambia nada: sin cabecera se acepta.
+
+### Puente nativo
+
+- `discovery_search` → `[{id, name, paired}]`: consulta mDNS de una sola vez (puerto efímero a
+  `224.0.0.251:5353`, 1.5 s y, si faltan registros, una segunda pregunta por SRV, TXT o A). Solo instancias completas
+  con `server_id` válido, `fp` de 16 hexadecimales y al menos una IPv4 de la red local. Las direcciones se quedan en
+  Rust. Error en español si la red no permite buscar (sin red o sin el permiso «Red local» de macOS).
+- `pairing_start_found {serverId, name}` → como `pairing_start`, con un servidor de la última búsqueda: prueba sus
+  direcciones, exige que el certificado que fija empiece con la huella anunciada y que el `server_id` de la
+  solicitud sea el anunciado.
+- Cambio de IP de una terminal emparejada: si una petición no logra conectar (error de conexión: no llegó al
+  servidor), Rust vuelve a buscar por `server_id` (una búsqueda a la vez y como máximo cada 10 s), prueba cada
+  dirección con la huella fijada completa y, si responde, la usa desde ese momento (API, SSE, exportaciones y estado
+  del sistema), la guarda como `server_url` en `connection.json` y repite la petición una sola vez. Mismo nombre o
+  `server_id` con otra huella: nunca. Sin encontrarlo: «No se encontró la computadora principal del restaurante en
+  la red…».
+- `Info.plist` de la aplicación: `NSLocalNetworkUsageDescription` y `NSBonjourServices` = `_adelpos._tcp`.
+
+### Conexión perdida en el escritorio
+
+- Con la sesión abierta y sin respuesta del servidor, la terminal muestra la capa «Sin conexión con el servidor»
+  debajo de la barra superior: el contenido queda montado e inerte (lo capturado y no guardado se conserva), la
+  sesión se reintenta sola cada 1, 2, 4, 8 y después 10 s («Reintentar» lo hace ya) y al volver se piden de nuevo
+  todas las consultas a la vista (`adel-server-change`, caja y el guardado incierto de la captura con su mismo
+  `operation_id`); el SSE reanuda con `after`.
+
+## Etapa 9G · impresión con varias terminales (fase E, esquema 23)
+
+Decisiones D10 y D13 de [docs/ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md). Sección E de la `0023`. Sin permisos
+nuevos. Las impresoras de red y las del equipo servidor las sigue usando el trabajador de Go. Una impresora con el
+transporte `agent` y su terminal (`agent_device_id`) es la **impresora USB de esa terminal**: `destination` es el
+nombre de su cola en esa computadora y la imprime el **agente de impresión** de la aplicación de escritorio mientras
+está abierta (`desktop/src-tauri/src/print_agent.rs`). Una `agent` sin terminal (anterior a la 9G, destinos de
+aceptación) sigue sin imprimir: sus trabajos quedan en `intervention` con `unsupported`.
+
+### Rutas del agente de impresión (solo credencial de la terminal, sin sesión)
+
+`X-Device-ID` + `X-Device-Token` (sin `Authorization`): el agente trabaja aunque nadie haya iniciado sesión. Terminal
+revocada o desconocida: `401 DEVICE_REVOKED|DEVICE_REQUIRED`. Cada terminal solo informa sus impresoras y solo reclama
+y confirma los trabajos cuya fotografía de impresora es suya (`printer_snapshot.agent_device_id`); otro trabajo
+responde `404 PRINT_JOB_NOT_FOUND` sin decir si existe. Cada reclamo y cada resultado actualizan
+`devices.print_agent_seen_at`.
+
+| Método y ruta                       | Cuerpo                                                                                                                                                                 | Respuesta                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUT print-agent/printers`          | `{printers: [{queue, model (≤120), connection (esquema de device-uri, ^[a-z0-9+.-]{0,20}$), printer_type}]}` (0–64, colas únicas con el patrón de Go)                  | `{printers: [{queue, model, connection, usable, reason?}]}`: reemplaza la lista de la terminal; `usable` lo decide Go con la regla del cajón por CUPS (usb, serial, parallel o socket; ni clase, ni remota, ni AirPrint). Auditoría `device.local_printers_reported` (autor: la terminal) y evento `devices.printers.changed` solo si la lista cambió.                                                                                                                                                                                                                                                                 |
+| `POST print-agent/jobs/claim`       | `{claim_id}` (UUID nuevo por reclamo; se repite igual si no llegó la respuesta)                                                                                        | `{job: null}` o `{job: {id, attempt_id, queue, title ("ADEL-<id>" o "ADEL-cajon-<id>"), data (base64 de los bytes ESC/POS exactos, todas las copias), size, drawer, lease_until}}`. El intento y la lease de 60 s se confirman antes de responder; la misma `claim_id` con la lease vigente devuelve el mismo intento. Un trabajo por impresora a la vez (lock 7820148307 de la transacción), en orden de llegada; reintento automático de errores como el servidor (3, espera creciente, nunca el cajón). Impresora o estación desactivada, o fotografía inválida: el trabajo queda en `intervention` sin entregarse. |
+| `POST print-agent/jobs/{id}/result` | `{attempt_id, outcome: submitted\|error\|uncertain, code? (error: not_found\|unreachable\|setup), reference? (submitted: "<cola>-<n>"), detail? (≤300, para soporte)}` | `{state, recorded: true}`. Repetir el mismo resultado responde lo guardado; otro resultado para un intento ya terminado `409 PRINT_RESULT_CONFLICT`. Con la lease vencida: `{state: "uncertain", recorded: false, reason: "lease_expired"}`, el trabajo queda incierto y el informe tardío en el historial (`print.agent_late_result`). Mensajes de Go: «Aceptado por la cola de impresión de <terminal>; no confirma salida física de papel.» (cajón: «…no confirma que el cajón se abrió.»).                                                                                                                         |
+
+Reglas de siempre: `submitted` = aceptado por la cola de la computadora, nunca papel; `uncertain` nunca se reenvía solo
+y se resuelve en la cola; un intento sin resultado al vencer su lease pasa a `uncertain` (lo recoge el trabajador del
+servidor o el siguiente reclamo del agente) con «La terminal no informó el resultado a tiempo…». Tres errores
+confirmados seguidos pasan a la impresora de respaldo configurada (nunca el cajón). El trabajador del servidor nunca
+envía un trabajo de la impresora de una terminal.
+
+### Rutas con sesión
+
+| Método y ruta                                                 | Permiso                    | Cambio                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET kitchen/terminal-printers`                               | `kitchen.printers.manage`  | Nueva: `[{device_id, device_name, agent_online (consulta del agente en los últimos 30 s), agent_seen_at, reported_at, queues: [{queue, model, connection, usable, reason?}], printers: [{id, name, destination, active}]}]` de las terminales no revocadas.                          |
+| `POST/PATCH kitchen/printers`                                 | `kitchen.printers.manage`  | `agent_device_id` (solo con `transport: "agent"`). Al elegir la terminal o cambiar la cola, la cola debe ser una que informó esa terminal y que sirva (400 con el motivo); terminal revocada o inexistente, 400. Sin opción de corte CUPS ni `accepts_escpos`.                       |
+| `GET kitchen/printers`, `kitchen/outputs`                     | sin cambio                 | Agregan `terminal_name` (vacío o nulo si no es de una terminal).                                                                                                                                                                                                                     |
+| `GET kitchen/jobs`, `kitchen/jobs/{id}`                       | sin cambio                 | Agregan `terminal_name`. `problem` nuevo `agent_offline` para un trabajo `pending`, `processing` o `error` que todavía se reintentará cuya terminal no consultó en 30 s (o está revocada): «La Caja 2 está desconectada».                                                            |
+| `GET payments/settings`                                       | sin cambio                 | Agrega `register_printers: [{register_id, register_name, register_active, printer_id, printer_name, terminal_name}]` (cajas activas o con impresora propia).                                                                                                                         |
+| `PUT payments/settings`                                       | `payments.settings.manage` | Acepta `register_printers: [{register_id, printer_id\|null}]` (sin el campo no cambia; null = usar la general). Misma validación que la impresora general (`422 RECEIPT_PRINTER_UNAVAILABLE` con una desactivada o de agente sin terminal); auditado en `payments.settings_changed`. |
+| `GET payments/accounts/{id}` (documentos), documentos de caja | sin cambio                 | `documents[].terminal_name` y `job_problem: "agent_offline"`.                                                                                                                                                                                                                        |
+| `GET payments/cash/drawers`                                   | sin cambio                 | `printers[].terminal_name`; la impresora de una terminal es compatible con el cajón (`connection: "terminal"`).                                                                                                                                                                      |
+| `GET devices/{id}/configuration`                              | sin cambio                 | `printers: [{id, name, destination, active}]` (las de AD-EL POS conectadas a la terminal) y `local_printers: {agent_online, agent_seen_at, reported_at, queues}`.                                                                                                                    |
+| `GET documents/printers`                                      | sin cambio                 | La impresora de una terminal es `supported` (`terminal_agent`); una de agente sin terminal sigue `unsupported` (`agent`).                                                                                                                                                            |
+
+**Impresora de tickets por caja (D10)**: precuentas, tickets de pago, documentos de caja y sus reintentos y
+reimpresiones salen en la impresora propia de la caja de la terminal que los pide (`register_receipt_printers`); sin
+una propia, en la general (`payment_settings.receipt_printer_id`), como antes. La impresora USB de una terminal ya es
+válida para tickets y para el cajón (antes se rechazaba).
+
+### Puente nativo
+
+- Operación nueva en `api.rs`: `kitchen_terminal_printers`. Las rutas `print-agent/*` **no** están en la lista cerrada
+  de React: solo las usa `print_agent.rs` con la credencial de la terminal.
+- `print_agent.rs` arranca con la aplicación (no en Windows hasta la Fase W), informa las impresoras al abrir y cada 5
+  minutos (`lpstat -a` y `lpoptions -p <cola>`, solo lecturas), consulta cada 3 s (y al llegar cualquier evento del
+  canal en tiempo real) y entrega cada trabajo con `lpstat -p <cola>` y `lp -d <cola> -o raw -n 1 -t <título>
+<archivo>` (argumentos separados, archivo privado 0600 que se borra). Sin comandos de Tauri nuevos; el puente de
+  Playwright simula el agente (`printAgent.report`, `printAgent.run` y `printAgent.calls`).
+- **Contrato v1 (OpenAPI)**: estas rutas no se agregan a `openapi.json`/`docs/API_V1.md`. El agente es exclusivo del
+  escritorio (impresoras USB de una computadora con su aplicación abierta) y las rutas de administración son de la
+  interfaz de escritorio; la aplicación Android de meseros no imprime por agente: sus documentos salen en la
+  impresora que elige Go (la de la caja de esa terminal o la general).

@@ -507,12 +507,13 @@ pub async fn export_report(
     let query = query.unwrap_or_default();
     validate_query(&query, format)?;
     let _guard = ExportGuard::acquire()?;
-    let config = state.config.as_ref().map_err(Clone::clone)?;
+    state.config.as_ref().map_err(Clone::clone)?;
     let vault = state.vault()?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
     let mut credentials = vault.read()?;
-    let mut request = client
-        .get(format!("{}/api/v1/{path}", config.server_url))
+    // Etapa 9G (fase C): la dirección vigente del servidor (discovery.rs).
+    let base = state.locator.base();
+    let mut request = crate::api::with_client_headers(client.get(format!("{base}/api/v1/{path}")))
         .timeout(Duration::from_secs(EXPORT_TIMEOUT_SECONDS))
         .query(&query)
         .query(&[("format", format.code())]);

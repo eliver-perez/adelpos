@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/windows"
+	"local/ad-el-pos/server/internal/fileacl"
 )
 
 // command prepara un programa de PostgreSQL con argumentos separados (nunca un shell con datos) y sin
@@ -138,6 +139,35 @@ func longPathName(path string) (string, bool) {
 		return "", false
 	}
 	return filepath.Clean(windows.UTF16ToString(buffer[:size])), true
+}
+
+// isPostmaster indica si el PID de postmaster.pid es el PostgreSQL de esta instalación, según el ejecutable
+// del proceso: un PID reutilizado por otro programa no cuenta.
+func (cluster *Cluster) isPostmaster(pid int) bool {
+	return samePath(processImage(pid), cluster.layout.tool("postgres"))
+}
+
+// protectDataDir fija la ACL privada de la carpeta de datos, que se hereda a todo lo que se cree dentro
+// (secretos, clúster, respaldos).
+func protectDataDir(directory string) error {
+	return fileacl.Protect(directory)
+}
+
+// privateFile deja un archivo solo para la cuenta del servidor (ACL privada).
+func privateFile(filename string) error {
+	return fileacl.Protect(filename)
+}
+
+// checkPostgresTools comprueba los binarios de PostgreSQL incluidos en el instalador.
+func checkPostgresTools(layout Layout) error {
+	if _, err := os.Stat(layout.tool("initdb")); err != nil {
+		return errors.New("faltan los binarios de PostgreSQL de la instalación; reinstala AD-EL POS")
+	}
+	// Sin nombres cortos de Windows, una carpeta del programa con acentos impide crear la base (ver tool).
+	if !isASCII(layout.tool("initdb")) {
+		return errors.New("la carpeta donde está instalado AD-EL POS tiene acentos u otros caracteres que la base de datos no admite al crearse; instálalo en una carpeta sin ellos")
+	}
+	return nil
 }
 
 // HostLock garantiza un solo servidor por carpeta de datos: un bloqueo exclusivo sobre host.lock que

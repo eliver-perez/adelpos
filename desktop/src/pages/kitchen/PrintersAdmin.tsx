@@ -17,8 +17,10 @@ import {
   previousCutFeedChoice,
   printerColumnChoices,
   printerColumns,
+  printerLabel,
   type ExecuteKitchen,
   type Printer,
+  type TerminalPrinterSet,
   type WidthTestResult,
 } from '../../services/kitchen';
 import { usePrecheckName } from '../../services/documentNames';
@@ -46,7 +48,21 @@ const emptyPrinter = (): Printer => ({
   active: true,
   fallback_id: null,
   revision: 0,
+  agent_device_id: null,
 });
+
+// Dónde está una impresora, como lo ve el restaurante (etapa 9G, fase E: la USB de una terminal dice cuál).
+function transportSummary(printer: Printer, windows: boolean) {
+  if (printer.transport === 'cups') {
+    return windows ? 'Impresora instalada en Windows' : 'CUPS del equipo servidor';
+  }
+  if (printer.transport === 'escpos_tcp') {
+    return 'ESC/POS por red';
+  }
+  return printer.terminal_name
+    ? `Impresora USB de ${printer.terminal_name}`
+    : 'Otra terminal sin elegir (no imprime)';
+}
 
 // Opciones de los renglones de avance: la lista cerrada de 0 a 8 y, solo para una impresora que ya
 // cortaba antes de la 9F y conserva su final, «Como hasta ahora».
@@ -71,6 +87,11 @@ export function PrintersAdmin({
   busy: boolean;
 }) {
   const printers = useLiveResource<Printer[]>('kitchen_printers');
+  // Etapa 9G (fase E): las terminales con las impresoras que informó cada una (para la impresora USB de una
+  // terminal) y si su agente de impresión está conectado.
+  const terminals = useLiveResource<TerminalPrinterSet[]>('kitchen_terminal_printers', {
+    interval: 10000,
+  });
   const discovery = useLiveResource<{ queue: string; status: string; options: string }[]>(
     'kitchen_discovery',
     { interval: 60000 },
@@ -100,19 +121,19 @@ export function PrintersAdmin({
             Registrar impresora
           </button>
         </div>
-        <Notice>{printers.error}</Notice>
+        <Notice>{printers.error || terminals.error}</Notice>
         {windows ? (
           <p className="muted">
-            Se usan las impresoras instaladas en Windows en el equipo servidor y las impresoras de
-            tickets conectadas a la red. Una impresora conectada a otra terminal todavía no se puede
-            usar: conéctala a la red o al equipo servidor.
+            Se usan las impresoras instaladas en Windows en el equipo servidor, las impresoras de
+            tickets conectadas a la red y las impresoras USB conectadas a otra terminal, que imprime
+            esa terminal mientras AD-EL POS está abierto en ella.
           </p>
         ) : (
           <p className="muted">
             Se usan las impresoras instaladas en el equipo servidor (colas CUPS, el sistema de
-            impresión de macOS) y las impresoras de tickets conectadas a la red. Una impresora
-            conectada a otra terminal todavía no se puede usar: conéctala a la red o al equipo
-            servidor.
+            impresión de macOS), las impresoras de tickets conectadas a la red y las impresoras USB
+            conectadas a otra terminal, que imprime esa terminal mientras AD-EL POS está abierto en
+            ella.
           </p>
         )}
         {printers.data?.map((printer) => (
@@ -123,15 +144,8 @@ export function PrintersAdmin({
           >
             <strong>{printer.name}</strong>
             <span>
-              {printer.transport === 'cups'
-                ? windows
-                  ? 'Impresora instalada en Windows'
-                  : 'CUPS del equipo servidor'
-                : printer.transport === 'escpos_tcp'
-                  ? 'ESC/POS por red'
-                  : 'Otra terminal (aún no disponible)'}{' '}
-              · {printer.paper_width} mm · {printerColumns(printer)} columnas ·{' '}
-              {printer.active ? 'Activa' : 'Inactiva'}
+              {transportSummary(printer, windows)} · {printer.paper_width} mm ·{' '}
+              {printerColumns(printer)} columnas · {printer.active ? 'Activa' : 'Inactiva'}
             </span>
           </button>
         ))}
@@ -228,7 +242,7 @@ export function PrintersAdmin({
                       : 'Cola CUPS del equipo servidor',
                   },
                   { value: 'escpos_tcp', label: 'Impresora ESC/POS en red privada' },
-                  { value: 'agent', label: 'Impresora de otra terminal (aún no disponible)' },
+                  { value: 'agent', label: 'Impresora USB de una terminal' },
                 ]}
                 onChange={(transport) =>
                   setValue({
@@ -238,24 +252,31 @@ export function PrintersAdmin({
                     cutter_option: '',
                     // La marca ESC/POS solo existe en CUPS: Go la rechaza en los demás transportes.
                     accepts_escpos: false,
+                    agent_device_id: null,
                   })
                 }
               />
             </Field>
-            <TextField
-              label={
-                value.transport === 'cups'
-                  ? windows
-                    ? 'Nombre de la impresora en Windows'
-                    : 'Nombre de cola CUPS'
-                  : value.transport === 'escpos_tcp'
-                    ? 'IP privada de la impresora'
-                    : 'Referencia del destino remoto'
-              }
-              required
-              value={value.destination}
-              onChange={(destination) => setValue({ ...value, destination })}
-            />
+            {value.transport === 'agent' ? (
+              <TerminalPrinterFields
+                value={value}
+                terminals={terminals.data ?? []}
+                onChange={setValue}
+              />
+            ) : (
+              <TextField
+                label={
+                  value.transport === 'cups'
+                    ? windows
+                      ? 'Nombre de la impresora en Windows'
+                      : 'Nombre de cola CUPS'
+                    : 'IP privada de la impresora'
+                }
+                required
+                value={value.destination}
+                onChange={(destination) => setValue({ ...value, destination })}
+              />
+            )}
             {/* En Windows la impresora recibe siempre ESC/POS sin convertir: la marca no aplica. */}
             {value.transport === 'cups' && windows && (
               <p className="muted text-sm">
@@ -303,12 +324,6 @@ export function PrintersAdmin({
                   su formato.
                 </p>
               </>
-            )}
-            {value.transport === 'agent' && (
-              <Notice>
-                Imprimir en una impresora de otra terminal aún no está disponible. Sus trabajos
-                quedan en espera de revisión y no se envía nada a esa terminal.
-              </Notice>
             )}
             <div className="form-grid">
               <Field label="Ancho de papel">
@@ -438,7 +453,9 @@ export function PrintersAdmin({
                 optional
                 label="Impresora de respaldo explícita"
                 value={value.fallback_id}
-                options={(printers.data ?? []).filter((printer) => printer.id !== value.id)}
+                options={(printers.data ?? [])
+                  .filter((printer) => printer.id !== value.id)
+                  .map((printer) => ({ ...printer, name: printerLabel(printer) }))}
                 onChange={(fallback_id) => setValue({ ...value, fallback_id: fallback_id || null })}
               />
               <p className="muted text-sm">
@@ -546,5 +563,101 @@ function PrinterColumns({
         </div>
       )}
     </div>
+  );
+}
+
+// Impresora USB de una terminal (etapa 9G, fase E, D13): la terminal donde está conectada y una de las impresoras
+// que informó su computadora. Go decide cuáles sirven (térmicas de tickets por USB, serie, paralelo o AppSocket,
+// con controlador) y lo vuelve a comprobar al guardar. Sin terminal elegida (impresoras de versiones
+// anteriores), la impresora no imprime.
+function TerminalPrinterFields({
+  value,
+  terminals,
+  onChange,
+}: {
+  value: Printer;
+  terminals: TerminalPrinterSet[];
+  onChange: (next: Printer) => void;
+}) {
+  const terminal = terminals.find((entry) => entry.device_id === value.agent_device_id) ?? null;
+  const queues = terminal?.queues ?? [];
+  const savedQueueMissing =
+    !!terminal &&
+    value.destination !== '' &&
+    !queues.some((queue) => queue.queue === value.destination);
+  return (
+    <>
+      <Field label="Terminal donde está conectada">
+        <Select
+          value={value.agent_device_id ?? ''}
+          placeholder="Elige la terminal"
+          options={[
+            { value: '', label: 'Sin terminal (no imprime)' },
+            ...terminals.map((entry) => ({
+              value: entry.device_id,
+              label: entry.device_name,
+              description: entry.agent_online ? 'Conectada' : 'Desconectada',
+            })),
+          ]}
+          onChange={(device) =>
+            onChange({ ...value, agent_device_id: device || null, destination: '' })
+          }
+        />
+      </Field>
+      {terminal ? (
+        <>
+          <Field label="Impresora de esa terminal">
+            <Select
+              value={value.destination}
+              placeholder="Elige la impresora"
+              options={[
+                ...(savedQueueMissing
+                  ? [
+                      {
+                        value: value.destination,
+                        label: `${value.destination} (ya no la informa la terminal)`,
+                        disabled: true,
+                      },
+                    ]
+                  : []),
+                ...queues.map((queue) => ({
+                  value: queue.queue,
+                  label: queue.model ? `${queue.queue} · ${queue.model}` : queue.queue,
+                  description: queue.usable ? undefined : queue.reason,
+                  disabled: !queue.usable,
+                })),
+              ]}
+              onChange={(destination) => onChange({ ...value, destination })}
+            />
+          </Field>
+          {queues.length === 0 && (
+            <Notice>
+              {terminal.device_name} todavía no informó sus impresoras. Abre AD-EL POS en esa
+              terminal con la impresora conectada y encendida; la lista se actualiza sola.
+            </Notice>
+          )}
+          <p className="muted text-sm">
+            {terminal.device_name} imprime esta impresora mientras AD-EL POS está abierto en ella:
+            recibe las comandas, los tickets y el pulso del cajón y avisa si su computadora los
+            aceptó. Si está apagada o sin conexión, los trabajos esperan y la cola de impresión dice
+            que está desconectada; al volver, imprime lo pendiente. Usa solo impresoras térmicas de
+            tickets: reciben los comandos ESC/POS con formato, logotipo y corte.
+          </p>
+        </>
+      ) : (
+        <>
+          <TextField
+            label="Nombre de la impresora en la terminal"
+            required
+            value={value.destination}
+            onChange={(destination) => onChange({ ...value, destination })}
+          />
+          <Notice>
+            Sin terminal elegida esta impresora no imprime: sus trabajos quedan en espera de
+            revisión. Elige la terminal donde está conectada.
+          </Notice>
+        </>
+      )}
+    </>
   );
 }

@@ -12,12 +12,32 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"local/ad-el-pos/server/internal/lanlistener"
 )
+
+// sourceAddress es la IP de origen en texto (IPv4 sin el prefijo de IPv6 mapeada) o vacía.
+func sourceAddress(address net.IP) string {
+	if address == nil {
+		return ""
+	}
+	if v4 := address.To4(); v4 != nil {
+		return v4.String()
+	}
+	return address.String()
+}
 
 func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	host, _, _ := net.SplitHostPort(request.RemoteAddr)
+	// Una dirección de enlace local IPv6 llega con su zona (fe80::1%en0): sin quitarla no se reconocería el
+	// origen de una terminal de la red local (revisión de la fase B).
+	if zone := strings.IndexByte(host, '%'); zone >= 0 {
+		host = host[:zone]
+	}
 	address := net.ParseIP(host)
-	local := address != nil && address.IsLoopback()
+	// Etapa 9G (D1): «local» es la escucha de loopback. Lo que llega por la escucha de red nunca es local,
+	// aunque la conexión venga de la propia computadora: así el asistente, el aprovisionamiento y la
+	// aprobación de terminales solo se aceptan en la ventana de la computadora principal.
+	local := address != nil && address.IsLoopback() && !lanlistener.FromNetwork(request)
 	if !local && request.TLS == nil {
 		writeFault(writer, request, &Fault{Status: 403, Code: "TLS_REQUIRED", Message: "Las conexiones de red requieren TLS verificado."})
 		return
@@ -78,6 +98,9 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		SessionToken:      strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "),
 		ProvisioningToken: request.Header.Get("X-Provisioning-Token"),
 		Local:             local,
+		IfNoneMatch:       request.Header.Get("If-None-Match"),
+		SourceAddress:     sourceAddress(address),
+		PairingSecret:     request.Header.Get("X-Pairing-Secret"),
 	})
 	if err == nil {
 		result, err = service.completeDeferred(ctx, result)
@@ -88,6 +111,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	// Un reporte exportado se envía como archivo binario, no como JSON.
 	if writeExport(writer, result) {
+		return
+	}
+	// La imagen del catálogo (etapa 9G) también: binaria, con su etiqueta de caché (binary.go).
+	if writeBinary(writer, result) {
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")

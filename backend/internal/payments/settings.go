@@ -30,6 +30,52 @@ type Settings struct {
 	USDRateAlertPercent string    `json:"usd_rate_alert_percent"`
 	Revision            int       `json:"revision"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// RegisterPrinters es la impresora de tickets de cada caja (etapa 9G, fase E, decisión D10): las cajas activas y
+	// las que tienen una propia; sin impresora propia, la caja usa la general. Solo en la consulta y al guardar.
+	RegisterPrinters []RegisterPrinter `json:"register_printers,omitempty"`
+}
+
+// RegisterPrinter es la impresora de tickets propia de una caja, con la terminal que la tiene conectada si es la
+// impresora USB de una terminal.
+type RegisterPrinter struct {
+	RegisterID     string  `json:"register_id"`
+	RegisterName   string  `json:"register_name"`
+	RegisterActive bool    `json:"register_active"`
+	PrinterID      *string `json:"printer_id"`
+	PrinterName    *string `json:"printer_name"`
+	TerminalName   *string `json:"terminal_name"`
+}
+
+// registerPrinters lee la impresora de tickets de cada caja activa o con impresora propia.
+func (handler *service) registerPrinters() ([]RegisterPrinter, error) {
+	rows, err := handler.tx.Query(handler.ctx, `SELECT r.id::text,r.name,r.active,rp.printer_id::text,p.name,d.name
+        FROM app.registers r LEFT JOIN app.register_receipt_printers rp ON rp.register_id=r.id
+        LEFT JOIN app.kitchen_printers p ON p.id=rp.printer_id LEFT JOIN app.devices d ON d.id=p.agent_device_id
+        WHERE r.active OR rp.register_id IS NOT NULL ORDER BY r.name,r.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []RegisterPrinter{}
+	for rows.Next() {
+		var item RegisterPrinter
+		if err := rows.Scan(&item.RegisterID, &item.RegisterName, &item.RegisterActive, &item.PrinterID, &item.PrinterName,
+			&item.TerminalName); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+// settingsWithRegisters es la configuración de cobro con la impresora de tickets de cada caja.
+func (handler *service) settingsWithRegisters() (*Settings, error) {
+	settings, err := handler.settings()
+	if err != nil {
+		return nil, err
+	}
+	settings.RegisterPrinters, err = handler.registerPrinters()
+	return settings, err
 }
 
 func (handler *service) settings() (*Settings, error) {
@@ -51,7 +97,86 @@ func (handler *service) settings() (*Settings, error) {
 }
 
 func (handler *service) readSettings(_ []string) (any, error) {
-	return handler.settings()
+	return handler.settingsWithRegisters()
+}
+
+// registerPrinterChoice es la impresora de tickets elegida para una caja (nil: usar la general).
+type registerPrinterChoice struct {
+	RegisterID string  `json:"register_id"`
+	PrinterID  *string `json:"printer_id"`
+}
+
+// usablePrinter valida una impresora elegida para tickets (general o de una caja): existe y, si cambió, puede
+// imprimir precuentas, tickets y documentos de caja (revisión 9F, B3; desde la 9G la impresora USB de una
+// terminal es válida).
+func (handler *service) usablePrinter(printerID string, previous *string) error {
+	if err := validateID(printerID); err != nil {
+		return err
+	}
+	var exists bool
+	if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.kitchen_printers WHERE id=$1)", printerID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return invalid("La impresora de tickets no existe.")
+	}
+	if previous != nil && *previous == printerID {
+		return nil
+	}
+	printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, printerID)
+	if err != nil {
+		return err
+	}
+	if problem := kitchen.PrinterProblem(printer); problem != "" {
+		return &Error{Status: 422, Code: "RECEIPT_PRINTER_UNAVAILABLE",
+			Message: kitchen.UnavailablePrinterMessage(problem, printer.Name) + " Elige otra impresora de tickets.",
+			Details: map[string]string{"problem": problem, "printer_name": printer.Name}}
+	}
+	return nil
+}
+
+// saveRegisterPrinters guarda la impresora de tickets de cada caja indicada (D10): una impresora la asigna y nil
+// vuelve a la general. Las cajas que no se envían no cambian.
+func (handler *service) saveRegisterPrinters(choices []registerPrinterChoice, previous []RegisterPrinter) error {
+	before := map[string]*string{}
+	for _, item := range previous {
+		before[item.RegisterID] = item.PrinterID
+	}
+	seen := map[string]bool{}
+	for _, choice := range choices {
+		if err := validateID(choice.RegisterID); err != nil {
+			return err
+		}
+		if seen[choice.RegisterID] {
+			return invalid("Cada caja aparece una sola vez en las impresoras de tickets por caja.")
+		}
+		seen[choice.RegisterID] = true
+		var exists bool
+		if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.registers WHERE id=$1)", choice.RegisterID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return invalid("La caja no existe.")
+		}
+		if choice.PrinterID != nil && strings.TrimSpace(*choice.PrinterID) == "" {
+			choice.PrinterID = nil
+		}
+		if choice.PrinterID == nil {
+			if _, err := handler.tx.Exec(handler.ctx, "DELETE FROM app.register_receipt_printers WHERE register_id=$1", choice.RegisterID); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := handler.usablePrinter(*choice.PrinterID, before[choice.RegisterID]); err != nil {
+			return err
+		}
+		if _, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.register_receipt_printers(register_id,printer_id) VALUES ($1,$2)
+            ON CONFLICT (register_id) DO UPDATE SET printer_id=EXCLUDED.printer_id,updated_at=now()`,
+			choice.RegisterID, *choice.PrinterID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (handler *service) saveSettings(_ []string) (any, error) {
@@ -62,11 +187,13 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 		PrintReceiptDefault          bool    `json:"print_receipt_default"`
 		ReceiptPrinterID             *string `json:"receipt_printer_id"`
 		RefundAuthorizationThreshold *string `json:"refund_authorization_threshold"`
+		// Etapa 9G (fase E, D10): impresora de tickets por caja; sin el campo, no cambia.
+		RegisterPrinters *[]registerPrinterChoice `json:"register_printers"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
 	}
-	previous, err := handler.settings()
+	previous, err := handler.settingsWithRegisters()
 	if err != nil {
 		return nil, err
 	}
@@ -82,30 +209,17 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 		formatted := money(value)
 		threshold = &formatted
 	}
+	// Revisión 9F (B3): una impresora que no puede imprimir precuentas, tickets ni documentos de caja (decisión D4:
+	// desactivada o de otra terminal sin terminal elegida) no se elige como impresora de tickets. La que ya estaba
+	// elegida y dejó de servir no impide guardar lo demás: sus documentos avisan con «Configurar impresora».
 	if input.ReceiptPrinterID != nil {
-		if err := validateID(*input.ReceiptPrinterID); err != nil {
+		if err := handler.usablePrinter(*input.ReceiptPrinterID, previous.ReceiptPrinterID); err != nil {
 			return nil, err
 		}
-		var exists bool
-		if err := handler.tx.QueryRow(handler.ctx, "SELECT EXISTS(SELECT FROM app.kitchen_printers WHERE id=$1)", *input.ReceiptPrinterID).Scan(&exists); err != nil {
+	}
+	if input.RegisterPrinters != nil {
+		if err := handler.saveRegisterPrinters(*input.RegisterPrinters, previous.RegisterPrinters); err != nil {
 			return nil, err
-		}
-		if !exists {
-			return nil, invalid("La impresora de tickets no existe.")
-		}
-		// Revisión 9F (B3): una impresora que no puede imprimir precuentas, tickets ni documentos de caja
-		// (decisión D4: desactivada o de otra terminal) no se elige como impresora de tickets. La que ya estaba
-		// elegida y dejó de servir no impide guardar lo demás: sus documentos avisan con «Configurar impresora».
-		if previous.ReceiptPrinterID == nil || *previous.ReceiptPrinterID != *input.ReceiptPrinterID {
-			printer, err := kitchen.ReadPrinter(handler.ctx, handler.tx, *input.ReceiptPrinterID)
-			if err != nil {
-				return nil, err
-			}
-			if problem := kitchen.PrinterProblem(printer); problem != "" {
-				return nil, &Error{Status: 422, Code: "RECEIPT_PRINTER_UNAVAILABLE",
-					Message: kitchen.UnavailablePrinterMessage(problem, printer.Name) + " Elige otra impresora de tickets.",
-					Details: map[string]string{"problem": problem, "printer_name": printer.Name}}
-			}
 		}
 	}
 	_, err = handler.tx.Exec(handler.ctx, `UPDATE app.payment_settings SET shared_shifts=$1,print_receipt_default=$2,
@@ -114,7 +228,7 @@ func (handler *service) saveSettings(_ []string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	saved, err := handler.settings()
+	saved, err := handler.settingsWithRegisters()
 	if err != nil {
 		return nil, err
 	}

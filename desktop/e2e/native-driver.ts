@@ -1,9 +1,32 @@
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import type { Page } from '@playwright/test';
+import {
+  cancelPairingRequest,
+  claimPairing,
+  pairingState,
+  renamePairingRequest,
+  requestPairingCode,
+  serverIdentifier,
+  validPairingAddress,
+} from './pairing';
+import type { PairingSession } from './pairing';
 
 // Servidor Go temporal de la aceptación. Por omisión el puerto 8183; ADEL_BROWSER_SERVER_URL permite
 // ejecutar dos aceptaciones aisladas a la vez con servidores temporales en otros puertos locales.
 const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
+
+// Etapa 9G (§5.1): el puente se identifica como lo hace Rust (with_client_headers de api.rs): la versión de la
+// aplicación (la de config/product.json, que sync-metadata copia a Cargo.toml) y el tipo de cliente.
+const clientHeaders = {
+  'X-Client-Version': (
+    JSON.parse(readFileSync(new URL('../src/generated/product.json', import.meta.url), 'utf8')) as {
+      version: string;
+    }
+  ).version,
+  'X-Client-Kind': 'desktop',
+};
 
 // Terminal temporal que este mismo proceso de Playwright configuró, por token de aprovisionamiento.
 // La aceptación corre con un solo worker: cuando varias especificaciones comparten la base temporal
@@ -83,7 +106,13 @@ export async function requireTestServer() {
   }
 }
 
-export async function installDriver(page: Page) {
+// Etapa 9G, fase C (§4.3): una segunda terminal en otro contexto del navegador usa su propia credencial de
+// dispositivo (enrolada por la prueba) en lugar de la terminal que configuró la base.
+export interface DriverOptions {
+  terminal?: { deviceID: string; deviceToken: string };
+}
+
+export async function installDriver(page: Page, options: DriverOptions = {}) {
   await requireTestServer();
   let fullscreen = true;
   const menuActions = readMenuActions();
@@ -91,6 +120,143 @@ export async function installDriver(page: Page) {
   let menuIndex = 0;
   let menuEnabled = new Set<string>(['view.fullscreen', 'help.shortcuts', 'help.about']);
   let menuPrecheckName = 'precheck';
+  // Etapa 9G (fase A): modalidad de la computadora que simulan installation_state,
+  // set_installation_mode (la misma lista cerrada que installation.rs) y restart_application (recarga
+  // la página, como el reinicio de la aplicación). setInstallation la cambia desde la prueba.
+  const installationModes = ['server-terminal', 'server-only', 'terminal-only'] as const;
+  type InstallationMode = (typeof installationModes)[number];
+  const installation = {
+    chosen: true,
+    mode: 'server-terminal' as InstallationMode,
+    serverDataKept: false,
+    // Etapa 9G (fase B): terminal emparejada con el servidor temporal por pairing_* (abajo).
+    paired: false,
+    serverName: '',
+  };
+  function installationState() {
+    const server = installation.mode !== 'terminal-only';
+    return {
+      chosen: installation.chosen,
+      mode: installation.mode,
+      server_configured: server || installation.paired,
+      can_change: true,
+      service_installed: true,
+      service_enabled: server,
+      server_data_kept: !server && installation.serverDataKept,
+      paired: installation.paired,
+      server_name: installation.paired ? installation.serverName : null,
+    };
+  }
+  // Etapa 9G (fase B): simulación de pairing_start, pairing_status, pairing_rename, pairing_cancel y
+  // pairing_forget de src-tauri/src/pairing.rs contra el servidor temporal (e2e/pairing.ts): misma lista
+  // cerrada de direcciones, mismo compromiso y código. Aprobada la solicitud, la credencial reclamada
+  // sustituye a la del puente (como el almacén seguro con la llave del servidor emparejado) y la
+  // terminal queda emparejada.
+  let pairingSession: PairingSession | null = null;
+  // Etapa 9G (fase C): búsqueda en la red simulada (discovery_search y pairing_start_found de discovery.rs y
+  // pairing.rs). «server» encuentra el servidor temporal con su identificador real; «none», nada; «blocked», la
+  // red no permite buscar. La lista conserva las «direcciones» del lado del puente, como Rust.
+  let discoveryMode: 'server' | 'none' | 'blocked' = 'server';
+  let discovered: { id: string; name: string; paired: boolean }[] = [];
+  function simulateDiscovery() {
+    if (discoveryMode === 'blocked') {
+      return {
+        __bridgeRejection:
+          'No se pudo buscar en la red local. Revisa que esta computadora esté conectada a la red del restaurante y que AD-EL POS tenga permiso de usar la red local; también puedes escribir la dirección.',
+      };
+    }
+    discovered =
+      discoveryMode === 'server'
+        ? [
+            {
+              id: serverIdentifier(),
+              name: 'Aceptación temporal — Computadora de pruebas',
+              paired: installation.paired,
+            },
+          ]
+        : [];
+    return discovered;
+  }
+  function pairingView(session: PairingSession, state: string) {
+    return {
+      state,
+      code: session.code,
+      name: session.name,
+      server_name: session.serverName,
+      expires_at: session.expiresAt,
+    };
+  }
+  async function simulatePairing(command: string, args: Record<string, unknown>) {
+    if (command === 'pairing_start' || command === 'pairing_start_found') {
+      if (installation.mode !== 'terminal-only' || installation.paired) {
+        return { __bridgeRejection: 'Esta terminal ya está emparejada con un servidor.' };
+      }
+      const name = String(args.name ?? '').trim();
+      // Elegida de la búsqueda: solo un identificador de la última lista (React nunca manda una dirección).
+      if (command === 'pairing_start_found') {
+        if (!discovered.some((server) => server.id === String(args.serverId ?? ''))) {
+          return { __bridgeRejection: 'Esa computadora ya no aparece en la red. Vuelve a buscar.' };
+        }
+      } else if (!validPairingAddress(String(args.address ?? ''))) {
+        return {
+          __bridgeRejection:
+            'La dirección debe ser de la red local del restaurante (por ejemplo 192.168.1.20 o caja.local).',
+        };
+      }
+      if (name === '' || name.length > 80) {
+        return {
+          __bridgeRejection: 'Escribe un nombre para esta terminal (máximo 80 caracteres).',
+        };
+      }
+      try {
+        pairingSession = await requestPairingCode(name, 'macOS');
+      } catch (error) {
+        return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
+      }
+      return pairingView(pairingSession, 'pending');
+    }
+    const session = pairingSession;
+    if (command === 'pairing_forget') {
+      installation.paired = false;
+      installation.serverName = '';
+      return null;
+    }
+    if (!session) {
+      if (command === 'pairing_cancel') return null;
+      return { __bridgeRejection: 'No hay un emparejamiento en curso. Pide un código nuevo.' };
+    }
+    if (command === 'pairing_cancel') {
+      pairingSession = null;
+      await cancelPairingRequest(session);
+      return null;
+    }
+    if (command === 'pairing_rename') {
+      const reply = await renamePairingRequest(session, String(args.name ?? ''));
+      if (reply.status !== 200) {
+        const error = reply.body.error as { message?: string } | undefined;
+        return { __bridgeRejection: error?.message ?? 'No se pudo cambiar el nombre.' };
+      }
+      session.name = String(reply.body.name);
+      return pairingView(session, 'pending');
+    }
+    const state = await pairingState(session);
+    if (state !== 'approved') {
+      return pairingView(session, state);
+    }
+    const claimed = await claimPairing(session);
+    pairingSession = null;
+    if (claimed.status !== 200) {
+      const error = claimed.body.error as { message?: string } | undefined;
+      return { __bridgeRejection: error?.message ?? 'No se pudo emparejar esta terminal.' };
+    }
+    deviceID = String(claimed.body.device_id);
+    deviceToken = String(claimed.body.device_token);
+    sessionToken = '';
+    installation.paired = true;
+    installation.serverName = String(claimed.body.server_name);
+    session.name = String(claimed.body.name);
+    return pairingView(session, 'paired');
+  }
   let streamGeneration = 0;
   const streams = new Map<number, AbortController>();
   page.on('close', () => {
@@ -163,6 +329,7 @@ export async function installDriver(page: Page) {
       `${serverURL}/api/v1/reports/export/${report}?${new URLSearchParams({ ...query, format })}`,
       {
         headers: {
+          ...clientHeaders,
           'X-Device-ID': deviceID,
           'X-Device-Token': deviceToken,
           Authorization: `Bearer ${sessionToken}`,
@@ -199,10 +366,39 @@ export async function installDriver(page: Page) {
   function nextSaveDialog(choice: 'save' | 'cancel') {
     saveDialogChoices.push(choice);
   }
+  // Etapa 9G (fase F): carpeta de los respaldos. Simula la operación cerrada choose_backup_directory de
+  // src-tauri/src/backup_folder.rs: solo con el servidor de la propia computadora; la prueba decide qué devuelve el
+  // diálogo nativo de carpeta (nextBackupFolder con una ruta absoluta o «cancel»; sin respuesta, se cancela) y el
+  // puente envía a Go esa ruta con PUT maintenance/backups/directory, que no está en la lista cerrada de api.rs: el
+  // navegador nunca envía una ruta.
+  const backupFolderChoices: string[] = [];
+  async function chooseBackupDirectory() {
+    if (!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(serverURL)) {
+      throw new Error(
+        'La carpeta de los respaldos solo se puede elegir en la computadora principal.',
+      );
+    }
+    const choice = backupFolderChoices.shift() ?? 'cancel';
+    if (choice === 'cancel') {
+      return { status: 200, body: { result: 'cancelled' } };
+    }
+    if (!isAbsolute(choice)) {
+      throw new Error('Elige una carpeta de esta computadora.');
+    }
+    const response = await request('PUT', 'maintenance/backups/directory', { directory: choice });
+    if (response.status !== 200) {
+      return response;
+    }
+    return { status: 200, body: { result: 'saved', state: response.body } };
+  }
+  function nextBackupFolder(choice: string) {
+    backupFolderChoices.push(choice);
+  }
   async function request(method: string, route: string, body?: unknown) {
     const response = await fetch(`${serverURL}/api/v1/${route}`, {
       method,
       headers: {
+        ...clientHeaders,
         'Content-Type': 'application/json',
         'X-Provisioning-Token': provisioning,
         'X-Device-ID': deviceID,
@@ -212,6 +408,16 @@ export async function installDriver(page: Page) {
       body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body),
     });
     const result = await response.json();
+    // Como Rust (api.rs): una terminal revocada o desconocida pierde su credencial y su sesión.
+    const failure = String(result?.error?.code ?? '');
+    if (
+      response.status === 401 &&
+      (failure === 'DEVICE_REVOKED' || failure === 'DEVICE_REQUIRED')
+    ) {
+      deviceID = '';
+      deviceToken = '';
+      sessionToken = '';
+    }
     if (response.ok) {
       if (result.device_token) {
         deviceID = result.device_id;
@@ -226,8 +432,13 @@ export async function installDriver(page: Page) {
     return { status: response.status, body: result };
   }
   const setup = await request('GET', 'setup/status');
-  const prepared = setup.body.configured ? preparedTerminals.get(provisioning) : undefined;
+  const prepared = setup.body.configured
+    ? (options.terminal ?? preparedTerminals.get(provisioning))
+    : undefined;
   if (!setup.body.configured) {
+    if (options.terminal) {
+      throw new Error('La segunda terminal necesita una base ya configurada');
+    }
     await request('POST', 'setup', {
       name: 'Aceptación temporal',
       timezone: 'America/Monterrey',
@@ -349,6 +560,7 @@ export async function installDriver(page: Page) {
       while (!controller.signal.aborted && !page.isClosed()) {
         const response = await fetch(`${serverURL}/api/v1/events?after=${cursor}`, {
           headers: {
+            ...clientHeaders,
             'X-Device-ID': deviceID,
             'X-Device-Token': deviceToken,
             Authorization: `Bearer ${sessionToken}`,
@@ -442,9 +654,49 @@ export async function installDriver(page: Page) {
           has_session: !!sessionToken,
           local_setup_available: false,
           local_enrollment_available: false,
+          paired: installation.paired,
         };
       if (command === 'connection_config')
-        return { installation_mode: 'server-terminal', server_url: serverURL };
+        return {
+          installation_mode: installation.mode,
+          server_url:
+            installation.mode === 'terminal-only' && !installation.paired ? '' : serverURL,
+        };
+      if (command.startsWith('pairing_')) {
+        if (
+          ![
+            'pairing_start',
+            'pairing_start_found',
+            'pairing_status',
+            'pairing_rename',
+            'pairing_cancel',
+            'pairing_forget',
+          ].includes(command)
+        ) {
+          throw new Error('Comando de prueba no autorizado');
+        }
+        return simulatePairing(command, args);
+      }
+      if (command === 'discovery_search') return simulateDiscovery();
+      if (command === 'installation_state') return installationState();
+      if (command === 'set_installation_mode') {
+        const mode = String(args.mode) as InstallationMode;
+        if (!installationModes.includes(mode)) {
+          return { __bridgeRejection: 'Modalidad desconocida.' };
+        }
+        if (installation.mode !== 'terminal-only' && mode === 'terminal-only') {
+          installation.serverDataKept = true;
+        }
+        installation.mode = mode;
+        installation.chosen = true;
+        return null;
+      }
+      if (command === 'restart_application') {
+        setTimeout(() => {
+          if (!page.isClosed()) void page.reload();
+        }, 50);
+        return null;
+      }
       if (command === 'server_snapshot')
         return {
           live: await request('GET', 'health/live'),
@@ -455,6 +707,13 @@ export async function installDriver(page: Page) {
         // Como en Tauri, un rechazo del puente llega al WebView como texto (no como Error).
         try {
           return await exportReport(args);
+        } catch (error) {
+          return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
+        }
+      }
+      if (command === 'choose_backup_directory') {
+        try {
+          return await chooseBackupDirectory();
         } catch (error) {
           return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
         }
@@ -525,5 +784,116 @@ export async function installDriver(page: Page) {
   function menuPrecheck() {
     return menuPrecheckName;
   }
-  return { request, nextSaveDialog, exports, clickMenu, menuState, menuPrecheck, menuActions };
+  // Etapa 9G: estado de la modalidad simulada (antes de abrir la página o entre recargas).
+  function setInstallation(next: { chosen?: boolean; mode?: InstallationMode; paired?: boolean }) {
+    Object.assign(installation, next);
+  }
+  // Etapa 9G (fase C): qué encuentra la búsqueda simulada en la red.
+  function setDiscovery(mode: 'server' | 'none' | 'blocked') {
+    discoveryMode = mode;
+  }
+  // Etapa 9G (fase E): agente de impresión simulado de esta terminal (src-tauri/src/print_agent.rs). Como Rust,
+  // usa solo la credencial de la terminal (sin sesión de usuario), informa las impresoras de su computadora
+  // (PUT print-agent/printers), reclama cada trabajo con una clave de reclamo nueva (POST print-agent/jobs/claim),
+  // lo «entrega» a un lp simulado que nunca imprime ni ejecuta nada (registra los mismos argumentos separados que
+  // Rust: -d cola -o raw -n 1 -t título archivo) y confirma el resultado que elige la prueba (POST
+  // print-agent/jobs/{id}/result). La aplicación real lo hace sola en segundo plano mientras está abierta; aquí la
+  // prueba decide cuándo: mientras no se ejecuta, la terminal está «desconectada» para la cola de impresión.
+  const printAgentCalls: string[][] = [];
+  let printAgentReference = 100;
+  async function agentRequest(method: string, route: string, body: unknown) {
+    const response = await fetch(`${serverURL}/api/v1/${route}`, {
+      method,
+      headers: {
+        ...clientHeaders,
+        'Content-Type': 'application/json',
+        'X-Device-ID': deviceID,
+        'X-Device-Token': deviceToken,
+      },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, body: await response.json() };
+  }
+  async function reportLocalPrinters(
+    printers: { queue: string; model: string; connection: string; printer_type: number | null }[],
+  ) {
+    const response = await agentRequest('PUT', 'print-agent/printers', { printers });
+    if (response.status !== 200) {
+      throw new Error(`Informe de impresoras rechazado: ${JSON.stringify(response.body)}`);
+    }
+    return response.body as { printers: { queue: string; usable: boolean; reason?: string }[] };
+  }
+  async function runPrintAgent(
+    result: { outcome: 'submitted' | 'error' | 'uncertain'; code?: string } = {
+      outcome: 'submitted',
+    },
+  ) {
+    const processed: { id: string; drawer: boolean; size: number; state: string }[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      const claimed = await agentRequest('POST', 'print-agent/jobs/claim', {
+        claim_id: randomUUID(),
+      });
+      if (claimed.status !== 200) {
+        throw new Error(`Reclamo rechazado: ${JSON.stringify(claimed.body)}`);
+      }
+      const job = claimed.body.job as {
+        id: string;
+        attempt_id: string;
+        queue: string;
+        title: string;
+        data: string;
+        drawer: boolean;
+      } | null;
+      if (!job) {
+        break;
+      }
+      const data = Buffer.from(job.data, 'base64');
+      printAgentCalls.push([
+        '-d',
+        job.queue,
+        '-o',
+        'raw',
+        '-n',
+        '1',
+        '-t',
+        job.title,
+        `adel-agent-${job.id}.bin`,
+      ]);
+      printAgentReference += 1;
+      const body =
+        result.outcome === 'submitted'
+          ? {
+              attempt_id: job.attempt_id,
+              outcome: 'submitted',
+              reference: `${job.queue}-${printAgentReference}`,
+            }
+          : result.outcome === 'error'
+            ? { attempt_id: job.attempt_id, outcome: 'error', code: result.code ?? 'unreachable' }
+            : { attempt_id: job.attempt_id, outcome: 'uncertain' };
+      const reported = await agentRequest('POST', `print-agent/jobs/${job.id}/result`, body);
+      if (reported.status !== 200) {
+        throw new Error(`Resultado rechazado: ${JSON.stringify(reported.body)}`);
+      }
+      processed.push({
+        id: job.id,
+        drawer: job.drawer,
+        size: data.length,
+        state: reported.body.state,
+      });
+    }
+    return processed;
+  }
+  return {
+    request,
+    nextSaveDialog,
+    nextBackupFolder,
+    exports,
+    clickMenu,
+    menuState,
+    menuPrecheck,
+    menuActions,
+    setInstallation,
+    setDiscovery,
+    printAgent: { report: reportLocalPrinters, run: runPrintAgent, calls: printAgentCalls },
+  };
 }

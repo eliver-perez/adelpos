@@ -1,5 +1,3 @@
-//go:build windows
-
 package standalone
 
 import (
@@ -23,6 +21,10 @@ import (
 type Cluster struct {
 	layout Layout
 	logger *slog.Logger
+	// temporaryPort, si no es cero, arranca PostgreSQL en otro puerto solo esta vez (pg_ctl -o -p), sin
+	// cambiar el de la configuración ni el del marcador: lo usa el paso de datos de una instalación
+	// anterior mientras el clúster anterior sigue ocupando el puerto definitivo (adopt.go).
+	temporaryPort int
 }
 
 func NewCluster(layout Layout, logger *slog.Logger) *Cluster {
@@ -36,13 +38,13 @@ type owner struct {
 	Port          int    `json:"port"`
 }
 
-// prepareFolders crea la carpeta de datos con su ACL privada y las de bitácoras y respaldos.
+// prepareFolders crea la carpeta de datos privada (ACL propia en Windows, 0700 en macOS) y las de
+// bitácoras y respaldos.
 func (cluster *Cluster) prepareFolders() error {
 	if err := os.MkdirAll(cluster.layout.DataDir, 0700); err != nil {
 		return errors.New("no se pudo crear la carpeta de datos de AD-EL POS")
 	}
-	// La ACL privada de la carpeta se hereda a todo lo que se cree dentro (secretos, clúster, respaldos).
-	if err := fileacl.Protect(cluster.layout.DataDir); err != nil {
+	if err := protectDataDir(cluster.layout.DataDir); err != nil {
 		return err
 	}
 	for _, folder := range []string{cluster.layout.Logs(), cluster.layout.Backups()} {
@@ -75,12 +77,8 @@ func (cluster *Cluster) Ensure(ctx context.Context) error {
 	if err := cluster.prepareFolders(); err != nil {
 		return err
 	}
-	if _, err := os.Stat(cluster.layout.tool("initdb")); err != nil {
-		return errors.New("faltan los binarios de PostgreSQL de la instalación; reinstala AD-EL POS")
-	}
-	// Sin nombres cortos de Windows, una carpeta del programa con acentos impide crear la base (ver tool).
-	if !isASCII(cluster.layout.tool("initdb")) {
-		return errors.New("la carpeta donde está instalado AD-EL POS tiene acentos u otros caracteres que la base de datos no admite al crearse; instálalo en una carpeta sin ellos")
+	if err := checkPostgresTools(cluster.layout); err != nil {
+		return err
 	}
 	owned, err := cluster.checkOwner()
 	if err != nil {
@@ -120,7 +118,8 @@ func (cluster *Cluster) Ensure(ctx context.Context) error {
 		cluster.logger.Error("initdb_failed", "output", tail(output))
 		return errors.New("no se pudo crear la base de datos de AD-EL POS")
 	}
-	// Igual que en macOS: solo TCP de loopback, UTC y SCRAM; en Windows sin socket de Unix.
+	// Igual que en desarrollo: solo TCP de loopback, UTC y SCRAM; sin socket de Unix (en macOS el
+	// servicio tampoco lo necesita: todo se conecta por 127.0.0.1).
 	settings := fmt.Sprintf("\nlisten_addresses = '127.0.0.1'\nport = %d\nunix_socket_directories = ''\n"+
 		"timezone = 'UTC'\npassword_encryption = 'scram-sha-256'\n", cluster.layout.Port)
 	file, err := os.OpenFile(filepath.Join(cluster.layout.Cluster(), "postgresql.conf"), os.O_WRONLY|os.O_APPEND, 0600)
@@ -136,14 +135,20 @@ func (cluster *Cluster) Ensure(ctx context.Context) error {
 	return nil
 }
 
-// Running indica si el postmaster de este clúster está activo, según postmaster.pid y el ejecutable del
-// proceso: un PID reutilizado por otro programa no cuenta.
+// ClusterInitialized indica si la carpeta de datos ya tiene un clúster creado (PG_VERSION).
+func ClusterInitialized(layout Layout) bool {
+	_, err := os.Stat(filepath.Join(layout.Cluster(), "PG_VERSION"))
+	return err == nil
+}
+
+// Running indica si el postmaster de este clúster está activo, según postmaster.pid y el proceso con ese
+// PID (isPostmaster, propio de cada sistema): un PID reutilizado por otro programa no cuenta.
 func (cluster *Cluster) Running() bool {
 	pid, ok := cluster.postmasterPID()
 	if !ok {
 		return false
 	}
-	return samePath(processImage(pid), cluster.layout.tool("postgres"))
+	return cluster.isPostmaster(pid)
 }
 
 func (cluster *Cluster) pidFile() string {
@@ -178,13 +183,17 @@ func (cluster *Cluster) Start(ctx context.Context) error {
 		}
 	}
 	started := time.Now()
-	err := runLogged(ctx, cluster.layout.ControlLog(), cluster.layout.tool("pg_ctl"), []string{
+	arguments := []string{
 		"start", "-w", "-t", "120",
 		"-D", cluster.layout.Cluster(),
 		"-l", cluster.layout.PostgresLog(),
-	})
+	}
+	if cluster.temporaryPort != 0 {
+		arguments = append(arguments, "-o", "-p "+strconv.Itoa(cluster.temporaryPort))
+	}
+	err := runLogged(ctx, cluster.layout.ControlLog(), cluster.layout.tool("pg_ctl"), arguments)
 	if err != nil {
-		return errors.New("PostgreSQL no pudo iniciar; revisa logs\\postgres.log en la carpeta de datos")
+		return errors.New("PostgreSQL no pudo iniciar; revisa " + filepath.Join("logs", "postgres.log") + " en la carpeta de datos")
 	}
 	cluster.logger.Info("cluster_started", "duration_ms", time.Since(started).Milliseconds())
 	return nil

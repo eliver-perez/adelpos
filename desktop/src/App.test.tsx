@@ -7,6 +7,7 @@ import product from './generated/product.json';
 import { useLeaveGuard } from './hooks/useLeaveGuard';
 import type { Identity } from './services/models';
 import { chooseOption } from './testing/select';
+import { serverTerminalInstallation } from './testing/installation';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -73,6 +74,9 @@ beforeEach(() => {
     }
     if (command === 'connection_config') {
       return { installation_mode: 'server-terminal', server_url: 'http://127.0.0.1:8181' };
+    }
+    if (command === 'installation_state') {
+      return serverTerminalInstallation;
     }
     if (command === 'server_snapshot') {
       return {
@@ -225,6 +229,57 @@ describe('acceso y recuperación de la interfaz', () => {
     });
     expect(screen.getByRole('status', { name: 'Servidor: En línea' })).toBeTruthy();
     expect(screen.queryByRole('status', { name: 'Servidor: Sin conexión' })).toBeNull();
+  });
+
+  // Etapa 9G, fase C (§4.2, D11): la capa «Sin conexión con el servidor» bloquea las operaciones sin desmontar la
+  // pantalla (lo escrito se conserva), se reintenta sola con espera creciente y al volver pide a todas las
+  // pantallas que consulten el estado vigente.
+  it('bloquea con la capa «Sin conexión» sin perder lo capturado y vuelve a consultar al reconectar', async () => {
+    hasSession = true;
+    vi.useFakeTimers();
+    const refreshed = vi.fn();
+    window.addEventListener('adel-server-change', refreshed);
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cambiar contraseña' })[0]!);
+    const field = screen.getByLabelText('Contraseña actual') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'lo que escribí' } });
+    expect(screen.queryByRole('alertdialog', { name: 'Sin conexión con el servidor' })).toBeNull();
+    offline = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    const layer = screen.getByRole('alertdialog', { name: 'Sin conexión con el servidor' });
+    expect(layer.textContent).toContain('se conserva en esta pantalla');
+    expect(layer.textContent).toMatch(/Se vuelve a intentar sola en 1 s\./);
+    // El contenido queda montado, con lo escrito, pero inerte (sin clics ni teclado) debajo de la capa.
+    const main = document.querySelector('main.admin-main') as HTMLElement;
+    expect(main.hasAttribute('inert')).toBe(true);
+    expect((screen.getByLabelText('Contraseña actual') as HTMLInputElement).value).toBe(
+      'lo que escribí',
+    );
+    // La barra superior sigue a la vista con «Sin conexión».
+    expect(screen.getByRole('status', { name: 'Servidor: Sin conexión' })).toBeTruthy();
+    // Espera creciente: el segundo intento fallido deja la próxima espera en 2 s.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(layer.textContent).toMatch(/Se vuelve a intentar sola en 2 s\./);
+    refreshed.mockClear();
+    offline = false;
+    fireEvent.click(within(layer).getByRole('button', { name: 'Reintentar' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.queryByRole('alertdialog', { name: 'Sin conexión con el servidor' })).toBeNull();
+    expect(main.hasAttribute('inert')).toBe(false);
+    expect((screen.getByLabelText('Contraseña actual') as HTMLInputElement).value).toBe(
+      'lo que escribí',
+    );
+    expect(refreshed).toHaveBeenCalled();
+    window.removeEventListener('adel-server-change', refreshed);
   });
 
   it('notifica el reemplazo de sesión y vuelve al acceso', async () => {

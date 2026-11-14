@@ -1,6 +1,6 @@
 [package]
 name = "ad-el-pos-desktop"
-version = "0.9.5"
+version = "0.10.0"
 edition = "2021"
 rust-version = "1.99"
 description = "Terminal de escritorio para el servidor local"
@@ -18,6 +18,11 @@ keyring = { version = "=3.6.3", features = ["apple-native", "windows-native"] }
 tokio = { version = "=1.54.1", features = ["time"] }
 # Diálogo nativo «Guardar como» de la exportación de reportes (etapa 9A), usado solo desde Rust.
 tauri-plugin-dialog = "=2.8.3"
+# Etapa 9G (fase B): verificador TLS propio que fija la huella del certificado del servidor emparejado
+# (pairing.rs). Las dos ya estaban en Cargo.lock por reqwest y tauri: sin descargas. rustls sin
+# aws-lc-rs (su opción por omisión), con ring, como lo usa reqwest.
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+sha2 = "=0.10.9"
 
 [profile.release]
 strip = true

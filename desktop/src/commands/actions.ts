@@ -514,6 +514,10 @@ export function commandEntries(
     if (coveredByActions.includes(entry.id) || !screenAuthorized(entry, context.permissions)) {
       continue;
     }
+    // Etapa 9G: la pantalla de «Solo servidor» no se ofrece en las demás modalidades.
+    if (entry.serverOnly) {
+      continue;
+    }
     const route = breadcrumbOf(entry.id)
       .slice(0, -1)
       .map((part) => part.label)

@@ -315,3 +315,39 @@ unidades»).
   `410 ROUTE_RETIRED` sin tocar nada, para que ningún cliente, tampoco la futura aplicación Android, cancele sin motivo
   del catálogo ni autorización. Una cuenta vacía se descarta y una con productos se cancela con su motivo.
 - **Sin verificar**: pantalla táctil física, la ventana nativa y Windows.
+
+## Varias terminales, conexión perdida y pedidos sin conexión · etapa 9G
+
+Fases C y D de la etapa 9G (decisiones D9 y D11; contrato para clientes en [API_V1.md](API_V1.md)).
+
+- **Dos terminales en la misma cuenta**: ninguna sobrescribe en silencio a la otra. Todas las escrituras siguen
+  serializadas por el lock 7820148305 y cada una exige la revisión de la cuenta: la segunda recibe
+  `409 ACCOUNT_CONFLICT` («…otra terminal…») y la vista actualizada; dos confirmaciones simultáneas del mismo borrador
+  envían una sola vez. Mesas, cuentas, envíos a cocina, cobros, turnos y estados de preparación se propagan a todas las
+  terminales por SSE y el sondeo de siempre. **Cada caja tiene su turno**: arqueo, pausa y tope funcionan por caja
+  (comprobado con dos terminales en `operations/stage9g_two_terminals_test.go` y `workflow-stage9g-two-terminals`).
+- **Conexión perdida** (D11): el escritorio sin servidor **no vende**. La capa «Sin conexión con el servidor» bloquea
+  todo debajo de la barra superior sin desmontar la pantalla (lo capturado y no guardado se conserva mientras la
+  ventana siga abierta), reintenta a los 1, 2, 4, 8 y después cada 10 s, y al volver pide de nuevo todo lo visible; la
+  captura recupera su guardado incierto con el mismo `operation_id`. El SSE reanuda con `after`, pero la consulta
+  completa es la garantía.
+- **Recuperación del estado** (`GET restaurant/state`): sesión, permisos vigentes, versión y época del catálogo, mesas
+  y cuentas abiertas con su revisión y sus estados; responde a cualquier sesión válida (las listas en `null` sin el
+  permiso) y una terminal revocada recibe `401 DEVICE_REVOKED`.
+- **«Agotado»**: ver [CATALOG.md](CATALOG.md). El borrador y la apertura de una cuenta rechazan lo que se agrega de un
+  producto agotado; una partida que ya estaba guardada cuando se agotó se puede conservar o reducir (el mesero la
+  quita), y la confirmación la rechaza.
+- **Pedido capturado sin conexión** (para la futura aplicación Android; el escritorio no captura sin conexión):
+  `POST restaurant/offline-orders` con `operation_id`, la versión del catálogo con la que se capturó, la hora de
+  captura y los precios que vio el mesero, hacia una cuenta abierta o una mesa (cuenta nueva). Si nada cambió, entra
+  normalmente. Si cambió algo, `409 ORDER_REQUIRES_CONFIRMATION` con la lista (producto, antes, ahora, motivo): unos
+  cambios se aceptan con la confirmación del mesero (precio distinto, mesa ya ocupada) y otros obligan a corregir el
+  pedido (agotado, eliminado, no disponible, cuenta cerrada, mesa fuera de servicio). El reenvío confirmado usa la misma
+  clave, trae la versión vigente del catálogo y cubre cada cambio vigente; entra **siempre con los precios del
+  servidor**, confirma sus propias partidas sin tocar el borrador de la cuenta y sube su revisión. Un envío tardío del
+  original con la misma clave nunca crea un pedido doble: si el pedido ya entró, el mismo usuario y la misma terminal
+  reciben `409 OFFLINE_ORDER_ALREADY_ACCEPTED` con el resultado. Registro de movimientos:
+  `restaurant.offline_order.accepted` y `restaurant.offline_order.requires_confirmation`; la historia de la cuenta marca
+  el pedido.
+- **Una sesión activa por usuario** (D9): sin cambio; iniciar sesión en otra terminal cierra la anterior.
+- **Sin verificar**: dos computadoras reales en la red y la carga con varias terminales (Fase W).

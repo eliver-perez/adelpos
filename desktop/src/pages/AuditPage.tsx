@@ -14,6 +14,8 @@ const actorKinds: Record<string, string> = {
   local_owner: 'Equipo servidor',
   process: 'Proceso automático',
   migration: 'Actualización del sistema',
+  // Etapa 9G (fase B): terminal nueva que todavía no se empareja.
+  pairing: 'Terminal por emparejar',
 };
 
 // Etapa 9D (§5.1): nombre en palabras del restaurante de las operaciones de «Cancelar cuenta» y de
@@ -32,6 +34,21 @@ const actionLabels: Record<string, string> = {
   'inventory.cancellation_preclassified': 'Cancelación preclasificada como merma',
   // Etapa 9F: «Quitar datos de prueba» (también el intento sin respaldo, con resultado fallido).
   'maintenance.test_data_removed': 'Datos de prueba quitados',
+  // Etapa 9G (fase A): reinicio del servicio del servidor desde Mantenimiento.
+  'maintenance.service_restarted': 'Servidor reiniciado',
+  // Etapa 9G (fase B): emparejamiento y administración de terminales.
+  'device.pairing_requested': 'Terminal nueva pidió su código',
+  'device.pairing_approved': 'Terminal aprobada',
+  'device.pairing_code_failed': 'Código de terminal incorrecto',
+  'device.pairing_rejected': 'Terminal rechazada',
+  'device.pairing_cancelled': 'Terminal canceló su solicitud',
+  'device.paired': 'Terminal emparejada',
+  'device.updated': 'Terminal modificada',
+  'device.revoked': 'Terminal revocada',
+  // Etapa 9G (fase F): respaldos programados y «Respaldar ahora» (también el fallido, con resultado fallido).
+  'maintenance.backup_settings_changed': 'Respaldos automáticos cambiados',
+  'maintenance.backup_directory_changed': 'Carpeta de los respaldos cambiada',
+  'maintenance.backup_created': 'Respaldo manual creado',
   // Etapa 9F (fase B): impresoras (corte de papel incluido), reintentos sin motivo y reimpresiones con
   // motivo, y la configuración de cobro.
   'kitchen.printer.saved': 'Impresora guardada',
@@ -53,6 +70,14 @@ const actionLabels: Record<string, string> = {
   'payments.document_reprinted': 'Reimpresión de un documento',
   'cash.document_retried': 'Reintento de impresión de un documento de caja',
   'cash.document_reprinted': 'Reimpresión de un documento de caja',
+  // Etapa 9G (fase D): «Agotado» desde la captura y su reinicio con el inicio del día, y los pedidos capturados
+  // sin conexión (aceptados y los que volvieron con cambios para que el mesero los confirme).
+  'catalog.product.sold_out': 'Producto marcado como agotado',
+  'catalog.product.available_again': 'Producto disponible otra vez',
+  'catalog.product.sold_out_reset': 'Agotado terminado con el inicio del día',
+  'restaurant.offline_order.accepted': 'Pedido capturado sin conexión aceptado',
+  'restaurant.offline_order.requires_confirmation':
+    'Pedido capturado sin conexión con cambios por confirmar',
 };
 
 export function AuditPage() {

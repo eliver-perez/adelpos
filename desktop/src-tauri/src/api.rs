@@ -6,6 +6,18 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 use tauri::State;
 
+// Identificación del cliente (etapa 9G, §5.1): cada petición a Go lleva la versión de la aplicación y su tipo. Go
+// responde 426 CLIENT_UPDATE_REQUIRED («Actualiza esta terminal») a una versión anterior a la mínima que acepta.
+pub(crate) const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const CLIENT_KIND: &str = "desktop";
+
+// with_client_headers agrega las cabeceras de identificación del cliente a una petición.
+pub(crate) fn with_client_headers(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    request
+        .header("X-Client-Version", CLIENT_VERSION)
+        .header("X-Client-Kind", CLIENT_KIND)
+}
+
 // Tiempo de respuesta de las consultas de reportes (Go responde en hasta 40 s).
 const REPORT_TIMEOUT_SECONDS: u64 = 45;
 // Tiempo de respuesta de «Quitar datos de prueba» (etapa 9F): Go crea antes un respaldo completo de la
@@ -48,6 +60,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "kitchen_create_station" => Some((Method::POST, "kitchen/stations")),
         "kitchen_printers" => Some((Method::GET, "kitchen/printers")),
         "kitchen_create_printer" => Some((Method::POST, "kitchen/printers")),
+        // Etapa 9G (fase E): impresoras que informó cada terminal para su agente de impresión.
+        "kitchen_terminal_printers" => Some((Method::GET, "kitchen/terminal-printers")),
         "kitchen_discovery" => Some((Method::GET, "kitchen/discovery")),
         "kitchen_routes" => Some((Method::GET, "kitchen/routes")),
         "kitchen_targets" => Some((Method::GET, "kitchen/targets")),
@@ -70,6 +84,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "kitchen_rerender" => Some((Method::POST, "kitchen/print-jobs/rerender")),
 
         "setup_status" => Some((Method::GET, "setup/status")),
+        // Etapa 9G (§5.1): versión del servidor para avisar si es más viejo de lo que necesita la aplicación.
+        "version" => Some((Method::GET, "version")),
         "setup" => Some((Method::POST, "setup")),
         "enroll" => Some((Method::POST, "devices/enroll")),
         "enroll_local" => Some((Method::POST, "devices/enroll")),
@@ -95,6 +111,18 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         // Etapa 9F: «Quitar datos de prueba» en el Mantenimiento del administrador (settings.manage).
         "maintenance_test_data" => Some((Method::GET, "maintenance/test-data")),
         "maintenance_remove_test_data" => Some((Method::POST, "maintenance/test-data/remove")),
+        // Etapa 9G, fase A: estado y reinicio del servicio del servidor (settings.manage).
+        "maintenance_service" => Some((Method::GET, "maintenance/service")),
+        "maintenance_service_restart" => Some((Method::POST, "maintenance/service/restart")),
+        // Etapa 9G, fase F: respaldos programados y «Respaldar ahora» (settings.manage). La carpeta de los respaldos no
+        // está aquí: solo la envía backup_folder.rs con la ruta que devuelve el diálogo nativo.
+        "maintenance_backups" => Some((Method::GET, "maintenance/backups")),
+        "maintenance_backups_status" => Some((Method::GET, "maintenance/backups/status")),
+        "maintenance_save_backup_settings" => Some((Method::PUT, "maintenance/backups/settings")),
+        "maintenance_backup_default_directory" => {
+            Some((Method::POST, "maintenance/backups/directory/default"))
+        }
+        "maintenance_backup_now" => Some((Method::POST, "maintenance/backups/run")),
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
@@ -110,6 +138,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "create_register" => Some((Method::POST, "registers")),
         "devices" => Some((Method::GET, "devices")),
         "invite_device" => Some((Method::POST, "devices/invitations")),
+        // Etapa 9G, fase B: solicitudes de emparejamiento y sesiones activas por tipo de dispositivo.
+        "devices_pairing_requests" => Some((Method::GET, "devices/pairing-requests")),
+        "devices_sessions_summary" => Some((Method::GET, "devices/sessions-summary")),
         "sessions" => Some((Method::GET, "sessions")),
         "audit" => Some((Method::GET, "audit")),
         "preferences" => Some((Method::GET, "preferences")),
@@ -315,6 +346,11 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "catalog_duplicate_product" => (
             Method::POST,
             format!("catalog/products/{identifier}/duplicate"),
+        ),
+        // Etapa 9G (§5.4): «Agotado» y «Disponible otra vez» desde la captura.
+        "catalog_product_sold_out" => (
+            Method::POST,
+            format!("catalog/products/{identifier}/sold-out"),
         ),
         "restaurant_save_area" => (Method::PATCH, format!("restaurant/areas/{identifier}")),
         "restaurant_save_table" => (Method::PATCH, format!("restaurant/tables/{identifier}")),
@@ -608,6 +644,17 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "update_register" => (Method::PATCH, format!("registers/{identifier}")),
         "update_device" => (Method::PATCH, format!("devices/{identifier}")),
         "revoke_device" => (Method::POST, format!("devices/{identifier}/revoke")),
+        // Etapa 9G, fase B: configuración de una terminal y aprobación o rechazo de una solicitud de
+        // emparejamiento (Go solo aprueba por la escucha local de la computadora principal).
+        "device_configuration" => (Method::GET, format!("devices/{identifier}/configuration")),
+        "approve_device_pairing" => (
+            Method::POST,
+            format!("devices/pairing-requests/{identifier}/approve"),
+        ),
+        "reject_device_pairing" => (
+            Method::POST,
+            format!("devices/pairing-requests/{identifier}/reject"),
+        ),
         "revoke_session" => (Method::POST, format!("sessions/{identifier}/revoke")),
         // Etapa 8 (fase A): inventario, un solo identificador por ruta.
         "inventory_save_unit" => (Method::PATCH, format!("inventory/units/{identifier}")),
@@ -729,6 +776,8 @@ pub struct LocalState {
     has_session: bool,
     local_setup_available: bool,
     local_enrollment_available: bool,
+    // Etapa 9G (fase B): terminal emparejada; si pierde su autorización (revocada), se empareja de nuevo.
+    paired: bool,
 }
 
 #[tauri::command]
@@ -740,6 +789,11 @@ pub fn authentication_state(state: State<'_, TerminalState>) -> Result<LocalStat
         has_session: credentials.session_token.is_some(),
         local_setup_available: state.provisioning_token().is_some(),
         local_enrollment_available: state.enrollment_code.is_some(),
+        paired: state
+            .config
+            .as_ref()
+            .map(|config| config.paired())
+            .unwrap_or(false),
     })
 }
 
@@ -751,12 +805,14 @@ pub async fn api_request(
     mut body: Option<Value>,
     query: Option<BTreeMap<String, String>>,
 ) -> Result<HTTPResult, String> {
-    let config = state.config.as_ref().map_err(Clone::clone)?;
+    state.config.as_ref().map_err(Clone::clone)?;
     let vault = state.vault()?;
     let client = state.client.as_ref().map_err(Clone::clone)?;
     let mut credentials = vault.read()?;
     let (method, path) = route(&operation, resource_id.as_deref())?;
-    let mut request = client.request(method, format!("{}/api/v1/{path}", config.server_url));
+    // Etapa 9G (fase C): dirección vigente del servidor (la de connection.json o la nueva tras un cambio de IP).
+    let base = state.locator.base();
+    let mut request = with_client_headers(client.request(method, format!("{base}/api/v1/{path}")));
     if let (Some(id), Some(token)) = (&credentials.device_id, &credentials.device_token) {
         request = request
             .header("X-Device-ID", id)
@@ -793,13 +849,39 @@ pub async fn api_request(
     if operation.starts_with("reports_") {
         request = request.timeout(Duration::from_secs(REPORT_TIMEOUT_SECONDS));
     }
-    if operation == "maintenance_remove_test_data" {
+    // «Respaldar ahora» (etapa 9G, fase F) espera el respaldo en Go hasta 115 s, como «Quitar datos de prueba».
+    if operation == "maintenance_remove_test_data" || operation == "maintenance_backup_now" {
         request = request.timeout(Duration::from_secs(MAINTENANCE_TIMEOUT_SECONDS));
     }
     if let Some(body) = body {
         request = request.json(&body);
     }
-    let mut response = request.send().await.map_err(|_| state.connection_error())?;
+    let built = request
+        .build()
+        .map_err(|_| "No se pudo preparar la petición.".to_string())?;
+    let again = built.try_clone();
+    let mut response = match client.execute(built).await {
+        Ok(response) => response,
+        Err(error) => {
+            // Etapa 9G (fase C, §4.1 y D6): una terminal emparejada que no logra conectar con la última dirección
+            // vuelve a buscar su servidor por server_id y, si lo encuentra con la misma huella en otra dirección,
+            // repite la petición allí una sola vez. Solo con un error de conexión: la petición no llegó al
+            // servidor, así que repetirla no duplica nada (las escrituras llevan además su operation_id).
+            let moved = if error.is_connect() {
+                state.locator.relocate(&base).await
+            } else {
+                None
+            };
+            let (Some(next), Some(mut retry)) = (moved, again) else {
+                return Err(state.connection_error());
+            };
+            crate::discovery::rebase(retry.url_mut(), &next)?;
+            client
+                .execute(retry)
+                .await
+                .map_err(|_| state.connection_error())?
+        }
+    };
     let status = response.status().as_u16();
     let mut bytes = Vec::new();
     while let Some(chunk) = response
@@ -1281,6 +1363,16 @@ mod tests {
         assert!(route("kitchen_execute", Some(identifier)).is_err());
         assert!(route("kitchen_job", Some("../../settings")).is_err());
         assert_eq!(route("kitchen_save_settings", None).unwrap().0, Method::PUT);
+        // Etapa 9G (fase E): solo lectura y sin identificador; las rutas del agente de impresión (print-agent/*)
+        // nunca se ofrecen a React: las usa print_agent.rs con la credencial de la terminal.
+        assert_eq!(
+            route("kitchen_terminal_printers", None).unwrap(),
+            (Method::GET, "kitchen/terminal-printers".to_string())
+        );
+        let source = include_str!("api.rs");
+        let operations = &source
+            [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];
+        assert!(!operations.contains(concat!("print-", "agent/")));
     }
 
     #[test]
@@ -1335,6 +1427,39 @@ mod tests {
         assert!(route("catalog_save_groups", None).is_err());
         assert!(route("catalog_delete_everything", Some(identifier)).is_err());
         assert!(route("catalog_image", Some("../../../../private/secrets")).is_err());
+    }
+
+    #[test]
+    fn stage9g_version_and_sold_out_routes_are_closed() {
+        let identifier = "00000000-0000-0000-0000-000000000001";
+        assert_eq!(
+            route("version", None).unwrap(),
+            (Method::GET, "version".to_string())
+        );
+        assert_eq!(
+            route("catalog_product_sold_out", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("catalog/products/{identifier}/sold-out")
+            )
+        );
+        assert!(route("catalog_product_sold_out", None).is_err());
+        assert!(route("catalog_product_sold_out", Some("../sync")).is_err());
+        // La descarga del catálogo y el pedido sin conexión son de la aplicación Android, no del escritorio.
+        assert!(route("catalog_sync", None).is_err());
+        assert!(route("restaurant_offline_order", None).is_err());
+    }
+
+    #[test]
+    fn client_identifies_its_version_and_kind() {
+        assert_eq!(CLIENT_VERSION, env!("CARGO_PKG_VERSION"));
+        assert_eq!(CLIENT_KIND, "desktop");
+        let request =
+            with_client_headers(reqwest::Client::new().get("http://127.0.0.1:8181/api/v1/auth/me"))
+                .build()
+                .unwrap();
+        assert_eq!(request.headers()["X-Client-Version"], CLIENT_VERSION);
+        assert_eq!(request.headers()["X-Client-Kind"], "desktop");
     }
 
     #[test]
@@ -2176,6 +2301,101 @@ mod tests {
             );
         }
         assert!(route("maintenance_backup", None).is_err());
+    }
+
+    #[test]
+    fn stage9g_pairing_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("devices_pairing_requests", None).unwrap(),
+            (Method::GET, "devices/pairing-requests".into())
+        );
+        assert_eq!(
+            route("devices_sessions_summary", None).unwrap(),
+            (Method::GET, "devices/sessions-summary".into())
+        );
+        assert_eq!(
+            route("approve_device_pairing", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("devices/pairing-requests/{identifier}/approve")
+            )
+        );
+        assert_eq!(
+            route("reject_device_pairing", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("devices/pairing-requests/{identifier}/reject")
+            )
+        );
+        assert_eq!(
+            route("device_configuration", Some(identifier)).unwrap(),
+            (Method::GET, format!("devices/{identifier}/configuration"))
+        );
+        assert!(route("approve_device_pairing", Some("../../setup")).is_err());
+        assert!(route("approve_device_pairing", None).is_err());
+        // La terminal que se empareja no pasa por la lista de operaciones: lo hace Rust (pairing.rs).
+        assert!(route("pairing_requests", None).is_err());
+    }
+
+    #[test]
+    fn stage9g_service_routes_are_fixed() {
+        assert_eq!(
+            route("maintenance_service", None).unwrap(),
+            (Method::GET, "maintenance/service".to_string())
+        );
+        assert_eq!(
+            route("maintenance_service_restart", Some("x")).unwrap(),
+            (Method::POST, "maintenance/service/restart".to_string())
+        );
+        assert!(route("maintenance_service_stop", None).is_err());
+        assert!(route("maintenance_service_mode", None).is_err());
+    }
+
+    #[test]
+    fn stage9g_backup_routes_are_fixed_and_never_carry_a_folder() {
+        for (operation, method, path) in [
+            ("maintenance_backups", Method::GET, "maintenance/backups"),
+            (
+                "maintenance_backups_status",
+                Method::GET,
+                "maintenance/backups/status",
+            ),
+            (
+                "maintenance_save_backup_settings",
+                Method::PUT,
+                "maintenance/backups/settings",
+            ),
+            (
+                "maintenance_backup_default_directory",
+                Method::POST,
+                "maintenance/backups/directory/default",
+            ),
+            (
+                "maintenance_backup_now",
+                Method::POST,
+                "maintenance/backups/run",
+            ),
+        ] {
+            assert_eq!(route(operation, None).unwrap(), (method, path.to_string()));
+            assert_eq!(
+                route(operation, Some("../../directory")).unwrap().1,
+                path.to_string()
+            );
+        }
+        // La ruta que guarda una carpeta no está en la lista cerrada de la interfaz: React no puede enviar una ruta.
+        for operation in [
+            "maintenance_backup_directory",
+            "maintenance_save_backup_directory",
+            "maintenance_backups_directory",
+        ] {
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
+        let source = include_str!("api.rs");
+        let table = &source
+            [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];
+        let forbidden = ["\"maintenance/backups/", "directory\")"].concat();
+        assert!(!table.contains(&forbidden));
     }
 
     #[test]

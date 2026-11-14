@@ -113,6 +113,9 @@ func allowed(scope string, permissions []string) bool {
 		// Diseñador de documentos (etapa 9B): plantillas e identidad documental cambiaron, sin
 		// contenido; lo reciben quienes consultan plantillas.
 		"documents": "documents.templates.read",
+		// Catálogo (etapa 9G, decisión D8): cambió el catálogo o un producto se agotó o volvió a estar disponible,
+		// con el producto como agregado y sin precios; lo reciben quienes consultan el catálogo.
+		"catalog": "catalog.read",
 	}[scope]
 	return slices.Contains(permissions, required)
 }

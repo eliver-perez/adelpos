@@ -1,8 +1,7 @@
-//go:build windows
-
 package standalone
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/fileacl"
+	"local/ad-el-pos/server/internal/maintenance"
 )
 
 // databaseEnvironment son las variables de libpq para los programas de PostgreSQL: la contraseña viaja
@@ -49,19 +49,62 @@ func Backup(ctx context.Context, layout Layout, database config.Database, label 
 		name += "-" + label
 	}
 	filename := filepath.Join(layout.Backups(), name+".dump")
-	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
-	if output, err := runCaptured(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl", "--file", filename}, environment); err != nil {
-		_ = os.Remove(filename)
-		return "", fmt.Errorf("no se pudo crear el respaldo: %s", tail(output))
+	if err := DumpFile(ctx, layout, database, filename); err != nil {
+		return "", err
 	}
+	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
 	if _, err := runCaptured(ctx, layout.tool("pg_restore"), []string{"--list", filename}, environment); err != nil {
 		_ = os.Remove(filename)
 		return "", errors.New("el respaldo no se pudo leer; se descartó")
 	}
-	if err := fileacl.Protect(filename); err != nil {
-		return "", err
-	}
 	return filename, nil
+}
+
+// DumpFile crea el respaldo pg_dump (formato custom) de la base de la instalación en filename. Lo usan Backup (manual,
+// antes de migrar y el respaldo de seguridad de restore) y los respaldos programados (etapa 9G, fase F), que eligen la
+// carpeta (la predeterminada, otro disco o una USB). Si algo falla, no deja el archivo.
+func DumpFile(ctx context.Context, layout Layout, database config.Database, filename string) error {
+	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
+	return dumpToFile(ctx, layout, environment, filename)
+}
+
+// dumpToFile ejecuta pg_dump con la salida en un archivo nuevo y privado desde el primer byte (revisión de la fase F):
+// se crea antes con fileacl.CreatePrivate (0600 sin importar la máscara del proceso, sin seguir enlaces ni reemplazar
+// un archivo existente; en Windows con la ACL privada antes de escribir) y pg_dump escribe en su salida estándar. Con
+// --file, pg_dump lo creaba con la máscara del proceso (0644 desde una consola), seguía enlaces y truncaba lo que
+// hubiera, y solo al final se dejaba privado. Si pg_dump falla o el archivo queda vacío, lo borra.
+func dumpToFile(ctx context.Context, layout Layout, environment []string, filename string) error {
+	output, err := fileacl.CreatePrivate(filename)
+	if err != nil {
+		return errors.New("no se pudo crear el archivo de respaldo")
+	}
+	dump := command(ctx, layout.tool("pg_dump"), []string{"--format=custom", "--no-owner", "--no-acl"}, environment)
+	dump.Stdout = output
+	var dumpErrors bytes.Buffer
+	dump.Stderr = &dumpErrors
+	runError := dump.Run()
+	closeError := output.Close()
+	if runError != nil || closeError != nil {
+		_ = os.Remove(filename)
+		return fmt.Errorf("no se pudo crear el respaldo: %s", tail(dumpErrors.Bytes()))
+	}
+	info, err := os.Lstat(filename)
+	if err != nil || info.Size() == 0 {
+		_ = os.Remove(filename)
+		return errors.New("el respaldo quedó vacío; se descartó")
+	}
+	return nil
+}
+
+// VerifyFile lee el catálogo de un respaldo con el pg_restore de la instalación y exige los datos de la tabla de
+// migraciones (maintenance.CheckListing), como los respaldos programados de serve. No borra el archivo.
+func VerifyFile(ctx context.Context, layout Layout, database config.Database, filename string) error {
+	environment := databaseEnvironment(layout.Port, database.User, database.Password, database.Name)
+	output, err := runCaptured(ctx, layout.tool("pg_restore"), []string{"--list", filename}, environment)
+	if err != nil {
+		return fmt.Errorf("el respaldo no se pudo leer: %s", tail(output))
+	}
+	return maintenance.CheckListing(string(output))
 }
 
 // RestoreReport es el resultado del ensayo de restauración: tablas del esquema app con su conteo.
@@ -78,6 +121,12 @@ func tableCounts(ctx context.Context, layout Layout, database string) (map[strin
 		return nil, err
 	}
 	defer connection.Close(context.Background())
+	return countTables(ctx, connection)
+}
+
+// countTables cuenta las filas de todas las tablas del esquema app con una conexión abierta (la del
+// superusuario de la instalación o, al pasar los datos de una instalación anterior, la de su rol).
+func countTables(ctx context.Context, connection *pgx.Conn) (map[string]int, error) {
 	rows, err := connection.Query(ctx, "SELECT tablename FROM pg_tables WHERE schemaname = 'app' ORDER BY tablename")
 	if err != nil {
 		return nil, errors.New("no se pudieron listar las tablas")
