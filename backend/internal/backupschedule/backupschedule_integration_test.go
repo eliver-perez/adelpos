@@ -109,6 +109,19 @@ func runCount(t *testing.T, pool *pgxpool.Pool, condition string) int {
 	return count
 }
 
+// withSuffix son los archivos regulares de la carpeta con esa terminación.
+func withSuffix(t *testing.T, directory, suffix string) []string {
+	t.Helper()
+	found := []string{}
+	for _, name := range names(t, directory) {
+		info, err := os.Lstat(filepath.Join(directory, name))
+		if err == nil && info.Mode().IsRegular() && strings.HasSuffix(name, suffix) {
+			found = append(found, name)
+		}
+	}
+	return found
+}
+
 func saveSettings(t *testing.T, pool *pgxpool.Pool, settings Settings) {
 	t.Helper()
 	ctx := context.Background()
@@ -167,7 +180,7 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		if runCount(t, pool, "kind = 'automatic' AND status = 'succeeded' AND verified") != 1 {
 			t.Fatal("no hubo exactamente un respaldo automático correcto")
 		}
-		last, err := LastBackup(ctx, pool)
+		last, err := LastBackup(ctx, pool, now.now())
 		if err != nil || last == nil || last.Location != "default" || last.FolderName != "predeterminada" {
 			t.Fatalf("último respaldo: %+v %v", last, err)
 		}
@@ -196,7 +209,7 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 	})
 
 	t.Run("retencion", func(t *testing.T) {
-		manual := FileName(target.database, KindManual, now.now(), "abcdef")
+		manual := FileName(target.database, "0a0b0c0d", KindManual, now.now(), "abcdef")
 		touch(t, target.directory, manual)
 		touch(t, target.directory, "notas.txt")
 		saveSettings(t, pool, Settings{Enabled: true, Time: "14:00", Keep: 2})
@@ -204,9 +217,9 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 			now.set(monterrey(t, 2026, 11, day, 14, 1))
 			worker.Tick(ctx)
 		}
-		files, err := regularFiles(target.directory, automaticPattern(target.database))
-		if err != nil || len(files) != 2 {
-			t.Fatalf("respaldos automáticos conservados: %v %v", files, err)
+		files := withSuffix(t, target.directory, "-automatico.dump")
+		if len(files) != 2 {
+			t.Fatalf("respaldos automáticos conservados: %v", files)
 		}
 		left := names(t, target.directory)
 		if !slices.Contains(left, manual) || !slices.Contains(left, "notas.txt") {
@@ -238,11 +251,11 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		saveSettings(t, pool, Settings{Enabled: true, Time: "14:00", Keep: 2, Directory: usb})
 		now.set(monterrey(t, 2026, 11, 18, 14, 1))
 		worker.Tick(ctx)
-		last, err := LastBackup(ctx, pool)
+		last, err := LastBackup(ctx, pool, now.now())
 		if err != nil || last.Status != StatusSucceeded || last.Location != "default" || last.FallbackReason != ReasonMissing {
 			t.Fatalf("respaldo en la predeterminada: %+v %v", last, err)
 		}
-		summary, err := SummaryOf(ctx, pool)
+		summary, err := runner.Summary(ctx, pool)
 		if err != nil || summary.Alert == nil || summary.Alert.Kind != "fallback" || summary.Alert.Reason != ReasonMissing {
 			t.Fatalf("aviso de carpeta no disponible: %+v %v", summary.Alert, err)
 		}
@@ -255,11 +268,11 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		}
 		now.set(monterrey(t, 2026, 11, 19, 14, 1))
 		worker.Tick(ctx)
-		last, err = LastBackup(ctx, pool)
+		last, err = LastBackup(ctx, pool, now.now())
 		if err != nil || last.Location != "custom" || last.FolderName != "Respaldos" || last.Directory != usb {
 			t.Fatalf("respaldo en la carpeta elegida: %+v %v", last, err)
 		}
-		if summary, _ := SummaryOf(ctx, pool); summary.Alert != nil {
+		if summary, _ := runner.Summary(ctx, pool); summary.Alert != nil {
 			t.Fatalf("el aviso siguió: %+v", summary.Alert)
 		}
 		saveSettings(t, pool, Settings{Enabled: true, Time: "14:00", Keep: 2})
@@ -271,12 +284,12 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		})
 		now.set(monterrey(t, 2026, 11, 20, 14, 1))
 		worker.Tick(ctx)
-		summary, err := SummaryOf(ctx, pool)
+		summary, err := runner.Summary(ctx, pool)
 		if err != nil || summary.Alert == nil || summary.Alert.Kind != "failed" || summary.Alert.Reason != FailureVerify ||
 			summary.Alert.Failures != 1 {
 			t.Fatalf("aviso de verificación fallida: %+v %v", summary.Alert, err)
 		}
-		if leftovers, _ := regularFiles(target.directory, partialPattern(target.database)); len(leftovers) != 0 {
+		if leftovers := withSuffix(t, target.directory, ".partial"); len(leftovers) != 0 {
 			t.Fatalf("quedó el respaldo sin verificar: %v", leftovers)
 		}
 		// El reintento espera RetryDelay.
@@ -287,7 +300,7 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		}
 		now.set(now.now().Add(RetryDelay))
 		worker.Tick(ctx)
-		summary, _ = SummaryOf(ctx, pool)
+		summary, _ = runner.Summary(ctx, pool)
 		if summary.Alert == nil || summary.Alert.Failures != 2 || !summary.Alert.Since.Equal(monterrey(t, 2026, 11, 20, 14, 1).UTC()) {
 			t.Fatalf("segundo fallo: %+v", summary.Alert)
 		}
@@ -296,7 +309,7 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		})
 		now.set(now.now().Add(RetryDelay))
 		worker.Tick(ctx)
-		if summary, _ := SummaryOf(ctx, pool); summary.Alert != nil || summary.LastBackup.Status != StatusSucceeded {
+		if summary, _ := runner.Summary(ctx, pool); summary.Alert != nil || summary.LastBackup.Status != StatusSucceeded {
 			t.Fatalf("un respaldo correcto posterior quita el aviso: %+v", summary)
 		}
 	})
@@ -318,25 +331,47 @@ func TestScheduledBackupsWithSimulatedTarget(t *testing.T) {
 		})
 	})
 
-	t.Run("interrumpido", func(t *testing.T) {
+	t.Run("fila_en_curso_huerfana", func(t *testing.T) {
+		// Una ejecución que quedó en curso (el servidor se detuvo a media copia o no pudo registrar el resultado), con
+		// su archivo temporal registrado; en la carpeta hay además un .partial ajeno con el mismo formato.
+		now.set(monterrey(t, 2026, 11, 22, 14, 0))
+		saveSettings(t, pool, Settings{Enabled: true, Time: "14:00", Keep: 2})
+		own := FileName(target.database, "0a0b0c0d", KindAutomatic, now.now(), "a1a1a1") + partialSuffix
+		foreign := FileName(target.database, "ffffffff", KindAutomatic, now.now(), "b2b2b2") + partialSuffix
+		touch(t, target.directory, own)
+		touch(t, target.directory, foreign)
 		var id string
-		err := pool.QueryRow(ctx, `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at)
-            VALUES (gen_random_uuid(), 'automatic', 'running', $1, $1) RETURNING id::text`,
-			monterrey(t, 2026, 11, 22, 14, 0)).Scan(&id)
+		err := pool.QueryRow(ctx, `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at, directory, partial_file)
+            VALUES (gen_random_uuid(), 'automatic', 'running', $1, $1, $2, $3) RETURNING id::text`,
+			now.now(), target.directory, own).Scan(&id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if running, _ := Running(ctx, pool); !running {
+		if running, _ := Running(ctx, pool, now.now()); !running {
 			t.Fatal("no aparece en curso")
 		}
-		now.set(monterrey(t, 2026, 11, 22, 14, 5))
-		if err := runner.RecoverInterrupted(ctx); err != nil {
-			t.Fatal(err)
+		// Un resto viejo ya no se muestra «en curso» ni detiene la programación.
+		if running, _ := Running(ctx, pool, now.now().Add(StaleAfter+time.Minute)); running {
+			t.Fatal("una fila en curso vieja aparece en curso")
 		}
+		now.set(monterrey(t, 2026, 11, 22, 14, 5))
+		// La revisión del trabajador la cierra (el lock está libre) y respalda el día.
+		worker.Tick(ctx)
 		var status, reason string
-		if err := pool.QueryRow(ctx, "SELECT status, failure_reason FROM app.backup_runs WHERE id = $1", id).Scan(&status, &reason); err != nil ||
-			status != StatusFailed || reason != FailureInterrupted {
-			t.Fatalf("interrumpido: %s %s %v", status, reason, err)
+		var partial *string
+		if err := pool.QueryRow(ctx, "SELECT status, failure_reason, partial_file FROM app.backup_runs WHERE id = $1", id).
+			Scan(&status, &reason, &partial); err != nil || status != StatusFailed || reason != FailureInterrupted || partial != nil {
+			t.Fatalf("interrumpido: %s %s %v %v", status, reason, partial, err)
+		}
+		left := names(t, target.directory)
+		if slices.Contains(left, own) {
+			t.Fatal("no se borró el archivo temporal propio")
+		}
+		if !slices.Contains(left, foreign) {
+			t.Fatal("se borró un archivo temporal ajeno")
+		}
+		if runCount(t, pool, "kind = 'automatic' AND status = 'succeeded' AND started_at >= '2026-11-22 20:00+00'") != 1 {
+			t.Fatal("la fila huérfana detuvo el respaldo del día")
 		}
 	})
 
@@ -637,9 +672,9 @@ func TestRealBackupAgainstPostgres(t *testing.T) {
 			t.Fatalf("respaldo automático real: %+v %v", run, err)
 		}
 	}
-	files, err := regularFiles(chosen, automaticPattern(target.DatabaseName()))
-	if err != nil || len(files) != 2 {
-		t.Fatalf("retención real: %v %v", files, err)
+	files := withSuffix(t, chosen, "-automatico.dump")
+	if len(files) != 2 {
+		t.Fatalf("retención real: %v", files)
 	}
 	if _, err := os.Stat(filename); err != nil {
 		t.Fatal("la retención borró el respaldo manual")
@@ -660,5 +695,222 @@ func TestRealBackupAgainstPostgres(t *testing.T) {
 	}
 	if err := target.Verify(ctx, filepath.Join(run.Directory, run.FileName)); err != nil {
 		t.Fatalf("verificación real: %v", err)
+	}
+}
+
+// Revisión de la fase F (hallazgo 1): en una carpeta compartida (una USB o una carpeta de red que usan otra
+// computadora u otra sucursal) la retención solo borra los respaldos automáticos que esta instalación registró, en el
+// orden en que los registró; nunca los de otra instalación aunque tengan el mismo formato y fechas posteriores, nunca
+// un .partial ajeno y nunca el respaldo recién hecho. Los nombres llevan el identificador de la instalación.
+func TestSharedFolderKeepsOtherInstallationsFiles(t *testing.T) {
+	pool, _ := testDatabase(t)
+	configure(t, pool)
+	ctx := context.Background()
+	root := t.TempDir()
+	shared := filepath.Join(root, "usb", "Respaldos")
+	if err := os.MkdirAll(shared, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := newFakeTarget(filepath.Join(root, "predeterminada"))
+	foreign := []string{
+		// Otra instalación con el formato nuevo y fechas posteriores (o un reloj adelantado).
+		target.database + "-ffffffff-20301201T110000Z-cccccc-automatico.dump",
+		target.database + "-ffffffff-20301202T110000Z-dddddd-automatico.dump",
+		// Una instalación anterior a esta revisión (sin identificador) y un respaldo a medias ajeno.
+		target.database + "-20301203T110000Z-eeeeee-automatico.dump",
+		target.database + "-ffffffff-20301204T110000Z-aaaaaa-automatico.dump.partial",
+		target.database + "-ffffffff-20301204T110000Z-bbbbbb-manual.dump",
+	}
+	for _, name := range foreign {
+		touch(t, shared, name)
+	}
+	now := &clock{current: monterrey(t, 2026, 11, 14, 9, 0)}
+	runner := &Runner{Pool: pool, Target: target, Now: now.now, InstallationID: "3f2a9c1b-0d4e-4f5a-8b6c-7d8e9f0a1b2c"}
+	worker := &Worker{Runner: runner}
+	saveSettings(t, pool, Settings{Enabled: true, Keep: 2, Directory: shared})
+	newest := ""
+	for day := 14; day <= 17; day++ {
+		now.set(monterrey(t, 2026, 11, day, 9, 0))
+		worker.Tick(ctx)
+		last, err := LastBackup(ctx, pool, now.now())
+		if err != nil || last == nil || last.Status != StatusSucceeded || last.Directory != shared {
+			t.Fatalf("respaldo del día %d: %+v %v", day, last, err)
+		}
+		if !strings.Contains(last.FileName, "-3f2a9c1b-") {
+			t.Fatalf("el nombre no lleva el identificador de la instalación: %s", last.FileName)
+		}
+		newest = last.FileName
+		left := names(t, shared)
+		if !slices.Contains(left, newest) {
+			t.Fatalf("la retención borró el respaldo recién hecho: %v", left)
+		}
+		for _, name := range foreign {
+			if !slices.Contains(left, name) {
+				t.Fatalf("la retención borró un archivo de otra instalación (%s): %v", name, left)
+			}
+		}
+		if own := withSuffix(t, shared, "-automatico.dump"); len(own) > 2+3 {
+			t.Fatalf("archivos automáticos: %v", own)
+		}
+	}
+	own := []string{}
+	for _, name := range withSuffix(t, shared, "-automatico.dump") {
+		if strings.Contains(name, "-3f2a9c1b-") {
+			own = append(own, name)
+		}
+	}
+	if len(own) != 2 || !slices.Contains(own, newest) {
+		t.Fatalf("respaldos propios conservados: %v", own)
+	}
+	if runCount(t, pool, "removed_at IS NOT NULL") != 2 {
+		t.Fatal("no se anotaron los respaldos propios borrados")
+	}
+	// Sin identidad del servidor, el nombre lleva el installation_id de la base.
+	var installation string
+	if err := pool.QueryRow(ctx, "SELECT installation_id::text FROM app.backup_settings").Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	runner.InstallationID = ""
+	now.set(monterrey(t, 2026, 11, 18, 9, 0))
+	worker.Tick(ctx)
+	last, err := LastBackup(ctx, pool, now.now())
+	if err != nil || !strings.Contains(last.FileName, "-"+InstallationTag(installation)+"-") {
+		t.Fatalf("nombre sin identidad: %+v %v", last, err)
+	}
+}
+
+// Revisión de la fase F (hallazgo 3): un respaldo hecho con el reloj adelantado no detiene la programación ni oculta un
+// fallo posterior al corregir el reloj; sin respaldo correcto en más de un día y dos horas hay aviso «atrasado».
+func TestClockAheadAndOverdueAlert(t *testing.T) {
+	pool, _ := testDatabase(t)
+	configure(t, pool)
+	ctx := context.Background()
+	target := newFakeTarget(filepath.Join(t.TempDir(), "predeterminada"))
+	real := time.Now()
+	now := &clock{current: real.Add(5 * 24 * time.Hour)}
+	runner := &Runner{Pool: pool, Target: target, Now: now.now, InstallationID: "3f2a9c1b-0d4e-4f5a-8b6c-7d8e9f0a1b2c"}
+	worker := &Worker{Runner: runner}
+	// Con el reloj adelantado cinco días se hace un respaldo correcto.
+	worker.Tick(ctx)
+	if runCount(t, pool, "status = 'succeeded'") != 1 {
+		t.Fatal("no se respaldó con el reloj adelantado")
+	}
+	// Se corrige el reloj (un día y tres horas después de configurar): ese respaldo «del futuro» no cuenta.
+	now.set(real.Add(27 * time.Hour))
+	summary, err := runner.Summary(ctx, pool)
+	if err != nil || summary.Alert == nil || summary.Alert.Kind != "overdue" || summary.Alert.Reason != "never" ||
+		summary.LastBackup != nil {
+		t.Fatalf("aviso de respaldo atrasado: %+v %v", summary, err)
+	}
+	plan, err := runner.Plan(ctx, pool)
+	if err != nil || !plan.Due {
+		t.Fatalf("el respaldo del futuro detuvo la programación: %+v %v", plan, err)
+	}
+	// Un fallo después de corregir el reloj se avisa (el orden es el de la base, no el de las fechas).
+	target.set(func(target *fakeTarget) {
+		target.failVerify = true
+	})
+	worker.Tick(ctx)
+	summary, _ = runner.Summary(ctx, pool)
+	if summary.Alert == nil || summary.Alert.Kind != "failed" || summary.LastBackup == nil || summary.LastBackup.Status != StatusFailed {
+		t.Fatalf("fallo después de un respaldo del futuro: %+v", summary)
+	}
+	target.set(func(target *fakeTarget) {
+		target.failVerify = false
+	})
+	now.set(now.now().Add(RetryDelay + time.Minute))
+	worker.Tick(ctx)
+	if summary, _ := runner.Summary(ctx, pool); summary.Alert != nil || summary.LastBackup.Status != StatusSucceeded {
+		t.Fatalf("un respaldo correcto quita el aviso: %+v", summary)
+	}
+	// Dos días sin respaldo correcto (la computadora apagada a la hora del respaldo y al encenderla falla todo lo
+	// demás): aviso «atrasado» con la fecha del último correcto.
+	lastSuccess, _ := LastBackup(ctx, pool, now.now())
+	now.set(now.now().Add(30 * time.Hour))
+	summary, _ = runner.Summary(ctx, pool)
+	if summary.Alert == nil || summary.Alert.Kind != "overdue" || summary.Alert.Reason != "stale" ||
+		!summary.Alert.Since.Equal(lastSuccess.StartedAt) {
+		t.Fatalf("atrasado con un respaldo anterior: %+v", summary.Alert)
+	}
+	// Desactivados no avisan atraso; al activarlos de nuevo se mide desde entonces.
+	saveSettings(t, pool, Settings{Enabled: false, Keep: 30})
+	if summary, _ := runner.Summary(ctx, pool); summary.Alert != nil {
+		t.Fatalf("desactivados: %+v", summary.Alert)
+	}
+	saveSettings(t, pool, Settings{Enabled: true, Keep: 30})
+	now.set(time.Now())
+	if summary, _ := runner.Summary(ctx, pool); summary.Alert != nil {
+		t.Fatalf("recién activados: %+v", summary.Alert)
+	}
+}
+
+// Fallo de verificación: el respaldo que no se puede leer no se conserva (ni con su nombre definitivo ni a medias) y
+// el resultado es «verify_failed»; un respaldo correcto queda verificado con su nombre definitivo. El archivo temporal
+// queda registrado antes de crearse.
+func TestProduceVerifiesBeforeKeepingTheFile(t *testing.T) {
+	pool, _ := testDatabase(t)
+	configure(t, pool)
+	ctx := context.Background()
+	target := newFakeTarget(filepath.Join(t.TempDir(), "respaldos"))
+	runner := &Runner{Pool: pool, Target: target, InstallationID: "3f2a9c1b-0d4e-4f5a-8b6c-7d8e9f0a1b2c", Now: func() time.Time {
+		return time.Date(2026, 11, 14, 11, 0, 0, 0, time.UTC)
+	}}
+	start := func() Run {
+		t.Helper()
+		slot := time.Date(2026, 11, 14, 11, 0, 0, 0, time.UTC)
+		run, err := runner.insertRun(ctx, Run{Kind: KindAutomatic, ScheduledFor: &slot, StartedAt: runner.now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	run := start()
+	result := runner.produce(ctx, run, Settings{Keep: 30})
+	if result.failure != "" || !result.verified || result.size == 0 || !strings.Contains(result.fileName, "-3f2a9c1b-") {
+		t.Fatalf("respaldo correcto: %+v", result)
+	}
+	if left := names(t, target.directory); !slices.Equal(left, []string{result.fileName}) {
+		t.Fatalf("archivos: %v", left)
+	}
+	if !slices.Contains(target.verified, result.fileName+partialSuffix) {
+		t.Fatalf("se verificó antes de darle su nombre definitivo: %v", target.verified)
+	}
+	var recorded string
+	if err := pool.QueryRow(ctx, "SELECT partial_file FROM app.backup_runs WHERE id = $1", run.ID).Scan(&recorded); err != nil ||
+		recorded != result.fileName+partialSuffix {
+		t.Fatalf("archivo temporal registrado: %q %v", recorded, err)
+	}
+	final := runner.finish(run, result)
+	if final.PartialFile != "" || final.Status != StatusSucceeded {
+		t.Fatalf("al terminar se borra el registro del temporal: %+v", final)
+	}
+	target.set(func(target *fakeTarget) {
+		target.failVerify = true
+	})
+	failed := runner.produce(ctx, start(), Settings{Keep: 30})
+	if failed.failure != FailureVerify || failed.verified || failed.fileName != "" {
+		t.Fatalf("verificación fallida: %+v", failed)
+	}
+	if left := names(t, target.directory); !slices.Equal(left, []string{result.fileName}) {
+		t.Fatalf("quedó el respaldo que no se pudo verificar: %v", left)
+	}
+	target.set(func(target *fakeTarget) {
+		target.failVerify = false
+		target.failDump = true
+	})
+	if dump := runner.produce(ctx, start(), Settings{Keep: 30}); dump.failure != FailureDump {
+		t.Fatalf("pg_dump fallido: %+v", dump)
+	}
+	target.set(func(target *fakeTarget) {
+		target.failDump = false
+		target.block = make(chan struct{})
+	})
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if interrupted := runner.produce(canceled, start(), Settings{Keep: 30}); interrupted.failure != FailureInterrupted {
+		t.Fatalf("interrumpido: %+v", interrupted)
+	}
+	if left := names(t, target.directory); len(left) != 1 {
+		t.Fatalf("quedaron restos: %v", left)
 	}
 }

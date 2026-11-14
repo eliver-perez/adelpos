@@ -116,7 +116,23 @@ describe('textos de los respaldos', () => {
     const fallback = alertMessage({ kind: 'fallback', reason: 'missing', since: '', failures: 0 });
     expect(fallback.title).toBe('La carpeta de los respaldos no estaba disponible');
     expect(fallback.description).toContain('¿se desconectó el disco o la USB?');
-    for (const text of [message.description, fallback.description, correct.description]) {
+    const stale = alertMessage({
+      kind: 'overdue',
+      reason: 'stale',
+      since: '2026-11-11T11:00:00Z',
+      failures: 0,
+    });
+    expect(stale.title).toBe('No hay un respaldo reciente de la base de datos');
+    expect(stale.description).toContain('El último respaldo correcto es del');
+    const never = alertMessage({ kind: 'overdue', reason: 'never', since: '', failures: 0 });
+    expect(never.description).toContain('Todavía no hay ningún respaldo correcto.');
+    for (const text of [
+      message.description,
+      fallback.description,
+      correct.description,
+      stale.description,
+      never.description,
+    ]) {
       expect(text).not.toMatch(/\/|pg_|PostgreSQL|\.dump/);
     }
   });
@@ -294,6 +310,18 @@ describe('Mantenimiento › Respaldos', () => {
 });
 
 describe('aviso de respaldos en la pantalla de inicio', () => {
+  it('el aviso de respaldo atrasado se ve como el de un fallo', async () => {
+    summary = {
+      last_backup: backupRun({ started_at: '2026-11-11T11:00:00Z' }),
+      alert: { kind: 'overdue', reason: 'stale', since: '2026-11-11T11:00:00Z', failures: 0 },
+      running: false,
+    };
+    render(<BackupAlertBanner onOpen={vi.fn()} />);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('No hay un respaldo reciente de la base de datos');
+    expect(alert.className).toContain('backup-warning-failed');
+  });
+
   it('sin aviso no muestra nada; con un fallo, el aviso lleva a Mantenimiento', async () => {
     const onOpen = vi.fn();
     const { unmount } = render(<BackupAlertBanner onOpen={onOpen} />);

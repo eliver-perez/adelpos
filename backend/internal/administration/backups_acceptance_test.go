@@ -30,6 +30,7 @@ import (
 type scheduledTarget struct {
 	mutex      sync.Mutex
 	directory  string
+	server     string
 	failVerify bool
 	block      chan struct{}
 	started    chan struct{}
@@ -42,6 +43,10 @@ func (target *scheduledTarget) Backup(ctx context.Context) (string, error) {
 
 func (target *scheduledTarget) DefaultDirectory() string {
 	return target.directory
+}
+
+func (target *scheduledTarget) ProtectedDirectories() []string {
+	return []string{target.server}
 }
 
 func (target *scheduledTarget) DatabaseName() string {
@@ -158,8 +163,21 @@ func TestStage9GBackupRoutes(t *testing.T) {
 	if err := os.WriteFile(tokenFile, []byte(provisioning), 0600); err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
-	target := &scheduledTarget{directory: filepath.Join(root, "predeterminada")}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// La carpeta de datos del servidor (protegida) y, dentro, la predeterminada de los respaldos, como en el servicio.
+	server := filepath.Join(root, "datos-servidor")
+	for _, folder := range []string{filepath.Join(server, "logs"), filepath.Join(server, "postgres", "pg_wal")} {
+		if err := os.MkdirAll(folder, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(server, "postgres", "PG_VERSION"), []byte("18"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	target := &scheduledTarget{directory: filepath.Join(server, "backups"), server: server}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	service := &administration.Service{Pool: pool, ProvisioningFile: tokenFile, Logger: logger}
 	service.ScheduledBackups = backupschedule.NewRunner(pool, target, logger)
@@ -358,7 +376,13 @@ func TestStage9GBackupRoutes(t *testing.T) {
 		if err := os.WriteFile(file, []byte("x"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		for _, directory := range []string{"", "Respaldos", filepath.Join(root, "no-existe"), file, chosen + "\n"} {
+		// También se rechazan las carpetas de los datos del servidor y de la base (directas o por un enlace).
+		toLogs := filepath.Join(root, "atajo")
+		if err := os.Symlink(filepath.Join(server, "logs"), toLogs); err != nil {
+			t.Fatal(err)
+		}
+		for _, directory := range []string{"", "Respaldos", filepath.Join(root, "no-existe"), file, chosen + "\n", server,
+			filepath.Join(server, "logs"), filepath.Join(server, "postgres", "pg_wal"), toLogs} {
 			response := call(admin, "PUT", "maintenance/backups/directory", map[string]string{"directory": directory}, 400)
 			if code(response) != "BACKUP_DIRECTORY_INVALID" {
 				t.Fatalf("carpeta %q: %s", directory, response)
@@ -378,6 +402,17 @@ func TestStage9GBackupRoutes(t *testing.T) {
 		audits := `SELECT count(*) FROM app.audit_events WHERE action = 'maintenance.backup_directory_changed'`
 		if scalar(audits+` AND before_state->>'directory' IS NULL AND after_state->>'directory' = $1`, chosen) != 1 {
 			t.Fatal("no se auditó el cambio de carpeta")
+		}
+		// Un enlace a la misma carpeta se guarda resuelto: no cambia nada ni se audita otra vez.
+		toChosen := filepath.Join(root, "atajo-usb")
+		if err := os.Symlink(chosen, toChosen); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(call(admin, "PUT", "maintenance/backups/directory", map[string]string{"directory": toChosen}, 200), &value); err != nil {
+			t.Fatal(err)
+		}
+		if value.Settings.Directory.Path != chosen || scalar(audits) != 1 {
+			t.Fatalf("carpeta por un enlace: %+v", value.Settings.Directory)
 		}
 		// Elegir la predeterminada es volver a ella.
 		if err := json.Unmarshal(call(admin, "PUT", "maintenance/backups/directory", map[string]string{"directory": target.directory}, 200), &value); err != nil {
