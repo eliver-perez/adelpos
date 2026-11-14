@@ -156,6 +156,7 @@ func routePermission(method string, parts []string) string {
 			"releases": "kitchen.states.read", "tickets": "kitchen.tickets.read",
 			"jobs": "kitchen.queue.read", "history": "kitchen.history.read",
 			"access": "kitchen.stations.manage", "outputs": "kitchen.stations.manage",
+			"terminal-printers": "kitchen.printers.manage",
 		}[resource]
 	}
 	if len(parts) == 1 {

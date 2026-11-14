@@ -69,11 +69,31 @@ func validatePrinter(printer *Printer) error {
 		if printer.AcceptsESCPos {
 			return invalid("La opción «Esta impresora entiende ESC/POS» solo se configura en colas CUPS.")
 		}
-		if strings.ContainsAny(printer.Destination, "\r\n\x00") {
+		if printer.CutterOption != "" {
+			return invalid("El corte de una impresora de otra terminal lo implementa su controlador ESC/POS, no una opción CUPS.")
+		}
+		if printer.AgentDeviceID != nil && *printer.AgentDeviceID == "" {
+			printer.AgentDeviceID = nil
+		}
+		// Etapa 9G (fase E): con su terminal, el destino es el nombre de la cola de esa computadora, que su agente
+		// usa como argumento separado de lp (nunca una ruta ni otros argumentos). Sin terminal (impresoras
+		// anteriores a la 9G y destinos de aceptación de las pruebas) el destino es un texto libre que nunca se usa.
+		if printer.AgentDeviceID != nil {
+			if err := validID(*printer.AgentDeviceID); err != nil {
+				return err
+			}
+			if !queuePattern.MatchString(printer.Destination) {
+				return invalid("Elige una de las impresoras que informó la terminal.")
+			}
+		} else if strings.ContainsAny(printer.Destination, "\r\n\x00") {
 			return invalid("El destino de agente no es válido.")
 		}
 	default:
-		return invalid("Selecciona CUPS, ESC/POS de red o agente futuro.")
+		return invalid("Selecciona CUPS, ESC/POS de red o la impresora de una terminal.")
+	}
+	// Solo una impresora «agent» pertenece a una terminal (CHECK kitchen_printers_agent_device_check de la 0023).
+	if printer.Transport != "agent" {
+		printer.AgentDeviceID = nil
 	}
 	if printer.FallbackID != nil {
 		if err := validID(*printer.FallbackID); err != nil {
@@ -236,6 +256,10 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 	if err := validatePrinter(&printer); err != nil {
 		return nil, err
 	}
+	// Etapa 9G (fase E): la impresora de una terminal se elige de las que esa terminal informó.
+	if err := handler.checkAgentPrinter(&printer, before); err != nil {
+		return nil, err
+	}
 	// Una identidad nueva todavía no puede formar parte de una cadena existente.
 	if printer.FallbackID != nil && len(parts) == 2 {
 		var cycle bool
@@ -257,11 +281,11 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 		}
 		printer.ID = events.NewID()
 		_, err := handler.tx.Exec(handler.ctx, `INSERT INTO app.kitchen_printers(id,name,transport,destination,port,paper_width,
-            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos,"columns",cut_mode,cut_feed_lines)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+            copies,supports_cut,cut,cutter_option,active,fallback_id,accepts_escpos,"columns",cut_mode,cut_feed_lines,agent_device_id)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
 			printer.ID, printer.Name, printer.Transport, printer.Destination, printer.Port, printer.PaperWidth, printer.Copies,
 			printer.SupportsCut, printer.Cut, printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos, printer.Columns,
-			printer.CutMode, printer.CutFeedLines)
+			printer.CutMode, printer.CutFeedLines, printer.AgentDeviceID)
 		if err != nil {
 			return nil, err
 		}
@@ -271,15 +295,15 @@ func (handler *service) savePrinter(parts []string) (any, error) {
 		}
 		_, err := handler.tx.Exec(handler.ctx, `UPDATE app.kitchen_printers SET name=$1,transport=$2,destination=$3,port=$4,
             paper_width=$5,copies=$6,supports_cut=$7,cut=$8,cutter_option=$9,active=$10,fallback_id=$11,accepts_escpos=$12,
-            "columns"=$13,cut_mode=$14,cut_feed_lines=$15,revision=revision+1,updated_at=now() WHERE id=$16`, printer.Name,
+            "columns"=$13,cut_mode=$14,cut_feed_lines=$15,agent_device_id=$16,revision=revision+1,updated_at=now() WHERE id=$17`, printer.Name,
 			printer.Transport, printer.Destination, printer.Port, printer.PaperWidth, printer.Copies, printer.SupportsCut, printer.Cut,
 			printer.CutterOption, printer.Active, printer.FallbackID, printer.AcceptsESCPos, printer.Columns, printer.CutMode,
-			printer.CutFeedLines, printer.ID)
+			printer.CutFeedLines, printer.AgentDeviceID, printer.ID)
 		if err != nil {
 			return nil, err
 		}
 	}
-	saved, err := one[Printer](handler.ctx, handler.tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p WHERE id=$1", printer.ID)
+	saved, err := one[Printer](handler.ctx, handler.tx, printerListQuery+" WHERE p.id=$1", printer.ID)
 	if err != nil {
 		return nil, err
 	}

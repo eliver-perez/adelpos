@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/kitchen"
 )
 
 // devicesQuery es la terminal tal como se audita (antes y después de cada cambio). Desde la etapa 9G
@@ -145,8 +146,9 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 }
 
 // deviceConfiguration reúne lo que se configura de una terminal: pantalla de inicio, caja, teclado, las
-// estaciones que muestra en Cocina (todas o una selección, etapa 9F) y su aviso sonoro. printers queda
-// vacío hasta la fase E (impresoras USB de la terminal con su agente de impresión).
+// estaciones que muestra en Cocina (todas o una selección, etapa 9F) y su aviso sonoro. Desde la fase E de la
+// 9G también sus impresoras: las de AD-EL POS conectadas a ella (printers) y las que informó su computadora para
+// su agente de impresión, con si sirven para tickets (local_printers).
 func deviceConfiguration(ctx context.Context, tx pgx.Tx, deviceID string) (any, error) {
 	device, err := object(ctx, tx, deviceListQuery+" WHERE d.id=$1", deviceID)
 	if err != nil {
@@ -161,12 +163,28 @@ func deviceConfiguration(ctx context.Context, tx pgx.Tx, deviceID string) (any, 
 	if err != nil {
 		return nil, err
 	}
+	sets, err := kitchen.TerminalPrinters(ctx, tx, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	printers := []kitchen.AssignedOutput{}
+	var localPrinters any
+	if len(sets) == 1 {
+		printers = sets[0].Printers
+		localPrinters = map[string]any{
+			"agent_online":  sets[0].AgentOnline,
+			"agent_seen_at": sets[0].AgentSeenAt,
+			"reported_at":   sets[0].ReportedAt,
+			"queues":        sets[0].Queues,
+		}
+	}
 	return map[string]any{
 		"device":               device,
 		"kitchen_all_stations": allStations,
 		"kitchen_sound_alert":  soundAlert,
 		"kitchen_stations":     stations,
-		"printers":             []any{},
+		"printers":             printers,
+		"local_printers":       localPrinters,
 	}, nil
 }
 

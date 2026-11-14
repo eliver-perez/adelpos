@@ -206,10 +206,11 @@ func (handler *service) enqueueJob(ticketID string, printer Printer, originalID 
 	state := "pending"
 	message := ""
 	var result any
-	// Una impresora desactivada o de otra terminal (agente) no puede imprimir: el trabajo queda en
-	// «Requiere intervención» con el motivo en palabras del restaurante (etapa 9F, §4.3). Las precuentas,
-	// los tickets y los documentos de caja ya no llegan aquí con esas impresoras (decisión D4).
-	if !printer.Active || printer.Transport == "agent" {
+	// Una impresora desactivada o de otra terminal sin terminal elegida (anterior a la 9G) no puede imprimir: el
+	// trabajo queda en «Requiere intervención» con el motivo en palabras del restaurante (etapa 9F, §4.3). Las
+	// precuentas, los tickets y los documentos de caja ya no llegan aquí con esas impresoras (decisión D4). Desde
+	// la etapa 9G (fase E) la impresora de una terminal recibe el trabajo pendiente: lo reclama su agente.
+	if !printer.Active || (printer.Transport == "agent" && !printer.AgentPrinter()) {
 		state = "intervention"
 		code := ProblemUnsupported
 		message = unsupportedPrinterMessage

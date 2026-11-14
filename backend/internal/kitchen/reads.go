@@ -13,9 +13,15 @@ func (handler *service) read(parts []string) (any, error) {
 	case "stations":
 		return many[Station](handler.ctx, handler.tx, "SELECT to_jsonb(s) FROM app.kitchen_stations s ORDER BY sort_order,name")
 	case "outputs":
-		return many[map[string]any](handler.ctx, handler.tx, "SELECT jsonb_build_object('id',id,'name',name,'active',active) FROM app.kitchen_printers ORDER BY name")
+		// Etapa 9G (fase E): cada impresora dice en qué terminal está, para elegirla sabiendo dónde sale el papel.
+		return many[map[string]any](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',p.id,'name',p.name,'active',p.active,
+            'terminal_name',d.name) FROM app.kitchen_printers p LEFT JOIN app.devices d ON d.id=p.agent_device_id ORDER BY p.name`)
 	case "printers":
-		return many[Printer](handler.ctx, handler.tx, "SELECT to_jsonb(p) FROM app.kitchen_printers p ORDER BY name")
+		return many[Printer](handler.ctx, handler.tx, printerListQuery+" ORDER BY p.name")
+	case "terminal-printers":
+		// Etapa 9G (fase E): las terminales con las impresoras que informó cada una, para elegir la impresora de
+		// una terminal al registrarla.
+		return TerminalPrinters(handler.ctx, handler.tx, "")
 	case "discovery":
 		return DiscoverPrinters(handler.ctx)
 	case "targets":
@@ -386,7 +392,7 @@ func (handler *service) readJobs(parts []string) (any, error) {
 // exige atención. Nunca el contenido ni el layout.
 var jobListQuery = `SELECT (to_jsonb(j)-'content'-'layout')||jsonb_build_object('printer_name',p.name,
         'ticket_kind',t.kind,'folio',coalesce(t.document->'context'->'folio',t.document->'folio'),
-        'document_title',t.document->>'title','problem',` + JobProblemSQL("j") + `)
+        'document_title',t.document->>'title','problem',` + JobProblemSQL("j") + `,'terminal_name',` + JobTerminalSQL("j") + `)
         FROM app.kitchen_print_jobs j JOIN app.kitchen_printers p ON p.id=j.printer_id
         JOIN app.kitchen_tickets t ON t.id=j.ticket_id`
 
