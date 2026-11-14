@@ -322,6 +322,8 @@ func TestStageTwoAcceptance(t *testing.T) {
 	testKitchenUserStations(t, environment)
 	// Etapa 9G, fase A: estado y reinicio del servicio del servidor (service_host_acceptance_test.go).
 	testServiceStatus(t, environment)
+	// Etapa 9G, fase B: emparejamiento con código, escucha de red y terminales (pairing_acceptance_test.go).
+	testPairingAndTerminals(t, environment)
 	t.Run("failed_login_throttling", func(t *testing.T) {
 		for attempt := 0; attempt < 5; attempt++ {
 			call(primary, "POST", "auth/login", map[string]string{"username": "admin", "password": "incorrecta"}, 401)

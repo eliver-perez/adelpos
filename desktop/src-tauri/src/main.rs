@@ -5,6 +5,7 @@ mod connection;
 mod export;
 mod installation;
 mod menu;
+mod pairing;
 mod realtime;
 mod server_host;
 mod vault;
@@ -15,7 +16,7 @@ mod window_state;
 use connection::{load_config, ConnectionConfig};
 use serde::Serialize;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{Manager, RunEvent, State};
 use vault::Vault;
@@ -31,6 +32,10 @@ pub struct TerminalState {
     host: Option<server_host::ServerHost>,
     // Modalidad de la computadora y servicio del servidor (etapa 9G, fase A; installation.rs).
     installation: installation::Context,
+    // Etapa 9G (fase B): verificador con la huella fijada de una terminal emparejada (avisa si el servidor
+    // cambió de identidad) y el emparejamiento en curso (pairing.rs).
+    pin: Option<Arc<pairing::PinnedVerifier>>,
+    pairing: Mutex<Option<pairing::PairingSession>>,
 }
 
 impl TerminalState {
@@ -64,6 +69,10 @@ impl TerminalState {
     /// Explicación de una petición sin respuesta: la general o, mientras el servidor local de Windows
     /// arranca, que el equipo se está preparando.
     pub fn connection_error(&self) -> String {
+        // Etapa 9G: el servidor emparejado presentó otro certificado; nunca se acepta.
+        if pairing::identity_changed(&self.pin) {
+            return pairing::IDENTITY_CHANGED_MESSAGE.to_string();
+        }
         self.host
             .as_ref()
             .and_then(|host| host.connection_message())
@@ -167,7 +176,22 @@ async fn server_snapshot(state: State<'_, TerminalState>) -> Result<Snapshot, St
     })
 }
 
-fn client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
+/// Cliente HTTP de la terminal: con un servidor emparejado, TLS con la huella fijada (etapa 9G, pairing.rs);
+/// si no, el de siempre (loopback o una CA local configurada).
+fn client(
+    config: &ConnectionConfig,
+) -> Result<(reqwest::Client, Option<Arc<pairing::PinnedVerifier>>), String> {
+    if let Some(fingerprint) = config.server_fingerprint.as_deref() {
+        let pinned = pairing::fingerprint_from_hex(fingerprint)
+            .ok_or("La conexión con el servidor emparejado no es válida.")?;
+        let verifier = Arc::new(pairing::PinnedVerifier::pinned(pinned));
+        let client = pairing::pinned_client(Arc::clone(&verifier))?;
+        return Ok((client, Some(verifier)));
+    }
+    unpinned_client(config).map(|client| (client, None))
+}
+
+fn unpinned_client(config: &ConnectionConfig) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(12))
         .redirect(reqwest::redirect::Policy::none())
@@ -208,7 +232,9 @@ fn main() {
         .setup(|app| {
             let config = load_config(app.path().app_config_dir().ok());
             let installation = installation::Context::detect(app.path().app_config_dir().ok());
-            let client = config.as_ref().map_err(Clone::clone).and_then(client);
+            let prepared = config.as_ref().map_err(Clone::clone).and_then(client);
+            let pin = prepared.as_ref().ok().and_then(|(_, pin)| pin.clone());
+            let client = prepared.map(|(client, _)| client);
             let vault = Arc::new(OnceLock::new());
             let pending_vault = Arc::clone(&vault);
             let vault_config = config.clone();
@@ -223,7 +249,8 @@ fn main() {
                         if value.awaiting_server() {
                             return Err(AWAITING_SERVER_MESSAGE.to_string());
                         }
-                        Vault::open(&value.server_url, &value.credential_namespace)
+                        // Etapa 9G: la llave de un servidor emparejado es su identificador.
+                        Vault::open(&value.credential_server(), &value.credential_namespace)
                     });
                 let _ = pending_vault.set(opened);
             });
@@ -246,6 +273,8 @@ fn main() {
                 events_generation: Arc::new(AtomicU64::new(0)),
                 host,
                 installation,
+                pin,
+                pairing: Mutex::new(None),
             });
             window_check::start(app.handle().clone());
             // Windows: la ventana recuerda tamaño, posición y pantalla completa (etapa 9E, §3.7).
@@ -268,6 +297,11 @@ fn main() {
             installation::installation_state,
             installation::set_installation_mode,
             installation::restart_application,
+            pairing::pairing_start,
+            pairing::pairing_status,
+            pairing::pairing_rename,
+            pairing::pairing_cancel,
+            pairing::pairing_forget,
         ])
         .build(tauri::generate_context!())
         .expect("No se pudo iniciar la aplicación de escritorio")
@@ -300,6 +334,8 @@ mod startup_tests {
                 chosen: true,
                 service: None,
             },
+            pin: None,
+            pairing: Mutex::new(None),
         };
         assert!(state
             .vault()

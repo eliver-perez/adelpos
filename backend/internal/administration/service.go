@@ -43,6 +43,13 @@ type Service struct {
 	// Host informa el estado del servicio del sistema y permite reiniciarlo (etapa 9G, fase A;
 	// service_host.go). Sin valor (serve y pruebas), el servidor no es un servicio administrado.
 	Host HostControl
+	// Identity es la identidad del servidor para emparejar terminales (etapa 9G, fase B; pairing.go): su
+	// identificador y la huella SPKI del certificado de la escucha de red. Sin valor no se empareja.
+	Identity *ServerIdentity
+	// NetworkPort es el puerto de la escucha HTTPS de la red local (0: sin escucha de red, como «serve» de
+	// desarrollo sin network_listen_address o Windows hasta la Fase W). La computadora principal lo
+	// muestra en Terminales junto a sus direcciones para emparejar a mano.
+	NetworkPort int
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once
@@ -63,7 +70,14 @@ type Request struct {
 	DeviceToken       string
 	SessionToken      string
 	ProvisioningToken string
-	Local             bool
+	// Local: la petición llegó por la escucha de loopback (nunca por la escucha de red, aunque venga de
+	// la propia computadora; etapa 9G, D1).
+	Local bool
+	// SourceAddress es la IP de origen de la conexión (límite de solicitudes de emparejamiento por
+	// origen, etapa 9G) y PairingSecret el secreto de la solicitud (X-Pairing-Secret) con el que la
+	// terminal que se empareja consulta su solicitud.
+	SourceAddress string
+	PairingSecret string
 	// IfNoneMatch es la cabecera del mismo nombre (etapa 9G): la imagen binaria del catálogo responde 304 si coincide.
 	IfNoneMatch string
 }
@@ -257,7 +271,16 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 		return service.setup(ctx, tx, request)
 	}
 	if route == "devices/enroll" && request.Method == "POST" {
+		// Etapa 9G (§0-B, «ninguna terminal se conecta sin emparejarse»): el código de 43 caracteres solo
+		// autoriza una terminal en la propia computadora; las de otras computadoras se emparejan con código.
+		if !request.Local {
+			return nil, &Fault{Status: 403, Code: "ENROLLMENT_LOCAL_ONLY", Message: "Las terminales de otras computadoras se emparejan con el código que muestran al buscar el servidor."}
+		}
 		return enroll(ctx, tx, request)
+	}
+	// Emparejamiento con código (etapa 9G, fase B): la terminal nueva todavía no tiene credencial.
+	if strings.HasPrefix(route, "pairing/") {
+		return service.pairingPublic(ctx, tx, request, route)
 	}
 	if err := authenticateDevice(ctx, tx, request); err != nil {
 		return nil, err

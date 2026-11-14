@@ -3346,3 +3346,74 @@ Decisiones D8, D9 y D12 del coordinador. Contrato OpenAPI 3.1 de la API para cli
 Puente nativo (`desktop/src-tauri/src/api.rs`): operaciones nuevas `version` (`GET version`) y `catalog_product_sold_out`
 (`POST catalog/products/{id}/sold-out`, con identificador validado); Rust envía `X-Client-Version` (la versión de
 `Cargo.toml`) y `X-Client-Kind: desktop` en `api_request`, el canal de eventos y la exportación de reportes.
+
+## Etapa 9G · emparejamiento de terminales y conexión cifrada (fase B)
+
+Decisiones D1, D2, D5, D6 y D9 de [docs/ETAPA_9G_AVANCE.md](docs/ETAPA_9G_AVANCE.md). Esquema 23 (sección B de la
+`0023`). Sin permisos nuevos: `devices.read` y `devices.manage`.
+
+### Escuchas e identidad del servidor
+
+- **HTTP local** en `listen_address` (`127.0.0.1:8181`) para la ventana de la propia computadora, como siempre.
+- **HTTPS de la red local** (`lanlistener`): el servicio de macOS la abre en `:8443` (todas las interfaces, IPv4 e
+  IPv6; `host --network-listen D|off` solo en pruebas; con `ADEL_TEST_MODE=1` sin el indicador no se abre); `serve`
+  solo con `network_listen_address` en la configuración (vacía por omisión; todas las interfaces, loopback o IP
+  privada, nunca el puerto de `listen_address`). Acepta solo orígenes loopback, RFC 1918, enlace local y ULA (los demás
+  se cierran al aceptarlos, antes de TLS), TLS ≥ 1.2, mismas rutas, plazos y SSE que la escucha local. Windows no la
+  abre hasta la Fase W.
+- **«Local»** = la petición llegó por la escucha de loopback. Lo que llega por la escucha HTTPS de red **nunca** es
+  local, aunque venga de `127.0.0.1`: ahí se rechazan `POST setup` (403), `POST devices/enroll`
+  (`403 ENROLLMENT_LOCAL_ONLY`, también desde esta etapa para cualquier origen no local) y la aprobación o el rechazo
+  de una solicitud de emparejamiento (`403 PAIRING_LOCAL_ONLY`, auditado como `access.denied`).
+- **Identidad**: carpeta `identity/` junto a `server.json` (`/Library/Application Support/AD-EL POS/identity` en el
+  servicio, `.local/identity` en desarrollo): `identity.json` (`server_id`, UUID v4), `server-cert.pem` (ECDSA P-256
+  autofirmado, 30 años) y `server-key.pem` (0600; carpeta 0700; ACL privada en Windows). Se crea al primer arranque y
+  **nunca se reemplaza sola** (incompleta o dañada: el servidor no arranca). Huella = SHA-256 del SPKI en hexadecimal.
+
+### Rutas de la terminal que se empareja (sin credencial de dispositivo)
+
+Todas responden `503 PAIRING_UNAVAILABLE` sin identidad. Las de una solicitud exigen `X-Pairing-Secret` (43
+caracteres, entregado al crearla); id desconocido o secreto distinto → `404 PAIRING_NOT_FOUND`.
+
+| Método y ruta                       | Cuerpo                                                                                                                                      | Respuesta                                                                                                                                                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST pairing/requests`             | `{name (1–80), device_kind (desktop\|android\|kitchen), os (1–80), app_version (1–40), commitment (SHA-256 hex del número de la terminal)}` | `{request_id, server_nonce (hex 32 bytes), pairing_secret, expires_at (+5 min), server_id, server_name, name}`. `409 SETUP_REQUIRED` sin establecimiento; `429 PAIRING_RATE_LIMITED` (5 por origen en 10 min) o `429 PAIRING_BUSY` (20 abiertas). |
+| `POST pairing/requests/{id}/reveal` | `{terminal_nonce (hex 32 bytes)}`                                                                                                           | `{state: "pending", expires_at}`. Si no corresponde al compromiso: `400 PAIRING_COMMITMENT_MISMATCH` y la solicitud queda rechazada. `409 PAIRING_ALREADY_REVEALED`, `PAIRING_EXPIRED`…                                                           |
+| `GET pairing/requests/{id}`         | —                                                                                                                                           | `{state: pending\|approved\|claimed\|rejected\|cancelled\|expired, expires_at, name}`                                                                                                                                                             |
+| `POST pairing/requests/{id}/claim`  | `{}`                                                                                                                                        | Una sola vez: `{device_id, device_token, server_id, server_name, name}`. Después `409 PAIRING_ALREADY_CLAIMED` sin token; sin aprobar `409 PAIRING_NOT_APPROVED`; vencida `409 PAIRING_EXPIRED` (aprobada, 5 min para reclamar).                  |
+| `POST pairing/requests/{id}/name`   | `{name}`                                                                                                                                    | Solo pendiente: `{state, name}`                                                                                                                                                                                                                   |
+| `POST pairing/requests/{id}/cancel` | `{}`                                                                                                                                        | `{state: "cancelled"}` (o el estado final si ya terminó)                                                                                                                                                                                          |
+
+Código de 6 dígitos (no viaja ni se guarda): `SHA-256(huella SPKI ‖ nT ‖ nS ‖ id)` con los cuatro campos en binario
+(32 + 32 + 32 + 16 bytes), primeros 8 bytes big-endian módulo 10⁶, con ceros a la izquierda (`PairingCode` en
+`administration/pairing.go`, `pairing_code` en `pairing.rs`, vector de prueba común `166101`).
+
+### Rutas de administración (con sesión)
+
+| Método y ruta                                | Permiso                  | Cuerpo                    | Respuesta                                                                                                                                                                                                                                                                                |
+| -------------------------------------------- | ------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET devices/pairing-requests`               | `devices.read`           | —                         | `{requests: [{id, name, device_kind, os, app_version, created_at, expires_at, ready, attempts_left}], approve_here}`; solo por la escucha local agrega `network: {available, port, addresses}` (IPv4 privadas y nombre `.local` para emparejar a mano).                                  |
+| `POST devices/pairing-requests/{id}/approve` | `devices.manage` + local | `{code: "123456", name?}` | `{state: "approved", name}`. Código incorrecto: `400 PAIRING_CODE_INVALID` con `details.attempts_left` (se conserva el intento); al quinto `409 PAIRING_ATTEMPTS_EXCEEDED` y la solicitud queda rechazada; `409 PAIRING_NOT_READY` (sin revelar), `PAIRING_EXPIRED`, `PAIRING_REJECTED`… |
+| `POST devices/pairing-requests/{id}/reject`  | `devices.manage` + local | `{}`                      | `{state: "rejected"}`                                                                                                                                                                                                                                                                    |
+| `GET devices/sessions-summary`               | `devices.read`           | —                         | `{by_kind: {desktop, android, kitchen}, total, limited: false}`: sesiones vigentes de terminales no revocadas por tipo; no limita nada.                                                                                                                                                  |
+| `GET devices/{id}/configuration`             | `devices.read`           | —                         | `{device, kitchen_all_stations, kitchen_sound_alert, kitchen_stations: [{id, name, active}], printers: []}` (impresoras de la terminal: fase E).                                                                                                                                         |
+
+`GET devices` agrega `kind`, `os`, `app_version`, `paired_at`, `online` (petición en los últimos 2 minutos, no revocada)
+y `current_user` (nombre del usuario con la sesión vigente más reciente en la terminal, nunca `sa`). Auditoría:
+`device.pairing_requested` (autor `pairing`), `device.pairing_approved`, `device.pairing_code_failed`
+(`success=false`), `device.pairing_rejected`, `device.pairing_cancelled` y `device.paired` (autor: la terminal nueva).
+
+### Puente nativo y conexión de la terminal
+
+- Operaciones nuevas en `api.rs`: `devices_pairing_requests`, `devices_sessions_summary`, `device_configuration`,
+  `approve_device_pairing` y `reject_device_pairing`. `authentication_state` agrega `paired`; `installation_state`
+  agrega `paired` y `server_name`.
+- Comandos de Tauri nuevos (simulados en `native-driver.ts`): `pairing_start {address, name}` (Rust valida la dirección:
+  HTTPS a una IPv4 privada o de enlace local, IPv6 ULA o de enlace local, o un nombre `.local`; puerto 8443 si no se
+  indica), `pairing_status`, `pairing_rename {name}`, `pairing_cancel` y `pairing_forget`; devuelven
+  `{state, code, name, server_name, expires_at}` sin secretos.
+- `connection.json` de una terminal emparejada (solo Rust, lista cerrada): `installation_mode: "terminal-only"`,
+  `server_url` (última dirección, `https://…`), `server_id`, `server_fingerprint` (hex) y `server_name`; sin
+  `ca_certificate`. TLS con verificador propio (`rustls`): compara la huella SPKI e ignora nombre e IP, verifica la
+  firma del intercambio y no reanuda sesiones. Credencial en el almacén seguro con la cuenta
+  `adel-server:{server_id}|{perfil}`; la de la computadora principal (`http://127.0.0.1:8181|main`) no cambia.

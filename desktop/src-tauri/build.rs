@@ -15,6 +15,11 @@ fn main() {
             "installation_state",
             "set_installation_mode",
             "restart_application",
+            "pairing_start",
+            "pairing_status",
+            "pairing_rename",
+            "pairing_cancel",
+            "pairing_forget",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

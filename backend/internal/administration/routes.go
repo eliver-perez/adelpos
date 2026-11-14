@@ -168,6 +168,14 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "settings/long-open-hours" {
 		return longOpenHoursSettings(ctx, tx, request, principal)
 	}
+	// Etapa 9G, fase B: solicitudes de emparejamiento y sesiones activas por tipo de dispositivo
+	// (pairing.go y devices.go).
+	if route == "devices/pairing-requests" || strings.HasPrefix(route, "devices/pairing-requests/") {
+		return service.pairingAdministration(ctx, tx, request, principal, route)
+	}
+	if route == "devices/sessions-summary" && request.Method == "GET" {
+		return sessionsSummary(ctx, tx, principal)
+	}
 	parts := strings.Split(route, "/")
 	if len(parts) > 1 && parts[1] != "invitations" && !identifierPattern.MatchString(parts[1]) {
 		return nil, invalid("El identificador no es válido.")

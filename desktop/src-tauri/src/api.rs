@@ -127,6 +127,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "create_register" => Some((Method::POST, "registers")),
         "devices" => Some((Method::GET, "devices")),
         "invite_device" => Some((Method::POST, "devices/invitations")),
+        // Etapa 9G, fase B: solicitudes de emparejamiento y sesiones activas por tipo de dispositivo.
+        "devices_pairing_requests" => Some((Method::GET, "devices/pairing-requests")),
+        "devices_sessions_summary" => Some((Method::GET, "devices/sessions-summary")),
         "sessions" => Some((Method::GET, "sessions")),
         "audit" => Some((Method::GET, "audit")),
         "preferences" => Some((Method::GET, "preferences")),
@@ -630,6 +633,17 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "update_register" => (Method::PATCH, format!("registers/{identifier}")),
         "update_device" => (Method::PATCH, format!("devices/{identifier}")),
         "revoke_device" => (Method::POST, format!("devices/{identifier}/revoke")),
+        // Etapa 9G, fase B: configuración de una terminal y aprobación o rechazo de una solicitud de
+        // emparejamiento (Go solo aprueba por la escucha local de la computadora principal).
+        "device_configuration" => (Method::GET, format!("devices/{identifier}/configuration")),
+        "approve_device_pairing" => (
+            Method::POST,
+            format!("devices/pairing-requests/{identifier}/approve"),
+        ),
+        "reject_device_pairing" => (
+            Method::POST,
+            format!("devices/pairing-requests/{identifier}/reject"),
+        ),
         "revoke_session" => (Method::POST, format!("sessions/{identifier}/revoke")),
         // Etapa 8 (fase A): inventario, un solo identificador por ruta.
         "inventory_save_unit" => (Method::PATCH, format!("inventory/units/{identifier}")),
@@ -751,6 +765,8 @@ pub struct LocalState {
     has_session: bool,
     local_setup_available: bool,
     local_enrollment_available: bool,
+    // Etapa 9G (fase B): terminal emparejada; si pierde su autorización (revocada), se empareja de nuevo.
+    paired: bool,
 }
 
 #[tauri::command]
@@ -762,6 +778,11 @@ pub fn authentication_state(state: State<'_, TerminalState>) -> Result<LocalStat
         has_session: credentials.session_token.is_some(),
         local_setup_available: state.provisioning_token().is_some(),
         local_enrollment_available: state.enrollment_code.is_some(),
+        paired: state
+            .config
+            .as_ref()
+            .map(|config| config.paired())
+            .unwrap_or(false),
     })
 }
 
@@ -2232,6 +2253,41 @@ mod tests {
             );
         }
         assert!(route("maintenance_backup", None).is_err());
+    }
+
+    #[test]
+    fn stage9g_pairing_routes_are_closed() {
+        let identifier = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            route("devices_pairing_requests", None).unwrap(),
+            (Method::GET, "devices/pairing-requests".into())
+        );
+        assert_eq!(
+            route("devices_sessions_summary", None).unwrap(),
+            (Method::GET, "devices/sessions-summary".into())
+        );
+        assert_eq!(
+            route("approve_device_pairing", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("devices/pairing-requests/{identifier}/approve")
+            )
+        );
+        assert_eq!(
+            route("reject_device_pairing", Some(identifier)).unwrap(),
+            (
+                Method::POST,
+                format!("devices/pairing-requests/{identifier}/reject")
+            )
+        );
+        assert_eq!(
+            route("device_configuration", Some(identifier)).unwrap(),
+            (Method::GET, format!("devices/{identifier}/configuration"))
+        );
+        assert!(route("approve_device_pairing", Some("../../setup")).is_err());
+        assert!(route("approve_device_pairing", None).is_err());
+        // La terminal que se empareja no pasa por la lista de operaciones: lo hace Rust (pairing.rs).
+        assert!(route("pairing_requests", None).is_err());
     }
 
     #[test]

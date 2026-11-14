@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"local/ad-el-pos/server/internal/identity"
 	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/lanlistener"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/maintenance"
@@ -62,6 +64,9 @@ func run(logger *slog.Logger) error {
 	flags.IntVar(&host.pgPort, "pg-port", 0, "puerto de PostgreSQL de una carpeta de datos nueva (pruebas)")
 	flags.StringVar(&host.listen, "listen", "", "dirección de Go de una carpeta de datos nueva (pruebas)")
 	flags.StringVar(&host.fromConfig, "from-config", "", "server.json de la instalación anterior (adopt-legacy)")
+	// Etapa 9G, fase B: escucha HTTPS de la red local del servicio de macOS (por omisión :8443; «off» la
+	// apaga). Las pruebas indican una dirección de loopback; en modo de pruebas sin este indicador no se abre.
+	flags.StringVar(&host.networkListen, "network-listen", "", "escucha HTTPS de la red local del servicio (pruebas)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -148,7 +153,32 @@ func run(logger *slog.Logger) error {
 		logger.Info("migrations_completed", "applied", count)
 		return nil
 	}
-	return serveHTTP(ctx, logger, cfg, pool, application, cfg.TestMode)
+	// Etapa 9G, fase B: identidad del servidor junto a la configuración (.local/identity en desarrollo) y,
+	// si la configuración la pide, la escucha HTTPS de la red local.
+	network := networkOptions{
+		Address:     cfg.NetworkListenAddress,
+		IdentityDir: filepath.Join(filepath.Dir(*filename), localsetup.IdentityFolder),
+	}
+	return serveHTTP(ctx, logger, cfg, pool, application, cfg.TestMode, network)
+}
+
+// networkOptions son la carpeta de la identidad del servidor (certificado propio y server_id, etapa 9G) y la
+// escucha HTTPS de la red local (vacía: sin escucha de red).
+type networkOptions struct {
+	Address     string
+	IdentityDir string
+}
+
+// loadIdentity crea la identidad del servidor la primera vez o la carga (nunca la reemplaza) y la entrega al
+// servicio para el emparejamiento.
+func loadIdentity(logger *slog.Logger, application *administration.Service, directory string) (localsetup.ServerIdentity, error) {
+	loaded, err := localsetup.EnsureIdentity(directory)
+	if err != nil {
+		return localsetup.ServerIdentity{}, err
+	}
+	application.Identity = &administration.ServerIdentity{ServerID: loaded.ServerID, Fingerprint: loaded.Fingerprint}
+	logger.Info("server_identity_ready", "server_id", loaded.ServerID, "fingerprint", loaded.FingerprintHex())
+	return loaded, nil
 }
 
 // newApplication arma el servicio de administración que comparten serve y el modo host de Windows. El
@@ -170,13 +200,21 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 // (SIGTERM en macOS, también el servicio al reiniciarse o al dejar de ser servidor; evento de parada o
 // cierre de la aplicación en Windows) y cierra en orden. testMode
 // lo informa /api/v1/version (etapa 9F): test_mode de la configuración o ADEL_TEST_MODE en el host.
-func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool *pgxpool.Pool, application *administration.Service, testMode bool) error {
+func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool *pgxpool.Pool, application *administration.Service, testMode bool, network networkOptions) error {
 	probe := func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}
+	serverIdentity, err := loadIdentity(logger, application, network.IdentityDir)
+	if err != nil {
+		return err
+	}
+	if err := config.CheckNetworkAddress(network.Address, cfg.ListenAddress); err != nil {
+		return err
+	}
+	handler := httpapi.NewWithOptions(httpapi.Options{TestMode: testMode}, probe, cfg.AllowedOrigins, logger, application)
 	server := &http.Server{
 		Addr:              cfg.ListenAddress,
-		Handler:           httpapi.NewWithOptions(httpapi.Options{TestMode: testMode}, probe, cfg.AllowedOrigins, logger, application),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
@@ -188,13 +226,34 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	if err != nil {
 		return errors.New("no se pudo abrir el puerto HTTP; compruebe dirección y puerto")
 	}
+	// Etapa 9G (D1): escucha HTTPS de la red local con el certificado propio, solo para orígenes de la red
+	// local; lo que llega por ella nunca es «local» (lanlistener.FromNetwork).
+	var networkServer *lanlistener.Server
+	if network.Address != "" {
+		networkServer, err = lanlistener.Listen(network.Address, serverIdentity.Certificate, handler)
+		if err != nil {
+			listener.Close()
+			return err
+		}
+		// Antes de atender peticiones: Terminales lo informa en la computadora principal.
+		if address, ok := networkServer.Addr().(*net.TCPAddr); ok {
+			application.NetworkPort = address.Port
+		}
+	}
 	// Al empezar el apagado los flujos de eventos (SSE) terminan; las demás peticiones terminan su
 	// trabajo como siempre. Sin esto el cierre esperaba 5 s a un flujo abierto y salía con error.
 	stopping := make(chan struct{})
 	application.Stopping = stopping
-	server.RegisterOnShutdown(func() {
-		close(stopping)
-	})
+	var stoppingOnce sync.Once
+	closeStopping := func() {
+		stoppingOnce.Do(func() {
+			close(stopping)
+		})
+	}
+	server.RegisterOnShutdown(closeStopping)
+	if networkServer != nil {
+		networkServer.RegisterOnShutdown(closeStopping)
+	}
 	workerContext, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() {
@@ -218,7 +277,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		(&catalog.SoldOutWorker{Pool: pool, Logger: logger}).Run(workerContext)
 	}()
 	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone }()
-	stopped := make(chan error, 1)
+	stopped := make(chan error, 2)
 	go func() {
 		if cfg.TLSCertificate != "" {
 			stopped <- server.ServeTLS(listener, cfg.TLSCertificate, cfg.TLSPrivateKey)
@@ -226,19 +285,37 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		}
 		stopped <- server.Serve(listener)
 	}()
-	logger.Info("server_started", "product", product.Read().TechnicalID, "version", product.Read().Version, "environment", cfg.Environment, "mode", cfg.InstallationMode, "listen", cfg.ListenAddress, "test_mode", testMode)
+	networkAddress := ""
+	if networkServer != nil {
+		networkAddress = networkServer.Addr().String()
+		go func() {
+			stopped <- networkServer.Serve()
+		}()
+	}
+	logger.Info("server_started", "product", product.Read().TechnicalID, "version", product.Read().Version, "environment", cfg.Environment, "mode", cfg.InstallationMode, "listen", cfg.ListenAddress, "network_listen", networkAddress, "test_mode", testMode)
+	var failure error
 	select {
 	case err := <-stopped:
 		if !errors.Is(err, http.ErrServerClosed) {
-			return errors.New("falló el servidor HTTP")
+			failure = errors.New("falló el servidor HTTP")
 		}
 	case <-ctx.Done():
-		shutdownCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
-		defer done()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			_ = server.Close()
-			return errors.New("se agotó el cierre ordenado HTTP")
+	}
+	// Cierre ordenado de las dos escuchas (también si una falló: la otra no queda atendiendo sola).
+	shutdownCtx, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		_ = server.Close()
+		failure = errors.Join(failure, errors.New("se agotó el cierre ordenado HTTP"))
+	}
+	if networkServer != nil {
+		if err := networkServer.Shutdown(shutdownCtx); err != nil {
+			_ = networkServer.Close()
+			failure = errors.Join(failure, errors.New("se agotó el cierre ordenado de la escucha de red"))
 		}
+	}
+	if failure != nil {
+		return failure
 	}
 	logger.Info("server_shutdown_complete")
 	return nil

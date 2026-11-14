@@ -14,6 +14,7 @@ import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/Acces
 import { AuditPage } from './pages/AuditPage';
 import { MaintenancePage } from './pages/MaintenancePage';
 import { DevicesPage } from './pages/DevicesPage';
+import { RepairTerminalPage, useRepairTerminal } from './pages/setup/RepairTerminal';
 import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
@@ -121,7 +122,9 @@ function InstallationGate() {
       </AccessShell>
     );
   }
-  return <ApplicationContent serverOnly={state.mode === 'server-only'} />;
+  return (
+    <ApplicationContent serverOnly={state.mode === 'server-only'} paired={state.paired ?? false} />
+  );
 }
 
 // Pantallas de acceso y del asistente: sin barra superior, con el control de pantalla completa fijo
@@ -141,8 +144,11 @@ function isOperation(screen: ScreenID) {
   return screen === 'restaurant' || screen === 'takeaway';
 }
 
-function ApplicationContent({ serverOnly }: { serverOnly: boolean }) {
+// paired (etapa 9G, fase B): terminal emparejada con la computadora principal; si pierde su autorización
+// o el servidor cambia de identidad, se ofrece emparejarla de nuevo.
+function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paired: boolean }) {
   const session = useSession();
+  const repairTerminal = useRepairTerminal();
   // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal (en «Solo servidor»,
   // el estado del servidor).
   const [screen, setScreen] = useState<ScreenID>(serverOnly ? 'server-status' : 'restaurant');
@@ -390,6 +396,7 @@ function ApplicationContent({ serverOnly }: { serverOnly: boolean }) {
           }
         >
           <Notice>{session.connectionError}</Notice>
+          <Notice>{repairTerminal.error}</Notice>
           <div className="button-row">
             <button className="primary-button" onClick={() => void session.refresh()}>
               Volver a comprobar
@@ -397,7 +404,19 @@ function ApplicationContent({ serverOnly }: { serverOnly: boolean }) {
             <button className="secondary-button" onClick={() => setTechnical(true)}>
               Ver estado del sistema
             </button>
+            {/* Etapa 9G: una terminal emparejada cuyo servidor cambió de identidad (o desapareció)
+                puede volver a emparejarse; nunca se acepta otro certificado en silencio. */}
+            {paired && session.phase === 'offline' && (
+              <button
+                className="secondary-button"
+                disabled={repairTerminal.busy}
+                onClick={() => void repairTerminal.repair()}
+              >
+                Emparejar de nuevo
+              </button>
+            )}
           </div>
+          {repairTerminal.dialog}
         </AccessFrame>
       </AccessShell>
     );
@@ -428,6 +447,14 @@ function ApplicationContent({ serverOnly }: { serverOnly: boolean }) {
           available={session.local?.local_setup_available ?? false}
           refresh={session.refresh}
         />
+      </AccessShell>
+    );
+  }
+  // Etapa 9G: una terminal emparejada sin autorización (revocada) se empareja de nuevo con código.
+  if (session.phase === 'enroll' && (paired || session.local?.paired)) {
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <RepairTerminalPage message={session.message} />
       </AccessShell>
     );
   }

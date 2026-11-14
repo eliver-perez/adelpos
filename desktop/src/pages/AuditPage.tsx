@@ -14,6 +14,8 @@ const actorKinds: Record<string, string> = {
   local_owner: 'Equipo servidor',
   process: 'Proceso automático',
   migration: 'Actualización del sistema',
+  // Etapa 9G (fase B): terminal nueva que todavía no se empareja.
+  pairing: 'Terminal por emparejar',
 };
 
 // Etapa 9D (§5.1): nombre en palabras del restaurante de las operaciones de «Cancelar cuenta» y de
@@ -34,6 +36,15 @@ const actionLabels: Record<string, string> = {
   'maintenance.test_data_removed': 'Datos de prueba quitados',
   // Etapa 9G (fase A): reinicio del servicio del servidor desde Mantenimiento.
   'maintenance.service_restarted': 'Servidor reiniciado',
+  // Etapa 9G (fase B): emparejamiento y administración de terminales.
+  'device.pairing_requested': 'Terminal nueva pidió su código',
+  'device.pairing_approved': 'Terminal aprobada',
+  'device.pairing_code_failed': 'Código de terminal incorrecto',
+  'device.pairing_rejected': 'Terminal rechazada',
+  'device.pairing_cancelled': 'Terminal canceló su solicitud',
+  'device.paired': 'Terminal emparejada',
+  'device.updated': 'Terminal modificada',
+  'device.revoked': 'Terminal revocada',
   // Etapa 9F (fase B): impresoras (corte de papel incluido), reintentos sin motivo y reimpresiones con
   // motivo, y la configuración de cobro.
   'kitchen.printer.saved': 'Impresora guardada',
