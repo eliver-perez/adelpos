@@ -2,6 +2,7 @@ import { Accordion } from '../components/Accordion';
 import { PageTitle } from '../components/Forms';
 import { StatusCard } from '../components/StatusCard';
 import { useConnection } from '../hooks/useConnection';
+import { modeLabels } from '../services/installation';
 import { plainStatus } from '../services/systemStatus';
 import type { CheckState } from '../services/systemStatus';
 import product from '../generated/product.json';
@@ -104,17 +105,11 @@ export function StatusPage({ support = false }: { support?: boolean }) {
             </div>
             <div className="detail-row">
               <dt>Servidor</dt>
-              <dd className="font-mono">{config?.server_url ?? 'Sin configurar'}</dd>
+              <dd className="font-mono">{config?.server_url || 'Sin configurar'}</dd>
             </div>
             <div className="detail-row">
               <dt>Instalación</dt>
-              <dd>
-                {config
-                  ? config.installation_mode === 'terminal-only'
-                    ? 'Solo terminal'
-                    : 'Servidor + terminal'
-                  : 'Sin verificar'}
-              </dd>
+              <dd>{config ? modeLabels[config.installation_mode] : 'Sin verificar'}</dd>
             </div>
             <div className="detail-row">
               <dt>Aplicación</dt>

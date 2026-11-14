@@ -3270,3 +3270,53 @@ terminal» (en Go y con un `UPDATE` en la sección «Fase C» de la 0022), porqu
 
 Operaciones nuevas `user_kitchen_stations` (`GET users/{id}/kitchen-stations`) y `save_user_kitchen_stations`
 (`PUT users/{id}/kitchen-stations`), con identificador validado. `kitchen_access` y `kitchen_save_access` no cambian.
+
+## Etapa 9G · servidor como servicio de macOS y modalidades (fase A, sin migración)
+
+### Servicio del servidor (`maintenance/service`)
+
+| Método | Ruta                           | Requisito                                                                                      |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/service`         | `settings.manage`; estado del servicio y terminales conectadas.                                |
+| POST   | `/maintenance/service/restart` | `settings.manage`; cuerpo vacío o `{}` (campos desconocidos: `400`); solo servicio habilitado. |
+
+- `GET` responde `{managed, restart_available, installation_mode, service_enabled, started_at, uptime_seconds,
+server_version, terminals: {connected, registered}, last_backup}`. `managed` indica que el servidor lo lanzó y lo
+  mantiene vivo launchd (servicio `local.adel.pos.server`, proceso padre 1); con `serve` (desarrollo y pruebas) y en
+  Windows antes de la Fase W es `false`, `installation_mode` vacío y `service_enabled` `false`. `restart_available` =
+  `managed` y archivo de habilitación presente. `installation_mode` es la modalidad del lado del servidor
+  (`installation-mode.json` de la carpeta de datos; sin archivo cuenta como `server-terminal`). `terminals` cuenta las
+  terminales no revocadas **sin la que pregunta**: `registered` todas y `connected` las que hicieron alguna petición en
+  los últimos 2 minutos (`devices.last_seen_at`). `last_backup` es `null` hasta la fase F (respaldos programados).
+- `POST …/restart` se autoriza y audita (`maintenance.service_restarted`, «Servidor reiniciado» en el Registro de
+  movimientos) en la transacción de autenticación; ya confirmada, programa el cierre ordenado (Go y después PostgreSQL) a
+  los 300 ms y responde `{restarting: true}`; launchd vuelve a lanzar el servidor porque el archivo de habilitación
+  sigue existiendo (`ThrottleInterval` 10 s). Sin servicio administrado o sin habilitación: `409 SERVICE_NOT_MANAGED`
+  («Este servidor no está instalado como servicio de la computadora; no se puede reiniciar desde aquí.») sin auditar.
+  No pide la contraseña de administrador del sistema. Tiempo de respuesta de `maintenance/*` (120 s).
+
+### Comandos del servidor en macOS (línea de comandos, no HTTP)
+
+| Comando                                                              | Qué hace                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host [--data-dir D] [--pg-bin B]`                                   | Servidor del servicio (lo lanza launchd). Sin archivo de habilitación o en «Solo terminal» termina con código 0 sin iniciar nada. Si no: bloqueo `flock` de la carpeta, clúster propio con marcador, respaldo antes de migrar, migración y `serve`; deja de servir si se quita la habilitación; `SIGTERM`/`SIGINT` en orden. |
+| `backup`, `restore-check [--file F]`, `restore --file F`             | Como en Windows. Con el servicio en marcha, `backup` y `restore-check` usan su PostgreSQL; `restore` pausa el servicio (quita el archivo de habilitación y espera la carpeta), crea antes un respaldo de seguridad, restaura y vuelve a habilitarlo.                                                                         |
+| `adopt-legacy --from-config F [--data-dir D]`                        | Pasa los datos de una instalación anterior (su `server.json`) a la carpeta del servicio: conteos, `pg_dump` comprobado, clúster nuevo en un puerto temporal, `pg_restore`, conteos iguales de todas las tablas y marcador `legacy-adopted.json`. Nunca modifica la anterior; se niega si el destino tiene datos.             |
+| `--pg-port P`, `--listen IP:PUERTO` (con una carpeta de datos nueva) | Solo pruebas: puerto de PostgreSQL y dirección de Go que se escriben la primera vez (la instalación usa 55432 y `127.0.0.1:8181`).                                                                                                                                                                                           |
+
+Carpeta de datos: `--data-dir`, `ADEL_DATA_DIR` o `/Library/Application Support/AD-EL POS` (de la cuenta que instaló,
+0700). PostgreSQL: `--pg-bin`, `postgres_bin` de la configuración existente, `ADEL_PG_BIN` o Homebrew. `ADEL_TEST_MODE=1`
+rechaza la carpeta real del servicio antes de abrir o crear nada.
+
+### Puente nativo
+
+- Operaciones nuevas en `desktop/src-tauri/src/api.rs`: `maintenance_service` (`GET maintenance/service`) y
+  `maintenance_service_restart` (`POST maintenance/service/restart`).
+- Comandos de Tauri nuevos (lista cerrada, simulados en `desktop/e2e/native-driver.ts`): `installation_state` →
+  `{chosen, mode, server_configured, can_change, service_installed, service_enabled, server_data_kept}`;
+  `set_installation_mode {mode}` con `mode` ∈ {`server-terminal`, `server-only`, `terminal-only`} (otro valor se
+  rechaza): escribe la modalidad y crea o quita el archivo de habilitación en la carpeta del servicio (si está
+  instalado) y después `connection.json` (con servidor, `http://127.0.0.1:8181`; «Solo terminal» sin servidor
+  emparejado, dirección vacía); `restart_application` (sin argumentos) reinicia la aplicación.
+- `connection.json` admite ahora `server-only` y, solo en `terminal-only` sin certificado, `server_url` vacío (terminal
+  sin servidor: no se abre el Keychain ni se hace ninguna petición).

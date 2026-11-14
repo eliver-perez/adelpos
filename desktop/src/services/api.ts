@@ -71,6 +71,9 @@ export type Operation =
   // Etapa 9F: «Quitar datos de prueba» en el Mantenimiento del administrador (services/maintenance.ts).
   | 'maintenance_test_data'
   | 'maintenance_remove_test_data'
+  // Etapa 9G (fase A): estado y reinicio del servicio del servidor (services/serverService.ts).
+  | 'maintenance_service'
+  | 'maintenance_service_restart'
   | 'reports_catalog'
   | 'reports_run'
   | 'reports_dashboard'

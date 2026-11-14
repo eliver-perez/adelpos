@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Instalador de AD-EL POS para macOS (etapa 9G, fase A). Plantilla: scripts/build-macos-pkg.sh reemplaza
+  __VERSION__ y la usa con productbuild. Tres paquetes, en este orden:
+
+    local.adel.pos.app      AD-EL POS.app en /Applications, con el servidor dentro (siempre)
+    local.adel.pos.server   «Servidor del restaurante»: carpeta de datos y archivo de habilitación (opción
+                            marcada por omisión; desmarcarla instala «Solo terminal»)
+    local.adel.pos.service  servicio del sistema (LaunchDaemon), registrado con launchctl (siempre)
+-->
+<installer-gui-script minSpecVersion="2">
+  <title>AD-EL POS</title>
+  <welcome file="welcome.html" mime-type="text/html"/>
+  <options customize="always" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64,x86_64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <choices-outline>
+    <line choice="app"/>
+    <line choice="server"/>
+    <line choice="service"/>
+  </choices-outline>
+  <choice id="app" title="AD-EL POS" description="La aplicación para cobrar, tomar pedidos y administrar el restaurante." enabled="false" start_selected="true">
+    <pkg-ref id="local.adel.pos.app"/>
+  </choice>
+  <choice id="server" title="Servidor del restaurante" description="Márcala en la computadora principal del restaurante: guarda los datos y atiende a las demás terminales, aunque nadie inicie sesión. Desmárcala para instalar solo una terminal (caja o cocina) que se conecta a la computadora principal." start_selected="true">
+    <pkg-ref id="local.adel.pos.server"/>
+  </choice>
+  <choice id="service" title="Servicio de AD-EL POS" visible="false" enabled="false" start_selected="true">
+    <pkg-ref id="local.adel.pos.service"/>
+  </choice>
+  <pkg-ref id="local.adel.pos.app" version="__VERSION__" onConclusion="none">app.pkg</pkg-ref>
+  <pkg-ref id="local.adel.pos.server" version="__VERSION__" onConclusion="none">server.pkg</pkg-ref>
+  <pkg-ref id="local.adel.pos.service" version="__VERSION__" onConclusion="none">service.pkg</pkg-ref>
+</installer-gui-script>

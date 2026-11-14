@@ -1,26 +1,26 @@
-//go:build windows
-
-// Package standalone opera la instalación autónoma de Windows (etapa 9E): la aplicación instalada lanza
-// el servidor en modo «host», que en la carpeta de datos del usuario crea el clúster de PostgreSQL con los
-// binarios incluidos en el instalador, lo arranca, prepara la base y la configuración, respalda antes de
-// migrar y lo detiene al terminar. En macOS nada de esto existe: PostgreSQL y Go se administran con
-// scripts/dev.sh y la aplicación nunca los inicia.
+// Package standalone opera el servidor de una instalación (sin scripts de desarrollo): el comando «host»
+// crea en la carpeta de datos el clúster de PostgreSQL, lo arranca, prepara la base y la configuración,
+// respalda antes de migrar, sirve y al terminar detiene PostgreSQL.
 //
-// Reglas que conserva de la instalación de macOS: un clúster exclusivo con marcador de propiedad (nunca se
-// opera sobre uno ajeno), solo TCP en 127.0.0.1, autenticación SCRAM, zona UTC y locale C en la base,
-// secretos en archivos privados que no se muestran, y respaldos pg_dump en formato custom con su
+//   - Windows (etapa 9E): la aplicación instalada lanza el servidor con los binarios de PostgreSQL que
+//     trae el instalador y la carpeta de datos es %LOCALAPPDATA%\<producto>.
+//   - macOS (etapa 9G, fase A): el servidor es un servicio del sistema (LaunchDaemon) que corre con la
+//     cuenta del usuario que instaló, con los datos en /Library/Application Support/<producto> y el
+//     PostgreSQL instalado en el equipo (postgres_bin, ADEL_PG_BIN o Homebrew).
+//
+// Reglas que conserva de la instalación de desarrollo: un clúster exclusivo con marcador de propiedad
+// (nunca se opera sobre uno ajeno), solo TCP en 127.0.0.1, autenticación SCRAM, zona UTC y locale C en la
+// base, secretos en archivos privados que no se muestran, y respaldos pg_dump en formato custom con su
 // comprobación.
 package standalone
 
 import (
-	"errors"
-	"os"
 	"path/filepath"
 )
 
 const (
-	// ServerAddress y ClusterPort son los mismos de la instalación de macOS: Go en 8181 y PostgreSQL en
-	// 55432, ambos solo en loopback (sin reglas de firewall).
+	// ServerAddress y ClusterPort son los de siempre: Go en 8181 y PostgreSQL en 55432, ambos solo en
+	// loopback (sin reglas de firewall).
 	ServerAddress = "127.0.0.1:8181"
 	ClusterPort   = 55432
 	// superuser administra el clúster (crear el rol y la base, respaldos de prueba); appRole es el rol sin
@@ -30,39 +30,29 @@ const (
 )
 
 // Layout son las rutas de una instalación: la carpeta de datos (nunca la de instalación) y la carpeta de
-// los binarios de PostgreSQL que trae el instalador.
+// los binarios de PostgreSQL.
 type Layout struct {
 	DataDir string
 	PGBin   string
 	// Port es el del clúster: ClusterPort en la instalación; las pruebas usan otro para no chocar con el
 	// clúster de desarrollo.
 	Port int
+	// Listen es la dirección de Go que se escribe en server.json la primera vez (ServerAddress si está
+	// vacía). Solo las pruebas la cambian; una configuración existente nunca se reescribe.
+	Listen string
 }
 
-// NewLayout completa las rutas que no se indicaron: datos en %LOCALAPPDATA%\<producto> y PostgreSQL en
-// la carpeta «postgresql\bin» junto al ejecutable del servidor.
+// NewLayout completa las rutas que no se indicaron con las de la instalación de cada sistema
+// (layout_windows.go y layout_unix.go).
 func NewLayout(dataDir, pgBin, productName string) (Layout, error) {
-	if dataDir == "" {
-		base := os.Getenv("LOCALAPPDATA")
-		if base == "" {
-			cache, err := os.UserCacheDir()
-			if err != nil {
-				return Layout{}, errors.New("no se encontró la carpeta de datos local del usuario")
-			}
-			base = cache
-		}
-		dataDir = filepath.Join(base, productName)
+	return newPlatformLayout(dataDir, pgBin, productName)
+}
+
+func (layout Layout) serverAddress() string {
+	if layout.Listen != "" {
+		return layout.Listen
 	}
-	if pgBin == "" {
-		executable, err := os.Executable()
-		if err != nil {
-			return Layout{}, errors.New("no se encontró la carpeta del programa")
-		}
-		pgBin = filepath.Join(filepath.Dir(executable), "postgresql", "bin")
-	}
-	// Forma larga y absoluta: el marcador del clúster y las comparaciones de procesos no dependen de cómo
-	// llegó la ruta (corta, relativa o con otras mayúsculas).
-	return Layout{DataDir: canonicalPath(dataDir), PGBin: canonicalPath(pgBin), Port: ClusterPort}, nil
+	return ServerAddress
 }
 
 func (layout Layout) Cluster() string {
@@ -111,15 +101,22 @@ func (layout Layout) Backups() string {
 	return filepath.Join(layout.DataDir, "backups")
 }
 
-func (layout Layout) lockFile() string {
-	return filepath.Join(layout.DataDir, "host.lock")
+// ModeFile guarda la modalidad de la computadora del lado del servidor (etapa 9G, mode.go).
+func (layout Layout) ModeFile() string {
+	return filepath.Join(layout.DataDir, ModeFileName)
 }
 
-// tool es la ruta de un programa de PostgreSQL. PostgreSQL deduce su carpeta share de la ruta con que se
-// ejecuta y, al crear el clúster, initdb escribe esa ruta dentro de una sentencia SQL en la codificación
-// de Windows: con acentos (un usuario «José» instala en C:\Users\José\…) la base UTF-8 la rechaza y el
-// clúster no se crea. Por eso los programas se ejecutan por la ruta corta de Windows (8.3, siempre en
-// ASCII) cuando la carpeta tiene caracteres fuera de ASCII. La carpeta de datos sí admite acentos.
-func (layout Layout) tool(name string) string {
-	return filepath.Join(asciiPath(layout.PGBin), name+".exe")
+// EnableFile es el archivo de habilitación del servicio de macOS: mientras existe, launchd mantiene vivo
+// el servidor (KeepAlive → PathState del plist) y el servidor sigue sirviendo (mode.go).
+func (layout Layout) EnableFile() string {
+	return filepath.Join(layout.DataDir, EnableFileName)
+}
+
+// AdoptionMarker registra el paso de los datos de una instalación anterior (adopt.go).
+func (layout Layout) AdoptionMarker() string {
+	return filepath.Join(layout.DataDir, "legacy-adopted.json")
+}
+
+func (layout Layout) lockFile() string {
+	return filepath.Join(layout.DataDir, "host.lock")
 }

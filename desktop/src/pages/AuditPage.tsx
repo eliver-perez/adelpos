@@ -32,6 +32,8 @@ const actionLabels: Record<string, string> = {
   'inventory.cancellation_preclassified': 'Cancelación preclasificada como merma',
   // Etapa 9F: «Quitar datos de prueba» (también el intento sin respaldo, con resultado fallido).
   'maintenance.test_data_removed': 'Datos de prueba quitados',
+  // Etapa 9G (fase A): reinicio del servicio del servidor desde Mantenimiento.
+  'maintenance.service_restarted': 'Servidor reiniciado',
   // Etapa 9F (fase B): impresoras (corte de papel incluido), reintentos sin motivo y reimpresiones con
   // motivo, y la configuración de cobro.
   'kitchen.printer.saved': 'Impresora guardada',

@@ -3,7 +3,8 @@ import product from '../generated/product.json';
 import defaultConnection from '../generated/connection.json';
 
 export interface ConnectionConfig {
-  installation_mode: 'server-terminal' | 'terminal-only';
+  // Etapa 9G: también «Solo servidor»; una terminal sin servidor todavía tiene la dirección vacía.
+  installation_mode: 'server-terminal' | 'server-only' | 'terminal-only';
   server_url: string;
 }
 export interface HTTPResult {

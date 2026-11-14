@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canOpen, tilesOf } from '../navigation/sections';
 import type { TestDataPreview, TestDataResult } from '../services/maintenance';
+import { serverTerminalInstallation } from '../testing/installation';
 import { MaintenancePage } from './MaintenancePage';
 
 // Etapa 9F, fase A (§3): «Quitar datos de prueba» en Administración › Sistema › Mantenimiento. La lista
@@ -86,6 +87,31 @@ const result: TestDataResult = {
   backup: 'adel_pos-20261113T183005Z-0a1b2c.dump',
 };
 
+// Etapa 9G: la página también muestra «Servicio del servidor» y «Modalidad de esta computadora»
+// (stage9gModality.test.tsx); aquí responden sin intervenir en «Quitar datos de prueba».
+function stage9gReply(command: string, operation?: string) {
+  if (command === 'installation_state') {
+    return serverTerminalInstallation;
+  }
+  if (command === 'api_request' && operation === 'maintenance_service') {
+    return {
+      status: 200,
+      body: {
+        managed: false,
+        restart_available: false,
+        installation_mode: '',
+        service_enabled: false,
+        started_at: '2026-11-13T18:00:00Z',
+        uptime_seconds: 60,
+        server_version: '0.9.5',
+        terminals: { connected: 0, registered: 0 },
+        last_backup: null,
+      },
+    };
+  }
+  return undefined;
+}
+
 function requests(operation: string) {
   return native.invoke.mock.calls
     .filter(([command, args]) => command === 'api_request' && args?.operation === operation)
@@ -96,6 +122,10 @@ beforeEach(() => {
   previews = [withTestData, empty];
   removal = { status: 200, body: result };
   native.invoke.mockImplementation(async (command: string, args: { operation: string }) => {
+    const stage9g = stage9gReply(command, args?.operation);
+    if (stage9g) {
+      return stage9g;
+    }
     if (command !== 'api_request') {
       throw new Error(`Comando no esperado: ${command}`);
     }
@@ -219,7 +249,11 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
 
   it('una respuesta sin conexión conserva el operation_id al reintentar', async () => {
     let attempt = 0;
-    native.invoke.mockImplementation(async (_command: string, args: { operation: string }) => {
+    native.invoke.mockImplementation(async (command: string, args: { operation: string }) => {
+      const stage9g = stage9gReply(command, args?.operation);
+      if (stage9g) {
+        return stage9g;
+      }
       if (args.operation === 'maintenance_test_data') {
         return { status: 200, body: withTestData };
       }

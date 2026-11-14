@@ -8896,3 +8896,88 @@ th[aria-sort='descending'] {
     max-height: none;
   }
 }
+
+/* Etapa 9G · Fase A · Modalidad de la computadora y servicio del servidor: elección de la modalidad
+   (primer arranque y Mantenimiento), «Buscar el servidor», pantalla de «Solo servidor» y el estado del
+   servicio. Solo usa los tokens de siempre. */
+.modality-options {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.modality-option {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+}
+.modality-option-selected {
+  border-color: var(--blue-border);
+  background: var(--blue-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.modality-option-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 650;
+}
+.modality-option-current {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--subtle);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.modality-option-description {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.modality-note,
+.find-server-help {
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.find-server-status,
+.server-only-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.server-only-state {
+  margin-bottom: 24px;
+}
+.server-only-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.maintenance-service-state p {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 880px;
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 8px;
+}
+.maintenance-service-state .status-dot {
+  flex: 0 0 auto;
+  margin-top: 6px;
+}
+.maintenance-modality-actions {
+  margin-top: 4px;
+}

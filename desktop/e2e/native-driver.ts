@@ -91,6 +91,28 @@ export async function installDriver(page: Page) {
   let menuIndex = 0;
   let menuEnabled = new Set<string>(['view.fullscreen', 'help.shortcuts', 'help.about']);
   let menuPrecheckName = 'precheck';
+  // Etapa 9G (fase A): modalidad de la computadora que simulan installation_state,
+  // set_installation_mode (la misma lista cerrada que installation.rs) y restart_application (recarga
+  // la página, como el reinicio de la aplicación). setInstallation la cambia desde la prueba.
+  const installationModes = ['server-terminal', 'server-only', 'terminal-only'] as const;
+  type InstallationMode = (typeof installationModes)[number];
+  const installation = {
+    chosen: true,
+    mode: 'server-terminal' as InstallationMode,
+    serverDataKept: false,
+  };
+  function installationState() {
+    const server = installation.mode !== 'terminal-only';
+    return {
+      chosen: installation.chosen,
+      mode: installation.mode,
+      server_configured: server,
+      can_change: true,
+      service_installed: true,
+      service_enabled: server,
+      server_data_kept: !server && installation.serverDataKept,
+    };
+  }
   let streamGeneration = 0;
   const streams = new Map<number, AbortController>();
   page.on('close', () => {
@@ -444,7 +466,29 @@ export async function installDriver(page: Page) {
           local_enrollment_available: false,
         };
       if (command === 'connection_config')
-        return { installation_mode: 'server-terminal', server_url: serverURL };
+        return {
+          installation_mode: installation.mode,
+          server_url: installation.mode === 'terminal-only' ? '' : serverURL,
+        };
+      if (command === 'installation_state') return installationState();
+      if (command === 'set_installation_mode') {
+        const mode = String(args.mode) as InstallationMode;
+        if (!installationModes.includes(mode)) {
+          return { __bridgeRejection: 'Modalidad desconocida.' };
+        }
+        if (installation.mode !== 'terminal-only' && mode === 'terminal-only') {
+          installation.serverDataKept = true;
+        }
+        installation.mode = mode;
+        installation.chosen = true;
+        return null;
+      }
+      if (command === 'restart_application') {
+        setTimeout(() => {
+          if (!page.isClosed()) void page.reload();
+        }, 50);
+        return null;
+      }
       if (command === 'server_snapshot')
         return {
           live: await request('GET', 'health/live'),
@@ -525,5 +569,18 @@ export async function installDriver(page: Page) {
   function menuPrecheck() {
     return menuPrecheckName;
   }
-  return { request, nextSaveDialog, exports, clickMenu, menuState, menuPrecheck, menuActions };
+  // Etapa 9G: estado de la modalidad simulada (antes de abrir la página o entre recargas).
+  function setInstallation(next: { chosen?: boolean; mode?: InstallationMode }) {
+    Object.assign(installation, next);
+  }
+  return {
+    request,
+    nextSaveDialog,
+    exports,
+    clickMenu,
+    menuState,
+    menuPrecheck,
+    menuActions,
+    setInstallation,
+  };
 }
