@@ -289,19 +289,24 @@ CREATE INDEX device_pairing_requests_created_idx ON app.device_pairing_requests 
 -- 1. Configuración de los respaldos automáticos (una sola fila), en Sistema › Mantenimiento con settings.manage. El
 --    servidor respalda una vez al día: scheduled_time es la hora (NULL = la «Hora de inicio del día»,
 --    inventory_settings.operating_day_cutoff, 05:00 por omisión, de modo que cambiarla también mueve el respaldo),
---    keep_count cuántos respaldos automáticos se conservan en la carpeta (los más viejos se borran solos; nunca los
---    manuales ni otros archivos) y directory la carpeta elegida en la computadora principal con el diálogo nativo
---    (NULL = la carpeta predeterminada: «backups» en la carpeta de datos del servicio o backup_directory de la
---    configuración). Go valida la carpeta al elegirla (ruta absoluta, existente y con permiso de escritura) y otra vez
---    en cada respaldo; si entonces no está disponible, usa la predeterminada y lo avisa.
+--    keep_count cuántos respaldos automáticos de esta instalación se conservan en la carpeta (los más viejos, según
+--    este registro, se borran solos; nunca los manuales, los de otra instalación ni otros archivos) y directory la
+--    carpeta elegida en la computadora principal con el diálogo nativo, ya resuelta sin enlaces (NULL = la carpeta
+--    predeterminada: «backups» en la carpeta de datos del servicio o backup_directory de la configuración). Go valida la
+--    carpeta al elegirla (ruta absoluta, existente, con permiso de escritura y fuera de los datos del servidor y de
+--    PostgreSQL) y otra vez en cada respaldo; si entonces no está disponible, usa la predeterminada y lo avisa.
+--    enabled_at es desde cuándo están activos (para el aviso de respaldo atrasado) e installation_id identifica la
+--    instalación en el nombre de sus respaldos cuando el servidor todavía no tiene su identidad (server_id, fase B).
 CREATE TABLE app.backup_settings (
     singleton boolean PRIMARY KEY DEFAULT true CONSTRAINT backup_settings_singleton_check CHECK (singleton),
     enabled boolean NOT NULL DEFAULT true,
+    enabled_at timestamptz NOT NULL DEFAULT now(),
     scheduled_time time CONSTRAINT backup_settings_scheduled_time_check
         CHECK (scheduled_time IS NULL OR extract(second FROM scheduled_time) = 0),
     keep_count integer NOT NULL DEFAULT 30 CONSTRAINT backup_settings_keep_count_check CHECK (keep_count BETWEEN 1 AND 365),
     directory text CONSTRAINT backup_settings_directory_check
         CHECK (directory IS NULL OR (length(directory) BETWEEN 2 AND 1024 AND directory !~ '[[:cntrl:]]')),
+    installation_id uuid NOT NULL DEFAULT gen_random_uuid(),
     updated_by uuid CONSTRAINT backup_settings_updated_by_fkey REFERENCES app.users(id),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -314,10 +319,15 @@ INSERT INTO app.backup_settings(singleton) VALUES (true);
 --    predeterminada), la carpeta usada (directory), si se usó la predeterminada porque la configurada no estaba
 --    disponible (used_default_directory con fallback_reason), el archivo y su tamaño, si se verificó (pg_restore
 --    --list), el resultado y el motivo de un fallo. removed_at es cuándo la retención borró el archivo. Un respaldo
---    solo cuenta como correcto si quedó verificado. Una fila en 'running' cuyo servidor se detuvo pasa a 'failed'
---    con motivo 'interrupted' la siguiente vez que el servidor toma el lock de los respaldos (7820148309).
+--    solo cuenta como correcto si quedó verificado.
+--    seq es el orden en que se registraron las ejecuciones (lo da la base, no el reloj: un reloj adelantado o
+--    atrasado no cambia qué respaldo es el último). partial_file es el archivo temporal (.partial) mientras se crea y
+--    se verifica: si el servidor se detiene a media copia, la ejecución queda en 'running' con ese nombre y, la
+--    siguiente vez que el servidor toma el lock de los respaldos (7820148309), pasa a 'failed' con motivo
+--    'interrupted' y se borra exactamente ese archivo; nunca otro.
 CREATE TABLE app.backup_runs (
     id uuid PRIMARY KEY,
+    seq bigint GENERATED ALWAYS AS IDENTITY CONSTRAINT backup_runs_seq_key UNIQUE,
     kind text NOT NULL CONSTRAINT backup_runs_kind_check CHECK (kind IN ('automatic', 'manual')),
     status text NOT NULL CONSTRAINT backup_runs_status_check CHECK (status IN ('running', 'succeeded', 'failed')),
     scheduled_for timestamptz,
@@ -329,6 +339,8 @@ CREATE TABLE app.backup_runs (
     fallback_reason text CONSTRAINT backup_runs_fallback_reason_check
         CHECK (fallback_reason IN ('missing', 'not_directory', 'not_writable')),
     file_name text CONSTRAINT backup_runs_file_name_check CHECK (file_name ~ '^[A-Za-z0-9_.-]{1,200}$'),
+    partial_file text CONSTRAINT backup_runs_partial_file_check
+        CHECK (partial_file ~ '^[A-Za-z0-9_.-]{1,200}\.partial$'),
     size_bytes bigint CONSTRAINT backup_runs_size_bytes_check CHECK (size_bytes > 0),
     verified boolean NOT NULL DEFAULT false,
     failure_reason text CONSTRAINT backup_runs_failure_reason_check
@@ -351,13 +363,17 @@ CREATE TABLE app.backup_runs (
         OR (status = 'failed' AND finished_at IS NOT NULL AND failure_reason IS NOT NULL AND NOT verified
             AND file_name IS NULL AND size_bytes IS NULL AND removed_at IS NULL)
     ),
+    CONSTRAINT backup_runs_partial_running_check CHECK (
+        partial_file IS NULL OR (status = 'running' AND directory IS NOT NULL)
+    ),
     CONSTRAINT backup_runs_fallback_check CHECK (
         fallback_reason IS NULL OR (used_default_directory AND requested_directory IS NOT NULL)
     ),
     CONSTRAINT backup_runs_finished_check CHECK (finished_at >= started_at)
 );
-CREATE INDEX backup_runs_started_idx ON app.backup_runs (started_at DESC);
-CREATE INDEX backup_runs_running_idx ON app.backup_runs (started_at) WHERE status = 'running';
+CREATE INDEX backup_runs_running_idx ON app.backup_runs (seq) WHERE status = 'running';
+CREATE INDEX backup_runs_retention_idx ON app.backup_runs (directory, seq)
+    WHERE kind = 'automatic' AND status = 'succeeded' AND removed_at IS NULL;
 COMMENT ON TABLE app.backup_settings IS
     'Respaldos automáticos diarios: activo, hora (NULL = hora de inicio del día), cuántos conservar y carpeta (etapa 9G, fase F)';
 COMMENT ON TABLE app.backup_runs IS

@@ -94,13 +94,14 @@ func (runner *Runner) State(ctx context.Context, querier Querier, local bool) (S
 		next := plan.Next.UTC()
 		state.NextRunAt = &next
 	}
-	if state.Running, err = Running(ctx, querier); err != nil {
+	now := runner.now()
+	if state.Running, err = Running(ctx, querier, now); err != nil {
 		return State{}, err
 	}
-	if state.LastBackup, err = LastBackup(ctx, querier); err != nil {
+	if state.LastBackup, err = LastBackup(ctx, querier, now); err != nil {
 		return State{}, err
 	}
-	success, err := lastRun(ctx, querier, "status = 'succeeded'")
+	success, err := lastRun(ctx, querier, "status = 'succeeded'", now)
 	if err != nil {
 		return State{}, err
 	}
@@ -108,7 +109,7 @@ func (runner *Runner) State(ctx context.Context, querier Querier, local bool) (S
 		view := View(*success, true)
 		state.LastSuccess = &view
 	}
-	if state.Alert, err = ComputeAlert(ctx, querier, settings.Directory); err != nil {
+	if state.Alert, err = ComputeAlert(ctx, querier, settings, now); err != nil {
 		return State{}, err
 	}
 	runs, err := ListRuns(ctx, querier, RunsShown)
@@ -121,21 +122,26 @@ func (runner *Runner) State(ctx context.Context, querier Querier, local bool) (S
 	return state, nil
 }
 
-// SummaryOf arma el resumen del último respaldo y el aviso.
-func SummaryOf(ctx context.Context, querier Querier) (Summary, error) {
+// SummaryOf arma el resumen del último respaldo y el aviso con la hora now.
+func SummaryOf(ctx context.Context, querier Querier, now time.Time) (Summary, error) {
 	settings, err := LoadSettings(ctx, querier)
 	if err != nil {
 		return Summary{}, err
 	}
 	var summary Summary
-	if summary.LastBackup, err = LastBackup(ctx, querier); err != nil {
+	if summary.LastBackup, err = LastBackup(ctx, querier, now); err != nil {
 		return Summary{}, err
 	}
-	if summary.Alert, err = ComputeAlert(ctx, querier, settings.Directory); err != nil {
+	if summary.Alert, err = ComputeAlert(ctx, querier, settings, now); err != nil {
 		return Summary{}, err
 	}
-	if summary.Running, err = Running(ctx, querier); err != nil {
+	if summary.Running, err = Running(ctx, querier, now); err != nil {
 		return Summary{}, err
 	}
 	return summary, nil
+}
+
+// Summary del ejecutor, con su hora (las pruebas la simulan).
+func (runner *Runner) Summary(ctx context.Context, querier Querier) (Summary, error) {
+	return SummaryOf(ctx, querier, runner.now())
 }

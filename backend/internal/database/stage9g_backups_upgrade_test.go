@@ -21,6 +21,11 @@ func checkStage9GBackups(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 	if err != nil || rows != 1 || !enabled || !timeIsNull || keep != 30 || !directoryIsNull {
 		t.Fatalf("configuración inicial de respaldos: %d %v %v %d %v %v", rows, enabled, timeIsNull, keep, directoryIsNull, err)
 	}
+	var hasInstallation, hasEnabledAt bool
+	if err := pool.QueryRow(ctx, `SELECT installation_id IS NOT NULL, enabled_at <= now() FROM app.backup_settings`).
+		Scan(&hasInstallation, &hasEnabledAt); err != nil || !hasInstallation || !hasEnabledAt {
+		t.Fatalf("identificador de la instalación y fecha de activación: %v %v %v", hasInstallation, hasEnabledAt, err)
+	}
 	var runs int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM app.backup_runs").Scan(&runs); err != nil || runs != 0 {
 		t.Fatalf("registro de respaldos inicial: %d %v", runs, err)
@@ -48,6 +53,13 @@ func checkStage9GBackups(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 		"fin antes del inicio": `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at, finished_at,
                 failure_reason)
             VALUES (gen_random_uuid(), 'automatic', 'failed', now(), now(), now() - interval '1 minute', 'dump_failed')`,
+		"temporal en un fallido": `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at, finished_at,
+                failure_reason, directory, partial_file)
+            VALUES (gen_random_uuid(), 'automatic', 'failed', now(), now(), now(), 'interrupted', '/r', 'a.dump.partial')`,
+		"temporal con carpeta": `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at, directory, partial_file)
+            VALUES (gen_random_uuid(), 'automatic', 'running', now(), now(), '/r', '../a.dump.partial')`,
+		"temporal sin carpeta": `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at, partial_file)
+            VALUES (gen_random_uuid(), 'automatic', 'running', now(), now(), 'a.dump.partial')`,
 		"nombre con carpeta": `INSERT INTO app.backup_runs(id, kind, status, scheduled_for, started_at, finished_at,
                 directory, file_name, size_bytes, verified)
             VALUES (gen_random_uuid(), 'automatic', 'succeeded', now(), now(), now(), '/r', '../a.dump', 10, true)`,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -33,6 +34,10 @@ type Settings struct {
 	Keep int
 	// Directory es la carpeta elegida; vacía, la predeterminada.
 	Directory string
+	// EnabledAt es desde cuándo están activos (para el aviso de respaldo atrasado).
+	EnabledAt time.Time
+	// InstallationID identifica la instalación en el nombre de sus respaldos si el servidor no tiene identidad.
+	InstallationID string
 }
 
 // DefaultSettings es la configuración de una instalación nueva (la misma de la migración).
@@ -44,8 +49,10 @@ func DefaultSettings() Settings {
 func LoadSettings(ctx context.Context, querier Querier) (Settings, error) {
 	var settings Settings
 	var scheduled, directory *string
-	err := querier.QueryRow(ctx, `SELECT enabled, to_char(scheduled_time, 'HH24:MI'), keep_count, directory
-        FROM app.backup_settings WHERE singleton`).Scan(&settings.Enabled, &scheduled, &settings.Keep, &directory)
+	err := querier.QueryRow(ctx, `SELECT enabled, to_char(scheduled_time, 'HH24:MI'), keep_count, directory, enabled_at,
+            installation_id::text
+        FROM app.backup_settings WHERE singleton`).Scan(&settings.Enabled, &scheduled, &settings.Keep, &directory,
+		&settings.EnabledAt, &settings.InstallationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DefaultSettings(), nil
 	}
@@ -87,8 +94,10 @@ func SaveSchedule(ctx context.Context, tx pgx.Tx, settings Settings, userID stri
 	if settings.Time != "" {
 		scheduled = &settings.Time
 	}
+	// Al activarlos de nuevo, el aviso de respaldo atrasado se mide desde ese momento.
 	_, err := tx.Exec(ctx, `UPDATE app.backup_settings
-        SET enabled = $1, scheduled_time = $2::time, keep_count = $3, updated_by = $4, updated_at = now()
+        SET enabled = $1, scheduled_time = $2::time, keep_count = $3, updated_by = $4, updated_at = now(),
+            enabled_at = CASE WHEN $1 AND NOT enabled THEN now() ELSE enabled_at END
         WHERE singleton`, settings.Enabled, scheduled, settings.Keep, nullable(userID))
 	return err
 }
