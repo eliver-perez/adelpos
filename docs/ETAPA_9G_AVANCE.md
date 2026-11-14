@@ -542,3 +542,317 @@ copia y entrega un parche desde `HEAD`, como en la 9D y la 9F.
   de cada ventana; mientras tanto todo se prueba en copias aisladas.
 - **Orden**: A ∥ D, después B ∥ F y al final C ∥ E (2 agentes a la vez, cada uno en su propio árbol de trabajo `git
 worktree` en el directorio temporal); revisión independiente de B, D y F.
+
+## Fase A · Modalidades de instalación y servidor como servicio (macOS)
+
+Un agente, en su propio árbol de trabajo (`etapa-9g-a`, desde `etapa-9g` en `ba83e55`), en paralelo con la Fase D.
+13–14/11/2026. Sin migración (la 0023 no tiene sección A). Pruebas en copias aisladas: clúster temporal 55499, clústeres
+propios de la prueba del `host` en 55511–55513, Go temporal 8184 (Playwright) y 8192–8194 (prueba del `host`), vista
+previa 1422, Rust en `cache/cargo-A` y carpetas «del sistema» dentro del directorio temporal. **No se instaló nada, no se
+usó `sudo` ni `launchctl` (salvo el simulado de las pruebas de los scripts) y no se tocó la instalación real.**
+
+Commits: `dcce2c9` (código, pruebas y contrato) y `aa748b7` (instalador compilado y examinado: firma ad hoc de la copia
+empaquetada y arquitectura del instalador). El fragmento vive fuera del repositorio (`frag/A.md`).
+
+### Qué cambió
+
+**Servidor Go (`backend/internal/standalone`, `backend/cmd/ad-el-pos-server`)**
+
+- `internal/standalone` deja de ser solo de Windows. Lo común queda sin etiqueta de compilación (`layout.go`,
+  `cluster.go`, `bootstrap.go`, `backup.go`, `testmode.go`, `mode.go`, `adopt.go`) y lo propio de cada sistema en
+  `*_windows.go` (lo de la 9E, movido sin cambios: `CREATE_NO_WINDOW`, rutas cortas 8.3, `LockFileEx`,
+  `QueryFullProcessImageName`, ACL de `fileacl`, carpeta conocida `LocalAppData`) y `*_unix.go` (nuevo):
+  - **Carpeta de datos** `--data-dir` → `ADEL_DATA_DIR` → `/Library/Application Support/AD-EL POS` (`SystemDataDir`).
+    **PostgreSQL** `--pg-bin` → `postgres_bin` del `server.json` existente → `ADEL_PG_BIN` → Homebrew
+    (`/opt/homebrew/opt/postgresql@18/bin`; el enlace `opt` no se resuelve, así sobrevive a `brew upgrade`).
+  - **Bloqueo** `host.lock` con `flock(LOCK_EX|LOCK_NB)` (pertenece al archivo abierto: también lo respeta otro intento
+    del mismo proceso). **Permisos**: carpeta 0700 (también si ya existía), secretos y configuración 0600 y respaldos
+    `pg_dump` 0600 (`privateFile`; antes de esto quedaban 0644 con la máscara de la consola).
+  - **PostgreSQL vivo**: `postmasterAlive` = el PID de `postmaster.pid` existe (`kill 0`) y se llama `postgres`
+    (`sysctl kern.proc.pid`). Un `postmaster.pid` solo se borra si su proceso ya no existe o es otro programa; con un
+    PostgreSQL vivo nunca se borra (aunque fuera de otra versión de Homebrew), porque otro postmaster sobre la misma
+    carpeta podría dañar los datos. `pg_ctl` separa a PostgreSQL en su propia sesión, así que launchd no lo mata con el
+    grupo de procesos y, si Go muere con SIGKILL, el siguiente arranque lo adopta.
+  - Los programas de PostgreSQL corren sin las variables `PG*` heredadas (como el respaldo de `internal/maintenance`).
+  - `ADEL_TEST_MODE=1` rechaza la carpeta real del servicio (`RealDataDir` = `SystemDataDir`, nunca la variable ni la
+    bandera; comparación sin mayúsculas y con enlaces resueltos) **antes de crear o abrir nada**.
+- **Modalidad y habilitación** (`mode.go`): `installation-mode.json` (`{"installation_mode": …}`, lista cerrada de tres)
+  y el archivo de habilitación `service-enabled` en la carpeta de datos, escritos 0600 con reemplazo atómico. Sin archivo
+  de modalidad cuenta como «Servidor y terminal»; un archivo ilegible no se adivina (error).
+- **`host` en macOS** (`host_unix.go`): si no hay archivo de habilitación o la modalidad es «Solo terminal», termina con
+  código 0 **sin iniciar PostgreSQL ni Go** (launchd lo lanza al arrancar por `RunAtLoad`, pero sin el archivo no lo
+  mantiene vivo). Si no, lo mismo que el de Windows: bloqueo, clúster propio con marcador, arranque o adopción,
+  respaldo antes de migrar, migración y `serve`. Además:
+  - antes de crear el clúster la primera vez exige el puerto de PostgreSQL libre (si lo ocupa la instalación anterior no
+    crea nada y la carpeta sigue lista para `adopt-legacy`);
+  - vigila cada 2 s el archivo de habilitación y la modalidad: si dejan de pedir servidor, deja de servir, detiene
+    PostgreSQL, **conserva los datos** y termina con 0 (launchd no lo relanza);
+  - `SIGTERM`/`SIGINT` (launchd al detenerlo o al apagar): cierre ordenado de Go y después `pg_ctl stop -m fast`.
+- **Comandos compartidos** (`host.go`): `backup`, `restore-check` y `restore` pasan a macOS con la lógica de Windows. En
+  macOS `restore` con el servicio en marcha lo **pausa** (quita el archivo de habilitación, espera hasta 90 s a tomar el
+  bloqueo), crea el respaldo de seguridad, restaura y lo **reanuda** (vuelve a crear el archivo; launchd lo relanza);
+  en Windows sigue diciendo «cierra AD-EL POS antes de restaurar un respaldo». `--pg-port` y `--listen` (solo pruebas, al
+  crear una carpeta nueva) y `--from-config`.
+- **`adopt-legacy --from-config <server.json anterior>`** (`adopt.go`, decisión D4): se niega si la carpeta del servicio
+  ya tiene datos (clúster, configuración o marcadores) o si el servidor anterior responde en su `listen_address`; cuenta
+  todas las tablas de `app` de la base anterior con su propio rol, la respalda (`pg_dump`, en `backups/` del servicio,
+  `…-instalacion-anterior.dump`, 0600), comprueba el respaldo con `pg_restore --list`, vuelve a contar (si algo cambió,
+  no sigue), crea el clúster nuevo y lo arranca **en un puerto temporal libre** (`pg_ctl -o "-p N"`: el anterior sigue
+  ocupando 55432; la configuración y el marcador conservan el definitivo), restaura, compara los conteos de todas las
+  tablas, lo detiene y deja `legacy-adopted.json` (sin secretos). Si algo falla quita solo lo que creó (clúster,
+  `server.json`, marcador del clúster) y conserva el respaldo. **Nunca modifica la instalación anterior.**
+- **Rutas** (`administration/service_host.go`, bloque en `routes.go` y caso en `completeDeferred`):
+  `GET maintenance/service` y `POST maintenance/service/restart` con `settings.manage` (contrato en `API_CONTRACTS.md`,
+  bloque «Etapa 9G · servidor como servicio de macOS y modalidades»). `Service.Host` (`HostControl`) lo implementa el
+  `host` de macOS: `managed` = proceso padre 1 (launchd). El reinicio se audita (`maintenance.service_restarted`,
+  «Servidor reiniciado» en el Registro de movimientos) y, ya confirmado, el servidor se cierra en orden a los 300 ms;
+  sin servicio administrado o sin habilitación, `409 SERVICE_NOT_MANAGED` sin auditar. Las terminales conectadas se
+  cuentan sin la que pregunta y sin las revocadas, con `last_seen_at` de los últimos 2 minutos. `last_backup` = `null`
+  (hueco para la Fase F).
+
+**Servicio e instalador (`ops/launchd`, `scripts/macos-pkg`, `scripts/build-macos-pkg.sh`)**
+
+- `ops/launchd/local.adel.pos.server.plist` (sustituye al `.example`): plantilla con `__ADEL_USER__`,
+  `__ADEL_SERVER__` y `__ADEL_DATA_DIR__`; `UserName`, `ProgramArguments` = servidor de dentro de la aplicación `host
+--data-dir …`, `WorkingDirectory`, `RunAtLoad`, `KeepAlive` → `PathState` del archivo de habilitación,
+  `ThrottleInterval` 10, `ExitTimeOut` 90, `Umask` 077 y bitácoras `logs/service.log` y `logs/service-error.log`.
+- `scripts/build-macos-pkg.sh` (`dev.sh build-macos-pkg [--reuse-app]`): compila el servidor como binario externo de
+  Tauri (`desktop/src-tauri/tauri.macos-pkg.conf.json`: `Contents/MacOS/ad-el-pos-server`, firmado con la aplicación),
+  comprueba la firma (`codesign --verify --deep --strict`) y arma tres paquetes con `pkgbuild` y la distribución
+  (`scripts/macos-pkg/Distribution.xml`, `customize="always"`, bienvenida en español) con `productbuild`:
+  - `local.adel.pos.app` (siempre): `AD-EL POS.app` a `/Applications`, **no reubicable**; `preinstall` descarga el
+    servicio anterior (`launchctl bootout`, espera a que termine).
+  - `local.adel.pos.server` = opción **«Servidor del restaurante» (marcada por omisión; desmarcarla es «Solo
+    terminal»)**: `preinstall` exige PostgreSQL 18 (si falta, el instalador falla con el aviso de instalarlo o
+    desmarcar la opción); `postinstall` crea la carpeta de datos de la cuenta que instala (0700), guarda «Servidor y
+    terminal» (conserva «Solo servidor» si ya estaba) y crea el archivo de habilitación.
+  - `local.adel.pos.service` (siempre, invisible, al final): crea la carpeta si falta (con «Solo terminal» si no hay
+    modalidad), escribe el plist con la cuenta de la consola (`stat -f %Su /dev/console`), lo valida con `plutil`, lo
+    deja `root:wheel 0644` y hace `launchctl enable` + `launchctl bootstrap system`.
+  - Seguridad de los scripts: si la carpeta de datos existe y es de otra cuenta, **no la toca** y falla; la cuenta se
+    valida (no root, no `_mbsetupuser`) antes de ponerla en el plist; solo el disco de arranque. Las bitácoras de launchd
+    se crean de la cuenta que instala.
+  - **Parametrizables para pruebas**: sin root solo corren con `ADEL_PKG_TEST_ROOT` (prefijo de destino) y
+    `ADEL_PKG_TEST_LAUNCHCTL` (launchctl simulado); como root esas variables se ignoran. `scripts/macos-pkg/
+test-scripts.sh` los ejecuta así (servidor nuevo, actualización con «Solo servidor», «Solo terminal» y rechazos).
+
+**Escritorio (Rust)**
+
+- `connection.rs`: admite `server-only`; `server_url` vacío solo en `terminal-only` sin certificado (terminal sin
+  servidor: no se abre el Keychain ni se hace ninguna petición; `AWAITING_SERVER_MESSAGE` en `main.rs`).
+- `installation.rs` (nuevo): lista cerrada de modalidades; `installation_state`, `set_installation_mode {mode}` y
+  `restart_application` (`AppHandle::request_restart`), registrados en `build.rs`, `permissions/diagnostics.toml` y
+  `main.rs`. Cambiar la modalidad escribe primero el lado del servidor (modalidad y archivo de habilitación, si el
+  servicio está instalado: plist en `/Library/LaunchDaemons` y carpeta de datos) y después `connection.json` (0600,
+  reemplazo atómico): con servidor `http://127.0.0.1:8181`; «Solo terminal» conserva un servidor emparejado o queda vacía.
+  Sin permiso en la carpeta del servicio («Solo la cuenta de la computadora que instaló AD-EL POS puede cambiar su
+  modalidad.») no cambia nada. Nunca borra la base ni otros archivos. `chosen` = existe `connection.json` (o
+  `ADEL_TERMINAL_CONFIG`); **en Windows siempre `true` y `can_change` `false`** (la modalidad de Windows es de la Fase W).
+- El token del asistente inicial también sale de la carpeta del servicio (`provisioning-token`) en una modalidad con
+  servidor, para preparar el establecimiento desde la propia Mac en una instalación nueva.
+- `api.rs`: `maintenance_service` y `maintenance_service_restart`.
+
+**Escritorio (React)**
+
+- `App.tsx`: `InstallationGate` antes de la sesión: sin modalidad elegida → `pages/setup/ModalityChoicePage.tsx`
+  (sugiere la del instalador: con servicio instalado y sin habilitar, «Solo terminal»; si no, «Servidor y terminal»);
+  «Solo terminal» sin servidor → `pages/setup/FindServerPage.tsx` («Buscar el servidor»: «Esta terminal todavía no está
+  conectada al servidor del restaurante», aviso de datos conservados y «Usar esta computadora como servidor» con
+  confirmación). **Punto de integración de las fases B y C** marcado en `FindServerPage.tsx`: cuando Rust guarde el
+  servidor emparejado, `server_configured` pasa a `true` y se muestra el acceso normal.
+- «Solo servidor» (`pages/server/ServerOnlyPage.tsx`): antes de iniciar sesión, «Servidor del restaurante» con el
+  estado (consultas públicas de salud) y «Entrar a Administración»; después, barra reducida («Estado del servidor»,
+  «Administración» si la puede abrir, estado de la conexión, usuario y pantalla completa) y la pantalla de estado
+  (servidor activo y desde cuándo, terminales conectadas —solo con `settings.manage`—, «Último respaldo: Sin registro»
+  como hueco de la Fase F y «Abrir Administración»). Sin interfaz de venta: `requestScreen` rechaza las secciones de
+  operación, no se consulta Caja y los atajos y la paleta no se ofrecen. Pantalla nueva `server-status` en
+  `navigation/sections.ts` (`serverOnly`, la paleta no la ofrece en otras modalidades).
+- Mantenimiento (`pages/maintenance/ServerSections.tsx`, insertado en `MaintenancePage.tsx`): «Servicio del servidor»
+  (estado en lenguaje sencillo, desde cuándo y terminales; «Reiniciar» con confirmación, solo si Go lo ofrece) y
+  «Modalidad de esta computadora» (opciones con «Actual» y «Cambiar la modalidad» con confirmación que explica lo que
+  cambia; al dejar de ser servidor: «La base de datos se conserva en esta computadora y no se borra nada»; luego la
+  aplicación se reinicia). Opciones grandes con patrón de radio (`pages/setup/ModalityOptions.tsx`). Tokens de color en
+  un bloque nuevo al final de `styles.css`. «Instalación» del estado del sistema muestra las tres modalidades.
+- `services/installation.ts`, `services/serverService.ts`, etiqueta de auditoría en `AuditPage.tsx`.
+
+**Pruebas y documentación**
+
+- Go: `standalone/standalone_unix_test.go` (rutas y precedencias, rechazo de la carpeta real, `flock`, modalidad y
+  habilitación incluido el formato que escriben Rust y el instalador, configuración de prueba, respaldos fuera de
+  `backups`, `postmasterAlive`, `HasData`, puerto temporal), `standalone/plist_test.go` (el plist real con los valores
+  del `postinstall`), `cmd/…/host_unix_test.go` (vigilancia y reinicio) y **`cmd/…/host_unix_integration_test.go`**
+  (`integration`, macOS: el binario real como proceso, ver «Pruebas»). `administration/service_host_acceptance_test.go`
+  (llamado desde `TestStageTwoAcceptance`). `./cmd/ad-el-pos-server` se agregó a la tupla de `scripts/database.py`.
+- Rust: `connection.rs` (tres modalidades, terminal sin servidor), `installation.rs` (7 pruebas), `api.rs`.
+- Vitest `pages/stage9gModality.test.tsx` (14) y ajustes de `maintenance.test.tsx`, `App.test.tsx`,
+  `inventory.test.tsx` (el puente simulado responde `installation_state`).
+- Playwright `workflow-stage9g-modality.spec.ts` y `native-driver.ts` (simula `installation_state`,
+  `set_installation_mode` con la misma lista cerrada y `restart_application` como recarga; `setInstallation` para la
+  prueba; `connection_config` devuelve la modalidad simulada).
+- `API_CONTRACTS.md`: bloque nuevo al final.
+
+### Decisiones tomadas en la fase
+
+1. **Semántica de `PathState`** (de `man launchd.plist`, macOS 26.5): «If the value of the key is true, then the job will
+   be kept alive as long as the path exists»; con `KeepAlive` como diccionario launchd hace un lanzamiento especulativo
+   al cargar (`RunAtLoad` implícito) y, si no hay razón para relanzarlo, vuelve a la invocación por demanda. **Supuestos
+   documentados** (no verificables sin instalar): (a) quitar el archivo **no detiene** un trabajo en marcha, por eso el
+   propio `host` vigila el archivo y termina; (b) crear el archivo hace que launchd lance el trabajo (vigilancia del
+   sistema de archivos, que el manual describe como «race-prone and lossy»): si en la Fase G no arrancara solo, basta
+   abrir la aplicación o reiniciar la Mac (`RunAtLoad`), y queda anotado; (c) el relanzamiento respeta `ThrottleInterval`.
+2. El servicio siempre queda registrado (también en «Solo terminal», inactivo): así cambiar a una modalidad con servidor
+   desde la aplicación no pide la contraseña de administrador (D3). «Solo terminal» no inicia PostgreSQL ni Go.
+3. El reinicio solo se ofrece si launchd lo va a relanzar (proceso padre 1 y archivo de habilitación); con `serve`
+   (desarrollo, Playwright) la sección dice que el servidor no es un servicio de la computadora.
+4. Restaurar en macOS pausa y reanuda el servicio con el archivo de habilitación (sin `sudo` ni `launchctl`).
+5. El paso de datos usa un puerto temporal (el anterior sigue en 55432) y se niega con el servidor anterior en marcha.
+   Además el `host` no crea el clúster si el puerto de PostgreSQL está ocupado: si en la Fase G se dejara marcada la
+   opción de servidor por error, no se crea nada que impida el paso de datos.
+6. Modalidad elegida en el primer arranque **solo en macOS**; Windows no cambia hasta la Fase W.
+7. Tras cambiar la modalidad la aplicación se reinicia (en lugar de recargar la configuración en caliente, que tocaría
+   cada uso de `state.config` en `api.rs`, `realtime.rs` y `main.rs`, compartidos con otras fases).
+8. Los cambios de modalidad no se auditan en Go: los hace Rust en la propia computadora y, al dejar de ser servidor, el
+   servidor se detiene. El reinicio sí se audita.
+9. PostgreSQL no viaja en el `.pkg` (D3): la opción de servidor exige el de Homebrew y falla con un aviso si falta.
+10. Tauri deja la aplicación sin firma de paquete (solo la firma ad hoc del enlazador en cada ejecutable; por eso
+    `codesign --verify --deep` falla en el `.app` de `build-macos`): la copia que va en el `.pkg` se firma ad hoc como
+    paquete completo (`codesign --force --deep --sign -`) y se verifica. Sin firma de desarrollador (etapa 10).
+11. `hostArchitectures` del instalador = la arquitectura compilada (`lipo -archs`; arm64 en esta Mac): la aplicación y
+    el servidor no son universales.
+
+### Pruebas ejecutadas (aisladas)
+
+| Suite                                                                                                                   | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `format` (Prettier, gofmt, cargo fmt; `docs/etapas` intacto por md5)                                                    | aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `sync`                                                                                                                  | aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `vet` (normal e `integration`)                                                                                          | aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `win` (`GOOS=windows` build, vet y vet `integration`)                                                                   | aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Go unitarias con `-race` (`go test ./...`)                                                                              | aprobado (14 s)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Integración `./cmd/ad-el-pos-server` (`TestServiceHostOnMacOS`, `-race`)                                                | aprobado, 41–43 s                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Integración `./internal/administration` (`TestStageTwoAcceptance` con `testServiceStatus`)                              | aprobado, 82 s                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `cargo test --locked --offline`                                                                                         | 54 aprobadas, 1 ignorada                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `tsc --noEmit`                                                                                                          | sin errores                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Vitest (`npm test`)                                                                                                     | 87 archivos, 835 pruebas aprobadas (14 nuevas en `stage9gModality.test.tsx`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Playwright Chromium (`restaurant`, `workflow-stage9c-navigation`, `workflow-stage9g-modality`, `workflow-zz-test-data`) | 4 de 4 (1.7 min)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Playwright WebKit (las mismas, pantalla desbloqueada)                                                                   | 4 de 4 (1.7 min)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Scripts del instalador con destino falso (`scripts/macos-pkg/test-scripts.sh`)                                          | 31 comprobaciones aprobadas (servidor nuevo, actualización que conserva «Solo servidor», «Solo terminal», sin PostgreSQL, carpeta de otra cuenta y sin destino de prueba)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `.pkg` compilado y examinado                                                                                            | `dev.sh build-macos-pkg`: aplicación con el servidor dentro (Tauri 1 min 23 s en `release`), `AD-EL POS_0.9.5.pkg` de 20 MB (la versión será la de `config/product.json`); `pkgutil --expand`: `Distribution` con las tres opciones y `hostArchitectures="arm64"`, `app.pkg` no reubicable con `AD-EL POS.app` (`Contents/MacOS/ad-el-pos-desktop` y `ad-el-pos-server`, firma ad hoc de paquete verificada con `codesign --verify --deep --strict`), `server.pkg` y `service.pkg` sin contenido con sus scripts idénticos a los del repositorio (`bash -n` correcto) y la plantilla del plist (`plutil -lint` correcto). El servidor del paquete, con `ADEL_TEST_MODE=1`, termina con 0 sin habilitación en una carpeta temporal y rechaza la carpeta real sin crearla. **No se instaló** |
+
+`TestServiceHostOnMacOS` recorre con el binario real (la prueba se vuelve a ejecutar a sí misma como el servidor):
+sin habilitación y en «Solo terminal» termina con 0 sin crear nada; con el puerto de PostgreSQL ocupado no crea el
+clúster; habilitado crea el clúster (carpeta 0700, `server.json`/`admin-password` 0600, marcador), migra y sirve
+(`test_mode` informado); un segundo `host` termina con error «ya está en uso»; `backup` (0600) y `restore-check` con el
+servicio en marcha; quitar el archivo de habilitación lo detiene en orden y conserva los datos; `restore` con el
+servicio en marcha lo pausa, restaura (con respaldo de seguridad) y lo vuelve a habilitar; `SIGTERM` cierra Go y
+PostgreSQL (`server_shutdown_complete`, `cluster_stopped`); `adopt-legacy` desde una base del clúster 55499 con todas
+las migraciones (se niega con el servidor anterior escuchando, pasa los datos con conteos idénticos de todas las tablas,
+deja el marcador sin secretos y 0600, no cambia la base anterior, se niega a repetirse) y el servicio arranca después
+con esos datos.
+
+### No verificado (exige la computadora real; Fase G)
+
+- Instalar el `.pkg`, que launchd lance el servicio al cargar y al encender sin iniciar sesión, que lo relance al
+  reiniciar desde Mantenimiento y al crear el archivo de habilitación (supuesto 1.b), el aviso «Elementos en segundo
+  plano añadidos» y el acceso al Keychain desde la aplicación instalada en `/Applications`.
+- El `postinstall` como root (`chown`, `root:wheel`, `launchctl bootstrap system`) solo se probó sin root con destino
+  falso y `launchctl` simulado.
+- No hay `shellcheck` en el equipo: los scripts se comprobaron con `bash -n` y su ejecución con destino falso.
+
+### Procedimiento para la Fase G (instalación real, con el propietario)
+
+Parada del §0 de la especificación: instalar pide la contraseña de administrador y conviene reiniciar al final. Se
+hace después de fusionar y aplicar todo en `REAL` (versión 0.10.0, esquema 23) y con la regresión aprobada.
+
+1. **Compilar** (sin efectos sobre datos): `./scripts/dev.sh build-macos-pkg` →
+   `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.10.0.pkg` (anotar SHA-256).
+2. **Respaldo y ensayo** de la instalación actual: `./scripts/dev.sh backup` y
+   `python3 scripts/restore-check.py backups/<archivo>` (conteos idénticos). Comprobación de solo lectura de conteos
+   como en la 9F, sin turnos en arqueo ni trabajos de impresión pendientes.
+3. **Detener solo Go** de la instalación actual: `./scripts/dev.sh server-stop` (PostgreSQL de `.local` **sigue en
+   marcha**: `adopt-legacy` lo lee). Cerrar la aplicación 0.9.5 si está abierta.
+4. **Instalar el `.pkg` (propietario)**: doble clic en el `.pkg` → Instalador de macOS → Introducción → **Tipo de
+   instalación: desmarcar «Servidor del restaurante»** (solo esta primera vez: el servicio aún no debe crear una base
+   vacía) → Instalar → **ventana de contraseña de administrador** («Instalador está intentando instalar software
+   nuevo», contraseña o Touch ID) → Cerrar. macOS mostrará la notificación **«Elementos en segundo plano añadidos»**
+   (permitir; en Ajustes › General › Ítems de inicio y extensiones › «Permitir en segundo plano» debe quedar activado).
+   Queda: `/Applications/AD-EL POS.app`, `/Library/Application Support/AD-EL POS` (de `eliver`, 0700, «Solo terminal»)
+   y el servicio cargado e inactivo. Comprobar (solo lectura): `launchctl print system/local.adel.pos.server` (estado
+   `not running`), `ls -le "/Library/Application Support/AD-EL POS"`, `cat ".../logs/server.log"` (`host_disabled`).
+   Si por error se dejó marcada la opción: el servicio no crea nada mientras 55432 esté ocupado (lo dice
+   `logs/server.log`); quitar `".../service-enabled"` (sin `sudo`) y seguir.
+5. **Pasar los datos** (sin `sudo`, como `eliver`):
+   `"/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server" adopt-legacy --from-config "/Users/eliver/Documents/ADEL POS/ad-el-pos/.local/server.json"`
+   → «Datos pasados y comprobados: N tablas con conteos idénticos.» y el nombre del respaldo; revisar
+   `legacy-adopted.json` (`counts_equal: true`, 134+ tablas). `.local` y `backups/` del proyecto no se tocan.
+6. **Detener PostgreSQL anterior**: `./scripts/dev.sh db-stop` (55432 queda libre).
+7. **Habilitar el servidor**: abrir `/Applications/AD-EL POS.app` → «¿Cómo se usará esta computadora?» (sugiere «Solo
+   terminal») → elegir **«Servidor y terminal»** → Continuar. La aplicación escribe la modalidad y `service-enabled`;
+   launchd lanza el servicio (arranca PostgreSQL de la carpeta nueva en 55432, respalda `…-antes-de-migrar` si hay
+   migraciones pendientes, migra y sirve en 8181) y la aplicación se reinicia. Puede aparecer el diálogo del
+   **Llavero** («AD-EL POS quiere usar información confidencial guardada en "local.adel.pos.dev"»): contraseña de la
+   sesión y **«Permitir siempre»** (la aplicación instalada es otra firma ad hoc). La credencial
+   `http://127.0.0.1:8181|main` no cambia, así que la terminal sigue enrolada. Alternativa sin la ventana (si el
+   lanzamiento por `PathState` no ocurriera, supuesto 1.b): reiniciar la Mac.
+8. **Verificar**: `curl -s http://127.0.0.1:8181/api/v1/health/ready` (200, esquema compatible) y `…/version` (0.10.0,
+   `test_mode` ausente); `lsof -nP -iTCP:55432 -sTCP:LISTEN` y `-iTCP:8181` (procesos de `eliver`, `postgres` con datos
+   en `/Library/Application Support/AD-EL POS/postgres`); `logs/server.log` (`host_ready`, `server_started`);
+   Mantenimiento › «Servicio del servidor» dice que funciona como servicio y ofrece «Reiniciar»; conteos de solo lectura
+   iguales a los del paso 2 (más lo que agregue la 0023). **Cerrar la ventana** y repetir el `curl` (sigue activo).
+9. **Reiniciar desde Mantenimiento** → «Reiniciar» → en ≈ 10–15 s vuelve (`logs/server.log`:
+   `service_restart_requested` y un `host_starting` nuevo).
+10. **Reiniciar la Mac (parada: avisar al propietario)** y, sin abrir la aplicación, comprobar al iniciar sesión que el
+    `host_starting` de `logs/server.log` es anterior al inicio de sesión (`ps -o lstart= -p <pid de ad-el-pos-server>`).
+11. Desde entonces **no usar `dev.sh db-start`, `server-start`, `migrate`, `backup` ni `restore-check.py` con la
+    instalación real**: actúan sobre la base anterior de `.local` (que queda como copia histórica) y ocuparían los
+    mismos puertos. Respaldos de la instalación: `"/Applications/AD-EL POS.app/Contents/MacOS/ad-el-pos-server" backup`
+    y `restore-check` (en `/Library/Application Support/AD-EL POS/backups`); restaurar: `… restore --file <respaldo>`
+    (pausa y reanuda el servicio). Desinstalar el servicio, si hiciera falta (pide contraseña):
+    `sudo launchctl bootout system/local.adel.pos.server` y borrar `/Library/LaunchDaemons/local.adel.pos.server.plist`;
+    los datos se conservan.
+
+### Para la Fase W (Windows) y otras fases
+
+- **Fase W**: servicio de Windows con el mismo `host` (falta `HostControl` para el administrador de servicios, la
+  vigilancia de la modalidad y el archivo de habilitación en `host_windows.go`, y `pauseServerForRestore`, que hoy pide
+  cerrar la aplicación); carpeta `%ProgramData%\AD-EL POS` en `layout_windows.go` (hoy `%LOCALAPPDATA%`, que sigue para
+  la instalación por usuario de la 9E con `server_host.rs`, sin cambios); `ServicePaths::system()` y `Context::detect`
+  de `installation.rs` para Windows (hoy `None`, `chosen` siempre `true` y `can_change` `false`); modalidad en el
+  instalador NSIS; paso de la instalación por usuario: `AdoptLegacy` sirve tal cual con el `server.json` de
+  `%LOCALAPPDATA%\AD-EL POS` (lee con su rol, no lo modifica). `server_host.rs` solo lanza el servidor en
+  `server-terminal`: con `server-only` no lo haría.
+- **Fases B y C**: `FindServerPage.tsx` es el punto de integración (búsqueda, dirección manual y emparejamiento);
+  Rust debe escribir el servidor emparejado en `connection.json` (`terminal-only` con `server_url`, que
+  `connection_for` ya conserva) y `server_configured` pasa a `true`. La escucha HTTPS 8443 (D1) solo con una modalidad
+  con servidor: `standalone.ServiceWanted` y el `installation_mode` de `HostStatus` dicen cuál.
+- **Fase F**: llenar `last_backup` de `GET maintenance/service` (hoy `null`) y la tarjeta «Último respaldo» de
+  `ServerOnlyPage.tsx` («Sin registro»); en el `host` de macOS el respaldo es `standalone.Backup`
+  (`installationBackup`), con la carpeta `backups` del servicio.
+
+### Para CLAUDE.md
+
+- §3: en macOS, desde la 9G, el servidor es un **servicio del sistema** (LaunchDaemon `local.adel.pos.server`,
+  `ops/launchd/local.adel.pos.server.plist`) que corre con la cuenta del usuario que instaló, con datos en
+  `/Library/Application Support/AD-EL POS` (0700) y PostgreSQL de Homebrew; `internal/standalone` y `host` ya no son
+  solo de Windows (`*_windows.go` / `*_unix.go`). La aplicación sigue sin iniciar ni detener Go: solo crea o quita el
+  archivo de habilitación `service-enabled` al cambiar la modalidad.
+- Modalidades (§2.3): `server-terminal`, `server-only`, `terminal-only`; lado servidor `installation-mode.json` +
+  `service-enabled` (KeepAlive → PathState); lado terminal `connection.json` (solo Rust, lista cerrada, se reinicia la
+  aplicación al cambiar). Primer arranque en macOS sin `connection.json` → elección. «Solo servidor» sin interfaz de
+  venta. Cambiar de modalidad nunca borra la base.
+- §5: `dev.sh build-macos-pkg [--reuse-app]` (instalador `.pkg`, no instala nada); comandos del servidor `host`,
+  `backup`, `restore-check`, `restore` y `adopt-legacy` en macOS; `ADEL_DATA_DIR`; `scripts/macos-pkg/test-scripts.sh`.
+  Tras la Fase G, los comandos de `dev.sh` que actúan sobre la base (`db-*`, `server*`, `migrate`, `backup`,
+  `restore-check.py`) **ya no son la instalación real** (lo es el servicio).
+- §6: `ADEL_TEST_MODE=1` también rechaza la carpeta del servicio en macOS. `./cmd/ad-el-pos-server` tiene pruebas de
+  integración (`TestServiceHostOnMacOS`, clústeres propios en 55511–55513 y Go en 8192–8194; necesita PostgreSQL 18 de
+  Homebrew o `ADEL_PG_BIN`); `iso.sh` solo toma por omisión los paquetes `./internal/…`: pasarlo con `ISO_PKGS`.
+- §7: ninguna regla nueva de red en esta fase (la escucha en la red es de la Fase B, D1).
+- §15: permiso sin cambios (`settings.manage` para el servicio); auditoría nueva `maintenance.service_restarted`.
+- §19: supuestos de `PathState` (1.a–c) hasta verificarlos en la Fase G; PostgreSQL fuera del paquete (etapa 10); el
+  `.pkg` y la aplicación con firma ad hoc (el Llavero vuelve a pedir permiso con cada compilación instalada).
+
+**Verificación del coordinador** (13/11/2026): copia exacta de `aa748b7` (`git archive`) en el entorno aislado: formato,
+`sync --check`, `go vet` (normal e `integration`), `GOOS=windows` build y vet, Go unitarias con `-race`, integración
+`./cmd/ad-el-pos-server` (43 s) y `./internal/administration` (92 s), `tsc`, Vitest y `cargo test`: todo aprobado. Fusión
+en `etapa-9g` por avance rápido.
