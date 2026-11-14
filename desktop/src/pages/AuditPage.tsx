@@ -53,6 +53,14 @@ const actionLabels: Record<string, string> = {
   'payments.document_reprinted': 'Reimpresión de un documento',
   'cash.document_retried': 'Reintento de impresión de un documento de caja',
   'cash.document_reprinted': 'Reimpresión de un documento de caja',
+  // Etapa 9G (fase D): «Agotado» desde la captura y su reinicio con el inicio del día, y los pedidos capturados
+  // sin conexión (aceptados y los que volvieron con cambios para que el mesero los confirme).
+  'catalog.product.sold_out': 'Producto marcado como agotado',
+  'catalog.product.available_again': 'Producto disponible otra vez',
+  'catalog.product.sold_out_reset': 'Agotado terminado con el inicio del día',
+  'restaurant.offline_order.accepted': 'Pedido capturado sin conexión aceptado',
+  'restaurant.offline_order.requires_confirmation':
+    'Pedido capturado sin conexión con cambios por confirmar',
 };
 
 export function AuditPage() {

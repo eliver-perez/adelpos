@@ -44,28 +44,28 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
 
 ## Operaciones
 
-| `operationId` | Método y ruta (bajo `/api/v1`) | Para qué |
-| --- | --- | --- |
-| `getVersion` | `GET /version` | Versión del servidor, `min_client_version`, tipos de cliente y funciones. |
-| `getReadiness` | `GET /health/ready` | Servidor y base de datos listos (200) o no (503). |
-| `getOpenAPI` | `GET /openapi.json` | Este contrato. |
-| `login` | `POST /auth/login` | Iniciar sesión en una terminal emparejada. |
-| `logout` | `POST /auth/logout` | Cerrar la sesión. |
-| `getIdentity` | `GET /auth/me` | Usuario, permisos vigentes, preferencias, terminal y establecimiento. |
-| `streamEvents` | `GET /events` | Eventos en tiempo real (SSE). |
-| `getCatalogSync` | `GET /catalog/sync` | Catálogo descargable completo o «solo cambios desde la versión X». |
-| `listCatalogProducts` | `GET /catalog/products` | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
-| `getCatalogImage` | `GET /catalog/images/{id}` | Imagen en JSON base64 (la usa el escritorio). |
-| `getCatalogImageContent` | `GET /catalog/images/{id}/content` | Imagen binaria con `ETag` (304 con `If-None-Match`). |
-| `setProductSoldOut` | `POST /catalog/products/{id}/sold-out` | «Agotado» y «Disponible otra vez». |
-| `getRecoveryState` | `GET /restaurant/state` | Estado al reconectar: permisos, mesas, cuentas y preparación. |
-| `listAccounts` | `GET /restaurant/accounts` | Cuentas con sus estados. |
-| `openAccount` | `POST /restaurant/accounts` | Abrir una cuenta con su primer producto. |
-| `getAccount` | `GET /restaurant/accounts/{id}` | Cuenta con su borrador y sus partidas confirmadas. |
-| `saveDraft` | `PUT /restaurant/accounts/{id}/draft` | Guardar el borrador. |
-| `previewDraft` | `GET /restaurant/accounts/{id}/preview` | Calcular el borrador y obtener su huella. |
-| `confirmDraft` | `POST /restaurant/accounts/{id}/confirm` | Confirmar (enviar a cocina) el borrador. |
-| `submitOfflineOrder` | `POST /restaurant/offline-orders` | Pedido capturado sin conexión (Android). |
+| `operationId`            | Método y ruta (bajo `/api/v1`)           | Para qué                                                                       |
+| ------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------ |
+| `getVersion`             | `GET /version`                           | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
+| `getReadiness`           | `GET /health/ready`                      | Servidor y base de datos listos (200) o no (503).                              |
+| `getOpenAPI`             | `GET /openapi.json`                      | Este contrato.                                                                 |
+| `login`                  | `POST /auth/login`                       | Iniciar sesión en una terminal emparejada.                                     |
+| `logout`                 | `POST /auth/logout`                      | Cerrar la sesión.                                                              |
+| `getIdentity`            | `GET /auth/me`                           | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
+| `streamEvents`           | `GET /events`                            | Eventos en tiempo real (SSE).                                                  |
+| `getCatalogSync`         | `GET /catalog/sync`                      | Catálogo descargable completo o «solo cambios desde la versión X».             |
+| `listCatalogProducts`    | `GET /catalog/products`                  | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
+| `getCatalogImage`        | `GET /catalog/images/{id}`               | Imagen en JSON base64 (la usa el escritorio).                                  |
+| `getCatalogImageContent` | `GET /catalog/images/{id}/content`       | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
+| `setProductSoldOut`      | `POST /catalog/products/{id}/sold-out`   | «Agotado» y «Disponible otra vez».                                             |
+| `getRecoveryState`       | `GET /restaurant/state`                  | Estado al reconectar: permisos, mesas, cuentas y preparación.                  |
+| `listAccounts`           | `GET /restaurant/accounts`               | Cuentas con sus estados.                                                       |
+| `openAccount`            | `POST /restaurant/accounts`              | Abrir una cuenta con su primer producto.                                       |
+| `getAccount`             | `GET /restaurant/accounts/{id}`          | Cuenta con su borrador y sus partidas confirmadas.                             |
+| `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`    | Guardar el borrador.                                                           |
+| `previewDraft`           | `GET /restaurant/accounts/{id}/preview`  | Calcular el borrador y obtener su huella.                                      |
+| `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm` | Confirmar (enviar a cocina) el borrador.                                       |
+| `submitOfflineOrder`     | `POST /restaurant/offline-orders`        | Pedido capturado sin conexión (Android).                                       |
 
 Las fases B (emparejamiento con código y conexión cifrada) y C (descubrimiento) de la 9G agregan sus rutas a este
 contrato.
@@ -221,17 +221,17 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
 
 ## Códigos de error más frecuentes
 
-| Código | Estado | Qué hacer |
-| --- | --- | --- |
-| `CLIENT_UPDATE_REQUIRED` | 426 | Actualizar la aplicación de este equipo. |
-| `DEVICE_REVOKED`, `DEVICE_REQUIRED` | 401 | Emparejar la terminal otra vez. |
-| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401 | Iniciar sesión otra vez. |
-| `PERMISSION_DENIED` | 403 | El usuario no tiene el permiso. |
-| `ACCOUNT_CONFLICT` | 409 | Otra terminal cambió la cuenta: recargarla. |
-| `QUOTE_CHANGED` | 409 | El cálculo cambió: volver a calcular y confirmar. |
-| `TABLE_HAS_ACCOUNT` | 409 | La mesa ya tiene una cuenta abierta: elegir. |
-| `PRODUCT_SOLD_OUT` | 409 | El producto está agotado. |
-| `PRODUCT_UNAVAILABLE` | 409 | El producto no está disponible (pausado, fuera de horario o inactivo). |
-| `ORDER_REQUIRES_CONFIRMATION` | 409 | Mostrar los cambios al mesero y reenviar con su confirmación. |
-| `IDEMPOTENCY_CONFLICT` | 409 | La clave ya se usó con otro contenido: consultar el resultado. |
-| `LOGIN_THROTTLED` | 429 | Esperar 15 minutos. |
+| Código                                                   | Estado | Qué hacer                                                              |
+| -------------------------------------------------------- | ------ | ---------------------------------------------------------------------- |
+| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                               |
+| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                        |
+| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                               |
+| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                        |
+| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                            |
+| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                      |
+| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                           |
+| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                              |
+| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo). |
+| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.          |
+| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.         |
+| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                    |

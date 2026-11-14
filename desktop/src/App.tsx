@@ -46,6 +46,7 @@ import type { ScreenID } from './navigation/sections';
 import { dismissNotice, notifyError, notifySuccess, notifyWarning } from './services/notify';
 import { savePreferences } from './services/preferences';
 import { setPrecheckName } from './services/documentNames';
+import { compatibilityNotices } from './services/compatibility';
 import { registerPrinterSetup } from './services/printProblems';
 import { requestPaymentPolicies } from './pages/payments/policiesRequest';
 
@@ -314,6 +315,25 @@ function ApplicationContent() {
           }
         >
           <Notice>{session.connectionError}</Notice>
+          <div className="button-row">
+            <button className="primary-button" onClick={() => void session.refresh()}>
+              Volver a comprobar
+            </button>
+            <button className="secondary-button" onClick={() => setTechnical(true)}>
+              Ver estado del sistema
+            </button>
+          </div>
+        </AccessFrame>
+      </AccessShell>
+    );
+  }
+  // Etapa 9G (§5.1): la aplicación o el servidor son demasiado viejos para trabajar juntos.
+  if (session.phase === 'update-terminal' || session.phase === 'update-server') {
+    const notice =
+      compatibilityNotices[session.phase === 'update-terminal' ? 'terminal' : 'server'];
+    return (
+      <AccessShell overlay={commands.overlay}>
+        <AccessFrame title={notice.title} description={notice.description}>
           <div className="button-row">
             <button className="primary-button" onClick={() => void session.refresh()}>
               Volver a comprobar

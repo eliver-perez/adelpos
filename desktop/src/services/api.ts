@@ -37,6 +37,8 @@ export type Operation =
   | 'kitchen_resolve_job'
   | 'restaurant_draft_preview'
   | 'setup_status'
+  // Etapa 9G (§5.1): versión del servidor, para avisar si es más viejo de lo que necesita la aplicación.
+  | 'version'
   | 'setup'
   | 'enroll'
   | 'enroll_local'
@@ -136,6 +138,8 @@ export type Operation =
   | 'catalog_configuration'
   | 'catalog_product_state'
   | 'catalog_product_availability'
+  // Etapa 9G (§5.4): «Agotado» y «Disponible otra vez» desde la captura.
+  | 'catalog_product_sold_out'
   | 'catalog_duplicate_product'
   | 'payments_settings'
   | 'payments_save_settings'
@@ -351,6 +355,10 @@ export type Operation =
   | 'payments_rerender'
   | 'payments_rerender_cash_document';
 
+// Evento de ventana con el que una operación rechazada por «Actualiza esta terminal» (426 CLIENT_UPDATE_REQUIRED)
+// avisa a la sesión (etapa 9G).
+export const clientUpdateEvent = 'adel-client-update-required';
+
 export class APIError extends Error {
   constructor(
     public code: string,
@@ -429,6 +437,10 @@ export async function api<T>(
       error.code.startsWith('SESSION_') || error.code.startsWith('DEVICE_');
     if (response.status === 401 && invalidatesSession) {
       window.dispatchEvent(new CustomEvent('session-invalid', { detail: error }));
+    }
+    // Etapa 9G (§5.1): el servidor ya no acepta esta versión de la aplicación; useSession muestra el aviso.
+    if (response.status === 426 && error.code === 'CLIENT_UPDATE_REQUIRED') {
+      window.dispatchEvent(new CustomEvent(clientUpdateEvent, { detail: error }));
     }
     throw error;
   }
