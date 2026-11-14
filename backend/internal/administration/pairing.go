@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -523,7 +525,17 @@ func (service *Service) pairingAdministration(ctx context.Context, tx pgx.Tx, re
 		}
 		// La aprobación solo se acepta en la computadora principal: la interfaz de otra terminal muestra
 		// las solicitudes sin el campo del código.
-		return map[string]any{"requests": requests, "approve_here": request.Local}, nil
+		result := map[string]any{"requests": requests, "approve_here": request.Local}
+		if request.Local {
+			// La computadora principal muestra cómo escribir su dirección en una terminal nueva (la
+			// búsqueda automática en la red es de la fase C).
+			result["network"] = map[string]any{
+				"available": service.NetworkPort > 0,
+				"port":      service.NetworkPort,
+				"addresses": localAddresses(),
+			}
+		}
+		return result, nil
 	}
 	if len(parts) != 4 || request.Method != "POST" || !identifierPattern.MatchString(parts[2]) || (parts[3] != "approve" && parts[3] != "reject") {
 		return nil, &Fault{Status: 404, Code: "NOT_FOUND", Message: "Ruta no disponible."}
@@ -658,4 +670,27 @@ func (service *Service) identityFingerprint() []byte {
 		return nil
 	}
 	return service.Identity.Fingerprint[:]
+}
+
+// localAddresses son las direcciones de la computadora principal que una terminal puede escribir: sus IPv4
+// privadas (RFC 1918) y, si el sistema lo informa, su nombre «.local».
+func localAddresses() []string {
+	addresses := []string{}
+	interfaces, err := net.InterfaceAddrs()
+	if err == nil {
+		for _, address := range interfaces {
+			network, ok := address.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if v4 := network.IP.To4(); v4 != nil && v4.IsPrivate() {
+				addresses = append(addresses, v4.String())
+			}
+		}
+	}
+	sort.Strings(addresses)
+	if host, err := os.Hostname(); err == nil && strings.HasSuffix(strings.ToLower(host), ".local") {
+		addresses = append(addresses, strings.ToLower(host))
+	}
+	return addresses
 }

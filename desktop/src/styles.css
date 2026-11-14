@@ -8981,3 +8981,121 @@ th[aria-sort='descending'] {
 .maintenance-modality-actions {
   margin-top: 4px;
 }
+
+/* Etapa 9G, fase B: emparejamiento con código («Buscar el servidor») y Sistema › Terminales. Solo tokens. */
+.find-server-form {
+  display: grid;
+  gap: 12px;
+  max-width: 480px;
+  margin-bottom: 16px;
+}
+.pairing-panel {
+  display: grid;
+  gap: 12px;
+}
+.pairing-server,
+.pairing-instructions,
+.pairing-expiry,
+.pairing-help {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.pairing-code {
+  padding: 16px 24px;
+  border: 1px solid var(--accent-border);
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 56px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+.pairing-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+}
+.pairing-name-editor {
+  display: grid;
+  gap: 12px;
+  max-width: 480px;
+}
+.pairing-requests h2,
+.sessions-summary h2,
+.device-configuration h2 {
+  margin-bottom: 12px;
+}
+.pairing-request-list {
+  display: grid;
+  gap: 12px;
+}
+.pairing-request {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.2fr);
+  gap: 16px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.pairing-request-summary {
+  display: grid;
+  gap: 4px;
+  font-size: 15px;
+}
+.pairing-request-summary small {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pairing-request-approval {
+  display: grid;
+  gap: 8px;
+}
+.pairing-request-approval input {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+}
+.sessions-summary-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.sessions-summary-counts div,
+.device-configuration-list div {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--subtle);
+}
+.sessions-summary-counts dt,
+.device-configuration-list dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.sessions-summary-counts dd {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.device-configuration-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+.device-configuration-list dd {
+  font-size: 15px;
+  font-weight: 600;
+}
+.device-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}

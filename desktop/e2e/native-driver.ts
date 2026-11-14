@@ -1,5 +1,14 @@
 import { readFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
+import {
+  cancelPairingRequest,
+  claimPairing,
+  pairingState,
+  renamePairingRequest,
+  requestPairingCode,
+  validPairingAddress,
+} from './pairing';
+import type { PairingSession } from './pairing';
 
 // Servidor Go temporal de la aceptación. Por omisión el puerto 8183; ADEL_BROWSER_SERVER_URL permite
 // ejecutar dos aceptaciones aisladas a la vez con servidores temporales en otros puertos locales.
@@ -100,18 +109,104 @@ export async function installDriver(page: Page) {
     chosen: true,
     mode: 'server-terminal' as InstallationMode,
     serverDataKept: false,
+    // Etapa 9G (fase B): terminal emparejada con el servidor temporal por pairing_* (abajo).
+    paired: false,
+    serverName: '',
   };
   function installationState() {
     const server = installation.mode !== 'terminal-only';
     return {
       chosen: installation.chosen,
       mode: installation.mode,
-      server_configured: server,
+      server_configured: server || installation.paired,
       can_change: true,
       service_installed: true,
       service_enabled: server,
       server_data_kept: !server && installation.serverDataKept,
+      paired: installation.paired,
+      server_name: installation.paired ? installation.serverName : null,
     };
+  }
+  // Etapa 9G (fase B): simulación de pairing_start, pairing_status, pairing_rename, pairing_cancel y
+  // pairing_forget de src-tauri/src/pairing.rs contra el servidor temporal (e2e/pairing.ts): misma lista
+  // cerrada de direcciones, mismo compromiso y código. Aprobada la solicitud, la credencial reclamada
+  // sustituye a la del puente (como el almacén seguro con la llave del servidor emparejado) y la
+  // terminal queda emparejada.
+  let pairingSession: PairingSession | null = null;
+  function pairingView(session: PairingSession, state: string) {
+    return {
+      state,
+      code: session.code,
+      name: session.name,
+      server_name: session.serverName,
+      expires_at: session.expiresAt,
+    };
+  }
+  async function simulatePairing(command: string, args: Record<string, unknown>) {
+    if (command === 'pairing_start') {
+      if (installation.mode !== 'terminal-only' || installation.paired) {
+        return { __bridgeRejection: 'Esta terminal ya está emparejada con un servidor.' };
+      }
+      const name = String(args.name ?? '').trim();
+      if (!validPairingAddress(String(args.address ?? ''))) {
+        return {
+          __bridgeRejection:
+            'La dirección debe ser de la red local del restaurante (por ejemplo 192.168.1.20 o caja.local).',
+        };
+      }
+      if (name === '' || name.length > 80) {
+        return {
+          __bridgeRejection: 'Escribe un nombre para esta terminal (máximo 80 caracteres).',
+        };
+      }
+      try {
+        pairingSession = await requestPairingCode(name, 'macOS');
+      } catch (error) {
+        return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
+      }
+      return pairingView(pairingSession, 'pending');
+    }
+    const session = pairingSession;
+    if (command === 'pairing_forget') {
+      installation.paired = false;
+      installation.serverName = '';
+      return null;
+    }
+    if (!session) {
+      if (command === 'pairing_cancel') return null;
+      return { __bridgeRejection: 'No hay un emparejamiento en curso. Pide un código nuevo.' };
+    }
+    if (command === 'pairing_cancel') {
+      pairingSession = null;
+      await cancelPairingRequest(session);
+      return null;
+    }
+    if (command === 'pairing_rename') {
+      const reply = await renamePairingRequest(session, String(args.name ?? ''));
+      if (reply.status !== 200) {
+        const error = reply.body.error as { message?: string } | undefined;
+        return { __bridgeRejection: error?.message ?? 'No se pudo cambiar el nombre.' };
+      }
+      session.name = String(reply.body.name);
+      return pairingView(session, 'pending');
+    }
+    const state = await pairingState(session);
+    if (state !== 'approved') {
+      return pairingView(session, state);
+    }
+    const claimed = await claimPairing(session);
+    pairingSession = null;
+    if (claimed.status !== 200) {
+      const error = claimed.body.error as { message?: string } | undefined;
+      return { __bridgeRejection: error?.message ?? 'No se pudo emparejar esta terminal.' };
+    }
+    deviceID = String(claimed.body.device_id);
+    deviceToken = String(claimed.body.device_token);
+    sessionToken = '';
+    installation.paired = true;
+    installation.serverName = String(claimed.body.server_name);
+    session.name = String(claimed.body.name);
+    return pairingView(session, 'paired');
   }
   let streamGeneration = 0;
   const streams = new Map<number, AbortController>();
@@ -234,6 +329,16 @@ export async function installDriver(page: Page) {
       body: body === undefined || method === 'GET' ? undefined : JSON.stringify(body),
     });
     const result = await response.json();
+    // Como Rust (api.rs): una terminal revocada o desconocida pierde su credencial y su sesión.
+    const failure = String(result?.error?.code ?? '');
+    if (
+      response.status === 401 &&
+      (failure === 'DEVICE_REVOKED' || failure === 'DEVICE_REQUIRED')
+    ) {
+      deviceID = '';
+      deviceToken = '';
+      sessionToken = '';
+    }
     if (response.ok) {
       if (result.device_token) {
         deviceID = result.device_id;
@@ -464,12 +569,28 @@ export async function installDriver(page: Page) {
           has_session: !!sessionToken,
           local_setup_available: false,
           local_enrollment_available: false,
+          paired: installation.paired,
         };
       if (command === 'connection_config')
         return {
           installation_mode: installation.mode,
-          server_url: installation.mode === 'terminal-only' ? '' : serverURL,
+          server_url:
+            installation.mode === 'terminal-only' && !installation.paired ? '' : serverURL,
         };
+      if (command.startsWith('pairing_')) {
+        if (
+          ![
+            'pairing_start',
+            'pairing_status',
+            'pairing_rename',
+            'pairing_cancel',
+            'pairing_forget',
+          ].includes(command)
+        ) {
+          throw new Error('Comando de prueba no autorizado');
+        }
+        return simulatePairing(command, args);
+      }
       if (command === 'installation_state') return installationState();
       if (command === 'set_installation_mode') {
         const mode = String(args.mode) as InstallationMode;
@@ -570,7 +691,7 @@ export async function installDriver(page: Page) {
     return menuPrecheckName;
   }
   // Etapa 9G: estado de la modalidad simulada (antes de abrir la página o entre recargas).
-  function setInstallation(next: { chosen?: boolean; mode?: InstallationMode }) {
+  function setInstallation(next: { chosen?: boolean; mode?: InstallationMode; paired?: boolean }) {
     Object.assign(installation, next);
   }
   return {

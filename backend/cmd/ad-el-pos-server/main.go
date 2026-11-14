@@ -234,6 +234,10 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 			listener.Close()
 			return err
 		}
+		// Antes de atender peticiones: Terminales lo informa en la computadora principal.
+		if address, ok := networkServer.Addr().(*net.TCPAddr); ok {
+			application.NetworkPort = address.Port
+		}
 	}
 	// Al empezar el apagado los flujos de eventos (SSE) terminan; las demás peticiones terminan su
 	// trabajo como siempre. Sin esto el cierre esperaba 5 s a un flujo abierto y salía con error.
