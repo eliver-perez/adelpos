@@ -135,6 +135,10 @@ beforeEach(() => {
     if (command === 'restart_application') {
       return null;
     }
+    // Etapa 9G, fase C: la búsqueda en la red no encuentra nada en estas pruebas de la dirección a mano.
+    if (command === 'discovery_search') {
+      return [];
+    }
     if (command !== 'api_request') {
       throw new Error(`Comando no esperado: ${command}`);
     }
