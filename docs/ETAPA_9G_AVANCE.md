@@ -856,3 +856,218 @@ hace después de fusionar y aplicar todo en `REAL` (versión 0.10.0, esquema 23)
 `sync --check`, `go vet` (normal e `integration`), `GOOS=windows` build y vet, Go unitarias con `-race`, integración
 `./cmd/ad-el-pos-server` (43 s) y `./internal/administration` (92 s), `tsc`, Vitest y `cargo test`: todo aprobado. Fusión
 en `etapa-9g` por avance rápido.
+
+## Fase D · API con versión y preparación para Android
+
+Un agente (13/11/2026), en su árbol de trabajo `etapa-9g-d` (desde `etapa-9g`), en paralelo con la Fase A. Decisiones del
+coordinador D8 («Agotado»), D9 (una sesión por usuario, sin cambio) y D12 (una sola 0023 con una sección por fase).
+Pruebas en el clúster temporal 55499, Go temporal en 8185, vista previa en 1423 y Rust en `cache/cargo-D`; nunca contra la
+instalación real. Commits: `f670382` (servidor), `7842d60` (contrato OpenAPI y pruebas de contrato), `dbf6c19` (escritorio) y
+`545683b` (pruebas de actualización anteriores adaptadas a la 0023).
+
+### Qué cambió
+
+**Migración `0023_network_terminals_and_android.sql`** (creada en esta fase con el encabezado general y la sección
+`-- Fase D`; esquema 23 en `config/product.json` y `sync`; la versión sigue en 0.9.5):
+
+1. `catalog_products.sold_out_at`, `sold_out_until` (NULL = hasta nuevo aviso) y `sold_out_by` con
+   `catalog_products_sold_out_check` (marca completa o vacía, fin posterior al inicio) e índice parcial.
+2. Permiso `catalog.sold_out.manage` («Marcar productos como agotados y disponibles otra vez desde la captura»), solo al
+   administrador; también en `catalog.Permissions` con la misma descripción.
+3. Ámbito `catalog` en `realtime_events_scope_check`. **Si otra fase redefine esta restricción después, debe conservar
+   `catalog`.**
+4. Versión del catálogo: secuencia `catalog_version_seq`, tabla `catalog_change_log` (una fila por registro: entidad,
+   id, último número, borrado) y disparadores en las 19 tablas del catálogo y en `payment_settings.tax_rate`. Un número
+   por transacción (variable local `adel.catalog_version`); el disparador toma el lock 7820148304 (reentrante: toda
+   escritura del catálogo ya lo tiene exclusivo; el IVA general lo toma después de 7820148305, en el orden de siempre).
+5. Comentario de conservación en `restaurant_operations` (las claves se guardan para siempre).
+
+**Go**
+
+- `internal/httpapi/clientversion.go` + `router.go`: cabeceras `X-Client-Version` y `X-Client-Kind`; las rutas de la
+  aplicación responden `426 CLIENT_UPDATE_REQUIRED` («Actualiza esta terminal», con `details`) a una versión anterior a
+  `min_client_version`; versión o tipo ilegibles → 400. **Sin cabecera se acepta** (herramientas, pruebas, aplicaciones
+  anteriores a la 9G que solo existen en la propia computadora principal). `/version`, `/health/*` y `/openapi.json`
+  siempre responden. `/version` agrega `min_client_version`, `client_kinds`, `openapi_path` y funciones nuevas.
+  `GET /api/v1/openapi.json` sirve el contrato.
+- `internal/product`: `MinClientVersion` y `MinServerVersion` (de `config/product.json`, hoy 0.9.5 los dos).
+- `internal/apicontract` (nuevo, en la tupla de `scripts/database.py`): `openapi.json` (OpenAPI 3.1, 20 operaciones),
+  validador de un subconjunto de JSON Schema sin dependencias (una palabra clave fuera del subconjunto hace fallar),
+  pruebas unitarias del documento y prueba de integración `TestContractV1`.
+- `internal/idempotency` (nuevo, neutral): huella, `Replay` y `Remember` sobre `restaurant_operations` con las reglas de
+  pedidos y cobros; `Remember` devuelve lo guardado para que la primera respuesta y la repetida sean idénticas. Lo usa
+  «Agotado»; los módulos anteriores no se tocaron.
+- `internal/catalog`: `soldout.go` (ruta `POST catalog/products/{id}/sold-out`, fin con `businessday` o hasta nuevo
+  aviso, auditoría, evento, `ResetExpiredSoldOut` y `SoldOutWorker` cada 30 s); `sync.go` (`GET catalog/sync[?since=X]`,
+  `Version`); `images.go` (`GET catalog/images/{id}/content` binaria con `ETag`/304, tipo `Binary`); `actions.go`,
+  `calculator.go` y `group_calculator.go` (agotado = no disponible, sin excepción; `409 PRODUCT_SOLD_OUT` para el
+  producto, un complemento o un componente; `Error.ProductID` interno); `handler.go` (`route` separado de `Handle`,
+  evento `catalog.changed` en toda escritura correcta, `sold_out*` en el listado); `context.go` (permiso, `Actor` con
+  usuario y terminal, `IfNoneMatch`); `models.go` (`SoldOut*` en `Product`, omitidos si vacíos).
+- `internal/operations`: `offline_orders.go` (`POST restaurant/offline-orders`), `recovery.go` (`Recovery`),
+  `confirmations.go` (`confirmLines` compartido por la confirmación y el pedido sin conexión, sin cambio de
+  comportamiento), `handler.go` (permiso de la ruta y sin evento genérico duplicado), `context.go` (`Error.Rejection`).
+- `internal/administration`: `recovery.go` (`GET restaurant/state`, antes del prefijo `restaurant/`), `binary.go`
+  (respuesta binaria y 304), `routes.go` (`operationFault` con auditoría de rechazos, actor e `IfNoneMatch` del
+  catálogo), `http.go` y `service.go` (`If-None-Match`).
+- `internal/events/store.go`: ámbito `catalog` → `catalog.read`.
+- `cmd/ad-el-pos-server/main.go`: arranca `catalog.SoldOutWorker` junto a los de cocina e inventario (bloque acotado).
+- `internal/database`: `stage9g_android_upgrade_test.go` (actualización desde el esquema 22, para que las fases B, E y
+  F agreguen sus comprobaciones) y las dos pruebas 9F que exigían «la última migración es la 22» ahora migran desde la
+  21 hasta la última.
+
+**Escritorio**
+
+- Rust: `api.rs` (`with_client_headers`, `CLIENT_VERSION` = `CARGO_PKG_VERSION`, `CLIENT_KIND` = `desktop`;
+  operaciones `version` y `catalog_product_sold_out`; pruebas), `realtime.rs` y `export.rs` (mismas cabeceras).
+- React: `services/compatibility.ts` (comparación de versiones y avisos), `hooks/useSession.ts` (fases
+  `update-terminal` y `update-server`; la versión del servidor se comprueba al conectar y después de perder la
+  conexión), `services/api.ts` (evento `adel-client-update-required` con un 426), `App.tsx` («Actualiza esta terminal»
+  y «Actualiza el servidor» con «Volver a comprobar» y «Ver estado del sistema»), `services/soldOut.ts`,
+  `ProductGrid.tsx` («Marcar agotados» solo con el permiso: barra con «Solo por hoy» / «Hasta nuevo aviso»; un toque
+  marca o devuelve; etiqueta «Agotado» o «Agotado hasta nuevo aviso» y producto no seleccionable), `CaptureScreen.tsx`,
+  `captureRules.ts`, `AuditPage.tsx` (nombres de las acciones nuevas) y `styles.css` (solo tokens). La recarga por el
+  evento nuevo no necesitó código: todo evento invalida las consultas vivas.
+- `desktop/e2e/native-driver.ts`: el puente envía las cabeceras de cliente como Rust (sin comandos Tauri nuevos).
+- Documentación: `docs/API_V1.md` (nuevo) y sección 9G en `API_CONTRACTS.md`.
+
+### Decisiones de la fase
+
+- **Peticiones sin `X-Client-Version`**: se aceptan como «cliente sin identificar» (ver arriba). Toda aplicación desde
+  la 9G envía las dos cabeceras; la fase B puede exigirlas en la escucha de red si lo considera necesario.
+- **Versiones mínimas en `config/product.json`**: `min_client_version` y `min_server_version`, hoy 0.9.5. **En la Fase G,
+  al fijar 0.10.0, subir las dos a 0.10.0** (el escritorio 0.10.0 usa rutas que un servidor 0.9.5 no tiene; un cliente
+  0.10.0 es el primero que se identifica). `services/compatibility.test.ts` comprueba que ninguna mínima supere la
+  versión.
+- **«Agotado» aplica a productos**, también cuando son complemento (`complements.product_id`) o componente de combo. Los
+  complementos que son ingredientes y las porciones no se agotan desde la captura (se desactivan en Catálogo). Es un
+  hecho físico: ninguna excepción de disponibilidad (`catalog.availability.override` de la vista previa) lo pasa por
+  alto. No cambia la revisión del producto. El fin se calcula al marcarlo (cambiar después la «Hora de inicio del día»
+  no lo mueve); la lectura ya ignora una marca vencida y el trabajador la limpia (sube la versión, audita como proceso y
+  avisa).
+- **El catálogo publica `catalog.changed` en toda escritura** (no solo «Agotado»), como pide D8; la nota de `CLAUDE.md` §6
+  («Los cambios de catálogo no publican eventos…») deja de ser cierta.
+- **Catálogo descargable**: requiere `catalog.read` y `catalog.prices.read`; precio por producto y presentación con
+  `effectivePrice` de la lista predeterminada (la misma función de `catalog.Calculate`); disponibilidad calculada al
+  descargar; archivados fuera de la descarga completa y con `archived` en la de cambios; un cambio de categoría trae sus
+  productos y un cambio de lista predeterminada o de IVA general, todos. Las promociones no se descargan (el servidor las
+  aplica al confirmar).
+- **Pedido sin conexión**: destino = cuenta abierta o mesa (cuenta nueva). Cambios aceptables con la confirmación
+  (`price_changed`, `table_has_account`) y cambios que exigen corregir el pedido (agotado, eliminado, no disponible,
+  complemento o parte no disponible, partida inválida, cuenta cerrada, mesa fuera de servicio). La confirmación debe
+  traer la versión vigente del catálogo **y** cubrir cada cambio vigente (tipo, partida, producto y valor «ahora»), así
+  que una confirmación con catálogo viejo o de otro precio se rechaza de nuevo. Se compara el precio por unidad antes de
+  promociones. El rechazo no guarda la clave: el reenvío confirmado usa la misma `operation_id` (así un envío tardío del
+  original es `IDEMPOTENCY_CONFLICT` y nunca un pedido doble). Confirma sus propias partidas sin tocar el borrador de la
+  cuenta (otra terminal puede estar capturando en ella) y sube la revisión de la cuenta. Auditoría
+  `restaurant.offline_order.accepted` y, por rechazo, `restaurant.offline_order.requires_confirmation` (`success=false`,
+  conservada aunque se revierta, como los rechazos de cobro); `order.confirmed` lleva `offline`.
+- **`GET restaurant/state`** responde a cualquier sesión válida (en `administration`, antes de `operations`), con listas
+  `null` sin el permiso; una terminal revocada recibe 401 `DEVICE_REVOKED` como en cualquier ruta.
+- **OpenAPI en JSON** (no hay biblioteca YAML) y contrato acotado a la API de clientes. Ampliarlo: documentar la operación
+  en `openapi.json`, explicarla en `docs/API_V1.md` con su `operationId` y su ruta (lo comprueba una prueba) y agregar su
+  paso en `contractScenario`; la prueba falla si una operación documentada no se recorre.
+
+### Pruebas
+
+13/11/2026, en el árbol `etapa-9g-d` con el arnés `iso.sh` (clúster 55499, Go 8185, vista previa 1423, Rust en
+`cache/cargo-D`). La pantalla del equipo no estaba bloqueada (`CGSSessionScreenIsLocked` ausente).
+
+| Suite                                                                                                                                                     | Resultado                                                                                                                                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Formato (Prettier, `gofmt`, `cargo fmt`), `sync --check`                                                                                                  | aprobado; `docs/etapas/*.md` con el mismo md5 del inicio                                                                                                                                     |
+| `go vet` (normal e `integration`) y `GOOS=windows go build`/`vet`                                                                                         | aprobado                                                                                                                                                                                     |
+| Go unitarias con `-race` (`go test ./...`)                                                                                                                | aprobado (17 s); nuevas: `httpapi` (versiones y 426), `apicontract` (documento, `docs/API_V1.md`, validador)                                                                                 |
+| Integración con `-race`, las 10 de la tupla                                                                                                               | `database` 11 s, `administration` 94 s, `catalog` 22 s, `operations` 306 s, `apicontract` 9 s, `payments` 4 s, `reports` 126 s, `reports/operational` 45 s, `designer` 25 s, `identity` 21 s |
+| `tsc --noEmit` / Vitest                                                                                                                                   | sin errores / 89 archivos, 830 pruebas                                                                                                                                                       |
+| `cargo test --locked --offline`                                                                                                                           | 47 aprobadas, 1 ignorada (nuevas: rutas `version` y `catalog_product_sold_out`, cabeceras de cliente)                                                                                        |
+| Playwright `restaurant.spec.ts` + `workflow-stage9g-sold-out.spec.ts`                                                                                     | Chromium 2/2 (1.5 min), WebKit 2/2 (1.6 min)                                                                                                                                                 |
+| Playwright `restaurant`, `table-price-decrease`, `takeaway-quick-notes`, `workflow-stage9c-navigation`, `workflow-stage9g` (por los eventos del catálogo) | Chromium 5/5 (1.9 min), WebKit 5/5 (1.9 min)                                                                                                                                                 |
+
+Pruebas nuevas de integración:
+
+- `catalog/stage9g_test.go` (`TestStage9GCatalog`): «Agotado» sin permiso (403), sin clave (400), **4 reintentos
+  simultáneos con la misma clave** (misma respuesta byte a byte, una auditoría, un evento), fin = inicio del día comercial
+  siguiente, reintento tras respuesta perdida, misma clave con otro contenido (409), `PRODUCT_SOLD_OUT` del producto y de
+  su presentación, listado de la captura, revisión intacta, «Disponible otra vez» y sin auditoría si no cambió nada;
+  agotado hasta nuevo aviso, complemento agotado, marca vencida ignorada al leer, `ResetExpiredSoldOut` (una vez,
+  auditoría de proceso, evento, versión); descarga completa, sin cambios, cambio de precio, agotado, archivado, borrado,
+  categoría, versión futura (`reset`) y `since` inválido; imagen binaria 200/304/404 y referencia en la descarga.
+- `operations/stage9g_offline_test.go` (`TestStage9GOfflineOrdersAndIdempotency`): **5 aperturas simultáneas con la
+  misma clave** (una cuenta, una clave, misma respuesta), reintento tras respuesta perdida, misma clave con otro
+  contenido y desde otra terminal y usuario, **5 confirmaciones simultáneas** (un pedido); pedido sin conexión sin cambios
+  con **3 envíos simultáneos** (un pedido) y reenvío tardío, auditoría e historia; **cambio de precio** (409 con antes y
+  ahora, rechazo auditado, nada guardado), **confirmación con catálogo viejo** (rechazada de nuevo), confirmación de otro
+  precio (rechazada), confirmación vigente (aceptada con el precio del servidor) y envío tardío del original
+  (`IDEMPOTENCY_CONFLICT`); **producto agotado** y eliminado (no se aceptan ni con confirmación; sin ellos, sí); **cuenta
+  cerrada mientras tanto**; mesa ocupada por otra terminal (confirmada: otra cuenta); 7 cuerpos inválidos (400) y sin
+  `orders.confirm` (403); `GET restaurant/state` con mesas, cuentas y permisos, con `accounts.read` revocado (cuentas
+  `null`) y con la terminal revocada (401 `DEVICE_REVOKED`).
+- `apicontract/contract_integration_test.go` (`TestContractV1`): recorre las 20 operaciones con el servidor real y valida
+  cuerpos y respuestas (incluidos 304, 409 de confirmación, 426 y el primer mensaje SSE). Comprobado que detecta una
+  ruptura: renombrar un campo de la respuesta de «Agotado» la hizo fallar (cambio revertido).
+- `database/stage9g_android_upgrade_test.go`: actualización desde el esquema 22 sin cambiar productos, cuentas, claves ni
+  cobros; CHECK de «Agotado»; permiso solo al administrador; ámbito `catalog`; bitácora (un número por transacción,
+  presentación → producto, borrado = baja, IVA general sí y otros cambios de cobro no).
+- Se adaptaron 4 pruebas de actualización anteriores que suponían que la 0022 era la última o comparaban todas las
+  columnas de productos y todos los permisos (`stage9f_printing`, `stage9f_kitchen`, `existing_install` de la etapa 8 y
+  `stage9a_catalog_precheck`): migran hasta la última y excluyen lo de la 0023, que se comprueba en su propia prueba.
+
+### Para el revisor independiente (idempotencia y validación de pedidos)
+
+Archivos: `backend/internal/operations/offline_orders.go`, `operations/handler.go` (permiso, clave, sin evento
+genérico), `operations/confirmations.go` (`confirmLines`), `operations/recovery.go`,
+`administration/recovery.go`, `administration/routes.go` (`operationFault`), `internal/idempotency/idempotency.go`,
+`catalog/soldout.go`, `catalog/sync.go`, `catalog/calculator.go` y `group_calculator.go` (agotado), la sección D de la
+0023 (disparadores y lock) y las pruebas `operations/stage9g_offline_test.go`, `catalog/stage9g_test.go`,
+`apicontract/contract_integration_test.go`, `database/stage9g_android_upgrade_test.go`.
+
+Reglas que conviene comprobar:
+
+1. Una clave de operación produce un solo efecto con reintentos simultáneos (lock exclusivo antes de buscar la clave:
+   7820148305 en pedidos, 7820148304 en «Agotado»), devuelve la misma respuesta (byte a byte en «Agotado»; mismo JSON en
+   pedidos) y rechaza otro contenido, otro usuario u otra terminal sin efecto.
+2. Un rechazo (409 de cambios, errores) nunca guarda la clave; la auditoría del rechazo se confirma sola.
+3. Un pedido sin conexión nunca entra con un precio distinto al del servidor sin una confirmación que cubra ese precio y
+   la versión vigente; nunca entra un producto agotado, eliminado o no disponible; nunca entra en una cuenta cerrada.
+4. El pedido aceptado no toca el borrador de la cuenta y respeta la revisión (otra terminal recibe `ACCOUNT_CONFLICT`).
+5. La versión del catálogo nunca se lee mayor mientras una transacción con un número menor sigue abierta (lock 04).
+6. Ninguna lectura de catálogo, estado o contrato expone precios sin `catalog.prices.read` ni secretos.
+
+### Lo no verificado y lo que queda para otras fases
+
+- Android no existe: el contrato se probó con un cliente simulado en Go (integración) y desde Node (Playwright).
+- Fase B: agregar al contrato las rutas de emparejamiento (y `devices.kind` si cambia `/auth/me` o el estado), con su paso
+  en `contractScenario`; decidir si la escucha de red exige `X-Client-Version`.
+- Fase G: subir `min_client_version` y `min_server_version` a 0.10.0 junto con la versión; actualizar CLAUDE.md.
+- Windows (Fase W): nada propio de Windows; `GOOS=windows go build/vet` aprobado.
+
+### Para CLAUDE.md
+
+- Esquema 23 (0023, sección D): «Agotado», `catalog.sold_out.manage`, ámbito `catalog`, `catalog_change_log`.
+- §3 Composición: `restaurant/state` → `administration/recovery.go` (antes del prefijo `restaurant/`);
+  `catalog/sync`, `catalog/images/{id}/content` y `catalog/products/{id}/sold-out` en `catalog`;
+  `restaurant/offline-orders` en `operations`; paquetes nuevos `internal/apicontract` (contrato OpenAPI y pruebas de
+  contrato) e `internal/idempotency`; trabajador `catalog.SoldOutWorker` en `main.go`.
+- §3 Locks: el disparador de `catalog_change_log` toma 7820148304 (reentrante); sin números nuevos.
+- §6 Pruebas: `./internal/apicontract` en la tupla; el puente envía `X-Client-Version`/`X-Client-Kind`; **los cambios de
+  catálogo sí publican eventos desde la 9G** (corregir la nota de Playwright WebKit en Windows); la especificación nueva
+  `workflow-stage9g-sold-out.spec.ts` usa una segunda terminal enrolada que habla con Go desde Node.
+- §15: reglas de «Agotado», del pedido sin conexión, de la versión mínima de cliente/servidor (y subirlas en cada versión
+  que rompa la compatibilidad), de la conservación de claves (para siempre) y del contrato (`docs/API_V1.md`: ampliar el
+  documento, la guía y el recorrido juntos).
+- Reglas permanentes propuestas: «Toda ruta nueva para clientes se documenta en `openapi.json` y `docs/API_V1.md` y se
+  recorre en `TestContractV1`»; «Una escritura nueva de cuentas, pedidos, pagos o catálogo operativo lleva
+  `operation_id` (paquete `idempotency` si el módulo no tiene la suya)».
+
+**Fusión con la Fase A y verificación del coordinador** (13/11/2026): la rama `etapa-9g-d` salió antes de la Fase A; se
+fusionó en `72b81dc` (conflictos solo en `API_CONTRACTS.md` —se conservan ambos bloques— y en la tupla de integración de
+`scripts/database.py` —se unen `./internal/apicontract` y `./cmd/ad-el-pos-server`—). Copia exacta de la fusión
+(`git archive`) en el entorno aislado: Go unitarias con `-race`; integración de los 11 paquetes de la tupla (`operations`
+310 s, `reports` 130 s, `administration` 92 s, `reports/operational` 45 s, `cmd/ad-el-pos-server` 43 s, `catalog`,
+`designer`, `identity`, `database`, `apicontract` y `payments`); `cargo test`; Playwright `restaurant`,
+`table-price-decrease`, `takeaway-quick-notes`, `workflow-stage9c-navigation`, `workflow-stage9g-modality`,
+`workflow-stage9g-sold-out` y `workflow-zz-test-data`: 7 de 7 en Chromium y 7 de 7 en WebKit; todo aprobado salvo
+Vitest: `compatibility.test.tsx` (de D) no simulaba `installation_state` (de A) y la aplicación se quedaba en la elección
+de modalidad. Corregido en `67741a2` (4 renglones en la prueba, sin cambios de producto) y repetido: formato, `tsc` y
+Vitest aprobados.
