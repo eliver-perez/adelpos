@@ -62,9 +62,11 @@ type CashDocumentRecord struct {
 	JobID            *string   `json:"job_id"`
 	JobState         *string   `json:"job_state"`
 	// JobProblem es la clave del problema del último trabajo si exige atención (etapa 9F).
-	JobProblem  *string `json:"job_problem"`
-	PrinterName *string `json:"printer_name"`
-	Copies      int     `json:"copies"`
+	JobProblem *string `json:"job_problem"`
+	// TerminalName es la terminal de la impresora USB de otra terminal (etapa 9G, fase E).
+	TerminalName *string `json:"terminal_name"`
+	PrinterName  *string `json:"printer_name"`
+	Copies       int     `json:"copies"`
 }
 
 // CashDocumentPreview es la vista previa de un documento de caja renderizada por Go.
@@ -570,9 +572,10 @@ func (handler *service) shiftDocuments(parts []string) (any, error) {
 
 var cashDocumentQuery = `SELECT d.id,d.kind,d.shift_id,d.report_id,d.cash_operation_id,d.ticket_id,d.includes_expected,
     u.display_name,d.created_at,latest.id,latest.state,latest.problem,latest.printer_name,
-    (SELECT count(*) FROM app.kitchen_print_jobs j WHERE j.ticket_id=d.ticket_id)::int
+    (SELECT count(*) FROM app.kitchen_print_jobs j WHERE j.ticket_id=d.ticket_id)::int,latest.terminal_name
     FROM app.cash_documents d JOIN app.users u ON u.id=d.created_by
-    LEFT JOIN LATERAL (SELECT j.id,j.state,` + jobProblemColumn + ` AS problem,p.name AS printer_name FROM app.kitchen_print_jobs j
+    LEFT JOIN LATERAL (SELECT j.id,j.state,` + jobProblemColumn + ` AS problem,p.name AS printer_name,
+        ` + kitchen.JobTerminalSQL("j") + ` AS terminal_name FROM app.kitchen_print_jobs j
         JOIN app.kitchen_printers p ON p.id=j.printer_id WHERE j.ticket_id=d.ticket_id ORDER BY j.created_at DESC,j.id DESC LIMIT 1) latest ON true`
 
 // jobProblemColumn es la clave del problema del trabajo (alias j, etapa 9F).
@@ -594,7 +597,7 @@ func scanCashDocuments(rows pgx.Rows) ([]CashDocumentRecord, error) {
 		var item CashDocumentRecord
 		if err := rows.Scan(&item.ID, &item.Kind, &item.ShiftID, &item.ReportID, &item.CashOperationID, &item.TicketID,
 			&item.IncludesExpected, &item.CreatedByName, &item.CreatedAt, &item.JobID, &item.JobState, &item.JobProblem, &item.PrinterName,
-			&item.Copies); err != nil {
+			&item.Copies, &item.TerminalName); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

@@ -220,7 +220,12 @@ export function CashDocumentActions({
       {document && <p className="muted text-xs">{documentSummary(document)}</p>}
       {attention && document && (
         <p className="checkout-result-warning">
-          {printProblemMessage(document.job_problem, document.printer_name, 'cash')}{' '}
+          {printProblemMessage(
+            document.job_problem,
+            document.printer_name,
+            'cash',
+            document.terminal_name,
+          )}{' '}
           {printProblemHint(document.job_problem, document.printer_name)}
         </p>
       )}

@@ -60,6 +60,8 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "kitchen_create_station" => Some((Method::POST, "kitchen/stations")),
         "kitchen_printers" => Some((Method::GET, "kitchen/printers")),
         "kitchen_create_printer" => Some((Method::POST, "kitchen/printers")),
+        // Etapa 9G (fase E): impresoras que informó cada terminal para su agente de impresión.
+        "kitchen_terminal_printers" => Some((Method::GET, "kitchen/terminal-printers")),
         "kitchen_discovery" => Some((Method::GET, "kitchen/discovery")),
         "kitchen_routes" => Some((Method::GET, "kitchen/routes")),
         "kitchen_targets" => Some((Method::GET, "kitchen/targets")),
@@ -1361,6 +1363,16 @@ mod tests {
         assert!(route("kitchen_execute", Some(identifier)).is_err());
         assert!(route("kitchen_job", Some("../../settings")).is_err());
         assert_eq!(route("kitchen_save_settings", None).unwrap().0, Method::PUT);
+        // Etapa 9G (fase E): solo lectura y sin identificador; las rutas del agente de impresión (print-agent/*)
+        // nunca se ofrecen a React: las usa print_agent.rs con la credencial de la terminal.
+        assert_eq!(
+            route("kitchen_terminal_printers", None).unwrap(),
+            (Method::GET, "kitchen/terminal-printers".to_string())
+        );
+        let source = include_str!("api.rs");
+        let operations = &source
+            [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];
+        assert!(!operations.contains(concat!("print-", "agent/")));
     }
 
     #[test]

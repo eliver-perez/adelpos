@@ -78,7 +78,7 @@ Indicaciones con efecto (etapa 8, migración 0012): la partida guarda además la
 
 **ESC/POS TCP**: dirección IP privada/loopback explícita, puertos 9100–9109 y tiempo límite. Codifica acentos en CP850; caracteres no representables se sustituyen. Inicialización, tamaño y corte pertenecen al controlador aislado. No acepta comandos introducidos en notas. Una conexión fallida antes de escribir es error confirmado; una escritura parcial o sin resultado concluyente es incierta. La aceptación TCP tampoco confirma papel.
 
-**Agente de impresión**: contrato de destino futuro. Puede registrarse, pero los trabajos quedan en intervención con explicación. No se finge un envío ni se ejecuta un agente remoto.
+**Impresora USB de una terminal** (agente de impresión, desde la etapa 9G; sección «Impresión con varias terminales · etapa 9G» al final): una impresora conectada a otra computadora se registra con su terminal y la cola de esa computadora, y la imprime la aplicación de esa terminal mientras está abierta. Una impresora de agente sin terminal (anterior a la 9G, o los destinos de aceptación de las pruebas) sigue sin imprimir: sus trabajos quedan en intervención con explicación. No se finge un envío.
 
 No hay redirección automática a la impresora predeterminada del sistema. Solo se utiliza un respaldo configurado explícitamente, sin ciclos, después de tres fallos confirmados consecutivos previos al envío y una sola vez por trabajo. Un resultado incierto nunca activa ese respaldo: si un intento incierto o en intervención aparece entre los tres últimos (por ejemplo, antes de un envío autorizado manualmente), la cuenta vuelve a empezar y se requieren tres errores confirmados seguidos.
 
@@ -544,3 +544,62 @@ KITCHEN_ACCESS_ALL_REQUIRED`. La descripción del permiso `kitchen.stations.mana
 **Verificación**: integración PostgreSQL (`operations`, `administration`, `database`), Vitest y
 `workflow-stage9f-kitchen-stations.spec.ts` (Chromium y WebKit). **Pendiente**: pantalla táctil física, sonido en el
 equipo real y dos terminales a la vez.
+
+## Impresión con varias terminales · etapa 9G (fase E)
+
+Fase E de la etapa 9G (§6, decisiones D10 y D13 del coordinador; avance en
+[ETAPA_9G_AVANCE.md](ETAPA_9G_AVANCE.md)). Migración: sección «Fase E» de la 0023 (esquema 23). Rutas en
+[API_CONTRACTS.md](../API_CONTRACTS.md), «Etapa 9G · impresión con varias terminales».
+
+- **Impresoras de red y del equipo servidor**: sin cambios; las usa el trabajador de Go.
+- **Impresora USB de una terminal** (transporte `agent` con `kitchen_printers.agent_device_id`; CHECK: solo una
+  impresora `agent` tiene terminal). Se registra en **Cocina › Impresoras** con «Impresora USB de una terminal»:
+  primero la terminal («Conectada» o «Desconectada») y después una de las impresoras que informó su computadora; las
+  que no sirven aparecen deshabilitadas con el motivo (las decide Go con la misma regla del cajón por CUPS: USB,
+  serie, paralelo o AppSocket con controlador; nunca una clase, una impresora compartida de otra computadora ni una
+  de documentos AirPrint) y Go lo vuelve a comprobar al guardar. Recibe siempre ESC/POS sin convertir (formato,
+  logotipo y corte en los bytes, como una impresora de red); no tiene opción de corte de CUPS ni la marca «Esta
+  impresora entiende ESC/POS».
+- **Agente de impresión** (`desktop/src-tauri/src/print_agent.rs`, D13): mientras la aplicación está abierta, aunque
+  nadie haya iniciado sesión, la terminal informa sus impresoras (`lpstat -a` y `lpoptions -p`, solo lecturas; al abrir
+  y cada 5 minutos), consulta cada 3 s y con cada evento del canal en tiempo real, reclama de la **misma cola
+  durable** el siguiente trabajo de sus impresoras (Go confirma el intento y la **lease de 60 s** antes de entregarlo,
+  con los bytes ESC/POS ya preparados: texto CP850, documento con formato o el pulso del cajón; las copias repetidas
+  en los mismos bytes), lo entrega con `lpstat -p <cola>` y `lp -d <cola> -o raw -n 1 -t ADEL-<trabajo> <archivo>`
+  (argumentos separados, archivo privado que se borra, sin intérprete de órdenes) y confirma el resultado con las
+  reglas de siempre: aceptado por la cola de su computadora (`submitted`, nunca papel), error confirmado sin enviar
+  nada (`not_found` si la cola no existe, `unreachable` si no respondió) o incierto si `lp` empezó y no devolvió un
+  resultado inequívoco (nunca se reenvía solo). Un reclamo o un resultado sin respuesta se repite igual (Go no
+  duplica: la misma clave de reclamo devuelve el mismo intento y el mismo resultado responde lo guardado) y un intento
+  ya entregado nunca se vuelve a imprimir. Un resultado que llega con la lease vencida no se acepta: el trabajo queda
+  «Resultado incierto · requiere revisión» y el informe tardío en su historial. El trabajador del servidor nunca envía
+  un trabajo de una terminal; solo deja incierto el que su agente dejó en proceso con la lease vencida.
+- **Terminal apagada o sin conexión**: el trabajo espera en la cola. Si la terminal no consultó en 30 s
+  (`devices.print_agent_seen_at`) o fue revocada, Go calcula el problema `agent_offline` (`kitchen/print_problems.go`)
+  y la cola, los documentos de la cuenta y los de Caja dicen «La Caja 2 está desconectada.» («La terminal Mostrador
+  está desconectada.» si el nombre no empieza por Caja, Terminal o Computadora) con «Se imprimirá sola cuando esa
+  terminal esté encendida…»; no se ofrece «Reintentar». Al volver, el agente imprime lo pendiente en orden.
+- **Cajón**: la impresora USB de una terminal abre el cajón de su caja (Caja › Configuración la ofrece como
+  compatible, «USB de Caja 2»); el pulso nunca se reintenta solo, como siempre.
+- **Impresora de tickets por caja** (D10): en **Cobros › Políticas de cobro**, «Impresora de tickets por caja» elige
+  la impresora propia de cada caja (por ejemplo, la USB de la Caja 2); sin una propia, la caja usa la impresora de
+  tickets general. Precuentas, tickets de pago, documentos de caja y sus reintentos y reimpresiones salen en la
+  impresora de la caja de la terminal que los pide (`payments/document_printing.go`, `receiptPrinter`). El cambio se
+  audita en `payments.settings_changed`. «Quitar datos de prueba» devuelve a la general una caja cuya impresora propia
+  era de prueba.
+- **Dónde está cada impresora**: al elegir impresora para estaciones, respaldo, reenvío desde la cola, tickets y
+  cajón se ve «USB de caja · en Caja 2». **Sistema › Terminales › Ver configuración** muestra las impresoras de
+  AD-EL POS de la terminal y las de su computadora (cuál se puede usar y por qué no), si está conectada y cuándo
+  informó su lista. El informe se audita (`device.local_printers_reported`, autor: la terminal) solo cuando la lista
+  cambia.
+- **Windows**: la cola de impresión de Windows del agente (EnumPrinters y RAW con winspool, como
+  `kitchen/windows_queue.go` de Go) es de la Fase W; hasta entonces el agente no arranca en Windows y una terminal de
+  Windows no informa impresoras.
+
+**Verificación**: pruebas unitarias de Go (bytes del agente, resultados, regla de colas), integración PostgreSQL
+(`TestStage9GPrintAgent` en `operations` y la sección E en `TestStage9GAndroidUpgrade`), pruebas de Rust con un
+ejecutor simulado (argumentos separados, `lpstat`, reintentos sin duplicar), Vitest y
+`workflow-stage9g-print-agent.spec.ts` (Chromium y WebKit, agente simulado en el puente; su impresora de prueba,
+«Impresora USB 9G-E», usa la cola `ADEL_E2E_SIN_IMPRESORA`, que no existe en ninguna computadora, y tiene su firma en
+`maintenance/signatures.go`). **Pendiente en hardware**:
+papel, logotipo, corte y cajón reales por la impresora USB de otra terminal y la terminal Windows (Fase W).

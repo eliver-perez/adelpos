@@ -49,6 +49,10 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
             WHERE receipt_printer_id::text = ANY($1::text[])`, []any{printers}},
 		{`UPDATE app.cash_drawer_settings SET printer_id = NULL, enabled = false, revision = revision + 1, updated_at = now()
             WHERE printer_id::text = ANY($1::text[])`, []any{printers}},
+		// Etapa 9G (fase E, D10): la caja vuelve a la impresora de tickets general; la revisión de Cobros avisa a quien
+		// edita las políticas.
+		{`DELETE FROM app.register_receipt_printers WHERE printer_id::text = ANY($1::text[])`, []any{printers}},
+		{`UPDATE app.payment_settings SET revision = revision + 1, updated_at = now() WHERE $1`, []any{len(plan.registerReceipts) > 0}},
 		{`UPDATE app.kitchen_printers SET fallback_id = NULL, revision = revision + 1, updated_at = now()
             WHERE fallback_id::text = ANY($1::text[])`, []any{printers}},
 		// Estaciones de prueba fuera de las terminales, de los usuarios (etapa 9F) y de las rutas que se
@@ -114,7 +118,7 @@ func publishChanges(ctx context.Context, tx pgx.Tx, plan *Plan) error {
 		{"kitchen.stations.changed", len(plan.deleteStations)+len(plan.deactivateStations) > 0},
 		{"kitchen.routes.changed", len(plan.deleteRoutes)+len(plan.trimmedRoutes) > 0},
 		{"kitchen.access.changed", plan.deviceLinks || plan.userLinks},
-		{"payments.settings.changed", plan.receiptPrinter},
+		{"payments.settings.changed", plan.receiptPrinter || len(plan.registerReceipts) > 0},
 	}
 	for _, change := range kitchen {
 		if !change.changed {

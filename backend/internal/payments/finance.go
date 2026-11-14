@@ -446,9 +446,9 @@ func loadFinance(ctx context.Context, tx pgx.Tx, accountID string) (*Finance, er
 // readDocuments lista precuentas y tickets con el estado de su último trabajo de impresión.
 func readDocuments(ctx context.Context, tx pgx.Tx, accountID string) ([]DocumentRecord, error) {
 	rows, err := tx.Query(ctx, `SELECT d.ticket_id,d.kind,d.payment_id,d.created_at,j.id,j.state,`+kitchen.JobProblemSQL("j")+`,p.name,
-        (SELECT count(*) FROM app.kitchen_print_jobs c WHERE c.ticket_id=d.ticket_id)::integer
+        (SELECT count(*) FROM app.kitchen_print_jobs c WHERE c.ticket_id=d.ticket_id)::integer,`+kitchen.JobTerminalSQL("j")+`
         FROM app.payment_documents d
-        LEFT JOIN LATERAL (SELECT id,state,result,printer_id FROM app.kitchen_print_jobs WHERE ticket_id=d.ticket_id
+        LEFT JOIN LATERAL (SELECT id,state,result,printer_id,attempts,printer_snapshot FROM app.kitchen_print_jobs WHERE ticket_id=d.ticket_id
             ORDER BY created_at DESC,id DESC LIMIT 1) j ON true
         LEFT JOIN app.kitchen_printers p ON p.id=j.printer_id
         WHERE d.account_id=$1 ORDER BY d.created_at,d.ticket_id`, accountID)
@@ -460,7 +460,7 @@ func readDocuments(ctx context.Context, tx pgx.Tx, accountID string) ([]Document
 	for rows.Next() {
 		var item DocumentRecord
 		if err := rows.Scan(&item.TicketID, &item.Kind, &item.PaymentID, &item.CreatedAt, &item.JobID, &item.JobState,
-			&item.JobProblem, &item.PrinterName, &item.Copies); err != nil {
+			&item.JobProblem, &item.PrinterName, &item.Copies, &item.TerminalName); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

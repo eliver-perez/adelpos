@@ -378,3 +378,62 @@ COMMENT ON TABLE app.backup_settings IS
     'Respaldos automáticos diarios: activo, hora (NULL = hora de inicio del día), cuántos conservar y carpeta (etapa 9G, fase F)';
 COMMENT ON TABLE app.backup_runs IS
     'Cada respaldo automático o de «Respaldar ahora» con carpeta, archivo, tamaño, verificación y resultado (etapa 9G, fase F)';
+
+-- =====================================================================================================================
+-- Fase E · Impresión con varias terminales (§6 de la especificación, decisiones D10 y D13)
+-- =====================================================================================================================
+
+-- 1. Impresora USB de una terminal (§6, D13). Una impresora con el transporte «agent» pertenece a la terminal que la
+--    tiene conectada (agent_device_id) y destination es el nombre de su cola de impresión en esa computadora. Mientras
+--    la aplicación de esa terminal está abierta funciona como agente de impresión: reclama de la cola durable de
+--    siempre los trabajos de sus impresoras (con su lease) y confirma el resultado. Solo una impresora «agent» puede
+--    tener terminal. Las impresoras «agent» anteriores a la 9G (sin terminal, como los destinos de aceptación de las
+--    pruebas) siguen sin poder imprimir: sus trabajos quedan en «Requiere intervención», como hasta ahora.
+ALTER TABLE app.kitchen_printers
+    ADD COLUMN agent_device_id uuid
+        CONSTRAINT kitchen_printers_agent_device_id_fkey REFERENCES app.devices(id),
+    ADD CONSTRAINT kitchen_printers_agent_device_check CHECK (agent_device_id IS NULL OR transport = 'agent');
+CREATE INDEX kitchen_printers_agent_device_idx ON app.kitchen_printers (agent_device_id) WHERE agent_device_id IS NOT NULL;
+
+-- 2. Cuándo trabajó por última vez el agente de impresión de cada terminal (print_agent_seen_at: cada consulta de
+--    trabajos, unas cada pocos segundos mientras la aplicación está abierta) y cuándo informó sus impresoras
+--    (local_printers_reported_at). Con el agente callado más de 30 segundos, Go calcula el problema «La Caja 2 está
+--    desconectada» de los trabajos pendientes de sus impresoras (kitchen/print_problems.go).
+ALTER TABLE app.devices
+    ADD COLUMN print_agent_seen_at timestamptz,
+    ADD COLUMN local_printers_reported_at timestamptz;
+
+-- 3. Impresoras de la computadora que informa cada terminal (solo lectura de su sistema de impresión): el nombre de
+--    la cola, el modelo que anuncia, el tipo de conexión (usb, socket, ipp…; nunca la dirección completa) y el tipo
+--    de impresora de CUPS (clase o remota). Cada informe reemplaza la lista de esa terminal. Si una cola sirve para
+--    los tickets lo decide Go al leerla con la misma regla del cajón por CUPS (kitchen/cups_raw.go).
+CREATE TABLE app.device_local_printers (
+    device_id uuid NOT NULL
+        CONSTRAINT device_local_printers_device_id_fkey REFERENCES app.devices(id),
+    queue text NOT NULL
+        CONSTRAINT device_local_printers_queue_check CHECK (queue ~ '^[A-Za-z0-9_][A-Za-z0-9_-]{0,126}$'),
+    model text NOT NULL DEFAULT ''
+        CONSTRAINT device_local_printers_model_check CHECK (length(model) <= 120),
+    connection text NOT NULL DEFAULT ''
+        CONSTRAINT device_local_printers_connection_check CHECK (connection ~ '^[a-z0-9+.-]{0,20}$'),
+    printer_type bigint,
+    reported_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (device_id, queue)
+);
+
+-- 4. Impresora de tickets por caja (D10). Cada caja puede tener su propia impresora de precuentas, tickets de pago y
+--    documentos de caja (por ejemplo, la impresora USB de la Caja 2 por medio de su agente); una caja sin fila usa la
+--    impresora de tickets general de Cobros (payment_settings.receipt_printer_id), como hasta ahora. Se elige en
+--    Cobros › Políticas de cobro con la revisión de payment_settings.
+CREATE TABLE app.register_receipt_printers (
+    register_id uuid PRIMARY KEY
+        CONSTRAINT register_receipt_printers_register_id_fkey REFERENCES app.registers(id),
+    printer_id uuid NOT NULL
+        CONSTRAINT register_receipt_printers_printer_id_fkey REFERENCES app.kitchen_printers(id),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX register_receipt_printers_printer_idx ON app.register_receipt_printers (printer_id);
+COMMENT ON TABLE app.device_local_printers IS
+    'Impresoras de la computadora que informa cada terminal para usarlas con su agente de impresión (etapa 9G, fase E)';
+COMMENT ON TABLE app.register_receipt_printers IS
+    'Impresora de tickets propia de una caja; sin fila, la general de Cobros (etapa 9G, fase E, D10)';

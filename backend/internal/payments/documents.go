@@ -390,4 +390,7 @@ type DocumentRecord struct {
 	JobProblem  *string `json:"job_problem"`
 	PrinterName *string `json:"printer_name"`
 	Copies      int     `json:"copies"`
+	// TerminalName es la terminal de la impresora USB de otra terminal (etapa 9G, fase E): con el problema
+	// agent_offline la interfaz dice «La Caja 2 está desconectada».
+	TerminalName *string `json:"terminal_name"`
 }
