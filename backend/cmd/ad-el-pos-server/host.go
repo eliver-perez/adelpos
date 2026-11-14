@@ -101,6 +101,25 @@ func (backup installationBackup) Backup(ctx context.Context) (string, error) {
 	return filepath.Base(filename), nil
 }
 
+// Respaldos programados y «Respaldar ahora» (etapa 9G, fase F; maintenance.ScheduledBackuper): los mismos pg_dump y
+// pg_restore de la instalación y, por omisión, la carpeta backups de los datos del servicio.
+
+func (backup installationBackup) DefaultDirectory() string {
+	return backup.layout.Backups()
+}
+
+func (backup installationBackup) DatabaseName() string {
+	return backup.database.Name
+}
+
+func (backup installationBackup) Dump(ctx context.Context, filename string) error {
+	return standalone.DumpFile(ctx, backup.layout, backup.database, filename)
+}
+
+func (backup installationBackup) Verify(ctx context.Context, filename string) error {
+	return standalone.VerifyFile(ctx, backup.layout, backup.database, filename)
+}
+
 // migrateWithBackup aplica las migraciones pendientes. Sobre una base que ya tiene datos (alguna migración
 // aplicada) primero crea un respaldo comprobado: nunca se migra la base del restaurante sin él.
 func migrateWithBackup(ctx context.Context, logger *slog.Logger, layout standalone.Layout, cfg config.Config, pool *pgxpool.Pool) error {

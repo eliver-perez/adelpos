@@ -193,3 +193,84 @@ CREATE TRIGGER payment_settings_tax_version AFTER UPDATE OF tax_rate ON app.paym
 --    nunca se borra: la especificación pide conservarlas al menos 7 días.
 COMMENT ON TABLE app.restaurant_operations IS
     'Resultado de cada escritura con clave de operación (idempotencia); se conserva para siempre (al menos 7 días, §5.2 de la etapa 9G)';
+
+-- =====================================================================================================================
+-- Fase F · Respaldos programados (§7 de la especificación, decisiones D7 y D12)
+-- =====================================================================================================================
+
+-- 1. Configuración de los respaldos automáticos (una sola fila), en Sistema › Mantenimiento con settings.manage. El
+--    servidor respalda una vez al día: scheduled_time es la hora (NULL = la «Hora de inicio del día»,
+--    inventory_settings.operating_day_cutoff, 05:00 por omisión, de modo que cambiarla también mueve el respaldo),
+--    keep_count cuántos respaldos automáticos se conservan en la carpeta (los más viejos se borran solos; nunca los
+--    manuales ni otros archivos) y directory la carpeta elegida en la computadora principal con el diálogo nativo
+--    (NULL = la carpeta predeterminada: «backups» en la carpeta de datos del servicio o backup_directory de la
+--    configuración). Go valida la carpeta al elegirla (ruta absoluta, existente y con permiso de escritura) y otra vez
+--    en cada respaldo; si entonces no está disponible, usa la predeterminada y lo avisa.
+CREATE TABLE app.backup_settings (
+    singleton boolean PRIMARY KEY DEFAULT true CONSTRAINT backup_settings_singleton_check CHECK (singleton),
+    enabled boolean NOT NULL DEFAULT true,
+    scheduled_time time CONSTRAINT backup_settings_scheduled_time_check
+        CHECK (scheduled_time IS NULL OR extract(second FROM scheduled_time) = 0),
+    keep_count integer NOT NULL DEFAULT 30 CONSTRAINT backup_settings_keep_count_check CHECK (keep_count BETWEEN 1 AND 365),
+    directory text CONSTRAINT backup_settings_directory_check
+        CHECK (directory IS NULL OR (length(directory) BETWEEN 2 AND 1024 AND directory !~ '[[:cntrl:]]')),
+    updated_by uuid CONSTRAINT backup_settings_updated_by_fkey REFERENCES app.users(id),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO app.backup_settings(singleton) VALUES (true);
+
+-- 2. Registro de cada respaldo que hace el servidor: los automáticos (kind 'automatic', con el instante programado al
+--    que corresponden) y los de «Respaldar ahora» (kind 'manual', con su clave de operación, quién y desde qué
+--    terminal). Los respaldos de la línea de comandos (dev.sh backup y «ad-el-pos-server backup») no pasan por aquí.
+--    Cada ejecución guarda inicio y fin, la carpeta configurada al empezar (requested_directory, NULL = la
+--    predeterminada), la carpeta usada (directory), si se usó la predeterminada porque la configurada no estaba
+--    disponible (used_default_directory con fallback_reason), el archivo y su tamaño, si se verificó (pg_restore
+--    --list), el resultado y el motivo de un fallo. removed_at es cuándo la retención borró el archivo. Un respaldo
+--    solo cuenta como correcto si quedó verificado. Una fila en 'running' cuyo servidor se detuvo pasa a 'failed'
+--    con motivo 'interrupted' la siguiente vez que el servidor toma el lock de los respaldos (7820148309).
+CREATE TABLE app.backup_runs (
+    id uuid PRIMARY KEY,
+    kind text NOT NULL CONSTRAINT backup_runs_kind_check CHECK (kind IN ('automatic', 'manual')),
+    status text NOT NULL CONSTRAINT backup_runs_status_check CHECK (status IN ('running', 'succeeded', 'failed')),
+    scheduled_for timestamptz,
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    requested_directory text,
+    directory text,
+    used_default_directory boolean NOT NULL DEFAULT false,
+    fallback_reason text CONSTRAINT backup_runs_fallback_reason_check
+        CHECK (fallback_reason IN ('missing', 'not_directory', 'not_writable')),
+    file_name text CONSTRAINT backup_runs_file_name_check CHECK (file_name ~ '^[A-Za-z0-9_.-]{1,200}$'),
+    size_bytes bigint CONSTRAINT backup_runs_size_bytes_check CHECK (size_bytes > 0),
+    verified boolean NOT NULL DEFAULT false,
+    failure_reason text CONSTRAINT backup_runs_failure_reason_check
+        CHECK (failure_reason IN ('directory_unavailable', 'dump_failed', 'verify_failed', 'interrupted')),
+    removed_at timestamptz,
+    operation_id uuid CONSTRAINT backup_runs_operation_id_key UNIQUE,
+    requested_by uuid CONSTRAINT backup_runs_requested_by_fkey REFERENCES app.users(id),
+    requested_device uuid CONSTRAINT backup_runs_requested_device_fkey REFERENCES app.devices(id),
+    CONSTRAINT backup_runs_kind_fields_check CHECK (
+        (kind = 'automatic' AND scheduled_for IS NOT NULL AND operation_id IS NULL AND requested_by IS NULL
+            AND requested_device IS NULL)
+        OR (kind = 'manual' AND scheduled_for IS NULL AND operation_id IS NOT NULL AND requested_by IS NOT NULL
+            AND requested_device IS NOT NULL)
+    ),
+    CONSTRAINT backup_runs_status_fields_check CHECK (
+        (status = 'running' AND finished_at IS NULL AND failure_reason IS NULL AND NOT verified AND file_name IS NULL
+            AND removed_at IS NULL)
+        OR (status = 'succeeded' AND finished_at IS NOT NULL AND failure_reason IS NULL AND verified
+            AND file_name IS NOT NULL AND size_bytes IS NOT NULL AND directory IS NOT NULL)
+        OR (status = 'failed' AND finished_at IS NOT NULL AND failure_reason IS NOT NULL AND NOT verified
+            AND file_name IS NULL AND size_bytes IS NULL AND removed_at IS NULL)
+    ),
+    CONSTRAINT backup_runs_fallback_check CHECK (
+        fallback_reason IS NULL OR (used_default_directory AND requested_directory IS NOT NULL)
+    ),
+    CONSTRAINT backup_runs_finished_check CHECK (finished_at >= started_at)
+);
+CREATE INDEX backup_runs_started_idx ON app.backup_runs (started_at DESC);
+CREATE INDEX backup_runs_running_idx ON app.backup_runs (started_at) WHERE status = 'running';
+COMMENT ON TABLE app.backup_settings IS
+    'Respaldos automáticos diarios: activo, hora (NULL = hora de inicio del día), cuántos conservar y carpeta (etapa 9G, fase F)';
+COMMENT ON TABLE app.backup_runs IS
+    'Cada respaldo automático o de «Respaldar ahora» con carpeta, archivo, tamaño, verificación y resultado (etapa 9G, fase F)';

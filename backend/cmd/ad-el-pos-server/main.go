@@ -17,6 +17,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/administration"
+	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/catalog"
 	"local/ad-el-pos/server/internal/config"
 	"local/ad-el-pos/server/internal/database"
@@ -154,7 +155,7 @@ func run(logger *slog.Logger) error {
 // newApplication arma el servicio de administración que comparten serve y el modo host de Windows. El
 // token de aprovisionamiento vive junto al archivo de configuración.
 func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.Backuper, logger *slog.Logger) *administration.Service {
-	return &administration.Service{
+	application := &administration.Service{
 		Pool:             pool,
 		ProvisioningFile: filepath.Join(filepath.Dir(configFile), "provisioning-token"),
 		Backups:          backups,
@@ -164,6 +165,12 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 		// Vista previa del logotipo en el diseñador de documentos (etapa 9B).
 		Rasters: identity.NewRasters(pool),
 	}
+	// Respaldos programados y «Respaldar ahora» (etapa 9G, fase F): el mismo respaldo de la instalación (pg_dump con
+	// serve; el de internal/standalone en el host), con su trabajador diario en serveHTTP.
+	if scheduled, ok := backups.(maintenance.ScheduledBackuper); ok {
+		application.ScheduledBackups = backupschedule.NewRunner(pool, scheduled, logger)
+	}
+	return application
 }
 
 // serveHTTP sirve la API con los trabajadores de impresión e inventario hasta que se cancela el contexto
@@ -217,7 +224,16 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		defer close(soldOutDone)
 		(&catalog.SoldOutWorker{Pool: pool, Logger: logger}).Run(workerContext)
 	}()
-	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone }()
+	// Respaldo automático diario (etapa 9G, fase F; internal/backupschedule): a la hora configurada (por omisión, la
+	// «Hora de inicio del día»), con el lock 7820148309 para no duplicarlo; al arrancar hace el que quedó pendiente.
+	backupDone := make(chan struct{})
+	go func() {
+		defer close(backupDone)
+		if application.ScheduledBackups != nil {
+			(&backupschedule.Worker{Runner: application.ScheduledBackups}).Run(workerContext)
+		}
+	}()
+	defer func() { stopWorker(); <-workerDone; <-inventoryDone; <-soldOutDone; <-backupDone }()
 	stopped := make(chan error, 1)
 	go func() {
 		if cfg.TLSCertificate != "" {
