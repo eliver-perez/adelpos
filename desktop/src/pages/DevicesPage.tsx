@@ -7,6 +7,7 @@ import { terminalHomes } from '../navigation/sections';
 import type { TerminalHome } from '../navigation/sections';
 import { api } from '../services/api';
 import { notifyError, notifySuccess } from '../services/notify';
+import { countLabel } from '../services/plural';
 import type {
   Device,
   DeviceConfiguration,
@@ -209,9 +210,34 @@ function PairingRequestsPanel({
           dirección de esta computadora: <strong>{addresses.join(' o ')}</strong>.
         </p>
       )}
-      {network && !network.available && (
+      {data?.pairing_available === false && (
+        <p className="pairing-alert" role="alert">
+          Esta computadora no puede emparejar terminales ahora: su identidad necesita revisión de
+          soporte. Las terminales ya emparejadas tampoco pueden conectarse hasta resolverlo; aquí se
+          sigue vendiendo con normalidad.
+        </p>
+      )}
+      {data?.pairing_available !== false && network && !network.available && (
         <p className="muted pairing-help">
           Esta computadora todavía no recibe terminales de la red.
+        </p>
+      )}
+      {data?.limit_reached && (
+        <p className="pairing-alert">
+          Se pidieron demasiados códigos de terminal en los últimos {data.window_minutes ?? 10}{' '}
+          minutos: por ahora no se aceptan más solicitudes.
+        </p>
+      )}
+      {(data?.recent_abandoned ?? 0) > 0 && (
+        <p className="pairing-alert">
+          En los últimos {data?.window_minutes ?? 10} minutos hubo{' '}
+          {countLabel(
+            data?.recent_abandoned ?? 0,
+            'solicitud cancelada, rechazada o vencida',
+            'solicitudes canceladas, rechazadas o vencidas',
+          )}{' '}
+          sin aprobarse. Si nadie del restaurante las pidió, alguien podría estar intentando hacerse
+          pasar por una terminal: aprueba solo el código que veas en la pantalla de la terminal.
         </p>
       )}
       {data && requests.length === 0 && (

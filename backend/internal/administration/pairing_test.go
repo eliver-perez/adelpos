@@ -1,6 +1,7 @@
 package administration
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -100,5 +101,33 @@ func TestPairingLabelsRejectControlCharactersAndLongText(t *testing.T) {
 	}
 	if _, ok := decodeNonce(strings.Repeat("a", 64)); !ok {
 		t.Error("64 caracteres hexadecimales son válidos")
+	}
+}
+
+// Hallazgo 1 de la revisión: el límite por origen agrupa la IPv6 por su /64 y todo el enlace local en un solo
+// grupo, para que una terminal no multiplique sus orígenes.
+func TestSourceGroups(t *testing.T) {
+	cases := map[string]string{
+		"192.168.1.20":         "v4:192.168.1.20",
+		"::ffff:192.168.1.20":  "v4:192.168.1.20",
+		"169.254.10.20":        "link-local",
+		"fe80::1":              "link-local",
+		"fe80::abcd:1234":      "link-local",
+		"fd12:3456:789a:1::20": "v6:fd12:3456:789a:1::/64",
+	}
+	for text, expected := range cases {
+		address := net.ParseIP(text)
+		if address == nil {
+			continue
+		}
+		if group := SourceGroup(address); group != expected {
+			t.Errorf("%s → %q, se esperaba %q", text, group, expected)
+		}
+	}
+	if SourceGroup(net.ParseIP("fd12:3456:789a:1::1")) != SourceGroup(net.ParseIP("fd12:3456:789a:1:ffff:ffff:ffff:ffff")) {
+		t.Error("todo el /64 es el mismo origen")
+	}
+	if SourceGroup(net.ParseIP("fd12:3456:789a:1::1")) == SourceGroup(net.ParseIP("fd12:3456:789a:2::1")) {
+		t.Error("otro /64 es otro origen")
 	}
 }

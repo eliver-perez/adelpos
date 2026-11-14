@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -58,5 +61,50 @@ func checkServiceNetwork(t *testing.T, layout standalone.Layout, address string)
 	again, err := localsetup.EnsureIdentity(directory)
 	if err != nil || again.ServerID != identity.ServerID {
 		t.Fatal("la identidad del servicio no debe cambiar")
+	}
+}
+
+// damageIdentity aparta identity.json (una identidad incompleta) y devuelve la función que lo repone.
+func damageIdentity(t *testing.T, layout standalone.Layout) func() {
+	t.Helper()
+	record := filepath.Join(layout.DataDir, localsetup.IdentityFolder, "identity.json")
+	aside := filepath.Join(layout.DataDir, "identity.json.apartado")
+	if err := os.Rename(record, aside); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		if err := os.Rename(aside, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// checkWithoutIdentity: el servidor quedó listo por la escucha local (ya lo comprobó waitReady), la bitácora lo
+// explica, no hay escucha de red y el emparejamiento responde 503 con un mensaje claro.
+func checkWithoutIdentity(t *testing.T, layout standalone.Layout, local, network string) {
+	t.Helper()
+	log, _ := os.ReadFile(layout.ServerLog())
+	if !strings.Contains(string(log), "server_identity_unavailable") || !strings.Contains(string(log), `"network_listen_disabled":true`) {
+		t.Fatalf("la bitácora explica la identidad dañada: %s", log)
+	}
+	if connection, err := net.DialTimeout("tcp", network, time.Second); err == nil {
+		connection.Close()
+		t.Fatal("sin identidad no se abre la escucha de red")
+	}
+	body, _ := json.Marshal(map[string]string{"name": "Caja 9", "device_kind": "desktop", "os": "macOS", "app_version": "0.10.0", "commitment": strings.Repeat("a", 64)})
+	response, err := http.Post("http://"+local+"/api/v1/pairing/requests", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var reply struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(response.Body).Decode(&reply)
+	if response.StatusCode != 503 || reply.Error.Code != "PAIRING_UNAVAILABLE" || !strings.Contains(reply.Error.Message, "identidad") {
+		t.Fatalf("sin identidad el emparejamiento responde 503 claro: %d %+v", response.StatusCode, reply)
 	}
 }
