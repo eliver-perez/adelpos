@@ -98,7 +98,7 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
    última dirección (cambio de IP por DHCP), vuelve a buscar por `server_id`, se conecta a la dirección nueva
    comprobando la huella completa (sin emparejarse de nuevo) y la guarda como última dirección. Un servidor con el
    mismo nombre o `server_id` pero otra huella nunca se acepta. Errores del emparejamiento: `PAIRING_*` (por ejemplo
-   `PAIRING_EXPIRED`, `PAIRING_REJECTED`, `PAIRING_ALREADY_CLAIMED`, 429 `PAIRING_RATE_LIMITED`); detalle en
+   `PAIRING_EXPIRED`, `PAIRING_REJECTED`, `PAIRING_ALREADY_CLAIMED`, 429 `PAIRING_RATE_LIMITED` y `PAIRING_LIMIT_REACHED`); detalle en
    [API_CONTRACTS.md](../API_CONTRACTS.md), «Etapa 9G · emparejamiento de terminales».
 
 ## Sesión y recuperación del estado
@@ -265,19 +265,20 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
 
 ## Códigos de error más frecuentes
 
-| Código                                                   | Estado | Qué hacer                                                                       |
-| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------- |
-| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                        |
-| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                 |
-| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                            |
-| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                        |
-| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                 |
-| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                     |
-| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                               |
-| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                    |
-| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                       |
-| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).          |
-| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                   |
-| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                  |
-| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez. |
-| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                             |
+| Código                                                   | Estado | Qué hacer                                                                              |
+| -------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                               |
+| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                        |
+| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                   |
+| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min). |
+| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                               |
+| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                        |
+| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                            |
+| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                      |
+| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                           |
+| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                              |
+| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                 |
+| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                          |
+| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                         |
+| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez.        |
+| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                    |
