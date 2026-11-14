@@ -101,3 +101,30 @@ func TestServiceControlRestartsOnlyWhenLaunchdRelaunches(t *testing.T) {
 		t.Fatal("el reinicio debe detener el servidor después de responder")
 	}
 }
+
+// Etapa 9G, fase B: la escucha de red del servicio es :8443 por omisión, se apaga con «off», acepta una
+// dirección de prueba y, en modo de pruebas, nunca se abre sin indicarla.
+func TestHostNetworkAddress(t *testing.T) {
+	cases := []struct {
+		flag     string
+		testMode bool
+		expected string
+	}{
+		{"", false, ":8443"},
+		{"", true, ""},
+		{"off", false, ""},
+		{"127.0.0.1:8196", true, "127.0.0.1:8196"},
+		{"0.0.0.0:9443", false, "0.0.0.0:9443"},
+	}
+	for _, item := range cases {
+		address, err := hostNetworkAddress(item.flag, item.testMode)
+		if err != nil || address != item.expected {
+			t.Errorf("%q (pruebas %v): %q %v", item.flag, item.testMode, address, err)
+		}
+	}
+	for _, flag := range []string{"8.8.8.8:8443", "127.0.0.1:8181", "nombre:8443", ":abc"} {
+		if _, err := hostNetworkAddress(flag, false); err == nil {
+			t.Errorf("%q debe rechazarse", flag)
+		}
+	}
+}

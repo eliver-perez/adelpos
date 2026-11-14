@@ -13,6 +13,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -223,6 +224,11 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		<-served
 	}()
 	networkBase := "https://" + network.Addr().String()
+	networkPort := network.Addr().(*net.TCPAddr).Port
+	env.service.NetworkPort = networkPort
+	defer func() {
+		env.service.NetworkPort = 0
+	}()
 	local := pairingEndpoint{base: localServer.URL, client: &http.Client{Timeout: 10 * time.Second}}
 	// El administrador también puede llegar por la escucha de red (otra terminal o la misma computadora
 	// por su IP): ahí nunca se aprueba.
@@ -265,6 +271,11 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 		}
 		if strings.Contains(string(listed.raw), "nonce") || strings.Contains(string(listed.raw), "secret") || strings.Contains(string(listed.raw), newcomer.code(t)) {
 			t.Fatal("la lista no muestra números, secretos ni el código")
+		}
+		// La computadora principal ve cómo escribir su dirección en la terminal nueva.
+		networkInfo, _ := listed.body["network"].(map[string]any)
+		if networkInfo["available"] != true || networkInfo["port"] != float64(networkPort) || networkInfo["addresses"] == nil {
+			t.Fatalf("datos de la escucha de red para emparejar a mano: %v", networkInfo)
 		}
 		if newcomer.status(t) != "pending" {
 			t.Fatal("sin aprobar sigue pendiente")
@@ -405,7 +416,7 @@ func testPairingAndTerminals(t *testing.T, env *delegationEnvironment) {
 			t.Fatalf("tampoco se rechaza por la red: %d", reply.status)
 		}
 		listed := adminOverNetwork.send(t, env.admin, "GET", "devices/pairing-requests", nil, nil)
-		if listed.status != 200 || listed.body["approve_here"] != false {
+		if listed.status != 200 || listed.body["approve_here"] != false || listed.body["network"] != nil {
 			t.Fatalf("por la red la lista dice que se aprueba en la computadora principal: %s", listed.raw)
 		}
 		// El asistente inicial y el código de 43 caracteres tampoco se aceptan por la escucha de red.

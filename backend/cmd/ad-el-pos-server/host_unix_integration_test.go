@@ -39,14 +39,16 @@ func TestMain(m *testing.M) {
 
 // Puertos de la prueba (fuera de los reales 55432/8181 y del clúster aislado 55499).
 const (
-	hostPGPort     = "55511"
-	adoptPGPort    = "55512"
-	hostListen     = "127.0.0.1:8192"
-	legacyListen   = "127.0.0.1:8193"
-	adoptedListen  = "127.0.0.1:8194"
-	readyTimeout   = 180 * time.Second
-	stopTimeout    = 60 * time.Second
-	commandTimeout = 180 * time.Second
+	hostPGPort    = "55511"
+	adoptPGPort   = "55512"
+	hostListen    = "127.0.0.1:8192"
+	legacyListen  = "127.0.0.1:8193"
+	adoptedListen = "127.0.0.1:8194"
+	// Escucha HTTPS de la red local del servicio en la prueba (etapa 9G, fase B): solo loopback.
+	hostNetworkListen = "127.0.0.1:8196"
+	readyTimeout      = 180 * time.Second
+	stopTimeout       = 60 * time.Second
+	commandTimeout    = 180 * time.Second
 )
 
 // lockedBuffer guarda la salida del proceso; la escriben las copias de exec y la lee la prueba.
@@ -293,8 +295,10 @@ func TestServiceHostOnMacOS(t *testing.T) {
 	}
 
 	// Habilitado: crea el clúster, migra y sirve.
-	first := startServer(t, host...)
+	first := startServer(t, append(append([]string{}, host...), "--network-listen", hostNetworkListen)...)
 	waitReady(t, hostListen, first, layout.ServerLog())
+	// Etapa 9G, fase B: identidad propia en la carpeta del servicio y escucha HTTPS de la red local.
+	checkServiceNetwork(t, layout, hostNetworkListen)
 	version := getJSON(t, hostListen, "version")
 	if version["test_mode"] != true {
 		t.Fatalf("ADEL_TEST_MODE=1 debe informarse: %v", version)
@@ -523,6 +527,10 @@ func testAdoptLegacy(t *testing.T, root, pgBin, dsn string) {
 	}
 	adopted := startServer(t, "host", "--data-dir", target, "--pg-bin", pgBin, "--pg-port", adoptPGPort)
 	waitReady(t, adoptedListen, adopted, targetLayout.ServerLog())
+	// En modo de pruebas, sin --network-listen el servicio no abre la escucha de red (nunca el 8443 real).
+	if log, _ := os.ReadFile(targetLayout.ServerLog()); !strings.Contains(string(log), `"network_listen":""`) {
+		t.Fatalf("en modo de pruebas no se abre la escucha de red por omisión: %s", log)
+	}
 	devices := 0
 	cfg, err := config.Load(targetLayout.ConfigFile())
 	if err != nil {

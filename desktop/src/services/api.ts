@@ -91,6 +91,12 @@ export type Operation =
   | 'invite_device'
   | 'update_device'
   | 'revoke_device'
+  // Etapa 9G (fase B): emparejamiento, configuración de una terminal y sesiones por tipo.
+  | 'devices_pairing_requests'
+  | 'approve_device_pairing'
+  | 'reject_device_pairing'
+  | 'device_configuration'
+  | 'devices_sessions_summary'
   | 'sessions'
   | 'revoke_session'
   | 'audit'
@@ -373,6 +379,8 @@ export interface LocalAuthentication {
   has_session: boolean;
   local_setup_available: boolean;
   local_enrollment_available: boolean;
+  // Etapa 9G (fase B): terminal emparejada con la computadora principal.
+  paired?: boolean;
 }
 
 export async function localAuthentication(): Promise<LocalAuthentication> {
