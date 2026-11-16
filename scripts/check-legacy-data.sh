@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Comprobación de datos reales del sistema anterior (etapa 9H, «Datos reales»): falla si el índice de git tiene un
-# respaldo de SQL Server o un paquete de migración, por su nombre (*.bak, *.adelmig, carpeta legacy-data/) o por su
-# contenido (un archivo binario que empiece con la firma de un paquete, «ADELMIG» y un NUL, o con la de un respaldo de
-# SQL Server, el bloque «TAPE» del formato MTF), aunque se le haya cambiado el nombre. La ejecutan
+# respaldo de SQL Server o un paquete de migración, por su nombre (*.bak y sus versiones comprimidas .bak.gz, .bak.zip y
+# .bak.7z, los archivos de datos y de registro *.mdf, *.ndf y *.ldf, los respaldos del registro *.trn, *.adelmig y la
+# carpeta legacy-data/) o por su contenido (un archivo binario que empiece con la firma de un paquete, «ADELMIG» y un
+# NUL, o con la de un respaldo de SQL Server, el bloque «TAPE» del formato MTF, también dentro de un gzip), aunque se le
+# haya cambiado el nombre. La ejecutan
 # `scripts/dev.sh format-check` y `scripts/dev.sh test`; en Windows, `scripts/windows/dev.mjs` (checkLegacyData).
 #
 #   scripts/check-legacy-data.sh [raíz del repositorio]
@@ -22,7 +24,7 @@ found=()
 shopt -s nocasematch
 while IFS= read -r -d '' path; do
     case "$path" in
-        *.bak | *.adelmig | legacy-data/* | */legacy-data/*)
+        *.bak | *.bak.gz | *.bak.zip | *.bak.7z | *.mdf | *.ndf | *.ldf | *.trn | *.adelmig | legacy-data/* | */legacy-data/*)
             found+=("$path (nombre)")
             ;;
     esac
@@ -45,6 +47,18 @@ while IFS= read -r -d '' path && IFS= read -r -d '' line && IFS= read -r signatu
         found+=("$path (respaldo de SQL Server)")
     fi
 done < <(git -C "$ROOT" -c core.quotePath=false grep --cached -a -n -o -z -E -e '^TAPE' -e '^ADELMIG' || true)
+
+# Respaldos comprimidos con gzip con otro nombre: archivos cuya primera línea empieza con la firma de gzip (1f 8b) y
+# cuyo contenido, al descomprimir sus primeros bytes, empieza con «TAPE». Solo se descomprime el principio.
+while IFS= read -r -d '' path && IFS= read -r -d '' line && IFS= read -r _signature; do
+    if [ "$line" != "1" ]; then
+        continue
+    fi
+    start="$( (git -C "$ROOT" cat-file blob ":$path" | gzip -dc 2>/dev/null | head -c 4) 2>/dev/null || true)"
+    if [ "$start" = "TAPE" ]; then
+        found+=("$path (respaldo de SQL Server comprimido)")
+    fi
+done < <(LC_ALL=C git -C "$ROOT" -c core.quotePath=false grep --cached -a -n -o -z -E -e $'^\x1f\x8b' || true)
 
 if [ "${#found[@]}" -gt 0 ]; then
     echo "El índice de git tiene datos del sistema anterior (nunca deben versionarse; quítalos con git rm --cached):" >&2
