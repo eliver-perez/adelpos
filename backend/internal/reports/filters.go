@@ -40,6 +40,9 @@ type Filter struct {
 	Source  string   `json:"source,omitempty"`
 	Options []Option `json:"options,omitempty"`
 	Default string   `json:"default,omitempty"`
+	// Legacy marca el filtro «Datos» del historial importado (etapa 9H, legacy.go): el catálogo solo
+	// lo ofrece y los metadatos solo lo describen si hay un lote importado vigente.
+	Legacy bool `json:"-"`
 }
 
 func idFilter(key, label, source string) Filter {
@@ -186,12 +189,14 @@ var filterNames = map[string]string{
 }
 
 // describeFilters arma la lista legible de filtros aplicados (pantalla y exportaciones). El nombre
-// de un turno fuera del alcance de Caja del actor no se revela («Registro no encontrado»).
-func describeFilters(ctx context.Context, tx pgx.Tx, actor Actor, definition *Definition, params *Params) ([]AppliedFilter, error) {
+// de un turno fuera del alcance de Caja del actor no se revela («Registro no encontrado»). El filtro
+// «Datos» solo se describe si hay un lote importado vigente (legacy, legacy.go).
+func describeFilters(ctx context.Context, tx pgx.Tx, actor Actor, definition *Definition, params *Params,
+	legacy legacyScope) ([]AppliedFilter, error) {
 	applied := []AppliedFilter{}
 	for _, filter := range definition.Filters {
 		value := params.Values[filter.Key]
-		if value == "" {
+		if value == "" || (filter.Legacy && !legacy.Available) {
 			continue
 		}
 		display := value

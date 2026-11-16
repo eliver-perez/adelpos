@@ -53,6 +53,10 @@ type Column struct {
 	// Permissions son permisos adicionales que exige la columna (costos, efectivo físico). Sin
 	// ellos la columna, sus valores, sus totales y sus cifras resumidas no se envían ni se exportan.
 	Permissions []string `json:"-"`
+	// Legacy marca una columna del historial importado del sistema anterior (etapa 9H: «Datos»,
+	// «Diferencia del sistema anterior»): solo existe en el catálogo, la pantalla y los archivos si
+	// hay un lote importado vigente (legacy.go). Sin lote el reporte queda exactamente como antes.
+	Legacy bool `json:"-"`
 }
 
 // Row es un renglón con valores tipados por clave de columna.

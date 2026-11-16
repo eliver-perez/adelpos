@@ -22,6 +22,9 @@ type Query struct {
 	Actor      Actor
 	Now        time.Time
 	definition *Definition
+	// legacy indica si hay un lote importado vigente y qué datos incluye el reporte (filtro «Datos»,
+	// legacy.go). Sin lote, o en un reporte que no lo declara, solo AD-EL POS.
+	legacy legacyScope
 }
 
 // Args devuelve los argumentos con nombre comunes: @from y @until (instantes del periodo), @tz (zona
