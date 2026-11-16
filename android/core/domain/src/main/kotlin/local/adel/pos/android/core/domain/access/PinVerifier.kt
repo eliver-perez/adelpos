@@ -61,9 +61,12 @@ class PinVerifier(
 
     companion object {
         /**
-         * Iteraciones de PBKDF2-HMAC-SHA256, medidas en la tableta de Android 8
-         * (`ADEL_A1_Tablet_API26`, PinVerifierTimingTest): unos 0.3 s por derivación ahí. Cada
-         * verificador guarda las suyas, así que cambiar este valor no invalida los anteriores.
+         * Iteraciones de PBKDF2-HMAC-SHA256, medidas con PinVerifierOnDeviceTest en la tableta de
+         * Android 8 (`ADEL_A1_Tablet_API26`): 0.27 a 0.32 s por derivación (en `Pixel_8`, Android
+         * 17: 0.37 a 0.54 s). Son emuladores sobre la Mac: una tableta económica real puede tardar
+         * varias veces más; se debe volver a medir en el dispositivo físico. Cada verificador
+         * guarda sus iteraciones, así que cambiar este valor no invalida los anteriores (el nuevo
+         * vale desde la siguiente entrada con conexión).
          */
         const val DEFAULT_ITERATIONS = 120_000
         const val SALT_BYTES = 16
