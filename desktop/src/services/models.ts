@@ -13,6 +13,9 @@ export interface User {
   role_name: string;
   active: boolean;
   initial_password: boolean;
+  // Etapa 9H: si tiene contraseña (los importados del sistema anterior llegan sin ella y sin acceso). Solo lo
+  // entrega la lista de Usuarios; la sesión no lo lleva.
+  has_password?: boolean;
 }
 
 export interface Identity {

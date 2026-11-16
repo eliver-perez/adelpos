@@ -9371,3 +9371,266 @@ th[aria-sort='descending'] {
   font-size: 15px;
   font-weight: 700;
 }
+
+/* Etapa 9H · Fase D: asistente de migración del sistema anterior (pasos, archivos elegidos, avance, resumen
+   previo, validación con las diferencias de dinero muy visibles) y «Sin acceso» en Usuarios. Solo tokens. */
+.legacy-step-panel h3 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 18px 0 10px;
+}
+.legacy-files {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+  max-width: 820px;
+  margin-bottom: 16px;
+}
+.legacy-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.legacy-file > .muted:first-child {
+  min-width: 150px;
+  font-size: 13px;
+}
+.legacy-passphrase {
+  display: grid;
+  gap: 12px;
+  max-width: 820px;
+}
+.legacy-problem {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+.legacy-running {
+  display: grid;
+  gap: 12px;
+  max-width: 820px;
+  margin-top: 8px;
+}
+.legacy-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legacy-step {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+}
+.legacy-step-started {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.legacy-step-finished svg {
+  color: var(--accent-strong);
+}
+.legacy-step-pending {
+  color: var(--muted);
+}
+.legacy-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.legacy-progress {
+  flex: 1;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--subtle);
+}
+.legacy-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}
+.legacy-progress-value {
+  min-width: 52px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.legacy-alert {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.legacy-alert > strong {
+  font-size: 14px;
+}
+.legacy-alert ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+.legacy-alert-good {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.legacy-alert-warning {
+  border-color: var(--warning-mark);
+  background: var(--warning-soft);
+}
+.legacy-alert-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.legacy-alert-danger > strong {
+  color: var(--danger);
+}
+.legacy-sentence {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.legacy-summary {
+  display: grid;
+  gap: 14px;
+}
+.legacy-counts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legacy-counts li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.legacy-counts strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.legacy-counts span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.legacy-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 16px;
+}
+.legacy-block h4 {
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+.legacy-year-list,
+.legacy-flag-list,
+.legacy-failing {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.legacy-year-list li,
+.legacy-flag-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.legacy-flag-list li {
+  justify-content: flex-start;
+}
+.legacy-flag-list li svg {
+  color: var(--warning-mark);
+}
+.legacy-flag-list li strong {
+  margin-left: auto;
+}
+.legacy-year-list strong,
+.legacy-flag-list strong {
+  font-variant-numeric: tabular-nums;
+}
+.legacy-failing li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--danger-border);
+}
+.legacy-difference {
+  color: var(--danger);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.legacy-check-failed td {
+  background: var(--danger-soft);
+}
+.legacy-checks .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.legacy-notes {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.legacy-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 8px 16px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.legacy-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.legacy-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+.legacy-current > strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+.legacy-report,
+.legacy-preview {
+  margin-top: 16px;
+}
+.users-state,
+.users-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}

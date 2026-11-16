@@ -36,6 +36,8 @@ export interface CommandCenterOptions {
   authenticated: boolean;
   permissions: string[];
   screen: ScreenID | null;
+  // Etapa 9H: modalidad con servidor (la computadora principal).
+  mainComputer: boolean;
   operation: OperationCommandState | null;
   operationHandlers: RefObject<OperationCommandHandlers | null>;
   cashOptions: CashOptionState[];
@@ -72,6 +74,7 @@ export function useCommandCenter(options: CommandCenterOptions): { overlay: Reac
       permissions: current.permissions,
       screen: current.screen,
       desktop,
+      mainComputer: current.mainComputer,
       operation: current.operation,
       cashOptions: current.cashOptions,
     }),

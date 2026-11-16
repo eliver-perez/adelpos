@@ -99,6 +99,67 @@ function UserEditor({
   );
 }
 
+// «Asignar contraseña» (etapa 9H): solo para usuarios sin contraseña, como los importados del sistema
+// anterior, que llegan sin acceso. Go la guarda como contraseña inicial y rechaza a quien ya tiene una
+// (solo él la cambia desde su formulario personal).
+export function AssignPasswordForm({
+  user,
+  onAssigned,
+}: {
+  user: User;
+  onAssigned: () => Promise<void>;
+}) {
+  const [password, setPassword] = useState('');
+  const [repeated, setRepeated] = useState('');
+  return (
+    <Form
+      label="Asignar contraseña"
+      successMessage="Contraseña asignada. Al entrar se le recomendará cambiarla."
+      onSave={async () => {
+        if (password !== repeated) {
+          throw new Error('Las dos contraseñas no coinciden.');
+        }
+        try {
+          await api('assign_user_password', { id: user.id, body: { password } });
+        } finally {
+          setPassword('');
+          setRepeated('');
+        }
+        await onAssigned();
+      }}
+    >
+      <p className="muted text-sm">
+        {user.display_name} no tiene contraseña y no puede entrar. Asígnale una contraseña inicial y
+        compártela con esa persona; al entrar se le recomendará cambiarla por una propia.
+      </p>
+      <div className="form-grid">
+        <Field label="Contraseña inicial">
+          <input
+            required
+            minLength={8}
+            maxLength={256}
+            type="password"
+            autoComplete="new-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </Field>
+        <Field label="Escríbela otra vez">
+          <input
+            required
+            minLength={8}
+            maxLength={256}
+            type="password"
+            autoComplete="new-password"
+            value={repeated}
+            onChange={(event) => setRepeated(event.target.value)}
+          />
+        </Field>
+      </div>
+    </Form>
+  );
+}
+
 // Excepción por permiso: la misma lista corta en cada uno de los ≈150 renglones (un solo arreglo
 // compartido; el selector no monta su lista mientras está cerrado).
 const overrideOptions = [
@@ -197,12 +258,15 @@ export function UsersPage({
   const registry = useResource<Permission[]>('permissions', { enabled: can('permissions.read') });
   const [selected, setSelected] = useState<User | null | undefined>(undefined);
   const [tab, setTab] = useState('details');
+  // Etapa 9H: usuario sin contraseña al que se le asigna una.
+  const [assigning, setAssigning] = useState<User | null>(null);
   async function saved() {
     await users.reload();
     await onChanged();
   }
   function edit(user: User | null) {
     setTab('details');
+    setAssigning(null);
     setSelected(user);
   }
   return (
@@ -218,6 +282,24 @@ export function UsersPage({
         )}
       </PageTitle>
       <Notice>{users.error || roles.error || registry.error}</Notice>
+      {assigning && (
+        <section className="surface panel" aria-labelledby="assign-password-title">
+          <div className="section-heading">
+            <h2 id="assign-password-title">Asignar contraseña a {assigning.display_name}</h2>
+            <button className="secondary-button" onClick={() => setAssigning(null)}>
+              Cerrar
+            </button>
+          </div>
+          <AssignPasswordForm
+            key={assigning.id}
+            user={assigning}
+            onAssigned={async () => {
+              setAssigning(null);
+              await saved();
+            }}
+          />
+        </section>
+      )}
       {selected !== undefined && (
         <section className="surface panel">
           <div className="section-heading">
@@ -295,24 +377,43 @@ export function UsersPage({
                 <td>{user.display_name}</td>
                 <td>{user.role_name}</td>
                 <td>
-                  <span className={`tag ${user.active ? 'tag-good' : ''}`}>
-                    {user.active ? 'Activo' : 'Inactivo'}
+                  <span className="users-state">
+                    <span className={`tag ${user.active ? 'tag-good' : ''}`}>
+                      {user.active ? 'Activo' : 'Inactivo'}
+                    </span>
+                    {/* Etapa 9H: sin contraseña no puede entrar (los importados del sistema anterior). */}
+                    {user.has_password === false && (
+                      <span className="tag tag-warning">Sin acceso</span>
+                    )}
                   </span>
                 </td>
                 <td>
-                  {(can('users.manage') || can('permissions.read')) && (
-                    <button
-                      className="secondary-button"
-                      onClick={() => {
-                        edit(user);
-                        if (!can('users.manage')) {
-                          setTab('permissions');
-                        }
-                      }}
-                    >
-                      Administrar
-                    </button>
-                  )}
+                  <span className="users-actions">
+                    {can('users.manage') && user.has_password === false && (
+                      <button
+                        className="secondary-button"
+                        onClick={() => {
+                          setSelected(undefined);
+                          setAssigning(user);
+                        }}
+                      >
+                        Asignar contraseña
+                      </button>
+                    )}
+                    {(can('users.manage') || can('permissions.read')) && (
+                      <button
+                        className="secondary-button"
+                        onClick={() => {
+                          edit(user);
+                          if (!can('users.manage')) {
+                            setTab('permissions');
+                          }
+                        }}
+                      >
+                        Administrar
+                      </button>
+                    )}
+                  </span>
                 </td>
               </tr>
             ))}
