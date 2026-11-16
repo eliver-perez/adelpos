@@ -43,6 +43,12 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
     `AdelDimens`); un solo botón principal por panel.
 13. **El indicador de conexión siempre visible** en la barra superior común (`AdelTopBar` + `ConnectionIndicator`):
     «En línea», «Sin conexión» y «N pedidos por enviar».
+14. **Código fuente claro, nunca ofuscado ni compactado** (regla del propietario, la misma de `AGENTS.md` para todo el
+    repositorio): saltos de línea, indentación de 4 espacios y una declaración por línea; funciones, `when`, `if` y
+    llamadas con muchos argumentos en varias líneas; nombres descriptivos y comentarios en español donde haya reglas,
+    validaciones, seguridad o lógica compleja. La meta es que cualquiera lo entienda y lo pueda modificar. ktfmt
+    (`android-format`) da el formato; no se compacta a mano para ahorrar líneas. R8 del APK de entrega solo reduce el
+    archivo compilado y **no ofusca** (`-dontobfuscate`, A1-D8): no toca el código fuente.
 
 ## Estructura
 
