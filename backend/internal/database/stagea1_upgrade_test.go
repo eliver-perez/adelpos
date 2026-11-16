@@ -19,8 +19,9 @@ import (
 // Etapa A1: actualización desde el esquema 24 con roles, usuarios, terminales y sesiones existentes. La sección B de la
 // 0025 agrega el PIN de los usuarios (sin PIN, versión 0, sin nombre corto ni color), los intentos del PIN, las
 // credenciales de envío, el bloqueo por inactividad de cada terminal (120 s) y el permiso waiter_devices.use para el
-// administrador y el rol Mesero. No cambia ninguna fila existente de ninguna tabla: solo agrega el permiso y sus dos
-// concesiones. Deja la base vacía.
+// administrador y el rol Mesero; la sección E, el renglón con que se capturó cada partida confirmada
+// (restaurant_items.draft_item_id, vacío en las existentes). No cambia ninguna fila existente de ninguna tabla: solo
+// agrega el permiso y sus dos concesiones. Deja la base vacía.
 func TestStageA1Upgrade(t *testing.T) {
 	dsn := os.Getenv("ADEL_TEST_DATABASE_URL")
 	u, err := url.Parse(dsn)
@@ -79,6 +80,28 @@ func TestStageA1Upgrade(t *testing.T) {
 	checkStageA1Permission(ctx, t, pool)
 	checkStageA1Columns(ctx, t, pool)
 	checkStageA1Credentials(ctx, t, pool)
+	checkStageA1DraftItems(ctx, t, pool)
+}
+
+// checkStageA1DraftItems (sección E): restaurant_items.draft_item_id es un uuid opcional, vacío en las partidas que ya
+// existían, con su índice parcial (lo consulta el pedido sin conexión que sustituye renglones del borrador).
+func checkStageA1DraftItems(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	var dataType, nullable, index string
+	var filled int
+	err := pool.QueryRow(ctx, `SELECT c.data_type,c.is_nullable,
+            coalesce((SELECT indexdef FROM pg_indexes WHERE schemaname='app' AND indexname='restaurant_items_draft_item_idx'),''),
+            (SELECT count(*) FROM app.restaurant_items WHERE draft_item_id IS NOT NULL)
+        FROM information_schema.columns c
+        WHERE c.table_schema='app' AND c.table_name='restaurant_items' AND c.column_name='draft_item_id'`).
+		Scan(&dataType, &nullable, &index, &filled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dataType != "uuid" || nullable != "YES" || filled != 0 ||
+		!strings.Contains(index, "(draft_item_id)") || !strings.Contains(index, "WHERE (draft_item_id IS NOT NULL)") {
+		t.Fatalf("restaurant_items.draft_item_id: %s %s, %d con valor, índice %q", dataType, nullable, filled, index)
+	}
 }
 
 // stageA1Tables son las tablas del esquema 24 con sus columnas: la comparación usa solo esas columnas (las nuevas de
