@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"local/ad-el-pos/server/internal/legacypkg"
@@ -14,6 +15,9 @@ import (
 // Lectura del paquete .adelmig con internal/legacypkg (formato en docs/MIGRACION_FORMATO.md). El lector es en
 // flujo: entrega las tablas en el orden del manifiesto y confirma la integridad completa (bloques cifrados, huellas
 // y conteos) solo cuando NextTable devuelve io.EOF; Load lee todo antes de que se escriba nada.
+
+// openMutex serializa las aperturas de paquetes (la derivación de la llave).
+var openMutex sync.Mutex
 
 // packageSource adapta un *legacypkg.Reader a Source.
 type packageSource struct {
@@ -35,7 +39,12 @@ func OpenPackage(path, passphrase string) (Source, io.Closer, error) {
 	if err != nil {
 		return nil, nil, &Error{Code: CodeUploadMissing, Message: "El paquete subido ya no está disponible. Vuelve a elegirlo.", cause: err}
 	}
+	// Una apertura a la vez en todo el servidor: derivar la llave puede pedir hasta 256 MiB de Argon2 (límite del
+	// formato). El trabajador ya corre una corrida a la vez; esto lo asegura aunque otra parte del servidor abra un
+	// paquete. OpenOptions vacío = los límites predeterminados completos del formato.
+	openMutex.Lock()
 	reader, err := legacypkg.Open(bufio.NewReaderSize(file, 1<<20), passphrase, legacypkg.OpenOptions{})
+	openMutex.Unlock()
 	if err != nil {
 		file.Close()
 		return nil, nil, packageError(err)
@@ -112,12 +121,13 @@ func (table *packageTable) Next() ([]any, error) {
 }
 
 // packageError traduce un error del formato a un error de la migración con el mensaje del formato (ya en español
-// sencillo y sin datos del paquete).
+// sencillo y sin datos del paquete). Detail lleva solo el detalle técnico del formato (Error() de legacypkg, que nunca
+// cita contenido); la causa interna (Unwrap) se conserva para errors.Is pero nunca se registra.
 func packageError(err error) error {
 	var typed *legacypkg.Error
 	if !errors.As(err, &typed) {
 		return &Error{Code: CodeDamaged, Message: "El paquete está dañado o no se pudo leer. Vuelve a copiarlo o prepáralo de nuevo.",
-			Detail: err.Error(), cause: err}
+			Detail: "error de lectura del paquete", cause: err}
 	}
 	codes := map[legacypkg.ErrorKind]string{
 		legacypkg.KindNotPackage:         CodeNotPackage,

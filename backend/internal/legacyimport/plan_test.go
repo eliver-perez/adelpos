@@ -110,8 +110,6 @@ func TestDeriveUsername(t *testing.T) {
 
 func TestLoadRejectsIncompatiblePackages(t *testing.T) {
 	pkg := standardSynthetic()
-	pkg.order = pkg.order[1:]
-	delete(pkg.tables, "cajas")
 	for index, name := range pkg.order {
 		if name == "pagos" {
 			pkg.order = append(pkg.order[:index], pkg.order[index+1:]...)

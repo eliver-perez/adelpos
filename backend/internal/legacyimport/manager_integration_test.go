@@ -225,6 +225,23 @@ func TestLegacyManagerAnalyzesAndImportsPackages(t *testing.T) {
 		if run := h.analyze(view, "otra frase de paso"); run.Status != StatusFailed || errorCode(run) != CodeWrongPassphrase {
 			t.Fatalf("frase incorrecta: %+v", run)
 		}
+		// Un paquete coherente consigo mismo pero sin una tabla que la importación necesita: error claro, no una
+		// importación parcial.
+		tables := []*legacysynth.Table{}
+		for _, table := range legacysynth.Dataset() {
+			if table.Name != "cortes" {
+				tables = append(tables, table)
+			}
+		}
+		withoutShifts := h.upload(syntheticPackageBytes(t, tables))
+		incomplete := h.analyze(withoutShifts, syntheticPassphrase)
+		if incomplete.Status != StatusFailed || errorCode(incomplete) != CodeIncompatible || incomplete.ErrorMessage == nil ||
+			!strings.Contains(*incomplete.ErrorMessage, "cortes") {
+			t.Fatalf("paquete sin la tabla cortes: %+v", incomplete)
+		}
+		if err := h.manager.CancelUpload(h.actor, withoutShifts.ID); err != nil {
+			t.Fatal(err)
+		}
 		damaged := append([]byte{}, content...)
 		damaged[len(damaged)/2] ^= 0x40
 		newer := append([]byte{}, content...)
