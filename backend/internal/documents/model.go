@@ -147,9 +147,13 @@ const (
 	FieldPair   = "pair"
 )
 
-// NotesOptions decide si la lista de productos imprime las observaciones de cada partida.
-type NotesOptions struct {
-	ShowNotes bool `json:"show_notes"`
+// ProductsOptions son las opciones de la lista de productos: ShowNotes imprime las observaciones de
+// cada partida y ShowUnitPrice (etapa 9H, §2.3; desactivada por omisión) el precio de una unidad junto
+// a la cantidad. ShowUnitPrice se omite en la forma canónica mientras está desactivada, de modo que las
+// plantillas predeterminadas y las guardadas antes de la 9H conservan exactamente sus bytes.
+type ProductsOptions struct {
+	ShowNotes     bool `json:"show_notes"`
+	ShowUnitPrice bool `json:"show_unit_price,omitempty"`
 }
 
 // ReasonOptions decide si los descuentos y cortesías muestran su motivo («Descuento · Atención»).

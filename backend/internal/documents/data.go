@@ -160,12 +160,17 @@ type CommercialData struct {
 	Identity    Identity               `json:"identity"`
 }
 
-// CommercialLine es una partida del documento comercial con su importe.
+// CommercialLine es una partida del documento comercial con su importe. UnitPrice (etapa 9H, §2.3) es el
+// precio comercial de una unidad que calculó Go: el precio unitario del motor del catálogo (base o
+// variante más complementos e ingredientes extra), antes de promociones y descuentos, tal como quedó en
+// las unidades de la partida. Vacío en los documentos anteriores a la 9H (que no lo guardaron) o si las
+// unidades de la partida no comparten un mismo precio; entonces no se imprime.
 type CommercialLine struct {
-	Quantity int    `json:"quantity"`
-	Name     string `json:"name"`
-	Notes    string `json:"notes"`
-	Amount   string `json:"amount"`
+	Quantity  int    `json:"quantity"`
+	Name      string `json:"name"`
+	Notes     string `json:"notes"`
+	Amount    string `json:"amount"`
+	UnitPrice string `json:"unit_price,omitempty"`
 }
 
 // CommercialAdjustment es un descuento, cortesía o cargo; Reason es el motivo del catálogo.
