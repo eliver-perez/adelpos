@@ -143,6 +143,18 @@ func actualMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config busin
 	return written, err
 }
 
+// ledgerCheckSQL cuenta, de las ventas pagadas del lote, las que su libro no suma lo que se debía y las que no tienen
+// ningún renglón en el libro. Suma el libro de cada venta con una subconsulta LATERAL que lo busca por el índice
+// (batch_id, legacy_sale_id), así que el plan no depende de la estimación del lote (revisión de la Fase E, D-1): con las
+// estadísticas de otro lote el planificador estimaba el lote nuevo en una fila y, con una subconsulta agregada del lote
+// dentro de la unión (o con la unión directa), elegía un nested loop que volvía a recorrer el libro del lote por cada
+// venta (horas con el volumen real).
+const ledgerCheckSQL = `SELECT count(*) FILTER (WHERE coalesce(l.net, 0) <> s.amount_due), count(*) FILTER (WHERE l.entries = 0)
+        FROM app.legacy_sales s
+        CROSS JOIN LATERAL (SELECT sum(r.net) AS net, count(*) AS entries FROM app.legacy_sales_recognitions r
+            WHERE r.batch_id = s.batch_id AND r.legacy_sale_id = s.legacy_id) l
+        WHERE s.batch_id = $1 AND s.status = 'paid'`
+
 func readMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (writtenMoney, error) {
 	sales, payments, withdrawals, err := readSalesAndPayments(ctx, tx, batch, config)
 	if err != nil {
@@ -150,12 +162,7 @@ func readMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config busines
 	}
 	written := writtenMoney{sales: sales, payments: payments, withdrawals: withdrawals}
 	// Cada venta pagada: Σ net de su libro = lo que se debía. Cuenta las que no y las que no tienen ningún renglón.
-	err = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE coalesce(l.net, 0) <> s.amount_due),
-            count(*) FILTER (WHERE l.legacy_sale_id IS NULL)
-        FROM app.legacy_sales s
-        LEFT JOIN (SELECT legacy_sale_id, sum(net) AS net FROM app.legacy_sales_recognitions WHERE batch_id = $1
-            GROUP BY legacy_sale_id) l ON l.legacy_sale_id = s.legacy_id
-        WHERE s.batch_id = $1 AND s.status = 'paid'`, batch).Scan(&written.unbalanced, &written.withoutLedger)
+	err = tx.QueryRow(ctx, ledgerCheckSQL, batch).Scan(&written.unbalanced, &written.withoutLedger)
 	return written, err
 }
 

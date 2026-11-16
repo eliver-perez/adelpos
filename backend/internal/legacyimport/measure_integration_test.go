@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/legacypkg"
 	"local/ad-el-pos/server/internal/legacysynth"
 )
@@ -135,4 +137,61 @@ func TestLegacyImportVolume(t *testing.T) {
 	t.Logf("análisis: lectura %s, con la correspondencia %s; memoria del modelo ≈ %.0f MB (montón en uso)",
 		read.Round(time.Millisecond), analyzed.Round(time.Millisecond), float64(after.HeapInuse-min(after.HeapInuse, before.HeapInuse))/1e6)
 	t.Logf("importación: %s; tiempos (ms) %v; base después de importar %s", imported.Round(time.Millisecond), report.TimingsMS, database)
+
+	// Reemplazo con las estadísticas del lote vigente (revisión de la Fase E, D-1): después de la primera importación el
+	// autovacuum analiza las tablas del historial y solo conocen ese lote; aquí se fuerza con ANALYZE. El reemplazo debe
+	// quedar en el mismo orden que la primera importación (si vuelve el plan cuadrático, el plazo lo corta).
+	if _, err := pool.Exec(ctx, "ANALYZE app."+strings.Join(historyTables, ", app.")); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("plan de la validación del libro para un lote nuevo con las estadísticas del vigente:\n%s",
+		explainText(t, pool, ledgerCheckSQL, uuidText(newUUID())))
+	environment, err = ReadEnvironment(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacePlan, replacePreview := Analyze(model, environment, written.Bytes, "")
+	if !replacePreview.WillReplace {
+		t.Fatal("el segundo análisis debía ofrecer reemplazar el lote")
+	}
+	limit := 3*imported + time.Minute
+	replaceCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	replaceStart := time.Now()
+	replaced, err := Import(replaceCtx, pool, replacePlan, environment.Config, ImportRequest{UserID: admin, Username: "admin",
+		DeviceID: device, ExpectedBatchID: report.BatchID, PackageSHA256: hex.EncodeToString(digest[:]), PackageBytes: written.Bytes}, nil)
+	if err != nil {
+		t.Fatalf("el reemplazo no terminó en %s (3 × la primera importación + 1 min): %v", limit.Round(time.Second), err)
+	}
+	replacedIn := time.Since(replaceStart)
+	if !replaced.Validation.OK || replaced.ReplacedBatchID != report.BatchID {
+		t.Fatalf("validación del reemplazo con volumen: %+v", replaced.Validation)
+	}
+	if err := pool.QueryRow(ctx, "SELECT pg_size_pretty(pg_database_size(current_database()))").Scan(&database); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("reemplazo: %s; tiempos (ms) %v; base después del reemplazo %s", replacedIn.Round(time.Millisecond),
+		replaced.TimingsMS, database)
+}
+
+// explainText es el plan (EXPLAIN, sin ejecutar) de una consulta con sus argumentos, para la bitácora de la medición.
+func explainText(t *testing.T, pool *pgxpool.Pool, query string, args ...any) string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), "EXPLAIN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	lines := []string{}
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, line)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(lines, "\n")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -246,13 +247,19 @@ func Import(ctx context.Context, pool *pgxpool.Pool, plan *Plan, config business
 		return nil, err
 	}
 	timings["write_history"] = time.Since(phaseStart).Milliseconds()
+	// Validación del historial antes de tomar los locks de la operación (no los necesita), con las estadísticas del
+	// historial ya actualizadas con el lote nuevo.
+	report(PhaseValidating, 0, 0)
+	phaseStart = time.Now()
+	if err := analyzeTables(ctx, tx, historyTables); err != nil {
+		return nil, err
+	}
+	timings["analyze_history"] = time.Since(phaseStart).Milliseconds()
 	if request.Hooks != nil && request.Hooks.AfterHistory != nil {
 		if err := request.Hooks.AfterHistory(ctx, tx); err != nil {
 			return nil, err
 		}
 	}
-	// Validación del historial antes de tomar los locks de la operación (no los necesita).
-	report(PhaseValidating, 0, 0)
 	phaseStart = time.Now()
 	money, err := actualMoney(ctx, tx, batch, config)
 	if err != nil {
@@ -301,6 +308,11 @@ func Import(ctx context.Context, pool *pgxpool.Pool, plan *Plan, config business
 			return nil, err
 		}
 	}
+	// La correspondencia ya solo tiene el lote nuevo: sus estadísticas también (la usan la comprobación de la instalación
+	// limpia y la validación de la próxima importación).
+	if err := analyzeTables(ctx, tx, []string{"legacy_id_map"}); err != nil {
+		return nil, err
+	}
 	result := &Report{
 		Summary:         summary,
 		BatchID:         uuidText(batch),
@@ -338,6 +350,20 @@ func Import(ctx context.Context, pool *pgxpool.Pool, plan *Plan, config business
 	timings["locks_held"] = time.Since(lockedAt).Milliseconds()
 	timings["total"] = time.Since(started).Milliseconds()
 	return result, nil
+}
+
+// analyzeTables actualiza las estadísticas de las tablas del esquema app indicadas dentro de la transacción de la
+// importación (revisión de la Fase E, D-1). Después de una importación, el autovacuum analiza el historial y sus
+// estadísticas solo conocen ese lote: sin esto, dentro del reemplazo el planificador estimaba el lote nuevo en una fila.
+// ANALYZE dentro de la transacción cuenta las filas que ella escribió y no las que borró, así que el planificador ve el
+// lote nuevo tal como es y, al confirmar, los reportes quedan con sus estadísticas. Si la transacción se deshace, las
+// estadísticas de las columnas (pg_statistic) vuelven a las de antes; solo el número de filas de pg_class queda con el
+// del intento (PostgreSQL lo actualiza en su lugar) hasta el siguiente ANALYZE. Toma ShareUpdateExclusiveLock hasta el
+// final (no estorba lecturas ni escrituras; un autovacuum de esas tablas espera o se cancela). Exige ser el dueño de las
+// tablas, como el servidor que corre las migraciones (si no, PostgreSQL solo avisa y no las analiza).
+func analyzeTables(ctx context.Context, tx pgx.Tx, tables []string) error {
+	_, err := tx.Exec(ctx, "ANALYZE app."+strings.Join(tables, ", app."))
+	return err
 }
 
 // takeOperationLocks toma 7820148305 → 7820148304 → 7820148308 exclusivos con un tiempo de espera acotado.
