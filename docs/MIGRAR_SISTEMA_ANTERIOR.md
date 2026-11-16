@@ -45,6 +45,11 @@ principal con AD-EL POS, aunque no tenga Docker.
 2. Abre **Docker Desktop** y espera a que diga que está listo. La primera vez acepta sus condiciones de uso.
 3. Déjalo abierto mientras preparas el paquete. Después puedes cerrarlo.
 
+Para leer el respaldo, AD-EL POS usa dentro de Docker **SQL Server Express**, la edición gratuita de Microsoft: lo crea
+solo para leer el respaldo, sin conexión a la red ni a ningún SQL Server del restaurante, y lo borra al terminar. Al
+preparar un paquete se aceptan las condiciones de licencia de SQL Server Express de Microsoft. La primera vez se
+descarga (unos 500 MB).
+
 Si al preparar el paquete el asistente dice:
 
 - **«Falta instalar Docker Desktop»**: instálalo como dice arriba y vuelve a intentarlo.
@@ -74,7 +79,9 @@ Si al preparar el paquete el asistente dice:
    paso 2 para importarlo en esta computadora; también puedes llevarlo en una USB a la computadora principal del
    restaurante.
 
-<!-- Fase E: tiempos y tamaño -->
+**Cuánto tarda**: con el respaldo actual del restaurante (unos 126 MB, siete años de ventas), preparar el paquete
+tarda menos de un minuto y el paquete pesa unos 17 MB. Después, revisar el paquete tarda unos segundos e importarlo,
+menos de un minuto.
 
 Las contraseñas del sistema anterior **no se copian**: el paquete solo sabe qué usuarios tenían una.
 
@@ -86,21 +93,23 @@ asistente inicial, como el usuario `admin` y la Caja 1). Si la instalación ya t
 **«No se puede importar en esta instalación.»**, lista lo que encontró (por ejemplo «Hay 3 cuentas registradas en
 AD-EL POS.») y no importa nada: hace falta una instalación nueva o limpia (pídesela a soporte).
 
-1. En **«2. Importar el paquete»**, toca **«Elegir el paquete»** (puede estar en una USB) y escribe su **frase de
+1. Antes de importar, revisa en **Administración › Sistema › Configuración** que la **«Zona horaria del restaurante»**
+   sea la correcta: con ella se leen las fechas y horas del sistema anterior.
+2. En **«2. Importar el paquete»**, toca **«Elegir el paquete»** (puede estar en una USB) y escribe su **frase de
    paso**.
-2. Toca **«Revisar el paquete»**. AD-EL POS sube el paquete y lo revisa; **todavía no se guarda nada**. Si la frase no
+3. Toca **«Revisar el paquete»**. AD-EL POS sube el paquete y lo revisa; **todavía no se guarda nada**. Si la frase no
    es correcta («La frase de paso no es correcta.»), corrígela y vuelve a tocar «Revisar el paquete».
-3. Lee el **resumen previo**: cuántos productos, mesas, usuarios y ventas trae y de qué periodo (por ejemplo «312
+4. Lee el **resumen previo**: cuántos productos, mesas, usuarios y ventas trae y de qué periodo (por ejemplo «312
    productos, 18 mesas, 6 usuarios y 48 230 ventas del 03/2018 al 11/2026.»), el IVA de los productos, el total vendido
    por año, los retiros y las salidas de efectivo, las ventas canceladas como las contaba el sistema anterior, los
    **datos incoherentes** y **«Para tener en cuenta»** (por ejemplo, que el sistema anterior no guardaba dólares: los
    pagos en dólares quedaron como efectivo en pesos).
-4. Toca **«Importar»** y confirma. Antes de importar, AD-EL POS hace **un respaldo de la base de datos** (aparece en
+5. Toca **«Importar»** y confirma. Antes de importar, AD-EL POS hace **un respaldo de la base de datos** (aparece en
    Mantenimiento › Respaldos).
-5. Verás el avance («Haciendo un respaldo de la base de datos», «Guardando el historial de ventas», «Comprobando
+6. Verás el avance («Haciendo un respaldo de la base de datos», «Guardando el historial de ventas», «Comprobando
    conteos y totales»…). La importación corre aparte: puedes salir de la pantalla y seguir usando AD-EL POS. **Si se
    interrumpe, no deja datos a medias.**
-6. Al terminar aparece el **informe de la importación** con la validación: conteos, total vendido por año, pagos por
+7. Al terminar aparece el **informe de la importación** con la validación: conteos, total vendido por año, pagos por
    forma de pago y año y otros totales, comparados con lo que traía el paquete. Si todo coincide dice **«Todo
    cuadra.»**. Toca **«Descargar informe (PDF)»** y guárdalo.
 
