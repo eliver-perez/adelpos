@@ -1,5 +1,6 @@
 package local.adel.pos.android.core.ui.components
 
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -17,6 +18,7 @@ import local.adel.pos.android.core.ui.theme.AdelTheme
 /**
  * Barra superior común a todas las pantallas: título a la izquierda y el indicador de conexión a la
  * derecha, siempre visible. Respeta la barra de estado del sistema (pantalla de borde a borde).
+ * [actions] va antes del indicador (por ejemplo, el menú del mesero activo).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,6 +26,7 @@ fun AdelTopBar(
     title: String,
     connection: ConnectionSummary,
     modifier: Modifier = Modifier,
+    actions: @Composable RowScope.() -> Unit = {},
 ) {
     TopAppBar(
         modifier = modifier.testTag(TAG_TOP_BAR),
@@ -35,7 +38,10 @@ fun AdelTopBar(
                 overflow = TextOverflow.Ellipsis,
             )
         },
-        actions = { ConnectionIndicator(connection, Modifier.padding(end = 16.dp)) },
+        actions = {
+            actions()
+            ConnectionIndicator(connection, Modifier.padding(start = 8.dp, end = 16.dp))
+        },
         colors =
             TopAppBarDefaults.topAppBarColors(
                 containerColor = AdelTheme.colors.panel,
