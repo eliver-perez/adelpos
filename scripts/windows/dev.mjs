@@ -496,7 +496,101 @@ function goTestArguments() {
   return { args: [], env: process.env };
 }
 
+// Etapa 9H («Datos reales»): equivalente de scripts/check-legacy-data.sh. Falla si el índice de git tiene un
+// respaldo de SQL Server o un paquete de migración del sistema anterior, por su nombre (*.bak, *.adelmig, carpeta
+// legacy-data/) o por su contenido (un archivo binario cuya primera línea empiece con la firma «ADELMIG» de un paquete
+// o «TAPE» de un respaldo de SQL Server), aunque se le haya cambiado el nombre. Sin .git (copia hecha con git archive)
+// no hay índice que revisar.
+function gitOutput(root, args) {
+  const result = spawnSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (result.error) {
+    fail(`No se pudo ejecutar git: ${result.error.message}`);
+  }
+  // git grep termina con 1 cuando no encuentra nada; con más de 1, falló.
+  if (result.status > 1) {
+    fail(`git ${args[0]} terminó con código ${result.status}.`);
+  }
+  return result.stdout ?? '';
+}
+
+function checkLegacyData(root = ROOT) {
+  if (!fs.existsSync(path.join(root, '.git'))) {
+    console.log(
+      `Datos del sistema anterior: sin .git en ${root} (copia sin índice); no hay nada que comprobar.`,
+    );
+    return;
+  }
+  const found = [];
+  for (const file of gitOutput(root, ['ls-files', '-z', '--cached']).split('\0')) {
+    const lower = file.toLowerCase();
+    const byName =
+      lower.endsWith('.bak') ||
+      lower.endsWith('.adelmig') ||
+      lower.startsWith('legacy-data/') ||
+      lower.includes('/legacy-data/');
+    if (file && byName) {
+      found.push(`${file} (nombre)`);
+    }
+  }
+  const signatures = ['-E', '-e', '^TAPE', '-e', '^ADELMIG'];
+  const textFiles = new Set(
+    gitOutput(root, ['grep', '--cached', '-I', '-l', '-z', ...signatures])
+      .split('\0')
+      .filter(Boolean),
+  );
+  // Cada coincidencia llega como «ruta NUL línea NUL firma» y un salto de línea.
+  const matches = gitOutput(root, [
+    '-c',
+    'core.quotePath=false',
+    'grep',
+    '--cached',
+    '-a',
+    '-n',
+    '-o',
+    '-z',
+    ...signatures,
+  ]);
+  let position = 0;
+  while (position < matches.length) {
+    const pathEnd = matches.indexOf('\0', position);
+    const lineEnd = matches.indexOf('\0', pathEnd + 1);
+    const recordEnd = matches.indexOf('\n', lineEnd + 1);
+    if (pathEnd < 0 || lineEnd < 0 || recordEnd < 0) {
+      break;
+    }
+    const file = matches.slice(position, pathEnd);
+    const line = matches.slice(pathEnd + 1, lineEnd);
+    const signature = matches.slice(lineEnd + 1, recordEnd);
+    position = recordEnd + 1;
+    if (line !== '1' || textFiles.has(file)) {
+      continue;
+    }
+    if (signature === 'ADELMIG') {
+      found.push(`${file} (paquete de migración)`);
+    } else {
+      found.push(`${file} (respaldo de SQL Server)`);
+    }
+  }
+  if (found.length > 0) {
+    console.error(
+      'El índice de git tiene datos del sistema anterior (nunca deben versionarse; quítalos con git rm --cached):',
+    );
+    for (const item of found) {
+      console.error(`  ${item}`);
+    }
+    fail('Hay datos del sistema anterior en el índice de git.');
+  }
+  console.log(
+    'Datos del sistema anterior: el índice de git no tiene respaldos ni paquetes de migración.',
+  );
+}
+
 function formatCheck() {
+  checkLegacyData();
   run(process.execPath, [
     path.join(ROOT, 'desktop', 'node_modules', 'prettier', 'bin', 'prettier.cjs'),
     '.',
@@ -653,6 +747,9 @@ async function main() {
       break;
     case 'format-check':
       formatCheck();
+      break;
+    case 'check-legacy-data':
+      checkLegacyData(args[0] ? path.resolve(args[0]) : ROOT);
       break;
     case 'db-init':
       dbInit();
