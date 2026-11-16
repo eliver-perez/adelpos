@@ -41,6 +41,10 @@ var capabilities = []string{
 	// si el servidor anuncia waiter-pin-v1, así que sigue funcionando con un servidor 0.11.0 sin esas pantallas.
 	"client-versions-by-kind",
 	"waiter-pin-v1",
+	// Etapa A1 (fase E, servidor): lo que el modo Mesero usa de la API v1 además de lo anterior: el contrato de mesas,
+	// cancelar y modificar unidades, restaurant.account.preparation_changed, error.details.reason en una cuenta que ya
+	// no está abierta, replaces_draft_items en el pedido sin conexión y event_cursor en restaurant/state.
+	"waiter-mode-v1",
 }
 
 type ErrorBody struct {

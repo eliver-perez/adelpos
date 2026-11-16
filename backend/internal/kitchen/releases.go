@@ -209,6 +209,10 @@ func (handler *service) releaseAction(id, action string) (any, error) {
 	if release.Revision != input.Revision {
 		return nil, conflict()
 	}
+	// Liberar o programar cambia la preparación de las cuentas de sus unidades (A1-D11, preparation.go).
+	if err := handler.notePreparationUnits(release.UnitIDs); err != nil {
+		return nil, err
+	}
 	if action == "release" {
 		if release.DueAt != nil && release.DueAt.After(time.Now()) {
 			if err := handler.request.Actor.Require("kitchen.release_early"); err != nil {
@@ -282,7 +286,7 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 	if found {
 		return nil
 	}
-	handler := service{ctx: ctx, tx: tx, request: Request{Actor: actor}}
+	handler := service{ctx: ctx, tx: tx, request: Request{Actor: actor}, preparation: map[string]bool{}}
 	var change struct {
 		After json.RawMessage `json:"after"`
 	}
@@ -307,6 +311,7 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		if _, err := handler.createRelease(eventID, accountID, order.OrderID, ids); err != nil {
 			return err
 		}
+		handler.notePreparationAccount(accountID)
 	case "item.modified", "item.cancelled", "account.cancelled":
 		// Inventario (etapa 8): las modificaciones y cancelaciones de unidades ya liberadas se
 		// registran antes de procesar cocina, para que queden aunque el cambio de cocina quede
@@ -319,6 +324,7 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		if err := handler.integrateChange(eventID, accountID, kind, change.After); err != nil {
 			return err
 		}
+		handler.notePreparationAccount(accountID)
 	case "account.updated":
 		changed, err := accountScheduleChanged(payload)
 		if err != nil {
@@ -329,7 +335,7 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		if !changed {
 			break
 		}
-		_, err = tx.Exec(ctx, `UPDATE app.kitchen_releases r SET scheduled_at=a.scheduled_at,
+		rescheduled, err := tx.Exec(ctx, `UPDATE app.kitchen_releases r SET scheduled_at=a.scheduled_at,
             due_at=a.scheduled_at-make_interval(mins=>r.lead_minutes),revision=r.revision+1,
             state=CASE WHEN a.scheduled_at IS NULL THEN 'pending' ELSE 'scheduled' END
             FROM app.restaurant_accounts a WHERE a.id=$1 AND r.account_id=a.id
@@ -337,6 +343,14 @@ func Integrate(ctx context.Context, tx pgx.Tx, eventID, accountID, kind string, 
 		if err != nil {
 			return err
 		}
+		if rescheduled.RowsAffected() > 0 {
+			handler.notePreparationAccount(accountID)
+		}
+	}
+	// Etapa A1 (A1-D11): la cuenta ya publica su propio evento restaurant.*; el de preparación dice además que cambió lo
+	// que ve cocina, una sola vez por cuenta (cada operación de la cuenta integra un solo evento con cocina).
+	if err := handler.publishPreparation(); err != nil {
+		return err
 	}
 	_, err := tx.Exec(ctx, "INSERT INTO app.kitchen_event_receipts(event_id,result) VALUES ($1,'integrated')", eventID)
 	return err

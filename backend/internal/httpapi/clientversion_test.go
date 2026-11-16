@@ -216,7 +216,7 @@ func TestClientMinimumVersionByKind(t *testing.T) {
 	for _, capability := range capabilities {
 		found[capability.(string)] = true
 	}
-	if !found["waiter-pin-v1"] || !found["client-versions-by-kind"] {
+	if !found["waiter-pin-v1"] || !found["client-versions-by-kind"] || !found["waiter-mode-v1"] {
 		t.Fatalf("capacidades de la etapa A1: %v", capabilities)
 	}
 }
