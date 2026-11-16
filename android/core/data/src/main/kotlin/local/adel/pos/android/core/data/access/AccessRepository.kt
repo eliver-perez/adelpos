@@ -94,7 +94,9 @@ class AccessRepository(
 
     override suspend fun start() {
         mutex.withLock {
-            if (mutableStatus.value == DeviceStatus.Starting) {
+            // Se relee lo guardado cada vez que se abre la pantalla principal; el aviso de
+            // dispositivo retirado se conserva hasta que el mesero lo lee.
+            if (mutableStatus.value !is DeviceStatus.Retired) {
                 loadLocked()
             }
             checkLocked()
@@ -383,11 +385,7 @@ class AccessRepository(
         when (val outcome = current.pinLogin(userId, pin)) {
             is ApiOutcome.Success -> {
                 val response = outcome.value
-                val profile =
-                    (listed.firstOrNull { it.userId == userId }
-                            ?: dao.knownWaiter(userId)?.profile()
-                            ?: WaiterProfile(userId, "", "", null, response.pinVersion, null))
-                        .copy(pinVersion = response.pinVersion, lockedUntilEpochMillis = null)
+                val profile = enteredProfile(userId, response.pinVersion)
                 rememberWaiterLocked(profile, pin, response.offlineCredential)
                 sessions[userId] = response.sessionToken
                 val waiter = ActiveWaiter(profile, hasServerSession = true)
@@ -406,6 +404,23 @@ class AccessRepository(
             is ApiOutcome.Malformed ->
                 return EntryResult.Failed(AppError.InvalidResponse(outcome.status))
         }
+    }
+
+    // Nombre, inicial y color del mesero que acaba de entrar: de la lista de Go o, si todavía no
+    // se tenía, de lo guardado; con la pin_version que confirmó Go y sin bloqueo.
+    private suspend fun enteredProfile(userId: String, pinVersion: Int): WaiterProfile {
+        val known =
+            listed.firstOrNull { it.userId == userId }
+                ?: dao.knownWaiter(userId)?.profile()
+                ?: WaiterProfile(
+                    userId = userId,
+                    name = "",
+                    initial = "",
+                    color = null,
+                    pinVersion = pinVersion,
+                    lockedUntilEpochMillis = null,
+                )
+        return known.copy(pinVersion = pinVersion, lockedUntilEpochMillis = null)
     }
 
     private suspend fun entryRejectedLocked(problem: ApiProblem): EntryResult =
@@ -498,8 +513,10 @@ class AccessRepository(
                 next.lockedUntilEpochMillis,
             )
             val lockedUntil = OfflineAttemptPolicy.lockedUntil(next, now)
-            return if (lockedUntil != null) EntryResult.Locked(lockedUntil)
-            else EntryResult.WrongPin
+            if (lockedUntil != null) {
+                return EntryResult.Locked(lockedUntil)
+            }
+            return EntryResult.WrongPin
         }
         val reset = OfflineAttemptPolicy.afterSuccess()
         dao.updateLocalAttempts(
@@ -642,11 +659,14 @@ class AccessRepository(
             localLockedUntilMillis = localLockedUntilMillis,
         )
 
-    private fun ApiProblem.lockedUntil(): Long? =
-        (details?.get("locked_until") as? JsonPrimitive)
-            ?.takeIf { it.isString }
-            ?.content
-            ?.let { epochMillis(it) }
+    // `details.locked_until` de 429 PIN_LOCKED (RFC 3339), en milisegundos.
+    private fun ApiProblem.lockedUntil(): Long? {
+        val value = details?.get("locked_until") as? JsonPrimitive ?: return null
+        if (!value.isString) {
+            return null
+        }
+        return epochMillis(value.content)
+    }
 
     companion object {
         /** Propósito del cifrado de la credencial del dispositivo. */

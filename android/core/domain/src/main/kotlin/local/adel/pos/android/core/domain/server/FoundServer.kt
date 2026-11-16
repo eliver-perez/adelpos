@@ -64,7 +64,13 @@ object ServerAnnouncements {
         if (localHosts.isEmpty()) {
             return null
         }
-        return FoundServer(serverId, displayName(instanceName), prefix, port, localHosts)
+        return FoundServer(
+            serverId = serverId,
+            name = displayName(instanceName),
+            fingerprintPrefix = prefix,
+            port = port,
+            hosts = localHosts,
+        )
     }
 
     /** Junta los anuncios repetidos del mismo servidor (por `server_id`, nunca por el nombre). */
