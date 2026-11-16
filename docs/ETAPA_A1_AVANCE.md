@@ -576,7 +576,7 @@ regeneran con `$SP/p0/gradle-spike.sh assembleDebug`); los guiones de la fase es
 
 ### Decisiones del coordinador al cerrar la Fase 0
 
-Tomadas según la regla de autonomía de `CLAUDE.md` §0: ninguna cambia la especificación; todas aplican lo que pide.
+Tomadas según la regla de autonomía de `CLAUDE.md` §0: ninguna cambia la especificación; todas aplican lo que pide. **El propietario confirmó A1-D1 (credencial de envío) y A1-D2 (permisos del rol Mesero) el 16/11/2026**, después de que el coordinador se las explicara.
 
 - **A1-D1 · Credencial de envío por mesero y dispositivo (B-1).** §0-B pide captura sin conexión «sin límite de
   tiempo» con el servidor como único juez al recibir, y §7 que WorkManager envíe los pendientes «aunque la aplicación
