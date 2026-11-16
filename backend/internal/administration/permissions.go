@@ -37,6 +37,8 @@ var Permissions = []Permission{
 	{"registers.read", "Consultar cajas físicas"},
 	{"registers.manage", "Crear y configurar cajas físicas"},
 	{"audit.read", "Consultar el registro de movimientos"},
+	// Etapa A1 (fase B, A1-D2): entrar con PIN en los dispositivos de meseros (migración 0025, misma descripción).
+	{"waiter_devices.use", "Entrar con PIN en teléfonos y tabletas de meseros"},
 }
 
 func init() {

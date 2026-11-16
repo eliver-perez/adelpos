@@ -92,6 +92,9 @@ type Request struct {
 	PairingSecret string
 	// IfNoneMatch es la cabecera del mismo nombre (etapa 9G): la imagen binaria del catálogo responde 304 si coincide.
 	IfNoneMatch string
+	// OfflineCredential es la credencial de envío del mesero (X-Offline-Credential, etapa A1, A1-D1): sustituye a la
+	// sesión solo en POST restaurant/offline-orders (pin_login.go).
+	OfflineCredential string
 }
 
 type Fault struct {
@@ -299,6 +302,32 @@ func (service *Service) dispatch(ctx context.Context, tx pgx.Tx, request Request
 	}
 	if route == "auth/login" && request.Method == "POST" {
 		return login(ctx, tx, request)
+	}
+	// Entrada con PIN en los teléfonos y tabletas de meseros (etapa A1, fase B; pin_login.go): con la credencial del
+	// dispositivo android y sin sesión.
+	if route == "auth/pin-users" && request.Method == "GET" {
+		return pinUsers(ctx, tx, request)
+	}
+	if route == "auth/pin-login" && request.Method == "POST" {
+		return pinLogin(ctx, tx, request)
+	}
+	// Credencial de envío del mesero (etapa A1, A1-D1): en lugar de una sesión, y solo para entregar un pedido capturado
+	// sin conexión. En cualquier otra ruta se rechaza, para que nunca abra nada más.
+	if request.OfflineCredential != "" {
+		if route != offlineOrdersRoute || request.Method != "POST" {
+			return nil, unauthorized("OFFLINE_CREDENTIAL_NOT_ALLOWED",
+				"La autorización de envío solo sirve para entregar pedidos capturados sin conexión.")
+		}
+		if request.SessionToken != "" {
+			return nil, invalid("Envía la sesión o la autorización de envío del mesero, no las dos.")
+		}
+		principal, err := authenticateOfflineCredential(ctx, tx, request)
+		if err != nil {
+			return nil, err
+		}
+		return runProtected(ctx, tx, principal, request, route, func(work pgx.Tx) (any, error) {
+			return service.protected(ctx, work, request, principal, route)
+		})
 	}
 	// Agente de impresión de la terminal (etapa 9G, fase E; print_agent.go): solo con la credencial de la terminal,
 	// sin sesión de usuario, porque imprime aunque nadie haya iniciado sesión en esa caja.
