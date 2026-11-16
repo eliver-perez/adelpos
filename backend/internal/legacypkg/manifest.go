@@ -59,9 +59,11 @@ type Source struct {
 	CompatibilityLevel int    `json:"compatibility_level,omitempty"`
 	Collation          string `json:"collation,omitempty"`
 	BackupSetPosition  int    `json:"backup_set_position,omitempty"`
-	ReaderImage        string `json:"reader_image,omitempty"`
-	ReaderImageID      string `json:"reader_image_id,omitempty"`
-	ReaderVersion      string `json:"reader_version,omitempty"`
+	// BackupSets es cuántos juegos de respaldo tenía el archivo (se restaura el completo más reciente).
+	BackupSets    int    `json:"backup_sets,omitempty"`
+	ReaderImage   string `json:"reader_image,omitempty"`
+	ReaderImageID string `json:"reader_image_id,omitempty"`
+	ReaderVersion string `json:"reader_version,omitempty"`
 }
 
 // Summary es el resumen que el asistente muestra sin leer las tablas: el rango de fechas de las ventas.

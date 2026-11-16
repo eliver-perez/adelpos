@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const LOCAL = path.join(ROOT, '.local');
@@ -497,10 +498,40 @@ function goTestArguments() {
 }
 
 // Etapa 9H («Datos reales»): equivalente de scripts/check-legacy-data.sh. Falla si el índice de git tiene un
-// respaldo de SQL Server o un paquete de migración del sistema anterior, por su nombre (*.bak, *.adelmig, carpeta
+// respaldo de SQL Server o un paquete de migración del sistema anterior, por su nombre (LEGACY_DATA_NAMES y la carpeta
 // legacy-data/) o por su contenido (un archivo binario cuya primera línea empiece con la firma «ADELMIG» de un paquete
-// o «TAPE» de un respaldo de SQL Server), aunque se le haya cambiado el nombre. Sin .git (copia hecha con git archive)
-// no hay índice que revisar.
+// o «TAPE» de un respaldo de SQL Server, también dentro de un gzip), aunque se le haya cambiado el nombre. Sin .git
+// (copia hecha con git archive) no hay índice que revisar.
+const LEGACY_DATA_NAMES = [
+  '.bak',
+  '.bak.gz',
+  '.bak.zip',
+  '.bak.7z',
+  '.mdf',
+  '.ndf',
+  '.ldf',
+  '.trn',
+  '.adelmig',
+];
+
+// gzipStartsWithTape descomprime solo el principio de un archivo del índice con la firma de gzip y dice si es un
+// respaldo de SQL Server (empieza con «TAPE»).
+function gzipStartsWithTape(root, file) {
+  // Con maxBuffer chico git se corta: basta el principio del archivo.
+  const result = spawnSync('git', ['-C', root, 'cat-file', 'blob', `:${file}`], {
+    maxBuffer: 1024 * 1024,
+    windowsHide: true,
+  });
+  if (!result.stdout || result.stdout.length === 0) {
+    return false;
+  }
+  try {
+    const start = zlib.gunzipSync(result.stdout, { finishFlush: zlib.constants.Z_SYNC_FLUSH });
+    return start.subarray(0, 4).toString('latin1') === 'TAPE';
+  } catch {
+    return false;
+  }
+}
 function gitOutput(root, args) {
   const result = spawnSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
@@ -528,8 +559,7 @@ function checkLegacyData(root = ROOT) {
   for (const file of gitOutput(root, ['ls-files', '-z', '--cached']).split('\0')) {
     const lower = file.toLowerCase();
     const byName =
-      lower.endsWith('.bak') ||
-      lower.endsWith('.adelmig') ||
+      LEGACY_DATA_NAMES.some((extension) => lower.endsWith(extension)) ||
       lower.startsWith('legacy-data/') ||
       lower.includes('/legacy-data/');
     if (file && byName) {
@@ -573,6 +603,40 @@ function checkLegacyData(root = ROOT) {
       found.push(`${file} (paquete de migración)`);
     } else {
       found.push(`${file} (respaldo de SQL Server)`);
+    }
+  }
+  // Respaldos comprimidos con gzip con otro nombre: candidatos con una línea que empieza con 1f (el primer byte de la
+  // firma de gzip; el segundo, 8b, no se puede pasar como argumento sin que Node lo convierta a UTF-8) y después se
+  // descomprime el principio de cada uno.
+  const gzipMatches = spawnSync(
+    'git',
+    [
+      '-C',
+      root,
+      '-c',
+      'core.quotePath=false',
+      'grep',
+      '--cached',
+      '-a',
+      '-z',
+      '-l',
+      '-E',
+      '-e',
+      '^\x1f',
+    ],
+    {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, LC_ALL: 'C' },
+    },
+  );
+  if (gzipMatches.status > 1) {
+    fail(`git grep terminó con código ${gzipMatches.status}.`);
+  }
+  for (const file of (gzipMatches.stdout ?? '').split('\0').filter(Boolean)) {
+    if (gzipStartsWithTape(root, file)) {
+      found.push(`${file} (respaldo de SQL Server comprimido)`);
     }
   }
   if (found.length > 0) {

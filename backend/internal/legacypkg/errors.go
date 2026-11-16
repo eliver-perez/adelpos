@@ -23,6 +23,9 @@ const (
 	KindLimit ErrorKind = "limit"
 	// KindInvalid: un uso incorrecto del escritor o del lector (por ejemplo, una frase de paso demasiado corta).
 	KindInvalid ErrorKind = "invalid"
+	// KindUnreadable: no se pudo leer el archivo (error de entrada y salida: una USB desconectada, una subida
+	// interrumpida). No dice nada del paquete: puede estar bien y bastar con volver a intentarlo.
+	KindUnreadable ErrorKind = "unreadable"
 )
 
 // Error es un error tipificado del paquete. Message está en español sencillo para el propietario; Detail es técnico
@@ -62,6 +65,7 @@ var (
 	ErrDamaged            = &Error{Kind: KindDamaged}
 	ErrLimit              = &Error{Kind: KindLimit}
 	ErrInvalid            = &Error{Kind: KindInvalid}
+	ErrUnreadable         = &Error{Kind: KindUnreadable}
 )
 
 // KindOf devuelve el tipo de un error del paquete o "" si no es uno.
@@ -102,6 +106,17 @@ func damaged(detail string, cause error) *Error {
 		Message: "El paquete está dañado o fue modificado. Vuelve a copiarlo o prepáralo de nuevo.",
 		Detail:  detail,
 		cause:   cause,
+	}
+}
+
+// unreadable es un error al leer el archivo (no un paquete dañado): el texto técnico del sistema va como causa.
+func unreadable(detail string, cause error) *Error {
+	return &Error{
+		Kind: KindUnreadable,
+		Message: "No se pudo leer el archivo del paquete. " +
+			"Si está en una USB, comprueba que siga conectada; si se copió o se subió, vuelve a intentarlo.",
+		Detail: detail,
+		cause:  cause,
 	}
 }
 

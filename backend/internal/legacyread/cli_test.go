@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -34,7 +35,8 @@ func newCLIRun(t *testing.T, stdin io.Reader) *cliRun {
 			NewRunner: func(string) Runner {
 				return run.fake
 			},
-			TempDir: run.tempDir,
+			TempDir:      run.tempDir,
+			ProcessAlive: testProcessAlive,
 			Adjust: func(options *Options) {
 				options.KDF = testKDF
 				options.PageRows = 50
@@ -218,4 +220,71 @@ func (writer *failingWriter) Write(data []byte) (int, error) {
 	}
 	writer.remaining--
 	return len(data), nil
+}
+
+// legacy-prepare --cleanup borra los restos y responde con un evento «cleanup»; no lee la entrada estándar.
+func TestCLICleanup(t *testing.T) {
+	current := newCLIRun(t, failingReader{})
+	stale, partial := staleRun(t, current.run)
+	if code := current.cli.Run(context.Background(), []string{"--cleanup"}); code != 0 {
+		t.Fatalf("código: %s", current.output.String())
+	}
+	event := lastEvent(t, current.events(t))
+	removed := event["removed"].(map[string]any)
+	if event["event"] != "cleanup" || event["docker"] != "checked" || removed["folders"].(float64) != 1 || removed["partials"].(float64) != 1 {
+		t.Fatalf("evento: %v", event)
+	}
+	for _, path := range []string{stale, partial} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("quedó %s", path)
+		}
+	}
+	withoutDocker := newCLIRun(t, failingReader{})
+	withoutDocker.cli.FindDocker = func() (string, error) {
+		return "", fail(CodeDockerMissing, "", nil)
+	}
+	if code := withoutDocker.cli.Run(context.Background(), []string{"--cleanup"}); code != 0 {
+		t.Fatal("sin Docker también limpia las carpetas")
+	}
+	if event := lastEvent(t, withoutDocker.events(t)); event["docker"] != "unavailable" {
+		t.Fatalf("evento: %v", event)
+	}
+	mixed := newCLIRun(t, failingReader{})
+	if code := mixed.cli.Run(context.Background(), append(mixed.arguments(), "--cleanup")); code != 1 {
+		t.Fatal("--cleanup con otros argumentos")
+	}
+	if event := lastEvent(t, mixed.events(t)); event["code"] != CodeUsage {
+		t.Fatalf("evento: %v", event)
+	}
+}
+
+func TestCLIAlreadyRunning(t *testing.T) {
+	current := newCLIRun(t, strings.NewReader(testPassphrase+"\n"))
+	other, err := openWorkspace(current.run.tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.close()
+	if code := current.cli.Run(context.Background(), current.arguments()); code != 1 {
+		t.Fatal("código")
+	}
+	event := lastEvent(t, current.events(t))
+	if event["code"] != CodeAlreadyRunning || !strings.Contains(event["message"].(string), "Ya se está preparando") {
+		t.Fatalf("evento: %v", event)
+	}
+	cleanup := newCLIRun(t, failingReader{})
+	cleanup.cli.TempDir = current.run.tempDir
+	if code := cleanup.cli.Run(context.Background(), []string{"--cleanup"}); code != 1 {
+		t.Fatal("--cleanup con una preparación en curso")
+	}
+	if event := lastEvent(t, cleanup.events(t)); event["code"] != CodeAlreadyRunning {
+		t.Fatalf("evento: %v", event)
+	}
+}
+
+// failingReader falla si alguien lee la entrada estándar.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("no se debía leer la entrada estándar")
 }

@@ -66,6 +66,15 @@ type ResultEvent struct {
 	Summary Summary `json:"summary"`
 }
 
+// CleanupEvent es el resultado de legacy-prepare --cleanup.
+type CleanupEvent struct {
+	Event   string        `json:"event"`
+	Removed CleanupReport `json:"removed"`
+	// Docker dice si se pudo revisar Docker («checked») o no estaba disponible («unavailable»: solo se borraron las
+	// carpetas).
+	Docker string `json:"docker"`
+}
+
 // ErrorEvent es el error final.
 type ErrorEvent struct {
 	Event   string `json:"event"`
@@ -76,15 +85,19 @@ type ErrorEvent struct {
 
 // Summary es el resumen de un paquete preparado (lo muestra el asistente y lo usa la Fase E para medir).
 type Summary struct {
-	Output             string                   `json:"output"`
-	PackageBytes       int64                    `json:"package_bytes"`
-	ContentFingerprint string                   `json:"content_fingerprint"`
-	Backup             BackupSummary            `json:"backup"`
-	Sales              *SalesRange              `json:"sales,omitempty"`
-	Tables             []TableCount             `json:"tables"`
-	SkippedTables      []legacypkg.SkippedTable `json:"skipped_tables"`
-	OmittedColumns     []OmittedColumnSummary   `json:"omitted_columns"`
-	Timings            map[string]float64       `json:"timings"`
+	Output             string `json:"output"`
+	PackageBytes       int64  `json:"package_bytes"`
+	ContentFingerprint string `json:"content_fingerprint"`
+	// Verified: el paquete escrito se abrió y se recorrió completo antes de darle su nombre.
+	Verified       bool                     `json:"verified"`
+	Backup         BackupSummary            `json:"backup"`
+	Sales          *SalesRange              `json:"sales,omitempty"`
+	Tables         []TableCount             `json:"tables"`
+	SkippedTables  []legacypkg.SkippedTable `json:"skipped_tables"`
+	OmittedColumns []OmittedColumnSummary   `json:"omitted_columns"`
+	Timings        map[string]float64       `json:"timings"`
+	// PreviousLeftovers es lo que dejó una preparación anterior terminada a la fuerza y se borró al empezar.
+	PreviousLeftovers CleanupReport `json:"previous_leftovers"`
 }
 
 // BackupSummary describe el respaldo leído.
@@ -95,6 +108,8 @@ type BackupSummary struct {
 	StartedAt     string `json:"started_at"`
 	FinishedAt    string `json:"finished_at"`
 	ServerVersion string `json:"server_version"`
+	// Sets es cuántos juegos de respaldo tenía el archivo (se restauró el completo más reciente).
+	Sets int `json:"sets"`
 }
 
 // SalesRange es la fecha de la primera y la última venta.

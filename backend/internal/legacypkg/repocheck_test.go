@@ -2,6 +2,7 @@ package legacypkg
 
 import (
 	"bytes"
+	"compress/gzip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,6 +106,8 @@ func TestRepositoryCheckRejectsLegacyData(t *testing.T) {
 		"datos/imagen.png":    {0x89, 'P', 'N', 'G', 0, 0},
 		"legacy-data-ok.md":   []byte("no es la carpeta\n"),
 		"scripts/respaldo.sh": []byte("#!/bin/sh\necho TAPE\n"),
+		"datos/normal.gz":     gzippedBytes(t, []byte("un texto comprimido cualquiera\n")),
+		"datos/aleatorio.bin": {0x1f, 0x8b, 0x00, 0x01, 0x02},
 	}
 	cases := map[string]struct {
 		file     string
@@ -116,6 +119,14 @@ func TestRepositoryCheckRejectsLegacyData(t *testing.T) {
 		"nombre .BAK":              {"Notas.BAK", []byte("texto"), "(nombre)"},
 		"nombre .adelmig":          {"exportes/migracion.adelmig", []byte("texto"), "(nombre)"},
 		"carpeta legacy-data":      {"herramientas/legacy-data/tabla.json", []byte("[]"), "(nombre)"},
+		"archivo de datos .MDF":    {"sql/Datos.MDF", []byte("x"), "(nombre)"},
+		"registro .ldf":            {"sql/registro.ldf", []byte("x"), "(nombre)"},
+		"datos secundarios .ndf":   {"sql/secundario.ndf", []byte("x"), "(nombre)"},
+		"respaldo del registro":    {"sql/registro.trn", []byte("x"), "(nombre)"},
+		"respaldo .bak.gz":         {"copias/respaldo.bak.gz", []byte("x"), "(nombre)"},
+		"respaldo .bak.zip":        {"copias/respaldo.bak.zip", []byte("x"), "(nombre)"},
+		"respaldo .BAK.7z":         {"copias/respaldo.BAK.7z", []byte("x"), "(nombre)"},
+		"respaldo en gzip":         {"copias/semana.gz", gzippedBytes(t, backup), "comprimido"},
 	}
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {
@@ -141,4 +152,17 @@ func TestRepositoryCheckRejectsLegacyData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func gzippedBytes(t *testing.T, content []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	writer := gzip.NewWriter(&output)
+	if _, err := writer.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
 }
