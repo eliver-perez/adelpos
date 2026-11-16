@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.RepairReason
@@ -174,6 +175,10 @@ class AccessScreensTest {
         waitFor("${TAG_FOUND_SERVER_PREFIX}11111111-2222-4333-8444-555555555555")
         compose.onNodeWithText("Fonda Doña Ñeli — Mac de caja").assertIsDisplayed()
         compose.onNodeWithTag(TAG_ADDRESS).performTextReplacement("192.168.1.20")
+        // El teclado se cierra antes de tocar el botón: mientras se abre, la pantalla se
+        // reacomoda y un toque puede no llegar a serlo.
+        Espresso.closeSoftKeyboard()
+        compose.waitForIdle()
         compose.onNodeWithTag(TAG_REQUEST_ADDRESS).performScrollTo().performClick()
         waitFor(TAG_PAIRING_CODE)
         compose.onNodeWithTag(TAG_PAIRING_CODE).assertTextContains("166 101")
