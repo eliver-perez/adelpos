@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.printToLog
@@ -38,7 +39,6 @@ import local.adel.pos.android.core.ui.components.TAG_WAITER_SWITCH
 import local.adel.pos.android.feature.access.findserver.TAG_ADDRESS
 import local.adel.pos.android.feature.access.findserver.TAG_FIND_SERVER
 import local.adel.pos.android.feature.access.findserver.TAG_PAIRING_CODE
-import local.adel.pos.android.feature.access.findserver.TAG_REQUEST_ADDRESS
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_BACK
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_EMPTY
@@ -155,8 +155,10 @@ class AccessOnGoTest {
     private fun pairByAddress() {
         waitFor(TAG_FIND_SERVER)
         compose.onNodeWithTag(TAG_ADDRESS).performTextReplacement(argument("address"))
-        // Con el teclado abierto el botón puede quedar fuera de la vista: primero se desplaza.
-        compose.onNodeWithTag(TAG_REQUEST_ADDRESS).performScrollTo().performClick()
+        // Se pide con «Ir» del teclado: tocar el botón mientras el teclado termina de abrirse
+        // (la pantalla se reacomoda) a veces no llega a ser un toque. El botón lo prueba
+        // AccessScreensTest.
+        compose.onNodeWithTag(TAG_ADDRESS).performImeAction()
         waitFor(TAG_PAIRING_CODE)
         val shown =
             compose
