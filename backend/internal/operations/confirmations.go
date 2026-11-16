@@ -56,7 +56,11 @@ func (handler *service) confirm(id string) (any, error) {
 
 // confirmLines registra el lote confirmado: el pedido con su snapshot, y por partida su versión con la tasa de IVA
 // efectiva y sus unidades. Lo comparten la confirmación del borrador y el pedido capturado sin conexión (etapa 9G),
-// que confirma sus propias partidas sin tocar el borrador de la cuenta.
+// que confirma sus propias partidas y solo quita del borrador los renglones que dice sustituir (etapa A1).
+//
+// Etapa A1 (A1-D6): cada partida guarda en draft_item_id el identificador que el cliente dio a su renglón al
+// capturarlo (el del borrador o el de la partida del pedido sin conexión). Con él, un pedido sin conexión que sustituye
+// un renglón del borrador sabe si ese renglón ya se envió a cocina (draft_item_sent) en lugar de tomarlo por borrado.
 func (handler *service) confirmLines(accountID string, items []DraftItem, quote *catalog.Quote, snapshot catalog.Snapshot) (string, []map[string]any, error) {
 	orderID, err := handler.insertOrder(accountID, "confirmation", quote, snapshot)
 	if err != nil {
@@ -71,7 +75,8 @@ func (handler *service) confirmLines(accountID string, items []DraftItem, quote 
 			return "", nil, err
 		}
 		itemID, versionID := newID(), newID()
-		_, err = handler.tx.Exec(handler.ctx, "INSERT INTO app.restaurant_items(id,original_order_id,product_id) VALUES ($1,$2,$3)", itemID, orderID, item.ProductID)
+		_, err = handler.tx.Exec(handler.ctx, `INSERT INTO app.restaurant_items(id,original_order_id,product_id,draft_item_id)
+            VALUES ($1,$2,$3,$4)`, itemID, orderID, item.ProductID, item.ID)
 		if err != nil {
 			return "", nil, err
 		}

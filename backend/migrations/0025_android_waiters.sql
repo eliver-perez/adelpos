@@ -2,7 +2,7 @@
 -- sección con el encabezado «Fase X», en el orden de las fases. Es transaccional (el migrador aplica todas las
 -- pendientes en una sola transacción) y no modifica filas existentes: ventas, pagos, cortes, cuentas, pedidos,
 -- sesiones, usuarios, terminales, trabajos de impresión ni sus fotografías. Solo agrega columnas con su valor por
--- omisión, tablas nuevas y un permiso.
+-- omisión (o vacías), índices, tablas nuevas y un permiso.
 
 -- =====================================================================================================================
 -- Fase B · PIN de los meseros, credencial de envío y bloqueo por inactividad (§3 de la especificación; decisiones
@@ -104,6 +104,26 @@ COMMENT ON TABLE app.offline_order_credentials IS
     'Credencial de envío de pedidos sin conexión por mesero y dispositivo; solo su SHA-256 (etapa A1, fase B)';
 
 -- =====================================================================================================================
--- Las fases siguientes de la etapa A1 (por ejemplo la E, del servidor para el modo Mesero) agregan su sección aquí,
--- debajo de esta línea, con el mismo formato de encabezado.
+-- Fase E · Modo Mesero: borrador del servidor y pedido sin conexión (§6 y §7 de la especificación; decisión A1-D6 del
+-- coordinador en docs/ETAPA_A1_AVANCE.md)
+-- =====================================================================================================================
+
+-- 6. Renglón con que se capturó cada partida confirmada (A1-D6). Al confirmar el borrador («Enviar a cocina») o un
+--    pedido capturado sin conexión, cada partida guarda el identificador que el cliente dio a su renglón al capturarlo
+--    (el id del renglón del borrador o el de la partida del pedido). Así, cuando un pedido sin conexión dice qué
+--    renglones del borrador sustituye (replaces_draft_items), Go distingue un renglón que ya se envió a cocina desde
+--    otra terminal de uno que se quitó del borrador, y nunca lo duplica ni lo da por enviado en silencio
+--    (operations/offline_orders.go). No es único: un renglón confirmado dos veces a propósito (el mesero aceptó
+--    repetirlo) deja dos partidas con el mismo valor. Las partidas confirmadas antes de esta migración quedan en NULL;
+--    ninguna fila existente cambia. El evento de preparación de la misma fase (restaurant.account.preparation_changed)
+--    no necesita cambios del esquema: el ámbito «restaurant» ya existe en realtime_events_scope_check.
+ALTER TABLE app.restaurant_items ADD COLUMN draft_item_id uuid;
+CREATE INDEX restaurant_items_draft_item_idx ON app.restaurant_items (draft_item_id) WHERE draft_item_id IS NOT NULL;
+
+COMMENT ON COLUMN app.restaurant_items.draft_item_id IS
+    'Id del renglón del borrador o de la partida del pedido sin conexión con que se capturó (etapa A1, fase E)';
+
+-- =====================================================================================================================
+-- Las fases siguientes de la etapa A1 agregan su sección aquí, debajo de esta línea, con el mismo formato de
+-- encabezado.
 -- =====================================================================================================================
