@@ -30,6 +30,7 @@ export type ScreenID =
   | 'registers'
   | 'audit'
   | 'maintenance'
+  | 'legacy-migration'
   | 'status'
   | 'server-status'
   | 'preferences'
@@ -253,7 +254,19 @@ export const sections: SectionEntry[] = [
     parent: 'system',
     permission: 'settings.manage',
     description:
-      'Servicio del servidor, respaldos, modalidad de esta computadora y datos de prueba (con un respaldo previo).',
+      'Servicio del servidor, respaldos, modalidad de esta computadora, migración del sistema anterior y datos de prueba (con un respaldo previo).',
+  },
+  {
+    // Etapa 9H (§5): asistente de migración del sistema anterior. Se abre desde Mantenimiento, el menú
+    // Archivo o la paleta, con el permiso de Mantenimiento (Go vuelve a exigir settings.manage y la
+    // escucha local); en una terminal explica que se usa en la computadora principal.
+    id: 'legacy-migration',
+    label: 'Migrar del sistema anterior',
+    icon: 'database',
+    group: 'administration',
+    parent: 'maintenance',
+    permission: 'settings.manage',
+    hiddenTile: true,
   },
   {
     // §4.1: «Estado del sistema» ya no es una sección ni el inicio; se abre con «Ver estado del

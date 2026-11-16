@@ -160,7 +160,7 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
   });
 
   it('no consulta nada hasta «Revisar datos de prueba» y muestra la lista agrupada', async () => {
-    render(<MaintenancePage />);
+    render(<MaintenancePage mainComputer={false} onOpenMigration={() => undefined} />);
     expect(requests('maintenance_test_data')).toHaveLength(0);
     expect(screen.queryByRole('button', { name: 'Quitar datos de prueba' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
@@ -183,14 +183,14 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
 
   it('sin datos de prueba lo dice y no ofrece quitar', async () => {
     previews = [empty];
-    render(<MaintenancePage />);
+    render(<MaintenancePage mainComputer={false} onOpenMigration={() => undefined} />);
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
     expect(await screen.findByText('No hay datos de prueba.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Quitar datos de prueba' })).toBeNull();
   });
 
   it('la confirmación es roja, dice que primero se respalda y Conservar no quita nada', async () => {
-    render(<MaintenancePage />);
+    render(<MaintenancePage mainComputer={false} onOpenMigration={() => undefined} />);
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Quitar datos de prueba' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Quitar datos de prueba' });
@@ -206,7 +206,7 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
   });
 
   it('al confirmar envía el plan revisado y avisa lo quitado con el nombre del respaldo', async () => {
-    render(<MaintenancePage />);
+    render(<MaintenancePage mainComputer={false} onOpenMigration={() => undefined} />);
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Quitar datos de prueba' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Quitar datos de prueba' });
@@ -241,7 +241,7 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
         },
       },
     };
-    render(<MaintenancePage />);
+    render(<MaintenancePage mainComputer={false} onOpenMigration={() => undefined} />);
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Quitar datos de prueba' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Quitar datos de prueba' });
@@ -268,7 +268,7 @@ describe('Mantenimiento › Quitar datos de prueba', () => {
       }
       return { status: 200, body: result };
     });
-    render(<MaintenancePage />);
+    render(<MaintenancePage mainComputer={false} onOpenMigration={() => undefined} />);
     fireEvent.click(screen.getByRole('button', { name: 'Revisar datos de prueba' }));
     for (let round = 0; round < 2; round += 1) {
       const button = await screen.findByRole('button', { name: 'Quitar datos de prueba' });

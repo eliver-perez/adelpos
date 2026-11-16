@@ -703,14 +703,19 @@ function testIntegration() {
   }
 }
 
-async function runBrowser(engine) {
-  ensureOwned();
+// Servidor temporal que comparten las especificaciones y, desde la etapa 9H (fase D), un segundo servidor con su
+// propia base limpia para la importación completa del sistema anterior (solo lo usa
+// workflow-stage9h-migration.spec.ts, por ADEL_BROWSER_CLEAN_SERVER_URL).
+const BROWSER_SHARED_PORT = 8183;
+const BROWSER_CLEAN_PORT = 8185;
+
+function prepareBrowserServer(port) {
   const name = 'adel_pos_test_browser_' + randomBytes(6).toString('hex');
   const directory = path.join(LOCAL, name);
   fs.mkdirSync(directory);
   const config = JSON.parse(fs.readFileSync(path.join(LOCAL, 'server.json'), 'utf8'));
   config.database.name = name;
-  config.listen_address = '127.0.0.1:8183';
+  config.listen_address = `127.0.0.1:${port}`;
   config.allow_lan = false;
   // Etapa 9F: modo de pruebas (el servidor se niega a arrancar si la base no es adel_pos_test_* y lo
   // informa a native-driver.ts) y respaldos de «Quitar datos de prueba» dentro de la carpeta temporal.
@@ -718,30 +723,45 @@ async function runBrowser(engine) {
   config.backup_directory = path.join(directory, 'backups');
   const filename = path.join(directory, 'server.json');
   writeJSON(filename, config, true);
-  let server = null;
-  let created = false;
-  try {
-    run(pg('createdb'), ['--owner=adel_app', name], { env: adminEnv() });
-    created = true;
-    for (const command of ['migrate', 'prepare-setup']) {
-      run(SERVER_BINARY, [command, '--config', filename]);
-    }
-    const log = fs.openSync(path.join(directory, 'server.log'), 'w');
-    server = spawn(SERVER_BINARY, ['serve', '--config', filename], {
-      cwd: ROOT,
-      stdio: ['ignore', log, log],
-      windowsHide: true,
-    });
-    let ready = false;
-    for (let attempt = 0; attempt < 100 && !ready; attempt += 1) {
-      ready = (await httpStatus('http://127.0.0.1:8183/api/v1/health/ready', 1000)) === 200;
-      if (!ready) {
-        await sleep(100);
-      }
-    }
+  return { name, directory, filename, port, process: null, created: false };
+}
+
+async function startBrowserServer(server) {
+  for (const command of ['migrate', 'prepare-setup']) {
+    run(SERVER_BINARY, [command, '--config', server.filename]);
+  }
+  const log = fs.openSync(path.join(server.directory, 'server.log'), 'w');
+  server.process = spawn(SERVER_BINARY, ['serve', '--config', server.filename], {
+    cwd: ROOT,
+    stdio: ['ignore', log, log],
+    windowsHide: true,
+  });
+  let ready = false;
+  for (let attempt = 0; attempt < 100 && !ready; attempt += 1) {
+    ready = (await httpStatus(`http://127.0.0.1:${server.port}/api/v1/health/ready`, 1000)) === 200;
     if (!ready) {
-      fail('El servidor temporal no quedó listo');
+      await sleep(100);
     }
+  }
+  if (!ready) {
+    fail('El servidor temporal no quedó listo');
+  }
+}
+
+async function runBrowser(engine) {
+  ensureOwned();
+  const servers = [];
+  try {
+    for (const port of [BROWSER_SHARED_PORT, BROWSER_CLEAN_PORT]) {
+      const server = prepareBrowserServer(port);
+      servers.push(server);
+      run(pg('createdb'), ['--owner=adel_app', server.name], { env: adminEnv() });
+      server.created = true;
+    }
+    for (const server of servers) {
+      await startBrowserServer(server);
+    }
+    const [shared, clean] = servers;
     // Los argumentos extra (por ejemplo, el nombre de una especificación) van antes de --project:
     // Playwright acepta varios valores después de --project y los tomaría como nombres de proyecto.
     const extra = process.argv.slice(3);
@@ -750,18 +770,23 @@ async function runBrowser(engine) {
       env: {
         ...process.env,
         ADEL_BROWSER_ENGINE: engine,
-        ADEL_BROWSER_PROVISIONING: path.join(directory, 'provisioning-token'),
+        ADEL_BROWSER_PROVISIONING: path.join(shared.directory, 'provisioning-token'),
+        ADEL_BROWSER_CLEAN_SERVER_URL: `http://127.0.0.1:${BROWSER_CLEAN_PORT}`,
+        ADEL_BROWSER_CLEAN_PROVISIONING: path.join(clean.directory, 'provisioning-token'),
+        ADEL_BROWSER_SERVER_BINARY: SERVER_BINARY,
         PLAYWRIGHT_BROWSERS_PATH: path.join(ROOT, '.cache', 'playwright'),
       },
     });
   } finally {
-    if (server !== null && server.exitCode === null) {
-      run(SERVER_BINARY, ['stop', '--pid', String(server.pid)], { allowFailure: true });
+    for (const server of servers) {
+      if (server.process !== null && server.process.exitCode === null) {
+        run(SERVER_BINARY, ['stop', '--pid', String(server.process.pid)], { allowFailure: true });
+      }
+      if (server.created) {
+        run(pg('dropdb'), ['--if-exists', server.name], { env: adminEnv() });
+      }
+      fs.rmSync(server.directory, { recursive: true, force: true });
     }
-    if (created) {
-      run(pg('dropdb'), ['--if-exists', name], { env: adminEnv() });
-    }
-    fs.rmSync(directory, { recursive: true, force: true });
   }
 }
 

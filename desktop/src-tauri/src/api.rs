@@ -123,6 +123,12 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
             Some((Method::POST, "maintenance/backups/directory/default"))
         }
         "maintenance_backup_now" => Some((Method::POST, "maintenance/backups/run")),
+        // Etapa 9H, fase D: migración del sistema anterior (settings.manage y solo la escucha local en Go). La subida
+        // por partes, la preparación y el informe en PDF no están aquí: solo los envía legacy_migration.rs con los
+        // archivos que eligió el administrador en los diálogos nativos.
+        "maintenance_legacy" => Some((Method::GET, "maintenance/legacy")),
+        "maintenance_legacy_analyze" => Some((Method::POST, "maintenance/legacy/analyze")),
+        "maintenance_legacy_import" => Some((Method::POST, "maintenance/legacy/import")),
         // Etapa 9A: reportes (todas de solo lectura).
         "reports_catalog" => Some((Method::GET, "reports/catalog")),
         "reports_dashboard" => Some((Method::GET, "reports/dashboard")),
@@ -631,6 +637,18 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         ),
         "documents_version" => (Method::GET, format!("documents/versions/{identifier}")),
         "update_user" => (Method::PATCH, format!("users/{identifier}")),
+        // Etapa 9H: «Asignar contraseña» a un usuario sin contraseña (users.manage en Go).
+        "assign_user_password" => (Method::POST, format!("users/{identifier}/password")),
+        // Etapa 9H, fase D: avance de una corrida, un lote importado y cancelar una subida del paquete.
+        "maintenance_legacy_run" => (Method::GET, format!("maintenance/legacy/runs/{identifier}")),
+        "maintenance_legacy_batch" => (
+            Method::GET,
+            format!("maintenance/legacy/batches/{identifier}"),
+        ),
+        "maintenance_legacy_cancel_upload" => (
+            Method::POST,
+            format!("maintenance/legacy/uploads/{identifier}/cancel"),
+        ),
         "user_permissions" => (Method::GET, format!("users/{identifier}/permissions")),
         "save_user_permissions" => (Method::PUT, format!("users/{identifier}/permissions")),
         "user_preferences" => (Method::GET, format!("users/{identifier}/preferences")),
@@ -2399,6 +2417,81 @@ mod tests {
             [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];
         let forbidden = ["\"maintenance/backups/", "directory\")"].concat();
         assert!(!table.contains(&forbidden));
+    }
+
+    #[test]
+    fn stage9h_legacy_routes_are_closed_and_never_carry_files() {
+        let identifier = "00000000-0000-4000-8000-000000000009";
+        for (operation, method, path) in [
+            ("maintenance_legacy", Method::GET, "maintenance/legacy"),
+            (
+                "maintenance_legacy_analyze",
+                Method::POST,
+                "maintenance/legacy/analyze",
+            ),
+            (
+                "maintenance_legacy_import",
+                Method::POST,
+                "maintenance/legacy/import",
+            ),
+        ] {
+            assert_eq!(
+                route(operation, None).unwrap(),
+                (method, path.to_string()),
+                "{operation}"
+            );
+        }
+        for (operation, method, path) in [
+            (
+                "maintenance_legacy_run",
+                Method::GET,
+                format!("maintenance/legacy/runs/{identifier}"),
+            ),
+            (
+                "maintenance_legacy_batch",
+                Method::GET,
+                format!("maintenance/legacy/batches/{identifier}"),
+            ),
+            (
+                "maintenance_legacy_cancel_upload",
+                Method::POST,
+                format!("maintenance/legacy/uploads/{identifier}/cancel"),
+            ),
+            (
+                "assign_user_password",
+                Method::POST,
+                format!("users/{identifier}/password"),
+            ),
+        ] {
+            assert_eq!(
+                route(operation, Some(identifier)).unwrap(),
+                (method, path),
+                "{operation}"
+            );
+            assert!(route(operation, Some("../x")).is_err(), "{operation}");
+        }
+        // Lo que lleva archivos o rutas solo lo envía legacy_migration.rs, nunca api_request.
+        for operation in [
+            "maintenance_legacy_uploads",
+            "maintenance_legacy_upload_part",
+            "maintenance_legacy_preparations",
+            "maintenance_legacy_report",
+        ] {
+            assert!(route(operation, Some(identifier)).is_err(), "{operation}");
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
+        let source = include_str!("api.rs");
+        let routes = &source
+            [source.find("fn route(").unwrap()..source.find("pub struct LocalState").unwrap()];
+        for forbidden in [
+            "/parts\"",
+            "legacy/uploads\"",
+            "preparations\"",
+            "report.pdf",
+        ] {
+            assert!(!routes.contains(forbidden), "{forbidden}");
+        }
+        assert!(allowed_query_keys("reports_run").contains(&"data_source"));
     }
 
     #[test]

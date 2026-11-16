@@ -437,10 +437,12 @@ pub(crate) fn save_with(
 }
 
 // DialogTarget abre «Guardar como» con tauri-plugin-dialog sobre la ventana principal. Se llama
-// fuera del hilo principal (spawn_blocking), como exige blocking_save_file.
-struct DialogTarget {
-    app: tauri::AppHandle,
-    window: tauri::WebviewWindow,
+// fuera del hilo principal (spawn_blocking), como exige blocking_save_file. Desde la etapa 9H también
+// lo usa el informe de la migración (legacy_migration.rs), con su propio título.
+pub(crate) struct DialogTarget {
+    pub app: tauri::AppHandle,
+    pub window: tauri::WebviewWindow,
+    pub title: &'static str,
 }
 
 impl SaveTarget for DialogTarget {
@@ -455,7 +457,7 @@ impl SaveTarget for DialogTarget {
             .dialog()
             .file()
             .set_parent(&self.window)
-            .set_title("Guardar reporte")
+            .set_title(self.title)
             .set_file_name(suggested)
             .add_filter(format.filter_name(), &[format.code()])
             .set_can_create_directories(true);
@@ -577,7 +579,11 @@ pub async fn export_report(
     validate_file(format, content_type.as_deref(), &bytes)?;
     let suggested = suggested_name(disposition.as_deref(), format);
     let body = tauri::async_runtime::spawn_blocking(move || {
-        let target = DialogTarget { app, window };
+        let target = DialogTarget {
+            app,
+            window,
+            title: "Guardar reporte",
+        };
         save_with(&target, &suggested, format, &bytes)
     })
     .await
