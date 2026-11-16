@@ -1,6 +1,9 @@
-import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 import {
   cancelPairingRequest,
@@ -15,7 +18,7 @@ import type { PairingSession } from './pairing';
 
 // Servidor Go temporal de la aceptación. Por omisión el puerto 8183; ADEL_BROWSER_SERVER_URL permite
 // ejecutar dos aceptaciones aisladas a la vez con servidores temporales en otros puertos locales.
-const serverURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
+const defaultServerURL = process.env.ADEL_BROWSER_SERVER_URL ?? 'http://127.0.0.1:8183';
 
 // Etapa 9G (§5.1): el puente se identifica como lo hace Rust (with_client_headers de api.rs): la versión de la
 // aplicación (la de config/product.json, que sync-metadata copia a Cargo.toml) y el tipo de cliente.
@@ -92,10 +95,10 @@ function readMenuActions() {
 // (`test_mode` de la configuración, que exige una base desechable adel_pos_test_*). Así un
 // ADEL_BROWSER_SERVER_URL equivocado nunca escribe en una instalación real. Se exporta solo para
 // probar el rechazo con un servidor simulado (src/testing/requireTestServer.test.ts).
-export async function requireTestServer() {
+export async function requireTestServer(url = defaultServerURL) {
   let testMode = false;
   try {
-    const response = await fetch(`${serverURL}/api/v1/version`);
+    const response = await fetch(`${url}/api/v1/version`);
     const version = (await response.json()) as { test_mode?: unknown };
     testMode = response.ok && version.test_mode === true;
   } catch {
@@ -110,10 +113,24 @@ export async function requireTestServer() {
 // dispositivo (enrolada por la prueba) en lugar de la terminal que configuró la base.
 export interface DriverOptions {
   terminal?: { deviceID: string; deviceToken: string };
+  // Etapa 9H (fase D): otro servidor temporal (la base limpia de ADEL_BROWSER_CLEAN_SERVER_URL, para la
+  // importación completa del sistema anterior) con su propio token de aprovisionamiento. Sin catálogo mínimo
+  // (`catalog: false`), la base queda como la deja el asistente inicial.
+  server?: { url: string; provisioning: string };
+  catalog?: boolean;
+}
+
+// Servidor temporal con una base limpia (etapa 9H, fase D): solo lo usa workflow-stage9h-migration.spec.ts para el
+// camino completo de la importación. Lo arrancan scripts/browser-tests.py, scripts/windows/dev.mjs y el arnés aislado.
+export function cleanServer(): { url: string; provisioning: string } | null {
+  const url = process.env.ADEL_BROWSER_CLEAN_SERVER_URL;
+  const provisioning = process.env.ADEL_BROWSER_CLEAN_PROVISIONING;
+  return url && provisioning ? { url, provisioning } : null;
 }
 
 export async function installDriver(page: Page, options: DriverOptions = {}) {
-  await requireTestServer();
+  const serverURL = options.server?.url ?? defaultServerURL;
+  await requireTestServer(serverURL);
   let fullscreen = true;
   const menuActions = readMenuActions();
   let menuChannel: number | null = null;
@@ -267,7 +284,10 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
   let deviceID = '';
   let deviceToken = '';
   let sessionToken = '';
-  const provisioning = readFileSync(process.env.ADEL_BROWSER_PROVISIONING!, 'utf8').trim();
+  const provisioning = readFileSync(
+    options.server?.provisioning ?? process.env.ADEL_BROWSER_PROVISIONING!,
+    'utf8',
+  ).trim();
   const rust = readFileSync(new URL('../src-tauri/src/api.rs', import.meta.url), 'utf8');
   const routes = new Map<string, { method: string; path: string }>();
   for (const match of rust.matchAll(
@@ -532,7 +552,7 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
       throw new Error('No se pudo preparar el catálogo temporal');
     await request('POST', 'auth/logout');
   }
-  if (!prepared) {
+  if (!prepared && options.catalog !== false) {
     await prepareCatalog();
   }
 
@@ -599,6 +619,391 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     } finally {
       streams.delete(identifier);
     }
+  }
+  // Etapa 9H (fase D): migración del sistema anterior. Simula las operaciones cerradas de
+  // src-tauri/src/legacy_migration.rs. Los diálogos nativos los decide la prueba (nextBackup, nextOutput y
+  // nextPackage con un nombre, una ruta o «cancel»; sin respuesta, se cancela) y las rutas se quedan del lado
+  // del puente, como en Rust: el navegador solo recibe el nombre y el tamaño. La preparación es simulada (sin
+  // Docker): sus eventos de avance y su resultado, o un error como DOCKER_MISSING (nextPreparation), y para el
+  // resultado escribe un paquete sintético real con `ADEL_TEST_MODE=1 ad-el-pos-server legacy-synthetic` y la
+  // misma frase de paso, que queda elegido para importarlo. Como Rust, anota cada preparación en Go (POST
+  // maintenance/legacy/preparations). La subida usa las mismas rutas por partes que Rust (POST
+  // maintenance/legacy/uploads y …/parts, que no están en la lista cerrada de api.rs) y el informe en PDF se
+  // «guarda» con la cola nextSaveDialog.
+  const legacyFolder = mkdtempSync(join(tmpdir(), 'adel-legacy-e2e-'));
+  page.on('close', () => {
+    rmSync(legacyFolder, { recursive: true, force: true });
+  });
+  const legacyChoices = {
+    backup: [] as string[],
+    output: [] as string[],
+    package: [] as string[],
+    preparation: [] as string[],
+  };
+  const legacySelection: {
+    backup: { file_name: string; size: number } | null;
+    output: { path: string; file_name: string } | null;
+    package: { path: string; file_name: string; size: number } | null;
+  } = { backup: null, output: null, package: null };
+  const legacyPreparation = {
+    running: false,
+    cancelled: false,
+    channel: null as number | null,
+    events: [] as Record<string, unknown>[],
+  };
+  const channelIndexes = new Map<number, number>();
+  const legacyRecords: Record<string, unknown>[] = [];
+  let legacyCleanups = 0;
+  let legacyUploadCancel = false;
+  let legacyUploading = false;
+  const serverBinary =
+    process.env.ADEL_BROWSER_SERVER_BINARY ??
+    fileURLToPath(
+      new URL(
+        process.platform === 'win32'
+          ? '../../bin/ad-el-pos-server.exe'
+          : '../../bin/ad-el-pos-server',
+        import.meta.url,
+      ),
+    );
+  function localServer() {
+    return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(serverURL);
+  }
+  async function sendToChannel(channel: number, message: unknown) {
+    const index = channelIndexes.get(channel) ?? 0;
+    channelIndexes.set(channel, index + 1);
+    if (page.isClosed()) return;
+    await page.evaluate(
+      ({ channel, index, message }) => {
+        const native = window as unknown as {
+          __TAURI_INTERNALS__: { runCallback: (id: number, message: unknown) => void };
+        };
+        native.__TAURI_INTERNALS__.runCallback(channel, { index, message });
+      },
+      { channel, index, message },
+    );
+  }
+  // Paquete sintético real (el de la Fase B), cifrado con la frase de paso indicada.
+  function syntheticPackage(passphrase: string, name = `sintetico-${randomUUID()}.adelmig`) {
+    const output = join(legacyFolder, name);
+    execFileSync(serverBinary, ['legacy-synthetic', '--output', output], {
+      input: `${passphrase}\n`,
+      env: { ...process.env, ADEL_TEST_MODE: '1' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return output;
+  }
+  function chosenFile(path: string) {
+    return { file_name: basename(path), size: statSync(path).size };
+  }
+  async function legacyDeliver(event: Record<string, unknown>) {
+    if (event.event === 'progress' || event.event === 'table') {
+      legacyPreparation.events = legacyPreparation.events.filter(
+        (previous) => previous.event !== event.event,
+      );
+    }
+    legacyPreparation.events.push(event);
+    if (legacyPreparation.channel !== null) {
+      await sendToChannel(legacyPreparation.channel, event);
+    }
+  }
+  // Resumen que Rust anota en Go (preparation_record de legacy_migration.rs).
+  function preparationRecord(event: Record<string, unknown>) {
+    if (event.event !== 'result') {
+      return { succeeded: false, error_code: event.code, tables: {}, timings_ms: {} };
+    }
+    const tables = Object.fromEntries(
+      (event.tables as { name: string; rows: number }[]).map((table) => [table.name, table.rows]),
+    );
+    const sales = event.sales as { first: string; last: string };
+    return {
+      succeeded: true,
+      error_code: '',
+      backup_taken_at: (event.backup as { finished_at: string }).finished_at,
+      sales_first: sales.first,
+      sales_last: sales.last,
+      package_bytes: event.package_bytes,
+      format_version: 1,
+      fingerprint: '',
+      tables,
+      timings_ms: { read: 1200, write: 300 },
+    };
+  }
+  async function simulatePreparation(passphrase: string) {
+    const scenario = legacyChoices.preparation.shift() ?? 'success';
+    const output = legacySelection.output!;
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 120));
+    let final: Record<string, unknown>;
+    if (scenario !== 'success') {
+      final = {
+        event: 'error',
+        code: scenario,
+        message:
+          scenario === 'DOCKER_MISSING'
+            ? 'Para preparar el paquete hace falta Docker Desktop. Instálalo desde docker.com (es gratuito), ábrelo y vuelve a intentarlo.'
+            : 'No se pudo preparar el paquete.',
+      };
+    } else {
+      final = {
+        event: 'error',
+        code: 'CANCELLED',
+        message: 'Se canceló la preparación del paquete.',
+      };
+      const steps = ['image', 'start', 'restore', 'read', 'write', 'cleanup'];
+      let cancelled = false;
+      for (const step of steps) {
+        if (legacyPreparation.cancelled) {
+          cancelled = true;
+          break;
+        }
+        await legacyDeliver({ event: 'step', step, status: 'started' });
+        if (step === 'restore') {
+          await legacyDeliver({ event: 'progress', step, current: 50, total: 100 });
+        }
+        if (step === 'read') {
+          for (let done = 1; done <= 3; done += 1) {
+            await pause();
+            await legacyDeliver({
+              event: 'table',
+              status: 'done',
+              done,
+              total: 3,
+              rows: done * 10,
+            });
+          }
+        }
+        if (step === 'write') {
+          syntheticPackage(passphrase, output.file_name);
+        }
+        await pause();
+        await legacyDeliver({ event: 'step', step, status: 'finished', seconds: 0.1 });
+      }
+      if (!cancelled) {
+        final = {
+          event: 'result',
+          package_bytes: statSync(output.path).size,
+          verified: true,
+          package_file_name: output.file_name,
+          backup: {
+            started_at: '2026-11-12T22:05:31.000',
+            finished_at: '2026-11-12T22:05:33.000',
+            sets: 1,
+          },
+          sales: { first: '2019-10-01T09:00:00.000', last: '2026-11-12T21:00:00.000' },
+          tables: [
+            { name: 'productos', rows: 12 },
+            { name: 'mesas', rows: 6 },
+            { name: 'usuarios', rows: 4 },
+            { name: 'ventas', rows: 240 },
+            { name: 'pagos', rows: 242 },
+          ],
+          timings: { read: 1.2, write: 0.3 },
+        };
+        legacySelection.package = { path: output.path, ...chosenFile(output.path) };
+        legacySelection.output = null;
+      }
+    }
+    const record = preparationRecord(final);
+    legacyRecords.push(record);
+    const response = await request('POST', 'maintenance/legacy/preparations', record);
+    final.recorded = response.status === 200;
+    legacyPreparation.running = false;
+    await legacyDeliver(final);
+  }
+  async function uploadPackage(channel: number) {
+    const chosen = legacySelection.package;
+    if (!chosen) throw new Error('Elige primero el paquete de migración.');
+    if (legacyUploading) throw new Error('Ya se está subiendo un paquete.');
+    legacyUploading = true;
+    legacyUploadCancel = false;
+    try {
+      const bytes = readFileSync(chosen.path);
+      const digest = createHash('sha256').update(bytes).digest('hex');
+      const created = await request('POST', 'maintenance/legacy/uploads', {
+        size: bytes.length,
+        sha256: digest,
+      });
+      if (created.status !== 200) return created;
+      const {
+        id,
+        part_size: partSize,
+        parts,
+      } = created.body as {
+        id: string;
+        part_size: number;
+        parts: number;
+      };
+      let last: { status: number; body: unknown } = created;
+      for (let index = 0; index < parts; index += 1) {
+        if (legacyUploadCancel) {
+          await request('POST', `maintenance/legacy/uploads/${id}/cancel`, {});
+          return { status: 200, body: { result: 'cancelled' } };
+        }
+        const data = bytes.subarray(index * partSize, (index + 1) * partSize);
+        last = await request('POST', `maintenance/legacy/uploads/${id}/parts`, {
+          index,
+          data: data.toString('base64'),
+          sha256: createHash('sha256').update(data).digest('hex'),
+        });
+        if (last.status !== 200) {
+          await request('POST', `maintenance/legacy/uploads/${id}/cancel`, {});
+          return last;
+        }
+        const sent = Math.min(bytes.length, (index + 1) * partSize);
+        await sendToChannel(channel, {
+          sent,
+          total: bytes.length,
+          percent: Math.floor((sent * 100) / bytes.length),
+        });
+      }
+      return { status: 200, body: { result: 'uploaded', upload: last.body } };
+    } finally {
+      legacyUploading = false;
+    }
+  }
+  async function saveLegacyReport(batchID: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(batchID))
+      throw new Error('El identificador del registro no es válido.');
+    const response = await fetch(
+      `${serverURL}/api/v1/maintenance/legacy/batches/${batchID}/report.pdf`,
+      {
+        headers: {
+          ...clientHeaders,
+          'X-Device-ID': deviceID,
+          'X-Device-Token': deviceToken,
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      },
+    );
+    if (response.status !== 200) {
+      return { status: response.status, body: await response.json() };
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const contentType = (response.headers.get('content-type') ?? '').trim().toLowerCase();
+    if (contentType !== 'application/pdf' || !bytes.subarray(0, 5).equals(Buffer.from('%PDF-')))
+      throw new Error('El archivo recibido no es válido.');
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const fileName = sanitizeFileName(
+      /filename="?([^";]*)"?/i.exec(disposition)?.[1] ?? '',
+      '.pdf',
+    );
+    if ((saveDialogChoices.shift() ?? 'save') === 'cancel') {
+      return { status: 200, body: { result: 'cancelled' } };
+    }
+    exports.push({ report: 'legacy.report', format: 'pdf', fileName, contentType, bytes });
+    return { status: 200, body: { result: 'saved', file_name: fileName, size: bytes.length } };
+  }
+  const legacyCommands = [
+    'legacy_choose_backup',
+    'legacy_choose_package_output',
+    'legacy_choose_package',
+    'legacy_selection',
+    'legacy_prepare_start',
+    'legacy_prepare_watch',
+    'legacy_prepare_cancel',
+    'legacy_prepare_cleanup',
+    'legacy_upload_package',
+    'legacy_upload_cancel',
+    'legacy_save_report',
+  ];
+  async function simulateLegacy(command: string, args: Record<string, unknown>) {
+    if (!legacyCommands.includes(command)) throw new Error('Comando de prueba no autorizado');
+    if (!localServer()) {
+      return {
+        __bridgeRejection:
+          'La migración del sistema anterior solo se hace en la computadora principal del restaurante.',
+      };
+    }
+    const reject = (message: string) => ({ __bridgeRejection: message });
+    switch (command) {
+      case 'legacy_choose_backup': {
+        const name = legacyChoices.backup.shift() ?? 'cancel';
+        if (name === 'cancel') return { result: 'cancelled' };
+        if (!name.toLowerCase().endsWith('.bak'))
+          return reject('Elige el respaldo del sistema anterior (un archivo terminado en .bak).');
+        legacySelection.backup = { file_name: name, size: 6_100_000 };
+        return { result: 'chosen', file: legacySelection.backup };
+      }
+      case 'legacy_choose_package_output': {
+        let name = legacyChoices.output.shift() ?? 'cancel';
+        if (name === 'cancel') return { result: 'cancelled' };
+        if (!name.toLowerCase().endsWith('.adelmig')) name = `${name}.adelmig`;
+        const path = join(legacyFolder, name);
+        if (existsSync(path))
+          return reject('Ya existe un archivo con ese nombre. Elige otro nombre para el paquete.');
+        legacySelection.output = { path, file_name: name };
+        return { result: 'chosen', file: { file_name: name } };
+      }
+      case 'legacy_choose_package': {
+        const path = legacyChoices.package.shift() ?? 'cancel';
+        if (path === 'cancel') return { result: 'cancelled' };
+        if (!isAbsolute(path) || !path.endsWith('.adelmig') || !existsSync(path))
+          return reject(
+            'Elige el paquete de migración (un archivo terminado en .adelmig) que preparó AD-EL POS.',
+          );
+        legacySelection.package = { path, ...chosenFile(path) };
+        return { result: 'chosen', file: chosenFile(path) };
+      }
+      case 'legacy_selection':
+        return {
+          backup: legacySelection.backup,
+          output: legacySelection.output ? { file_name: legacySelection.output.file_name } : null,
+          package: legacySelection.package
+            ? {
+                file_name: legacySelection.package.file_name,
+                size: legacySelection.package.size,
+              }
+            : null,
+        };
+      case 'legacy_prepare_start': {
+        const passphrase = String(args.passphrase ?? '');
+        if ([...passphrase].length < 8 || /[\r\n\0]/.test(passphrase))
+          return reject('La frase de paso debe tener al menos 8 caracteres.');
+        if (legacyPreparation.running)
+          return reject('Ya se está preparando un paquete. Espera a que termine.');
+        if (!legacySelection.backup)
+          return reject('Elige primero el respaldo del sistema anterior.');
+        if (!legacySelection.output) return reject('Elige primero dónde guardar el paquete.');
+        legacyPreparation.running = true;
+        legacyPreparation.cancelled = false;
+        legacyPreparation.channel = Number(args.channel);
+        legacyPreparation.events = [];
+        void simulatePreparation(passphrase);
+        return { started: true };
+      }
+      case 'legacy_prepare_watch':
+        legacyPreparation.channel = Number(args.channel);
+        return { running: legacyPreparation.running, events: legacyPreparation.events };
+      case 'legacy_prepare_cancel': {
+        const cancelling = legacyPreparation.running;
+        legacyPreparation.cancelled = cancelling;
+        return { cancelling };
+      }
+      case 'legacy_prepare_cleanup':
+        if (legacyPreparation.running) return { result: 'skipped' };
+        legacyCleanups += 1;
+        return {
+          result: 'cleaned',
+          removed: { folders: 0, partials: 0, containers: 0, volumes: 0 },
+          docker: 'unavailable',
+        };
+      case 'legacy_upload_package':
+        try {
+          return await uploadPackage(Number(args.channel));
+        } catch (error) {
+          return reject(error instanceof Error ? error.message : String(error));
+        }
+      case 'legacy_upload_cancel':
+        legacyUploadCancel = legacyUploading;
+        return { cancelling: legacyUploading };
+      case 'legacy_save_report':
+        try {
+          return await saveLegacyReport(String(args.batchId ?? ''));
+        } catch (error) {
+          return reject(error instanceof Error ? error.message : String(error));
+        }
+    }
+    throw new Error('Comando de prueba no autorizado');
   }
   await page.exposeFunction(
     '__nativeTestBridge',
@@ -718,6 +1123,7 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
           return { __bridgeRejection: error instanceof Error ? error.message : String(error) };
         }
       }
+      if (command.startsWith('legacy_')) return simulateLegacy(command, args);
       if (command !== 'api_request') throw new Error('Comando de prueba no autorizado');
       const operation = String(args.operation);
       const entry = routes.get(operation);
@@ -895,5 +1301,16 @@ export async function installDriver(page: Page, options: DriverOptions = {}) {
     setInstallation,
     setDiscovery,
     printAgent: { report: reportLocalPrinters, run: runPrintAgent, calls: printAgentCalls },
+    // Etapa 9H (fase D): diálogos, preparación simulada, paquetes sintéticos y lo anotado en Go.
+    legacy: {
+      nextBackup: (name: string) => legacyChoices.backup.push(name),
+      nextOutput: (name: string) => legacyChoices.output.push(name),
+      nextPackage: (path: string) => legacyChoices.package.push(path),
+      nextPreparation: (scenario: 'success' | 'DOCKER_MISSING' | string) =>
+        legacyChoices.preparation.push(scenario),
+      syntheticPackage,
+      records: legacyRecords,
+      cleanups: () => legacyCleanups,
+    },
   };
 }
