@@ -26,6 +26,8 @@ case "${1:-help}" in
         (cd desktop/src-tauri && cargo fmt)
         ;;
     format-check)
+        # Etapa 9H: ningún respaldo ni paquete de migración del sistema anterior en el índice de git (datos reales).
+        "$PROJECT_ROOT/scripts/check-legacy-data.sh" "$PROJECT_ROOT"
         desktop/node_modules/.bin/prettier . --check
         unformatted_go="$(gofmt -l backend)"
         if [ -n "$unformatted_go" ]; then
@@ -84,7 +86,11 @@ case "${1:-help}" in
         shift
         exec scripts/build-macos-pkg.sh "$@"
         ;;
+    check-legacy-data)
+        exec "$PROJECT_ROOT/scripts/check-legacy-data.sh" "$PROJECT_ROOT"
+        ;;
     test)
+        # format-check incluye la comprobación de datos del sistema anterior (check-legacy-data.sh).
         "$PROJECT_ROOT/scripts/dev.sh" format-check
         node scripts/sync-metadata.mjs --check
         (cd backend && go test -race ./... && go vet ./...)
