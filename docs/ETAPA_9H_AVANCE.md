@@ -1763,3 +1763,17 @@ keyboard` (espera «En cocina» y recibe «Enviado · sin confirmar en cocina»)
   el respaldo) y dice qué se borra y qué se actualiza»; «los mensajes de error de la migración son los de Go; la interfaz
   solo reacciona al código»; «los usuarios importados se ven “Sin acceso” hasta que un administrador con `users.manage`
   les asigna una contraseña (`has_password`)».
+
+### Fusión en `etapa-9h` (coordinador)
+
+Las correcciones de la revisión de la Fase C (`etapa-9h-c3`) y la Fase D (`etapa-9h-d`) se fusionaron sin conflictos en
+un árbol aparte (`262e642` y `5a4d769`, más la nota de M-7 en `docs/REPORTS.md`, `ec65529`) y se probaron sobre una
+copia exacta (`git archive`) de `ece1fe9` antes de avanzar `etapa-9h` (16/11/2026, 05:10–05:20): `fmt-check` y
+`sync-check` aprobados; `go-unit` aprobado (vet normal e `integration`, `go test -race ./...`, `GOOS=windows` build y
+vet); `go-int` de `./internal/legacyimport` (11 s), `./internal/database` (11 s), `./internal/administration` (123 s) y
+`./internal/reports` (138 s) aprobados; Vitest 95 archivos y 902 pruebas; `cargo test` 106 aprobadas y 3 ignoradas; y
+`workflow-stage9h-migration.spec.ts` con las dos partes de la Fase C: Chromium 7 de 7 y WebKit 7 de 7 (también la de
+los reportes con el filtro «Datos», que en la rama D sola se omitía). La falla de `workflow-stage9c-keyboard` en la
+corrida filtrada de especificaciones vecinas de la Fase D («En cocina» esperado) corresponde a una especificación
+filtrada sobre una base nueva sin la ruta de cocina que crean las anteriores (§6 de `CLAUDE.md`); se comprueba en la
+regresión completa de la Fase F.
