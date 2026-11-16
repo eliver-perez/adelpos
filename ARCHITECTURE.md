@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9G
+# Arquitectura · Etapa 9H
 
 ## Responsabilidades
 
@@ -57,7 +57,7 @@ Hay siete roles ordinarios iniciales y roles personalizados. El registro central
 
 La delegación administrativa es segura (`administration/delegation.go`): nadie puede crear, asignar ni editar un rol, ni conceder excepciones, cuyo resultado tenga permisos efectivos que el actor no posee; nadie administra a un usuario con más permisos que los suyos; nadie modifica su propio rol ni sus propias excepciones. Retirar un `deny` también se evalúa como concesión. El resultado se proyecta y autoriza antes de escribir. Debe permanecer al menos un **administrador completo**: un usuario ordinario activo con todos los permisos registrados, determinado por permisos efectivos y no por el código del rol (`sa` no cuenta). Los cambios de usuarios, roles y excepciones que lo eliminarían se rechazan con 400 y se revierten; todos se serializan con el lock 7820148303.
 
-Los tokens de dispositivo y sesión tienen 256 bits aleatorios; PostgreSQL guarda SHA-256, no los tokens. Cada sesión está ligada al dispositivo y al usuario. Un índice único parcial y un lock de usuario garantizan una sola sesión no revocada por usuario. Un acceso nuevo revoca la anterior; Go rechaza de inmediato sus operaciones y la interfaz informa el reemplazo en la siguiente consulta, como máximo tras el intervalo de cinco segundos si existe conectividad.
+Los tokens de dispositivo y sesión tienen 256 bits aleatorios; PostgreSQL guarda SHA-256, no los tokens. Cada sesión está ligada al dispositivo y al usuario. Un índice único parcial y un lock de usuario garantizan una sola sesión no revocada por usuario y por terminal (desde la etapa 9H, `sessions_one_active_user_device_idx`; antes, una por usuario en todo el sistema). Un acceso nuevo revoca la anterior del usuario en esa terminal (cambiar la contraseña revoca todas); Go rechaza de inmediato sus operaciones y la interfaz informa el reemplazo en la siguiente consulta, como máximo tras el intervalo de cinco segundos si existe conectividad.
 
 Las sesiones expiran a las doce horas. Logout, desactivación, cambio de contraseña, revocación administrativa y revocación de terminal se validan en el servidor. Cinco fallos de acceso por usuario y terminal bloquean nuevos intentos durante quince minutos; las respuestas no distinguen cuentas inexistentes de contraseñas incorrectas.
 
@@ -466,7 +466,9 @@ cambió: los combos reparten sus componentes por estación y los complementos vi
 **Operaciones.** `restaurant/accounts/{id}/void` responde `410 ROUTE_RETIRED` antes de permisos, lock o lectura.
 `operations/supervisor_approval.go` (`approveWithSupervisor`) es la autorización común de «Cancelar cuenta», «Cancelar
 unidades» y la reducción desde «Modificar», decidida dentro de la ruta antes de la primera escritura con el autorizador
-de `administration/supervisor.go`; Go calcula `cancel_units_requires_authorization`. La huella idempotente de
+de `administration/supervisor.go`; Go calcula `cancel_units_requires_authorization`. **Desde la etapa 9H** solo
+«Cancelar cuenta» la usa: cancelar o reducir unidades exige el permiso propio `orders.cancel` (en la ruta `cancel` y en
+`calculateEdit`) y `cancel_units_requires_authorization` se retiró. La huella idempotente de
 `operations` y `payments` quita la contraseña de todo objeto `authorization` sin distinguir mayúsculas
 (`withoutAuthorizationPasswords`).
 
@@ -550,3 +552,54 @@ La carpeta elegida solo llega del diálogo nativo (`backup_folder.rs`) por una c
 versión, «Agotado» e impresoras de terminal) y comandos de Tauri nuevos (`installation_state`, `set_installation_mode`,
 `restart_application`, `pairing_*`, `pairing_start_found`, `discovery_search`, `choose_backup_directory`), todos
 simulados en `native-driver.ts`. Las rutas `print-agent/*` no están en la lista de React.
+
+## Migración del sistema anterior y pendientes · etapa 9H
+
+**Alcance.** La migración del sistema anterior (C#/WinForms con SQL Server 2012) con todo su historial, que se puede
+repetir, y tres pendientes: «Cancelar unidades» sin autorización de supervisor, precio unitario por renglón y sesiones
+en varios dispositivos. Paquetes Go nuevos `legacypkg`, `legacyread`, `legacysynth` y `legacyimport`; un lock nuevo
+(7820148310), ningún permiso nuevo y ninguna dependencia nueva. Una sola migración, `0024_legacy_migration.sql`, con las
+secciones A y C. Avance: [ETAPA_9H_AVANCE.md](docs/ETAPA_9H_AVANCE.md); decisiones en `CLAUDE.md` §15, «Etapa 9H»;
+análisis: [MIGRACION_ANALISIS.md](docs/MIGRACION_ANALISIS.md); formato: [MIGRACION_FORMATO.md](docs/MIGRACION_FORMATO.md);
+guía para el propietario: [MIGRAR_SISTEMA_ANTERIOR.md](docs/MIGRAR_SISTEMA_ANTERIOR.md).
+
+**Dos pasos y dónde corre cada uno.** El **lector** es el subcomando `ad-el-pos-server legacy-prepare`
+(`cmd/ad-el-pos-server/legacy.go` con `internal/legacyread`, que ningún otro paquete importa): en la computadora con
+Docker Desktop restaura el `.bak` en un SQL Server 2022 temporal (`--network none`, respaldo de solo lectura,
+contraseña de `sa` solo en el entorno, contenedor y volumen eliminados al terminar), lee todas las tablas con
+`FOR JSON` y escribe el paquete `.adelmig` cifrado con la frase de paso (`internal/legacypkg`, neutral). `serve` y el
+`host` nunca lo usan: el servidor normal no depende de Docker ni de SQL Server. La **importación** es parte del
+servidor (`internal/legacyimport`, que no importa el lector) y corre en la computadora principal, Mac o Windows, sin
+Docker. En la aplicación, `legacy_migration.rs` (Rust) elige los archivos con diálogos nativos, lanza el lector con el
+servidor que viaja junto a su ejecutable (frase por la entrada estándar, eventos saneados por un `Channel`, cancelar =
+cerrar la entrada estándar) y sube el paquete a Go por partes por la escucha local; React solo ve nombres, tamaños,
+avance y resultados.
+
+**Historial de solo lectura.** Vive en tablas propias `app.legacy_*` (0024, sección C) con un lote vigente a la vez,
+importes `numeric(19,4)` tal como los guardó el anterior, marcas de incoherencia y nombres copiados, sin llaves desde
+las tablas operativas, y un disparador por sentencia que rechaza toda escritura fuera de la transacción de la
+importación (marca `adel.legacy_import`). La operación, la caja, el inventario, la cocina, el tiempo real, la API para
+clientes y Android no lo ven; nada lo reabre, lo cobra ni lo cancela. Lo importado al catálogo, a las mesas y a los
+usuarios sí es vivo (los usuarios sin contraseña, «Sin acceso», hasta «Asignar contraseña»).
+
+**Importación.** El trabajador `legacyimport.Manager.Run` (arrancado en `serveHTTP`) atiende una corrida a la vez:
+toma 7820148310 en una conexión propia, lee y comprueba el paquete completo, revisa la instalación limpia, hace el
+respaldo previo por el camino de «Respaldar ahora» (7820148309 aparte) y abre una sola transacción: COPY del historial
+y de su libro de ventas, validación de §4.4 contra una pasada independiente de las filas del paquete y, solo para lo
+vivo, 7820148305 → 7820148304 → 7820148308. Repetir reemplaza el lote completo y actualiza en su lugar lo vivo de un
+lote anterior. Un error, la cancelación o el apagado deshacen todo; al arrancar y cada minuto se cierran las corridas
+que quedaron sin terminar.
+
+**Reportes.** Con un lote vigente, 27 reportes unen el libro del historial (`legacy_sales_recognitions`) al de AD-EL POS
+con las mismas medidas (`reports/legacy.go`: filtro «Datos», columnas «Datos» y «Diferencia del sistema anterior»); sin
+lote ejecutan la SQL de antes. Siguen sin locks consultivos, en el ejecutor de solo lectura.
+
+**Pendientes de la 9F.** Cancelar o reducir unidades vuelve a exigir el permiso propio `orders.cancel` y
+`supervisor_approval.go` queda solo para «Cancelar cuenta». «Mostrar precio unitario» es una opción `omitempty` de la
+lista de productos (predeterminadas idénticas byte a byte) con el precio que Go guardó en la unidad. Las sesiones son una
+por usuario y por terminal (`sessions_one_active_user_device_idx`): iniciar sesión solo cierra la de esa terminal y
+cambiar la contraseña cierra todas.
+
+**Puente.** Operaciones nuevas en la lista cerrada de `api.rs` (`maintenance_legacy*` y `assign_user_password`) y
+comandos de Tauri nuevos (`legacy_*`), todos simulados en `native-driver.ts`; lo que lleva archivos o rutas (subida,
+partes, preparaciones, informe) solo lo envía `legacy_migration.rs`, nunca `api_request`.

@@ -3018,6 +3018,9 @@ motivo ni autorización. Los eventos `account.void` y la auditoría `restaurant.
 
 ### Autorización para cancelar unidades (`cancel` y la reducción con `edit`)
 
+> **Retirada en la etapa 9H** (decisión del propietario): ver «Etapa 9H · “Cancelar unidades” sin autorización de
+> supervisor». Lo de abajo describe la 9F.
+
 Mismo criterio de «Cancelar cuenta» (9D): con `orders.cancel` basta el permiso propio; sin él, la autorización puntual
 de un supervisor que lo tenga, con el autorizador de `administration/supervisor.go` (sin sesión, con el límite de intentos
 del inicio de sesión, sin autoautorización) y siempre **antes de la primera escritura**.
@@ -3048,7 +3051,7 @@ AUTHORIZATION_INSUFFICIENT` («El supervisor indicado no tiene permiso para canc
   Como Go acepta las claves sin distinguir mayúsculas, la huella de `restaurant/*` quita la contraseña de cualquier
   objeto `authorization` sin distinguirlas (`Authorization`, `Password`, `PASSWORD`…), en cualquier nivel del cuerpo
   (revisión independiente de la 9F, B3).
-- **Campos nuevos de lectura** (los calcula Go; React no los deduce):
+- **Campos nuevos de lectura** (los calcula Go; React no los deduce; **retirados en la etapa 9H**):
 
 | Campo                                 | Dónde                        | Significado                                                                                                       |
 | ------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -3605,3 +3608,218 @@ válida para tickets y para el cajón (antes se rechazaba).
   escritorio (impresoras USB de una computadora con su aplicación abierta) y las rutas de administración son de la
   interfaz de escritorio; la aplicación Android de meseros no imprime por agente: sus documentos salen en la
   impresora que elige Go (la de la caja de esa terminal o la general).
+
+## Etapa 9H · «Cancelar unidades» sin autorización de supervisor (fase A, sin migración)
+
+Decisión del propietario (§0-B y §2.2 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)): cancelar o reducir unidades
+enviadas no pide autorización de supervisor; basta el permiso propio y queda registrado quién lo hizo. «Cancelar cuenta»
+(9D) conserva su autorización. Sin operaciones nuevas del puente.
+
+| Ruta (`/restaurant`)               | Permiso de la ruta                                                    | Cuerpo                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| POST `/accounts/{id}/cancel`       | `orders.cancel` (como antes de la 9F); para llevar, `takeaway.manage` | `{operation_id, revision, version_id, quantity, reason}`                   |
+| POST `/accounts/{id}/edit-preview` | `orders.edit`; si la cantidad baja, además `orders.cancel`            | el de siempre                                                              |
+| POST `/accounts/{id}/edit`         | `orders.edit`; si la cantidad baja, además `orders.cancel`            | `{operation_id, revision, version_id, line, reason, expected_fingerprint}` |
+
+- **Sin el permiso**: `cancel` responde `403 PERMISSION_DENIED` antes de leer el cuerpo; reducir responde `403
+PERMISSION_DENIED` («Reducir la cantidad de un producto enviado a cocina requiere el permiso «Cancelar partidas o
+  cantidades confirmadas».») ya en `edit-preview`, antes de cualquier escritura. No se valida ninguna contraseña de
+  supervisor ni cuenta un intento.
+- **`authorization` ya no es un campo** de `cancel`, `edit` ni `edit-preview`: con la decodificación estricta de siempre,
+  enviarlo es `400 OPERATION_VALIDATION`. Ningún cliente de la 0.10.0 lo envía con el permiso propio (el formulario solo
+  aparecía sin él), y sin el permiso el `403` llega antes.
+- **`cancel_units_requires_authorization` se retiró** de la cuenta y de la respuesta de `edit-preview`. No estaba en el
+  contrato v1 (`openapi.json`, [docs/API_V1.md](docs/API_V1.md)); un cliente 0.10.0 lo lee como ausente (`false`).
+- **Qué se registra**: el autor del evento `item.cancelled`/`item.modified` y de la auditoría
+  `restaurant.item.cancelled`/`restaurant.item.modified`, con el motivo. Los eventos nuevos no llevan `authorized_by`,
+  `authorized_by_username` ni `authorized_by_name` ni se audita `restaurant.supervisor_authorized` (`item_cancel` o
+  `item_modify`); los de la 9F se conservan.
+- **Reportes**: «Modificaciones de cantidades» y «Productos cancelados» conservan la columna `authorized_by` «Autorizó»
+  (vacía en lo nuevo, con el supervisor en los registros de la 9F y con quien autorizó cancelar la cuenta en las partidas
+  de una cuenta cancelada); «Actividad por empleado» sigue contando las autorizaciones de la 9F.
+
+## Etapa 9H · precio unitario por renglón (fase A, sin migración)
+
+- **Plantillas** (`documents/templates*`, `documents/preview`, `documents/samples`, `GET documents/catalog`): el bloque
+  `products` de la precuenta y el ticket acepta `options.show_unit_price` (booleano, `false` por omisión); el catálogo lo
+  ofrece como opción `boolean` «Mostrar precio unitario» con su `help`. Mientras está en `false` se omite de la forma
+  canónica (las predeterminadas y las plantillas guardadas no cambian); con `true` se guarda. Otro tipo de valor o la
+  clave en otro bloque (por ejemplo `kitchen_items`) es `422 TEMPLATE_INVALID`, como cualquier opción desconocida.
+- **Datos guardados**: cada partida de la precuenta y el ticket (`kitchen_tickets.document` y `GET
+payments/accounts/{id}/precheck`) agrega `unit_price` (decimal en texto, omitido si no existe), el precio comercial de
+  una unidad que calculó Go antes de promociones y descuentos. `amount` no cambia. La respuesta de cobros
+  (`payments/accounts/{id}`) no cambia. No forma parte del contrato v1.
+
+## Etapa 9H · sesiones en varios dispositivos (fase A, esquema 24)
+
+Decisión del propietario (§0-B y §2.4 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)): un usuario puede tener una
+sesión activa por dispositivo, en varios dispositivos a la vez.
+
+- **`POST auth/login`**: cierra solo la sesión vigente del usuario **en la misma terminal** (`revoke_reason`
+  `replaced`, auditoría `session.replaced` con `revoked_sessions`); las de otras terminales siguen. Hasta la 9G cerraba
+  las del usuario en todas. La sesión reemplazada responde `401 SESSION_REPLACED` con «Tu sesión se cerró porque el
+  usuario inició sesión de nuevo en esta terminal.».
+- **Sin cambios**: `auth/logout` (solo esa sesión), `auth/password` (cierra las del usuario en todas las terminales con
+  `password_changed` y abre una nueva en esta), revocar una terminal (`device_revoked`), desactivar al usuario
+  (`user_disabled`), el restablecimiento de soporte (`support_reset`) y `sessions/{id}/revoke`.
+- **Base** (0024, sección A): `sessions_one_active_user_idx` (único por `user_id` con `revoked_at IS NULL`) se sustituye
+  por `sessions_one_active_user_device_idx` (único por `user_id, device_id` con `revoked_at IS NULL`). No cierra ni
+  modifica sesiones existentes.
+- **`GET devices/sessions-summary`** cuenta sesiones, no usuarios (el mismo usuario en dos terminales son dos) y **`GET
+devices`** muestra el usuario actual de cada terminal (el mismo usuario puede aparecer en varias). Sin campos nuevos.
+- **Por terminal, como antes**: caja física y turno (`payments/shifts/current`, apertura, arqueo y cierre de la caja de
+  la terminal), estaciones visibles, canal de eventos (2 conexiones por terminal) y `restaurant/state`; los permisos se
+  leen en cada petición de cada sesión.
+- Contrato v1: la descripción de `login` en `openapi.json` y [docs/API_V1.md](docs/API_V1.md) (§4) dicen el
+  comportamiento nuevo; sin operaciones ni esquemas nuevos.
+
+## Etapa 9H · migración del sistema anterior (fase C, esquema 24)
+
+Importación del paquete `.adelmig` ([docs/MIGRACION_FORMATO.md](docs/MIGRACION_FORMATO.md)) con la correspondencia de
+[docs/MIGRACION_ANALISIS.md](docs/MIGRACION_ANALISIS.md) §6 (paquete Go `internal/legacyimport`, rutas en
+`administration/legacy_migration.go`). Todas con `settings.manage` (el permiso de Mantenimiento y de los respaldos) y
+**solo por la escucha local** (`Request.Local`; por la escucha de red `403 LOCAL_REQUIRED`, «La migración del sistema
+anterior solo se hace desde la computadora principal.»). No son de la API de clientes (Android): no van en
+`internal/apicontract/openapi.json` ni en `docs/API_V1.md`. Tiempo de respuesta de `maintenance/*` (120 s); el análisis y
+la importación corren en segundo plano y la respuesta es inmediata. La interfaz es de la Fase D. Sin el servicio de
+migración: `503 LEGACY_UNAVAILABLE`.
+
+| Método | Ruta                                          | Cuerpo / respuesta                                                                                                                                  |
+| ------ | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/legacy`                         | `{max_upload_bytes, part_size, current_batch, active_run, recent_runs, uploads}` (las subidas abiertas del usuario y la terminal).                  |
+| POST   | `/maintenance/legacy/uploads`                 | `{size, sha256}` → `Upload`. Tope 1 GiB (`413 LEGACY_UPLOAD_TOO_LARGE`); hasta 3 subidas abiertas (`409 LEGACY_UPLOAD_LIMIT`).                      |
+| GET    | `/maintenance/legacy/uploads/{id}`            | `Upload`.                                                                                                                                           |
+| POST   | `/maintenance/legacy/uploads/{id}/parts`      | `{index, data (base64), sha256 (de la parte)}` → `Upload`. Cuerpo hasta 1 398 104 + 1 024 bytes.                                                    |
+| POST   | `/maintenance/legacy/uploads/{id}/cancel`     | Sin cuerpo → `{cancelled: true}`; borra el archivo (`409 LEGACY_UPLOAD_BUSY` si un trabajo lo usa).                                                 |
+| POST   | `/maintenance/legacy/analyze`                 | `{upload_id, passphrase}` → `Run` en cola (`kind: analyze`).                                                                                        |
+| POST   | `/maintenance/legacy/import`                  | `{upload_id, passphrase, analysis_run_id, confirm: true, replace_batch_id: uuid \| null}` → `Run` en cola (`kind: import`).                         |
+| GET    | `/maintenance/legacy/runs/{id}`               | `Run` con su avance y, al terminar, `summary` (resumen previo o informe final).                                                                     |
+| GET    | `/maintenance/legacy/batches/{id}`            | `{batch: Batch, report, validation}`.                                                                                                               |
+| GET    | `/maintenance/legacy/batches/{id}/report.pdf` | El informe en PDF (`application/pdf`, `Content-Disposition: attachment`), con la lista de datos incoherentes. Auditoría `legacy.report_downloaded`. |
+| POST   | `/maintenance/legacy/preparations`            | Resumen de una preparación del paquete (Fase D) → `{recorded: true}`; solo se audita.                                                               |
+| POST   | `/users/{id}/password`                        | «Asignar contraseña» `{password}` con `users.manage` (ver abajo).                                                                                   |
+
+- **Subida por partes**: el servicio de macOS no puede leer las carpetas del usuario, así que la aplicación lee el paquete
+  (Rust, Fase D) y lo envía en partes de 1 MiB (`part_size`; la última, el resto), en orden desde 0, cada una en base64
+  con el SHA-256 de sus bytes. `Upload` = `{id, status: receiving|complete, size, sha256, part_size, parts,
+received_parts, received_bytes, created_at, expires_at}`. Una parte con huella mala: `400 LEGACY_UPLOAD_HASH_MISMATCH`
+  (se reenvía); fuera de orden: `409 LEGACY_UPLOAD_OUT_OF_ORDER` («Se esperaba la parte N»); reenviar la última recibida
+  con la misma huella no cambia nada (reintento después de un corte). Cada parte se escribe en su lugar (el archivo se
+  recorta a lo ya recibido antes de escribirla, así que un intento que falló a medias no deja bytes de más). Con la última
+  parte Go comprueba el tamaño y el SHA-256 del archivo completo tal como quedó en el disco: si no coinciden, descarta la
+  subida (`400 LEGACY_UPLOAD_HASH_MISMATCH`). Solo la ve y la usa el mismo usuario en la misma terminal (si no, `404
+LEGACY_UPLOAD_MISSING`). El archivo vive en `<carpeta de datos>/legacy-import/`
+  (0700; el archivo 0600 desde el primer byte con `fileacl.CreatePrivate`, ACL privada en Windows) y se borra al importar
+  correctamente, al cancelar o a las 2 horas sin actividad (el trabajador lo revisa cada minuto); al arrancar el servidor
+  se borra lo que haya quedado (las subidas viven en memoria). Auditoría `legacy.upload_created`, `legacy.upload_completed`
+  y `legacy.upload_cancelled` (tamaño y huella, nunca contenido).
+- **Corridas** (`app.legacy_import_runs`): `Run` = `{id, kind: analyze|import, status: queued|running|succeeded|failed|
+interrupted, phase, progress: {done, total, percent}, upload_id, package_bytes, analysis_run_id, replace_batch_id,
+batch_id, backup_file, error_code, error_message, with_differences, summary, timings_ms, requested_by, created_at,
+started_at, finished_at}`. Fases: `queued`, `reading` (lectura y comprobación del paquete), `checking`, `backup`,
+  `removing_previous`, `writing_history`, `validating`, `waiting_locks`, `writing_catalog`, `committing`, `done`. Una sola
+  corrida en cola o en curso a la vez (índice único parcial; una segunda: `409 LEGACY_BUSY`). Al arrancar el servidor,
+  una corrida que quedó en cola o en curso pasa a `interrupted` (`LEGACY_INTERRUPTED`: su transacción se deshizo, no
+  quedó nada a medias), salvo una importación cuyo lote sí se confirmó (`legacy_import_batches.run_id`; el proceso
+  terminó entre la confirmación y el registro del resultado), que pasa a `succeeded` con el informe y la validación del
+  lote (auditoría `legacy.import_finished` con `recovered: true`). El trabajador repite esa recuperación cada minuto,
+  con el lock de la migración libre, para las corridas sin cambios desde hace más de 2 minutos («La migración se
+  interrumpió antes de terminar…»), y reintenta registrar el resultado de una corrida hasta 5 veces si la base no
+  responde (al apagarse, un solo intento); al apagarse, la importación en curso se deshace y queda `interrupted`. **La
+  frase de paso viaja solo en la petición y vive en memoria mientras se abre el paquete**: nunca en disco, en la base, en
+  el Registro de movimientos ni en la bitácora (mínimo 8 caracteres: `400 LEGACY_PASSPHRASE_INVALID`).
+- **Análisis** (`summary` = `Preview`): `{package: {format_version, created_at, tool, product_version, fingerprint,
+backup_taken_at, size_bytes, sha256}, counts, sales_period: {first: "AAAA-MM", last, label: "10/2019 a 11/2026"},
+tax_rates: {"0": n, "16": n}, totals: {sales_by_year: [{year, amount}], payments_by_method_year: [{method, label, year,
+amount}], cancelled_legacy_style, withdrawals, expenses}, flags: [{entity, code, label, count, listed}], notes: [{code,
+message}], warnings: [texto], current_batch: Batch | null, will_replace, clean, blockers: [{code, message, count}]}`.
+  `counts` usa las llaves de la validación (`categories`, `products`, `complements`, `tables`, `users`, `sales`,
+  `sales_paid`, `sales_cancelled`, `sales_open`, `lines`, `line_complements`, `quantity_changes`, `discounts`,
+  `cancellations`, `payments`, `cash_shifts`, `withdrawals`, `expenses`, `price_history`) más `option_groups`, `areas` y
+  `products_inactive`. Importes como texto exacto con 4 decimales («1234.5000»). `warnings` explica, con su conteo, los
+  cortes del anterior sin fecha de inicio o de fin (se usa la de su primera o su última venta o pago; marcas
+  `start_estimated`, `end_estimated` y `no_start`) y, con `will_replace`, avisa que repetir la migración vuelve a poner
+  en lo importado (usuarios, catálogo y mesas) los datos del paquete y que lo que ya no viene se borra o queda retirado.
+  No escribe nada. Errores de la corrida: `LEGACY_PASSPHRASE_INVALID` («La frase de paso no es correcta.»),
+  `LEGACY_PACKAGE_DAMAGED` (el paquete está dañado: hay que copiarlo o prepararlo de nuevo), `LEGACY_PACKAGE_UNREADABLE`
+  (no se pudo leer el archivo por un error de entrada y salida del disco; se puede reintentar tal cual),
+  `LEGACY_PACKAGE_VERSION` (más nuevo que esta versión), `LEGACY_NOT_PACKAGE`, `LEGACY_PACKAGE_LIMIT`,
+  `LEGACY_PACKAGE_INCOMPATIBLE` (falta una tabla o columna del anterior, o un valor con otra forma; el mensaje nombra la
+  tabla y la columna, nunca el valor) y `LEGACY_UPLOAD_MISSING`.
+- **Importación**: exige `confirm: true` (si no, `400 LEGACY_UPLOAD_INVALID`), un análisis `succeeded` del mismo paquete
+  (`analysis_run_id`) y que `replace_batch_id` sea el lote vigente (o `null` si no hay); si no coincide, `409
+LEGACY_BATCH_CHANGED` («Vuelve a analizar el paquete»). En segundo plano: vuelve a leer el paquete completo, comprueba
+  la instalación (`LEGACY_INSTALLATION_NOT_CLEAN` con `summary.blockers`), hace el **respaldo verificado** por el camino
+  de «Respaldar ahora» (si hay otro respaldo en curso espera hasta 5 minutos; si falla, `LEGACY_BACKUP_FAILED` y no se
+  importa) y escribe todo en **una sola transacción** (`LEGACY_LOCKS_BUSY` si los locks de la operación no se liberan en
+  30 s). Termina `succeeded` también con diferencias en la validación (`with_differences: true`): las diferencias de dinero
+  nunca se ocultan. `summary` = `Report`: el `Summary` del análisis más `{batch_id, replaced_batch_id, validation,
+written, retired, timings_ms, backup_file}`. `validation` = `{ok, has_money_differences, checks: [{group:
+counts|sales_by_year|payments_by_method_year|totals, key, label, kind: count|money, expected, actual, difference, ok}],
+notes}` (`notes` incluye, con su conteo, las ventas pagadas sin renglones ni importes, que no quedan en el libro y por
+  eso no cuentan en las cuentas de los reportes). Auditoría `legacy.analysis_requested`/`legacy.import_requested` (en la
+  petición), `legacy.analysis_finished`/`legacy.import_finished` (`success` según el resultado, con el código de error o
+  el lote, la validación, las filas escritas, el respaldo y el tiempo de los locks), `legacy.batch_replaced` y el
+  `maintenance.backup_created` del respaldo previo; entidad `legacy_import` con el id de la corrida o del lote.
+- **Instalación limpia** (`blockers`): no se importa si hay operación propia (`own_accounts`, `own_orders`, `own_items`,
+  `own_drafts`, `own_payments`, `own_refunds`, `own_adjustments`, `own_cancellations`, `own_sales`, `own_deliveries`,
+  `own_shifts`, `own_cash_operations`, `own_cash_movements`, `own_cash_counts`, `own_kitchen`, `own_inventory_movements`,
+  `own_receipts`, `own_inventory_adjustments`, `own_inventory_counts`, `own_transfers`, `own_purchase_orders`,
+  `own_productions`, `own_supplier_returns`) ni catálogo, mesas o usuarios propios fuera del lote vigente y de lo que
+  crea una instalación nueva (`own_categories`, `own_products`, `own_variants`, `own_ingredients`, `own_portions`,
+  `own_complements`, `own_groups`, `own_options`, `own_promotions`, `own_images`, `own_price_lists` —más de la lista
+  «Restaurante»—, `own_quick_notes`, `own_areas`, `own_tables`, `own_users` —cualquiera salvo `sa` y el administrador del
+  asistente inicial—). Cada uno con `message` en español sencillo («Hay 3 cuentas registradas en AD-EL POS.») y `count`.
+  También en el rechazo directo de las rutas (`409 LEGACY_INSTALLATION_NOT_CLEAN`, `details.blockers`).
+- **`Batch`**: `{id, status: completed|replaced, imported_at, completed_at, imported_by, backup_taken_at, fingerprint,
+sales, sales_first_at, sales_last_at, has_differences}`.
+- **Preparación** (`POST maintenance/legacy/preparations`): `{succeeded, error_code, backup_taken_at, sales_first,
+sales_last, package_bytes, format_version, fingerprint, tables: {tabla: filas}, timings_ms: {paso: ms}}` (campos
+  desconocidos, textos con caracteres fuera de `[A-Za-z0-9_:.+ -]` o de más de 40, llaves que no sean
+  `[A-Za-z0-9_]{1,64}` o números negativos: `400 VALIDATION_ERROR`; nunca rutas de archivos ni datos del restaurante).
+  Auditoría `legacy.preparation_recorded` con ese resumen (`success` = `succeeded`).
+- **«Asignar contraseña»** (`POST users/{id}/password {password}`, decisión del coordinador): con `users.manage`, a un
+  usuario **sin contraseña** (los importados del sistema anterior entran sin ella y sin acceso; AD-EL POS no tiene PIN).
+  Deja `initial_password = true`, así que al entrar debe cambiarla. Contraseña de 8 a 256 caracteres (`400
+VALIDATION_ERROR`); si ya tiene contraseña, `409 PASSWORD_ALREADY_SET` (solo él la cambia desde su formulario personal);
+  `sa` y usuarios con permisos que el actor no tiene: `403`. Sigue el patrón de las demás rutas de usuarios (sin
+  restricción de escucha local, lock de administración, delegación segura). Responde el usuario; auditoría
+  `user.password_assigned` con `{initial_password: true}` (nunca la contraseña ni su hash).
+- **`GET users`** (y las respuestas de crear y editar usuarios) incluyen `has_password` (si tiene contraseña; nunca la
+  contraseña ni su hash), para que Usuarios ofrezca «Asignar contraseña» solo a quien no tiene.
+- **Quién llama a cada ruta (Fase D, asistente de la aplicación)**: `maintenance/legacy`, `…/analyze`, `…/import`,
+  `…/runs/{id}`, `…/batches/{id}`, `…/uploads/{id}/cancel` y `users/{id}/password` van por la lista cerrada de
+  `api.rs` (`maintenance_legacy*`, `assign_user_password`). Las que llevan archivos o datos de la computadora solo las
+  envía Rust (`desktop/src-tauri/src/legacy_migration.rs`), nunca React: la creación de la subida y sus partes (lee el
+  `.adelmig` elegido en el diálogo nativo, calcula sus huellas y lo envía en orden, reenviando una parte sin
+  respuesta), la preparación (al terminar `legacy-prepare`, con el resumen saneado) y el informe `report.pdf`
+  (comprueba `application/pdf` y `%PDF-` y lo guarda con el diálogo «Guardar como»).
+- **Las ventas importadas no son cuentas**: viven en `app.legacy_*` (esquema en `docs/ETAPA_9H_AVANCE.md`, Fase C), así
+  que las rutas de cuentas, cobros, cancelación, cocina, caja y `restaurant/state` no las ven ni pueden reabrirlas,
+  cobrarlas, cancelarlas ni modificarlas; sus folios no consumen ni chocan con `restaurant_accounts.folio`. Lo importado
+  al catálogo, a las mesas y a los usuarios sí es vivo (se edita y se vende como cualquier otro).
+
+## Etapa 9H · el historial del sistema anterior en los reportes (fase C, parte 2, sin migración)
+
+Sin rutas nuevas: cambian el catálogo y los resultados de `reports/*` (detalle y lista de los 27 reportes en
+[docs/REPORTS.md](docs/REPORTS.md), «El historial del sistema anterior»).
+
+- **Solo con un lote importado vigente** (`app.legacy_import_batches` con `status = 'completed'`): los reportes que
+  incluyen el historial declaran **primero** el filtro `data_source` («Datos», tipo `choice`): `all` (por omisión,
+  «AD-EL POS y sistema anterior»), `native` («Solo AD-EL POS») y `legacy` («Solo sistema anterior»); y las columnas
+  `data_source` («Datos»: «AD-EL POS», «Sistema anterior» o «AD-EL POS y sistema anterior») y, donde se agrega por
+  venta, día, semana, mes, hora, tasa, modalidad, mesa, origen o turno, `legacy_difference` («Diferencia del sistema
+  anterior», importe incluido en la venta neta y nunca repartido entre productos). Las dos columnas siguen con «Solo
+  AD-EL POS» (con «AD-EL POS» y diferencia 0), para que no cambien al cambiar el filtro.
+- **Sin lote vigente** el catálogo no ofrece el filtro ni las columnas, `meta.filters` no los describe y un
+  `data_source` recibido se ignora: cada respuesta (y la SQL que la produce) es exactamente la de antes.
+- **`GET reports/run/{id}`** y **`GET reports/export/{id}`** aceptan `data_source`, que está en la lista blanca de
+  `reports_*` del puente (`api.rs`); el PDF y la hoja «Filtros» del Excel muestran «Datos: …». Los importes del historial
+  se suman exactos (cuatro decimales) y se redondean solo al mostrar. Un filtro de algo que solo existe en AD-EL POS
+  (caja, turno, método de pago, lista de precios, motivo del catálogo, quién canceló o modificó, origen distinto de
+  «Sistema anterior») excluye el historial; los de lo importado (producto, categoría, área, mesa, usuario) lo filtran por
+  el identificador nuevo.
+- Los cobros del historial quedan fuera del alcance de Caja y de los turnos en arqueo; los cortes del anterior aparecen
+  en «Turnos de caja» solo para quien consulta en Caja todas las cajas y el historial, y su diferencia guardada exige
+  `cash.expected.read`. El resumen ejecutivo (`reports/dashboard`) no incluye el historial. Sin locks consultivos, como
+  todo reporte.

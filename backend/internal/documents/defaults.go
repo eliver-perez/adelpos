@@ -84,7 +84,7 @@ func defaultCommercial(kind Kind) *Template {
 		fieldBlock("context", FieldItem{Key: "context"}, FieldItem{Key: "datetime"}),
 		fieldBlock("cashier", FieldItem{Key: "cashier", Label: "Atendió:"}),
 		dividerBlock("divider-1"),
-		newBlock("products", BlockProducts, &NotesOptions{ShowNotes: true}),
+		newBlock("products", BlockProducts, &ProductsOptions{ShowNotes: true}),
 		newBlock("adjustments", BlockAdjustments, &ReasonOptions{ShowReason: true}),
 		dividerBlock("divider-2"),
 		newBlock("taxes", BlockTaxes, &TaxesOptions{ShowBase: true}),

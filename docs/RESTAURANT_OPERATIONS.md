@@ -289,6 +289,9 @@ de cobro ni las acciones del panel de mesa; solo su presentación y lo que dice 
 
 ## Cancelar unidades con autorización y ruta antigua de anulación · etapa 9F
 
+> **Desde la etapa 9H** cancelar o reducir unidades ya no pide autorización de supervisor (ver «“Cancelar unidades” sin
+> autorización de supervisor · etapa 9H»); lo de abajo describe la 9F. La ruta antigua de anulación sigue retirada.
+
 Fase E de la etapa 9F (§7 de [etapas/ETAPA_9F.md](etapas/ETAPA_9F.md)), sin migración. Contratos en
 [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9F · ruta antigua de anulación retirada y autorización para cancelar
 unidades»).
@@ -315,6 +318,24 @@ unidades»).
   `410 ROUTE_RETIRED` sin tocar nada, para que ningún cliente, tampoco la futura aplicación Android, cancele sin motivo
   del catálogo ni autorización. Una cuenta vacía se descarta y una con productos se cancela con su motivo.
 - **Sin verificar**: pantalla táctil física, la ventana nativa y Windows.
+
+## «Cancelar unidades» sin autorización de supervisor · etapa 9H
+
+Fase A de la etapa 9H (§2.2 de [etapas/ETAPA_9H.md](etapas/ETAPA_9H.md), decisión del propietario), sin migración.
+Sustituye la autorización de la sección anterior (9F) para estas dos operaciones; «Cancelar cuenta» (9D) no cambia.
+
+- **Basta el permiso propio** «Cancelar partidas o cantidades confirmadas» (`orders.cancel`) para «Cancelar unidades» y
+  para reducir la cantidad de una partida enviada desde «Modificar». Sin él, la acción **no se ofrece** («Cancelar
+  unidades» no aparece en el menú del producto y en «Modificar» la cantidad no baja de la enviada) y Go la rechaza
+  (`403 PERMISSION_DENIED`, ya en la previsualización de la reducción), sin camino de supervisor.
+- **Antes de la 9F era igual**: la ruta `cancel` exigía `orders.cancel` y reducir desde «Modificar» también; la 9F
+  agregó la autorización de un supervisor para quien no lo tenía (`cancel_units_requires_authorization`, el formulario
+  de supervisor y `authorized_by` en los eventos) y la 9H la retira.
+- **Qué se registra**: quién canceló o redujo (autor del evento `item.cancelled`/`item.modified` y de la auditoría, en
+  el historial de la cuenta y en el Registro de movimientos) y el motivo. Los eventos nuevos no llevan `authorized_by`;
+  los de la 9F que lo guardaron se conservan y el historial los sigue mostrando.
+- **Reportes**: «Modificaciones de cantidades» y «Productos cancelados» conservan «Autorizó», vacía en lo nuevo
+  ([REPORTS.md](REPORTS.md)).
 
 ## Varias terminales, conexión perdida y pedidos sin conexión · etapa 9G
 
@@ -349,5 +370,7 @@ Fases C y D de la etapa 9G (decisiones D9 y D11; contrato para clientes en [API_
   reciben `409 OFFLINE_ORDER_ALREADY_ACCEPTED` con el resultado. Registro de movimientos:
   `restaurant.offline_order.accepted` y `restaurant.offline_order.requires_confirmation`; la historia de la cuenta marca
   el pedido.
-- **Una sesión activa por usuario** (D9): sin cambio; iniciar sesión en otra terminal cierra la anterior.
+- **Una sesión activa por usuario** (D9): sin cambio en la 9G; iniciar sesión en otra terminal cerraba la anterior.
+  **Desde la etapa 9H** es una por usuario y por terminal: iniciar sesión en otra terminal ya no cierra la anterior
+  (solo volver a entrar en la misma terminal), y cambiar la contraseña cierra todas.
 - **Sin verificar**: dos computadoras reales en la red y la carga con varias terminales (Fase W).

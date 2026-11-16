@@ -41,6 +41,21 @@ también en PDF y Excel) y «Actividad por empleado» cuenta esas autorizaciones
 sus registros anteriores siguen en «Cuentas canceladas». Registro sin cambios (95 reportes). Contratos en
 [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9F»).
 
+**Etapa 9H, fase A** (decisión del propietario): «Cancelar unidades» y reducir cantidades ya **no piden autorización
+de supervisor**: basta el permiso propio `orders.cancel` y queda registrado quién lo hizo («Modificó» y «Canceló»). La
+columna **«Autorizó» se conserva** en «Modificaciones de cantidades» y «Productos cancelados» (decisión del
+coordinador): vacía en lo nuevo, con el supervisor en los registros de la 9F que lo guardaron y con quien autorizó
+cancelar la cuenta en las partidas de una cuenta cancelada. «Actividad por empleado» sigue contando las autorizaciones
+de la 9F. Sin datos ni columnas borrados de la base; registro sin cambios (95 reportes).
+
+**Etapa 9H, fase C (parte 2)**: con un **lote importado vigente** del sistema anterior (tablas `app.legacy_*` de la 0024,
+sección C), 27 reportes de ventas, productos, cobros, por día y por turno incluyen el historial, con el filtro
+**«Datos»** (`data_source`: «AD-EL POS y sistema anterior», por omisión; «Solo AD-EL POS»; «Solo sistema anterior»), la
+columna **«Datos»** y, donde se agrega por venta, día, hora, turno o modalidad, la **«Diferencia del sistema anterior»**.
+**Sin lote, nada cambia**: ni el catálogo, ni las columnas, ni los metadatos, ni la SQL. Detalle en
+[El historial del sistema anterior](#el-historial-del-sistema-anterior). Registro sin cambios (95 reportes); sin
+migración nueva ni índices nuevos.
+
 ## Contenido
 
 - [Principios](#principios)
@@ -57,6 +72,7 @@ sus registros anteriores siguen en «Cuentas canceladas». Registro sin cambios 
 - [Compras y proveedores](#compras-y-proveedores)
 - [Costos y márgenes](#costos-y-márgenes)
 - [Empleados](#empleados)
+- [El historial del sistema anterior](#el-historial-del-sistema-anterior)
 - [Resumen ejecutivo](#resumen-ejecutivo)
 - [Interfaz](#interfaz)
 - [Permisos](#permisos)
@@ -295,6 +311,9 @@ Cada reporte declara su fecha (`meta.date_basis`), que la pantalla y los archivo
   un turno en arqueo.
 - Los filtros aplicados viajan en `meta.filters` con su texto legible; los archivos los repiten en el encabezado (PDF) o
   en la hoja «Filtros» (Excel).
+- **Etapa 9H**: `data_source` («Datos», `all`/`native`/`legacy`, por omisión `all`) solo existe con un lote importado
+  vigente; sin lote no se ofrece, no se describe y, si llega, se ignora. No se llama `origin` porque ese es «Origen (para
+  llevar)». Ver [El historial del sistema anterior](#el-historial-del-sistema-anterior).
 
 ## Definiciones de métricas
 
@@ -439,7 +458,9 @@ la mesa y el área son las actuales de la cuenta.
   partida no pedía autorización de otra persona. Desde la 9F, sin `orders.cancel` se pide la de un supervisor y el
   evento la guarda (`after.authorized_by`): la columna «Autorizó», después de «Modificó» (y en «Productos cancelados»,
   después de «Canceló»), muestra su nombre visible actual; en las partidas de una cuenta cancelada, quien autorizó
-  cancelarla; vacía si bastó el permiso propio y en los registros anteriores (no se inventa). Lo explica una nota. Desde la etapa 9D incluye las partidas de las cuentas
+  cancelarla; vacía si bastó el permiso propio y en los registros anteriores (no se inventa). Lo explica una nota.
+  Desde la etapa 9H cancelar o reducir unidades no pide autorización: la columna se conserva, vacía en lo nuevo y con
+  el supervisor en los registros de la 9F. Desde la etapa 9D incluye las partidas de las cuentas
   canceladas (un renglón por partida, acción «Cancelación de la cuenta»), igual que «Productos cancelados» (motivo
   «Cuenta cancelada: …»). En la 9C tampoco «Cuentas anuladas» tenía «Autorizó»; desde la 9D sí, para las cancelaciones
   nuevas.
@@ -593,6 +614,75 @@ registradas**:
   movimientos de caja.
 - **No se reporta**: quién capturó (el borrador se borra al confirmar y no se conserva), estadísticas de productividad,
   costos ni el esperado de caja.
+
+## El historial del sistema anterior
+
+Etapa 9H, fase C (parte 2; §4.2 de [etapas/ETAPA_9H.md](etapas/ETAPA_9H.md)). El historial importado vive en tablas propias
+`app.legacy_*` (0024, sección C), de solo lectura, con un solo lote vigente y solo las filas de ese lote; su libro
+`legacy_sales_recognitions` tiene las mismas medidas que `sales_recognitions`. Código en
+`backend/internal/reports/legacy.go`.
+
+- **Filtro «Datos»** (`data_source`, tipo `choice`, primero en la lista de filtros): «AD-EL POS y sistema anterior»
+  (`all`, por omisión, para comparar contra años anteriores), «Solo AD-EL POS» (`native`) y «Solo sistema anterior»
+  (`legacy`). Se describe en `meta.filters` (pantalla, PDF y hoja «Filtros» del Excel) y en `report.exported`. La
+  pantalla lo dibuja del catálogo (selector con su valor por omisión, sin «Sin filtro»); el puente lo admite en
+  `allowed_query_keys`.
+- **Sin lote vigente** (`legacy_import_batches` sin `completed`): el catálogo no ofrece el filtro ni las columnas del
+  historial, los metadatos no lo describen, el parámetro se ignora y cada consulta es exactamente la de antes.
+- **Reportes** (27): `sales.summary`, `sales.by_day`, `sales.by_week`, `sales.by_month`, `sales.by_hour`,
+  `sales.by_category`, `sales.by_product`, `sales.by_mode`, `sales.dine_in`, `sales.takeaway`, `sales.accounts`,
+  `sales.by_shift`, `sales.evolution`, `products.top`, `products.bottom`, `products.trends`, `products.complements`,
+  `payments.by_method`, `payments.by_day`, `payments.by_shift`, `payments.by_user`, `payments.by_register`,
+  `payments.list`, `sales.voided_accounts`, `sales.cancellations_by_reason`, `products.quantity_changes` y `cash.shifts`.
+  Los demás (variantes, listas de precios, combos, descuentos por motivo, cocina, inventario, costos, compras, caja por
+  día y empleados) no tienen equivalente en el anterior y no cambian.
+- **Cómo se juntan**: los de ventas y productos leen la **unión** del libro de AD-EL POS y el del historial con las mismas
+  columnas (PostgreSQL empuja el periodo a cada rama y usa sus índices de `recognized_at`). Un renglón de la misma
+  dimensión —día, semana ISO, mes, hora, tasa, modalidad, área y mesa, categoría, producto (el historial copia los
+  identificadores del catálogo, las mesas y los usuarios importados)— suma los dos sistemas y se marca «AD-EL POS y
+  sistema anterior». Las ventas (folio `SA-<folio>`, «Venta del sistema anterior»), los cortes (turnos), las cajas, las
+  formas de pago, las cancelaciones, los cambios de cantidad, los complementos («Complementos (sistema anterior)») y los
+  cortes de caja del anterior son **renglones propios** marcados «Sistema anterior»; en «Cobros por día» y «Cobros por
+  usuario» se juntan con los de AD-EL POS del mismo día o del mismo usuario importado. «Evolución de ventas» compara
+  cubetas de tiempo: tiene el filtro pero no la columna.
+- **Importes**: `numeric(19,4)` tal como los guardó el anterior; se suman exactos en SQL y en Go y se redondean a dos
+  decimales solo al mostrar (dos renglones de 10.1234 suman 20.25, no 20.24).
+- **Venta neta del anterior** = lo que se debía de cada venta pagada no cancelada (total + cargo − descuentos;
+  Σ `net` por venta = `legacy_sales.amount_due`). Lo que no cuadra con sus renglones es la **«Diferencia del sistema
+  anterior»** (decisión 2 del propietario): columna `legacy_difference` en los reportes por venta, día, semana, mes, hora,
+  tasa, modalidad, mesa, origen y turno, y cifra resumida en todos los de ventas y productos. Está incluida en la venta
+  neta y fuera del importe bruto: **venta neta = bruto − promociones − descuentos − cortesías + cargos + diferencia del
+  sistema anterior**. Nunca se reparte entre productos (no tiene producto): los reportes de productos usan los renglones
+  con sus complementos y concilian con las cifras «Descuentos y cortesías generales de cuenta», «Cargos generales de
+  cuenta» y «Diferencia del sistema anterior». En «Ventas del periodo», los descuentos, cargos y diferencias del anterior
+  (sin IVA propio) son el renglón «Sin tasa (sistema anterior)».
+- **Cuentas, cantidades y nombres**: cada venta del anterior cuenta una vez como cuenta cerrada; sus cantidades se suman
+  como unidades (el respaldo real no tiene cantidades fraccionarias); en un renglón combinado los nombres son los más
+  recientes de AD-EL POS. Las ventas canceladas nunca son venta (regla de la 9D).
+- **Día comercial**: el mismo `inPeriod`/`businessDate` con la hora de inicio del día y la semana ISO sobre el instante
+  guardado (la importación interpretó la hora local del anterior con la zona del establecimiento): cambiar la hora de
+  inicio reagrupa sin reescribir.
+- **Filtros**: los de algo que solo existe en AD-EL POS —caja, turno, método de pago, lista de precios, origen distinto de
+  «Sistema anterior», motivo del catálogo, quién canceló o modificó— excluyen el historial; los de lo importado
+  —producto, categoría, área, mesa, usuario— lo filtran por el identificador nuevo; «Sin motivo del catálogo» incluye
+  las cancelaciones del anterior.
+- **Cobros del anterior**: tal como se guardaron (también en cero o negativos y los de ventas canceladas o abiertas, como
+  la validación §4.4 por forma de pago), sin devoluciones, correcciones ni propinas (no las registraba), con «Efectivo» y
+  «Tarjeta (sistema anterior)». Quedan **fuera del alcance de Caja y de los turnos en arqueo** (`paymentScope`), que son
+  de los turnos de AD-EL POS. En «Detalle de cobros» un pago de una venta cancelada o abierta se rotula «Cobro de una
+  venta cancelada» o «abierta».
+- **Cancelaciones y cambios de cantidad**: el anterior no guardaba motivo ni quién canceló o modificó (sí quién
+  autorizó): motivo «Sin motivo (sistema anterior)»; importe = lo que se debía de la venta (lo que el anterior contaba
+  como vendido); en «Modificaciones de cantidades», cada cambio frente a la cantidad original del renglón (aumentos y
+  reducciones; sin los registros sin cambio de cantidad ni el importe de la diferencia).
+- **Cortes del anterior** en «Turnos de caja»: fondo, cobros de su corte, retiros (sus cortes parciales), salidas,
+  conteo final y su «Venta del corte (sistema anterior)», sin esperado (no se recalcula); su diferencia guardada exige
+  `cash.expected.read` y solo se muestran a quien consulta en Caja todas las cajas y el historial de turnos.
+- **Resumen ejecutivo**: no incluye el historial (es la operación de AD-EL POS, sin filtros, y mezcla caja, inventario y
+  costos que el anterior no tiene); la comparación con años anteriores se hace en «Evolución de ventas» y «Tendencia de
+  demanda».
+- **Ejecución**: todo en la transacción de solo lectura del Runner, con su semáforo, su `statement_timeout` y sin locks
+  consultivos; una consulta corta por reporte averigua si hay lote vigente.
 
 ## Resumen ejecutivo
 
@@ -856,6 +946,28 @@ Detalle de lo ejecutado en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
   anulación anterior a la 9F directamente en su base (`legacyVoid`). Playwright
   `workflow-stage9f-cancel-units.spec.ts` consulta «Modificaciones de cantidades» y «Productos cancelados» con «Autorizó»
   y exporta el primero a PDF y Excel.
+- **Etapa 9H, fase A**: integración `operations/stage9h_cancel_units_test.go` (`TestStage9HCancelUnitsWithoutAuthorization`:
+  sin `orders.cancel` cancelar y reducir se rechazan sin camino de supervisor; con él, «Modificó» y «Canceló» con quien lo
+  hizo y «Autorizó» vacía en «Modificaciones de cantidades» y «Productos cancelados»; un registro de la 9F simulado en la
+  base sigue mostrando al supervisor y «Actividad por empleado» lo cuenta). La prueba de la 9F quedó solo con la ruta
+  retirada (`TestStage9FRetiredVoid`). Playwright `workflow-stage9h-adjustments.spec.ts` consulta los dos reportes.
+- **Etapa 9H, fase C (parte 2), el historial en los reportes**: unitarias `reports/legacy_test.go` (solo los 27 reportes
+  declaran «Datos» con su forma y las columnas del historial; qué incluye cada valor con y sin lote; sin lote la fuente y
+  las medidas son las de antes y no se envían las columnas; renglones juntados por día). Integración (el historial se
+  carga con el importador real, `legacyimport`, desde un paquete de `legacysynth` con ventas agregadas en fechas límite;
+  base propia desde cero): `TestStage9HReportsWithoutLegacyBatch` (sin lote, ningún reporte ofrece «Datos» ni sus
+  columnas y los 27 dan el mismo JSON con y sin `data_source`, con cualquiera de sus valores) y
+  `TestStage9HLegacyHistoryInReports` (catálogo y metadatos con el lote; los 27 reportes con los tres valores —en 2025,
+  los dos = solo el anterior y solo AD-EL POS en cero; en un periodo con los dos sistemas, cada total = AD-EL POS +
+  anterior—; totales de 2025 contra el lote: venta, IVA, diferencia, bruto, descuentos, cargos, cuentas, productos,
+  tendencia y evolución contra 2024, cobros por forma de pago, detalle, canceladas, cambios de cantidad, complementos y
+  cortes; las 04:59 en el día anterior y las 05:00 en el siguiente, la hora de inicio cambiada a las 04:00, los dos cambios
+  de horario de 2021 en Monterrey, cuatro decimales redondeados solo al mostrar, la diferencia fuera de los productos y
+  en «Sin tasa», la cancelada fuera de la venta con su cobro rotulado, «Sin turno», el alcance de Caja limitado con los
+  cobros del anterior pero sin sus cortes, un producto importado vendido en los dos sistemas en un solo renglón, el
+  resumen ejecutivo sin historial, PDF y Excel con «Datos: Solo sistema anterior» y la marca, y filtros de AD-EL POS que
+  excluyen el historial). Vitest: «Datos» se dibuja del catálogo con su valor por omisión y sin «Sin filtro». Rust:
+  `data_source` en la lista blanca de `reports_*`.
 - **Rust**: `report_routes_are_closed_read_only_and_keyed` (`api.rs`) y las pruebas de `export.rs` (lista cerrada,
   parámetros en lista blanca, tipo y firma antes del diálogo, nombres saneados, escritura atómica, cancelación sin
   escribir, una exportación a la vez y ventana sin permisos de diálogo ni de archivos).
@@ -906,6 +1018,17 @@ Ningún reporte se acercó al límite de 30 s, por lo que no se agregó otra mig
 `restaurant_events(created_at)` para esos tipos, 20 ms y 141 ms: no lo usan (parten de las cuentas anuladas y de las
 unidades canceladas, con el índice de la 0017, y leen el evento por el índice de la cuenta), así que no se agregó.
 
+**El historial del sistema anterior** (`TestStage9HLegacyReportsVolume`, opcional con `ADEL_REPORTS_MEASURE=1`, sin
+`-race`): un historial sintético importado con el importador real con un volumen parecido al real (230 240 ventas de
+10/2019 a 09/2026, 719 258 renglones del libro, 230 242 pagos; base de 784 MB) y `reports.Run` completo en el ejecutor
+real con los tres valores de «Datos». Año 2025 (≈ 33 mil ventas, 103 mil renglones del libro): los de ventas y
+productos entre 86 y 346 ms (`sales.accounts`, con 32 883 renglones, 400 ms; `products.trends`, con el año anterior,
+346 ms), los de cobros entre 7 y 23 ms (`payments.list`, 32 885 renglones, 123 ms), cancelaciones, cambios de cantidad
+y cortes entre 1 y 14 ms, «Solo AD-EL POS» 1–6 ms. El periodo más largo que se admite (400 días, 2024–2025): el más
+lento, `sales.accounts` con 36 036 renglones, 450 ms; `products.trends` 425 ms. Planes: la unión empuja el periodo a cada
+rama (`legacy_sales_recognitions_recognized_idx`; las ventas por día de un año, 29 ms en SQL); las canceladas del
+anterior recorren `legacy_sales` (10 ms con 230 mil ventas). Lejos del límite de 30 s: no se agregaron índices.
+
 **Exportaciones** (`TestReportExports`, con `-race`): `payments.list` con 3 004 renglones, PDF de 95 páginas (307 912
 bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de 4.7 MB en 11.1 s y Excel de 2.7 MB en
 7.7 s.
@@ -952,6 +1075,13 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
   tienen «Autorizó» ni motivo del catálogo. La 0021 se aplicó a la instalación real el 12/11/2026.
 - **«Autorizó» de unidades (9F)**: las cancelaciones y reducciones de unidades anteriores a la 9F no lo tienen (quedan
   vacías); el nombre es el visible actual del supervisor, como en «Cuentas canceladas».
+- **Historial del sistema anterior (9H)**: el periodo más largo sigue siendo de 400 días, así que «todos los años» se
+  comparan año por año («Evolución de ventas» y «Tendencia de demanda» contra el año anterior). «Evolución de ventas» no
+  tiene columna «Datos». Los cortes del anterior no tienen esperado ni dólares y solo aparecen en «Turnos de caja» (no
+  en «Ventas y cobros por turno», «Historial por caja» ni «Caja por día»). Las ventas pagadas del anterior **sin
+  renglones y con total 0** no dejan renglón en el libro del historial, así que no cuentan en «Cuentas cerradas» ni en el
+  número de cuentas de los reportes, aunque sí en «Ventas pagadas» de la validación de la importación (el informe dice
+  cuántas son; revisión de la Fase C, M-7). Sin verificar con el respaldo real (Fase E).
 - **Reportes de la 9C**: «Cuentas anuladas» (desde la 9D, «Cuentas canceladas») muestra la mesa y el área actuales de la cuenta; si la respuesta idempotente
   de una cancelación no tuviera las partidas, la cantidad anterior y la nueva quedan vacías (la diferencia y el importe
   salen siempre del evento).
@@ -970,5 +1100,9 @@ La guía completa está en el comentario del paquete (`backend/internal/reports/
    `registerDashboard(...)`.
 5. Agregar el identificador a `EXPORTABLE_REPORTS` (`desktop/src-tauri/src/export.rs`) y cualquier filtro nuevo a
    `allowed_query_keys` de `api.rs`; la interfaz lo muestra sin pantalla nueva.
+   Si el reporte debe incluir el historial del sistema anterior (etapa 9H), declarar `withDataSource(...)`, las columnas
+   con `withLegacyColumns(...)` y leer `query.ledgerFrom()`/`query.ledgerExtras()` (o una consulta propia del historial
+   cuando `query.legacy.History`), marcando lo de AD-EL POS con `query.markNative`; sin lote la consulta debe ser la de
+   antes (ver `legacy.go`).
 6. Pruebas: el registro se valida solo (`reports_test.go`); agregar integración con totales contra los registros,
    permisos por API directa y paginación.

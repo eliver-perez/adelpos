@@ -65,6 +65,13 @@ pub const MENU_ACTIONS: &[MenuAction] = &[
         mac: Some("CmdOrCtrl+P"),
         other: Some("CmdOrCtrl+P"),
     },
+    // Etapa 9H (fase D): solo abre el asistente de migración (no ejecuta nada por sí mismo).
+    MenuAction {
+        id: "file.legacy_migration",
+        label: "Migrar del sistema anterior…",
+        mac: None,
+        other: None,
+    },
     MenuAction {
         id: "file.logout",
         label: "Cerrar sesión",
@@ -273,6 +280,8 @@ pub fn layout(platform: Platform) -> Vec<Section> {
             Action("file.takeaway_order"),
             Separator,
             Action("file.print_precheck"),
+            Separator,
+            Action("file.legacy_migration"),
             Separator,
             Action("file.logout"),
             Separator,
@@ -620,6 +629,7 @@ mod tests {
                     "Cuenta sin mesa",
                     "Nuevo pedido para llevar",
                     "Imprimir precuenta",
+                    "Migrar del sistema anterior…",
                     "Cerrar sesión"
                 ]
             );

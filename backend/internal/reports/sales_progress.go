@@ -136,7 +136,7 @@ func registerSalesEvolution() {
 		ID: "sales.evolution", Group: "sales", Title: "Evolución de ventas",
 		Description: "Venta neta del periodo frente al periodo anterior equivalente, por día, semana o mes.",
 		Permissions: []string{PermissionSales}, Comparison: true, DateBasis: salesDateBasis,
-		Filters: append([]Filter{filterChoice("group_by", "Agrupar", "day", evolutionGrouping...)}, salesFilters()...),
+		Filters: append([]Filter{filterChoice("group_by", "Agrupar", "day", evolutionGrouping...)}, legacySalesFilters()...),
 		Columns: []Column{
 			textColumn("bucket", "Periodo"),
 			dateColumn("bucket_start", "Desde"),
@@ -197,7 +197,7 @@ func bucketTotals(ctx context.Context, query *Query, period *businessday.Period,
 	case "month":
 		expression = "date_trunc('month'," + expression + ")::date"
 	}
-	rows, err := query.Tx.Query(ctx, `SELECT `+expression+`,coalesce(sum(r.net),0)::text FROM app.sales_recognitions r
+	rows, err := query.Tx.Query(ctx, `SELECT `+expression+`,coalesce(sum(r.net),0)::text FROM `+query.ledgerFrom()+`
         WHERE true`+ledgerConditions(query).sql()+` GROUP BY 1`, query.PeriodArgs(period))
 	if err != nil {
 		return nil, err
@@ -241,7 +241,7 @@ func salesEvolution(ctx context.Context, query *Query) (*Dataset, error) {
 		return nil, err
 	}
 	rows, extra := evolutionRows(grouping, period, previous, current, before)
-	notes := productNotes(query)
+	notes := append(productNotes(query), legacyNotes(query)...)
 	if extra > 0 {
 		singular, pluralForm := bucketNouns(grouping)
 		notes = append(notes, "El periodo anterior tiene "+plural.Count(extra, singular, pluralForm)+" más: "+

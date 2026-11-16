@@ -36,8 +36,16 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
    `offline-orders-v1`, `state-recovery-v1`, `client-version-check`, `openapi-v1`…).
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>`. Los tokens se guardan en el almacén seguro del sistema. Go valida terminal,
-   sesión y permisos en cada petición. **Una sola sesión activa por usuario** en todo el sistema (decisión D9): iniciar
-   sesión en otro dispositivo cierra la anterior (`SESSION_REPLACED`).
+   sesión y permisos en cada petición. **Una sesión activa por usuario y por dispositivo** (desde la etapa 9H, decisión
+   del propietario; en la 9G era una sola por usuario en todo el sistema, decisión D9): el mismo usuario puede tener
+   sesión a la vez en varios dispositivos (por ejemplo, una caja y un teléfono). Iniciar sesión **de nuevo en el mismo
+   dispositivo** cierra la sesión anterior de ese dispositivo (`SESSION_REPLACED`); en otro dispositivo, no. Cerrar
+   sesión cierra solo la de ese dispositivo; cambiar la contraseña, revocar el dispositivo, desactivar al usuario o el
+   restablecimiento de soporte siguen cerrando las suyas como antes (`SESSION_REVOKED`; revocar el dispositivo,
+   `DEVICE_REVOKED`). Lo que depende del dispositivo sigue siendo de cada uno: su caja física y el turno de caja, la
+   pantalla de inicio, las estaciones de cocina que ve, el canal de eventos (hasta 2 conexiones por dispositivo) y
+   `restaurant/state`. «Sesiones activas por tipo de terminal» (`devices/sessions-summary`, de administración, fuera de
+   este contrato) cuenta sesiones, no usuarios.
 5. **Errores**: `{"error": {"code", "message", "request_id", "details"?}}`. `message` está en español para mostrarse
    tal cual; el cliente decide por `code`. 401 `DEVICE_*` / `SESSION_*` borra la sesión (y con `DEVICE_REVOKED` o
    `DEVICE_REQUIRED`, la credencial de la terminal: hay que emparejar otra vez).

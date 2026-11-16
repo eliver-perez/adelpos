@@ -147,22 +147,9 @@ func (handler *service) authorizeRoute(parts []string) error {
 		switch parts[2] {
 		case "draft", "preview", "draft-preview", "confirm", "edit-preview", "edit":
 			return handler.request.Actor.Require("catalog.read", "catalog.prices.read")
-		case "cancel":
-			return handler.requireUnitsCancelRoute()
 		}
 	}
 	return nil
-}
-
-// requireUnitsCancelRoute es el permiso de la ruta de «Cancelar unidades» (etapa 9F, §7.2): quien
-// tiene orders.cancel cancela con su permiso, como antes; sin él, basta poder abrir cuentas
-// (accounts.open, el mismo umbral de «Cancelar cuenta») para pedir la autorización de un supervisor,
-// que la ruta decide antes de escribir (cancellations.go).
-func (handler *service) requireUnitsCancelRoute() error {
-	if handler.request.Actor.Can(unitsCancelPermission) {
-		return nil
-	}
-	return handler.request.Actor.Require("accounts.open")
 }
 
 func routePermission(method string, parts []string) string {
@@ -252,9 +239,10 @@ func routePermission(method string, parts []string) string {
 			return map[string]string{
 				"draft-preview": "orders.capture",
 				"confirm":       "orders.confirm", "edit-preview": "orders.edit", "edit": "orders.edit",
-				// Etapa 9F: «Cancelar unidades» ya no exige orders.cancel en la ruta (sin él procede con
-				// supervisor); authorizeRoute pide además orders.cancel o accounts.open.
-				"cancel": "accounts.read", "split": "accounts.split", "transfer": "accounts.transfer_items",
+				// «Cancelar unidades» exige el permiso propio en la ruta. La 9F lo había sustituido por
+				// accounts.read + accounts.open para pedir la autorización de un supervisor; desde la etapa
+				// 9H (decisión del propietario) no hay camino de supervisor: sin orders.cancel, 403.
+				"cancel": unitsCancelPermission, "split": "accounts.split", "transfer": "accounts.transfer_items",
 				"merge": "accounts.merge", "move": "accounts.move", "assign": "accounts.transfer",
 				"release": "accounts.open",
 				// Etapa 9D: descartar una cuenta vacía (sin motivo) y cancelar una cuenta con motivo. La

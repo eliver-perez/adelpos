@@ -156,6 +156,10 @@ func (service *Service) protected(ctx context.Context, tx pgx.Tx, request Reques
 	if route == "maintenance/backups" || strings.HasPrefix(route, "maintenance/backups/") {
 		return service.backupRoutes(ctx, tx, request, principal, route)
 	}
+	// Migración del sistema anterior (etapa 9H, fase C; legacy_migration.go).
+	if route == "maintenance/legacy" || strings.HasPrefix(route, "maintenance/legacy/") {
+		return service.legacyRoutes(ctx, tx, request, principal, route)
+	}
 	// Mantenimiento del administrador (etapa 9F): «Quitar datos de prueba» (maintenance.go).
 	if strings.HasPrefix(route, "maintenance/") {
 		return service.maintenanceRoutes(ctx, tx, request, principal, route)

@@ -2,18 +2,18 @@ package operations
 
 import (
 	"strings"
-
-	"local/ad-el-pos/server/internal/payments"
 )
 
-// «Cancelar unidades» (POST restaurant/accounts/{id}/cancel). Desde la etapa 9F (§7.2) sigue el
-// criterio de «Cancelar cuenta» de la 9D: con orders.cancel basta el permiso propio; sin él, la
-// autorización puntual de un supervisor que lo tenga (approveWithSupervisor, antes de la primera
-// escritura). Por eso la ruta ya no exige orders.cancel: basta accounts.open o el propio
-// orders.cancel (authorizeRoute), para que quien no tiene el permiso pueda pedir la autorización. El
-// evento item.cancelled guarda quién autorizó (authorized_by, authorized_by_username y
-// authorized_by_name, null si bastó el permiso propio) y la autorización se audita aparte, sin
-// contraseña. Cada cuenta abierta trae cancel_units_requires_authorization, calculado por Go.
+// «Cancelar unidades» (POST restaurant/accounts/{id}/cancel). Exige el permiso propio
+// «Cancelar partidas o cantidades confirmadas» (orders.cancel) en la ruta y queda registrado quién lo
+// hizo: el autor del evento item.cancelled (con el motivo) y la auditoría restaurant.item.cancelled.
+//
+// Etapa 9H (decisión del propietario, §2.2): no hay autorización de supervisor. Antes de la 9F era
+// igual (la ruta exigía orders.cancel); la 9F permitió hacerlo sin el permiso con la autorización
+// puntual de un supervisor (approveWithSupervisor, authorized_by en el evento y
+// cancel_units_requires_authorization en la cuenta), y la 9H lo retira. Los eventos de la 9F que
+// guardaron quién autorizó se conservan y los reportes los siguen mostrando en «Autorizó»; los nuevos
+// ya no llevan esos campos. «Cancelar cuenta» (9D) conserva su autorización de supervisor.
 
 // unitsCancelPermission es el permiso propio para cancelar o reducir unidades ya enviadas.
 const unitsCancelPermission = "orders.cancel"
@@ -21,10 +21,9 @@ const unitsCancelPermission = "orders.cancel"
 func (handler *service) cancel(id string) (any, error) {
 	var input struct {
 		Mutation
-		VersionID     string                       `json:"version_id"`
-		Quantity      int                          `json:"quantity"`
-		Reason        string                       `json:"reason"`
-		Authorization *payments.AuthorizationInput `json:"authorization"`
+		VersionID string `json:"version_id"`
+		Quantity  int    `json:"quantity"`
+		Reason    string `json:"reason"`
 	}
 	if err := decode(handler.request.Body, &input); err != nil {
 		return nil, err
@@ -58,22 +57,12 @@ func (handler *service) cancel(id string) (any, error) {
 		return nil, handler.requireUnitsFree(held)
 	}
 	selected := free[len(free)-input.Quantity:]
-	// Las validaciones de la partida van antes de la autorización: una cantidad imposible o una
-	// unidad pagada se informan sin pedir la contraseña del supervisor (ni contar un intento).
-	supervisor, err := handler.approveWithSupervisor(unitsCancelRule, input.Authorization)
-	if err != nil {
-		return nil, err
-	}
 	previous, err := readOne[versionRecord](handler.ctx, handler.tx,
 		"SELECT to_jsonb(v) FROM app.restaurant_item_versions v WHERE id=$1", input.VersionID)
 	if err != nil {
 		return nil, err
 	}
-	authorization, err := handler.authorizationFields(supervisor)
-	if err != nil {
-		return nil, err
-	}
-	// Desde aquí se escribe: la autorización y todos los permisos ya se comprobaron.
+	// Desde aquí se escribe: los permisos ya se comprobaron.
 	if err := handler.touch(id, input.Revision); err != nil {
 		return nil, err
 	}
@@ -87,16 +76,8 @@ func (handler *service) cancel(id string) (any, error) {
 	if err := handler.requireAccountCovered(id); err != nil {
 		return nil, err
 	}
-	if err := handler.auditSupervisor(id, supervisor, "item_cancel", map[string]any{
-		"version_id": input.VersionID, "quantity": input.Quantity, "amount": unitTotals(selected).Total,
-	}); err != nil {
-		return nil, err
-	}
 	after := map[string]any{
 		"version_id": input.VersionID, "quantity": input.Quantity, "unit_ids": identifiers, "reason": input.Reason,
-	}
-	for key, value := range authorization {
-		after[key] = value
 	}
 	if err := handler.event(id, nil, "item.cancelled", map[string]any{
 		"units":      selected,

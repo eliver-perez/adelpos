@@ -73,8 +73,8 @@ var Permissions = []Permission{
 	{"orders.capture", "Capturar y editar borradores de pedidos"},
 	{"orders.confirm", "Confirmar pedidos"},
 	{"orders.edit", "Modificar partidas confirmadas sin aprobación adicional"},
-	// Etapa 9F: sin orders.cancel, cancelar o reducir unidades enviadas procede con la autorización de
-	// un supervisor que lo tenga.
+	// Permiso propio para cancelar o reducir unidades enviadas. La 9F permitió hacerlo sin él con la
+	// autorización de un supervisor; desde la 9H (decisión del propietario) no hay ese camino.
 	{"orders.cancel", "Cancelar partidas o cantidades confirmadas"},
 	{"orders.price_list.manage", "Seleccionar listas de precios para nuevas capturas"},
 	{"orders.history.read", "Consultar historial de pedidos y cuentas"},

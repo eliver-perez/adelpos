@@ -14,6 +14,7 @@ import type { TestDataEntry, TestDataPreview, TestDataResult } from '../services
 import { errorMessage, notifyError, notifySuccess } from '../services/notify';
 import { countLabel } from '../services/plural';
 import { BackupSection } from './maintenance/BackupSection';
+import { LegacyMigrationSection } from './maintenance/LegacyMigrationSection';
 import { ModalitySection, ServiceSection } from './maintenance/ServerSections';
 
 // Mantenimiento del administrador (etapa 9F, §3): «Quitar datos de prueba». La lista la arma Go con la
@@ -96,7 +97,14 @@ function confirmationMessage(preview: TestDataPreview) {
   );
 }
 
-export function MaintenancePage() {
+export function MaintenancePage({
+  mainComputer,
+  onOpenMigration,
+}: {
+  // Etapa 9H: «Migrar del sistema anterior» solo en la computadora principal.
+  mainComputer: boolean;
+  onOpenMigration: () => void;
+}) {
   const [preview, setPreview] = useState<TestDataPreview | null>(null);
   const [result, setResult] = useState<TestDataResult | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -170,6 +178,8 @@ export function MaintenancePage() {
       <ServiceSection />
       <BackupSection />
       <ModalitySection />
+      {/* Etapa 9H (fase D): asistente de migración del sistema anterior. */}
+      <LegacyMigrationSection mainComputer={mainComputer} onOpen={onOpenMigration} />
       <section
         className="surface panel maintenance-panel"
         aria-labelledby="maintenance-test-data-title"

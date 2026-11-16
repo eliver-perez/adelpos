@@ -17,6 +17,7 @@ import (
 	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/documents"
 	"local/ad-el-pos/server/internal/kitchen"
+	"local/ad-el-pos/server/internal/legacyimport"
 	"local/ad-el-pos/server/internal/maintenance"
 	"local/ad-el-pos/server/internal/reports"
 )
@@ -58,6 +59,9 @@ type Service struct {
 	// trabajador diario de main.go usa el mismo. Sin valor (pruebas que no lo necesitan), las rutas de respaldos
 	// responden 503.
 	ScheduledBackups *backupschedule.Runner
+	// Legacy es la migración del sistema anterior (etapa 9H, fase C; legacy_migration.go): subidas, corridas y su
+	// trabajador, que arranca main.go. Sin valor, las rutas de la migración responden 503.
+	Legacy *legacyimport.Manager
 	// Logger recibe el detalle técnico de los fallos que la interfaz explica sin términos técnicos.
 	Logger      *slog.Logger
 	reportsOnce sync.Once
@@ -356,8 +360,9 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 		return principal, err
 	}
 	if revoked || !active {
+		// Desde la etapa 9H solo un nuevo inicio de sesión en esta misma terminal reemplaza la sesión.
 		if reason == "replaced" {
-			return principal, unauthorized("SESSION_REPLACED", "Tu sesión se cerró porque el usuario inició sesión en otra terminal.")
+			return principal, unauthorized("SESSION_REPLACED", "Tu sesión se cerró porque el usuario inició sesión de nuevo en esta terminal.")
 		}
 		return principal, unauthorized("SESSION_REVOKED", "Tu sesión fue revocada. Inicia sesión nuevamente.")
 	}

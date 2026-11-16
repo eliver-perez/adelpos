@@ -3,27 +3,21 @@ import type { FormEvent } from 'react';
 import { useConfirmDialog } from '../../components/ConfirmDialog';
 import { Notice } from '../../components/Forms';
 import { IconLabel } from '../../components/Icon';
-import { SupervisorAuthorization } from '../../components/SupervisorAuthorization';
 import { IntegerField, TextField } from '../../components/catalog/EditorFields';
-import { useSupervisorAuthorization } from '../../hooks/useSupervisorAuthorization';
 import { notifyError, notifySuccess } from '../../services/notify';
 import { countLabel } from '../../services/plural';
 import type { Bill, CancelUnitsInput, ConfirmedLine } from '../../services/restaurant';
 import { uncertainError } from './capture/draftSync';
 import type { ExecuteMutation } from './OperationsAdmin';
 
-// Texto del formulario de autorización de «Cancelar unidades» (etapa 9F, §7.2).
-export const cancelUnitsAuthorizationText =
-  'Cancelar unidades enviadas a cocina requiere la autorización de un supervisor con el permiso «Cancelar partidas o cantidades confirmadas». Es puntual: no inicia sesión ni cambia la sesión del supervisor en su terminal.';
-
 // Cancelación de unidades confirmadas. Antes de escribir se confirma con el diálogo estándar de
 // peligro (etapa 7.1): la acción retira unidades enviadas a cocina. El resultado se avisa con el
 // sistema único de mensajes; un resultado incierto queda en «Recuperar resultado» de la página.
 //
-// Etapa 9F (§7.2): como «Cancelar cuenta», basta el permiso propio («Cancelar partidas o cantidades
-// confirmadas»); sin él, Go lo indica en la cuenta (`cancel_units_requires_authorization`) y el panel
-// pide desde el principio la autorización de un supervisor. Un rechazo AUTHORIZATION_REQUIRED también
-// la muestra. La contraseña sale del formulario al enviar y el almacén de pendientes no la guarda.
+// Etapa 9H (§2.2, decisión del propietario): no pide autorización de supervisor. Solo se ofrece a
+// quien tiene el permiso propio «Cancelar partidas o cantidades confirmadas» (el menú del producto lo
+// decide con los permisos de la sesión) y Go lo vuelve a exigir; el evento guarda quién canceló. La
+// 9F había agregado aquí la autorización de un supervisor para quien no tenía el permiso.
 export function CancelItem({
   bill,
   line,
@@ -42,27 +36,22 @@ export function CancelItem({
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const { confirm, dialog } = useConfirmDialog();
-  const auth = useSupervisorAuthorization(
-    bill.account.cancel_units_requires_authorization === true,
-  );
   const stale = revision !== bill.account.revision;
   const locked = busy || stale || saving;
   const name = line.quote_line.name;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (locked || !auth.ready) {
+    if (locked) {
       return;
     }
     const units = countLabel(quantity, 'unidad', 'unidades');
-    const supervisor = auth.visible ? auth.username.trim() : '';
     const confirmed = await confirm({
       title: `¿Cancelar ${units} de ${name}?`,
       message: (
         <>
           <p>Se conservarán la partida y el motivo en el historial.</p>
           <p>Esta operación no registra una devolución financiera.</p>
-          {supervisor && <p>Autoriza: {supervisor}</p>}
         </>
       ),
       confirmLabel: 'Cancelar unidades',
@@ -72,12 +61,7 @@ export function CancelItem({
     if (!confirmed) {
       return;
     }
-    // La contraseña del supervisor sale del formulario antes de enviar, sea cual sea el resultado.
-    const authorization = auth.take();
     const body: CancelUnitsInput = { revision, version_id: line.version_id, quantity, reason };
-    if (authorization) {
-      body.authorization = authorization;
-    }
     setSaving(true);
     try {
       await execute('restaurant_cancel', {
@@ -87,10 +71,6 @@ export function CancelItem({
       notifySuccess(`Cancelación registrada: ${units} de ${name}`);
       onClose();
     } catch (problem) {
-      // Un rechazo de la autorización se explica en su formulario, que se muestra si no estaba.
-      if (auth.handleError(problem)) {
-        return;
-      }
       if (!uncertainError(problem)) {
         notifyError(problem, 'No se pudieron cancelar las unidades.');
       }
@@ -123,14 +103,9 @@ export function CancelItem({
             onChange={setQuantity}
           />
           <TextField label="Motivo de cancelación" value={reason} onChange={setReason} required />
-          <SupervisorAuthorization
-            auth={auth}
-            disabled={locked}
-            description={cancelUnitsAuthorizationText}
-          />
         </fieldset>
         <div className="form-actions">
-          <button type="submit" className="danger-solid-button" disabled={locked || !auth.ready}>
+          <button type="submit" className="danger-solid-button" disabled={locked}>
             <IconLabel icon="trash">
               {saving ? 'Cancelando…' : 'Confirmar cancelación de unidades'}
             </IconLabel>

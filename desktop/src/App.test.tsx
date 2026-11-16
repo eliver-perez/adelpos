@@ -123,7 +123,8 @@ beforeEach(() => {
             body: {
               error: {
                 code: 'SESSION_REPLACED',
-                message: 'Tu sesión se cerró por un nuevo acceso en otra terminal.',
+                message:
+                  'Tu sesión se cerró porque el usuario inició sesión de nuevo en esta terminal.',
               },
             },
           };
@@ -296,7 +297,9 @@ describe('acceso y recuperación de la interfaz', () => {
     });
     expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeTruthy();
     expect(
-      screen.getByText('Tu sesión se cerró por un nuevo acceso en otra terminal.'),
+      screen.getByText(
+        'Tu sesión se cerró porque el usuario inició sesión de nuevo en esta terminal.',
+      ),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Personal' })).toBeNull();
   });
