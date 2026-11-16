@@ -266,5 +266,6 @@ func (handler *service) retryChange(id string) (any, error) {
 	if err := handler.integrateChange(id, accountID, kind, payload); err != nil {
 		return nil, err
 	}
+	handler.notePreparationAccount(accountID)
 	return map[string]bool{"reviewed": true}, handler.history("change.retried", &id, nil, map[string]string{"event_id": id})
 }

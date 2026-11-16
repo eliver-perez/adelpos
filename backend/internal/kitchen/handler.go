@@ -65,7 +65,7 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 			return nil, err
 		}
 	}
-	handler := service{ctx: ctx, tx: tx, request: request, audit: audit}
+	handler := service{ctx: ctx, tx: tx, request: request, audit: audit, preparation: map[string]bool{}}
 	if request.Method == "GET" {
 		return handler.read(parts)
 	}
@@ -109,6 +109,11 @@ func Handle(ctx context.Context, tx pgx.Tx, request Request, audit Audit) (any, 
 	}
 	result, err := handler.write(parts)
 	if err != nil {
+		return nil, err
+	}
+	// Etapa A1 (A1-D11): avanzar, liberar, programar o reintentar un aviso cambia la preparación de sus cuentas; el
+	// mesero sin permisos de cocina se entera por el ámbito restaurant (preparation.go).
+	if err := handler.publishPreparation(); err != nil {
 		return nil, err
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO app.restaurant_operations(id,actor_id,device_id,route,fingerprint,response)
