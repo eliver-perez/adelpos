@@ -35,7 +35,7 @@ import { screenAuthorized, sectionByID } from '../../navigation/sections';
 import { dashboardRefreshMilliseconds } from './DashboardView';
 import { ReportChart } from './ReportChart';
 import { ReportsPage } from './ReportsPage';
-import { chooseOptionAsync, chooseValue, waitForOption } from '../../testing/select';
+import { chooseOptionAsync, chooseValue, openSelect, waitForOption } from '../../testing/select';
 
 const native = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke, isTauri: () => true }));
@@ -708,6 +708,50 @@ describe('reporte: tabla, filtros, paginación y estados', () => {
     await waitFor(() => expect(requests('reports_run').at(-1)?.id).toBe('sales.by_product'));
     expect(requests('reports_run').at(-1)?.query).toMatchObject({ period: 'yesterday' });
     expect(requests('reports_run').at(-1)?.query.mode).toBeUndefined();
+  });
+
+  it('«Datos» (historial del sistema anterior) sale del catálogo de Go con su valor por omisión', async () => {
+    // Etapa 9H: con un lote importado vigente, Go agrega el filtro «Datos» (choice con valor por omisión, sin «Sin
+    // filtro») y la columna «Datos»; la pantalla no los conoce: los dibuja del catálogo y del resultado.
+    const withHistory: CatalogReport = {
+      ...salesByDay,
+      filters: [
+        {
+          key: 'data_source',
+          label: 'Datos',
+          type: 'choice',
+          default: 'all',
+          options: [
+            { value: 'all', label: 'AD-EL POS y sistema anterior' },
+            { value: 'native', label: 'Solo AD-EL POS' },
+            { value: 'legacy', label: 'Solo sistema anterior' },
+          ],
+        },
+        ...salesByDay.filters,
+      ],
+    };
+    catalog = {
+      ...catalogFor({ payments: false }),
+      groups: [{ id: 'sales', title: 'Ventas', reports: [withHistory] }],
+    };
+    renderPage();
+    await screen.findByRole('heading', { name: 'Resumen ejecutivo' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Ventas' }));
+    await screen.findByRole('heading', { name: 'Ventas por día' });
+    const source = await screen.findByRole('combobox', { name: 'Datos' });
+    expect(source.getAttribute('value')).toBe('all');
+    // Sin elegir nada no se envía: Go aplica su valor por omisión.
+    await waitFor(() => expect(requests('reports_run').at(-1)?.id).toBe('sales.by_day'));
+    expect(requests('reports_run').at(-1)?.query.data_source).toBeUndefined();
+    const listbox = openSelect(source);
+    expect(within(listbox).queryByRole('option', { name: 'Sin filtro' })).toBeNull();
+    expect(
+      within(listbox)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['AD-EL POS y sistema anterior', 'Solo AD-EL POS', 'Solo sistema anterior']);
+    chooseValue(source, 'legacy');
+    await waitFor(() => expect(requests('reports_run').at(-1)?.query.data_source).toBe('legacy'));
   });
 
   it('un filtro con el mismo parámetro pero otra fuente no se hereda entre reportes', async () => {
