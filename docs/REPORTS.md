@@ -865,6 +865,11 @@ Detalle de lo ejecutado en [VERIFICATION_STAGE9A.md](VERIFICATION_STAGE9A.md).
   anulación anterior a la 9F directamente en su base (`legacyVoid`). Playwright
   `workflow-stage9f-cancel-units.spec.ts` consulta «Modificaciones de cantidades» y «Productos cancelados» con «Autorizó»
   y exporta el primero a PDF y Excel.
+- **Etapa 9H, fase A**: integración `operations/stage9h_cancel_units_test.go` (`TestStage9HCancelUnitsWithoutAuthorization`:
+  sin `orders.cancel` cancelar y reducir se rechazan sin camino de supervisor; con él, «Modificó» y «Canceló» con quien lo
+  hizo y «Autorizó» vacía en «Modificaciones de cantidades» y «Productos cancelados»; un registro de la 9F simulado en la
+  base sigue mostrando al supervisor y «Actividad por empleado» lo cuenta). La prueba de la 9F quedó solo con la ruta
+  retirada (`TestStage9FRetiredVoid`). Playwright `workflow-stage9h-adjustments.spec.ts` consulta los dos reportes.
 - **Rust**: `report_routes_are_closed_read_only_and_keyed` (`api.rs`) y las pruebas de `export.rs` (lista cerrada,
   parámetros en lista blanca, tipo y firma antes del diálogo, nombres saneados, escritura atómica, cancelación sin
   escribir, una exportación a la vez y ventana sin permisos de diálogo ni de archivos).

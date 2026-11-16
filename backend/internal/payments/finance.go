@@ -46,10 +46,13 @@ type unitState struct {
 	Ordinal   int
 	Name      string
 	Notes     string
-	Total     decimal.Decimal
-	TaxRate   int
-	Discount  decimal.Decimal
-	Paid      decimal.Decimal
+	// Subtotal es el precio comercial de la unidad antes de promociones y descuentos (el precio
+	// unitario del motor del catálogo que Go guardó al confirmarla); Total ya resta la promoción.
+	Subtotal decimal.Decimal
+	Total    decimal.Decimal
+	TaxRate  int
+	Discount decimal.Decimal
+	Paid     decimal.Decimal
 }
 
 // Due es lo que la unidad debe tras descuentos manuales vigentes.
@@ -76,7 +79,7 @@ func (unit unitState) Status() string {
 const activeAdjustment = "NOT EXISTS(SELECT FROM app.account_adjustment_voids v WHERE v.adjustment_id=j.id)"
 
 func readUnits(ctx context.Context, tx pgx.Tx, accountID string) ([]unitState, error) {
-	rows, err := tx.Query(ctx, `SELECT u.id,u.version_id,u.item_id,u.ordinal,coalesce(v.quote_line->>'name',''),coalesce(v.request->'customization'->>'notes',''),u.total::text,v.tax_rate,
+	rows, err := tx.Query(ctx, `SELECT u.id,u.version_id,u.item_id,u.ordinal,coalesce(v.quote_line->>'name',''),coalesce(v.request->'customization'->>'notes',''),u.subtotal::text,u.total::text,v.tax_rate,
         coalesce((SELECT sum(a.amount) FROM app.account_adjustment_allocations a JOIN app.account_adjustments j ON j.id=a.adjustment_id
             WHERE a.unit_id=u.id AND j.kind='discount' AND `+activeAdjustment+`),0)::numeric(18,2)::text,
         (coalesce((SELECT sum(p.amount) FROM app.payment_allocations p WHERE p.unit_id=u.id),0)
@@ -90,11 +93,12 @@ func readUnits(ctx context.Context, tx pgx.Tx, accountID string) ([]unitState, e
 	units := []unitState{}
 	for rows.Next() {
 		var unit unitState
-		var total, discount, paid string
-		if err := rows.Scan(&unit.ID, &unit.VersionID, &unit.ItemID, &unit.Ordinal, &unit.Name, &unit.Notes, &total, &unit.TaxRate,
+		var subtotal, total, discount, paid string
+		if err := rows.Scan(&unit.ID, &unit.VersionID, &unit.ItemID, &unit.Ordinal, &unit.Name, &unit.Notes, &subtotal, &total, &unit.TaxRate,
 			&discount, &paid); err != nil {
 			return nil, err
 		}
+		unit.Subtotal = decimal.RequireFromString(subtotal)
 		unit.Total = decimal.RequireFromString(total)
 		unit.Discount = decimal.RequireFromString(discount)
 		unit.Paid = decimal.RequireFromString(paid)
@@ -277,6 +281,11 @@ type FinanceLine struct {
 	Due             string        `json:"due"`
 	Remaining       string        `json:"remaining"`
 	Units           []FinanceUnit `json:"units"`
+	// UnitPrice (etapa 9H, §2.3) es el precio comercial de una unidad de la partida (el subtotal que
+	// comparten sus unidades, antes de promociones y descuentos) para la opción «Mostrar precio
+	// unitario» de la precuenta y el ticket; vacío si sus unidades no comparten un mismo precio. Solo
+	// lo usan los documentos: no forma parte de la respuesta de cobros.
+	UnitPrice string `json:"-"`
 }
 
 type Delivery struct {
@@ -488,9 +497,16 @@ func groupLines(units []unitState) []FinanceLine {
 		if !found {
 			position = len(lines)
 			positions[unit.VersionID] = position
-			lines = append(lines, FinanceLine{VersionID: unit.VersionID, ItemID: unit.ItemID, Name: unit.Name, Notes: unit.Notes, Due: "0.00", Remaining: "0.00"})
+			lines = append(lines, FinanceLine{
+				VersionID: unit.VersionID, ItemID: unit.ItemID, Name: unit.Name, Notes: unit.Notes, Due: "0.00", Remaining: "0.00",
+				UnitPrice: money(unit.Subtotal),
+			})
 		}
 		line := &lines[position]
+		// Si una unidad de la partida tiene otro precio, la partida no tiene un precio unitario único.
+		if line.UnitPrice != "" && line.UnitPrice != money(unit.Subtotal) {
+			line.UnitPrice = ""
+		}
 		line.Quantity++
 		switch unit.Status() {
 		case "settled":

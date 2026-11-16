@@ -3051,7 +3051,7 @@ AUTHORIZATION_INSUFFICIENT` («El supervisor indicado no tiene permiso para canc
   Como Go acepta las claves sin distinguir mayúsculas, la huella de `restaurant/*` quita la contraseña de cualquier
   objeto `authorization` sin distinguirlas (`Authorization`, `Password`, `PASSWORD`…), en cualquier nivel del cuerpo
   (revisión independiente de la 9F, B3).
-- **Campos nuevos de lectura** (los calcula Go; React no los deduce):
+- **Campos nuevos de lectura** (los calcula Go; React no los deduce; **retirados en la etapa 9H**):
 
 | Campo                                 | Dónde                        | Significado                                                                                                       |
 | ------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -3637,3 +3637,15 @@ PERMISSION_DENIED` («Reducir la cantidad de un producto enviado a cocina requie
 - **Reportes**: «Modificaciones de cantidades» y «Productos cancelados» conservan la columna `authorized_by` «Autorizó»
   (vacía en lo nuevo, con el supervisor en los registros de la 9F y con quien autorizó cancelar la cuenta en las partidas
   de una cuenta cancelada); «Actividad por empleado» sigue contando las autorizaciones de la 9F.
+
+## Etapa 9H · precio unitario por renglón (fase A, sin migración)
+
+- **Plantillas** (`documents/templates*`, `documents/preview`, `documents/samples`, `GET documents/catalog`): el bloque
+  `products` de la precuenta y el ticket acepta `options.show_unit_price` (booleano, `false` por omisión); el catálogo lo
+  ofrece como opción `boolean` «Mostrar precio unitario» con su `help`. Mientras está en `false` se omite de la forma
+  canónica (las predeterminadas y las plantillas guardadas no cambian); con `true` se guarda. Otro tipo de valor o la
+  clave en otro bloque (por ejemplo `kitchen_items`) es `422 TEMPLATE_INVALID`, como cualquier opción desconocida.
+- **Datos guardados**: cada partida de la precuenta y el ticket (`kitchen_tickets.document` y `GET
+payments/accounts/{id}/precheck`) agrega `unit_price` (decimal en texto, omitido si no existe), el precio comercial de
+  una unidad que calculó Go antes de promociones y descuentos. `amount` no cambia. La respuesta de cobros
+  (`payments/accounts/{id}`) no cambia. No forma parte del contrato v1.
