@@ -1127,3 +1127,255 @@ credencial.
   Usuarios.
 
 **Nota del coordinador**: el «Bloqueo por inactividad» quedó en «Editar» del teléfono o tableta (Administración › Terminales) y «Ver configuración» lo muestra; cumple §3.2 («configurable por dispositivo en Administración › Terminales»), así que se conserva así. Rama `etapa-a1-bs` fusionada en `etapa-a1-android` (`bc30780`) sin conflictos; las suites de la fase corrieron sobre su rama, que solo difiere de la fusión en este avance.
+
+---
+
+## Fase E · Servidor
+
+Un agente, en su propio árbol de trabajo (`etapa-a1-es`, desde `etapa-a1-android` en `a139e2e`), en paralelo con la
+fase C/B del dispositivo (otro agente en `android/`). 16/11/2026. **Sin cambio de versión** (sigue 0.12.0, esquema 25:
+la 0025 todavía no está en ninguna instalación) y sin cambios en el escritorio. Migración `0025_android_waiters.sql`,
+**sección E**. Pruebas en copias aisladas (`ISO_TAG=E`): clúster temporal 55499 con una base `adel_pos_test_e_*` por
+paquete. **No se tocó la instalación real** ni `android/`, `scripts/dev.sh`, `.gitignore`, `docs/DEPENDENCIES.md`,
+`CLAUDE.md` ni `AGENTS.md`; `docs/etapas/*.md` con el mismo md5 antes y después. No se usó Go temporal, Playwright ni
+emuladores (no hicieron falta).
+
+Commits en `etapa-a1-es`:
+
+- `cc3e4e5` — evento `restaurant.account.preparation_changed` (A1-D11), `kitchen/preparation.go`.
+- `3e34759` — `error.details.reason: account_not_open` con el estado de la cuenta (§6.4).
+- `3363894` — `replaces_draft_items` en el pedido sin conexión y `restaurant_items.draft_item_id` (0025, sección E) con
+  su comprobación en `TestStageA1Upgrade` (A1-D6).
+- `685c81b` — `event_cursor` en `restaurant/state` y capacidad `waiter-mode-v1`.
+- `70b31c3` — contrato v1 (`openapi.json`, `TestContractV1`), `docs/API_V1.md`, `API_CONTRACTS.md` y
+  `docs/RESTAURANT_OPERATIONS.md`.
+- `d8dd384` — prueba `TestStageA1WaiterMode` (`operations`).
+
+Cada commit compila y pasa `go vet -tags=integration` por sí solo (comprobado con `git archive` de cada uno).
+
+### Qué cambió
+
+**1. Rutas que ya existían, ahora en el contrato para clientes** (`openapi.json`, `docs/API_V1.md` «Modo Mesero»,
+`TestContractV1`). Comprobado en el código antes de documentar (método, ruta, cuerpo, permisos y errores):
+
+- `getRestaurantOverview` — `GET /restaurant/overview` (`operations/areas.go:113`): permisos `restaurant.tables.read`
+  (en la ruta) y `restaurant.areas.read` (en la función); `{areas, tables, settings, timezone}` con los esquemas nuevos
+  `Area`, `RestaurantSettings` y `RestaurantOverview`.
+- `Table` con lo que Go ya enviaba (`operations/models.go:23`): `shape` (`rectangle`/`round`), `x`, `y`, `width`,
+  `height` (lienzo lógico de 1000 × 560, restricciones de la 0004), `seats`, `occupied_seconds`; ahora obligatorias en
+  el esquema junto con `occupied_since` y `long_open`.
+- `cancelUnits` — `POST /restaurant/accounts/{id}/cancel` (`operations/cancellations.go`): `orders.cancel` +
+  `accounts.read`, `{operation_id, revision, version_id, quantity, reason (5–500)}` → `Bill`.
+- `previewEdit` — `POST …/edit-preview` y `editUnits` — `POST …/edit` (`operations/amendments.go`): `orders.edit` +
+  `accounts.read` + `catalog.read` + `catalog.prices.read`; reducir la cantidad exige además `orders.cancel` (403);
+  vista previa `{revision, version_id, line}` → `QuoteResult`; modificar con `operation_id`, `expected_fingerprint`
+  (409 `QUOTE_CHANGED`) y `reason`. Errores documentados: `UNIT_HAS_PAYMENT`, `UNIT_HAS_DISCOUNT`,
+  `ACCOUNT_BELOW_PAYMENTS`, `ACCOUNT_CONFLICT` y los del catálogo al recalcular.
+- `Account` documenta además `assigned_name`, `elapsed_seconds`, `urgency` y `long_open` (opcionales) y los valores de
+  `preparation_state`; `ConfirmedLine.preparation_state` y `state`, también.
+- Capacidad nueva **`waiter-mode-v1`** en `GET version` (`httpapi/router.go`), para que la app compruebe la función en
+  lugar de suponerla por la versión.
+
+**2. Evento de preparación (A1-D11)** — `backend/internal/kitchen/preparation.go` (nuevo):
+
+- `restaurant.account.preparation_changed` con la cuenta como agregado, en el ámbito **`restaurant`** (o **`takeaway`**
+  para una cuenta para llevar, la misma regla de `operations/queries.go` para los eventos de la cuenta, de modo que
+  quien no tiene `takeaway.read` no se entere de los pedidos para llevar). Sin contenido, como todos.
+- Se anota la cuenta (por la pertenencia **actual** de las unidades, que cambia al transferir o dividir) en cada punto
+  que modifica los registros de los que sale `kitchen.VersionPreparation` (liberaciones, unidades liberadas, tareas y
+  avisos pendientes), y se publica **una vez por cuenta** al final de la operación:
+  - API de cocina (`kitchen/handler.go`, después de `write`): `saveStates` (`states.go`, cuentas de las unidades de las
+    tareas), `releaseAction` liberar o programar (`releases.go`), `retryChange` (`changes.go`);
+  - liberación automática (`worker.go`, `ReleaseDue`, una vez por cuenta del lote);
+  - `kitchen.Integrate` (la integración de las operaciones de la cuenta, en su misma transacción): `order.confirmed`,
+    `item.modified`, `item.cancelled`, `account.cancelled` y `account.updated` solo si reprogramó alguna liberación.
+- Todos los escritores de esas tablas están en `kitchen` (comprobado con `grep` de `kitchen_tasks`, `kitchen_releases`,
+  `kitchen_unit_releases` y `kitchen_pending_changes`), así que el punto de publicación es uno por entrada.
+- **Restricciones de `realtime_events`**: no hizo falta cambiarlas (el ámbito `restaurant`/`takeaway` ya existe y
+  `kind` no tiene CHECK); `realtime_events_scope_check` no se tocó.
+- **Escritorio**: `desktop/src/hooks/useRealtime.ts` marca `changed` por mensaje del canal (no por evento) y lanza un
+  solo `adel-server-change`; Rust (`realtime.rs`) pasa el JSON sin filtrar tipos. Un tipo nuevo no rompe nada: en una
+  confirmación el evento llega en el mismo mensaje que `restaurant.order.confirmed` (la misma transacción) y no provoca
+  consultas de más; con un avance de cocina, quien tiene `accounts.read` y no ve cocina (caja, mesero de escritorio)
+  ahora recarga lo visible una vez, que es justo lo que pide A1-D11. No se cambió el escritorio.
+
+**3. Cuenta cerrada mientras tanto (§6.4)** — `ensureOpen` → `accountNotOpen` (`operations/queries.go:112`): el mismo
+`400 OPERATION_VALIDATION` (compatibilidad), con mensaje por estado («La cuenta «Mesa 4» ya se cobró. No admite nuevas
+operaciones.», «…ya se canceló o se liberó…», «…se combinó con otra cuenta…») y `error.details`
+`{reason: "account_not_open", account_id, account_state: closed|voided|merged, merged_into_id}` (esquema
+`AccountNotOpenDetails`). `ensureOpen` es común, así que aplica a guardar el borrador, la vista previa, la vista previa
+del borrador sin guardar, enviar a cocina, cancelar y modificar unidades (y también a transferir, combinar, liberar,
+descartar y cancelar la cuenta). En `submitOfflineOrder`, `account_closed` usa el mismo mensaje y lleva el estado en
+`now`.
+
+**4. Borrador del servidor y pedido sin conexión (A1-D6)** — `operations/offline_orders.go`:
+
+- `replaces_draft_items` (opcional, **solo con `account_id`**, hasta 20 `DraftItem` únicos con cantidad 1–1000 y la
+  forma de personalización del borrador; si no, 400): los renglones del borrador que **ese dispositivo** había guardado
+  y que el pedido sustituye, tal como los vio (`validateReplacedDraft`, `:253`).
+- Revisión (`diagnoseReplacedDraft`, `:430`), con la cuenta abierta: un renglón que sigue **exactamente** igual
+  (producto, presentación, cantidad y personalización con `sameDraftLine`) se quitará; si no, un cambio **aceptable**
+  (`replacedDraftChange`, `:461`) con `item_id` = el id del renglón y `product_id`/`product_name` del que vio:
+  - `draft_item_changed` — sigue en el borrador con otro contenido: «Papas: lo cambiaron en otra terminal. Si confirmas,
+    tu pedido entra como lo capturaste y el cambio de la otra terminal se queda sin enviar en la cuenta.»;
+  - `draft_item_sent` — ya no está y una partida confirmada de la cuenta conserva su id: «Tacos al pastor: ya se envió
+    desde otra terminal. Si confirmas, tu pedido entra completo y puede repetirlo.» (con el mismo dispositivo, «ya se
+    había enviado desde este dispositivo»);
+  - `draft_item_removed` — ya no está y nunca se envió: «…: lo quitaron de la cuenta en otra terminal. Si confirmas, tu
+    pedido entra como lo capturaste.»
+- Al aceptar (`removeReplacedDraft`, `:728`), en la misma transacción y después de `touch`: borra solo esos renglones
+  y publica **lo mismo que un guardado del borrador** (`handler.event("draft.saved", antes, después)`: historia de la
+  cuenta, `restaurant.draft.saved` en tiempo real y auditoría `restaurant.draft.saved`). Los demás renglones (los de
+  otras terminales) conservan su lugar. La respuesta y la auditoría `restaurant.offline_order.accepted` llevan
+  `removed_draft_item_ids`.
+- **Cómo se sabe «ya enviado»**: la partida confirmada no conservaba el id del renglón (`confirmLines` creaba
+  `restaurant_items` con id nuevo). Ahora `confirmLines` (`confirmations.go`) guarda en
+  **`restaurant_items.draft_item_id`** el id que el cliente dio al renglón (del borrador al «Enviar a cocina», o de la
+  partida del pedido sin conexión). Migración **0025, sección E**: la columna (uuid opcional, NULL en lo existente) y el
+  índice parcial `restaurant_items_draft_item_idx`; ninguna fila cambia.
+- Idempotencia: el rechazo no guarda la clave; la confirmación usa la misma `operation_id`; un reintento después de
+  aceptado devuelve la misma respuesta sin quitar nada más; otro contenido con la misma clave,
+  `OFFLINE_ORDER_ALREADY_ACCEPTED`. El mensaje del 409 aceptable ahora menciona «lo que se capturó en otra terminal».
+  Funciona igual con la credencial de envío (es el mismo `operations.Handle`).
+
+**5. Cursor de eventos** — `GET restaurant/state` entrega `event_cursor` (`events.Head`, `events/store.go:54`), leído en
+`operations.Recovery` **con el lock 7820148305 compartido ya tomado y antes** de mesas y cuentas
+(`operations/recovery.go:37`): las escrituras de cuentas, cocina y cobros toman ese lock en exclusiva hasta su commit,
+así que ninguna queda entre el cursor y la lectura; el resto (catálogo) confirma su evento con secuencia mayor (los
+productores toman el lock de eventos 7820148306 hasta el commit) y a lo más provoca una lectura de más. Documentado el
+orden recomendado al volver de segundo plano (`docs/API_V1.md`, «Sesión y recuperación del estado», punto 5).
+
+**Documentación**: `openapi.json`, `docs/API_V1.md` (operaciones, capacidad, cursor, «Modo Mesero», borrador y pedido
+sin conexión, códigos), `API_CONTRACTS.md` («Etapa A1 · modo Mesero en el servidor (fase E, esquema 25)») y
+`docs/RESTAURANT_OPERATIONS.md`.
+
+### Decisiones (con su porqué)
+
+1. **Coincidencia por contenido, no por `device_id` del renglón.** `saveDraft` reescribe el borrador completo y pone
+   en **todas** las filas el autor y el dispositivo de quien guarda (`insertDraftItems`): si otra terminal guarda sin
+   tocar el renglón del mesero, el renglón ya «es» de la otra terminal. Exigir el mismo dispositivo daría un falso
+   «cambiado». Se quita solo lo que el pedido nombra **y** sigue exactamente como lo vio: nunca se borra en silencio lo
+   de otra terminal, y un cliente no gana ningún poder nuevo (con `orders.capture` ya podía reemplazar el borrador).
+2. **Los tres cambios del borrador son aceptables** (como el precio, según el encargo). Al aceptar `draft_item_changed`
+   el renglón de la otra terminal **se queda** en el borrador (no se borra lo ajeno); el mensaje lo dice. `before` y
+   `now` van en `null` en estos tres: el mensaje lo explica y la confirmación se compara por tipo, renglón y producto.
+3. **`draft_item_id` también en las partidas del pedido sin conexión**: si la app reutiliza el id del renglón como id
+   de la partida (lo natural), una segunda cola que sustituya ese renglón lo verá como ya enviado. No es único: un
+   renglón repetido a propósito deja dos partidas.
+4. **Evento de preparación también en las operaciones de la cuenta** (confirmar, modificar, cancelar, reprogramar),
+   aunque esas ya publican su `restaurant.*`: así la regla es una sola («cambiaron los registros de cocina de la
+   cuenta») y la A2 («platillos listos») puede escuchar solo este tipo. Cuesta un evento más por confirmación, en el
+   mismo mensaje del canal. **No** se publica al guardar el borrador ni al transferir o combinar (no cambian registros
+   de cocina; publican su propio evento).
+5. **Ámbito `takeaway` para cuentas para llevar** (el encargo decía «ámbito restaurant»): es la regla de todos los
+   eventos de una cuenta; publicarlo en `restaurant` filtraría la actividad de para llevar a quien no tiene
+   `takeaway.read`. Para el mesero de salón no cambia nada; la A2 lo recibirá con `takeaway.read`.
+6. **Mensajes por estado en `ensureOpen`** (antes uno genérico): el código y el estado no cambian y ningún cliente ni
+   prueba dependía del texto (comprobado con `grep` en Go, escritorio y Playwright).
+7. **Capacidad `waiter-mode-v1`**: la app exige servidor ≥ 0.12.0, pero la convención del proyecto es comprobar
+   capacidades; no cuesta nada y evita depender del número.
+
+### Forma final para el agente de Android
+
+- `GET /api/v1/version` → `capabilities` incluye `waiter-mode-v1`.
+- `GET /api/v1/restaurant/overview` → `{"areas": [{"id","name","description","sort_order","active","revision",
+"table_count"}], "tables": [{"id","area_id","name","shape","x","y","width","height","seats","active",
+"out_of_service","revision","account_count","state","occupied_since","occupied_seconds","balance","long_open"}],
+"settings": {"warning_minutes","overdue_minutes","long_open_hours","revision"}, "timezone"}`. Mapa: lienzo de
+  1000 × 560 por área.
+- `POST /api/v1/restaurant/accounts/{id}/cancel` `{"operation_id","revision","version_id","quantity","reason"}` → `Bill`.
+- `POST …/edit-preview` `{"revision","version_id","line": LineRequest}` → `QuoteResult` (`fingerprint`,
+  `pricing_policy`); `POST …/edit` `{"operation_id","revision","version_id","line","expected_fingerprint","reason"}` →
+  `Bill`. Mismo producto; reducir cantidad exige `orders.cancel`.
+- Tiempo real: `restaurant.account.preparation_changed` (scope `restaurant`, `aggregate_id` = cuenta) → volver a leer
+  `GET restaurant/accounts/{id}`. Uno por cuenta y transacción. `preparation_state` de cuenta: `without_items`,
+  `draft`, `pending_release`, `scheduled`, `released`, `preparing`, `ready`, `change_pending`, `cancelled`; por línea,
+  desde `pending_release`. Transferir/dividir/combinar: el agregado es la cuenta de origen (la de destino, por su
+  revisión en `restaurant/state`).
+- Cuenta que ya no está abierta (en `saveDraft`, `previewDraft`, `confirmDraft`, `cancelUnits`, `previewEdit`,
+  `editUnits`): 400 `OPERATION_VALIDATION` con `error.details = {"reason":"account_not_open","account_id",
+"account_state":"closed|voided|merged","merged_into_id"}` → «Requiere tu revisión» con `error.message`.
+- `POST /api/v1/restaurant/offline-orders` con `destination.account_id` y `"replaces_draft_items": [DraftItem…]` (los
+  renglones que el dispositivo guardó en línea, con el contenido del último `saveDraft` aceptado) → 200 con
+  `removed_draft_item_ids` y `bill.draft` restante; o 409 `ORDER_REQUIRES_CONFIRMATION` con cambios
+  `draft_item_changed` / `draft_item_removed` / `draft_item_sent` (`acceptable: true`, `item_id` = id del renglón,
+  `before`/`now` en `null`, `message` para mostrar), que se confirman como el precio (misma `operation_id`,
+  `confirmation: {catalog_version, changes}`). `account_closed` trae `now` = `closed|voided|merged`.
+- `GET /api/v1/restaurant/state` → `event_cursor`: abrir `GET /api/v1/events?after=<event_cursor>`.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                     | Dónde                                        | Resultado                                |
+| --------------------------------------------------------------------------------------- | -------------------------------------------- | ---------------------------------------- |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)          | `iso.sh go-unit`, al final                   | **Aprobado**                             |
+| `TestStageA1WaiterMode` (6 subpruebas), sola y con `-v`                                 | `go-int ./internal/operations`, base propia  | **ok** (18 s; las 6 subpruebas PASS)     |
+| `go-int ./internal/apicontract` (`TestContractV1` con `contractWaiterMode` y unitarias) | base `adel_pos_test_e_*`                     | **ok** (14 s)                            |
+| `go-int ./internal/database` (`TestStageA1Upgrade` con `checkStageA1DraftItems`)        | idem                                         | **ok** (15 s)                            |
+| `go-int ./internal/kitchen`                                                             | idem (el paquete no tiene pruebas con base)  | **ok** (4 s)                             |
+| `go-int ./internal/administration` (por `recovery.go`)                                  | idem                                         | **ok** (174 s)                           |
+| `go-int ./internal/operations` completo (con las de cocina, programación y 9G)          | idem                                         | **ok** (359 s)                           |
+| `TestClientMinimumVersionByKind` con `waiter-mode-v1`                                   | `internal/httpapi` (unitarias, en `go-unit`) | Aprobada                                 |
+| `format`, `fmt-check` (Prettier, gofmt, `cargo fmt --check`), `sync-check`              | árbol `Es`                                   | Correctos                                |
+| md5 de `docs/etapas/*.md`                                                               | contra `$SP/etapas.md5`, al final            | Idénticos                                |
+| Vitest, `build`, Playwright                                                             | —                                            | No se corrieron: el escritorio no cambió |
+
+`TestStageA1WaiterMode` (`backend/internal/operations/stagea1_waiter_test.go`, base propia) cubre: el mesero (sin
+permisos de cocina ni de para llevar; `kitchen/board` 403) confirma dos partidas → **un** evento de preparación, en la
+misma transacción que `restaurant.order.confirmed` (misma `created_at`); cocina avanza 4 tareas de 2 cuentas en una
+operación → **un evento por cuenta**; el mesero lo recibe **por el SSE** y en su lectura del canal no hay ningún evento
+de cocina; la cuenta y la línea dicen `preparing`; «Listo» de una cuenta avisa solo a esa; una cuenta para llevar avisa
+en `takeaway` y el mesero no la ve. Cuenta descartada (`voided`: guardar y vista previa), combinada (`merged` con
+`merged_into_id`: confirmar, cancelar, vista previa de modificar y modificar) y cobrada (`closed`, simulada en la base:
+guardar y `account_closed` con `now` en el pedido sin conexión), siempre 400 `OPERATION_VALIDATION`. Pedido sin conexión
+que sustituye dos renglones propios (uno cambiado sin conexión y otro quitado): quita esos dos, deja intacto el de la
+otra terminal, conserva `draft_item_id`, publica historia, evento y auditoría del borrador una vez; reintento sin
+duplicar ni tocar el borrador; misma clave con otro contenido → `OFFLINE_ORDER_ALREADY_ACCEPTED`. Renglón cambiado,
+quitado y ya enviado desde otra terminal → 409 con los tres cambios aceptables y sin escribir nada; confirmación con la
+misma clave → entra completo y el renglón de la otra terminal se queda; ya enviado desde el mismo dispositivo → su
+mensaje. Con la **credencial de envío** (tableta `android`, PIN, sin sesión): quita el renglón y el reintento devuelve lo
+mismo; un solo pedido a nombre del mesero y de la tableta. Forma inválida (mesa, repetidos, 21 renglones, cantidad 0)
+→ 400. `event_cursor` = último evento al leer; desde él no queda nada pendiente y llega lo posterior.
+
+`TestContractV1` agrega `contractWaiterMode`: `getRestaurantOverview`, `previewEdit` + `editUnits` (solo observaciones),
+`cancelUnits`, `saveDraft` sobre una cuenta descartada (400 con `details` validado contra `AccountNotOpenDetails`) y un
+pedido sin conexión con `replaces_draft_items` (409 `draft_item_changed`, confirmación y 200 con
+`removed_draft_item_ids`); además que el primer mensaje del canal trae el evento de preparación de la cuenta confirmada y
+que `restaurant/state` trae `event_cursor`.
+
+### No verificado
+
+- La aplicación Android real contra estas rutas (fase E del dispositivo).
+- La liberación automática (`ReleaseDue`) y `retryChange` publicando el evento: el código está, pero la prueba nueva solo
+  ejercita el avance de estados, la confirmación y la cuenta para llevar (las pruebas de programación y de avisos
+  pendientes existentes siguen pasando).
+- El cierre real por cobro antes del rechazo (`closed` se simuló en la base; el rechazo es el mismo `ensureOpen`).
+- Playwright y Vitest: el escritorio no cambió (análisis de `useRealtime.ts` en lugar de prueba).
+- `go-int` de los demás paquetes de la tupla (catalog, payments, reports, designer, identity, backupschedule,
+  `cmd/ad-el-pos-server`, discovery, legacyimport): no se tocaron; quedan para la Fase G.
+
+### Para el coordinador
+
+- **Sin decisiones de negocio cambiadas.** Dos lecturas del encargo que conviene confirmar: el ámbito `takeaway` para
+  el evento de una cuenta para llevar (decisión 5) y que aceptar `draft_item_changed` deja el renglón de la otra
+  terminal en el borrador (decisión 2).
+- Anotado, sin hacerlo (no indispensable para §6–§7):
+  - en transferir, dividir o combinar el evento solo lleva la cuenta de **origen**; la app debe reconocer la de destino
+    por su revisión en `restaurant/state` (documentado). Un evento también para la de destino sería un cambio pequeño
+    en `operations/queries.go` si el agente de Android lo pide;
+  - exponer `draft_item_id` en `ConfirmedLine` (ayudaría a la app a reconciliar sus renglones con lo enviado tras una
+    respuesta perdida; hoy basta reintentar con la misma `operation_id`);
+  - `POST …/draft-preview` (cotizar el borrador sin guardarlo) existe y no está en el contrato; la app puede guardar y
+    usar `previewDraft`.
+- Para `CLAUDE.md` (no lo edité): §6, prueba nueva `TestStageA1WaiterMode` (`operations`), `contractWaiterMode` en
+  `TestContractV1` y `checkStageA1DraftItems` en `TestStageA1Upgrade`; §15, A1-D11 implementada (regla: todo cambio de
+  los registros de cocina de una cuenta publica `restaurant.account.preparation_changed` una vez por transacción desde
+  `kitchen/preparation.go`) y A1-D6 (`replaces_draft_items` y `restaurant_items.draft_item_id`); la capacidad
+  `waiter-mode-v1`.
+- `AGENTS.md`: quien agregue un escritor nuevo de `kitchen_tasks`, `kitchen_releases`, `kitchen_unit_releases` o
+  `kitchen_pending_changes` debe anotar la cuenta (`notePreparationAccount`/`notePreparationUnits`) y publicar al final.
+
+**Decisiones del coordinador al cerrar la Fase E del servidor** (rama `etapa-a1-es` fusionada en `etapa-a1-android`, `da9c5e2`, sin conflictos: no comparte archivos con la Fase A):
+
+- Se acepta publicar el evento de preparación de una cuenta para llevar en el ámbito `takeaway` (regla de todos los eventos de una cuenta; no cambia nada para el mesero de salón).
+- Se acepta que confirmar `draft_item_changed` conserve en el borrador el renglón que cambió otra terminal (nunca se borra en silencio lo ajeno) y que el mensaje lo diga.
+- Lo anotado sin hacer (evento de la cuenta de destino al transferir, `draft_item_id` en `ConfirmedLine`, `draft-preview` en el contrato) se hace solo si el agente de Android de la Fase E lo necesita.
