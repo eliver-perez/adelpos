@@ -3823,3 +3823,63 @@ Sin rutas nuevas: cambian el catálogo y los resultados de `reports/*` (detalle 
   en «Turnos de caja» solo para quien consulta en Caja todas las cajas y el historial, y su diferencia guardada exige
   `cash.expected.read`. El resumen ejecutivo (`reports/dashboard`) no incluye el historial. Sin locks consultivos, como
   todo reporte.
+
+## Etapa A1 · PIN de los meseros (fase B, esquema 25)
+
+Especificación: [docs/etapas/ETAPA_A1_ANDROID.md](docs/etapas/ETAPA_A1_ANDROID.md) §3 y decisiones A1-D1 a A1-D5 de
+[docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md). Las rutas del dispositivo (`auth/pin-users`, `auth/pin-login` y la
+credencial de envío en `restaurant/offline-orders`) son de la API para clientes: [docs/API_V1.md](docs/API_V1.md),
+«Entrada con PIN y credencial de envío», y `internal/apicontract/openapi.json`. Aquí, las de administración y «Mi PIN»,
+que usa el escritorio (no están en el contrato para clientes, como `devices/*`). Código en
+`administration/pin.go` (reglas y administración) y `administration/pin_login.go` (dispositivo y credencial).
+
+| Método | Ruta                     | Permiso                                  | Cuerpo / respuesta                                                                                                                                                                                                                                     |
+| ------ | ------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/users/badge-colors`    | `users.read`                             | La paleta cerrada del distintivo: `[{hex, name}]` (la misma de las categorías del catálogo, `catalog.Palette`).                                                                                                                                        |
+| PUT    | `/users/{id}/pin`        | `users.manage`                           | `{pin?, short_name, badge_color}` → usuario. Con `pin`: asigna o cambia el PIN. Sin `pin` (y el usuario ya tiene uno): solo el nombre corto y el color. Un administrador no se asigna su propio PIN aquí (403: lo hace en «Mi PIN» con su contraseña). |
+| POST   | `/users/{id}/pin/remove` | `users.manage`                           | Sin cuerpo → usuario. Quita el PIN (se puede volver a asignar). Sin PIN: `409 PIN_NOT_SET`.                                                                                                                                                            |
+| POST   | `/users/{id}/pin/unlock` | `users.manage`                           | Sin cuerpo → usuario. Quita el bloqueo por intentos fallidos (sin bloqueo vigente responde igual y no registra nada).                                                                                                                                  |
+| PUT    | `/auth/pin`              | `waiter_devices.use` (el propio usuario) | «Mi PIN»: `{current_password, pin}` → `{has_pin: true, pin_version}`. Contraseña incorrecta: `401 INVALID_CREDENTIALS`. La identidad reservada no tiene PIN (403).                                                                                     |
+| PATCH  | `/devices/{id}`          | `devices.manage`                         | Campo opcional nuevo `idle_lock_seconds` (bloqueo por inactividad, de 30 a 3600; 400 fuera de ese rango). Sin él se conserva el guardado (clientes anteriores). `GET devices`, la configuración, `auth/me` y `restaurant/state` lo informan.           |
+
+- **Reglas del PIN** (las mismas en todas las rutas): de 4 a 6 dígitos ASCII (si no, `400 VALIDATION_ERROR`) y nunca uno
+  trivial (`400 PIN_TOO_SIMPLE`): todos los dígitos iguales, una secuencia ascendente o descendente (también la que da la
+  vuelta, como 7890 o 0987), un bloque de 2 o 3 dígitos repetido completo (1212, 121212, 123123) o uno de la lista corta
+  de muy usados (`commonPINs` de `pin.go`: 2580, 1004, 2000, 112233, 147258…). Se guarda con Argon2id, como las
+  contraseñas.
+- **Nombre corto**: hasta 20 caracteres, sin espacios al principio ni al final; vacío = el nombre visible. **Color**: uno
+  de la paleta o ninguno (vacío); un hexadecimal fuera de la paleta es 400.
+- **`pin_version`** sube al asignar, cambiar o quitar el PIN (no al cambiar solo el nombre corto o el color). Asignar,
+  cambiar o quitar el PIN —también en «Mi PIN»— borra los intentos fallidos, **cierra las sesiones del usuario en
+  dispositivos `android`** (`revoke_reason` `pin_changed` o `pin_removed`; «Mi PIN» conserva la sesión desde la que se
+  hace) y **revoca su credencial de envío** en todos los dispositivos. Las sesiones de escritorio no se tocan.
+  **Desactivar al usuario** (`PATCH users/{id}` con `active: false`) también revoca su credencial (`user_disabled`) y
+  **revocar un dispositivo** (`POST devices/{id}/revoke`), las de ese dispositivo (`device_revoked`).
+- **Usuarios** (`GET users` y la respuesta de cada ruta de usuario): propiedades nuevas `has_pin`, `short_name`,
+  `badge_color` y `pin_locked_until` (`null` si no está bloqueado). Nunca el PIN ni su hash. **`GET auth/me`**: `user.has_pin`.
+- **Bloqueo** (A1-D5): 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN del usuario 5 minutos; al
+  bloquearse, la cuenta vuelve a empezar. La contraseña no se bloquea con el PIN (su límite sigue siendo por usuario y
+  terminal).
+- **Registro de movimientos** (sin el PIN, su hash ni la credencial): `user.pin_set` (`set_by`: `administrator` o
+  `self`, si reemplazó otro, `pin_version`, nombre corto, color y cuántas sesiones y credenciales cerró),
+  `user.pin_badge_changed` (antes y después), `user.pin_removed`, `user.pin_unlocked` (hasta cuándo estaba bloqueado),
+  `session.pin_login` (con el dispositivo y `pin_version`), `session.pin_login_failed` (`reason`: `PIN_INVALID`,
+  `PIN_LOCKED` o `PERMISSION_DENIED`) y `user.pin_locked` (una vez por bloqueo, con el dispositivo, hasta cuándo y los 5
+  fallos).
+- **Base** (0025, sección B): `users.pin_hash`, `pin_set_at`, `pin_version` (0), `short_name`, `badge_color`;
+  `app.pin_attempts` (por usuario); `app.offline_order_credentials` (usuario, dispositivo, SHA-256, `pin_version` con que
+  se emitió, fechas, revocación y motivo; una vigente por usuario y dispositivo); `devices.idle_lock_seconds` (120);
+  permiso `waiter_devices.use` («Entrar con PIN en teléfonos y tabletas de meseros») para el administrador y el rol
+  Mesero (también en una instalación nueva, desde el asistente).
+- **Versiones**: `GET version` informa `min_client_versions` (`desktop` 0.10.0, `android` 0.1.0) y las capacidades
+  `client-versions-by-kind` y `waiter-pin-v1`; la comprobación de `X-Client-Version` usa la mínima del tipo de
+  `X-Client-Kind` (sin tipo, la general, que es la del escritorio). El escritorio 0.12.0 muestra lo del PIN y el bloqueo
+  por inactividad solo si el servidor anuncia `waiter-pin-v1` (`services/serverCapabilities.ts`): con un servidor 0.11.0
+  sigue funcionando sin esas pantallas (no envía `idle_lock_seconds`, que ese servidor rechazaría).
+
+### Puente nativo (`desktop/src-tauri/src/api.rs`)
+
+Operaciones nuevas de la lista cerrada: `user_badge_colors` (`GET users/badge-colors`), `set_user_pin`
+(`PUT users/{id}/pin`), `remove_user_pin` (`POST users/{id}/pin/remove`), `unlock_user_pin`
+(`POST users/{id}/pin/unlock`) y `set_own_pin` (`PUT auth/pin`). `update_device` ya existía (cuerpo con
+`idle_lock_seconds`). El PIN viaja solo en el cuerpo de esas peticiones; nunca se guarda en la terminal.

@@ -105,6 +105,7 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		IfNoneMatch:       request.Header.Get("If-None-Match"),
 		SourceAddress:     sourceAddress(address),
 		PairingSecret:     request.Header.Get("X-Pairing-Secret"),
+		OfflineCredential: request.Header.Get(OfflineCredentialHeader),
 	})
 	if err == nil {
 		result, err = service.completeDeferred(ctx, result)

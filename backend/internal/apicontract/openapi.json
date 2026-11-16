@@ -276,6 +276,101 @@
         "tags": ["Sesión"]
       }
     },
+    "/auth/pin-users": {
+      "get": {
+        "operationId": "listPinUsers",
+        "summary": "Meseros que pueden entrar con PIN en este dispositivo",
+        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial y sin sesión. Usuarios activos, no de soporte, con PIN y con el permiso waiter_devices.use, con su versión del PIN y su bloqueo; y lo que el dispositivo necesita antes de que alguien entre (su nombre y su bloqueo por inactividad). Al reconectarse, el dispositivo borra el verificador local del PIN de quien ya no aparece o tiene otra pin_version.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meseros y configuración del dispositivo.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinUsers"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Sesión"],
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
+    "/auth/pin-login": {
+      "post": {
+        "operationId": "pinLogin",
+        "summary": "Entrar con PIN en un dispositivo de meseros",
+        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (un administrador puede desbloquearlo). PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesión iniciada con la credencial de envío.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinLoginResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Sesión"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "pin": {
+                    "type": "string",
+                    "pattern": "^[0-9]{4,6}$"
+                  }
+                },
+                "required": ["user_id", "pin"]
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": []
+          }
+        ]
+      }
+    },
     "/events": {
       "get": {
         "operationId": "streamEvents",
@@ -1094,7 +1189,7 @@
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa).",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1148,7 +1243,19 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "deviceId": [],
+            "deviceToken": [],
+            "session": []
+          },
+          {
+            "deviceId": [],
+            "deviceToken": [],
+            "offlineCredential": []
+          }
+        ]
       }
     },
     "/pairing/requests": {
@@ -1614,6 +1721,12 @@
         "type": "http",
         "scheme": "bearer",
         "description": "Token de sesión de 43 caracteres."
+      },
+      "offlineCredential": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Offline-Credential",
+        "description": "Etapa A1: credencial de envío del mesero (256 bits) que entrega pinLogin. Sustituye a la sesión solo en submitOfflineOrder; en cualquier otra ruta, 401 OFFLINE_CREDENTIAL_NOT_ALLOWED."
       }
     },
     "parameters": {
@@ -1650,7 +1763,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos.",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until). Etapa A1: 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED.",
         "content": {
           "application/json": {
             "schema": {
@@ -1733,6 +1846,13 @@
           },
           "openapi_path": {
             "type": "string"
+          },
+          "min_client_versions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Etapa A1: la versión mínima que acepta el servidor de cada tipo de cliente (desktop, android). min_client_version es la del escritorio."
           }
         },
         "required": [
@@ -1743,7 +1863,8 @@
           "supported_api_versions",
           "capabilities",
           "min_client_version",
-          "client_kinds"
+          "client_kinds",
+          "min_client_versions"
         ]
       },
       "Health": {
@@ -1809,6 +1930,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "has_pin": {
+            "type": "boolean",
+            "description": "Etapa A1: si el usuario tiene PIN para los dispositivos de meseros (solo en getIdentity)."
           }
         },
         "required": [
@@ -1841,9 +1966,15 @@
           },
           "home_screen": {
             "type": "string"
+          },
+          "idle_lock_seconds": {
+            "type": "integer",
+            "minimum": 30,
+            "maximum": 3600,
+            "description": "Etapa A1: segundos sin uso tras los que el dispositivo de meseros vuelve a la pantalla de entrada (120 por omisión)."
           }
         },
-        "required": ["id", "name"]
+        "required": ["id", "name", "idle_lock_seconds"]
       },
       "Identity": {
         "type": "object",
@@ -4177,6 +4308,92 @@
           }
         },
         "required": ["error"]
+      },
+      "PinUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Nombre corto o, si no tiene, el nombre visible."
+          },
+          "initial": {
+            "type": "string",
+            "description": "Inicial del nombre, en mayúscula."
+          },
+          "color": {
+            "type": ["string", "null"],
+            "pattern": "^#[0-9a-f]{6}$",
+            "description": "Color del distintivo elegido de la paleta de Go, o null."
+          },
+          "pin_version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Sube al definir, cambiar o quitar el PIN: el verificador local guardado con otra versión deja de valer."
+          },
+          "locked_until": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Hasta cuándo está bloqueado el PIN por intentos fallidos, o null."
+          }
+        },
+        "required": ["id", "name", "initial", "color", "pin_version", "locked_until"],
+        "description": "Mesero en la pantalla de entrada del dispositivo: solo lo que necesita su botón (nada de roles ni permisos)."
+      },
+      "PinUsers": {
+        "type": "object",
+        "properties": {
+          "device": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "idle_lock_seconds": {
+                "type": "integer",
+                "minimum": 30,
+                "maximum": 3600
+              }
+            },
+            "required": ["id", "name", "idle_lock_seconds"]
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PinUser"
+            }
+          }
+        },
+        "required": ["device", "users"]
+      },
+      "PinLoginResult": {
+        "type": "object",
+        "properties": {
+          "session_token": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43
+          },
+          "pin_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offline_credential": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 43,
+            "description": "Credencial de envío del mesero en este dispositivo (se entrega una sola vez). Solo sirve en submitOfflineOrder, en X-Offline-Credential."
+          }
+        },
+        "required": ["session_token", "pin_version", "offline_credential"]
       }
     }
   }
