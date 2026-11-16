@@ -58,7 +58,8 @@ func login(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	token, err := issueSession(ctx, tx, userID, request.DeviceID, "replaced")
+	// Etapa 9H (§2.4): iniciar sesión solo cierra la sesión anterior del usuario en esta misma terminal.
+	token, err := issueSession(ctx, tx, userID, request.DeviceID, "replaced", sameDevice)
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +94,32 @@ func failedLogin(ctx context.Context, tx pgx.Tx, deviceID, username, code string
 	return nil, &Fault{Status: status, Code: code, Message: message, Commit: true}
 }
 
-func issueSession(ctx context.Context, tx pgx.Tx, userID, deviceID, reason string) (string, error) {
-	// El lock de usuario y el índice parcial garantizan una sola sesión incluso con accesos simultáneos.
+// sessionScope decide qué sesiones vigentes del usuario cierra una sesión nueva.
+type sessionScope int
+
+const (
+	// sameDevice: la sesión anterior del usuario en la misma terminal (iniciar sesión, etapa 9H §2.4).
+	// Un usuario puede tener a la vez una sesión en cada terminal (por ejemplo, una caja y un teléfono).
+	sameDevice sessionScope = iota
+	// allDevices: todas las sesiones del usuario, en cualquier terminal (cambiar la contraseña).
+	allDevices
+)
+
+func issueSession(ctx context.Context, tx pgx.Tx, userID, deviceID, reason string, scope sessionScope) (string, error) {
+	// El lock de usuario serializa los accesos simultáneos del mismo usuario y el índice parcial
+	// sessions_one_active_user_device_idx (migración 0024) garantiza una sola sesión vigente por usuario y
+	// terminal. Hasta la etapa 9G el índice era por usuario (sessions_one_active_user_idx) e iniciar sesión
+	// cerraba las sesiones del usuario en todas las terminales.
 	if _, err := tx.Exec(ctx, "SELECT id FROM app.users WHERE id=$1 FOR UPDATE", userID); err != nil {
 		return "", err
 	}
-	replaced, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason=$2 WHERE user_id=$1 AND revoked_at IS NULL", userID, reason)
+	query := "UPDATE app.sessions SET revoked_at=now(),revoke_reason=$2 WHERE user_id=$1 AND revoked_at IS NULL"
+	arguments := []any{userID, reason}
+	if scope == sameDevice {
+		query += " AND device_id=$3"
+		arguments = append(arguments, deviceID)
+	}
+	replaced, err := tx.Exec(ctx, query, arguments...)
 	if err != nil {
 		return "", err
 	}
@@ -138,7 +159,9 @@ func changePassword(ctx context.Context, tx pgx.Tx, principal Principal, body []
 	if err != nil {
 		return nil, err
 	}
-	token, err := issueSession(ctx, tx, principal.UserID, principal.DeviceID, "password_changed")
+	// Cambiar la contraseña cierra las sesiones del usuario en todas las terminales (como antes de la 9H) y
+	// abre una nueva en esta.
+	token, err := issueSession(ctx, tx, principal.UserID, principal.DeviceID, "password_changed", allDevices)
 	if err != nil {
 		return nil, err
 	}
