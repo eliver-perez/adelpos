@@ -561,3 +561,254 @@ PERMISSION_DENIED` con su mensaje. Por eso **no** se subieron `min_client_versio
   firmas: no son impresoras, estaciones ni productos de las listas de `maintenance/signatures.go`).
 - Regla permanente propuesta: «Una opción nueva de un bloque de documento que no deba cambiar las plantillas existentes
   lleva `omitempty` y su valor por omisión en falso, y una prueba con el SHA-256 de las predeterminadas».
+
+---
+
+## Fase B · Lectura del respaldo y paquete de migración
+
+Un agente (15–16/11/2026), en su árbol de trabajo `etapa-9h-b` (desde `etapa-9h`, `2d214f1`), en paralelo con la Fase A.
+Pruebas de Go con `iso.sh` (`ISO_TAG=B`, `TMPDIR` dentro del directorio temporal de la sesión) y, para Docker, contenedores
+propios con datos sintéticos (etiquetas `local.adel.pos.legacy-reader=1` del lector y `local.adel.pos.legacy-test=1` de
+la base sintética de la prueba). **Nunca se usó el respaldo real** (la prueba con él es de la Fase E).
+
+Commits: `7c9ead6` (formato `legacypkg` y comprobación de datos reales en el índice), `133db77` (base y paquete
+sintéticos `legacysynth`) y `9762ba8` (lector `legacyread`, subcomandos `legacy-prepare` y `legacy-synthetic` y
+`docs/MIGRACION_FORMATO.md`).
+
+### Qué cambió
+
+**Go**
+
+- `internal/legacypkg` (paquete nuevo, neutral: sin Docker ni SQL Server; lo usará también el importador de la Fase C):
+  - Formato `.adelmig` v1 (estructura completa en [MIGRACION_FORMATO.md](MIGRACION_FORMATO.md)): encabezado en claro con
+    la firma `ADELMIG\0`, la versión (uint16), un JSON corto de parámetros (Argon2id con sal de 32 bytes: 3 pasadas,
+    64 MiB, 4 hilos; AES-256-GCM; bloque de 1 MiB; prefijo de nonce; valor de comprobación de la llave =
+    HMAC-SHA-256 con una subllave HKDF) y su SHA-256; cuerpo cifrado por bloques (nonce = prefijo ‖ número de bloque ‖
+    bandera de último bloque; AAD = SHA-256 del encabezado); texto claro = gzip de un tar con `manifest.json` primero y
+    `tables/<tabla>.json` (arreglo de objetos).
+  - `manifest.json`: formato y versión, fecha de creación, versión de AD-EL POS y herramienta, datos del respaldo
+    (archivo, tamaño, SHA-256, base, fechas del respaldo, versión de SQL Server de origen, compatibilidad,
+    intercalación), digest e identificador de la imagen y versión del lector, rango de fechas de las ventas, por tabla
+    (nombre, archivo, filas, bytes, SHA-256, llave primaria, columnas con su tipo, columnas omitidas con sus filas con
+    valor), tablas omitidas con su conteo y la **huella de contenido** (SHA-256 sobre nombre, filas y SHA-256 de cada
+    tabla en orden; solo depende de los datos).
+  - `Writer` en flujo: cada tabla se prepara en un archivo temporal de una carpeta privada **cifrado con una llave
+    aleatoria que solo vive en memoria** (el manifiesto va primero pero sus huellas se conocen al final; los datos reales
+    nunca quedan en claro en el disco) y `Finish` arma el paquete. `CreateOutput`: temporal privado junto al destino con
+    `fileacl.CreatePrivate` y nombre definitivo **sin reemplazar nunca** un archivo existente.
+  - `Open`/`Reader`/`TableReader` en flujo con iterador de tablas y filas (valores `nil`, `bool`, `string` y
+    `json.Number`), `Verify` e `Inspect` (solo el encabezado). Errores tipificados con mensaje en español:
+    `not_package`, `unsupported_version`, `wrong_passphrase`, `damaged` y `limit`. Límites: Argon2 (≤ 256 MiB, ≤ 10
+    pasadas, ≤ 16 hilos), bloque (4 KiB–8 MiB), total descomprimido (16 GiB), manifiesto (16 MiB), tabla (8 GiB), 1000
+    tablas, 1024 columnas y 4 MiB por fila; nombres del tar validados y en el orden del manifiesto.
+  - `policy.go`: las reglas de lo que no viaja, compartidas por el lector, los paquetes sintéticos y el importador
+    (`IsPasswordColumn`, `TreatmentFor`, `ExcludedTableReason`: `sysdiagrams` y `personal_detalles`).
+- `internal/legacyread` (paquete nuevo, el **lector**; solo lo importa `cmd/ad-el-pos-server/legacy.go`, lo comprueba
+  `imports_test.go`): busca `docker` (PATH, `~/.docker/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, la aplicación de
+  Docker Desktop y, en Windows, `%ProgramFiles%\Docker\Docker\resources\bin\docker.exe`), comprueba que esté en marcha
+  y con contenedores de Linux, descarga la imagen si falta (con avance), limpia los restos con su etiqueta, crea el
+  volumen y el contenedor (`--network none`, `--pull never`, imagen por su identificador, contraseña de `sa` solo por
+  el entorno, respaldo `readonly`; copia privada si Docker no puede montar la carpeta), espera a SQL Server, lee
+  `RESTORE HEADERONLY` y `FILELISTONLY`, restaura con `MOVE` y `STATS` (avance), deja la base de solo lectura, enumera
+  todas las tablas del catálogo y las extrae por páginas `FOR JSON`, y escribe el paquete. Siempre elimina el
+  contenedor, el volumen, la copia, las tablas en preparación y el paquete a medias (también con error, Ctrl-C/SIGTERM,
+  cierre de la entrada estándar con `--watch-stdin`, salida cerrada o pánico).
+- `internal/legacysynth` (paquete nuevo): la base sintética con **las 52 tablas** del respaldo (mismas columnas, tipos y
+  llaves que `MIGRACION_ANALISIS.md`) y datos inventados con sus casos: IVA por producto (casi todo al 0 %, un producto
+  al 16 % desde 11/2025, complementos al 16 % hasta 07/2023), complementos con importe negativo y filas idénticas,
+  descuentos, cargos extra (también sin descripción o sin importe), cancelaciones, divisas, 8 cortes (abiertos,
+  traslapado, sin ventas, con «venta» que no cuadra), retiros (en cero, negativo y de $1 500 000), salidas, pagos
+  partidos, repetidos, de menos, en cero y negativos, tarjeta con folio (y uno repetido), pagos sin corte, ventas
+  abiertas, sin renglones y con totales que no cuadran, folio repetido, renglón sin precio anterior, renglones en
+  cantidad 0 y agregados después, contraseñas e imágenes inventadas y textos difíciles (acentos, comillas, saltos de
+  línea, `|`, caracteres de control, barra invertida, espacios al final). `TSQL` crea la base en un SQL Server;
+  `WritePackage`/`Build` escriben, sin Docker, el mismo paquete que `legacy-prepare` produce de su respaldo (mismo
+  orden de filas que SQL Server: `order.go`). 240 ventas, 503 renglones, 364 complementos, 242 pagos.
+- `cmd/ad-el-pos-server/legacy.go` y `main.go`: `legacy-prepare` y `legacy-synthetic` se atienden antes que los demás
+  comandos (tienen su propia salida en líneas JSON, sin la bitácora del servidor).
+
+**Subcomandos**
+
+- `ad-el-pos-server legacy-prepare --backup <respaldo.bak> --output <paquete.adelmig> [--watch-stdin]`: frase de paso
+  **solo por la entrada estándar** (primera línea; en una terminal, dos veces sin mostrarla; mínimo 8 caracteres,
+  normalizada a NFC). Avance en líneas JSON: `step` (`image`, `start`, `restore`, `read`, `write`, `cleanup`;
+  `started`/`finished` con segundos), `progress` (capas de la imagen o porcentaje de la restauración), `table`
+  (`reading`/`done`/`skipped`, `done`/`total` de tablas y filas), `result` (resumen: paquete, tamaño, huella, respaldo,
+  rango de ventas, conteos por tabla, omitidas y tiempos por paso) y `error` (`code`, `message` sin tecnicismos,
+  `detail` técnico sin datos). Códigos: `USAGE`, `PASSPHRASE_INVALID`, `BACKUP_UNREADABLE`, `BACKUP_INVALID`,
+  `OUTPUT_EXISTS`, `OUTPUT_INVALID`, `DOCKER_MISSING` («Instálalo desde docker.com (es gratuito), ábrelo y vuelve a
+  intentarlo»), `DOCKER_NOT_RUNNING`, `DOCKER_UNSUPPORTED`, `IMAGE_UNAVAILABLE`, `READER_START_FAILED`,
+  `READER_MEMORY`, `RESTORE_FAILED`, `READ_FAILED`, `WRITE_FAILED`, `CANCELLED` e `INTERNAL`. Sale con 0 o 1.
+- `ADEL_TEST_MODE=1 ad-el-pos-server legacy-synthetic --output <paquete.adelmig>` (solo pruebas; frase por la entrada
+  estándar): el paquete sintético, sin Docker, para el asistente en Playwright (Fase D).
+
+**Datos reales en el repositorio**
+
+- `.gitignore`: `*.bak`, `*.adelmig` y `legacy-data/`.
+- `scripts/check-legacy-data.sh` (y `checkLegacyData` en `scripts/windows/dev.mjs`, también como comando
+  `check-legacy-data`): falla si el índice de git tiene un archivo con esos nombres o un archivo **binario** cuya primera
+  línea empiece con la firma del paquete (`ADELMIG`) o la de un respaldo de SQL Server (`TAPE`, MTF), aunque tenga otro
+  nombre; sin `.git` lo dice y termina bien. Lo ejecutan `dev.sh format-check` (y por tanto `dev.sh test`) y el
+  `formatCheck` de Windows. Tarda 0,2 s sobre el repositorio.
+
+**Documentación**: `docs/MIGRACION_FORMATO.md` (solo estructura: archivo, llaves, contenido, manifiesto, lo que no viaja,
+límites, escritura y el subcomando con sus eventos y códigos).
+
+### Decisiones
+
+1. **`-h -1` y `-y 0` no se pueden combinar** (sqlcmd responde «The -h and the -y 0 options are mutually exclusive»).
+   Con `-y 0` sqlcmd ya no imprime encabezados, así que las páginas JSON se leen solo con `-y 0` (sin `-W`). Lo
+   comprobé en el contenedor: una página de 3 MB sale entera en una línea, sin cortes ni ajuste de ancho. `RESTORE
+HEADERONLY`/`FILELISTONLY` se leen con encabezados, `-W -k2` y el separador ASCII `\x1f` (un nombre de respaldo con
+   `|` no rompe la lectura).
+2. **Lo que entrega `FOR JSON`** (comprobado en SQL Server 2022 con compatibilidad 110): `money` con 4 decimales
+   (`150.0000`, `-0.0001`, `922337203685477.5807`), `numeric(p,s)` con sus `s` decimales, texto con `\n`, `\t` y
+   `\u0001`, y `datetime` **sin la fracción cuando los milisegundos son cero** (`…T12:34:56`). El lector deja siempre
+   `AAAA-MM-DDTHH:MM:SS.mmm` y valida el tipo de cada valor; los números se leen con `UseNumber` y nunca pasan por
+   `float`.
+3. **Técnica de extracción** (mejor que páginas por rangos de la llave, sin dependencias): una sesión de sqlcmd por tabla
+   copia la tabla a `#adel_rows` con `ROW_NUMBER()` sobre el orden determinista y un índice agrupado, entrega una línea
+   con el total y los conteos de las columnas omitidas y después una línea `FOR JSON` por página (5000 filas; un solo
+   `nvarchar(max)` por página). Así se ordena una sola vez, también en las tablas sin llave primaria
+   (`ventas_complementos`), sin `OFFSET` que reordene en cada página. Las columnas van como `c0`, `c1`… en el JSON (un
+   nombre con puntos cambiaría la forma de `FOR JSON PATH`).
+4. **Orden determinista**: por la llave primaria; sin llave (o con una columna de la llave que no viaja), por todas las
+   columnas, las de texto con `COLLATE Latin1_General_BIN2` y su `DATALENGTH` (con la intercalación del sistema
+   anterior, que no distingue mayúsculas, y con los espacios del final, que SQL Server ignora al comparar, dos filas
+   distintas podían empatar y salir en otro orden entre páginas). Las filas que empatan son idénticas, así que la huella
+   de contenido es la misma en cada preparación del mismo respaldo.
+5. **Contraseñas**: `<columna>_present` = `CAST(CASE WHEN DATALENGTH(columna) > 0 THEN 1 ELSE 0 END AS bit)` en lugar de
+   `<> ''` (sirve también para columnas binarias o `text`); una contraseña de solo espacios cuenta como presente. La
+   regla de contraseñas va antes que la de binarios (una columna binaria de contraseña también se sustituye).
+6. **`sysdiagrams`** se enumera aunque SQL Server la marque como de la herramienta (`is_ms_shipped`), para registrarla
+   como omitida con su conteo.
+7. **Destino**: el temporal se renombra sin reemplazar (`renamex_np` con `RENAME_EXCL` en macOS, `renameat2` con
+   `RENAME_NOREPLACE` en Linux, `MoveFileEx` sin `MOVEFILE_REPLACE_EXISTING` en Windows; en una USB sin esas operaciones,
+   enlace duro o comprobación previa), porque `os.Rename` reemplaza un archivo que haya aparecido mientras tanto.
+8. **Imagen**: se ejecuta por su identificador con `--pull never`, así el digest del manifiesto es el de la imagen usada.
+   Al montar, Docker Desktop responde «bind source path does not exist» para una carpeta fuera de sus carpetas
+   compartidas: con ese error (o si el tamaño del respaldo dentro del contenedor no coincide) se usa la copia privada.
+   Comprobé que un respaldo 0600 en una carpeta 0700 se lee dentro del contenedor (Docker Desktop asigna el dueño al
+   usuario `mssql`) y que el montaje es de solo lectura (escribir falla con «Read-only file system»).
+9. **Respaldo con varios juegos**: se restaura el respaldo completo (`BackupType = 1`) más reciente del archivo; la base
+   restaurada queda de solo lectura. Antes de arrancar Docker se comprueba que el archivo empiece con `TAPE` (si no,
+   `BACKUP_INVALID` en segundos). El SHA-256 del `.bak` queda en el manifiesto (`backup_sha256`).
+10. **Mensajes sin datos**: el detalle de un error de SQL Server lleva solo su número («error 3241 de SQL Server»), nunca
+    su texto (puede citar valores del respaldo). La frase de paso nunca aparece en argumentos, eventos ni mensajes (lo
+    comprueban las pruebas).
+11. **Cancelación desde la aplicación** (para la Fase D): además de SIGTERM, `--watch-stdin` cancela al cerrarse la
+    entrada estándar (en Windows no hay SIGTERM; matar el proceso deja el contenedor, que se borra al empezar la
+    siguiente preparación). Si la salida estándar se cierra, la preparación se cancela y limpia (en macOS SIGPIPE ya no
+    mata el proceso).
+12. **Pasos**: la comprobación de Docker va antes del paso `image` (sin evento de paso; sus errores son
+    `DOCKER_MISSING`, `DOCKER_NOT_RUNNING` y `DOCKER_UNSUPPORTED`). Agregué el evento `progress` y los códigos
+    `DOCKER_UNSUPPORTED`, `READER_MEMORY` (SQL Server pide 2 GB) y `BACKUP_INVALID`.
+13. **Paquete sintético = paquete de Docker**: `legacysynth` reproduce el orden de SQL Server (BIN2 en la página 1252,
+    espacios del final, `DATALENGTH`, nulos primero). La prueba con Docker comprueba que el paquete de `legacy-prepare`
+    tiene **la misma huella de contenido** que el de `legacysynth.Build`: la Fase C puede probar el importador con
+    paquetes sintéticos sin Docker sabiendo que tienen la forma exacta de uno real.
+14. **`legacy-synthetic` viaja en el binario** (como sugiere el encargo), pero solo corre con `ADEL_TEST_MODE=1`; no toca
+    ninguna carpeta de datos, solo escribe `--output`.
+15. **Sin dependencias nuevas**: `golang.org/x/crypto/argon2`, `golang.org/x/text/unicode/norm` y
+    `encoding/charmap`, `golang.org/x/sys` y `golang.org/x/term` ya estaban en `go.mod`; HKDF es `crypto/hkdf` de la
+    biblioteca estándar.
+
+### Pruebas ejecutadas
+
+| Prueba                                                                                                                                                                                                 | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ISO_TAG=B iso.sh … go-unit` (vet normal e `integration`, `go test -race ./...`, `GOOS=windows` build y vet)                                                                                           | Aprobado (dos veces; la última con el código final)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `go vet -tags 'integration legacydocker'` de los tres paquetes, en macOS y con `GOOS=windows`                                                                                                          | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `legacypkg` (unitarias)                                                                                                                                                                                | Aprobadas: ida y vuelta con 5000 filas y textos difíciles, huella independiente del cifrado, NFC, frase incorrecta, 13 daños (byte del JSON y del SHA-256 del encabezado, de un bloque, de la etiqueta final, truncados, último bloque quitado o duplicado, bloques intercambiados o quitados, datos de más), versión más nueva y 0, no es un paquete (también un respaldo MTF), límites de encabezado (Argon2 de 4 GiB, tiempo, hilos, bloque de 1 GiB), tar manipulado (`../`, ruta absoluta, enlace, orden, entradas de más o de menos, conteo, SHA-256, columnas, valor anidado, JSON inválido, huella, manifiesto inválido), bomba de descompresión (3 MiB de espacios en menos de 64 KiB), tabla, fila, número de tablas y manifiesto enormes, texto claro de más después del gzip, temporal cifrado y borrado, destino que nunca se reemplaza y la comprobación de datos reales |
+| Comprobación de datos reales (`repocheck_test.go`, con un índice de git temporal)                                                                                                                      | Aprobada con `check-legacy-data.sh` y con `dev.mjs`: falla con un paquete real escrito por `Writer` llamado `.bin`, con un respaldo MTF llamado `.dat`, con `Notas.BAK`, con `*.adelmig` y con `legacy-data/`; pasa con textos que solo se parecen y sin `.git`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `legacysynth` (unitarias)                                                                                                                                                                              | Aprobadas: 52 tablas, cada valor cabe en su columna (página 1252, longitudes, decimales, milisegundos 0/3/7, nulos), casos presentes, paquete sintético sin contraseñas ni datos personales, orden como SQL Server, script T-SQL                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `legacyread` (unitarias, docker simulado servido con el paquete sintético)                                                                                                                             | Aprobadas: paquete con la huella del sintético; argumentos exactos de `docker run` (`--network none`, etiqueta, montaje `readonly`, `-e MSSQL_SA_PASSWORD` sin valor; la contraseña solo en el entorno y en ninguna otra orden); limpieza de restos solo por la etiqueta; limpieza en éxito, error de restauración, página dañada, cancelación a media lectura y pánico; respaldo montado como copia privada; Docker detenido, con contenedores de Windows o sin memoria; arranque lento; imagen descargada con avance; contraseñas nunca seleccionadas; binarios y tablas excluidas; análisis de la salida de sqlcmd; CLI (frase por la entrada estándar, frase corta o ausente, argumentos inválidos y `--passphrase` rechazado, terminal con dos frases distintas, `--watch-stdin`, salida cerrada); búsqueda de docker; solo el subcomando importa el lector                       |
+| **Docker real con el respaldo sintético** (`ADEL_TEST_DOCKER=1 go test -tags 'integration legacydocker' -run TestLegacyPrepareWithDocker ./internal/legacyread`)                                       | Aprobada dos veces (una corrida anterior falló solo porque mi contenedor de experimentos llevaba la etiqueta de prueba; lo eliminé), 57,5 s: base sintética creada y respaldada (`.bak` de 6,1 MB) en 8,4 s; **`legacy-prepare` (binario compilado) en 24,1 s** (arranque 7,0 s, restauración 1,3 s, lectura de 52 tablas 14,2 s, escritura 0,09 s, limpieza 0,17 s), paquete de 32 885 bytes con **la misma huella de contenido** que el sintético y sin contraseñas ni datos personales; con páginas de 7 filas, 23,9 s y la misma huella; al terminar, ningún contenedor ni volumen con las dos etiquetas                                                                                                                                                                                                                                                                           |
+| Medición de volumen (sintética, fuera de la suite): 4 tablas con la forma y los conteos de las grandes del respaldo (722 400 renglones, 328 489 complementos sin llave, 226 170 ventas, 225 810 pagos) | `.bak` de 114 MB; `legacy-prepare` en 22–23 s (arranque 7,0 s, restauración 1,6 s, **lectura de 1 502 869 filas 11,0 s**, escritura 1,0 s); paquete de 15,6 MB (241 MB de JSON); memoria máxima 225 MB; `legacypkg.Verify` del paquete en 1,8 s                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `iso.sh … fmt-check` y `sync-check`                                                                                                                                                                    | Aprobados («All matched files use Prettier code style!», `gofmt` sin diferencias, «Metadatos coherentes»)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+### No verificado
+
+- El respaldo real (Fase E): la restauración de un respaldo de SQL Server 2012 en 2022 (actualiza la base) y sus tiempos
+  reales; la medición de volumen sugiere menos de un minuto de lectura.
+- Windows: Docker Desktop en Windows (ruta de `docker.exe`, montaje de `C:\…`, cancelación cuando la aplicación termina
+  el proceso, `MoveFileEx`), solo compilado y analizado con `GOOS=windows`. `check-legacy-data` de `dev.mjs` sí corrió
+  (con Node en macOS).
+- La descarga real de la imagen (ya estaba en la Mac; la descarga y su avance solo con el docker simulado), Docker
+  Desktop con menos de 2 GB de memoria (simulado), la copia del respaldo desde una USB real fuera de las carpetas
+  compartidas (simulada; el error real de Docker sí lo vi) y el renombrado sin reemplazo en exFAT (camino de reserva sin
+  probar en un disco así).
+- La frase de paso pedida en una terminal (`term.ReadPassword`), solo con una función simulada.
+- El contenedor del coordinador `adel-legacy-analysis` y su volumen ya no estaban la primera vez que listé los
+  contenedores después de empezar (16/11, 00:05; existían a las 23:25). Mis órdenes solo eliminan por nombre lo que
+  crean o por la etiqueta del lector, que ese contenedor no tenía; lo comprobé con dos contenedores y dos volúmenes de
+  prueba (con y sin etiqueta: el filtro solo selecciona los etiquetados). Supongo que el coordinador lo eliminó
+  (`legacy-sql.sh down`).
+
+### Para la Fase C (API pública de `legacypkg`)
+
+```go
+// Lectura en flujo
+func Inspect(source io.Reader, options OpenOptions) (Header, error)
+func Open(source io.Reader, passphrase string, options OpenOptions) (*Reader, error)
+func (reader *Reader) Header() Header
+func (reader *Reader) Manifest() Manifest
+func (reader *Reader) NextTable() (*TableReader, error) // io.EOF solo cuando todo cuadró
+func (table *TableReader) Info() TableManifest
+func (table *TableReader) Columns() []Column
+func (table *TableReader) ColumnIndex(name string) int
+func (table *TableReader) Next() ([]any, error) // nil, bool, string o json.Number; io.EOF al final de la tabla
+func Verify(source io.Reader, passphrase string, options OpenOptions) (Manifest, error)
+func (manifest *Manifest) Table(name string) (TableManifest, bool)
+func ContentFingerprint(tables []TableManifest) string
+func DefaultLimits() Limits
+func KindOf(err error) ErrorKind // not_package, unsupported_version, wrong_passphrase, damaged, limit, invalid
+// errors.Is(err, legacypkg.ErrWrongPassphrase), ErrDamaged, ErrNotPackage, ErrUnsupportedVersion, ErrLimit
+
+// Escritura en flujo
+func NewWriter(options WriterOptions) (*Writer, error) // WriterOptions{SpoolDir, KDF, ChunkSize}
+func (writer *Writer) BeginTable(spec TableSpec) (*TableWriter, error)
+func (tableWriter *TableWriter) WriteRow(values []any) error // nil, bool, string, json.Number, int, int32, int64
+func (tableWriter *TableWriter) SetOmittedRows(name string, rows int64) error
+func (tableWriter *TableWriter) Close() error
+func (writer *Writer) SkipTable(skipped SkippedTable) error
+func (writer *Writer) Finish(output io.Writer, passphrase string, info PackageInfo) (Result, error)
+func (writer *Writer) Close() error // siempre: borra las tablas en preparación
+func CreateOutput(path string) (*Output, error) // Commit() / Abort() / Path(); ErrOutputExists, ErrOutputExtension
+func ValidatePassphrase(passphrase string) error
+
+// Reglas (lo que no viaja) y constantes
+func IsPasswordColumn(name string) bool
+func TreatmentFor(name, baseType string) ColumnTreatment
+func ExcludedTableReason(name string) string
+func PresentColumn(name string) Column
+func BaseType(sqlType string) string
+const Signature, FormatVersion, Extension, PresentSuffix, SalesTable ("ventas"), SalesDateColumn ("fecha")
+```
+
+Paquetes sintéticos: `legacysynth.Build(output, frase, legacypkg.WriterOptions{KDF: …})` (para ir rápido en las
+pruebas, `KDF: legacypkg.KDFParams{Time: 1, MemoryKiB: 8 << 10, Threads: 1}`), `legacysynth.Dataset()` (las tablas con
+sus filas, para armar variantes) con `legacysynth.WritePackage(writer, tablas)`, y `legacysynth.SyntheticPasswords`.
+Notas: el importador no debe confirmar su transacción antes de que `NextTable` devuelva `io.EOF`; las fechas del
+paquete son hora local del equipo de origen sin zona (convertirlas con la zona del establecimiento, §6.1 del análisis);
+los importes llegan como `json.Number` con 4 decimales (`decimal.NewFromString`).
+
+### Para CLAUDE.md
+
+- Estructura: `backend/internal/legacypkg` (formato `.adelmig`, neutral), `backend/internal/legacyread` (lector con
+  Docker; **solo** lo importa `cmd/ad-el-pos-server/legacy.go`, lo comprueba `imports_test.go`) y
+  `backend/internal/legacysynth` (base y paquete sintéticos); `scripts/check-legacy-data.sh`; `docs/MIGRACION_FORMATO.md`.
+- Subcomandos `legacy-prepare --backup F.bak --output F.adelmig [--watch-stdin]` (frase de paso solo por la entrada
+  estándar; avance en líneas JSON) y `legacy-synthetic --output F` (solo con `ADEL_TEST_MODE=1`), atendidos antes que
+  los demás comandos.
+- Reglas de datos reales: `.gitignore` con `*.bak`, `*.adelmig` y `legacy-data/`; `dev.sh format-check` (y `test`) y el
+  `format-check` de Windows ejecutan `check-legacy-data`, que también reconoce un paquete o un respaldo renombrado por
+  su firma; el lector nunca lee contraseñas (`<columna>_present`), omite binarios, `sysdiagrams` y
+  `personal_detalles`, y nunca deja datos en claro en el disco.
+- Pruebas: la de Docker real es opcional y nunca va en la tupla de `scripts/database.py`
+  (`ADEL_TEST_DOCKER=1 go test -tags 'integration legacydocker' -run TestLegacyPrepareWithDocker ./internal/legacyread`,
+  ~1 minuto, necesita la imagen `mcr.microsoft.com/mssql/server:2022-latest` descargada); usa la etiqueta
+  `local.adel.pos.legacy-test=1` para su SQL Server de prueba, que el lector no toca. Las demás pruebas de la
+  migración usan el docker simulado o `legacysynth`.
+- sqlcmd: `-y 0` y `-h` son incompatibles (con `-y 0` no hay encabezados); `FOR JSON` omite los milisegundos en cero de
+  `datetime`; con `--network none` hay que usar `-S 127.0.0.1`.
