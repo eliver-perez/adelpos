@@ -1366,3 +1366,400 @@ Commit en `etapa-9h-c2`:
   `ADEL_REPORTS_MEASURE=1` (sin `-race`). `TestOperationalReports` falla entre las 00:00 y las 05:00 de Monterrey
   (dependencia de la hora anterior a esta fase).
 - Puente: `data_source` en `allowed_query_keys` de `reports_*` (`api.rs`).
+
+---
+
+### Fase C · Correcciones de la revisión
+
+Un agente de la etapa (16/11/2026), en el árbol `etapa-9h-c3` (desde `etapa-9h`, `0778805`), con `ISO_TAG=C`. Retomó
+los cambios sin probar ni confirmar que dejó un agente anterior (I-1, M-1, M-3, M-4 y M-5), los revisó, los corrigió
+donde hacía falta y terminó lo demás. Solo datos sintéticos: nunca el respaldo real. Sin tocar `desktop/` ni
+`docs/REPORTS.md`.
+
+Commits: `cf4cad1` (código y pruebas) y `bf79530` (`API_CONTRACTS.md` y `docs/MIGRACION_ANALISIS.md`).
+
+#### Qué cambió
+
+- **I-1 · Fecha de reconocimiento** (regla del coordinador).
+  - La venta se reconoce en el pago con el que lo acumulado alcanza lo que se debía. Solo cuentan los pagos mayores que
+    cero, en orden de fecha y luego de id. Si nunca lo alcanza, se reconoce en el último pago mayor que cero; sin pagos
+    mayores que cero, en su apertura.
+  - La regla está en el importador (`history_plan.go`, `recognize`) y, calculada aparte, en la pasada independiente de
+    la validación (`expected.go`, `computeExpected`). Un pago con importe nulo cuenta como 0.
+  - Los pagos repetidos, en cero o negativos se importan igual: cuentan en Cobros y llevan su marca.
+    `last_payment_at` sigue siendo el último pago de cualquier importe (marca `late_payment`).
+  - Comentario de la 0024 y `MIGRACION_ANALISIS.md` §6.8 actualizados.
+- **M-1 · Corridas mal registradas o que bloqueaban la migración.**
+  - `closeLeftoverRuns` (`manager.go`) cierra las corridas en cola o en curso, siempre con el lock 7820148310 libre:
+    - Una importación cuyo lote quedó confirmado (`legacy_import_batches.run_id`) pasa a `succeeded`. Se le copian el
+      informe, la validación, `with_differences` y el respaldo del lote, con la auditoría `legacy.import_finished`
+      (`recovered: true`) y, si reemplazó otro lote, `legacy.batch_replaced`.
+    - Las demás pasan a `interrupted`.
+  - Corre al arrancar (`RecoverInterrupted`, todas) y cada minuto en `Run` (solo las que llevan más de 2 minutos sin
+    cambios según el reloj de la base). La periódica usa el mensaje «La migración se interrumpió antes de terminar…».
+  - `finishRun` reintenta hasta 5 veces (esperas de 0.5, 1, 2 y 4 s), cada intento con su propio plazo de 10 s, pero
+    solo mientras siga vivo el contexto del trabajador. Al apagarse hace un solo intento, así que el apagado no se
+    alarga (el `host` de macOS tiene `ExitTimeOut` 90 s); lo que no se registró lo cierra la recuperación al arrancar.
+  - `worker.go` no ejecuta una corrida que la recuperación ya cerró.
+- **M-3 · Subida.** Cada parte se escribe en su lugar: `Truncate` a lo ya recibido y `WriteAt` en ese desplazamiento, sin
+  `O_APPEND`. Al terminar, el tamaño y el SHA-256 se calculan del archivo tal como quedó en el disco (ya no en memoria).
+- **M-4 · Nombres de lo retirado.**
+  - `retiredName` (`write_live.go`) quita las terminaciones que ya traía el nombre antes de poner la suya, así que el
+    nombre queda con una sola. Vale para «(retirado x)», «.retirado-x» de usuario y el respaldo «retirado-x», con
+    cualquier identificador.
+  - Respeta el límite de longitud y la regla de nombres de usuario.
+- **M-5 · `LEGACY_PACKAGE_UNREADABLE`.**
+  - `legacypkg.KindUnreadable` y cualquier error de lectura que no sea del formato tienen código propio (antes
+    `LEGACY_PACKAGE_DAMAGED`), con el mensaje del formato («vuelve a intentarlo»). Responde 503 si llega a una
+    respuesta directa (hoy solo sale en las corridas).
+  - Documentado en `API_CONTRACTS.md`, junto con la recuperación de corridas, la subida, los avisos y la nota nueva.
+- **M-7 · Ventas pagadas que no quedan en el libro.**
+  - La validación cuenta en la base las ventas pagadas sin ningún renglón en `legacy_sales_recognitions`: sin
+    renglones, con total 0 y sin cargo ni descuento.
+  - Con alguna, `validation.notes` lo explica con su conteo: «N ventas pagadas no tienen renglones ni importes
+    (total 0): no quedan en el libro de ventas, así que «Cuentas cerradas» y el conteo de cuentas de los reportes dan N
+    menos que «Ventas pagadas».» Sin ninguna, no aparece.
+  - No es una diferencia: no cambia `ok`.
+- **M-8 · Cortes sin `fecha_inicio`.**
+  - Un corte sin `fecha_inicio` toma la fecha de su primera venta (apertura) o pago, con la marca nueva
+    `start_estimated`. Con eso aparece en «Turnos de caja» y tiene fecha en «Ventas por turno».
+  - Un corte cerrado sin `fecha_fin` toma la de su última venta o pago (`end_estimated`).
+  - Un corte sin fecha de inicio ni ventas o pagos queda sin fecha (`no_start`, además de `no_activity`).
+  - Una fecha estimada nunca queda del otro lado de la que sí estaba guardada.
+  - Las tres marcas son informativas. Están en `flags.go` y en `MIGRACION_ANALISIS.md` §6.8; la 0024 no tiene `CHECK`
+    de marcas, así que su esquema no cambió (solo su comentario).
+  - `summary.warnings` (resumen previo e informe) cuenta cada caso en lenguaje sencillo («3 cortes del sistema anterior
+    no tenían fecha de inicio: se usa la de su primera venta o pago para que aparezcan en «Turnos de caja».»).
+- **Aviso de reemplazo.** Con `will_replace`, el resumen previo y el informe final agregan dos avisos a
+  `summary.warnings`:
+  - «Esta migración reemplaza la que ya se hizo. Los usuarios importados vuelven a tener el nombre de usuario, el nombre
+    visible, el rol y el estado (activo o inactivo) que traen en el paquete: lo que hayas cambiado en ellos se pierde
+    (las contraseñas que les asignaste se conservan). Lo mismo pasa con los productos, las categorías, los complementos y
+    las mesas importados.»
+  - «Lo que se importó la vez anterior y ya no viene en este paquete se borra; si ya se usó en AD-EL POS, se desactiva y
+    queda como retirado.»
+- **M-2** no se corrigió (decisión del coordinador): se propone una línea para CLAUDE.md abajo.
+
+#### Decisiones
+
+- **Lo que se conservó del agente anterior:** I-1, M-3, M-4 y M-5 tal como estaban, salvo dos cosas:
+  - M-4: un usuario que ya había quedado como «retirado-x» acumulaba otra terminación.
+  - M-5: el `gofmt` de `errors.go` desalineaba la constante.
+- **Lo que se corrigió de M-1:**
+  - Los reintentos dormían sin mirar el apagado.
+  - La comparación «vieja» usaba el reloj de Go contra `updated_at` de la base (ahora es toda en SQL).
+  - La recuperación no guardaba el respaldo ni auditaba el reemplazo.
+  - El mensaje de la recuperación periódica decía «porque el servidor se detuvo» aunque el servidor siguiera.
+- **2 minutos sin cambios** para la recuperación periódica: una corrida recién registrada se entrega al trabajador en
+  milisegundos, y una en curso tiene el lock (la recuperación no corre mientras tanto: es el mismo ciclo del trabajador).
+- **M-7 se cuenta en la base** (ventas pagadas sin renglones en el libro) y no con una regla aparte. Así la nota da
+  exactamente lo que le falta al conteo de cuentas de los reportes.
+- **M-8:**
+  - Para las fechas estimadas se usan las ventas y los pagos del corte, no sus retiros: la misma actividad que ya define
+    `no_activity`.
+  - El fin solo se estima en un corte cerrado: uno abierto o con estado desconocido no tiene fin.
+  - El conteo va en `summary.warnings`, y no en `validation.notes`, para que el propietario lo vea también en el
+    resumen previo.
+- **El aviso de reemplazo también nombra el catálogo y las mesas**, porque `writeCatalog` y `writeTables` también
+  vuelven a poner los datos del paquete en lo importado. Las contraseñas asignadas sí se conservan.
+- **Checksum de la 0024:** sus comentarios cambiaron (reconocimiento y fechas de los cortes), así que cambió su
+  checksum. Ninguna instalación real la tiene. Una base de desarrollo o de prueba donde ya se aplicó, en cambio, tendría
+  que recrearse.
+- **Huella al terminar la subida:** el SHA-256 del archivo completo (hasta 1 GiB) se calcula con el mutex de las
+  subidas tomado. Es una sola lectura al final, y así no hay carreras con otra parte de la misma subida.
+
+#### Pruebas ejecutadas
+
+| Prueba                                                                             | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ISO_TAG=C iso.sh … go-unit` (vet normal e `integration`, `-race`, `GOOS=windows`) | Aprobado (con el estado final)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Unitarias nuevas de `legacyimport`                                                 | Aprobadas: `TestRecognitionIgnoresLaterRepeatedZeroAndNegativePayments` (9 casos, importador y validación), `TestPackageErrorCodes`, `TestLegacyUploadWritesPartsInPlace` (777 bytes de basura antes de la parte 1 y media parte antes de la última: tamaño y huella correctos; bytes cambiados en el disco: subida descartada), `TestRetiredNameHasASingleSuffix` (12 casos, también usuarios y límites de 40, 60 y 100), `TestShiftDatesFallBackToTheirSalesAndPayments`, `TestPreviewWarnsWhatReplacingDoes`, `TestValidationExplainsPaidSalesWithoutLedger` (0, 1 y 22) y `TestFinishRunRetriesOnlyWhileTheWorkerRuns` (sin base: 1 intento al apagarse, 2 si se apaga a los 0.7 s). |
+| `go-int ./internal/legacyimport`                                                   | Aprobado (14 s). Nuevas: `TestLegacyImportRecognitionShiftDatesAndNotes` y `TestLegacyManagerClosesLeftoverRuns`, más el reemplazo ampliado.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `go-int ./internal/reports`                                                        | Aprobado (139 s), con la subprueba nueva del corte sin fechas. La primera corrida falló solo en esa subprueba porque comprobaba `shift_key`, que no viaja en la respuesta; se cambió por la fuente, las fechas y la venta.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `go-int ./internal/administration`                                                 | Aprobado (124 s, dos veces: antes y después del último cambio).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Mutaciones (se revirtieron)                                                        | Con la regla anterior de reconocimiento, con `retiredName` sin quitar terminaciones y con la recuperación sin el caso `succeeded`, fallan las pruebas correspondientes. La validación §4.4 también lo detecta: con el importador viejo y la pasada nueva, la venta 20 da −50 en 2024 y +50 en 2025. Con la escritura de partes a continuación del archivo, falla `TestLegacyUploadWritesPartsInPlace`.                                                                                                                                                                                                                                                                                   |
+| `iso.sh … format`, después `fmt-check`; `sync-check`                               | Aprobados.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+
+Qué cubren las integraciones:
+
+- **I-1** (venta 20 abierta el 31/12/2024 a las 20:00, pagada a las 20:30, con el pago repetido el 02/01/2025 y uno en
+  cero después):
+  - `app.legacy_sales.recognized_at` y su renglón del libro quedan el 31/12/2024 a las 20:30.
+  - Total vendido: 272.5 en 2024 y 130 en 2025, sin cambio en 2025; el cobro repetido sí cuenta en el efectivo de 2025
+    (210).
+  - La validación da `OK` y los pagos llevan `possible_duplicate` y `zero_amount`.
+- **M-7:** la venta 10 del paquete estándar no queda en el libro. Ventas pagadas − cuentas del libro = 1, y la nota
+  dice 1.
+- **M-8:**
+  - El corte 9 queda del 10/05/2023 13:00 al 10/05/2023 13:40, con `start_estimated,end_estimated`, y aparece con el
+    filtro de periodo de «Turnos de caja».
+  - El corte 10 queda sin fecha, con `no_activity,no_start`.
+  - Están los tres avisos.
+  - En `internal/reports` (`TestStage9HLegacyHistoryInReports`, subprueba nueva), el corte 9100 sin fechas aparece en
+    «Turnos de caja» del 12/07/2023 (13:00 a 13:45, venta 33) y en «Ventas por turno» de ese día.
+- **M-1:**
+  - Una corrida reciente no se toca, ni una vieja con el lock tomado desde otra conexión.
+  - Con el lock libre, la que tiene su lote confirmado queda `succeeded`, con el informe, la validación, el respaldo y
+    la auditoría `recovered`.
+  - Un análisis viejo en cola queda `interrupted` con el mensaje de la recuperación periódica.
+  - Al arrancar, un reemplazo confirmado reciente queda `succeeded` (con `legacy.batch_replaced`), y una importación sin
+    lote queda `interrupted`.
+- **M-4 y aviso de reemplazo:**
+  - Un cuarto reemplazo deja al usuario retirado como «u1beto.retirado-x» (antes, «….retirado-x.retirado-x»), en la
+    correspondencia como `retired`.
+  - El informe del reemplazo y el resumen previo traen los dos avisos; la primera importación, no.
+
+#### No verificado
+
+- El respaldo real (Fase E): cuántos cortes no tienen `fecha_inicio` o `fecha_fin`, cuántas ventas cambian de día o de
+  año con la regla nueva y si las 22 ventas pagadas sin libro dan esa nota.
+- La interfaz (Fase D, en otra rama): cómo se ven los avisos nuevos y la nota. Muestra de forma genérica
+  `summary.warnings`, `summary.notes` y `validation.notes`, pero no se probó con estos textos.
+- La recuperación periódica dentro de `Run`, con el reloj real de un minuto: se probó llamando a `closeLeftoverRuns`.
+  Tampoco se probó un apagado real del servicio de macOS con la base caída.
+- Windows: solo se compiló y se analizó con `GOOS=windows`.
+- El tiempo de la huella final de una subida de 1 GiB con el mutex tomado.
+
+#### Para CLAUDE.md
+
+- Venta importada: se reconoce en el pago con el que lo acumulado de los pagos mayores que cero (por fecha y luego por
+  id) alcanza lo que se debía; si nunca lo alcanza, en el último pago mayor que cero; sin ellos, en su apertura. La
+  misma regla vale en el importador y en la pasada independiente de la validación.
+- Corridas de la migración: la que tiene su lote confirmado (`legacy_import_batches.run_id`) se recupera como
+  `succeeded`, y las demás como `interrupted`. La recuperación corre al arrancar y cada minuto (más de 2 minutos sin
+  cambios), siempre con el lock 7820148310 libre. `finishRun` reintenta solo mientras el trabajador vive (al apagarse,
+  un intento).
+- `LEGACY_PACKAGE_UNREADABLE` (error de lectura, se reintenta tal cual) es distinto de `LEGACY_PACKAGE_DAMAGED`.
+- Cortes del anterior sin `fecha_inicio`: toman la fecha de su primera venta o pago (`start_estimated`). Cerrados sin
+  `fecha_fin`: la de la última (`end_estimated`). Sin ventas ni pagos: sin fecha (`no_start`).
+- **Límite conocido (M-2):** el disparador de las tablas `app.legacy_*` protege contra escrituras accidentales, no
+  contra una sesión SQL con acceso a la base. `set_config('adel.legacy_import', …)` con un lote `importing` propio lo
+  burla. Ninguna ruta de la API lo permite; no es una barrera de seguridad.
+
+---
+
+## Fase D · Asistente de migración
+
+Un agente, en su propio árbol de trabajo (`etapa-9h-d`, desde `efd631a`). 16/11/2026. Sin migración de base de datos y
+sin cambios en Go (solo Rust, React, el puente de Playwright y los scripts de pruebas). Pruebas en copias aisladas:
+clúster temporal 55499 (bases `adel_pos_test_d_*`). **No se tocó la instalación real ni se usó el respaldo real**: la
+importación de las pruebas usa el paquete sintético de la Fase B (`ad-el-pos-server legacy-synthetic`, con
+`ADEL_TEST_MODE=1`) y la preparación con el lector es simulada por el puente (sin Docker). El agente se detuvo por el
+límite de uso antes de escribir este fragmento; lo redactó otro agente leyendo los commits y los registros de pruebas.
+
+Commits en `etapa-9h-d`:
+
+- `a8755ec` — asistente de migración del sistema anterior (preparar el paquete con el lector, subida por partes, resumen
+  previo, importar con confirmación, avance, informe con su validación y PDF, reemplazo del lote), «Asignar contraseña» y
+  «Sin acceso» en Usuarios, y Archivo › «Migrar del sistema anterior…».
+- `63836c0` — puente de Playwright del asistente, segundo servidor temporal con base limpia
+  (`ADEL_BROWSER_CLEAN_SERVER_URL`) en `scripts/browser-tests.py` y `scripts/windows/dev.mjs`, y
+  `desktop/e2e/workflow-stage9h-migration.spec.ts`.
+- `2baf69d` — notas de la revisión de la Fase C en el asistente (siempre el mensaje de Go, volver a subir con
+  `LEGACY_PACKAGE_UNREADABLE`, qué se sobrescribe al reemplazar, respaldo final con el sistema anterior cerrado),
+  validación plegable por grupo, filtro «Datos» en Playwright y contrato de quién llama cada ruta (`API_CONTRACTS.md`).
+
+### Qué cambió
+
+**Rust (`desktop/src-tauri/src/legacy_migration.rs`, nuevo, ~2 100 líneas con sus pruebas)**
+
+- **Operaciones nuevas** (lista cerrada, registradas en `main.rs` y permitidas en `permissions/diagnostics.toml`; la
+  ventana sigue sin permisos `dialog:*` ni `fs:*`): `legacy_choose_backup`, `legacy_choose_package_output`,
+  `legacy_choose_package`, `legacy_selection`, `legacy_prepare_start`, `legacy_prepare_watch`, `legacy_prepare_cancel`,
+  `legacy_prepare_cleanup`, `legacy_upload_package`, `legacy_upload_cancel` y `legacy_save_report`. Todas exigen que el
+  servidor sea el de la propia computadora (`backup_folder::is_local_server`; Go vuelve a exigir `settings.manage` y la
+  escucha local).
+- **Archivos elegidos solo con diálogos nativos**: Rust guarda las rutas en memoria (`SELECTION`) y a React solo le da
+  el nombre y el tamaño; React nunca envía una ruta. El respaldo debe ser un `.bak` existente; el paquete de salida
+  fuerza la extensión `.adelmig` y nunca reemplaza un archivo existente; el paquete a importar es un `.adelmig` no vacío
+  de hasta 1 GiB. Un solo diálogo a la vez. El nombre propuesto es `sistema-anterior-AAAA-MM-DD.adelmig`.
+- **Lanzamiento del lector**: `ad-el-pos-server legacy-prepare --backup <.bak> --output <.adelmig> --watch-stdin`,
+  con argumentos separados (nunca un intérprete de órdenes). El servidor es el que viaja con la aplicación: junto a
+  `current_exe()` (en el `.pkg` de macOS y en el instalador de Windows); en una compilación de desarrollo, si no está,
+  `ADEL_SERVER_BINARY` (solo con `debug_assertions`) y, si tampoco, el mensaje «Esta copia de AD-EL POS no incluye el
+  preparador del paquete…». La frase de paso es lo único que llega de React y va por la primera línea de la entrada
+  estándar (nunca en argumentos, variables ni registros); Rust repite el mínimo de `ValidatePassphrase` (8 caracteres,
+  hasta 1024 bytes, una línea) y el lector vuelve a validarla.
+- **Eventos por `Channel`** (patrón de `menu_subscribe`): cada línea JSON del lector se sanea (`sanitize_event`: solo la
+  lista cerrada de eventos `step`, `table`, `progress`, `result` y `error` y de campos, sin rutas, nombres de la base ni
+  detalle técnico de un error; líneas de hasta 4 MiB). `legacy_prepare_watch` vuelve a escuchar al volver a entrar al
+  asistente y devuelve lo que ya pasó (pasos, último avance, última tabla y el final). Si el lector termina sin decir
+  resultado ni error, Rust lo informa como error propio.
+- **Cancelar**: `legacy_prepare_cancel` cierra la entrada estándar del lector (también en Windows, donde no hay SIGTERM);
+  el lector limpia lo suyo y avisa `CANCELLED`. Si la aplicación se cierra, el sistema cierra la tubería y pasa lo mismo.
+- **`--cleanup`**: `legacy_prepare_cleanup` ejecuta `legacy-prepare --cleanup` (hasta 90 s) para borrar restos de una
+  preparación forzada a cerrar; React lo pide al abrir el asistente sin esperarlo, y si esta aplicación está preparando
+  no hace nada. Mientras corre no se empieza a preparar (mismo bloqueo del lector).
+- **Registro de movimientos**: al terminar, Rust anota la preparación en Go (`POST maintenance/legacy/preparations`) con
+  solo fechas, conteos, tiempos y tamaño (`preparation_record`: exactamente los campos que acepta Go).
+- **Subida por partes** (`upload_file`): calcula el SHA-256 del archivo, crea la subida con su tamaño y huella, envía
+  cada parte de 1 MiB en base64 con su huella, en orden, con avance por un `Channel`; una parte sin respuesta o dañada se
+  reenvía (hasta 3 intentos: Go no cambia nada al recibir otra vez la última). Si algo falla o se cancela, la subida se
+  cancela en Go. React recibe solo la subida (identificador y estado), nunca el contenido. Un rechazo de Go llega como el
+  de `api_request` (`{status, body}`).
+- **PDF**: `legacy_save_report` pide `maintenance/legacy/batches/{id}/report.pdf` (tope de 32 MiB y 60 s), comprueba tipo
+  y firma `%PDF-` con `export::validate_file` y lo guarda con el diálogo «Guardar el informe de la migración» (escritura
+  atómica de `export.rs`). `export.rs` solo cambió para que `DialogTarget` sea `pub(crate)` y lleve su título.
+- **`api.rs`**: operaciones de lectura y avance con identificadores validados, sin archivos ni rutas:
+  `maintenance_legacy`, `maintenance_legacy_analyze`, `maintenance_legacy_import`, `maintenance_legacy_run`,
+  `maintenance_legacy_batch`, `maintenance_legacy_cancel_upload` y `assign_user_password`. Lo que lleva archivos o rutas
+  (subida, partes, preparaciones, informe) no está en `route()` (lo comprueba la prueba
+  `stage9h_legacy_routes_are_closed_and_never_carry_files`, que también revisa el código fuente).
+- **`menu.rs`**: acción `file.legacy_migration` («Migrar del sistema anterior…», sin atajo) en `MENU_ACTIONS` y en
+  `layout()` de Archivo, entre «Imprimir precuenta» y «Cerrar sesión».
+
+**React**
+
+- **Pantallas** (`desktop/src/pages/maintenance/`): `LegacyMigrationPage` (el asistente: estado, lote vigente, última
+  importación fallida, los dos pasos), `LegacyPrepareStep` (paso 1), `LegacyImportStep` (paso 2 e informe),
+  `LegacySummary` (resumen del paquete, estado previo, validación, avance) y `LegacyMigrationSection` (sección «Migrar
+  del sistema anterior» en Mantenimiento, con el aviso del lote vigente y el botón «Abrir el asistente de migración»).
+  Servicio: `services/legacyMigration.ts`; `has_password` en el modelo de usuarios.
+- **Paso 1, «Preparar paquete»**: botones para elegir el respaldo y dónde guardar el paquete (diálogos de Rust), frase de
+  paso dos veces con su explicación («protege los datos reales… no se puede recuperar»), avance por pasos y tablas,
+  cancelar, y el resumen final (rango de fechas y conteos). Mensajes por código: `DOCKER_MISSING` («Falta instalar Docker
+  Desktop», con `https://www.docker.com/products/docker-desktop/` en texto), `DOCKER_NOT_RUNNING` («Abre Docker Desktop,
+  espera a que diga que está listo y vuelve a intentarlo»), `DOCKER_UNSUPPORTED`, `DOCKER_REMOTE`, `READER_MEMORY` (2 GB),
+  `BACKUP_INVALID`, `ALREADY_RUNNING`, etc. Dice que Docker solo hace falta para preparar, no para importar.
+- **Paso 2, «Importar paquete»**: elegir el `.adelmig`, frase de paso, subida con avance, análisis en segundo plano y
+  **resumen previo** (conteos, periodo, tasas, totales, avisos, «Datos incoherentes», por qué la instalación no es limpia
+  y que entonces no se puede importar, y qué lote se reemplazará). **Confirmar** con `ConfirmDialog`: «Importar el
+  paquete»; con lote vigente, «Reemplazar lo importado del sistema anterior» en tono rojo (`danger`) que dice qué se
+  borra (historial) y qué se actualiza (catálogo, mesas y usuarios; los usuarios conservan la contraseña asignada; lo que
+  ya no viene se borra si nada lo usa o se desactiva) y que no se deshace salvo con el respaldo. **Avance** con consulta
+  cada 800 ms de la corrida: la aplicación sigue usable y se puede salir y volver a ver el avance (`resumeRun`). **Informe
+  final** con la validación §4.4 (agrupada y plegable por grupo; diferencias de dinero visibles) y «Descargar informe
+  (PDF)». Una frase incorrecta se corrige sin subir otra vez; con `LEGACY_UPLOAD_MISSING` o `LEGACY_PACKAGE_UNREADABLE`
+  se vuelve a subir al revisar de nuevo. Siempre se muestra el mensaje de Go. Texto de ayuda: hacer el respaldo final con
+  el sistema anterior cerrado; con operación propia en AD-EL POS ya no se podrá volver a importar.
+- **Si ya hay lote**: al abrir, «Ya hay datos importados del sistema anterior» (fecha del respaldo, cuándo y quién lo
+  importó), «Ver el informe» y reemplazo con confirmación.
+- **Dónde y para quién**: pantalla `legacy-migration` en `navigation/sections.ts` (grupo Administración, hija de
+  Mantenimiento, permiso `settings.manage`, `hiddenTile`); `App.tsx` pasa `mainComputer` (modalidad con servidor, por
+  `includesServer`) a la pantalla y a Mantenimiento. En una terminal, la pantalla explica que la migración se hace en la
+  computadora principal; `LOCAL_REQUIRED` de Go da el mismo mensaje.
+- **Menú, acción y paleta**: acción `file.legacy_migration` en `commands/actions.ts` (grupo Archivo, visible solo con
+  acceso a la pantalla y en la computadora principal; solo ejecuta `requestScreen('legacy-migration')`); la pantalla
+  `legacy-migration` queda fuera de las acciones de «Ir a…» de la paleta (ya está como acción de Archivo). Contexto
+  `mainComputer` en `useCommandCenter`. `MenuActionID` incluye `file.legacy_migration`.
+- **Usuarios** (`UsersPage.tsx`): etiqueta «Sin acceso» para usuarios con `has_password === false` y botón «Asignar
+  contraseña» (con `users.manage`) que abre el formulario «Asignar contraseña a …»; el usuario cambia la contraseña al
+  entrar (`initial_password` en Go).
+- **Estilos**: `styles.css` (~260 líneas para el asistente).
+
+**Puente de Playwright y pruebas**
+
+- `desktop/e2e/native-driver.ts`: simula cada operación nueva de Rust (si no, «Comando de prueba no autorizado»): elegir
+  respaldo, salida y paquete (cola de diálogos), preparación con avance y resultado simulados y `nextPreparation(
+'DOCKER_MISSING')`, el paquete sintético real (`legacy-synthetic`) que queda elegido, subida por partes a Go por las
+  mismas rutas, cancelar, limpieza y el PDF por la cola `nextSaveDialog`. Exporta `cleanServer()`.
+- **Segundo servidor limpio**: `scripts/browser-tests.py` (puerto 8185) y `scripts/windows/dev.mjs` (puerto 8185)
+  preparan y arrancan un segundo Go con su propia base y exponen `ADEL_BROWSER_CLEAN_SERVER_URL`,
+  `ADEL_BROWSER_CLEAN_PROVISIONING` (token de aprovisionamiento) y `ADEL_BROWSER_SERVER_BINARY`; solo lo usa la
+  especificación nueva. `$SP/iso.sh` (fuera del repositorio) hace lo mismo con `ISO_CLEAN_GO_PORT` (por omisión, el puerto
+  principal + 10).
+- `desktop/e2e/workflow-stage9h-migration.spec.ts` (7 pruebas, ordenada antes de `workflow-zz-test-data.spec.ts`; las 4
+  que necesitan base limpia se omiten sin el segundo servidor): preparar el paquete (simulado: Docker sin instalar,
+  avance, salir y volver, resultado y Registro de movimientos); rechazo en una instalación con operación propia; menú
+  Archivo y paleta; asistente completo (frase incorrecta, resumen previo, confirmar, avance, informe y PDF); lote
+  vigente y reemplazo con confirmación en rojo; «Asignar contraseña» y primer inicio de sesión del usuario importado;
+  reportes con el filtro «Datos» (se omite si el filtro no existe: depende de la Fase C, parte 2).
+- Vitest: `legacyMigration.test.tsx` (nuevo, ~625 líneas), `maintenance.test.tsx`, `commands.test.ts` y
+  `commandCenter.test.tsx` (acción y contexto nuevos).
+
+**Documentación**: `API_CONTRACTS.md` (quién llama a cada ruta de la 9H: la lista cerrada de `api.rs` y lo que solo envía
+Rust) y `docs/NAVIGATION_AND_SHORTCUTS.md` (Archivo › «Migrar del sistema anterior…»).
+
+### Decisiones
+
+1. **React nunca ve rutas ni contenido**: los archivos se eligen con diálogos de Rust y solo viaja el nombre y el
+   tamaño; la subida, el PDF y la preparación son operaciones propias de Rust y no están en la lista de rutas de
+   `api_request` (con una prueba que lo vigila). Los eventos del lector se sanean antes de llegar a React.
+2. **La frase de paso solo por la entrada estándar** del lector y en memoria; la preparación se registra en Go sin ella
+   y sin rutas.
+3. **Cerrar la entrada estándar es cancelar** (portable a Windows); no se mata el proceso salvo en las pruebas y como
+   último recurso.
+4. **Un solo lector y una sola subida a la vez**; la limpieza (`--cleanup`) y la preparación comparten el bloqueo.
+5. **El mensaje de error es siempre el de Go** (lenguaje sencillo); la interfaz solo decide qué hacer con el código
+   (volver a subir con `LEGACY_UPLOAD_MISSING` o `LEGACY_PACKAGE_UNREADABLE`; `LEGACY_BATCH_CHANGED` al confirmar).
+6. **Reemplazar es rojo y lo explica** (tono `danger`; se dice qué se borra y qué se actualiza, tal como hace la Fase C).
+   Importar sin lote usa la confirmación normal.
+7. **El asistente no bloquea la ventana**: la importación corre en segundo plano en Go y la pantalla consulta su estado;
+   al volver a entrar retoma la corrida activa.
+8. **Segundo Go temporal con base limpia** (en lugar de limpiar la base compartida): es lo más simple y seguro porque las
+   demás especificaciones ya crean operación; solo la usa la especificación nueva, vía variable de entorno, y sin ella
+   esas pruebas se omiten.
+9. **La pantalla no es mosaico** (`hiddenTile`): se llega desde la sección de Mantenimiento, el menú Archivo y la paleta
+   (acción de Archivo), no desde «Ir a…».
+10. **El filtro «Datos» de los reportes no necesitó interfaz nueva** (sale del catálogo de Go): se agregó solo su prueba de
+    Playwright, que se omite en la rama D sola.
+
+### Pruebas ejecutadas (aisladas)
+
+Horas de los registros contra el último commit (`2baf69d`, 02:10:59):
+
+- `vitest` (`tmp-D-vitest3.log`, 02:08:51, posterior a la última edición de React salvo lo que pudiera cambiar después
+  de esa hora): **95 archivos, 901 pruebas, aprobado**.
+- `cargo test` (`tmp-D-cargo3.log`, 01:58:37, **anterior** a `63836c0` y a `2baf69d`): **106 aprobadas, 0 fallidas, 3
+  ignoradas**, incluidas las 16 de `legacy_migration::tests` (rutas, línea de órdenes, eventos saneados, lector falso con
+  la frase por stdin, cancelar, lector que muere sin resultado, limpieza, partes con servidor de prueba en 127.0.0.1,
+  parte sin respuesta reenviada, rechazo y cancelación de la subida, rechazo de Go, permisos de la ventana). El único
+  cambio de Rust posterior (`2baf69d`, `api.rs`) es un comentario.
+- Formato (`tmp-D-fmt2.log`, 02:08:27): `fmt-check` aprobado («All matched files use Prettier code style!», salida 0).
+- Playwright, rama `etapa-9h-d` sola (la prueba de reportes con «Datos» se omite): Chromium
+  (`tmp-D-pw-final-chromium.log`, 02:09:40) **6 aprobadas, 1 omitida**; WebKit (`tmp-D-pw-final-webkit.log`, 02:10:12)
+  **6 aprobadas, 1 omitida**.
+- Playwright con la parte 2 de la Fase C fusionada (copia `tmp-D/c2check`): Chromium `tmp-D-pw-c2c.log` (02:03:10) y
+  `tmp-D-pw-c2d.log` (02:10:53, seis segundos antes del último commit): **7 de 7 aprobadas** en cada uno, con la prueba de
+  reportes con el filtro «Datos»; WebKit `tmp-D-pw-c2w.log` (02:03:50): **7 de 7 aprobadas**. Esta última es anterior a
+  `2baf69d`.
+- Especificaciones vecinas, una por una en Chromium (02:05–02:06): `workflow-stage9c-navigation` 1/1,
+  `workflow-stage9g-backups` 1/1, `workflow-stage9g-modality` 1/1 y `workflow-zz-test-data` 1/1, aprobadas.
+- Una corrida conjunta de vecinas (`tmp-D-pw-neighbors.log`, 02:04:37) **falló 8 de 12**: la primera, `workflow-stage9c-
+keyboard` (espera «En cocina» y recibe «Enviado · sin confirmar en cocina»), deja la base del motor a medias y las
+  siguientes fallan con «La aceptación debe comenzar con una base sin configurar». No hay una corrida individual de
+  `workflow-stage9c-keyboard` en los registros, así que ese fallo queda sin explicar (ver «No verificado»).
+- Go no se tocó: no se corrió `go-unit` ni `go-int`.
+
+### No verificado
+
+- El coordinador debe repetir `cargo test` (el registro es anterior a los dos últimos commits), `sync-check` (no hay
+  registro de que se haya corrido) y Playwright WebKit con la parte 2 de la Fase C tras fusionar.
+- `workflow-stage9c-keyboard.spec.ts` falló en la corrida conjunta de vecinas y no se repitió sola: no se sabe si es un
+  defecto previo, de tiempo (envío a cocina) o de esta fase. Conviene correrla en la regresión de la Fase F.
+- La ventana nativa y los diálogos reales (elegir el `.bak`, guardar el paquete, elegir el `.adelmig` y «Guardar como» del
+  PDF): en Playwright los simula el puente.
+- Docker real desde la aplicación: el lector con Docker Desktop (imagen, restauración, lectura), los mensajes
+  `DOCKER_*` reales, la memoria y la cancelación con un contenedor corriendo. El lanzamiento solo se probó con un binario
+  falso; el servidor dentro del `.pkg` y del instalador de Windows (junto a `current_exe()`) no se verificó.
+- Windows: el cierre de la entrada estándar como cancelación, el nombre `ad-el-pos-server.exe` y el segundo servidor de
+  `scripts/windows/dev.mjs` no se corrieron (solo macOS).
+- El respaldo real (Fase E): tiempos de subida y análisis con un paquete real (hasta 1 GiB), el resumen previo y el
+  informe con datos reales.
+- WebKit con la pantalla de la Mac bloqueada no se comprobó (las corridas de WebKit pasaron).
+
+### Para CLAUDE.md
+
+- **§3 (estructura) y §4 (Rust y puente)**: `desktop/src-tauri/src/legacy_migration.rs` (diálogos nativos del asistente,
+  lanzamiento de `legacy-prepare`, subida por partes e informe en PDF). Operaciones nuevas de la ventana:
+  `legacy_choose_backup`, `legacy_choose_package_output`, `legacy_choose_package`, `legacy_selection`,
+  `legacy_prepare_start`, `legacy_prepare_watch`, `legacy_prepare_cancel`, `legacy_prepare_cleanup`,
+  `legacy_upload_package`, `legacy_upload_cancel` y `legacy_save_report` (todas en `permissions/diagnostics.toml`); rutas
+  nuevas de `api_request`: `maintenance_legacy`, `maintenance_legacy_analyze`, `maintenance_legacy_import`,
+  `maintenance_legacy_run`, `maintenance_legacy_batch`, `maintenance_legacy_cancel_upload` y `assign_user_password`.
+  Regla: lo que lleva archivos, rutas o la frase de paso solo lo envía Rust; nunca se agrega a `route()`.
+- **§6 (pruebas)**: Playwright arranca un **segundo servidor temporal con base limpia** (puerto 8185 en
+  `scripts/browser-tests.py` y `scripts/windows/dev.mjs`; `ISO_CLEAN_GO_PORT` en el arnés aislado) y lo expone con
+  `ADEL_BROWSER_CLEAN_SERVER_URL` (más `ADEL_BROWSER_CLEAN_PROVISIONING` y `ADEL_BROWSER_SERVER_BINARY`). Solo lo usa
+  `workflow-stage9h-migration.spec.ts` (`cleanServer()` de `native-driver.ts`) para la importación completa con el
+  paquete sintético de `ad-el-pos-server legacy-synthetic`; sin la variable, esas pruebas se omiten. Las demás
+  especificaciones comparten la base del servidor principal y siguen sin tocar el segundo. Toda operación nueva de Rust se
+  simula en `native-driver.ts`.
+- **§11–12 (interfaz)**: el asistente «Migrar del sistema anterior» (pantalla `legacy-migration`) se abre desde Sistema ›
+  Mantenimiento, Archivo › «Migrar del sistema anterior…» (macOS) y la paleta; solo con `settings.manage` y solo en la
+  computadora principal (modalidades con servidor); la acción del menú solo abre el asistente, y preparar, importar y
+  reemplazar siguen con sus confirmaciones. Reglas permanentes propuestas: «Los archivos del propietario se eligen solo con
+  diálogos de Rust; React nunca recibe rutas ni contenido»; «el reemplazo del lote importado es rojo (irreversible salvo con
+  el respaldo) y dice qué se borra y qué se actualiza»; «los mensajes de error de la migración son los de Go; la interfaz
+  solo reacciona al código»; «los usuarios importados se ven “Sin acceso” hasta que un administrador con `users.manage`
+  les asigna una contraseña (`has_password`)».
