@@ -23,6 +23,18 @@ fn main() {
             "choose_backup_directory",
             "pairing_start_found",
             "discovery_search",
+            // Etapa 9H: migración del sistema anterior (legacy_migration.rs).
+            "legacy_choose_backup",
+            "legacy_choose_package_output",
+            "legacy_choose_package",
+            "legacy_selection",
+            "legacy_prepare_start",
+            "legacy_prepare_watch",
+            "legacy_prepare_cancel",
+            "legacy_prepare_cleanup",
+            "legacy_upload_package",
+            "legacy_upload_cancel",
+            "legacy_save_report",
         ]));
     tauri_build::try_build(attributes).expect("No se pudo preparar la aplicación Tauri");
 }

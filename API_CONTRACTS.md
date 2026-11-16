@@ -3798,3 +3798,28 @@ VALIDATION_ERROR`); si ya tiene contraseña, `409 PASSWORD_ALREADY_SET` (solo é
   que las rutas de cuentas, cobros, cancelación, cocina, caja y `restaurant/state` no las ven ni pueden reabrirlas,
   cobrarlas, cancelarlas ni modificarlas; sus folios no consumen ni chocan con `restaurant_accounts.folio`. Lo importado
   al catálogo, a las mesas y a los usuarios sí es vivo (se edita y se vende como cualquier otro).
+
+## Etapa 9H · el historial del sistema anterior en los reportes (fase C, parte 2, sin migración)
+
+Sin rutas nuevas: cambian el catálogo y los resultados de `reports/*` (detalle y lista de los 27 reportes en
+[docs/REPORTS.md](docs/REPORTS.md), «El historial del sistema anterior»).
+
+- **Solo con un lote importado vigente** (`app.legacy_import_batches` con `status = 'completed'`): los reportes que
+  incluyen el historial declaran **primero** el filtro `data_source` («Datos», tipo `choice`): `all` (por omisión,
+  «AD-EL POS y sistema anterior»), `native` («Solo AD-EL POS») y `legacy` («Solo sistema anterior»); y las columnas
+  `data_source` («Datos»: «AD-EL POS», «Sistema anterior» o «AD-EL POS y sistema anterior») y, donde se agrega por
+  venta, día, semana, mes, hora, tasa, modalidad, mesa, origen o turno, `legacy_difference` («Diferencia del sistema
+  anterior», importe incluido en la venta neta y nunca repartido entre productos). Las dos columnas siguen con «Solo
+  AD-EL POS» (con «AD-EL POS» y diferencia 0), para que no cambien al cambiar el filtro.
+- **Sin lote vigente** el catálogo no ofrece el filtro ni las columnas, `meta.filters` no los describe y un
+  `data_source` recibido se ignora: cada respuesta (y la SQL que la produce) es exactamente la de antes.
+- **`GET reports/run/{id}`** y **`GET reports/export/{id}`** aceptan `data_source`, que está en la lista blanca de
+  `reports_*` del puente (`api.rs`); el PDF y la hoja «Filtros» del Excel muestran «Datos: …». Los importes del historial
+  se suman exactos (cuatro decimales) y se redondean solo al mostrar. Un filtro de algo que solo existe en AD-EL POS
+  (caja, turno, método de pago, lista de precios, motivo del catálogo, quién canceló o modificó, origen distinto de
+  «Sistema anterior») excluye el historial; los de lo importado (producto, categoría, área, mesa, usuario) lo filtran por
+  el identificador nuevo.
+- Los cobros del historial quedan fuera del alcance de Caja y de los turnos en arqueo; los cortes del anterior aparecen
+  en «Turnos de caja» solo para quien consulta en Caja todas las cajas y el historial, y su diferencia guardada exige
+  `cash.expected.read`. El resumen ejecutivo (`reports/dashboard`) no incluye el historial. Sin locks consultivos, como
+  todo reporte.
