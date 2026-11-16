@@ -370,5 +370,7 @@ Fases C y D de la etapa 9G (decisiones D9 y D11; contrato para clientes en [API_
   reciben `409 OFFLINE_ORDER_ALREADY_ACCEPTED` con el resultado. Registro de movimientos:
   `restaurant.offline_order.accepted` y `restaurant.offline_order.requires_confirmation`; la historia de la cuenta marca
   el pedido.
-- **Una sesión activa por usuario** (D9): sin cambio; iniciar sesión en otra terminal cierra la anterior.
+- **Una sesión activa por usuario** (D9): sin cambio en la 9G; iniciar sesión en otra terminal cerraba la anterior.
+  **Desde la etapa 9H** es una por usuario y por terminal: iniciar sesión en otra terminal ya no cierra la anterior
+  (solo volver a entrar en la misma terminal), y cambiar la contraseña cierra todas.
 - **Sin verificar**: dos computadoras reales en la red y la carga con varias terminales (Fase W).
