@@ -1078,7 +1078,10 @@ bytes) en 884 ms y Excel de 177 789 bytes en 2.9 s; con 50 000 renglones, PDF de
 - **Historial del sistema anterior (9H)**: el periodo más largo sigue siendo de 400 días, así que «todos los años» se
   comparan año por año («Evolución de ventas» y «Tendencia de demanda» contra el año anterior). «Evolución de ventas» no
   tiene columna «Datos». Los cortes del anterior no tienen esperado ni dólares y solo aparecen en «Turnos de caja» (no
-  en «Ventas y cobros por turno», «Historial por caja» ni «Caja por día»). Sin verificar con el respaldo real (Fase E).
+  en «Ventas y cobros por turno», «Historial por caja» ni «Caja por día»). Las ventas pagadas del anterior **sin
+  renglones y con total 0** no dejan renglón en el libro del historial, así que no cuentan en «Cuentas cerradas» ni en el
+  número de cuentas de los reportes, aunque sí en «Ventas pagadas» de la validación de la importación (el informe dice
+  cuántas son; revisión de la Fase C, M-7). Sin verificar con el respaldo real (Fase E).
 - **Reportes de la 9C**: «Cuentas anuladas» (desde la 9D, «Cuentas canceladas») muestra la mesa y el área actuales de la cuenta; si la respuesta idempotente
   de una cancelación no tuviera las partidas, la cantidad anterior y la nueva quedan vacías (la diferencia y el importe
   salen siempre del evento).
