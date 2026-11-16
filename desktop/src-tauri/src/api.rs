@@ -1006,6 +1006,8 @@ pub(crate) fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "supplier_id",
             "modality",
             "currency",
+            // Etapa 9H: «Datos» (AD-EL POS, sistema anterior o los dos) con un lote importado vigente.
+            "data_source",
         ]
     } else if operation.starts_with("inventory_") {
         // Inventario (etapa 8): búsqueda, filtros de listados y paginación.
@@ -1597,6 +1599,7 @@ mod tests {
             "supplier_id",
             "modality",
             "currency",
+            "data_source",
         ] {
             query.insert(key.to_string(), "valor".to_string());
         }

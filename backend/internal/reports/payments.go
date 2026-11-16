@@ -19,6 +19,11 @@ import (
 // movimientos de los turnos que el usuario puede consultar en Caja (cashScopeSQL, con el aviso
 // CASH_SCOPE): un reporte de cobros no revela otras cajas ni turnos cerrados que Caja no le
 // mostraría (tampoco en el aviso de turnos en arqueo, en el dashboard ni en las exportaciones).
+//
+// Etapa 9H: con un lote importado vigente y el filtro «Datos», los cobros del sistema anterior
+// (legacy_payments) se agregan como renglones propios marcados «Sistema anterior» (los del mismo día
+// o del mismo usuario importado se juntan con los de AD-EL POS), tal como se guardaron y fuera del
+// alcance de Caja y de los turnos en arqueo, que son de los turnos de AD-EL POS (legacy.go).
 
 const paymentsDateBasis = "Fecha de registro de cada cobro, devolución o corrección, con la hora de inicio del día."
 
@@ -52,6 +57,60 @@ var paymentMeasureColumns = []Column{
 
 func paymentFilters() []Filter {
 	return []Filter{filterMethod(), filterRegister(), filterShift(), filterUser("Usuario que registró")}
+}
+
+// legacyPaymentFilters son los filtros de cobros con «Datos» (reportes que incluyen el historial importado).
+func legacyPaymentFilters() []Filter {
+	return withDataSource(paymentFilters())
+}
+
+// legacyPaymentsSQL son los cobros del historial del periodo (alias m en la consulta que sigue), con el corte s y la
+// venta v del anterior (legacyPaymentJoins).
+const legacyPaymentsSQL = `WITH legacy_movements AS (
+        SELECT p.batch_id,p.paid_at AS at,p.method,p.method_name,p.amount,p.legacy_shift_id,p.legacy_sale_id,p.sale_status,
+            p.received_user_id,p.legacy_received_by,p.received_name,p.reference
+        FROM app.legacy_payments p WHERE p.paid_at >= @from AND p.paid_at < @until
+    )`
+
+const legacyPaymentJoins = `
+        LEFT JOIN app.legacy_cash_shifts s ON s.batch_id=m.batch_id AND s.legacy_id=m.legacy_shift_id
+        LEFT JOIN app.legacy_sales v ON v.batch_id=m.batch_id AND v.legacy_id=m.legacy_sale_id`
+
+// legacyPaymentMeasures son las medidas de cobros del historial: el anterior no registraba devoluciones, correcciones
+// ni propinas.
+const legacyPaymentMeasures = `count(*)::bigint AS payments,coalesce(sum(m.amount),0) AS collected,0::numeric AS refunds,
+    0::numeric AS corrections,coalesce(sum(m.amount),0) AS net,0::numeric AS tips,coalesce(sum(m.amount),0) AS received_total,
+    '` + LegacySourceLabel + `'::text AS data_source`
+
+// legacyPaymentConditions son los filtros de cobros sobre el historial: el método, la caja y el turno son de AD-EL POS
+// (lo excluyen); el usuario, el importado que recibió el pago.
+func legacyPaymentConditions(query *Query) conditions {
+	list := conditions{}
+	list.excludeLegacy(query, "method_id", "register_id", "shift_id")
+	list.when(query, "user_id", "m.received_user_id = @user_id::uuid")
+	return list
+}
+
+// Expresiones del historial: la caja del cobro (la de su corte o, sin corte, la de su venta), la fecha comercial y el
+// estado del corte.
+const (
+	legacyPaymentRegisterSQL = `coalesce(s.register_name,v.register_name,'Sin caja')`
+	legacyShiftDateSQL       = `(s.opened_at AT TIME ZONE @tz)::date`
+	legacyShiftStateSQL      = `CASE s.status WHEN 'open' THEN 'Abierto' WHEN 'closed' THEN 'Cerrado' WHEN 'unknown' THEN 'Desconocido' END`
+)
+
+// legacyPaymentsNote explica los cobros del historial.
+const legacyPaymentsNote = "Sistema anterior: cobros tal como los guardó (también los de importe cero o negativo y los de ventas " +
+	"que después se cancelaron o quedaron abiertas), sin devoluciones, correcciones ni propinas, que no registraba. No dependen " +
+	"del alcance de Caja ni de los turnos en arqueo, que son de los turnos de AD-EL POS."
+
+// legacyGrouping es la misma agrupación de un reporte de cobros sobre el historial (selectSQL y groupSQL, con m, s y v
+// de legacyPaymentsSQL). merge, si no está vacía, es la clave con que se juntan los renglones de AD-EL POS y del
+// historial (el día o el usuario).
+type legacyGrouping struct {
+	selectSQL string
+	groupSQL  string
+	merge     string
 }
 
 // paymentScope son las condiciones comunes de los turnos s de los cobros: sin turnos en arqueo y
@@ -123,12 +182,35 @@ func paymentDataset(ctx context.Context, query *Query, sql string) (*Dataset, er
 	return &Dataset{Rows: rows, Warnings: warnings}, nil
 }
 
-// paymentsBy agrupa los movimientos por una dimensión.
-func paymentsBy(selectSQL, joins, groupSQL string) func(ctx context.Context, query *Query) (*Dataset, error) {
+// paymentsBy agrupa los movimientos por una dimensión y, con el historial, sus cobros por la misma dimensión.
+func paymentsBy(selectSQL, joins, groupSQL string, legacy legacyGrouping) func(ctx context.Context, query *Query) (*Dataset, error) {
 	return func(ctx context.Context, query *Query) (*Dataset, error) {
-		return paymentDataset(ctx, query, paymentMovements+` SELECT `+selectSQL+`,`+paymentMeasures+`
-            FROM movements m JOIN app.cash_shifts s ON s.id=m.shift_id `+joins+`
-            WHERE true`+paymentConditions(query).sql()+` GROUP BY `+groupSQL)
+		dataset := &Dataset{Rows: []Row{}}
+		if query.legacy.Native {
+			native, err := paymentDataset(ctx, query, paymentMovements+` SELECT `+selectSQL+`,`+paymentMeasures+`
+                FROM movements m JOIN app.cash_shifts s ON s.id=m.shift_id `+joins+`
+                WHERE true`+paymentConditions(query).sql()+` GROUP BY `+groupSQL)
+			if err != nil {
+				return nil, err
+			}
+			query.markNative(native.Rows)
+			dataset = native
+		}
+		if !query.legacy.History {
+			return dataset, nil
+		}
+		rows, err := query.collect(ctx, legacyPaymentsSQL+` SELECT `+legacy.selectSQL+`,`+legacyPaymentMeasures+`
+            FROM legacy_movements m`+legacyPaymentJoins+`
+            WHERE true`+legacyPaymentConditions(query).sql()+` GROUP BY `+legacy.groupSQL, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		dataset.Rows = append(dataset.Rows, rows...)
+		if legacy.merge != "" {
+			dataset.Rows = mergeRows(dataset.Rows, legacy.merge, query.definition.Columns)
+		}
+		dataset.Notes = append(dataset.Notes, legacyPaymentsNote)
+		return dataset, nil
 	}
 }
 
@@ -142,46 +224,59 @@ func init() {
 	register(Definition{
 		ID: "payments.by_method", Group: "payments", Title: "Cobros por método",
 		Description: "Cobros, devoluciones, correcciones y propinas por método de pago (devoluciones por su método de salida).",
-		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: paymentFilters(),
-		Columns:     withColumns([]Column{textColumn("method", "Método")}, paymentMeasureColumns),
+		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: legacyPaymentFilters(),
+		Columns:     withLegacyColumns(withColumns([]Column{textColumn("method", "Método")}, paymentMeasureColumns), false),
 		DefaultSort: Sort{Key: "net", Descending: true},
-		Query:       paymentsBy("(array_agg(m.method_name ORDER BY m.at DESC))[1] AS method", "", "m.method_id"),
+		Query: paymentsBy("(array_agg(m.method_name ORDER BY m.at DESC))[1] AS method", "", "m.method_id",
+			legacyGrouping{selectSQL: "m.method_name AS method", groupSQL: "m.method,m.method_name"}),
 	})
 	register(Definition{
 		ID: "payments.by_register", Group: "payments", Title: "Cobros por caja",
 		Description: "Cobros, devoluciones, correcciones y propinas por caja física.",
-		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: paymentFilters(),
-		Columns:     withColumns([]Column{textColumn("register", "Caja")}, paymentMeasureColumns),
+		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: legacyPaymentFilters(),
+		Columns:     withLegacyColumns(withColumns([]Column{textColumn("register", "Caja")}, paymentMeasureColumns), false),
 		DefaultSort: Sort{Key: "register"},
-		Query:       paymentsBy("register.name AS register", "JOIN app.registers register ON register.id=m.register_id", "m.register_id,register.name"),
+		Query: paymentsBy("register.name AS register", "JOIN app.registers register ON register.id=m.register_id", "m.register_id,register.name",
+			legacyGrouping{selectSQL: legacyPaymentRegisterSQL + " AS register", groupSQL: "1"}),
 	})
 	register(Definition{
 		ID: "payments.by_shift", Group: "payments", Title: "Cobros por turno",
 		Description: "Cobros de cada turno con su fecha comercial (vista por turno); los turnos en arqueo se excluyen.",
 		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis + " Turno de cada registro.",
-		Filters: paymentFilters(),
-		Columns: withColumns([]Column{textColumn("register", "Caja"), dateColumn("business_date", "Fecha comercial del turno"),
-			textColumn("opened_by", "Abrió"), textColumn("shift_state", "Estado")}, paymentMeasureColumns),
+		Filters: legacyPaymentFilters(),
+		Columns: withLegacyColumns(withColumns([]Column{textColumn("register", "Caja"),
+			dateColumn("business_date", "Fecha comercial del turno"), textColumn("opened_by", "Abrió"),
+			textColumn("shift_state", "Estado")}, paymentMeasureColumns), false),
 		DefaultSort: Sort{Key: "business_date"},
 		Query: paymentsBy(`register.name AS register,coalesce(s.business_date,(s.opened_at AT TIME ZONE @tz)::date) AS business_date,
                 opener.display_name AS opened_by,CASE s.state WHEN 'open' THEN 'Abierto' ELSE 'Cerrado' END AS shift_state`,
-			shiftJoins, "m.shift_id,register.name,s.business_date,s.opened_at,opener.display_name,s.state"),
+			shiftJoins, "m.shift_id,register.name,s.business_date,s.opened_at,opener.display_name,s.state",
+			// Un renglón por corte del anterior; «Sin turno», los cobros sin corte.
+			legacyGrouping{selectSQL: `CASE WHEN m.legacy_shift_id IS NULL THEN 'Sin turno' ELSE coalesce(min(s.register_name),
+                    'Corte '||m.legacy_shift_id) END AS register,min(` + legacyShiftDateSQL + `) AS business_date,
+                min(s.cashier_name) AS opened_by,min(` + legacyShiftStateSQL + `) AS shift_state`, groupSQL: "m.legacy_shift_id"}),
 	})
 	register(Definition{
 		ID: "payments.by_user", Group: "payments", Title: "Cobros por usuario",
 		Description: "Cobros por el usuario que los registró (las devoluciones, por quien devolvió).",
-		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: paymentFilters(),
-		Columns:     withColumns([]Column{textColumn("user", "Usuario")}, paymentMeasureColumns),
+		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: legacyPaymentFilters(),
+		Columns:     withLegacyColumns(withColumns([]Column{textColumn("user", "Usuario")}, paymentMeasureColumns), false),
 		DefaultSort: Sort{Key: "net", Descending: true},
-		Query:       paymentsBy("actor.display_name AS \"user\"", "JOIN app.users actor ON actor.id=m.actor_id", "m.actor_id,actor.display_name"),
+		// user_ref (no se envía) junta los cobros de un usuario importado en los dos sistemas.
+		Query: paymentsBy("actor.display_name AS \"user\",m.actor_id::text AS user_ref", "JOIN app.users actor ON actor.id=m.actor_id",
+			"m.actor_id,actor.display_name", legacyGrouping{
+				selectSQL: `coalesce(min(m.received_name),'Sin usuario') AS "user",
+                    coalesce(m.received_user_id::text,'legacy:'||coalesce(m.legacy_received_by::text,'')) AS user_ref`,
+				groupSQL: "m.received_user_id,m.legacy_received_by", merge: "user_ref"}),
 	})
 	register(Definition{
 		ID: "payments.by_day", Group: "payments", Title: "Cobros por día",
 		Description: "Cobros por día comercial (vista por día, sin depender de los turnos).",
-		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: paymentFilters(),
-		Columns:     withColumns([]Column{dateColumn("day", "Día")}, paymentMeasureColumns),
+		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: legacyPaymentFilters(),
+		Columns:     withLegacyColumns(withColumns([]Column{dateColumn("day", "Día")}, paymentMeasureColumns), false),
 		DefaultSort: Sort{Key: "day"},
-		Query:       paymentsBy(businessDate("m.at")+" AS day", "", "1"),
+		Query: paymentsBy(businessDate("m.at")+" AS day", "", "1",
+			legacyGrouping{selectSQL: businessDate("m.at") + " AS day", groupSQL: "1", merge: "day"}),
 	})
 	registerPaymentDetails()
 }

@@ -52,36 +52,16 @@ func registerPaymentDetails() {
 	register(Definition{
 		ID: "payments.list", Group: "payments", Title: "Detalle de cobros",
 		Description: "Cada cobro, devolución y reverso de corrección del periodo.",
-		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: paymentFilters(),
-		Columns: []Column{dateTimeColumn("created_at", "Fecha"), codeColumn("folio", "Folio"), textColumn("kind", "Tipo"),
+		Permissions: []string{PermissionPayments}, DateBasis: paymentsDateBasis, Filters: legacyPaymentFilters(),
+		Columns: withLegacyColumns([]Column{dateTimeColumn("created_at", "Fecha"), codeColumn("folio", "Folio"), textColumn("kind", "Tipo"),
 			textColumn("method", "Método"), moneyColumn("amount", "Importe"), moneyColumn("tip", "Propina"),
 			physical(optional(moneyColumn("received", "Recibido"))), physical(optional(moneyColumn("change", "Cambio"))),
 			physical(optional(dollarColumn("received_usd", "Dólares recibidos"))),
 			physical(optional(Column{Key: "usd_rate", Label: "Tipo de cambio", Type: TypeQuantity, Sortable: true})),
 			textColumn("register", "Caja"), dateColumn("business_date", "Fecha comercial del turno"), textColumn("user", "Registró"),
-			optional(textColumn("reference", "Referencia"))},
+			optional(textColumn("reference", "Referencia"))}, false),
 		DefaultSort: Sort{Key: "created_at"},
-		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			return paymentDataset(ctx, query, paymentMovements+`
-                SELECT m.at AS created_at,a.folio::text AS folio,
-                    CASE m.kind WHEN 'payment' THEN CASE WHEN m.corrective THEN 'Cobro de corrección' ELSE 'Cobro' END
-                        WHEN 'refund' THEN 'Devolución' ELSE 'Reverso de corrección' END AS kind,
-                    m.method_name AS method,m.amount,m.tip,
-                    CASE WHEN m.kind='payment' THEN p.received END AS received,
-                    CASE WHEN m.kind='payment' AND p.is_cash THEN p.change_given END AS change,
-                    CASE WHEN m.kind='payment' THEN p.received_usd END AS received_usd,
-                    CASE WHEN m.kind='payment' THEN p.usd_rate END AS usd_rate,
-                    register.name AS register,coalesce(s.business_date,(s.opened_at AT TIME ZONE @tz)::date) AS business_date,
-                    actor.display_name AS "user",coalesce(CASE WHEN m.kind='payment' THEN p.reference ELSE refund.reference END,'') AS reference
-                FROM movements m
-                JOIN app.cash_shifts s ON s.id=m.shift_id
-                JOIN app.registers register ON register.id=m.register_id
-                JOIN app.users actor ON actor.id=m.actor_id
-                JOIN app.restaurant_accounts a ON a.id=m.account_id
-                JOIN app.payments p ON p.id=m.payment_id
-                LEFT JOIN app.payment_refunds refund ON refund.id=m.refund_id
-                WHERE true`+paymentConditions(query).sql())
-		},
+		Query:       paymentList,
 	})
 	register(Definition{
 		ID: "payments.mixed_partial", Group: "payments", Title: "Pagos mixtos y parciales",
@@ -234,4 +214,55 @@ func registerPaymentDetails() {
                 WHERE true`+list.sql()+` GROUP BY `+group+` ORDER BY min(`+order+`)`)
 		},
 	})
+}
+
+// paymentList es cada cobro, devolución y reverso de corrección de AD-EL POS y, con el historial, cada cobro del
+// anterior (folio SA-…; «Cobro de una venta cancelada» o «abierta» si su venta no se pagó), sin importes físicos.
+func paymentList(ctx context.Context, query *Query) (*Dataset, error) {
+	dataset := &Dataset{Rows: []Row{}}
+	if query.legacy.Native {
+		native, err := paymentDataset(ctx, query, paymentMovements+`
+                SELECT m.at AS created_at,a.folio::text AS folio,
+                    CASE m.kind WHEN 'payment' THEN CASE WHEN m.corrective THEN 'Cobro de corrección' ELSE 'Cobro' END
+                        WHEN 'refund' THEN 'Devolución' ELSE 'Reverso de corrección' END AS kind,
+                    m.method_name AS method,m.amount,m.tip,
+                    CASE WHEN m.kind='payment' THEN p.received END AS received,
+                    CASE WHEN m.kind='payment' AND p.is_cash THEN p.change_given END AS change,
+                    CASE WHEN m.kind='payment' THEN p.received_usd END AS received_usd,
+                    CASE WHEN m.kind='payment' THEN p.usd_rate END AS usd_rate,
+                    register.name AS register,coalesce(s.business_date,(s.opened_at AT TIME ZONE @tz)::date) AS business_date,
+                    actor.display_name AS "user",coalesce(CASE WHEN m.kind='payment' THEN p.reference ELSE refund.reference END,'') AS reference
+                FROM movements m
+                JOIN app.cash_shifts s ON s.id=m.shift_id
+                JOIN app.registers register ON register.id=m.register_id
+                JOIN app.users actor ON actor.id=m.actor_id
+                JOIN app.restaurant_accounts a ON a.id=m.account_id
+                JOIN app.payments p ON p.id=m.payment_id
+                LEFT JOIN app.payment_refunds refund ON refund.id=m.refund_id
+                WHERE true`+paymentConditions(query).sql())
+		if err != nil {
+			return nil, err
+		}
+		query.markNative(native.Rows)
+		dataset = native
+	}
+	if !query.legacy.History {
+		return dataset, nil
+	}
+	rows, err := query.collect(ctx, legacyPaymentsSQL+`
+        SELECT m.at AS created_at,coalesce('`+legacyFolioPrefix+`'||v.folio,'Venta '||m.legacy_sale_id) AS folio,
+            CASE m.sale_status WHEN 'paid' THEN 'Cobro' WHEN 'cancelled' THEN 'Cobro de una venta cancelada'
+                ELSE 'Cobro de una venta abierta' END AS kind,
+            m.method_name AS method,m.amount,0::numeric AS tip,`+legacyPaymentRegisterSQL+` AS register,
+            `+legacyShiftDateSQL+` AS business_date,coalesce(m.received_name,'') AS "user",m.reference,
+            '`+LegacySourceLabel+`' AS data_source
+        FROM legacy_movements m`+legacyPaymentJoins+`
+        WHERE true`+legacyPaymentConditions(query).sql()+`
+        ORDER BY m.at`, query.Args())
+	if err != nil {
+		return nil, err
+	}
+	dataset.Rows = append(dataset.Rows, rows...)
+	dataset.Notes = append(dataset.Notes, legacyPaymentsNote)
+	return dataset, nil
 }
