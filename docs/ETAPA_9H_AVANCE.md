@@ -1196,3 +1196,168 @@ orden de textos) y `57a95c0` (`legacyread`: bloqueo, restos, `--cleanup`, Docker
   `OpenOptions` toman el valor predeterminado.
 - La comprobación de datos reales también reconoce `*.bak.gz`, `*.bak.zip`, `*.bak.7z`, `*.mdf`, `*.ndf`, `*.ldf`,
   `*.trn` y un respaldo dentro de un gzip.
+
+---
+
+## Fase C · El historial en los reportes
+
+Un agente, en su propio árbol de trabajo (`etapa-9h-c2`, desde `etapa-9h` con las fases A, B y C parte 1). 16/11/2026.
+Sin migración nueva ni cambios en la sección C de la 0024 (ni tablas, ni índices, ni vistas: la medición no los pidió).
+Pruebas en copias aisladas: clúster temporal 55499 (bases `adel_pos_test_d2_*`). **No se tocó la instalación real ni se
+usó el respaldo real**: el historial de las pruebas se carga con el importador real (`legacyimport`: `OpenPackage`,
+`Load`, `Analyze` e `Import`) desde paquetes sintéticos de `internal/legacysynth` (`Dataset()` + `WritePackage`), con
+ventas agregadas en fechas límite; ninguna prueba escribe en `app.legacy_*` a mano y no hizo falta ningún ayudante
+exportado nuevo en `legacyimport`.
+
+Commit en `etapa-9h-c2`:
+
+- `edd558d` — el historial importado del sistema anterior en los reportes (filtro «Datos», unión del libro, diferencia
+  del sistema anterior, cobros fuera del alcance de Caja, cortes y exportaciones).
+
+### Qué cambió
+
+- **`backend/internal/reports/legacy.go`** (nuevo): filtro «Datos» (`data_source`, `choice`: «AD-EL POS y sistema
+  anterior» `all` por omisión, «Solo AD-EL POS» `native`, «Solo sistema anterior» `legacy`), alcance por reporte
+  (`legacyScope`: hay lote vigente, incluye AD-EL POS, incluye el historial), la unión del libro (`ledgerFrom`: el de
+  AD-EL POS tal como antes, el del historial o los dos con las mismas columnas) y sus medidas (`ledgerExtras`), las
+  medidas y condiciones del historial para las consultas propias, las columnas «Datos» y «Diferencia del sistema
+  anterior», la marca de lo de AD-EL POS (`markNative`) y la unión de renglones por clave (`mergeRows`).
+- **Motor** (`engine.go`, `handler.go`, `filters.go`, `model.go`, `query.go`): `Column.Legacy` y `Filter.Legacy`
+  (`json:"-"`); una consulta corta por reporte y por catálogo averigua si hay un lote `completed`; sin lote, el catálogo
+  no ofrece el filtro ni las columnas del historial, `meta.filters` no lo describe y el valor recibido se ignora.
+- **Reportes** (27): ventas y productos por la unión del libro (`sales.summary`, `by_day`, `by_week`, `by_month`,
+  `by_hour`, `by_category`, `by_product`, `by_mode`, `dine_in`, `takeaway`, `evolution`, `products.top`, `bottom`,
+  `trends`); con renglones propios del historial (`sales.accounts` —folio `SA-<folio>`, «Venta del sistema anterior»—,
+  `sales.by_shift` —un renglón por corte, «Sin turno» para las pagadas sin corte—, `products.complements`
+  —«Complementos (sistema anterior)»—, `payments.by_method`, `by_shift`, `by_register`, `list`, `by_day` y `by_user`
+  —estos dos se juntan con los de AD-EL POS del mismo día o del mismo usuario importado—, `sales.voided_accounts`,
+  `sales.cancellations_by_reason`, `products.quantity_changes` y `cash.shifts`). Cada renglón lleva «Datos»: «AD-EL
+  POS», «Sistema anterior» o «AD-EL POS y sistema anterior».
+- **Puente** (`desktop/src-tauri/src/api.rs`): `data_source` en la lista blanca de `reports_*` (y en su prueba). La
+  interfaz no cambió: el filtro y las columnas salen del catálogo de Go (el selector `choice` con valor por omisión ya
+  existía); prueba de Vitest nueva.
+- **Documentación**: `docs/REPORTS.md` (sección «El historial del sistema anterior», filtros, pruebas, mediciones,
+  limitaciones y cómo agregar un reporte) y `reports/doc.go`.
+
+### Decisiones
+
+1. **Sin lote, la misma SQL de antes**: cada consulta arma la unión solo si el reporte incluye el historial; sin lote la
+   fuente es `app.sales_recognitions r` y las medidas, las de antes (la prueba compara el JSON de los 27 reportes con y
+   sin el parámetro). Con lote y «Solo AD-EL POS», las columnas del historial siguen (para que no cambien al cambiar el
+   filtro) con «AD-EL POS» y diferencia 0.
+2. **Juntar o separar**: un renglón de una dimensión que existe igual en los dos sistemas (día, semana, mes, hora, tasa,
+   modalidad, área y mesa, categoría, producto y, en cobros, día y usuario importado) suma los dos y se marca «AD-EL POS
+   y sistema anterior» (comparar años y ver un producto importado vendido en los dos como un solo renglón); las ventas,
+   los cortes, las cajas, las formas de pago, las cancelaciones, los cambios de cantidad, los complementos y los cortes
+   de caja del anterior son entidades distintas y van en renglones propios. «Efectivo» del anterior no se junta con el
+   método de AD-EL POS (son registros de sistemas distintos; la columna «Datos» los distingue).
+3. **Diferencia del sistema anterior** (decisión 2 del propietario): medida propia `legacy_difference`, fuera del importe
+   bruto e incluida en la venta neta (venta neta = bruto − promociones − descuentos − cortesías + cargos + diferencia);
+   columna en los reportes por venta, día, semana, mes, hora, tasa, modalidad, mesa, origen y turno, y cifra resumida en
+   todos los de ventas y productos. Los de productos solo cuentan renglones (con sus complementos) y concilian con las
+   cifras de descuentos, cargos y diferencia. En «Ventas del periodo» los descuentos, cargos y diferencias del anterior
+   (sin IVA propio) forman el renglón «Sin tasa (sistema anterior)».
+4. **Cuentas**: cada venta del anterior cuenta una vez; en la unión, un UUID sintético de la versión 0 por venta (los de
+   AD-EL POS son de la versión 4) y la secuencia del historial por debajo de la de AD-EL POS, para que en un renglón
+   combinado los nombres sean los más recientes de AD-EL POS.
+5. **Filtros**: los de algo que solo existe en AD-EL POS (caja, turno, método de pago, lista de precios, motivo del
+   catálogo, quién canceló o modificó, origen distinto de «Sistema anterior») excluyen el historial; los de lo importado
+   (producto, categoría, área, mesa, usuario) lo filtran por el identificador nuevo; «Sin motivo del catálogo» incluye
+   las cancelaciones del anterior.
+6. **Cobros**: todos los pagos del anterior en su fecha, también los de importe cero o negativo y los de ventas
+   canceladas o abiertas (los cuenta así la validación §4.4 por forma de pago), sin devoluciones, correcciones ni
+   propinas; fuera del alcance de Caja y de los turnos en arqueo (como pide el encargo). En «Detalle de cobros» se rotulan
+   «Cobro de una venta cancelada» o «abierta».
+7. **Cortes del anterior en «Turnos de caja»**: tal como se guardaron, sin esperado (no se recalcula); su diferencia
+   guardada exige `cash.expected.read` y **solo se muestran a quien consulta en Caja todas las cajas y el historial**
+   (decisión propia: son turnos cerrados de otras cajas; los cobros sí quedan fuera del alcance, como pide el encargo).
+   No se agregaron a «Ventas y cobros por turno», «Historial por caja» ni «Caja por día».
+8. **Cancelaciones y cambios de cantidad**: motivo «Sin motivo (sistema anterior)», importe = lo que se debía (lo que el
+   anterior contaba como vendido), quién autorizó; en «Modificaciones de cantidades», los cambios frente a la cantidad
+   original del renglón (también aumentos), sin los registros sin cambio de cantidad ni el importe (no se guardaba).
+9. **Resumen ejecutivo sin historial**: es la operación de AD-EL POS, no tiene filtros y mezcla caja, inventario y costos
+   sin equivalente; la comparación con años anteriores se hace en «Evolución de ventas» y «Tendencia de demanda», que sí
+   lo incluyen. «Evolución de ventas» tiene el filtro pero no la columna «Datos» (compara cubetas de tiempo).
+10. **Sin índices nuevos**: la unión empuja el periodo a cada rama y usa `legacy_sales_recognitions_recognized_idx`; el
+    reporte más lento con el volumen real fue de 450 ms. Las canceladas del anterior recorren `legacy_sales` (10 ms con
+    230 mil ventas): un índice parcial no se justificó.
+
+### Pruebas ejecutadas (aisladas)
+
+- `go-unit` (`ISO_TAG=D2`): aprobado (vet normal e `integration`, `go test -race ./...`, `GOOS=windows` build y vet).
+  Unitarias nuevas `reports/legacy_test.go`: `TestLegacyReportsDeclareDataSource`, `TestResolveLegacy`,
+  `TestMergeRows`.
+- `go-int ./internal/reports` completo: **aprobado** (137 s), con las pruebas nuevas
+  `TestStage9HReportsWithoutLegacyBatch` (sin lote: catálogo sin «Datos» ni columnas del historial; los 27 reportes dan
+  el mismo JSON sin el parámetro y con `all`, `native` y `legacy`) y `TestStage9HLegacyHistoryInReports` (catálogo y
+  metadatos; cada uno de los 27 reportes con los tres valores en 2025 —solo historial— y en un periodo con los dos
+  sistemas —cada total igual a AD-EL POS + anterior—; totales de 2025 contra las tablas del lote; día comercial a las
+  04:59 y 05:00, hora de inicio cambiada a las 04:00 y de vuelta, los dos cambios de horario de 2021 en Monterrey;
+  cuatro decimales redondeados solo al mostrar; diferencia fuera de los productos; cancelada fuera de la venta;
+  «Sin turno»; alcance de Caja limitado; producto importado vendido en los dos sistemas en un solo renglón; resumen
+  ejecutivo sin historial; PDF y Excel con «Datos: Solo sistema anterior» y la marca; filtros de AD-EL POS que excluyen el
+  historial). Las pruebas anteriores del paquete (aceptación, exportaciones, 9C, 9D) siguen aprobadas sin cambios.
+- `go-int ./internal/reports/operational`: **4 subpruebas fallan igual con y sin este cambio**
+  (`turno en arqueo excluido…`, `cierre definitivo con sobrante y cortes`, `esperado y diferencias protegidos…`,
+  `compras por periodo…`): la prueba depende de la hora; entre las 00:00 y las 05:00 de Monterrey (se corrió a la 01:45)
+  la fecha calendario de un turno abierto ahora queda fuera del rango de días comerciales que consulta. Se comprobó
+  corriendo `TestOperationalReports` sobre una copia del backend con el paquete `reports` original de `etapa-9h`: mismas
+  4 fallas. Las demás subpruebas aprobadas.
+- `vitest` (`tsc --noEmit` + 94 archivos, 885 pruebas): aprobado, con la nueva «“Datos” (historial del sistema anterior)
+  sale del catálogo de Go con su valor por omisión».
+- `cargo` (`cargo test --locked --offline`): aprobado (89 pruebas, 3 ignoradas), con `data_source` en
+  `report_routes_are_closed_read_only_and_keyed`.
+- `fmt-check` y `sync-check`: aprobados.
+- **Medición** (`ADEL_REPORTS_MEASURE=1`, `TestStage9HLegacyReportsVolume`, sin `-race`, `$SP/measure-d2.sh`):
+  historial sintético importado con el importador real: 230 240 ventas (10/2019–09/2026), 719 258 renglones del libro,
+  230 242 pagos; generar e importar, 23 s; base de 784 MB. `reports.Run` completo en el ejecutor real:
+
+  | Reporte (año 2025, ≈ 33 mil ventas)             | Los dos | Solo anterior | Solo AD-EL POS |
+  | ----------------------------------------------- | ------- | ------------- | -------------- |
+  | `sales.summary`                                 | 159 ms  | 155 ms        | 1 ms           |
+  | `sales.by_day` (365 renglones)                  | 157 ms  | 180 ms        | 2 ms           |
+  | `sales.by_week`                                 | 242 ms  | 309 ms        | 1 ms           |
+  | `sales.by_month`                                | 184 ms  | 205 ms        | 1 ms           |
+  | `sales.by_product`                              | 210 ms  | 238 ms        | 1 ms           |
+  | `sales.accounts` (32 883 renglones)             | 400 ms  | 392 ms        | 1 ms           |
+  | `sales.by_shift`                                | 213 ms  | 189 ms        | 2 ms           |
+  | `sales.evolution` (contra 2024)                 | 58 ms   | 101 ms        | 1 ms           |
+  | `products.trends` (contra 2024)                 | 315 ms  | 346 ms        | 1 ms           |
+  | `products.complements`                          | 47 ms   | 42 ms         | 6 ms           |
+  | `payments.by_method`                            | 15 ms   | 8 ms          | 1 ms           |
+  | `payments.list` (32 885 renglones)              | 123 ms  | 118 ms        | 2 ms           |
+  | `sales.voided_accounts`, `cash.shifts`, cambios | ≤ 14 ms | ≤ 12 ms       | ≤ 2 ms         |
+
+  Con el periodo más largo que se admite (400 días, 2024–2025): el más lento, `sales.accounts` (36 036 renglones),
+  450 ms; `products.trends` 425 ms; los demás de ventas y productos entre 116 y 343 ms y los de cobros entre 8 y 125 ms.
+  Planes (`EXPLAIN ANALYZE`): la unión empuja el periodo a las dos ramas (índice `legacy_sales_recognitions_recognized_idx`
+  en el historial; la consulta de ventas por día de 2025, 29 ms); las canceladas recorren `legacy_sales` (10 ms).
+
+- `docs/etapas/*.md` sin cambios.
+
+### No verificado
+
+- El respaldo real (Fase E): los reportes del historial con los datos reales y su comparación con el sistema anterior.
+- La interfaz con el filtro y las columnas en la ventana nativa y en Playwright (no se agregó especificación: la pantalla
+  no cambió y el filtro sale del catálogo; cubierto por Vitest y por las rutas de Go). El PDF y el Excel con el
+  historial no se abrieron ni imprimieron (solo su texto y sus hojas).
+- `TestOperationalReports` completo después de las 05:00 de Monterrey (ver «Pruebas ejecutadas»); conviene repetirlo
+  en la regresión de la Fase F.
+- Comparar «todos los años» en un solo reporte: el periodo sigue limitado a 400 días (se compara año por año).
+
+### Para CLAUDE.md
+
+- §15 (Etapa 9H) y §6: con un lote importado vigente, 27 reportes (`docs/REPORTS.md`, «El historial del sistema
+  anterior») incluyen `app.legacy_*` con el filtro «Datos» (`data_source`: `all` por omisión, `native`, `legacy`) y las
+  columnas «Datos» y «Diferencia del sistema anterior»; el resumen ejecutivo no. Sin lote, cada reporte es exactamente el
+  de antes (catálogo, columnas, metadatos y SQL).
+- Regla permanente propuesta: «Un reporte que incluya el historial del sistema anterior lo declara con `withDataSource`
+  y `withLegacyColumns` (`reports/legacy.go`), usa `query.ledgerFrom()`/`ledgerExtras()` o una consulta propia cuando
+  `query.legacy.History`, y sin lote vigente ejecuta la misma consulta de antes; los importes del historial se suman
+  exactos (4 decimales) y se redondean solo al mostrar; la «Diferencia del sistema anterior» nunca se reparte entre
+  productos; los cobros del historial quedan fuera del alcance de Caja».
+- §6, pruebas: `TestStage9HReportsWithoutLegacyBatch` y `TestStage9HLegacyHistoryInReports` (`internal/reports`, cargan
+  el historial con el importador real); medición opcional `TestStage9HLegacyReportsVolume` con
+  `ADEL_REPORTS_MEASURE=1` (sin `-race`). `TestOperationalReports` falla entre las 00:00 y las 05:00 de Monterrey
+  (dependencia de la hora anterior a esta fase).
+- Puente: `data_source` en `allowed_query_keys` de `reports_*` (`api.rs`).
