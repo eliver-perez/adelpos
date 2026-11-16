@@ -634,3 +634,261 @@ Como máximo dos agentes a la vez; servidor y Android avanzan en paralelo cuando
 | 4     | **E (dispositivo)** · modo Mesero y cola sin conexión                                                                                 | Correcciones de la revisión de §3                                                                                                  |
 | 5     | **F** · extremo a extremo en los emuladores                                                                                           | Revisión independiente de §6–§7 (cola sin conexión)                                                                                |
 | 6     | **G** · regresión completa, documentación, APK, `.pkg`, fusión y push                                                                 | —                                                                                                                                  |
+
+---
+
+## Fase B · Servidor y escritorio
+
+Un agente, en su propio árbol de trabajo (`etapa-a1-bs`, desde `etapa-a1-android` en `6b5109e`), en paralelo con la
+Fase A (proyecto `android/`, otro agente). 16/11/2026. **Versión 0.12.0 y esquema 25** (`config/product.json` y
+`node scripts/sync-metadata.mjs`, más la versión del paquete en `desktop/package-lock.json` y `Cargo.lock`, como en la
+0.11.0). Migración `0025_android_waiters.sql`, una sola para la etapa, con su **sección B**. Pruebas en copias aisladas
+(`ISO_TAG=B`): clúster temporal 55499 con una base `adel_pos_test_b_*` por paquete, Go temporal de Playwright en 8186 y
+vista previa en 1424. **No se tocó la instalación real** ni `android/`, `scripts/dev.sh`, `.gitignore`,
+`docs/DEPENDENCIES.md`, `CLAUDE.md` ni `AGENTS.md`; `docs/etapas/*.md` con el mismo md5 antes y después.
+
+Commits en `etapa-a1-bs`:
+
+- `ed603ae` — versión 0.12.0 (esquema 25) y versión mínima por tipo de cliente (A1-D4).
+- `56bd9ae` — migración 0025, sección B, con su prueba de subida 24 → 25.
+- `3aacd0c` — entrada con PIN, credencial de envío, administración del PIN, «Mi PIN» y bloqueo por inactividad en Go;
+  contrato v1, `docs/API_V1.md` y `API_CONTRACTS.md`.
+- `b11c01f` — escritorio: Personal › Usuarios, «Mi PIN», Terminales y Registro de movimientos.
+- `c9c2c14` — Playwright `workflow-stagea1-pin.spec.ts`.
+- `0b0633e` — el canal de eventos también rechaza la credencial de envío.
+
+### Qué cambió
+
+**Versiones (A1-D4).** `config/product.json` lleva `min_client_versions` (`desktop` 0.10.0, `android` 0.1.0) y conserva
+`min_client_version` (0.10.0, la del escritorio) y `min_server_version` (0.10.0). `product.Metadata.MinimumFor(kind)`
+(`backend/internal/product/product.go`) da la mínima de un tipo; sin tipo o con uno sin mínima propia, la general.
+`checkClient` (`backend/internal/httpapi/clientversion.go`) compara `X-Client-Version` con la mínima del tipo de
+`X-Client-Kind` y el 426 informa en `details.min_client_version` la de ese tipo. `GET version` agrega
+`min_client_versions` (todos los tipos de `ClientKinds`) y las capacidades **`client-versions-by-kind`** y
+**`waiter-pin-v1`** (`router.go`). Ningún cliente 0.10.x/0.11.x deja de funcionar: el escritorio sigue con su mínima
+0.10.0 y la omisión del tipo nunca rebaja la exigencia (se compara con la general).
+
+**Migración `backend/migrations/0025_android_waiters.sql`, sección B** (el final del archivo dice dónde van las
+secciones de las fases siguientes):
+
+- `app.users`: `pin_hash` (Argon2id, el formato de las contraseñas), `pin_set_at`, `pin_version` (0; sube al definir,
+  cambiar o quitar), `short_name` (1–20, sin espacios a los lados) y `badge_color` (`^#[0-9a-f]{6}$`; Go solo acepta los
+  de la paleta); `users_pin_fields_check` (hash y fecha juntos).
+- `app.pin_attempts` (por usuario): `failures` (0–5), `window_start`, `locked_until`, `last_device_id`.
+- `app.offline_order_credentials`: usuario, dispositivo, `secret_hash` (SHA-256, único), `pin_version` con que se
+  emitió, `issued_at`, `last_used_at`, `revoked_at` y `revoke_reason` (`replaced`, `pin_changed`, `pin_removed`,
+  `user_disabled`, `device_revoked`); índice único parcial **una vigente por usuario y dispositivo**.
+- `app.devices.idle_lock_seconds` (120; CHECK 30–3600).
+- Permiso **`waiter_devices.use`** («Entrar con PIN en teléfonos y tabletas de meseros», igual en
+  `administration.Permissions`) para `administrator` y `waiter` (A1-D2). En una instalación nueva los roles nacen en el
+  asistente después de las migraciones: `setup.go` hace la misma concesión al rol Mesero. Ningún otro permiso cambia.
+
+**Entrada con PIN** (`backend/internal/administration/pin_login.go`; despachadas en `service.go` después de
+`authenticateDevice` y antes de la sesión):
+
+- `GET auth/pin-users` (`pinUsers`, `pin_login.go:67`): solo dispositivo `android` (si no, `403
+PIN_DEVICE_NOT_ALLOWED`); `{device: {id, name, idle_lock_seconds}, users: [{id, name, initial, color, pin_version,
+locked_until}]}` de usuarios activos, no de soporte, con PIN y con `waiter_devices.use` efectivo (rol más excepciones
+  individuales, la misma regla de `effectivePermissions`, en SQL: `waiterEligibility`).
+- `POST auth/pin-login` (`pinLogin`, `pin_login.go:109`) `{user_id, pin}` → `{session_token, pin_version,
+offline_credential}`. Orden: solo `android`; forma del PIN (400, no cuenta); bloqueo vigente → `429 PIN_LOCKED` con
+  `details.locked_until` sin verificar; siempre se verifica un hash (el ficticio `pinDummyHash` si el usuario no existe,
+  está inactivo, es de soporte o no tiene PIN); fallo → `401 PIN_INVALID`, cuenta para el usuario si existe y el quinto
+  en 15 minutos (desde cualquier dispositivo) bloquea 5 minutos y responde ya `429 PIN_LOCKED` (`recordPINFailure`,
+  `pin_login.go:206`, registra `user.pin_locked` una sola vez con el dispositivo y reinicia la cuenta); acierto → borra
+  los intentos; sin `waiter_devices.use` → `403 PERMISSION_DENIED`; sesión con `issueSession(…, "replaced",
+sameDevice)` (reemplaza solo la de ese usuario en ese dispositivo: el cambio rápido de mesero no cierra las de los
+  demás) y credencial de envío nueva (`issueOfflineCredential`, revoca la anterior de ese usuario y dispositivo).
+- **Credencial de envío** (A1-D1): cabecera **`X-Offline-Credential`** junto a `X-Device-ID`/`X-Device-Token`, sin
+  `Authorization`. `dispatch` la acepta **solo** en `POST restaurant/offline-orders` (en cualquier otra ruta o método,
+  incluido el canal de eventos, `401 OFFLINE_CREDENTIAL_NOT_ALLOWED`; con sesión y credencial juntas, 400).
+  `authenticateOfflineCredential` (`pin_login.go:275`) revisa en cada petición: misma credencial y mismo dispositivo,
+  no revocada, usuario activo y no de soporte, PIN vigente con la **misma `pin_version`**, dispositivo `android` y
+  `waiter_devices.use`; si algo falla, `401 OFFLINE_CREDENTIAL_INVALID`. Devuelve al mesero con sus **permisos
+  vigentes** y la operación pasa por `runProtected` y `operations.Handle` como con una sesión (sin `orders.confirm`,
+  403). Registra `last_used_at`. No es una sesión: no cuenta en `devices/sessions-summary`.
+
+**Administración del PIN** (`backend/internal/administration/pin.go`; rutas en `API_CONTRACTS.md`, «Etapa A1 · PIN de
+los meseros», no en el contrato para clientes):
+
+- `GET users/badge-colors` (`users.read`): `BadgePalette` = `catalog.Palette` (16 colores con contraste ≥ 3:1 en ambos
+  temas; la interfaz nunca escribe un color).
+- `PUT users/{id}/pin {pin?, short_name, badge_color}` (`users.manage`, lock de administración, nunca soporte,
+  delegación segura): con `pin` asigna o cambia (sube `pin_version`, borra intentos, cierra las sesiones del usuario en
+  dispositivos `android` y revoca su credencial: `revokeWaiterAccess`); sin `pin` solo cambia el distintivo de quien ya
+  tiene PIN (`user.pin_badge_changed`, sin cerrar nada). Un administrador no se da su propio PIN por aquí (403): lo
+  hace en «Mi PIN» con su contraseña.
+- `POST users/{id}/pin/remove` (409 `PIN_NOT_SET` si no tiene) y `POST users/{id}/pin/unlock` (registra solo si había
+  bloqueo).
+- `PUT auth/pin {current_password, pin}` («Mi PIN», `ownPIN`): exige `waiter_devices.use` y la contraseña actual (401
+  `INVALID_CREDENTIALS`); cierra las sesiones `android` del usuario salvo la actual.
+- **Reglas del PIN** (`validatePIN`, `pin.go`): 4 a 6 dígitos ASCII (400 `VALIDATION_ERROR`) y nada trivial (400
+  **`PIN_TOO_SIMPLE`**, mensaje en español): todos iguales, secuencia ascendente o descendente de paso 1 módulo 10
+  (también 7890 y 0987), bloque de 2 o 3 dígitos repetido completo (1212, 121212, 123123) y la lista `commonPINs` (50:
+  fechas y patrones del teclado más usados de 4, 5 y 6 dígitos).
+- Desactivar al usuario revoca su credencial (`user_disabled`, `users.go`); revocar un dispositivo, las de ese
+  dispositivo (`device_revoked`, `devices.go`).
+- `PATCH devices/{id}` acepta `idle_lock_seconds` opcional (30–3600; sin él se conserva). `GET devices`, la
+  configuración, `auth/me` (`terminal`) y `restaurant/state` (`terminal`) lo informan; `auth/me` informa además
+  `user.has_pin`. Los usuarios (`GET users` y las respuestas de usuario) llevan `has_pin`, `short_name`, `badge_color` y
+  `pin_locked_until`.
+- **Registro de movimientos** (nunca el PIN, su hash ni la credencial): `user.pin_set` (`set_by` `administrator` o
+  `self`, `replaced`, `pin_version`, distintivo y sesiones y credenciales cerradas), `user.pin_badge_changed`,
+  `user.pin_removed`, `user.pin_unlocked`, `session.pin_login`, `session.pin_login_failed` (`reason`) y `user.pin_locked`.
+
+**Contrato v1** (`backend/internal/apicontract/openapi.json`, `docs/API_V1.md` sección «Entrada con PIN y credencial de
+envío (etapa A1, fase B)», `TestContractV1`): operaciones nuevas `listPinUsers` (`GET /auth/pin-users`) y `pinLogin`
+(`POST /auth/pin-login`); esquemas `PinUser`, `PinUsers` y `PinLoginResult`; esquema de seguridad `offlineCredential`
+como alternativa de `session` en `submitOfflineOrder`; `VersionInfo.min_client_versions`, `Terminal.idle_lock_seconds`
+y `Principal.has_pin`; códigos nuevos en la tabla de errores. El recorrido (`contractWaiterPIN`) usa el teléfono que
+empareja `contractPairing`: lista, PIN incorrecto (401), PIN correcto, `getIdentity` con `idle_lock_seconds` y un
+pedido sin conexión **con la credencial y sin sesión** (200).
+
+**Escritorio** (React; Rust solo agrega operaciones a la lista cerrada):
+
+- `desktop/src/services/serverCapabilities.ts`: `useSession` guarda las `capabilities` de `version`; lo del PIN y el
+  bloqueo por inactividad solo aparecen con `waiter-pin-v1`.
+- **Personal › Usuarios** (`pages/UsersPage.tsx` y `pages/UserPin.tsx`): columna «PIN» («Sin PIN», «Con PIN · Ana» con
+  la muestra del color, «PIN bloqueado hasta las 14:05»); «Asignar PIN» / «Cambiar PIN» (panel con el PIN dos veces en
+  campos ocultos de solo dígitos, «Nombre corto» y «Color del distintivo» con `ColorField` y la paleta de Go; con PIN,
+  dejarlo vacío conserva el PIN y guarda solo el distintivo); «Quitar PIN» secundario con `ConfirmDialog` normal
+  (anotado en la lista de reversibles de `components/stage9dStyles.test.tsx`); «Desbloquear». Los mensajes son los de
+  Go (`notify.ts`).
+- **«Mi PIN»** (sección `pin` de `navigation/sections.ts`, permiso `waiter_devices.use`; opción del menú del usuario solo
+  con el permiso y la capacidad; `MyPinPage`): contraseña actual y el PIN dos veces.
+- **Sistema › Terminales** (`pages/DevicesPage.tsx`): el tipo `android` se llama **«Teléfono o tableta»** (antes
+  «Comandero Android»; cambiadas las expectativas de `stage9gPairing.test.tsx` y `workflow-stage9g-terminals.spec.ts`);
+  en «Editar» de un teléfono o tableta, «Bloqueo por inactividad» con `Select` en minutos (1, 2 —«recomendado», por
+  omisión—, 3, 5, 10, 15, 30 y 60; un valor guardado fuera de la lista se conserva como opción); «Ver configuración»
+  dice «2 minutos sin uso vuelve a la pantalla de entrada con PIN».
+- **Registro de movimientos** (`pages/AuditPage.tsx`): etiquetas de las siete acciones nuevas.
+- `desktop/src-tauri/src/api.rs`: `user_badge_colors`, `set_user_pin`, `remove_user_pin`, `unlock_user_pin` y
+  `set_own_pin` (con su prueba `stage_a1_pin_routes_are_closed`; la entrada con PIN no está en la lista del
+  escritorio). `native-driver.ts` las descubre con su expresión regular: no necesitó cambios.
+
+### Decisiones (con su porqué)
+
+1. **Escritorio 0.12.0 con un servidor 0.11.0: se esconde lo nuevo por capacidad; `min_server_version` sigue en
+   0.10.0.** El servidor y la aplicación de la computadora principal se instalan juntos (`.pkg`), así que el caso real
+   es una terminal Mac actualizada antes que la principal: con la mínima en 0.12.0 esa terminal quedaría entera en
+   «Actualiza el servidor»; con la capacidad sigue vendiendo y solo no ve el PIN (que ese servidor no tiene). Además,
+   enviar `idle_lock_seconds` a un 0.11.0 rompería el guardado de la terminal (`DisallowUnknownFields`): por eso el
+   campo solo se envía con la capacidad. Mismo criterio que la 9H (rutas nuevas sin subir la mínima). La aplicación
+   Android sí exige servidor ≥ 0.12.0 (A1-D4).
+2. **Paleta del distintivo = `catalog.Palette`.** Ya cumple el contraste en ambos temas y evita una segunda lista; se
+   guarda el hexadecimal canónico (Android lo pinta sin traducir), validado por Go contra la paleta. Ruta propia
+   `GET users/badge-colors` (`users.read`).
+3. **Al bloquearse, la cuenta de fallos vuelve a cero** (`window_start = now()`): al vencer los 5 minutos hay otros 5
+   intentos. Con la cuenta de `login_attempts` (sin reinicio) el sexto fallo dentro de la misma ventana volvería a
+   bloquear al instante, que sería un escalamiento que A1-D5 descarta. **El quinto fallo ya responde 429** (no el
+   sexto, como el inicio de sesión con contraseña), para que el dispositivo diga el bloqueo en ese momento.
+4. **Los fallos cuentan para cualquier usuario existente** (también inactivo o sin PIN): si no, el 429 al quinto
+   intento delataría quién tiene PIN. El dispositivo nunca ve el PIN de nadie y la lista ya es pública para un
+   dispositivo emparejado, pero se siguió la regla del encargo (hash ficticio).
+5. **PIN correcto sin `waiter_devices.use` → 403 `PERMISSION_DENIED`** (con el PIN verificado se puede decir el motivo
+   sin revelar nada); el usuario tampoco aparece en la lista.
+6. **Un administrador no se asigna su propio PIN por la ruta de administración** (403): «Mi PIN» pide la contraseña
+   actual, para que una sesión de administrador desatendida no baste; quitar el propio PIN sí se permite (reduce
+   acceso). «Mi PIN» exige `waiter_devices.use`: solo lo define quien puede usarlo.
+7. **Desviaciones del diseño de la Fase 0**: `DELETE users/{id}/pin` pasó a **`POST users/{id}/pin/remove`** (el puente
+   y las rutas del proyecto usan POST para acciones, como `devices/{id}/revoke` y `documents/identity/logo/remove`);
+   `pin_attempts.last_device_id` en lugar de un dispositivo del bloqueo aparte (es el del quinto fallo); la paleta es
+   la del catálogo (la Fase 0 solo pedía un hexadecimal); y se agregó `PUT users/{id}/pin` sin `pin` para cambiar solo
+   el nombre corto y el color (no sube `pin_version` ni cierra sesiones).
+8. **La credencial de envío también se revisa en el canal de eventos** (`events.go` la pasa a `dispatch`): así «solo en
+   esa ruta» vale sin excepciones. Sesión y credencial juntas en `offline-orders` es 400, para que nunca haya duda de
+   quién actúa.
+9. **Las sesiones `android` se cierran con `pin_changed`/`pin_removed`** (el dispositivo recibe `SESSION_REVOKED`, como
+   con `password_changed`); las de escritorio no se tocan porque el PIN no sirve en ellas. «Mi PIN» conserva la sesión
+   desde la que se hace.
+10. **«Bloqueo por inactividad» se edita en «Editar»** del teléfono o tableta y se muestra en «Ver configuración»: el
+    `PATCH` de terminales reemplaza todos sus campos (caja incluida), y editarlo desde la vista de solo lectura obligaría
+    a reenviar la terminal completa desde ahí. El encargo lo pedía en «Ver configuración»; queda a decisión del
+    coordinador moverlo.
+
+### Forma final para el agente de Android
+
+- Cabeceras de siempre: `X-Client-Version: 0.1.0`, `X-Client-Kind: android`, `X-Device-ID`, `X-Device-Token`.
+  `GET /api/v1/version` → `min_client_versions.android` (0.1.0) y capacidad `waiter-pin-v1` (exigir servidor ≥ 0.12.0).
+- `GET /api/v1/auth/pin-users` (sin sesión) → `{"device": {"id", "name", "idle_lock_seconds"}, "users": [{"id",
+"name", "initial", "color" (hex o null), "pin_version", "locked_until" (RFC 3339 o null)}]}`. En otro tipo de
+  dispositivo: 403 `PIN_DEVICE_NOT_ALLOWED`.
+- `POST /api/v1/auth/pin-login` (sin sesión) `{"user_id", "pin"}` → 200 `{"session_token" (43), "pin_version",
+"offline_credential" (43)}`; 400 `VALIDATION_ERROR` (forma), 401 `PIN_INVALID`, 429 `PIN_LOCKED` con
+  `error.details.locked_until`, 403 `PERMISSION_DENIED` (sin `waiter_devices.use`) o `PIN_DEVICE_NOT_ALLOWED`.
+- `POST /api/v1/restaurant/offline-orders` con `X-Offline-Credential: <offline_credential>` **en lugar de**
+  `Authorization` → como con sesión (200, 409 `ORDER_REQUIRES_CONFIRMATION`, 409 `OFFLINE_ORDER_ALREADY_ACCEPTED`…);
+  401 `OFFLINE_CREDENTIAL_INVALID` = conservar el pedido y pedir al mesero que entre con PIN con conexión; 401
+  `OFFLINE_CREDENTIAL_NOT_ALLOWED` en cualquier otra ruta; 400 con sesión y credencial juntas; 401 `DEVICE_REVOKED`
+  como siempre.
+- `terminal.idle_lock_seconds` también en `GET auth/me` y `GET restaurant/state`. Tras cambiar o quitar el PIN, sus
+  sesiones `android` responden 401 `SESSION_REVOKED` y `pin_version` sube en la lista.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                               | Dónde                                                                 | Resultado                                                                                                                      |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)                    | `iso.sh go-unit`, dos veces (después de los commits de Go y al final) | **Aprobado** las dos veces                                                                                                     |
+| `TestPINRules`, `TestBadgeValidation` (lista de muy usados y cada regla)                          | `internal/administration` (unitarias)                                 | Aprobadas                                                                                                                      |
+| `TestClientMinimumVersionByKind` y las de 9G ajustadas                                            | `internal/httpapi` (unitarias)                                        | Aprobadas: 426 a `android` 0.0.9 y 0.1.0-beta, a `desktop` 0.9.9 y 0.1.0 y sin tipo 0.1.0; pasa `android` 0.1.0                |
+| `go-int ./internal/database`                                                                      | base `adel_pos_test_b_*`                                              | **ok** (`TestStageA1Upgrade` nueva; `TestStage9HUpgrade` y `existing_install_test` excluyen lo de la 0025)                     |
+| `go-int ./internal/administration`                                                                | idem                                                                  | **ok** (178 s), con `TestStageA1WaiterPIN` (9 subpruebas); después del último cambio, `TestStageA1WaiterPIN` sola otra vez: ok |
+| `go-int ./internal/operations`                                                                    | idem                                                                  | **ok** (442 s)                                                                                                                 |
+| `go-int ./internal/apicontract` (`TestContractV1` con `listPinUsers`, `pinLogin` y la credencial) | idem                                                                  | **ok** (dos corridas)                                                                                                          |
+| Vitest (`tsc --noEmit` + `vitest run src`)                                                        | `iso.sh vitest`                                                       | **96 archivos, 914 pruebas aprobadas** (12 nuevas en `stageA1Pin.test.tsx`)                                                    |
+| `npm run build`                                                                                   | `iso.sh build`                                                        | Correcto                                                                                                                       |
+| `cargo test --locked --offline`                                                                   | `iso.sh cargo`                                                        | **107 aprobadas**, 3 ignoradas (con `stage_a1_pin_routes_are_closed`)                                                          |
+| Playwright `workflow-stagea1` Chromium                                                            | Go temporal 8186, vista previa 1424, base nueva                       | **1/1** (4.7 s)                                                                                                                |
+| Playwright `workflow-stagea1` WebKit                                                              | idem                                                                  | **1/1** (4.6 s)                                                                                                                |
+| Playwright `workflow-stage9g-terminals` Chromium (por el cambio de etiqueta)                      | idem                                                                  | **2/2**                                                                                                                        |
+| `format`, `fmt-check` (Prettier, gofmt, `cargo fmt --check`), `sync-check`                        | árbol `Bs`                                                            | Correctos                                                                                                                      |
+| md5 de `docs/etapas/*.md`                                                                         | antes y al final                                                      | Idénticos                                                                                                                      |
+
+`TestStageA1WaiterPIN` (`backend/internal/administration/pin_acceptance_test.go:107`) cubre: PIN inválido y trivial
+(sin guardar nada), sin `users.manage` 403; lista solo en `android` y sin sesión con exactamente las 6 propiedades; PIN
+correcto e incorrecto, usuario inexistente, cuatro fallos y el quinto desde **otro** dispositivo → 429 con
+`locked_until` ≈ 5 min, también con el PIN correcto; `user.pin_locked` una sola vez con el dispositivo; desbloqueo
+(registrado una vez); sin permiso 403; cambio rápido de usuario (Ana y Beto en la misma tableta, la nueva entrada de Ana
+reemplaza solo la suya y su credencial); `sessions-summary` cuenta 2 sesiones `android` (la credencial no); pedido con la
+credencial sin sesión a nombre del mesero y del dispositivo; credencial en otra ruta, en el canal de eventos y con otro
+método (401), con sesión (400), desde otro dispositivo o inventada (401); permisos vigentes (sin `orders.confirm` 403;
+sin `waiter_devices.use` 401 y fuera de la lista); cambiar el PIN cierra la sesión `android` y la credencial, conserva
+la de escritorio y sube `pin_version`; cambiar solo el distintivo no cierra nada; «Mi PIN» con contraseña incorrecta,
+trivial y correcto (cierra lo `android`, conserva la actual; `set_by: self`); «Mi PIN» sin permiso 403; el
+administrador no se asigna su PIN por la ruta de administración; quitar el PIN (y 409 la segunda vez); desactivar y
+reactivar; revocar el dispositivo (`DEVICE_REVOKED` y credenciales `device_revoked`); bloqueo por inactividad (600 s,
+rechazos 29, 3601, 0 y texto, conservación sin el campo, en la lista y en `restaurant/state`, CHECK de la base); y que
+ningún registro de usuario, PIN, sesión o pedido sin conexión contiene los PIN usados, `argon2`, el hash, la sesión ni la
+credencial.
+
+### No verificado
+
+- La aplicación Android real contra estas rutas (es de las fases C y E del dispositivo); el escritorio en la ventana
+  nativa (solo el puente de Playwright).
+- La regresión completa de Playwright (Fase G): la especificación nueva solo corrió filtrada, sobre base nueva. En la
+  corrida completa empareja **un** teléfono más: cuenta para el límite de 5 solicitudes por origen cada 10 minutos
+  junto con las de `workflow-stage9g-*`, que corren mucho antes.
+- `go-int` de los demás paquetes de la tupla (catalog, payments, reports, designer, identity, backupschedule,
+  `cmd/ad-el-pos-server`, discovery, legacyimport): no se tocaron; quedan para la Fase G.
+- El escritorio 0.12.0 contra un servidor 0.11.0 real (cubierto con Vitest simulando un servidor sin `waiter-pin-v1`).
+
+### Para el coordinador
+
+- **Decidir** si «Bloqueo por inactividad» se queda en «Editar» (decisión 10) o se mueve a «Ver configuración».
+- La etiqueta «Comandero Android» pasó a «Teléfono o tableta» en todo el escritorio (Terminales, solicitudes y sesiones
+  por tipo).
+- Para `CLAUDE.md` (no lo edité): §4 versión 0.12.0 y esquema 25 con la 0025 (sección B); §6, pruebas nuevas
+  `TestStageA1WaiterPIN` (`administration`), `TestStageA1Upgrade` (`database`; las de subida anteriores excluyen las
+  tablas y el permiso de la 0025), `TestClientMinimumVersionByKind` (`httpapi`) y la especificación
+  `workflow-stagea1-pin.spec.ts` (sus datos «Andrea Meseros A1» y «Tableta de meseros A1» no son impresoras, estaciones
+  ni productos: sin firma en `maintenance/signatures.go`); §7, la credencial de envío (solo SHA-256, solo en
+  `offline-orders`, revisada en cada petición); §11–12, regla permanente: **una pantalla que use rutas nuevas del
+  servidor se esconde por capacidad (`services/serverCapabilities.ts`) cuando `min_server_version` no sube**, y el
+  distintivo del mesero sale de la paleta de Go; §15, las decisiones 1, 3, 6 y 8 de arriba.
+- `AGENTS.md`: la `0025_android_waiters.sql` es la única migración de la etapa A1, editable mientras no se aplique a
+  ninguna instalación.
+- `docs/ANDROID_INSTALAR.md` (Fase G) debe decir que el rol Mesero ya trae «Entrar con PIN en teléfonos y tabletas de
+  meseros» y qué permisos darle en Personal › Roles (tabla de §4 de la Fase 0), y cómo asignar el PIN en Personal ›
+  Usuarios.
+
+**Nota del coordinador**: el «Bloqueo por inactividad» quedó en «Editar» del teléfono o tableta (Administración › Terminales) y «Ver configuración» lo muestra; cumple §3.2 («configurable por dispositivo en Administración › Terminales»), así que se conserva así. Rama `etapa-a1-bs` fusionada en `etapa-a1-android` (`bc30780`) sin conflictos; las suites de la fase corrieron sobre su rama, que solo difiere de la fusión en este avance.
