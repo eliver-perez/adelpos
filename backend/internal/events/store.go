@@ -49,6 +49,14 @@ func Append(ctx context.Context, tx pgx.Tx, kind, scope string, aggregateID, sta
 	return err
 }
 
+// Head es el cursor del último evento confirmado (0 si no hay ninguno). Etapa A1: GET restaurant/state lo entrega como
+// event_cursor para que el cliente abra el canal desde el momento de la lectura sin perder nada.
+func Head(ctx context.Context, tx pgx.Tx) (int64, error) {
+	var head int64
+	err := tx.QueryRow(ctx, "SELECT coalesce(max(sequence),0) FROM app.realtime_events").Scan(&head)
+	return head, err
+}
+
 // Read entrega los eventos posteriores al cursor que la persona puede recibir. stations son las estaciones
 // de cocina que puede ver (etapa 9F: en la terminal, intersectadas con las que atiende el usuario; con
 // kitchen.stations.all, todas): un evento de una estación fuera de ellas no se entrega.

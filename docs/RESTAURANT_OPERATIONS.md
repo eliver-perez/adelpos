@@ -369,7 +369,16 @@ Fases C y D de la etapa 9G (decisiones D9 y D11; contrato para clientes en [API_
   original con la misma clave nunca crea un pedido doble: si el pedido ya entró, el mismo usuario y la misma terminal
   reciben `409 OFFLINE_ORDER_ALREADY_ACCEPTED` con el resultado. Registro de movimientos:
   `restaurant.offline_order.accepted` y `restaurant.offline_order.requires_confirmation`; la historia de la cuenta marca
-  el pedido.
+  el pedido. **Desde la etapa A1 (fase E, A1-D6)**, con una cuenta como destino, el pedido puede decir qué renglones
+  del borrador sustituye (`replaces_draft_items`, tal como los vio el dispositivo): al aceptarlo Go quita del borrador
+  los que siguen así (como un guardado del borrador, con su evento y su auditoría) y no toca los de otras terminales;
+  un renglón cambiado, quitado o ya enviado a cocina desde otra terminal es un cambio más que el mesero confirma o
+  corrige. Cada partida confirmada guarda el id del renglón con que se capturó (`restaurant_items.draft_item_id`).
+- **Etapa A1 (fase E)**: una operación sobre una cuenta que ya no está abierta sigue respondiendo
+  `400 OPERATION_VALIDATION`, ahora con un mensaje por estado («La cuenta «Mesa 4» ya se cobró…») y
+  `details.reason: "account_not_open"` con el estado; cocina publica además `restaurant.account.preparation_changed`
+  (ámbito `restaurant`, una vez por cuenta y transacción) para que quien solo consulta cuentas vea los estados de
+  preparación al momento; y `restaurant/state` entrega `event_cursor`.
 - **Una sesión activa por usuario** (D9): sin cambio en la 9G; iniciar sesión en otra terminal cerraba la anterior.
   **Desde la etapa 9H** es una por usuario y por terminal: iniciar sesión en otra terminal ya no cierra la anterior
   (solo volver a entrar en la misma terminal), y cambiar la contraseña cierra todas.

@@ -375,7 +375,7 @@
       "get": {
         "operationId": "streamEvents",
         "summary": "Eventos en tiempo real (SSE)",
-        "description": "Flujo text/event-stream de mensajes «changes» (EventBatch) cada 750 ms; dura 30 s y el cliente se vuelve a conectar con ?after=<cursor> (o Last-Event-ID). Requiere events.read. Un evento solo dice qué cambió (tipo, ámbito y agregado): el cliente vuelve a consultar. Ámbito catalog desde la 9G (catalog.changed, catalog.product.sold_out, catalog.product.available).",
+        "description": "Flujo text/event-stream de mensajes «changes» (EventBatch) cada 750 ms; dura 30 s y el cliente se vuelve a conectar con ?after=<cursor> (o Last-Event-ID). Requiere events.read. Un evento solo dice qué cambió (tipo, ámbito y agregado): el cliente vuelve a consultar. Ámbito catalog desde la 9G (catalog.changed, catalog.product.sold_out, catalog.product.available). Etapa A1: restaurant.account.preparation_changed (ámbito restaurant, o takeaway en una cuenta para llevar, con la cuenta como agregado) avisa una vez por cuenta y transacción que cambió la preparación de sus partidas, para que un mesero con accounts.read y sin permisos de cocina vea «Preparando» o «Listo» al momento.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -768,7 +768,7 @@
       "get": {
         "operationId": "getRecoveryState",
         "summary": "Recuperación del estado al reconectar",
-        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED.",
+        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -784,6 +784,37 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RecoveryState"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/overview": {
+      "get": {
+        "operationId": "getRestaurantOverview",
+        "summary": "Áreas, mesas y umbrales",
+        "description": "Lo que muestran Mesas (lista y mapa): las áreas en su orden, las mesas con su ocupación, forma, posición, lugares y tiempo calculados por Go, y los umbrales de tiempo. Requiere restaurant.tables.read y restaurant.areas.read. El servidor no restringe mesas por mesero: con el permiso se ven todas.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Áreas y mesas.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestaurantOverview"
                 }
               }
             }
@@ -1185,11 +1216,229 @@
         }
       }
     },
+    "/restaurant/accounts/{id}/cancel": {
+      "post": {
+        "operationId": "cancelUnits",
+        "summary": "Cancelar unidades enviadas",
+        "description": "Cancela quantity unidades activas de una partida confirmada (version_id) con su motivo (5 a 500 caracteres). Requiere orders.cancel y accounts.read (desde la etapa 9H sin autorización de supervisor); queda registrado quién lo hizo y cocina recibe el aviso de cancelación si ya la tenía. Las unidades con pago o descuento manual no se cancelan (409 UNIT_HAS_PAYMENT o UNIT_HAS_DISCOUNT); 409 ACCOUNT_CONFLICT si la revisión cambió; 400 con details.reason account_not_open si la cuenta ya no está abierta. Idempotente con operation_id.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "version_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 500
+                  }
+                },
+                "required": ["operation_id", "revision", "version_id", "quantity", "reason"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cuenta después de cancelar.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/accounts/{id}/edit-preview": {
+      "post": {
+        "operationId": "previewEdit",
+        "summary": "Calcular la modificación de una partida enviada",
+        "description": "Cotiza la partida confirmada version_id con su nueva solicitud (line: mismo producto, otra cantidad o personalización) y devuelve la huella que exige editUnits. Cambiar solo observaciones o reducir la cantidad conserva los importes históricos; aumentar o cambiar la receta recalcula con el catálogo vigente (pricing_policy lo explica). No escribe nada. Requiere orders.edit, accounts.read, catalog.read y catalog.prices.read; reducir la cantidad exige además orders.cancel (403).",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "version_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "line": {
+                    "$ref": "#/components/schemas/LineRequest"
+                  }
+                },
+                "required": ["revision", "version_id", "line"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cálculo de la modificación.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
+    "/restaurant/accounts/{id}/edit": {
+      "post": {
+        "operationId": "editUnits",
+        "summary": "Modificar una partida enviada",
+        "description": "Aplica la modificación calculada por previewEdit si la huella sigue igual (409 QUOTE_CHANGED si no), con su motivo (5 a 500 caracteres). Requiere los permisos de previewEdit; queda registrado quién lo hizo y cocina recibe el aviso de modificación. Mismas reglas de pagos, revisión y cuenta cerrada que cancelUnits. Idempotente con operation_id.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "version_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "line": {
+                    "$ref": "#/components/schemas/LineRequest"
+                  },
+                  "expected_fingerprint": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "revision",
+                  "version_id",
+                  "line",
+                  "expected_fingerprint",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cuenta después de modificar.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"]
+      }
+    },
     "/restaurant/offline-orders": {
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400.",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1763,7 +2012,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until). Etapa A1: 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED.",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until). Etapa A1: 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open).",
         "content": {
           "application/json": {
             "schema": {
@@ -3658,7 +3907,8 @@
             "enum": ["dine_in", "takeaway"]
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "description": "open, closed (cobrada), voided (cancelada o liberada) o merged."
           },
           "table_id": {
             "type": ["string", "null"],
@@ -3688,7 +3938,8 @@
             "format": "date-time"
           },
           "preparation_state": {
-            "type": "string"
+            "type": "string",
+            "description": "without_items, draft (solo borrador), pending_release, scheduled, released, preparing, ready, change_pending o cancelled. Cambia sin otra operación de la cuenta cuando cocina avanza: evento restaurant.account.preparation_changed."
           },
           "payment_state": {
             "type": "string"
@@ -3704,6 +3955,19 @@
           },
           "totals": {
             "$ref": "#/components/schemas/Totals"
+          },
+          "assigned_name": {
+            "type": "string"
+          },
+          "elapsed_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "urgency": {
+            "enum": ["normal", "warning", "overdue"]
+          },
+          "long_open": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -3739,6 +4003,34 @@
           "name": {
             "type": "string"
           },
+          "shape": {
+            "enum": ["rectangle", "round"]
+          },
+          "x": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 936
+          },
+          "y": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 504
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 64,
+            "maximum": 240
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 56,
+            "maximum": 180
+          },
+          "seats": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 40
+          },
           "active": {
             "type": "boolean"
           },
@@ -3758,6 +4050,10 @@
             "type": ["string", "null"],
             "format": "date-time"
           },
+          "occupied_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
           "balance": {
             "$ref": "#/components/schemas/Money"
           },
@@ -3769,19 +4065,30 @@
           "id",
           "area_id",
           "name",
+          "shape",
+          "x",
+          "y",
+          "width",
+          "height",
+          "seats",
           "active",
           "out_of_service",
           "revision",
           "account_count",
           "state",
-          "balance"
-        ]
+          "occupied_since",
+          "occupied_seconds",
+          "balance",
+          "long_open"
+        ],
+        "description": "Mesa con su ocupación calculada por Go. Mapa: lienzo lógico de 1000 × 560 por área (x + width ≤ 1000, y + height ≤ 560), forma rectangle o round y seats lugares. state: free, occupied, awaiting_payment, partial_payment u out_of_service (con varias cuentas gana el más avanzado). occupied_since es la apertura de la cuenta abierta más antigua y occupied_seconds el tiempo transcurrido según el servidor (null y 0 sin cuentas); long_open, si esa cuenta lleva más de long_open_hours abierta."
       },
       "ConfirmedLine": {
         "type": "object",
         "properties": {
           "preparation_state": {
-            "type": "string"
+            "type": "string",
+            "description": "Estado de la partida (por versión y estado de sus unidades): pending_release, scheduled, released, preparing, ready, change_pending o cancelled. Para modificarla o cancelarla se usa version_id."
           },
           "version_id": {
             "type": "string",
@@ -3799,7 +4106,8 @@
             "type": "integer"
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "description": "active o cancelled (las unidades canceladas se agrupan aparte)."
           },
           "quantity": {
             "type": "integer"
@@ -3941,6 +4249,11 @@
                 "type": "null"
               }
             ]
+          },
+          "event_cursor": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Etapa A1: cursor del canal de eventos al leer este estado. Abrir streamEvents con ?after=event_cursor entrega todo lo ocurrido después, sin perder nada (a lo más, un evento de algo que ya se ve aquí)."
           }
         },
         "required": [
@@ -3950,7 +4263,8 @@
           "user",
           "terminal",
           "tables",
-          "accounts"
+          "accounts",
+          "event_cursor"
         ],
         "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read (las cuentas para llevar exigen además takeaway.read)."
       },
@@ -4056,6 +4370,14 @@
                 "type": "null"
               }
             ]
+          },
+          "replaces_draft_items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftItem"
+            },
+            "maxItems": 20,
+            "description": "Etapa A1 (opcional, solo con destination.account_id): los renglones del borrador de la cuenta que este dispositivo había guardado y que el pedido sustituye, tal como los vio (id, producto, presentación, cantidad y personalización). Al aceptar el pedido Go quita del borrador los que siguen así (removed_draft_item_ids) y avisa como un guardado del borrador; los demás son cambios draft_item_changed, draft_item_removed o draft_item_sent que el mesero confirma o corrige."
           }
         },
         "required": ["operation_id", "catalog_version", "captured_at", "destination", "items"]
@@ -4074,7 +4396,10 @@
               "item_invalid",
               "account_closed",
               "table_unavailable",
-              "table_has_account"
+              "table_has_account",
+              "draft_item_changed",
+              "draft_item_removed",
+              "draft_item_sent"
             ]
           },
           "item_id": {
@@ -4111,7 +4436,7 @@
           "message",
           "acceptable"
         ],
-        "description": "Cambio entre lo que vio el mesero y el estado vigente: producto, antes, ahora y motivo. acceptable indica si basta la confirmación del mesero (precio, mesa con otra cuenta) o si hay que corregir el pedido."
+        "description": "Cambio entre lo que vio el mesero y el estado vigente: producto, antes, ahora y motivo. acceptable indica si basta la confirmación del mesero (precio, mesa con otra cuenta, renglón del borrador cambiado, quitado o ya enviado desde otra terminal) o si hay que corregir el pedido. En draft_item_*, item_id es el id del renglón del borrador. En account_closed, now es el estado de la cuenta (closed, voided o merged)."
       },
       "OfflineOrderResult": {
         "type": "object",
@@ -4155,6 +4480,14 @@
           },
           "bill": {
             "$ref": "#/components/schemas/Bill"
+          },
+          "removed_draft_item_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Etapa A1: renglones de replaces_draft_items que se quitaron del borrador (vacío sin ellos)."
           }
         },
         "required": [
@@ -4273,7 +4606,7 @@
           }
         },
         "required": ["cursor", "reset", "events"],
-        "description": "Contenido (data) de cada mensaje «changes» del canal de eventos."
+        "description": "Contenido (data) de cada mensaje «changes» del canal de eventos. kind es estable (restaurant.account.preparation_changed, restaurant.order.confirmed, catalog.changed…); un cliente ignora los tipos que no conoce."
       },
       "OfflineOrderAlreadyAccepted": {
         "type": "object",
@@ -4394,6 +4727,115 @@
           }
         },
         "required": ["session_token", "pin_version", "offline_credential"]
+      },
+      "Area": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "table_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "sort_order",
+          "active",
+          "revision",
+          "table_count"
+        ],
+        "description": "Área del restaurante en su orden visual (sort_order). table_count cuenta todas sus mesas."
+      },
+      "RestaurantSettings": {
+        "type": "object",
+        "properties": {
+          "warning_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240
+          },
+          "overdue_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1440
+          },
+          "long_open_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 72
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": ["warning_minutes", "overdue_minutes", "long_open_hours", "revision"],
+        "description": "Umbrales de tiempo de las cuentas: una cuenta pasa a urgency warning y overdue a esos minutos de abierta y a long_open a esas horas. Los calcula Go; el cliente solo los muestra."
+      },
+      "RestaurantOverview": {
+        "type": "object",
+        "properties": {
+          "areas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Area"
+            }
+          },
+          "tables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            }
+          },
+          "settings": {
+            "$ref": "#/components/schemas/RestaurantSettings"
+          },
+          "timezone": {
+            "type": "string"
+          }
+        },
+        "required": ["areas", "tables", "settings", "timezone"],
+        "description": "Áreas (también las inactivas, con active), mesas con su ocupación y umbrales de tiempo."
+      },
+      "AccountNotOpenDetails": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "const": "account_not_open"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "account_state": {
+            "enum": ["closed", "voided", "merged"]
+          },
+          "merged_into_id": {
+            "type": ["string", "null"],
+            "format": "uuid"
+          }
+        },
+        "required": ["reason", "account_id", "account_state", "merged_into_id"],
+        "description": "Etapa A1 (§6.4): error.details de 400 OPERATION_VALIDATION cuando la cuenta se cobró (closed), se canceló o liberó (voided) o se combinó con otra (merged, con merged_into_id) mientras se capturaba. Lo devuelven saveDraft, previewDraft, confirmDraft, cancelUnits, previewEdit y editUnits; el mensaje lo dice en español («La cuenta «Mesa 4» ya se cobró. No admite nuevas operaciones.»)."
       }
     }
   }

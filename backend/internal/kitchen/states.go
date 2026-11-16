@@ -124,6 +124,14 @@ func (handler *service) saveStates() (any, error) {
 			return nil, err
 		}
 	}
+	// Etapa A1 (A1-D11): el mesero de cada cuenta afectada se entera por el ámbito restaurant (preparation.go).
+	units := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		units = append(units, task.UnitID)
+	}
+	if err := handler.notePreparationUnits(units); err != nil {
+		return nil, err
+	}
 	for id := range stations {
 		if err := events.Append(handler.ctx, handler.tx, "kitchen.state.changed", "kitchen", nil, &id); err != nil {
 			return nil, err
