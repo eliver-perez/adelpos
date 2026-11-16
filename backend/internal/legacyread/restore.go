@@ -87,13 +87,16 @@ func (box *container) readHeader(ctx context.Context) (backupSet, error) {
 	return chooseBackupSet(rows)
 }
 
-// chooseBackupSet elige el respaldo completo de la base (BackupType 1) más reciente de los que tenga el archivo.
+// chooseBackupSet elige el respaldo completo de la base (BackupType 1) más reciente de los que tenga el archivo. Si el
+// archivo tiene respaldos completos de varias bases, no adivina cuál es la del sistema anterior: BACKUP_INVALID.
 func chooseBackupSet(rows []map[string]string) (backupSet, error) {
 	chosen := backupSet{}
+	databases := map[string]bool{}
 	for _, row := range rows {
 		if atoi(row["BackupType"]) != 1 {
 			continue
 		}
+		databases[strings.ToLower(strings.TrimSpace(row["DatabaseName"]))] = true
 		position := atoi(row["Position"])
 		if position <= chosen.Position {
 			continue
@@ -112,6 +115,11 @@ func chooseBackupSet(rows []map[string]string) (backupSet, error) {
 	}
 	if chosen.Position == 0 {
 		return backupSet{}, fail(CodeBackupInvalid, "el archivo no tiene un respaldo completo de la base", nil)
+	}
+	if len(databases) > 1 {
+		failure := fail(CodeBackupInvalid, fmt.Sprintf("respaldos completos de %d bases distintas", len(databases)), nil)
+		failure.Message = "El archivo tiene respaldos de varias bases de datos. Usa un respaldo que solo tenga la del sistema anterior."
+		return backupSet{}, failure
 	}
 	chosen.Sets = len(rows)
 	return chosen, nil

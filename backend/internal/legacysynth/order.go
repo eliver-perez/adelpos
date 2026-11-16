@@ -44,9 +44,9 @@ func compareValues(sqlType string, left, right any) int {
 	case "bit":
 		return compareBools(left.(bool), right.(bool))
 	case "char", "varchar", "text":
-		return compareText(codePageBytes(left.(string)), codePageBytes(right.(string)), " ")
+		return compareText(codePageBytes(left.(string)), codePageBytes(right.(string)), []byte(" "))
 	case "nchar", "nvarchar", "ntext":
-		return compareText(utf16Bytes(left.(string)), utf16Bytes(right.(string)), "\x00 ")
+		return compareText(utf16Bytes(left.(string)), utf16Bytes(right.(string)), []byte("\x00 "))
 	}
 	// Fechas («AAAA-MM-DDTHH:MM:SS.mmm») y lo demás: el texto ya ordena.
 	return strings.Compare(left.(string), right.(string))
@@ -66,10 +66,12 @@ func compareBools(left, right bool) int {
 	return 1
 }
 
-// compareText compara como BIN2 (bytes, sin contar los espacios del final, que SQL Server ignora al comparar) y, si
-// empatan, por DATALENGTH (con los espacios).
-func compareText(left, right []byte, space string) int {
-	if result := bytes.Compare(trimSpaces(left, space), trimSpaces(right, space)); result != 0 {
+// compareText compara como BIN2: SQL Server rellena el texto más corto con espacios hasta la longitud del otro y
+// compara los bytes (así «a» + U+0001 < «a» < «a!», porque U+0001 es menor que el espacio). Si empatan, por
+// DATALENGTH (con los espacios del final). space es el espacio en la codificación del texto.
+func compareText(left, right []byte, space []byte) int {
+	length := max(len(left), len(right))
+	if result := bytes.Compare(padded(left, length, space), padded(right, length, space)); result != 0 {
 		return result
 	}
 	switch {
@@ -81,11 +83,13 @@ func compareText(left, right []byte, space string) int {
 	return 0
 }
 
-func trimSpaces(value []byte, space string) []byte {
-	for bytes.HasSuffix(value, []byte(space)) {
-		value = value[:len(value)-len(space)]
+// padded completa con espacios hasta length bytes.
+func padded(value []byte, length int, space []byte) []byte {
+	result := append([]byte{}, value...)
+	for len(result) < length {
+		result = append(result, space...)
 	}
-	return value
+	return result
 }
 
 // codePageBytes es el texto en la página de códigos 1252 (la de la intercalación SQL_Latin1_General_CP1_CI_AS).

@@ -29,14 +29,17 @@ import (
 // Códigos de error del subcomando (evento «error» de la salida). La Fase D los muestra con su mensaje.
 const (
 	CodeUsage             = "USAGE"
+	CodeAlreadyRunning    = "ALREADY_RUNNING"
 	CodePassphraseInvalid = "PASSPHRASE_INVALID"
 	CodeBackupUnreadable  = "BACKUP_UNREADABLE"
 	CodeBackupInvalid     = "BACKUP_INVALID"
+	CodeBackupChanged     = "BACKUP_CHANGED"
 	CodeOutputExists      = "OUTPUT_EXISTS"
 	CodeOutputInvalid     = "OUTPUT_INVALID"
 	CodeDockerMissing     = "DOCKER_MISSING"
 	CodeDockerNotRunning  = "DOCKER_NOT_RUNNING"
 	CodeDockerUnsupported = "DOCKER_UNSUPPORTED"
+	CodeDockerRemote      = "DOCKER_REMOTE"
 	CodeImageUnavailable  = "IMAGE_UNAVAILABLE"
 	CodeReaderStartFailed = "READER_START_FAILED"
 	CodeReaderMemory      = "READER_MEMORY"
@@ -49,15 +52,19 @@ const (
 
 // messages son los mensajes para el propietario, sin tecnicismos.
 var messages = map[string]string{
-	CodeUsage:             "Uso: ad-el-pos-server legacy-prepare --backup <respaldo.bak> --output <paquete.adelmig> (la frase de paso, en la primera línea de la entrada estándar).",
+	CodeUsage: "Uso: ad-el-pos-server legacy-prepare --backup <respaldo.bak> --output <paquete.adelmig> " +
+		"(la frase de paso, en la primera línea de la entrada estándar), o legacy-prepare --cleanup.",
+	CodeAlreadyRunning:    "Ya se está preparando un paquete en esta computadora. Espera a que termine y vuelve a intentarlo.",
 	CodePassphraseInvalid: "La frase de paso debe tener al menos 8 caracteres.",
 	CodeBackupUnreadable:  "No se pudo leer el respaldo. Comprueba que el archivo exista y que se pueda abrir.",
 	CodeBackupInvalid:     "El archivo no es un respaldo de SQL Server del sistema anterior, o está dañado.",
+	CodeBackupChanged:     "El respaldo cambió mientras se preparaba el paquete. Espera a que termine de copiarse y vuelve a intentarlo.",
 	CodeOutputExists:      "Ya existe un archivo con ese nombre. Elige otro nombre para el paquete.",
 	CodeOutputInvalid:     "El paquete debe terminar en .adelmig y guardarse en una carpeta en la que se pueda escribir.",
 	CodeDockerMissing:     "Para preparar el paquete hace falta Docker Desktop. Instálalo desde docker.com (es gratuito), ábrelo y vuelve a intentarlo.",
 	CodeDockerNotRunning:  "Docker Desktop está instalado pero no está en marcha. Ábrelo, espera a que diga que está listo y vuelve a intentarlo.",
 	CodeDockerUnsupported: "Docker Desktop está usando contenedores de Windows. Cámbialo a contenedores de Linux desde su menú y vuelve a intentarlo.",
+	CodeDockerRemote:      "Docker está configurado para usar otra computadora. El lector debe correr en esta: elige el Docker de esta computadora en Docker Desktop y vuelve a intentarlo.",
 	CodeImageUnavailable:  "No se pudo descargar el lector del sistema anterior. Revisa la conexión a Internet y vuelve a intentarlo.",
 	CodeReaderStartFailed: "No se pudo iniciar el lector temporal. Reinicia Docker Desktop y vuelve a intentarlo.",
 	CodeReaderMemory:      "Docker Desktop no tiene memoria suficiente para el lector (necesita al menos 2 GB). Auméntala en la configuración de Docker Desktop (Resources) y vuelve a intentarlo.",

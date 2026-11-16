@@ -20,6 +20,10 @@ import (
 // CLI es el subcomando legacy-prepare:
 //
 //	ad-el-pos-server legacy-prepare --backup <respaldo.bak> --output <paquete.adelmig> [--watch-stdin]
+//	ad-el-pos-server legacy-prepare --cleanup
+//
+// --cleanup borra los restos de una preparación que terminó a la fuerza (Preparer.Cleanup) y responde con un evento
+// «cleanup»; no lee la entrada estándar.
 //
 // La frase de paso llega solo por la entrada estándar (primera línea; nunca por argumentos ni variables). Si la
 // entrada es una terminal, se pide dos veces sin mostrarla. Con --watch-stdin, cerrar la entrada estándar cancela la
@@ -35,6 +39,8 @@ type CLI struct {
 	FindDocker func() (string, error)
 	NewRunner  func(docker string) Runner
 	TempDir    string
+	// ProcessAlive sustituye la comprobación de procesos en las pruebas (nil = el sistema).
+	ProcessAlive func(pid int) bool
 	// Adjust permite a las pruebas cambiar las opciones (Argon2 rápido, páginas chicas).
 	Adjust func(options *Options)
 }
@@ -84,8 +90,22 @@ func (cli CLI) Run(parent context.Context, arguments []string) int {
 	backup := flags.String("backup", "", "respaldo .bak del sistema anterior")
 	output := flags.String("output", "", "paquete .adelmig que se crea (nunca se reemplaza uno existente)")
 	watch := flags.Bool("watch-stdin", false, "cancelar si se cierra la entrada estándar")
-	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 || *backup == "" || *output == "" {
+	cleanup := flags.Bool("cleanup", false, "borrar los restos de una preparación que terminó a la fuerza")
+	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 {
 		return report(fail(CodeUsage, "", err))
+	}
+	tempDir := cli.TempDir
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+	if *cleanup {
+		if *backup != "" || *output != "" || *watch {
+			return report(fail(CodeUsage, "", nil))
+		}
+		return cli.runCleanup(ctx, reporter, tempDir, report)
+	}
+	if *backup == "" || *output == "" {
+		return report(fail(CodeUsage, "", nil))
 	}
 	input := bufio.NewReaderSize(cli.Stdin, 4096)
 	passphrase, err := cli.readPassphrase(input)
@@ -106,16 +126,30 @@ func (cli CLI) Run(parent context.Context, arguments []string) int {
 	if cli.Adjust != nil {
 		cli.Adjust(&options)
 	}
-	tempDir := cli.TempDir
-	if tempDir == "" {
-		tempDir = os.TempDir()
-	}
-	preparer := &Preparer{Runner: cli.NewRunner(docker), Events: reporter, TempDir: tempDir}
+	preparer := &Preparer{Runner: cli.NewRunner(docker), Events: reporter, TempDir: tempDir, ProcessAlive: cli.ProcessAlive}
 	summary, err := preparer.Prepare(ctx, options)
 	if err != nil {
 		return report(err)
 	}
 	reporter.Emit(ResultEvent{Event: "result", Summary: summary})
+	return 0
+}
+
+// runCleanup ejecuta legacy-prepare --cleanup. Sin Docker (no instalado o detenido) borra igual las carpetas.
+func (cli CLI) runCleanup(ctx context.Context, reporter *JSONReporter, tempDir string, report func(error) int) int {
+	preparer := &Preparer{Events: reporter, TempDir: tempDir, ProcessAlive: cli.ProcessAlive}
+	if docker, err := cli.FindDocker(); err == nil {
+		preparer.Runner = cli.NewRunner(docker)
+	}
+	removed, dockerChecked, err := preparer.Cleanup(ctx)
+	if err != nil {
+		return report(err)
+	}
+	status := "unavailable"
+	if dockerChecked {
+		status = "checked"
+	}
+	reporter.Emit(CleanupEvent{Event: "cleanup", Removed: removed, Docker: status})
 	return 0
 }
 

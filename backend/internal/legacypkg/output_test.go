@@ -95,3 +95,43 @@ func TestAbortRemovesTheTemporaryFile(t *testing.T) {
 		t.Fatal("Commit después de Abort")
 	}
 }
+
+// El temporal de un paquete que quedó a medias (proceso terminado a la fuerza) se puede borrar después, y solo si su
+// nombre es exactamente el de un temporal de CreateOutput y es un archivo regular.
+func TestRemoveStalePartial(t *testing.T) {
+	directory := t.TempDir()
+	output, err := CreateOutput(filepath.Join(directory, "migracion.adelmig"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	temporary := output.TemporaryPath()
+	_ = output.File.Close()
+	removed, err := RemoveStalePartial(temporary)
+	if err != nil || !removed {
+		t.Fatalf("no se borró el temporal: %v %v", removed, err)
+	}
+	if _, err := os.Stat(temporary); !os.IsNotExist(err) {
+		t.Fatal("el temporal sigue ahí")
+	}
+	other := filepath.Join(directory, "notas.txt")
+	if err := os.WriteFile(other, []byte("del propietario"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(directory, ".migracion.adelmig.0123456789ab.partial")
+	if err := os.Symlink(other, link); err == nil {
+		if removed, _ := RemoveStalePartial(link); removed {
+			t.Fatal("se borró un enlace")
+		}
+	}
+	for _, path := range []string{other, "relativa/.x.adelmig.0123456789ab.partial", filepath.Join(directory, "x.adelmig")} {
+		if removed, _ := RemoveStalePartial(path); removed {
+			t.Fatalf("se borró %s", path)
+		}
+	}
+	if content, err := os.ReadFile(other); err != nil || string(content) != "del propietario" {
+		t.Fatal("se tocó un archivo ajeno")
+	}
+	if removed, err := RemoveStalePartial(temporary); removed || err != nil {
+		t.Fatal("borrar dos veces")
+	}
+}

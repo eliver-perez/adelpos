@@ -179,14 +179,15 @@ func (reader *chunkReader) open() error {
 		if _, peekErr := reader.source.Peek(1); peekErr == io.EOF {
 			last = true
 		} else if peekErr != nil {
-			return damaged("lectura del bloque", peekErr)
+			return unreadable("lectura del bloque", peekErr)
 		}
 	case errors.Is(err, io.ErrUnexpectedEOF):
 		last = true
 	case errors.Is(err, io.EOF):
 		return damaged("el paquete está truncado (falta el último bloque)", nil)
 	default:
-		return damaged("lectura del bloque", err)
+		// Un error de lectura del archivo (no un fin inesperado) no dice que el paquete esté dañado.
+		return unreadable("lectura del bloque", err)
 	}
 	if count < tagSize {
 		return damaged("bloque truncado", nil)

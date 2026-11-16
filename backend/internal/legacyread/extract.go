@@ -17,6 +17,11 @@ import (
 // DefaultPageRows es el número de filas por página de JSON (alrededor de 1 MB en las tablas grandes del respaldo).
 const DefaultPageRows = 5000
 
+// tableTimeout es el plazo de la lectura de una tabla: muy generoso (la tabla más grande del respaldo real tarda
+// segundos), solo para que un SQL Server atascado no deje la preparación esperando para siempre. Es variable para que
+// las pruebas lo acorten.
+var tableTimeout = 2 * time.Hour
+
 // sourceTable y sourceColumn son una tabla y una columna como las describe el catálogo de SQL Server.
 type sourceTable struct {
 	Schema  string         `json:"schema"`
@@ -403,13 +408,18 @@ func (box *container) readTable(
 		})
 		return nil
 	}
-	err = streamLines(ctx, box.runner, Command{
+	tableContext, cancel := context.WithTimeout(ctx, tableTimeout)
+	defer cancel()
+	err = streamLines(tableContext, box.runner, Command{
 		Args:   execArguments(box.name, databaseName, jsonArguments),
 		Stdin:  strings.NewReader("SET NOCOUNT ON;\nSET TEXTSIZE 2147483647;\n" + plan.readSQL(pageRows)),
 		Stderr: stderr,
 	}, onLine)
 	if ctx.Err() != nil {
 		return 0, fail(CodeCancelled, "", ctx.Err())
+	}
+	if errors.Is(tableContext.Err(), context.DeadlineExceeded) {
+		return 0, failf(CodeReadFailed, err, "se agotó el plazo de lectura de %s", plan.name)
 	}
 	if err != nil {
 		var failure *Failure

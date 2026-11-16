@@ -95,9 +95,13 @@ type fakeDocker struct {
 	// Comportamientos configurables.
 	infoOS          string
 	infoFails       bool
+	endpoint        string
 	imageMissing    bool
 	leftoverIDs     string
 	leftoverVolumes string
+	headerRows      []string
+	onRun           func()
+	blockTable      string
 	mountFailures   int
 	restoreFails    bool
 	restorePanics   bool
@@ -110,7 +114,7 @@ type fakeDocker struct {
 }
 
 func newFakeDocker(t *testing.T) *fakeDocker {
-	return &fakeDocker{t: t, source: loadSynthetic(t), infoOS: "linux"}
+	return &fakeDocker{t: t, source: loadSynthetic(t), infoOS: "linux", endpoint: "unix:///var/run/docker.sock"}
 }
 
 func (fake *fakeDocker) record(command Command) recorded {
@@ -145,6 +149,8 @@ func (fake *fakeDocker) Run(ctx context.Context, command Command) error {
 	call := fake.record(command)
 	arguments := strings.Join(call.Args, " ")
 	switch {
+	case arguments == "context inspect --format {{.Endpoints.docker.Host}}":
+		write(command.Stdout, fake.endpoint+"\n")
 	case arguments == "info --format {{.OSType}}":
 		if fake.infoFails {
 			write(command.Stderr, "Cannot connect to the Docker daemon")
@@ -159,12 +165,15 @@ func (fake *fakeDocker) Run(ctx context.Context, command Command) error {
 		write(command.Stdout, `sha256:1111|amd64|["mcr.microsoft.com/mssql/server@sha256:2222"]`+"\n")
 	case strings.HasPrefix(arguments, "pull "):
 		write(command.Stdout, "2022-latest: Pulling from mssql/server\naaa: Pulling fs layer\nbbb: Pulling fs layer\naaa: Pull complete\nbbb: Already exists\n")
-	case strings.HasPrefix(arguments, "ps -a -q"):
+	case strings.HasPrefix(arguments, "ps -a --filter label=local.adel.pos.legacy-reader=1 --format"):
 		write(command.Stdout, fake.leftoverIDs)
-	case strings.HasPrefix(arguments, "volume ls -q"):
+	case strings.HasPrefix(arguments, "volume ls --filter label=local.adel.pos.legacy-reader=1 --format"):
 		write(command.Stdout, fake.leftoverVolumes)
 	case strings.HasPrefix(arguments, "rm -f -v"), strings.HasPrefix(arguments, "volume rm"), strings.HasPrefix(arguments, "volume create"):
 	case strings.HasPrefix(arguments, "run -d"):
+		if fake.onRun != nil {
+			fake.onRun()
+		}
 		if fake.mountFailures > 0 {
 			fake.mountFailures--
 			write(command.Stderr, `docker: Error response from daemon: invalid mount config for type "bind": bind source path does not exist`)
@@ -212,10 +221,12 @@ func (fake *fakeDocker) sql(ctx context.Context, command Command, call recorded)
 	case strings.Contains(sql, "RESTORE HEADERONLY"):
 		header := strings.Join([]string{"BackupName", "BackupType", "Position", "DatabaseName", "DatabaseVersion", "BackupStartDate",
 			"BackupFinishDate", "CompatibilityLevel", "SoftwareVersionMajor", "SoftwareVersionMinor", "SoftwareVersionBuild", "Collation"}, columnSeparator)
-		row := strings.Join([]string{"nombre | con barra", "1", "1", "possys", "706", "2026-11-14 22:00:01.000", "2026-11-14 22:00:09.123",
-			"110", "11", "0", "7001", "SQL_Latin1_General_CP1_CI_AS"}, columnSeparator)
+		rows := fake.headerRows
+		if rows == nil {
+			rows = []string{headerRow("1", "1", "possys")}
+		}
 		dashes := strings.Repeat("-", 5)
-		write(command.Stdout, header+"\n"+dashes+"\n"+row+"\n\n")
+		write(command.Stdout, header+"\n"+dashes+"\n"+strings.Join(rows, "\n")+"\n\n")
 	case strings.Contains(sql, "RESTORE FILELISTONLY"):
 		header := strings.Join([]string{"LogicalName", "PhysicalName", "Type", "FileId"}, columnSeparator)
 		rows := strings.Join([]string{"possys", `C:\datos\possys.mdf`, "D", "1"}, columnSeparator) + "\n" +
@@ -242,6 +253,11 @@ func (fake *fakeDocker) sql(ctx context.Context, command Command, call recorded)
 		if fake.onTable != nil {
 			fake.onTable(name)
 		}
+		if name == fake.blockTable {
+			// SQL Server atascado: no responde hasta que se cancela.
+			<-ctx.Done()
+			return ctx.Err()
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -255,6 +271,12 @@ func (fake *fakeDocker) sql(ctx context.Context, command Command, call recorded)
 		return &ExitError{Code: 1}
 	}
 	return nil
+}
+
+// headerRow es una fila de RESTORE HEADERONLY: tipo de respaldo, posición y base.
+func headerRow(kind, position, database string) string {
+	return strings.Join([]string{"nombre | con barra", kind, position, database, "706", "2026-11-14 22:00:01.000",
+		"2026-11-14 22:00:09.123", "110", "11", "0", "7001", "SQL_Latin1_General_CP1_CI_AS"}, columnSeparator)
 }
 
 // catalogJSON describe las tablas sintéticas como lo haría el catálogo de SQL Server.

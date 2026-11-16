@@ -12,7 +12,7 @@ import (
 	"io"
 )
 
-// OpenOptions configura la lectura. Con Limits en cero se usan DefaultLimits.
+// OpenOptions configura la lectura. Los campos de Limits en cero toman el valor de DefaultLimits.
 type OpenOptions struct {
 	Limits Limits
 }
@@ -35,11 +35,42 @@ type Reader struct {
 	err        error
 }
 
+// resolveLimits completa con los predeterminados los límites en cero (así quien solo quiere cambiar uno no deja los
+// demás en cero, que rechazaría todo).
 func resolveLimits(options OpenOptions) Limits {
-	if options.Limits == (Limits{}) {
-		return DefaultLimits()
+	limits := options.Limits
+	defaults := DefaultLimits()
+	if limits.MaxArgonMemoryKiB == 0 {
+		limits.MaxArgonMemoryKiB = defaults.MaxArgonMemoryKiB
 	}
-	return options.Limits
+	if limits.MaxArgonTime == 0 {
+		limits.MaxArgonTime = defaults.MaxArgonTime
+	}
+	if limits.MaxArgonThreads == 0 {
+		limits.MaxArgonThreads = defaults.MaxArgonThreads
+	}
+	if limits.MaxChunkSize == 0 {
+		limits.MaxChunkSize = defaults.MaxChunkSize
+	}
+	if limits.MaxUncompressedBytes == 0 {
+		limits.MaxUncompressedBytes = defaults.MaxUncompressedBytes
+	}
+	if limits.MaxManifestBytes == 0 {
+		limits.MaxManifestBytes = defaults.MaxManifestBytes
+	}
+	if limits.MaxTableBytes == 0 {
+		limits.MaxTableBytes = defaults.MaxTableBytes
+	}
+	if limits.MaxTables == 0 {
+		limits.MaxTables = defaults.MaxTables
+	}
+	if limits.MaxColumns == 0 {
+		limits.MaxColumns = defaults.MaxColumns
+	}
+	if limits.MaxRowBytes == 0 {
+		limits.MaxRowBytes = defaults.MaxRowBytes
+	}
+	return limits
 }
 
 // Inspect lee solo el encabezado en claro (sin la frase de paso): dice si el archivo es un paquete y de qué versión.
