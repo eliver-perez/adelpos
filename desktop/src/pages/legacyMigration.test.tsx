@@ -352,6 +352,50 @@ describe('pantalla del asistente', () => {
     expect(within(step).getByRole('button', { name: 'Importar' })).toBeTruthy();
   });
 
+  it('muestra el mensaje de Go y solo vuelve a subir el paquete si no se pudo leer', async () => {
+    runs = [
+      run({
+        status: 'failed',
+        summary: null,
+        error_code: 'LEGACY_PASSPHRASE_INVALID',
+        error_message: 'La frase de paso no es correcta.',
+      }),
+    ];
+    render(<LegacyMigrationPage mainComputer />);
+    const step = await screen.findByRole('region', { name: '2. Importar el paquete' });
+    expect(step.textContent).toContain('con el sistema anterior ya cerrado');
+    expect(step.textContent).toContain('ya no se podrá volver a importar');
+    fireEvent.click(within(step).getByRole('button', { name: 'Elegir el paquete' }));
+    await within(step).findByText('paquete.adelmig');
+    const phrase = within(step).getByLabelText('Frase de paso del paquete');
+    const review = async (message: string) => {
+      fireEvent.change(phrase, { target: { value: 'Frase de migración' } });
+      fireEvent.click(within(step).getByRole('button', { name: 'Revisar el paquete' }));
+      await waitFor(() => expect(within(step).getByRole('alert').textContent).toBe(message), {
+        timeout: 4000,
+      });
+    };
+    await review('La frase de paso no es correcta.');
+    // Frase incorrecta: se vuelve a analizar sin subir otra vez.
+    runs = [
+      run({
+        status: 'failed',
+        summary: null,
+        error_code: 'LEGACY_PACKAGE_UNREADABLE',
+        error_message: 'No se pudo leer el archivo del paquete. Vuelve a intentarlo.',
+      }),
+    ];
+    await review('No se pudo leer el archivo del paquete. Vuelve a intentarlo.');
+    expect(bridgeCalls('legacy_upload_package')).toHaveLength(1);
+    await waitFor(() => expect(apiCalls('maintenance_legacy_cancel_upload')).toHaveLength(1));
+    // No se pudo leer: la siguiente revisión sube el paquete otra vez.
+    runs = [run()];
+    fireEvent.change(phrase, { target: { value: 'Frase de migración' } });
+    fireEvent.click(within(step).getByRole('button', { name: 'Revisar el paquete' }));
+    await within(step).findByRole('heading', { name: 'Resumen previo' }, { timeout: 4000 });
+    expect(bridgeCalls('legacy_upload_package')).toHaveLength(2);
+  });
+
   it('una instalación con operación propia explica por qué no se importa y no ofrece importar', async () => {
     runs = [
       run({

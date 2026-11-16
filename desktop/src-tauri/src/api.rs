@@ -1024,7 +1024,7 @@ pub(crate) fn allowed_query_keys(operation: &str) -> &'static [&'static str] {
             "supplier_id",
             "modality",
             "currency",
-            // Etapa 9H: filtro «Datos» (AD-EL POS, sistema anterior o ambos) de los reportes con el historial importado.
+            // Etapa 9H: «Datos» (AD-EL POS, sistema anterior o los dos) con un lote importado vigente.
             "data_source",
         ]
     } else if operation.starts_with("inventory_") {
