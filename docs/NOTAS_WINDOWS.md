@@ -529,3 +529,51 @@ consultan antes con el propietario.
 14. **Documentación**: el resultado de las pruebas cruzadas y de la carga, la migración de la instalación por usuario y
     las limitaciones van al avance; actualizar `CLAUDE.md` (§3, §5, §17 y §19), esta sección,
     [INSTALAR_EN_WINDOWS.md](INSTALAR_EN_WINDOWS.md) e [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).
+
+## 8. Etapa 9H: qué verificar en Windows
+
+La 9H (versión 0.11.0, esquema 24, migración `0024_legacy_migration.sql`: migración del sistema anterior y pendientes)
+se desarrolló y se probó en la Mac, en copias aisladas y con datos sintéticos ([ETAPA_9H_AVANCE.md](ETAPA_9H_AVANCE.md)).
+**Nada de la 9H se ejecutó en Windows**: Go se compiló y se revisó con `GOOS=windows` (también con
+`-tags=integration` y con `-tags 'integration legacydocker'`) y `checkLegacyData` de `scripts/windows/dev.mjs` corrió con
+Node en la Mac; Rust no se compiló para Windows. Lo propio de cada sistema está en `*_windows.go` (`legacyread/lock_windows.go`,
+`legacyread/process_windows.go`, `legacypkg/rename_windows.go` y `legacypkg/partial_windows.go`) y en `cfg!` de
+`legacy_migration.rs`. Guía para el propietario: [MIGRAR_SISTEMA_ANTERIOR.md](MIGRAR_SISTEMA_ANTERIOR.md). Nunca con el
+respaldo real del restaurante: solo con el paquete y el respaldo sintéticos (`legacy-synthetic` y la prueba con Docker).
+
+1. **Suites** (`scripts\dev.ps1`): `test` (su `format-check` empieza con `check-legacy-data`), `test-integration` (la
+   tupla incluye `./internal/legacyimport`, 14 paquetes) y `test-browser` con Chromium y WebKit, que ahora arranca un
+   **segundo Go temporal con base limpia en 8185** para `workflow-stage9h-migration.spec.ts` (también
+   `workflow-stage9h-adjustments.spec.ts`). `cargo test` compila por primera vez en Windows `legacy_migration.rs`.
+2. **Lector con Docker Desktop para Windows** (`internal/legacyread`): que encuentre `docker.exe` en el `PATH` o en
+   `%ProgramFiles%\Docker\Docker\resources\bin\`; contenedores de Linux (con los de Windows, `DOCKER_UNSUPPORTED`); el
+   extremo `npipe://` aceptado por `docker context inspect` (cualquier otro que no sea local, `DOCKER_REMOTE`); el
+   montaje de solo lectura de un respaldo en `C:\…` (si Docker no comparte la carpeta, la copia privada); la memoria
+   (menos de 2 GB, `READER_MEMORY`) y la descarga de la imagen con su avance. Correr
+   `ADEL_TEST_DOCKER=1 go test -tags "integration legacydocker" -run TestLegacyPrepareWithDocker ./internal/legacyread`
+   (respaldo sintético, ~1 minuto).
+3. **Una preparación a la vez y restos**: el bloqueo `LockFileEx` sobre `%TEMP%\adel-legacy-prepare\lock`
+   (`ALREADY_RUNNING`), `OpenProcess`/`GetExitCodeProcess` para no borrar el lector de un proceso vivo y
+   `legacy-prepare --cleanup` después de matar una preparación.
+4. **Cancelación por la entrada estándar**: en Windows no hay SIGTERM. «Cancelar la preparación» cierra la entrada
+   estándar del lector (`--watch-stdin`) y el lector limpia y responde `CANCELLED`; cerrar la aplicación hace lo mismo.
+   Comprobar que no quedan contenedores ni volúmenes (`docker ps -a`, `docker volume ls`).
+5. **Servidor junto al ejecutable**: «Preparar paquete» lanza `ad-el-pos-server.exe` de la carpeta de
+   `ad-el-pos-desktop.exe` (en la instalación por usuario de la 9E, `%LOCALAPPDATA%\Programs\AD-EL POS\`); comprobar que
+   lo encuentra en la aplicación instalada (en `scripts\dev.ps1 desktop`, con `ADEL_SERVER_BINARY`).
+6. **Paquete en el disco**: el nombre definitivo sin reemplazar (`MoveFileEx` sin `MOVEFILE_REPLACE_EXISTING`), una USB
+   FAT32 o exFAT (el temporal se crea sin ACL: `GetVolumeInformation` sin `FILE_PERSISTENT_ACLS`) y rutas con acentos
+   y espacios.
+7. **Carpeta de trabajo con ACL**: el `host` de Windows arma la migración con la carpeta `legacy-import` junto a
+   `server.json` (hoy `%LOCALAPPDATA%\AD-EL POS\legacy-import`; `%ProgramData%` en la Fase W de la 9G). Comprobar la
+   ACL privada (`fileacl.Protect`), que el paquete subido nace privado (`fileacl.CreatePrivate`) y se borra al
+   importar, y que el respaldo previo a la importación (el de «Respaldar ahora» del `host`) funciona.
+8. **Asistente completo** con el paquete sintético en la aplicación instalada: sin menú nativo, se abre desde
+   Mantenimiento y la paleta (Ctrl+K); resumen previo, importación, informe, PDF guardado con el diálogo nativo,
+   «Asignar contraseña» y reportes con el filtro «Datos».
+9. **Paquete preparado en la Mac e importado en Windows**, y al revés (§3.2 de la especificación: la computadora que
+   importa no necesita Docker).
+10. **Fase A**: el precio unitario en papel por la cola RAW de Windows (el «×» de CP850) y el mismo usuario con sesión
+    en dos terminales a la vez.
+11. **Documentación**: el resultado va al avance; actualizar esta sección, «Pendiente de comprobar» de
+    [MIGRAR_SISTEMA_ANTERIOR.md](MIGRAR_SISTEMA_ANTERIOR.md) y `CLAUDE.md` (§17 y §19).
