@@ -1777,3 +1777,928 @@ los reportes con el filtro «Datos», que en la rama D sola se omitía). La fall
 corrida filtrada de especificaciones vecinas de la Fase D («En cocina» esperado) corresponde a una especificación
 filtrada sobre una base nueva sin la ruta de cocina que crean las anteriores (§6 de `CLAUDE.md`); se comprueba en la
 regresión completa de la Fase F.
+
+---
+
+## Fase E · Prueba completa con el respaldo real
+
+Un agente (16/11/2026), sobre `etapa-9h` en `a2b6305` (árbol `$SP/wt/e`, sin cambios). **Sin cambios de código ni
+commits.** Es la única fase que usó el respaldo real (`ADEL POS/possys.bak`). Este fragmento solo trae conteos y cifras
+agregadas: totales de un día, un mes y un año, conteos, tiempos, tamaños y diferencias agregadas.
+
+**Se encontró un defecto del importador (D-1, abajo).** Al reemplazar el lote con el volumen real, la validación no
+termina en un tiempo razonable. Se detuvo la prueba y se reporta sin corregirlo. **Se corrigió después** («Fase E ·
+Corrección del reemplazo (D-1)», abajo) y el reemplazo con el respaldo real se repitió con la corrección y terminó con
+«Todo cuadra.» («Fase E · Reemplazo con el respaldo real después de la corrección»), donde está también la lista de
+pasos para el propietario.
+
+### Cómo se hizo (aislamiento y datos reales)
+
+- **Carpeta privada.** Todo lo producido con datos reales vivió en `$SP/legacy-data/` (0700):
+  - Una copia exacta del árbol (`git archive` de `a2b6305`, con los enlaces de `.tools`, `node_modules`, `go-mod` y
+    `playwright`).
+  - La especificación `workflow-stage9h-real.spec.ts`, que solo existió en esa copia.
+  - La frase de paso: aleatoria, en un archivo 0600. Solo pasó por la entrada estándar y por la especificación, nunca por
+    la salida.
+  - El paquete, los registros, las respuestas JSON de la API, los PDF, las carpetas de corrida del Go temporal (con sus
+    respaldos y su `legacy-import`) y los artefactos de Playwright.
+  - Al terminar se borró todo (ver «Limpieza»).
+- **Preparar.** Se usó `ad-el-pos-server legacy-prepare` del binario compilado en la copia, el mismo subcomando que lanza
+  el asistente. `TMPDIR` apuntaba dentro de `legacy-data`.
+- **Importar.** Se hizo en un Go temporal en modo de pruebas (`test_mode`, 127.0.0.1:8200, vista previa 1428), con una
+  base `adel_pos_test_e_*` nueva del clúster 55499 y la configuración que escribe `iso.sh`. El asistente se recorrió en
+  Chromium con el puente de Playwright:
+  - `nextPackage(<ruta>)` y subida real por partes.
+  - Análisis, resumen previo, confirmación, avance, informe con su validación y PDF.
+  - Reportes con el filtro «Datos».
+  - Reemplazo del lote.
+- **Nunca se tocó la instalación real**: ni el servicio, ni la carpeta de datos, ni `.local`, ni los puertos 55432 y 8181.
+- **Comparación externa.** Se levantó el SQL Server temporal (`$SP/legacy-sql.sh up`: sin red y con el respaldo de solo
+  lectura, restaurado en 16 s). Ahí se calcularon con **consultas agregadas** los mismos totales con las reglas del
+  importador:
+  - Fecha de reconocimiento: el pago que liquida la venta. Es el pago con el que lo acumulado de los pagos mayores que
+    cero, por fecha y luego por id, alcanza `total + montoExtra − descuentos`. Si nunca lo alcanza, cuenta el último pago
+    mayor que cero; sin pagos mayores que cero, la apertura.
+  - Las ventas canceladas no cuentan.
+  - Día comercial: la hora local menos las 05:00 de inicio del día de la instalación temporal (zona
+    `America/Monterrey`).
+- **Corridas.** Hubo tres importaciones completas en bases nuevas (corridas 1 a 3) y una cuarta de diagnóstico (D-1).
+
+### 1. Preparación del paquete (`legacy-prepare`)
+
+| Paso                                            | Tiempo                                           |
+| ----------------------------------------------- | ------------------------------------------------ |
+| Imagen (ya descargada)                          | 0.99 s                                           |
+| Arranque de SQL Server                          | 8.23 s                                           |
+| Restauración del respaldo                       | 2.05 s                                           |
+| Lectura (50 tablas, 1 536 808 filas)            | 20.83 s                                          |
+| Escritura del paquete                           | 3.10 s                                           |
+| Verificación del paquete (`verified: true`)     | 1.89 s                                           |
+| Limpieza (contenedor y volumen)                 | 0.21 s                                           |
+| **Total** (del resumen; reloj de pared: 35.7 s) | **35.53 s** (CPU: 11.9 s usuario, 1.7 s sistema) |
+
+- **Tamaños.** El respaldo pesa 132 304 896 bytes (126.2 MiB) y el paquete **17 418 045 bytes (16.6 MiB)**, un 13 % del
+  respaldo.
+- **Memoria.** `legacy-prepare` llegó a 229 MiB de memoria residente. El contenedor de SQL Server llegó a 1.38 GiB
+  (`docker stats` cada 3 s; Docker Desktop tiene 8 GiB).
+- **Contenido.** Un juego de respaldo, de SQL Server 2012 (11.0). Ventas de 10/2019 a 11/2026; respaldo de 11/2026.
+- **Lo que no viaja.** Se omitieron 2 tablas, `personal_detalles` (9 filas, datos personales) y `sysdiagrams` (1), y 3
+  columnas binarias (las tres sin valores).
+- **Restos.** No había restos previos. Al terminar no quedó ningún contenedor ni volumen; en `adel-legacy-prepare` solo
+  quedó el archivo `lock`, sin carpetas `run-*`.
+- **Conteos.** Iguales a los de `MIGRACION_ANALISIS.md`:
+  - Ventas e historial: `ventas` 226 170, `ventas_productos` 722 400, `ventas_complementos` 328 489, `pagos` 225 810,
+    `ventas_modificaciones` 31 563, `cancelaciones` 1 119, `descuentos` 50.
+  - Caja: `cortes` 256, `cortes_parciales` 269.
+  - Catálogo: `productos` 107, `productos_precios` 367, `complementos` 6, `complementos_precios` 28, `categorias` 5.
+  - Mesas y usuarios: `mesas` 25, `usuarios` 7.
+
+### 2. Importación con el asistente (Playwright, Chromium)
+
+| Medida (corridas 1 a 3, cada una en una base nueva)                       | Resultado                                                                                                                                                                               |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clic en «Revisar el paquete» → «Resumen previo» en pantalla               | 3.88–4.39 s. La subida de 17 partes de 1 MiB tomó unos 0.25 s; el análisis en Go, 3.16–3.25 s (lectura del paquete: 2.78–2.84 s).                                                       |
+| Clic en «Importar» (confirmado) → informe en pantalla                     | **21.2–22.2 s**                                                                                                                                                                         |
+| Trabajo de importación en Go (`timings_ms`)                               | 20.1–21.2 s: respaldo previo 0.16–0.17 s (base limpia), lectura 2.77–2.78 s, historial (COPY) 15.1–16.3 s, validación 1.20–1.22 s, espera de locks 0–3 ms, **locks tomados 263–272 ms** |
+| Memoria residente del Go (muestras cada 0.5 s con `ps`)                   | 94 MiB al arrancar; hasta 534–547 MiB en el análisis y **hasta 763–769 MiB en la importación**. Se queda en unos 760 MiB después (no la devuelve al sistema).                           |
+| Base de datos después de importar                                         | 746 MiB (781 842 111 bytes). El respaldo automático posterior pesó 47 MB.                                                                                                               |
+| Informe en PDF («Descargar informe (PDF)»)                                | 431 751 bytes y 145 páginas: los datos incoherentes van renglón por renglón.                                                                                                            |
+| Resultado igual en las cuatro importaciones y en el reemplazo diagnóstico | Sí: misma huella de contenido, mismo resumen previo, la misma validación y los mismos totales de los reportes.                                                                          |
+
+**Resumen previo.**
+
+- **Conteos del catálogo**: 5 categorías, 107 productos (ninguno inactivo), 6 complementos y 2 grupos de opciones.
+- **Mesas y usuarios**: 24 mesas más «para llevar», en 1 área; 7 usuarios.
+- **Ventas**: 226 170 (225 046 pagadas, 1 119 canceladas y 5 abiertas), con 722 400 renglones, 328 489 complementos
+  vendidos, 31 563 cambios de cantidad, 50 descuentos, 1 119 cancelaciones y 225 810 pagos.
+- **Caja y precios**: 256 cortes, 269 retiros, 0 egresos y 395 precios en el historial.
+- **Tasas y periodo**: 106 productos al 0 % y 1 al 16 %. Periodo de 10/2019 a 11/2026.
+- **Avisos**: 4 en la primera importación y 6 en un reemplazo (los dos del reemplazo). La instalación quedó «limpia», sin
+  impedimentos.
+
+**Datos incoherentes (marcas del resumen previo).**
+
+| Entidad      | Marcas con su conteo                                                                                                                                                                                                                                                                                 |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ventas       | `total_mismatch` 423, `subtotal_mismatch` 627, `tax_mismatch` 599, `amounts_inconsistent` 2 805, `no_lines` 22, `overpaid` 219, `underpaid` 15, `duplicate_folio` 54, `negative_tax` 68, `charge_without_amount` 2, `charge_without_concept` 1. Informativas: `no_shift` 4 237 y `late_payment` 230. |
+| Renglones    | `amounts_inconsistent` 151, `zero_quantity` 31, `rate_not_standard` 9                                                                                                                                                                                                                                |
+| Complementos | `negative_amount` 14 587 (bonificaciones), `amounts_inconsistent` 5 197                                                                                                                                                                                                                              |
+| Pagos        | `zero_amount` 539, `negative_amount` 9, `possible_duplicate` 227. Informativas: `no_shift` 4 254 y `shift_differs` 563.                                                                                                                                                                              |
+| Otros        | Descuentos: `exceeds_total` 1. Cortes: `sales_mismatch` 2, `no_activity` 6. Retiros: `zero_or_negative` 8, `doubtful_amount` 45. Precios: `rate_not_standard` 1.                                                                                                                                     |
+
+Por qué algunas marcas no coinciden con la Fase 0 (no son diferencias de dinero; lo comprobé en SQL Server):
+
+- **Comparación exacta.** El importador compara los importes exactos, a 4 decimales. Así, en SQL Server, los descuadres
+  de total, subtotal, IVA y subtotal + IVA dan 423, 627, 599 y 2 805, igual que las marcas. Con un centavo de tolerancia
+  dan 423, 428, 179 y 80; la Fase 0 usó otra tolerancia (428, 192 y 121).
+- **`exceeds_total` 1.** Es un descuento mayor que el `total` de su venta, pero no mayor que `total + montoExtra`. La
+  Fase 0 comparaba contra lo que se debía.
+- **`no_lines` 22 contra la nota de 21.** Las 22 son pagadas con total 0. Una tiene un cargo extra, así que tiene un
+  renglón en el libro.
+- **`duplicate_folio` 54.** Son los 27 folios repetidos, cada uno en 2 ventas.
+
+### 3. Validación §4.4 (informe final)
+
+- **El informe dice «Todo cuadra.»**: 42 de 42 comparaciones cuadran y no hay diferencias de dinero, también en el PDF.
+- **Conteos**: cuadran los 19.
+- **Notas**:
+  - Egresos 0.
+  - Las canceladas no son venta: $410 241.67 al estilo del anterior.
+  - No hay dólares.
+  - 21 ventas pagadas no tienen renglones ni importes.
+
+**Total vendido por año.**
+
+- El año es el del día comercial del reconocimiento.
+- Coinciden las tres fuentes: el paquete (pasada independiente), lo importado (Σ del libro) y SQL Server (consulta
+  agregada directa).
+- El reporte «Ventas por mes» de cada año (con «Solo sistema anterior», y también con «AD-EL POS y sistema anterior») da
+  el mismo total.
+- Como referencia, se agregan el total por **fecha de apertura** (como lo reportaba el sistema anterior) y el del
+  «Registro de ventas» del anterior (`pagado = 1 AND cancelado = 0`, que incluye las canceladas).
+
+| Año       | Ventas pagadas | Total vendido (paquete = importado = SQL Server = reporte) | Cuentas en el reporte | Por apertura (pagadas no canceladas) | «Registro de ventas» del anterior | Canceladas (por apertura) |
+| --------- | -------------- | ---------------------------------------------------------- | --------------------- | ------------------------------------ | --------------------------------- | ------------------------- |
+| 2019      | 2 405          | $843 332.00                                                | 2 405                 | 2 418 · $848 310.00                  | 2 630 · $911 010.00               | 212 · $62 700.00          |
+| 2020      | 12 138         | $3 852 167.00                                              | 12 137                | 12 125 · $3 847 189.00               | 12 177 · $3 865 840.00            | 52 · $18 651.00           |
+| 2021      | 35 796         | $10 850 250.68                                             | 35 796                | 35 796 · $10 850 250.68              | 36 144 · $10 963 183.68           | 348 · $112 933.00         |
+| 2022      | 35 205         | $11 166 597.93                                             | 35 201                | 35 205 · $11 166 597.93              | 35 606 · $11 339 486.93           | 401 · $172 889.00         |
+| 2023      | 38 537         | $11 603 695.53                                             | 38 534                | 38 538 · $11 603 935.53              | 38 607 · $11 632 705.53           | 69 · $28 770.00           |
+| 2024      | 36 808         | $11 670 078.02                                             | 36 803                | 36 808 · $11 670 203.02              | 36 824 · $11 676 221.69           | 16 · $6 018.67            |
+| 2025      | 34 373         | $11 587 899.67                                             | 34 370                | 34 372 · $11 587 534.67              | 34 377 · $11 589 424.67           | 5 · $1 890.00             |
+| 2026      | 29 784         | $10 449 847.50                                             | 29 779                | 29 784 · $10 449 847.50              | 29 800 · $10 456 237.50           | 16 · $6 390.00            |
+| **Total** | **225 046**    | **$72 023 868.33**                                         | **225 025**           |                                      |                                   | **1 119 · $410 241.67**   |
+
+**Las diferencias se explican por los datos, no por el importador.**
+
+- **Por apertura contra por reconocimiento.** 3 541 ventas se reconocen en un día comercial distinto del de su apertura:
+  2 686 al día siguiente y la más lejana a los 53 días. 15 cambian de año:
+  - 13 abiertas en 2019 y liquidadas en 2020 ($4 978.00).
+  - 1 de 2023 a 2024 ($240.00).
+  - 1 de 2024 a 2025 ($365.00).
+  - Por eso las diferencias por año suman cero: 2019 −$4 978.00, 2020 +$4 978.00, 2023 −$240.00, 2024 −$125.00 y 2025
+    +$365.00.
+- **El «Registro de ventas» del anterior** suma además las canceladas (decisión del coordinador: no son venta). La
+  diferencia de cada año es exactamente la columna de canceladas.
+- **Las cuentas del reporte** dan 21 menos que las ventas pagadas: son las 21 ventas sin renglones ni importes de la nota
+  M-7.
+
+**Pagos por forma de pago y año.**
+
+- Año del día comercial del pago. Coinciden el paquete, lo importado y SQL Server.
+- El reporte «Cobros por método» de cada año da el total de la última columna.
+- Incluye todos los pagos: los repetidos, los de cero y los negativos.
+
+| Año  | Efectivo (cobros)       | Tarjeta (sistema anterior) | Total «Cobros por método» |
+| ---- | ----------------------- | -------------------------- | ------------------------- |
+| 2019 | $845 157.00 (2 412)     | —                          | $845 157.00               |
+| 2020 | $3 860 066.00 (12 186)  | —                          | $3 860 066.00             |
+| 2021 | $10 861 796.68 (35 847) | —                          | $10 861 796.68            |
+| 2022 | $11 176 782.93 (35 230) | —                          | $11 176 782.93            |
+| 2023 | $11 616 080.53 (38 574) | $795.00 (1)                | $11 616 875.53            |
+| 2024 | $11 033 401.02 (35 520) | $649 867.00 (1 446)        | $11 683 268.02            |
+| 2025 | $10 801 854.67 (32 880) | $803 975.00 (1 711)        | $11 605 829.67            |
+| 2026 | $9 762 396.50 (28 642)  | $699 926.00 (1 361)        | $10 462 322.50            |
+
+**Otros totales.**
+
+- **Retiros.** 269, por $26 421 169.00 (= SQL Server). Incluyen los 45 retiros de $100 000 o más que el informe marca como
+  dudosos.
+- **Egresos.** $0.00.
+- **Canceladas al estilo del anterior.** $410 241.67 (= SQL Server).
+- **Ventas cuyo libro no suma lo que se debía.** 0.
+
+### 4. Reportes en la interfaz contra el sistema anterior
+
+En la pantalla Reportes, con «Datos: Solo sistema anterior», el pie de cada tabla mostró el total de Go. Elegí fechas con
+actividad normal:
+
+- El día: un jueves de 108 ventas; la mediana de los días con venta de ese mes es 107.
+- El mes: 04/2025, con 3 101 ventas; el promedio mensual de 2025 es de 2 864.
+- El año: 2025, completo.
+
+Con «AD-EL POS y sistema anterior» (el valor por omisión) dieron lo mismo. Con «Solo AD-EL POS» dieron $0.00.
+
+| Periodo y reporte                                                      | En la interfaz (y por la API)                                                                                                                        | SQL Server (reglas del importador)                                               | Diferencia | Por apertura (como el anterior)                                                                                         |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Día 03/04/2025 · «Ventas por día»                                      | **$33 575.00**: 108 cuentas, 497 unidades, sin descuentos, cargos ni diferencia                                                                      | 108 ventas · $33 575.00                                                          | 0          | 102 ventas · $31 525.00. Hay 6 ventas abiertas en días anteriores y liquidadas ese día (+$2 050.00); ninguna cancelada. |
+| Mes 04/2025 · «Ventas por día» (periodo mes)                           | **$1 004 744.50**: 3 101 cuentas; bruto $1 004 287.00, cargos $665.00, «Diferencia del sistema anterior» −$207.50; 14 405 unidades                   | 3 101 ventas · $1 004 744.50 (mismos componentes)                                | 0          | 3 104 ventas · $1 005 629.50                                                                                            |
+| Año 2025 · «Ventas por mes»                                            | **$11 587 899.67**: 34 370 cuentas; bruto $11 579 582.00, descuentos $390.00, cargos $10 041.00, diferencia −$1 333.33, IVA $11.20; 164 529 unidades | 34 373 ventas pagadas (34 370 con renglones) · $11 587 899.67                    | 0          | 34 372 ventas · $11 587 534.67. El «Registro de ventas» daba 34 377 · $11 589 424.67.                                   |
+| Año 2025 · «Cobros por método»                                         | **$11 605 829.67**: 34 591 cobros (efectivo 32 880 · $10 801 854.67; tarjeta 1 711 · $803 975.00)                                                    | Igual                                                                            | 0          | —                                                                                                                       |
+| Mes 04/2025 · «Ventas por producto» (también «Productos más vendidos») | **$1 004 287.00**: 77 productos en 2 páginas de 50, 14 405 unidades                                                                                  | Renglones $1 001 072.00 (9 328) + complementos $3 215.00 (4 044) = $1 004 287.00 | 0          | —                                                                                                                       |
+
+Además, por la API:
+
+- **«Cobros por método».** El día: 108 cobros, $33 575.00 (efectivo 104 · $31 715.00 y tarjeta 4 · $1 860.00). El mes:
+  3 126 cobros, $1 005 239.50 (efectivo 2 974 · $932 519.50 y tarjeta 152 · $72 720.00). Todo igual a SQL Server.
+- **Reportes de productos.** No llevan los cargos ni la diferencia (decisión 2 del propietario). Por eso «Ventas por
+  producto» del mes es $1 004 287.00 y no $1 004 744.50.
+- **Tiempos de los reportes con el historial real.**
+  - Día y mes: ≤ 28 ms. «Ventas por mes» de 2025: 248 ms. «Ventas del periodo» de 2025: 168 ms. El más lento,
+    «Turnos de caja» de 2023: 456 ms.
+  - En la interfaz, cada reporte tardó unos 2 s: llegar al reporte, elegir el periodo y «Datos», y mostrar el total.
+
+### 5. Cortes sin `fecha_inicio` y «Turnos de caja»
+
+- **Fechas de los cortes.** En el respaldo real los 256 cortes tienen `fecha_inicio`. 5 no tienen `fecha_fin`, y son los
+  5 abiertos. Ningún corte cerrado carece de fin.
+- **Marcas y avisos.** No aparece ninguna marca `start_estimated`, `end_estimated` ni `no_start`, y `summary.warnings` no
+  trae ese aviso. Hay 6 cortes sin ventas ni pagos (`no_activity`).
+- **«Turnos de caja»** («Solo sistema anterior», por año) mostró 111 cortes en 2022, 114 en 2023, 20 en 2024, 8 en 2025 y
+  2 en 2026. Con el de 12/2018 (abierto en 2018, cerrado en 02/2022) son los 256. Coincide con SQL Server por año de
+  `fecha_inicio`.
+- **Estado.** 251 cerrados y 5 abiertos: 3 abiertos en 2023, 1 en 2024 y 1 en 2026.
+
+### 6. Horas de venta y el cambio de horario
+
+Calculé, con consultas agregadas, la hora media de las ventas (`ventas.fecha`) y la primera venta de cada día. Lo hice por
+mes y en los 14 días antes y después de cada cambio de horario de 2021 a 2026, tanto de México hasta 2022 (y la regla vieja
+después) como de EE. UU.
+
+| Cambio (fecha)                                  | Hora media de venta: antes → después | Primera venta del día (media): antes → después |
+| ----------------------------------------------- | ------------------------------------ | ---------------------------------------------- |
+| 2021 · EE. UU. inicia (14/03)                   | 14.34 → 13.43                        | 10.37 → 9.62                                   |
+| 2021 · México inicia (04/04)                    | 13.35 → 14.46                        | 9.63 → 10.98                                   |
+| 2021 · México termina (31/10)                   | 14.42 → 13.93                        | 10.83 → 10.17                                  |
+| 2022 · EE. UU. inicia (13/03)                   | 14.40 → 13.58                        | 11.13 → 10.04                                  |
+| 2022 · México inicia (03/04)                    | 13.48 → 14.41                        | 9.72 → 10.97                                   |
+| 2023 · EE. UU. inicia (12/03)                   | 13.85 → 13.27                        | 10.32 → 9.48                                   |
+| 2023 · regla vieja de México (02/04)            | 13.24 → 13.23                        | 9.44 → 9.44                                    |
+| 2023 · EE. UU. termina (05/11)                  | 13.27 → 14.11                        | 9.61 → 10.49                                   |
+| 2024 · EE. UU. inicia (10/03) / termina (03/11) | 14.18 → 13.40 / 13.43 → 14.32        | 10.33 → 9.54 / 9.75 → 10.88                    |
+| 2025 · EE. UU. inicia (09/03) / termina (02/11) | 14.36 → 13.59 / 13.66 → 14.42        | 10.62 → 9.62 / 9.86 → 10.58                    |
+| 2026 · EE. UU. inicia (08/03) / termina (01/11) | 14.46 → 13.73 / 13.82 → 14.59        | 10.73 → 10.02 / 10.43 → 10.99                  |
+
+**Por mes.**
+
+- En 2021 y 2022 la hora media de abril a octubre (14.3–14.7) es la del invierno.
+- De 2023 a 2026, de abril a octubre baja a 13.2–13.8, contra 14.0–14.6 de noviembre a febrero. Marzo y noviembre quedan
+  en medio.
+- En la regla vieja de México (abril y octubre de 2023 a 2026) no hay ningún salto.
+
+**Conclusión** (no se corrigió nada):
+
+- **La computadora del anterior sí recibió el cambio de 2022 de México**: desde 2023 no aplica el horario de verano.
+- **La actividad del restaurante sigue el calendario de EE. UU.** Del segundo domingo de marzo al primer domingo de
+  noviembre, las horas registradas quedan **una hora antes** que en el resto del año: desde 2023, en todo ese periodo; en
+  2021 y 2022, solo en las semanas entre el cambio de EE. UU. y el de México.
+- **Explicaciones posibles.** Coincide con un restaurante en la franja fronteriza norte, que mantiene el horario de verano
+  de EE. UU. (zona `America/Matamoros`), con la computadora en la hora del centro (Monterrey). También cabe un restaurante
+  que ajusta su horario al de EE. UU.
+- **Efecto.** Solo cambia la **hora del día** del historial en esos periodos («Ventas por hora» y las horas de cortes,
+  cobros y cuentas). Ningún total de día, mes ni año cambia: las ventas son de 06 a 21 h y el día comercial empieza a las
+  05:00.
+- **Queda como pregunta para el propietario.**
+
+### 7. Repetición (reemplazo del lote) e interrupción
+
+#### Corrida normal: el reemplazo no termina
+
+En la corrida 3 se reemplazó el lote con el mismo paquete, desde el asistente y con la confirmación en rojo. El resumen
+previo del reemplazo estuvo en 3.89 s, con `will_replace` y los dos avisos del reemplazo.
+
+La importación se quedó en la fase **«Validando»**:
+
+- La consulta de `readMoney` llevaba más de 3 minutos al 98 % de una CPU (defecto D-1). En la primera importación, toda la
+  validación del historial tomó 1.2 s.
+- La detuve a los 3 min 28 s, apagando el Go temporal.
+
+#### Interrupción con datos reales: no deja nada a medias
+
+Al volver a arrancar el servidor:
+
+- La corrida quedó `interrupted` (`LEGACY_INTERRUPTED`).
+- El lote anterior seguía `completed` e intacto: 1 solo lote, con 226 170 ventas, 722 174 renglones del libro, 225 810
+  pagos, 722 400 renglones y 328 489 complementos.
+
+#### Diagnóstico, no corrección
+
+En una cuarta base nueva puse `ALTER DATABASE … SET enable_nestloop = off`, **solo en esa base temporal**. Así el
+planificador no puede elegir el plan del defecto. Con eso **el reemplazo terminó en 28.7 s** (clic → informe: 29.2 s):
+
+- Tiempos: respaldo previo 5.25 s (ya con historial), borrado del lote anterior 0.94 s, historial 17.6 s, validación
+  1.06 s y locks tomados 438 ms.
+- Memoria: el Go llegó a 848 MiB.
+- La base quedó en 1.5 GB antes de que el autovacuum limpiara el lote borrado.
+
+Resultado del reemplazo diagnóstico, igual al de la primera importación:
+
+- **Validación**: las mismas 42 comparaciones, todas correctas; mismas notas y mismos conteos escritos; 0 retirados.
+- **Reportes**: los 105 resultados de la API (35 consultas × 3 valores de «Datos») tienen totales y renglones idénticos.
+- **Lotes**: uno `completed` y otro `replaced`, este con 0 filas en el historial y en el libro.
+- **Nada duplicado**:
+  - Historial: 226 170 ventas de un solo lote, 0 ventas repetidas, 722 400 renglones, 328 489 complementos, 225 810 pagos,
+    722 174 renglones del libro, 256 cortes, 269 retiros, 31 563 cambios, 50 descuentos, 1 119 cancelaciones y 395
+    precios.
+  - Catálogo: 107 productos (107 códigos `SA-` distintos), 5 categorías y 6 complementos.
+  - Mesas y usuarios: 24 mesas en 1 área; 9 usuarios (7 importados sin contraseña, `admin` y `sa`).
+  - Correspondencia: toda `active`.
+  - Operación propia: 0.
+
+#### Defecto D-1 (importador): el reemplazo del lote no termina con el volumen real
+
+**Dónde.** En `backend/internal/legacyimport/validate.go`, `readMoney`. Se llama desde `actualMoney` en `write.go`, en
+la fase `validating`, antes de los locks de la operación:
+
+```sql
+SELECT count(*) FILTER (WHERE coalesce(l.net, 0) <> s.amount_due), count(*) FILTER (WHERE l.legacy_sale_id IS NULL)
+FROM app.legacy_sales s
+LEFT JOIN (SELECT legacy_sale_id, sum(net) AS net FROM app.legacy_sales_recognitions WHERE batch_id = $1
+    GROUP BY legacy_sale_id) l ON l.legacy_sale_id = s.legacy_id
+WHERE s.batch_id = $1 AND s.status = 'paid'
+```
+
+**Causa.**
+
+- Después de la primera importación, el autovacuum analiza `legacy_sales` y `legacy_sales_recognitions`. Sus
+  estadísticas solo conocen el `batch_id` del lote vigente.
+- Dentro de la transacción del reemplazo, el lote nuevo se estima en 1 fila. El planificador elige entonces `Nested Loop
+Left Join` con la subconsulta agregada adentro: `GroupAggregate` sobre `Index Scan using
+legacy_sales_recognitions_sale_idx`, con `Index Cond` solo en `batch_id` y `Join Filter` en `legacy_sale_id`.
+- Recalcula el agregado del libro por cada venta pagada, así que el costo es O(ventas × renglones del libro). Medido con
+  datos reales: unos 300 ms por venta con el libro completo, es decir, del orden de horas para 225 046 ventas pagadas.
+- La primera importación no lo sufre: las tablas vacías no tienen estadísticas y el planificador elige `Hash Join`.
+- Las pruebas no lo notan: tienen 240 ventas, y la medición de volumen de la Fase C importa una sola vez.
+
+**Impacto.**
+
+- **No se puede repetir la migración con el volumen real** (§4.3 y §0-B: repetirla al pasar a producción). El asistente
+  se queda en «Validando».
+- Mientras tanto quedan tomados el lock 7820148310 y una transacción enorme: la escritura del historial nuevo y el
+  borrado del anterior. Los locks de la operación todavía no se toman, así que la operación no se bloquea.
+- Detenerlo lo deshace todo sin dejar nada a medias (comprobado arriba).
+
+**Reproducción con datos sintéticos (mínima):**
+
+1. Importa un paquete con decenas de miles de ventas pagadas. Por ejemplo, el de `TestLegacyImportVolume`
+   (`ADEL_LEGACY_MEASURE=1`, unas 230 mil ventas) o `legacysynth` con más ventas.
+2. Ejecuta `ANALYZE app.legacy_sales, app.legacy_sales_recognitions`, o espera al autovacuum, que tarda alrededor de un
+   minuto.
+3. Importa el mismo paquete otra vez, confirmando el reemplazo. `validate_history` crece cuadráticamente.
+4. Solo con SQL: después de los pasos 1 y 2, un `EXPLAIN` de esa consulta con cualquier otro UUID como `$1` muestra el plan
+   descrito. Lo comprobé así en la base temporal.
+
+**Correcciones posibles** (para el coordinador; no cambié código):
+
+- Un `ANALYZE` de las tablas `app.legacy_*` escritas, dentro de la transacción, justo después del COPY. Puede correr en la
+  transacción y ve sus propias filas.
+- Reescribir la consulta para que no dependa de la estimación: agrupar el libro con la venta en una sola agregación, o
+  usar `SET LOCAL enable_nestloop = off` durante la validación.
+- Revisar con el mismo criterio las demás consultas del reemplazo filtradas por el lote nuevo.
+- Agregar a la medición de volumen una segunda importación después de `ANALYZE`, para que no vuelva a pasar.
+
+### Pruebas ejecutadas
+
+| Prueba                                                                                                           | Resultado                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `legacy-prepare` con el respaldo real (binario de la copia; frase por la entrada estándar desde el archivo 0600) | Aprobado: 35.7 s, `verified: true`, conteos iguales al análisis, sin restos.                                                                                                                             |
+| `workflow-stage9h-real.spec.ts` (solo en la copia, Chromium, Go temporal 8200), corrida 1                        | Importación aprobada. Los reportes fallaron por un selector de la prueba: el campo «Día» se llama «Día Quitar fecha»; se usó el marcador `dd/mm/aaaa`.                                                   |
+| Corrida 2                                                                                                        | Importación aprobada. Los reportes fallaron por una carrera de la prueba: el periodo elegido se aplica solo y reemplazaba lo escrito; se agregó una espera.                                              |
+| Corrida 3                                                                                                        | Importación y los 5 reportes en la interfaz aprobados. El reemplazo se quedó en «Validando» (D-1) y se detuvo; la recuperación al arrancar quedó comprobada (`interrupted`, lote anterior intacto).      |
+| Corrida 4 (diagnóstico, `enable_nestloop = off` solo en esa base)                                                | 3 de 3 aprobadas: importación, reportes y reemplazo, con resultados idénticos.                                                                                                                           |
+| SQL Server temporal (`legacy-sql.sh up`/`sql`/`down`)                                                            | Restaurado en 16 s. Consultas agregadas: totales por año, por apertura y al estilo del anterior; pagos por forma y año; día, mes y año; productos; cortes; horas; marcas. Todo cuadró con el importador. |
+| Consultas agregadas a la base temporal (lotes, conteos, duplicados, cortes y plan de la consulta de D-1)         | Lo descrito arriba.                                                                                                                                                                                      |
+| `./scripts/dev.sh check-legacy-data` y `git status` en `$SP/wt/e` (después de la limpieza)                       | Aprobado (ver «Limpieza»).                                                                                                                                                                               |
+
+### No verificado
+
+- **El reemplazo del lote en condiciones normales** (verificado después de la corrección, en «Fase E · Reemplazo con el
+  respaldo real después de la corrección»). En esta corrida no terminaba por D-1. Solo se verificó con el diagnóstico
+  `enable_nestloop = off`, que no es una corrección. Tampoco se verificaron:
+  - Los reportes justo después de un reemplazo real, antes de que el autovacuum vuelva a analizar las tablas, cuando
+    podría pasar algo parecido durante alrededor de un minuto.
+  - Otras consultas del reemplazo con estadísticas del lote anterior.
+- **La preparación desde la aplicación.** Faltan la ventana nativa con sus diálogos reales y Rust lanzando el lector con
+  Docker. Aquí se usó el mismo subcomando desde la terminal, y el paquete se eligió con el puente.
+- **La descarga de la imagen y Windows.** La imagen ya estaba descargada en la Mac, y Windows no se probó.
+- **El PDF** no se abrió ni se imprimió: solo se comprobaron su firma, su tamaño y sus páginas. Tampoco se probó
+  restaurar el respaldo previo a la importación.
+- **WebKit**: no hacía falta en esta fase.
+- **La interpretación del corrimiento de una hora (§6).** Sale de agregados y no está confirmada con el propietario.
+- **Restos fuera de `legacy-data`, pendientes o no borrables.**
+  - El WAL del clúster temporal compartido (`$SP/pg/data/pg_wal`, 1.0 GB) puede conservar fragmentos de las filas
+    importadas hasta que PostgreSQL recicle y sobrescriba esos segmentos. No lo borré porque el clúster lo comparte el
+    otro agente. Conviene borrar `$SP/pg` cuando la etapa termine.
+  - El disco virtual de Docker Desktop puede conservar bloques ya liberados del volumen de SQL Server, que sí se borró.
+
+### Pasos para el propietario
+
+La lista actualizada (sin el aviso de esperar la corrección de D-1) está en «Fase E · Reemplazo con el respaldo real
+después de la corrección».
+
+### Limpieza (comprobada al terminar)
+
+- **Servidores y bases.**
+  - Se apagaron el Go temporal (8200) y la vista previa (1428); los dos puertos quedaron sin escucha.
+  - Se borraron las 4 bases `adel_pos_test_e_*` del clúster 55499; la lista de bases ya no tiene ninguna.
+- **Docker.**
+  - Se borraron el contenedor y el volumen de SQL Server (`legacy-sql.sh down`).
+  - El contenedor y el volumen del lector los borró `legacy-prepare` al terminar.
+  - `docker ps -a` y `docker volume ls` quedaron vacíos (la imagen se conserva).
+- **Archivos.** Se borró `$SP/legacy-data/` completo (317 MB):
+  - El paquete y la frase de paso.
+  - La copia del árbol con la especificación, la compilación y los artefactos y capturas de Playwright.
+  - Las carpetas de corrida del Go temporal, con sus respaldos, `legacy-import` y registros.
+  - La carpeta `adel-legacy-prepare`, que solo tenía `lock`.
+  - Los JSON y PDF de las corridas, las consultas y sus salidas, y las muestras de memoria.
+- **Búsquedas.** Ya no hay ningún `*.adelmig`, `adel-legacy-prepare`, `adel-legacy-e2e-*`, `run-adel_pos_test_e_*` ni
+  frase de paso en `$SP` ni en las carpetas temporales. Solo aparecen archivos sintéticos de fases anteriores:
+  `tmp-D/adel-legacy-choose-*`, de 0 a 4 bytes, de las pruebas de Rust de la Fase D, y `r-notes/exp/sintetico.bak`, del
+  revisor de la Fase B.
+- **El registro del clúster 55499** no tiene datos: solo errores de mis consultas agregadas y la cancelación de la
+  consulta de D-1.
+- **`$SP/wt/e`**: `git status` limpio y `./scripts/dev.sh check-legacy-data` aprobado («el índice de git no tiene
+  respaldos ni paquetes de migración»). No se escribió nada en el repositorio principal.
+- **Pendiente y fuera de mi alcance**: el WAL del clúster temporal compartido y los bloques liberados del disco de Docker
+  Desktop (ver «No verificado»).
+
+### Para CLAUDE.md
+
+- **Volumen real (Fase E):**
+  - Preparar el paquete toma unos 36 s y produce un paquete de 16.6 MiB (respaldo de 126 MiB). El contenedor del lector
+    usa hasta 1.4 GiB.
+  - Revisar el paquete toma unos 4 s e importarlo unos 22 s, con los locks de la operación tomados unos 270 ms.
+  - El Go llega a unos 770 MiB de memoria residente y la base queda en unos 750 MiB.
+  - La validación §4.4 cuadra en las 42 comparaciones y coincide con agregados calculados directamente en SQL Server.
+- **Defecto D-1 (corregido después, ver «Fase E · Corrección del reemplazo (D-1)»):** el reemplazo del lote se queda en «Validando» porque la consulta de `readMoney` elige un
+  Nested Loop con estadísticas del lote anterior.
+- **Regla permanente propuesta:** «Las consultas del importador sobre `app.legacy_*` filtradas por el lote que se está
+  escribiendo en la misma transacción no deben depender de las estadísticas del lote anterior: `ANALYZE` después del
+  COPY o una consulta cuyo plan no dependa de la estimación. La medición de volumen incluye un reemplazo».
+- **Horas del historial:** en el respaldo real están corridas una hora en los periodos del horario de verano de EE. UU.
+  Los totales por día, mes y año no se afectan. Pregunta abierta al propietario sobre la zona horaria del restaurante.
+
+### Fase E · Corrección del reemplazo (D-1)
+
+Un agente de la etapa (16/11/2026), en el árbol `etapa-9h-c4` (desde `etapa-9h`, `a2b6305`), con `ISO_TAG=C`. Solo
+datos sintéticos: nunca el respaldo real ni la instalación real.
+
+Commit: `28db789`.
+
+#### Qué cambió
+
+- **Defecto reproducido antes de corregir.**
+  - Medición de volumen ampliada con el reemplazo (230 240 ventas sintéticas), con el código de `a2b6305`: importar →
+    `ANALYZE` de las tablas del historial → importar otra vez confirmando el reemplazo.
+  - `EXPLAIN` de la validación del libro para otro lote dio exactamente el plan de la Fase E:
+    - `Nested Loop Left Join` con `Join Filter: (legacy_sales_recognitions.legacy_sale_id = s.legacy_id)`;
+    - del lado de adentro, `GroupAggregate` sobre `legacy_sales_recognitions_sale_idx`, con `Index Cond` solo en
+      `batch_id`;
+    - estimación de 1 fila.
+  - El reemplazo no terminó en el plazo de la prueba: 1 min 51 s, es decir, 3 × la primera importación más 1 minuto
+    (`context deadline exceeded`).
+- **`ANALYZE` dentro de la transacción** (`write.go`, `analyzeTables`).
+  - Justo después de escribir el historial, y antes de la validación y de lo vivo, se analizan las 12 tablas `app.legacy_*`
+    del historial (`historyTables`). Va en la fase «Validando», con el tiempo nuevo `timings_ms.analyze_history`.
+  - Después de borrar la correspondencia del lote anterior (con los locks tomados, unos milisegundos) se analiza
+    `legacy_id_map`.
+  - Comprobado en PostgreSQL 18.6: `ANALYZE` dentro de la transacción cuenta las filas que ella escribió y no las que
+    borró.
+    - Con 5 000 filas de un valor, borradas, y 7 000 de otro escritas: 7 000 filas y valor frecuente `{2}`.
+    - Si la transacción se deshace, `pg_statistic` vuelve a `{1}`. Solo `pg_class.reltuples` queda con el número del
+      intento (PostgreSQL lo actualiza en su lugar) hasta el siguiente `ANALYZE`.
+  - Al confirmar, los reportes ya tienen las estadísticas del lote nuevo (antes las tenían hasta que pasara el
+    autovacuum).
+- **La validación del libro ya no depende de la estimación** (`validate.go`, `ledgerCheckSQL`).
+  - Ahora suma el libro de cada venta pagada con una subconsulta `LATERAL` agregada que lo busca por el índice
+    `(batch_id, legacy_sale_id)`.
+  - Con las estadísticas del lote anterior, el plan es un `Nested Loop` con
+    `Index Cond: ((batch_id = s.batch_id) AND (legacy_sale_id = s.legacy_id))`, lineal.
+  - Primero probé la unión directa con una sola agregación. Con esas estadísticas, el planificador eligió otra vez
+    `Join Filter: (l.legacy_sale_id = s.legacy_id)` con el índice solo por `batch_id`, también cuadrático; la prueba
+    nueva lo detectó y por eso quedó `LATERAL`.
+- **El informe (PDF)** (`pdf.go`, `incoherentQueries`).
+  - La venta de cada pago, descuento o renglón marcado se busca con `LEFT JOIN LATERAL (… LIMIT 1)` por su llave. El
+    `LIMIT 1` evita que PostgreSQL la convierta en una unión; la llave es única.
+  - Con la unión directa y las estadísticas de otro lote, la prueba mostró el mismo `Join Filter` sobre las ventas del
+    lote.
+- **Las demás consultas de la importación y del reemplazo, revisadas** (no cambian):
+  - Conteos (`count(*) … WHERE batch_id = $1`), totales por año y forma de pago, retiros y egresos: una sola tabla,
+    lineales con cualquier plan.
+  - Borrado del lote anterior: por su `batch_id`, que las estadísticas sí conocen; 0.65 s con volumen.
+  - `write_live` y `retire`: por llave primaria.
+  - `loadIDMap` y la comprobación de la instalación limpia: lote vigente, tablas chicas.
+  - Corrección de corridas y `RecoverInterrupted`: `legacy_import_runs` y `legacy_import_batches`, de pocas filas.
+  - Las uniones de la correspondencia con el catálogo en los conteos: tablas de cientos de filas.
+  - No hizo falta ningún índice nuevo: los de la 0024 (`legacy_sales_pkey` y `legacy_sales_recognitions_sale_idx`)
+    bastan. La 0024 no cambió.
+
+#### Pruebas ejecutadas
+
+| Prueba                                                                                               | Resultado                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Medición de volumen **antes** (`$SP/measure-c4.sh`, sin `-race`, `a2b6305` con la medición ampliada) | Defecto reproducido. Primera importación: 17.0 s (historial 15.4 s, validación 1.2 s). Plan del defecto en el `EXPLAIN`. El reemplazo no terminó en 1 min 51 s.                                                                                 |
+| Medición intermedia (solo con `ANALYZE` y la unión directa)                                          | Reemplazo en 18.0 s. Pero el `EXPLAIN` con estadísticas viejas seguía con `Join Filter`: la consulta dependía del `ANALYZE`.                                                                                                                    |
+| **Medición final** (una vez, con la corrección completa)                                             | Aprobada; se detalla abajo.                                                                                                                                                                                                                     |
+| `TestLegacyImportReplaceWithStaleStatistics` (nueva, determinista)                                   | Aprobada; se detalla abajo.                                                                                                                                                                                                                     |
+| Mutaciones (se revirtieron)                                                                          | Sin el `ANALYZE`, dentro del reemplazo `pg_stats` mostraba el lote anterior. Sin `LIMIT 1` en el PDF, plan con `Join Filter (v.legacy_id = p.legacy_sale_id)`. Con la unión directa en la validación, `Join Filter`. Las tres fallan la prueba. |
+| `go-unit`                                                                                            | Aprobado.                                                                                                                                                                                                                                       |
+| `go-int ./internal/legacyimport ./internal/database ./internal/reports`                              | Aprobados (18 s, 12 s y 137 s).                                                                                                                                                                                                                 |
+| `format`, después `fmt-check`; `sync-check`                                                          | Aprobados.                                                                                                                                                                                                                                      |
+
+Medición final (230 240 ventas, 719 253 renglones, 323 806 complementos y 230 242 pagos sintéticos):
+
+| Fase (`timings_ms`)                         | Primera importación | Reemplazo después de `ANALYZE` |
+| ------------------------------------------- | ------------------: | -----------------------------: |
+| `remove_previous` (borrar el lote anterior) |                   — |                         646 ms |
+| `write_history` (COPY)                      |           13 688 ms |                      13 682 ms |
+| `analyze_history` (nuevo)                   |              742 ms |                         827 ms |
+| `validate_history`                          |              939 ms |                       1 002 ms |
+| `locks_held` (locks de la operación)        |              117 ms |                         158 ms |
+| `lock_wait`                                 |                0 ms |                           0 ms |
+| **Total**                                   |       **15 680 ms** |                  **16 505 ms** |
+
+- El reemplazo queda en el mismo orden que la primera importación. La base pasó de 780 MB a 1 460 MB antes de que el
+  autovacuum limpie el lote borrado.
+- El plan de la validación del libro para otro lote, con las estadísticas del vigente, es un `Nested Loop` con
+  `Index Scan using legacy_sales_recognitions_sale_idx`, `Index Cond: ((batch_id = s.batch_id) AND (legacy_sale_id =
+s.legacy_id))`.
+- La medición ahora falla si el reemplazo pasa de 3 × la primera importación más 1 minuto.
+
+Qué comprueba `TestLegacyImportReplaceWithStaleStatistics` (paquete estándar más 3 000 ventas):
+
+- Importa, analiza todo el historial (lo que deja el autovacuum) y, con esas estadísticas, revisa los planes:
+  - Control: la consulta anterior tiene el plan del defecto.
+  - La validación del libro y las consultas del informe no tienen ningún `Join Filter` y buscan por índice.
+- Dentro de la transacción del reemplazo (gancho `AfterHistory`):
+  - `pg_stats.most_common_vals` de `batch_id` es solo el lote nuevo en las cinco tablas grandes del historial.
+  - La estimación de las ventas pagadas del lote nuevo está dentro del 10 % de las reales.
+- La validación del reemplazo da `OK`.
+- Al confirmar, otra sesión ve solo el lote nuevo en `legacy_id_map` y en esas tablas, y `reltuples` de
+  `legacy_sales` es el número de filas real.
+- No depende del tiempo: las tablas son chicas, así que `ANALYZE` las lee completas.
+
+#### Decisiones
+
+- Las dos medidas juntas: el `ANALYZE` corrige las estimaciones dentro de la importación y, al confirmar, para los
+  reportes; la reescritura hace que la validación y el PDF sean lineales aunque las estadísticas estén mal (un
+  `ANALYZE` que no corra, por ejemplo). No se usa `enable_nestloop`.
+- `LATERAL` en la validación cuesta lo mismo que el plan con hash cuando las estadísticas están bien: 1.0 s contra
+  0.94 s con 230 mil ventas. Por eso no se dejó la unión directa, que con estadísticas malas vuelve a ser cuadrática.
+- El `ANALYZE` corre también en la primera importación: cuesta 0.74 s con el volumen y deja las estadísticas listas
+  para los reportes desde el primer momento.
+- No se analizan las tablas vivas (catálogo, mesas, usuarios): son de cientos de filas y ninguna consulta de la
+  importación las agrega por lote.
+
+#### No verificado
+
+- El respaldo real: el reemplazo con los datos reales tras la corrección. La Fase E lo midió con `enable_nestloop = off`
+  (28.7 s); falta repetirlo sin ese ajuste.
+- Una instalación donde las tablas no sean del usuario del servidor: `ANALYZE` solo avisaría y no las analizaría. La
+  reescritura mantiene lineal la validación, pero los reportes esperarían al autovacuum. En las instalaciones de AD-EL
+  POS el servidor corre las migraciones y es el dueño.
+- Windows: solo compilado y analizado.
+
+#### Para CLAUDE.md
+
+- Las consultas del importador sobre `app.legacy_*` filtradas por el lote que se escribe en la misma transacción no
+  dependen de las estadísticas del lote anterior: la importación hace `ANALYZE` del historial justo después del COPY, y
+  de `legacy_id_map` al final. Las búsquedas por venta van por índice con `LATERAL` (con `LIMIT 1` si no agregan, para
+  que no se conviertan en una unión).
+- La medición de volumen (`TestLegacyImportVolume`, `ADEL_LEGACY_MEASURE=1`) incluye un reemplazo después de `ANALYZE`
+  y falla si no queda en el orden de la primera importación.
+
+### Fase E · Reemplazo con el respaldo real después de la corrección
+
+El mismo agente (16/11/2026), sobre `etapa-9h` en `c1713e5`: versión 0.11.0, con la corrección de D-1 (`28db789`) y la
+documentación de la Fase F. Repetí solo lo necesario para comprobar D-1 con el respaldo real, con las mismas reglas que
+la primera vuelta:
+
+- Todo lo producido con datos reales vivió en `$SP/legacy-data/` (0700): la copia del árbol (`git archive c1713e5`) con
+  `workflow-stage9h-real.spec.ts`, la frase de paso nueva al azar (0600, solo por la entrada estándar), el paquete,
+  registros, respuestas JSON, PDF y artefactos. Al terminar se borró y se comprobó.
+- Se usó un Go temporal en modo de pruebas (127.0.0.1:8200, vista previa 1428), con una base `adel_pos_test_e_*` nueva
+  del clúster 55499. **Sin `enable_nestloop = off` ni ningún otro ajuste.**
+- Nunca se tocó la instalación real.
+- Sin cambios de código ni commits.
+
+**Resultado: D-1 queda corregido con los datos reales.**
+
+- **Validación.** La del reemplazo tarda 0.99 s. Antes no terminaba: más de 3 minutos sin acabar, del orden de horas.
+- **Informe.** El reemplazo termina con «Todo cuadra.», con los mismos conteos y totales que la primera importación y
+  que la vuelta anterior.
+- **Duplicados.** No duplica nada.
+- **Reportes.** Justo después del reemplazo dan lo mismo, igual de rápido.
+
+#### Preparación del paquete (otra vez)
+
+- **Tiempo.** `legacy-prepare` tardó 38.1 s de reloj (37.9 s en el resumen):
+  - Imagen 0.86 s, arranque 8.12 s y restauración 3.36 s.
+  - Lectura de las 50 tablas (1 536 808 filas) 21.5 s.
+  - Escritura 3.24 s, verificación 1.97 s y limpieza 0.22 s.
+- **Paquete.** Pesa 17 418 048 bytes (16.6 MiB) y quedó con `verified: true`. Tiene los mismos conteos que la primera
+  vuelta.
+- **Memoria.** El lector llegó a 232 MiB y el contenedor de SQL Server a 1.37 GiB.
+- **Restos.** No había restos previos. Al terminar no quedó ningún contenedor ni volumen, solo el archivo `lock`.
+
+#### Las dos importaciones, por fase
+
+Primero importé con el asistente. Después forcé `ANALYZE app.legacy_sales, app.legacy_sales_recognitions` y reemplacé
+el lote con el mismo paquete desde el asistente, con su confirmación en rojo. Los tiempos por fase salen de
+`timings_ms`; la memoria residente del Go, de muestras cada 0.5 s con `ps`.
+
+| Medida                                                   | Primera importación  | Reemplazo (después de `ANALYZE`)                               |
+| -------------------------------------------------------- | -------------------- | -------------------------------------------------------------- |
+| Clic en «Revisar el paquete» → «Resumen previo»          | 3.89 s               | 3.88 s                                                         |
+| Análisis en Go (lectura del paquete)                     | 3.22 s (2.82 s)      | 3.18 s (2.79 s)                                                |
+| Clic en «Importar» o «Reemplazar lo importado» → informe | 21.8 s               | 39.6 s                                                         |
+| Trabajo de importación en Go (`total_run`)               | 21.48 s              | 39.44 s                                                        |
+| `read`                                                   | 2.77 s               | 2.77 s                                                         |
+| `backup` (respaldo previo)                               | 0.17 s (base limpia) | 15.23 s (ver la nota)                                          |
+| `remove_previous`                                        | —                    | 0.96 s                                                         |
+| `write_history` (COPY)                                   | 15.95 s              | 17.75 s                                                        |
+| `analyze_history` (nuevo)                                | 0.91 s               | 0.94 s                                                         |
+| `validate_history`                                       | 0.94 s               | **0.99 s** (antes de la corrección, más de 3 min sin terminar) |
+| `lock_wait` / `locks_held`                               | 0 ms / 144 ms        | 0 ms / 206 ms                                                  |
+| `total_before_commit`                                    | 18.15 s              | 21.04 s                                                        |
+| Memoria máxima del Go                                    | 768 MiB              | 833 MiB                                                        |
+
+**Nota sobre el respaldo previo del reemplazo.** Al confirmar la primera importación empezó el respaldo automático de la
+instalación temporal (47 MB). El respaldo previo del reemplazo esperó a que terminara (unos 10 s), como está previsto:
+espera hasta 5 minutos a otro respaldo en curso. Luego hizo el suyo (unos 5 s, 47 MB). Sin esa espera, el reemplazo
+habría tardado unos 29 s.
+
+#### Validación §4.4 de las dos importaciones
+
+| Comprobación                                                                                                                                                                                           | Primera importación | Reemplazo    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------- | ------------ |
+| «Todo cuadra.» en pantalla; comparaciones correctas                                                                                                                                                    | Sí; 42 de 42        | Sí; 42 de 42 |
+| Diferencias de dinero                                                                                                                                                                                  | Ninguna             | Ninguna      |
+| 19 conteos iguales a la vuelta anterior (226 170 ventas: 225 046 pagadas, 1 119 canceladas, 5 abiertas; 722 400 renglones; 328 489 complementos; 225 810 pagos; 256 cortes; 269 retiros; 395 precios…) | Sí                  | Sí           |
+| Total vendido por año: los 8 años iguales a la vuelta anterior (Σ $72 023 868.33)                                                                                                                      | Sí                  | Sí           |
+| Pagos por forma de pago y año: las 12 cifras iguales (Σ $72 112 098.33)                                                                                                                                | Sí                  | Sí           |
+| Retiros $26 421 169.00; egresos $0.00; ventas cuyo libro no suma lo que se debía: 0                                                                                                                    | Sí                  | Sí           |
+| Notas: las 4 de siempre, incluida la de las 21 ventas pagadas sin renglones                                                                                                                            | Sí                  | Sí           |
+| Conteos escritos (12 tablas del historial; 722 174 renglones del libro); retirados                                                                                                                     | Iguales; 0          | Iguales; 0   |
+
+**Nada duplicado después del reemplazo:**
+
+- **Lotes.** Hay un lote `completed` y uno `replaced`. El reemplazado tiene 0 filas en el historial y en el libro.
+- **Historial.** 226 170 ventas de un solo lote, 722 400 renglones, 328 489 complementos, 225 810 pagos, 722 174
+  renglones del libro, 256 cortes, 269 retiros, 31 563 cambios, 50 descuentos, 1 119 cancelaciones y 395 precios.
+- **Catálogo.** 107 productos con 107 códigos `SA-` distintos, 5 categorías y 6 complementos.
+- **Mesas y usuarios.** 24 mesas en 1 área. 9 usuarios: los 7 importados sin contraseña, `admin` y `sa`.
+- **Correspondencia y operación.** Toda la correspondencia está `active` y no hay operación propia.
+
+**PDF.** El informe en PDF se generó en 0.3 s en las dos importaciones (431 763 y 432 380 bytes). Después del
+reemplazo también lo hizo así, con las búsquedas por venta `LATERAL` de la corrección.
+
+#### Reportes justo después del reemplazo
+
+**Momento.** Los cinco reportes de la §4 de la primera vuelta se recorrieron en la interfaz, con «Datos: Solo sistema
+anterior», en los 10.4 s siguientes a que apareciera el informe del reemplazo. Fue sin esperar al autovacuum, cuyo
+análisis de `legacy_sales` llegó 37 s después de confirmar el reemplazo; el de `legacy_sales_recognitions` todavía no
+había llegado. Las estadísticas eran las del `ANALYZE` que la importación hace dentro de su transacción.
+
+| Reporte en la interfaz             | Total en el pie (igual a la vuelta anterior y a SQL Server) | Tiempo en la interfaz |
+| ---------------------------------- | ----------------------------------------------------------- | --------------------- |
+| «Ventas por día», día 03/04/2025   | $33 575.00                                                  | 2.1 s                 |
+| «Ventas por día», mes 04/2025      | $1 004 744.50                                               | 2.0 s                 |
+| «Ventas por mes», año 2025         | $11 587 899.67                                              | 2.4 s                 |
+| «Cobros por método», año 2025      | $11 605 829.67                                              | 1.9 s                 |
+| «Ventas por producto», mes 04/2025 | $1 004 287.00                                               | 2.0 s                 |
+
+El tiempo en la interfaz incluye llegar al reporte, elegir el periodo y «Datos», y ver el total.
+
+Por la API comparé 37 consultas × 3 valores de «Datos», es decir, 111 resultados, antes y después del reemplazo:
+
+- Abarcan el día, el mes y el año, los productos, los cobros, «Cuentas cerradas» de 2025, y «Ventas por mes», «Cobros
+  por método» y «Turnos de caja» de cada año de 2018 a 2026.
+- **Totales, renglones y páginas: idénticos.**
+- **Los tiempos no cambian:**
+  - «Ventas por mes» de 2025: 253 ms antes y 212 ms después.
+  - «Ventas del periodo» de 2025: 171 ms antes y 179 ms después.
+  - El más lento, «Cuentas cerradas» de 2025: 427 ms antes y 426 ms después.
+  - Día y mes: ≤ 29 ms.
+- **«Turnos de caja».** Muestra 1, 111, 114, 20, 8 y 2 cortes en 2018 y de 2022 a 2026: los 256.
+
+#### Interrupción a la mitad del reemplazo
+
+Hice un tercer reemplazo con el mismo paquete desde el asistente y detuve el Go temporal con SIGTERM a los 15.9 s de
+confirmar:
+
+- Estaba en la fase `writing_history` («Guardando el historial de ventas»), al 69 %: 940 000 de 2 258 695 filas.
+- El servidor se apagó en 0.3 s.
+
+Al volver a arrancar:
+
+- La corrida quedó `interrupted` (`LEGACY_INTERRUPTED`).
+- El lote vigente siguió siendo el mismo (el del reemplazo anterior), `completed`. Sigue habiendo 1 `completed` y 1
+  `replaced`, y ninguna fila de lotes no vigentes.
+- Todos los conteos del historial, el catálogo, las mesas y los usuarios quedaron iguales.
+- Σ del libro: $72 023 868.33. Σ de los pagos: $72 112 098.33.
+- La memoria máxima del Go en esa corrida fue de 877 MiB.
+- La base temporal ocupaba 1.8 GB al final, por las filas muertas del lote reemplazado y de la transacción deshecha
+  antes del vacuum.
+
+#### Pruebas ejecutadas
+
+| Prueba                                                                                                       | Resultado                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `legacy-prepare` con el respaldo real (binario de `c1713e5`)                                                 | Aprobado: 38.1 s, `verified: true`, mismos conteos, sin restos.                                                                                                        |
+| `workflow-stage9h-real.spec.ts` (solo en la copia; Chromium; Go temporal 8200; sin ajustes del planificador) | **3 de 3 aprobadas, en 2.1 min**: primera importación; `ANALYZE` forzado, reemplazo y los cinco reportes justo después; interrupción durante «Guardando el historial». |
+| Intento previo de la misma corrida                                                                           | No arrancó: `tsc` de la compilación rechazó una variable sin usar de mi especificación. Se corrigió en la copia, sin ninguna prueba ejecutada todavía contra la base.  |
+| Consultas agregadas a la base temporal (lotes, conteos, duplicados, estadísticas y tamaño)                   | Lo descrito arriba.                                                                                                                                                    |
+| `./scripts/dev.sh check-legacy-data` y `git status` en `$SP/wt/e` (`c1713e5`)                                | Aprobados («el índice de git no tiene respaldos ni paquetes de migración»; árbol limpio).                                                                              |
+
+#### No verificado
+
+- **El reemplazo tras días de uso**, con autovacuum y estadísticas más viejas. Aquí el `ANALYZE` se forzó segundos antes;
+  la corrección lo hace de todos modos dentro de la transacción.
+- **El reemplazo con un paquete distinto**: un respaldo más reciente, con más ventas o con usuarios y productos que ya no
+  vienen. Se usó el mismo paquete.
+- **La preparación desde la ventana nativa**, con sus diálogos reales y Docker lanzado por Rust; Windows; el PDF abierto
+  e impreso; restaurar el respaldo previo.
+- **Restos que no pude borrar.** El WAL del clúster temporal compartido (`$SP/pg/data/pg_wal`) puede conservar fragmentos
+  de las filas importadas hasta que se recicle, y el disco virtual de Docker Desktop puede conservar bloques liberados.
+  Conviene borrar `$SP/pg` al terminar la etapa, como dije en la primera vuelta.
+
+#### Pasos para el propietario (importar en su instalación real)
+
+1. **Revisa la zona horaria.** En **Administración › Sistema › Configuración**, la «Zona horaria del restaurante» debe
+   ser la correcta. Si el restaurante está en la franja fronteriza con horario de verano, dilo antes de importar (ver
+   §6 de la prueba anterior: las horas del historial en esos meses quedan una hora antes).
+2. **Usa una instalación limpia.**
+   - La importación solo se permite sin operación propia (ventas, cobros, turnos ni movimientos) y sin catálogo, mesas ni
+     usuarios capturados en AD-EL POS, salvo lo del asistente inicial.
+   - Si hay algo de eso, el asistente dice «No se puede importar en esta instalación.», lista lo que encontró y no
+     importa nada.
+3. **Instala Docker Desktop**, solo en la computadora que prepara el paquete.
+   - Descárgalo de docker.com (es gratuito), ábrelo y espera a que diga que está listo.
+   - Necesita al menos 2 GB de memoria para Docker. La primera vez descarga la imagen de SQL Server, de unos 500 MB.
+4. **Haz el respaldo del sistema anterior** con el sistema anterior **cerrado**.
+5. **Prepara el paquete.**
+   - Entra en Archivo › «Migrar del sistema anterior…», o en Sistema › Mantenimiento › «Abrir el asistente de migración»,
+     y ve a «1. Preparar el paquete».
+   - Elige el `.bak` y dónde guardar el paquete.
+   - Escribe dos veces una frase de paso de al menos 8 caracteres y **guárdala**: no se puede recuperar.
+   - Con el respaldo actual tarda unos 40 s. Al terminar muestra el rango de fechas y los conteos, por ejemplo 226 170
+     ventas.
+6. **Importa.**
+   - En «2. Importar el paquete», elige el `.adelmig` (puede estar en una USB), escribe la frase y toca «Revisar el
+     paquete». Tarda unos 4 s y todavía no guarda nada.
+   - Lee el resumen previo: conteos, periodo, totales por año, avisos y datos incoherentes.
+   - Toca «Importar» y confirma. Antes se hace solo un respaldo de AD-EL POS; si en ese momento corre un respaldo
+     automático, espera a que termine. Con este volumen tarda unos 22 s.
+   - Puedes salir de la pantalla. Si se interrumpe, no deja nada a medias.
+7. **Revisa la validación.**
+   - El informe debe decir «Todo cuadra.». Descarga el PDF y guárdalo: tiene datos del restaurante.
+   - Si algo no cuadra, el informe muestra cada diferencia con su importe. No uses el historial y avisa a soporte con el
+     PDF.
+   - En Reportes, con «Datos: Solo sistema anterior», compara un día, un mes y un año con lo que conoces del sistema
+     anterior. AD-EL POS cuenta la venta el día del pago que la liquida y no cuenta las canceladas. El «Registro de
+     ventas» anterior usaba la fecha de apertura y sumaba las canceladas, así que puede haber diferencias pequeñas que
+     son de criterio, no de la importación.
+8. **Da acceso a los usuarios importados.** Entran «Sin acceso»: en Usuarios, toca «Asignar contraseña».
+9. **No operes en AD-EL POS entre la prueba y la importación final.** En cuanto haya una venta, un turno o un movimiento
+   propio, ya no se puede volver a importar.
+10. **Al pasar a producción.**
+    - Cierra el sistema anterior, haz el respaldo final, prepara un paquete nuevo e impórtalo.
+    - El asistente dirá «Ya hay datos importados del sistema anterior.». Toca **«Reemplazar lo importado»** (en rojo) y
+      confirma.
+    - Con este volumen el reemplazo tarda menos de un minuto, incluido el respaldo previo.
+    - Lo que hayas cambiado en el catálogo, las mesas o los usuarios importados se pierde; las contraseñas asignadas se
+      conservan. Haz esos ajustes después de la importación final y empieza a operar.
+11. **Guarda en un lugar seguro, o borra, el paquete y la frase de paso.** El paquete va cifrado, pero contiene todo el
+    historial.
+
+#### Limpieza (comprobada al terminar)
+
+- **Servidores y bases.**
+  - Se apagaron el Go temporal (8200) y la vista previa (1428); los dos puertos quedaron sin escucha.
+  - Se borró la base `adel_pos_test_e_*`; no queda ninguna en el clúster 55499.
+- **Docker.** El lector borró su contenedor y su volumen; esta vez no se levantó el SQL Server de análisis. `docker ps -a`
+  y `docker volume ls` quedaron vacíos.
+- **Archivos.** Se borró `$SP/legacy-data/` completo (219 MB): el paquete, la frase de paso, la copia del árbol con la
+  especificación y los artefactos, las carpetas de corrida (respaldos, `legacy-import` y registros), `adel-legacy-prepare`
+  (solo con `lock`), los JSON y PDF, y las muestras de memoria.
+- **Búsquedas.** Ya no hay ningún `*.adelmig`, `adel-legacy-prepare`, `adel-legacy-e2e-*`, `run-adel_pos_test_e_*` ni
+  frase de paso en `$SP` ni en las carpetas temporales. Solo aparecen los archivos sintéticos de 0 y 1 byte de las
+  pruebas de Rust de la Fase D (`tmp-D/adel-legacy-choose-*`).
+- **Procesos.** No queda ningún proceso mío. El único `ad-el-pos-server` en marcha es el servicio real
+  (`/Applications/AD-EL POS.app … host`), que no se tocó.
+- **`$SP/wt/e`** está en `c1713e5`: `git status` limpio y `check-legacy-data` aprobado.
+
+#### Para CLAUDE.md
+
+- **Volumen real, después de D-1:**
+  - La primera importación tarda unos 22 s (`analyze_history` 0.9 s, `validate_history` 0.9 s, locks 144 ms).
+  - El reemplazo tarda unos 29 s, más la espera del respaldo previo si hay otro respaldo en curso. Ahí
+    `validate_history` toma 1.0 s y los locks 206 ms.
+  - El Go llega a unos 830 MiB en el reemplazo.
+  - Los reportes del historial justo después del reemplazo dan lo mismo y tardan lo mismo que antes, sin esperar al
+    autovacuum.
+- **Una interrupción durante «Guardando el historial» del reemplazo**, con datos reales, deja el lote vigente intacto y
+  la corrida `interrupted`.
+
+---
+
+## Fase F · Documentación y versión
+
+Un agente (16/11/2026), en su árbol de trabajo `etapa-9h-f` (desde `etapa-9h`, `a2b6305`), con `ISO_TAG=F`, en paralelo
+con la Fase E (sin tocar su árbol). Solo versión y documentación: sin cambios de código. No se tocó la instalación real ni
+el respaldo real, y no se corrió la regresión (es de otro agente).
+
+Commits en `etapa-9h-f`:
+
+- `e68d9e6` — versión 0.11.0 con metadatos sincronizados.
+- `f352c9f` — `CLAUDE.md`, guía `docs/MIGRAR_SISTEMA_ANTERIOR.md` y sesiones por terminal en `docs/INSTALAR_EN_RED.md`.
+- `9d51ea4` — README, ARCHITECTURE, NEXT_STEPS, DEVELOPMENT_MACOS, DEVELOPMENT_WINDOWS, DEPENDENCIES, NOTAS_WINDOWS y
+  API_CONTRACTS.
+- `00ccb7b` — sesiones por usuario y por terminal también en ARCHITECTURE y RESTAURANT_OPERATIONS.
+
+### Qué cambió
+
+- **Versión 0.11.0**: `config/product.json` (`version`; esquema 24 de la Fase A; `min_client_version` y
+  `min_server_version` siguen en 0.10.0, decisión de la Fase A) y `node scripts/sync-metadata.mjs` (`metadata.json`,
+  `generated/product.json`, `tauri.conf.json`, `package.json` y `Cargo.toml`). Como en las versiones anteriores (9G
+  `c4cc94d`, 9F `0c06001`, 9E `38cac8d`, 9D `f58c384`), cambian también la versión del paquete raíz en
+  `desktop/package-lock.json` (sus dos renglones `version`) y en `desktop/src-tauri/Cargo.lock` (con
+  `cargo update --workspace --offline`, que solo cambió ese renglón). Ninguna dependencia cambió.
+- **`CLAUDE.md`**, por secciones: encabezado «Última revisión» (0.11.0, esquema 24, la 0024 con sus secciones A y C, cómo
+  se actualiza la instalación real y que la importación real la decide el propietario; la 9G pasa a «Antes:») con los
+  dos huecos del coordinador; §0 con la parada del `.pkg` y **«Datos reales del restaurante (regla permanente desde la
+  etapa 9H)»**, con `check-legacy-data`; §2 (sin dependencias nuevas; el SQL Server temporal solo del lector); §3 (la
+  migración en dos pasos, `legacy_migration.rs`, «Etapa 9H» en «Composición del backend» y el lock **7820148310** en la
+  tabla con su orden); §4 (paquetes `legacypkg`, `legacyread`, `legacysynth` y `legacyimport`, archivos nuevos de Go,
+  React, Rust, Playwright y scripts, la 0024 y los patrones de datos reales fuera de git); §5 (`check-legacy-data`,
+  `legacy-prepare`, `--cleanup` y `legacy-synthetic`, variables y el puerto 8185); §6 (pruebas de la 9H: solo datos
+  sintéticos, tupla de 14 paquetes, pruebas nuevas, Docker opcional, notas del lector, mediciones, Playwright con el
+  segundo Go limpio y la dependencia de la hora de `TestOperationalReports`); §7 (frase de paso, lector, carpeta de
+  trabajo y el límite del disparador); §11–12 («Migración del sistema anterior en la interfaz» y «Reglas permanentes
+  desde la etapa 9H»; reglas de la 9D y la 9F corregidas por «Cancelar unidades»); §13–14 (fila 9H y párrafo del plan);
+  §15 («Etapa 9H» con §0-B, Fase 0, decisiones del propietario y del coordinador y cada fase con sus revisiones; la
+  autorización de la 9F y la D9 de la 9G anotadas como sustituidas); §16 (sesiones por dispositivo y dónde quedó la
+  herramienta de migración); §17, §18, §19 («Etapa 9H sin verificar…» y la D9 resuelta), §20 y §21 (hallazgos del
+  respaldo real y la excepción del SQL Server temporal). Se integraron los bloques «Para CLAUDE.md» de la Fase 0, A, B,
+  B revisión, C (partes 1 y 2), C revisión y D, y sus reglas permanentes propuestas.
+- **`docs/MIGRAR_SISTEMA_ANTERIOR.md`** (nuevo, para el propietario): dónde está el asistente; (1) instalar Docker
+  Desktop en Mac y Windows y qué hacer con cada aviso del asistente; (2) preparar el paquete (respaldo, dónde guardarlo,
+  la frase de paso y por qué no se recupera, el avance y el resultado); (3) importarlo (instalación limpia, resumen
+  previo, confirmación, avance, informe y PDF; «Sin acceso» y «Asignar contraseña»; el filtro «Datos»); (4) repetirlo al
+  pasar a producción (respaldo final con el sistema anterior cerrado, qué sobrescribe el reemplazo, que tras la primera
+  operación propia ya no se importa, llevar el paquete en USB a otra computadora sin Docker); (5) si la validación no
+  cuadra (diferencias de dinero, datos incoherentes, «Diferencia del sistema anterior», ventas canceladas, guardar el PDF y
+  volver al respaldo previo). Con los textos reales de `Legacy*.tsx`, `UsersPage.tsx`, `services/legacyMigration.ts` y
+  los mensajes de Go (`legacypkg`, `legacyimport`).
+- **Otros documentos**: README (título, resumen, sección «Migración del sistema anterior», reportes, estructura y
+  documentación); ARCHITECTURE (título y sección de la 9H; sesiones por terminal); NEXT_STEPS_FOR_SOL (estado, regla de
+  la 0024, regla de datos reales, continuidad de la migración y próxima etapa); DEVELOPMENT_MACOS (título,
+  `check-legacy-data` en `test` y sección de la 9H: lector, importación, pruebas sin datos reales y cómo se actualiza el
+  servicio a la 0.11.0); DEVELOPMENT_WINDOWS (`check-legacy-data` y el segundo Go limpio en `test-browser`);
+  `docs/NOTAS_WINDOWS.md` (§8, «Etapa 9H: qué verificar en Windows»: suites, lector con Docker Desktop de Windows,
+  bloqueo y restos, cancelación por la entrada estándar, servidor junto al ejecutable, paquete en el disco, carpeta de
+  trabajo con ACL, asistente completo, paquete entre Mac y Windows y la Fase A); `docs/DEPENDENCIES.md` («Etapa 9H», sin
+  dependencias nuevas); `API_CONTRACTS.md` (el filtro «Datos» y sus columnas en `reports/*`); `docs/INSTALAR_EN_RED.md`
+  y `docs/RESTAURANT_OPERATIONS.md` (sesiones por terminal). `docs/API_V1.md` ya tenía lo de la 9H (Fase A) y no
+  necesitó nada más.
+
+### Decisiones
+
+1. **Huecos del coordinador**: en `CLAUDE.md`, dos renglones propios justo después del encabezado (`<!-- Fase E -->` y
+   `<!-- Fase F -->`); el encabezado, la fila 9H de §13–14, §19 y NEXT_STEPS remiten a ellos sin adelantar resultados.
+   En la guía, `<!-- Fase E: tiempos y tamaño -->` al final de «2. Preparar el paquete».
+2. **§16 y §21 de `CLAUDE.md`** decían que la herramienta de migración iría «sin compartir binario ni rutas API» y «no
+   conectarse a ninguna base SQL Server». Se reescribieron con lo que pide la especificación (§3.1, §3.2 y §5: subcomando
+   del servidor, asistente en la aplicación, SQL Server temporal en Docker) y lo que se hizo, citándola; queda anotado
+   abajo como contradicción para el propietario.
+3. **Regla de lo que envía Rust**: el avance (Fase D) proponía «lo que lleva archivos, rutas o la frase de paso solo lo
+   envía Rust; nunca se agrega a `route()`», pero la frase de paso viaja por `api_request` en `maintenance_legacy_analyze`
+   e `import`, que sí están en `route()`. `CLAUDE.md` dice lo que hace el código: lo que lleva archivos o rutas.
+4. **No se tocaron** `AGENTS.md` (contradicción anotada abajo), `docs/VERIFICATION.md` (lo actualiza la regresión) ni el
+   nombre del instalador `AD-EL POS_0.10.0.pkg` de `INSTALAR_EN_RED.md` (como `INSTALAR_EN_WINDOWS.md`, que conserva el
+   de la 0.9.4).
+
+### Pruebas ejecutadas
+
+- `ISO_TAG=F iso.sh … sync-check`: «Metadatos coherentes.» (después de la versión y al final).
+- `ISO_TAG=F iso.sh … cargo` (`cargo test --locked --offline`, con el `Cargo.lock` de la 0.11.0): 106 aprobadas,
+  0 fallidas, 3 ignoradas; el lockfile no volvió a cambiar.
+- `ISO_TAG=F iso.sh … vitest` (`tsc --noEmit` y Vitest): 95 archivos, 902 pruebas aprobadas.
+- `ISO_TAG=F iso.sh … format` y después `fmt-check`: aprobado (comprobación de datos reales sin respaldos ni paquetes en
+  el índice, «All matched files use Prettier code style!», `gofmt` y `cargo fmt` sin diferencias), también al final.
+- `docs/etapas/*.md` sin cambios (md5 antes y después). Árbol limpio al terminar.
+
+### No verificado
+
+- Nada de código cambió fuera de la versión: no se corrieron Go ni Playwright (regresión de la Fase F).
+- Cada ruta, archivo, comando, variable, puerto y nombre de prueba de `CLAUDE.md` y de la guía se comprobó contra el
+  código del árbol; el comportamiento de Docker Desktop (instalación, primer arranque) se describe en general, sin
+  probarlo en una computadora nueva ni en Windows.
+
+### Contradicciones y hallazgos para el coordinador
+
+- `AGENTS.md:179` («Reglas confirmadas en la etapa 9F»: cancelar unidades y reducir cantidades con el permiso propio o
+  un supervisor) contradice la decisión de la 9H (§0-B y §2.2). No hay «Reglas confirmadas en la etapa 9H» en `AGENTS.md`
+  (la 9G sí agregó las suyas).
+- `desktop/src-tauri/build.rs`: la lista de `AppManifest::commands` no tiene los 11 comandos `legacy_*` (todos los demás
+  de `generate_handler!` sí están), aunque `CLAUDE.md` §20.5 dice que una operación nativa propia se registra en
+  `build.rs`, `permissions/diagnostics.toml` y `generate_handler!`. Cargo y Playwright (que simula el puente) pasan; en la
+  ventana nativa no se probó si Tauri los permite. Conviene comprobarlo en la regresión con la aplicación real.
+- El lector crea el contenedor con `ACCEPT_EULA=Y` y `MSSQL_PID=Express`: acepta la licencia de SQL Server de Microsoft
+  por el propietario en cada preparación (anotado en `docs/DEPENDENCIES.md`).
+
+### Para CLAUDE.md
+
+- Ya integrado en esta fase. Falta reemplazar `<!-- Fase E -->` y `<!-- Fase F -->` (renglones 7 y 9) y, en la guía,
+  `<!-- Fase E: tiempos y tamaño -->`.
