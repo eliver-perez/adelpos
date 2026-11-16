@@ -34,11 +34,10 @@ type Model struct {
 	Shifts          []Shift
 	Withdrawals     []Withdrawal
 
-	// Expenses y Purchases son las salidas de efectivo (salidas) y las compras recibidas (entradas, lo que la interfaz
-	// anterior llamaba «Egresos»): no se importan (en el respaldo real están vacías), pero su número y su total se
-	// informan en la validación.
-	Expenses        int64
-	ExpensesTotal   Money
+	// Expenses son las salidas de efectivo del turno (salidas; vacía en el respaldo real). Purchases son las compras
+	// recibidas (entradas, lo que la interfaz anterior llamaba «Egresos»): no se importan (vacía en el respaldo real),
+	// pero su número y su total se informan en la validación.
+	Expenses        []Expense
 	Purchases       int64
 	PurchasesTotal  Money
 	CurrencyRates   int64
@@ -230,5 +229,14 @@ type Withdrawal struct {
 	Amount       Money
 	Reason       string
 	WithdrawnAt  time.Time
+	AuthorizedBy NullInt
+}
+
+// Expense es salidas (salida de efectivo del turno, sin llave: Position es su orden en el paquete).
+type Expense struct {
+	Position     int32
+	Shift        NullInt
+	Amount       Money
+	SpentAt      time.Time
 	AuthorizedBy NullInt
 }

@@ -27,7 +27,7 @@ const (
 const lockWait = "30s"
 
 // historyTables en el orden en que se borran al reemplazar un lote.
-var historyTables = []string{"legacy_sales_recognitions", "legacy_price_history", "legacy_cash_withdrawals",
+var historyTables = []string{"legacy_sales_recognitions", "legacy_price_history", "legacy_cash_expenses", "legacy_cash_withdrawals",
 	"legacy_cash_shifts", "legacy_payments", "legacy_cancellations", "legacy_discounts", "legacy_quantity_changes",
 	"legacy_line_complements", "legacy_sale_lines", "legacy_sales"}
 
@@ -248,7 +248,7 @@ func Import(ctx context.Context, pool *pgxpool.Pool, plan *Plan, config business
 	// Validación del historial antes de tomar los locks de la operación (no los necesita).
 	report(PhaseValidating, 0, 0)
 	phaseStart = time.Now()
-	sales, payments, withdrawals, unbalanced, err := actualMoney(ctx, tx, batch, config)
+	money, err := actualMoney(ctx, tx, batch, config)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +285,7 @@ func Import(ctx context.Context, pool *pgxpool.Pool, plan *Plan, config business
 	if err != nil {
 		return nil, err
 	}
-	validation := compare(expected, counts, sales, payments, withdrawals, unbalanced)
+	validation := compare(expected, counts, money)
 	if current != "" {
 		if _, err := tx.Exec(ctx, "DELETE FROM app.legacy_id_map WHERE batch_id = $1", current); err != nil {
 			return nil, err

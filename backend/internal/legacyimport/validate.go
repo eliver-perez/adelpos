@@ -65,6 +65,7 @@ var countLabels = []struct {
 	{CountPayments, "Pagos"},
 	{CountShifts, "Cortes"},
 	{CountWithdrawals, "Retiros"},
+	{CountExpenses, "Salidas de efectivo (egresos)"},
 	{CountPrices, "Historial de precios"},
 }
 
@@ -87,6 +88,7 @@ func actualCounts(ctx context.Context, tx pgx.Tx, batch pgtype.UUID) (map[string
 		CountPayments:        "SELECT count(*) FROM app.legacy_payments WHERE batch_id = $1",
 		CountShifts:          "SELECT count(*) FROM app.legacy_cash_shifts WHERE batch_id = $1",
 		CountWithdrawals:     "SELECT count(*) FROM app.legacy_cash_withdrawals WHERE batch_id = $1",
+		CountExpenses:        "SELECT count(*) FROM app.legacy_cash_expenses WHERE batch_id = $1",
 		CountPrices:          "SELECT count(*) FROM app.legacy_price_history WHERE batch_id = $1",
 		CountCategories: `SELECT count(*) FROM app.legacy_id_map m JOIN app.catalog_categories c ON c.id = m.new_id
             WHERE m.batch_id = $1 AND m.entity = 'category' AND m.state = 'active' AND m.legacy_key <> 'sin-categoria'`,
@@ -112,8 +114,37 @@ func actualCounts(ctx context.Context, tx pgx.Tx, batch pgtype.UUID) (map[string
 // yearExpression es el año del día comercial de un instante en SQL, como businessday.DayOf.
 const yearExpression = "extract(year FROM ((%s AT TIME ZONE $2) - $3::interval))::int"
 
-// actualMoney lee los totales escritos: venta por año (Σ net del libro), pagos por forma de pago y año y retiros.
-func actualMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (map[int]Money,
+// writtenMoney son los totales escritos del historial.
+type writtenMoney struct {
+	sales       map[int]Money
+	payments    map[string]map[int]Money
+	withdrawals Money
+	expenses    Money
+	unbalanced  int64
+}
+
+// actualMoney lee los totales escritos: venta por año (Σ net del libro), pagos por forma de pago y año, retiros,
+// egresos y las ventas cuyo libro no suma lo que se debía.
+func actualMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (writtenMoney, error) {
+	written, err := readMoney(ctx, tx, batch, config)
+	if err != nil {
+		return writtenMoney{}, err
+	}
+	var expensesText string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(sum(amount), 0)::text FROM app.legacy_cash_expenses WHERE batch_id = $1`,
+		batch).Scan(&expensesText); err != nil {
+		return writtenMoney{}, err
+	}
+	written.expenses, err = ParseDisplayMoney(expensesText)
+	return written, err
+}
+
+func readMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (writtenMoney, error) {
+	sales, payments, withdrawals, unbalanced, err := readSalesAndPayments(ctx, tx, batch, config)
+	return writtenMoney{sales: sales, payments: payments, withdrawals: withdrawals, unbalanced: unbalanced}, err
+}
+
+func readSalesAndPayments(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (map[int]Money,
 	map[string]map[int]Money, Money, int64, error) {
 	sales := map[int]Money{}
 	payments := map[string]map[int]Money{}
@@ -193,16 +224,16 @@ func validate(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, expected Expect
 	if err != nil {
 		return Validation{}, err
 	}
-	sales, payments, withdrawals, unbalanced, err := actualMoney(ctx, tx, batch, config)
+	written, err := actualMoney(ctx, tx, batch, config)
 	if err != nil {
 		return Validation{}, err
 	}
-	return compare(expected, counts, sales, payments, withdrawals, unbalanced), nil
+	return compare(expected, counts, written), nil
 }
 
 // compare arma las comparaciones (función pura: la prueba unitaria la usa con diferencias provocadas).
-func compare(expected Expected, counts map[string]int64, sales map[int]Money, payments map[string]map[int]Money,
-	withdrawals Money, unbalanced int64) Validation {
+func compare(expected Expected, counts map[string]int64, written writtenMoney) Validation {
+	sales, payments := written.sales, written.payments
 	validation := Validation{OK: true, Notes: []string{}}
 	addCount := func(group, key, label string, want, got int64) {
 		check := Check{Group: group, Key: key, Label: label, Kind: KindCount, Expected: strconv.FormatInt(want, 10),
@@ -250,16 +281,16 @@ func compare(expected Expected, counts map[string]int64, sales map[int]Money, pa
 				payments[method][year])
 		}
 	}
-	addMoney(GroupTotals, "withdrawals", "Total de retiros", expected.WithdrawalsTotal, withdrawals)
-	// Egresos: el anterior no tenía (salidas y entradas vacías en el respaldo real); si el paquete trae alguno, no se
-	// importa y la diferencia queda a la vista.
-	addMoney(GroupTotals, "expenses", "Total de egresos (salidas de efectivo)", expected.ExpensesTotal, 0)
-	addMoney(GroupTotals, "purchases", "Total de compras recibidas («Egresos» del sistema anterior)", expected.PurchasesTotal, 0)
-	addCount(GroupTotals, "unbalanced_sales", "Ventas cuyo libro no suma lo que se debía", 0, unbalanced)
-	if expected.Expenses == 0 && expected.Purchases == 0 {
+	addMoney(GroupTotals, "withdrawals", "Total de retiros", expected.WithdrawalsTotal, written.withdrawals)
+	// Egresos: las salidas de efectivo (en el respaldo real, ninguna). Las compras recibidas («Egresos» en la interfaz
+	// anterior) no se importan: si el paquete trae alguna, la diferencia queda a la vista.
+	addMoney(GroupTotals, "expenses", "Total de egresos (salidas de efectivo)", expected.ExpensesTotal, written.expenses)
+	if expected.Purchases > 0 {
+		addMoney(GroupTotals, "purchases", "Total de compras recibidas (no se importan)", expected.PurchasesTotal, 0)
+	}
+	addCount(GroupTotals, "unbalanced_sales", "Ventas cuyo libro no suma lo que se debía", 0, written.unbalanced)
+	if expected.Counts[CountExpenses] == 0 && expected.Purchases == 0 {
 		validation.Notes = append(validation.Notes, "El sistema anterior no tenía egresos registrados: su total es 0.")
-	} else {
-		validation.Notes = append(validation.Notes, "El paquete trae egresos o compras del sistema anterior; no se importan.")
 	}
 	validation.Notes = append(validation.Notes, fmt.Sprintf(
 		"Las ventas canceladas no son venta; el sistema anterior las contaba como vendidas: %s en total.",

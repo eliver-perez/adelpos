@@ -74,6 +74,11 @@ func (service *Service) completeDeferred(ctx context.Context, result any) (any, 
 	if pending, ok := result.(*backupNow); ok {
 		return service.runBackupNow(ctx, pending)
 	}
+	// Migración del sistema anterior (etapa 9H): el análisis o la importación se entregan al trabajador ya
+	// confirmada su corrida (legacy_migration.go).
+	if start, ok := result.(*legacyStart); ok {
+		return service.completeLegacyStart(start)
+	}
 	pending, ok := result.(*reportPlan)
 	if !ok {
 		return result, nil
