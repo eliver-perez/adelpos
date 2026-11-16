@@ -3883,3 +3883,32 @@ Operaciones nuevas de la lista cerrada: `user_badge_colors` (`GET users/badge-co
 (`PUT users/{id}/pin`), `remove_user_pin` (`POST users/{id}/pin/remove`), `unlock_user_pin`
 (`POST users/{id}/pin/unlock`) y `set_own_pin` (`PUT auth/pin`). `update_device` ya existía (cuerpo con
 `idle_lock_seconds`). El PIN viaja solo en el cuerpo de esas peticiones; nunca se guarda en la terminal.
+
+## Etapa A1 · modo Mesero en el servidor (fase E, esquema 25)
+
+Especificación: [docs/etapas/ETAPA_A1_ANDROID.md](docs/etapas/ETAPA_A1_ANDROID.md) §6–§8 y decisiones A1-D6 y A1-D11 de
+[docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md). Todo es de la API para clientes y está en
+`internal/apicontract/openapi.json` y [docs/API_V1.md](docs/API_V1.md), «Modo Mesero» (capacidad `waiter-mode-v1`).
+Ninguna ruta del escritorio cambia de forma; el escritorio no cambió.
+
+- **En el contrato** (ya existían): `GET restaurant/overview` (`getRestaurantOverview`, con `Area`,
+  `RestaurantSettings` y `Table` con `shape`, `x`, `y`, `width`, `height`, `seats` y `occupied_seconds`),
+  `POST restaurant/accounts/{id}/cancel` (`cancelUnits`), `…/edit-preview` (`previewEdit`) y `…/edit` (`editUnits`).
+- **Evento `restaurant.account.preparation_changed`** (`kitchen/preparation.go`): en la misma transacción en que cambian
+  los registros de cocina de una cuenta (`kitchen/states`, `kitchen/releases/{id}/release|schedule`,
+  `kitchen/changes/{id}/retry`, la liberación automática del trabajador de cocina y `kitchen.Integrate` de
+  `order.confirmed`, `item.modified`, `item.cancelled`, `account.cancelled` y `account.updated` con reprogramación),
+  uno por cuenta y transacción, ámbito `restaurant` (o `takeaway`), agregado = cuenta, sin contenido. El escritorio lo
+  trata como cualquier evento (invalida las consultas visibles una vez por mensaje): no hace consultas de más.
+- **Cuenta que ya no está abierta** (`ensureOpen`, `operations/queries.go`): el mismo `400 OPERATION_VALIDATION`, con
+  un mensaje por estado y `details` `{reason: "account_not_open", account_id, account_state, merged_into_id}`. En el
+  pedido sin conexión, `account_closed` lleva el estado en `now`.
+- **`POST restaurant/offline-orders`**: `replaces_draft_items` opcional (solo con `account_id`, hasta 20 `DraftItem`
+  únicos); al aceptar quita del borrador los renglones que siguen exactamente así y publica `draft.saved` (historia,
+  evento `restaurant.draft.saved` y auditoría `restaurant.draft.saved`); cambios nuevos `draft_item_changed`,
+  `draft_item_removed` y `draft_item_sent` (aceptables). La respuesta y la auditoría
+  `restaurant.offline_order.accepted` llevan `removed_draft_item_ids`.
+- **`GET restaurant/state`**: `event_cursor` (máximo de `app.realtime_events` leído con el lock de la operación ya
+  tomado y antes que mesas y cuentas).
+- **Base** (0025, sección E): `restaurant_items.draft_item_id` (uuid opcional, con índice parcial): el id del renglón
+  del borrador o de la partida del pedido sin conexión con que se capturó cada partida confirmada (`confirmLines`).
