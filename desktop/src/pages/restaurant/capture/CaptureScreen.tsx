@@ -171,6 +171,7 @@ export function CaptureScreen({
                   noteShortcuts={shortcuts}
                   execute={workspace.execute}
                   busy={blocked}
+                  canReduce={can('orders.cancel')}
                   onBack={() => void leaveEditor()}
                   onSave={workspace.saveEditorLine}
                 />

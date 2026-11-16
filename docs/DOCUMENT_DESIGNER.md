@@ -139,6 +139,9 @@ y propiedades», sin perder lo que estabas haciendo.
    - **Propiedades** del bloque elegido: Visible, Alineación (izquierda, centro, derecha), Tamaño (normal, doble alto,
      doble ancho, doble), Negrita, Mayúsculas, espacio antes y después (0 a 3 líneas) y sus opciones propias (el texto de
      un «Texto fijo», el carácter del separador, las líneas en blanco, «Según Cocina / Sí / No» en la lista de cocina…).
+     En la lista de productos de la precuenta y el ticket, desde la etapa 9H, **Mostrar precio unitario** (apagada al
+     principio) agrega el precio de una unidad junto a la cantidad («3 × $150.00 Tacos … $450.00») o, si no cabe, en un
+     renglón propio debajo del nombre.
      En la lista de cocina, **Importes** solo ofrece «Según Cocina» u «Ocultar»: para imprimirlos se activa «Incluir importes comerciales en comandas» en Cocina →
      Comandas y tiempos (las comandas guardadas sin precios no pueden imprimirlos después).
    - En comandas y avisos hay además **Tamaño de texto de todo el documento** («Según Cocina», Normal o Grande). Con
@@ -323,7 +326,7 @@ documents/catalog` entrega esta misma lista, con nombres, opciones y valores per
 | `divider`                                                             | Separador                                                 | Todos                                 | —    | `character` `-` \| `=` \| `*` \| `.` (`-`)                                                                                                                                                                                                                                                                                         | —                                                                           |
 | `spacer`                                                              | Espacio                                                   | Todos                                 | —    | `lines` 1–5 (1)                                                                                                                                                                                                                                                                                                                    | —                                                                           |
 | `field`                                                               | Campo de datos                                            | Todos                                 | —    | `items` 1–4 `{key, label}` (etiqueta ≤ 40); `layout` `inline` (unidos con « · ») \| `pair` (etiqueta a la izquierda, valor a la derecha; un solo dato) (`inline`); `omit_empty` (sí; las predeterminadas usan no)                                                                                                                  | Con `omit_empty`, todos los valores vacíos                                  |
-| `products`                                                            | Lista de productos                                        | Ticket, precuenta                     | 1    | `show_notes` (sí)                                                                                                                                                                                                                                                                                                                  | Sin partidas                                                                |
+| `products`                                                            | Lista de productos                                        | Ticket, precuenta                     | 1    | `show_notes` (sí); desde la 9H `show_unit_price` «Mostrar precio unitario» (no; se omite de la forma canónica mientras está apagada)                                                                                                                                                                                               | Sin partidas                                                                |
 | `adjustments`                                                         | Descuentos y cargos                                       | Ticket, precuenta                     | 1    | `show_reason` (sí): «Descuento · Atención»                                                                                                                                                                                                                                                                                         | Sin ajustes                                                                 |
 | `taxes`                                                               | Impuestos                                                 | Ticket, precuenta                     | 1    | `show_base` (sí): subtotal sin IVA además del IVA por tasa                                                                                                                                                                                                                                                                         | Sin desglose                                                                |
 | `total`                                                               | Total                                                     | Ticket, precuenta                     | 1    | —                                                                                                                                                                                                                                                                                                                                  | —                                                                           |
@@ -778,3 +781,40 @@ el predeterminado (NULL) y ningún documento cambia.
 - **Imprimir con la plantilla vigente** (revisión independiente, B2): en los documentos de una cuenta y de Caja pide
   motivo (5–500), como la de la cola de cocina, porque saca otra copia en papel de un documento ya emitido; la
   confirmación que la distingue de «Reimprimir» se conserva.
+
+## Etapa 9H · precio unitario por renglón
+
+Fase A de la etapa 9H (§2.3 de [etapas/ETAPA_9H.md](etapas/ETAPA_9H.md); decisión del propietario: opción del bloque),
+sin migración.
+
+- **Opción** `show_unit_price` («Mostrar precio unitario») de la lista de productos (`products`, `ProductsOptions`), solo
+  en la **precuenta y el ticket de pago**: son los documentos con renglones con importe. La comanda y los avisos de cocina
+  no la tienen (la lista de cocina rechaza la clave; sus importes siguen con «Incluir importes comerciales en comandas»)
+  ni los documentos de caja, que no tienen partidas. **Desactivada por omisión**; el editor la muestra con su
+  explicación (catálogo de Go, sin cambios en React salvo el resumen «Con precio unitario» en la estructura).
+- **Plantillas sin cambios**: la clave lleva `omitempty`, así que mientras está apagada no aparece en la forma canónica.
+  Las **predeterminadas siguen idénticas byte a byte** (su JSON, el que siembra la 0018, y lo que imprimen) y una
+  plantilla guardada antes de la 9H sigue siendo válida y conserva sus bytes; activarla y desactivarla vuelve a la misma
+  forma. Lo comprueba `documents/unit_price_test.go` con los SHA-256 de antes del cambio.
+- **Qué es el precio comercial de la unidad**: el precio unitario que ya calcula el motor del catálogo (precio base o de
+  la variante más complementos e ingredientes extra), **antes de promociones y descuentos**, tal como Go lo guardó en las
+  unidades de la partida (`restaurant_item_units.subtotal`; `payments.FinanceLine.UnitPrice`, fuera de la respuesta de
+  cobros). Si las unidades de una partida no comparten un mismo precio, la partida no lo muestra. El **importe del
+  renglón no cambia**: es el exacto de sus unidades, con sus promociones, y los descuentos y cargos de la cuenta siguen en
+  su propio bloque; por eso con una promoción «3 × $150.00» puede ir junto a un importe menor. Nunca lo calcula React: se
+  guarda con el documento (`DocumentLine.unit_price`, `CommercialLine.UnitPrice`, omitido si falta) y se expresa con
+  `internal/moneytext`.
+- **Cómo se imprime** (`renderProductLine`): si «3 × $150.00 Tacos» cabe completo junto al importe en el ancho del
+  bloque, va en el mismo renglón («3 × $150.00 Tacos … $450.00»); si no, el renglón queda como siempre («3 x Tacos …
+  $450.00», cortado como antes si el nombre es largo) y debajo, con la sangría de las observaciones, « 3 × $150.00»,
+  antes de la nota. Vale para 42 y 48 columnas (80 mm), 30 y 32 (58 mm) y para el doble ancho del bloque (la mitad de
+  columnas). La vista previa, la muestra, la impresión, la reimpresión exacta y «Imprimir con la plantilla vigente» usan
+  la misma IR.
+- **Documentos anteriores**: una precuenta o un ticket emitido antes de la 9H no guardó el precio unitario; con la
+  opción activa (vista previa con el documento real o «Imprimir con la plantilla vigente») sus partidas salen como
+  siempre.
+- **Pruebas**: `documents/unit_price_test.go` (predeterminadas idénticas, plantillas sin la opción, catálogo y renglones
+  con y sin espacio a 42, 48, 30 y 32 columnas y con doble ancho), la integración
+  `operations/stage9h_unit_price_test.go` (precio unitario con un ingrediente extra en la precuenta, el documento
+  guardado, la vista previa con el documento real y una plantilla activa) y Vitest y Playwright del editor
+  (`designer.test.tsx`, `workflow-stage9h-adjustments.spec.ts`).

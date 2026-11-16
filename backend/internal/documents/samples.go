@@ -91,8 +91,8 @@ func sampleCommercial(kind Kind, identity Identity) *CommercialData {
 		Kind: kind, Folio: 123, AccountName: "Cuenta de muestra", Context: "Mesa de muestra", LocalTime: "01/01/2026 13:00",
 		Cashier: "Cajero de muestra",
 		Lines: []CommercialLine{
-			{Quantity: 2, Name: "Platillo de muestra", Notes: "Observación de muestra", Amount: "500.00"},
-			{Quantity: 1, Name: "Bebida de muestra", Amount: "45.00"},
+			{Quantity: 2, Name: "Platillo de muestra", Notes: "Observación de muestra", Amount: "500.00", UnitPrice: "250.00"},
+			{Quantity: 1, Name: "Bebida de muestra", Amount: "45.00", UnitPrice: "45.00"},
 		},
 		Adjustments: []CommercialAdjustment{{Concept: "Descuento", Reason: "Motivo de muestra", Amount: "-45.00"}},
 		Tax:         []CommercialTax{{Rate: 16, Base: "431.03", Tax: "68.97"}},

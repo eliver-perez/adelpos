@@ -381,6 +381,27 @@ describe('vista previa', () => {
     await screen.findByText('Impresoras que no reproducen todo el formato');
   });
 
+  it('«Mostrar precio unitario» de la lista de productos: desactivada por omisión y previsualizada (etapa 9H)', async () => {
+    renderDesigner();
+    await previewReady();
+    fireEvent.click(row('Lista de productos'));
+    const toggle = screen.getByRole('button', { name: 'Mostrar precio unitario' });
+    expect(pressed(toggle)).toBe('false');
+    expect(screen.getByText(/«3 × \$150\.00»/)).toBeTruthy();
+    const before = calls('documents_preview').length;
+    fireEvent.click(toggle);
+    expect(pressed(screen.getByRole('button', { name: 'Mostrar precio unitario' }))).toBe('true');
+    await waitFor(() => expect(calls('documents_preview').length).toBeGreaterThan(before));
+    await waitFor(() => {
+      const layout = calls('documents_preview').at(-1)?.body.layout as TemplateLayout;
+      expect(layout.blocks[2]).toMatchObject({
+        type: 'products',
+        options: { show_unit_price: true },
+      });
+    });
+    expect(row('Lista de productos · Con precio unitario')).toBeTruthy();
+  });
+
   it('muestra el error de Go en la vista previa y señala el bloque', async () => {
     handlers.documents_preview = () =>
       fail(422, 'TEMPLATE_INVALID', 'El texto fijo no puede quedar vacío.', {

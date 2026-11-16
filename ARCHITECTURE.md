@@ -466,7 +466,9 @@ cambió: los combos reparten sus componentes por estación y los complementos vi
 **Operaciones.** `restaurant/accounts/{id}/void` responde `410 ROUTE_RETIRED` antes de permisos, lock o lectura.
 `operations/supervisor_approval.go` (`approveWithSupervisor`) es la autorización común de «Cancelar cuenta», «Cancelar
 unidades» y la reducción desde «Modificar», decidida dentro de la ruta antes de la primera escritura con el autorizador
-de `administration/supervisor.go`; Go calcula `cancel_units_requires_authorization`. La huella idempotente de
+de `administration/supervisor.go`; Go calcula `cancel_units_requires_authorization`. **Desde la etapa 9H** solo
+«Cancelar cuenta» la usa: cancelar o reducir unidades exige el permiso propio `orders.cancel` (en la ruta `cancel` y en
+`calculateEdit`) y `cancel_units_requires_authorization` se retiró. La huella idempotente de
 `operations` y `payments` quita la contraseña de todo objeto `authorization` sin distinguir mayúsculas
 (`withoutAuthorizationPasswords`).
 

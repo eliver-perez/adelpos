@@ -148,7 +148,7 @@
       "post": {
         "operationId": "login",
         "summary": "Iniciar sesión en una terminal emparejada",
-        "description": "Requiere la credencial de la terminal. Una sola sesión activa por usuario: iniciar sesión en otra terminal cierra la anterior (SESSION_REPLACED). 5 fallos en 15 minutos por usuario y terminal bloquean 15 minutos (429). El token de sesión dura 12 horas y se guarda en el almacén seguro del sistema.",
+        "description": "Requiere la credencial de la terminal. Una sesión activa por usuario y por terminal: el mismo usuario puede tener sesión a la vez en varias terminales, e iniciar sesión de nuevo en la misma terminal cierra la anterior de esa terminal (SESSION_REPLACED). 5 fallos en 15 minutos por usuario y terminal bloquean 15 minutos (429). El token de sesión dura 12 horas y se guarda en el almacén seguro del sistema.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"

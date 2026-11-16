@@ -356,8 +356,9 @@ func authenticateSession(ctx context.Context, tx pgx.Tx, request Request) (Princ
 		return principal, err
 	}
 	if revoked || !active {
+		// Desde la etapa 9H solo un nuevo inicio de sesión en esta misma terminal reemplaza la sesión.
 		if reason == "replaced" {
-			return principal, unauthorized("SESSION_REPLACED", "Tu sesión se cerró porque el usuario inició sesión en otra terminal.")
+			return principal, unauthorized("SESSION_REPLACED", "Tu sesión se cerró porque el usuario inició sesión de nuevo en esta terminal.")
 		}
 		return principal, unauthorized("SESSION_REVOKED", "Tu sesión fue revocada. Inicia sesión nuevamente.")
 	}

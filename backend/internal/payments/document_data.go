@@ -30,7 +30,9 @@ func CommercialData(document *CommercialDocument) documents.CommercialData {
 		Payments:    make([]documents.CommercialPayment, 0, len(document.Payments)),
 	}
 	for _, line := range document.Lines {
-		data.Lines = append(data.Lines, documents.CommercialLine{Quantity: line.Quantity, Name: line.Name, Notes: line.Notes, Amount: line.Amount})
+		data.Lines = append(data.Lines, documents.CommercialLine{
+			Quantity: line.Quantity, Name: line.Name, Notes: line.Notes, Amount: line.Amount, UnitPrice: line.UnitPrice,
+		})
 	}
 	for _, adjustment := range document.Adjustments {
 		data.Adjustments = append(data.Adjustments, documents.CommercialAdjustment{Concept: adjustment.Concept, Reason: adjustment.Reason, Amount: adjustment.Amount})
