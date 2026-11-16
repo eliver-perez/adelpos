@@ -94,12 +94,46 @@ func (handler *service) event(accountID string, relatedID *string, kind string, 
 
 func ensureOpen(account *Account, revision int) error {
 	if account.State != "open" {
-		return invalid("La cuenta ya no está abierta para nuevas operaciones.")
+		return accountNotOpen(account)
 	}
 	if account.Revision != revision {
 		return conflict()
 	}
 	return nil
+}
+
+// AccountNotOpenReason es error.details.reason del rechazo de una operación sobre una cuenta que ya no está abierta.
+const AccountNotOpenReason = "account_not_open"
+
+// accountNotOpen rechaza una operación sobre una cuenta cobrada, cancelada o combinada mientras se capturaba (etapa
+// A1, §6.4). Conserva el estado y el código de siempre (400 OPERATION_VALIDATION, compatible con el escritorio) y
+// agrega en details el motivo y el estado de la cuenta, para que el teléfono lleve el pedido a «Requiere tu revisión»
+// («La cuenta «Mesa 4» ya se cobró») en lugar de mostrar un error genérico. Con merged, la cuenta en que se combinó.
+func accountNotOpen(account *Account) error {
+	return &Error{
+		Status:  400,
+		Code:    "OPERATION_VALIDATION",
+		Message: accountNotOpenMessage(account) + " No admite nuevas operaciones.",
+		Details: map[string]any{
+			"reason":         AccountNotOpenReason,
+			"account_id":     account.ID,
+			"account_state":  account.State,
+			"merged_into_id": account.MergedIntoID,
+		},
+	}
+}
+
+// accountNotOpenMessage dice en palabras del restaurante qué pasó con la cuenta.
+func accountNotOpenMessage(account *Account) string {
+	switch account.State {
+	case "closed":
+		return "La cuenta «" + account.Name + "» ya se cobró."
+	case "voided":
+		return "La cuenta «" + account.Name + "» ya se canceló o se liberó."
+	case "merged":
+		return "La cuenta «" + account.Name + "» se combinó con otra cuenta."
+	}
+	return "La cuenta «" + account.Name + "» ya no está abierta."
 }
 
 func (handler *service) authorizeAccount(account *Account, write bool) error {
