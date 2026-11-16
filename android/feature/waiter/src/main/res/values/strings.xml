@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="tables_title">Mesas</string>
+    <string name="tables_search">Buscar mesa</string>
+    <string name="tables_states_heading">Estados de las mesas</string>
+    <string name="tables_placeholder">Aquí aparecerán las áreas y las mesas del restaurante.</string>
+    <string name="account_title">Cuenta</string>
+    <string name="account_open">Ver cuenta</string>
+    <string name="account_placeholder">Elige una mesa para ver sus cuentas y capturar pedidos.</string>
+</resources>

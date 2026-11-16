@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="access_title">Entrar</string>
+    <string name="access_heading">Entrada de meseros</string>
+    <string name="access_placeholder">Aquí cada mesero elegirá su nombre y escribirá su PIN para entrar.</string>
+    <string name="access_enter">Entrar</string>
+</resources>
