@@ -69,7 +69,12 @@ func Execute(ctx context.Context, tx pgx.Tx, actor Actor, definition *Definition
 	if err != nil {
 		return nil, err
 	}
-	query := &Query{Tx: tx, Config: config, Params: params, Actor: actor, Now: now, definition: definition}
+	available, err := legacyAvailable(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	query := &Query{Tx: tx, Config: config, Params: params, Actor: actor, Now: now, definition: definition,
+		legacy: resolveLegacy(definition, params, available)}
 	dataset, err := definition.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -88,11 +93,12 @@ func snapshot(ctx context.Context, tx pgx.Tx) (businessday.Config, time.Time, er
 	return config, now.UTC(), err
 }
 
-// visibleColumns quita las columnas que exigen permisos que el actor no tiene.
-func visibleColumns(actor Actor, columns []Column) []Column {
+// visibleColumns quita las columnas que exigen permisos que el actor no tiene y, sin un lote
+// importado vigente (legacyAvailable falso), las del historial del sistema anterior.
+func visibleColumns(actor Actor, columns []Column, legacyAvailable bool) []Column {
 	visible := make([]Column, 0, len(columns))
 	for _, column := range columns {
-		if actor.CanAll(column.Permissions) {
+		if actor.CanAll(column.Permissions) && (legacyAvailable || !column.Legacy) {
 			visible = append(visible, column)
 		}
 	}
@@ -113,7 +119,7 @@ func strip(row Row, columns []Column) Row {
 func assemble(ctx context.Context, tx pgx.Tx, query *Query, definition *Definition, dataset *Dataset) (*Result, error) {
 	params := query.Params
 	allColumns := definition.Columns
-	columns := visibleColumns(query.Actor, allColumns)
+	columns := visibleColumns(query.Actor, allColumns, query.legacy.Available)
 	totals := sumRows(allColumns, dataset.Rows)
 	if definition.Totals != nil {
 		definition.Totals(dataset.Rows, totals)
@@ -139,7 +145,7 @@ func assemble(ctx context.Context, tx pgx.Tx, query *Query, definition *Definiti
 			summary = append(summary, figure)
 		}
 	}
-	filters, err := describeFilters(ctx, tx, query.Actor, definition, params)
+	filters, err := describeFilters(ctx, tx, query.Actor, definition, params, query.legacy)
 	if err != nil {
 		return nil, err
 	}
