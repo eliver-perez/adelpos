@@ -8,9 +8,14 @@ import (
 	"time"
 )
 
-// Tablas que una importación necesita: sin ellas el paquete no es del sistema anterior (o de una versión con otra
-// estructura). Las demás son opcionales (vacías si faltan).
-var requiredTables = []string{"categorias", "productos", "mesas", "usuarios", "ventas", "ventas_productos", "pagos"}
+// Tablas que la importación necesita, todas las que lee (las 52 del respaldo real, 50 extraídas y 2 omitidas por el
+// lector; MIGRACION_ANALISIS.md §1.3): si falta una, el paquete no es del sistema anterior o es de una versión con
+// otra estructura, y se rechaza con un error claro en lugar de importar solo una parte. Solo divisas y articulos,
+// que únicamente se cuentan para el informe, pueden faltar.
+var requiredTables = []string{"cajas", "cancelaciones", "categorias", "complementos", "complementos_precios", "cortes",
+	"cortes_parciales", "descuentos", "entradas", "mesas", "pagos", "personal", "productos", "productos_complementos",
+	"productos_precios", "puestos", "salidas", "tipos_descuentos", "tipos_pagos", "usuarios", "ventas",
+	"ventas_complementos", "ventas_modificaciones", "ventas_productos"}
 
 // LoadProgress informa el avance de la lectura: filas leídas de todas las tablas y el total del manifiesto.
 type LoadProgress func(table string, rowsRead, totalRows int64)
@@ -223,39 +228,40 @@ func (rows *rowReader) truthy(column string) bool {
 	return err == nil && parsed.Valid && parsed.Value != 0
 }
 
-// tableDecoder son las columnas obligatorias de una tabla y cómo se agrega cada fila al modelo.
+// tableDecoder son las columnas obligatorias de una tabla (todas las que se leen: las tiene el respaldo real) y cómo se
+// agrega cada fila al modelo.
 type tableDecoder struct {
 	columns []string
 	read    func(rows *rowReader)
 }
 
 var decoders = map[string]tableDecoder{
-	"categorias": {[]string{"id", "categoria"}, func(rows *rowReader) {
+	"categorias": {[]string{"id", "categoria", "cocina"}, func(rows *rowReader) {
 		rows.model.Categories = append(rows.model.Categories, Category{
 			ID: rows.integer("id"), Name: rows.text("categoria"), Kitchen: rows.nullInt("cocina"),
 		})
 	}},
-	"productos": {[]string{"id", "categoria", "producto"}, func(rows *rowReader) {
+	"productos": {[]string{"id", "categoria", "producto", "nombre_corto", "unidad"}, func(rows *rowReader) {
 		rows.model.Products = append(rows.model.Products, Product{
 			ID: rows.integer("id"), Category: rows.nullInt("categoria"), Name: rows.text("producto"),
 			ShortName: rows.text("nombre_corto"), Unit: rows.text("unidad"),
 		})
 	}},
-	"productos_precios": {[]string{"producto", "fecha_inicio", "subtotal", "iva", "total"}, func(rows *rowReader) {
+	"productos_precios": {[]string{"producto", "fecha_inicio", "vigencia", "subtotal", "iva", "total"}, func(rows *rowReader) {
 		rows.model.ProductPrices = append(rows.model.ProductPrices, readPrice(rows, "producto"))
 	}},
 	"complementos": {[]string{"id", "complemento"}, func(rows *rowReader) {
 		rows.model.Complements = append(rows.model.Complements, Complement{ID: rows.integer("id"), Name: rows.text("complemento")})
 	}},
-	"complementos_precios": {[]string{"id", "fecha_inicio", "subtotal", "iva", "total"}, func(rows *rowReader) {
+	"complementos_precios": {[]string{"id", "fecha_inicio", "vigencia", "subtotal", "iva", "total"}, func(rows *rowReader) {
 		rows.model.ComplementPrices = append(rows.model.ComplementPrices, readPrice(rows, "id"))
 	}},
-	"productos_complementos": {[]string{"producto", "complemento"}, func(rows *rowReader) {
+	"productos_complementos": {[]string{"producto", "complemento", "cantidad"}, func(rows *rowReader) {
 		rows.model.ProductComplements = append(rows.model.ProductComplements, ProductComplement{
 			Product: rows.integer("producto"), Complement: rows.integer("complemento"), Included: rows.nullQuantity("cantidad"),
 		})
 	}},
-	"mesas": {[]string{"id"}, func(rows *rowReader) {
+	"mesas": {[]string{"id", "mesa", "capacidad"}, func(rows *rowReader) {
 		rows.model.Tables = append(rows.model.Tables, DiningTable{
 			ID: rows.integer("id"), Name: rows.text("mesa"), Capacity: rows.nullInt("capacidad"),
 		})
@@ -263,13 +269,13 @@ var decoders = map[string]tableDecoder{
 	"puestos": {[]string{"id", "puesto"}, func(rows *rowReader) {
 		rows.model.Positions = append(rows.model.Positions, NamedRow{ID: rows.integer("id"), Name: rows.text("puesto")})
 	}},
-	"personal": {[]string{"id", "nombre"}, func(rows *rowReader) {
+	"personal": {[]string{"id", "nombre", "paterno", "materno", "puesto", "activo"}, func(rows *rowReader) {
 		rows.model.People = append(rows.model.People, Person{
 			ID: rows.integer("id"), Name: rows.text("nombre"), Paternal: rows.text("paterno"), Maternal: rows.text("materno"),
 			Position: rows.nullInt("puesto"), Active: rows.nullInt("activo"),
 		})
 	}},
-	"usuarios": {[]string{"id", "usuario"}, func(rows *rowReader) {
+	"usuarios": {[]string{"id", "usuario", "personal", "activo"}, func(rows *rowReader) {
 		rows.model.Users = append(rows.model.Users, User{
 			ID: rows.integer("id"), Username: rows.text("usuario"), Person: rows.nullInt("personal"), Active: rows.nullInt("activo"),
 		})
@@ -287,7 +293,8 @@ var decoders = map[string]tableDecoder{
 	"tipos_descuentos": {[]string{"id", "tipo"}, func(rows *rowReader) {
 		rows.model.DiscountTypes = append(rows.model.DiscountTypes, NamedRow{ID: rows.integer("id"), Name: rows.text("tipo")})
 	}},
-	"ventas": {[]string{"id", "folio", "fecha", "subtotal", "iva", "total"}, func(rows *rowReader) {
+	"ventas": {[]string{"id", "caja", "mesa", "nombre", "folio", "fecha", "cajero", "facturado", "subtotal", "iva", "total",
+		"montoPagado", "pagado", "extra", "montoExtra", "enmesa", "corte", "cancelado"}, func(rows *rowReader) {
 		charge, chargeSet := rows.textPresent("extra")
 		rows.model.Sales = append(rows.model.Sales, Sale{
 			ID: rows.integer("id"), Register: rows.nullInt("caja"), Table: rows.nullInt("mesa"), AccountName: rows.text("nombre"),
@@ -298,7 +305,8 @@ var decoders = map[string]tableDecoder{
 			Shift: rows.nullInt("corte"), Cancelled: rows.nullInt("cancelado"),
 		})
 	}},
-	"ventas_productos": {[]string{"id", "venta", "producto", "cantidad", "subtotal", "iva", "total"}, func(rows *rowReader) {
+	"ventas_productos": {[]string{"id", "venta", "producto", "cantidad", "cantidadOriginal", "subtotal", "iva", "total",
+		"observaciones"}, func(rows *rowReader) {
 		quantity := rows.nullQuantity("cantidad")
 		if !quantity.Valid {
 			rows.fail("cantidad")
@@ -309,38 +317,39 @@ var decoders = map[string]tableDecoder{
 			Total: rows.money("total"), Notes: rows.text("observaciones"),
 		})
 	}},
-	"ventas_complementos": {[]string{"producto", "complemento", "subtotal", "iva", "total"}, func(rows *rowReader) {
+	"ventas_complementos": {[]string{"producto", "complemento", "incluido", "pedido", "subtotal", "iva", "total"}, func(rows *rowReader) {
 		rows.model.LineComplements = append(rows.model.LineComplements, LineComplement{
 			Position: rows.position, Line: rows.integer("producto"), Complement: rows.integer("complemento"),
 			Included: rows.nullQuantity("incluido"), Requested: rows.nullQuantity("pedido"), Subtotal: rows.money("subtotal"),
 			Tax: rows.nullMoney("iva"), Total: rows.money("total"),
 		})
 	}},
-	"ventas_modificaciones": {[]string{"producto"}, func(rows *rowReader) {
+	"ventas_modificaciones": {[]string{"producto", "cantAnt", "cantNueva", "autorizacion", "fecha"}, func(rows *rowReader) {
 		rows.model.QuantityChanges = append(rows.model.QuantityChanges, QuantityChange{
 			Position: rows.position, Line: rows.integer("producto"), Original: rows.nullQuantity("cantAnt"),
 			New: rows.nullQuantity("cantNueva"), AuthorizedBy: rows.nullInt("autorizacion"), ChangedAt: rows.time("fecha"),
 		})
 	}},
-	"descuentos": {[]string{"venta", "descuento"}, func(rows *rowReader) {
+	"descuentos": {[]string{"tipo", "venta", "descripcion", "descuento"}, func(rows *rowReader) {
 		rows.model.Discounts = append(rows.model.Discounts, Discount{
 			Position: rows.position, Type: rows.nullInt("tipo"), Sale: rows.integer("venta"),
 			Description: rows.text("descripcion"), Amount: rows.money("descuento"),
 		})
 	}},
-	"cancelaciones": {[]string{"id", "venta", "fecha"}, func(rows *rowReader) {
+	"cancelaciones": {[]string{"id", "venta", "autorizo", "fecha"}, func(rows *rowReader) {
 		rows.model.Cancellations = append(rows.model.Cancellations, Cancellation{
 			ID: rows.integer("id"), Sale: rows.integer("venta"), AuthorizedBy: rows.nullInt("autorizo"), CancelledAt: rows.requiredTime("fecha"),
 		})
 	}},
-	"pagos": {[]string{"id", "venta", "monto", "fecha"}, func(rows *rowReader) {
+	"pagos": {[]string{"id", "venta", "folio", "tipo", "monto", "recibio", "fecha", "corte"}, func(rows *rowReader) {
 		rows.model.Payments = append(rows.model.Payments, Payment{
 			ID: rows.integer("id"), Sale: rows.integer("venta"), Reference: rows.text("folio"), Type: rows.nullInt("tipo"),
 			Amount: rows.nullMoney("monto"), ReceivedBy: rows.nullInt("recibio"), PaidAt: rows.requiredTime("fecha"),
 			Shift: rows.nullInt("corte"),
 		})
 	}},
-	"cortes": {[]string{"id"}, func(rows *rowReader) {
+	"cortes": {[]string{"id", "cajero", "inicio_caja", "fin_caja", "venta", "caja", "status", "autorizacion", "fecha_inicio",
+		"fecha_fin", "retiros", "diferencia"}, func(rows *rowReader) {
 		status, statusSet := rows.textPresent("status")
 		rows.model.Shifts = append(rows.model.Shifts, Shift{
 			ID: rows.integer("id"), Cashier: rows.nullInt("cajero"), OpeningCash: rows.nullMoney("inicio_caja"),
@@ -350,13 +359,13 @@ var decoders = map[string]tableDecoder{
 			Difference: rows.nullMoney("diferencia"),
 		})
 	}},
-	"cortes_parciales": {[]string{"id", "monto"}, func(rows *rowReader) {
+	"cortes_parciales": {[]string{"id", "corte", "monto", "razon", "fecha", "autorizacion"}, func(rows *rowReader) {
 		rows.model.Withdrawals = append(rows.model.Withdrawals, Withdrawal{
 			ID: rows.integer("id"), Shift: rows.nullInt("corte"), Amount: rows.money("monto"), Reason: rows.text("razon"),
 			WithdrawnAt: rows.time("fecha"), AuthorizedBy: rows.nullInt("autorizacion"),
 		})
 	}},
-	"salidas": {[]string{"monto"}, func(rows *rowReader) {
+	"salidas": {[]string{"corte", "monto", "fecha", "autorizacion"}, func(rows *rowReader) {
 		rows.model.Expenses = append(rows.model.Expenses, Expense{
 			Position: rows.position, Shift: rows.nullInt("corte"), Amount: rows.money("monto"), SpentAt: rows.time("fecha"),
 			AuthorizedBy: rows.nullInt("autorizacion"),
