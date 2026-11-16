@@ -36,6 +36,10 @@ import { PackageSummary, PreviewStatus, ProgressBar, ValidationReport } from './
 // La consulta del avance de una corrida mientras está en cola o en curso.
 const pollInterval = 800;
 
+// Errores después de los cuales el paquete se vuelve a subir al revisar otra vez: la subida ya no existe o el
+// archivo subido no se pudo leer (se puede reintentar). Con un paquete dañado, Go pide prepararlo de nuevo.
+const resendCodes = ['LEGACY_UPLOAD_MISSING', 'LEGACY_PACKAGE_UNREADABLE'];
+
 type Stage = 'idle' | 'uploading' | 'analyzing' | 'preview' | 'importing' | 'report';
 
 // useRunPolling consulta una corrida hasta que termina.
@@ -180,8 +184,10 @@ export function LegacyImportStep({
       return;
     }
     setStage('idle');
-    if (run.error_code === 'LEGACY_UPLOAD_MISSING') {
-      setUpload(null);
+    // El mensaje es siempre el de Go (en lenguaje sencillo). Si la subida ya no existe o el archivo subido no se
+    // pudo leer, se vuelve a subir al revisar otra vez.
+    if (resendCodes.includes(run.error_code ?? '')) {
+      void forgetUpload();
     }
     setProblem(run.error_message || 'No se pudo revisar el paquete.');
   }
@@ -205,7 +211,12 @@ export function LegacyImportStep({
       void onSelectionChange();
       return;
     }
-    setStage('preview');
+    if (resendCodes.includes(run.error_code ?? '')) {
+      void forgetUpload();
+      setStage('idle');
+    } else {
+      setStage('preview');
+    }
     setProblem(run.error_message || 'No se pudo importar el paquete.');
     void onImported();
   }
@@ -267,7 +278,7 @@ export function LegacyImportStep({
       analysisUpdated(await analyzeLegacyPackage(current.id, passphrase));
     } catch (error) {
       setStage('idle');
-      if (error instanceof APIError && error.code === 'LEGACY_UPLOAD_MISSING') {
+      if (error instanceof APIError && resendCodes.includes(error.code)) {
         setUpload(null);
       }
       setProblem(errorMessage(error, 'No se pudo revisar el paquete.'));
@@ -291,9 +302,16 @@ export function LegacyImportStep({
             message: (
               <>
                 <p>
-                  Se borra completo el lote importado el{' '}
-                  {legacyDateTime(preview.current_batch?.completed_at)} (catálogo, mesas, usuarios e
-                  historial) y se importa este paquete en su lugar.
+                  Se reemplaza completo el lote importado el{' '}
+                  {legacyDateTime(preview.current_batch?.completed_at)}: el historial se borra y se
+                  importa el de este paquete.
+                </p>
+                <p>
+                  El catálogo, las mesas y los usuarios importados se actualizan con lo del paquete:
+                  los usuarios toman otra vez el rol, si están activos y el nombre visible del
+                  sistema anterior (conservan la contraseña que les hayas asignado). Lo importado
+                  antes que ya no viene en el paquete se borra si nada lo usa; si ya se usó, se
+                  desactiva y queda como retirado.
                 </p>
                 <p>
                   Antes se hace un respaldo de la base de datos. Reemplazar no se puede deshacer
@@ -367,6 +385,11 @@ export function LegacyImportStep({
       <p className="muted maintenance-help">
         Elige el paquete preparado (puede estar en una USB) y escribe su frase de paso. Antes de
         importar verás un resumen; nada se guarda hasta que lo confirmes.
+      </p>
+      <p className="muted maintenance-help">
+        Para pasar a producción, haz el respaldo final con el sistema anterior ya cerrado (que nadie
+        esté vendiendo) y prepara el paquete con ese respaldo. En cuanto haya operación propia en
+        AD-EL POS (ventas, turnos o movimientos), ya no se podrá volver a importar.
       </p>
       <div className="legacy-files">
         <p className="legacy-file">

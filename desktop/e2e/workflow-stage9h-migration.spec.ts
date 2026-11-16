@@ -492,7 +492,8 @@ test.describe.serial('instalación limpia (segundo servidor temporal)', () => {
       'El filtro «Datos» de los reportes llega con la Fase C, parte 2.',
     );
     const batch = (await call(driver, 'GET', 'maintenance/legacy')).current_batch;
-    const year = new Date(batch.sales_last_at).getFullYear();
+    // El primer año del historial (no es el año en curso, que el reporte ya trae aplicado).
+    const year = new Date(batch.sales_first_at).getFullYear();
     const expected = await call(
       driver,
       'GET',
@@ -518,6 +519,9 @@ test.describe.serial('instalación limpia (segundo servidor temporal)', () => {
       .click();
     await page.getByLabel('Año', { exact: true }).fill(String(year));
     await page.getByRole('button', { name: 'Aplicar periodo', exact: true }).click();
+    await expect(
+      page.getByRole('form', { name: 'Periodo' }).getByText(`Año ${year}`, { exact: true }),
+    ).toBeVisible();
     const data = page
       .getByRole('group', { name: 'Filtros adicionales' })
       .getByRole('combobox', { name: 'Datos', exact: true });
