@@ -35,6 +35,12 @@ var capabilities = []string{
 	"catalog-sold-out",
 	"offline-orders-v1",
 	"state-recovery-v1",
+	// Etapa A1 (fase B): versión mínima por tipo de cliente (min_client_versions), entrada con PIN en los teléfonos y
+	// tabletas de meseros con su credencial de envío de pedidos sin conexión, y su administración (PIN, nombre corto,
+	// color, desbloqueo y bloqueo por inactividad de cada dispositivo). El escritorio 0.12.0 muestra lo del PIN solo
+	// si el servidor anuncia waiter-pin-v1, así que sigue funcionando con un servidor 0.11.0 sin esas pantallas.
+	"client-versions-by-kind",
+	"waiter-pin-v1",
 }
 
 type ErrorBody struct {
@@ -89,6 +95,8 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			"min_client_version": metadata.MinClientVersion,
 			"client_kinds":       ClientKinds,
 			"openapi_path":       "/api/v1/openapi.json",
+			// Etapa A1 (A1-D4): la mínima de cada tipo de cliente; min_client_version sigue siendo la del escritorio.
+			"min_client_versions": clientMinimums(metadata),
 		})
 	})
 	// Contrato OpenAPI 3.1 de la API v1 para los clientes (etapa 9G, §5.1): el mismo documento que comprueban las
@@ -155,12 +163,22 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 		}
 		// Un cliente que se identifica con una versión anterior a la mínima recibe «Actualiza esta terminal»
 		// antes de llegar a la aplicación (etapa 9G, §5.1; clientversion.go).
-		if problem := checkClient(r, metadata.MinClientVersion, metadata.Version); problem != nil {
+		if problem := checkClient(r, metadata.MinimumFor, metadata.Version); problem != nil {
 			failWithDetails(tracked, r, problem.status, problem.code, problem.message, problem.details)
 			return
 		}
 		mux.ServeHTTP(tracked, r)
 	})
+}
+
+// clientMinimums es la versión mínima de cada tipo de cliente que conoce la API v1 (todos presentes: un tipo sin
+// mínima propia en product.json usa la general).
+func clientMinimums(metadata product.Metadata) map[string]string {
+	minimums := map[string]string{}
+	for _, kind := range ClientKinds {
+		minimums[kind] = metadata.MinimumFor(kind)
+	}
+	return minimums
 }
 
 type responseWriter struct {

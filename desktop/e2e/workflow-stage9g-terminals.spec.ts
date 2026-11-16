@@ -120,7 +120,7 @@ test('Terminales: aprobación con código, renombrar, configuración, revocació
   await expect(row).toContainText('En línea');
   const summary = page.getByRole('region', { name: 'Sesiones activas por tipo de terminal' });
   await expect(summary).toContainText('Escritorio');
-  await expect(summary).toContainText('Comandero Android0');
+  await expect(summary).toContainText('Teléfono o tableta0');
   await expect(summary).toContainText('Solo se cuentan; todavía no se limita ninguna.');
 
   // 5. Renombrar y ver su configuración (pantalla de inicio, estaciones y el hueco de las impresoras).

@@ -106,10 +106,13 @@ func (service *Service) setup(ctx context.Context, tx pgx.Tx, request Request) (
 	if err != nil {
 		return nil, err
 	}
+	// Etapa A1 (A1-D2): el rol Mesero recibe además waiter_devices.use (entrar con PIN en los dispositivos de
+	// meseros), lo mismo que la migración 0025 concede en una instalación existente.
 	_, err = tx.Exec(ctx, `INSERT INTO app.role_permissions(role_id,permission_key)
         SELECT r.id,p.key FROM app.roles r CROSS JOIN app.permissions p
         WHERE (r.code='supervisor' AND p.key IN ('users.read','devices.read','sessions.read','registers.read'))
         OR (r.code IN ('cashier','finance') AND p.key='registers.read')
+        OR (r.code='waiter' AND p.key='waiter_devices.use')
         ON CONFLICT DO NOTHING`)
 	if err != nil {
 		return nil, err

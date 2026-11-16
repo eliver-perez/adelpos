@@ -3,6 +3,7 @@ import { api, APIError, clientUpdateEvent, localAuthentication } from '../servic
 import { clientUpdateRequired, serverOutdated } from '../services/compatibility';
 import type { LocalAuthentication } from '../services/api';
 import { reconnectDelay } from '../services/reconnection';
+import { rememberServerCapabilities } from '../services/serverCapabilities';
 import type { Identity } from '../services/models';
 
 // update-terminal y update-server (etapa 9G, §5.1): la aplicación o el servidor son demasiado viejos para trabajar
@@ -42,7 +43,9 @@ export function useSession() {
       // Etapa 9G: un servidor anterior a la versión que necesita esta aplicación se avisa antes de cualquier otra
       // consulta (sus rutas nuevas no existirían). Se comprueba al conectar y otra vez después de perder la conexión.
       if (!versionChecked.current) {
-        const version = await api<{ server_version?: unknown }>('version');
+        const version = await api<{ server_version?: unknown; capabilities?: unknown }>('version');
+        // Etapa A1: lo que el servidor puede hacer (por ejemplo, el PIN de los meseros) decide qué pantallas se ven.
+        rememberServerCapabilities(version.capabilities);
         if (serverOutdated(version.server_version)) {
           setConnectionError('');
           setPhase('update-server');

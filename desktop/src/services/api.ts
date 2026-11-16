@@ -53,6 +53,12 @@ export type Operation =
   | 'update_user'
   // Etapa 9H: «Asignar contraseña» a un usuario sin contraseña (los importados del sistema anterior).
   | 'assign_user_password'
+  // Etapa A1 (fase B): PIN de los meseros para los teléfonos y tabletas, su distintivo y «Mi PIN».
+  | 'user_badge_colors'
+  | 'set_user_pin'
+  | 'remove_user_pin'
+  | 'unlock_user_pin'
+  | 'set_own_pin'
   | 'user_permissions'
   | 'save_user_permissions'
   | 'user_preferences'
