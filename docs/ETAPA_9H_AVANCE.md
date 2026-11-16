@@ -379,3 +379,185 @@ Preguntas 1, 6, 12 y 13 de [MIGRACION_ANALISIS.md](MIGRACION_ANALISIS.md) §7:
 - §21: el respaldo real tiene 52 tablas (4 más que `Base de Datos.sql` y columnas nuevas en `ventas`, `pagos`, `cortes` e
   `impresoras`); el catálogo se capturó con IVA 0 %; los dólares, las propinas y (antes de 2024) la tarjeta no quedaban
   registrados; `ventas.cancelado` nunca se usó; el «Registro de ventas» y los cortes contaban las canceladas.
+
+---
+
+## Fase A · Pendientes y ajustes
+
+Un agente, en su propio árbol de trabajo (`etapa-9h-a`, desde `etapa-9h` en `fd11d89`), en paralelo con la Fase 0
+(solo documentación). 15/11/2026. Migración `0024_legacy_migration.sql` con su sección A (índice de sesiones) y
+**esquema 24** (`config/product.json` y `node scripts/sync-metadata.mjs`); la versión del producto sigue en 0.10.0 (la
+0.11.0 es de la Fase F). Pruebas en copias aisladas: clúster temporal 55499 (una base `adel_pos_test_a_*` por paquete),
+Go temporal de Playwright en 8184 y vista previa en 1422. **No se tocó la instalación real.**
+
+Commits en `etapa-9h-a`:
+
+- `de66512` — «Cancelar unidades» y reducir cantidades sin autorización de supervisor (§2.2).
+- `94fc263` — opción «Mostrar precio unitario» del diseñador (§2.3) y referencias de la 9F en `AGENTS.md` y
+  `docs/REPORTS.md`.
+- `f6aab2d` — una sesión activa por usuario y por terminal; 0024 sección A; esquema 24 (§2.4).
+- `8afef7a` — Playwright `workflow-stage9h-adjustments.spec.ts`.
+
+### §2.1 · Lo que faltaba de la 9F
+
+Nada: la Fase 0 encontró hechas la barra compacta, la leyenda del mapa y la ruta antigua de anulación, y el coordinador
+corrigió la memoria de trabajo. Sin commit propio.
+
+### Qué cambió
+
+**§2.2 · «Cancelar unidades» sin autorización de supervisor** (decisión del propietario)
+
+- **Qué permiso basta ahora**: el propio, «Cancelar partidas o cantidades confirmadas» (`orders.cancel`), para «Cancelar
+  unidades» (`POST restaurant/accounts/{id}/cancel`) y para reducir la cantidad de una partida enviada desde
+  «Modificar» (`edit-preview` y `edit`). Sin él, la interfaz no ofrece la acción («Cancelar unidades» no aparece en el
+  menú del producto; en «Modificar» el «−» no baja de la cantidad enviada) y Go la rechaza: la ruta `cancel` vuelve a
+  exigir `orders.cancel` (`403 PERMISSION_DENIED` antes de leer el cuerpo) y `calculateEdit` exige `orders.cancel` si la
+  cantidad baja (`403 PERMISSION_DENIED`, «Reducir la cantidad de un producto enviado a cocina requiere el permiso
+  «Cancelar partidas o cantidades confirmadas».», ya en la previsualización). No hay camino de supervisor.
+- **Qué pasaba antes de la 9F**: exactamente eso (la ruta exigía `orders.cancel` y reducir también; la interfaz lo
+  mostraba solo con el permiso). La 9F agregó que, sin él, procediera con la autorización de un supervisor (la ruta
+  dejaba entrar con `accounts.read` + `accounts.open`); la 9H lo retira.
+- **Go** (`operations`): fuera `unitsCancelRule`, `authorizationFields` y `auditSupervisor` de `supervisor_approval.go`
+  (que queda solo para «Cancelar cuenta», con `approveWithSupervisor` y `approveCancellation`), `requireUnitsCancelRoute`
+  de `handler.go`, `Authorization` de `cancel` y de `EditInput`, `Reduces` de `editCalculation` y
+  `cancel_units_requires_authorization` de `Account` y `QuoteResult`. Los eventos `item.cancelled`/`item.modified` nuevos
+  ya no llevan `authorized_by*` ni se audita `restaurant.supervisor_authorized` (`item_cancel`/`item_modify`); siguen
+  registrando quién lo hizo (autor del evento y de la auditoría `restaurant.item.cancelled`/`modified`) y el motivo. La
+  huella sin contraseña (`withoutAuthorizationPasswords`) no cambió.
+- **React**: `CancelItem.tsx` sin formulario de supervisor; `BillLines.tsx` ofrece «Cancelar unidades» solo con
+  `orders.cancel` (la 9F también con `accounts.open`); `CustomizationPanel.tsx` sin autorización y con mínimo = cantidad
+  enviada sin `orders.cancel` (`canReduce` desde `CaptureScreen.tsx`); tipos de `services/restaurant.ts` sin el campo ni
+  `authorization`. Se conservan `UnitsAuthorization` de `HistoryDetails.tsx` (muestra los eventos de la 9F que guardaron
+  quién autorizó) y la repetición de la autorización de «Recuperar resultado» (`OperationalPage.tsx`, común a «Cancelar
+  cuenta»).
+- **Reportes** (decisión del coordinador): «Autorizó» **se conserva** en «Modificaciones de cantidades» y «Productos
+  cancelados»: vacía en lo nuevo, con el supervisor en los registros de la 9F y con quien autorizó cancelar la cuenta en
+  las partidas de una cuenta cancelada (9D). «Actividad por empleado» sigue contando las autorizaciones de la 9F (ninguna
+  nueva). Nota y descripciones de la columna actualizadas. Sin datos ni columnas borrados de la base.
+- **`cancel_units_requires_authorization`** no estaba en el contrato v1 (`openapi.json`, `docs/API_V1.md`): se retiró.
+  `API_CONTRACTS.md` marca la sección de la 9F como retirada y agrega «Etapa 9H · “Cancelar unidades” sin autorización de
+  supervisor».
+- **«Cancelar cuenta» (9D) no cambia**: conserva su autorización de supervisor.
+
+**§2.3 · Precio unitario por renglón** (opción del bloque, decisión del propietario)
+
+- Opción `show_unit_price` «Mostrar precio unitario» de la lista de productos (`ProductsOptions`, sustituye a
+  `NotesOptions`), **desactivada por omisión**, solo en la precuenta y el ticket de pago (los documentos con renglones
+  con importe; la comanda y los avisos de cocina no la tienen y la lista de cocina rechaza la clave). El catálogo de Go la
+  entrega con su ayuda; el editor la muestra sin cambios (control genérico) y la estructura dice «Lista de productos ·
+  Con precio unitario» (`blockLabels.ts`).
+- **Precio comercial de la unidad**: el que ya calcula el motor del catálogo (base o variante más complementos e
+  ingredientes extra), antes de promociones y descuentos, tal como Go lo guardó en las unidades
+  (`restaurant_item_units.subtotal`): `payments.FinanceLine.UnitPrice` (`json:"-"`, fuera de la respuesta de cobros) →
+  `DocumentLine.unit_price` (guardado con el documento, omitido si falta) → `CommercialLine.UnitPrice`. Si las unidades de
+  una partida no comparten un precio, no se muestra. El importe del renglón no cambia (con una promoción, «3 × $150.00»
+  puede ir con un importe menor). Se expresa con `moneytext`; React no calcula nada.
+- **Impresión** (`renderProductLine`): «3 × $150.00 Tacos … $450.00» en el mismo renglón si cabe completo junto al
+  importe en el ancho del bloque; si no, el renglón de siempre («3 x Tacos … $450.00», cortado como antes) y debajo
+  « 3 × $150.00» (sangría de las observaciones), antes de la nota. Vale para 42/48 y 30/32 columnas y para el doble
+  ancho. Misma IR en vista previa, muestra, impresión, reimpresión y «Imprimir con la plantilla vigente».
+- **Predeterminadas idénticas byte a byte**: la clave lleva `omitempty`, así que mientras está apagada no aparece en la
+  forma canónica: el JSON de las diez predeterminadas (el que siembra la 0018) y lo que imprimen no cambian, y las
+  plantillas guardadas sin la opción siguen válidas con los mismos bytes. Los datos de muestra traen el precio unitario
+  (sin efecto con la opción apagada).
+
+**§2.4 · Sesiones en varios dispositivos** (decisión del propietario)
+
+- `issueSession` recibe el alcance: **iniciar sesión** cierra solo la sesión vigente del usuario **en la misma
+  terminal** (`replaced`); **cambiar la contraseña** sigue cerrando las de todas las terminales (`password_changed`).
+  Cerrar sesión, revocar la terminal, desactivar al usuario y el restablecimiento de soporte no cambian.
+- **Base**: 0024 sección A sustituye `sessions_one_active_user_idx` (único por usuario, de la 0002) por
+  `sessions_one_active_user_device_idx` (único por `user_id, device_id` con `revoked_at IS NULL`); no toca filas.
+- `SESSION_REPLACED` dice «Tu sesión se cerró porque el usuario inició sesión de nuevo en esta terminal.».
+- `devices/sessions-summary` ya contaba sesiones (sin cambio de código, comentario aclarado) y el «usuario actual» de
+  Sistema › Terminales ya era por terminal.
+- **Revisado, sin cambios**: turnos de caja y arqueo son de la caja física de la terminal (`payments` usa
+  `devices.register_id`; el único índice por usuario era el de sesiones; `cash_shifts_one_active_idx` es por caja),
+  permisos leídos en cada petición de cada sesión, SSE limitado a 2 conexiones por terminal, `restaurant/state` con la
+  terminal y el usuario de la sesión, estaciones visibles por terminal ∩ usuario.
+- Contrato: descripción de `login` en `openapi.json`, `docs/API_V1.md` (§4) y `API_CONTRACTS.md` («Etapa 9H ·
+  sesiones en varios dispositivos»). Sin operaciones ni esquemas nuevos.
+
+### Decisiones tomadas en la fase
+
+1. **`authorization` deja de ser un campo** de `cancel`, `edit` y `edit-preview` (decodificación estricta: enviarlo es
+   `400 OPERATION_VALIDATION`). Un cliente 0.10.0 con el permiso propio nunca lo envía (el formulario solo aparecía sin
+   él) y sin el permiso el `403` llega antes; un 0.10.0 sin el permiso que toque «Cancelar unidades» recibe `403
+PERMISSION_DENIED` con su mensaje. Por eso **no** se subieron `min_client_version` ni `min_server_version`.
+2. **`auditSupervisor` y `authorizationFields` se quitaron**: solo los usaban las unidades («Cancelar cuenta» audita su
+   autorización directamente en `account_cancellation.go` y guarda quién autorizó en `account_cancellations`). La nota de
+   la Fase 0 los daba como compartidos; el compilador lo confirma.
+3. **La reducción se rechaza ya en `edit-preview`** (como antes de la 9F), con un mensaje propio que nombra el permiso;
+   la interfaz no la ofrece.
+4. **Precio unitario = subtotal de la unidad** (no el `unit_price` del JSON de la versión): es lo que Go guardó y cobró,
+   también después de una modificación que conserva precios; coincide con el `unit_price` del motor en los demás casos.
+5. **Formato**: «N × $P Nombre» en un renglón (el «×» del ejemplo de la especificación; CP850 lo tiene, como «Producto × 2»
+   de cocina) y, si no cabe, el renglón de siempre con «N x» más « N × $P» debajo.
+6. **Cambiar la contraseña sigue cerrando todas las sesiones** del usuario (la especificación solo cambia el inicio de
+   sesión; es lo seguro).
+
+### Pruebas ejecutadas (aisladas)
+
+- `go-unit`: aprobado (`go vet` normal e `integration`, `go test -race ./...`, `GOOS=windows` build y vet normal e
+  `integration`).
+- Integración (`iso.sh go-int`):
+  - después de §2.2: `./internal/operations` aprobado (312 s, incluye `TestStage9HCancelUnitsWithoutAuthorization` y
+    `TestStage9FRetiredVoid`) y `./internal/reports` aprobado (124 s);
+  - después de §2.3: `./internal/designer` aprobado (22 s); `./internal/operations` con `TestRestaurantAcceptance` (la
+    cadena con los documentos de la 9B, reimpresión idéntica incluida) y `TestStage9HUnitPriceInCommercialDocuments`
+    aprobado (245 s);
+  - después de §2.4: `TestStage9HSameUserOnTwoTerminals` aprobado; `./internal/database` (10 s, con
+    `TestStage9HUpgrade` 23 → 24 y la de la 9G ajustada), `./internal/apicontract` (8 s, `TestContractV1`) y
+    `./internal/administration` (117 s, `TestStageTwoAcceptance` con `14_new_login_replaces_only_the_session_of_the_same_terminal`)
+    aprobados;
+  - al final: `./internal/payments` (3 s), `./internal/operations` completo (330 s) y `./internal/reports` (125 s), aprobados.
+- Unitarias nuevas: `documents/unit_price_test.go` (predeterminadas idénticas por SHA-256 del JSON canónico y de texto
+  y ESC/POS a 42/48/30/32 calculados antes del cambio; plantillas sin la opción; catálogo; renglones con y sin espacio a
+  42, 48, 30 y 32 columnas; doble ancho).
+- Vitest: `tsc --noEmit` y 94 archivos, 884 pruebas aprobadas (`cancelItem.test.tsx` y el caso de reducción de
+  `capture.test.tsx` reescritos; caso nuevo sin `orders.cancel`; `designer.test.tsx` con «Mostrar precio unitario»).
+- Playwright Chromium: `workflow-stage9h-adjustments` 3 de 3; junto con `workflow-stage9b-designer`,
+  `workflow-stage9f-cancel-units` (reescrita: sin el permiso no se ofrece, «Modificar» no baja y Go responde 403),
+  `workflow-stage9g-terminals` y `workflow-stage9g-two-terminals`: 9 de 9. WebKit (pantalla sin bloquear):
+  `workflow-stage9f-cancel-units` y `workflow-stage9h-adjustments`, 4 de 4.
+- `fmt-check` y `sync-check` aprobados; `docs/etapas/*.md` sin cambios (md5). Sin cambios de Rust (no se corrió
+  `cargo`).
+
+### No verificado
+
+- El «×» y los renglones del precio unitario en papel real (CP850 0x9E en una impresora física), y 48/32 columnas en
+  papel (siguen como prueba física pendiente desde la 9C).
+- Dos dispositivos reales a la vez por la red local (las dos terminales de Playwright son dos credenciales en la misma
+  Mac) y un teléfono Android; Windows.
+- La regresión completa (Fase F).
+
+### Para CLAUDE.md
+
+- Encabezado y §13–14: esquema **24**, migración `0024_legacy_migration.sql` (una para la etapa, sección A: índice de
+  sesiones por usuario y terminal).
+- §3, «Composición del backend»: `restaurant/*` recibe el autorizador de supervisor solo para «Cancelar cuenta»; §4, la
+  línea de `internal/operations/`: `supervisor_approval.go` es la autorización de «Cancelar cuenta» (la 9F la compartía
+  con «Cancelar unidades»).
+- §11–12, «Reglas permanentes desde la etapa 9D»: quitar `cancel_units_requires_authorization` de la lista de lo que
+  calcula Go. «Reglas permanentes desde la etapa 9F»: sustituir el último punto por «**«Cancelar unidades» y reducir
+  una cantidad enviada solo con el permiso propio `orders.cancel`, sin autorización de supervisor** (etapa 9H): sin él no
+  se ofrecen y Go las rechaza; queda registrado quién lo hizo. «Cancelar cuenta» conserva su autorización».
+- §15, «Etapa 9F» › «Autorización para cancelar unidades»: anotar «retirada en la etapa 9H (decisión del propietario)»;
+  nueva entrada **Etapa 9H** con: (1) cancelar o reducir unidades sin supervisor, «Autorizó» conservada (vacía en lo
+  nuevo); (2) **precio unitario**: opción `show_unit_price` de la lista de productos (precuenta y ticket), desactivada
+  por omisión y omitida de la forma canónica (predeterminadas idénticas byte a byte), precio de Go antes de promociones y
+  descuentos (subtotal de la unidad), en el mismo renglón o debajo del nombre; (3) **sesiones por dispositivo**: una por
+  usuario y terminal, iniciar sesión solo cierra la de esa terminal, cambiar la contraseña cierra todas, el conteo por
+  tipo cuenta sesiones.
+- §19, «Una sesión activa por usuario (D9)»: resuelto en la 9H (una por usuario y por terminal); las licencias por
+  sesiones simultáneas siguen para la etapa 10.
+- §20, punto 3: quitar «o, desde la 9F, `orders.cancel`» de los permisos que puede sustituir un supervisor; punto 6: quitar
+  `cancel_units_requires_authorization` de la lista.
+- §6, «Pruebas seguras»: integración nueva `TestStage9HCancelUnitsWithoutAuthorization`,
+  `TestStage9HUnitPriceInCommercialDocuments` y `TestStage9HSameUserOnTwoTerminals` (`operations`), `TestStage9HUpgrade`
+  (`database`, 23 → 24; las pruebas de subida anteriores, también la de la 9G, migran hasta la última); la de la 9F se
+  llama ahora `TestStage9FRetiredVoid`; Playwright `workflow-stage9h-adjustments.spec.ts` (sus datos: «Antojitos 9H-A»,
+  «Sopes 9H-A», «Patio 9H-A», «Mesa H1», la terminal «Comedor 9H-A» y la plantilla «Ticket con precio unitario 9H», sin
+  firmas: no son impresoras, estaciones ni productos de las listas de `maintenance/signatures.go`).
+- Regla permanente propuesta: «Una opción nueva de un bloque de documento que no deba cambiar las plantillas existentes
+  lleva `omitempty` y su valor por omisión en falso, y una prueba con el SHA-256 de las predeterminadas».
