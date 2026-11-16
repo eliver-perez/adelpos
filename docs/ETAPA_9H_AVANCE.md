@@ -326,8 +326,13 @@ Preguntas 1, 6, 12 y 13 de [MIGRACION_ANALISIS.md](MIGRACION_ANALISIS.md) §7:
 
 ### Decisiones del coordinador (reglas vigentes del propietario; ninguna cambia la especificación)
 
-- **Fecha de reconocimiento** de una venta importada (pregunta 3): la de su **último pago**, como AD-EL POS reconoce la
-  venta al cerrar la cuenta (decisión del propietario de la 9A, CLAUDE.md §21); la fecha de apertura se conserva.
+- **Fecha de reconocimiento** de una venta importada (pregunta 3): la del pago que la **liquida**, como AD-EL POS
+  reconoce la venta al cerrar la cuenta (decisión del propietario de la 9A, CLAUDE.md §21); la fecha de apertura se
+  conserva. Precisada tras la revisión independiente de la Fase C (hallazgo I-1: un pago repetido, en cero o negativo
+  registrado después movía la venta de día, turno o año): es el pago con el que lo acumulado, contando solo pagos
+  mayores que cero en orden de fecha, alcanza lo que se debía; si nunca lo alcanza, el último pago mayor que cero; sin
+  pagos mayores que cero, la apertura. Los pagos en cero o negativos se importan y cuentan en Cobros con su marca, pero
+  no mueven la fecha.
 - **Ventas canceladas** (pregunta 4): entran como **canceladas que no son venta** (regla de la 9D: una cuenta cancelada
   nunca cuenta como venta), aunque el «Registro de ventas» y los cortes del anterior las contaran; el informe muestra
   aparte el total al estilo del anterior para poder compararlo.
