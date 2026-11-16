@@ -3649,3 +3649,26 @@ PERMISSION_DENIED` («Reducir la cantidad de un producto enviado a cocina requie
 payments/accounts/{id}/precheck`) agrega `unit_price` (decimal en texto, omitido si no existe), el precio comercial de
   una unidad que calculó Go antes de promociones y descuentos. `amount` no cambia. La respuesta de cobros
   (`payments/accounts/{id}`) no cambia. No forma parte del contrato v1.
+
+## Etapa 9H · sesiones en varios dispositivos (fase A, esquema 24)
+
+Decisión del propietario (§0-B y §2.4 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)): un usuario puede tener una
+sesión activa por dispositivo, en varios dispositivos a la vez.
+
+- **`POST auth/login`**: cierra solo la sesión vigente del usuario **en la misma terminal** (`revoke_reason`
+  `replaced`, auditoría `session.replaced` con `revoked_sessions`); las de otras terminales siguen. Hasta la 9G cerraba
+  las del usuario en todas. La sesión reemplazada responde `401 SESSION_REPLACED` con «Tu sesión se cerró porque el
+  usuario inició sesión de nuevo en esta terminal.».
+- **Sin cambios**: `auth/logout` (solo esa sesión), `auth/password` (cierra las del usuario en todas las terminales con
+  `password_changed` y abre una nueva en esta), revocar una terminal (`device_revoked`), desactivar al usuario
+  (`user_disabled`), el restablecimiento de soporte (`support_reset`) y `sessions/{id}/revoke`.
+- **Base** (0024, sección A): `sessions_one_active_user_idx` (único por `user_id` con `revoked_at IS NULL`) se sustituye
+  por `sessions_one_active_user_device_idx` (único por `user_id, device_id` con `revoked_at IS NULL`). No cierra ni
+  modifica sesiones existentes.
+- **`GET devices/sessions-summary`** cuenta sesiones, no usuarios (el mismo usuario en dos terminales son dos) y **`GET
+devices`** muestra el usuario actual de cada terminal (el mismo usuario puede aparecer en varias). Sin campos nuevos.
+- **Por terminal, como antes**: caja física y turno (`payments/shifts/current`, apertura, arqueo y cierre de la caja de
+  la terminal), estaciones visibles, canal de eventos (2 conexiones por terminal) y `restaurant/state`; los permisos se
+  leen en cada petición de cada sesión.
+- Contrato v1: la descripción de `login` en `openapi.json` y [docs/API_V1.md](docs/API_V1.md) (§4) dicen el
+  comportamiento nuevo; sin operaciones ni esquemas nuevos.

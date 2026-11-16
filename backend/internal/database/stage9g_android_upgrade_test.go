@@ -46,8 +46,11 @@ func TestStage9GAndroidUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if last := expected[len(expected)-1].Version; last != 23 || product.Read().SchemaVersion != 23 {
-		t.Fatalf("se esperaba el esquema 23 en la última migración (%d) y en el producto (%d)", last, product.Read().SchemaVersion)
+	// Desde la etapa 9H la última migración es posterior a la 0023: se migra desde el esquema 22 hasta la última y se
+	// comprueba solo el efecto de la 0023 (la sección A de la 0024 solo cambia el índice de sesiones; no toca catálogo,
+	// cuentas, impresoras, respaldos ni claves de operación).
+	if last := expected[len(expected)-1].Version; last < 23 || last != product.Read().SchemaVersion {
+		t.Fatalf("la última migración (%d) no coincide con el esquema del producto (%d)", last, product.Read().SchemaVersion)
 	}
 	schema22 := fstest.MapFS{}
 	for _, migration := range expected {
@@ -66,7 +69,7 @@ func TestStage9GAndroidUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := stage9GSnapshot(ctx, t, pool)
-	if n, err := Migrate(ctx, pool); err != nil || n != 1 {
+	if n, err := Migrate(ctx, pool); err != nil || n != len(expected)-22 {
 		t.Fatalf("la 0023 no se aplicó sobre el esquema 22: %d %v", n, err)
 	}
 	if n, err := Migrate(ctx, pool); err != nil || n != 0 {
