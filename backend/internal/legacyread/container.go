@@ -24,11 +24,15 @@ const (
 	Platform = "linux/amd64"
 	// ReaderLabel marca los contenedores y volúmenes del lector: los que queden de una ejecución interrumpida se
 	// eliminan al empezar (y solo esos).
-	ReaderLabel  = "local.adel.pos.legacy-reader=1"
-	namePrefix   = "adel-legacy-"
-	backupTarget = "/backup/respaldo.bak"
-	dataTarget   = "/var/opt/mssql"
-	databaseName = "adel_legacy"
+	ReaderLabel = "local.adel.pos.legacy-reader=1"
+	// ReaderPIDLabel y ReaderStartedLabel dicen qué proceso creó el lector y cuándo: la limpieza de restos solo borra
+	// los lectores cuyo proceso ya no existe (o de hace más de staleReaderAge), nunca los de una preparación en curso.
+	ReaderPIDLabel     = "local.adel.pos.legacy-reader.pid"
+	ReaderStartedLabel = "local.adel.pos.legacy-reader.started"
+	namePrefix         = "adel-legacy-"
+	backupTarget       = "/backup/respaldo.bak"
+	dataTarget         = "/var/opt/mssql"
+	databaseName       = "adel_legacy"
 )
 
 // Plazos de las órdenes de docker.
@@ -38,6 +42,8 @@ const (
 	cleanupTimeout = 2 * time.Minute
 	probeTimeout   = 30 * time.Second
 	pullTimeout    = 2 * time.Hour
+	// staleReaderAge: un lector más viejo que esto es un resto aunque su PID exista (el PID pudo reutilizarse).
+	staleReaderAge = 12 * time.Hour
 )
 
 // imageInfo es la imagen que se usó (va al manifiesto).
@@ -57,6 +63,10 @@ type container struct {
 	sleep    func(context.Context, time.Duration) error
 	created  bool
 	readyFor time.Duration
+	// pid y started van en las etiquetas; alive dice si el proceso de un lector anterior sigue vivo.
+	pid     int
+	started time.Time
+	alive   func(pid int) bool
 }
 
 func randomHex(size int) string {
@@ -79,8 +89,12 @@ func newContainer(
 	tempDir string,
 	sleep func(context.Context, time.Duration) error,
 	ready time.Duration,
+	alive func(pid int) bool,
 ) *container {
 	name := namePrefix + randomHex(6)
+	if alive == nil {
+		alive = processAlive
+	}
 	return &container{
 		runner:   runner,
 		events:   events,
@@ -89,6 +103,18 @@ func newContainer(
 		tempDir:  tempDir,
 		sleep:    sleep,
 		readyFor: ready,
+		pid:      os.Getpid(),
+		started:  time.Now(),
+		alive:    alive,
+	}
+}
+
+// labels son las etiquetas del contenedor y del volumen.
+func (box *container) labels() []string {
+	return []string{
+		"--label", ReaderLabel,
+		"--label", ReaderPIDLabel + "=" + strconv.Itoa(box.pid),
+		"--label", ReaderStartedLabel + "=" + strconv.FormatInt(box.started.Unix(), 10),
 	}
 }
 
@@ -102,8 +128,20 @@ func (box *container) run(ctx context.Context, timeout time.Duration, arguments 
 	return stdout.String(), stderr.String(), err
 }
 
-// checkDocker comprueba que Docker esté en marcha y use contenedores de Linux.
+// checkDocker comprueba que Docker sea el de esta computadora (DOCKER_HOST o el contexto actual pueden apuntar a otra:
+// el respaldo nunca sale del equipo), que esté en marcha y que use contenedores de Linux.
 func (box *container) checkDocker(ctx context.Context) error {
+	endpoint, _, err := box.run(ctx, shortTimeout, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
+	if ctx.Err() != nil {
+		return fail(CodeCancelled, "", ctx.Err())
+	}
+	if err != nil {
+		return fail(CodeDockerNotRunning, "docker context inspect falló", err)
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	if !strings.HasPrefix(endpoint, "unix://") && !strings.HasPrefix(endpoint, "npipe://") {
+		return fail(CodeDockerRemote, "Docker no es local (DOCKER_HOST o el contexto apuntan a una dirección de red)", nil)
+	}
 	stdout, _, err := box.run(ctx, shortTimeout, "info", "--format", "{{.OSType}}")
 	if ctx.Err() != nil {
 		return fail(CodeCancelled, "", ctx.Err())
@@ -180,26 +218,61 @@ func (box *container) inspectImage(ctx context.Context) (imageInfo, bool) {
 	return info, true
 }
 
-// removeLeftovers elimina los contenedores y volúmenes del lector que haya dejado una ejecución interrumpida (solo los
-// que llevan la etiqueta del lector).
-func (box *container) removeLeftovers(ctx context.Context) error {
-	stdout, _, err := box.run(ctx, shortTimeout, "ps", "-a", "-q", "--filter", "label="+ReaderLabel)
+// labelFormat es el formato de docker ps y docker volume ls para la limpieza: identificador, PID y hora.
+const labelFormat = `|{{.Label "` + ReaderPIDLabel + `"}}|{{.Label "` + ReaderStartedLabel + `"}}`
+
+// stale dice si un lector es un resto: sin PID (de una versión anterior), de un proceso que ya no existe o de hace más
+// de staleReaderAge. Uno de una preparación en curso (otro proceso vivo) nunca se toca.
+func (box *container) stale(pidLabel, startedLabel string) bool {
+	pid, err := strconv.Atoi(strings.TrimSpace(pidLabel))
+	if err != nil || pid <= 0 {
+		return true
+	}
+	if started, err := strconv.ParseInt(strings.TrimSpace(startedLabel), 10, 64); err == nil {
+		if time.Since(time.Unix(started, 0)) > staleReaderAge {
+			return true
+		}
+	}
+	return !box.alive(pid)
+}
+
+// staleEntries interpreta la salida «nombre|pid|hora» y devuelve los restos.
+func (box *container) staleEntries(output string) []string {
+	stale := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Split(strings.TrimSpace(line), "|")
+		if len(fields) != 3 || fields[0] == "" {
+			continue
+		}
+		if box.stale(fields[1], fields[2]) {
+			stale = append(stale, fields[0])
+		}
+	}
+	return stale
+}
+
+// removeLeftovers elimina los contenedores y volúmenes del lector que haya dejado una ejecución interrumpida: solo los
+// que llevan la etiqueta del lector y cuyo proceso ya no existe.
+func (box *container) removeLeftovers(ctx context.Context, report *CleanupReport) error {
+	stdout, _, err := box.run(ctx, shortTimeout, "ps", "-a", "--filter", "label="+ReaderLabel, "--format", "{{.ID}}"+labelFormat)
 	if err != nil {
 		return fail(CodeDockerNotRunning, "docker ps falló", err)
 	}
-	if ids := strings.Fields(stdout); len(ids) > 0 {
+	if ids := box.staleEntries(stdout); len(ids) > 0 {
 		if _, _, err := box.run(ctx, runTimeout, append([]string{"rm", "-f", "-v"}, ids...)...); err != nil {
 			return fail(CodeReaderStartFailed, "no se pudo eliminar un lector anterior", err)
 		}
+		report.Containers += len(ids)
 	}
-	stdout, _, err = box.run(ctx, shortTimeout, "volume", "ls", "-q", "--filter", "label="+ReaderLabel)
+	stdout, _, err = box.run(ctx, shortTimeout, "volume", "ls", "--filter", "label="+ReaderLabel, "--format", "{{.Name}}"+labelFormat)
 	if err != nil {
 		return fail(CodeDockerNotRunning, "docker volume ls falló", err)
 	}
-	if names := strings.Fields(stdout); len(names) > 0 {
+	if names := box.staleEntries(stdout); len(names) > 0 {
 		if _, _, err := box.run(ctx, runTimeout, append([]string{"volume", "rm", "-f"}, names...)...); err != nil {
 			return fail(CodeReaderStartFailed, "no se pudo eliminar un volumen anterior", err)
 		}
+		report.Volumes += len(names)
 	}
 	return nil
 }
@@ -216,10 +289,9 @@ func mountOption(fields ...string) string {
 // runArguments son los argumentos exactos de docker run (las pruebas los comprueban): sin red, con la etiqueta del
 // lector, el respaldo de solo lectura, el volumen propio y la contraseña solo por el entorno (-e sin valor).
 func (box *container) runArguments(image, backup string) []string {
-	return []string{
-		"run", "-d",
-		"--name", box.name,
-		"--label", ReaderLabel,
+	arguments := []string{"run", "-d", "--name", box.name}
+	arguments = append(arguments, box.labels()...)
+	return append(arguments,
 		"--platform", Platform,
 		"--pull", "never",
 		"--network", "none",
@@ -229,13 +301,14 @@ func (box *container) runArguments(image, backup string) []string {
 		"--mount", mountOption("type=bind", "source="+backup, "target="+backupTarget, "readonly"),
 		"--mount", mountOption("type=volume", "source="+box.volume, "target="+dataTarget),
 		image,
-	}
+	)
 }
 
 // start crea el volumen y el contenedor. Si Docker no puede montar la carpeta del respaldo (por ejemplo una USB fuera
 // de las carpetas compartidas de Docker Desktop), copia el respaldo a una carpeta temporal privada y monta la copia.
 func (box *container) start(ctx context.Context, image, backup string, size int64) error {
-	if _, _, err := box.run(ctx, shortTimeout, "volume", "create", "--label", ReaderLabel, box.volume); err != nil {
+	create := append(append([]string{"volume", "create"}, box.labels()...), box.volume)
+	if _, _, err := box.run(ctx, shortTimeout, create...); err != nil {
 		if ctx.Err() != nil {
 			return fail(CodeCancelled, "", ctx.Err())
 		}

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -180,15 +181,78 @@ func requireSyntheticContent(t *testing.T, path string, expected legacypkg.Manif
 	return manifest
 }
 
-func requireNoLeftovers(t *testing.T, docker string) {
+// requireNoLeftovers comprueba que no quedó ningún contenedor ni volumen de los procesos de esta prueba (por la
+// etiqueta con su PID: un lector de otra ejecución viva no cuenta).
+func requireNoLeftovers(t *testing.T, docker string, pids ...int) {
 	t.Helper()
-	for _, label := range []string{ReaderLabel, testLabel} {
-		containers := dockerRun(t, docker, "", "ps", "-a", "-q", "--filter", "label="+label)
-		volumes := dockerRun(t, docker, "", "volume", "ls", "-q", "--filter", "label="+label)
-		if strings.TrimSpace(containers+volumes) != "" {
-			t.Fatalf("quedaron contenedores o volúmenes con %s: %q %q", label, containers, volumes)
+	ours := map[string]bool{}
+	for _, pid := range pids {
+		ours[strconv.Itoa(pid)] = true
+	}
+	format := `{{.Label "` + ReaderPIDLabel + `"}}`
+	containers := dockerRun(t, docker, "", "ps", "-a", "--filter", "label="+ReaderLabel, "--format", "{{.ID}}|"+format)
+	volumes := dockerRun(t, docker, "", "volume", "ls", "--filter", "label="+ReaderLabel, "--format", "{{.Name}}|"+format)
+	for _, line := range strings.Split(strings.TrimSpace(containers+"\n"+volumes), "\n") {
+		name, pid, _ := strings.Cut(strings.TrimSpace(line), "|")
+		if name != "" && ours[pid] {
+			t.Fatalf("quedó %s del proceso %s", name, pid)
 		}
 	}
+}
+
+// preparation es una ejecución del subcomando real.
+type binaryRun struct {
+	command *exec.Cmd
+	stdout  *bytes.Buffer
+}
+
+func startBinary(t *testing.T, binary, backup, output, tempDir string) *binaryRun {
+	t.Helper()
+	command := exec.Command(binary, "legacy-prepare", "--backup", backup, "--output", output)
+	command.Stdin = strings.NewReader(testPassphrase + "\n")
+	command.Env = append(os.Environ(), "TMPDIR="+tempDir, "TMP="+tempDir, "TEMP="+tempDir)
+	stdout := &bytes.Buffer{}
+	command.Stdout = stdout
+	command.Stderr = os.Stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return &binaryRun{command: command, stdout: stdout}
+}
+
+// finish espera el fin y devuelve el último evento.
+func (run *binaryRun) finish(t *testing.T) (map[string]any, []byte) {
+	t.Helper()
+	_ = run.command.Wait()
+	var last map[string]any
+	var lastLine []byte
+	scanner := bufio.NewScanner(bytes.NewReader(run.stdout.Bytes()))
+	scanner.Buffer(make([]byte, 1<<20), 1<<24)
+	for scanner.Scan() {
+		var event map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatalf("línea que no es JSON: %s", scanner.Text())
+		}
+		last = event
+		lastLine = append([]byte{}, scanner.Bytes()...)
+	}
+	return last, lastLine
+}
+
+func requireResult(t *testing.T, name string, event map[string]any, line []byte, expected legacypkg.Manifest) Summary {
+	t.Helper()
+	if event["event"] != "result" {
+		t.Fatalf("%s: %v", name, event)
+	}
+	var result ResultEvent
+	if err := json.Unmarshal(line, &result); err != nil {
+		t.Fatal(err)
+	}
+	summary := result.Summary
+	if summary.ContentFingerprint != expected.ContentFingerprint || !summary.Verified || summary.Sales == nil || len(summary.Tables) != 50 {
+		t.Fatalf("%s: resumen %+v", name, summary)
+	}
+	return summary
 }
 
 func TestLegacyPrepareWithDocker(t *testing.T) {
@@ -198,47 +262,39 @@ func TestLegacyPrepareWithDocker(t *testing.T) {
 	t.Logf("respaldo sintético creado en %.1f s", time.Since(started).Seconds())
 	expected := syntheticManifest(t)
 	directory := t.TempDir()
-
-	// 1. El subcomando real (binario compilado, frase por la entrada estándar, avance en líneas JSON).
 	binary := filepath.Join(t.TempDir(), "ad-el-pos-server")
 	build := exec.Command("go", "build", "-o", binary, "./cmd/ad-el-pos-server")
 	build.Dir = filepath.Join("..", "..")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, output)
 	}
-	output := filepath.Join(directory, "sintetico.adelmig")
-	command := exec.Command(binary, "legacy-prepare", "--backup", backup, "--output", output)
-	command.Stdin = strings.NewReader(testPassphrase + "\n")
-	var stdout bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = os.Stderr
-	prepared := time.Now()
-	if err := command.Run(); err != nil {
-		t.Fatalf("legacy-prepare: %v\n%s", err, stdout.String())
+	// 1. El subcomando real (binario compilado, frase por la entrada estándar, avance en líneas JSON). Mientras corre:
+	//    otra preparación con la misma carpeta temporal responde ALREADY_RUNNING, y una con otra carpeta (otro bloqueo)
+	//    corre a la vez sin que ninguna destruya el lector de la otra.
+	shared := t.TempDir()
+	first := startBinary(t, binary, backup, filepath.Join(directory, "primero.adelmig"), shared)
+	time.Sleep(2 * time.Second)
+	blocked := startBinary(t, binary, backup, filepath.Join(directory, "bloqueado.adelmig"), shared)
+	event, _ := blocked.finish(t)
+	if event["code"] != CodeAlreadyRunning {
+		t.Fatalf("la segunda preparación con la misma carpeta: %v", event)
 	}
-	elapsed := time.Since(prepared)
-	var result ResultEvent
-	scanner := bufio.NewScanner(&stdout)
-	scanner.Buffer(make([]byte, 1<<20), 1<<24)
-	for scanner.Scan() {
-		var event map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
-			t.Fatalf("línea que no es JSON: %s", scanner.Text())
-		}
-		if event["event"] == "result" {
-			if err := json.Unmarshal(scanner.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-		}
+	parallelStart := time.Now()
+	parallel := startBinary(t, binary, backup, filepath.Join(directory, "paralelo.adelmig"), t.TempDir())
+	firstEvent, firstLine := first.finish(t)
+	parallelEvent, parallelLine := parallel.finish(t)
+	summary := requireResult(t, "la primera", firstEvent, firstLine, expected)
+	requireResult(t, "la que corrió a la vez", parallelEvent, parallelLine, expected)
+	t.Logf("legacy-prepare: %.1f s en total; pasos %v; paquete de %d bytes; la paralela terminó %.1f s después de empezar",
+		summary.Timings["total"], summary.Timings, summary.PackageBytes, time.Since(parallelStart).Seconds())
+	requireSyntheticContent(t, filepath.Join(directory, "primero.adelmig"), expected)
+	requireSyntheticContent(t, filepath.Join(directory, "paralelo.adelmig"), expected)
+	requireNoLeftovers(t, docker, first.command.Process.Pid, blocked.command.Process.Pid, parallel.command.Process.Pid)
+	if _, err := os.Stat(filepath.Join(directory, "bloqueado.adelmig")); !os.IsNotExist(err) {
+		t.Fatal("la preparación bloqueada escribió un paquete")
 	}
-	if result.Summary.ContentFingerprint != expected.ContentFingerprint || result.Summary.Sales == nil || len(result.Summary.Tables) != 50 {
-		t.Fatalf("resumen: %+v", result.Summary)
-	}
-	t.Logf("legacy-prepare: %.1f s en total; pasos %v; paquete de %d bytes", elapsed.Seconds(), result.Summary.Timings, result.Summary.PackageBytes)
-	requireSyntheticContent(t, output, expected)
-	requireNoLeftovers(t, docker)
 
-	// 2. Páginas de 7 filas (muchos límites de página, también en las tablas sin llave primaria).
+	// 2. Páginas de 7 filas (muchos límites de página, también en las tablas sin llave primaria), en este proceso.
 	paged := filepath.Join(directory, "paginas.adelmig")
 	var events bytes.Buffer
 	cli := CLI{
@@ -260,5 +316,5 @@ func TestLegacyPrepareWithDocker(t *testing.T) {
 	}
 	t.Logf("con páginas de 7 filas: %.1f s", time.Since(pagedStart).Seconds())
 	requireSyntheticContent(t, paged, expected)
-	requireNoLeftovers(t, docker)
+	requireNoLeftovers(t, docker, os.Getpid())
 }
