@@ -220,9 +220,12 @@ class ServerAnnouncementsTest {
             (1..5)
                 .map {
                     async {
-                        relocator
-                            .relocate(serverId, fingerprint, failed) { current }
-                            .also { result -> if (result != null) current = result }
+                        val result = relocator.relocate(serverId, fingerprint, failed) { current }
+                        // Como PairedConnection: la dirección nueva queda como la vigente.
+                        if (result != null) {
+                            current = result
+                        }
+                        result
                     }
                 }
                 .awaitAll()

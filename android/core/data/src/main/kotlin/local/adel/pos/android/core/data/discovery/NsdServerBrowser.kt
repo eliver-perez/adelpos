@@ -10,8 +10,6 @@ import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import local.adel.pos.android.core.domain.server.FoundServer
@@ -90,13 +88,14 @@ class NsdServerBrowser(
             if (withTimeoutOrNull(START_TIMEOUT_MILLIS) { started.await() } != true) {
                 return Browse.Unavailable
             }
+            // Durante la ventana se resuelve cada instancia que aparece, de una en una (así
+            // funciona
+            // igual en todas las versiones); al vencer, lo que se haya encontrado.
             withTimeoutOrNull(windowMillis) {
-                coroutineScope {
-                    launch {
-                        // De uno en uno: así funciona igual en todas las versiones.
-                        for (service in discovered) {
-                            resolve(nsd, service)?.let(found::add)
-                        }
+                for (service in discovered) {
+                    val server = resolve(nsd, service)
+                    if (server != null) {
+                        found.add(server)
                     }
                 }
             }

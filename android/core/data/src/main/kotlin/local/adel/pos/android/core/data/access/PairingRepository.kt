@@ -136,65 +136,96 @@ class PairingRepository(
 
     override suspend fun poll(): PairingStep = mutex.withLock {
         val current = session ?: return@withLock failed(PairingProblem.NoSession)
+        // Mientras no se tiene la credencial: se consulta el estado y, aprobada, se reclama.
         if (current.claimed == null) {
-            when (
-                val status =
-                    current.api.get(
-                        "pairing/requests/${current.requestId}",
-                        PairingStatusDto.serializer(),
-                        current.headers(),
-                    )
-            ) {
-                is ApiOutcome.Success -> {
-                    status.value.name?.takeIf { it.isNotBlank() }?.let { current.deviceName = it }
-                    if (status.value.state != "approved") {
-                        val state =
-                            PairingState.fromWireName(status.value.state)
-                                ?: return@withLock failed(
-                                    PairingProblem.Server(AppError.InvalidResponse(200)),
-                                )
-                        if (state.finished) {
-                            session = null
-                        }
-                        return@withLock PairingStep.Showing(current.view(state))
-                    }
-                }
-                else -> return@withLock failed(PairingProblem.Server(status.error()))
+            val notApprovedYet = checkApproval(current)
+            if (notApprovedYet != null) {
+                return@withLock notApprovedYet
             }
-            when (
-                val claim =
-                    current.api.post(
-                        "pairing/requests/${current.requestId}/claim",
-                        EmptyBody(),
-                        EmptyBody.serializer(),
-                        ClaimedCredentialDto.serializer(),
-                        current.headers(),
-                    )
-            ) {
-                is ApiOutcome.Success -> {
-                    val credential = claim.value
-                    if (
-                        !UUID_PATTERN.matches(credential.deviceId) ||
-                            credential.deviceToken.length != TOKEN_LENGTH ||
-                            credential.serverId != current.serverId
-                    ) {
-                        session = null
-                        return@withLock failed(PairingProblem.InvalidCredential)
-                    }
-                    current.claimed =
-                        Claimed(
-                            credential.deviceId,
-                            credential.deviceToken,
-                            credential.name.ifBlank { current.deviceName },
-                        )
-                }
-                else -> {
-                    session = null
-                    return@withLock failed(PairingProblem.Server(claim.error()))
-                }
+            val claimFailure = claimCredential(current)
+            if (claimFailure != null) {
+                return@withLock claimFailure
             }
         }
-        val claimed = current.claimed ?: return@withLock failed(PairingProblem.NoSession)
+        // Con la credencial: se guarda cifrada junto con el servidor emparejado.
+        saveClaimed(current)
+    }
+
+    /**
+     * Estado de la solicitud en el servidor. null si ya se aprobó (sigue reclamar la credencial);
+     * si no, lo que muestra la pantalla (en espera, rechazada, vencida…) o el problema.
+     */
+    private suspend fun checkApproval(current: Session): PairingStep? {
+        val outcome =
+            current.api.get(
+                "pairing/requests/${current.requestId}",
+                PairingStatusDto.serializer(),
+                current.headers(),
+            )
+        if (outcome !is ApiOutcome.Success) {
+            return failed(PairingProblem.Server(outcome.error()))
+        }
+        val status = outcome.value
+        // El administrador pudo corregir el nombre al aprobar.
+        val name = status.name
+        if (!name.isNullOrBlank()) {
+            current.deviceName = name
+        }
+        if (status.state == "approved") {
+            return null
+        }
+        val state =
+            PairingState.fromWireName(status.state)
+                ?: return failed(PairingProblem.Server(AppError.InvalidResponse(200)))
+        if (state.finished) {
+            session = null
+        }
+        return PairingStep.Showing(current.view(state))
+    }
+
+    /**
+     * Reclama la credencial del dispositivo, una sola vez. null si se recibió y es válida (queda en
+     * la sesión hasta guardarla); si no, el problema, y la sesión termina.
+     */
+    private suspend fun claimCredential(current: Session): PairingStep.Failed? {
+        val outcome =
+            current.api.post(
+                "pairing/requests/${current.requestId}/claim",
+                EmptyBody(),
+                EmptyBody.serializer(),
+                ClaimedCredentialDto.serializer(),
+                current.headers(),
+            )
+        if (outcome !is ApiOutcome.Success) {
+            session = null
+            return failed(PairingProblem.Server(outcome.error()))
+        }
+        val credential = outcome.value
+        val valid =
+            UUID_PATTERN.matches(credential.deviceId) &&
+                credential.deviceToken.length == TOKEN_LENGTH &&
+                credential.serverId == current.serverId
+        if (!valid) {
+            session = null
+            return failed(PairingProblem.InvalidCredential)
+        }
+        current.claimed =
+            Claimed(
+                deviceId = credential.deviceId,
+                deviceToken = credential.deviceToken,
+                deviceName = credential.name.ifBlank { current.deviceName },
+            )
+        return null
+    }
+
+    /**
+     * Cifra la credencial reclamada con el Android Keystore y guarda el servidor emparejado (su
+     * `server_id`, la huella fijada en la sesión, la dirección y los nombres). Si el Keystore
+     * falla, lo reclamado se conserva y la siguiente consulta vuelve a intentarlo sin reclamar otra
+     * vez.
+     */
+    private suspend fun saveClaimed(current: Session): PairingStep {
+        val claimed = current.claimed ?: return failed(PairingProblem.NoSession)
         val sealedToken =
             try {
                 sealer.seal(
@@ -202,8 +233,7 @@ class PairingRepository(
                     AccessRepository.DEVICE_PURPOSE,
                 )
             } catch (_: SecretUnavailableException) {
-                // Se conserva lo reclamado: la siguiente consulta vuelve a intentar guardarlo.
-                return@withLock failed(PairingProblem.StorageFailed)
+                return failed(PairingProblem.StorageFailed)
             }
         access.onPaired(
             PairedServerEntity(
@@ -220,7 +250,7 @@ class PairingRepository(
         )
         session = null
         current.deviceName = claimed.deviceName
-        PairingStep.Showing(current.view(PairingState.PAIRED))
+        return PairingStep.Showing(current.view(PairingState.PAIRED))
     }
 
     override suspend fun rename(deviceName: String): PairingStep = mutex.withLock {
