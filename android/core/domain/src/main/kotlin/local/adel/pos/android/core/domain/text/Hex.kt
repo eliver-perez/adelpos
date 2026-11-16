@@ -1,4 +1,4 @@
-package local.adel.pos.android.core.data.security
+package local.adel.pos.android.core.domain.text
 
 /** Hexadecimal en minúsculas, como guarda Go las huellas. */
 object Hex {
