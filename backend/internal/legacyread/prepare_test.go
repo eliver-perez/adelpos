@@ -2,10 +2,14 @@ package legacyread
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +44,7 @@ func newPreparation(t *testing.T) *preparation {
 			Sleep: func(ctx context.Context, duration time.Duration) error {
 				return ctx.Err()
 			},
+			ProcessAlive: testProcessAlive,
 		},
 		options: Options{
 			Backup:     backup,
@@ -51,6 +56,13 @@ func newPreparation(t *testing.T) *preparation {
 		directory: directory,
 		tempDir:   tempDir,
 	}
+}
+
+// livePID es el PID de una preparación «en curso» de otro proceso en las pruebas; los demás PID se dan por terminados.
+const livePID = 111
+
+func testProcessAlive(pid int) bool {
+	return pid == livePID || pid == os.Getpid()
 }
 
 func (run *preparation) prepare(ctx context.Context) (Summary, error) {
@@ -98,8 +110,12 @@ func (run *preparation) requireCleanedUp(t *testing.T, expectPackage bool) {
 	if !removedContainer || !removedVolume {
 		t.Fatalf("no se eliminó el contenedor (%v) o su volumen (%v)", removedContainer, removedVolume)
 	}
-	if entries, _ := os.ReadDir(run.tempDir); len(entries) != 0 {
+	// En la carpeta temporal solo queda la carpeta de trabajo con su bloqueo.
+	if entries, _ := os.ReadDir(run.tempDir); len(entries) != 1 || entries[0].Name() != workspaceName {
 		t.Fatalf("quedó en la carpeta temporal: %v", entries)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(run.tempDir, workspaceName)); len(entries) != 1 || entries[0].Name() != lockName {
+		t.Fatalf("quedó en la carpeta de trabajo: %v", entries)
 	}
 	entries, _ := os.ReadDir(run.directory)
 	for _, entry := range entries {
@@ -117,14 +133,21 @@ func (run *preparation) requireCleanedUp(t *testing.T, expectPackage bool) {
 // huella), los argumentos de docker son los exactos y al terminar no queda nada.
 func TestPrepareWritesTheExpectedPackageAndCleansUp(t *testing.T) {
 	run := newPreparation(t)
-	run.fake.leftoverIDs = "viejo1\nviejo2\n"
-	run.fake.leftoverVolumes = "adel-legacy-viejo-data\n"
+	now := time.Now().Unix()
+	old := time.Now().Add(-13 * time.Hour).Unix()
+	// viejo1: de otra preparación en curso (su proceso vive): no se toca. viejo2: su proceso terminó. viejo3: sin PID
+	// (versión anterior). viejo4: su PID existe, pero es de hace más de 12 horas (PID reutilizado).
+	run.fake.leftoverIDs = fmt.Sprintf("viejo1|%d|%d\nviejo2|222|%d\nviejo3||\nviejo4|%d|%d\n", livePID, now, now, livePID, old)
+	run.fake.leftoverVolumes = fmt.Sprintf("adel-legacy-vivo-data|%d|%d\nadel-legacy-viejo-data|222|%d\n", livePID, now, now)
 	summary, err := run.prepare(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.ContentFingerprint != run.fake.source.manifest.ContentFingerprint {
 		t.Fatal("el paquete no tiene el contenido del sintético")
+	}
+	if !summary.Verified || summary.Backup.Sets != 1 || summary.PreviousLeftovers.Containers != 3 || summary.PreviousLeftovers.Volumes != 1 {
+		t.Fatalf("resumen: verificado %v, juegos %d, restos %+v", summary.Verified, summary.Backup.Sets, summary.PreviousLeftovers)
 	}
 	file, err := os.Open(run.options.Output)
 	if err != nil {
@@ -144,7 +167,8 @@ func TestPrepareWritesTheExpectedPackageAndCleansUp(t *testing.T) {
 	source := manifest.Source
 	if source.Kind != legacypkg.SourceSQLServerBackup || source.DatabaseName != "possys" || source.ServerVersion != "11.0.7001" ||
 		source.BackupFinishedAt != "2026-11-14T22:00:09.123" || source.CompatibilityLevel != 110 || source.ReaderImage != "mcr.microsoft.com/mssql/server@sha256:2222" ||
-		source.ReaderImageID != "sha256:1111" || source.ReaderVersion != "16.0.4325.4" || len(source.BackupSHA256) != 64 || source.BackupFile != "sintetico.bak" {
+		source.ReaderImageID != "sha256:1111" || source.ReaderVersion != "16.0.4325.4" || source.BackupSHA256 != fileSHA256(t, run.options.Backup) ||
+		source.BackupFile != "sintetico.bak" || source.BackupSets != 1 {
 		t.Fatalf("origen: %+v", source)
 	}
 	expectedSteps := []string{"image:started", "image:finished", "start:started", "start:finished", "restore:started",
@@ -155,15 +179,26 @@ func TestPrepareWritesTheExpectedPackageAndCleansUp(t *testing.T) {
 	if summary.Sales == nil || summary.Sales.First != manifest.Summary.SalesFirst || len(summary.Tables) != 50 || len(summary.SkippedTables) != 2 {
 		t.Fatalf("resumen: %+v", summary)
 	}
-	for _, step := range []string{StepImage, StepStart, StepRestore, StepRead, StepWrite, StepCleanup, "total"} {
+	for _, step := range []string{StepImage, StepStart, StepRestore, StepRead, StepWrite, StepCleanup, "verify", "total"} {
 		if _, ok := summary.Timings[step]; !ok {
 			t.Fatalf("falta el tiempo de %s", step)
 		}
 	}
 	calls := run.fake.commands()
 	name, runCall := containerName(t, calls)
+	started := ""
+	for _, argument := range runCall.Args {
+		if strings.HasPrefix(argument, ReaderStartedLabel+"=") {
+			started = argument
+		}
+	}
+	if seconds, err := strconv.ParseInt(strings.TrimPrefix(started, ReaderStartedLabel+"="), 10, 64); err != nil || time.Since(time.Unix(seconds, 0)) > time.Minute {
+		t.Fatalf("etiqueta de la hora: %q", started)
+	}
+	pidLabel := ReaderPIDLabel + "=" + strconv.Itoa(os.Getpid())
 	expectedRun := []string{
-		"run", "-d", "--name", name, "--label", "local.adel.pos.legacy-reader=1", "--platform", "linux/amd64",
+		"run", "-d", "--name", name, "--label", "local.adel.pos.legacy-reader=1", "--label", pidLabel, "--label", started,
+		"--platform", "linux/amd64",
 		"--pull", "never", "--network", "none", "-e", "ACCEPT_EULA=Y", "-e", "MSSQL_PID=Express", "-e", "MSSQL_SA_PASSWORD",
 		"--mount", "type=bind,source=" + mustResolve(t, run.options.Backup) + ",target=/backup/respaldo.bak,readonly",
 		"--mount", "type=volume,source=" + name + "-data,target=/var/opt/mssql",
@@ -191,20 +226,35 @@ func TestPrepareWritesTheExpectedPackageAndCleansUp(t *testing.T) {
 	}
 	all := strings.Join(joined, "\n")
 	for _, expected := range []string{
-		"ps -a -q --filter label=local.adel.pos.legacy-reader=1",
-		"rm -f -v viejo1 viejo2",
-		"volume ls -q --filter label=local.adel.pos.legacy-reader=1",
+		"context inspect --format {{.Endpoints.docker.Host}}",
+		"ps -a --filter label=local.adel.pos.legacy-reader=1 --format {{.ID}}" + labelFormat,
+		"rm -f -v viejo2 viejo3 viejo4",
+		"volume ls --filter label=local.adel.pos.legacy-reader=1 --format {{.Name}}" + labelFormat,
 		"volume rm -f adel-legacy-viejo-data",
-		"volume create --label local.adel.pos.legacy-reader=1 " + name + "-data",
+		"volume create --label local.adel.pos.legacy-reader=1 --label " + pidLabel + " --label " + started + " " + name + "-data",
 	} {
 		if !strings.Contains(all, expected) {
 			t.Fatalf("falta la orden %q", expected)
 		}
 	}
+	if strings.Contains(all, "viejo1") && strings.Contains(all, "rm -f -v viejo1") || strings.Contains(all, "adel-legacy-vivo-data\n") ||
+		strings.Contains(all, "volume rm -f adel-legacy-vivo-data") {
+		t.Fatal("se borró el lector de una preparación en curso")
+	}
 	if strings.Contains(all, "adel-legacy-analysis") {
 		t.Fatal("se tocó un contenedor ajeno")
 	}
 	run.requireCleanedUp(t, true)
+}
+
+func fileSHA256(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	return hex.EncodeToString(digest[:])
 }
 
 func mustResolve(t *testing.T, path string) string {
@@ -550,4 +600,216 @@ func TestMountOptionQuotesOddPaths(t *testing.T) {
 	if value := mountOption("type=bind", "source=/Volumes/USB, copia/respaldo.bak", "readonly"); value != `type=bind,"source=/Volumes/USB, copia/respaldo.bak",readonly` {
 		t.Fatalf("montaje: %s", value)
 	}
+}
+
+// Una sola preparación a la vez: con el bloqueo tomado por otra, ALREADY_RUNNING sin tocar Docker ni la carpeta.
+func TestOnlyOnePreparationAtATime(t *testing.T) {
+	run := newPreparation(t)
+	other, err := openWorkspace(run.tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	busyRun, err := other.newRun()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = run.prepare(context.Background())
+	requireCode(t, err, CodeAlreadyRunning)
+	if len(run.fake.commands()) != 0 {
+		t.Fatal("se llamó a docker con otra preparación en curso")
+	}
+	if _, err := os.Stat(busyRun); err != nil {
+		t.Fatal("se borró la carpeta de la preparación en curso")
+	}
+	_, _, err = run.preparer.Cleanup(context.Background())
+	requireCode(t, err, CodeAlreadyRunning)
+	if err := other.close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.prepare(context.Background()); err != nil {
+		t.Fatalf("después de soltar el bloqueo: %v", err)
+	}
+}
+
+// staleRun deja en la carpeta de trabajo lo que deja una preparación terminada a la fuerza: su carpeta con tablas en
+// preparación y la copia del respaldo, y el paquete a medias junto al destino (registrado en la carpeta).
+func staleRun(t *testing.T, run *preparation) (string, string) {
+	t.Helper()
+	root := filepath.Join(run.tempDir, workspaceName)
+	stale := filepath.Join(root, "run-viejo")
+	for _, directory := range []string{filepath.Join(stale, "adel-migracion-1"), filepath.Join(stale, "adel-respaldo-1")} {
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(stale, "adel-respaldo-1", "respaldo.bak"), []byte("TAPE copia"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	partial := filepath.Join(run.directory, ".migracion-anterior.adelmig.0123456789ab.partial")
+	if err := os.WriteFile(partial, []byte("ADELMIG\x00a medias"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stale, partialRecord), []byte(partial+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return stale, partial
+}
+
+func TestStaleFilesFromAKilledPreparationAreRemoved(t *testing.T) {
+	t.Run("al preparar", func(t *testing.T) {
+		run := newPreparation(t)
+		stale, partial := staleRun(t, run)
+		summary, err := run.prepare(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatal("quedó la carpeta de la preparación anterior")
+		}
+		if _, err := os.Stat(partial); !os.IsNotExist(err) {
+			t.Fatal("quedó el paquete a medias")
+		}
+		if summary.PreviousLeftovers.Folders != 1 || summary.PreviousLeftovers.Partials != 1 {
+			t.Fatalf("restos: %+v", summary.PreviousLeftovers)
+		}
+		run.requireCleanedUp(t, true)
+	})
+	t.Run("con --cleanup", func(t *testing.T) {
+		run := newPreparation(t)
+		stale, partial := staleRun(t, run)
+		run.fake.leftoverIDs = fmt.Sprintf("muerto|222|%d\nvivo|%d|%d\n", time.Now().Unix(), livePID, time.Now().Unix())
+		report, checked, err := run.preparer.Cleanup(context.Background())
+		if err != nil || !checked {
+			t.Fatalf("limpieza: %v %v", checked, err)
+		}
+		if report.Folders != 1 || report.Partials != 1 || report.Containers != 1 {
+			t.Fatalf("informe: %+v", report)
+		}
+		for _, path := range []string{stale, partial} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("quedó %s", path)
+			}
+		}
+		removed := false
+		for _, call := range run.fake.commands() {
+			joined := strings.Join(call.Args, " ")
+			if joined == "rm -f -v muerto" {
+				removed = true
+			}
+			if strings.Contains(joined, "vivo") || call.Args[0] == "run" {
+				t.Fatalf("orden inesperada: %s", joined)
+			}
+		}
+		if !removed {
+			t.Fatal("no se borró el lector cuyo proceso terminó")
+		}
+	})
+	t.Run("sin Docker", func(t *testing.T) {
+		run := newPreparation(t)
+		stale, _ := staleRun(t, run)
+		run.fake.infoFails = true
+		report, checked, err := run.preparer.Cleanup(context.Background())
+		if err != nil || checked || report.Folders != 1 {
+			t.Fatalf("limpieza sin Docker: %+v %v %v", report, checked, err)
+		}
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Fatal("quedó la carpeta")
+		}
+	})
+}
+
+// Docker debe ser el de esta computadora: un DOCKER_HOST o un contexto remoto se rechazan antes de contactarlo.
+func TestRemoteDockerIsRefused(t *testing.T) {
+	for _, endpoint := range []string{"tcp://192.0.2.1:2375", "ssh://usuario@192.0.2.1", ""} {
+		run := newPreparation(t)
+		run.fake.endpoint = endpoint
+		_, err := run.prepare(context.Background())
+		requireCode(t, err, CodeDockerRemote)
+		for _, call := range run.fake.commands() {
+			if call.Args[0] != "context" {
+				t.Fatalf("se contactó al Docker remoto: %v", call.Args)
+			}
+		}
+	}
+	local := newPreparation(t)
+	local.fake.endpoint = "npipe:////./pipe/docker_engine"
+	if _, err := local.prepare(context.Background()); err != nil {
+		t.Fatalf("Docker de Windows: %v", err)
+	}
+}
+
+// Si el respaldo cambia mientras se lee (se seguía copiando), el paquete no se escribe.
+func TestBackupChangedDuringThePreparation(t *testing.T) {
+	run := newPreparation(t)
+	run.fake.onRun = func() {
+		file, err := os.OpenFile(run.options.Backup, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_, _ = file.Write([]byte("más datos"))
+		_ = file.Close()
+	}
+	_, err := run.prepare(context.Background())
+	requireCode(t, err, CodeBackupChanged)
+	run.requireCleanedUp(t, false)
+	// Si el contenedor ya ve el respaldo con otro tamaño, el error también es BACKUP_CHANGED (no «no se pudo iniciar»).
+	seen := newPreparation(t)
+	seen.fake.onRun = func() {
+		_ = os.WriteFile(seen.options.Backup, append([]byte("TAPE"), make([]byte, 9000)...), 0600)
+	}
+	seen.fake.backupSize = 9004
+	_, err = seen.prepare(context.Background())
+	requireCode(t, err, CodeBackupChanged)
+	seen.requireCleanedUp(t, false)
+}
+
+func TestBackupSets(t *testing.T) {
+	t.Run("varios juegos de la misma base", func(t *testing.T) {
+		run := newPreparation(t)
+		run.fake.headerRows = []string{headerRow("1", "1", "possys"), headerRow("5", "2", "possys"), headerRow("1", "3", "POSSYS")}
+		summary, err := run.prepare(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary.Backup.Sets != 3 {
+			t.Fatalf("juegos: %d", summary.Backup.Sets)
+		}
+		restored := false
+		for _, call := range run.fake.commands() {
+			if strings.Contains(call.Stdin, "RESTORE DATABASE") && strings.Contains(call.Stdin, "WITH FILE = 3,") {
+				restored = true
+			}
+		}
+		if !restored {
+			t.Fatal("no se restauró el juego completo más reciente")
+		}
+	})
+	t.Run("varias bases", func(t *testing.T) {
+		run := newPreparation(t)
+		run.fake.headerRows = []string{headerRow("1", "1", "possys"), headerRow("1", "2", "contabilidad")}
+		_, err := run.prepare(context.Background())
+		requireCode(t, err, CodeBackupInvalid)
+		if !strings.Contains(AsFailure(err).Message, "varias bases") {
+			t.Fatalf("mensaje: %s", AsFailure(err).Message)
+		}
+		run.requireCleanedUp(t, false)
+	})
+}
+
+// Un SQL Server atascado en una tabla agota el plazo de esa tabla (READ_FAILED) en lugar de esperar para siempre.
+func TestTableTimeout(t *testing.T) {
+	previous := tableTimeout
+	tableTimeout = 200 * time.Millisecond
+	defer func() {
+		tableTimeout = previous
+	}()
+	run := newPreparation(t)
+	run.fake.blockTable = "pagos"
+	_, err := run.prepare(context.Background())
+	requireCode(t, err, CodeReadFailed)
+	if !strings.Contains(AsFailure(err).Detail, "plazo") || !strings.Contains(AsFailure(err).Detail, "pagos") {
+		t.Fatalf("detalle: %s", AsFailure(err).Detail)
+	}
+	run.requireCleanedUp(t, false)
 }
