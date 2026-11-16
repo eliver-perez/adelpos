@@ -390,6 +390,7 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		env.fails(credentialActor(), "GET", "restaurant/state", nil, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
 		env.fails(credentialActor(), "GET", "restaurant/offline-orders", nil, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
 		env.fails(credentialActor(), "GET", "auth/me", nil, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
+		env.fails(credentialActor(), "GET", "events?after=0", nil, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
 		both := credentialActor()
 		both.session = anaSession
 		env.fails(both, "POST", "restaurant/offline-orders", order(), 400, "VALIDATION_ERROR")
