@@ -26,6 +26,11 @@ import (
 // salte la comprobación de la versión mínima con solo omitir la cabecera, sin cambiar nada para la ventana de
 // la propia computadora ni para las herramientas locales. Sin ella la respuesta es la misma que a un cliente
 // viejo: 426 «Actualiza esta terminal». Las rutas técnicas (salud, versión y contrato) siguen sin pedirla.
+//
+// Etapa A1 (decisión A1-D4): la versión mínima es **por tipo de cliente** (min_client_versions de product.json). La
+// aplicación Android numera sus versiones aparte (0.1.0 es la primera) y con una sola mínima (la del escritorio,
+// 0.10.0) quedaría rechazada. Un cliente sin X-Client-Kind se compara con la mínima general (la del escritorio): omitir
+// el tipo nunca rebaja la exigencia.
 const (
 	ClientVersionHeader = "X-Client-Version"
 	ClientKindHeader    = "X-Client-Kind"
@@ -116,8 +121,9 @@ type clientProblem struct {
 }
 
 // checkClient revisa las cabeceras de identificación del cliente en una ruta de la aplicación. Sin cabecera de
-// versión no hay nada que revisar (ver el comentario del paquete).
-func checkClient(request *http.Request, minimum, serverVersion string) *clientProblem {
+// versión no hay nada que revisar (ver el comentario del paquete). minimumFor da la versión mínima del tipo de
+// cliente (la general si el tipo no viene).
+func checkClient(request *http.Request, minimumFor func(kind string) string, serverVersion string) *clientProblem {
 	if slices.Contains(unversionedRoutes, request.URL.Path) {
 		return nil
 	}
@@ -129,6 +135,7 @@ func checkClient(request *http.Request, minimum, serverVersion string) *clientPr
 			message: "El servidor no reconoce el tipo de esta terminal. Actualiza esta terminal.",
 		}
 	}
+	minimum := minimumFor(kind)
 	text := request.Header.Get(ClientVersionHeader)
 	if text == "" {
 		if lanlistener.FromNetwork(request) {
