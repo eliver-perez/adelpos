@@ -95,6 +95,9 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "change_password" => Some((Method::POST, "auth/password")),
         "users" => Some((Method::GET, "users")),
         "create_user" => Some((Method::POST, "users")),
+        // Etapa A1 (fase B): paleta del distintivo de los meseros y «Mi PIN» (el propio usuario, con su contraseña).
+        "user_badge_colors" => Some((Method::GET, "users/badge-colors")),
+        "set_own_pin" => Some((Method::PUT, "auth/pin")),
         "roles" => Some((Method::GET, "roles")),
         "create_role" => Some((Method::POST, "roles")),
         "permissions" => Some((Method::GET, "permissions")),
@@ -639,6 +642,10 @@ fn route(operation: &str, id: Option<&str>) -> Result<(Method, String), String> 
         "update_user" => (Method::PATCH, format!("users/{identifier}")),
         // Etapa 9H: «Asignar contraseña» a un usuario sin contraseña (users.manage en Go).
         "assign_user_password" => (Method::POST, format!("users/{identifier}/password")),
+        // Etapa A1 (fase B): asignar, quitar y desbloquear el PIN de un usuario (users.manage en Go).
+        "set_user_pin" => (Method::PUT, format!("users/{identifier}/pin")),
+        "remove_user_pin" => (Method::POST, format!("users/{identifier}/pin/remove")),
+        "unlock_user_pin" => (Method::POST, format!("users/{identifier}/pin/unlock")),
         // Etapa 9H, fase D: avance de una corrida, un lote importado y cancelar una subida del paquete.
         "maintenance_legacy_run" => (Method::GET, format!("maintenance/legacy/runs/{identifier}")),
         "maintenance_legacy_batch" => (
@@ -2492,6 +2499,49 @@ mod tests {
             assert!(!routes.contains(forbidden), "{forbidden}");
         }
         assert!(allowed_query_keys("reports_run").contains(&"data_source"));
+    }
+
+    #[test]
+    fn stage_a1_pin_routes_are_closed() {
+        // Etapa A1 (fase B): el PIN de un usuario lleva un identificador; la paleta y «Mi PIN», ninguno.
+        let identifier = "00000000-0000-4000-8000-0000000000a1";
+        for (operation, method, path) in [
+            (
+                "set_user_pin",
+                Method::PUT,
+                format!("users/{identifier}/pin"),
+            ),
+            (
+                "remove_user_pin",
+                Method::POST,
+                format!("users/{identifier}/pin/remove"),
+            ),
+            (
+                "unlock_user_pin",
+                Method::POST,
+                format!("users/{identifier}/pin/unlock"),
+            ),
+        ] {
+            assert_eq!(
+                route(operation, Some(identifier)).unwrap(),
+                (method, path),
+                "{operation}"
+            );
+            assert!(route(operation, Some("../x")).is_err(), "{operation}");
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
+        assert_eq!(
+            route("user_badge_colors", None).unwrap(),
+            (Method::GET, "users/badge-colors".to_string())
+        );
+        assert_eq!(
+            route("set_own_pin", None).unwrap(),
+            (Method::PUT, "auth/pin".to_string())
+        );
+        // La entrada con PIN es solo de los dispositivos android: el escritorio no la tiene en su lista cerrada.
+        for operation in ["pin_login", "pin_users"] {
+            assert!(route(operation, None).is_err(), "{operation}");
+        }
     }
 
     #[test]

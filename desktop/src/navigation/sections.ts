@@ -34,7 +34,8 @@ export type ScreenID =
   | 'status'
   | 'server-status'
   | 'preferences'
-  | 'password';
+  | 'password'
+  | 'pin';
 
 // operation: secciones de la barra superior; administration: Administración y lo que contiene;
 // personal: pantallas del menú del usuario.
@@ -299,6 +300,15 @@ export const sections: SectionEntry[] = [
     label: 'Cambiar contraseña',
     icon: 'key',
     group: 'personal',
+  },
+  {
+    // Etapa A1 (fase B): «Mi PIN», el PIN propio para los teléfonos y tabletas de meseros (Go vuelve a exigir
+    // waiter_devices.use y la contraseña actual). El menú del usuario lo ofrece solo si el servidor tiene el PIN.
+    id: 'pin',
+    label: 'Mi PIN',
+    icon: 'lock',
+    group: 'personal',
+    permission: 'waiter_devices.use',
   },
 ];
 

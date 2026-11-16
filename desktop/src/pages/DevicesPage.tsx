@@ -18,6 +18,7 @@ import type {
   SessionsSummary,
 } from '../services/models';
 import { Select } from '../components/Select';
+import { serverHas, waiterPINCapability } from '../services/serverCapabilities';
 
 // Etapa 9G (fase B, §3.2–§3.4): Sistema › Terminales también recibe las terminales nuevas que piden su
 // código (se aprueban escribiendo el código que muestra la terminal, solo en la computadora principal),
@@ -28,11 +29,44 @@ import { Select } from '../components/Select';
 export const pairingRefreshMilliseconds = 3000;
 export const devicesRefreshMilliseconds = 5000;
 
+// Etapa A1 (fase B): el tipo android se dice en lenguaje sencillo, «Teléfono o tableta» (antes «Comandero Android»).
 export const deviceKindLabels: Record<DeviceKind, string> = {
   desktop: 'Escritorio',
-  android: 'Comandero Android',
+  android: 'Teléfono o tableta',
   kitchen: 'Cocina',
 };
+
+// Bloqueo por inactividad de un teléfono o tableta de meseros (etapa A1, fase B): tras ese tiempo sin uso vuelve a
+// la pantalla de entrada con PIN (salvo con una captura en curso o pedidos sin enviar; lo decide el dispositivo). Go
+// acepta de 30 s a 1 h; aquí se elige en minutos y 2 es el valor por omisión.
+export const defaultIdleLockSeconds = 120;
+const idleLockMinutes = [1, 2, 3, 5, 10, 15, 30, 60];
+
+export function idleLockLabel(seconds: number) {
+  if (seconds % 60 === 0) {
+    return countLabel(seconds / 60, 'minuto', 'minutos');
+  }
+  if (seconds < 60) {
+    return countLabel(seconds, 'segundo', 'segundos');
+  }
+  return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+}
+
+function idleLockOptions(current: number) {
+  const values = idleLockMinutes.map((minutes) => minutes * 60);
+  // Un valor guardado que no está en la lista (puesto por otro medio) se conserva como opción.
+  if (!values.includes(current)) {
+    values.push(current);
+    values.sort((left, right) => left - right);
+  }
+  return values.map((seconds) => ({
+    value: String(seconds),
+    label:
+      seconds === defaultIdleLockSeconds
+        ? `${idleLockLabel(seconds)} (recomendado)`
+        : idleLockLabel(seconds),
+  }));
+}
 
 const keyboardLabels: Record<Device['keyboard_mode'], string> = {
   auto: 'Automático',
@@ -331,6 +365,15 @@ function DeviceConfigurationPanel({ device, onClose }: { device: Device; onClose
             <dt>Teclado virtual</dt>
             <dd>{keyboardLabels[shown.keyboard_mode]}</dd>
           </div>
+          {shown.kind === 'android' && serverHas(waiterPINCapability) && (
+            <div>
+              <dt>Bloqueo por inactividad</dt>
+              <dd>
+                {idleLockLabel(shown.idle_lock_seconds ?? defaultIdleLockSeconds)} sin uso vuelve a
+                la pantalla de entrada con PIN
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Estaciones que muestra en Cocina</dt>
             <dd>
@@ -435,6 +478,12 @@ function DeviceEditor({
   const [registerID, setRegisterID] = useState(device.register_id ?? '');
   const [keyboard, setKeyboard] = useState(device.keyboard_mode);
   const [home, setHome] = useState<TerminalHome>(device.home_screen ?? 'tables');
+  const [idleLock, setIdleLock] = useState(
+    String(device.idle_lock_seconds ?? defaultIdleLockSeconds),
+  );
+  // Solo los teléfonos y tabletas de meseros tienen bloqueo por inactividad, y solo si el servidor lo acepta (un
+  // servidor 0.11.0 rechazaría el campo).
+  const waiterDevice = device.kind === 'android' && serverHas(waiterPINCapability);
   return (
     <section className="surface panel">
       <h2 className="mb-5">Editar {device.name}</h2>
@@ -448,6 +497,7 @@ function DeviceEditor({
               register_id: registerID || null,
               keyboard_mode: keyboard,
               home_screen: home,
+              ...(waiterDevice ? { idle_lock_seconds: Number(idleLock) } : {}),
             },
           });
           await reload();
@@ -487,6 +537,18 @@ function DeviceEditor({
               onChange={setKeyboard}
             />
           </Field>
+          {waiterDevice && (
+            <Field
+              label="Bloqueo por inactividad"
+              hint="Tiempo sin uso tras el que el teléfono o la tableta vuelve a la pantalla de entrada con PIN. No se bloquea mientras un mesero tiene una captura en curso o pedidos sin enviar."
+            >
+              <Select
+                value={idleLock}
+                options={idleLockOptions(Number(idleLock))}
+                onChange={setIdleLock}
+              />
+            </Field>
+          )}
         </div>
         {/* Etapa 9C (§1.5): pantalla en la que abre la aplicación en esta terminal y a la que vuelve
             el logotipo. Lista cerrada validada en Go; quien no pueda ver esa sección abre en la

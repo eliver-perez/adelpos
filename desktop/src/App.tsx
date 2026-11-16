@@ -17,6 +17,8 @@ import { LegacyMigrationPage } from './pages/maintenance/LegacyMigrationPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { RepairTerminalPage, useRepairTerminal } from './pages/setup/RepairTerminal';
 import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
+import { MyPinPage } from './pages/UserPin';
+import { serverHas, waiterPINCapability } from './services/serverCapabilities';
 import { PaymentsAdminPage } from './pages/payments/PaymentsAdminPage';
 import { CashPage } from './pages/cash/CashPage';
 import { CashShortcutSheet, shortcutOptions, useCashShortcut } from './pages/cash/CashShortcut';
@@ -619,6 +621,9 @@ function ApplicationContent({
         return <PreferencesPage identity={identity} refresh={session.refresh} />;
       case 'password':
         return <PasswordPage refresh={session.refresh} />;
+      case 'pin':
+        // Etapa A1 (fase B): el PIN propio para los teléfonos y tabletas de meseros.
+        return <MyPinPage hasPIN={identity.user.has_pin === true} refresh={session.refresh} />;
       default:
         return null;
     }
@@ -641,6 +646,11 @@ function ApplicationContent({
       compact={compact}
       onPreferences={() => requestScreen('preferences')}
       onPassword={() => requestScreen('password')}
+      onPin={
+        serverHas(waiterPINCapability) && can('waiter_devices.use')
+          ? () => requestScreen('pin')
+          : undefined
+      }
       onLogout={() => void logout()}
     />
   );
