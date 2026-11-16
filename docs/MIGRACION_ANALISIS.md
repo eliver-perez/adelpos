@@ -572,6 +572,64 @@ retiros (269); **total vendido por año** (`Σ(total + montoExtra − descuento)
 año de la fecha que se decida en §7, pregunta 3) y **total por forma de pago** (`Σ pagos.monto` por tipo y año); total
 de egresos (0) y de retiros. Las diferencias de §5 (filas 6, 8, 14 y 15) se muestran como tales, nunca se ocultan.
 
+### 6.8 Correspondencia final (Fase C)
+
+Lo que implementa `backend/internal/legacyimport` con las decisiones del propietario y del coordinador
+([ETAPA_9H_AVANCE.md](ETAPA_9H_AVANCE.md), Fase 0). Donde difiere de §6.2–§6.7, manda esta sección.
+
+**Catálogo, mesas y usuarios (a lo vivo, identificados por su id anterior en `legacy_id_map`).**
+
+| Anterior                                  | AD-EL POS                                                                                                                                                                                                                                |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `categorias`                              | `catalog_categories` (nombre sin espacios de más; repetido → «(2)»), en el orden de su id. `cocina` no se importa (las estaciones y rutas de cocina se configuran en AD-EL POS).                                                         |
+| `productos`                               | `catalog_products` con código `SA-<id>`, su categoría (sin categoría → «Sin categoría (sistema anterior)») y `nombre_corto` en la descripción («Nombre corto en el sistema anterior: …») si es distinto del nombre.                      |
+| Precio más reciente (`productos_precios`) | `base_price` = `total` redondeado a centavos (aviso si tenía más decimales); `tax_rate` = la tasa de ese precio (`iva / subtotal`, la más cercana de 0, 8 y 16; aviso si no era exacta). Sin precio: $0.00 y **desactivado**, con aviso. |
+| `productos_complementos` con incluidos    | `price_can_decrease = true` (decisión 3).                                                                                                                                                                                                |
+| `complementos` + `complementos_precios`   | `catalog_complements`; su precio más reciente es el valor de referencia de su opción. Aviso si su tasa no era 0 % (en AD-EL POS el complemento se desglosa con la tasa del producto).                                                    |
+| Conjuntos de `productos_complementos`     | Un grupo de modo valor por cada conjunto distinto de complementos (el más usado se llama «Complementos»; los demás, «Complementos: A, B…»), opciones con extra 0 y la cantidad incluida (> 0) en `catalog_group_defaults`.               |
+| `mesas` (sin la id 1)                     | `restaurant_tables` en el área «Salón» (y «Salón 2»… cada 48), en una cuadrícula de 8 por renglón de 100 × 72; capacidad 4 si falta, entre 1 y 40.                                                                                       |
+| `usuarios` + `personal` + `puestos`       | `users` sin contraseña (`password_hash` nulo), con su preferencia de tema; nombre visible = nombre y apellidos; activo si el usuario y la persona lo están; rol según §6.4 (puesto desconocido → Mesero, con aviso).                     |
+| `usuarios.usuario`                        | En minúsculas; si no cumple la regla o choca con `admin`, `sa` u otro: sin acentos, lo demás → «.», «u» al inicio si empieza con número y «-2», «-3»… (aviso).                                                                           |
+
+**Repetir la migración.** Lo que ya existía del lote vigente conserva su identificador y se actualiza en su lugar (por
+eso se conservan una contraseña asignada o una receta ligada a un producto importado); lo que ya no viene en el paquete
+se borra si nada lo usa o, si algo lo usa, se desactiva con el nombre «<nombre> (retirado …)» y queda en la
+correspondencia como `retired`. Un cambio de nombres entre respaldos no choca (renombre en dos fases).
+
+**Historial (tablas `legacy_*`, de solo lectura).** Cada tabla del anterior con historial va a su tabla propia con el id
+(o la posición, si no tiene llave) y los importes exactos: `ventas` → `legacy_sales`, `ventas_productos` →
+`legacy_sale_lines`, `ventas_complementos` → `legacy_line_complements`, `ventas_modificaciones` →
+`legacy_quantity_changes`, `descuentos` + `tipos_descuentos` → `legacy_discounts`, `cancelaciones` →
+`legacy_cancellations`, `pagos` → `legacy_payments`, `cortes` → `legacy_cash_shifts`, `cortes_parciales` →
+`legacy_cash_withdrawals`, `salidas` → `legacy_cash_expenses` (vacía en el respaldo real) y `productos_precios` +
+`complementos_precios` → `legacy_price_history`. `entradas` (compras) no se importa: si un paquete trae alguna, la
+validación la muestra como diferencia. Estado de la venta: cancelada si tiene fila en `cancelaciones`; si no, pagada con
+`pagado = 1`; si no, abierta. Reconocimiento = último pago (sin pagos, la apertura). Forma de pago: `tipo` 1 o nulo →
+«Efectivo» (`cash`), 2 → «Tarjeta (sistema anterior)» (`card`), otro → su nombre (`other`, marcado). Fechas
+interpretadas con `establishment.timezone`. Un IVA nulo se estima con la tasa del precio vigente en la fecha de la venta
+(marca `tax_estimated`). El libro `legacy_sales_recognitions` se describe en el avance (Fase C).
+
+**Marcas de incoherencia** (lista cerrada, `internal/legacyimport/flags.go`; «lista» = va renglón por renglón en el PDF).
+
+| Entidad             | Marca                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Venta (lista)       | `total_mismatch`, `subtotal_mismatch`, `tax_mismatch`, `amounts_inconsistent` (subtotal + IVA ≠ total), `no_lines`, `overpaid`, `underpaid`, `no_payments`, `cancelled_with_payments`, `open_with_payments`, `paid_amount_mismatch`, `duplicate_folio`, `tax_estimated`, `negative_tax`, `charge_without_amount`, `charge_without_concept`, `unknown_table`, `unknown_cashier`, `unknown_register`, `unknown_shift` |
+| Venta (informativa) | `no_shift`, `late_payment` (último pago más de 2 días después de abrir)                                                                                                                                                                                                                                                                                                                                             |
+| Renglón             | `unknown_product`, `unknown_sale` (lista); `amounts_inconsistent`, `zero_quantity`, `rate_not_standard`, `tax_estimated` (informativas)                                                                                                                                                                                                                                                                             |
+| Complemento         | `unknown_complement`, `unknown_line` (lista); `negative_amount` (bonificación), `amounts_inconsistent`, `tax_estimated` (informativas)                                                                                                                                                                                                                                                                              |
+| Pago                | `zero_amount`, `negative_amount`, `possible_duplicate` (mismo importe que otro de una venta cobrada de más), `unknown_method`, `before_sale`, `unknown_sale` (lista); `no_shift`, `shift_differs` (informativas)                                                                                                                                                                                                    |
+| Descuento           | `exceeds_total`, `zero_or_negative`, `unknown_sale` (lista); `unknown_type` (informativa)                                                                                                                                                                                                                                                                                                                           |
+| Corte               | `sales_mismatch` (su «venta» guardada ≠ Σ(total + montoExtra − descuentos) de sus ventas, incluidas canceladas), `withdrawals_mismatch`, `unknown_status` (lista); `no_activity` (informativa)                                                                                                                                                                                                                      |
+| Retiro              | `zero_or_negative`, `doubtful_amount` ($100 000 o más), `unknown_shift` (lista)                                                                                                                                                                                                                                                                                                                                     |
+| Precio              | `rate_not_standard` (informativa)                                                                                                                                                                                                                                                                                                                                                                                   |
+
+**Validación (§4.4).** Conteos del manifiesto del paquete (categorías, productos, complementos, mesas sin «para
+llevar», usuarios, ventas por estado, renglones, complementos vendidos, cambios de cantidad, descuentos, cancelaciones,
+pagos, cortes, retiros, salidas e historial de precios) contra lo escrito; total vendido por año del día comercial del
+reconocimiento (Σ del libro contra Σ(total + montoExtra − descuentos) de las pagadas no canceladas calculado aparte);
+pagos por forma de pago y año; total de retiros; total de egresos (salidas; 0 en el respaldo real); y cuántas ventas no
+suman en el libro lo que se debía (0). Las canceladas al estilo del anterior y la ausencia de dólares quedan como nota.
+
 ## 7. Decisiones que necesita el propietario
 
 Preguntas cerradas, con la opción recomendada; el coordinador las presenta al propietario. Ninguna se decidió aquí.
