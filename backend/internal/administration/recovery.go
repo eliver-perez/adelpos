@@ -49,5 +49,7 @@ func recoveryState(ctx context.Context, tx pgx.Tx, principal Principal) (any, er
 		"terminal":        terminal,
 		"tables":          restaurant.Tables,
 		"accounts":        restaurant.Accounts,
+		// Etapa A1: el cursor del canal de eventos al leer este estado (GET events?after=event_cursor).
+		"event_cursor": restaurant.EventCursor,
 	}, nil
 }
