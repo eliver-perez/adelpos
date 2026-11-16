@@ -51,6 +51,8 @@ export type Operation =
   | 'users'
   | 'create_user'
   | 'update_user'
+  // Etapa 9H: «Asignar contraseña» a un usuario sin contraseña (los importados del sistema anterior).
+  | 'assign_user_password'
   | 'user_permissions'
   | 'save_user_permissions'
   | 'user_preferences'
@@ -85,6 +87,14 @@ export type Operation =
   | 'maintenance_save_backup_settings'
   | 'maintenance_backup_default_directory'
   | 'maintenance_backup_now'
+  // Etapa 9H (fase D): migración del sistema anterior (services/legacyMigration.ts). La subida del paquete,
+  // la preparación y el informe en PDF son operaciones propias de Rust (legacy_migration.rs), no rutas.
+  | 'maintenance_legacy'
+  | 'maintenance_legacy_analyze'
+  | 'maintenance_legacy_import'
+  | 'maintenance_legacy_run'
+  | 'maintenance_legacy_batch'
+  | 'maintenance_legacy_cancel_upload'
   | 'reports_catalog'
   | 'reports_run'
   | 'reports_dashboard'

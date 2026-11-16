@@ -3774,6 +3774,13 @@ VALIDATION_ERROR`); si ya tiene contraseña, `409 PASSWORD_ALREADY_SET` (solo é
   `user.password_assigned` con `{initial_password: true}` (nunca la contraseña ni su hash).
 - **`GET users`** (y las respuestas de crear y editar usuarios) incluyen `has_password` (si tiene contraseña; nunca la
   contraseña ni su hash), para que Usuarios ofrezca «Asignar contraseña» solo a quien no tiene.
+- **Quién llama a cada ruta (Fase D, asistente de la aplicación)**: `maintenance/legacy`, `…/analyze`, `…/import`,
+  `…/runs/{id}`, `…/batches/{id}`, `…/uploads/{id}/cancel` y `users/{id}/password` van por la lista cerrada de
+  `api.rs` (`maintenance_legacy*`, `assign_user_password`). Las que llevan archivos o datos de la computadora solo las
+  envía Rust (`desktop/src-tauri/src/legacy_migration.rs`), nunca React: la creación de la subida y sus partes (lee el
+  `.adelmig` elegido en el diálogo nativo, calcula sus huellas y lo envía en orden, reenviando una parte sin
+  respuesta), la preparación (al terminar `legacy-prepare`, con el resumen saneado) y el informe `report.pdf`
+  (comprueba `application/pdf` y `%PDF-` y lo guarda con el diálogo «Guardar como»).
 - **Las ventas importadas no son cuentas**: viven en `app.legacy_*` (esquema en `docs/ETAPA_9H_AVANCE.md`, Fase C), así
   que las rutas de cuentas, cobros, cancelación, cocina, caja y `restaurant/state` no las ven ni pueden reabrirlas,
   cobrarlas, cancelarlas ni modificarlas; sus folios no consumen ni chocan con `restaurant_accounts.folio`. Lo importado

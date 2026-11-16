@@ -291,14 +291,14 @@ La aplicación tiene su propio menú en español. Sus opciones hacen **exactamen
 pantalla, con los mismos permisos; se deshabilitan según los permisos y el contexto (por ejemplo, «Imprimir precuenta»
 solo con una cuenta con productos enviados a cocina).
 
-| Menú                   | Opciones                                                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-| AD-EL POS (solo macOS) | Acerca de AD-EL POS, Ocultar AD-EL POS, Ocultar otras, Mostrar todas, Salir de AD-EL POS                     |
-| Archivo                | Nueva cuenta en mesa, Cuenta sin mesa, Nuevo pedido para llevar, Imprimir precuenta, Cerrar sesión, Salir    |
-| Edición                | Deshacer, Rehacer, Cortar, Copiar, Pegar, Seleccionar todo (los del sistema) y Buscar en la pantalla         |
-| Ver                    | Mesas, Para llevar, Cocina, Caja, Administración, Paleta de comandos, Pantalla completa, Tema claro u oscuro |
-| Caja                   | Ingreso, Retiro, Gasto, Corte parcial, Abrir cajón, Abrir turno, Ir a Caja                                   |
-| Ayuda                  | Atajos de teclado, Acerca de AD-EL POS                                                                       |
+| Menú                   | Opciones                                                                                                                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AD-EL POS (solo macOS) | Acerca de AD-EL POS, Ocultar AD-EL POS, Ocultar otras, Mostrar todas, Salir de AD-EL POS                                                                                                                |
+| Archivo                | Nueva cuenta en mesa, Cuenta sin mesa, Nuevo pedido para llevar, Imprimir precuenta, Migrar del sistema anterior… (etapa 9H: solo abre el asistente, en la computadora principal), Cerrar sesión, Salir |
+| Edición                | Deshacer, Rehacer, Cortar, Copiar, Pegar, Seleccionar todo (los del sistema) y Buscar en la pantalla                                                                                                    |
+| Ver                    | Mesas, Para llevar, Cocina, Caja, Administración, Paleta de comandos, Pantalla completa, Tema claro u oscuro                                                                                            |
+| Caja                   | Ingreso, Retiro, Gasto, Corte parcial, Abrir cajón, Abrir turno, Ir a Caja                                                                                                                              |
+| Ayuda                  | Atajos de teclado, Acerca de AD-EL POS                                                                                                                                                                  |
 
 - Las opciones de Caja **solo abren su hoja**, como el menú rápido; nada se registra sin la confirmación de siempre.
 - No hay «Cerrar ventana» (⌘W cerraría la única ventana).

@@ -29,6 +29,7 @@ export type ActionID =
   | 'file.account_without_table'
   | 'file.takeaway_order'
   | 'file.print_precheck'
+  | 'file.legacy_migration'
   | 'file.logout'
   | 'edit.find'
   | 'view.tables'
@@ -71,6 +72,8 @@ export interface CommandContext {
   screen: ScreenID | null;
   // Ventana de escritorio (pantalla completa nativa disponible).
   desktop: boolean;
+  // Etapa 9H: la computadora principal (modalidad con servidor), la única en la que se migra del sistema anterior.
+  mainComputer: boolean;
   operation: OperationCommandState | null;
   cashOptions: CashOptionState[];
 }
@@ -258,6 +261,18 @@ export const actions: ActionDefinition[] = [
       operationVisible(context) && !!context.operation?.active && !!context.operation.precheckReady,
     hint: 'Elige una cuenta con productos enviados a cocina.',
     run: (runtime) => runtime.operation()?.openPrecheck(),
+  },
+  {
+    // Etapa 9H (fase D): solo abre el asistente; preparar, importar o reemplazar siguen con sus
+    // confirmaciones dentro de él.
+    id: 'file.legacy_migration',
+    label: 'Migrar del sistema anterior…',
+    group: 'file',
+    keywords: ['migrar', 'sistema anterior', 'importar', 'migración', 'respaldo anterior'],
+    description:
+      'Abre el asistente para preparar e importar los datos del sistema anterior (Sistema › Mantenimiento).',
+    visible: (context) => allowed(context, 'legacy-migration') && context.mainComputer,
+    run: (runtime) => runtime.requestScreen('legacy-migration'),
   },
   {
     id: 'file.logout',
@@ -469,6 +484,8 @@ const coveredByActions: ScreenID[] = [
   'kitchen',
   'cash',
   'administration',
+  // Etapa 9H: el asistente ya está como acción de Archivo (solo en la computadora principal).
+  'legacy-migration',
 ];
 
 // Entrada de la paleta: una acción del registro, una pantalla o una mesa.
