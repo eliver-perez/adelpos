@@ -28,6 +28,7 @@ import (
 	"local/ad-el-pos/server/internal/inventory"
 	"local/ad-el-pos/server/internal/kitchen"
 	"local/ad-el-pos/server/internal/lanlistener"
+	"local/ad-el-pos/server/internal/legacyimport"
 	"local/ad-el-pos/server/internal/licensing"
 	"local/ad-el-pos/server/internal/localsetup"
 	"local/ad-el-pos/server/internal/maintenance"
@@ -35,6 +36,10 @@ import (
 )
 
 func main() {
+	// Etapa 9H: legacy-prepare y legacy-synthetic tienen su propia salida (legacy.go).
+	if code, handled := runLegacyCommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
 		logger.Error("server_stopped", "reason", err.Error())
@@ -219,6 +224,9 @@ func newApplication(pool *pgxpool.Pool, configFile string, backups maintenance.B
 	if scheduled, ok := backups.(maintenance.ScheduledBackuper); ok {
 		application.ScheduledBackups = backupschedule.NewRunner(pool, scheduled, logger)
 	}
+	// Migración del sistema anterior (etapa 9H, fase C): el paquete subido vive en una carpeta de trabajo privada junto
+	// a la configuración (la carpeta de datos del servicio; .local en desarrollo); su trabajador arranca en serveHTTP.
+	application.EnableLegacyMigration(filepath.Join(filepath.Dir(configFile), legacyimport.WorkFolder))
 	return application
 }
 
@@ -337,6 +345,16 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 	} else {
 		close(discoveryDone)
 	}
+	// Trabajador de la migración del sistema anterior (etapa 9H, fase C): análisis e importaciones en segundo plano, una
+	// a la vez; al arrancar marca como interrumpidas las que quedaron en curso y borra los archivos de trabajo que
+	// sobraron; al apagarse, la importación en curso se deshace completa y queda registrada como interrumpida.
+	legacyDone := make(chan struct{})
+	go func() {
+		defer close(legacyDone)
+		if application.Legacy != nil {
+			application.Legacy.Run(workerContext)
+		}
+	}()
 	// Limpieza por lotes de las solicitudes de emparejamiento antiguas (etapa 9G, fase B; hallazgo 2 de la revisión).
 	pairingCleanupDone := make(chan struct{})
 	go func() {
@@ -351,6 +369,7 @@ func serveHTTP(ctx context.Context, logger *slog.Logger, cfg config.Config, pool
 		<-backupDone
 		<-discoveryDone
 		<-pairingCleanupDone
+		<-legacyDone
 	}()
 	stopped := make(chan error, 2)
 	go func() {

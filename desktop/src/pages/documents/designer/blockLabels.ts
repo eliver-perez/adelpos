@@ -119,6 +119,11 @@ export function blockSummary(kind: CatalogKind | undefined, block: TemplateBlock
   if (block.type === 'spacer' && typeof options.lines === 'number') {
     return options.lines === 1 ? '1 línea en blanco' : `${options.lines} líneas en blanco`;
   }
+  // Etapa 9H (§2.3): la opción «Mostrar precio unitario» de la lista de productos, desactivada por
+  // omisión, se distingue en la estructura.
+  if (block.type === 'products' && options.show_unit_price === true) {
+    return 'Con precio unitario';
+  }
   return '';
 }
 

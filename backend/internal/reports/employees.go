@@ -14,8 +14,9 @@ import (
 //   - cobró, devolvió y corrigió: quien registró el pago o la devolución (sin turnos en arqueo y, como
 //     los reportes de cobros y de caja, solo de los turnos que el usuario puede consultar en Caja);
 //   - aplicó descuentos o cortesías y autorizó como supervisor: los ajustes vigentes y las
-//     autorizaciones puntuales (desde la etapa 9D también las de «Cancelar cuenta» y desde la 9F las
-//     de «Cancelar unidades» y las reducciones desde «Modificar», after.authorized_by de sus eventos);
+//     autorizaciones puntuales (desde la etapa 9D también las de «Cancelar cuenta» y las de
+//     «Cancelar unidades» y las reducciones desde «Modificar» que se registraron en la 9F,
+//     after.authorized_by de sus eventos; desde la 9H esas dos ya no piden autorización);
 //   - movimientos de caja: quien registró la operación de efectivo (sin turnos en arqueo y con el
 //     mismo alcance de Caja).
 // Las cifras de venta (reconocimientos), confirmaciones, cancelaciones, descuentos y autorizaciones

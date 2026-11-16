@@ -58,6 +58,11 @@
 //   - Combos: el combo es la unidad vendida; sus componentes solo se reportan como cantidades
 //     preparadas, sin importe.
 //   - Demanda y cocina: fecha de liberación a cocina (kitchen_unit_releases), indicada en el reporte.
+//   - Historial del sistema anterior (etapa 9H, legacy.go): con un lote importado vigente, 27 reportes
+//     de ventas, productos, cobros, por día y por turno leen también app.legacy_* con el filtro «Datos»
+//     (data_source); su venta neta es lo que se debía de cada venta pagada y lo que no cuadra con sus
+//     renglones es la «Diferencia del sistema anterior» (incluida en la venta neta, nunca repartida
+//     entre productos). Sin lote, cada reporte es exactamente el de antes.
 //
 // # Cómo agregar un reporte (fases B2 y C1)
 //

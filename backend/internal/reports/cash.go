@@ -29,6 +29,11 @@ import (
 // El esperado de un turno abierto es payments.ExpectedCash (el cálculo único de cash_expected.go)
 // sobre los componentes que suma aquí el mismo SQL que readCashFlows; el de un turno cerrado es el
 // que guardó su cierre. Los descuentos no se atribuyen a turnos (no se replica readAdjustmentTotals).
+//
+// Etapa 9H: con un lote importado vigente y el filtro «Datos», «Turnos de caja» agrega los cortes del
+// sistema anterior (legacy_cash_shifts) tal como se guardaron (legacyCashShiftRows), solo para quien
+// consulta en Caja todas las cajas y el historial de turnos: no son turnos de AD-EL POS ni tienen
+// esperado; su diferencia guardada exige cash.expected.read como la de Caja.
 
 const (
 	cashShiftDateBasis = "Fecha comercial del turno: la fecha de su apertura en la zona del establecimiento (no usa la " +
@@ -444,8 +449,8 @@ func init() {
 		ID: "cash.shifts", Group: "cash", Title: "Turnos de caja",
 		Description: "Historial por turno con su fecha comercial: aperturas, fondos, cobros, operaciones de efectivo, cortes, " +
 			"cierres y, con permiso, esperado y diferencias por moneda con el tipo de cambio del turno.",
-		Permissions: []string{PermissionCash}, DateBasis: cashShiftDateBasis, Filters: cashShiftFilters(),
-		Columns: []Column{columnShiftRegister, columnShiftDate, columnShiftState, dateTimeColumn("opened_at", "Apertura"),
+		Permissions: []string{PermissionCash}, DateBasis: cashShiftDateBasis, Filters: withDataSource(cashShiftFilters()),
+		Columns: withLegacyColumns([]Column{columnShiftRegister, columnShiftDate, columnShiftState, dateTimeColumn("opened_at", "Apertura"),
 			optional(dateTimeColumn("closed_at", "Cierre")), columnShiftOpenedBy, optional(textColumn("closed_by", "Cerró")),
 			described(moneyColumn("opening_float", "Fondo inicial"), "Fondo inicial en pesos."),
 			optional(dollarColumn("opening_float_usd", "Fondo en dólares")),
@@ -456,20 +461,33 @@ func init() {
 			columnIncomeUSD, columnWithdrawalsUSD, columnExpensesUSD,
 			optional(countColumn("regularizations", "Regularizaciones")), columnPartialCuts, columnCountedMXN, columnCountedUSD,
 			columnExpectedMXN, columnExpectedUSD, columnMXNIn, columnMXNOut, columnUSDIn, columnUSDOut, columnDifferenceMXN,
-			columnDifferenceUSD, columnDifferenceEquiv, protectedCash(textColumn("result", "Resultado"))},
+			columnDifferenceUSD, columnDifferenceEquiv, protectedCash(textColumn("result", "Resultado")),
+			legacyColumn(described(moneyColumn("legacy_sales_amount", "Venta del corte (sistema anterior)"),
+				"La «venta» que guardó el corte del sistema anterior (incluía tarjeta y ventas canceladas)."))}, false),
 		DefaultSort: Sort{Key: "opened_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			rows, err := cashShiftRows(ctx, query, shiftScopeConditions(query))
-			if err != nil {
-				return nil, err
+			dataset := &Dataset{Rows: []Row{}}
+			if query.legacy.Native {
+				rows, err := cashShiftRows(ctx, query, shiftScopeConditions(query))
+				if err != nil {
+					return nil, err
+				}
+				if dataset, err = cashDataset(ctx, query, rows); err != nil {
+					return nil, err
+				}
+				query.markNative(dataset.Rows)
+				dataset.Notes = append(dataset.Notes, "Un turno permanente aparece en la fecha de su apertura con todos sus importes; "+
+					"lo ocurrido en cada día está en «Caja por día».")
 			}
-			dataset, err := cashDataset(ctx, query, rows)
-			if err != nil {
-				return nil, err
+			if query.legacy.History {
+				legacy, notes, err := legacyCashShiftRows(ctx, query)
+				if err != nil {
+					return nil, err
+				}
+				dataset.Rows = append(dataset.Rows, legacy...)
+				dataset.Notes = append(dataset.Notes, notes...)
 			}
-			dataset.Summary = cashFigures(rows, expectedVisible(query))
-			dataset.Notes = append(dataset.Notes, "Un turno permanente aparece en la fecha de su apertura con todos sus importes; "+
-				"lo ocurrido en cada día está en «Caja por día».")
+			dataset.Summary = cashFigures(dataset.Rows, expectedVisible(query))
 			return dataset, nil
 		},
 	})
@@ -525,6 +543,68 @@ func init() {
 	})
 	registerCashDay()
 	registerCashDetails()
+}
+
+// legacyCashShiftRows son los cortes del sistema anterior cuya fecha de apertura cae en el periodo, tal como se
+// guardaron: fondo, cobros de su corte (pagos.corte), retiros (cortes parciales), salidas, conteo final, la «venta» del
+// corte y, con cash.expected.read, su diferencia (conteo − fondo − venta + retiros, como la calculaba el anterior) y
+// el resultado. Sin esperado (el anterior no lo guardaba y no se recalcula). Solo para quien consulta en Caja todas
+// las cajas y el historial; a los demás, una nota.
+func legacyCashShiftRows(ctx context.Context, query *Query) ([]Row, []string, error) {
+	notes := []string{"Sistema anterior: sus cortes tal como los guardó (sin esperado ni dólares, que no registraba); los cobros " +
+		"son los de su corte y los retiros, sus cortes parciales."}
+	if cashScopeLimited(query.Actor) {
+		return nil, []string{"Los cortes del sistema anterior solo se muestran a quien puede consultar en Caja todas las cajas y el " +
+			"historial de turnos."}, nil
+	}
+	list := conditions{}
+	if query.Params.Period != nil {
+		list.add("(s.opened_at AT TIME ZONE @tz)::date BETWEEN @first_day::date AND @last_day::date")
+	}
+	list.excludeLegacy(query, "register_id", "shift_id")
+	list.when(query, "user_id", "s.cashier_user_id = @user_id::uuid")
+	list.when(query, "state", "s.status = @state")
+	protected := expectedVisible(query)
+	difference := ""
+	if protected {
+		difference = ",s.difference AS difference_mxn"
+	}
+	rows, err := query.collect(ctx, `SELECT 'legacy:'||s.legacy_id AS shift_key,s.status AS state_code,
+            coalesce(s.register_name,'Sin caja') AS register,(s.opened_at AT TIME ZONE @tz)::date AS business_date,s.opened_at,
+            s.closed_at,coalesce(s.cashier_name,'') AS opened_by,'' AS closed_by,s.opening_cash AS opening_float,
+            coalesce(p.payments,0) AS payments,coalesce(p.amount,0) AS sales,0::numeric AS tips,0::numeric AS refunds,
+            coalesce(p.amount,0) AS net,coalesce(p.cash,0) AS cash_net,0::numeric AS income_mxn,
+            coalesce(w.amount,0) AS withdrawals_mxn,coalesce(e.amount,0) AS expenses_mxn,0::bigint AS partial_cuts,
+            CASE WHEN s.status='closed' THEN s.closing_cash END AS counted_mxn,s.sales_amount AS legacy_sales_amount,
+            '`+LegacySourceLabel+`' AS data_source`+difference+`
+        FROM app.legacy_cash_shifts s
+        LEFT JOIN LATERAL (SELECT count(*)::bigint AS payments,sum(x.amount) AS amount,sum(x.amount) FILTER (WHERE x.method='cash') AS cash
+            FROM app.legacy_payments x WHERE x.legacy_shift_id=s.legacy_id AND x.batch_id=s.batch_id) p ON true
+        LEFT JOIN LATERAL (SELECT sum(x.amount) AS amount FROM app.legacy_cash_withdrawals x
+            WHERE x.legacy_shift_id=s.legacy_id AND x.batch_id=s.batch_id) w ON true
+        LEFT JOIN LATERAL (SELECT sum(x.amount) AS amount FROM app.legacy_cash_expenses x
+            WHERE x.legacy_shift_id=s.legacy_id AND x.batch_id=s.batch_id) e ON true
+        WHERE true`+list.sql()+`
+        ORDER BY s.opened_at,s.legacy_id`, cashArgs(query))
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, row := range rows {
+		switch row["state_code"] {
+		case "open":
+			row["state"] = "Abierto"
+		case "closed":
+			row["state"] = "Cerrado"
+		default:
+			row["state"] = "Desconocido"
+		}
+		row["operations_net_mxn"] = decimalOf(row, "withdrawals_mxn").Add(decimalOf(row, "expenses_mxn")).Neg()
+		if protected && row["difference_mxn"] != nil {
+			row["result"] = differenceLabel(decimalOf(row, "difference_mxn"), decimal.Zero)
+			addOverShort(row, decimalOf(row, "difference_mxn"), decimal.Zero)
+		}
+	}
+	return rows, notes, nil
 }
 
 // registerSums son las medidas que el historial por caja suma de sus turnos (los turnos en arqueo ya

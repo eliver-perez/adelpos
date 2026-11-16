@@ -45,6 +45,7 @@ function context(overrides: Partial<CommandContext> = {}): CommandContext {
     permissions: adminPermissions,
     screen: 'restaurant',
     desktop: true,
+    mainComputer: true,
     operation: {
       active: true,
       view: 'tables',

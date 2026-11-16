@@ -14,7 +14,9 @@ import (
 // agrupada por día comercial con la hora de inicio del día. Cada unidad se reconoce una vez aunque
 // haya pasado por varias cuentas (división, transferencia o combinación) y un combo cuenta como la
 // unidad vendida, sin sumar sus componentes. Las devoluciones no restan aquí: se reportan en su día
-// con los cobros. Las propinas no son venta.
+// con los cobros. Las propinas no son venta. Desde la etapa 9H, con un lote importado vigente, los
+// reportes con el filtro «Datos» leen también el libro del historial del sistema anterior
+// (legacy.go: ledgerFrom y ledgerExtras; sin lote la consulta es la misma de antes).
 
 const salesDateBasis = "Fecha de cierre de la cuenta (reconocimiento de la venta), con la hora de inicio del día."
 
@@ -27,6 +29,16 @@ const ledgerMeasures = `count(DISTINCT r.account_id) FILTER (WHERE r.recognition
 // salesFilters son los filtros comunes de los reportes de ventas.
 func salesFilters() []Filter {
 	return []Filter{filterMode(), filterArea(), filterTable(), filterCategory(), filterProduct(), filterPriceList(), filterOrigin()}
+}
+
+// legacySalesFilters son los filtros de ventas con «Datos» (reportes que incluyen el historial importado).
+func legacySalesFilters() []Filter {
+	return withDataSource(salesFilters())
+}
+
+// legacySalesColumns agrega a las columnas de un reporte de ventas la diferencia del sistema anterior y «Datos».
+func legacySalesColumns(columns []Column) []Column {
+	return withLegacyColumns(columns, true)
 }
 
 // ledgerConditions son las condiciones del periodo y de los filtros indicados sobre el libro r. Con
@@ -69,9 +81,15 @@ func salesFiguresWhere(ctx context.Context, query *Query, list conditions) ([]Fi
 	var accounts, quantity int64
 	var net, tax decimal.Decimal
 	var netText, taxText string
+	difference := "'0'"
+	if query.legacy.History {
+		difference = "coalesce(sum(r.legacy_difference),0)::text"
+	}
+	var differenceText string
 	err := query.Tx.QueryRow(ctx, `SELECT count(DISTINCT r.account_id) FILTER (WHERE r.recognition_kind <> 'resettlement'),
-            coalesce(sum(r.net),0)::text,coalesce(sum(r.tax),0)::text,coalesce(sum(r.quantity),0)
-        FROM app.sales_recognitions r WHERE true`+list.sql(), query.Args()).Scan(&accounts, &netText, &taxText, &quantity)
+            coalesce(sum(r.net),0)::text,coalesce(sum(r.tax),0)::text,coalesce(sum(r.quantity),0)::bigint,`+difference+`
+        FROM `+query.ledgerFrom()+` WHERE true`+list.sql(), query.Args()).Scan(&accounts, &netText, &taxText, &quantity,
+		&differenceText)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +105,11 @@ func salesFiguresWhere(ctx context.Context, query *Query, list conditions) ([]Fi
 		figures = append(figures, Figure{Key: "average_ticket", Label: "Ticket promedio", Type: TypeMoneyMXN,
 			Value: net.DivRound(decimal.NewFromInt(accounts), 2)})
 	}
+	if query.legacy.History {
+		figures = append(figures, Figure{Key: "legacy_difference", Label: "Diferencia del sistema anterior", Type: TypeMoneyMXN,
+			Value: decimal.RequireFromString(differenceText),
+			Hint:  "Ya incluida en la venta neta: ventas del sistema anterior cuyo total guardado no cuadra con sus renglones."})
+	}
 	return figures, nil
 }
 
@@ -97,7 +120,8 @@ func ledgerReport(ctx context.Context, query *Query, selectSQL, groupSQL, extra,
 	if extra != "" {
 		list.add(extra)
 	}
-	sql := "SELECT " + selectSQL + "," + ledgerMeasures + " FROM app.sales_recognitions r WHERE true" + list.sql()
+	sql := "SELECT " + selectSQL + "," + ledgerMeasures + query.ledgerExtras() + " FROM " + query.ledgerFrom() + " WHERE true" +
+		list.sql()
 	if groupSQL != "" {
 		sql += " GROUP BY " + groupSQL
 	}
@@ -113,30 +137,38 @@ func withFigures(ctx context.Context, query *Query, rows []Row) (*Dataset, error
 	if err != nil {
 		return nil, err
 	}
-	return &Dataset{Rows: rows, Summary: figures, Notes: productNotes(query)}, nil
+	return &Dataset{Rows: rows, Summary: figures, Notes: append(productNotes(query), legacyNotes(query)...)}, nil
 }
 
 func init() {
 	register(Definition{
 		ID: "sales.summary", Group: "sales", Title: "Ventas del periodo",
 		Description: "Venta neta del periodo por tasa de IVA, con subtotal sin IVA, IVA y total.",
-		Permissions: []string{PermissionSales}, Comparison: false, DateBasis: salesDateBasis, Filters: salesFilters(),
-		Columns:     withColumns([]Column{textColumn("rate", "Tasa de IVA")}, salesMeasureColumns()),
+		Permissions: []string{PermissionSales}, Comparison: false, DateBasis: salesDateBasis, Filters: legacySalesFilters(),
+		Columns:     legacySalesColumns(withColumns([]Column{textColumn("rate", "Tasa de IVA")}, salesMeasureColumns())),
 		DefaultSort: Sort{},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			rows, err := ledgerReport(ctx, query, "r.tax_rate::text||' %' AS rate", "r.tax_rate", "", "r.tax_rate DESC")
+			// Los descuentos, cargos y diferencias del sistema anterior no tienen tasa (no llevaban IVA propio).
+			rows, err := ledgerReport(ctx, query, "coalesce(r.tax_rate::text||' %','"+legacyNoRateLabel+"') AS rate", "r.tax_rate",
+				"", "r.tax_rate DESC NULLS LAST")
 			if err != nil {
 				return nil, err
 			}
-			return withFigures(ctx, query, rows)
+			dataset, err := withFigures(ctx, query, rows)
+			if err == nil && query.legacy.History {
+				dataset.Notes = append(dataset.Notes, "«"+legacyNoRateLabel+"»: descuentos, cargos extra y diferencias de las ventas "+
+					"del sistema anterior, que no llevaban IVA propio (el IVA de ese renglón, si lo hay, es la diferencia entre el IVA "+
+					"guardado de la venta y el de sus renglones).")
+			}
+			return dataset, err
 		},
 	})
-	dayColumns := withColumns([]Column{dateColumn("day", "Día"), columnAccounts}, salesMeasureColumns(),
-		[]Column{columnAverageTicket})
+	dayColumns := legacySalesColumns(withColumns([]Column{dateColumn("day", "Día"), columnAccounts}, salesMeasureColumns(),
+		[]Column{columnAverageTicket}))
 	register(Definition{
 		ID: "sales.by_day", Group: "sales", Title: "Ventas por día",
 		Description: "Venta de cada día comercial del periodo, incluidos los días sin ventas.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(), Columns: dayColumns,
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(), Columns: dayColumns,
 		DefaultSort: Sort{Key: "day"}, Totals: averageTicketTotals,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, businessDate("r.recognized_at")+" AS day", "1", "", "1")
@@ -149,9 +181,9 @@ func init() {
 	register(Definition{
 		ID: "sales.by_week", Group: "sales", Title: "Ventas por semana",
 		Description: "Venta por semana del año (ISO 8601, de lunes a domingo).",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(),
-		Columns: withColumns([]Column{codeColumn("week", "Semana"), dateColumn("week_start", "Del"), dateColumn("week_end", "Al"),
-			columnAccounts}, salesMeasureColumns(), []Column{columnAverageTicket}),
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(),
+		Columns: legacySalesColumns(withColumns([]Column{codeColumn("week", "Semana"), dateColumn("week_start", "Del"),
+			dateColumn("week_end", "Al"), columnAccounts}, salesMeasureColumns(), []Column{columnAverageTicket})),
 		DefaultSort: Sort{Key: "week_start"}, Totals: averageTicketTotals,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			day := businessDate("r.recognized_at")
@@ -166,9 +198,9 @@ func init() {
 	register(Definition{
 		ID: "sales.by_month", Group: "sales", Title: "Ventas por mes",
 		Description: "Venta por mes calendario de días comerciales.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(),
-		Columns: withColumns([]Column{codeColumn("month", "Mes"), textColumn("month_label", "Nombre del mes"), columnAccounts},
-			salesMeasureColumns(), []Column{columnAverageTicket}),
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(),
+		Columns: legacySalesColumns(withColumns([]Column{codeColumn("month", "Mes"), textColumn("month_label", "Nombre del mes"),
+			columnAccounts}, salesMeasureColumns(), []Column{columnAverageTicket})),
 		DefaultSort: Sort{Key: "month"}, Totals: averageTicketTotals,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, "to_char("+businessDate("r.recognized_at")+",'YYYY-MM') AS month", "1", "", "1")
@@ -181,11 +213,11 @@ func init() {
 			return withFigures(ctx, query, rows)
 		},
 	})
-	hourColumns := []Column{textColumn("hour", "Hora"), columnAccounts, columnQuantity, columnNet, columnShare}
+	hourColumns := legacySalesColumns([]Column{textColumn("hour", "Hora"), columnAccounts, columnQuantity, columnNet, columnShare})
 	register(Definition{
 		ID: "sales.by_hour", Group: "sales", Title: "Ventas por hora",
 		Description: "Venta por hora del día (hora local del cierre), en el orden del día comercial.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(), Columns: hourColumns,
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(), Columns: hourColumns,
 		Totals: shareTotals,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, localHour("r.recognized_at")+" AS hour_number", "1", "", "1")
@@ -198,8 +230,9 @@ func init() {
 	register(Definition{
 		ID: "sales.by_category", Group: "categories", Title: "Ventas por categoría",
 		Description: "Cantidades e ingresos por categoría, con el nombre registrado al vender.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(),
-		Columns:     withColumns([]Column{textColumn("category", "Categoría")}, salesMeasureColumns(), []Column{columnShare}),
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(),
+		Columns: withLegacyColumns(withColumns([]Column{textColumn("category", "Categoría")}, salesMeasureColumns(),
+			[]Column{columnShare}), false),
 		DefaultSort: Sort{Key: "net", Descending: true}, Totals: shareTotals,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, "coalesce("+latest("r.category_name")+",'Sin categoría') AS category",
@@ -213,9 +246,9 @@ func init() {
 	register(Definition{
 		ID: "sales.by_product", Group: "sales", Title: "Ventas por producto",
 		Description: "Cantidades e ingresos por producto, con el nombre y la categoría registrados al vender.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(),
-		Columns: withColumns([]Column{codeColumn("code", "Código"), textColumn("product", "Producto"),
-			textColumn("category", "Categoría")}, salesMeasureColumns(), []Column{columnShare}),
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(),
+		Columns: withLegacyColumns(withColumns([]Column{codeColumn("code", "Código"), textColumn("product", "Producto"),
+			textColumn("category", "Categoría")}, salesMeasureColumns(), []Column{columnShare}), false),
 		DefaultSort: Sort{Key: "net", Descending: true}, Totals: shareTotals,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, latest("r.product_code")+" AS code,"+latest("r.product_name")+" AS product,"+
@@ -242,12 +275,12 @@ func init() {
 			return productDataset(ctx, query, rows)
 		},
 	})
-	modeColumns := withColumns([]Column{textColumn("mode", "Modalidad"), columnAccounts}, salesMeasureColumns(),
-		[]Column{columnAverageTicket, columnShare})
+	modeColumns := legacySalesColumns(withColumns([]Column{textColumn("mode", "Modalidad"), columnAccounts}, salesMeasureColumns(),
+		[]Column{columnAverageTicket, columnShare}))
 	register(Definition{
 		ID: "sales.by_mode", Group: "sales", Title: "Ventas por modalidad",
 		Description: "Venta de salón y de para llevar o ventanilla.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(), Columns: modeColumns,
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(), Columns: modeColumns,
 		DefaultSort: Sort{Key: "net", Descending: true}, Totals: combineTotals(averageTicketTotals, shareTotals),
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, "CASE r.mode WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar y ventanilla' END AS mode",
@@ -262,9 +295,9 @@ func init() {
 		ID: "sales.dine_in", Group: "sales", Title: "Ventas de salón",
 		Description: "Venta de salón por área y mesa (la mesa de la cuenta al cerrarse).",
 		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis,
-		Filters: []Filter{filterArea(), filterTable(), filterCategory(), filterProduct(), filterPriceList()},
-		Columns: withColumns([]Column{textColumn("area", "Área"), textColumn("table", "Mesa"), columnAccounts}, salesMeasureColumns(),
-			[]Column{columnAverageTicket, columnShare}),
+		Filters: withDataSource([]Filter{filterArea(), filterTable(), filterCategory(), filterProduct(), filterPriceList()}),
+		Columns: legacySalesColumns(withColumns([]Column{textColumn("area", "Área"), textColumn("table", "Mesa"), columnAccounts},
+			salesMeasureColumns(), []Column{columnAverageTicket, columnShare})),
 		DefaultSort: Sort{Key: "net", Descending: true}, Totals: combineTotals(averageTicketTotals, shareTotals),
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, "coalesce("+latest("r.area_name")+",'Sin área') AS area,"+
@@ -279,9 +312,9 @@ func init() {
 		ID: "sales.takeaway", Group: "sales", Title: "Ventas para llevar y ventanilla",
 		Description: "Venta para llevar por origen (Para llevar, Mostrador, Teléfono, Ventanilla…).",
 		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis,
-		Filters: []Filter{filterOrigin(), filterCategory(), filterProduct(), filterPriceList()},
-		Columns: withColumns([]Column{textColumn("origin", "Origen"), columnAccounts}, salesMeasureColumns(),
-			[]Column{columnAverageTicket, columnShare}),
+		Filters: withDataSource([]Filter{filterOrigin(), filterCategory(), filterProduct(), filterPriceList()}),
+		Columns: legacySalesColumns(withColumns([]Column{textColumn("origin", "Origen"), columnAccounts}, salesMeasureColumns(),
+			[]Column{columnAverageTicket, columnShare})),
 		DefaultSort: Sort{Key: "net", Descending: true}, Totals: combineTotals(averageTicketTotals, shareTotals),
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
 			rows, err := ledgerReport(ctx, query, "r.origin AS origin", "r.origin", "r.mode = 'takeaway'", "")
@@ -310,38 +343,61 @@ func init() {
 		ID: "sales.by_shift", Group: "sales", Title: "Ventas por turno",
 		Description: "Venta reconocida en cada turno: la venta pertenece al turno de la operación que cerró la cuenta.",
 		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis + " Turno de la operación que cerró la cuenta.",
-		Filters: []Filter{filterRegister(), filterMode()},
-		Columns: withColumns([]Column{textColumn("register", "Caja"), dateColumn("business_date", "Fecha comercial del turno"),
-			textColumn("opened_by", "Abrió"), columnAccounts}, salesMeasureColumns(), []Column{columnAverageTicket}),
+		Filters: withDataSource([]Filter{filterRegister(), filterMode()}),
+		Columns: legacySalesColumns(withColumns([]Column{textColumn("register", "Caja"),
+			dateColumn("business_date", "Fecha comercial del turno"), textColumn("opened_by", "Abrió"), columnAccounts},
+			salesMeasureColumns(), []Column{columnAverageTicket})),
 		DefaultSort: Sort{Key: "business_date"}, Totals: averageTicketTotals,
 		Query: salesByShift,
 	})
 	register(Definition{
 		ID: "sales.accounts", Group: "sales", Title: "Cuentas cerradas",
 		Description: "Detalle de cada cierre reconocido en el periodo (las reliquidaciones aparecen aparte).",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: []Filter{filterMode(), filterArea(), filterTable()},
-		Columns: []Column{codeColumn("folio", "Folio"), dateTimeColumn("recognized_at", "Cierre"), textColumn("kind", "Tipo"),
-			textColumn("mode", "Modalidad"), textColumn("place", "Mesa u origen"), columnQuantity, columnGross, columnPromotion,
-			columnDiscount, columnCourtesy, columnCharge, columnNet, columnTax},
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis,
+		Filters: withDataSource([]Filter{filterMode(), filterArea(), filterTable()}),
+		Columns: legacySalesColumns([]Column{codeColumn("folio", "Folio"), dateTimeColumn("recognized_at", "Cierre"),
+			textColumn("kind", "Tipo"), textColumn("mode", "Modalidad"), textColumn("place", "Mesa u origen"), columnQuantity,
+			columnGross, columnPromotion, columnDiscount, columnCourtesy, columnCharge, columnNet, columnTax}),
 		DefaultSort: Sort{Key: "recognized_at"},
-		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			list := ledgerConditions(query)
-			rows, err := query.collect(ctx, `SELECT min(r.account_folio)::text AS folio,min(r.recognized_at) AS recognized_at,
-                    CASE min(r.recognition_kind) WHEN 'initial' THEN 'Cierre' WHEN 'backfill' THEN 'Cierre (relleno inicial)'
-                        ELSE 'Reliquidación' END AS kind,
-                    CASE min(r.mode) WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar' END AS mode,
-                    coalesce(min(r.table_name),min(r.origin)) AS place,
-                    coalesce(sum(r.quantity),0)::bigint AS quantity,sum(r.gross) AS gross,sum(r.promotion) AS promotion,
-                    sum(r.discount) AS discount,sum(r.courtesy) AS courtesy,sum(r.charge) AS charge,sum(r.net) AS net,sum(r.tax) AS tax
-                FROM app.sales_recognitions r WHERE true`+list.sql()+`
-                GROUP BY r.closing_id ORDER BY 2`, query.Args())
-			if err != nil {
-				return nil, err
-			}
-			return withFigures(ctx, query, rows)
-		},
+		Query:       closedAccounts,
 	})
 	registerSalesEvolution()
+}
+
+// closedAccounts es el detalle de cierres de AD-EL POS y, con el historial, una venta del anterior por renglón (folio
+// SA-…, «Venta del sistema anterior»), con su diferencia del sistema anterior.
+func closedAccounts(ctx context.Context, query *Query) (*Dataset, error) {
+	rows := []Row{}
+	if query.legacy.Native {
+		list := ledgerConditions(query)
+		native, err := query.collect(ctx, `SELECT min(r.account_folio)::text AS folio,min(r.recognized_at) AS recognized_at,
+                CASE min(r.recognition_kind) WHEN 'initial' THEN 'Cierre' WHEN 'backfill' THEN 'Cierre (relleno inicial)'
+                    ELSE 'Reliquidación' END AS kind,
+                CASE min(r.mode) WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar' END AS mode,
+                coalesce(min(r.table_name),min(r.origin)) AS place,
+                coalesce(sum(r.quantity),0)::bigint AS quantity,sum(r.gross) AS gross,sum(r.promotion) AS promotion,
+                sum(r.discount) AS discount,sum(r.courtesy) AS courtesy,sum(r.charge) AS charge,sum(r.net) AS net,sum(r.tax) AS tax
+            FROM app.sales_recognitions r WHERE true`+list.sql()+`
+            GROUP BY r.closing_id ORDER BY 2`, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		query.markNative(native)
+		rows = native
+	}
+	if query.legacy.History {
+		legacy, err := query.collect(ctx, `SELECT '`+legacyFolioPrefix+`'||l.sale_folio AS folio,min(l.recognized_at) AS recognized_at,
+                'Venta del sistema anterior' AS kind,CASE min(l.mode) WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar' END AS mode,
+                CASE WHEN min(l.mode)='dine_in' THEN coalesce(min(l.table_name),'Sin mesa') ELSE 'Para llevar' END AS place,
+                `+legacyLedgerMeasures+`
+            FROM app.legacy_sales_recognitions l WHERE true`+legacyLedgerConditions(query).sql()+`
+            GROUP BY l.legacy_sale_id,l.sale_folio ORDER BY 2,l.legacy_sale_id`, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, legacy...)
+	}
+	return withFigures(ctx, query, rows)
 }
 
 // productDataset agrega la conciliación con los ajustes de cuenta que no pertenecen a productos.
@@ -357,7 +413,7 @@ func productDataset(ctx context.Context, query *Query, rows []Row) (*Dataset, er
 	list := ledgerConditions(query)
 	list.add("r.source_kind = 'adjustment'")
 	if err := query.Tx.QueryRow(ctx, `SELECT coalesce(sum(r.discount+r.courtesy),0)::text,coalesce(sum(r.charge),0)::text
-        FROM app.sales_recognitions r WHERE true`+list.sql(), query.Args()).Scan(&discounts, &charges); err != nil {
+        FROM `+query.ledgerFrom()+` WHERE true`+list.sql(), query.Args()).Scan(&discounts, &charges); err != nil {
 		return nil, err
 	}
 	dataset.Summary = append(dataset.Summary,
@@ -445,17 +501,37 @@ func salesByShift(ctx context.Context, query *Query) (*Dataset, error) {
 	list := ledgerConditions(query)
 	// Paridad con Caja: las ventas de un turno en arqueo no se muestran hasta que termine.
 	list.add("(r.shift_id IS NULL OR NOT EXISTS(SELECT FROM app.cash_shifts closing WHERE closing.id=r.shift_id AND closing.state='closing'))")
-	rows, err := query.collect(ctx, `SELECT coalesce(register.name,'Sin turno') AS register,
-            coalesce(s.business_date,(s.opened_at AT TIME ZONE @tz)::date) AS business_date,opener.display_name AS opened_by,`+
-		ledgerMeasures+`
-        FROM app.sales_recognitions r
-        LEFT JOIN app.cash_shifts s ON s.id=r.shift_id
-        LEFT JOIN app.registers register ON register.id=s.register_id
-        LEFT JOIN app.users opener ON opener.id=s.opened_by
-        WHERE true`+list.sql()+`
-        GROUP BY r.shift_id,register.name,s.business_date,s.opened_at,opener.display_name`, query.Args())
-	if err != nil {
-		return nil, err
+	rows := []Row{}
+	if query.legacy.Native {
+		native, err := query.collect(ctx, `SELECT coalesce(register.name,'Sin turno') AS register,
+                coalesce(s.business_date,(s.opened_at AT TIME ZONE @tz)::date) AS business_date,opener.display_name AS opened_by,`+
+			ledgerMeasures+`
+            FROM app.sales_recognitions r
+            LEFT JOIN app.cash_shifts s ON s.id=r.shift_id
+            LEFT JOIN app.registers register ON register.id=s.register_id
+            LEFT JOIN app.users opener ON opener.id=s.opened_by
+            WHERE true`+list.sql()+`
+            GROUP BY r.shift_id,register.name,s.business_date,s.opened_at,opener.display_name`, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		query.markNative(native)
+		rows = native
+	}
+	if query.legacy.History {
+		// Un renglón por corte del anterior (el del último pago de la venta, ventas.corte), con su caja, la fecha de su
+		// apertura y su cajero; «Sin turno» agrupa las ventas pagadas sin corte.
+		legacy, err := query.collect(ctx, `SELECT CASE WHEN l.legacy_shift_id IS NULL THEN 'Sin turno'
+                    ELSE coalesce(min(s.register_name),'Corte '||l.legacy_shift_id) END AS register,
+                (min(s.opened_at) AT TIME ZONE @tz)::date AS business_date,min(s.cashier_name) AS opened_by,`+legacyLedgerMeasures+`
+            FROM app.legacy_sales_recognitions l
+            LEFT JOIN app.legacy_cash_shifts s ON s.batch_id=l.batch_id AND s.legacy_id=l.legacy_shift_id
+            WHERE true`+legacyLedgerConditions(query).sql()+`
+            GROUP BY l.legacy_shift_id`, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, legacy...)
 	}
 	// Las cifras resumidas excluyen los turnos en arqueo igual que los renglones.
 	figures, err := salesFiguresWhere(ctx, query, list)
@@ -463,14 +539,20 @@ func salesByShift(ctx context.Context, query *Query) (*Dataset, error) {
 		return nil, err
 	}
 	dataset := &Dataset{Rows: rows, Summary: figures, Notes: productNotes(query)}
-	warning, err := closingShiftsWarning(ctx, query)
-	if err != nil {
-		return nil, err
+	if query.legacy.Native {
+		warning, err := closingShiftsWarning(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		if warning != nil {
+			dataset.Warnings = append(dataset.Warnings, *warning)
+		}
+		dataset.Notes = append(dataset.Notes,
+			"«Sin turno»: cortesías o entregas que cerraron la cuenta sin un turno activo en la caja de la terminal, o cuentas del relleno inicial cerradas sin pago.")
 	}
-	if warning != nil {
-		dataset.Warnings = append(dataset.Warnings, *warning)
+	if query.legacy.History {
+		dataset.Notes = append(dataset.Notes, "Sistema anterior: cada corte es un turno (el del último pago de cada venta); «Sin "+
+			"turno» son sus ventas pagadas sin corte.", legacySalesNote)
 	}
-	dataset.Notes = append(dataset.Notes,
-		"«Sin turno»: cortesías o entregas que cerraron la cuenta sin un turno activo en la caja de la terminal, o cuentas del relleno inicial cerradas sin pago.")
 	return dataset, nil
 }

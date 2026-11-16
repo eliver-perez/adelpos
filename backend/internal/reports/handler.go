@@ -169,6 +169,11 @@ func buildCatalog(ctx context.Context, tx pgx.Tx, actor Actor) (*Catalog, error)
 	if err != nil {
 		return nil, err
 	}
+	// El filtro «Datos» y las columnas del historial importado solo se ofrecen con un lote vigente.
+	available, err := legacyAvailable(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	catalog := &Catalog{Groups: []CatalogGroup{}, Periods: periodOptions, Dashboard: true, Timezone: config.Timezone,
 		DayStart: config.Cutoff()}
 	byGroup := map[string][]CatalogReport{}
@@ -178,11 +183,13 @@ func buildCatalog(ctx context.Context, tx pgx.Tx, actor Actor) (*Catalog, error)
 		}
 		entry := CatalogReport{
 			ID: definition.ID, Title: definition.Title, Description: definition.Description, DateBasis: definition.DateBasis,
-			Period: definition.Period, Comparison: definition.Comparison, Filters: definition.Filters,
-			Columns: visibleColumns(actor, definition.Columns),
+			Period: definition.Period, Comparison: definition.Comparison, Filters: []Filter{},
+			Columns: visibleColumns(actor, definition.Columns, available),
 		}
-		if entry.Filters == nil {
-			entry.Filters = []Filter{}
+		for _, filter := range definition.Filters {
+			if available || !filter.Legacy {
+				entry.Filters = append(entry.Filters, filter)
+			}
 		}
 		entry.DefaultSort = SortInfo{Key: definition.DefaultSort.Key, Direction: "asc"}
 		if definition.DefaultSort.Descending {

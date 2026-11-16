@@ -83,6 +83,7 @@ function Harness({ operationHandlers, children, ...props }: HarnessProps) {
     authenticated: true,
     permissions,
     screen: 'restaurant',
+    mainComputer: true,
     operation: operationState,
     operationHandlers: ref,
     cashOptions: [

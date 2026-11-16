@@ -71,8 +71,8 @@ func trendDataset(ctx context.Context, query *Query) (*Dataset, error) {
 	list.add("r.product_id IS NOT NULL")
 	before, err := collectRows(ctx, query.Tx, `SELECT r.product_id::text AS product_ref,`+latest("r.product_code")+` AS code,
             `+latest("r.product_name")+` AS product,coalesce(`+latest("r.category_name")+`,'Sin categoría') AS category,
-            coalesce(sum(r.quantity),0)::bigint AS previous_quantity
-        FROM app.sales_recognitions r WHERE true`+list.sql()+` GROUP BY r.product_id`, query.PeriodArgs(previous),
+            coalesce(sum(r.quantity),0)::bigint AS previous_quantity`+query.ledgerExtras()+`
+        FROM `+query.ledgerFrom()+` WHERE true`+list.sql()+` GROUP BY r.product_id`, query.PeriodArgs(previous),
 		map[string]string{"previous_quantity": TypeInteger})
 	if err != nil {
 		return nil, err
@@ -86,6 +86,10 @@ func trendDataset(ctx context.Context, query *Query) (*Dataset, error) {
 		reference := row["product_ref"].(string)
 		if existing, found := byProduct[reference]; found {
 			existing["previous_quantity"] = row["previous_quantity"]
+			// Con el historial, «Datos» abarca los dos periodos que compara el renglón.
+			if source, ok := row["data_source"].(string); ok && existing["data_source"] != source {
+				existing["data_source"] = BothSourcesLabel
+			}
 			continue
 		}
 		row["quantity"] = int64(0)
@@ -101,19 +105,77 @@ func trendDataset(ctx context.Context, query *Query) (*Dataset, error) {
 	return current, nil
 }
 
+// selectedComplements son los complementos elegidos en las partidas vendidas de AD-EL POS (de la cotización guardada de
+// cada versión) y, con el historial, los de los renglones vendidos del anterior (legacy_line_complements, con lo
+// incluido y lo pedido por unidad del renglón), en renglones propios del grupo «Complementos (sistema anterior)».
+func selectedComplements(ctx context.Context, query *Query) (*Dataset, error) {
+	dataset := &Dataset{Rows: []Row{}}
+	if query.legacy.Native {
+		list := ledgerConditions(query)
+		list.add("r.source_kind = 'unit'")
+		rows, err := query.collect(ctx, `WITH lines AS (
+                SELECT r.quantity,v.quote_line AS line FROM app.sales_recognitions r
+                JOIN app.restaurant_item_versions v ON v.id=r.version_id WHERE true`+list.sql()+`
+                UNION ALL
+                SELECT r.quantity*(component.value->>'quantity')::integer,component.value->'product'
+                FROM app.sales_recognitions r
+                JOIN app.restaurant_item_versions v ON v.id=r.version_id
+                CROSS JOIN LATERAL jsonb_array_elements(coalesce(v.quote_line->'components','[]'::jsonb)) component
+                WHERE component.value->'product' IS NOT NULL AND (component.value->>'quantity')::integer > 0`+list.sql()+`
+            )
+            SELECT grp.value->>'name' AS "group",choice.value->>'name' AS complement,
+                sum(lines.quantity) FILTER (WHERE (choice.value->>'requested')::numeric > 0)::bigint AS units,
+                coalesce(sum(lines.quantity*(choice.value->>'requested')::numeric),0) AS portions,
+                coalesce(sum(lines.quantity*greatest((choice.value->>'requested')::numeric-(choice.value->>'included')::numeric,0)),0)
+                    AS extra_portions
+            FROM lines
+            CROSS JOIN LATERAL jsonb_array_elements(coalesce(lines.line->'groups','[]'::jsonb)) grp
+            CROSS JOIN LATERAL jsonb_array_elements(coalesce(grp.value->'options','[]'::jsonb)) choice
+            WHERE (choice.value->>'requested')::numeric > 0
+            GROUP BY grp.value->>'group_id',grp.value->>'name',choice.value->>'complement_id',choice.value->>'name'`, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		query.markNative(rows)
+		dataset.Rows = rows
+	}
+	if query.legacy.History {
+		list := legacyLedgerConditions(query)
+		list.add("l.entry_kind = 'line'")
+		rows, err := query.collect(ctx, `SELECT '`+legacyComplementsGroup+`' AS "group",min(c.complement_name) AS complement,
+                coalesce(sum(l.quantity),0)::bigint AS units,coalesce(sum(l.quantity*c.requested),0) AS portions,
+                coalesce(sum(l.quantity*greatest(c.requested-coalesce(c.included,0),0)),0) AS extra_portions,
+                '`+LegacySourceLabel+`' AS data_source
+            FROM app.legacy_sales_recognitions l
+            JOIN app.legacy_line_complements c ON c.batch_id=l.batch_id AND c.legacy_line_id=l.legacy_line_id
+            WHERE c.requested > 0`+list.sql()+`
+            GROUP BY c.legacy_complement_id`, query.Args())
+		if err != nil {
+			return nil, err
+		}
+		dataset.Rows = append(dataset.Rows, rows...)
+		dataset.Notes = append(dataset.Notes, "Sistema anterior: lo incluido y lo pedido de cada complemento por unidad del renglón, "+
+			"tal como se guardó.")
+	}
+	return dataset, nil
+}
+
+// legacyComplementsGroup es el grupo de los complementos del sistema anterior (no tenía grupos).
+const legacyComplementsGroup = "Complementos (sistema anterior)"
+
 func init() {
-	rankingColumns := []Column{codeColumn("code", "Código"), textColumn("product", "Producto"), textColumn("category", "Categoría"),
-		columnQuantity, columnNet, columnShare}
+	rankingColumns := withLegacyColumns([]Column{codeColumn("code", "Código"), textColumn("product", "Producto"),
+		textColumn("category", "Categoría"), columnQuantity, columnNet, columnShare}, false)
 	register(Definition{
 		ID: "products.top", Group: "products", Title: "Productos más vendidos",
 		Description: "Productos ordenados por unidades vendidas, con su venta neta.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(), Columns: rankingColumns,
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(), Columns: rankingColumns,
 		DefaultSort: Sort{Key: "quantity", Descending: true}, Totals: shareTotals, Query: productRanking,
 	})
 	register(Definition{
 		ID: "products.bottom", Group: "products", Title: "Productos menos vendidos",
 		Description: "Productos ordenados de menos a más unidades vendidas, incluidos los activos sin ventas.",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: salesFilters(), Columns: rankingColumns,
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: legacySalesFilters(), Columns: rankingColumns,
 		DefaultSort: Sort{Key: "quantity"}, Totals: shareTotals, Query: unsoldProducts,
 	})
 	register(Definition{
@@ -160,42 +222,16 @@ func init() {
 	register(Definition{
 		ID: "products.complements", Group: "products", Title: "Complementos seleccionados",
 		Description: "Complementos elegidos en los grupos de las partidas vendidas (también dentro de combos).",
-		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis, Filters: []Filter{filterProduct(), filterCategory(), filterMode()},
-		Columns: []Column{textColumn("group", "Grupo"), textColumn("complement", "Complemento"),
+		Permissions: []string{PermissionSales}, DateBasis: salesDateBasis,
+		Filters: withDataSource([]Filter{filterProduct(), filterCategory(), filterMode()}),
+		Columns: withLegacyColumns([]Column{textColumn("group", "Grupo"), textColumn("complement", "Complemento"),
 			described(countColumn("units", "Partidas"), "Unidades vendidas que llevaron el complemento."),
 			described(Column{Key: "portions", Label: "Porciones", Type: TypeQuantity, Total: TotalSum, Sortable: true},
 				"Porciones solicitadas en total."),
 			described(Column{Key: "extra_portions", Label: "Porciones adicionales", Type: TypeQuantity, Total: TotalSum, Sortable: true},
-				"Porciones por encima de las incluidas.")},
+				"Porciones por encima de las incluidas.")}, false),
 		DefaultSort: Sort{Key: "units", Descending: true},
-		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			list := ledgerConditions(query)
-			list.add("r.source_kind = 'unit'")
-			rows, err := query.collect(ctx, `WITH lines AS (
-                    SELECT r.quantity,v.quote_line AS line FROM app.sales_recognitions r
-                    JOIN app.restaurant_item_versions v ON v.id=r.version_id WHERE true`+list.sql()+`
-                    UNION ALL
-                    SELECT r.quantity*(component.value->>'quantity')::integer,component.value->'product'
-                    FROM app.sales_recognitions r
-                    JOIN app.restaurant_item_versions v ON v.id=r.version_id
-                    CROSS JOIN LATERAL jsonb_array_elements(coalesce(v.quote_line->'components','[]'::jsonb)) component
-                    WHERE component.value->'product' IS NOT NULL AND (component.value->>'quantity')::integer > 0`+list.sql()+`
-                )
-                SELECT grp.value->>'name' AS "group",choice.value->>'name' AS complement,
-                    sum(lines.quantity) FILTER (WHERE (choice.value->>'requested')::numeric > 0)::bigint AS units,
-                    coalesce(sum(lines.quantity*(choice.value->>'requested')::numeric),0) AS portions,
-                    coalesce(sum(lines.quantity*greatest((choice.value->>'requested')::numeric-(choice.value->>'included')::numeric,0)),0)
-                        AS extra_portions
-                FROM lines
-                CROSS JOIN LATERAL jsonb_array_elements(coalesce(lines.line->'groups','[]'::jsonb)) grp
-                CROSS JOIN LATERAL jsonb_array_elements(coalesce(grp.value->'options','[]'::jsonb)) choice
-                WHERE (choice.value->>'requested')::numeric > 0
-                GROUP BY grp.value->>'group_id',grp.value->>'name',choice.value->>'complement_id',choice.value->>'name'`, query.Args())
-			if err != nil {
-				return nil, err
-			}
-			return &Dataset{Rows: rows}, nil
-		},
+		Query:       selectedComplements,
 	})
 	register(Definition{
 		ID: "products.cancelled", Group: "products", Title: "Productos cancelados",
@@ -206,7 +242,8 @@ func init() {
 		Columns: []Column{dateTimeColumn("cancelled_at", "Cancelación"), codeColumn("folio", "Folio"), textColumn("product", "Producto"),
 			countColumn("quantity", "Cantidad"), moneyColumn("amount", "Importe"), textColumn("reason", "Motivo"),
 			textColumn("cancelled_by", "Canceló"),
-			// Etapa 9F (§7.2): el supervisor que autorizó, como en «Modificaciones de cantidades».
+			// Etapa 9F (§7.2): el supervisor que autorizó, como en «Modificaciones de cantidades». Desde
+			// la 9H solo lo tienen las cuentas canceladas con supervisor y los registros de la 9F.
 			described(textColumn("authorized_by", "Autorizó"), unitsAuthorizedDescription),
 			textColumn("released", "Liberada a cocina")},
 		DefaultSort: Sort{Key: "cancelled_at"},
@@ -265,10 +302,11 @@ func init() {
 	register(Definition{
 		ID: "products.trends", Group: "products", Title: "Tendencia de demanda",
 		Description: "Unidades vendidas por producto frente al periodo anterior equivalente.",
-		Permissions: []string{PermissionSales}, Comparison: true, DateBasis: salesDateBasis, Filters: salesFilters(),
-		Columns: []Column{codeColumn("code", "Código"), textColumn("product", "Producto"), textColumn("category", "Categoría"),
-			columnQuantity, countColumn("previous_quantity", "Cantidad anterior"),
+		Permissions: []string{PermissionSales}, Comparison: true, DateBasis: salesDateBasis, Filters: legacySalesFilters(),
+		Columns: withLegacyColumns([]Column{codeColumn("code", "Código"), textColumn("product", "Producto"),
+			textColumn("category", "Categoría"), columnQuantity, countColumn("previous_quantity", "Cantidad anterior"),
 			described(countColumn("change", "Variación"), "Cantidad − cantidad anterior."), percentColumn("change_percent", "Variación %")},
+			false),
 		DefaultSort: Sort{Key: "change", Descending: true},
 		Totals: func(rows []Row, totals Row) {
 			quantity, _ := totals["quantity"].(int64)

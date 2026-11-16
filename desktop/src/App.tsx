@@ -13,6 +13,7 @@ import { KitchenPage } from './pages/kitchen/KitchenPage';
 import { AccessFrame, EnrollmentPage, LoginPage, SetupPage } from './pages/AccessPages';
 import { AuditPage } from './pages/AuditPage';
 import { MaintenancePage } from './pages/MaintenancePage';
+import { LegacyMigrationPage } from './pages/maintenance/LegacyMigrationPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { RepairTerminalPage, useRepairTerminal } from './pages/setup/RepairTerminal';
 import { PasswordPage, PreferencesPage } from './pages/PreferencesPage';
@@ -46,7 +47,7 @@ import { TopBar } from './navigation/TopBar';
 import { UserMenu } from './navigation/UserMenu';
 import { barHighlight, canOpen, resolveHome, sectionByID } from './navigation/sections';
 import type { ScreenID } from './navigation/sections';
-import { installationError, readInstallation } from './services/installation';
+import { includesServer, installationError, readInstallation } from './services/installation';
 import type { InstallationState } from './services/installation';
 import { ModalityChoicePage } from './pages/setup/ModalityChoicePage';
 import { FindServerPage } from './pages/setup/FindServerPage';
@@ -126,7 +127,11 @@ function InstallationGate() {
     );
   }
   return (
-    <ApplicationContent serverOnly={state.mode === 'server-only'} paired={state.paired ?? false} />
+    <ApplicationContent
+      serverOnly={state.mode === 'server-only'}
+      paired={state.paired ?? false}
+      mainComputer={includesServer(state.mode)}
+    />
   );
 }
 
@@ -148,8 +153,17 @@ function isOperation(screen: ScreenID) {
 }
 
 // paired (etapa 9G, fase B): terminal emparejada con la computadora principal; si pierde su autorización
-// o el servidor cambia de identidad, se ofrece emparejarla de nuevo.
-function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paired: boolean }) {
+// o el servidor cambia de identidad, se ofrece emparejarla de nuevo. mainComputer (etapa 9H): modalidad
+// con servidor, la única en la que se migra del sistema anterior.
+function ApplicationContent({
+  serverOnly,
+  paired,
+  mainComputer,
+}: {
+  serverOnly: boolean;
+  paired: boolean;
+  mainComputer: boolean;
+}) {
   const session = useSession();
   const repairTerminal = useRepairTerminal();
   // Pantalla visible. Al iniciar sesión se sustituye por el inicio de la terminal (en «Solo servidor»,
@@ -200,6 +214,7 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
     authenticated: authenticated && !!identity && !serverOnly,
     permissions,
     screen: authenticated && identity && !serverOnly ? screen : null,
+    mainComputer,
     operation: can('accounts.read') && !serverOnly ? operationCommands : null,
     operationHandlers,
     cashOptions,
@@ -591,7 +606,15 @@ function ApplicationContent({ serverOnly, paired }: { serverOnly: boolean; paire
       case 'audit':
         return <AuditPage />;
       case 'maintenance':
-        return <MaintenancePage />;
+        return (
+          <MaintenancePage
+            mainComputer={mainComputer}
+            onOpenMigration={() => void requestScreen('legacy-migration')}
+          />
+        );
+      case 'legacy-migration':
+        // Etapa 9H (fase D): asistente de migración del sistema anterior.
+        return <LegacyMigrationPage mainComputer={mainComputer} />;
       case 'preferences':
         return <PreferencesPage identity={identity} refresh={session.refresh} />;
       case 'password':

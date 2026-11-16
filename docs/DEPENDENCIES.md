@@ -227,3 +227,26 @@ Lo demás de la etapa se hizo con lo que ya había:
 - **Agente de impresión** (`print_agent.rs`): `/usr/bin/lpstat`, `/usr/bin/lpoptions` y `/usr/bin/lp` del sistema;
   base64 y UUID propios y el aleatorio de `ring`/`rustls`. **Respaldos programados**: `pg_dump`/`pg_restore` de la
   instalación de PostgreSQL, como los respaldos anteriores.
+
+## Etapa 9H
+
+**Sin dependencias nuevas**: ningún módulo, crate ni paquete npm nuevo (comprobado con `git diff` desde `main` 0.10.0:
+`backend/go.mod` y `go.sum` sin cambios; `desktop/package.json`, `package-lock.json`, `src-tauri/Cargo.toml` y
+`Cargo.lock` solo cambian el número de versión del propio paquete, 0.11.0). Todo compila y se prueba con `GOPROXY=off` y
+`cargo … --locked --offline`. Lo que usa la migración del sistema anterior:
+
+- **Paquete `.adelmig`** (`internal/legacypkg`): Argon2id de `golang.org/x/crypto/argon2` (ya directa por las
+  contraseñas) y, de la biblioteca estándar de Go, AES-256-GCM, HMAC-SHA-256, HKDF (`crypto/hkdf`), gzip y tar.
+- **Frase de paso y datos sintéticos**: NFC con `golang.org/x/text/unicode/norm` y lectura sin eco en una terminal con
+  `golang.org/x/term`; `golang.org/x/text/encoding/charmap` (página 1252) solo para que `internal/legacysynth` ordene
+  los textos como SQL Server. Bloqueos y procesos (`flock`, `LockFileEx`, `OpenProcess`) y el renombrado sin reemplazo
+  (`MoveFileEx`) con `golang.org/x/sys`.
+- **Informe en PDF** de la importación: `go-pdf/fpdf` con las fuentes Go de `golang.org/x/image` (los de la 9A).
+- **Lector** (`internal/legacyread`): **Docker Desktop**, que instala el propietario en la computadora donde prepara el
+  paquete (herramienta externa: no va en el `.pkg` ni en el instalador de Windows y no la necesita el servidor), y la
+  imagen oficial de Microsoft `mcr.microsoft.com/mssql/server:2022-latest`, que el lector descarga la primera vez y
+  ejecuta por su identificador. El contenedor corre la edición Express (`MSSQL_PID=Express`) con `ACCEPT_EULA=Y`: el
+  lector acepta la licencia de SQL Server de Microsoft al crear cada contenedor temporal. Las consultas usan el `sqlcmd`
+  que trae la imagen (`docker exec`).
+- **Rust** (`legacy_migration.rs`): `tauri-plugin-dialog` 2.8.3 (9A) para los diálogos, `sha2` (9G) para la huella de
+  la subida, base64 propio y procesos con `std::process`.

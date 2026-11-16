@@ -133,7 +133,7 @@ func TestPermissionsAndParameters(t *testing.T) {
 	if _, _, err := Prepare(payer, "payments.list", url.Values{"sort": {"received"}}); !isCode(err, "VALIDATION_ERROR") {
 		t.Fatal("No se puede ordenar por una columna protegida sin su permiso")
 	}
-	if columns := visibleColumns(payer, definitionOf(t, "payments.list").Columns); slices.ContainsFunc(columns, func(column Column) bool {
+	if columns := visibleColumns(payer, definitionOf(t, "payments.list").Columns, false); slices.ContainsFunc(columns, func(column Column) bool {
 		return column.Key == "received"
 	}) {
 		t.Fatal("Sin cash.expected.read no se envía el efectivo recibido")

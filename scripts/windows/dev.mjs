@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const LOCAL = path.join(ROOT, '.local');
@@ -496,7 +497,164 @@ function goTestArguments() {
   return { args: [], env: process.env };
 }
 
+// Etapa 9H («Datos reales»): equivalente de scripts/check-legacy-data.sh. Falla si el índice de git tiene un
+// respaldo de SQL Server o un paquete de migración del sistema anterior, por su nombre (LEGACY_DATA_NAMES y la carpeta
+// legacy-data/) o por su contenido (un archivo binario cuya primera línea empiece con la firma «ADELMIG» de un paquete
+// o «TAPE» de un respaldo de SQL Server, también dentro de un gzip), aunque se le haya cambiado el nombre. Sin .git
+// (copia hecha con git archive) no hay índice que revisar.
+const LEGACY_DATA_NAMES = [
+  '.bak',
+  '.bak.gz',
+  '.bak.zip',
+  '.bak.7z',
+  '.mdf',
+  '.ndf',
+  '.ldf',
+  '.trn',
+  '.adelmig',
+];
+
+// gzipStartsWithTape descomprime solo el principio de un archivo del índice con la firma de gzip y dice si es un
+// respaldo de SQL Server (empieza con «TAPE»).
+function gzipStartsWithTape(root, file) {
+  // Con maxBuffer chico git se corta: basta el principio del archivo.
+  const result = spawnSync('git', ['-C', root, 'cat-file', 'blob', `:${file}`], {
+    maxBuffer: 1024 * 1024,
+    windowsHide: true,
+  });
+  if (!result.stdout || result.stdout.length === 0) {
+    return false;
+  }
+  try {
+    const start = zlib.gunzipSync(result.stdout, { finishFlush: zlib.constants.Z_SYNC_FLUSH });
+    return start.subarray(0, 4).toString('latin1') === 'TAPE';
+  } catch {
+    return false;
+  }
+}
+function gitOutput(root, args) {
+  const result = spawnSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (result.error) {
+    fail(`No se pudo ejecutar git: ${result.error.message}`);
+  }
+  // git grep termina con 1 cuando no encuentra nada; con más de 1, falló.
+  if (result.status > 1) {
+    fail(`git ${args[0]} terminó con código ${result.status}.`);
+  }
+  return result.stdout ?? '';
+}
+
+function checkLegacyData(root = ROOT) {
+  if (!fs.existsSync(path.join(root, '.git'))) {
+    console.log(
+      `Datos del sistema anterior: sin .git en ${root} (copia sin índice); no hay nada que comprobar.`,
+    );
+    return;
+  }
+  const found = [];
+  for (const file of gitOutput(root, ['ls-files', '-z', '--cached']).split('\0')) {
+    const lower = file.toLowerCase();
+    const byName =
+      LEGACY_DATA_NAMES.some((extension) => lower.endsWith(extension)) ||
+      lower.startsWith('legacy-data/') ||
+      lower.includes('/legacy-data/');
+    if (file && byName) {
+      found.push(`${file} (nombre)`);
+    }
+  }
+  const signatures = ['-E', '-e', '^TAPE', '-e', '^ADELMIG'];
+  const textFiles = new Set(
+    gitOutput(root, ['grep', '--cached', '-I', '-l', '-z', ...signatures])
+      .split('\0')
+      .filter(Boolean),
+  );
+  // Cada coincidencia llega como «ruta NUL línea NUL firma» y un salto de línea.
+  const matches = gitOutput(root, [
+    '-c',
+    'core.quotePath=false',
+    'grep',
+    '--cached',
+    '-a',
+    '-n',
+    '-o',
+    '-z',
+    ...signatures,
+  ]);
+  let position = 0;
+  while (position < matches.length) {
+    const pathEnd = matches.indexOf('\0', position);
+    const lineEnd = matches.indexOf('\0', pathEnd + 1);
+    const recordEnd = matches.indexOf('\n', lineEnd + 1);
+    if (pathEnd < 0 || lineEnd < 0 || recordEnd < 0) {
+      break;
+    }
+    const file = matches.slice(position, pathEnd);
+    const line = matches.slice(pathEnd + 1, lineEnd);
+    const signature = matches.slice(lineEnd + 1, recordEnd);
+    position = recordEnd + 1;
+    if (line !== '1' || textFiles.has(file)) {
+      continue;
+    }
+    if (signature === 'ADELMIG') {
+      found.push(`${file} (paquete de migración)`);
+    } else {
+      found.push(`${file} (respaldo de SQL Server)`);
+    }
+  }
+  // Respaldos comprimidos con gzip con otro nombre: candidatos con una línea que empieza con 1f (el primer byte de la
+  // firma de gzip; el segundo, 8b, no se puede pasar como argumento sin que Node lo convierta a UTF-8) y después se
+  // descomprime el principio de cada uno.
+  const gzipMatches = spawnSync(
+    'git',
+    [
+      '-C',
+      root,
+      '-c',
+      'core.quotePath=false',
+      'grep',
+      '--cached',
+      '-a',
+      '-z',
+      '-l',
+      '-E',
+      '-e',
+      '^\x1f',
+    ],
+    {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, LC_ALL: 'C' },
+    },
+  );
+  if (gzipMatches.status > 1) {
+    fail(`git grep terminó con código ${gzipMatches.status}.`);
+  }
+  for (const file of (gzipMatches.stdout ?? '').split('\0').filter(Boolean)) {
+    if (gzipStartsWithTape(root, file)) {
+      found.push(`${file} (respaldo de SQL Server comprimido)`);
+    }
+  }
+  if (found.length > 0) {
+    console.error(
+      'El índice de git tiene datos del sistema anterior (nunca deben versionarse; quítalos con git rm --cached):',
+    );
+    for (const item of found) {
+      console.error(`  ${item}`);
+    }
+    fail('Hay datos del sistema anterior en el índice de git.');
+  }
+  console.log(
+    'Datos del sistema anterior: el índice de git no tiene respaldos ni paquetes de migración.',
+  );
+}
+
 function formatCheck() {
+  checkLegacyData();
   run(process.execPath, [
     path.join(ROOT, 'desktop', 'node_modules', 'prettier', 'bin', 'prettier.cjs'),
     '.',
@@ -545,14 +703,19 @@ function testIntegration() {
   }
 }
 
-async function runBrowser(engine) {
-  ensureOwned();
+// Servidor temporal que comparten las especificaciones y, desde la etapa 9H (fase D), un segundo servidor con su
+// propia base limpia para la importación completa del sistema anterior (solo lo usa
+// workflow-stage9h-migration.spec.ts, por ADEL_BROWSER_CLEAN_SERVER_URL).
+const BROWSER_SHARED_PORT = 8183;
+const BROWSER_CLEAN_PORT = 8185;
+
+function prepareBrowserServer(port) {
   const name = 'adel_pos_test_browser_' + randomBytes(6).toString('hex');
   const directory = path.join(LOCAL, name);
   fs.mkdirSync(directory);
   const config = JSON.parse(fs.readFileSync(path.join(LOCAL, 'server.json'), 'utf8'));
   config.database.name = name;
-  config.listen_address = '127.0.0.1:8183';
+  config.listen_address = `127.0.0.1:${port}`;
   config.allow_lan = false;
   // Etapa 9F: modo de pruebas (el servidor se niega a arrancar si la base no es adel_pos_test_* y lo
   // informa a native-driver.ts) y respaldos de «Quitar datos de prueba» dentro de la carpeta temporal.
@@ -560,30 +723,45 @@ async function runBrowser(engine) {
   config.backup_directory = path.join(directory, 'backups');
   const filename = path.join(directory, 'server.json');
   writeJSON(filename, config, true);
-  let server = null;
-  let created = false;
-  try {
-    run(pg('createdb'), ['--owner=adel_app', name], { env: adminEnv() });
-    created = true;
-    for (const command of ['migrate', 'prepare-setup']) {
-      run(SERVER_BINARY, [command, '--config', filename]);
-    }
-    const log = fs.openSync(path.join(directory, 'server.log'), 'w');
-    server = spawn(SERVER_BINARY, ['serve', '--config', filename], {
-      cwd: ROOT,
-      stdio: ['ignore', log, log],
-      windowsHide: true,
-    });
-    let ready = false;
-    for (let attempt = 0; attempt < 100 && !ready; attempt += 1) {
-      ready = (await httpStatus('http://127.0.0.1:8183/api/v1/health/ready', 1000)) === 200;
-      if (!ready) {
-        await sleep(100);
-      }
-    }
+  return { name, directory, filename, port, process: null, created: false };
+}
+
+async function startBrowserServer(server) {
+  for (const command of ['migrate', 'prepare-setup']) {
+    run(SERVER_BINARY, [command, '--config', server.filename]);
+  }
+  const log = fs.openSync(path.join(server.directory, 'server.log'), 'w');
+  server.process = spawn(SERVER_BINARY, ['serve', '--config', server.filename], {
+    cwd: ROOT,
+    stdio: ['ignore', log, log],
+    windowsHide: true,
+  });
+  let ready = false;
+  for (let attempt = 0; attempt < 100 && !ready; attempt += 1) {
+    ready = (await httpStatus(`http://127.0.0.1:${server.port}/api/v1/health/ready`, 1000)) === 200;
     if (!ready) {
-      fail('El servidor temporal no quedó listo');
+      await sleep(100);
     }
+  }
+  if (!ready) {
+    fail('El servidor temporal no quedó listo');
+  }
+}
+
+async function runBrowser(engine) {
+  ensureOwned();
+  const servers = [];
+  try {
+    for (const port of [BROWSER_SHARED_PORT, BROWSER_CLEAN_PORT]) {
+      const server = prepareBrowserServer(port);
+      servers.push(server);
+      run(pg('createdb'), ['--owner=adel_app', server.name], { env: adminEnv() });
+      server.created = true;
+    }
+    for (const server of servers) {
+      await startBrowserServer(server);
+    }
+    const [shared, clean] = servers;
     // Los argumentos extra (por ejemplo, el nombre de una especificación) van antes de --project:
     // Playwright acepta varios valores después de --project y los tomaría como nombres de proyecto.
     const extra = process.argv.slice(3);
@@ -592,18 +770,23 @@ async function runBrowser(engine) {
       env: {
         ...process.env,
         ADEL_BROWSER_ENGINE: engine,
-        ADEL_BROWSER_PROVISIONING: path.join(directory, 'provisioning-token'),
+        ADEL_BROWSER_PROVISIONING: path.join(shared.directory, 'provisioning-token'),
+        ADEL_BROWSER_CLEAN_SERVER_URL: `http://127.0.0.1:${BROWSER_CLEAN_PORT}`,
+        ADEL_BROWSER_CLEAN_PROVISIONING: path.join(clean.directory, 'provisioning-token'),
+        ADEL_BROWSER_SERVER_BINARY: SERVER_BINARY,
         PLAYWRIGHT_BROWSERS_PATH: path.join(ROOT, '.cache', 'playwright'),
       },
     });
   } finally {
-    if (server !== null && server.exitCode === null) {
-      run(SERVER_BINARY, ['stop', '--pid', String(server.pid)], { allowFailure: true });
+    for (const server of servers) {
+      if (server.process !== null && server.process.exitCode === null) {
+        run(SERVER_BINARY, ['stop', '--pid', String(server.process.pid)], { allowFailure: true });
+      }
+      if (server.created) {
+        run(pg('dropdb'), ['--if-exists', server.name], { env: adminEnv() });
+      }
+      fs.rmSync(server.directory, { recursive: true, force: true });
     }
-    if (created) {
-      run(pg('dropdb'), ['--if-exists', name], { env: adminEnv() });
-    }
-    fs.rmSync(directory, { recursive: true, force: true });
   }
 }
 
@@ -653,6 +836,9 @@ async function main() {
       break;
     case 'format-check':
       formatCheck();
+      break;
+    case 'check-legacy-data':
+      checkLegacyData(args[0] ? path.resolve(args[0]) : ROOT);
       break;
     case 'db-init':
       dbInit();

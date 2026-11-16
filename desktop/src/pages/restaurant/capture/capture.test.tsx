@@ -202,7 +202,7 @@ let replays: Map<string, unknown>;
 let saves: { id: string; body: { revision: number; items: DraftItem[] } }[];
 let confirms: { id: string; body: Record<string, unknown> }[];
 let cancels: { id: string; body: Record<string, unknown> }[];
-// Etapa 9F: previsualizaciones y confirmaciones de «Modificar» de una partida enviada.
+// Etapa 9F (y 9H): previsualizaciones y confirmaciones de «Modificar» de una partida enviada.
 let editPreviews: Record<string, unknown>[];
 let edits: { id: string; body: Record<string, unknown> }[];
 let holdSaves: boolean;
@@ -558,13 +558,9 @@ function respond(
       return bill(state!);
     }
     case 'restaurant_edit_preview': {
-      // Como Go (etapa 9F): reducir la partida pide supervisor a este usuario simulado.
       editPreviews.push(body!);
       const line = body!.line as DraftItem;
-      return {
-        ...quote(state!, [{ ...line, id: 'edicion' }], body!.revision as number),
-        cancel_units_requires_authorization: line.quantity < 2,
-      };
+      return quote(state!, [{ ...line, id: 'edicion' }], body!.revision as number);
     }
     case 'restaurant_edit': {
       edits.push({ id: id!, body: body! });
@@ -679,21 +675,16 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function renderCapture() {
+function renderCapture(can: (permission: string) => boolean = () => true) {
   render(
     <PendingOperationsProvider>
-      <OperationalPage
-        active
-        timezone="America/Monterrey"
-        requestedView="tables"
-        can={() => true}
-      />
+      <OperationalPage active timezone="America/Monterrey" requestedView="tables" can={can} />
     </PendingOperationsProvider>,
   );
 }
 
-async function openFirstAccount() {
-  renderCapture();
+async function openFirstAccount(can?: (permission: string) => boolean) {
+  renderCapture(can);
   // Etapa 6.2: tocar la mesa abre su panel lateral; «Capturar» entra a la cuenta elegida.
   fireEvent.click(await screen.findByRole('button', { name: /^Mesa 1, Ocupada/ }));
   const panel = await screen.findByRole('complementary', { name: 'Panel de Mesa 1' });
@@ -1064,7 +1055,10 @@ describe('captura táctil de pedidos', () => {
     expect(notice.textContent).toContain('Cancelación registrada: 2 unidades de Filete de prueba');
   });
 
-  it('reducir desde «Modificar» pide al supervisor cuando Go lo indica (etapa 9F)', async () => {
+  // Etapa 9H (§2.2): reducir desde «Modificar» no pide autorización de supervisor. Con el permiso
+  // propio se envía directamente; sin él, la cantidad no baja de la enviada y «Cancelar unidades» no se
+  // ofrece.
+  function sentSteak() {
     const item: DraftItem = {
       id: 'draft-enviado',
       product_id: ids.steak,
@@ -1088,6 +1082,10 @@ describe('captura táctil de pedidos', () => {
       },
     ];
     accounts[ids.first]!.confirmedTotal = '281.10';
+  }
+
+  it('reducir desde «Modificar» con el permiso propio no pide supervisor (etapa 9H)', async () => {
+    sentSteak();
     const bill = await openFirstAccount();
     const line = await within(bill).findByRole('article', { name: '2 × Filete de prueba' });
     fireEvent.click(within(line).getByRole('button', { name: 'Acciones de 2 × Filete de prueba' }));
@@ -1098,23 +1096,13 @@ describe('captura táctil de pedidos', () => {
     });
     const confirmButton = () =>
       within(panel).getByRole('button', { name: /^Confirmar modificación/ }) as HTMLButtonElement;
-    // Sin reducir, Go no pide supervisor.
     await waitFor(() => expect(confirmButton().disabled).toBe(false));
-    expect(within(panel).queryByRole('group', { name: 'Autorización de supervisor' })).toBeNull();
     fireEvent.click(
       within(panel).getByRole('button', { name: 'Quitar una unidad de Filete de prueba' }),
     );
-    const group = await within(panel).findByRole('group', { name: 'Autorización de supervisor' });
-    expect(group.textContent).toContain('«Cancelar partidas o cantidades confirmadas»');
     await waitFor(() => expect(editPreviews.length).toBeGreaterThanOrEqual(2));
-    expect(confirmButton().disabled).toBe(true);
-    fireEvent.change(within(group).getByLabelText('Usuario del supervisor'), {
-      target: { value: 'admin' },
-    });
-    fireEvent.change(within(group).getByLabelText('Contraseña del supervisor'), {
-      target: { value: 'clave-del-supervisor' },
-    });
     await waitFor(() => expect(confirmButton().disabled).toBe(false));
+    expect(within(panel).queryByRole('group', { name: 'Autorización de supervisor' })).toBeNull();
     fireEvent.click(confirmButton());
     await waitFor(() => expect(edits).toHaveLength(1));
     expect(edits[0]!.body).toEqual(
@@ -1123,11 +1111,31 @@ describe('captura táctil de pedidos', () => {
         version_id: 'version-0',
         reason: 'Solo quería uno',
         line: expect.objectContaining({ quantity: 1 }),
-        authorization: { username: 'admin', password: 'clave-del-supervisor' },
       }),
     );
-    // La previsualización nunca lleva la autorización ni la contraseña.
+    expect('authorization' in edits[0]!.body).toBe(false);
     expect(editPreviews.every((entry) => !('authorization' in entry))).toBe(true);
+  });
+
+  it('sin el permiso propio no ofrece «Cancelar unidades» ni reducir la cantidad enviada (etapa 9H)', async () => {
+    sentSteak();
+    const bill = await openFirstAccount((permission) => permission !== 'orders.cancel');
+    const line = await within(bill).findByRole('article', { name: '2 × Filete de prueba' });
+    fireEvent.click(within(line).getByRole('button', { name: 'Acciones de 2 × Filete de prueba' }));
+    expect(within(line).queryByRole('button', { name: 'Cancelar unidades' })).toBeNull();
+    fireEvent.click(within(line).getByRole('button', { name: 'Modificar' }));
+    const panel = await screen.findByRole('region', { name: 'Personalizar Filete de prueba' });
+    const remove = within(panel).getByRole('button', {
+      name: 'Quitar una unidad de Filete de prueba',
+    }) as HTMLButtonElement;
+    // La cantidad enviada es el mínimo: «−» está deshabilitado y no hay formulario de supervisor.
+    expect(remove.disabled).toBe(true);
+    expect(within(panel).queryByRole('group', { name: 'Autorización de supervisor' })).toBeNull();
+    // Aumentar sí se puede.
+    fireEvent.click(
+      within(panel).getByRole('button', { name: 'Agregar una unidad de Filete de prueba' }),
+    );
+    await waitFor(() => expect(remove.disabled).toBe(false));
   });
 
   it('las acciones secundarias son botones y «Más…» reúne las demás', async () => {

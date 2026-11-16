@@ -15,12 +15,21 @@ import "context"
 //   - Una partida se reduce o se cancela después de confirmarse con «Cancelar» (item.cancelled), al
 //     modificarla con menos unidades (item.modified con cancelled_unit_ids) o al cancelar su cuenta
 //     (account.cancelled, con las partidas en before.lines). Cada evento guarda las unidades de antes
-//     con sus importes, las que se retiraron, el motivo y el autor. Desde la etapa 9F los tres guardan
-//     además quién autorizó (after.authorized_by, null si bastó el permiso propio); los eventos
-//     item.cancelled e item.modified anteriores no lo tienen y su «Autorizó» queda vacía.
+//     con sus importes, las que se retiraron, el motivo y el autor. account.cancelled guarda además
+//     quién autorizó cancelar la cuenta (after.authorized_by, null si bastó el permiso propio). En la
+//     etapa 9F item.cancelled e item.modified también lo guardaban, porque cancelar o reducir unidades
+//     sin orders.cancel procedía con un supervisor; desde la 9H (decisión del propietario) ya no se
+//     pide autorización para eso y los eventos nuevos no lo tienen. «Autorizó» se conserva: vacía en
+//     lo nuevo y en lo anterior a la 9F, y con el supervisor en los registros de la 9F.
 // Una cuenta cancelada nunca es venta: no se cierra, de modo que no tiene reconocimientos en
 // sales_recognitions. Los reportes usan el permiso de «Productos cancelados» (reports.sales.read) y no
 // toman locks: solo leen.
+//
+// Etapa 9H: con un lote importado vigente y el filtro «Datos», las ventas canceladas del sistema anterior
+// (legacy_sales con status cancelled, fechadas con su primera cancelación) y sus cambios de cantidad
+// (legacy_quantity_changes) se agregan como renglones propios marcados «Sistema anterior». El anterior no
+// guardaba motivo ni quién canceló o modificó (solo quién autorizó); su importe cancelado es lo que se
+// debía de la venta (total + cargo − descuentos, lo que el anterior contaba como vendido).
 
 const cancelledDateBasis = "Fecha de la cancelación de la cuenta, con la hora de inicio del día."
 
@@ -30,14 +39,15 @@ const changesDateBasis = "Fecha de la cancelación o modificación de la partida
 const legacyCancelReason = "Cancelaciones anteriores con motivo libre"
 
 // changesAuthorizationNote explica de dónde sale «Autorizó» en los reportes de unidades canceladas
-// (etapa 9F, §7.2).
-const changesAuthorizationNote = "«Autorizó» es la persona que dio su autorización porque quien canceló o redujo no tenía permiso " +
-	"para hacerlo; queda vacía si bastó su propio permiso y en los registros anteriores, cuando no se pedía autorización."
+// (etapa 9F, §7.2; desde la 9H cancelar o reducir unidades ya no pide autorización).
+const changesAuthorizationNote = "Cancelar o reducir unidades no pide autorización: basta el permiso de quien lo hace y queda " +
+	"registrado quién fue. «Autorizó» solo aparece en las cuentas canceladas con la autorización de un supervisor y en los " +
+	"registros de cuando también se pedía para cancelar o reducir unidades."
 
 // unitsAuthorizedDescription describe la columna «Autorizó» de los reportes de unidades canceladas.
-const unitsAuthorizedDescription = "Supervisor que autorizó la cancelación o la reducción porque quien la hizo no tenía el permiso " +
-	"«Cancelar partidas o cantidades confirmadas» (en una cuenta cancelada, quien autorizó cancelarla); vacía si bastó su permiso " +
-	"y en los registros anteriores, cuando no se pedía autorización."
+const unitsAuthorizedDescription = "En una cuenta cancelada, el supervisor que autorizó cancelarla porque quien la canceló no tenía " +
+	"el permiso «Cancelar cuentas». Cancelar o reducir unidades no pide autorización, así que en esos renglones queda vacía, salvo " +
+	"en los registros de cuando sí se pedía."
 
 // placeSQL es la mesa (salón) o el origen (para llevar) de una cuenta con la mesa actual.
 const placeSQL = "CASE WHEN a.mode='dine_in' THEN coalesce(place.name,'Sin mesa') ELSE a.origin END"
@@ -79,6 +89,32 @@ const cancelledAccountsSQL = `WITH cancelled AS (
             AND NOT EXISTS(SELECT FROM app.account_cancellations x WHERE x.account_id=a.id)
     )`
 
+// legacyCancelledReason es el motivo de las cancelaciones del sistema anterior, que no lo guardaba.
+const legacyCancelledReason = "Sin motivo (sistema anterior)"
+
+// legacyCancelledSQL son las ventas canceladas del historial en el periodo (alias v) con sus unidades y quién
+// autorizó la primera cancelación.
+const legacyCancelledSQL = `WITH legacy_cancelled AS (
+        SELECT v.*,coalesce((SELECT sum(x.quantity) FROM app.legacy_sale_lines x
+                WHERE x.batch_id=v.batch_id AND x.legacy_sale_id=v.legacy_id),0)::bigint AS cancelled_units,
+            (SELECT c.authorized_name FROM app.legacy_cancellations c WHERE c.batch_id=v.batch_id AND c.legacy_sale_id=v.legacy_id
+                ORDER BY c.cancelled_at,c.legacy_id LIMIT 1) AS authorizer
+        FROM app.legacy_sales v WHERE v.status='cancelled' AND v.cancelled_at >= @from AND v.cancelled_at < @until
+    )`
+
+// legacyCancelledConditions son los filtros de cuentas canceladas sobre el historial: el motivo del catálogo y quién
+// canceló no existen en el anterior (lo excluyen; «Sin motivo del catálogo» lo incluye).
+func legacyCancelledConditions(query *Query) conditions {
+	list := conditions{}
+	if value := query.Params.Value("reason_id"); value != "" && value != NoReason {
+		list.add("false")
+	}
+	list.when(query, "mode", "v.mode = @mode")
+	list.when(query, "area_id", "v.area_id = @area_id::uuid")
+	list.excludeLegacy(query, "user_id")
+	return list
+}
+
 // cancelledConditions son los filtros comunes de los dos reportes de cuentas canceladas.
 func cancelledConditions(query *Query) conditions {
 	list := conditions{}
@@ -108,8 +144,8 @@ func init() {
 		Description: "Cuentas canceladas con su motivo, descripción, importe, quién las canceló y quién lo autorizó. No incluye las " +
 			"cuentas vacías liberadas ni descartadas, que no son cancelaciones.",
 		Permissions: []string{PermissionSales}, DateBasis: cancelledDateBasis,
-		Filters: []Filter{filterCancelReason(), filterMode(), filterArea(), filterUser("Usuario que canceló")},
-		Columns: []Column{dateTimeColumn("cancelled_at", "Cancelación"), codeColumn("folio", "Folio"),
+		Filters: withDataSource([]Filter{filterCancelReason(), filterMode(), filterArea(), filterUser("Usuario que canceló")}),
+		Columns: withLegacyColumns([]Column{dateTimeColumn("cancelled_at", "Cancelación"), codeColumn("folio", "Folio"),
 			textColumn("reason", "Motivo"), textColumn("description", "Descripción"),
 			described(moneyColumn("cancelled_amount", "Importe"),
 				"Importe de los productos que tenía la cuenta al cancelarla (en las cancelaciones anteriores con motivo libre, el de "+
@@ -122,10 +158,12 @@ func init() {
 			textColumn("terminal", "Terminal"), textColumn("mode", "Modalidad"), textColumn("place", "Mesa u origen"),
 			textColumn("area", "Área"),
 			optional(textColumn("kind", "Registro")), optional(textColumn("account", "Cuenta")),
-			optional(dateTimeColumn("opened_at", "Apertura")), optional(textColumn("opened_by", "Abrió"))},
+			optional(dateTimeColumn("opened_at", "Apertura")), optional(textColumn("opened_by", "Abrió"))}, false),
 		DefaultSort: Sort{Key: "cancelled_at"},
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			rows, err := query.collect(ctx, cancelledAccountsSQL+`
+			rows := []Row{}
+			if query.legacy.Native {
+				native, err := query.collect(ctx, cancelledAccountsSQL+`
                 SELECT x.cancelled_at,a.folio::text AS folio,x.reason,x.description,x.cancelled_amount,x.cancelled_units,
                     author.display_name AS cancelled_by,coalesce(approver.display_name,'') AS authorized_by,
                     coalesce(device.name,'') AS terminal,`+modeSQL+` AS mode,`+placeSQL+` AS place,
@@ -139,29 +177,53 @@ func init() {
                 LEFT JOIN app.restaurant_tables place ON place.id=a.table_id
                 LEFT JOIN app.restaurant_areas area ON area.id=place.area_id
                 WHERE true`+cancelledConditions(query).sql(), query.Args())
-			if err != nil {
-				return nil, err
+				if err != nil {
+					return nil, err
+				}
+				query.markNative(native)
+				rows = native
 			}
-			return &Dataset{Rows: rows, Notes: []string{
+			notes := []string{
 				"Una cuenta cancelada nunca cuenta como venta. El motivo es el nombre que tenía al cancelar: renombrarlo no cambia el historial.",
 				"Las cuentas vacías liberadas o descartadas no son cancelaciones y no aparecen aquí. La mesa y el área son las actuales de la cuenta.",
 				"Las unidades canceladas también aparecen, una por una, en «Productos cancelados» y en «Modificaciones de cantidades».",
-			}}, nil
+			}
+			if query.legacy.History {
+				legacy, err := query.collect(ctx, legacyCancelledSQL+`
+                    SELECT v.cancelled_at,'`+legacyFolioPrefix+`'||v.folio AS folio,'`+legacyCancelledReason+`' AS reason,
+                        '' AS description,v.amount_due AS cancelled_amount,v.cancelled_units,'' AS cancelled_by,
+                        coalesce(v.authorizer,'') AS authorized_by,coalesce(v.register_name,'') AS terminal,
+                        CASE v.mode WHEN 'dine_in' THEN 'Salón' ELSE 'Para llevar' END AS mode,
+                        CASE WHEN v.mode='dine_in' THEN coalesce(v.table_name,'Sin mesa') ELSE 'Para llevar' END AS place,
+                        coalesce(v.area_name,'') AS area,'Cancelación del sistema anterior' AS kind,v.account_name AS account,
+                        v.opened_at,coalesce(v.cashier_name,'') AS opened_by,'`+LegacySourceLabel+`' AS data_source
+                    FROM legacy_cancelled v WHERE true`+legacyCancelledConditions(query).sql()+`
+                    ORDER BY v.cancelled_at,v.legacy_id`, query.Args())
+				if err != nil {
+					return nil, err
+				}
+				rows = append(rows, legacy...)
+				notes = append(notes, "Sistema anterior: no guardaba el motivo ni quién canceló, solo quién autorizó; el importe es lo "+
+					"que se debía de la venta (total + cargo − descuentos), lo que el anterior contaba como vendido. La terminal es su caja.")
+			}
+			return &Dataset{Rows: rows, Notes: notes}, nil
 		},
 	})
 	register(Definition{
 		ID: "sales.cancellations_by_reason", Group: "sales", Title: "Cancelaciones por motivo",
 		Description: "Total de cuentas canceladas por motivo: cuántas, cuántas unidades y qué importe se dejó de cobrar.",
 		Permissions: []string{PermissionSales}, DateBasis: cancelledDateBasis,
-		Filters: []Filter{filterMode(), filterArea(), filterUser("Usuario que canceló")},
-		Columns: []Column{textColumn("reason", "Motivo"),
+		Filters: withDataSource([]Filter{filterMode(), filterArea(), filterUser("Usuario que canceló")}),
+		Columns: withLegacyColumns([]Column{textColumn("reason", "Motivo"),
 			described(countColumn("accounts", "Cuentas"), "Cuentas canceladas con ese motivo en el periodo."),
 			described(countColumn("cancelled_units", "Unidades"), "Unidades que se cancelaron con esas cuentas."),
 			described(moneyColumn("cancelled_amount", "Importe"), "Importe de los productos de esas cuentas al cancelarlas. Nunca es venta."),
-			described(percentColumn("share", "% del importe"), "Participación en el importe cancelado del periodo.")},
+			described(percentColumn("share", "% del importe"), "Participación en el importe cancelado del periodo.")}, false),
 		DefaultSort: Sort{Key: "cancelled_amount", Descending: true}, Totals: cancelledShare,
 		Query: func(ctx context.Context, query *Query) (*Dataset, error) {
-			rows, err := query.collect(ctx, cancelledAccountsSQL+`
+			rows := []Row{}
+			if query.legacy.Native {
+				native, err := query.collect(ctx, cancelledAccountsSQL+`
                 SELECT CASE WHEN x.reason_id IS NULL THEN '`+legacyCancelReason+`' ELSE x.reason END AS reason,
                     count(*)::bigint AS accounts,coalesce(sum(x.cancelled_units),0)::bigint AS cancelled_units,
                     coalesce(sum(x.cancelled_amount),0) AS cancelled_amount
@@ -170,13 +232,30 @@ func init() {
                 LEFT JOIN app.restaurant_tables place ON place.id=a.table_id
                 WHERE true`+cancelledConditions(query).sql()+`
                 GROUP BY CASE WHEN x.reason_id IS NULL THEN '`+legacyCancelReason+`' ELSE x.reason END`, query.Args())
-			if err != nil {
-				return nil, err
+				if err != nil {
+					return nil, err
+				}
+				query.markNative(native)
+				rows = native
 			}
-			return &Dataset{Rows: rows, Notes: []string{
+			notes := []string{
 				"El motivo es el nombre que tenía al cancelar: renombrarlo no junta ni separa el historial. El detalle de cada cuenta está " +
 					"en «Cuentas canceladas».",
-			}}, nil
+			}
+			if query.legacy.History {
+				legacy, err := query.collect(ctx, legacyCancelledSQL+`
+                    SELECT '`+legacyCancelledReason+`' AS reason,count(*)::bigint AS accounts,
+                        coalesce(sum(v.cancelled_units),0)::bigint AS cancelled_units,coalesce(sum(v.amount_due),0) AS cancelled_amount,
+                        '`+LegacySourceLabel+`' AS data_source
+                    FROM legacy_cancelled v WHERE true`+legacyCancelledConditions(query).sql()+`
+                    GROUP BY 1`, query.Args())
+				if err != nil {
+					return nil, err
+				}
+				rows = append(rows, legacy...)
+				notes = append(notes, "Sistema anterior: no guardaba el motivo; su importe es lo que se debía de cada venta cancelada.")
+			}
+			return &Dataset{Rows: rows, Notes: notes}, nil
 		},
 	})
 	register(Definition{
@@ -184,8 +263,9 @@ func init() {
 		Description: "Partidas confirmadas cuya cantidad se redujo o que se cancelaron (también al cancelar su cuenta): cantidad " +
 			"anterior y nueva, diferencia en unidades e importe, quién, quién lo autorizó, motivo y fecha.",
 		Permissions: []string{PermissionSales}, DateBasis: changesDateBasis,
-		Filters: []Filter{filterProduct(), filterMode(), filterUser("Usuario que modificó")},
-		Columns: []Column{dateTimeColumn("changed_at", "Fecha"), codeColumn("folio", "Folio"), textColumn("product", "Producto"),
+		Filters: withDataSource([]Filter{filterProduct(), filterMode(), filterUser("Usuario que modificó")}),
+		Columns: withLegacyColumns([]Column{dateTimeColumn("changed_at", "Fecha"), codeColumn("folio", "Folio"),
+			textColumn("product", "Producto"),
 			textColumn("change", "Cambio"),
 			described(Column{Key: "previous_quantity", Label: "Cantidad anterior", Type: TypeInteger, Sortable: true},
 				"Unidades activas de la partida en la cuenta antes del cambio."),
@@ -200,10 +280,59 @@ func init() {
 			optional(textColumn("action", "Acción")), optional(textColumn("terminal", "Terminal")),
 			optional(textColumn("mode", "Modalidad")), optional(textColumn("place", "Mesa u origen")),
 			optional(described(countColumn("released_units", "Ya liberadas a cocina"),
-				"Unidades retiradas que ya se habían liberado a cocina."))},
+				"Unidades retiradas que ya se habían liberado a cocina."))}, false),
 		DefaultSort: Sort{Key: "changed_at"},
-		Query:       quantityChanges,
+		Query:       quantityChangesWithHistory,
 	})
+}
+
+// quantityChangesWithHistory son los cambios de AD-EL POS y, con el historial, los del anterior
+// (legacyQuantityChanges).
+func quantityChangesWithHistory(ctx context.Context, query *Query) (*Dataset, error) {
+	dataset := &Dataset{Rows: []Row{}}
+	if query.legacy.Native {
+		native, err := quantityChanges(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		query.markNative(native.Rows)
+		dataset = native
+	}
+	if !query.legacy.History {
+		return dataset, nil
+	}
+	rows, err := legacyQuantityChanges(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	dataset.Rows = append(dataset.Rows, rows...)
+	dataset.Notes = append(dataset.Notes, "Sistema anterior: cada cambio de la cantidad de un renglón (también los aumentos) frente a "+
+		"su cantidad original, que es lo que guardaba como «cantidad anterior»; sin el importe de la diferencia, el motivo ni quién "+
+		"modificó, que no guardaba (sí quién autorizó). Los registros sin cambio de cantidad (complementos u observaciones) no aparecen.")
+	return dataset, nil
+}
+
+// legacyQuantityChanges son los cambios de cantidad del historial en el periodo (los que tienen fecha y cambian la
+// cantidad), con el producto del renglón y la venta.
+func legacyQuantityChanges(ctx context.Context, query *Query) ([]Row, error) {
+	list := conditions{inPeriod("q.changed_at"), "q.new_quantity IS DISTINCT FROM q.original_quantity"}
+	list.when(query, "product_id", "x.product_id = @product_id::uuid")
+	list.when(query, "mode", "v.mode = @mode")
+	list.excludeLegacy(query, "user_id")
+	return query.collect(ctx, `SELECT q.changed_at,coalesce('`+legacyFolioPrefix+`'||v.folio,'') AS folio,
+            coalesce(x.product_name,'') AS product,
+            CASE WHEN q.new_quantity < q.original_quantity THEN 'Cantidad reducida' ELSE 'Cantidad aumentada' END AS change,
+            q.original_quantity::bigint AS previous_quantity,q.new_quantity::bigint AS new_quantity,
+            (q.new_quantity-q.original_quantity)::bigint AS difference,'' AS changed_by,coalesce(q.authorized_name,'') AS authorized_by,
+            '' AS reason,'Modificación en el sistema anterior' AS action,coalesce(v.register_name,'') AS terminal,
+            CASE v.mode WHEN 'dine_in' THEN 'Salón' WHEN 'takeaway' THEN 'Para llevar' END AS mode,
+            CASE WHEN v.mode='dine_in' THEN coalesce(v.table_name,'Sin mesa') WHEN v.mode='takeaway' THEN 'Para llevar' END AS place,
+            '`+LegacySourceLabel+`' AS data_source
+        FROM app.legacy_quantity_changes q
+        LEFT JOIN app.legacy_sale_lines x ON x.batch_id=q.batch_id AND x.legacy_id=q.legacy_line_id
+        LEFT JOIN app.legacy_sales v ON v.batch_id=q.batch_id AND v.legacy_id=coalesce(q.legacy_sale_id,x.legacy_sale_id)
+        WHERE true`+list.sql()+`
+        ORDER BY q.changed_at,q.position`, query.Args())
 }
 
 // quantityChanges arma un renglón por cancelación o modificación con unidades retiradas. Se parte de
@@ -222,7 +351,8 @@ func init() {
 // con sus unidades en before.lines y se reporta un renglón por partida («Partida cancelada»).
 //
 // «Autorizó» (etapa 9F) es el supervisor de after.authorized_by con su nombre visible actual, como
-// «Cuentas canceladas»; vacía si bastó el permiso propio y en los eventos anteriores, que no lo guardan.
+// «Cuentas canceladas»; vacía si bastó el permiso propio, en los eventos anteriores a la 9F y en los
+// item.cancelled e item.modified desde la 9H, que no lo guardan.
 func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
 	list := conditions{}
 	list.when(query, "product_id", "c.product_id = @product_id::text")

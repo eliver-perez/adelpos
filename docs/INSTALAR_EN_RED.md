@@ -87,8 +87,10 @@ actual y si está **en línea**. Con **«Editar»** eliges su caja, su pantalla 
 configuración»** ves sus estaciones de cocina y sus impresoras. Las estaciones de una terminal de cocina se eligen en
 **Cocina › Estaciones** ([TERMINAL_DE_COCINA.md](TERMINAL_DE_COCINA.md)).
 
-**Un usuario, una sesión.** Cada usuario puede tener la sesión abierta en una sola terminal a la vez: si entra en otra,
-la primera se cierra. Da a cada persona su propio usuario.
+**Una sesión por terminal.** Desde la versión 0.11.0 (etapa 9H), un usuario puede tener la sesión abierta a la vez en
+varias terminales (por ejemplo, una caja y un teléfono): entrar en otra terminal ya no cierra la primera. Si vuelve a
+entrar en la **misma** terminal, se cierra su sesión anterior de esa terminal, y cambiar su contraseña cierra sus
+sesiones en todas. Aun así, da a cada persona su propio usuario: el Registro de movimientos dice quién hizo cada cosa.
 
 ### Impresora USB conectada a una caja
 
