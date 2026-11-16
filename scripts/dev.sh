@@ -11,6 +11,23 @@ build_server() {
     (cd backend && go build -trimpath -o ../bin/ad-el-pos-server ./cmd/ad-el-pos-server)
 }
 
+# Etapa A1: Gradle del proyecto Android (android/) con el JDK de Android Studio (JBR) y el SDK del usuario, salvo que
+# JAVA_HOME o ANDROID_HOME ya estén definidos. Necesita Android Studio instalado, por eso los comandos android-* no
+# forman parte de format-check ni de test (ver android/CLAUDE.md).
+android_gradle() {
+    if [ -z "${JAVA_HOME:-}" ]; then
+        export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+    fi
+    if [ -z "${ANDROID_HOME:-}" ]; then
+        export ANDROID_HOME="$HOME/Library/Android/sdk"
+    fi
+    if [ ! -f "$PROJECT_ROOT/android/local.properties" ]; then
+        # Ruta local del SDK para Gradle (ignorada por git).
+        echo "sdk.dir=$ANDROID_HOME" >"$PROJECT_ROOT/android/local.properties"
+    fi
+    (cd "$PROJECT_ROOT/android" && ./gradlew "$@")
+}
+
 case "${1:-help}" in
     sync)
         node scripts/sync-metadata.mjs
@@ -102,6 +119,27 @@ case "${1:-help}" in
         ;;
     test-integration)
         exec python3 scripts/database.py test-integration
+        ;;
+    android-format)
+        android_gradle ktfmtFormat
+        ;;
+    android-format-check)
+        android_gradle ktfmtCheck
+        ;;
+    android-build)
+        # APK de depuración (pruebas) y release reducido con R8; release se firma solo si hay propiedades de firma
+        # fuera del repositorio (ADELPOS_SIGNING_PROPERTIES; ver android/CLAUDE.md).
+        android_gradle assembleDebug assembleRelease
+        find "$PROJECT_ROOT/android/app/build/outputs/apk" -name '*.apk' -exec ls -l {} \;
+        ;;
+    android-test)
+        # Pruebas de la JVM (dominio, cliente HTTP con MockWebServer), Robolectric (Room) y Android Lint.
+        android_gradle :core:domain:test testDebugUnitTest lintDebug
+        ;;
+    android-connected)
+        # Pruebas instrumentadas en un emulador o dispositivo. Con más de uno conectado, elegir con ANDROID_SERIAL
+        # (por ejemplo ANDROID_SERIAL=emulator-5580); sin él, Gradle las corre en todos.
+        android_gradle connectedDebugAndroidTest
         ;;
     *)
         echo 'Consulta README.md para los comandos de desarrollo, formato, aprovisionamiento y pruebas.'
