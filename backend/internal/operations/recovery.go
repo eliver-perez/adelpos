@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+
+	"local/ad-el-pos/server/internal/events"
 )
 
 // Recuperación del estado al reconectar (etapa 9G, §5.6). Una terminal o un teléfono que perdió la conexión no
@@ -18,6 +20,9 @@ import (
 type RecoveryView struct {
 	Tables   []Table   `json:"tables"`
 	Accounts []Account `json:"accounts"`
+	// EventCursor (etapa A1) es el cursor del canal de eventos en el momento de la lectura: lo que ocurra después llega
+	// por GET events?after=event_cursor.
+	EventCursor int64 `json:"event_cursor"`
 }
 
 // Recovery lee el estado con el lock de la operación compartido, como cualquier consulta de Mesas o Cuentas.
@@ -25,8 +30,16 @@ func Recovery(ctx context.Context, tx pgx.Tx, request Request) (*RecoveryView, e
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock_shared(7820148305)"); err != nil {
 		return nil, err
 	}
+	// Etapa A1: el cursor se lee antes que las mesas y las cuentas y con el lock ya tomado. Las escrituras de cuentas,
+	// cocina y cobros toman el mismo lock en exclusiva hasta su commit, así que ninguna queda a medias entre el cursor y
+	// la lectura; las demás (por ejemplo, el catálogo) confirman su evento después del cursor y el cliente lo recibe
+	// aunque su efecto ya se vea en este estado (a lo más, una lectura de más; nunca un cambio perdido).
+	cursor, err := events.Head(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	handler := service{ctx: ctx, tx: tx, request: request}
-	view := &RecoveryView{}
+	view := &RecoveryView{EventCursor: cursor}
 	if request.Actor.Can("restaurant.tables.read") {
 		tables, err := readList[Table](ctx, tx, tableQuery+" ORDER BY t.area_id,t.name,t.id")
 		if err != nil {
