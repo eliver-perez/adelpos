@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -341,6 +342,20 @@ func TestLegacyImportReplacesTheBatchCompletely(t *testing.T) {
 	if !second.Validation.OK || second.ReplacedBatchID != first.BatchID {
 		t.Fatalf("segundo lote: %+v", second.Validation)
 	}
+	// El informe del reemplazo (y no el de la primera importación) avisa qué pasa al repetir la migración.
+	for _, warning := range replaceWarnings() {
+		if !slices.Contains(second.Warnings, warning) || slices.Contains(first.Warnings, warning) {
+			t.Fatalf("aviso de reemplazo: primera %q, segunda %q", first.Warnings, second.Warnings)
+		}
+	}
+	environment, err := ReadEnvironment(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, preview := Analyze(loadSynthetic(t, updated), environment, 1234, strings.Repeat("cd", 32)); !preview.WillReplace ||
+		!slices.Contains(preview.Warnings, replaceWarnings()[0]) {
+		t.Fatalf("el resumen previo de un reemplazo debía avisarlo: %+v", preview.Warnings)
+	}
 	if got := queryText(t, pool, `SELECT string_agg(status, ',' ORDER BY seq) FROM app.legacy_import_batches`); got != "replaced,completed" {
 		t.Fatalf("estados de los lotes: %s", got)
 	}
@@ -368,7 +383,7 @@ func TestLegacyImportReplacesTheBatchCompletely(t *testing.T) {
 	if got := queryText(t, pool, `SELECT count(*)::text FROM app.users WHERE username = 'jose'`); got != "0" {
 		t.Fatalf("el usuario que ya no existe debía borrarse: %s", got)
 	}
-	environment, err := ReadEnvironment(ctx, pool)
+	environment, err = ReadEnvironment(ctx, pool)
 	if err != nil || len(environment.Blockers) != 0 || environment.CurrentBatch == nil || environment.CurrentBatch.ID != second.BatchID {
 		t.Fatalf("después del reemplazo la instalación sigue limpia: %+v %v", environment.Blockers, err)
 	}
@@ -397,6 +412,23 @@ func TestLegacyImportReplacesTheBatchCompletely(t *testing.T) {
 	environment, err = ReadEnvironment(ctx, pool)
 	if err != nil || len(environment.Blockers) != 0 {
 		t.Fatalf("lo retirado sigue siendo del lote: %+v %v", environment.Blockers, err)
+	}
+	// Otro reemplazo sin ese usuario lo vuelve a retirar con una sola terminación en el nombre (revisión de la Fase C,
+	// M-4: antes quedaba «u1beto.retirado-x.retirado-x»).
+	retiredName := queryText(t, pool, `SELECT username FROM app.users WHERE id = $1`, userID)
+	fourth, err := importSynthetic(t, pool, third, admin, device, report.BatchID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth.Retired != 1 || !fourth.Validation.OK {
+		t.Fatalf("cuarto lote: retirados %d, validación %+v", fourth.Retired, fourth.Validation)
+	}
+	if got := queryText(t, pool, `SELECT username || '/' || active FROM app.users WHERE id = $1`, userID); got != retiredName+"/false" ||
+		strings.Count(got, ".retirado-") != 1 {
+		t.Fatalf("el usuario retirado otra vez: %s (antes %s)", got, retiredName)
+	}
+	if got := queryText(t, pool, `SELECT state FROM app.legacy_id_map WHERE batch_id = $1 AND new_id = $2`, fourth.BatchID, userID); got != "retired" {
+		t.Fatalf("el usuario retirado en la correspondencia nueva: %s", got)
 	}
 }
 

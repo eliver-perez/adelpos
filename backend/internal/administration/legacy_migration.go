@@ -73,6 +73,7 @@ var legacyStatusCodes = map[string]int{
 	legacyimport.CodeNotPackage:         400,
 	legacyimport.CodeUnsupportedVersion: 400,
 	legacyimport.CodeDamaged:            400,
+	legacyimport.CodeUnreadable:         503,
 }
 
 func legacyFault(err error) error {
