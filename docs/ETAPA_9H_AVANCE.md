@@ -812,3 +812,272 @@ los importes llegan como `json.Number` con 4 decimales (`decimal.NewFromString`)
   migración usan el docker simulado o `legacysynth`.
 - sqlcmd: `-y 0` y `-h` son incompatibles (con `-y 0` no hay encabezados); `FOR JSON` omite los milisegundos en cero de
   `datetime`; con `--network none` hay que usar `-S 127.0.0.1`.
+
+---
+
+## Fase C · Correspondencia e importación
+
+Un agente, en su propio árbol de trabajo (`etapa-9h-c`, desde `etapa-9h` con la Fase A; la Fase B se fusionó a mitad de la
+fase con `git merge etapa-9h`). 15–16/11/2026. Migración `0024_legacy_migration.sql` con su **sección C** (al final de la
+misma migración, sin migración nueva; el esquema sigue en 24). Pruebas en copias aisladas: clúster temporal 55499 (una
+base `adel_pos_test_c_*` por paquete). **No se tocó la instalación real ni se usó el respaldo real**: todas las pruebas
+usan datos sintéticos (los paquetes de `internal/legacysynth` de la Fase B y un paquete en memoria propio de las pruebas
+del importador con todos los casos de §7).
+
+Commits en `etapa-9h-c`:
+
+- `3cb716b` — historial en tablas propias (0024 sección C, solo lectura por disparador) y la importación en una sola
+  transacción (catálogo, mesas y usuarios en su lugar, libro del historial, reemplazo del lote y validación §4.4).
+- `ec827ab` — fusión de `etapa-9h` (Fase B: `legacypkg`, `legacyread`, `legacysynth`).
+- `98470b0` — rutas de la migración, trabajador con el lock 7820148310, salidas de efectivo en el historial y «Asignar
+  contraseña».
+- `e26637d` — medición de volumen opcional y prueba de subida 23 → 24 con la sección C.
+- `c222e2b` — `API_CONTRACTS.md`, `MIGRACION_ANALISIS.md` §6.8 y prueba de rutas ampliada.
+- `2440f7d` — notas del revisor de la Fase B (tablas y columnas obligatorias, una apertura a la vez, sin la causa en la
+  bitácora).
+
+### Qué cambió
+
+- **Paquete Go nuevo `internal/legacyimport`** (correspondencia e importación; no importa `internal/legacyread`, así que
+  `serve` y el `host` siguen sin depender de Docker):
+  - `package.go`: lectura del `.adelmig` con `legacypkg.Open` (errores del formato → `LEGACY_PASSPHRASE_INVALID`,
+    `LEGACY_PACKAGE_DAMAGED`, `LEGACY_PACKAGE_VERSION`, `LEGACY_NOT_PACKAGE`, `LEGACY_PACKAGE_LIMIT`), detrás de una
+    interfaz propia `Source`/`Table` (`source.go`; `MemorySource` para las pruebas unitarias).
+  - `load.go`/`model.go`/`values.go`: lectura completa del paquete (también la comprobación de huellas y conteos, antes
+    de escribir nada) a filas tipadas; importes `MONEY` como enteros de diezmilésimos (`Money`) y cantidades como
+    milésimos (`Quantity`): nada pasa por float ni se redondea. Fechas `DATETIME` interpretadas con
+    `establishment.timezone`. Falta de una tabla o columna del anterior, o un valor con otra forma →
+    `LEGACY_PACKAGE_INCOMPATIBLE` con la tabla y la columna, nunca el valor.
+  - `catalog_plan.go`/`names.go`: correspondencia del catálogo, las mesas y los usuarios (`MIGRACION_ANALISIS.md`
+    §6.8). `history_plan.go`/`plan.go`: estados, fechas de reconocimiento, sumas, IVA estimado, marcas y el libro del
+    historial. `flags.go`: la lista cerrada de marcas.
+  - `expected.go`: la pasada independiente de la validación (conteos del manifiesto y totales calculados directamente
+    de las filas del paquete, sin la correspondencia ni lo escrito). `validate.go`: la comparación con la base dentro de
+    la transacción.
+  - `write.go`, `write_history.go`, `write_live.go`, `ids.go`: la importación en una sola transacción (abajo).
+  - `clean.go`: las condiciones de instalación limpia con mensajes en español sencillo.
+  - `manager.go`, `worker.go`, `runs.go`, `uploads.go`, `status.go`: subidas por partes, corridas en segundo plano, el
+    trabajador y el lock 7820148310. `pdf.go`: el informe en PDF. `summary.go`: resumen previo e informe final.
+- **Administración** (`administration/legacy_migration.go`, rutas `maintenance/legacy/*`; `user_password.go`, «Asignar
+  contraseña»; `users.go` con `has_password`; `http.go` con el límite de cuerpo de una parte y el envío del PDF;
+  `routes.go`, `reports.go` —`completeDeferred` entrega la corrida al trabajador después de confirmar la petición— y
+  `service.go` con `Service.Legacy`). Contrato completo en `API_CONTRACTS.md`, «Etapa 9H · migración del sistema
+  anterior».
+- **`cmd/ad-el-pos-server/main.go`**: `newApplication` arma la migración con la carpeta de trabajo
+  `<carpeta de la configuración>/legacy-import` (en el servicio, dentro de la carpeta de datos; `.local/legacy-import` en
+  desarrollo) y `serveHTTP` arranca y espera su trabajador como los de la 9G (`serve` y el `host`).
+- **`scripts/database.py`**: `./internal/legacyimport` en la tupla de integración (14 paquetes).
+- **Documentación**: `API_CONTRACTS.md` (rutas, cuerpos, respuestas, errores y auditoría), `docs/MIGRACION_ANALISIS.md`
+  §6.8 (correspondencia final, lista de marcas y validación).
+
+### Esquema del historial (0024, sección C): contrato para los reportes (Fase C, parte 2)
+
+Todas las tablas en `app`, con `batch_id` → `legacy_import_batches(id)`; un solo lote `completed` a la vez (índice
+único parcial) y, al reemplazarlo, sus filas del historial se borran en la misma transacción (el lote queda
+`replaced`). Para los reportes basta filtrar por el lote vigente: `batch_id = (SELECT id FROM app.legacy_import_batches
+WHERE status = 'completed')` (o, como solo hay filas del vigente, sin filtro). Importes `numeric(19,4)` exactos (MONEY);
+cantidades `numeric(19,3)`; instantes `timestamptz` (la hora local del anterior interpretada con
+`legacy_import_batches.timezone`). Ninguna llave hacia lo vivo: los identificadores nuevos (`product_id`, `category_id`,
+`table_id`, `area_id`, `*_user_id`) son copias de `legacy_id_map.new_id` y los nombres se copian.
+
+**`legacy_sales_recognitions`** (el libro, con las medidas de `sales_recognitions`):
+
+| Columna                                                             | Significado                                                                                                                                                                                 |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sequence`                                                          | Identidad (orden de escritura; para `latest()`).                                                                                                                                            |
+| `entry_kind`                                                        | `line` (un renglón del anterior con sus complementos sumados), `discount`, `charge` (cargo extra) o `difference` («Diferencia del sistema anterior»).                                       |
+| `legacy_sale_id`, `sale_folio`, `legacy_line_id`                    | Venta y folio originales (texto); renglón original solo en `line`.                                                                                                                          |
+| `recognized_at`                                                     | Instante de reconocimiento = último pago de la venta (sin pagos: su apertura). Día comercial igual que en los reportes: `((recognized_at AT TIME ZONE zona) - hora_de_inicio)::date`.       |
+| `opened_at`                                                         | Apertura de la venta.                                                                                                                                                                       |
+| `mode`                                                              | `dine_in` / `takeaway` (mesa 1 del anterior = para llevar).                                                                                                                                 |
+| `legacy_table_id`, `table_id`, `table_name`, `area_id`, `area_name` | Mesa (nulos para llevar).                                                                                                                                                                   |
+| `legacy_register_id`, `register_name`                               | Caja del anterior (solo su nombre; no hay `registers`).                                                                                                                                     |
+| `legacy_shift_id`                                                   | Turno = corte del anterior (`ventas.corte`, el del último pago); `legacy_cash_shifts.legacy_id`. Nulo = «Sin turno».                                                                        |
+| `legacy_cashier_id`, `responsible_user_id`, `responsible_name`      | Cajero que abrió la venta.                                                                                                                                                                  |
+| `legacy_product_id`, `product_id`, `product_code`, `product_name`   | Producto (solo `line`; `product_code` = `SA-<id>`).                                                                                                                                         |
+| `legacy_category_id`, `category_id`, `category_name`                | Categoría del producto (solo `line`).                                                                                                                                                       |
+| `concept`                                                           | `discount`: «Descuento: <tipo> · <descripción>»; `charge`: «Cargo: <descripción>»; `difference`: «Diferencia del sistema anterior».                                                         |
+| `tax_rate`, `tax_estimated`                                         | Tasa deducida del renglón (0, 8 o 16; nula fuera de `line`) e IVA estimado (no estaba guardado).                                                                                            |
+| `quantity`, `gross`, `discount`, `charge`, `net`, `base`, `tax`     | Medidas. `net = gross − discount + charge` y `net = base + tax` (restricciones). `line`: `gross` = total del renglón + Σ total de sus complementos; `tax` = Σ IVA; `discount` y `charge` 0. |
+
+Solo las ventas pagadas no canceladas tienen renglones en el libro. Por venta, **Σ `net` = `legacy_sales.amount_due`**
+(total + montoExtra − descuentos: lo que se debía según el anterior) y **Σ `tax` = `legacy_sales.tax`**, exactos; la
+`difference` aparece cuando el total o el IVA guardados no cuadran con los renglones (decisión 2 del propietario). No hay
+promociones ni cortesías: para unir con `sales_recognitions`, `promotion = 0` y `courtesy = 0`. Índices:
+`(recognized_at, sequence)`, `(batch_id, legacy_sale_id)`, `(legacy_shift_id, recognized_at)`, `(product_id,
+recognized_at)`.
+
+**Demás tablas** (columnas completas en la migración):
+
+- `legacy_sales`: una por venta (`legacy_id`, `folio`, `status` `paid`/`cancelled`/`open`, `opened_at`, `recognized_at`
+  solo en `paid`, `last_payment_at`, `cancelled_at`, `mode`, mesa, área, caja, cajero, `legacy_shift_id`,
+  `account_name`, `subtotal`/`tax`/`total` guardados, `amount_paid` (`montoPagado`), los valores originales de
+  `pagado`/`enmesa`/`facturado`/`cancelado`, `charge_concept`/`charge_amount` (el cargo extra), `discount_amount`,
+  `amount_due`, `lines_amount`, `lines_count`, `payments_amount`, `payments_count`, `tax_estimated`, `flags`, `note`).
+  Índice parcial `(recognized_at) WHERE status = 'paid'`. **Canceladas al estilo del anterior** (lo que el anterior
+  contaba): Σ `amount_due` de `status = 'cancelled'`.
+- `legacy_sale_lines` (renglones: producto, código y categoría copiados, cantidad y original, importes guardados,
+  `tax_rate`, sumas de sus complementos, `notes`, `flags`), `legacy_line_complements` (por renglón: complemento,
+  `included`, `requested` —por unidad del renglón—, importes con signo; para «Complementos seleccionados»:
+  `units` = Σ cantidad del renglón con `requested > 0`, porciones = Σ cantidad × `requested`, adicionales = Σ cantidad ×
+  max(`requested` − `included`, 0)), `legacy_quantity_changes` («Modificaciones de cantidades»: `original_quantity`,
+  `new_quantity`, quién autorizó; el anterior no guardaba quién modificó), `legacy_discounts`, `legacy_cancellations`
+  (quién autorizó y cuándo; sin motivo ni quién canceló).
+- `legacy_payments`: `method` `cash`/`card`/`other`, `method_name` («Efectivo», «Tarjeta (sistema anterior)»),
+  `reference` (comprobante), `amount` exacto (también 0 o negativo, con su marca), quién recibió, `paid_at`,
+  `legacy_shift_id` (`pagos.corte`), `sale_status` (para excluir los pagos de canceladas o abiertas si se quiere) y
+  `flags`. Índices `(paid_at)`, `(batch_id, legacy_sale_id)`, `(legacy_shift_id, paid_at)`.
+- `legacy_cash_shifts` (cortes tal como se guardaron: caja, cajero, `status` `open`/`closed`/`unknown`, fondo, conteo,
+  «venta» —que en el anterior incluía tarjeta y canceladas—, retiros, diferencia, apertura y cierre),
+  `legacy_cash_withdrawals` (retiros), `legacy_cash_expenses` (salidas de efectivo; vacía en el respaldo real),
+  `legacy_price_history` (historial de precios con vigencias y tasa deducida) y `legacy_id_map`.
+- **Filtro de los reportes**: el existente `origin` («Origen (para llevar)») choca; la Fase 0 propuso otra clave (p. ej.
+  `data_source`, «Datos: AD-EL POS / Sistema anterior»).
+
+### Importación (transacción, locks y tiempos)
+
+1. **Antes de la transacción** (trabajador): lock 7820148310 (sesión, conexión propia, sin esperar); lectura completa del
+   paquete; comprobación de la instalación y del lote confirmado; **respaldo verificado** por el camino de «Respaldar
+   ahora» (`backupschedule.Runner.StartManual`, 7820148309 solo en su conexión, sin transacción abierta; si hay otro
+   respaldo en curso espera hasta 5 min; si falla, no se importa).
+2. **La transacción**: `set_config('adel.legacy_import', <lote>, true)`; lote nuevo `importing`; si hay lote vigente,
+   borra su historial; **COPY** del historial completo y del libro; validación del historial (sumas por año y forma de
+   pago, ventas cuyo libro no suma); **después**, 7820148305 → 7820148304 → 7820148308 exclusivos (espera acotada a 30 s:
+   `LEGACY_LOCKS_BUSY`); vuelve a comprobar la instalación con los locks tomados; escribe catálogo, mesas, usuarios y la
+   correspondencia; conteos; marca el lote anterior `replaced` y el nuevo `completed` con su validación e informe;
+   confirma. Un error, la cancelación del contexto o el apagado del servidor deshacen todo.
+3. **Tiempo con los locks tomados** (medido, ≈ 230 mil ventas sintéticas): **257 ms** (el COPY del historial, 15.4 s, va
+   antes de tomarlos). Mientras están tomados esperan las pantallas que leen o escriben la operación del restaurante y
+   cobros (7820148305: Mesas y cuentas, captura, cocina, Caja), el catálogo (7820148304: Catálogo, cotizaciones) y el
+   inventario (7820148308); en una instalación limpia no hay operación en curso. Las demás rutas (reportes, estado del
+   sistema, `maintenance/legacy`) siguen respondiendo: la importación usa su conexión del pool (2 conexiones en total
+   con la del lock 7820148310; 3 durante el respaldo).
+
+### Decisiones
+
+1. **Tablas propias del historial** (decisión del coordinador), con el disparador **por sentencia** (no por fila: el
+   COPY de cientos de miles de filas no paga un disparador por fila). Crear el lote exige una marca con forma de
+   identificador; cualquier otra escritura (también `UPDATE` de lotes y `TRUNCATE`) exige que la marca sea un lote
+   `importing` existente. Es una protección contra escrituras accidentales; no contra un dueño de la base.
+2. **Repetir la migración actualiza en su lugar** lo vivo de un lote anterior (mismo identificador por clave anterior)
+   en vez de borrar e insertar: los usuarios importados pueden tener sesiones, auditoría o una contraseña asignada, y un
+   producto importado una receta, y borrarlos fallaría por llave foránea o perdería esa información. Lo que ya no viene
+   se borra si nada lo usa; si no, se desactiva («<nombre> (retirado 1a2b3c4d)») y queda como `retired` en la
+   correspondencia (sigue siendo «del lote» para la condición de instalación limpia).
+3. **Un grupo por conjunto distinto de complementos** (no uno solo): AD-EL POS ofrece todas las opciones del grupo a
+   cada producto que lo tiene, y el anterior admitía complementos por producto.
+4. **Producto sin precio** → $0.00 y desactivado (no se puede vender gratis por error); categoría inexistente → «Sin
+   categoría (sistema anterior)»; `categorias.cocina` no se importa (las estaciones y rutas de cocina no existen todavía
+   en una instalación limpia).
+5. **`salidas` se importa** (`legacy_cash_expenses`, tabla agregada a la sección C) y forma el «Total de egresos» de la
+   validación: el paquete sintético de la Fase B trae salidas para probar los egresos y, sin importarlas, la validación
+   habría marcado una diferencia que no es tal. En el respaldo real está vacía (0). `entradas` (compras) no se importa; si
+   un paquete trae alguna, la validación la muestra como diferencia.
+6. **Analizar también es un trabajo en segundo plano** (la lectura completa del paquete real tarda segundos, más que el
+   plazo de una petición) y la importación exige un análisis correcto del mismo paquete (`analysis_run_id`) y la
+   confirmación del lote que reemplaza (`replace_batch_id`). La frase de paso se pide en los dos pasos (nunca se guarda).
+7. **El estado de las subidas vive en memoria** (el archivo, en la carpeta de trabajo): al arrancar se borra lo que haya
+   quedado. Solo el mismo usuario en la misma terminal ve su subida. Tope 1 GiB; vencimiento a 2 horas sin actividad;
+   el archivo se borra al importar correctamente (no al fallar: se puede reintentar con la frase correcta).
+8. **Permiso `settings.manage` y solo la escucha local** para la migración (como Mantenimiento y los respaldos).
+   **«Asignar contraseña» no exige la escucha local**: las demás rutas de usuarios no la exigen (crear un usuario con su
+   contraseña funciona desde cualquier terminal con `users.manage`). `GET users` agrega `has_password`.
+9. **Validación**: los conteos esperados salen del **manifiesto** del paquete (el lector ya comprobó que cada tabla trae
+   exactamente esas filas); los totales, de una pasada propia sobre las filas. El año es el del **día comercial** del
+   reconocimiento (como los reportes). Una venta pagada sin pagos se reconoce en su apertura (marca `no_payments`).
+   Pagos con `tipo` nulo → efectivo (el predeterminado del anterior era 1).
+10. **El respaldo previo aparece como un «Respaldar ahora»** en la lista de respaldos (su `operation_id` es el id de la
+    corrida) y con su `maintenance.backup_created`.
+11. **El IVA de una venta cuyo IVA guardado no cuadra con sus renglones** también produce un renglón `difference` (con
+    `net = 0` si el total sí cuadra): así Σ `tax` por venta es el IVA guardado de la venta.
+12. **Notas del revisor independiente de la Fase B**: (1) la importación lee el paquete completo con `Load` —hasta que
+    `NextTable` devuelve `io.EOF`, que es cuando el lector confirma bloques, huellas y conteos— antes de abrir la
+    transacción, así que nunca se confirma nada de un paquete sin comprobar; (2) **todas las tablas y columnas que el
+    importador lee son obligatorias** (24 tablas del anterior, con todas sus columnas usadas; solo `divisas` y
+    `articulos`, que solo se cuentan, pueden faltar): un paquete coherente consigo mismo pero sin una de ellas se rechaza
+    con `LEGACY_PACKAGE_INCOMPATIBLE` nombrando la tabla, nunca se importa a medias (prueba con un paquete real sin
+    `cortes`); (3) `legacypkg.Open` recibe `OpenOptions{}` (los límites predeterminados completos, nunca parciales);
+    (4) **una apertura de paquete a la vez** en el servidor (mutex alrededor de `legacypkg.Open`, además de que el
+    trabajador corre una corrida a la vez); (5) en la bitácora solo van el código de la migración y el detalle técnico del
+    formato (`Error()` de `legacypkg`), nunca la causa interna (`Unwrap`); un error de lectura que no es del formato se
+    registra como «error de lectura del paquete».
+
+### Pruebas ejecutadas (aisladas)
+
+- `go-unit`: aprobado (vet normal e `integration`, `go test -race ./...`, `GOOS=windows` build y vet).
+- Unitarias nuevas (`internal/legacyimport`): `TestParseFixedIsExact`, `TestDeduceRateAndEstimate`,
+  `TestDeriveUsername`, `TestLoadRejectsIncompatiblePackages`, `TestCatalogCorrespondence`,
+  `TestHistoryStatesFlagsAndLedger` (Σ del libro = lo que se debía y Σ IVA = IVA de la venta en cada venta),
+  `TestExpectedIsIndependent`, `TestLegacyUploadsInParts` (orden, reenvío, huella mala de parte y del total, otro
+  usuario, tope, vencimiento y limpieza).
+- Integración (`iso.sh go-int`):
+  - `./internal/legacyimport` (≈ 7 s): `TestLegacyImportMapsHistoryExactly` (importes exactos en cada tabla, el libro, lo
+    vivo, la operación, la caja, los turnos y el inventario sin cambios, la numeración de folios intacta, el disparador
+    rechaza `INSERT`/`UPDATE`/`DELETE`/`TRUNCATE` también con una marca que no es de un lote en curso, y el motor real
+    `catalog.QuoteForOrder` cobra el producto importado como el anterior: incluidos $150, quitar el arroz $130 —la
+    bonificación—, quitar el arroz y agregar papas $155, agregar papas $175, dos ensaladas $165),
+    `TestLegacyImportReplacesTheBatchCompletely` (lote anterior `replaced` sin filas, mismos identificadores, contraseña
+    asignada conservada, mesa y usuario que ya no vienen borrados, usuario con sesión retirado y sin sesión, confirmación
+    del lote), `TestLegacyImportRefusesOwnData` (turno propio; categoría, área y usuario propios con sus mensajes; nada
+    escrito), `TestLegacyImportInterruptedLeavesNothing` (error después del historial y contexto cancelado después de lo
+    vivo: el lote anterior intacto), `TestLegacyImportShowsMoneyDifferences` (un peso de más provocado en un pago: la
+    validación lo muestra con su importe y el lote queda `completed` con diferencias) y
+    `TestLegacyManagerAnalyzesAndImportsPackages` (paquetes reales de `legacysynth`: frase incorrecta, dañado, versión
+    desconocida, no es un paquete, resumen previo, dos importaciones a la vez —una rechazada—, corrida en cola marcada
+    `interrupted`, importación con validación sin diferencias, subida borrada, PDF, auditoría sin la frase de paso,
+    reemplazo y respaldo fallido sin importar nada).
+  - `./internal/administration` con `TestStage9HLegacyMigrationRoutes` (≈ 13 s): por HTTP, permisos (403), escucha no
+    local (`LOCAL_REQUIRED`), tope de tamaño, huella mala, fuera de orden, cancelar, frase corta e incorrecta, paquete
+    dañado, versión y no paquete, importar sin confirmar, importación con el respaldo previo real de `backupschedule`
+    (destino simulado), estado, lote, PDF, rutas de cuentas y `restaurant/state` sin ventas importadas, «Asignar
+    contraseña» (403 sin `users.manage`, 409 a quien ya tiene, contraseña corta, inicio de sesión con
+    `initial_password`, auditada), auditoría completa sin la frase de paso, preparación válida y con una ruta rechazada,
+    reemplazo sin confirmar el lote (409) y confirmado, y el servidor respondiendo (`maintenance/legacy`,
+    `restaurant/tables`, `catalog/products`) con la importación detenida a propósito a mitad.
+  - `./internal/database` (≈ 10 s): `TestStage9HUpgrade` ampliada (23 → 24 con la sección C: cada tabla, el disparador
+    en cada tabla del historial, ninguna llave de tablas operativas hacia el historial, rechazos, escritura dentro de una
+    importación con importe exacto, dos lotes en curso imposibles y **ninguna fila existente cambiada** en ninguna tabla
+    del esquema 23).
+  - `./internal/administration` completo (122 s) y `./cmd/ad-el-pos-server` (41 s): aprobados (el cambio de
+    `publicUserColumns` y de `main.go` no rompe nada de lo anterior). Después de las notas del revisor se repitieron
+    `./internal/legacyimport` (7 s) y `TestStage9HLegacyMigrationRoutes` (13 s): aprobados.
+- **Medición de volumen** (`ADEL_LEGACY_MEASURE=1`, `TestLegacyImportVolume`, sin `-race`, `$SP/measure-c.sh`): 230 240
+  ventas, 719 253 renglones, 323 806 complementos y 230 242 pagos sintéticos. Paquete de 8.8 MB (generarlo, 2.1 s; los
+  datos sintéticos se comprimen más que los reales). Análisis: lectura completa 2.6 s, con la correspondencia 3.0 s;
+  memoria del modelo en el montón ≈ 367 MB (el proceso de la prueba completo, con la generación del paquete, llegó a
+  907 MB de memoria residente). Importación: 17.1 s (COPY del historial 15.4 s, validación del historial 1.3 s), **locks de
+  la operación tomados 257 ms**, espera de los locks 4 ms; base de 774 MB después de importar.
+- `fmt-check` y `sync-check` aprobados; `docs/etapas/*.md` sin cambios (md5).
+
+### No verificado
+
+- El respaldo real (Fase E): tiempos, tamaño del paquete, memoria y la validación con los datos reales.
+- La interfaz (Fase D): la subida desde Rust, el asistente, el PDF visto en pantalla e impreso.
+- Windows (solo `GOOS=windows` build y vet): la carpeta de trabajo con ACL, el `host` de Windows con la migración.
+- Una hora local ambigua del cambio de horario (no ocurre en el respaldo real: horas de 06 a 21 y sin horario de verano
+  desde 2022); la regla es la de `time.Date` (primera ocurrencia).
+- Los reportes con el historial importado (Fase C, parte 2).
+
+### Para CLAUDE.md
+
+- Encabezado y §13–14: 0024 con la **sección C** (historial importado del sistema anterior); esquema 24.
+- §3, tabla de locks: **7820148310** — migración del sistema anterior (`internal/legacyimport`): `pg_try_advisory_lock`
+  de sesión en una conexión propia mientras dura un análisis o una importación (una a la vez aunque dos servidores
+  compartan la base; ocupado → la corrida falla con `LEGACY_BUSY`). Se toma primero; con él tomado se hace el respaldo
+  previo (7820148309 sigue tomándose solo en su conexión, sin transacción abierta) y después la transacción de la
+  importación toma 7820148305 → 7820148304 → 7820148308 exclusivos, solo para lo vivo y después del COPY del historial.
+  Nadie más lo pide. Orden: 7820148310 → (7820148309 aparte) → 7820148305 → 7820148304 → 7820148308.
+- §3, «Composición del backend»: `maintenance/legacy*` → `administration/legacy_migration.go` con
+  `internal/legacyimport` (subidas, corridas, trabajador `legacyimport.Manager.Run` arrancado en `serveHTTP`, rutas solo
+  locales con `settings.manage`); `users/{id}/password` → `administration/user_password.go`. El historial vive en
+  `app.legacy_*` (solo lectura por disparador, sin llaves desde tablas operativas).
+- §4, estructura: `backend/internal/legacyimport/` (correspondencia e importación del sistema anterior).
+- §6, pruebas: integración nueva `./internal/legacyimport` (14 paquetes en la tupla), `TestStage9HLegacyMigrationRoutes`
+  (`administration`), `TestStage9HUpgrade` con la sección C; medición opcional `ADEL_LEGACY_MEASURE=1`
+  (`internal/legacyimport`, sin `-race` para tiempos representativos).
+- §15, Etapa 9H: historial en tablas propias con su libro; la importación en una transacción con respaldo previo;
+  repetir actualiza en su lugar; «Asignar contraseña» (solo a usuarios sin contraseña, `initial_password`); `has_password`
+  en Usuarios.
+- Regla permanente propuesta: «El historial importado (`app.legacy_*`) solo lo escribe `internal/legacyimport` dentro de
+  su transacción (marca `adel.legacy_import`); ninguna ruta ni módulo lo modifica y ninguna tabla operativa tiene llaves
+  hacia él».
