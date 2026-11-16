@@ -1,7 +1,138 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Entrada al dispositivo (fases B y C): textos del restaurante, sin tecnicismos (nada de IP, puertos ni códigos;
+     los datos técnicos solo en «Datos para soporte»). Las frases con «esta tableta» tienen su versión de teléfono. -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
-    <string name="access_title">Entrar</string>
-    <string name="access_heading">Entrada de meseros</string>
-    <string name="access_placeholder">Aquí cada mesero elegirá su nombre y escribirá su PIN para entrar.</string>
-    <string name="access_enter">Entrar</string>
+    <!-- Títulos de la barra superior. -->
+    <string name="access_title_loading">AD-EL POS</string>
+    <string name="access_title_find_server">Buscar el servidor</string>
+    <string name="access_title_entry">Entrar</string>
+    <string name="access_title_repair">Emparejar de nuevo</string>
+    <string name="access_title_update">Actualizar</string>
+    <string name="access_title_retired">Dispositivo retirado</string>
+
+    <!-- Dispositivo: tableta o teléfono. -->
+    <string name="device_this_tablet">esta tableta</string>
+    <string name="device_this_phone">este teléfono</string>
+    <string name="device_this_tablet_capital">Esta tableta</string>
+    <string name="device_this_phone_capital">Este teléfono</string>
+    <string name="device_default_tablet_name">Tableta 1</string>
+    <string name="device_default_phone_name">Teléfono 1</string>
+
+    <string name="access_loading">Preparando…</string>
+
+    <!-- Buscar el servidor (§4). -->
+    <string name="find_server_status">%1$s todavía no está conectada a la computadora principal del restaurante.</string>
+    <string name="find_server_status_phone">%1$s todavía no está conectado a la computadora principal del restaurante.</string>
+    <string name="find_server_name_label">Nombre de %1$s</string>
+    <string name="find_server_found_title">Computadoras principales en la red</string>
+    <string name="find_server_search_again">Buscar otra vez</string>
+    <string name="find_server_searching">Buscando la computadora principal en la red…</string>
+    <string name="find_server_none">No se encontró ninguna computadora principal en la red. Revisa que esté encendida y conectada a la misma red que %1$s, o escribe su dirección abajo.</string>
+    <string name="find_server_unavailable">No se pudo buscar en la red del restaurante desde %1$s. Escribe la dirección de la computadora principal abajo.</string>
+    <string name="find_server_request_code">Pedir código</string>
+    <string name="find_server_request_code_to">Pedir código a %1$s</string>
+    <string name="find_server_address_title">Escribir la dirección</string>
+    <string name="find_server_address_help">Si la red del restaurante no permite encontrarla, escribe la dirección de la computadora principal. La encuentras en esa computadora, en Administración › Sistema › Terminales.</string>
+    <string name="find_server_address_label">Dirección de la computadora principal</string>
+    <string name="find_server_address_placeholder">Por ejemplo 192.168.1.20</string>
+    <string name="find_server_log_title">Pedidos que no se enviaron</string>
+    <string name="find_server_log_help">Quedaron en la bitácora de este dispositivo cuando dejó de usar su servidor. Revísalos con el restaurante antes de borrarlos.</string>
+
+    <!-- Problemas al pedir el código. -->
+    <string name="pairing_problem_address_malformed">Escribe la dirección de la computadora principal, por ejemplo 192.168.1.20 o caja.local.</string>
+    <string name="pairing_problem_address_not_local">La dirección debe ser de la red local del restaurante (por ejemplo 192.168.1.20 o caja.local).</string>
+    <string name="pairing_problem_name">Escribe un nombre para %1$s (máximo 80 caracteres).</string>
+    <string name="pairing_problem_no_longer_found">Esa computadora ya no aparece en la red. Vuelve a buscar.</string>
+    <string name="pairing_problem_mismatch">La computadora encontrada no respondió como la computadora principal que se anunció en la red. Vuelve a buscar o escribe su dirección.</string>
+    <string name="pairing_problem_no_session">No hay un emparejamiento en curso. Pide un código nuevo.</string>
+    <string name="pairing_problem_credential">La computadora principal no entregó una autorización válida. Pide un código nuevo.</string>
+    <string name="pairing_problem_storage">No se pudo guardar la autorización en %1$s. Se vuelve a intentar sola.</string>
+    <string name="pairing_problem_unreachable">No se pudo conectar con la computadora principal en esa dirección. Revisa que esté encendida, en la misma red y que la dirección sea correcta.</string>
+    <string name="pairing_problem_identity">La computadora principal cambió de identidad durante el emparejamiento. Pide un código nuevo.</string>
+    <string name="pairing_problem_server">La computadora principal no respondió como se esperaba. Inténtalo de nuevo.</string>
+
+    <!-- Código de emparejamiento. -->
+    <string name="pairing_server_of">Computadora principal de %1$s</string>
+    <string name="pairing_instructions">En la computadora principal, un administrador entra a Administración › Sistema › Terminales y escribe este código:</string>
+    <string name="pairing_code_description">Código de emparejamiento %1$s</string>
+    <string name="pairing_expires_in">El código vence en %1$s.</string>
+    <string name="pairing_will_be_named">%1$s se llamará %2$s</string>
+    <string name="pairing_change_name">Cambiar nombre</string>
+    <string name="pairing_save_name">Guardar nombre</string>
+    <string name="pairing_waiting">Esperando la aprobación de la computadora principal…</string>
+    <string name="pairing_paired">Emparejamiento listo.</string>
+    <string name="pairing_rejected">La computadora principal rechazó %1$s. Si fue un error, pide otro código.</string>
+    <string name="pairing_expired">El código venció antes de aprobarse. Pide otro código.</string>
+    <string name="pairing_cancelled">Se canceló la solicitud.</string>
+    <string name="pairing_claimed">%1$s ya recibió su autorización. Para repetirlo, pide otro código.</string>
+    <string name="pairing_request_another">Pedir otro código</string>
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_back">Volver</string>
+
+    <!-- Permiso de red local (Android 17 con targetSdk 37; hoy no se pide). -->
+    <string name="permission_local_network_title">Permiso para la red del restaurante</string>
+    <string name="permission_local_network_text">Para encontrar la computadora principal y hablar con ella, AD-EL POS necesita permiso para usar los dispositivos de la red local. Android te lo pedirá a continuación.</string>
+    <string name="permission_local_network_denied">Sin ese permiso, %1$s no puede conectarse con la computadora principal. Puedes darlo en los ajustes del sistema, en Aplicaciones › AD-EL POS › Permisos › Dispositivos cercanos.</string>
+    <string name="permission_continue">Continuar</string>
+    <string name="permission_open_settings">Abrir ajustes</string>
+    <string name="permission_try_again">Volver a intentar</string>
+
+    <!-- Entrada con PIN (§3.2). -->
+    <string name="entry_heading">¿Quién eres?</string>
+    <string name="entry_help">Toca tu nombre y escribe tu PIN.</string>
+    <string name="entry_offline">Sin conexión con la computadora principal: solo pueden entrar los meseros que ya entraron antes en %1$s.</string>
+    <string name="entry_empty_online">Todavía no hay meseros con PIN. En la computadora principal, asígnalo en Personal › Usuarios.</string>
+    <string name="entry_empty_offline">Sin conexión y nadie ha entrado antes en %1$s. Conecta el dispositivo a la red del restaurante para entrar.</string>
+    <string name="entry_refresh">Actualizar</string>
+    <string name="entry_locked_until">Bloqueado hasta las %1$s</string>
+    <string name="entry_pin_for">PIN de %1$s</string>
+    <string name="entry_enter">Entrar</string>
+    <string name="entry_other_waiter">Elegir otro nombre</string>
+    <string name="entry_checking">Comprobando…</string>
+    <string name="entry_wrong_pin">PIN incorrecto. Inténtalo de nuevo.</string>
+    <string name="entry_locked">Demasiados intentos. Intenta de nuevo a las %1$s.</string>
+    <string name="entry_locked_admin">Demasiados intentos. Pide a un administrador que desbloquee tu PIN.</string>
+    <string name="entry_not_allowed">No tienes permiso para entrar en los teléfonos y tabletas de meseros. Pídelo al administrador.</string>
+    <string name="entry_unknown_offline">Sin conexión solo entran los meseros que ya entraron antes en %1$s. Conecta el dispositivo a la red del restaurante para entrar.</string>
+    <string name="entry_failed">No se pudo entrar. Inténtalo de nuevo.</string>
+    <string name="entry_update_required">Esta aplicación necesita actualizarse para entrar.</string>
+    <string name="entry_unreachable">No se pudo conectar con la computadora principal. Inténtalo de nuevo.</string>
+
+    <!-- Cambio rápido de mesero bloqueado (§7). -->
+    <string name="switch_blocked_title">Antes de cambiar de mesero</string>
+    <string name="switch_blocked_text">Tienes pedidos sin enviar. Envíalos o revísalos antes de cambiar de mesero.</string>
+    <string name="common_understood">Entendido</string>
+
+    <!-- Emparejar de nuevo (§4, como RepairTerminal del escritorio). -->
+    <string name="repair_title">%1$s necesita emparejarse de nuevo</string>
+    <string name="repair_identity_changed">El servidor del restaurante cambió su identidad y %1$s ya no puede comprobar que es el del restaurante. Por seguridad no se conecta: vuelve a emparejarla.</string>
+    <string name="repair_identity_changed_phone">El servidor del restaurante cambió su identidad y %1$s ya no puede comprobar que es el del restaurante. Por seguridad no se conecta: vuelve a emparejarlo.</string>
+    <string name="repair_not_recognized">La computadora principal ya no reconoce %1$s.</string>
+    <string name="repair_credential_lost">%1$s perdió su autorización guardada (por ejemplo, porque se borraron los datos de la aplicación).</string>
+    <string name="repair_action">Emparejar de nuevo</string>
+    <string name="repair_check_again">Volver a comprobar</string>
+    <string name="repair_confirm_title">Emparejar de nuevo</string>
+    <string name="repair_confirm_text">%1$s dejará de usar el servidor del restaurante con el que se emparejó. Después busca la computadora principal y pide un código nuevo. Los datos del restaurante no cambian.</string>
+
+    <!-- Versiones (§4). -->
+    <string name="update_app_title">Actualiza esta aplicación</string>
+    <string name="update_app_text">La computadora principal del restaurante necesita una versión más reciente de AD-EL POS en %1$s. Instala la versión nueva y vuelve a abrirla.</string>
+    <string name="update_server_title">Actualiza el servidor del restaurante</string>
+    <string name="update_server_text">La computadora principal del restaurante tiene una versión anterior de AD-EL POS que no permite entrar con PIN en los teléfonos y tabletas. Pide que la actualicen.</string>
+    <string name="update_check_again">Volver a comprobar</string>
+    <string name="support_title">Datos para soporte</string>
+    <string name="support_app_version">Versión de esta aplicación: %1$s</string>
+    <string name="support_min_version">Versión mínima que pide el servidor: %1$s</string>
+    <string name="support_server_version">Versión del servidor: %1$s</string>
+
+    <!-- Dispositivo retirado (§3.2). -->
+    <string name="retired_title">Este dispositivo fue retirado del restaurante</string>
+    <string name="retired_text">La computadora principal retiró %1$s. Se borraron sus datos y su autorización.</string>
+    <string name="retired_unsent">Este dispositivo fue retirado del restaurante; estos pedidos no se enviaron:</string>
+    <string name="retired_log_kept">Quedan en la bitácora de este dispositivo hasta que la borres.</string>
+    <string name="retired_pair_again">Emparejar de nuevo</string>
+    <string name="log_clear">Borrar la bitácora</string>
+    <string name="log_clear_confirm_title">Borrar la bitácora</string>
+    <string name="log_clear_confirm_text">Los pedidos de la bitácora se borrarán de este dispositivo. Revísalos antes con el restaurante: nunca llegaron a la cocina.</string>
+    <string name="log_order_line">%1$s · %2$s · %3$s</string>
 </resources>

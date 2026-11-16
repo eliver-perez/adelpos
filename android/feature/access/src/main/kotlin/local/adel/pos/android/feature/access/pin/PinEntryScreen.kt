@@ -1,0 +1,376 @@
+package local.adel.pos.android.feature.access.pin
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
+import local.adel.pos.android.core.domain.access.WaiterProfile
+import local.adel.pos.android.core.domain.access.WaiterRoster
+import local.adel.pos.android.core.ui.components.PinPad
+import local.adel.pos.android.core.ui.components.SecondaryButton
+import local.adel.pos.android.core.ui.components.WaiterBadge
+import local.adel.pos.android.core.ui.icons.AdelIcons
+import local.adel.pos.android.core.ui.layout.PaneLayout
+import local.adel.pos.android.core.ui.theme.AdelDimens
+import local.adel.pos.android.core.ui.theme.AdelTheme
+import local.adel.pos.android.feature.access.AccessDependencies
+import local.adel.pos.android.feature.access.R
+import local.adel.pos.android.feature.access.clockTime
+import local.adel.pos.android.feature.access.deviceWords
+import local.adel.pos.android.feature.access.findserver.ProblemNotice
+
+/**
+ * Entrada con PIN con su ViewModel: pide la lista al mostrarse y cada [refreshMillis] mientras está
+ * a la vista (aparecen los meseros a los que se les acaba de asignar un PIN).
+ */
+@Composable
+fun PinEntryRoute(
+    dependencies: AccessDependencies,
+    layout: PaneLayout,
+    viewModel: PinEntryViewModel =
+        viewModel(factory = PinEntryViewModel.factory(dependencies.access)),
+    refreshMillis: Long = REFRESH_MILLIS,
+) {
+    LaunchedEffect(viewModel) {
+        while (true) {
+            viewModel.refresh()
+            delay(refreshMillis)
+        }
+    }
+    PinEntryScreen(
+        layout = layout,
+        roster = viewModel.roster,
+        loading = viewModel.loading,
+        selected = viewModel.selected,
+        pinLength = viewModel.pinLength,
+        busy = viewModel.busy,
+        message = viewModel.message,
+        now = dependencies.wallClock(),
+        onRefresh = viewModel::refresh,
+        onSelect = viewModel::select,
+        onBack = viewModel::back,
+        onDigit = viewModel::onDigit,
+        onDelete = viewModel::onDelete,
+        onSubmit = viewModel::submit,
+    )
+}
+
+private const val REFRESH_MILLIS = 30_000L
+
+/**
+ * Lista de meseros en botones grandes y el teclado del PIN del elegido. En la tableta, lado a lado;
+ * en el teléfono, primero la lista y después el teclado (Atrás regresa a la lista).
+ */
+@Composable
+fun PinEntryScreen(
+    layout: PaneLayout,
+    roster: WaiterRoster?,
+    loading: Boolean,
+    selected: WaiterProfile?,
+    pinLength: Int,
+    busy: Boolean,
+    message: EntryMessage?,
+    now: Long,
+    onRefresh: () -> Unit,
+    onSelect: (WaiterProfile) -> Unit,
+    onBack: () -> Unit,
+    onDigit: (Char) -> Unit,
+    onDelete: () -> Unit,
+    onSubmit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val list: @Composable () -> Unit = {
+        WaiterList(
+            roster = roster,
+            loading = loading,
+            selected = selected,
+            now = now,
+            onRefresh = onRefresh,
+            onSelect = onSelect,
+        )
+    }
+    val pad: @Composable () -> Unit = {
+        PinPanel(
+            selected = selected,
+            pinLength = pinLength,
+            busy = busy,
+            message = message,
+            onBack = onBack,
+            onDigit = onDigit,
+            onDelete = onDelete,
+            onSubmit = onSubmit,
+        )
+    }
+    when (layout) {
+        PaneLayout.DOUBLE ->
+            Row(modifier = modifier.fillMaxSize().testTag(TAG_ENTRY)) {
+                Box(modifier = Modifier.weight(0.55f).fillMaxHeight()) { list() }
+                VerticalDivider()
+                Box(modifier = Modifier.weight(0.45f).fillMaxHeight()) { pad() }
+            }
+        PaneLayout.SINGLE ->
+            Box(modifier = modifier.fillMaxSize().testTag(TAG_ENTRY)) {
+                if (selected == null) {
+                    list()
+                } else {
+                    BackHandler(onBack = onBack)
+                    pad()
+                }
+            }
+    }
+}
+
+@Composable
+private fun WaiterList(
+    roster: WaiterRoster?,
+    loading: Boolean,
+    selected: WaiterProfile?,
+    now: Long,
+    onRefresh: () -> Unit,
+    onSelect: (WaiterProfile) -> Unit,
+) {
+    val words = deviceWords()
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 200.dp),
+        contentPadding = PaddingValues(AdelDimens.ScreenPadding),
+        horizontalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
+        verticalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
+        modifier = Modifier.fillMaxSize().testTag(TAG_WAITER_LIST),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.entry_heading),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Text(
+                    text = stringResource(R.string.entry_help),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (roster != null && !roster.online) {
+                    Text(
+                        text = stringResource(R.string.entry_offline, words.thisDevice),
+                        color = AdelTheme.colors.amber,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.testTag(TAG_ENTRY_OFFLINE),
+                    )
+                }
+            }
+        }
+        if (roster == null) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+            }
+        } else if (roster.waiters.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(AdelDimens.Gap)) {
+                    Text(
+                        text =
+                            if (roster.online) stringResource(R.string.entry_empty_online)
+                            else stringResource(R.string.entry_empty_offline, words.thisDevice),
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.testTag(TAG_ENTRY_EMPTY),
+                    )
+                    SecondaryButton(
+                        text = stringResource(R.string.entry_refresh),
+                        onClick = onRefresh,
+                        enabled = !loading,
+                        icon = AdelIcons.Refresh,
+                        modifier = Modifier.testTag(TAG_ENTRY_REFRESH),
+                    )
+                }
+            }
+        } else {
+            items(roster.waiters, key = WaiterProfile::userId) { waiter ->
+                WaiterButton(
+                    waiter = waiter,
+                    selected = waiter.userId == selected?.userId,
+                    now = now,
+                    onClick = { onSelect(waiter) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Botón grande de un mesero: su distintivo, su nombre y, si aplica, hasta cuándo está bloqueado.
+ */
+@Composable
+private fun WaiterButton(
+    waiter: WaiterProfile,
+    selected: Boolean,
+    now: Long,
+    onClick: () -> Unit,
+) {
+    val lockedUntil = waiter.lockedUntilEpochMillis?.takeIf { it > now }
+    val colors =
+        if (selected) {
+            ButtonDefaults.outlinedButtonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            )
+        } else {
+            ButtonDefaults.outlinedButtonColors()
+        }
+    OutlinedButton(
+        onClick = onClick,
+        colors = colors,
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        modifier =
+            Modifier.fillMaxWidth()
+                .heightIn(min = WAITER_BUTTON_HEIGHT)
+                .testTag("$TAG_WAITER_PREFIX${waiter.userId}"),
+    ) {
+        WaiterBadge(initial = waiter.initial, colorHex = waiter.color)
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(
+                text = waiter.name,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (lockedUntil != null) {
+                Text(
+                    text = stringResource(R.string.entry_locked_until, clockTime(lockedUntil)),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AdelTheme.colors.red,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PinPanel(
+    selected: WaiterProfile?,
+    pinLength: Int,
+    busy: Boolean,
+    message: EntryMessage?,
+    onBack: () -> Unit,
+    onDigit: (Char) -> Unit,
+    onDelete: () -> Unit,
+    onSubmit: () -> Unit,
+) {
+    Column(
+        modifier =
+            Modifier.fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(AdelDimens.ScreenPadding)
+                .testTag(TAG_PIN_PANEL),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(AdelDimens.Gap),
+    ) {
+        if (message != null) {
+            Box(modifier = Modifier.testTag(TAG_ENTRY_MESSAGE)) {
+                ProblemNotice(entryMessageText(message))
+            }
+        }
+        if (selected == null) {
+            Text(
+                text = stringResource(R.string.entry_help),
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@Column
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            WaiterBadge(initial = selected.initial, colorHex = selected.color, size = 56.dp)
+            Text(
+                text = stringResource(R.string.entry_pin_for, selected.name),
+                style = MaterialTheme.typography.headlineSmall,
+            )
+        }
+        if (busy) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            ) {
+                CircularProgressIndicator(modifier = Modifier.padding(4.dp))
+                Text(stringResource(R.string.entry_checking))
+            }
+        }
+        PinPad(
+            length = pinLength,
+            onDigit = onDigit,
+            onDelete = onDelete,
+            onSubmit = onSubmit,
+            submitLabel = stringResource(R.string.entry_enter),
+            enabled = !busy,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SecondaryButton(
+            text = stringResource(R.string.entry_other_waiter),
+            onClick = onBack,
+            icon = AdelIcons.ChevronLeft,
+            modifier = Modifier.testTag(TAG_ENTRY_BACK),
+        )
+    }
+}
+
+@Composable
+private fun entryMessageText(message: EntryMessage): String {
+    val words = deviceWords()
+    return when (message) {
+        EntryMessage.WrongPin -> stringResource(R.string.entry_wrong_pin)
+        is EntryMessage.Locked ->
+            message.untilEpochMillis?.let { stringResource(R.string.entry_locked, clockTime(it)) }
+                ?: stringResource(R.string.entry_locked_admin)
+        EntryMessage.NotAllowed -> stringResource(R.string.entry_not_allowed)
+        EntryMessage.UnknownOffline ->
+            stringResource(R.string.entry_unknown_offline, words.thisDevice)
+        EntryMessage.UpdateRequired -> stringResource(R.string.entry_update_required)
+        EntryMessage.Unreachable -> stringResource(R.string.entry_unreachable)
+        is EntryMessage.Failed -> message.serverMessage ?: stringResource(R.string.entry_failed)
+    }
+}
+
+private val WAITER_BUTTON_HEIGHT = 72.dp
+
+/** Etiquetas para las pruebas. */
+const val TAG_ENTRY = "entry"
+const val TAG_WAITER_LIST = "entry-waiters"
+const val TAG_WAITER_PREFIX = "entry-waiter-"
+const val TAG_ENTRY_OFFLINE = "entry-offline"
+const val TAG_ENTRY_EMPTY = "entry-empty"
+const val TAG_ENTRY_REFRESH = "entry-refresh"
+const val TAG_PIN_PANEL = "entry-pin-panel"
+const val TAG_ENTRY_MESSAGE = "entry-message"
+const val TAG_ENTRY_BACK = "entry-back"
