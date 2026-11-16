@@ -1081,3 +1081,118 @@ recognized_at)`.
 - Regla permanente propuesta: «El historial importado (`app.legacy_*`) solo lo escribe `internal/legacyimport` dentro de
   su transacción (marca `adel.legacy_import`); ninguna ruta ni módulo lo modifica y ninguna tabla operativa tiene llaves
   hacia él».
+
+---
+
+### Fase B · Correcciones de la revisión
+
+El mismo agente (16/11/2026), en el árbol `etapa-9h-b2` (desde `etapa-9h`, `0fe4a7b`), con `ISO_TAG=B`, en paralelo con
+la Fase C (sin tocar `internal/legacyimport`). La prueba con Docker corrió **una sola vez, sin contenedores de otros
+agentes** (comprobado antes). Nunca se usó el respaldo real.
+
+Commits: `49535d5` (M-2: comprobación de datos reales), `abe392f` (`legacypkg` y `legacysynth`: lectura, límites, FAT y
+orden de textos) y `57a95c0` (`legacyread`: bloqueo, restos, `--cleanup`, Docker local, respaldo y verificación; y
+`docs/MIGRACION_FORMATO.md`).
+
+#### Qué cambió
+
+- **I-1 · Una sola preparación a la vez y limpieza que no destruye lectores vivos.**
+  - Bloqueo del sistema operativo (`flock` en macOS y Linux, `LockFileEx` en Windows) sobre
+    `<carpeta temporal del usuario>/adel-legacy-prepare/lock`. El sistema lo suelta aunque el proceso termine a la
+    fuerza. Con otra preparación en curso: `ALREADY_RUNNING` («Ya se está preparando un paquete en esta computadora…»),
+    sin tocar Docker ni archivos.
+  - El contenedor y el volumen llevan además las etiquetas `local.adel.pos.legacy-reader.pid` y
+    `local.adel.pos.legacy-reader.started`.
+  - La limpieza de restos solo borra los lectores de un proceso que ya no existe (`kill(pid, 0)` u `OpenProcess`), los
+    que no tienen PID (de la versión anterior) o los de hace más de 12 horas (por si el PID se reutilizó). Uno de otra
+    preparación viva (por ejemplo, con otra carpeta temporal) nunca se toca.
+  - `requireNoLeftovers` de la prueba con Docker solo mira los lectores con el PID de sus propios procesos.
+- **M-1 · Restos de una preparación terminada a la fuerza.**
+  - Cada preparación trabaja en `adel-legacy-prepare/run-<aleatorio>`: tablas en preparación cifradas, copia del
+    respaldo y un archivo `partial` con la ruta del paquete a medias.
+  - Al empezar, con el bloqueo tomado, borra lo que dejó otra: carpetas `run-*` (también la copia **en claro** del
+    respaldo), el paquete a medias registrado (`legacypkg.RemoveStalePartial`, solo si el nombre es exactamente el de
+    un temporal de `CreateOutput` y es un archivo regular) y los contenedores y volúmenes cuyo proceso terminó. También
+    borra las carpetas sueltas del formato anterior (`adel-migracion-*` y `adel-respaldo-*` en la carpeta temporal) con
+    más de 6 horas.
+  - Nuevo `legacy-prepare --cleanup`, para que la Fase D lo llame al abrir el asistente: hace la misma limpieza y
+    responde con `{"event":"cleanup","removed":{"folders","partials","containers","volumes"},"docker":"checked"|"unavailable"}`.
+    Sin Docker borra igual las carpetas. No lee la entrada estándar. Con una preparación en curso responde
+    `ALREADY_RUNNING`.
+  - El resumen final lleva `previous_leftovers`.
+  - `prepare.go` y `MIGRACION_FORMATO.md` ya no dicen «pase lo que pase»: dicen qué queda tras SIGKILL y quién lo borra.
+- **M-2 · Más archivos detectados.**
+  - `.gitignore`, `check-legacy-data.sh` y `checkLegacyData` (`dev.mjs`) incluyen `*.bak.gz`, `*.bak.zip`, `*.bak.7z`,
+    `*.mdf`, `*.ndf`, `*.ldf` y `*.trn`.
+  - Además detectan un gzip con otro nombre cuyo contenido descomprimido empieza con `TAPE`; solo se descomprime el
+    principio. En `dev.mjs` los candidatos se buscan con `^\x1f`, porque Node pasaría el byte `8b` como UTF-8, y se
+    confirman al descomprimir.
+  - Sin ganchos de git.
+- **M-3 · Orden de textos como SQL Server (`legacysynth/order.go`).** Al comparar, el texto más corto se rellena con
+  espacios; si empatan, decide `DATALENGTH`. `TestOrderingFollowsSQLServer` comprueba el orden completo que midió el
+  revisor (`nil`, `""`, `"A"`, `"a\x01"`, `"a\t"`, `"a\x1f"`, `"a"`, `"a "`, `"a!"`) en `varchar` y `nvarchar`. La
+  huella del paquete sintético no cambió (`38b7125f…`): sus datos no tenían esos empates.
+- **M-4 · Respaldos con varias bases.** Si el archivo tiene respaldos completos de varias bases, `BACKUP_INVALID` con
+  el mensaje «El archivo tiene respaldos de varias bases de datos…». El número de juegos del archivo va en el
+  manifiesto (`source.backup_sets`) y en el resumen (`backup.sets`).
+- **M-5 · Docker local.** Antes de todo se ejecuta `docker context inspect --format {{.Endpoints.docker.Host}}`, que
+  respeta `DOCKER_HOST` y `DOCKER_CONTEXT` (comprobado en esta Mac con `tcp://` y `ssh://`). Si el resultado no
+  empieza con `unix://` ni `npipe://`, `DOCKER_REMOTE` sin contactar ese Docker.
+- **M-6 · Huella del respaldo.** El SHA-256 del respaldo se calcula antes de arrancar el contenedor. Al escribir se
+  comprueba que el tamaño y la fecha del archivo no cambiaron; si cambiaron, `BACKUP_CHANGED`. El mismo error sale si
+  el contenedor ve el respaldo con otro tamaño.
+- **M-7 · Windows con USB FAT o exFAT.** Si el disco no guarda listas de control de acceso (`GetVolumeInformation` sin
+  `FILE_PERSISTENT_ACLS`), el temporal del paquete se crea sin ACL propia, sin reemplazar nada. El paquete va cifrado.
+- **Sugerencias aplicadas.**
+  - Plazo de 2 horas por tabla en `readTable`, con `READ_FAILED` «se agotó el plazo de lectura de <tabla>».
+  - `resolveLimits` completa campo por campo los límites en cero.
+  - Nuevo tipo `unreadable` en `legacypkg`: un error de entrada y salida de la fuente (en el encabezado o en un bloque)
+    ya no se reporta como «dañado», sino «No se pudo leer el archivo del paquete. Si está en una USB…». `KindOf` y
+    `errors.Is(err, legacypkg.ErrUnreadable)` lo reconocen.
+  - `legacy-prepare` recorre con `legacypkg.Verify` el paquete escrito antes de darle su nombre. Informa
+    `verified: true` y el tiempo `timings.verify`.
+
+#### Decisiones
+
+- El bloqueo va en la carpeta temporal del usuario y no en la de configuración, para que las pruebas lo aíslen con su
+  `TMPDIR`. En macOS la aplicación y la terminal comparten el mismo `TMPDIR` de la cuenta. Dos preparaciones con
+  carpetas temporales distintas sí pueden correr a la vez; las etiquetas con PID impiden que una destruya a la otra, y
+  la prueba con Docker lo comprueba.
+- En el bloqueo no se borra el archivo `lock`: borrarlo crearía una carrera entre procesos.
+- `BACKUP_CHANGED` se decide por tamaño y fecha, no con un segundo SHA-256, para no volver a leer el respaldo completo.
+- Para la Fase C: `legacyimport.packageError` hoy traduce un tipo desconocido a `CodeDamaged`, conservando el mensaje
+  del formato. Puede agregar `legacypkg.KindUnreadable` con un código propio. No lo toqué porque es de esa fase.
+
+#### Pruebas ejecutadas
+
+| Prueba                                                                              | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ISO_TAG=B iso.sh … go-unit` (vet normal e `integration`, `-race`, `GOOS=windows`)  | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `go vet -tags 'integration legacydocker'` en macOS y con `GOOS=windows`             | Aprobado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `legacypkg` (nuevas)                                                                | Aprobadas: error de entrada y salida en el encabezado, en el JSON, en el primer bloque y a media lectura → `unreadable`; límites parciales; `RemoveStalePartial` (borra el temporal; no borra un enlace, un archivo ajeno, una ruta relativa ni otro nombre).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Comprobación de datos reales (índice temporal, `.sh` y `dev.mjs`)                   | Aprobada: falla con `.MDF`, `.ldf`, `.ndf`, `.trn`, `.bak.gz`, `.bak.zip`, `.BAK.7z` y con un respaldo MTF dentro de un gzip llamado `semana.gz`; pasa con un gzip de texto y con un binario que empieza con `1f 8b` y no es gzip. 0,2 s sobre el repositorio.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `legacysynth`                                                                       | Aprobado, con el orden completo de SQL Server en `varchar` y `nvarchar`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `legacyread` (docker simulado)                                                      | Aprobadas. Bloqueo: `ALREADY_RUNNING` sin llamar a Docker ni borrar la carpeta en curso, también con `--cleanup` y desde la línea de órdenes. Restos: solo se borran los lectores muertos, sin PID o de más de 12 h, nunca el vivo. Carpetas y paquete a medias de una preparación matada, borrados al preparar, con `--cleanup` y con `--cleanup` sin Docker. `DOCKER_REMOTE` con `tcp://`, `ssh://` y vacío (sin contactar), y `npipe://` aceptado. `BACKUP_CHANGED` en los dos caminos. Juegos de respaldo: se restaura el completo más reciente de la misma base y se rechazan varias bases. Plazo por tabla. Resumen con `verified`, `verify`, `sets` y `previous_leftovers`. Argumentos de `docker run` y `volume create` con las etiquetas de PID y hora. |
+| **Docker real con el respaldo sintético** (una sola vez, sin contenedores de otros) | Aprobada en 64,7 s. Con dos preparaciones en la misma carpeta temporal, la segunda responde `ALREADY_RUNNING` y no escribe nada. Otra preparación con su propia carpeta corre a la vez que la primera y **las dos terminan bien**, con la huella del sintético. Paso de la primera: 25,8 s (lectura 15,1 s, verificación 0,06 s); paquete de 32 890 bytes. Con páginas de 7 filas, 24,8 s y la misma huella. Al terminar, ningún contenedor ni volumen.                                                                                                                                                                                                                                                                                                          |
+| Experimento manual de SIGKILL (respaldo sintético del revisor)                      | `kill -9` a los 18 s, durante la lectura: quedaron `run-*`, el contenedor y su volumen. `legacy-prepare --cleanup` respondió `{"folders":1,"partials":0,"containers":1,"volumes":1}`, `docker: checked`, y no quedó nada (en la carpeta de trabajo solo `lock`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `iso.sh … fmt-check` y `sync-check`                                                 | Aprobados                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+#### No verificado
+
+- Windows (solo compilado y analizado con `GOOS=windows`): `LockFileEx`, `OpenProcess` y `GetExitCodeProcess`, el
+  temporal sin ACL en una USB FAT o exFAT (M-7) y el extremo `npipe://` real.
+- El paquete a medias borrado tras un SIGKILL en la fase de escritura (probado con el docker simulado; el experimento
+  real mató la preparación durante la lectura, antes de crear el paquete).
+
+#### Para CLAUDE.md
+
+- `legacy-prepare`: una sola preparación a la vez (`ALREADY_RUNNING`, bloqueo en
+  `<temporal>/adel-legacy-prepare/lock`). `legacy-prepare --cleanup` borra los restos de una preparación terminada a la
+  fuerza; la aplicación lo llama al abrir el asistente. Docker debe ser local (`DOCKER_REMOTE`). `BACKUP_CHANGED` si el
+  respaldo cambia durante la preparación. El paquete se verifica antes de darle su nombre.
+- Los lectores llevan su PID y su hora en etiquetas, y la limpieza nunca borra el de un proceso vivo. La prueba con
+  Docker no debe correr a la vez que la de otro agente.
+- `legacypkg`: tipo de error `unreadable` (error de lectura de la fuente, distinto de `damaged`). Los límites en cero de
+  `OpenOptions` toman el valor predeterminado.
+- La comprobación de datos reales también reconoce `*.bak.gz`, `*.bak.zip`, `*.bak.7z`, `*.mdf`, `*.ndf`, `*.ldf`,
+  `*.trn` y un respaldo dentro de un gzip.
