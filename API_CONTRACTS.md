@@ -3672,3 +3672,109 @@ devices`** muestra el usuario actual de cada terminal (el mismo usuario puede ap
   leen en cada petición de cada sesión.
 - Contrato v1: la descripción de `login` en `openapi.json` y [docs/API_V1.md](docs/API_V1.md) (§4) dicen el
   comportamiento nuevo; sin operaciones ni esquemas nuevos.
+
+## Etapa 9H · migración del sistema anterior (fase C, esquema 24)
+
+Importación del paquete `.adelmig` ([docs/MIGRACION_FORMATO.md](docs/MIGRACION_FORMATO.md)) con la correspondencia de
+[docs/MIGRACION_ANALISIS.md](docs/MIGRACION_ANALISIS.md) §6 (paquete Go `internal/legacyimport`, rutas en
+`administration/legacy_migration.go`). Todas con `settings.manage` (el permiso de Mantenimiento y de los respaldos) y
+**solo por la escucha local** (`Request.Local`; por la escucha de red `403 LOCAL_REQUIRED`, «La migración del sistema
+anterior solo se hace desde la computadora principal.»). No son de la API de clientes (Android): no van en
+`internal/apicontract/openapi.json` ni en `docs/API_V1.md`. Tiempo de respuesta de `maintenance/*` (120 s); el análisis y
+la importación corren en segundo plano y la respuesta es inmediata. La interfaz es de la Fase D. Sin el servicio de
+migración: `503 LEGACY_UNAVAILABLE`.
+
+| Método | Ruta                                          | Cuerpo / respuesta                                                                                                                                  |
+| ------ | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/maintenance/legacy`                         | `{max_upload_bytes, part_size, current_batch, active_run, recent_runs, uploads}` (las subidas abiertas del usuario y la terminal).                  |
+| POST   | `/maintenance/legacy/uploads`                 | `{size, sha256}` → `Upload`. Tope 1 GiB (`413 LEGACY_UPLOAD_TOO_LARGE`); hasta 3 subidas abiertas (`409 LEGACY_UPLOAD_LIMIT`).                      |
+| GET    | `/maintenance/legacy/uploads/{id}`            | `Upload`.                                                                                                                                           |
+| POST   | `/maintenance/legacy/uploads/{id}/parts`      | `{index, data (base64), sha256 (de la parte)}` → `Upload`. Cuerpo hasta 1 398 104 + 1 024 bytes.                                                    |
+| POST   | `/maintenance/legacy/uploads/{id}/cancel`     | Sin cuerpo → `{cancelled: true}`; borra el archivo (`409 LEGACY_UPLOAD_BUSY` si un trabajo lo usa).                                                 |
+| POST   | `/maintenance/legacy/analyze`                 | `{upload_id, passphrase}` → `Run` en cola (`kind: analyze`).                                                                                        |
+| POST   | `/maintenance/legacy/import`                  | `{upload_id, passphrase, analysis_run_id, confirm: true, replace_batch_id: uuid \| null}` → `Run` en cola (`kind: import`).                         |
+| GET    | `/maintenance/legacy/runs/{id}`               | `Run` con su avance y, al terminar, `summary` (resumen previo o informe final).                                                                     |
+| GET    | `/maintenance/legacy/batches/{id}`            | `{batch: Batch, report, validation}`.                                                                                                               |
+| GET    | `/maintenance/legacy/batches/{id}/report.pdf` | El informe en PDF (`application/pdf`, `Content-Disposition: attachment`), con la lista de datos incoherentes. Auditoría `legacy.report_downloaded`. |
+| POST   | `/maintenance/legacy/preparations`            | Resumen de una preparación del paquete (Fase D) → `{recorded: true}`; solo se audita.                                                               |
+| POST   | `/users/{id}/password`                        | «Asignar contraseña» `{password}` con `users.manage` (ver abajo).                                                                                   |
+
+- **Subida por partes**: el servicio de macOS no puede leer las carpetas del usuario, así que la aplicación lee el paquete
+  (Rust, Fase D) y lo envía en partes de 1 MiB (`part_size`; la última, el resto), en orden desde 0, cada una en base64
+  con el SHA-256 de sus bytes. `Upload` = `{id, status: receiving|complete, size, sha256, part_size, parts,
+received_parts, received_bytes, created_at, expires_at}`. Una parte con huella mala: `400 LEGACY_UPLOAD_HASH_MISMATCH`
+  (se reenvía); fuera de orden: `409 LEGACY_UPLOAD_OUT_OF_ORDER` («Se esperaba la parte N»); reenviar la última recibida
+  con la misma huella no cambia nada (reintento después de un corte). Con la última parte Go comprueba el SHA-256 del
+  paquete completo: si no coincide, descarta la subida (`400 LEGACY_UPLOAD_HASH_MISMATCH`). Solo la ve y la usa el mismo
+  usuario en la misma terminal (si no, `404 LEGACY_UPLOAD_MISSING`). El archivo vive en `<carpeta de datos>/legacy-import/`
+  (0700; el archivo 0600 desde el primer byte con `fileacl.CreatePrivate`, ACL privada en Windows) y se borra al importar
+  correctamente, al cancelar o a las 2 horas sin actividad (el trabajador lo revisa cada minuto); al arrancar el servidor
+  se borra lo que haya quedado (las subidas viven en memoria). Auditoría `legacy.upload_created`, `legacy.upload_completed`
+  y `legacy.upload_cancelled` (tamaño y huella, nunca contenido).
+- **Corridas** (`app.legacy_import_runs`): `Run` = `{id, kind: analyze|import, status: queued|running|succeeded|failed|
+interrupted, phase, progress: {done, total, percent}, upload_id, package_bytes, analysis_run_id, replace_batch_id,
+batch_id, backup_file, error_code, error_message, with_differences, summary, timings_ms, requested_by, created_at,
+started_at, finished_at}`. Fases: `queued`, `reading` (lectura y comprobación del paquete), `checking`, `backup`,
+  `removing_previous`, `writing_history`, `validating`, `waiting_locks`, `writing_catalog`, `committing`, `done`. Una sola
+  corrida en cola o en curso a la vez (índice único parcial; una segunda: `409 LEGACY_BUSY`). Al arrancar el servidor,
+  una corrida que quedó en curso pasa a `interrupted` (`LEGACY_INTERRUPTED`: su transacción se deshizo, no quedó nada a
+  medias); al apagarse, la importación en curso se deshace y queda `interrupted`. **La frase de paso viaja solo en la
+  petición y vive en memoria mientras se abre el paquete**: nunca en disco, en la base, en el Registro de movimientos ni
+  en la bitácora (mínimo 8 caracteres: `400 LEGACY_PASSPHRASE_INVALID`).
+- **Análisis** (`summary` = `Preview`): `{package: {format_version, created_at, tool, product_version, fingerprint,
+backup_taken_at, size_bytes, sha256}, counts, sales_period: {first: "AAAA-MM", last, label: "10/2019 a 11/2026"},
+tax_rates: {"0": n, "16": n}, totals: {sales_by_year: [{year, amount}], payments_by_method_year: [{method, label, year,
+amount}], cancelled_legacy_style, withdrawals, expenses}, flags: [{entity, code, label, count, listed}], notes: [{code,
+message}], warnings: [texto], current_batch: Batch | null, will_replace, clean, blockers: [{code, message, count}]}`.
+  `counts` usa las llaves de la validación (`categories`, `products`, `complements`, `tables`, `users`, `sales`,
+  `sales_paid`, `sales_cancelled`, `sales_open`, `lines`, `line_complements`, `quantity_changes`, `discounts`,
+  `cancellations`, `payments`, `cash_shifts`, `withdrawals`, `expenses`, `price_history`) más `option_groups`, `areas` y
+  `products_inactive`. Importes como texto exacto con 4 decimales («1234.5000»). No escribe nada. Errores de la corrida:
+  `LEGACY_PASSPHRASE_INVALID` («La frase de paso no es correcta.»), `LEGACY_PACKAGE_DAMAGED`, `LEGACY_PACKAGE_VERSION`
+  (más nuevo que esta versión), `LEGACY_NOT_PACKAGE`, `LEGACY_PACKAGE_LIMIT`, `LEGACY_PACKAGE_INCOMPATIBLE` (falta una
+  tabla o columna del anterior, o un valor con otra forma; el mensaje nombra la tabla y la columna, nunca el valor) y
+  `LEGACY_UPLOAD_MISSING`.
+- **Importación**: exige `confirm: true` (si no, `400 LEGACY_UPLOAD_INVALID`), un análisis `succeeded` del mismo paquete
+  (`analysis_run_id`) y que `replace_batch_id` sea el lote vigente (o `null` si no hay); si no coincide, `409
+LEGACY_BATCH_CHANGED` («Vuelve a analizar el paquete»). En segundo plano: vuelve a leer el paquete completo, comprueba
+  la instalación (`LEGACY_INSTALLATION_NOT_CLEAN` con `summary.blockers`), hace el **respaldo verificado** por el camino
+  de «Respaldar ahora» (si hay otro respaldo en curso espera hasta 5 minutos; si falla, `LEGACY_BACKUP_FAILED` y no se
+  importa) y escribe todo en **una sola transacción** (`LEGACY_LOCKS_BUSY` si los locks de la operación no se liberan en
+  30 s). Termina `succeeded` también con diferencias en la validación (`with_differences: true`): las diferencias de dinero
+  nunca se ocultan. `summary` = `Report`: el `Summary` del análisis más `{batch_id, replaced_batch_id, validation,
+written, retired, timings_ms, backup_file}`. `validation` = `{ok, has_money_differences, checks: [{group:
+counts|sales_by_year|payments_by_method_year|totals, key, label, kind: count|money, expected, actual, difference, ok}],
+notes}`. Auditoría `legacy.analysis_requested`/`legacy.import_requested` (en la petición), `legacy.analysis_finished`/
+  `legacy.import_finished` (`success` según el resultado, con el código de error o el lote, la validación, las filas
+  escritas, el respaldo y el tiempo de los locks), `legacy.batch_replaced` y el `maintenance.backup_created` del respaldo
+  previo; entidad `legacy_import` con el id de la corrida o del lote.
+- **Instalación limpia** (`blockers`): no se importa si hay operación propia (`own_accounts`, `own_orders`, `own_items`,
+  `own_drafts`, `own_payments`, `own_refunds`, `own_adjustments`, `own_cancellations`, `own_sales`, `own_deliveries`,
+  `own_shifts`, `own_cash_operations`, `own_cash_movements`, `own_cash_counts`, `own_kitchen`, `own_inventory_movements`,
+  `own_receipts`, `own_inventory_adjustments`, `own_inventory_counts`, `own_transfers`, `own_purchase_orders`,
+  `own_productions`, `own_supplier_returns`) ni catálogo, mesas o usuarios propios fuera del lote vigente y de lo que
+  crea una instalación nueva (`own_categories`, `own_products`, `own_variants`, `own_ingredients`, `own_portions`,
+  `own_complements`, `own_groups`, `own_options`, `own_promotions`, `own_images`, `own_price_lists` —más de la lista
+  «Restaurante»—, `own_quick_notes`, `own_areas`, `own_tables`, `own_users` —cualquiera salvo `sa` y el administrador del
+  asistente inicial—). Cada uno con `message` en español sencillo («Hay 3 cuentas registradas en AD-EL POS.») y `count`.
+  También en el rechazo directo de las rutas (`409 LEGACY_INSTALLATION_NOT_CLEAN`, `details.blockers`).
+- **`Batch`**: `{id, status: completed|replaced, imported_at, completed_at, imported_by, backup_taken_at, fingerprint,
+sales, sales_first_at, sales_last_at, has_differences}`.
+- **Preparación** (`POST maintenance/legacy/preparations`): `{succeeded, error_code, backup_taken_at, sales_first,
+sales_last, package_bytes, format_version, fingerprint, tables: {tabla: filas}, timings_ms: {paso: ms}}` (campos
+  desconocidos, textos con caracteres fuera de `[A-Za-z0-9_:.+ -]` o de más de 40, llaves que no sean
+  `[A-Za-z0-9_]{1,64}` o números negativos: `400 VALIDATION_ERROR`; nunca rutas de archivos ni datos del restaurante).
+  Auditoría `legacy.preparation_recorded` con ese resumen (`success` = `succeeded`).
+- **«Asignar contraseña»** (`POST users/{id}/password {password}`, decisión del coordinador): con `users.manage`, a un
+  usuario **sin contraseña** (los importados del sistema anterior entran sin ella y sin acceso; AD-EL POS no tiene PIN).
+  Deja `initial_password = true`, así que al entrar debe cambiarla. Contraseña de 8 a 256 caracteres (`400
+VALIDATION_ERROR`); si ya tiene contraseña, `409 PASSWORD_ALREADY_SET` (solo él la cambia desde su formulario personal);
+  `sa` y usuarios con permisos que el actor no tiene: `403`. Sigue el patrón de las demás rutas de usuarios (sin
+  restricción de escucha local, lock de administración, delegación segura). Responde el usuario; auditoría
+  `user.password_assigned` con `{initial_password: true}` (nunca la contraseña ni su hash).
+- **`GET users`** (y las respuestas de crear y editar usuarios) incluyen `has_password` (si tiene contraseña; nunca la
+  contraseña ni su hash), para que Usuarios ofrezca «Asignar contraseña» solo a quien no tiene.
+- **Las ventas importadas no son cuentas**: viven en `app.legacy_*` (esquema en `docs/ETAPA_9H_AVANCE.md`, Fase C), así
+  que las rutas de cuentas, cobros, cancelación, cocina, caja y `restaurant/state` no las ven ni pueden reabrirlas,
+  cobrarlas, cancelarlas ni modificarlas; sus folios no consumen ni chocan con `restaurant_accounts.folio`. Lo importado
+  al catálogo, a las mesas y a los usuarios sí es vivo (se edita y se vende como cualquier otro).
