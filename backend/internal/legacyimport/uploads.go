@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -72,7 +72,6 @@ type upload struct {
 	userID     string
 	deviceID   string
 	updatedAt  time.Time
-	digest     hash.Hash
 	lastDigest string
 	busy       int
 }
@@ -166,7 +165,6 @@ func (manager *Manager) CreateUpload(actor Actor, size int64, digest string) (Up
 		userID:    actor.UserID,
 		deviceID:  actor.DeviceID,
 		updatedAt: now,
-		digest:    sha256.New(),
 	}
 	manager.uploads[id] = entry
 	return entry.view, nil
@@ -223,18 +221,11 @@ func (manager *Manager) AddPart(actor Actor, id string, index int, data []byte, 
 	if int64(len(data)) != expected {
 		return UploadView{}, uploadError(CodeUploadInvalid, "Una parte del paquete no tiene el tamaño esperado.")
 	}
-	file, err := os.OpenFile(manager.partialPath(view.ID), os.O_WRONLY|os.O_APPEND, 0600)
-	if err != nil {
+	// La parte se escribe en su lugar (el desplazamiento de lo ya recibido), después de recortar el archivo a lo
+	// recibido: si un intento anterior de esta misma parte falló a medias, sus bytes no quedan de más.
+	if err := writePartAt(manager.partialPath(view.ID), view.ReceivedBytes, data); err != nil {
 		return UploadView{}, failure("No se pudo guardar la parte del paquete.", err)
 	}
-	if _, err := file.Write(data); err != nil {
-		file.Close()
-		return UploadView{}, failure("No se pudo guardar la parte del paquete.", err)
-	}
-	if err := file.Close(); err != nil {
-		return UploadView{}, failure("No se pudo guardar la parte del paquete.", err)
-	}
-	entry.digest.Write(data)
 	entry.lastDigest = digest
 	view.ReceivedParts++
 	view.ReceivedBytes += int64(len(data))
@@ -244,7 +235,12 @@ func (manager *Manager) AddPart(actor Actor, id string, index int, data []byte, 
 	if view.ReceivedParts < view.Parts {
 		return *view, nil
 	}
-	if hex.EncodeToString(entry.digest.Sum(nil)) != view.SHA256 {
+	// La huella del paquete completo se calcula del archivo tal como quedó en el disco.
+	fileDigest, fileSize, err := fileSHA256(manager.partialPath(view.ID))
+	if err != nil {
+		return UploadView{}, failure("No se pudo comprobar el paquete.", err)
+	}
+	if fileSize != view.Size || fileDigest != view.SHA256 {
 		manager.dropUpload(view.ID)
 		return UploadView{}, uploadError(CodeUploadHash,
 			"El paquete llegó dañado (su huella no coincide). Vuelve a elegirlo y a subirlo.")
@@ -352,4 +348,36 @@ func (manager *Manager) cleanOrphans() int {
 		}
 	}
 	return removed
+}
+
+// writePartAt recorta el archivo a offset y escribe data desde ahí.
+func writePartAt(path string, offset int64, data []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	if err := file.Truncate(offset); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.WriteAt(data, offset); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+// fileSHA256 es la huella y el tamaño de un archivo.
+func fileSHA256(path string) (string, int64, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer file.Close()
+	digest := sha256.New()
+	size, err := io.Copy(digest, file)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(digest.Sum(nil)), size, nil
 }

@@ -75,6 +75,9 @@ const (
 	FlagSalesMismatch       = "sales_mismatch"
 	FlagWithdrawalsMismatch = "withdrawals_mismatch"
 	FlagNoActivity          = "no_activity"
+	FlagStartEstimated      = "start_estimated"
+	FlagEndEstimated        = "end_estimated"
+	FlagNoStart             = "no_start"
 	FlagUnknownStatus       = "unknown_status"
 	FlagDoubtfulAmount      = "doubtful_amount"
 )
@@ -130,6 +133,9 @@ var Flags = []FlagInfo{
 	{EntityShift, FlagWithdrawalsMismatch, "Corte cuyos «retiros» guardados no coinciden con sus retiros", true},
 	{EntityShift, FlagUnknownStatus, "Corte con un estado desconocido", true},
 	{EntityShift, FlagNoActivity, "Corte sin ventas ni pagos", false},
+	{EntityShift, FlagStartEstimated, "Corte sin fecha de inicio (se usa la de su primera venta o pago)", false},
+	{EntityShift, FlagEndEstimated, "Corte cerrado sin fecha de fin (se usa la de su última venta o pago)", false},
+	{EntityShift, FlagNoStart, "Corte sin fecha de inicio ni ventas o pagos (queda sin fecha)", false},
 	{EntityWithdrawal, FlagZeroOrNegative, "Retiro en cero o negativo", true},
 	{EntityWithdrawal, FlagDoubtfulAmount, "Retiro de $100 000 o más (posible error de captura)", true},
 	{EntityWithdrawal, FlagUnknownShift, "Retiro de un corte que no existe", true},

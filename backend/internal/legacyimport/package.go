@@ -126,7 +126,7 @@ func (table *packageTable) Next() ([]any, error) {
 func packageError(err error) error {
 	var typed *legacypkg.Error
 	if !errors.As(err, &typed) {
-		return &Error{Code: CodeDamaged, Message: "El paquete está dañado o no se pudo leer. Vuelve a copiarlo o prepáralo de nuevo.",
+		return &Error{Code: CodeUnreadable, Message: "No se pudo leer el archivo del paquete. Vuelve a intentarlo.",
 			Detail: "error de lectura del paquete", cause: err}
 	}
 	codes := map[legacypkg.ErrorKind]string{
@@ -136,6 +136,7 @@ func packageError(err error) error {
 		legacypkg.KindDamaged:            CodeDamaged,
 		legacypkg.KindLimit:              CodeLimit,
 		legacypkg.KindInvalid:            CodeWrongPassphrase,
+		legacypkg.KindUnreadable:         CodeUnreadable,
 	}
 	code, found := codes[typed.Kind]
 	if !found {

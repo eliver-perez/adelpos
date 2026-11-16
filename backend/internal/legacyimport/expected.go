@@ -1,6 +1,9 @@
 package legacyimport
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // Expected son los conteos y totales de la validación posterior (§4.4) calculados directamente de las filas del
 // paquete, con una pasada propia que no usa la correspondencia (plan.go) ni lo escrito en la base: así una falla en la
@@ -8,7 +11,7 @@ import "time"
 type Expected struct {
 	Counts map[string]int64
 	// SalesByYear: Σ(total + montoExtra − descuentos) de las ventas pagadas no canceladas, por el año del día comercial
-	// de su último pago (o de su apertura si no tienen pagos).
+	// de su reconocimiento (el pago con el que lo acumulado de los pagos mayores que cero alcanza lo que se debía).
 	SalesByYear map[int]Money
 	// PaymentsByMethodYear: Σ pagos.monto por forma de pago (cash, card, other) y año del día comercial del pago.
 	PaymentsByMethodYear map[string]map[int]Money
@@ -93,11 +96,39 @@ func computeExpected(model *Model, yearOf func(time.Time) int) Expected {
 	for _, discount := range model.Discounts {
 		discounts[discount.Sale] += discount.Amount
 	}
-	lastPayment := map[int32]time.Time{}
+	// Pagos mayores que cero de cada venta, para la fecha de reconocimiento (calculada aquí aparte de la
+	// correspondencia: el pago con el que lo acumulado alcanza lo que se debía; si nunca, el último mayor que cero;
+	// sin pagos mayores que cero, la apertura).
+	type positivePayment struct {
+		id     int32
+		at     time.Time
+		amount Money
+	}
+	positive := map[int32][]positivePayment{}
 	for _, payment := range model.Payments {
-		if payment.PaidAt.After(lastPayment[payment.Sale]) {
-			lastPayment[payment.Sale] = payment.PaidAt
+		if amount := payment.Amount.Or(0); amount > 0 {
+			positive[payment.Sale] = append(positive[payment.Sale], positivePayment{id: payment.ID, at: payment.PaidAt, amount: amount})
 		}
+	}
+	recognition := func(sale Sale, owed Money) time.Time {
+		payments := positive[sale.ID]
+		if len(payments) == 0 {
+			return sale.OpenedAt
+		}
+		sort.Slice(payments, func(left, right int) bool {
+			if !payments[left].at.Equal(payments[right].at) {
+				return payments[left].at.Before(payments[right].at)
+			}
+			return payments[left].id < payments[right].id
+		})
+		var paid Money
+		for _, payment := range payments {
+			paid += payment.amount
+			if paid >= owed {
+				return payment.at
+			}
+		}
+		return payments[len(payments)-1].at
 	}
 	for _, sale := range model.Sales {
 		owed := sale.Total + sale.ChargeTotal.Or(0) - discounts[sale.ID]
@@ -111,11 +142,7 @@ func computeExpected(model *Model, yearOf func(time.Time) int) Expected {
 			continue
 		}
 		expected.Counts[CountSalesPaid]++
-		instant, found := lastPayment[sale.ID]
-		if !found {
-			instant = sale.OpenedAt
-		}
-		expected.SalesByYear[yearOf(instant)] += owed
+		expected.SalesByYear[yearOf(recognition(sale, owed))] += owed
 	}
 	for _, payment := range model.Payments {
 		method := MethodOther

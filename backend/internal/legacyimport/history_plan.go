@@ -107,10 +107,13 @@ type DiscountPlan struct {
 	Flags     flagSet
 }
 
-// ShiftPlan es un corte con su estado y sus marcas.
+// ShiftPlan es un corte con su estado, sus fechas (las del anterior o, si faltan, las estimadas de sus ventas y pagos)
+// y sus marcas.
 type ShiftPlan struct {
-	Status string
-	Flags  flagSet
+	Status   string
+	OpenedAt time.Time
+	ClosedAt time.Time
+	Flags    flagSet
 }
 
 // WithdrawalPlan es un retiro.
@@ -440,14 +443,60 @@ func (plan *HistoryPlan) planSales(model *Model) {
 		}
 		sale.Due = original.Total + original.ChargeTotal.Or(0) - sale.DiscountTotal
 		plan.saleFlags(original, sale, folios, tables, users, registers, shifts, hasRegisters, hasShifts)
-		if sale.Status == SalePaid {
-			sale.RecognizedAt = sale.LastPaymentAt
-			if sale.PaymentsCount == 0 {
-				sale.RecognizedAt = original.OpenedAt
-			}
+	}
+	plan.recognize(model)
+	plan.markDuplicatePayments(model)
+}
+
+// recognize fija la fecha de reconocimiento de cada venta pagada (decisión del coordinador, precisada en la revisión de
+// la Fase C): el pago con el que lo acumulado, contando solo pagos mayores que cero en orden de fecha y luego de id,
+// alcanza lo que se debía; si nunca lo alcanza, el último pago mayor que cero; si no tiene pagos mayores que cero, su
+// apertura. Así un pago repetido, en cero o negativo registrado después no mueve la venta de día, turno ni año (esos
+// pagos se importan igual, cuentan en los cobros y llevan su marca).
+func (plan *HistoryPlan) recognize(model *Model) {
+	order := make([]int, 0, len(model.Payments))
+	for index := range model.Payments {
+		if plan.Payments[index].SaleIndex >= 0 && model.Payments[index].Amount.Or(0) > 0 {
+			order = append(order, index)
 		}
 	}
-	plan.markDuplicatePayments(model)
+	sort.Slice(order, func(left, right int) bool {
+		first, second := model.Payments[order[left]], model.Payments[order[right]]
+		firstSale, secondSale := plan.Payments[order[left]].SaleIndex, plan.Payments[order[right]].SaleIndex
+		if firstSale != secondSale {
+			return firstSale < secondSale
+		}
+		if !first.PaidAt.Equal(second.PaidAt) {
+			return first.PaidAt.Before(second.PaidAt)
+		}
+		return first.ID < second.ID
+	})
+	recognized := make([]time.Time, len(model.Sales))
+	reached := make([]bool, len(model.Sales))
+	accumulated := make([]Money, len(model.Sales))
+	for _, index := range order {
+		saleIndex := plan.Payments[index].SaleIndex
+		if reached[saleIndex] {
+			continue
+		}
+		payment := model.Payments[index]
+		accumulated[saleIndex] += payment.Amount.Value
+		// Sin alcanzar lo que se debía, queda el último pago mayor que cero.
+		recognized[saleIndex] = payment.PaidAt
+		if accumulated[saleIndex] >= plan.Sales[saleIndex].Due {
+			reached[saleIndex] = true
+		}
+	}
+	for index, sale := range model.Sales {
+		state := &plan.Sales[index]
+		if state.Status != SalePaid {
+			continue
+		}
+		state.RecognizedAt = recognized[index]
+		if state.RecognizedAt.IsZero() {
+			state.RecognizedAt = sale.OpenedAt
+		}
+	}
 }
 
 // paymentMethod traduce el tipo de pago del anterior: 1 «Efectivo» y 2 «Tarjeta Credito/Debito» (los dos de
@@ -564,6 +613,21 @@ func (plan *HistoryPlan) markDuplicatePayments(model *Model) {
 func (plan *HistoryPlan) planShifts(model *Model) {
 	expected := map[int32]Money{}
 	activity := map[int32]bool{}
+	// La primera y la última fecha de las ventas (su apertura) y los pagos de cada corte, para las fechas que falten.
+	first := map[int32]time.Time{}
+	last := map[int32]time.Time{}
+	seen := func(shift int32, moment time.Time) {
+		activity[shift] = true
+		if moment.IsZero() {
+			return
+		}
+		if current, found := first[shift]; !found || moment.Before(current) {
+			first[shift] = moment
+		}
+		if current, found := last[shift]; !found || moment.After(current) {
+			last[shift] = moment
+		}
+	}
 	for index, sale := range model.Sales {
 		if !sale.Shift.Valid {
 			continue
@@ -571,11 +635,11 @@ func (plan *HistoryPlan) planShifts(model *Model) {
 		// La «venta» del corte del anterior: Σ(total + montoExtra) − Σ descuentos de las ventas con ese corte,
 		// incluidas tarjeta y canceladas (CerrarCorte.cs:325-370).
 		expected[sale.Shift.Value] += sale.Total + sale.ChargeTotal.Or(0) - plan.Sales[index].DiscountTotal
-		activity[sale.Shift.Value] = true
+		seen(sale.Shift.Value, sale.OpenedAt)
 	}
 	for _, payment := range model.Payments {
 		if payment.Shift.Valid {
-			activity[payment.Shift.Value] = true
+			seen(payment.Shift.Value, payment.PaidAt)
 		}
 	}
 	withdrawals := map[int32]Money{}
@@ -604,6 +668,34 @@ func (plan *HistoryPlan) planShifts(model *Model) {
 		if !activity[shift.ID] {
 			state.Flags.add(FlagNoActivity)
 		}
+		shiftDates(shift, state, first[shift.ID], last[shift.ID])
+	}
+}
+
+// shiftDates fija las fechas de un corte (revisión de la Fase C, M-8): las del anterior; sin fecha_inicio (columna
+// posterior al script y con nulos), la de su primera venta o pago, para que aparezca en «Turnos de caja» y en «Ventas
+// por turno» (marca start_estimated); cerrado y sin fecha_fin, la de su última venta o pago (end_estimated). Un corte
+// sin fecha de inicio ni ventas o pagos queda sin fecha (no_start). Una fecha estimada nunca queda del otro lado de la
+// que sí estaba guardada.
+func shiftDates(shift Shift, state *ShiftPlan, first, last time.Time) {
+	state.OpenedAt, state.ClosedAt = shift.OpenedAt, shift.ClosedAt
+	if shift.OpenedAt.IsZero() {
+		if first.IsZero() {
+			state.Flags.add(FlagNoStart)
+		} else {
+			state.OpenedAt = first
+			if !shift.ClosedAt.IsZero() && shift.ClosedAt.Before(first) {
+				state.OpenedAt = shift.ClosedAt
+			}
+			state.Flags.add(FlagStartEstimated)
+		}
+	}
+	if shift.ClosedAt.IsZero() && state.Status == "closed" && !last.IsZero() {
+		state.ClosedAt = last
+		if !state.OpenedAt.IsZero() && last.Before(state.OpenedAt) {
+			state.ClosedAt = state.OpenedAt
+		}
+		state.Flags.add(FlagEndEstimated)
 	}
 }
 

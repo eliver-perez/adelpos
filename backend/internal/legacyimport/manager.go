@@ -223,7 +223,7 @@ func (manager *Manager) Dispatch(pending *Pending) {
 		default:
 		}
 	}
-	manager.finishRun(pending.job.runID, StatusFailed, nil, &Error{Code: CodeFailed,
+	manager.finishRun(context.Background(), pending.job.runID, StatusFailed, nil, &Error{Code: CodeFailed,
 		Message: "El servidor no pudo empezar la migración. Reinícialo e inténtalo de nuevo."}, nil, nil, "")
 }
 
@@ -268,11 +268,11 @@ func (manager *Manager) updateProgress(runID, phase string, progress progressVie
 	}
 }
 
-// finishRun registra el resultado de una corrida (también al apagarse el servidor: con su propio plazo).
-func (manager *Manager) finishRun(runID, status string, summary any, failure *Error, batchID *string, timings map[string]int64,
-	backupFile string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+// finishRun registra el resultado de una corrida (también al apagarse el servidor: cada intento con su propio plazo).
+// Si la base no responde, reintenta mientras ctx (el del trabajador) siga vigente: al apagarse el servidor solo se hace
+// un intento, para no alargar el apagado (lo que no se pudo registrar lo cierra la recuperación al volver a arrancar).
+func (manager *Manager) finishRun(ctx context.Context, runID, status string, summary any, failure *Error, batchID *string,
+	timings map[string]int64, backupFile string) {
 	var encoded []byte
 	if summary != nil {
 		encoded, _ = json.Marshal(summary)
@@ -289,32 +289,127 @@ func (manager *Manager) finishRun(runID, status string, summary any, failure *Er
 	if report, ok := summary.(*Report); ok {
 		withDifferences = !report.Validation.OK
 	}
-	_, err := manager.Pool.Exec(ctx, `UPDATE app.legacy_import_runs SET status = $2, phase = $3, summary = $4, error_code = $5,
-            error_message = $6, batch_id = $7, timings = $8, with_differences = $9, backup_file = nullif($10, ''),
-            finished_at = greatest(now(), coalesce(started_at, now())), started_at = coalesce(started_at, now()),
-            updated_at = now()
-        WHERE id = $1 AND status IN ('queued', 'running')`,
-		runID, status, PhaseDone, encoded, code, message, batchID, encodedTimings, withDifferences, backupFile)
-	if err != nil {
-		manager.logWarning("legacy_run_not_recorded", "reason", err.Error())
+	// Si la base no responde unos segundos, se reintenta: una corrida que quedara «en curso» bloquearía toda migración
+	// (índice único de corridas activas) hasta la recuperación periódica del trabajador.
+	wait := finishRetryFirst
+	for attempt := 1; ; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := manager.Pool.Exec(attemptCtx, `UPDATE app.legacy_import_runs SET status = $2, phase = $3, summary = $4,
+                error_code = $5, error_message = $6, batch_id = $7, timings = $8, with_differences = $9,
+                backup_file = nullif($10, ''), finished_at = greatest(now(), coalesce(started_at, now())),
+                started_at = coalesce(started_at, now()), updated_at = now()
+            WHERE id = $1 AND status IN ('queued', 'running')`,
+			runID, status, PhaseDone, encoded, code, message, batchID, encodedTimings, withDifferences, backupFile)
+		cancel()
+		if err == nil {
+			return
+		}
+		manager.logWarning("legacy_run_not_recorded", "attempt", attempt, "reason", err.Error())
+		if attempt == finishAttempts || ctx.Err() != nil {
+			return
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		wait *= 2
 	}
 }
 
-// RecoverInterrupted marca como interrumpidas las corridas que quedaron en cola o en curso porque su servidor se
-// detuvo (su transacción ya se deshizo: no quedaron datos a medias). Solo con el lock de la migración tomado
-// (entonces nada está en curso en ningún servidor); si está ocupado, no hace nada.
+// Reintentos del registro del resultado de una corrida: hasta 5 intentos con esperas de 0.5, 1, 2 y 4 s.
+const (
+	finishAttempts   = 5
+	finishRetryFirst = 500 * time.Millisecond
+)
+
+// staleAfter es cuánto debe llevar una corrida sin cambios para que la recuperación periódica la trate como un resto
+// (una recién registrada se entrega al trabajador en milisegundos y una en curso tiene el lock de la migración).
+const staleAfter = 2 * time.Minute
+
+// Mensajes de una corrida que la recuperación cierra sin que se haya importado nada: al arrancar (el servidor se
+// detuvo) y en la recuperación periódica (el servidor siguió, pero la corrida quedó sin terminar o sin su resultado).
+const (
+	interruptedMessage = "La migración se interrumpió porque el servidor se detuvo. No se importó nada; vuelve a intentarlo."
+	leftoverMessage    = "La migración se interrumpió antes de terminar. No se importó nada; vuelve a intentarlo."
+)
+
+// RecoverInterrupted cierra las corridas que quedaron en cola o en curso porque su servidor se detuvo. Solo con el lock
+// de la migración tomado (entonces nada está en curso en ningún servidor); si está ocupado, no hace nada.
 func (manager *Manager) RecoverInterrupted(ctx context.Context) error {
+	return manager.closeLeftoverRuns(ctx, 0)
+}
+
+// closeLeftoverRuns cierra las corridas en cola o en curso sin cambios desde hace más de olderThan según el reloj de la
+// base (0 = todas), solo con el lock de la migración tomado (si está ocupado, algo está en curso y no hace nada):
+//   - una importación cuyo lote quedó confirmado (legacy_import_batches.run_id; el proceso terminó justo después de la
+//     confirmación y antes de registrar el resultado) queda «succeeded» con el informe y la validación del lote;
+//   - las demás quedan «interrupted»: su transacción ya se deshizo y no quedó nada a medias.
+func (manager *Manager) closeLeftoverRuns(ctx context.Context, olderThan time.Duration) error {
 	connection, acquired, err := manager.lock(ctx)
 	if err != nil || !acquired {
 		return err
 	}
 	defer manager.unlock(connection)
-	_, err = manager.Pool.Exec(ctx, `UPDATE app.legacy_import_runs SET status = 'interrupted', phase = 'done',
-            error_code = $1, error_message = $2, started_at = coalesce(started_at, now()), finished_at = now(),
-            updated_at = now()
-        WHERE status IN ('queued', 'running')`, CodeInterrupted,
-		"La migración se interrumpió porque el servidor se detuvo. No se importó nada; vuelve a intentarlo.")
-	return err
+	message := interruptedMessage
+	if olderThan > 0 {
+		message = leftoverMessage
+	}
+	stale := "($1::bigint = 0 OR r.updated_at < now() - $1::bigint * interval '1 millisecond')"
+	rows, err := manager.Pool.Query(ctx, `UPDATE app.legacy_import_runs r SET status = 'succeeded', phase = 'done',
+            summary = b.report, batch_id = b.id, with_differences = b.has_differences, error_code = NULL,
+            error_message = NULL, backup_file = coalesce(nullif(b.report->>'backup_file', ''), r.backup_file),
+            started_at = coalesce(r.started_at, b.started_at),
+            finished_at = greatest(coalesce(b.completed_at, now()), coalesce(r.started_at, b.started_at)), updated_at = now()
+        FROM app.legacy_import_batches b
+        WHERE b.run_id = r.id AND b.status IN ('completed', 'replaced') AND b.report IS NOT NULL
+            AND r.kind = 'import' AND r.status IN ('queued', 'running') AND `+stale+`
+        RETURNING r.id::text, r.requested_by::text, r.requested_device::text,
+            coalesce((SELECT u.username FROM app.users u WHERE u.id = r.requested_by), ''), b.id::text,
+            coalesce(b.report->>'replaced_batch_id', ''), NOT b.has_differences`, olderThan.Milliseconds())
+	if err != nil {
+		return err
+	}
+	type recovered struct {
+		run, batch, replaced string
+		actor                Actor
+		validationOK         bool
+	}
+	completed := []recovered{}
+	for rows.Next() {
+		var item recovered
+		if err := rows.Scan(&item.run, &item.actor.UserID, &item.actor.DeviceID, &item.actor.Username, &item.batch,
+			&item.replaced, &item.validationOK); err != nil {
+			rows.Close()
+			return err
+		}
+		completed = append(completed, item)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	tag, err := manager.Pool.Exec(ctx, `UPDATE app.legacy_import_runs r SET status = 'interrupted', phase = 'done',
+            error_code = $2, error_message = $3, started_at = coalesce(r.started_at, now()),
+            finished_at = greatest(now(), coalesce(r.started_at, now())), updated_at = now()
+        WHERE r.status IN ('queued', 'running') AND `+stale, olderThan.Milliseconds(), CodeInterrupted, message)
+	if err != nil {
+		return err
+	}
+	for _, item := range completed {
+		manager.auditShort(item.actor, "legacy.import_finished", item.run, map[string]any{"batch_id": item.batch,
+			"replaced_batch_id": item.replaced, "validation_ok": item.validationOK, "recovered": true}, true)
+		if item.replaced != "" {
+			manager.auditShort(item.actor, "legacy.batch_replaced", item.batch, map[string]any{
+				"batch_id": item.batch, "replaced_batch_id": item.replaced, "recovered": true}, true)
+		}
+	}
+	if len(completed) > 0 || tag.RowsAffected() > 0 {
+		manager.logWarning("legacy_runs_recovered", "succeeded", len(completed), "interrupted", tag.RowsAffected())
+	}
+	return nil
 }
 
 // lock toma el lock de la migración sin esperar en una conexión propia.
@@ -346,8 +441,9 @@ func (manager *Manager) unlock(connection *pgxpool.Conn) {
 	connection.Release()
 }
 
-// Run es el trabajador de la migración: al arrancar marca las corridas interrumpidas y borra los archivos que hayan
-// quedado en la carpeta de trabajo; después atiende las corridas una a una y cada minuto borra las subidas vencidas.
+// Run es el trabajador de la migración: al arrancar cierra las corridas que quedaron sin terminar y borra los archivos
+// que hayan quedado en la carpeta de trabajo; después atiende las corridas una a una y cada minuto borra las subidas
+// vencidas y cierra las corridas que llevan más de staleAfter sin terminar (con el lock de la migración libre).
 // Termina al cancelarse ctx, después de que la corrida en curso registre su resultado (una importación a la mitad
 // se deshace sola: su transacción nunca se confirma).
 func (manager *Manager) Run(ctx context.Context) {
@@ -376,6 +472,11 @@ func (manager *Manager) Run(ctx context.Context) {
 		case <-ticker.C:
 			if removed := manager.cleanExpired(); removed > 0 {
 				manager.logInfo("legacy_uploads_expired", "uploads", removed)
+			}
+			// Una corrida que quedó en cola o en curso sin que nadie la atienda (por ejemplo, porque no se pudo
+			// registrar su resultado) se cierra cuando el lock de la migración está libre.
+			if err := manager.closeLeftoverRuns(ctx, staleAfter); err != nil && ctx.Err() == nil {
+				manager.logWarning("legacy_recovery_failed", "reason", err.Error())
 			}
 		case next := <-jobs:
 			manager.inflight.Add(1)
@@ -449,7 +550,7 @@ func asError(ctx context.Context, err error) *Error {
 		return problem
 	}
 	if ctx.Err() != nil {
-		return &Error{Code: CodeInterrupted, Message: "La migración se interrumpió porque el servidor se detuvo. No se importó nada; vuelve a intentarlo."}
+		return &Error{Code: CodeInterrupted, Message: interruptedMessage}
 	}
 	return failure("La migración no se pudo completar. No se importó nada; inténtalo de nuevo.", err)
 }

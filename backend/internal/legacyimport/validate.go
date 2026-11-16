@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"local/ad-el-pos/server/internal/businessday"
+	"local/ad-el-pos/server/internal/plural"
 )
 
 // Validación posterior (§4.4): dentro de la misma transacción de la importación, lo escrito en la base contra lo
@@ -121,6 +122,9 @@ type writtenMoney struct {
 	withdrawals Money
 	expenses    Money
 	unbalanced  int64
+	// withoutLedger: ventas pagadas sin ningún renglón en el libro (sin renglones ni importes; revisión de la Fase C,
+	// M-7). No son una diferencia: solo explican por qué el conteo de cuentas de los reportes da menos.
+	withoutLedger int64
 }
 
 // actualMoney lee los totales escritos: venta por año (Σ net del libro), pagos por forma de pago y año, retiros,
@@ -140,53 +144,64 @@ func actualMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config busin
 }
 
 func readMoney(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (writtenMoney, error) {
-	sales, payments, withdrawals, unbalanced, err := readSalesAndPayments(ctx, tx, batch, config)
-	return writtenMoney{sales: sales, payments: payments, withdrawals: withdrawals, unbalanced: unbalanced}, err
+	sales, payments, withdrawals, err := readSalesAndPayments(ctx, tx, batch, config)
+	if err != nil {
+		return writtenMoney{}, err
+	}
+	written := writtenMoney{sales: sales, payments: payments, withdrawals: withdrawals}
+	// Cada venta pagada: Σ net de su libro = lo que se debía. Cuenta las que no y las que no tienen ningún renglón.
+	err = tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE coalesce(l.net, 0) <> s.amount_due),
+            count(*) FILTER (WHERE l.legacy_sale_id IS NULL)
+        FROM app.legacy_sales s
+        LEFT JOIN (SELECT legacy_sale_id, sum(net) AS net FROM app.legacy_sales_recognitions WHERE batch_id = $1
+            GROUP BY legacy_sale_id) l ON l.legacy_sale_id = s.legacy_id
+        WHERE s.batch_id = $1 AND s.status = 'paid'`, batch).Scan(&written.unbalanced, &written.withoutLedger)
+	return written, err
 }
 
 func readSalesAndPayments(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, config businessday.Config) (map[int]Money,
-	map[string]map[int]Money, Money, int64, error) {
+	map[string]map[int]Money, Money, error) {
 	sales := map[int]Money{}
 	payments := map[string]map[int]Money{}
 	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT %s, sum(net)::text FROM app.legacy_sales_recognitions
         WHERE batch_id = $1 GROUP BY 1`, fmt.Sprintf(yearExpression, "recognized_at")), batch, config.Timezone, config.Interval())
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
 	for rows.Next() {
 		var year int
 		var total string
 		if err := rows.Scan(&year, &total); err != nil {
 			rows.Close()
-			return nil, nil, 0, 0, err
+			return nil, nil, 0, err
 		}
 		amount, err := ParseDisplayMoney(total)
 		if err != nil {
 			rows.Close()
-			return nil, nil, 0, 0, err
+			return nil, nil, 0, err
 		}
 		sales[year] = amount
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
 	rows, err = tx.Query(ctx, fmt.Sprintf(`SELECT method, %s, sum(amount)::text FROM app.legacy_payments
         WHERE batch_id = $1 GROUP BY 1, 2`, fmt.Sprintf(yearExpression, "paid_at")), batch, config.Timezone, config.Interval())
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
 	for rows.Next() {
 		var method, total string
 		var year int
 		if err := rows.Scan(&method, &year, &total); err != nil {
 			rows.Close()
-			return nil, nil, 0, 0, err
+			return nil, nil, 0, err
 		}
 		amount, err := ParseDisplayMoney(total)
 		if err != nil {
 			rows.Close()
-			return nil, nil, 0, 0, err
+			return nil, nil, 0, err
 		}
 		if payments[method] == nil {
 			payments[method] = map[int]Money{}
@@ -195,27 +210,18 @@ func readSalesAndPayments(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, con
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
 	var withdrawalsText string
 	if err := tx.QueryRow(ctx, `SELECT coalesce(sum(amount), 0)::text FROM app.legacy_cash_withdrawals WHERE batch_id = $1`,
 		batch).Scan(&withdrawalsText); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
 	withdrawals, err := ParseDisplayMoney(withdrawalsText)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
-	// Cada venta pagada: Σ net de su libro = lo que se debía. Cuenta las que no.
-	var unbalanced int64
-	err = tx.QueryRow(ctx, `SELECT count(*) FROM app.legacy_sales s
-        LEFT JOIN (SELECT legacy_sale_id, sum(net) AS net FROM app.legacy_sales_recognitions WHERE batch_id = $1
-            GROUP BY legacy_sale_id) l ON l.legacy_sale_id = s.legacy_id
-        WHERE s.batch_id = $1 AND s.status = 'paid' AND coalesce(l.net, 0) <> s.amount_due`, batch).Scan(&unbalanced)
-	if err != nil {
-		return nil, nil, 0, 0, err
-	}
-	return sales, payments, withdrawals, unbalanced, nil
+	return sales, payments, withdrawals, nil
 }
 
 // validate compara lo escrito con lo esperado.
@@ -297,6 +303,13 @@ func compare(expected Expected, counts map[string]int64, written writtenMoney) V
 		expected.CancelledLegacyStyle.Display()))
 	validation.Notes = append(validation.Notes,
 		"El sistema anterior no guardaba dólares ni tipo de cambio: los pagos en dólares quedaron como efectivo en pesos.")
+	if written.withoutLedger > 0 {
+		count := int(written.withoutLedger)
+		validation.Notes = append(validation.Notes, plural.Count(count, "venta pagada", "ventas pagadas")+" "+
+			plural.Word(count, "no tiene", "no tienen")+" renglones ni importes (total 0): "+
+			plural.Word(count, "no queda", "no quedan")+" en el libro de ventas, así que «Cuentas cerradas» y el conteo de "+
+			"cuentas de los reportes dan "+strconv.Itoa(count)+" menos que «Ventas pagadas».")
+	}
 	return validation
 }
 

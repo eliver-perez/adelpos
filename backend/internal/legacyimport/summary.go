@@ -3,6 +3,8 @@ package legacyimport
 import (
 	"strconv"
 	"time"
+
+	"local/ad-el-pos/server/internal/plural"
 )
 
 // Resumen de un paquete para el asistente (Fase D): lo mismo en el resumen previo del análisis y en el informe final
@@ -185,7 +187,54 @@ func buildSummary(plan *Plan, expected Expected, sizeBytes int64, sha256 string)
 	if expected.Purchases > 0 {
 		summary.Warnings = append(summary.Warnings, "El paquete trae compras recibidas del sistema anterior; no se importan.")
 	}
+	summary.Warnings = append(summary.Warnings, shiftDateWarnings(plan.History)...)
 	return summary
+}
+
+// shiftDateWarnings explica, con su conteo, los cortes del anterior sin fecha de inicio o de fin (revisión de la Fase C,
+// M-8). Sin ninguno, no dice nada.
+func shiftDateWarnings(history *HistoryPlan) []string {
+	var started, ended, undated int
+	for _, state := range history.Shifts {
+		if state.Flags.has(FlagStartEstimated) {
+			started++
+		}
+		if state.Flags.has(FlagEndEstimated) {
+			ended++
+		}
+		if state.Flags.has(FlagNoStart) {
+			undated++
+		}
+	}
+	warnings := []string{}
+	if started > 0 {
+		warnings = append(warnings, plural.Count(started, "corte", "cortes")+" del sistema anterior "+
+			plural.Word(started, "no tenía", "no tenían")+" fecha de inicio: se usa la de su primera venta o pago para que "+
+			plural.Word(started, "aparezca", "aparezcan")+" en «Turnos de caja».")
+	}
+	if ended > 0 {
+		warnings = append(warnings, plural.Count(ended, "corte cerrado", "cortes cerrados")+" del sistema anterior "+
+			plural.Word(ended, "no tenía", "no tenían")+" fecha de fin: se usa la de su última venta o pago.")
+	}
+	if undated > 0 {
+		warnings = append(warnings, plural.Count(undated, "corte", "cortes")+" del sistema anterior sin fecha de inicio ni "+
+			"ventas o pagos "+plural.Word(undated, "queda", "quedan")+" sin fecha y no "+
+			plural.Word(undated, "aparece", "aparecen")+" en «Turnos de caja».")
+	}
+	return warnings
+}
+
+// replaceWarnings es el aviso de repetir la migración sobre un lote vigente, en el resumen previo y en el informe
+// final: lo importado vuelve a quedar como en el paquete y lo que ya no viene se borra o se retira.
+func replaceWarnings() []string {
+	return []string{
+		"Esta migración reemplaza la que ya se hizo. Los usuarios importados vuelven a tener el nombre de usuario, el " +
+			"nombre visible, el rol y el estado (activo o inactivo) que traen en el paquete: lo que hayas cambiado en ellos " +
+			"se pierde (las contraseñas que les asignaste se conservan). Lo mismo pasa con los productos, las categorías, " +
+			"los complementos y las mesas importados.",
+		"Lo que se importó la vez anterior y ya no viene en este paquete se borra; si ya se usó en AD-EL POS, se " +
+			"desactiva y queda como retirado.",
+	}
 }
 
 func yearsOf(values map[int]Money) map[int]bool {
