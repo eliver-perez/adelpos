@@ -1,4 +1,4 @@
-# Desarrollo macOS · Etapa 9G
+# Desarrollo macOS · Etapa 9H
 
 ## Entorno preparado
 
@@ -123,7 +123,7 @@ Se emite y audita una autorización de diez minutos en `.local/enrollment-code`,
 ./scripts/dev.sh build-macos
 ```
 
-`test` incluye formato, Go con detector de carreras/vet, frontend/TypeScript/build y Rust. Las suites de migraciones y administración usan bases aleatorias distintas `adel_pos_test_*`, eliminadas al terminar, y no escriben en adel_pos.
+`test` incluye formato (desde la etapa 9H, también la comprobación de datos reales `check-legacy-data`), Go con detector de carreras/vet, frontend/TypeScript/build y Rust. Las suites de migraciones y administración usan bases aleatorias distintas `adel_pos_test_*`, eliminadas al terminar, y no escriben en adel_pos.
 
 `python3 tests/runtime_smoke.py` detiene/recupera temporalmente servicios propios y cierra/reabre Tauri. Solo desarrollo, una ventana nativa y sin trabajo real en curso. Deja servicios y escritorio activos. `--terminal-only` comprueba también el modo técnico de solo terminal. No es una prueba de todos los controles visuales.
 
@@ -294,3 +294,59 @@ contraseña; lo hace el propietario): `sudo launchctl bootout system/local.adel.
 `.local/server.json` (nunca en los ejemplos de `config/`, que copian las pruebas); la identidad del servidor de
 desarrollo vive en `.local/identity`. El permiso «Red local» de macOS se pide a la aplicación al buscar o conectarse a
 un servidor de la red (con firma ad hoc puede volver a pedirse en cada compilación); el anuncio lo hace mDNSResponder.
+
+## Migración del sistema anterior · etapa 9H
+
+Especificación en [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md); decisiones y pruebas en
+[docs/ETAPA_9H_AVANCE.md](docs/ETAPA_9H_AVANCE.md); guía para el propietario en
+[docs/MIGRAR_SISTEMA_ANTERIOR.md](docs/MIGRAR_SISTEMA_ANTERIOR.md).
+
+**Datos reales** (`CLAUDE.md` §0): el respaldo del sistema anterior (`ADEL POS/possys.bak`) y todo lo extraído de él
+viven fuera del repositorio y nunca se versionan. `.gitignore` excluye respaldos y paquetes y la comprobación los busca
+en el índice de git por nombre y por firma:
+
+```bash
+./scripts/dev.sh check-legacy-data   # también la corre format-check
+```
+
+**Lector** (`ad-el-pos-server legacy-prepare`): necesita **Docker Desktop** local en marcha (contenedores de Linux, al
+menos 2 GB de memoria) y la imagen `mcr.microsoft.com/mssql/server:2022-latest`, que descarga la primera vez. La
+frase de paso va por la entrada estándar (en una terminal la pide dos veces sin mostrarla); el avance y el resultado
+salen en líneas JSON:
+
+```bash
+bin/ad-el-pos-server legacy-prepare --backup <respaldo.bak> --output <paquete.adelmig>
+bin/ad-el-pos-server legacy-prepare --cleanup   # restos de una preparación terminada a la fuerza
+```
+
+Trabaja en `<carpeta temporal de la cuenta>/adel-legacy-prepare/` (una preparación a la vez), no toca la base ni la
+carpeta de datos de AD-EL POS y al terminar no deja contenedores ni volúmenes (`docker ps -a` y `docker volume ls` con
+la etiqueta `local.adel.pos.legacy-reader=1`). Formato del paquete, eventos y códigos en
+[docs/MIGRACION_FORMATO.md](docs/MIGRACION_FORMATO.md). En la aplicación lo lanza Rust con el servidor que viaja junto
+al ejecutable, que solo trae el `.pkg` (`build-macos-pkg`); el `.app` de `build-macos` no lo incluye y en
+`./scripts/dev.sh desktop` se indica con `ADEL_SERVER_BINARY` (solo en una compilación de desarrollo).
+
+**Importar** se hace en el asistente de la aplicación (Sistema › Mantenimiento › «Migrar del sistema anterior»), solo en
+la computadora principal y en una instalación sin operación propia ni catálogo, mesas o usuarios capturados en
+AD-EL POS. El paquete subido se guarda en la carpeta de trabajo `legacy-import` junto a la configuración (en el servicio,
+`/Library/Application Support/AD-EL POS/legacy-import`; en desarrollo, `.local/legacy-import`) y se borra al importar.
+Antes de importar se hace un respaldo verificado («Respaldar ahora»). **La importación en la instalación real la decide
+el propietario**; para probar, el procedimiento aislado de `CLAUDE.md` §6 con datos sintéticos.
+
+**Pruebas sin datos reales**:
+
+```bash
+# Paquete sintético sin Docker (solo en modo de pruebas; frase por la entrada estándar)
+ADEL_TEST_MODE=1 bin/ad-el-pos-server legacy-synthetic --output <paquete.adelmig>
+# Prueba opcional con Docker real y un respaldo sintético (~1 minuto)
+(cd backend && ADEL_TEST_DOCKER=1 go test -tags 'integration legacydocker' -run TestLegacyPrepareWithDocker ./internal/legacyread)
+```
+
+La tupla de integración incluye `./internal/legacyimport` (con su propia base `adel_pos_test_*`); la medición de volumen
+es opcional (`ADEL_LEGACY_MEASURE=1`, sin `-race`). Playwright arranca además un segundo Go temporal con base limpia
+en 8185 para la importación completa de `workflow-stage9h-migration.spec.ts`.
+
+**Actualizar la instalación real (el servicio) a la 0.11.0**: `./scripts/dev.sh build-macos-pkg` e instalar el `.pkg`
+con «Servidor del restaurante» marcada (lo hace el propietario: ventana de la contraseña de administrador). Al arrancar,
+el `host` respalda (`…-antes-de-migrar.dump`) y aplica la `0024_legacy_migration.sql`, que cambia el índice de sesiones
+(una por usuario y terminal) y agrega las tablas `app.legacy_*` vacías con su protección; no modifica filas.

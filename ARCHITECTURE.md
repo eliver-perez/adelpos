@@ -1,4 +1,4 @@
-# Arquitectura · Etapa 9G
+# Arquitectura · Etapa 9H
 
 ## Responsabilidades
 
@@ -552,3 +552,54 @@ La carpeta elegida solo llega del diálogo nativo (`backup_folder.rs`) por una c
 versión, «Agotado» e impresoras de terminal) y comandos de Tauri nuevos (`installation_state`, `set_installation_mode`,
 `restart_application`, `pairing_*`, `pairing_start_found`, `discovery_search`, `choose_backup_directory`), todos
 simulados en `native-driver.ts`. Las rutas `print-agent/*` no están en la lista de React.
+
+## Migración del sistema anterior y pendientes · etapa 9H
+
+**Alcance.** La migración del sistema anterior (C#/WinForms con SQL Server 2012) con todo su historial, que se puede
+repetir, y tres pendientes: «Cancelar unidades» sin autorización de supervisor, precio unitario por renglón y sesiones
+en varios dispositivos. Paquetes Go nuevos `legacypkg`, `legacyread`, `legacysynth` y `legacyimport`; un lock nuevo
+(7820148310), ningún permiso nuevo y ninguna dependencia nueva. Una sola migración, `0024_legacy_migration.sql`, con las
+secciones A y C. Avance: [ETAPA_9H_AVANCE.md](docs/ETAPA_9H_AVANCE.md); decisiones en `CLAUDE.md` §15, «Etapa 9H»;
+análisis: [MIGRACION_ANALISIS.md](docs/MIGRACION_ANALISIS.md); formato: [MIGRACION_FORMATO.md](docs/MIGRACION_FORMATO.md);
+guía para el propietario: [MIGRAR_SISTEMA_ANTERIOR.md](docs/MIGRAR_SISTEMA_ANTERIOR.md).
+
+**Dos pasos y dónde corre cada uno.** El **lector** es el subcomando `ad-el-pos-server legacy-prepare`
+(`cmd/ad-el-pos-server/legacy.go` con `internal/legacyread`, que ningún otro paquete importa): en la computadora con
+Docker Desktop restaura el `.bak` en un SQL Server 2022 temporal (`--network none`, respaldo de solo lectura,
+contraseña de `sa` solo en el entorno, contenedor y volumen eliminados al terminar), lee todas las tablas con
+`FOR JSON` y escribe el paquete `.adelmig` cifrado con la frase de paso (`internal/legacypkg`, neutral). `serve` y el
+`host` nunca lo usan: el servidor normal no depende de Docker ni de SQL Server. La **importación** es parte del
+servidor (`internal/legacyimport`, que no importa el lector) y corre en la computadora principal, Mac o Windows, sin
+Docker. En la aplicación, `legacy_migration.rs` (Rust) elige los archivos con diálogos nativos, lanza el lector con el
+servidor que viaja junto a su ejecutable (frase por la entrada estándar, eventos saneados por un `Channel`, cancelar =
+cerrar la entrada estándar) y sube el paquete a Go por partes por la escucha local; React solo ve nombres, tamaños,
+avance y resultados.
+
+**Historial de solo lectura.** Vive en tablas propias `app.legacy_*` (0024, sección C) con un lote vigente a la vez,
+importes `numeric(19,4)` tal como los guardó el anterior, marcas de incoherencia y nombres copiados, sin llaves desde
+las tablas operativas, y un disparador por sentencia que rechaza toda escritura fuera de la transacción de la
+importación (marca `adel.legacy_import`). La operación, la caja, el inventario, la cocina, el tiempo real, la API para
+clientes y Android no lo ven; nada lo reabre, lo cobra ni lo cancela. Lo importado al catálogo, a las mesas y a los
+usuarios sí es vivo (los usuarios sin contraseña, «Sin acceso», hasta «Asignar contraseña»).
+
+**Importación.** El trabajador `legacyimport.Manager.Run` (arrancado en `serveHTTP`) atiende una corrida a la vez:
+toma 7820148310 en una conexión propia, lee y comprueba el paquete completo, revisa la instalación limpia, hace el
+respaldo previo por el camino de «Respaldar ahora» (7820148309 aparte) y abre una sola transacción: COPY del historial
+y de su libro de ventas, validación de §4.4 contra una pasada independiente de las filas del paquete y, solo para lo
+vivo, 7820148305 → 7820148304 → 7820148308. Repetir reemplaza el lote completo y actualiza en su lugar lo vivo de un
+lote anterior. Un error, la cancelación o el apagado deshacen todo; al arrancar y cada minuto se cierran las corridas
+que quedaron sin terminar.
+
+**Reportes.** Con un lote vigente, 27 reportes unen el libro del historial (`legacy_sales_recognitions`) al de AD-EL POS
+con las mismas medidas (`reports/legacy.go`: filtro «Datos», columnas «Datos» y «Diferencia del sistema anterior»); sin
+lote ejecutan la SQL de antes. Siguen sin locks consultivos, en el ejecutor de solo lectura.
+
+**Pendientes de la 9F.** Cancelar o reducir unidades vuelve a exigir el permiso propio `orders.cancel` y
+`supervisor_approval.go` queda solo para «Cancelar cuenta». «Mostrar precio unitario» es una opción `omitempty` de la
+lista de productos (predeterminadas idénticas byte a byte) con el precio que Go guardó en la unidad. Las sesiones son una
+por usuario y por terminal (`sessions_one_active_user_device_idx`): iniciar sesión solo cierra la de esa terminal y
+cambiar la contraseña cierra todas.
+
+**Puente.** Operaciones nuevas en la lista cerrada de `api.rs` (`maintenance_legacy*` y `assign_user_password`) y
+comandos de Tauri nuevos (`legacy_*`), todos simulados en `native-driver.ts`; lo que lleva archivos o rutas (subida,
+partes, preparaciones, informe) solo lo envía `legacy_migration.rs`, nunca `api_request`.
