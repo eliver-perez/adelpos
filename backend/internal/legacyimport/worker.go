@@ -17,14 +17,19 @@ func (manager *Manager) execute(ctx context.Context, next job) {
 		if err != nil {
 			failure = asError(ctx, err)
 		}
-		manager.finishRun(next.runID, StatusFailed, nil, failure, nil, timings, "")
+		manager.finishRun(ctx, next.runID, StatusFailed, nil, failure, nil, timings, "")
 		manager.auditFinished(next, false, failure.Code, nil)
 		return
 	}
 	defer manager.unlock(connection)
-	if _, err := manager.Pool.Exec(context.Background(), `UPDATE app.legacy_import_runs SET status = 'running', phase = $2,
-            started_at = now(), updated_at = now() WHERE id = $1 AND status = 'queued'`, next.runID, PhaseReading); err != nil {
-		manager.finishRun(next.runID, StatusFailed, nil, asError(ctx, err), nil, timings, "")
+	tag, err := manager.Pool.Exec(context.Background(), `UPDATE app.legacy_import_runs SET status = 'running', phase = $2,
+            started_at = now(), updated_at = now() WHERE id = $1 AND status = 'queued'`, next.runID, PhaseReading)
+	if err != nil {
+		manager.finishRun(ctx, next.runID, StatusFailed, nil, asError(ctx, err), nil, timings, "")
+		return
+	}
+	if tag.RowsAffected() != 1 {
+		// La recuperación ya la cerró (quedó demasiado tiempo en cola): no se hace.
 		return
 	}
 	reporter := &progressReporter{manager: manager, runID: next.runID, kind: next.kind}
@@ -63,7 +68,7 @@ func (manager *Manager) execute(ctx context.Context, next job) {
 		reporter.report(PhaseChecking, 0, 0)
 		_, preview := Analyze(model, environment, view.Size, view.SHA256)
 		timings["total"] = time.Since(started).Milliseconds()
-		manager.finishRun(next.runID, StatusSucceeded, preview, nil, nil, timings, "")
+		manager.finishRun(ctx, next.runID, StatusSucceeded, preview, nil, nil, timings, "")
 		manager.auditFinished(next, true, "", map[string]any{"sales": preview.Counts[CountSales], "clean": preview.Clean,
 			"will_replace": preview.WillReplace})
 		succeeded = true
@@ -80,7 +85,7 @@ func (manager *Manager) execute(ctx context.Context, next job) {
 		if failure.Code == CodeInterrupted {
 			status = StatusInterrupted
 		}
-		manager.finishRun(next.runID, status, summary, failure, nil, timings, backupFile)
+		manager.finishRun(ctx, next.runID, status, summary, failure, nil, timings, backupFile)
 		manager.auditFinished(next, false, failure.Code, nil)
 		manager.logWarning("legacy_import_failed", "run", next.runID, "code", failure.Code, "reason", failure.Detail)
 		return
@@ -90,7 +95,7 @@ func (manager *Manager) execute(ctx context.Context, next job) {
 	}
 	timings["total_run"] = time.Since(started).Milliseconds()
 	batch := report.BatchID
-	manager.finishRun(next.runID, StatusSucceeded, report, nil, &batch, timings, backupFile)
+	manager.finishRun(ctx, next.runID, StatusSucceeded, report, nil, &batch, timings, backupFile)
 	details := map[string]any{"batch_id": report.BatchID, "replaced_batch_id": report.ReplacedBatchID,
 		"validation_ok": report.Validation.OK, "money_differences": report.Validation.HasMoneyDifferences,
 		"written": report.Written, "backup_file": backupFile, "locks_held_ms": report.TimingsMS["locks_held"]}
@@ -167,7 +172,7 @@ func (manager *Manager) fail(ctx context.Context, next job, err error, timings m
 	if failure.Code == CodeInterrupted {
 		status = StatusInterrupted
 	}
-	manager.finishRun(next.runID, status, nil, failure, nil, timings, "")
+	manager.finishRun(ctx, next.runID, status, nil, failure, nil, timings, "")
 	manager.auditFinished(next, false, failure.Code, nil)
 	if failure.Detail != "" {
 		manager.logWarning("legacy_run_failed", "run", next.runID, "code", failure.Code, "reason", failure.Detail)

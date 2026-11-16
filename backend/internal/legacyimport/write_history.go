@@ -389,7 +389,7 @@ func shiftRow(model *Model, history *HistoryPlan, names *historyNames, batch pgt
 	return []any{batch, shift.ID, shift.Register.Pointer(), names.register(shift.Register), legacyCashier, cashierID,
 		cashierName, state.Status, textPointer(shift.Status, shift.StatusSet), shift.OpeningCash.Numeric(),
 		shift.ClosingCash.Numeric(), shift.Sales.Numeric(), shift.Withdrawals.Numeric(), shift.Difference.Numeric(),
-		legacyAuthorized, authorizedID, authorizedName, timePointer(shift.OpenedAt), timePointer(shift.ClosedAt),
+		legacyAuthorized, authorizedID, authorizedName, timePointer(state.OpenedAt), timePointer(state.ClosedAt),
 		state.Flags.array()}
 }
 

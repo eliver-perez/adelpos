@@ -3704,9 +3704,11 @@ migración: `503 LEGACY_UNAVAILABLE`.
   con el SHA-256 de sus bytes. `Upload` = `{id, status: receiving|complete, size, sha256, part_size, parts,
 received_parts, received_bytes, created_at, expires_at}`. Una parte con huella mala: `400 LEGACY_UPLOAD_HASH_MISMATCH`
   (se reenvía); fuera de orden: `409 LEGACY_UPLOAD_OUT_OF_ORDER` («Se esperaba la parte N»); reenviar la última recibida
-  con la misma huella no cambia nada (reintento después de un corte). Con la última parte Go comprueba el SHA-256 del
-  paquete completo: si no coincide, descarta la subida (`400 LEGACY_UPLOAD_HASH_MISMATCH`). Solo la ve y la usa el mismo
-  usuario en la misma terminal (si no, `404 LEGACY_UPLOAD_MISSING`). El archivo vive en `<carpeta de datos>/legacy-import/`
+  con la misma huella no cambia nada (reintento después de un corte). Cada parte se escribe en su lugar (el archivo se
+  recorta a lo ya recibido antes de escribirla, así que un intento que falló a medias no deja bytes de más). Con la última
+  parte Go comprueba el tamaño y el SHA-256 del archivo completo tal como quedó en el disco: si no coinciden, descarta la
+  subida (`400 LEGACY_UPLOAD_HASH_MISMATCH`). Solo la ve y la usa el mismo usuario en la misma terminal (si no, `404
+LEGACY_UPLOAD_MISSING`). El archivo vive en `<carpeta de datos>/legacy-import/`
   (0700; el archivo 0600 desde el primer byte con `fileacl.CreatePrivate`, ACL privada en Windows) y se borra al importar
   correctamente, al cancelar o a las 2 horas sin actividad (el trabajador lo revisa cada minuto); al arrancar el servidor
   se borra lo que haya quedado (las subidas viven en memoria). Auditoría `legacy.upload_created`, `legacy.upload_completed`
@@ -3717,10 +3719,15 @@ batch_id, backup_file, error_code, error_message, with_differences, summary, tim
 started_at, finished_at}`. Fases: `queued`, `reading` (lectura y comprobación del paquete), `checking`, `backup`,
   `removing_previous`, `writing_history`, `validating`, `waiting_locks`, `writing_catalog`, `committing`, `done`. Una sola
   corrida en cola o en curso a la vez (índice único parcial; una segunda: `409 LEGACY_BUSY`). Al arrancar el servidor,
-  una corrida que quedó en curso pasa a `interrupted` (`LEGACY_INTERRUPTED`: su transacción se deshizo, no quedó nada a
-  medias); al apagarse, la importación en curso se deshace y queda `interrupted`. **La frase de paso viaja solo en la
-  petición y vive en memoria mientras se abre el paquete**: nunca en disco, en la base, en el Registro de movimientos ni
-  en la bitácora (mínimo 8 caracteres: `400 LEGACY_PASSPHRASE_INVALID`).
+  una corrida que quedó en cola o en curso pasa a `interrupted` (`LEGACY_INTERRUPTED`: su transacción se deshizo, no
+  quedó nada a medias), salvo una importación cuyo lote sí se confirmó (`legacy_import_batches.run_id`; el proceso
+  terminó entre la confirmación y el registro del resultado), que pasa a `succeeded` con el informe y la validación del
+  lote (auditoría `legacy.import_finished` con `recovered: true`). El trabajador repite esa recuperación cada minuto,
+  con el lock de la migración libre, para las corridas sin cambios desde hace más de 2 minutos («La migración se
+  interrumpió antes de terminar…»), y reintenta registrar el resultado de una corrida hasta 5 veces si la base no
+  responde (al apagarse, un solo intento); al apagarse, la importación en curso se deshace y queda `interrupted`. **La
+  frase de paso viaja solo en la petición y vive en memoria mientras se abre el paquete**: nunca en disco, en la base, en
+  el Registro de movimientos ni en la bitácora (mínimo 8 caracteres: `400 LEGACY_PASSPHRASE_INVALID`).
 - **Análisis** (`summary` = `Preview`): `{package: {format_version, created_at, tool, product_version, fingerprint,
 backup_taken_at, size_bytes, sha256}, counts, sales_period: {first: "AAAA-MM", last, label: "10/2019 a 11/2026"},
 tax_rates: {"0": n, "16": n}, totals: {sales_by_year: [{year, amount}], payments_by_method_year: [{method, label, year,
@@ -3729,11 +3736,16 @@ message}], warnings: [texto], current_batch: Batch | null, will_replace, clean, 
   `counts` usa las llaves de la validación (`categories`, `products`, `complements`, `tables`, `users`, `sales`,
   `sales_paid`, `sales_cancelled`, `sales_open`, `lines`, `line_complements`, `quantity_changes`, `discounts`,
   `cancellations`, `payments`, `cash_shifts`, `withdrawals`, `expenses`, `price_history`) más `option_groups`, `areas` y
-  `products_inactive`. Importes como texto exacto con 4 decimales («1234.5000»). No escribe nada. Errores de la corrida:
-  `LEGACY_PASSPHRASE_INVALID` («La frase de paso no es correcta.»), `LEGACY_PACKAGE_DAMAGED`, `LEGACY_PACKAGE_VERSION`
-  (más nuevo que esta versión), `LEGACY_NOT_PACKAGE`, `LEGACY_PACKAGE_LIMIT`, `LEGACY_PACKAGE_INCOMPATIBLE` (falta una
-  tabla o columna del anterior, o un valor con otra forma; el mensaje nombra la tabla y la columna, nunca el valor) y
-  `LEGACY_UPLOAD_MISSING`.
+  `products_inactive`. Importes como texto exacto con 4 decimales («1234.5000»). `warnings` explica, con su conteo, los
+  cortes del anterior sin fecha de inicio o de fin (se usa la de su primera o su última venta o pago; marcas
+  `start_estimated`, `end_estimated` y `no_start`) y, con `will_replace`, avisa que repetir la migración vuelve a poner
+  en lo importado (usuarios, catálogo y mesas) los datos del paquete y que lo que ya no viene se borra o queda retirado.
+  No escribe nada. Errores de la corrida: `LEGACY_PASSPHRASE_INVALID` («La frase de paso no es correcta.»),
+  `LEGACY_PACKAGE_DAMAGED` (el paquete está dañado: hay que copiarlo o prepararlo de nuevo), `LEGACY_PACKAGE_UNREADABLE`
+  (no se pudo leer el archivo por un error de entrada y salida del disco; se puede reintentar tal cual),
+  `LEGACY_PACKAGE_VERSION` (más nuevo que esta versión), `LEGACY_NOT_PACKAGE`, `LEGACY_PACKAGE_LIMIT`,
+  `LEGACY_PACKAGE_INCOMPATIBLE` (falta una tabla o columna del anterior, o un valor con otra forma; el mensaje nombra la
+  tabla y la columna, nunca el valor) y `LEGACY_UPLOAD_MISSING`.
 - **Importación**: exige `confirm: true` (si no, `400 LEGACY_UPLOAD_INVALID`), un análisis `succeeded` del mismo paquete
   (`analysis_run_id`) y que `replace_batch_id` sea el lote vigente (o `null` si no hay); si no coincide, `409
 LEGACY_BATCH_CHANGED` («Vuelve a analizar el paquete»). En segundo plano: vuelve a leer el paquete completo, comprueba
@@ -3744,10 +3756,11 @@ LEGACY_BATCH_CHANGED` («Vuelve a analizar el paquete»). En segundo plano: vuel
   nunca se ocultan. `summary` = `Report`: el `Summary` del análisis más `{batch_id, replaced_batch_id, validation,
 written, retired, timings_ms, backup_file}`. `validation` = `{ok, has_money_differences, checks: [{group:
 counts|sales_by_year|payments_by_method_year|totals, key, label, kind: count|money, expected, actual, difference, ok}],
-notes}`. Auditoría `legacy.analysis_requested`/`legacy.import_requested` (en la petición), `legacy.analysis_finished`/
-  `legacy.import_finished` (`success` según el resultado, con el código de error o el lote, la validación, las filas
-  escritas, el respaldo y el tiempo de los locks), `legacy.batch_replaced` y el `maintenance.backup_created` del respaldo
-  previo; entidad `legacy_import` con el id de la corrida o del lote.
+notes}` (`notes` incluye, con su conteo, las ventas pagadas sin renglones ni importes, que no quedan en el libro y por
+  eso no cuentan en las cuentas de los reportes). Auditoría `legacy.analysis_requested`/`legacy.import_requested` (en la
+  petición), `legacy.analysis_finished`/`legacy.import_finished` (`success` según el resultado, con el código de error o
+  el lote, la validación, las filas escritas, el respaldo y el tiempo de los locks), `legacy.batch_replaced` y el
+  `maintenance.backup_created` del respaldo previo; entidad `legacy_import` con el id de la corrida o del lote.
 - **Instalación limpia** (`blockers`): no se importa si hay operación propia (`own_accounts`, `own_orders`, `own_items`,
   `own_drafts`, `own_payments`, `own_refunds`, `own_adjustments`, `own_cancellations`, `own_sales`, `own_deliveries`,
   `own_shifts`, `own_cash_operations`, `own_cash_movements`, `own_cash_counts`, `own_kitchen`, `own_inventory_movements`,

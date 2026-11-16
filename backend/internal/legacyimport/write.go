@@ -169,6 +169,9 @@ func Analyze(model *Model, environment Environment, sizeBytes int64, sha256 stri
 		Clean:        len(environment.Blockers) == 0,
 		Blockers:     environment.Blockers,
 	}
+	if preview.WillReplace {
+		preview.Warnings = append(preview.Warnings, replaceWarnings()...)
+	}
 	if preview.Blockers == nil {
 		preview.Blockers = []Blocker{}
 	}
@@ -208,6 +211,9 @@ func Import(ctx context.Context, pool *pgxpool.Pool, plan *Plan, config business
 	if current != request.ExpectedBatchID {
 		return nil, &Error{Code: CodeBatchChanged,
 			Message: "El lote importado cambió desde que revisaste el resumen. Vuelve a analizar el paquete antes de importar."}
+	}
+	if current != "" {
+		summary.Warnings = append(summary.Warnings, replaceWarnings()...)
 	}
 	previous, err := loadIDMap(ctx, tx, current)
 	if err != nil {
