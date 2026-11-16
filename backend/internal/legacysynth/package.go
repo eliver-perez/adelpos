@@ -148,13 +148,13 @@ func packageValue(column keptColumn, value any) any {
 	case "bit":
 		return value.(bool)
 	case "char", "nchar":
-		return padded(value.(string), column.source.Type)
+		return padChar(value.(string), column.source.Type)
 	}
 	return value.(string)
 }
 
-// padded completa con espacios un char(n), como lo devuelve SQL Server.
-func padded(text, sqlType string) string {
+// padChar completa con espacios un char(n), como lo devuelve SQL Server.
+func padChar(text, sqlType string) string {
 	open := strings.IndexByte(sqlType, '(')
 	length, err := strconv.Atoi(strings.TrimSuffix(sqlType[open+1:], ")"))
 	if err != nil {

@@ -7,9 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
-
-	"local/ad-el-pos/server/internal/fileacl"
 )
 
 // Extension es la terminación de los paquetes de migración.
@@ -32,7 +31,7 @@ type Output struct {
 
 // CreateOutput prepara el archivo del paquete. El destino no debe existir y debe terminar en .adelmig; el temporal
 // («.<nombre>.<aleatorio>.partial» en la misma carpeta) nace 0600, sin seguir enlaces ni reemplazar nada (en Windows,
-// con la ACL privada).
+// con la ACL privada si el disco la admite: createPartial).
 func CreateOutput(path string) (*Output, error) {
 	if !strings.EqualFold(filepath.Ext(path), Extension) {
 		return nil, ErrOutputExtension
@@ -51,11 +50,39 @@ func CreateOutput(path string) (*Output, error) {
 		return nil, err
 	}
 	temporary := filepath.Join(filepath.Dir(final), "."+filepath.Base(final)+"."+hex.EncodeToString(suffix)+".partial")
-	file, err := fileacl.CreatePrivate(temporary)
+	file, err := createPartial(temporary)
 	if err != nil {
 		return nil, err
 	}
 	return &Output{File: file, temporary: temporary, final: final}, nil
+}
+
+// TemporaryPath es la ruta del temporal mientras se escribe (para comprobarlo antes de darle su nombre o para borrarlo
+// si el proceso termina a la fuerza).
+func (output *Output) TemporaryPath() string {
+	return output.temporary
+}
+
+// partialPattern es el nombre de un temporal de CreateOutput.
+var partialPattern = regexp.MustCompile(`^\..+\.adelmig\.[0-9a-f]{12}\.partial$`)
+
+// RemoveStalePartial borra el temporal de un paquete que quedó a medias (el proceso terminó a la fuerza), solo si la ruta
+// tiene la forma exacta de un temporal de CreateOutput y es un archivo regular (nunca un enlace ni otra cosa).
+func RemoveStalePartial(path string) (bool, error) {
+	if !filepath.IsAbs(path) || !partialPattern.MatchString(strings.ToLower(filepath.Base(path))) {
+		return false, nil
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	return true, os.Remove(path)
 }
 
 // Path es la ruta definitiva.

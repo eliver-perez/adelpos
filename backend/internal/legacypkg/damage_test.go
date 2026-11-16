@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -394,4 +395,51 @@ func gzipped(t *testing.T, content []byte) []byte {
 		t.Fatal(err)
 	}
 	return output.Bytes()
+}
+
+// failingSource entrega los primeros bytes y después un error de entrada y salida (una USB que se desconecta).
+type failingSource struct {
+	data  []byte
+	after int
+	read  int
+}
+
+func (source *failingSource) Read(buffer []byte) (int, error) {
+	if source.read >= source.after {
+		return 0, errors.New("error de entrada y salida simulado")
+	}
+	limit := min(len(buffer), source.after-source.read)
+	count := copy(buffer, source.data[source.read:source.read+limit])
+	source.read += count
+	return count, nil
+}
+
+// Un error al leer el archivo no es «paquete dañado»: es «no se pudo leer» (puede bastar con volver a intentarlo).
+func TestReadErrorsAreNotDamage(t *testing.T) {
+	encoded := samplePackage(t)
+	start := headerLength(encoded)
+	for name, after := range map[string]int{
+		"en el encabezado":    5,
+		"en el JSON":          fixedHeaderSize + 3,
+		"en el primer bloque": start + 100,
+		"a media lectura":     start + 3*(testChunkSize+tagSize) + 10,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Verify(&failingSource{data: encoded, after: after}, testPassphrase, OpenOptions{})
+			requireKind(t, err, KindUnreadable)
+			if !strings.Contains(err.Error(), "USB") {
+				t.Fatalf("mensaje: %v", err)
+			}
+		})
+	}
+}
+
+// Los límites en cero toman el valor predeterminado: cambiar uno no deja los demás en cero.
+func TestPartialLimitsKeepTheDefaults(t *testing.T) {
+	encoded := samplePackage(t)
+	if _, err := Verify(bytes.NewReader(encoded), testPassphrase, OpenOptions{Limits: Limits{MaxRowBytes: 1 << 20}}); err != nil {
+		t.Fatalf("con un solo límite cambiado: %v", err)
+	}
+	_, err := Verify(bytes.NewReader(encoded), testPassphrase, OpenOptions{Limits: Limits{MaxManifestBytes: 64}})
+	requireKind(t, err, KindLimit)
 }

@@ -172,6 +172,9 @@ func encodeHeader(params headerParams) ([]byte, error) {
 func readHeader(source io.Reader, limits Limits) ([]byte, headerParams, error) {
 	fixed := make([]byte, fixedHeaderSize)
 	read, err := io.ReadFull(source, fixed)
+	if err != nil && !isEnd(err) {
+		return nil, headerParams{}, unreadable("encabezado", err)
+	}
 	if read < len(Signature) || string(fixed[:len(Signature)]) != Signature {
 		return nil, headerParams{}, notPackage()
 	}
@@ -191,6 +194,9 @@ func readHeader(source io.Reader, limits Limits) ([]byte, headerParams, error) {
 	}
 	rest := make([]byte, int(length)+sha256.Size)
 	if _, err := io.ReadFull(source, rest); err != nil {
+		if !isEnd(err) {
+			return nil, headerParams{}, unreadable("encabezado", err)
+		}
 		return nil, headerParams{}, damaged("encabezado truncado", err)
 	}
 	raw := append(fixed, rest...)
@@ -207,6 +213,11 @@ func readHeader(source io.Reader, limits Limits) ([]byte, headerParams, error) {
 		return nil, headerParams{}, err
 	}
 	return raw, params, nil
+}
+
+// isEnd dice si un error de lectura es el fin del archivo (truncado) y no un error de entrada y salida.
+func isEnd(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // decodeHeaderParams decodifica el JSON de parámetros de forma estricta (sin campos desconocidos ni datos de más).

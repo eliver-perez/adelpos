@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -251,10 +253,24 @@ func TestOrderingFollowsSQLServer(t *testing.T) {
 		{"datetime", "2019-10-01T00:00:00.003", "2019-10-01T00:00:00.007", -1},
 		{"bit", false, true, -1},
 		{"nvarchar(10)", "a", "a", 0},
+		{"varchar(10)", "a\x01", "a", -1},
 	}
 	for _, testCase := range cases {
 		if result := compareValues(testCase.sqlType, testCase.left, testCase.right); result != testCase.expected {
 			t.Errorf("%s %v %v: %d", testCase.sqlType, testCase.left, testCase.right, result)
+		}
+	}
+	// El orden completo que da SQL Server 2022 con Latin1_General_BIN2 y DATALENGTH (comprobado por el revisor en un
+	// SQL Server propio): un carácter menor que el espacio después de un prefijo ordena antes que el prefijo, porque
+	// SQL Server rellena el más corto con espacios.
+	expected := []any{nil, "", "A", "a\x01", "a\t", "a\x1f", "a", "a ", "a!"}
+	for _, sqlType := range []string{"varchar(20)", "nvarchar(20)"} {
+		values := []any{"a", "a\x01", "a\t", "a ", "a!", "A", "", nil, "a\x1f"}
+		sort.SliceStable(values, func(left, right int) bool {
+			return compareValues(sqlType, values[left], values[right]) < 0
+		})
+		if !reflect.DeepEqual(values, expected) {
+			t.Errorf("%s: %q, SQL Server: %q", sqlType, values, expected)
 		}
 	}
 }
