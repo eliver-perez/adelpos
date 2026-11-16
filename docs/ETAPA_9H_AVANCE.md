@@ -308,6 +308,49 @@ Las 13 de `MIGRACION_ANALISIS.md` §7 (tasa del catálogo; IVA del historial; fe
 bonificación de complementos; tarjeta; pagos repetidos y en cero; asignar contraseña; rol de los administradores;
 inventario; ventas que no cuadran; instalación de destino). Las que afectan dinero: 1, 2, 3, 4, 5, 8 y 12.
 
+### Decisiones del propietario (15/11/2026, sobre las preguntas de la Fase 0)
+
+Preguntas 1, 6, 12 y 13 de [MIGRACION_ANALISIS.md](MIGRACION_ANALISIS.md) §7:
+
+1. **Tasa de IVA del catálogo importado**: cada producto entra con **la tasa que tenía en el sistema anterior** (la de
+   su precio más reciente: 0 % en casi todos y 16 % en uno), como dice §4.1. El historial conserva su IVA tal como se
+   guardó.
+2. **Ventas cuyo total no cuadra con sus renglones**: los reportes por venta, día, turno y forma de pago usan **el total
+   que guardó el sistema anterior**; los de productos usan los renglones, y **la diferencia aparece como un concepto
+   aparte**, «Diferencia del sistema anterior», marcada en el informe.
+3. **Complementos incluidos que se quitan**: en los productos importados que incluyen complementos se **activa «El
+   precio puede bajar al cambiar complementos»**, para cobrar igual que el sistema anterior.
+4. **Instalación de destino**: además de no tener operación propia, debe estar **limpia de catálogo, mesas y usuarios
+   propios** (salvo lo que crea el asistente inicial); si los hay, el asistente lo explica y no importa. Cada repetición
+   reemplaza completo lo importado.
+
+### Decisiones del coordinador (reglas vigentes del propietario; ninguna cambia la especificación)
+
+- **Fecha de reconocimiento** de una venta importada (pregunta 3): la de su **último pago**, como AD-EL POS reconoce la
+  venta al cerrar la cuenta (decisión del propietario de la 9A, CLAUDE.md §21); la fecha de apertura se conserva.
+- **Ventas canceladas** (pregunta 4): entran como **canceladas que no son venta** (regla de la 9D: una cuenta cancelada
+  nunca cuenta como venta), aunque el «Registro de ventas» y los cortes del anterior las contaran; el informe muestra
+  aparte el total al estilo del anterior para poder compararlo.
+- **IVA del historial** (pregunta 2): se conserva tal como se guardó (§4.2: los importes nunca se recalculan). El «IVA
+  estimado» solo se aplicaría a un IVA que no esté guardado; en el respaldo real las columnas de IVA son obligatorias,
+  así que no ocurre.
+- **Retiros, pagos repetidos y pagos en cero o negativos** (preguntas 5 y 8): se importan **tal como estaban, con su
+  marca y su nota**, cuentan donde los contaba el sistema anterior y se listan en el informe (§4.2, «Datos
+  incoherentes»). Los retiros son retiros de efectivo del turno, no gastos.
+- **Tarjeta** (pregunta 7): forma de pago propia del historial, «Tarjeta (sistema anterior)», sin crear un método nuevo
+  en Cobros.
+- **Dólares** (§4.1): el sistema anterior no los guardaba (quedaban como efectivo en pesos): no hay nada que importar y el
+  informe lo dice.
+- **Usuarios** (preguntas 9 y 10): entran sin contraseña y sin acceso, con el rol de la correspondencia del análisis
+  (los de puesto «Administrador», como Administrador); se agrega **«Asignar contraseña»** para los usuarios sin
+  contraseña (contraseña inicial que el usuario cambia al entrar), porque AD-EL POS no tiene PIN y hoy el administrador
+  no puede asignar la contraseña de otro (§4.1 exige que el administrador pueda darles acceso).
+- **Inventario** (pregunta 11): **no se importa** (un solo artículo, sin recetas ni compras; su libro de movimientos es de
+  solo inserción y no se podría reemplazar al repetir la migración).
+- **Historial en tablas propias** del historial importado (recomendación de la Fase 0, nota 2), de solo lectura por
+  construcción y con un disparador que impide modificarlas fuera de la importación; el filtro nuevo de los reportes no se
+  llama «Origen» (ya existe «Origen (para llevar)»).
+
 ### Qué cambió en la fase
 
 - Nuevo `docs/MIGRACION_ANALISIS.md` (estructura, diferencias con el script, conceptos, IVA, cómo se registraba,
