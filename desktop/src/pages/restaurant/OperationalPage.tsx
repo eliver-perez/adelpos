@@ -474,7 +474,8 @@ export function OperationalPage({
   // «Recuperar resultado» repite la misma operación con su operation_id. Si Go la confirma se
   // avisa; si la rechaza, el error permanece; si sigue sin respuesta, el panel continúa. Una operación
   // con autorización de supervisor se repite sin su contraseña (no se conserva): si no llegó a
-  // registrarse, Go la rechaza por la autorización y se pide repetirla (etapa 9F, «Cancelar unidades»).
+  // registrarse, Go la rechaza por la autorización y se pide repetirla («Cancelar cuenta»; en la 9F
+  // también «Cancelar unidades», que desde la 9H ya no pide autorización).
   async function recoverOperation() {
     const authorized = typeof mutation.pending?.body.authorization === 'object';
     const problem = await mutation.retry();

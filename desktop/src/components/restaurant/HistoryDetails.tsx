@@ -63,8 +63,9 @@ function AccountCancelled({ event, after }: { event: HistoryEvent; after: Record
   );
 }
 
-// Etapa 9F (§7.2): «Cancelar unidades» y la reducción desde «Modificar» guardan quién autorizó (null si
-// bastó el permiso propio). Los eventos anteriores no tienen el dato y no muestran nada.
+// Etapa 9F (§7.2): «Cancelar unidades» y la reducción desde «Modificar» guardaban quién autorizó (null
+// si bastó el permiso propio). Los eventos anteriores a la 9F y los de la 9H en adelante (ya no se pide
+// autorización, decisión del propietario) no tienen el dato y no muestran nada.
 function UnitsAuthorization({ after }: { after: RecordValue }) {
   if (!('authorized_by' in after)) {
     return null;

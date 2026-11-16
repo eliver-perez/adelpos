@@ -41,6 +41,13 @@ también en PDF y Excel) y «Actividad por empleado» cuenta esas autorizaciones
 sus registros anteriores siguen en «Cuentas canceladas». Registro sin cambios (95 reportes). Contratos en
 [API_CONTRACTS.md](../API_CONTRACTS.md) («Etapa 9F»).
 
+**Etapa 9H, fase A** (decisión del propietario): «Cancelar unidades» y reducir cantidades ya **no piden autorización
+de supervisor**: basta el permiso propio `orders.cancel` y queda registrado quién lo hizo («Modificó» y «Canceló»). La
+columna **«Autorizó» se conserva** en «Modificaciones de cantidades» y «Productos cancelados» (decisión del
+coordinador): vacía en lo nuevo, con el supervisor en los registros de la 9F que lo guardaron y con quien autorizó
+cancelar la cuenta en las partidas de una cuenta cancelada. «Actividad por empleado» sigue contando las autorizaciones
+de la 9F. Sin datos ni columnas borrados de la base; registro sin cambios (95 reportes).
+
 ## Contenido
 
 - [Principios](#principios)
@@ -439,7 +446,9 @@ la mesa y el área son las actuales de la cuenta.
   partida no pedía autorización de otra persona. Desde la 9F, sin `orders.cancel` se pide la de un supervisor y el
   evento la guarda (`after.authorized_by`): la columna «Autorizó», después de «Modificó» (y en «Productos cancelados»,
   después de «Canceló»), muestra su nombre visible actual; en las partidas de una cuenta cancelada, quien autorizó
-  cancelarla; vacía si bastó el permiso propio y en los registros anteriores (no se inventa). Lo explica una nota. Desde la etapa 9D incluye las partidas de las cuentas
+  cancelarla; vacía si bastó el permiso propio y en los registros anteriores (no se inventa). Lo explica una nota.
+  Desde la etapa 9H cancelar o reducir unidades no pide autorización: la columna se conserva, vacía en lo nuevo y con
+  el supervisor en los registros de la 9F. Desde la etapa 9D incluye las partidas de las cuentas
   canceladas (un renglón por partida, acción «Cancelación de la cuenta»), igual que «Productos cancelados» (motivo
   «Cuenta cancelada: …»). En la 9C tampoco «Cuentas anuladas» tenía «Autorizó»; desde la 9D sí, para las cancelaciones
   nuevas.

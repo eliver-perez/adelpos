@@ -237,9 +237,9 @@ export function ConfirmedLines({
           key={`${line.version_id}-${line.state}`}
           line={line}
           canEdit={editable && can('orders.edit')}
-          // Etapa 9F (§7.2): sin «Cancelar partidas» se puede pedir la autorización de un supervisor
-          // con el permiso de abrir cuentas (la ruta de Go acepta cualquiera de los dos).
-          canCancel={editable && (can('orders.cancel') || can('accounts.open'))}
+          // Etapa 9H (§2.2): «Cancelar unidades» solo con el permiso propio, sin autorización de
+          // supervisor (la 9F la ofrecía también con el permiso de abrir cuentas). Go lo vuelve a exigir.
+          canCancel={editable && can('orders.cancel')}
           disabled={disabled}
           open={menuFor === line.version_id && line.state !== 'cancelled'}
           onToggle={() =>

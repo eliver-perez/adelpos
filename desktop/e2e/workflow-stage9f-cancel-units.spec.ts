@@ -4,18 +4,17 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { installDriver } from './native-driver';
-import { openAdministration, openSection } from './navigation';
-import { notice } from './notices';
-import { chooseOption } from './select';
+import { openSection } from './navigation';
 
-// Etapa 9F, fase E (§7.2): un cajero sin «Cancelar partidas o cantidades confirmadas» cancela una
-// unidad ya enviada a cocina con la autorización del administrador. Go le indica desde el principio
-// que hace falta un supervisor (`cancel_units_requires_authorization`), el panel lo pide, el evento
-// guarda quién canceló y quién autorizó, y «Modificaciones de cantidades» y «Productos cancelados»
-// muestran «Autorizó» en pantalla y en las exportaciones PDF y Excel. Además comprueba que la ruta
-// antigua de anulación responde 410 sin tocar la cuenta. Mismo transporte que las demás
-// especificaciones (Go temporal y base adel_pos_test_*). Capturas en tema claro y oscuro a 1280 × 720
-// y 1920 × 1080 (copia opcional en ADEL_SHOTS_DIR).
+// Etapa 9F, fase E (§7.1): la ruta antigua de anulación responde 410 sin tocar la cuenta. Hasta la 9H
+// esta especificación también hacía que un cajero sin «Cancelar partidas o cantidades confirmadas»
+// cancelara una unidad con la autorización del administrador; la etapa 9H retiró esa autorización
+// (decisión del propietario): ahora comprueba que, sin el permiso propio, «Cancelar unidades» no se
+// ofrece, «Modificar» no deja bajar la cantidad enviada y Go rechaza la cancelación sin camino de
+// supervisor. La cancelación con el permiso propio y los reportes con «Autorizó» están en
+// workflow-stage9h-adjustments.spec.ts. Mismo transporte que las demás especificaciones (Go temporal y
+// base adel_pos_test_*). Capturas en tema claro y oscuro a 1280 × 720 y 1920 × 1080 (copia opcional en
+// ADEL_SHOTS_DIR).
 
 type Driver = Awaited<ReturnType<typeof installDriver>>;
 
@@ -131,27 +130,7 @@ async function logout(page: Page) {
   await expect(page.getByRole('heading', { name: 'Inicia sesión' })).toBeVisible();
 }
 
-// Abre un reporte de un grupo: por debajo de 1440 px con el selector «Reporte» y en pantallas
-// anchas con la lista lateral.
-async function openReport(page: Page, group: string, title: string) {
-  await page
-    .getByRole('tablist', { name: 'Grupos de reportes' })
-    .getByRole('tab', { name: group, exact: true })
-    .click();
-  const picker = page.getByRole('combobox', { name: 'Reporte', exact: true });
-  if (await picker.isVisible()) {
-    await chooseOption(picker, title);
-  } else {
-    await page
-      .getByRole('navigation', { name: `Reportes de ${group}` })
-      .getByRole('button', { name: title, exact: true })
-      .click();
-  }
-  await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
-  return page.getByRole('region', { name: `Tabla: ${title}` });
-}
-
-test('cajero sin permiso cancela unidades con la autorización del administrador y el reporte muestra «Autorizó» (etapa 9F, fase E)', async ({
+test('la ruta antigua de anulación responde 410 y sin «Cancelar partidas» no se ofrece «Cancelar unidades» (etapa 9F, fase E; ajustada en la 9H)', async ({
   page,
 }, testInfo) => {
   test.setTimeout(300000);
@@ -162,7 +141,7 @@ test('cajero sin permiso cancela unidades con la autorización del administrador
   await call(driver, 'PUT', 'terminal/preferences', { keyboard_mode: 'disabled' });
 
   // 1. Datos por la API: una mesa con tres productos enviados a cocina y un cajero sin «Cancelar
-  // partidas o cantidades confirmadas» (sí abre cuentas y captura).
+  // partidas o cantidades confirmadas» (sí abre cuentas, captura y modifica).
   const category = await call(driver, 'POST', 'catalog/categories', {
     name: 'Platillos 9F-E',
     active: true,
@@ -204,6 +183,7 @@ test('cajero sin permiso cancela unidades con la autorización del administrador
       'restaurant.areas.read',
       'orders.capture',
       'orders.confirm',
+      'orders.edit',
       'orders.history.read',
       'catalog.read',
       'catalog.prices.read',
@@ -231,7 +211,8 @@ test('cajero sin permiso cancela unidades con la autorización del administrador
   expect(untouched.account.revision).toBe(account.revision);
   await driver.request('POST', 'auth/logout');
 
-  // 3. El cajero abre la captura de la mesa y elige «Cancelar unidades» en el menú del producto.
+  // 3. El cajero abre la captura de la mesa: el menú del producto ofrece «Modificar», pero no
+  // «Cancelar unidades».
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto('/');
   await login(page, 'cajero9fe', cashierPassword);
@@ -253,99 +234,49 @@ test('cajero sin permiso cancela unidades con la autorización del administrador
   await expect(line).toBeVisible();
   await line.getByRole('button', { name: 'Acciones de 3 × Tacos 9F-E', exact: true }).click();
   const menu = line.getByRole('group', { name: 'Acciones de 3 × Tacos 9F-E' });
-  // Sin «Modificar» (no tiene ese permiso), pero sí «Cancelar unidades», en rojo.
-  await expect(menu.getByRole('button', { name: 'Modificar', exact: true })).toHaveCount(0);
-  const cancelUnits = menu.getByRole('button', { name: 'Cancelar unidades', exact: true });
-  await expect(cancelUnits).toHaveClass(/danger-button/);
-  await cancelUnits.click();
-  await expect(
-    page.getByRole('heading', { name: 'Cancelar unidades · Tacos 9F-E', exact: true }),
-  ).toBeVisible();
+  const modify = menu.getByRole('button', { name: 'Modificar', exact: true });
+  await expect(modify).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Cancelar unidades', exact: true })).toHaveCount(0);
+  await views(page, testInfo, 'sin-cancelar-unidades', async () => {
+    await expect(modify).toBeVisible();
+  });
 
-  // 4. Go pidió supervisor desde el principio: el envío espera su usuario y contraseña.
-  const fieldset = page.getByRole('group', { name: 'Autorización de supervisor' });
-  await expect(fieldset).toBeVisible();
-  await expect(fieldset).toContainText('«Cancelar partidas o cantidades confirmadas»');
-  const submit = page.getByRole('button', {
-    name: 'Confirmar cancelación de unidades',
+  // 4. «Modificar» no deja bajar la cantidad enviada (sin formulario de supervisor) y sí subirla.
+  await modify.click();
+  const panel = page.getByRole('region', { name: 'Personalizar Tacos 9F-E' });
+  await expect(panel).toBeVisible();
+  const remove = panel.getByRole('button', {
+    name: 'Quitar una unidad de Tacos 9F-E',
     exact: true,
   });
-  await expect(submit).toHaveClass(/danger-solid-button/);
-  await page.getByRole('textbox', { name: 'Unidades por cancelar' }).fill('1');
-  await page.getByLabel('Motivo de cancelación').fill('Se enfrió en la mesa 9F');
-  await expect(submit).toBeDisabled();
-  await fieldset.getByLabel('Usuario del supervisor', { exact: true }).fill('admin');
-  const password = fieldset.getByLabel('Contraseña del supervisor', { exact: true });
-  await password.fill('admin');
-  await expect(submit).toBeEnabled();
-  await views(page, testInfo, 'cancelar-unidades-con-supervisor', async () => {
-    await expect(fieldset).toBeVisible();
-  });
-  await submit.click();
-  const dialog = page.getByRole('alertdialog', { name: '¿Cancelar 1 unidad de Tacos 9F-E?' });
-  await expect(dialog).toHaveClass(/dialog-panel-danger/);
-  await expect(dialog).toContainText('Autoriza: admin');
-  await dialog.getByRole('button', { name: 'Cancelar unidades', exact: true }).click();
-  await expect(notice(page, 'Cancelación registrada: 1 unidad de Tacos 9F-E')).toBeVisible();
-  await expect(bill.getByRole('article', { name: '2 × Tacos 9F-E' })).toBeVisible();
-  await clearToasts(page);
-  await logout(page);
+  await expect(remove).toBeDisabled();
+  await expect(page.getByRole('group', { name: 'Autorización de supervisor' })).toHaveCount(0);
+  await panel
+    .getByRole('button', { name: 'Agregar una unidad de Tacos 9F-E', exact: true })
+    .click();
+  await expect(remove).toBeEnabled();
+  await panel.getByRole('button', { name: 'Volver', exact: true }).click();
+  const discard = page.getByRole('alertdialog', { name: 'Descartar la selección' });
+  await discard.getByRole('button', { name: 'Descartar selección', exact: true }).click();
+  await expect(panel).toHaveCount(0);
 
-  // 5. Go registró quién canceló y quién autorizó en el historial de la cuenta.
-  await call(driver, 'POST', 'auth/login', { username: 'admin', password: 'admin' });
-  const history = await call(driver, 'GET', `restaurant/accounts/${account.id}/history`);
-  const cancellation = (
-    history.items as {
-      kind: string;
-      author_name: string;
-      payload: { after: Record<string, unknown> };
-    }[]
-  ).find((event) => event.kind === 'item.cancelled');
-  expect(cancellation?.author_name).toBe('Cajero 9F');
-  expect(cancellation?.payload.after).toEqual(
-    expect.objectContaining({
-      quantity: 1,
-      reason: 'Se enfrió en la mesa 9F',
-      authorized_by_username: 'admin',
-      authorized_by_name: 'Administrador',
-    }),
-  );
-  expect(JSON.stringify(history)).not.toContain('"password"');
-  await driver.request('POST', 'auth/logout');
-
-  // 6. Reportes: «Autorizó» en «Modificaciones de cantidades» y «Productos cancelados», en pantalla
-  // y exportados a PDF y Excel (títulos, columnas y valores vienen de Go).
-  await login(page, 'admin', 'admin');
-  await openAdministration(page, 'Reportes');
-  const changes = await openReport(page, 'Productos', 'Modificaciones de cantidades');
-  await expect(changes.getByRole('columnheader', { name: /^Autorizó/ })).toBeVisible();
-  const changeRow = changes.getByRole('row').filter({ hasText: 'Se enfrió en la mesa 9F' });
-  await expect(changeRow).toContainText('Cajero 9F');
-  await expect(changeRow).toContainText('Administrador');
-  await views(page, testInfo, 'modificaciones-de-cantidades-autorizo', async () => {
-    await expect(changeRow).toBeVisible();
+  // 5. Go también lo rechaza sin el permiso propio, aunque se envíe la autorización de un supervisor
+  // (ya no existe ese camino), y la cuenta no cambia.
+  const current = await call(driver, 'GET', `restaurant/accounts/${account.id}`);
+  const refused = await driver.request('POST', `restaurant/accounts/${account.id}/cancel`, {
+    operation_id: randomUUID(),
+    revision: current.account.revision,
+    version_id: (current.lines as { version_id: string }[])[0]!.version_id,
+    quantity: 1,
+    reason: 'Se enfrió en la mesa 9F',
+    authorization: { username: 'admin', password: 'admin' },
   });
-  const exportGroup = page.getByRole('group', { name: 'Exportar' });
-  await exportGroup.getByRole('button', { name: 'Exportar PDF', exact: true }).click();
-  await expect(notice(page, 'Modificaciones de cantidades: PDF guardado.')).toBeVisible({
-    timeout: 30000,
-  });
-  await exportGroup.getByRole('button', { name: 'Exportar Excel', exact: true }).click();
-  await expect(notice(page, 'Modificaciones de cantidades: Excel guardado.')).toBeVisible({
-    timeout: 30000,
-  });
-  const cancelled = await openReport(page, 'Productos', 'Productos cancelados');
-  await expect(cancelled.getByRole('columnheader', { name: /^Autorizó/ })).toBeVisible();
-  const cancelledRow = cancelled.getByRole('row').filter({ hasText: 'Se enfrió en la mesa 9F' });
-  await expect(cancelledRow).toContainText('Cajero 9F');
-  await expect(cancelledRow).toContainText('Administrador');
-  const exported = driver.exports.map((entry) => `${entry.report}:${entry.contentType}`);
-  expect(exported).toEqual(
-    expect.arrayContaining([
-      'products.quantity_changes:application/pdf',
-      'products.quantity_changes:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ]),
-  );
+  expect(refused.status).toBe(403);
+  expect(refused.body.error.code).toBe('PERMISSION_DENIED');
+  const after = await call(driver, 'GET', `restaurant/accounts/${account.id}`);
+  expect(after.account.revision).toBe(current.account.revision);
+  expect(after.account.confirmed_quantity).toBe(3);
+  expect(JSON.stringify(after)).not.toContain('cancel_units_requires_authorization');
   await clearToasts(page);
   await logout(page);
   expect(errors).toEqual([]);
