@@ -2702,3 +2702,67 @@ Commits en `etapa-9h-f`:
 
 - Ya integrado en esta fase. Falta reemplazar `<!-- Fase E -->` y `<!-- Fase F -->` (renglones 7 y 9) y, en la guía,
   `<!-- Fase E: tiempos y tamaño -->`.
+
+### Fase F · Regresión final
+
+Un agente (16/11/2026, de 06:26 a 07:07, hora de Monterrey), con `ISO_TAG=G`, sobre una **copia exacta de la punta de
+`etapa-9h`, `80afeba`** (`git archive` en `$SP/tmp-G/copy`, con `.tools`, `node_modules`, `go-mod` y `playwright`
+enlazados y el hash en `.merged-head`). Nadie más trabajó en el código mientras tanto. Una sola vez (§7, último punto, y
+§8). Clúster temporal 55499 (una base `adel_pos_test_g_*` por paquete y por motor), Go temporal 8183, vista previa 1421
+y Go limpio 8193. **No se tocó la instalación real ni el respaldo real**; Docker solo con el respaldo sintético. Sin
+cambios de código. Documentación en `etapa-9h-g`: `docs/VERIFICATION_STAGE9H.md` (nuevo).
+
+**Resultado: todo aprobado a la primera**, sin repeticiones ni pruebas intermitentes (unos 2 250 s de suites).
+
+#### Pruebas ejecutadas
+
+| Suite                                                                                                                  | Resultado                                                                                                                                                                                                                                                                                                                                                      | Tiempo         |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| `fmt-check`                                                                                                            | Aprobado. En la copia (sin `.git`) la comprobación de datos reales lo dice y termina bien; sobre el índice de git de `80afeba` (árbol `etapa-9h-g`), `check-legacy-data.sh`: «el índice de git no tiene respaldos ni paquetes de migración»                                                                                                                    | 13 s           |
+| `sync-check`                                                                                                           | «Metadatos coherentes.»                                                                                                                                                                                                                                                                                                                                        | < 1 s          |
+| `go-unit`                                                                                                              | Aprobado: `go vet` normal e `integration`, `go test -race -count=1 ./...` (35 paquetes con pruebas; 5 sin pruebas), `GOOS=windows` build y vet normal e `integration`                                                                                                                                                                                          | 57 s           |
+| `go vet -tags 'integration legacydocker'` (macOS y `GOOS=windows`)                                                     | Aprobado                                                                                                                                                                                                                                                                                                                                                       | 4 s            |
+| `go-int` de los 14 paquetes de la tupla (uno por uno, `-race`)                                                         | **14 de 14**: `database` 9,9 s, `administration` 120,3 s, `catalog` 17,6 s, `operations` 323,6 s, `payments` 2,4 s, `reports` 134,6 s, `reports/operational` 40,2 s, `designer` 20,3 s, `identity` 17,8 s, `apicontract` 7,0 s, `backupschedule` 6,7 s, `cmd/ad-el-pos-server` 41,5 s, `discovery` 5,0 s, `legacyimport` 11,5 s                                | 784 s de reloj |
+| `reports/operational`                                                                                                  | Corrió a las 06:39 (fuera de 00:00–05:00 de Monterrey): `TestOperationalReports` completo aprobado, también las 4 subpruebas que fallan de madrugada                                                                                                                                                                                                           | —              |
+| Docker real del lector, una vez (`ADEL_TEST_DOCKER=1`, `-race -tags 'integration legacydocker' ./internal/legacyread`) | 26 pruebas aprobadas, ninguna omitida. `TestLegacyPrepareWithDocker` 63,5 s: respaldo sintético 8,4 s; `legacy-prepare` 24,8 s (lectura 14,9 s); `ALREADY_RUNNING` con la misma carpeta y otra preparación a la vez con otra carpeta, las dos con la huella del sintético (32 889 bytes); páginas de 7 filas 23,4 s. Sin contenedores ni volúmenes al terminar | 71 s           |
+| `vitest` (`tsc --noEmit` + Vitest)                                                                                     | 95 archivos, 902 pruebas                                                                                                                                                                                                                                                                                                                                       | 26 s           |
+| `build`                                                                                                                | Aprobado                                                                                                                                                                                                                                                                                                                                                       | 9 s            |
+| `cargo test --locked --offline`                                                                                        | 106 aprobadas, 0 fallidas, 3 ignoradas                                                                                                                                                                                                                                                                                                                         | 34 s           |
+| Playwright Chromium, completo (todas las especificaciones en orden, base compartida)                                   | **42 de 42**, también `workflow-stage9c-keyboard` (la falla de la corrida filtrada de la Fase D no se repite en el orden completo) y las 7 de `workflow-stage9h-migration` con el segundo Go limpio                                                                                                                                                            | 10,4 min       |
+| Playwright WebKit, completo                                                                                            | **42 de 42**, con la pantalla bloqueada al empezar y al terminar (`CGSSessionScreenIsLocked` verdadero)                                                                                                                                                                                                                                                        | 10,3 min       |
+| `scripts/macos-pkg/test-scripts.sh` (sin root, destino falso)                                                          | «Scripts del instalador: todo correcto» (31 comprobaciones); `bash -n` de los scripts del instalador y de `check-legacy-data.sh`                                                                                                                                                                                                                               | 4 s            |
+
+Registros en `$SP/tmp-G-*.log`. Al terminar: ninguna base `adel_pos_test_*` en el clúster 55499, los puertos 8183, 1421
+y 8193 sin escucha, ningún `ad-el-pos-server` de las pruebas en marcha (solo el servicio real, que no se tocó), ningún
+contenedor ni volumen de Docker, `docs/etapas/*.md` idéntico por md5 y el repositorio principal en `etapa-9h`
+(`80afeba`) sin cambios. Quedan las carpetas `$SP/run-G-*` (configuración y respaldos de los Go temporales, solo con
+datos sintéticos), como las de las fases anteriores. No se compiló el `.pkg`.
+
+#### No verificado
+
+- Lo de [VERIFICATION_STAGE9H.md](VERIFICATION_STAGE9H.md), «No verificado»: la instalación real (el `.pkg` 0.11.0 y la
+  0024 en el servicio, del propietario), la ventana nativa con los diálogos reales del asistente y Docker lanzado por la
+  aplicación (las 11 operaciones `legacy_*` solo compiladas y simuladas), Windows y el hardware.
+- `TestServiceHostOnMacOS` corrió con PostgreSQL 18 de Homebrew disponible (`ADEL_PG_BIN`); la suite no se corrió con
+  `-v`, así que no hay una línea propia de esa prueba en el registro (el paquete tardó lo de siempre, 41,5 s).
+
+#### Para CLAUDE.md
+
+- Encabezado y hueco `<!-- Fase F -->`: regresión final de la 0.11.0 aprobada sobre `80afeba` (16/11/2026): `fmt-check`
+  y `sync-check`, `go-unit` (35 paquetes con `-race`, `GOOS=windows`), integración 14 de 14, Docker real del lector con
+  el respaldo sintético, Vitest 95 archivos y 902 pruebas, `npm run build`, `cargo test` 106 aprobadas y 3 ignoradas,
+  Playwright Chromium 42 de 42 y WebKit 42 de 42, y los scripts del instalador (31 comprobaciones).
+
+### Fase F · Instalador y fusión (coordinador)
+
+- **`.pkg` 0.11.0**: `./scripts/dev.sh build-macos-pkg` en el repositorio principal sobre `2e5ef10` (código idéntico al de la
+  regresión, `80afeba`; después solo Markdown): `desktop/src-tauri/target/release/bundle/macos-pkg/AD-EL POS_0.11.0.pkg`,
+  22 983 186 bytes, SHA-256 `88b6cc71e58f96897d48a9da6fb4629dcbebd77a7e7e9494a376bca81c7e9fe0`. Examinado con
+  `pkgutil --expand` (en el directorio temporal): `app.pkg`, `server.pkg` y `service.pkg` en la versión 0.11.0; la
+  aplicación dice 0.11.0 (`CFBundleShortVersionString`), su `ad-el-pos-server version` responde 0.11.0 y la firma ad hoc
+  pasa `codesign --verify --deep --strict` (47 MB). No se instaló nada.
+- **Parada con el propietario**: instalar el `.pkg` con «Servidor del restaurante» marcada (pide la contraseña de
+  administrador). Al arrancar, el `host` respalda la base (`…-antes-de-migrar.dump`) y aplica la 0024; después,
+  comprobar en Mantenimiento › «Servicio del servidor» que la versión es la 0.11.0. La importación del sistema anterior
+  la decide el propietario desde el asistente ([MIGRAR_SISTEMA_ANTERIOR.md](MIGRAR_SISTEMA_ANTERIOR.md)).
+- **Fusión**: `etapa-9h` en `main` y push (16/11/2026), según la regla de autonomía de `CLAUDE.md` §0.
