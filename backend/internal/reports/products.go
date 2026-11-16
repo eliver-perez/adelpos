@@ -206,7 +206,8 @@ func init() {
 		Columns: []Column{dateTimeColumn("cancelled_at", "Cancelación"), codeColumn("folio", "Folio"), textColumn("product", "Producto"),
 			countColumn("quantity", "Cantidad"), moneyColumn("amount", "Importe"), textColumn("reason", "Motivo"),
 			textColumn("cancelled_by", "Canceló"),
-			// Etapa 9F (§7.2): el supervisor que autorizó, como en «Modificaciones de cantidades».
+			// Etapa 9F (§7.2): el supervisor que autorizó, como en «Modificaciones de cantidades». Desde
+			// la 9H solo lo tienen las cuentas canceladas con supervisor y los registros de la 9F.
 			described(textColumn("authorized_by", "Autorizó"), unitsAuthorizedDescription),
 			textColumn("released", "Liberada a cocina")},
 		DefaultSort: Sort{Key: "cancelled_at"},

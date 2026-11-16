@@ -1,7 +1,7 @@
 package operations
 
 // persistEdit escribe la versión nueva y mueve, agrega o cancela unidades. Devuelve el contenido
-// posterior del evento item.modified (edit agrega quién autorizó cuando la modificación reduce).
+// posterior del evento item.modified.
 func (handler *service) persistEdit(account *Account, input EditInput, calculation *editCalculation) (map[string]any, error) {
 	previous := calculation.Previous
 	orderID := previous.OrderID

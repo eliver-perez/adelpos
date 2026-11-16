@@ -3018,6 +3018,9 @@ motivo ni autorización. Los eventos `account.void` y la auditoría `restaurant.
 
 ### Autorización para cancelar unidades (`cancel` y la reducción con `edit`)
 
+> **Retirada en la etapa 9H** (decisión del propietario): ver «Etapa 9H · “Cancelar unidades” sin autorización de
+> supervisor». Lo de abajo describe la 9F.
+
 Mismo criterio de «Cancelar cuenta» (9D): con `orders.cancel` basta el permiso propio; sin él, la autorización puntual
 de un supervisor que lo tenga, con el autorizador de `administration/supervisor.go` (sin sesión, con el límite de intentos
 del inicio de sesión, sin autoautorización) y siempre **antes de la primera escritura**.
@@ -3605,3 +3608,32 @@ válida para tickets y para el cajón (antes se rechazaba).
   escritorio (impresoras USB de una computadora con su aplicación abierta) y las rutas de administración son de la
   interfaz de escritorio; la aplicación Android de meseros no imprime por agente: sus documentos salen en la
   impresora que elige Go (la de la caja de esa terminal o la general).
+
+## Etapa 9H · «Cancelar unidades» sin autorización de supervisor (fase A, sin migración)
+
+Decisión del propietario (§0-B y §2.2 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)): cancelar o reducir unidades
+enviadas no pide autorización de supervisor; basta el permiso propio y queda registrado quién lo hizo. «Cancelar cuenta»
+(9D) conserva su autorización. Sin operaciones nuevas del puente.
+
+| Ruta (`/restaurant`)               | Permiso de la ruta                                                    | Cuerpo                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| POST `/accounts/{id}/cancel`       | `orders.cancel` (como antes de la 9F); para llevar, `takeaway.manage` | `{operation_id, revision, version_id, quantity, reason}`                   |
+| POST `/accounts/{id}/edit-preview` | `orders.edit`; si la cantidad baja, además `orders.cancel`            | el de siempre                                                              |
+| POST `/accounts/{id}/edit`         | `orders.edit`; si la cantidad baja, además `orders.cancel`            | `{operation_id, revision, version_id, line, reason, expected_fingerprint}` |
+
+- **Sin el permiso**: `cancel` responde `403 PERMISSION_DENIED` antes de leer el cuerpo; reducir responde `403
+PERMISSION_DENIED` («Reducir la cantidad de un producto enviado a cocina requiere el permiso «Cancelar partidas o
+  cantidades confirmadas».») ya en `edit-preview`, antes de cualquier escritura. No se valida ninguna contraseña de
+  supervisor ni cuenta un intento.
+- **`authorization` ya no es un campo** de `cancel`, `edit` ni `edit-preview`: con la decodificación estricta de siempre,
+  enviarlo es `400 OPERATION_VALIDATION`. Ningún cliente de la 0.10.0 lo envía con el permiso propio (el formulario solo
+  aparecía sin él), y sin el permiso el `403` llega antes.
+- **`cancel_units_requires_authorization` se retiró** de la cuenta y de la respuesta de `edit-preview`. No estaba en el
+  contrato v1 (`openapi.json`, [docs/API_V1.md](docs/API_V1.md)); un cliente 0.10.0 lo lee como ausente (`false`).
+- **Qué se registra**: el autor del evento `item.cancelled`/`item.modified` y de la auditoría
+  `restaurant.item.cancelled`/`restaurant.item.modified`, con el motivo. Los eventos nuevos no llevan `authorized_by`,
+  `authorized_by_username` ni `authorized_by_name` ni se audita `restaurant.supervisor_authorized` (`item_cancel` o
+  `item_modify`); los de la 9F se conservan.
+- **Reportes**: «Modificaciones de cantidades» y «Productos cancelados» conservan la columna `authorized_by` «Autorizó»
+  (vacía en lo nuevo, con el supervisor en los registros de la 9F y con quien autorizó cancelar la cuenta en las partidas
+  de una cuenta cancelada); «Actividad por empleado» sigue contando las autorizaciones de la 9F.

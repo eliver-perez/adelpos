@@ -15,9 +15,12 @@ import "context"
 //   - Una partida se reduce o se cancela después de confirmarse con «Cancelar» (item.cancelled), al
 //     modificarla con menos unidades (item.modified con cancelled_unit_ids) o al cancelar su cuenta
 //     (account.cancelled, con las partidas en before.lines). Cada evento guarda las unidades de antes
-//     con sus importes, las que se retiraron, el motivo y el autor. Desde la etapa 9F los tres guardan
-//     además quién autorizó (after.authorized_by, null si bastó el permiso propio); los eventos
-//     item.cancelled e item.modified anteriores no lo tienen y su «Autorizó» queda vacía.
+//     con sus importes, las que se retiraron, el motivo y el autor. account.cancelled guarda además
+//     quién autorizó cancelar la cuenta (after.authorized_by, null si bastó el permiso propio). En la
+//     etapa 9F item.cancelled e item.modified también lo guardaban, porque cancelar o reducir unidades
+//     sin orders.cancel procedía con un supervisor; desde la 9H (decisión del propietario) ya no se
+//     pide autorización para eso y los eventos nuevos no lo tienen. «Autorizó» se conserva: vacía en
+//     lo nuevo y en lo anterior a la 9F, y con el supervisor en los registros de la 9F.
 // Una cuenta cancelada nunca es venta: no se cierra, de modo que no tiene reconocimientos en
 // sales_recognitions. Los reportes usan el permiso de «Productos cancelados» (reports.sales.read) y no
 // toman locks: solo leen.
@@ -30,14 +33,15 @@ const changesDateBasis = "Fecha de la cancelación o modificación de la partida
 const legacyCancelReason = "Cancelaciones anteriores con motivo libre"
 
 // changesAuthorizationNote explica de dónde sale «Autorizó» en los reportes de unidades canceladas
-// (etapa 9F, §7.2).
-const changesAuthorizationNote = "«Autorizó» es la persona que dio su autorización porque quien canceló o redujo no tenía permiso " +
-	"para hacerlo; queda vacía si bastó su propio permiso y en los registros anteriores, cuando no se pedía autorización."
+// (etapa 9F, §7.2; desde la 9H cancelar o reducir unidades ya no pide autorización).
+const changesAuthorizationNote = "Cancelar o reducir unidades no pide autorización: basta el permiso de quien lo hace y queda " +
+	"registrado quién fue. «Autorizó» solo aparece en las cuentas canceladas con la autorización de un supervisor y en los " +
+	"registros de cuando también se pedía para cancelar o reducir unidades."
 
 // unitsAuthorizedDescription describe la columna «Autorizó» de los reportes de unidades canceladas.
-const unitsAuthorizedDescription = "Supervisor que autorizó la cancelación o la reducción porque quien la hizo no tenía el permiso " +
-	"«Cancelar partidas o cantidades confirmadas» (en una cuenta cancelada, quien autorizó cancelarla); vacía si bastó su permiso " +
-	"y en los registros anteriores, cuando no se pedía autorización."
+const unitsAuthorizedDescription = "En una cuenta cancelada, el supervisor que autorizó cancelarla porque quien la canceló no tenía " +
+	"el permiso «Cancelar cuentas». Cancelar o reducir unidades no pide autorización, así que en esos renglones queda vacía, salvo " +
+	"en los registros de cuando sí se pedía."
 
 // placeSQL es la mesa (salón) o el origen (para llevar) de una cuenta con la mesa actual.
 const placeSQL = "CASE WHEN a.mode='dine_in' THEN coalesce(place.name,'Sin mesa') ELSE a.origin END"
@@ -222,7 +226,8 @@ func init() {
 // con sus unidades en before.lines y se reporta un renglón por partida («Partida cancelada»).
 //
 // «Autorizó» (etapa 9F) es el supervisor de after.authorized_by con su nombre visible actual, como
-// «Cuentas canceladas»; vacía si bastó el permiso propio y en los eventos anteriores, que no lo guardan.
+// «Cuentas canceladas»; vacía si bastó el permiso propio, en los eventos anteriores a la 9F y en los
+// item.cancelled e item.modified desde la 9H, que no lo guardan.
 func quantityChanges(ctx context.Context, query *Query) (*Dataset, error) {
 	list := conditions{}
 	list.when(query, "product_id", "c.product_id = @product_id::text")
