@@ -20,11 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/backupschedule"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	"local/ad-el-pos/server/internal/legacyimport"
 	"local/ad-el-pos/server/internal/legacypkg"
 	"local/ad-el-pos/server/internal/legacysynth"
 )
@@ -142,12 +144,12 @@ func TestStage9HLegacyMigrationRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(content.Bytes())
-	upload := func() string {
+	uploadBytes := func(part []byte) string {
 		t.Helper()
-		created := call(admin, "POST", "maintenance/legacy/uploads", map[string]any{"size": content.Len(),
+		digest := sha256.Sum256(part)
+		created := call(admin, "POST", "maintenance/legacy/uploads", map[string]any{"size": len(part),
 			"sha256": hex.EncodeToString(digest[:])}, 200)
 		id := field(created, "id")
-		part := content.Bytes()
 		partDigest := sha256.Sum256(part)
 		body := call(admin, "POST", "maintenance/legacy/uploads/"+id+"/parts", map[string]any{"index": 0,
 			"data": base64.StdEncoding.EncodeToString(part), "sha256": hex.EncodeToString(partDigest[:])}, 200)
@@ -155,6 +157,10 @@ func TestStage9HLegacyMigrationRoutes(t *testing.T) {
 			t.Fatalf("subida: %s", body)
 		}
 		return id
+	}
+	upload := func() string {
+		t.Helper()
+		return uploadBytes(content.Bytes())
 	}
 	waitRun := func(id string) map[string]any {
 		t.Helper()
@@ -187,6 +193,11 @@ func TestStage9HLegacyMigrationRoutes(t *testing.T) {
 			if body := call(reader, "GET", route, nil, 403); code(body) != "PERMISSION_DENIED" {
 				t.Fatalf("%s sin permiso: %s", route, body)
 			}
+		}
+		// «Asignar contraseña» sin users.manage.
+		readerID := text(`SELECT id::text FROM app.users WHERE username = 'lectora9hc'`)
+		if body := call(reader, "POST", "users/"+readerID+"/password", map[string]string{"password": "contrasena-9h-c"}, 403); code(body) != "PERMISSION_DENIED" {
+			t.Fatalf("asignar contraseña sin permiso: %s", body)
 		}
 		// Por la escucha de red (no local) se rechaza aunque tenga el permiso.
 		_, err := service.Execute(ctx, administration.Request{Method: "GET", Path: "/api/v1/maintenance/legacy",
@@ -226,6 +237,23 @@ func TestStage9HLegacyMigrationRoutes(t *testing.T) {
 		}
 		call(admin, "POST", "maintenance/legacy/uploads/"+id+"/cancel", nil, 200)
 		call(admin, "GET", "maintenance/legacy/uploads/"+id, nil, 404)
+	})
+
+	t.Run("paquete_danado_version_desconocida_y_no_paquete", func(t *testing.T) {
+		damaged := append([]byte{}, content.Bytes()...)
+		damaged[len(damaged)/2] ^= 0x20
+		newer := append([]byte{}, content.Bytes()...)
+		newer[len(legacypkg.Signature)+1] = 7
+		for expected, data := range map[string][]byte{"LEGACY_PACKAGE_DAMAGED": damaged, "LEGACY_PACKAGE_VERSION": newer,
+			"LEGACY_NOT_PACKAGE": []byte("no es un paquete")} {
+			bad := uploadBytes(data)
+			run := waitRun(field(call(admin, "POST", "maintenance/legacy/analyze", map[string]any{"upload_id": bad,
+				"passphrase": legacyPassphrase}, 200), "id"))
+			if run["status"] != "failed" || run["error_code"] != expected {
+				t.Fatalf("%s: %v", expected, run)
+			}
+			call(admin, "POST", "maintenance/legacy/uploads/"+bad+"/cancel", nil, 200)
+		}
 	})
 
 	id := upload()
@@ -374,8 +402,31 @@ func TestStage9HLegacyMigrationRoutes(t *testing.T) {
 			"analysis_run_id": again["id"], "confirm": true, "replace_batch_id": nil}, 409); code(body) != "LEGACY_BATCH_CHANGED" {
 			t.Fatalf("reemplazar sin confirmar el lote: %s", body)
 		}
-		replaced := waitRun(field(call(admin, "POST", "maintenance/legacy/import", map[string]any{"upload_id": second,
-			"passphrase": legacyPassphrase, "analysis_run_id": again["id"], "confirm": true, "replace_batch_id": batch}, 200), "id"))
+		// Mientras se escribe el historial (la importación detenida a propósito), el servidor sigue respondiendo: la
+		// importación corre en su propia conexión y todavía no toma los locks de la operación.
+		paused, resume := make(chan struct{}), make(chan struct{})
+		service.Legacy.Hooks = &legacyimport.Hooks{AfterHistory: func(context.Context, pgx.Tx) error {
+			close(paused)
+			<-resume
+			return nil
+		}}
+		running := field(call(admin, "POST", "maintenance/legacy/import", map[string]any{"upload_id": second,
+			"passphrase": legacyPassphrase, "analysis_run_id": again["id"], "confirm": true, "replace_batch_id": batch}, 200), "id")
+		<-paused
+		var during struct {
+			ActiveRun *struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"active_run"`
+		}
+		if err := json.Unmarshal(call(admin, "GET", "maintenance/legacy", nil, 200), &during); err != nil || during.ActiveRun == nil ||
+			during.ActiveRun.ID != running || during.ActiveRun.Status != "running" {
+			t.Fatalf("estado durante la importación: %+v %v", during.ActiveRun, err)
+		}
+		call(admin, "GET", "restaurant/tables", nil, 200)
+		call(admin, "GET", "catalog/products", nil, 200)
+		close(resume)
+		replaced := waitRun(running)
 		if replaced["status"] != "succeeded" {
 			t.Fatalf("reemplazo: %v", replaced)
 		}
