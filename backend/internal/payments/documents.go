@@ -15,11 +15,16 @@ import (
 // internal/documents con la plantilla activa del tipo; el documento guarda la versión usada y una
 // copia de la identidad del establecimiento. La reimpresión exacta copia el trabajo original.
 
+// DocumentLine es una partida de la precuenta o el ticket. UnitPrice (etapa 9H, §2.3) es el precio
+// comercial de una unidad (FinanceLine.UnitPrice); se guarda con el documento para que su reimpresión y
+// «Imprimir con la plantilla vigente» lo conserven, y se omite si no existe (los documentos anteriores a
+// la 9H no lo tienen y se imprimen como siempre).
 type DocumentLine struct {
-	Quantity int    `json:"quantity"`
-	Name     string `json:"name"`
-	Notes    string `json:"notes"`
-	Amount   string `json:"amount"`
+	Quantity  int    `json:"quantity"`
+	Name      string `json:"name"`
+	Notes     string `json:"notes"`
+	Amount    string `json:"amount"`
+	UnitPrice string `json:"unit_price,omitempty"`
 }
 
 // DocumentAdjustment es una línea de ajuste del documento. Reason es el nombre del motivo del
@@ -123,7 +128,9 @@ func (handler *service) buildDocument(finance *Finance, kind string, payment *Pa
 		for _, unit := range line.Units {
 			amount = amount.Add(decimal.RequireFromString(unit.Total))
 		}
-		document.Lines = append(document.Lines, DocumentLine{Quantity: line.Quantity, Name: line.Name, Notes: line.Notes, Amount: money(amount)})
+		document.Lines = append(document.Lines, DocumentLine{
+			Quantity: line.Quantity, Name: line.Name, Notes: line.Notes, Amount: money(amount), UnitPrice: line.UnitPrice,
+		})
 	}
 	for _, adjustment := range finance.Adjustments {
 		if adjustment.Voided {

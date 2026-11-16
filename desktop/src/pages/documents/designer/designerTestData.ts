@@ -112,7 +112,21 @@ export const receiptKind: CatalogKind = {
   text_sizes: ['normal'],
   blocks: [
     ...sharedBlocks,
-    definition('products', 'Lista de productos', { group: 'commercial', max: 1 }),
+    definition('products', 'Lista de productos', {
+      group: 'commercial',
+      max: 1,
+      options: [
+        { key: 'show_notes', label: 'Imprimir observaciones', type: 'boolean', default: true },
+        // Etapa 9H (§2.3): como en el catálogo de Go, desactivada por omisión.
+        {
+          key: 'show_unit_price',
+          label: 'Mostrar precio unitario',
+          type: 'boolean',
+          default: false,
+          help: 'Cada producto muestra el precio de una unidad junto a la cantidad («3 × $150.00»).',
+        },
+      ],
+    }),
     definition('total', 'Total', { group: 'commercial', max: 1 }),
     definition('this_payment', 'Este pago', { group: 'commercial', max: 1 }),
     definition('fiscal_notice', 'Aviso fiscal', { max: 1, required: true }),

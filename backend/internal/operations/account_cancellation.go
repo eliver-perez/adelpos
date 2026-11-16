@@ -31,9 +31,9 @@ import (
 //
 // Permiso: con accounts.cancel basta el propio; sin él, la autorización puntual de un supervisor que
 // lo tenga, con el mismo mecanismo de los descuentos (validada antes de escribir, sin sesión, con el
-// límite de intentos del inicio de sesión y sin autoautorización; supervisor_approval.go, compartido
-// desde la etapa 9F con «Cancelar unidades»). La contraseña nunca forma parte de la huella
-// idempotente (requestFingerprint) ni de la auditoría.
+// límite de intentos del inicio de sesión y sin autoautorización; supervisor_approval.go, que la 9F
+// compartió con «Cancelar unidades» y que desde la 9H solo usa esta ruta). La contraseña nunca forma
+// parte de la huella idempotente (requestFingerprint) ni de la auditoría.
 
 // cancelPermission es el permiso propio para cancelar cuentas.
 const cancelPermission = "accounts.cancel"

@@ -14,10 +14,11 @@ const currencyUSD = "USD"
 func renderCommercialBlock(block Block, data *CommercialData, w *writer) {
 	switch block.Type {
 	case BlockProducts:
-		options, _ := block.parsed.(*NotesOptions)
+		options, _ := block.parsed.(*ProductsOptions)
 		showNotes := options == nil || options.ShowNotes
+		showUnitPrice := options != nil && options.ShowUnitPrice
 		for _, line := range data.Lines {
-			w.row(strconv.Itoa(line.Quantity)+" x "+line.Name, pesos(line.Amount))
+			renderProductLine(line, showUnitPrice, w)
 			if showNotes && strings.TrimSpace(line.Notes) != "" {
 				w.text("   Nota: " + line.Notes)
 			}
@@ -59,6 +60,30 @@ func renderCommercialBlock(block Block, data *CommercialData, w *writer) {
 			w.row("SALDO PENDIENTE", pesos(data.Balance))
 		}
 	}
+}
+
+// renderProductLine imprime una partida: «N x Producto … importe», como siempre. Con «Mostrar precio
+// unitario» (etapa 9H, §2.3) y el precio unitario en los datos, el precio de una unidad va junto a la
+// cantidad en el mismo renglón («3 × $150.00 Tacos … $450.00») si cabe en el ancho del bloque sin
+// cortarse; si no, el renglón queda como siempre y el precio unitario va en un renglón propio debajo
+// del nombre, con la sangría de las observaciones («   3 × $150.00»). El importe es siempre el del
+// documento; el precio unitario también lo calculó Go y se expresa con moneytext.
+func renderProductLine(line CommercialLine, showUnitPrice bool, w *writer) {
+	quantity := strconv.Itoa(line.Quantity)
+	amount := pesos(line.Amount)
+	if !showUnitPrice || line.UnitPrice == "" {
+		w.row(quantity+" x "+line.Name, amount)
+		return
+	}
+	unitPrice := quantity + " × " + pesos(line.UnitPrice)
+	combined := unitPrice + " " + line.Name
+	// Cabe si el concepto entra completo en el espacio que deja el importe (row lo cortaría si no).
+	if runeCount(Printable(combined)) <= w.width-runeCount(amount)-1 {
+		w.row(combined, amount)
+		return
+	}
+	w.row(quantity+" x "+line.Name, amount)
+	w.text("   " + unitPrice)
 }
 
 func sectionOptions(block Block) SectionOptions {

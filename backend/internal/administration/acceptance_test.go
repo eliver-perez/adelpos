@@ -206,14 +206,37 @@ func TestStageTwoAcceptance(t *testing.T) {
 			t.Fatal("No persistió el modo de teclado")
 		}
 	})
-	t.Run("14_new_login_invalidates_previous_session", func(t *testing.T) {
+	t.Run("14_new_login_replaces_only_the_session_of_the_same_terminal", func(t *testing.T) {
+		// Etapa 9H (§2.4): el mismo usuario puede tener sesión a la vez en varias terminales. Iniciar sesión en
+		// otra terminal ya no cierra la anterior (hasta la 9G sí, con SESSION_REPLACED); iniciar sesión de nuevo en la
+		// misma terminal sí cierra la anterior de esa terminal.
 		latest := primary
 		latest.session = text(call(latest, "POST", "auth/login", map[string]string{"username": "prueba", "password": employeePassword}, 200), "session_token")
-		response := call(employee, "GET", "auth/me", nil, 401)
-		if !strings.Contains(string(response), "SESSION_REPLACED") {
-			t.Fatal("No se informó el nuevo acceso")
-		}
+		call(employee, "GET", "auth/me", nil, 200)
 		call(latest, "GET", "auth/me", nil, 200)
+		activeSessions := func(username string) int {
+			var count int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM app.sessions s JOIN app.users u ON u.id=s.user_id
+                WHERE u.username=$1 AND s.revoked_at IS NULL`, username).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			return count
+		}
+		if count := activeSessions("prueba"); count != 2 {
+			t.Fatalf("El usuario debía tener una sesión vigente en cada terminal: %d", count)
+		}
+		again := employee
+		again.session = text(call(again, "POST", "auth/login", map[string]string{"username": "prueba", "password": employeePassword}, 200), "session_token")
+		response := call(employee, "GET", "auth/me", nil, 401)
+		if !strings.Contains(string(response), "SESSION_REPLACED") || !strings.Contains(string(response), "de nuevo en esta terminal") {
+			t.Fatalf("No se informó el nuevo acceso en la misma terminal: %s", response)
+		}
+		call(again, "GET", "auth/me", nil, 200)
+		call(latest, "GET", "auth/me", nil, 200)
+		if count := activeSessions("prueba"); count != 2 {
+			t.Fatalf("Iniciar de nuevo en la misma terminal debía conservar una sola sesión en ella: %d", count)
+		}
+		employee = again
 	})
 	t.Run("15_device_revocation_and_16_enforcement", func(t *testing.T) {
 		call(primary, "POST", "devices/"+second.id+"/revoke", map[string]any{}, 200)

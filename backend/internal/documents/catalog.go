@@ -124,6 +124,10 @@ var priceValues = []OptionValue{
 const priceHelp = "Para imprimir los importes, activa «Incluir importes comerciales en comandas» en Cocina → " +
 	"Comandas y tiempos; con «Ocultar», esta plantilla no los imprime aunque Cocina los muestre."
 
+// unitPriceHelp explica la opción «Mostrar precio unitario» de la lista de productos (etapa 9H).
+const unitPriceHelp = "Cada producto muestra el precio de una unidad junto a la cantidad («3 × $150.00»); si no cabe en " +
+	"el mismo renglón, va en un renglón propio debajo del nombre. El importe del producto no cambia."
+
 // Límites de las plantillas (§2 del diseño).
 const (
 	MaxBlocks         = 60
@@ -258,10 +262,13 @@ var definitions = []blockDefinition{
 		Description: "Partidas con cantidad «N x», nombre e importe.", Properties: allProperties, Max: 1,
 		accepts: familyIs(FamilyCommercial),
 		defaults: func(Kind) any {
-			return &NotesOptions{ShowNotes: true}
+			return &ProductsOptions{ShowNotes: true}
 		},
 		options: func(Kind) []OptionSpec {
-			return []OptionSpec{booleanOption("show_notes", "Imprimir observaciones", true)}
+			// Etapa 9H (§2.3): el precio unitario es opcional y está desactivado por omisión.
+			unitPrice := booleanOption("show_unit_price", "Mostrar precio unitario", false)
+			unitPrice.Help = unitPriceHelp
+			return []OptionSpec{booleanOption("show_notes", "Imprimir observaciones", true), unitPrice}
 		},
 		EmptyReason: "El documento no tiene partidas.",
 	},

@@ -3018,6 +3018,9 @@ motivo ni autorización. Los eventos `account.void` y la auditoría `restaurant.
 
 ### Autorización para cancelar unidades (`cancel` y la reducción con `edit`)
 
+> **Retirada en la etapa 9H** (decisión del propietario): ver «Etapa 9H · “Cancelar unidades” sin autorización de
+> supervisor». Lo de abajo describe la 9F.
+
 Mismo criterio de «Cancelar cuenta» (9D): con `orders.cancel` basta el permiso propio; sin él, la autorización puntual
 de un supervisor que lo tenga, con el autorizador de `administration/supervisor.go` (sin sesión, con el límite de intentos
 del inicio de sesión, sin autoautorización) y siempre **antes de la primera escritura**.
@@ -3048,7 +3051,7 @@ AUTHORIZATION_INSUFFICIENT` («El supervisor indicado no tiene permiso para canc
   Como Go acepta las claves sin distinguir mayúsculas, la huella de `restaurant/*` quita la contraseña de cualquier
   objeto `authorization` sin distinguirlas (`Authorization`, `Password`, `PASSWORD`…), en cualquier nivel del cuerpo
   (revisión independiente de la 9F, B3).
-- **Campos nuevos de lectura** (los calcula Go; React no los deduce):
+- **Campos nuevos de lectura** (los calcula Go; React no los deduce; **retirados en la etapa 9H**):
 
 | Campo                                 | Dónde                        | Significado                                                                                                       |
 | ------------------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -3605,3 +3608,67 @@ válida para tickets y para el cajón (antes se rechazaba).
   escritorio (impresoras USB de una computadora con su aplicación abierta) y las rutas de administración son de la
   interfaz de escritorio; la aplicación Android de meseros no imprime por agente: sus documentos salen en la
   impresora que elige Go (la de la caja de esa terminal o la general).
+
+## Etapa 9H · «Cancelar unidades» sin autorización de supervisor (fase A, sin migración)
+
+Decisión del propietario (§0-B y §2.2 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)): cancelar o reducir unidades
+enviadas no pide autorización de supervisor; basta el permiso propio y queda registrado quién lo hizo. «Cancelar cuenta»
+(9D) conserva su autorización. Sin operaciones nuevas del puente.
+
+| Ruta (`/restaurant`)               | Permiso de la ruta                                                    | Cuerpo                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| POST `/accounts/{id}/cancel`       | `orders.cancel` (como antes de la 9F); para llevar, `takeaway.manage` | `{operation_id, revision, version_id, quantity, reason}`                   |
+| POST `/accounts/{id}/edit-preview` | `orders.edit`; si la cantidad baja, además `orders.cancel`            | el de siempre                                                              |
+| POST `/accounts/{id}/edit`         | `orders.edit`; si la cantidad baja, además `orders.cancel`            | `{operation_id, revision, version_id, line, reason, expected_fingerprint}` |
+
+- **Sin el permiso**: `cancel` responde `403 PERMISSION_DENIED` antes de leer el cuerpo; reducir responde `403
+PERMISSION_DENIED` («Reducir la cantidad de un producto enviado a cocina requiere el permiso «Cancelar partidas o
+  cantidades confirmadas».») ya en `edit-preview`, antes de cualquier escritura. No se valida ninguna contraseña de
+  supervisor ni cuenta un intento.
+- **`authorization` ya no es un campo** de `cancel`, `edit` ni `edit-preview`: con la decodificación estricta de siempre,
+  enviarlo es `400 OPERATION_VALIDATION`. Ningún cliente de la 0.10.0 lo envía con el permiso propio (el formulario solo
+  aparecía sin él), y sin el permiso el `403` llega antes.
+- **`cancel_units_requires_authorization` se retiró** de la cuenta y de la respuesta de `edit-preview`. No estaba en el
+  contrato v1 (`openapi.json`, [docs/API_V1.md](docs/API_V1.md)); un cliente 0.10.0 lo lee como ausente (`false`).
+- **Qué se registra**: el autor del evento `item.cancelled`/`item.modified` y de la auditoría
+  `restaurant.item.cancelled`/`restaurant.item.modified`, con el motivo. Los eventos nuevos no llevan `authorized_by`,
+  `authorized_by_username` ni `authorized_by_name` ni se audita `restaurant.supervisor_authorized` (`item_cancel` o
+  `item_modify`); los de la 9F se conservan.
+- **Reportes**: «Modificaciones de cantidades» y «Productos cancelados» conservan la columna `authorized_by` «Autorizó»
+  (vacía en lo nuevo, con el supervisor en los registros de la 9F y con quien autorizó cancelar la cuenta en las partidas
+  de una cuenta cancelada); «Actividad por empleado» sigue contando las autorizaciones de la 9F.
+
+## Etapa 9H · precio unitario por renglón (fase A, sin migración)
+
+- **Plantillas** (`documents/templates*`, `documents/preview`, `documents/samples`, `GET documents/catalog`): el bloque
+  `products` de la precuenta y el ticket acepta `options.show_unit_price` (booleano, `false` por omisión); el catálogo lo
+  ofrece como opción `boolean` «Mostrar precio unitario» con su `help`. Mientras está en `false` se omite de la forma
+  canónica (las predeterminadas y las plantillas guardadas no cambian); con `true` se guarda. Otro tipo de valor o la
+  clave en otro bloque (por ejemplo `kitchen_items`) es `422 TEMPLATE_INVALID`, como cualquier opción desconocida.
+- **Datos guardados**: cada partida de la precuenta y el ticket (`kitchen_tickets.document` y `GET
+payments/accounts/{id}/precheck`) agrega `unit_price` (decimal en texto, omitido si no existe), el precio comercial de
+  una unidad que calculó Go antes de promociones y descuentos. `amount` no cambia. La respuesta de cobros
+  (`payments/accounts/{id}`) no cambia. No forma parte del contrato v1.
+
+## Etapa 9H · sesiones en varios dispositivos (fase A, esquema 24)
+
+Decisión del propietario (§0-B y §2.4 de [docs/etapas/ETAPA_9H.md](docs/etapas/ETAPA_9H.md)): un usuario puede tener una
+sesión activa por dispositivo, en varios dispositivos a la vez.
+
+- **`POST auth/login`**: cierra solo la sesión vigente del usuario **en la misma terminal** (`revoke_reason`
+  `replaced`, auditoría `session.replaced` con `revoked_sessions`); las de otras terminales siguen. Hasta la 9G cerraba
+  las del usuario en todas. La sesión reemplazada responde `401 SESSION_REPLACED` con «Tu sesión se cerró porque el
+  usuario inició sesión de nuevo en esta terminal.».
+- **Sin cambios**: `auth/logout` (solo esa sesión), `auth/password` (cierra las del usuario en todas las terminales con
+  `password_changed` y abre una nueva en esta), revocar una terminal (`device_revoked`), desactivar al usuario
+  (`user_disabled`), el restablecimiento de soporte (`support_reset`) y `sessions/{id}/revoke`.
+- **Base** (0024, sección A): `sessions_one_active_user_idx` (único por `user_id` con `revoked_at IS NULL`) se sustituye
+  por `sessions_one_active_user_device_idx` (único por `user_id, device_id` con `revoked_at IS NULL`). No cierra ni
+  modifica sesiones existentes.
+- **`GET devices/sessions-summary`** cuenta sesiones, no usuarios (el mismo usuario en dos terminales son dos) y **`GET
+devices`** muestra el usuario actual de cada terminal (el mismo usuario puede aparecer en varias). Sin campos nuevos.
+- **Por terminal, como antes**: caja física y turno (`payments/shifts/current`, apertura, arqueo y cierre de la caja de
+  la terminal), estaciones visibles, canal de eventos (2 conexiones por terminal) y `restaurant/state`; los permisos se
+  leen en cada petición de cada sesión.
+- Contrato v1: la descripción de `login` en `openapi.json` y [docs/API_V1.md](docs/API_V1.md) (§4) dicen el
+  comportamiento nuevo; sin operaciones ni esquemas nuevos.

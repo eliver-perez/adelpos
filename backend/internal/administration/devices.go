@@ -21,7 +21,8 @@ const devicesQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d
 const onlineWindow = "2 minutes"
 
 // deviceListQuery es la lista de Sistema › Terminales (etapa 9G, §3.3): además, si está en línea y el
-// usuario que tiene la sesión activa en ella (nunca la identidad reservada de soporte).
+// usuario que tiene la sesión activa en ella (nunca la identidad reservada de soporte). Es por terminal:
+// desde la etapa 9H el mismo usuario puede ser el usuario actual de varias terminales a la vez.
 const deviceListQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
     d.kind,d.os,d.app_version,d.paired_at,
     (d.revoked_at IS NULL AND d.last_seen_at > now() - interval '` + onlineWindow + `') AS online,
@@ -190,7 +191,8 @@ func deviceConfiguration(ctx context.Context, tx pgx.Tx, deviceID string) (any, 
 
 // sessionsSummary cuenta las sesiones activas por tipo de dispositivo (etapa 9G, §3.4 y D9): escritorio,
 // comandero Android y cocina. Solo informa: no limita nada todavía (las licencias por sesiones
-// simultáneas son de la etapa 10). Cuenta sesiones vigentes de terminales no revocadas.
+// simultáneas son de la etapa 10). Cuenta sesiones vigentes de terminales no revocadas, no usuarios:
+// desde la etapa 9H el mismo usuario con sesión en dos terminales son dos sesiones.
 func sessionsSummary(ctx context.Context, tx pgx.Tx, principal Principal) (any, error) {
 	if err := principal.require("devices.read"); err != nil {
 		return nil, err
