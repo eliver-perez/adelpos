@@ -35,6 +35,10 @@ import (
 )
 
 func main() {
+	// Etapa 9H: legacy-prepare y legacy-synthetic tienen su propia salida (legacy.go).
+	if code, handled := runLegacyCommand(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
 		logger.Error("server_stopped", "reason", err.Error())
