@@ -1,8 +1,9 @@
 # API v1 para clientes · Etapa 9G
 
-Contrato de la API que usan la aplicación de escritorio y las terminales y que usará la **aplicación Android de
-meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
-[etapas/ETAPA_9G.md](etapas/ETAPA_9G.md)).
+Contrato de la API que usan la aplicación de escritorio y las terminales y la **aplicación Android de meseros**
+(carpeta `android/`, etapa A1). Fase D de la etapa 9G (§5 de [etapas/ETAPA_9G.md](etapas/ETAPA_9G.md)); la etapa A1
+agregó la versión mínima por tipo de cliente, la entrada con PIN y la credencial de envío
+([etapas/ETAPA_A1_ANDROID.md](etapas/ETAPA_A1_ANDROID.md), §3).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -21,9 +22,12 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
    servidor y nunca decide una regla de negocio. Los importes viajan como cadenas decimales con dos decimales
    (`"130.00"`, IVA incluido); nunca como números de punto flotante.
 2. **Identificación del cliente**: cada petición lleva `X-Client-Version` (la versión de la aplicación,
-   `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop` o `android`). Si la versión es anterior a
-   `min_client_version`, las rutas de la aplicación responden **426 `CLIENT_UPDATE_REQUIRED`** («Actualiza esta
-   terminal») con `details.min_client_version`. **Por la escucha de red** (HTTPS, la única que usan las terminales y
+   `MAJOR.MINOR.PATCH`) y `X-Client-Kind` (`desktop` o `android`). Si la versión es anterior a la mínima **de su
+   tipo de cliente** (`min_client_versions` de `getVersion`, desde la etapa A1: `desktop` 0.10.0 y `android` 0.1.0,
+   porque la aplicación Android numera sus versiones aparte), las rutas de la aplicación responden **426
+   `CLIENT_UPDATE_REQUIRED`** («Actualiza esta terminal») con `details.min_client_version` (la mínima de ese tipo).
+   Sin `X-Client-Kind` se exige la general, `min_client_version`, que es la del escritorio y se conserva para los
+   clientes que solo leen esa propiedad. **Por la escucha de red** (HTTPS, la única que usan las terminales y
    el teléfono) `X-Client-Version` es **obligatoria**: sin ella la respuesta también es 426 (fase C; todo cliente que
    llega por la red es de la 9G o posterior). Por la escucha local de la computadora principal una petición sin
    `X-Client-Version` se acepta como «cliente sin identificar» (herramientas, pruebas automáticas y aplicaciones
@@ -33,9 +37,13 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
    cabeceras) y compara `server_version` con la versión mínima de servidor que necesita (en el escritorio,
    `min_server_version` de `config/product.json`); si es menor, avisa «Actualiza el servidor» en lugar de fallar en
    cada operación. `capabilities` dice qué funciones existen (`catalog-sync-v1`, `catalog-sold-out`,
-   `offline-orders-v1`, `state-recovery-v1`, `client-version-check`, `openapi-v1`…).
+   `offline-orders-v1`, `state-recovery-v1`, `client-version-check`, `openapi-v1`…; desde la etapa A1,
+   `client-versions-by-kind` y `waiter-pin-v1`: entrada con PIN, credencial de envío y su administración). La
+   aplicación Android exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue funcionando con un servidor
+   0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
-   además `Authorization: Bearer <token>`. Los tokens se guardan en el almacén seguro del sistema. Go valida terminal,
+   además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
+   lugar la credencial de envío del mesero, `X-Offline-Credential`; ver «Entrada con PIN y credencial de envío»). Los tokens se guardan en el almacén seguro del sistema. Go valida terminal,
    sesión y permisos en cada petición. **Una sesión activa por usuario y por dispositivo** (desde la etapa 9H, decisión
    del propietario; en la 9G era una sola por usuario en todo el sistema, decisión D9): el mismo usuario puede tener
    sesión a la vez en varios dispositivos (por ejemplo, una caja y un teléfono). Iniciar sesión **de nuevo en el mismo
@@ -62,6 +70,8 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
 | `login`                  | `POST /auth/login`                       | Iniciar sesión en una terminal emparejada.                                     |
 | `logout`                 | `POST /auth/logout`                      | Cerrar la sesión.                                                              |
 | `getIdentity`            | `GET /auth/me`                           | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
+| `listPinUsers`           | `GET /auth/pin-users`                    | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
+| `pinLogin`               | `POST /auth/pin-login`                   | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
 | `streamEvents`           | `GET /events`                            | Eventos en tiempo real (SSE).                                                  |
 | `getCatalogSync`         | `GET /catalog/sync`                      | Catálogo descargable completo o «solo cambios desde la versión X».             |
 | `listCatalogProducts`    | `GET /catalog/products`                  | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
@@ -75,7 +85,7 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
 | `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`    | Guardar el borrador.                                                           |
 | `previewDraft`           | `GET /restaurant/accounts/{id}/preview`  | Calcular el borrador y obtener su huella.                                      |
 | `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm` | Confirmar (enviar a cocina) el borrador.                                       |
-| `submitOfflineOrder`     | `POST /restaurant/offline-orders`        | Pedido capturado sin conexión (Android).                                       |
+| `submitOfflineOrder`     | `POST /restaurant/offline-orders`        | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
 | `createPairingRequest`   | `POST /pairing/requests`                 | Pedir un código de emparejamiento (sin credencial).                            |
 | `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`     | Revelar el número de la terminal después de recibir el del servidor.           |
 | `getPairingRequest`      | `GET /pairing/requests/{id}`             | Consultar si la computadora principal ya aprobó el código.                     |
@@ -129,6 +139,53 @@ meseros** (proyecto aparte, etapa posterior). Fase D de la etapa 9G (§5 de
    `?after=<cursor>` (o `Last-Event-ID`). Fuera de la ventana de 5000 eventos llega `reset: true` y el cliente vuelve a
    consultar todo. Desde la 9G existe el ámbito **`catalog`**: `catalog.changed` (cualquier cambio del catálogo),
    `catalog.product.sold_out` y `catalog.product.available` (con el producto como agregado).
+
+## Entrada con PIN y credencial de envío (etapa A1, fase B)
+
+Los teléfonos y tabletas de meseros se comparten: cada mesero entra con su **PIN** de 4 a 6 dígitos. Solo un
+dispositivo emparejado de tipo `android` usa estas rutas (en otro tipo, **403 `PIN_DEVICE_NOT_ALLOWED`**; las
+terminales de escritorio siguen con usuario y contraseña). Llevan la credencial del dispositivo y **no** una sesión.
+
+1. **`listPinUsers`** (`GET /auth/pin-users`): `{"device": {"id", "name", "idle_lock_seconds"}, "users": [...]}`.
+   Cada usuario: `id`, `name` (nombre corto o, si no tiene, el visible), `initial`, `color` (hexadecimal de la paleta
+   que elige el administrador, o `null`), `pin_version` y `locked_until` (`null` si no está bloqueado). Solo usuarios
+   activos, no de soporte, con PIN y con el permiso **`waiter_devices.use`** («Entrar con PIN en teléfonos y tabletas
+   de meseros»; lo tienen el administrador y el rol Mesero). `idle_lock_seconds` es el bloqueo por inactividad del
+   dispositivo (120 por omisión; se cambia en Administración › Terminales y también llega en `terminal` de
+   `getIdentity` y `getRecoveryState`).
+2. **`pinLogin`** (`POST /auth/pin-login`, `{"user_id", "pin"}`) → `{"session_token", "pin_version",
+"offline_credential"}`:
+   - PIN incorrecto (o un usuario que no puede entrar): **401 `PIN_INVALID`**. Un PIN sin forma de PIN: 400.
+   - **5 fallos en 15 minutos**, desde cualquier dispositivo, bloquean el PIN de ese usuario **5 minutos**: **429
+     `PIN_LOCKED`** con `details.locked_until` (también si se intenta durante el bloqueo, aunque el PIN sea correcto).
+     Un administrador lo desbloquea en Personal › Usuarios. Queda en el Registro de movimientos.
+   - PIN correcto sin `waiter_devices.use`: **403 `PERMISSION_DENIED`**.
+   - La sesión es como la de `login` (12 h) y **reemplaza solo la sesión anterior de ese usuario en ese
+     dispositivo**: el cambio rápido de mesero no cierra las de los demás meseros del mismo dispositivo.
+   - `offline_credential` es la **credencial de envío** del mesero en ese dispositivo: se entrega **una sola vez**,
+     se guarda cifrada (Android Keystore) y la nueva sustituye a la anterior de ese mesero en ese dispositivo.
+3. **Verificador local y `pin_version`**: el dispositivo guarda el verificador del PIN de cada mesero con su
+   `pin_version`. Al reconectarse (y al abrir la aplicación) pide `listPinUsers` y borra el verificador de quien ya no
+   aparece (desactivado, sin PIN o sin permiso) o tiene otra `pin_version`. Cambiar o quitar el PIN (o que el propio
+   usuario lo cambie en «Mi PIN») sube `pin_version`, **cierra sus sesiones en dispositivos android**
+   (`SESSION_REVOKED`) y revoca su credencial de envío; desactivar al usuario también.
+4. **Credencial de envío en `submitOfflineOrder`**: WorkManager entrega la cola **sin sesión** con las cabeceras del
+   dispositivo y **`X-Offline-Credential: <offline_credential>`** (sin `Authorization`; las dos juntas son 400). Go
+   valida al recibir, sin caché: dispositivo no revocado (si no, `DEVICE_REVOKED`), usuario activo, su PIN vigente con
+   la misma `pin_version` con que se emitió, `waiter_devices.use` y **los permisos vigentes** de la operación (sin
+   `orders.confirm`, 403 como con una sesión). El pedido queda a nombre del mesero y del dispositivo, igual que con su
+   sesión, y la misma `operation_id` sirve en los reintentos aunque uno haya ido con sesión y otro con la credencial.
+   - Credencial que ya no vale (PIN cambiado o quitado, usuario desactivado o sin `waiter_devices.use`, credencial
+     reemplazada por una entrada posterior): **401 `OFFLINE_CREDENTIAL_INVALID`**. El dispositivo **conserva el
+     pedido** en «Por enviar» y pide al mesero que entre con su PIN con conexión (eso emite una credencial nueva).
+   - **Solo sirve en esa ruta**: en cualquier otra (o con otro método) la petición se rechaza con **401
+     `OFFLINE_CREDENTIAL_NOT_ALLOWED`**, aunque traiga sesión. «Requiere tu revisión» siempre necesita al mesero con su
+     PIN y conexión.
+   - No es una sesión: no cuenta en «Sesiones activas por tipo de terminal» y no vence por tiempo.
+
+La administración del PIN (asignar, cambiar, quitar y desbloquear, nombre corto y color del distintivo, «Mi PIN» y el
+bloqueo por inactividad de cada dispositivo) es de la computadora principal y está en
+[API_CONTRACTS.md](../API_CONTRACTS.md), «Etapa A1 · PIN de los meseros».
 
 ## Catálogo descargable por versión (§5.3)
 
@@ -273,20 +330,25 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
 
 ## Códigos de error más frecuentes
 
-| Código                                                   | Estado | Qué hacer                                                                              |
-| -------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------- |
-| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                               |
-| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                        |
-| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                   |
-| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min). |
-| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                               |
-| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                        |
-| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                            |
-| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                      |
-| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                           |
-| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                              |
-| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                 |
-| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                          |
-| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                         |
-| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez.        |
-| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                    |
+| Código                                                   | Estado | Qué hacer                                                                                |
+| -------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- |
+| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                                 |
+| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                          |
+| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                     |
+| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min).   |
+| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                                 |
+| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                          |
+| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                              |
+| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                        |
+| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                             |
+| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                                |
+| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                   |
+| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                            |
+| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                           |
+| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez.          |
+| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                      |
+| `PIN_INVALID`                                            | 401    | PIN incorrecto: volver a escribirlo.                                                     |
+| `PIN_LOCKED`                                             | 429    | PIN bloqueado hasta `details.locked_until` (o hasta que un administrador lo desbloquee). |
+| `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                    |
+| `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                 |
+| `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                              |

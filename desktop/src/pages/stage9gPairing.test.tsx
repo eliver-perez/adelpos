@@ -395,7 +395,7 @@ describe('Sistema › Terminales con solicitudes, configuración y sesiones (eta
     expect(row.textContent).toContain('En línea');
     const summary = screen.getByRole('region', { name: 'Sesiones activas por tipo de terminal' });
     expect(summary.textContent).toContain('Escritorio3');
-    expect(summary.textContent).toContain('Comandero Android1');
+    expect(summary.textContent).toContain('Teléfono o tableta1');
     expect(summary.textContent).toContain('todavía no se limita ninguna');
     fireEvent.click(within(row).getByRole('button', { name: 'Ver configuración' }));
     const configuration = await screen.findByRole('region', {

@@ -11,9 +11,10 @@ import (
 )
 
 // devicesQuery es la terminal tal como se audita (antes y después de cada cambio). Desde la etapa 9G
-// (fase B) informa también el tipo, el sistema, la versión de la aplicación y cuándo se emparejó.
+// (fase B) informa también el tipo, el sistema, la versión de la aplicación y cuándo se emparejó; desde la etapa A1
+// (fase B), el bloqueo por inactividad (lo usan los teléfonos y tabletas de meseros).
 const devicesQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
-    d.kind,d.os,d.app_version,d.paired_at
+    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds
     FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id`
 
 // onlineWindow: una terminal está «en línea» si hizo alguna petición en los últimos 2 minutos (la ventana
@@ -24,12 +25,19 @@ const onlineWindow = "2 minutes"
 // usuario que tiene la sesión activa en ella (nunca la identidad reservada de soporte). Es por terminal:
 // desde la etapa 9H el mismo usuario puede ser el usuario actual de varias terminales a la vez.
 const deviceListQuery = `SELECT d.id,d.name,d.register_id,r.name AS register_name,d.keyboard_mode,d.home_screen,d.created_at,d.last_seen_at,d.revoked_at,
-    d.kind,d.os,d.app_version,d.paired_at,
+    d.kind,d.os,d.app_version,d.paired_at,d.idle_lock_seconds,
     (d.revoked_at IS NULL AND d.last_seen_at > now() - interval '` + onlineWindow + `') AS online,
     (SELECT u.display_name FROM app.sessions s JOIN app.users u ON u.id=s.user_id
         WHERE s.device_id=d.id AND s.revoked_at IS NULL AND s.expires_at > now() AND NOT u.support
         ORDER BY s.last_seen_at DESC LIMIT 1) AS "current_user"
     FROM app.devices d LEFT JOIN app.registers r ON r.id=d.register_id`
+
+// Límites del bloqueo por inactividad de un dispositivo (etapa A1, fase B): los mismos del CHECK
+// devices_idle_lock_seconds_check de la migración 0025.
+const (
+	minimumIdleLockSeconds = 30
+	maximumIdleLockSeconds = 3600
+)
 
 // terminalHomeScreens es la lista cerrada de pantallas de inicio de una terminal (etapa 9C, §1.5):
 // las secciones operativas de la barra superior. Coincide con el CHECK devices_home_screen_check de
@@ -88,6 +96,11 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		if _, err := tx.Exec(ctx, "UPDATE app.sessions SET revoked_at=now(),revoke_reason='device_revoked' WHERE device_id=$1 AND revoked_at IS NULL", deviceID); err != nil {
 			return nil, err
 		}
+		// Etapa A1 (A1-D1): las credenciales de envío de los meseros en este dispositivo también dejan de valer (la
+		// credencial del dispositivo ya se rechaza antes con DEVICE_REVOKED; esto deja el registro coherente).
+		if _, err := revokeOfflineCredentials(ctx, tx, "device_id", deviceID, "device_revoked"); err != nil {
+			return nil, err
+		}
 		return map[string]bool{"ok": true}, audit(ctx, tx, principal, "device.revoked", "device", &deviceID, previous, map[string]bool{"revoked": true}, true)
 	}
 	if request.Method != "PATCH" || len(parts) != 2 {
@@ -100,6 +113,8 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 		// Pantalla de inicio de la terminal (etapa 9C). Opcional: si no se envía, se conserva la
 		// guardada, de modo que los clientes anteriores siguen editando la terminal sin cambiarla.
 		HomeScreen *string `json:"home_screen"`
+		// Bloqueo por inactividad en segundos (etapa A1, fase B; de 30 a 3600). Opcional por la misma razón.
+		IdleLockSeconds *int `json:"idle_lock_seconds"`
 	}
 	if err := decode(request.Body, &input); err != nil {
 		return nil, err
@@ -110,6 +125,9 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	}
 	if input.HomeScreen != nil && !validTerminalHome(*input.HomeScreen) {
 		return nil, invalid("Elige la pantalla inicial de la terminal: Mesas, Para llevar, Cocina o Caja.")
+	}
+	if input.IdleLockSeconds != nil && (*input.IdleLockSeconds < minimumIdleLockSeconds || *input.IdleLockSeconds > maximumIdleLockSeconds) {
+		return nil, invalid("El bloqueo por inactividad debe ser de 30 segundos a 1 hora.")
 	}
 	if input.RegisterID != nil {
 		if !identifierPattern.MatchString(*input.RegisterID) {
@@ -135,8 +153,10 @@ func devices(ctx context.Context, tx pgx.Tx, request Request, principal Principa
 	if registerChanged && shiftOpen {
 		return nil, &Fault{Status: 409, Code: "SHIFT_OPEN", Message: "La caja actual de esta terminal tiene un turno abierto o en arqueo de cierre. No se puede cambiar de caja hasta cerrarlo."}
 	}
-	// coalesce conserva la pantalla de inicio guardada cuando la petición no la incluye.
-	if _, err := tx.Exec(ctx, "UPDATE app.devices SET name=$1,register_id=$2,keyboard_mode=$3,home_screen=coalesce($4,home_screen) WHERE id=$5", input.Name, input.RegisterID, input.KeyboardMode, input.HomeScreen, deviceID); err != nil {
+	// coalesce conserva la pantalla de inicio y el bloqueo por inactividad guardados cuando la petición no los incluye.
+	if _, err := tx.Exec(ctx, `UPDATE app.devices SET name=$1,register_id=$2,keyboard_mode=$3,home_screen=coalesce($4,home_screen),
+        idle_lock_seconds=coalesce($5,idle_lock_seconds) WHERE id=$6`,
+		input.Name, input.RegisterID, input.KeyboardMode, input.HomeScreen, input.IdleLockSeconds, deviceID); err != nil {
 		return nil, err
 	}
 	next, err := object(ctx, tx, devicesQuery+" WHERE d.id=$1", deviceID)

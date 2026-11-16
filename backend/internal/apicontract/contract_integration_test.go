@@ -373,14 +373,53 @@ func contractScenario(t *testing.T, client *contractClient) {
 	if accounts, _ := state["accounts"].([]any); len(accounts) < 2 {
 		t.Fatalf("el estado no trae las cuentas abiertas: %v", state["accounts"])
 	}
-	contractPairing(t, client)
+	phone := contractPairing(t, client)
+	// Etapa A1 (fase B): el teléfono emparejado muestra a los meseros, uno entra con PIN y la cola entrega un pedido con
+	// la credencial de envío (sin sesión).
+	order := offline("40.00")
+	order["destination"] = map[string]any{"account_id": accountID}
+	contractWaiterPIN(t, client, phone, order)
 	client.call("POST", "/auth/logout", nil, nil, 200)
+}
+
+// contractWaiterPIN es la entrada con PIN de la etapa A1 (fase B): el administrador da a un mesero su PIN (fuera del
+// contrato, en Personal › Usuarios); el teléfono emparejado pide la lista sin sesión, el PIN incorrecto se rechaza, el
+// correcto entrega la sesión y la credencial de envío, y con esa credencial (sin sesión) se entrega un pedido
+// capturado sin conexión.
+func contractWaiterPIN(t *testing.T, client *contractClient, phone *contractClient, order map[string]any) {
+	role := decodeContract[map[string]any](t, client.setup("POST", "/roles", map[string]any{"name": "Meseros contrato",
+		"permissions": []string{"waiter_devices.use", "orders.confirm", "orders.capture", "accounts.read", "accounts.open",
+			"catalog.read", "catalog.prices.read"}}, 200))
+	waiter := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "ana.contrato",
+		"display_name": "Ana del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato"}, 200))
+	waiterID := fmt.Sprint(waiter["id"])
+	client.setup("PUT", "/users/"+waiterID+"/pin", map[string]any{"pin": "4829", "short_name": "Ana", "badge_color": "#3591d4"}, 200)
+	list := decodeContract[map[string]any](t, phone.call("GET", "/auth/pin-users", nil, nil, 200).Body.Bytes())
+	users, _ := list["users"].([]any)
+	if len(users) != 1 || users[0].(map[string]any)["id"] != waiterID || users[0].(map[string]any)["color"] != "#3591d4" {
+		t.Fatalf("meseros del teléfono: %v", list)
+	}
+	phone.call("POST", "/auth/pin-login", map[string]string{"user_id": waiterID, "pin": "4828"}, nil, 401)
+	login := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": waiterID, "pin": "4829"}, nil, 200).Body.Bytes())
+	waiterPhone := *phone
+	waiterPhone.session = fmt.Sprint(login["session_token"])
+	identity := decodeContract[map[string]any](t, waiterPhone.call("GET", "/auth/me", nil, nil, 200).Body.Bytes())
+	if identity["terminal"].(map[string]any)["idle_lock_seconds"] != float64(120) {
+		t.Fatalf("bloqueo por inactividad del teléfono: %v", identity["terminal"])
+	}
+	queue := *phone
+	accepted := decodeContract[map[string]any](t, queue.call("POST", "/restaurant/offline-orders", order,
+		map[string]string{"X-Offline-Credential": fmt.Sprint(login["offline_credential"])}, 200).Body.Bytes())
+	if accepted["status"] != "accepted" {
+		t.Fatalf("pedido con la credencial de envío: %v", accepted)
+	}
 }
 
 // contractPairing es el emparejamiento de un teléfono Android (etapa 9G, fases B y C): pide el código con el
 // compromiso de su número, lo revela, cambia su nombre, espera la aprobación (que se hace en la computadora
 // principal, fuera del contrato) y reclama su credencial una sola vez; otra solicitud se cancela.
-func contractPairing(t *testing.T, client *contractClient) {
+func contractPairing(t *testing.T, client *contractClient) *contractClient {
 	nonce := make([]byte, 32)
 	_, _ = rand.Read(nonce)
 	created := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
@@ -423,4 +462,8 @@ func contractPairing(t *testing.T, client *contractClient) {
 	}, nil, 200).Body.Bytes())
 	client.call("POST", "/pairing/requests/"+other["request_id"]+"/cancel", map[string]any{},
 		map[string]string{"X-Pairing-Secret": other["pairing_secret"]}, 200)
+	// El teléfono ya emparejado (etapa A1): sus credenciales, sin sesión.
+	phone := *client
+	phone.device, phone.token, phone.session = claimed["device_id"], claimed["device_token"], ""
+	return &phone
 }

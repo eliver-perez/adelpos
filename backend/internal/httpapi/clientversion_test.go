@@ -59,7 +59,7 @@ func TestClientVersionCheck(t *testing.T) {
 	}
 	problem := body["error"].(map[string]any)
 	details := problem["details"].(map[string]any)
-	if problem["code"] != "CLIENT_UPDATE_REQUIRED" || details["min_client_version"] != metadata.MinClientVersion ||
+	if problem["code"] != "CLIENT_UPDATE_REQUIRED" || details["min_client_version"] != metadata.MinimumFor("android") ||
 		details["client_version"] != "0.0.1" || problem["request_id"] == "" {
 		t.Fatalf("rechazo del cliente viejo: %v", body)
 	}
@@ -123,7 +123,7 @@ func TestClientVersionIsRequiredOverTheNetwork(t *testing.T) {
 		}
 		problem := body["error"].(map[string]any)
 		details := problem["details"].(map[string]any)
-		if problem["code"] != "CLIENT_UPDATE_REQUIRED" || details["min_client_version"] != metadata.MinClientVersion {
+		if problem["code"] != "CLIENT_UPDATE_REQUIRED" || details["min_client_version"] != metadata.MinimumFor("android") {
 			t.Fatalf("rechazo sin versión: %v", body)
 		}
 		// Por la escucha local sin cabecera se sigue aceptando (aquí, sin aplicación: 404, o 501 sin eventos).
@@ -139,6 +139,85 @@ func TestClientVersionIsRequiredOverTheNetwork(t *testing.T) {
 		if status, _ := request(route, true, nil); status != 200 {
 			t.Fatalf("%s por la red sin versión: %d", route, status)
 		}
+	}
+}
+
+// Etapa A1 (decisión A1-D4): la versión mínima es por tipo de cliente. La aplicación Android 0.1.0 pasa aunque sea
+// anterior a la mínima del escritorio (0.10.0); un escritorio anterior a la suya y un Android anterior a la suya
+// reciben 426 con la mínima de su tipo; sin tipo se exige la general (la del escritorio). GET version informa ambas y
+// conserva min_client_version con la del escritorio.
+func TestClientMinimumVersionByKind(t *testing.T) {
+	h := handler(database.Health{Postgres: "available", Schema: "compatible"})
+	metadata := product.Read()
+	if metadata.MinimumFor("desktop") != "0.10.0" || metadata.MinimumFor("android") != "0.1.0" ||
+		metadata.MinClientVersion != metadata.MinimumFor("desktop") || metadata.MinimumFor("") != metadata.MinClientVersion {
+		t.Fatalf("versiones mínimas de product.json: %+v", metadata)
+	}
+	request := func(network bool, headers map[string]string) (int, map[string]any) {
+		r := httptest.NewRequest("GET", "/api/v1/restaurant/state", nil)
+		if network {
+			r = r.WithContext(lanlistener.WithNetwork(r.Context()))
+		}
+		for key, value := range headers {
+			r.Header.Set(key, value)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+	for _, network := range []bool{false, true} {
+		for _, tc := range []struct {
+			kind, version string
+			status        int
+			minimum       string
+		}{
+			{"android", "0.1.0", 404, ""},
+			{"android", "0.1.7", 404, ""},
+			{"android", "0.0.9", 426, "0.1.0"},
+			{"android", "0.1.0-beta.1", 426, "0.1.0"},
+			{"desktop", "0.10.0", 404, ""},
+			{"desktop", "0.11.0", 404, ""},
+			{"desktop", "0.9.9", 426, "0.10.0"},
+			{"desktop", "0.1.0", 426, "0.10.0"},
+			{"", "0.1.0", 426, "0.10.0"},
+			{"", metadata.Version, 404, ""},
+		} {
+			headers := map[string]string{ClientVersionHeader: tc.version}
+			if tc.kind != "" {
+				headers[ClientKindHeader] = tc.kind
+			}
+			status, body := request(network, headers)
+			if status != tc.status {
+				t.Fatalf("%q %s (red %v): %d %v", tc.kind, tc.version, network, status, body)
+			}
+			if tc.status == 426 {
+				details := body["error"].(map[string]any)["details"].(map[string]any)
+				if details["min_client_version"] != tc.minimum || details["client_version"] != tc.version {
+					t.Fatalf("%q %s: detalles del rechazo %v", tc.kind, tc.version, details)
+				}
+			}
+		}
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/version", nil))
+	version := map[string]any{}
+	if err := json.Unmarshal(w.Body.Bytes(), &version); err != nil || w.Code != 200 {
+		t.Fatalf("versión: %d %v", w.Code, err)
+	}
+	minimums, _ := version["min_client_versions"].(map[string]any)
+	if version["min_client_version"] != "0.10.0" || minimums["desktop"] != "0.10.0" || minimums["android"] != "0.1.0" ||
+		len(minimums) != len(ClientKinds) {
+		t.Fatalf("versiones mínimas informadas: %v %v", version["min_client_version"], version["min_client_versions"])
+	}
+	capabilities, _ := version["capabilities"].([]any)
+	found := map[string]bool{}
+	for _, capability := range capabilities {
+		found[capability.(string)] = true
+	}
+	if !found["waiter-pin-v1"] || !found["client-versions-by-kind"] {
+		t.Fatalf("capacidades de la etapa A1: %v", capabilities)
 	}
 }
 
