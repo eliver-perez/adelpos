@@ -176,14 +176,14 @@ func buildSummary(plan *Plan, expected Expected, sizeBytes int64, sha256 string)
 	}
 	summary.Totals.CancelledLegacyStyle = expected.CancelledLegacyStyle.String()
 	summary.Totals.Withdrawals = expected.WithdrawalsTotal.String()
-	summary.Totals.Expenses = (expected.ExpensesTotal + expected.PurchasesTotal).String()
+	summary.Totals.Expenses = expected.ExpensesTotal.String()
 	summary.Warnings = append(summary.Warnings,
 		"El sistema anterior no guardaba dólares ni tipo de cambio: los pagos en dólares quedaron como efectivo en pesos.",
 		"Las ventas canceladas se importan como canceladas y no cuentan como venta (el sistema anterior las contaba).",
 		"El inventario, las impresoras, las cajas como equipos y la configuración del equipo no se importan.",
 		"Los usuarios se importan sin contraseña y sin acceso; asígnales una en Usuarios para que puedan entrar.")
-	if expected.Expenses > 0 || expected.Purchases > 0 {
-		summary.Warnings = append(summary.Warnings, "El paquete trae egresos o compras del sistema anterior; no se importan.")
+	if expected.Purchases > 0 {
+		summary.Warnings = append(summary.Warnings, "El paquete trae compras recibidas del sistema anterior; no se importan.")
 	}
 	return summary
 }

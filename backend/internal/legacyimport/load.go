@@ -357,8 +357,10 @@ var decoders = map[string]tableDecoder{
 		})
 	}},
 	"salidas": {[]string{"monto"}, func(rows *rowReader) {
-		rows.model.Expenses++
-		rows.model.ExpensesTotal += rows.money("monto")
+		rows.model.Expenses = append(rows.model.Expenses, Expense{
+			Position: rows.position, Shift: rows.nullInt("corte"), Amount: rows.money("monto"), SpentAt: rows.time("fecha"),
+			AuthorizedBy: rows.nullInt("autorizacion"),
+		})
 	}},
 	"entradas": {[]string{"total"}, func(rows *rowReader) {
 		rows.model.Purchases++

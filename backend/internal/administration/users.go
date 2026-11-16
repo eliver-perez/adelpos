@@ -8,7 +8,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const publicUserColumns = "u.id,u.username,u.display_name,u.role_id,r.name AS role_name,u.active,u.initial_password,u.created_at,u.updated_at"
+// has_password (etapa 9H) dice si el usuario tiene contraseña: los importados del sistema anterior entran sin ella
+// (sin acceso) hasta «Asignar contraseña» (user_password.go). Nunca se expone la contraseña ni su hash.
+const publicUserColumns = "u.id,u.username,u.display_name,u.role_id,r.name AS role_name,u.active,u.initial_password," +
+	"(u.password_hash IS NOT NULL) AS has_password,u.created_at,u.updated_at"
 
 type UserInput struct {
 	Username    string `json:"username"`
@@ -24,6 +27,10 @@ func users(ctx context.Context, tx pgx.Tx, request Request, principal Principal,
 	}
 	if len(parts) == 3 && parts[2] == "preferences" {
 		return preferences(ctx, tx, request, principal, parts[1], true)
+	}
+	// Etapa 9H: «Asignar contraseña» a un usuario sin contraseña (user_password.go).
+	if len(parts) == 3 && parts[2] == "password" {
+		return assignPassword(ctx, tx, request, principal, parts[1])
 	}
 	// Etapa 9F: «Estaciones que puede atender» (user_stations.go).
 	if len(parts) == 3 && parts[2] == "kitchen-stations" {

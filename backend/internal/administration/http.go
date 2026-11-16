@@ -58,6 +58,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	if strings.HasPrefix(request.URL.Path, "/api/v1/inventory/") {
 		limit = 2 * 1024 * 1024
 	}
+	// Una parte del paquete del sistema anterior: 1 MiB en base64 (etapa 9H, legacy_migration.go).
+	if legacyLimit := legacyBodyLimit(request.URL.Path); legacyLimit > 0 {
+		limit = legacyLimit
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, limit))
 	if err != nil {
 		writeFault(writer, request, &Fault{Status: 413, Code: "REQUEST_TOO_LARGE", Message: "La solicitud excede el tamaño permitido."})
@@ -115,6 +119,10 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 	}
 	// La imagen del catálogo (etapa 9G) también: binaria, con su etiqueta de caché (binary.go).
 	if writeBinary(writer, result) {
+		return
+	}
+	// El informe en PDF de la migración del sistema anterior (etapa 9H).
+	if writeLegacyFile(writer, result) {
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")

@@ -162,6 +162,7 @@ func writeHistory(ctx context.Context, tx pgx.Tx, plan *Plan, ids IDMap, batch p
 	counter := &copyCounter{progress: progress}
 	counter.total = int64(len(model.Sales)+len(model.Lines)+len(model.LineComplements)+len(model.QuantityChanges)+
 		len(model.Discounts)+len(model.Cancellations)+len(model.Payments)+len(model.Shifts)+len(model.Withdrawals)+
+		len(model.Expenses)+
 		len(history.Prices)) + ledgerRows
 	written := map[string]int64{}
 	copyTable := func(table string, columns []string, rows int, next func(int) ([]any, error)) error {
@@ -222,6 +223,14 @@ func writeHistory(ctx context.Context, tx pgx.Tx, plan *Plan, ids IDMap, batch p
 		legacyUser, userID, userName := names.user(withdrawal.AuthorizedBy)
 		return []any{batch, withdrawal.ID, withdrawal.Shift.Pointer(), withdrawal.Amount.Numeric(), withdrawal.Reason,
 			timePointer(withdrawal.WithdrawnAt), legacyUser, userID, userName, history.Withdrawals[index].Flags.array()}, nil
+	}); err != nil {
+		return nil, err
+	}
+	if err := copyTable("legacy_cash_expenses", expenseColumns, len(model.Expenses), func(index int) ([]any, error) {
+		expense := model.Expenses[index]
+		legacyUser, userID, userName := names.user(expense.AuthorizedBy)
+		return []any{batch, expense.Position, expense.Shift.Pointer(), expense.Amount.Numeric(), timePointer(expense.SpentAt),
+			legacyUser, userID, userName, []string{}}, nil
 	}); err != nil {
 		return nil, err
 	}
@@ -386,6 +395,9 @@ func shiftRow(model *Model, history *HistoryPlan, names *historyNames, batch pgt
 
 var withdrawalColumns = []string{"batch_id", "legacy_id", "legacy_shift_id", "amount", "reason", "withdrawn_at",
 	"legacy_authorized_by", "authorized_user_id", "authorized_name", "flags"}
+
+var expenseColumns = []string{"batch_id", "position", "legacy_shift_id", "amount", "spent_at", "legacy_authorized_by",
+	"authorized_user_id", "authorized_name", "flags"}
 
 var priceColumns = []string{"batch_id", "position", "item_kind", "legacy_item_id", "item_id", "item_name", "starts_at",
 	"valid_until", "subtotal", "tax", "total", "tax_rate", "flags"}

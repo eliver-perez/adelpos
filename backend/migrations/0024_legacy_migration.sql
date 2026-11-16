@@ -351,6 +351,22 @@ CREATE TABLE app.legacy_cash_withdrawals (
 );
 CREATE INDEX legacy_cash_withdrawals_shift_idx ON app.legacy_cash_withdrawals (legacy_shift_id);
 
+-- 12 b. Salidas de efectivo del turno (salidas, sin llave en el anterior: position es su orden en el paquete). En el
+--     respaldo real está vacía (el anterior no tenía egresos); si un paquete las trae, se conservan y forman el «Total de
+--     egresos» de la validación.
+CREATE TABLE app.legacy_cash_expenses (
+    batch_id uuid NOT NULL CONSTRAINT legacy_cash_expenses_batch_id_fkey REFERENCES app.legacy_import_batches(id),
+    position integer NOT NULL,
+    legacy_shift_id integer,
+    amount numeric(19,4) NOT NULL,
+    spent_at timestamptz,
+    legacy_authorized_by integer,
+    authorized_user_id uuid,
+    authorized_name text,
+    flags text[] NOT NULL DEFAULT '{}',
+    CONSTRAINT legacy_cash_expenses_pkey PRIMARY KEY (batch_id, position)
+);
+
 -- 13. Historial de precios (productos_precios y complementos_precios, sin llave en el anterior) con sus vigencias. El
 --     catálogo importado solo tiene el precio más reciente; aquí queda todo para consulta.
 CREATE TABLE app.legacy_price_history (
@@ -460,6 +476,8 @@ CREATE TRIGGER legacy_payments_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCA
 CREATE TRIGGER legacy_cash_shifts_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON app.legacy_cash_shifts
     FOR EACH STATEMENT EXECUTE FUNCTION app.legacy_history_guard();
 CREATE TRIGGER legacy_cash_withdrawals_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON app.legacy_cash_withdrawals
+    FOR EACH STATEMENT EXECUTE FUNCTION app.legacy_history_guard();
+CREATE TRIGGER legacy_cash_expenses_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON app.legacy_cash_expenses
     FOR EACH STATEMENT EXECUTE FUNCTION app.legacy_history_guard();
 CREATE TRIGGER legacy_price_history_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON app.legacy_price_history
     FOR EACH STATEMENT EXECUTE FUNCTION app.legacy_history_guard();

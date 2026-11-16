@@ -17,7 +17,6 @@ type Expected struct {
 	CancelledLegacyStyle Money
 	WithdrawalsTotal     Money
 	ExpensesTotal        Money
-	Expenses             int64
 	PurchasesTotal       Money
 	Purchases            int64
 }
@@ -42,6 +41,7 @@ const (
 	CountShifts          = "cash_shifts"
 	CountWithdrawals     = "withdrawals"
 	CountPrices          = "price_history"
+	CountExpenses        = "expenses"
 )
 
 // computeExpected recorre las filas del paquete. yearOf da el año del día comercial de un instante.
@@ -50,33 +50,40 @@ func computeExpected(model *Model, yearOf func(time.Time) int) Expected {
 		Counts:               map[string]int64{},
 		SalesByYear:          map[int]Money{},
 		PaymentsByMethodYear: map[string]map[int]Money{},
-		WithdrawalsTotal:     0,
-		ExpensesTotal:        model.ExpensesTotal,
-		Expenses:             model.Expenses,
 		PurchasesTotal:       model.PurchasesTotal,
 		Purchases:            model.Purchases,
 	}
-	tables := int64(0)
+	// Los conteos salen del manifiesto del paquete (el lector ya comprobó que cada tabla trae exactamente esas filas);
+	// solo si una tabla no está en el manifiesto se cuentan sus filas.
+	manifest := func(table string, rows int) int64 {
+		if count, found := model.Info.Tables[table]; found {
+			return count
+		}
+		return int64(rows)
+	}
+	takeaway := int64(0)
 	for _, table := range model.Tables {
-		if table.ID != takeawayTableID {
-			tables++
+		if table.ID == takeawayTableID {
+			takeaway = 1
 		}
 	}
-	expected.Counts[CountCategories] = int64(len(model.Categories))
-	expected.Counts[CountProducts] = int64(len(model.Products))
-	expected.Counts[CountComplements] = int64(len(model.Complements))
-	expected.Counts[CountTables] = tables
-	expected.Counts[CountUsers] = int64(len(model.Users))
-	expected.Counts[CountSales] = int64(len(model.Sales))
-	expected.Counts[CountLines] = int64(len(model.Lines))
-	expected.Counts[CountLineComplements] = int64(len(model.LineComplements))
-	expected.Counts[CountQuantityChanges] = int64(len(model.QuantityChanges))
-	expected.Counts[CountDiscounts] = int64(len(model.Discounts))
-	expected.Counts[CountCancellations] = int64(len(model.Cancellations))
-	expected.Counts[CountPayments] = int64(len(model.Payments))
-	expected.Counts[CountShifts] = int64(len(model.Shifts))
-	expected.Counts[CountWithdrawals] = int64(len(model.Withdrawals))
-	expected.Counts[CountPrices] = int64(len(model.ProductPrices) + len(model.ComplementPrices))
+	expected.Counts[CountCategories] = manifest("categorias", len(model.Categories))
+	expected.Counts[CountProducts] = manifest("productos", len(model.Products))
+	expected.Counts[CountComplements] = manifest("complementos", len(model.Complements))
+	expected.Counts[CountTables] = manifest("mesas", len(model.Tables)) - takeaway
+	expected.Counts[CountUsers] = manifest("usuarios", len(model.Users))
+	expected.Counts[CountSales] = manifest("ventas", len(model.Sales))
+	expected.Counts[CountLines] = manifest("ventas_productos", len(model.Lines))
+	expected.Counts[CountLineComplements] = manifest("ventas_complementos", len(model.LineComplements))
+	expected.Counts[CountQuantityChanges] = manifest("ventas_modificaciones", len(model.QuantityChanges))
+	expected.Counts[CountDiscounts] = manifest("descuentos", len(model.Discounts))
+	expected.Counts[CountCancellations] = manifest("cancelaciones", len(model.Cancellations))
+	expected.Counts[CountPayments] = manifest("pagos", len(model.Payments))
+	expected.Counts[CountShifts] = manifest("cortes", len(model.Shifts))
+	expected.Counts[CountWithdrawals] = manifest("cortes_parciales", len(model.Withdrawals))
+	expected.Counts[CountExpenses] = manifest("salidas", len(model.Expenses))
+	expected.Counts[CountPrices] = manifest("productos_precios", len(model.ProductPrices)) +
+		manifest("complementos_precios", len(model.ComplementPrices))
 
 	cancelled := map[int32]bool{}
 	for _, cancellation := range model.Cancellations {
@@ -125,6 +132,9 @@ func computeExpected(model *Model, yearOf func(time.Time) int) Expected {
 	}
 	for _, withdrawal := range model.Withdrawals {
 		expected.WithdrawalsTotal += withdrawal.Amount
+	}
+	for _, expense := range model.Expenses {
+		expected.ExpensesTotal += expense.Amount
 	}
 	return expected
 }
