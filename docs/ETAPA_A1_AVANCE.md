@@ -637,6 +637,241 @@ Como máximo dos agentes a la vez; servidor y Android avanzan en paralelo cuando
 
 ---
 
+## Fase A · Proyecto base
+
+Rama `etapa-a1-a` (desde `etapa-a1-android`, `6b5109e`), un agente, 16 de noviembre de 2026. Árbol `$SP/wt/A`,
+`ISO_TAG=A`, Go temporal propio en 8193/8453 (solo para una prueba del cliente; apagado al terminar). **Sin cambios en
+el servidor, el escritorio, `config/` ni `docs/API_V1.md`**; `docs/etapas/*.md` con el mismo md5 antes y después.
+Ninguna prueba usó el servicio real de la Mac.
+
+Commits:
+
+| Commit    | Tema                                                                                                                     |
+| --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `0a04de4` | Proyecto Gradle de `android/`: wrapper 9.9.1, catálogo, módulos, tipos de compilación, bloqueos y verificación SHA-256   |
+| `4e368d0` | `core:domain`: importes como texto, monitor de red, errores de la API, cifrado (interfaz), estados de mesa               |
+| `a66f3d4` | `core:data`: cliente con huella fijada, errores de Go, `GET version`, Room v1, monitor de conexión, Keystore             |
+| `d78a6a5` | `core:ui`: tema claro/oscuro, íconos propios, estado de mesa, botones, barra con indicador, uno o dos paneles            |
+| `f738f7f` | `app`, `feature:access`, `feature:waiter`: inyección manual, navegación, Entrar y Mesas de muestra, rotación sin pérdida |
+| `f33aeb7` | `scripts/dev.sh` (`android-*`), `android/CLAUDE.md` y `docs/DEPENDENCIES.md` («Etapa A1 · Android»)                      |
+
+### Qué se hizo
+
+**Proyecto** (`android/`, estructura A1-D10): `app`, `core:domain` (Kotlin/JVM puro), `core:data`, `core:ui`,
+`feature:access`, `feature:waiter`; espacios de nombres `local.adel.pos.android[.core.data|…]`. Versiones de §1.2 del
+avance, exactas, en `android/gradle/libs.versions.toml` (WorkManager y `okhttp-sse` declarados pero sin usar hasta las
+fases D/E). Gradle 9.9.1: el `gradle-wrapper.jar` se regeneró con el propio 9.9.1 y es **idéntico al publicado**
+(SHA-256 `621008af…cdaf8`, el de `gradle-9.9.1-wrapper.jar.sha256`; el del proyecto de prueba de la Fase 0 era de otra
+versión) y `gradle-wrapper.properties` lleva `distributionSha256Sum`. `minSdk` 26, `targetSdk` 36, `compileSdk` 37,
+`applicationId` `local.adel.pos.android`, `versionName` 0.1.0 y `versionCode` 1 (`android/app/build.gradle.kts:62-65`).
+**La versión se escribe en un solo lugar**, `android/gradle.properties` (`adelpos.versionName`/`versionCode`); la usan
+el APK y `X-Client-Version` (`BuildConfig.VERSION_NAME` → `ClientIdentity` en `AppContainer`).
+
+**Bloqueo y verificación de dependencias**: `dependencyLocking { lockAllConfigurations() }` en todos los proyectos
+(`android/build.gradle.kts:33`) y en el classpath de los complementos: un `gradle.lockfile` por proyecto (todas las
+configuraciones, también Lint, KSP, ktfmt y la plataforma de pruebas instrumentadas), `buildscript-gradle.lockfile` y
+`settings-gradle.lockfile`. **La verificación de Gradle funciona sin dolores**: `android/gradle/verification-metadata.xml`
+(555 componentes con SHA-256, metadatos verificados, firmas no) se generó con la tarea `resolveAllDependencies`
+(`android/build.gradle.kts:38`, resuelve grafo y archivos de todas las configuraciones) más la compilación, las pruebas,
+Lint, ktfmt y `connectedDebugAndroidTest` en un emulador; después pasó todo con la verificación activa y
+`--rerun-tasks`, y desde una exportación limpia del commit (`git archive`). Detalles: `aapt2` es por sistema operativo
+(solo el de macOS); fuentes y javadoc de Android Studio quedan como confiables (no entran a la compilación); agregar una
+dependencia obliga a regenerar ambos con un emulador encendido (orden exacta en `android/CLAUDE.md`, «Dependencias»).
+
+**Tipos de compilación** (A1-D8): `debug` con `app/src/debug/AndroidManifest.xml` y `network_security_config.xml`
+(base sin texto claro, `domain-config` solo `10.0.2.2`); `release` con `isMinifyEnabled`, `isShrinkResources` y
+`-dontobfuscate` (`app/proguard-rules.pro`), firmado **solo** si la propiedad `adelpos.signingProperties` o la variable
+`ADELPOS_SIGNING_PROPERTIES` apuntan a un archivo de propiedades fuera del repositorio
+(`app/build.gradle.kts:25`, `loadReleaseSigning`: rechaza archivo o llave dentro del repositorio y faltantes). Manifiesto
+con `allowBackup="false"`, `dataExtractionRules` (Android 12+) y `fullBackupContent` (8–11) que excluyen todos los
+dominios, `usesCleartextTraffic="false"`, `enableOnBackInvokedCallback="true"` e ícono reducido con `sips` desde
+`desktop/src-tauri/icons/icon.png` (mipmaps clásicos de 48 a 192 px).
+
+**Inyección manual**: `AdelPosApplication` crea `AppContainer` (identidad del cliente, monitor de conexión, contador de
+pendientes, Room, preferencias y el sellador del Keystore, perezosos); `ShellViewModel` y `TablesViewModel` con
+`viewModelFactory { initializer { … } }`. Sin Hilt.
+
+**`core:domain`**: `Money` (cadena decimal validada; nunca número) y `MoneyFormat`, puerto exacto de
+`desktop/src/services/money.ts` (formato, con signo, deducción y denominación), probado con **la misma tabla de casos**
+que Go y Vitest (`backend/internal/moneytext/testdata/cases.json`, leída por la prueba); `DefaultNetworkTracker` (red
+predeterminada, bloqueos, cambio de red; **no exige red validada**); `ConnectionSummary`/`LinkState`;
+`PendingOrdersSource`; `AppError`/`AppResult`; `SecretSealer` + `SecretUnavailableException` (KEY_LOST, DAMAGED,
+KEYSTORE_FAILED); `TableState` con los nombres de la API; `TablesView`.
+
+**`core:data`**:
+
+- `PinnedHttpClient` (`core/data/.../api/PinnedHttpClient.kt:36-40`): `PinnedTrustManager` (SHA-256 de la SPKI,
+  `MessageDigest.isEqual` en tiempo constante, `PinMismatchException`), `hostnameVerifier` sustituido por la huella con
+  el comentario del porqué, **solo `ConnectionSpec.RESTRICTED_TLS`** (TLS 1.3/1.2), un `SSLContext` por cliente, sin
+  reintentos automáticos, `ClientHeadersInterceptor` (`X-Client-Version`, `X-Client-Kind: android`).
+- JSON: `ApiJson` (ignora campos desconocidos), `MoneySerializer` (solo cadenas; un número JSON se rechaza).
+- Errores (`ApiProblem.kt:44-116`): la forma de Go (`backend/internal/httpapi/router.go:40`, `fail`/`failWithDetails`)
+  → `ApiProblem` (con `details`) → `AppError`: 426 y `CLIENT_VERSION_INVALID`/`CLIENT_KIND_INVALID` → `UpdateRequired`
+  (con `min_client_version` y `server_version`); `DEVICE_REVOKED`; otros `DEVICE_*`; `SESSION_*`;
+  `PERMISSION_DENIED`; 429 → `TryLater`; 5xx → `ServerProblem`; cuerpo sin la forma de Go → `InvalidResponse`; lo
+  demás → `Rejected` con su `code`; sin respuesta → `Unreachable`; huella distinta → `ServerIdentityChanged`.
+- `ServerApi.getVersion()` (`VersionInfo` del contrato; `min_client_versions` opcional para el servidor 0.12.0, A1-D4).
+- Room `AppDatabase` v1 con `device_preferences` (clave/valor) y `DevicePreferencesRepository` (vista de mesas, lista
+  por omisión); esquema exportado en `core/data/schemas/` (complemento `androidx.room`), `MIGRATIONS` vacía y la regla
+  de nunca destruir la base.
+- `ConnectionMonitor` (`registerDefaultNetworkCallback`, estado inicial síncrono con `current()`), `NoPendingOrders`.
+- `KeystoreSecretSealer`: AES-256-GCM, llave del Android Keystore no exportable, StrongBox si el dispositivo lo anuncia
+  (función `@RequiresApi(28)` con respaldo sin él), sin autenticación de usuario ni exigencia de desbloqueo (dispositivos
+  compartidos y cola con la pantalla bloqueada), vector del Keystore, propósito como dato autenticado; formato versión ·
+  largo del vector · vector · cifrado; `destroyKey()` para la revocación.
+
+**`core:ui`**: `AdelPalette.kt`, **único archivo con colores**, con los tokens de `desktop/src/styles.css` (`:root` y
+`:root[data-theme='dark']`, resueltos: `--table-free-bg` = panel de cada tema, etc.); `AdelTheme` llena **todos** los
+roles de Material 3 (también `surfaceContainer*`) para que nada use la paleta de muestra; `AdelTheme.colors` para lo
+propio (mesas, ámbar, uva, indicador). Tipografía algo mayor para tableta (cuerpo 16–18 sp). `AdelIcons`: palomita,
+reloj, recibo, efectivo, candado, enviar y volver, con los trazos de `Icon.tsx` (círculos y rectángulos convertidos a
+trazos) como `ImageVector`. `TableStateBadge` (color, texto, ícono). `PrimaryButton` 56 dp y `SecondaryButton` 48 dp.
+`AdelTopBar` + `ConnectionIndicator` («En línea» punto azul, «Sin conexión» punto y texto rojos, «N pedidos por enviar»
+en ámbar con plural; región viva para lectores de pantalla). `AdaptivePanes` + `paneLayoutFor`/`currentPaneLayout()`
+con `currentWindowAdaptiveInfoV2()`. Textos en `strings.xml` con `tools:locale="es"`.
+
+**`app` y `feature:*`**: `MainActivity` con `enableEdgeToEdge()` y `WindowInsets.safeDrawing` en el `Scaffold`;
+navigation-compose con rutas con tipo («Entrar» → «Mesas»); barra superior común con el indicador en todas las
+pantallas; Mesas con «Buscar mesa» y el panel de cuenta abierto en `SavedStateHandle` (`TablesViewModel.kt:20-33`);
+en el teléfono la cuenta va «a un toque» («Ver cuenta») y vuelve con «Volver a Mesas» o Atrás (`BackHandler`,
+`AdaptivePanes.kt:69`).
+
+**Formato y comprobación**: ktfmt con `kotlinLangStyle()` (complemento `com.ncorti.ktfmt.gradle` 0.28.0 →
+`org.jetbrains.kotlinx:ktfmt` 0.65, bloqueado) en fuentes y `.kts` de todos los proyectos; Android Lint con
+`warningsAsErrors` en los cinco módulos Android. `scripts/dev.sh` (`:17`, `:123-142`): `android-format`,
+`android-format-check`, `android-build` (con el tamaño de cada APK), `android-test` (JVM, Robolectric y Lint) y
+`android-connected` (`ANDROID_SERIAL`), con el JBR de Android Studio y `~/Library/Android/sdk` por omisión; **fuera** de
+`format-check` y `test`. `.gitignore` (`android/.gradle`, `android/**/build`, `android/local.properties`,
+`android/.kotlin`, `*.jks`, `*.keystore`, `*.p12`, propiedades de firma), `.prettierignore` (compilaciones y esquemas de
+Room), `.gitattributes` (`*.kt`, `*.kts`, `*.xml`, `*.properties`, `*.lockfile`, `*.pro`, `gradlew` con LF; `*.jar`,
+`*.apk`, `*.webp` binarios) y `.editorconfig` (Kotlin con 4 espacios y 100 columnas, XML de Android con 4).
+
+### Decisiones tomadas en la fase
+
+- **Regla de dos paneles: ancho ≥ 600 dp y alto ≥ 480 dp** (`core/ui/.../layout/PaneLayout.kt:22`). El encargo dice «en
+  ancho expandido» (≥ 840 dp), pero la Pixel Tablet vertical mide 800 dp de ancho y §0-B pide catálogo y cuenta lado a
+  lado en la tableta; con ≥ 600 dp la tableta tiene dos paneles en ambas orientaciones y el teléfono horizontal (ancho
+  expandido, alto compacto ≈ 411 dp) se queda con uno. Es una constante: el coordinador puede subirla a 840.
+- **Andamio propio** (`AdaptivePanes`) en lugar de `ListDetailPaneScaffold`: regla propia (la de Material da un panel
+  en ancho medio), estado guardable por el `ViewModel` y pruebas deterministas con la disposición forzada;
+  `material3-adaptive` solo aporta `currentWindowAdaptiveInfoV2()`.
+- **Solo `RESTRICTED_TLS`** (el proyecto de prueba agregaba `MODERN_TLS` de respaldo): verificado contra el Go temporal
+  en Android 8 y 13 (abajo).
+- **Huella distinta detectada en causas y suprimidas**: con `localhost` OkHttp prueba `::1` y `127.0.0.1` y lanza la
+  primera falla (`ConnectException`) con el `SSLHandshakeException` de la huella como **suprimida** (comprobado);
+  `ApiErrors.fromException` busca `PinMismatchException` en ambas, así nunca se confunde con «sin red».
+- **`CLIENT_VERSION_INVALID` y `CLIENT_KIND_INVALID` → `UpdateRequired`**: el remedio es el mismo («Actualiza esta
+  terminal»); el `code` se conserva.
+- **Room sin cifrado de base completa**: no se agregó SQLCipher (no está en §1.2). Las credenciales y el verificador del
+  PIN se guardarán cifrados campo a campo con el Keystore (fases B/C); la base queda en el almacenamiento privado de la
+  aplicación, fuera de las copias. Ver «Para el coordinador».
+- **Espresso 3.7.0 fijado** en `core:ui` y `app` (pruebas): Compose UI test trae Espresso 3.5.0, que en Android 17 falla
+  en todas las pruebas de Compose con `NoSuchMethodException: InputManager.getInstance` (visto en Pixel_8).
+- **API v2 de las reglas de prueba de Compose** (`androidx.compose.ui.test.junit4.v2`): las de v1 están en desuso en el
+  BOM 2026.09.00.
+- **Lint**: `warningsAsErrors`, con `GradleDependency`, `AndroidGradlePluginVersion`, `NewerVersionAvailable` y
+  `OldTargetApi` desactivadas (versiones del avance y A1-D7) y `ObsoleteLintCustomCheck` informativa (el `lint.jar` de
+  lifecycle 2.11.0 usa una API que el lint de AGP 9.5.1 no tiene: se omiten `UnsafeLifecycleWhenUsage` y
+  `RepeatOnLifecycleWrongUsage`). `CustomX509TrustManager` se suprime en `PinnedTrustManager` con la justificación
+  (rechaza todo salvo la llave fijada).
+- **Rotación real en las pruebas** (`UiAutomation.setRotation`, la actividad se recrea), no `recreate()`: vale también
+  en tabletas (Android 16 ignora la orientación pedida por la aplicación en pantallas ≥ 600 dp).
+- **Tema** según el sistema (`isSystemInDarkTheme()`); el escritorio guarda la preferencia por usuario en el servidor.
+- **Comentarios de línea de 100 columnas como máximo**: ktfmt corta los `//` más largos en renglones sueltos; se
+  reacomodaron todos.
+
+### Pruebas ejecutadas (aisladas)
+
+| Qué                                                                                                     | Dónde                                                         | Resultado                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM (`:core:domain:test`, `testDebugUnitTest`)                                                          | Mac, JBR 25                                                   | **41/41**: `MoneyFormatTest` 7 (tabla compartida: 34 de formato, 10 con signo, 8 de denominación), `TableStateTest` 2, `DefaultNetworkTrackerTest` 5, `ServerApiTest` 11, `MoneySerializerTest` 4, `PaneLayoutTest` 4, `ColorsOnlyInPaletteTest` 2, `PaletteContrastTest` 2, `TablesViewModelTest` 2 |
+| Robolectric SDK 36                                                                                      | `AppDatabaseTest`                                             | **2/2** (incluido en las 41)                                                                                                                                                                                                                                                                         |
+| Android Lint (`lintDebug`, 5 módulos)                                                                   | Mac                                                           | Sin problemas (solo el aviso informativo de lifecycle)                                                                                                                                                                                                                                               |
+| ktfmt (`ktfmtCheck`) y `./scripts/dev.sh android-format-check`                                          | Mac                                                           | Correcto                                                                                                                                                                                                                                                                                             |
+| Instrumentadas (`connectedDebugAndroidTest`, 21: core:data 9, core:ui 6, app 6)                         | `Pixel_8` API 37 (5580), con `dev.sh android-connected`       | **19/19** + 2 omitidas (las del Go temporal, sin argumentos)                                                                                                                                                                                                                                         |
+| Lo mismo                                                                                                | `Pixel_Tablet` API 37 (5582)                                  | **19/19** + 2 omitidas; dos paneles en ambas orientaciones                                                                                                                                                                                                                                           |
+| Lo mismo, con la verificación de dependencias activa y `--rerun-tasks`                                  | `ADEL_A1_Phone_API33` (5592)                                  | **19/19** + 2 omitidas                                                                                                                                                                                                                                                                               |
+| Lo mismo                                                                                                | `ADEL_A1_Tablet_API26` (5590), con `dev.sh android-connected` | **18/18** + 3 omitidas (las 2 del Go y el modo avión, que no existe como `shell` en Android 8)                                                                                                                                                                                                       |
+| `ServerApiOnDeviceTest` contra el Go temporal A (`https://10.0.2.2:8453`, huella del `server-cert.pem`) | API 26 y API 33                                               | **2/2** en cada uno: `getVersion` 200 con solo `RESTRICTED_TLS` (el registro de Go muestra cada petición) y otra huella → `ServerIdentityChanged`                                                                                                                                                    |
+| Indicador con corte de red real en Android 8 (`adb root` + `svc wifi/data disable` desde la Mac)        | API 26                                                        | «Sin conexión» con `Active default network: none` y «En línea» al volver (capturas en `$SP/tmp-A/shots/`)                                                                                                                                                                                            |
+| Capturas de Entrar y Mesas, tema claro y oscuro (`cmd uimode night`)                                    | Pixel_8 y Pixel_Tablet                                        | Revisadas: un panel con «Ver cuenta» en el teléfono, dos paneles en la tableta, estados con color, texto e ícono, de borde a borde                                                                                                                                                                   |
+| `assembleDebug` / `assembleRelease` (`dev.sh android-build`)                                            | Mac                                                           | Depuración **13 362 399 bytes (12.7 MiB)**; release sin firmar **1 504 318 bytes (1.43 MiB)**; APK de pruebas 1 093 152 bytes                                                                                                                                                                        |
+| Release firmado con una llave **desechable** del scratchpad (borrada después)                           | Mac; instalado en API 26 y API 33                             | 1 512 514 bytes; abre, navega a Mesas (R8 no rompe la navegación con rutas serializadas); un archivo de firma dentro del repositorio se rechaza                                                                                                                                                      |
+| Exportación limpia del commit (`git archive`) con verificación activa                                   | Mac                                                           | Compila, pruebas JVM, Lint y ktfmt correctos                                                                                                                                                                                                                                                         |
+| `iso.sh format`, `fmt-check` (Prettier, gofmt, cargo fmt, datos del sistema anterior) y `sync-check`    | Árbol A                                                       | Correctos; md5 de `docs/etapas/*.md` igual antes y después                                                                                                                                                                                                                                           |
+
+### No verificado
+
+- Dispositivo físico; foldables y multiventana.
+- Restauración tras la muerte del proceso **en el dispositivo** (solo la prueba JVM de `SavedStateHandle`; la rotación
+  real sí se probó).
+- La versión de TLS negociada con el cliente final (no se mide en la prueba; la Fase 0 midió TLS 1.2 en Android 8 y 1.3
+  desde el 10 con la misma pila).
+- El release en Android 17 (solo en 8 y 13) y el release firmado con la llave de desarrollo real (Fase G).
+- La verificación de dependencias con la caché de Gradle vacía (se generó y comprobó con la caché llena y desde una
+  exportación limpia).
+- Robolectric en SDK distintos de 36; tema oscuro del **sistema** en Android 8 (no hay modo oscuro global: la prueba
+  fuerza el parámetro del tema).
+- Las verificaciones de lint de lifecycle 2.11.0 (las omite el lint de AGP 9.5.1).
+
+### Para el coordinador
+
+1. **Dos paneles desde 600 dp** (y alto ≥ 480 dp) en lugar de «ancho expandido» (840 dp): ver Decisiones; cambiarlo es
+   una constante en `PaneLayout.kt`.
+2. **Cifrado de la base local**: el encargo menciona «la base y las credenciales van cifradas con una llave que no
+   viaja». Se cifran las credenciales (Keystore); la base de Room **no** (haría falta SQLCipher, que no está en las
+   versiones de la Fase 0). Si se quiere la base cifrada, es una dependencia nueva (decidir antes de la Fase E, que
+   guarda pedidos).
+3. **AGP 9.5.1: una instalación fallida no hace fallar `connectedDebugAndroidTest`** (registra
+   `INSTALL_FAILED_UPDATE_INCOMPATIBLE` y termina con BUILD SUCCESSFUL sin correr ese módulo; lo vi al dejar instalado un
+   release con otra firma). Las fases siguientes deben contar los resultados en
+   `*/build/outputs/androidTest-results/connected/` y desinstalar antes; anotado en `android/CLAUDE.md`.
+4. Los resultados de las pruebas instrumentadas de cada módulo se borran en cada corrida: para conservar los de varios
+   emuladores, copiarlos después de cada uno.
+5. El complemento de ktfmt 0.28.0 usa `Configuration.setVisible` (en desuso, se quita en Gradle 11): aviso en cada
+   compilación, inofensivo hasta entonces.
+6. Tema por usuario como en el escritorio (preferencia en el servidor) o según el sistema: hoy según el sistema.
+
+### Para CLAUDE.md y AGENTS.md (no los edité)
+
+- `CLAUDE.md` §16, punto 2: la aplicación Android vive en `android/` de este repositorio (ya decidido en la Fase 0);
+  §4 (estructura) con `android/` y un enlace a `android/CLAUDE.md`; §5 (comandos) con `./scripts/dev.sh android-format`,
+  `android-format-check`, `android-build`, `android-test` y `android-connected` (necesitan Android Studio; fuera de
+  `format-check` y `test`); §6 con la matriz de emuladores y la regla de no usar nunca el servicio real.
+- `AGENTS.md`, reglas de la etapa A1: Kotlin con ktfmt (`kotlinLangStyle`, 4 espacios, 100 columnas, comentarios `//` de
+  100 columnas como máximo) y Android Lint sin advertencias; la aplicación nunca calcula reglas de negocio; colores solo
+  en `android/core/ui/.../theme/AdelPalette.kt`; credenciales solo con el Keystore; nada de llaves de firma ni
+  `local.properties` en el repositorio; toda dependencia nueva actualiza `libs.versions.toml`, los `gradle.lockfile` y
+  `gradle/verification-metadata.xml` (con un emulador encendido) y `docs/DEPENDENCIES.md`; cada cambio de esquema de
+  Room sube la versión con su migración y su prueba con `MigrationTestHelper`.
+- `README.md` y `DEVELOPMENT_MACOS.md`: los comandos `android-*` y que requieren Android Studio (JBR) y el SDK en
+  `~/Library/Android/sdk`.
+
+### Estado al terminar
+
+Emuladores 5580, 5582, 5590 y 5592 apagados; Go temporal de `ISO_TAG=A` detenido y su base borrada (`server-down`);
+demonio de Gradle detenido; árbol sin cambios por confirmar. La llave de firma desechable de la prueba del release se
+borró. En `$SP/tmp-A/` quedan los registros (`connected-*.log`, `devsh-connected-*.log`, `write-meta.log`,
+`verify-run.log`), las capturas (`shots/`), los XML de resultados (`results/`) y los guiones de apoyo.
+
+**Decisiones del coordinador al cerrar la Fase A** (rama `etapa-a1-a` fusionada en `etapa-a1-android`, `90e5426`;
+`fmt-check` y `sync-check` aprobados sobre la fusión):
+
+- **A1-D12 · Dos paneles desde 600 dp de ancho y 480 dp de alto** (lo propuesto por la fase): la tableta en vertical
+  también muestra catálogo y cuenta lado a lado (§0-B) y el teléfono horizontal conserva un panel.
+- **A1-D13 · La base local de Room no se cifra entera.** La especificación pide cifrar con el Android Keystore la
+  credencial del dispositivo (§4) y el verificador del PIN (§3.2); eso, la credencial de envío (A1-D1) y cualquier otro
+  secreto van cifrados con el Keystore. El resto de la base (catálogo, mesas y pedidos) queda en el almacenamiento
+  privado de la app, sin copias de seguridad (`allowBackup="false"` y reglas de extracción que excluyen todo) y con el
+  cifrado del propio dispositivo. Cifrar la base completa exigiría SQLCipher (biblioteca nativa nueva, con costo en las
+  tabletas económicas) sin que lo pida la especificación.
+- **A1-D14 · Tema claro u oscuro según el sistema** del dispositivo (compartido por varios meseros); el escritorio lo
+  guarda por usuario, pero aquí no hay una preferencia por mesero.
+- **Pruebas instrumentadas**: AGP 9.5.1 puede terminar con «BUILD SUCCESSFUL» sin correr las pruebas de un módulo si
+  falla la instalación; cada fase cuenta los XML de resultados (anotado en `android/CLAUDE.md`).
+
+---
+
 ## Fase B · Servidor y escritorio
 
 Un agente, en su propio árbol de trabajo (`etapa-a1-bs`, desde `etapa-a1-android` en `6b5109e`), en paralelo con la
