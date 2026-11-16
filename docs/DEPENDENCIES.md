@@ -250,3 +250,40 @@ Lo demás de la etapa se hizo con lo que ya había:
   que trae la imagen (`docker exec`).
 - **Rust** (`legacy_migration.rs`): `tauri-plugin-dialog` 2.8.3 (9A) para los diálogos, `sha2` (9G) para la huella de
   la subida, base64 propio y procesos con `std::process`.
+
+## Etapa A1 · Android
+
+Aplicación de meseros en `android/` (Fase A, 16 de noviembre de 2026). Versiones elegidas en la Fase 0
+([docs/ETAPA_A1_AVANCE.md](ETAPA_A1_AVANCE.md), §1.2: todas estables, revisadas en `maven-metadata.xml` de Google Maven,
+Maven Central y el portal de complementos de Gradle) y declaradas en `android/gradle/libs.versions.toml`. Las resueltas
+quedan fijadas en un `gradle.lockfile` por proyecto (todas las configuraciones), `buildscript-gradle.lockfile` (los
+complementos) y `settings-gradle.lockfile`, y cada artefacto con su SHA-256 en `android/gradle/verification-metadata.xml`
+(verificación de dependencias de Gradle). Cómo actualizar: `android/CLAUDE.md`, «Dependencias». Nada de esto se instala en
+las terminales ni en el servidor: va dentro del APK o solo sirve para compilar y probar.
+
+| Componente                                                     | Versión                                                                      | Fuente                          | Para qué                                                                                                                              |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Gradle (wrapper)                                               | 9.9.1 (`distributionSha256Sum` y `gradle-wrapper.jar` idéntico al publicado) | services.gradle.org             | Compilación; corre con el JDK de Android Studio (JBR 25).                                                                             |
+| Android Gradle Plugin                                          | 9.5.1 (aapt2 9.5.1-16666295, solo macOS)                                     | Google Maven                    | Compilación Android con Kotlin integrado, R8, Lint y pruebas instrumentadas. Usa `android-37.0` y build-tools 36.0.0 ya instalados.   |
+| Kotlin (compilador, Compose, serialización, JVM)               | 2.4.21                                                                       | Maven Central / portal          | Lenguaje; el complemento de Compose y el de serialización; `core:domain` con `org.jetbrains.kotlin.jvm`.                              |
+| KSP                                                            | 2.3.14                                                                       | Maven Central / portal          | Procesador de anotaciones de Room.                                                                                                    |
+| ktfmt (complemento `com.ncorti.ktfmt.gradle`)                  | 0.28.0, con `org.jetbrains.kotlinx:ktfmt` 0.65                               | Portal de Gradle, Maven Central | Formato de Kotlin en el estilo oficial (`kotlinLangStyle`), `android-format` y `android-format-check`.                                |
+| Compose BOM                                                    | 2026.09.00 (UI y foundation 1.12.1, Material 3 1.4.0)                        | Google Maven                    | Interfaz.                                                                                                                             |
+| material3-adaptive / window-core                               | 1.3.0 / 1.5.1                                                                | Google Maven                    | `currentWindowAdaptiveInfoV2()` y las clases de tamaño de ventana para uno o dos paneles.                                             |
+| core-ktx / activity-compose                                    | 1.19.1 / 1.13.0                                                              | Google Maven                    | `enableEdgeToEdge()`, `BackHandler`.                                                                                                  |
+| lifecycle (runtime-compose, viewmodel-compose, savedstate)     | 2.11.0                                                                       | Google Maven                    | `ViewModel` con fábricas, `SavedStateHandle`, estado con ciclo de vida.                                                               |
+| navigation-compose                                             | 2.10.2                                                                       | Google Maven                    | Navegación con rutas con tipo (kotlinx.serialization).                                                                                |
+| Room (runtime, compiler, testing; complemento `androidx.room`) | 2.8.5                                                                        | Google Maven                    | Base local con esquemas exportados (`android/core/data/schemas/`) y `MigrationTestHelper`.                                            |
+| OkHttp                                                         | 5.5.1                                                                        | Maven Central                   | Cliente HTTPS con la huella SPKI fijada; `okhttp-tls` y `mockwebserver3` solo en pruebas.                                             |
+| kotlinx.serialization-json                                     | 1.13.0                                                                       | Maven Central                   | JSON de la API v1 (importes como cadenas decimales).                                                                                  |
+| kotlinx.coroutines (core, android, test)                       | 1.11.0                                                                       | Maven Central                   | Corrutinas y Flow.                                                                                                                    |
+| JUnit / androidx.test (runner, core) / ext-junit / Espresso    | 4.13.2 / 1.7.0 / 1.3.0 / 3.7.0                                               | Maven Central / Google Maven    | Pruebas. Espresso 3.7.0 se fija porque Compose UI test trae 3.5.0, que falla en Android 17 (`InputManager.getInstance` ya no existe). |
+| Robolectric                                                    | 4.18 (descarga `android-all-instrumented` de SDK 36, 224 MB)                 | Maven Central                   | Room en la JVM. El `android-all` lo descarga Robolectric al probar (en `~/.m2`), fuera del bloqueo de Gradle.                         |
+
+En el catálogo, sin usar todavía: WorkManager 2.12.0 (`work-runtime-ktx`, `work-testing`; la cola sin conexión de la
+Fase E) y `okhttp-sse` 5.5.1 (eventos en tiempo real). **No se usan** Hilt, Retrofit, Coil, DataStore ni
+`security-crypto` (en desuso; el cifrado es AES-256-GCM directo con el Android Keystore). Licencias: lo que entra al APK
+(Kotlin, AndroidX, Compose, OkHttp con Okio, kotlinx) es Apache 2.0; de las herramientas y pruebas, ktfmt es Apache 2.0,
+Robolectric MIT y JUnit 4 EPL 1.0. **SDK de Android**: no se instaló
+ningún paquete nuevo (`android-37.0`, build-tools 36.0.0, platform-tools 37.0.1 y las imágenes de los emuladores ya
+estaban, avance §1.1).
