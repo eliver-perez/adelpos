@@ -334,6 +334,8 @@ const reversible: Record<string, string> = {
   'pages/inventory/CountPanel.tsx: Borrar captura': 'vacía la cantidad del renglón, sin guardar',
   'pages/documents/designer/StructureList.tsx: Quitar':
     'bloque del borrador de la plantilla, con «Deshacer»',
+  // Etapa A1 (fase B): quitar el PIN de un mesero se deshace asignándole otro; lo confirma un diálogo normal.
+  'pages/UserPin.tsx: Quitar PIN': 'el PIN se puede volver a asignar en el mismo panel',
 };
 // Componentes que reciben su texto por la propiedad `label` y solo quitan un renglón de un
 // formulario sin guardar (los repetibles del catálogo): secundarios, como `reversible`.

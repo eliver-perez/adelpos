@@ -9634,3 +9634,15 @@ th[aria-sort='descending'] {
   align-items: center;
   gap: 6px;
 }
+/* Etapa A1 (fase B): estado del PIN de los meseros con la muestra del color de su distintivo. */
+.users-pin {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.users-pin-swatch {
+  flex-basis: 16px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
