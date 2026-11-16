@@ -298,6 +298,22 @@ func legacyBoundarySales(now time.Time) []legacySale {
 	}
 }
 
+// legacyUndatedShiftSale es la venta del corte 9100, que no tiene fecha_inicio ni fecha_fin (columna con nulos en el
+// respaldo; revisión de la Fase C, M-8): el corte toma las fechas de su venta y su pago del 12/07/2023.
+var legacyUndatedShiftSale = legacySale{id: 9010, table: 2, opened: "2023-07-12T13:00:00.000", total: "33.0000",
+	shift: int64(9100), lines: []legacyLine{{6, "1.000", "33.0000"}},
+	payments: []legacyPayment{{1, "33.0000", "2023-07-12T13:45:00.000", int64(9100)}}}
+
+// addLegacyUndatedShift agrega el corte 9100 cerrado, sin fecha de inicio ni de fin.
+func addLegacyUndatedShift(tables []*legacysynth.Table) {
+	for _, table := range tables {
+		if table.Name == "cortes" {
+			table.Rows = append(table.Rows, []any{int64(9100), int64(1), "100.0000", "133.0000", "33.0000", int64(1), "C",
+				int64(1), nil, nil, "0.0000", "0.0000"})
+		}
+	}
+}
+
 // freshFixture prepara una base nueva para la prueba y la deja vacía al terminar.
 func freshFixture(t *testing.T) *reportsFixture {
 	t.Helper()
@@ -393,7 +409,8 @@ func TestStage9HLegacyHistoryInReports(t *testing.T) {
 	}
 	now := time.Now().In(location)
 	tables := legacysynth.Dataset()
-	addLegacySales(tables, legacyBoundarySales(now))
+	addLegacySales(tables, append(legacyBoundarySales(now), legacyUndatedShiftSale))
+	addLegacyUndatedShift(tables)
 	fixture.importLegacy(t, tables)
 	// Las fechas límite no comparten día comercial con las ventas del conjunto sintético.
 	for _, day := range []string{"2025-03-17", "2025-03-18", "2025-03-19", "2021-04-03", "2021-04-04", "2021-10-30", "2021-10-31"} {
@@ -745,6 +762,29 @@ func TestStage9HLegacyHistoryInReports(t *testing.T) {
 		shifts := fixture.legacyRun(t, fixture.admin, "sales.by_shift", "period=day&date=2025-03-19&data_source=legacy")
 		if len(shifts.Rows) != 1 || shifts.Rows[0]["register"] != "Sin turno" || text(shifts.Rows[0]["net"]) != "70.00" {
 			t.Fatalf("Venta del anterior sin corte: %+v", shifts.Rows)
+		}
+	})
+
+	t.Run("corte del anterior sin fecha de inicio", func(t *testing.T) {
+		// Sin fecha_inicio en el respaldo, el corte 9100 toma la de su venta: aparece en «Turnos de caja» del día de su
+		// venta y su pago, y en «Ventas por turno» con esa fecha.
+		if got := fixture.scalar(t, `SELECT array_to_string(flags, ',') FROM app.legacy_cash_shifts WHERE legacy_id = 9100`); got !=
+			"start_estimated,end_estimated" {
+			t.Fatalf("Marcas del corte sin fechas: %s", got)
+		}
+		shifts := fixture.legacyRun(t, fixture.admin, "cash.shifts", "period=day&date=2023-07-12&data_source=legacy")
+		// 13:00 y 13:45 en Monterrey (UTC−6 desde 2022): la venta y el pago.
+		if len(shifts.Rows) != 1 || shifts.Rows[0]["data_source"] != reports.LegacySourceLabel ||
+			!strings.HasPrefix(text(shifts.Rows[0]["business_date"]), "2023-07-12") ||
+			text(shifts.Rows[0]["opened_at"]) != "2023-07-12T19:00:00Z" || text(shifts.Rows[0]["closed_at"]) != "2023-07-12T19:45:00Z" ||
+			!number(t, shifts.Rows[0]["sales"]).Equal(decimal.RequireFromString("33")) {
+			t.Fatalf("Turnos de caja del 12/07/2023: %+v", shifts.Rows)
+		}
+		byShift := fixture.legacyRun(t, fixture.admin, "sales.by_shift", "period=day&date=2023-07-12&data_source=legacy")
+		if !slices.ContainsFunc(byShift.Rows, func(row map[string]any) bool {
+			return strings.HasPrefix(text(row["business_date"]), "2023-07-12") && text(row["net"]) == "33.00"
+		}) {
+			t.Fatalf("Ventas por turno del 12/07/2023: %+v", byShift.Rows)
 		}
 	})
 

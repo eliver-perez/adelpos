@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -171,18 +173,8 @@ func retire(ctx context.Context, tx pgx.Tx, descriptor liveTable, id pgtype.UUID
 		return false, deleteErr
 	}
 	if descriptor.nameColumn != "" {
-		// El nombre temporal de la fase 1 se cambia por uno legible y único: «<nombre> (retirado 1a2b3c4d)» (para un
-		// usuario, «<usuario>.retirado-1a2b3c4d», que cumple la regla de nombres de usuario).
-		tag := uuidText(id)[:8]
-		retiredName := truncateRunes(name, descriptor.maxName-20) + " (retirado " + tag + ")"
-		if descriptor.entity == MapUser {
-			retiredName = truncateRunes(name, descriptor.maxName-18) + ".retirado-" + tag
-			if !usernamePattern.MatchString(retiredName) {
-				retiredName = "retirado-" + tag
-			}
-		}
 		_, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE app.%[1]s SET %[2]s = $2 WHERE id = $1`, descriptor.table,
-			descriptor.nameColumn), id, retiredName)
+			descriptor.nameColumn), id, retiredName(descriptor.entity, name, id, descriptor.maxName))
 		if err != nil {
 			return false, err
 		}
@@ -351,4 +343,29 @@ func writeIDMap(ctx context.Context, tx pgx.Tx, batch pgtype.UUID, ids IDMap, re
 	_, err := tx.CopyFrom(ctx, pgx.Identifier{"app", "legacy_id_map"}, []string{"batch_id", "entity", "legacy_key", "new_id", "state"},
 		pgx.CopyFromRows(rows))
 	return err
+}
+
+// Terminaciones de un nombre retirado (con cualquier identificador), para no acumularlas al repetir la migración. Un
+// usuario cuyo nombre no admitía la terminación quedó como «retirado-1a2b3c4d» (todo el nombre es la terminación).
+var (
+	retiredSuffix     = regexp.MustCompile(`( \(retirado [0-9a-f]{8}\))+$`)
+	retiredUserSuffix = regexp.MustCompile(`(^retirado-[0-9a-f]{8}|\.retirado-[0-9a-f]{8})+$`)
+)
+
+// retiredName es el nombre legible y único de algo retirado: «<nombre> (retirado 1a2b3c4d)» (para un usuario,
+// «<usuario>.retirado-1a2b3c4d», que cumple la regla de nombres de usuario, o «retirado-1a2b3c4d» si no la cumple). Un
+// nombre que ya tenía la terminación (lo retirado se vuelve a retirar en cada reemplazo mientras algo lo use) no recibe
+// otra.
+func retiredName(entity, name string, id pgtype.UUID, maxName int) string {
+	tag := uuidText(id)[:8]
+	if entity == MapUser {
+		base := retiredUserSuffix.ReplaceAllString(name, "")
+		candidate := truncateRunes(base, maxName-18) + ".retirado-" + tag
+		if !usernamePattern.MatchString(candidate) {
+			return "retirado-" + tag
+		}
+		return candidate
+	}
+	base := strings.TrimSpace(retiredSuffix.ReplaceAllString(name, ""))
+	return truncateRunes(base, maxName-20) + " (retirado " + tag + ")"
 }

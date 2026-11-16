@@ -6,12 +6,14 @@ import (
 )
 
 // Códigos de error de la migración (los ve el asistente en error_code de la corrida y en las respuestas de las
-// rutas). Los mensajes van en español sencillo y nunca llevan datos del paquete ni la frase de paso.
+// rutas). Los mensajes van en español sencillo y nunca llevan datos del paquete ni la frase de paso. CodeUnreadable es
+// un error de lectura del archivo (entrada y salida): a diferencia de CodeDamaged, se puede reintentar tal cual.
 const (
 	CodeNotPackage         = "LEGACY_NOT_PACKAGE"
 	CodeUnsupportedVersion = "LEGACY_PACKAGE_VERSION"
 	CodeWrongPassphrase    = "LEGACY_PASSPHRASE_INVALID"
 	CodeDamaged            = "LEGACY_PACKAGE_DAMAGED"
+	CodeUnreadable         = "LEGACY_PACKAGE_UNREADABLE"
 	CodeLimit              = "LEGACY_PACKAGE_LIMIT"
 	CodeIncompatible       = "LEGACY_PACKAGE_INCOMPATIBLE"
 	CodeNotClean           = "LEGACY_INSTALLATION_NOT_CLEAN"

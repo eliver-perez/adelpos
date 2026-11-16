@@ -128,8 +128,10 @@ CREATE TABLE app.legacy_id_map (
 CREATE INDEX legacy_id_map_new_id_idx ON app.legacy_id_map (entity, new_id);
 
 -- 4. Ventas (ventas). status: paid (pagado = 1 sin cancelación), cancelled (fila en cancelaciones; no son venta,
---    regla de la 9D) u open (sin pagar al hacer el respaldo; historial, no venta). recognized_at solo en las pagadas:
---    la fecha del último pago (decisión del coordinador) o, si no tiene pagos, la de apertura (marca no_payments).
+--    regla de la 9D) u open (sin pagar al hacer el respaldo; historial, no venta). recognized_at solo en las pagadas
+--    (decisión del coordinador, precisada en la revisión): la fecha del pago con el que lo acumulado de los pagos
+--    mayores que cero (por fecha y luego por id) alcanza lo que se debía; si nunca lo alcanza, la del último pago mayor
+--    que cero; sin pagos mayores que cero, la de apertura. last_payment_at es el último pago de cualquier importe.
 --    amount_due = total + montoExtra − Σ descuentos («por cobrar» del anterior, PagarEfectivo.cs:205);
 --    lines_amount = Σ renglones + Σ complementos. Los valores originales de pagado, enmesa, facturado y cancelado se
 --    conservan tal cual (cancelado nunca se escribió en el anterior).
@@ -309,6 +311,9 @@ CREATE INDEX legacy_payments_shift_idx ON app.legacy_payments (legacy_shift_id, 
 
 -- 11. Cortes (turnos de un cajero en una caja) tal como se guardaron: fondo, venta, retiros, conteo final y diferencia
 --     del anterior (su «venta» incluía tarjeta y canceladas). No se convierten en cash_shifts ni se recalculan.
+--     opened_at y closed_at son los del anterior; sin fecha_inicio (columna con nulos), la de la primera venta o pago
+--     del corte (marca start_estimated) y, cerrado sin fecha_fin, la de la última (end_estimated); sin ventas ni pagos,
+--     queda nula (no_start).
 CREATE TABLE app.legacy_cash_shifts (
     batch_id uuid NOT NULL CONSTRAINT legacy_cash_shifts_batch_id_fkey REFERENCES app.legacy_import_batches(id),
     legacy_id integer NOT NULL,
