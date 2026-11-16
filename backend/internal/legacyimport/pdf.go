@@ -151,40 +151,48 @@ func listedFlags(entity string) []string {
 	return flags
 }
 
-// incoherentRows lee de las tablas del lote las filas con marcas de la lista.
-func incoherentRows(ctx context.Context, tx pgx.Tx, batchID string) ([]incoherentRow, bool, error) {
-	queries := []struct {
-		entity string
-		sql    string
-	}{
-		{EntitySale, `SELECT 'Folio ' || folio, opened_at, flags,
+// incoherentQueries leen de las tablas del lote las filas con marcas de la lista. La venta de cada pago, descuento o
+// renglón se busca con una subconsulta LATERAL por su llave (batch_id, legacy_id), con LIMIT 1 para que no se convierta
+// en una unión: así el plan no depende de la estimación del lote (revisión de la Fase E, D-1; con estadísticas de otro
+// lote, la unión directa podía recorrer las ventas del lote por cada fila marcada).
+var incoherentQueries = []struct {
+	entity string
+	sql    string
+}{
+	{EntitySale, `SELECT 'Folio ' || folio, opened_at, flags,
                 'Total ' || total::text || ' · debe ' || amount_due::text || ' · renglones ' || lines_amount::text ||
                 ' · pagos ' || payments_amount::text
             FROM app.legacy_sales WHERE batch_id = $1 AND flags && $2 ORDER BY opened_at, legacy_id`},
-		{EntityPayment, `SELECT 'Pago ' || p.legacy_id || ' · folio ' || coalesce(s.folio, '?'), p.paid_at, p.flags,
+	{EntityPayment, `SELECT 'Pago ' || p.legacy_id || ' · folio ' || coalesce(s.folio, '?'), p.paid_at, p.flags,
                 p.method_name || ' ' || p.amount::text
-            FROM app.legacy_payments p LEFT JOIN app.legacy_sales s ON s.batch_id = p.batch_id AND s.legacy_id = p.legacy_sale_id
+            FROM app.legacy_payments p LEFT JOIN LATERAL (SELECT folio FROM app.legacy_sales v
+                WHERE v.batch_id = p.batch_id AND v.legacy_id = p.legacy_sale_id LIMIT 1) s ON true
             WHERE p.batch_id = $1 AND p.flags && $2 ORDER BY p.paid_at, p.legacy_id`},
-		{EntityDiscount, `SELECT 'Descuento · folio ' || coalesce(s.folio, '?'), s.opened_at, d.flags,
+	{EntityDiscount, `SELECT 'Descuento · folio ' || coalesce(s.folio, '?'), s.opened_at, d.flags,
                 'Descuento ' || d.amount::text || ' · total ' || coalesce(s.total::text, '?')
-            FROM app.legacy_discounts d LEFT JOIN app.legacy_sales s ON s.batch_id = d.batch_id AND s.legacy_id = d.legacy_sale_id
+            FROM app.legacy_discounts d LEFT JOIN LATERAL (SELECT folio, opened_at, total FROM app.legacy_sales v
+                WHERE v.batch_id = d.batch_id AND v.legacy_id = d.legacy_sale_id LIMIT 1) s ON true
             WHERE d.batch_id = $1 AND d.flags && $2 ORDER BY d.position`},
-		{EntityLine, `SELECT 'Renglón ' || l.legacy_id || ' · folio ' || coalesce(s.folio, '?'), s.opened_at, l.flags,
+	{EntityLine, `SELECT 'Renglón ' || l.legacy_id || ' · folio ' || coalesce(s.folio, '?'), s.opened_at, l.flags,
                 'Total ' || l.total::text
-            FROM app.legacy_sale_lines l LEFT JOIN app.legacy_sales s ON s.batch_id = l.batch_id AND s.legacy_id = l.legacy_sale_id
+            FROM app.legacy_sale_lines l LEFT JOIN LATERAL (SELECT folio, opened_at FROM app.legacy_sales v
+                WHERE v.batch_id = l.batch_id AND v.legacy_id = l.legacy_sale_id LIMIT 1) s ON true
             WHERE l.batch_id = $1 AND l.flags && $2 ORDER BY l.legacy_id`},
-		{EntityComplement, `SELECT 'Complemento del renglón ' || c.legacy_line_id, NULL::timestamptz, c.flags,
+	{EntityComplement, `SELECT 'Complemento del renglón ' || c.legacy_line_id, NULL::timestamptz, c.flags,
                 'Total ' || c.total::text
             FROM app.legacy_line_complements c WHERE c.batch_id = $1 AND c.flags && $2 ORDER BY c.position`},
-		{EntityShift, `SELECT 'Corte ' || legacy_id || coalesce(' · ' || register_name, ''), opened_at, flags,
+	{EntityShift, `SELECT 'Corte ' || legacy_id || coalesce(' · ' || register_name, ''), opened_at, flags,
                 'Venta guardada ' || coalesce(sales_amount::text, '-') || ' · retiros ' || coalesce(withdrawals_amount::text, '-')
             FROM app.legacy_cash_shifts WHERE batch_id = $1 AND flags && $2 ORDER BY legacy_id`},
-		{EntityWithdrawal, `SELECT 'Retiro ' || legacy_id || coalesce(' · corte ' || legacy_shift_id, ''), withdrawn_at, flags,
+	{EntityWithdrawal, `SELECT 'Retiro ' || legacy_id || coalesce(' · corte ' || legacy_shift_id, ''), withdrawn_at, flags,
                 'Importe ' || amount::text
             FROM app.legacy_cash_withdrawals WHERE batch_id = $1 AND flags && $2 ORDER BY legacy_id`},
-	}
+}
+
+// incoherentRows lee las filas con marcas de la lista de un lote (como mucho pdfMaxIncoherent).
+func incoherentRows(ctx context.Context, tx pgx.Tx, batchID string) ([]incoherentRow, bool, error) {
 	result := []incoherentRow{}
-	for _, query := range queries {
+	for _, query := range incoherentQueries {
 		rows, err := tx.Query(ctx, query.sql, batchID, listedFlags(query.entity))
 		if err != nil {
 			return nil, false, err
