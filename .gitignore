@@ -35,3 +35,16 @@ desktop/src-tauri/binaries/
 *.trn
 *.adelmig
 legacy-data/
+
+# Etapa A1 (Android): compilaciones y cachés de Gradle, la ruta local del SDK y cualquier llave o propiedades de firma.
+# Las llaves de firma viven fuera del repositorio (android/CLAUDE.md, «Firma»); estas reglas son la red de seguridad.
+android/.gradle/
+android/.kotlin/
+android/.idea/
+android/**/build/
+android/local.properties
+*.jks
+*.keystore
+*.p12
+android/**/signing.properties
+android/**/keystore.properties

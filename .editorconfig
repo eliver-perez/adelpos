@@ -21,3 +21,11 @@ trim_trailing_whitespace = false
 # Windows PowerShell 5.1 y makensis leen bien los acentos solo con BOM (etapa 9E).
 [{*.ps1,*.nsh}]
 charset = utf-8-bom
+
+# Etapa A1 (Android): Kotlin con el estilo oficial (4 espacios, 100 columnas, como ktfmt) y XML de Android con 4.
+[{*.kt,*.kts}]
+indent_size = 4
+max_line_length = 100
+
+[android/**.xml]
+indent_size = 4
