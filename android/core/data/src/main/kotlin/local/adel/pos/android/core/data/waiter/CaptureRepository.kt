@@ -277,6 +277,18 @@ class CaptureRepository(
             if (bill.account.revision <= capture.baseRevision) {
                 return
             }
+            if (!bill.account.isOpen) {
+                // Se cobró, se canceló o se combinó en otra terminal: no es un conflicto que se
+                // resuelva conservando los toques, sino una cuenta que ya no admite nada (§6.4).
+                save(
+                    capture.copy(
+                        baseRevision = bill.account.revision,
+                        sync = DraftSync.ACCOUNT_CLOSED,
+                        syncMessage = null,
+                    ),
+                )
+                return
+            }
             // Sin base leída, los toques nunca vieron otra: se aplican encima de la de Go.
             if (capture.operations.isEmpty() || capture.baseRevision == 0) {
                 save(

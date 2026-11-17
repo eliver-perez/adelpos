@@ -27,6 +27,7 @@ import local.adel.pos.android.core.data.waiter.WaiterTestSupport.error
 import local.adel.pos.android.core.data.waiter.WaiterTestSupport.json
 import local.adel.pos.android.core.data.waiter.WaiterTestSupport.line
 import local.adel.pos.android.core.domain.money.Money
+import local.adel.pos.android.core.domain.waiter.AccountBill
 import local.adel.pos.android.core.domain.waiter.AccountSummary
 import local.adel.pos.android.core.domain.waiter.Capture
 import local.adel.pos.android.core.domain.waiter.DraftLine
@@ -431,5 +432,31 @@ class CaptureSyncTest {
             listOf("ajeno", "r1"),
             put["items"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
         )
+    }
+
+    @Test
+    fun laCuentaCobradaQueLlegaPorElCanalNoEsUnConflicto() = runBlocking {
+        respond("GET restaurant/accounts/$ACCOUNT", bill(3))
+        val capture =
+            captures.open(ANA, TABLE, "Mesa 4", account = account, seenAccountIds = emptyList())
+        awaitCapture(capture.id) { it.baseRevision == 3 }
+        server.sessions.clear()
+        captures.stage(capture.id, DraftOperation.Add(DraftLine("r1", line(BURGER))), null)
+        awaitCapture(capture.id) { it.sync == DraftSync.PENDING }
+        // Otra terminal la cobró: llega la cuenta cerrada con otra revisión.
+        val closed =
+            AccountBill(
+                account = account.copy(state = "closed", revision = 4),
+                draft = emptyList(),
+                lines = emptyList(),
+            )
+        captures.observe(capture.id, closed)
+        val observed = awaitCapture(capture.id) { it.sync == DraftSync.ACCOUNT_CLOSED }
+        assertEquals(1, observed.operations.size)
+        // «Abrir una cuenta nueva en la mesa»: lo del mesero pasa a una cuenta pendiente.
+        captures.openAnotherAccount(capture.id)
+        val moved = awaitCapture(capture.id) { it.accountId == null }
+        assertEquals(1, moved.visible.size)
+        assertFalse(moved.visible.single().id == "r1")
     }
 }

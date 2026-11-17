@@ -237,8 +237,12 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
             DraftSync.CONFLICT -> stringResource(R.string.sync_conflict) to colors.redSoft
             DraftSync.TABLE_HAS_ACCOUNT ->
                 stringResource(R.string.sync_table_has_account) to colors.amberSoft
-            DraftSync.REJECTED,
-            DraftSync.ACCOUNT_CLOSED -> (capture.syncMessage ?: "") to colors.redSoft
+            DraftSync.REJECTED -> (capture.syncMessage ?: "") to colors.redSoft
+            // El mensaje de Go si lo hubo («La cuenta «Mesa 4» ya se cobró…»); si se supo por el
+            // canal de tiempo real, el texto general.
+            DraftSync.ACCOUNT_CLOSED ->
+                (capture.syncMessage ?: stringResource(R.string.sync_account_closed)) to
+                    colors.redSoft
         }
     Surface(
         color = tone,

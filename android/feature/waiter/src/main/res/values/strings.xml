@@ -81,6 +81,7 @@
     <string name="sync_table_has_account">Otra terminal ya abrió una cuenta en esta mesa.</string>
     <string name="sync_join_account">Agregar a «%1$s»</string>
     <string name="sync_open_another">Abrir otra cuenta</string>
+    <string name="sync_account_closed">Esta cuenta ya no está abierta: se cobró, se canceló o se combinó en otra terminal.</string>
     <string name="sync_account_closed_action">Abrir una cuenta nueva en la mesa</string>
 
     <!-- Lo enviado: modificar o cancelar unidades (§6.3). -->

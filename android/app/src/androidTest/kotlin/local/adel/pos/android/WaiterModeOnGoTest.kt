@@ -327,10 +327,9 @@ class WaiterModeOnGoTest {
         backToCatalog()
         addProduct(ids.getValue("tacos"))
         showOrder()
-        // Go rechaza el guardado: «La cuenta … ya se cobró» y se ofrece una cuenta nueva en la
-        // mesa.
+        // La cuenta ya no está abierta (por el canal de tiempo real, o porque Go rechaza el
+        // guardado con «…ya se cobró»): se ofrece una cuenta nueva en la mesa.
         waitFor("${TAG_SYNC_PREFIX}account_closed")
-        waitForText("ya se cobró")
         compose.onNodeWithTag(TAG_OPEN_ANOTHER).performScrollTo().performClick()
         waitFor("${TAG_SYNC_PREFIX}saved")
         val moved = currentCapture(ids.getValue("table1"))
