@@ -220,6 +220,12 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   olvidar el emparejamiento y destruir la llave del Keystore. Hoy registra el catálogo con sus imágenes; **la Fase E
   registra ahí** la cola de pedidos y sus borradores y cancela su trabajo (`WorkManager.cancelAllWork()`). Todo módulo
   nuevo que guarde datos del restaurante se registra ahí.
+- **Versiones** (`ServerCompatibility.check`: servidor 0.12.0 o posterior con `waiter-pin-v1` y la mínima de Android de
+  `min_client_versions`): se comprueba con `GET version` **antes de pedir el código de emparejamiento** (también con
+  la dirección escrita; `PairingRepository.request`) y en cada comprobación ya emparejado. Un servidor viejo da
+  «Actualiza el servidor del restaurante» con «Volver a comprobar» (`PairingProblem.UpdateServer` al emparejar,
+  `DeviceStatus.UpdateServer` después). Un 426 o un tipo de cliente desconocido durante el emparejamiento de un
+  servidor que no informa la mínima de Android también es un servidor viejo, nunca «Actualiza esta aplicación».
 - Límite de la entrada sin conexión (`OfflineAttemptPolicy`, sin reloj): los fallos (con o sin conexión) se acumulan y
   solo vuelven a cero con una entrada correcta; al quinto, o con el PIN bloqueado en Go (`PIN_LOCKED`, `locked_until`
   o `requires_unlock` de `auth/pin-users`, A1-D16), la entrada sin conexión de ese mesero queda cerrada hasta que
