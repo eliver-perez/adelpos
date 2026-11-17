@@ -181,15 +181,22 @@ run_step() {
     shift
     local log="$OUT/$method.txt"
     "$ADB" -s "$ANDROID_SERIAL" logcat -c >/dev/null 2>&1 || true
+    # adb shell une los argumentos en una sola línea: un valor vacío desaparecería y correría los demás
+    # (am termina leyendo basura), así que serverId solo se pasa si existe.
+    local server_id=()
+    if [ -n "${ADELPOS_E2E_SERVER_ID:-}" ]; then
+        server_id=(-e serverId "$ADELPOS_E2E_SERVER_ID")
+    fi
     "$ADB" -s "$ANDROID_SERIAL" shell am instrument -w -r \
         -e class "local.adel.pos.android.AccessOnGoTest#$method" \
         -e local "http://$DEVICE_HOST:$LOCAL_PORT" -e address "$DEVICE_HOST:$NETWORK_PORT" -e pin "$PIN" \
-        -e serverId "${ADELPOS_E2E_SERVER_ID:-}" -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
+        ${server_id[@]+"${server_id[@]}"} -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
         local.adel.pos.android.test/local.adel.pos.android.AdelTestRunner >"$log" 2>&1 || true
     "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V TestRunner:V AndroidRuntime:E \
         >"$OUT/$method-logcat.txt" 2>/dev/null || true
     local codes verdict
-    codes="$(grep -E '^INSTRUMENTATION_STATUS_CODE: ' "$log" | awk '{print $2}' | tr -d '\r' | tr '\n' ' ')"
+    # Sin ningún código (am no llegó a correr la prueba) grep no encuentra nada: «SIN RESULTADO».
+    codes="$(grep -E '^INSTRUMENTATION_STATUS_CODE: ' "$log" | awk '{print $2}' | tr -d '\r' | tr '\n' ' ' || true)"
     case "$codes" in
         *"-2"*) verdict="FALLA" ;;
         *"-4"* | *"-3"*) verdict="OMITIDA" ;;
@@ -200,6 +207,7 @@ run_step() {
     if [ "$verdict" != "APROBADA" ]; then
         FAILED=1
         grep -A12 'INSTRUMENTATION_STATUS: stack=' "$log" | head -14 | tee -a "$SUMMARY" || true
+        grep -m3 -E '^(Error|onError):' "$log" | tee -a "$SUMMARY" || true
     fi
 }
 
