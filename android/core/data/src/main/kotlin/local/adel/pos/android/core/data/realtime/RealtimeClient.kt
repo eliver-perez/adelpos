@@ -131,10 +131,22 @@ class RealtimeClient(
             when (val end = connectOnce(server, cursor)) {
                 // Go cierra cada flujo a los 30 s: si la conexión llegó a recibir mensajes, se
                 // reconecta enseguida.
-                is ConnectionEnd.Closed -> failures = if (end.receivedMessages) 0 else failures + 1
+                is ConnectionEnd.Closed ->
+                    failures =
+                        if (end.receivedMessages) {
+                            0
+                        } else {
+                            failures + 1
+                        }
                 // Una conexión que funcionó y se cayó (sin red, conexión muerta) espera lo mínimo;
                 // las fallas seguidas sin un solo mensaje esperan cada vez más.
-                is ConnectionEnd.Failed -> failures = if (end.receivedMessages) 1 else failures + 1
+                is ConnectionEnd.Failed ->
+                    failures =
+                        if (end.receivedMessages) {
+                            1
+                        } else {
+                            failures + 1
+                        }
                 is ConnectionEnd.Interrupted -> {
                     stateFlow.value = RealtimeState.Interrupted(end.interruption)
                     signalFlow.emit(RealtimeSignal.Interrupted(end.interruption))

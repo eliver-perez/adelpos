@@ -90,7 +90,12 @@ class CatalogMapper(private val json: Json = ApiJson) {
             categoryId = dto.categoryId,
             code = dto.code,
             barcode = dto.barcode,
-            kind = if (dto.kind == "combo") ProductKind.COMBO else ProductKind.PRODUCT,
+            kind =
+                if (dto.kind == "combo") {
+                    ProductKind.COMBO
+                } else {
+                    ProductKind.PRODUCT
+                },
             referencePrice = dto.price,
             pricingError = dto.pricingError,
             imageId = dto.imageId,
@@ -168,8 +173,11 @@ class CatalogMapper(private val json: Json = ApiJson) {
             description = dto.description,
             active = dto.active,
             pricingMode =
-                if (dto.pricingMode == "quantity") GroupPricingMode.QUANTITY
-                else GroupPricingMode.VALUE,
+                if (dto.pricingMode == "quantity") {
+                    GroupPricingMode.QUANTITY
+                } else {
+                    GroupPricingMode.VALUE
+                },
             minQuantity = dto.minQuantity,
             maxQuantity = dto.maxQuantity,
             options =

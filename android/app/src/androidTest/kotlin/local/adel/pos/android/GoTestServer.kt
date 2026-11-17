@@ -58,15 +58,22 @@ class GoTestServer {
     ): Answer {
         val builder = Request.Builder().url(url)
         headers.forEach { (name, value) -> builder.header(name, value) }
+        // Un POST sin cuerpo manda un cuerpo vacío (OkHttp lo exige); un GET, ninguno.
         val payload =
-            body?.toRequestBody(JSON_TYPE)
-                ?: if (method == "POST") "".toRequestBody(JSON_TYPE) else null
+            when {
+                body != null -> body.toRequestBody(JSON_TYPE)
+                method == "POST" -> "".toRequestBody(JSON_TYPE)
+                else -> null
+            }
         builder.method(method, payload)
         client.newCall(builder.build()).execute().use { response ->
             val text = response.body.string()
             val parsed =
-                if (text.isBlank()) JsonObject(emptyMap())
-                else Json.parseToJsonElement(text).jsonObject
+                if (text.isBlank()) {
+                    JsonObject(emptyMap())
+                } else {
+                    Json.parseToJsonElement(text).jsonObject
+                }
             return Answer(response.code, parsed)
         }
     }

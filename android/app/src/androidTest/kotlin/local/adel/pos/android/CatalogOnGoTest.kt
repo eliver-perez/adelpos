@@ -380,7 +380,12 @@ class CatalogOnGoTest {
         price: String,
         image: String? = null,
     ): String {
-        val imageField = if (image != null) ""","image_id":"$image"""" else ""
+        val imageField =
+            if (image != null) {
+                ""","image_id":"$image""""
+            } else {
+                ""
+            }
         val answer =
             server.main(
                 "POST",

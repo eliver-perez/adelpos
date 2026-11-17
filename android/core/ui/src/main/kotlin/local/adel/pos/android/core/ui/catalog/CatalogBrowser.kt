@@ -274,8 +274,13 @@ private fun statusText(product: CatalogProduct): String? =
             stringResource(R.string.product_sold_out_indefinite)
         AvailabilityStatus.UNAVAILABLE ->
             product.availability.reason.ifBlank { stringResource(R.string.product_unavailable) }
+        // Disponible pero sin precio que Go pudiera determinar: tampoco se puede elegir.
         AvailabilityStatus.AVAILABLE ->
-            if (product.selectable) null else stringResource(R.string.product_unavailable)
+            if (product.selectable) {
+                null
+            } else {
+                stringResource(R.string.product_unavailable)
+            }
     }
 
 fun productTag(productId: String): String = "product-$productId"
