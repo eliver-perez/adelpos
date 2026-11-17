@@ -2,6 +2,9 @@ package local.adel.pos.android.core.data.wipe
 
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Una parte de los datos que este dispositivo guarda del restaurante y que se borra al retirarlo o
@@ -23,7 +26,7 @@ fun interface DeviceDataPart {
  * `WorkManager.cancelAllWork()`), después de que `UnsentOrdersSource` haya entregado lo que no se
  * envió.
  */
-class DeviceDataWipe {
+class DeviceDataWipe(private val dispatcher: CoroutineDispatcher = Dispatchers.IO) {
     private class Registered(val name: String, val part: DeviceDataPart)
 
     private val parts = CopyOnWriteArrayList<Registered>()
@@ -38,20 +41,22 @@ class DeviceDataWipe {
         get() = parts.map { it.name }
 
     /**
-     * Borra todas las partes, en orden. Una que falla no detiene a las demás (se borra todo lo que
-     * se pueda); devuelve los nombres de las que fallaron.
+     * Borra todas las partes, en orden y fuera del hilo principal ([dispatcher]). Una que falla no
+     * detiene a las demás (se borra todo lo que se pueda); devuelve los nombres de las que
+     * fallaron.
      */
-    suspend fun eraseAll(): List<String> {
-        val failed = mutableListOf<String>()
-        for (registered in parts) {
-            try {
-                registered.part.erase()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                failed.add(registered.name)
+    suspend fun eraseAll(): List<String> =
+        withContext(dispatcher) {
+            val failed = mutableListOf<String>()
+            for (registered in parts) {
+                try {
+                    registered.part.erase()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    failed.add(registered.name)
+                }
             }
+            failed
         }
-        return failed
-    }
 }
