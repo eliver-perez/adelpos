@@ -1855,6 +1855,261 @@ que `restaurant/state` trae `event_cursor`.
 
 ---
 
+## Fase E · Modo Mesero en el dispositivo
+
+Rama `etapa-a1-e` (desde `etapa-a1-android` en `b4e1cfe`), un agente, 16 y 17 de noviembre de 2026, en paralelo con las
+correcciones de la revisión R3 en el dispositivo (otro agente). Árbol `$SP/wt/E`, `ISO_TAG=E2`, Go temporal en
+8197/8457 (uno nuevo por corrida completa contra el servidor; apagado y su base borrada al terminar), emuladores propios
+de solo lectura en las consolas 5600 (`Pixel_Tablet`), 5602 (`Pixel_8`), 5604 (`ADEL_A1_Tablet_API26`) y 5606
+(`ADEL_A1_Phone_API33`), como mucho dos a la vez y siempre con `ANDROID_SERIAL`. A mitad de la fase se fusionó
+`etapa-a1-android` con las correcciones R3 del dispositivo (fusión `9758899`, sin rebase) y la fase se conectó con ellas
+(cabeceras por mesero, «Vuelve a escribir tu PIN», registro único de borrado, Room v3 → la cola va en la **v4**).
+**Sin cambios en `backend/`, `desktop/`, `config/`, `CLAUDE.md` ni `AGENTS.md`**; `docs/etapas/*.md` con el mismo md5
+antes y después. Ninguna prueba usó el servicio real de la Mac (8181, 8443, 55432 ni su carpeta) y ninguna abrió la
+aplicación normal con la búsqueda en la red real (todas con `AdelTestRunner`).
+
+### Commits (`etapa-a1-e`, 19 sobre `etapa-a1-android` en `6a1c496`)
+
+| Commit    | Qué                                                                                                                           |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `c9731fe` | Dominio del modo Mesero (mesas, tiempo, cuentas, permisos, borrador, captura, A1-D6, cola con cinco estados)                  |
+| `9758899` | Fusión de `etapa-a1-android` con las correcciones R3 del dispositivo (sin rebase)                                             |
+| `5cd1d89` | Cola en `core:data`: Room v4 y migración 3 → 4, API con cabeceras del mesero dueño, envío, revisión, WorkManager 2.12.0       |
+| `64a9d46` | Captura en `core:data` (borrador en Room y en Go), mesas y cuentas sin conexión, modificar o cancelar lo enviado              |
+| `7704357` | La aplicación conecta la cola (`WaiterWorkGate`, `UnsentOrdersSource`, contador, registro de borrado) y WorkManager           |
+| `b0bdacc` | Pantallas: Mesas (lista y mapa), cuentas, captura, lo enviado, «Enviar a cocina», pendientes y revisión                       |
+| `0b12d8a` | Comentario de WorkManager en una línea                                                                                        |
+| `a0aafa6` | Pruebas de la aplicación con las etiquetas de Mesas en su paquete nuevo                                                       |
+| `13a4115` | Prueba del bloqueo por inactividad con la cola real                                                                           |
+| `5f562be` | El trabajador lee el servidor emparejado sin pantallas; reloj de Mesas solo a la vista; WorkManager en `docs/DEPENDENCIES.md` |
+| `f70e65e` | Pruebas: ViewModels (JVM), pantallas en el dispositivo, `WaiterModeOnGoTest` y `android-e2e.sh --suite waiter`                |
+| `ffc0b42` | `android/CLAUDE.md`, prueba de la red sin internet con WorkManager, giro y Atrás robustos en la prueba de punta a punta       |
+| `9b7d33c` | «Actualiza esta aplicación» muestra los pedidos sin enviar                                                                    |
+| `fc8bdf2` | Más pruebas (mesa cobrada, cancelar/modificar lo enviado, cuenta cobrada sin conexión, bloqueo con pedido, teléfono)          |
+| `1efc7d3` | Una cuenta cobrada que llega por el canal no es un conflicto: se ofrece una cuenta nueva en la mesa                           |
+| `4797131` | Formato de las tablas de `android/CLAUDE.md` y `docs/DEPENDENCIES.md`                                                         |
+| `02fc45d` | `WaiterModeOnGoTest` reconoce el panel por sus botones (teléfono)                                                             |
+| `cc5ae19` | `WaiterModeOnGoTest` acepta Mesas con la mesa abierta (teléfono)                                                              |
+| `735a97a` | `WaiterModeOnGoTest` desplaza las listas perezosas hasta lo que busca (pantalla chica de API 26)                              |
+
+### Qué se hizo
+
+**Dominio** (`android/core/domain/.../waiter/`, Kotlin puro):
+
+- `Restaurant.kt`: áreas, mesas (forma y posición en el lienzo lógico de 1000 × 560, `TableCanvas.scaleToFit`), umbrales,
+  `RestaurantView` (áreas activas en su orden; mesas activas o con cuentas abiertas, como `operationalTables` del
+  escritorio) y `TableSearch` (sin acentos ni mayúsculas). `ElapsedTime`: el formato exacto de `elapsedTime` del
+  escritorio («45 min», «5 h 12 min», «3 d 14 h») y los segundos de Go más lo que pasó desde la lectura con el reloj
+  monótono.
+- `Accounts.kt`: `AccountSummary`, `DraftLine`, `SentLine`, `AccountBill`, `DraftQuote`, `PreparationState` (los nombres
+  de Go; un valor desconocido no se inventa).
+- `WaiterPermissions.kt`: cada acción con los permisos que exige Go (abrir cuenta, capturar, enviar, modificar, cancelar);
+  solo deshabilita lo que Go rechazaría y, si nunca se leyeron (entrada sin conexión), no deshabilita nada.
+- `DraftOperations.kt`: puerto de `draftOperations.ts` (agregar, sumar con respaldo, sustituir, quitar; lo sencillo
+  idéntico se suma, lo personalizado nunca).
+- `Capture.kt`: la captura por mesero (base de Go + toques locales, renglones propios, precios vistos, estado del
+  guardado, clave del guardado en curso y cuántos toques incluye) y `OfflineOrderPlan` (A1-D6).
+- `OrderQueue.kt`, `OrderSendRules.kt`, `OrderReviewRules.kt`, `OrderFactory.kt`: los **cinco estados** (`DRAFT`,
+  `QUEUED`, `SENDING`, `RECEIVED`, `NEEDS_REVIEW`) y `OrderTransitions` (las permitidas y nada más), el pedido de la
+  cola, la interpretación de cada respuesta, «Requiere tu revisión» (aceptar, quitar, reenviar, cuenta nueva en la
+  mesa) y `WaiterWorkSummary` (lo que decide bloquear, cambiar de mesero y cerrar sesión).
+- `WaiterServices.kt`: interfaces para las pantallas (`RestaurantSource`, `CaptureService`, `OrderQueueService`,
+  `SentLineService`), para que la A2 las reutilice.
+
+**Datos** (`android/core/data/.../waiter/`):
+
+- `WaiterDtos.kt` y `WaiterMapper.kt`: las formas del contrato (overview, state, cuentas, `Bill`, `QuoteResult`, abrir,
+  guardar, confirmar, cancelar, modificar, pedido sin conexión, rechazos con `details`). Al escribir, `CustomizationJson`
+  (`"variant_id": null`).
+- `WaiterServer` / `DeviceWaiterServer`: interfaz estrecha sobre `AccessRepository` con las cabeceras **del mesero
+  dueño** (`requestHeaders(userId)`, solo si trae `Authorization`), la credencial de envío (`X-Offline-Credential`) y
+  `report(error, userId)`; `prepare()` lee el servidor emparejado si WorkManager despertó el proceso sin pantallas.
+- `WaiterApi`: las rutas del modo Mesero con `ApiOutcome` (rechazo con `details`, «la petición salió»); con
+  `LostResponses` (solo pruebas) descarta la respuesta **después** de que Go la procesó.
+- Room **`AppDatabase` v4** (`waiter/db/`): `captures`, `pending_orders`, `restaurant_snapshot` y `waiter_permissions`;
+  migración 3 → 4 con el SQL del esquema exportado (`WAITER_TABLES_V4`); `queueFromCapture` y `captureFromOrder` en una
+  transacción. `WaiterStorage` guarda los renglones con la forma `DraftItem` del contrato.
+- `OrderQueueRepository`: la cola (servicio de las pantallas), `PendingOrdersSource` (contador), `WaiterWorkGate`,
+  `UnsentOrdersSource` (también las capturas sin enviar), `recoverAfterRestart`, `credentialRenewed` y `eraseAll`.
+- `OrderSender` + `OrderSendWorker`/`OrderWorkerFactory`/`WorkManagerOrderScheduler`: envío del más viejo al más nuevo
+  con la credencial del mesero que capturó, la misma clave siempre; WorkManager **sin restricción de red**, espera
+  exponencial desde 10 s, trabajo normal (no urgente), periódico de respaldo cada 15 min, «otra vuelta» si llega un
+  pedido mientras se envía.
+- `CaptureRepository`: el guardado del borrador como `draftSync.ts` (700 ms, una petición a la vez, creación diferida,
+  `TABLE_HAS_ACCOUNT`, guardado incierto repetido igual también tras reiniciar, `ACCOUNT_CONFLICT` explícito, cuenta
+  que ya no está abierta), la cotización de Go (huella y precio por renglón) y «Enviar a cocina» (en línea con
+  `confirmDraft` y la huella vista; si no se puede, pedido sin conexión).
+- `RestaurantRepository`: mesas, cuentas abiertas y permisos con la sesión del mesero activo, guardados para verse sin
+  conexión; el canal de tiempo real (ámbito `restaurant`) avisa qué cuenta cambió y vuelve a leer las mesas.
+- `SentLineRepository`: `previewEdit`, `editUnits` y `cancelUnits` con motivo y clave propia.
+
+**Interfaz** (`core:ui/.../waiter/` y `feature:waiter`):
+
+- `OrderStateBadge` (los cinco estados con color, texto e ícono distintos), `PreparationBadge` (los textos del escritorio
+  y de cocina) y `ElapsedLabel` (el tiempo, en ámbar con el triángulo si Go marcó `long_open`), compartidos con la A2.
+- **Mesas** (`tables/`): lista por área (predeterminada) o **mapa** a escala por área, recordada en el dispositivo;
+  búsqueda; «Sin conexión: se ven las mesas de la última vez»; el panel de la mesa con lo del mesero en ella (captura y
+  pedidos con su estado), las cuentas abiertas y «Nueva cuenta» (deshabilitada con su motivo sin `accounts.open` o si la
+  mesa está fuera de servicio).
+- **Captura** (`capture/`): catálogo y personalizador de la Fase D con la cuenta **al lado en la tableta y a un toque en
+  el teléfono**; lo enviado con su preparación y «Modificar»/«Cancelar unidades» (con motivo, solo con conexión y los
+  permisos); lo por enviar con −/+, «Cambiar» y «Quitar», «Capturado en otra terminal», precios de Go o «Precio de
+  referencia»; el estado del guardado con «Conservar mis cambios»/«Descartar mis cambios», «Agregar a esa cuenta»/«Abrir
+  otra cuenta» y «Abrir una cuenta nueva en la mesa»; «Enviar a cocina» y «Descartar la captura» (con confirmación).
+- **Pedidos pendientes** y **Requiere tu revisión** (`pending/`): lo del mesero con su estado, «Reintentar ya», el aviso
+  de la credencial, el número (nunca el detalle) de los pedidos de otros meseros; la revisión con los mensajes de Go,
+  «Quitar del pedido», «Aceptar los cambios y enviar» (solo con cambios aceptables), «Abrir una cuenta nueva en la
+  mesa», «Corregir en la captura» y «Descartar el pedido».
+- `feature:access`: «Actualiza esta aplicación» muestra los pedidos sin enviar con su aviso (salen al instalar encima;
+  desinstalar los perdería) — lo pendiente de las fases C y B; «Emparejar de nuevo» y la revocación ya los mostraban con
+  `pendingOrders()`, ahora con la cola real.
+
+**Aplicación**: `WaiterModeContainer` (arranque: recuperar la cola, envío al volver la red, a primer plano y cuando un
+mesero entra con conexión), `AppContainer` (cola, contador, `WaiterWorkGate`, `UnsentOrdersSource`, registro de borrado
+«cola de pedidos y capturas» con `WorkManager.cancelAllWork()`, `waiterDependencies`), `AdelPosApplication` como
+`Configuration.Provider` (el inicializador automático de WorkManager quitado en el manifiesto) y la navegación (Mesas →
+Captura, Pedidos pendientes, Requiere tu revisión). La pantalla de muestra «Catálogo» de la Fase D queda sin ruta.
+
+**Dónde está lo principal** (rutas desde `android/`; `…/domain` = `core/domain/src/main/kotlin/local/adel/pos/android/core/domain`,
+`…/data` = `core/data/src/main/kotlin/local/adel/pos/android/core/data`):
+
+| Qué                                                                       | Ruta:línea                                                                                         |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Transiciones permitidas de los cinco estados                              | `…/domain/waiter/OrderQueue.kt:47`                                                                 |
+| Lo que se manda sin conexión (A1-D6, `replaces_draft_items`)              | `…/domain/waiter/Capture.kt:115`                                                                   |
+| Room v4 y la migración 3 → 4                                              | `…/data/db/AppDatabase.kt:45`, `:145`; SQL en `…/data/waiter/db/WaiterEntities.kt:98`              |
+| Envío de la cola e interpretación de cada respuesta                       | `…/data/waiter/OrderSender.kt:53`, `:115` (`OFFLINE_CREDENTIAL_INVALID` en `:153`)                 |
+| WorkManager sin restricción de red, espera exponencial y periódico        | `…/data/waiter/OrderSendWork.kt:126`, `:129`, `:139`                                               |
+| Cola, `WaiterWorkGate`, `UnsentOrdersSource`, recuperación tras reiniciar | `…/data/waiter/OrderQueueRepository.kt:151`, `:157`, `:120`                                        |
+| Guardado del borrador (700 ms), cuenta cerrada, «Enviar a cocina»         | `…/data/waiter/CaptureRepository.kt:404`, `:270`, `:308`                                           |
+| Cabeceras del mesero dueño y credencial de envío                          | `…/data/waiter/WaiterServer.kt:67`, `:77`                                                          |
+| Registro de borrado de la cola                                            | `app/src/main/kotlin/local/adel/pos/android/AppContainer.kt:141`                                   |
+| «Actualiza esta aplicación» con los pedidos sin enviar                    | `feature/access/src/main/kotlin/local/adel/pos/android/feature/access/status/StatusScreens.kt:191` |
+| Prueba de punta a punta contra Go                                         | `app/src/androidTest/kotlin/local/adel/pos/android/WaiterModeOnGoTest.kt`                          |
+
+### Decisiones (con su porqué)
+
+1. **La cola y las capturas en `AppDatabase` v4** (instrucción del coordinador al fusionar R3, que ya usó la v3): una
+   sola base para el acceso, la bitácora y la cola; migración 3 → 4 que solo crea tablas, probada con
+   `MigrationTestHelper`.
+2. **«Enviar a cocina» siempre deja un pedido en la cola** (`queueFromCapture`, en una transacción con el borrado de la
+   captura): con conexión nace «Enviando» e intenta `confirmDraft` con la huella de la cotización que vio el mesero (el
+   flujo del escritorio); cualquier cosa que no sea «confirmado», «la cuenta ya no está abierta» o «sin permiso» (sin
+   respuesta, `QUOTE_CHANGED`, agotado, conflicto, sesión terminada) lo deja como **pedido sin conexión** y Go lo revisa
+   todo al recibirlo con sus propios mensajes (precio, agotado, `draft_item_*` de A1-D6). Así el trabajador de
+   WorkManager, que solo tiene la credencial de envío (las sesiones viven en memoria), puede terminar cualquier envío, y
+   un reinicio a media confirmación nunca deja un pedido perdido («Enviando» vuelve a «Por enviar»). Si la confirmación
+   en línea sí había entrado y la respuesta se perdió dos veces, Go lo dice como `draft_item_sent` («ya se había enviado
+   desde este dispositivo») y el mesero lo descarta: nunca entra dos veces sin que el mesero lo acepte.
+3. **La clave del pedido es el id de la captura**: «Corregir en la captura» y volver a enviar usa la misma clave (Go no
+   guarda la clave de un rechazo); la confirmación en línea tiene su propia clave.
+4. **`seen_unit_price`**: el precio por unidad de la cotización de Go si el renglón se guardó en línea; si no, el de
+   referencia del catálogo (presentación o producto). **Nunca se calcula uno**: un renglón con complementos con cargo
+   capturado sin conexión llega con el precio base y Go lo avisa como cambio de precio que el mesero acepta.
+5. **WorkManager sin restricción de red** (riesgo de la Fase 0 **comprobado**: con la red sin validar,
+   `NetworkType.CONNECTED` no corre y el trabajo sin restricción sí, `WorkNetworkOnDeviceTest`): el trabajador prueba
+   el servidor y reintenta con espera exponencial desde 10 s; además se pide un envío al recuperar la red, al volver a
+   primer plano y cuando un mesero entra con conexión, y un trabajo periódico de 15 minutos cubre la aplicación cerrada.
+   Nunca trabajo urgente.
+6. **Una base de Go sin leer nunca se sobrescribe**: `saveDraft` sustituye el borrador completo, así que una captura que
+   empezó sin conexión en una cuenta existente (`baseRevision` 0) primero lee el borrador vigente y guarda encima (sus
+   toques nunca vieron otro); con base leída, una revisión nueva con toques pendientes es un conflicto explícito, como
+   el escritorio.
+7. **Una cuenta cobrada, cancelada o combinada no es un conflicto**: si llega por el canal (o Go rechaza el guardado con
+   `account_not_open`), la captura dice que la cuenta ya no está abierta y ofrece «Abrir una cuenta nueva en la mesa»
+   (con renglones nuevos: los anteriores pertenecían a la otra cuenta). Observado en el Go temporal: **Go no cierra una
+   cuenta de salón liquidada mientras tiene borrador**, así que «la mesa se cobró mientras tanto» ocurre cuando lo del
+   mesero aún no estaba guardado en Go (sin conexión o recién tocado); en línea lo cubre la captura y sin conexión la
+   revisión (`account_closed` con «Abrir una cuenta nueva en la mesa»).
+8. **El contador del indicador es de todo el dispositivo** (lo que importa antes de apagarlo); «Pedidos pendientes»
+   muestra solo los del mesero activo y, de los demás, solo cuántos son.
+9. **Las capturas sin enviar también pasan a la bitácora** al retirar el dispositivo o emparejarlo de nuevo («(sin enviar
+   a cocina)»): nunca se pierden en silencio.
+10. **Modificar lo enviado ofrece cantidad y observaciones** (con `previewEdit` primero y motivo); reducir exige además
+    cancelar (el diálogo no deja bajar sin ese permiso). Cambiar la receta o los complementos de algo ya enviado no se
+    ofrece en esta fase (Go lo admite con `previewEdit`; queda para después si el propietario lo pide).
+11. **Mesas**: todas las mesas se muestran (Go no restringe por mesero); el tiempo es el de Go más el reloj monótono
+    desde la lectura; la última lectura queda en Room para trabajar sin conexión (también tras reiniciar).
+12. **Sin cambios en el servidor**: lo opcional de la Fase E del servidor no hizo falta (la cuenta de destino de una
+    transferencia se ve porque cada evento del ámbito `restaurant` vuelve a leer mesas y cuentas; `draft_item_id` en
+    `ConfirmedLine` no se necesitó porque el reintento usa la misma clave; `previewDraft` basta).
+
+### Pruebas que se corrieron (todas en `735a97a`, la cabeza de la rama)
+
+| Prueba                                                                                           | Dónde                                                       | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./scripts/dev.sh android-test` (JVM, Robolectric con Room y WorkManager, lint)                  | Mac                                                         | **219 pruebas, 0 fallas**, lint sin hallazgos: `core:domain` 94 (nuevas `WaiterRulesTest` 10 y `OrderQueueRulesTest` 10), `core:data` 107 (nuevas `OrderQueueTest` 13 y `CaptureSyncTest` 10; `AppDatabaseTest` en la v4), `core:ui` 9, `feature:access` 6, `feature:waiter` 3 (`WaiterViewModelsTest`)                                                                                                                                                                                                                                                                                                                                                                          |
+| `./scripts/dev.sh android-format-check`, `iso.sh format` y `fmt-check` antes de cada commit      | Mac                                                         | correcto; `docs/etapas/*.md` con el mismo md5 antes y después                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Instrumentadas completas (`connectedDebugAndroidTest`), XML contados                             | `Pixel_8` (API 37)                                          | **71 pruebas, 0 fallas**, 22 omitidas a propósito (las de punta a punta sin los argumentos del guion: `AccessOnGoTest` 7, `CatalogOnGoTest` 3, `WaiterModeOnGoTest` 10, `ServerApiOnDeviceTest` 2). Incluye `AppDatabaseMigrationTest` 3 → 4 con `MigrationTestHelper`, `WaiterScreensTest` 4 (los cinco estados distintos en ambos temas, «Pedidos pendientes» con «Reintentar ya» y solo el número de los de otros meseros, la revisión que solo se acepta con cambios aceptables, Mesas en uno o dos paneles y sin permiso para abrir), `WorkNetworkOnDeviceTest` (riesgo de la Fase 0) e `IdleLockWithPendingOnDeviceTest` (no bloquea con un pedido por enviar y sí sin él) |
+| Ídem                                                                                             | `Pixel_Tablet` (API 37)                                     | **71 pruebas, 0 fallas**, las mismas 22 omitidas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `scripts/android-e2e.sh --suite waiter`, 10 pasos contra el Go temporal (base nueva por corrida) | `ADEL_A1_Tablet_API26` (red cortada con `adb root` + `svc`) | **10/10 aprobados**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Ídem                                                                                             | `ADEL_A1_Phone_API33` (modo avión)                          | **10/10 aprobados**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Ídem                                                                                             | `Pixel_8` (API 37)                                          | **10/10 aprobados**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Ídem                                                                                             | `Pixel_Tablet` (API 37)                                     | **10/10 aprobados**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+
+Los pasos de `WaiterModeOnGoTest`: `w1` emparejar y entrar con PIN; `w2` captura en línea con creación diferida de la
+cuenta, giro sin perder nada, «Enviar a cocina» (`confirmDraft` con la huella) y los cambios de otra terminal al momento
+por el canal; `w3` captura **sin conexión** (red cortada por el guion) que queda «Por enviar», con «1 pedido por enviar» en el indicador de la barra (la cola real); `w4` al volver la red el
+trabajador lo envía **sin entrar con el PIN**, con la primera respuesta **perdida** (`lostOfflineResponses`): Go lo tiene
+una sola vez; `w5` precio cambiado y producto agotado: «Requiere tu revisión», quitar el agotado y aceptar; `w6` la mesa
+se cobró mientras se capturaba: «Abrir una cuenta nueva en la mesa»; `w7a`–`w7c` A1-D6 (borrador guardado en Go, sin
+conexión se agrega y se cambia, el pedido sustituye el borrador sin duplicar); `w8` cancelar y modificar unidades
+enviadas con motivo y permisos. En la primera corrida de API 26, `w2` no encontró «Enviar a cocina» (la lista del pedido
+no lo había compuesto en esa pantalla) y `w6` falló por arrastre; la prueba ahora desplaza las listas (`735a97a`) y las
+cuatro corridas de arriba son posteriores a ese cambio.
+
+Dependencias: WorkManager 2.12.0 (`work-runtime-ktx` y `work-testing`) y lo que trae (`lifecycle-livedata` y
+`lifecycle-service`, que resuelven a 2.10.0 en `core:data` y a 2.11.0 —la del catálogo— en la aplicación;
+`concurrent-futures-ktx` 1.1.0, `tracing-ktx` 1.2.0, `startup-runtime` 1.1.1 en la compilación de `core:data`), con el
+procedimiento documentado (`--write-locks --write-verification-metadata sha256`; se descargaron de Google Maven y sus
+SHA-1 se compararon con los publicados); la corrida completa siguiente no cambió nada. No se instaló ningún paquete del
+SDK.
+
+### No verificado
+
+- Los estados de cocina «En preparación» y «Listo» de punta a punta: el Go temporal de las pruebas no tenía estaciones
+  ni rutas de cocina, así que lo enviado quedó «Enviado · sin confirmar en cocina» (el estado que da Go). La lectura de
+  `preparation_state` y la nueva lectura de la cuenta con cualquier evento de su agregado (incluido
+  `restaurant.account.preparation_changed`) sí se ejercitaron (el borrador y la confirmación de otra terminal llegaron al
+  momento en `w2`).
+- Un dispositivo físico y la wifi real de un restaurante sin internet (se simuló una red sin validar haciendo fallar la
+  comprobación de internet del sistema en el emulador).
+- La aplicación cerrada mucho tiempo con Doze (el trabajo periódico de 15 minutos y la espera exponencial larga de
+  WorkManager no se observaron; sí el envío con el proceso nuevo y sin entrar con el PIN, `w4`).
+- Varios meseros a la vez en el mismo dispositivo contra el Go temporal (la separación por mesero se probó en la JVM y en
+  `WaiterScreensTest`; el cambio de mesero y su bloqueo con pedidos ya los prueban las fases C y B con
+  `WaiterWorkGate`).
+- Transferir, dividir o combinar cuentas desde otra terminal mientras se captura.
+- La personalización en curso después de que Android cierra el proceso (vuelve el producto con su configuración
+  original; la rotación sí la conserva).
+- Lint con reglas de lifecycle 2.11.0 (las omite el lint de AGP 9.5.1, como en las fases anteriores).
+
+### Para el coordinador
+
+1. **Sin cambios en el servidor** ni pedidos para él (decisión 12).
+2. **Cambio pequeño en `feature:access`** (del agente de las fases C y B, ya fusionado): «Actualiza esta aplicación» ahora
+   muestra los pedidos sin enviar con su aviso (lo pendiente de las fases C y B); nada más de su código cambió. La forma
+   del contrato R3 (`requestHeaders(userId)`, `report`, `deviceDataWipe`, `pendingOrders()`) sirvió tal cual.
+3. **`scripts/android-e2e.sh --suite waiter`**: el guion de las fases C y B ahora corre también `WaiterModeOnGoTest`
+   (pasos `w1`–`w8`, la red la corta el guion); `--suite access` (por omisión) no cambia.
+4. **Riesgo de la Fase 0 confirmado** (decisión 5): conviene que la Fase F lo repita en un dispositivo físico con una
+   wifi sin internet.
+5. Para `CLAUDE.md`/`AGENTS.md` (no los edité): §4 y §6 con la cola (`AppDatabase` v4), las pruebas nuevas y
+   `--suite waiter`; reglas permanentes nuevas 18 y 19 de `android/CLAUDE.md` (la cola nunca pierde ni duplica; WorkManager
+   sin restricción de red).
+6. La pantalla de muestra «Catálogo» de la Fase D quedó sin ruta (su prueba sigue): se puede borrar en la Fase G.
+
+**Al cerrar la Fase E del dispositivo** (rama `etapa-a1-e`, que ya traía fusionadas las correcciones R3, fusionada en
+`etapa-a1-android`, `f6e6b39`): se aceptan las decisiones de la fase (cola en `AppDatabase` v4; «Enviar a cocina»
+siempre pasa por la cola; WorkManager sin restricción de red, porque se comprobó que con `CONNECTED` y una red sin
+validar el trabajo no corre; el contador del indicador cuenta los pedidos de todo el dispositivo; «Abrir una cuenta
+nueva en la mesa» cuando la cuenta ya se cobró). La revisión independiente de §6–§7 examina en especial que la misma
+clave de operación pase de `confirmDraft` a `submitOfflineOrder` sin duplicar ni perder pedidos. La Fase F completa lo
+no verificado (estados de preparación con cocina de punta a punta, varios meseros a la vez, transferir o combinar desde
+otra terminal y la muerte del proceso a mitad de un personalizador) y la Fase G borra la pantalla de muestra «Catálogo».
+
+---
+
 ## Revisión independiente R3 · PIN y sesión (§3)
 
 Revisor independiente que pide la especificación (§0, «Eficiencia»), 16/11/2026. Árbol `$SP/wt/R3` (rama `etapa-a1-r3`,
