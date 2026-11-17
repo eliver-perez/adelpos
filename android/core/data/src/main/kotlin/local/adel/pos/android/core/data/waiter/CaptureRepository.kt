@@ -27,6 +27,7 @@ import local.adel.pos.android.core.domain.waiter.AccountBill
 import local.adel.pos.android.core.domain.waiter.AccountSummary
 import local.adel.pos.android.core.domain.waiter.Capture
 import local.adel.pos.android.core.domain.waiter.CaptureService
+import local.adel.pos.android.core.domain.waiter.DiscardResult
 import local.adel.pos.android.core.domain.waiter.DraftLine
 import local.adel.pos.android.core.domain.waiter.DraftOperation
 import local.adel.pos.android.core.domain.waiter.DraftQuote
@@ -53,7 +54,12 @@ import local.adel.pos.android.core.domain.waiter.TableAccountRef
  * - un guardado sin respuesta se repite **igual** (misma clave y mismo contenido) antes de mandar
  *   nada más, también después de reiniciar;
  * - si otra terminal cambió la cuenta (`ACCOUNT_CONFLICT` o una revisión nueva por el canal) con
- *   toques sin guardar, el conflicto es explícito: «Conservar mis cambios» o «Descartarlos».
+ *   toques sin guardar, el conflicto es explícito: «Conservar mis cambios» o «Descartarlos»;
+ * - «Enviar a cocina» con conexión no arma el pedido mientras el guardado anterior no tenga
+ *   respuesta (lo espera o lo repite con su clave) y la confirmación en línea usa **la clave del
+ *   pedido** (revisión R6, C1 y A1);
+ * - «Descartar la captura» también quita de Go lo suyo guardado (y la cuenta vacía que nació con la
+ *   captura); sin conexión el descarte queda pendiente (revisión R6, A2).
  *
  * Todo sale con las cabeceras del **mesero que capturó** (revisión R3, M5).
  */
@@ -67,6 +73,9 @@ class CaptureRepository(
     private val clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { UUID.randomUUID().toString() },
     private val saveDelayMillis: Long = SAVE_DELAY_MILLIS,
+    private val serverClock: ServerClock? = null,
+    private val inFlight: OrdersInFlight = OrdersInFlight(),
+    private val settleTimeoutMillis: Long = SETTLE_TIMEOUT_MILLIS,
 ) : CaptureService {
     /** Lo que el modo Mesero necesita del catálogo guardado. */
     interface CatalogLookups {
@@ -118,7 +127,9 @@ class CaptureRepository(
     ): Capture {
         val existing = edits.withLock {
             dao.capturesOf(userId).map(WaiterStorage::toCapture).firstOrNull { capture ->
-                capture.tableId == tableId && capture.accountId == account?.id
+                capture.tableId == tableId &&
+                    capture.accountId == account?.id &&
+                    capture.sync != DraftSync.DISCARDING
             }
         }
         if (existing != null) {
@@ -160,6 +171,9 @@ class CaptureRepository(
     override suspend fun stage(captureId: String, operation: DraftOperation, seenPrice: Money?) {
         edits.withLock {
             val capture = load(captureId) ?: return
+            if (capture.sync == DraftSync.DISCARDING) {
+                return
+            }
             val own =
                 when (operation) {
                     is DraftOperation.Add -> capture.ownItemIds + operation.item.id
@@ -227,11 +241,22 @@ class CaptureRepository(
             save(
                 capture.copy(
                     accountId = account.id,
-                    accountName = account.name,
+                    accountName = account.name.ifEmpty { capture.accountName },
+                    // Seguir una cuenta combinada (M3): la combinación movió el borrador con sus
+                    // identificadores, así que lo que vio el mesero se compara con el de la cuenta
+                    // nueva. Sin cuenta antes (otra terminal abrió una), no había base.
+                    baseRevision =
+                        if (capture.accountId == null) {
+                            0
+                        } else {
+                            Capture.SEEN_BASE_REVISION
+                        },
                     tableAccounts = emptyList(),
                     sync = DraftSync.PENDING,
+                    syncMessage = null,
                     pendingOperationId = null,
                     inFlightCount = 0,
+                    createdAccount = false,
                 ),
             )
         }
@@ -270,8 +295,13 @@ class CaptureRepository(
     override suspend fun observe(captureId: String, bill: AccountBill) {
         edits.withLock {
             val capture = load(captureId) ?: return
-            if (capture.accountId != bill.account.id || capture.pendingOperationId != null) {
-                // Con un guardado propio en curso, su respuesta es la autoridad.
+            val ignored =
+                capture.accountId != bill.account.id ||
+                    capture.pendingOperationId != null ||
+                    capture.sync == DraftSync.DISCARDING
+            if (ignored) {
+                // Con un guardado propio en curso, su respuesta es la autoridad; un descarte
+                // pendiente ya no muestra la cuenta.
                 return
             }
             if (bill.account.revision <= capture.baseRevision) {
@@ -285,8 +315,13 @@ class CaptureRepository(
                         baseRevision = bill.account.revision,
                         sync = DraftSync.ACCOUNT_CLOSED,
                         syncMessage = null,
+                        tableAccounts = mergedTarget(bill.account.mergedIntoId),
                     ),
                 )
+                return
+            }
+            if (capture.baseRevision == Capture.SEEN_BASE_REVISION) {
+                save(reconciled(capture, bill))
                 return
             }
             // Sin base leída, los toques nunca vieron otra: se aplican encima de la de Go.
@@ -306,8 +341,21 @@ class CaptureRepository(
     }
 
     override suspend fun sendToKitchen(captureId: String, waiterName: String): SendRequest {
-        settle(captureId)
-        val capture = edits.withLock { load(captureId) } ?: return SendRequest.NothingToSend
+        settle(captureId, settleTimeoutMillis)
+        var capture = edits.withLock { load(captureId) } ?: return SendRequest.NothingToSend
+        if (capture.sync == DraftSync.DISCARDING) {
+            return SendRequest.NothingToSend
+        }
+        if (capture.pendingOperationId != null && hasSession(capture)) {
+            // Revisión R6, C1: con conexión no se arma el pedido mientras el guardado anterior no
+            // tenga respuesta. Se espera a que llegue (su lectura tarda hasta 15 s) o se repite
+            // con su clave, y el pedido sale con lo que Go guardó de verdad.
+            settle(captureId, RESOLVE_TIMEOUT_MILLIS)
+            capture = edits.withLock { load(captureId) } ?: return SendRequest.NothingToSend
+            if (capture.pendingOperationId != null && capture.sync == DraftSync.SAVING) {
+                return SendRequest.StillSaving
+            }
+        }
         val plan = OfflineOrderPlan.of(capture)
         if (plan.items.isEmpty()) {
             return SendRequest.NothingToSend
@@ -316,22 +364,40 @@ class CaptureRepository(
             return SendRequest.TooManyLines
         }
         val online = onlineConfirmFor(capture)
-        val order =
+        // La hora de captura en la hora de Go si se conoce la diferencia (revisión R6, B4).
+        val offset = serverClock?.offsetMillis()
+        val factoryOrder =
             OrderFactory.fromCapture(
                 capture = capture,
                 waiterName = waiterName,
-                // La clave del pedido es la de la captura: si vuelve a la captura para corregirlo,
+                // La clave del pedido es la de la captura, **la misma** en la confirmación en línea
+                // y en el pedido sin conexión (A1-D19): si la confirmación entró y su respuesta se
+                // perdió, Go lo reconoce como ya aceptado. Si vuelve a la captura para corregirlo,
                 // sale con la misma.
                 operationId = capture.id,
                 catalog = catalog.stamp(),
                 lookup = catalog.lookup,
                 onlineConfirm = online,
-                nowMillis = clock(),
+                nowMillis = clock() + (offset ?: 0L),
             ) ?: return SendRequest.NothingToSend
-        edits.withLock {
-            dao.queueFromCapture(WaiterStorage.toEntity(order), captureId)
-            timers.remove(captureId)?.cancel()
-            quotes.value = quotes.value - captureId
+        val order =
+            factoryOrder.copy(
+                unresolvedSave = capture.unresolvedSave(),
+                clockCorrected = offset != null,
+            )
+        if (online != null) {
+            // Antes de que exista «Enviando»: el trabajador no lo toma por interrumpido (B2).
+            inFlight.add(order.operationId)
+        }
+        try {
+            edits.withLock {
+                dao.queueFromCapture(WaiterStorage.toEntity(order), captureId)
+                timers.remove(captureId)?.cancel()
+                quotes.value = quotes.value - captureId
+            }
+        } catch (failure: Throwable) {
+            inFlight.remove(order.operationId)
+            throw failure
         }
         if (online != null) {
             scope.launch { confirmOnline(order) }
@@ -341,11 +407,35 @@ class CaptureRepository(
         return SendRequest.Queued(order.operationId, order.state)
     }
 
-    override suspend fun discard(captureId: String) {
+    override suspend fun discard(captureId: String): DiscardResult {
         edits.withLock {
+            val capture = load(captureId) ?: return DiscardResult.DONE
             timers.remove(captureId)?.cancel()
-            dao.deleteCapture(captureId)
             quotes.value = quotes.value - captureId
+            // Lo suyo pudo llegar al borrador de Go: renglones guardados o un guardado sin
+            // respuesta. Si no, no hay nada que quitar fuera del dispositivo.
+            val inGo =
+                capture.pendingOperationId != null ||
+                    (capture.accountId != null && capture.base.any { capture.isOwn(it.id) })
+            if (!inGo) {
+                dao.deleteCapture(captureId)
+                return DiscardResult.DONE
+            }
+            save(capture.copy(sync = DraftSync.DISCARDING, syncMessage = null))
+        }
+        return discardNow(captureId)
+    }
+
+    /**
+     * Termina un descarte (también el de «Descartar el pedido», que pasa el pedido a una captura en
+     * descarte): lo intenta enseguida y dice si quedó pendiente (sin conexión o sin sesión).
+     */
+    suspend fun discardNow(captureId: String): DiscardResult {
+        settle(captureId, settleTimeoutMillis)
+        return if (edits.withLock { load(captureId) } == null) {
+            DiscardResult.DONE
+        } else {
+            DiscardResult.PENDING
         }
     }
 
@@ -372,7 +462,8 @@ class CaptureRepository(
             val waiting =
                 capture.sync == DraftSync.PENDING ||
                     capture.sync == DraftSync.UNCERTAIN ||
-                    capture.sync == DraftSync.SAVING
+                    capture.sync == DraftSync.SAVING ||
+                    capture.sync == DraftSync.DISCARDING
             if (waiting) {
                 requestSync(capture.id)
             }
@@ -393,16 +484,26 @@ class CaptureRepository(
         queue.trySend(SyncRequest(captureId, done = null))
     }
 
-    /** Guarda ya lo pendiente y espera (un poco) a que termine, antes de «Enviar a cocina». */
-    private suspend fun settle(captureId: String) {
+    /**
+     * Guarda ya lo pendiente (o termina un descarte) y espera hasta [timeoutMillis] a que termine,
+     * antes de «Enviar a cocina» o de decir cómo quedó un descarte.
+     */
+    private suspend fun settle(captureId: String, timeoutMillis: Long) {
         timers.remove(captureId)?.cancel()
         val done = CompletableDeferred<Unit>()
         queue.trySend(SyncRequest(captureId, done))
-        withTimeoutOrNull(SETTLE_TIMEOUT_MILLIS) { done.await() }
+        withTimeoutOrNull(timeoutMillis) { done.await() }
     }
+
+    private fun hasSession(capture: Capture): Boolean =
+        server.transport() != null && server.sessionHeaders(capture.waiterUserId) != null
 
     private suspend fun syncOnce(captureId: String) {
         val capture = edits.withLock { load(captureId) } ?: return
+        if (capture.sync == DraftSync.DISCARDING) {
+            discardInGo(captureId)
+            return
+        }
         val blocked =
             capture.sync == DraftSync.CONFLICT ||
                 capture.sync == DraftSync.TABLE_HAS_ACCOUNT ||
@@ -422,14 +523,15 @@ class CaptureRepository(
         }
         if (
             capture.accountId != null &&
-                capture.baseRevision == 0 &&
+                capture.baseRevision <= 0 &&
                 capture.pendingOperationId == null
         ) {
             // Primero el borrador vigente de Go (puede tener renglones de otras terminales): un
-            // guardado sustituye el borrador completo.
+            // guardado sustituye el borrador completo. Con una base vista (M2), si otra terminal
+            // la cambió, el conflicto se muestra en lugar de guardar encima.
             refreshFromGo(captureId)
             val loaded = edits.withLock { load(captureId) } ?: return
-            if (loaded.baseRevision == 0) {
+            if (loaded.baseRevision <= 0 || loaded.sync == DraftSync.CONFLICT) {
                 return
             }
         }
@@ -507,6 +609,9 @@ class CaptureRepository(
             val remaining = capture.operations.drop(capture.inFlightCount)
             val next =
                 capture.copy(
+                    // La cuenta nació con esta captura (`openAccount`): si el mesero la descarta
+                    // vacía, también se descarta la cuenta (A2).
+                    createdAccount = capture.createdAccount || capture.accountId == null,
                     accountId = bill.account.id,
                     accountName = bill.account.name,
                     base = bill.draft,
@@ -563,8 +668,16 @@ class CaptureRepository(
                     }
                 }
             }
-            isAccountNotOpen(problem) ->
+            isAccountNotOpen(problem) -> {
                 clearInFlight(captureId, DraftSync.ACCOUNT_CLOSED, problem.message)
+                // Una cuenta combinada ofrece seguir en la cuenta en que se combinó (M3).
+                val merged = accountNotOpenDetails(problem)?.mergedIntoId
+                if (merged != null) {
+                    edits.withLock {
+                        load(captureId)?.let { save(it.copy(tableAccounts = mergedTarget(merged))) }
+                    }
+                }
+            }
             problem.code == ACCOUNT_CONFLICT || problem.code == IDEMPOTENCY_CONFLICT ->
                 clearInFlight(captureId, DraftSync.CONFLICT, null)
             error is AppError.SessionEnded ||
@@ -614,10 +727,12 @@ class CaptureRepository(
         val bill = fetchBill(captureId) ?: return
         edits.withLock {
             val capture = load(captureId) ?: return
-            if (capture.pendingOperationId != null) {
+            if (capture.pendingOperationId != null || capture.sync == DraftSync.DISCARDING) {
                 return
             }
-            if (capture.operations.isEmpty() || capture.baseRevision == 0) {
+            if (capture.baseRevision == Capture.SEEN_BASE_REVISION) {
+                save(reconciled(capture, bill).copy(accountName = bill.account.name))
+            } else if (capture.operations.isEmpty() || capture.baseRevision == 0) {
                 save(
                     capture.copy(
                         base = bill.draft,
@@ -698,6 +813,16 @@ class CaptureRepository(
         if (!clean || server.sessionHeaders(capture.waiterUserId) == null) {
             return null
         }
+        // `confirmDraft` confirma el borrador completo: con un descarte pendiente en la misma
+        // cuenta (lo que el mesero quitó todavía está en Go), el pedido sale sin conexión y solo
+        // con lo suyo.
+        val discarding =
+            dao.capturesOf(capture.waiterUserId).map(WaiterStorage::toCapture).any {
+                it.sync == DraftSync.DISCARDING && it.accountId == accountId
+            }
+        if (discarding) {
+            return null
+        }
         var quote = quotes.value[capture.id]
         if (quote == null || quote.revision != capture.baseRevision) {
             refreshQuote(capture.id)
@@ -709,7 +834,8 @@ class CaptureRepository(
             return null
         }
         return OnlineConfirm(
-            operationId = newId(),
+            // La misma clave que el pedido (A1-D19).
+            operationId = capture.id,
             accountId = accountId,
             revision = capture.baseRevision,
             fingerprint = quote.fingerprint,
@@ -723,21 +849,27 @@ class CaptureRepository(
      */
     private suspend fun confirmOnline(order: PendingOrder) {
         val online = order.onlineConfirm ?: return
-        var outcome = confirmOnce(order, online)
-        if (outcome == null) {
-            // Salió y no hubo respuesta: se repite una vez con la misma clave (Go devuelve lo
-            // mismo si ya lo había confirmado).
-            delay(UNCERTAIN_RETRY_MILLIS)
-            outcome = confirmOnce(order, online) ?: SendOutcome.ContinueOffline(null)
-        }
-        val current = dao.order(order.operationId)?.let(WaiterStorage::toOrder) ?: return
-        if (current.state != OrderState.SENDING || current.onlineConfirm != online) {
-            return
-        }
-        val next = OrderSendRules.after(current, outcome, clock())
-        dao.saveOrder(WaiterStorage.toEntity(next))
-        if (next.state == OrderState.QUEUED) {
-            scheduler.requestSend()
+        try {
+            var outcome = confirmOnce(order, online)
+            if (outcome == null) {
+                // Salió y no hubo respuesta: se repite una vez con la misma clave (Go devuelve lo
+                // mismo si ya lo había confirmado).
+                delay(UNCERTAIN_RETRY_MILLIS)
+                outcome = confirmOnce(order, online) ?: SendOutcome.ContinueOffline(null)
+            }
+            val current = dao.order(order.operationId)?.let(WaiterStorage::toOrder) ?: return
+            if (current.state != OrderState.SENDING || current.onlineConfirm != online) {
+                return
+            }
+            val next = OrderSendRules.after(current, outcome, clock())
+            // Solo si sigue «Enviando» (nunca revive un pedido borrado; M1).
+            val written =
+                dao.transition(WaiterStorage.toEntity(next), OrderState.SENDING.storedName)
+            if (written && next.state == OrderState.QUEUED) {
+                scheduler.requestSend()
+            }
+        } finally {
+            inFlight.remove(order.operationId)
         }
     }
 
@@ -782,15 +914,184 @@ class CaptureRepository(
         return SendOutcome.ContinueOffline(problem.message)
     }
 
-    private fun isAccountNotOpen(problem: ApiProblem): Boolean {
-        val details = problem.details ?: return false
+    private fun isAccountNotOpen(problem: ApiProblem): Boolean =
+        accountNotOpenDetails(problem)?.reason == ACCOUNT_NOT_OPEN
+
+    private fun accountNotOpenDetails(problem: ApiProblem): AccountNotOpenDetailsDto? {
+        val details = problem.details ?: return null
         return try {
-            ApiJson.decodeFromJsonElement(AccountNotOpenDetailsDto.serializer(), details).reason ==
-                ACCOUNT_NOT_OPEN
+            ApiJson.decodeFromJsonElement(AccountNotOpenDetailsDto.serializer(), details)
         } catch (_: SerializationException) {
-            false
+            null
         } catch (_: IllegalArgumentException) {
-            false
+            null
+        }
+    }
+
+    // --- Descartar (revisión R6, A2) ---
+
+    /**
+     * Quita del borrador de Go lo que el mesero descartó, con su sesión: primero, una apertura sin
+     * respuesta se repite con su clave (si abrió la cuenta, se sabe cuál); después se quitan de la
+     * cuenta los renglones suyos que siguen **igual** a alguna versión que conoce este dispositivo
+     * (lo que otra terminal cambió se queda: nunca se borra en silencio lo de otro). Si la cuenta
+     * nació con esta captura y queda vacía, se descarta la cuenta. Sin conexión o sin sesión, el
+     * descarte queda pendiente y se repite al volver.
+     */
+    private suspend fun discardInGo(captureId: String) {
+        var capture = edits.withLock { load(captureId) } ?: return
+        val transport = server.transport() ?: return
+        val headers = server.sessionHeaders(capture.waiterUserId) ?: return
+        if (capture.accountId == null) {
+            val operationId = capture.pendingOperationId
+            if (operationId == null) {
+                forget(captureId)
+                return
+            }
+            val opened =
+                api.openAccount(
+                    transport,
+                    headers,
+                    OpenAccountBody(
+                        operationId = operationId,
+                        mode = DINE_IN,
+                        tableId = capture.tableId,
+                        seenAccountIds = capture.seenAccountIds,
+                        items = capture.inFlightItems.map(WaiterMapper::draftItem),
+                    ),
+                )
+            when (opened) {
+                is ApiOutcome.Success -> {
+                    val bill = WaiterMapper.bill(opened.value)
+                    capture =
+                        capture.copy(
+                            accountId = bill.account.id,
+                            accountName = bill.account.name,
+                            pendingOperationId = null,
+                            inFlightCount = 0,
+                            createdAccount = true,
+                        )
+                    edits.withLock { save(capture) }
+                }
+                is ApiOutcome.Rejected -> {
+                    val error = ApiErrors.toAppError(opened.problem)
+                    if (stillPending(error, capture)) {
+                        return
+                    }
+                    // Go la rechazó: nunca se abrió y no hay nada que quitar.
+                    forget(captureId)
+                    return
+                }
+                is ApiOutcome.NoAnswer,
+                is ApiOutcome.Malformed -> return
+            }
+        }
+        repeat(MAXIMUM_DISCARD_ATTEMPTS) {
+            val accountId = requireNotNull(capture.accountId)
+            val bill =
+                when (val read = api.bill(transport, headers, accountId)) {
+                    is ApiOutcome.Success -> WaiterMapper.bill(read.value)
+                    is ApiOutcome.Rejected -> {
+                        if (stillPending(ApiErrors.toAppError(read.problem), capture)) {
+                            return
+                        }
+                        forget(captureId)
+                        return
+                    }
+                    else -> return
+                }
+            if (!bill.account.isOpen) {
+                val merged = bill.account.mergedIntoId
+                if (merged != null && merged != accountId) {
+                    // La combinación movió el borrador con sus identificadores: se sigue ahí.
+                    capture = capture.copy(accountId = merged, createdAccount = false)
+                    edits.withLock { save(capture) }
+                    return@repeat
+                }
+                forget(captureId)
+                return
+            }
+            val known = capture.base + capture.visible + capture.inFlightItems
+            val removable =
+                bill.draft.filter { row ->
+                    capture.isOwn(row.id) &&
+                        known.any { version -> version.id == row.id && version.sameContentAs(row) }
+                }
+            if (removable.isEmpty()) {
+                forget(captureId)
+                return
+            }
+            val removableIds = removable.map(DraftLine::id).toSet()
+            val remaining = bill.draft.filter { it.id !in removableIds }
+            val discardAccount =
+                remaining.isEmpty() && bill.lines.isEmpty() && capture.createdAccount
+            val written =
+                if (discardAccount) {
+                    api.discardAccount(
+                        transport,
+                        headers,
+                        accountId,
+                        MutationBody(operationId = newId(), revision = bill.account.revision),
+                    )
+                } else {
+                    api.saveDraft(
+                        transport,
+                        headers,
+                        accountId,
+                        SaveDraftBody(
+                            operationId = newId(),
+                            revision = bill.account.revision,
+                            items = remaining.map(WaiterMapper::draftItem),
+                        ),
+                    )
+                }
+            when (written) {
+                is ApiOutcome.Success -> {
+                    forget(captureId)
+                    return
+                }
+                is ApiOutcome.Rejected -> {
+                    val problem = written.problem
+                    when {
+                        // Otra terminal escribió a la vez: se vuelve a leer.
+                        problem.code == ACCOUNT_CONFLICT || isAccountNotOpen(problem) -> Unit
+                        // La cuenta ya tiene algo más: solo se quitan los renglones.
+                        problem.code == ACCOUNT_NOT_EMPTY -> {
+                            capture = capture.copy(createdAccount = false)
+                            edits.withLock { save(capture) }
+                        }
+                        stillPending(ApiErrors.toAppError(problem), capture) -> return
+                        else -> {
+                            edits.withLock { save(capture.copy(syncMessage = problem.message)) }
+                            return
+                        }
+                    }
+                }
+                is ApiOutcome.NoAnswer,
+                is ApiOutcome.Malformed -> return
+            }
+        }
+    }
+
+    /** Un error de acceso deja el descarte pendiente (lo decide la entrada al dispositivo). */
+    private fun stillPending(error: AppError, capture: Capture): Boolean {
+        val access =
+            error is AppError.SessionEnded ||
+                error is AppError.DeviceRevoked ||
+                error is AppError.DeviceNotRecognized ||
+                error is AppError.UpdateRequired
+        if (access) {
+            server.report(error, capture.waiterUserId)
+        }
+        return access || error is AppError.TryLater || error is AppError.ServerProblem
+    }
+
+    /** El descarte terminó: la captura ya no existe en el dispositivo. */
+    private suspend fun forget(captureId: String) {
+        edits.withLock {
+            timers.remove(captureId)?.cancel()
+            dao.deleteCapture(captureId)
+            quotes.value = quotes.value - captureId
         }
     }
 
@@ -812,6 +1113,35 @@ class CaptureRepository(
     private suspend fun save(capture: Capture) {
         dao.saveCapture(WaiterStorage.toEntity(capture, clock()))
     }
+
+    /**
+     * Revisión R6, M2: una base vista sin su revisión se compara con el borrador vigente de Go. Si
+     * cada renglón que vio el mesero sigue igual, el de Go pasa a ser la base y los toques se
+     * aplican encima; si otra terminal cambió o quitó alguno, el conflicto se muestra («Conservar
+     * mis cambios» o «Descartarlos»), nunca se guarda encima.
+     */
+    private fun reconciled(capture: Capture, bill: AccountBill): Capture {
+        val current = bill.draft.associateBy(DraftLine::id)
+        val intact = capture.base.all { seen -> current[seen.id]?.sameContentAs(seen) == true }
+        if (!intact) {
+            return capture.copy(sync = DraftSync.CONFLICT, syncMessage = null)
+        }
+        return capture.copy(
+            base = bill.draft,
+            baseRevision = bill.account.revision,
+            sync =
+                if (capture.operations.isEmpty()) {
+                    DraftSync.SAVED
+                } else {
+                    DraftSync.PENDING
+                },
+            syncMessage = null,
+        )
+    }
+
+    /** La cuenta en que se combinó, para ofrecer seguir ahí (M3). */
+    private fun mergedTarget(mergedIntoId: String?): List<TableAccountRef> =
+        listOfNotNull(mergedIntoId?.let { TableAccountRef(it, folio = 0, name = "") })
 
     /** Un toque nuevo: lo que estaba guardado pasa a «por guardar» (un conflicto se conserva). */
     private fun pendingStateAfterTouch(capture: Capture): DraftSync =
@@ -859,6 +1189,15 @@ class CaptureRepository(
         /** Cuánto espera «Enviar a cocina» a que termine el guardado pendiente. */
         const val SETTLE_TIMEOUT_MILLIS = 6_000L
 
+        /**
+         * Con conexión y un guardado sin respuesta, cuánto más se espera su respuesta o su
+         * repetición antes de decir «Todavía se está guardando» (la lectura tarda hasta 15 s).
+         */
+        const val RESOLVE_TIMEOUT_MILLIS = 20_000L
+
+        /** Lecturas y escrituras de un descarte si otra terminal escribe a la vez. */
+        private const val MAXIMUM_DISCARD_ATTEMPTS = 3
+
         private const val UNCERTAIN_RETRY_MILLIS = 1_500L
 
         /** Un pedido sin conexión admite hasta 20 partidas (Go, `submitOfflineOrder`). */
@@ -867,6 +1206,7 @@ class CaptureRepository(
         private const val DINE_IN = "dine_in"
         private const val TABLE_HAS_ACCOUNT = "TABLE_HAS_ACCOUNT"
         private const val ACCOUNT_CONFLICT = "ACCOUNT_CONFLICT"
+        private const val ACCOUNT_NOT_EMPTY = "ACCOUNT_NOT_EMPTY"
         private const val IDEMPOTENCY_CONFLICT = "IDEMPOTENCY_CONFLICT"
         private const val ACCOUNT_NOT_OPEN = "account_not_open"
         private const val ACCOUNT_NOT_OPEN_FALLBACK = "La cuenta ya no está abierta."

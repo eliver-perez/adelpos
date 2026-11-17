@@ -38,11 +38,13 @@ fun interface LostResponses {
 /**
  * Rutas del modo Mesero de la API v1 con las cabeceras del mesero dueño de la operación. Cada
  * llamada devuelve el valor o el rechazo de Go con sus `details` ([ApiOutcome]); nunca una
- * excepción de red.
+ * excepción de red. La hora de Go de cada respuesta (cabecera `Date`) va a [serverClock] (revisión
+ * R6, B4).
  */
 class WaiterApi(
     private val lostResponses: LostResponses? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val serverClock: ServerClock? = null,
 ) {
     suspend fun overview(server: ServerTransport, headers: Headers) =
         get(server, headers, "restaurant/overview", RestaurantOverviewDto.serializer())
@@ -96,6 +98,26 @@ class WaiterApi(
             path = "restaurant/accounts/$accountId/confirm",
             body = body,
             serializer = ConfirmDraftBody.serializer(),
+            deserializer = BillDto.serializer(),
+        )
+
+    /**
+     * «Descartar cuenta vacía» (`accounts.open`, el permiso con que el mesero la abrió): una cuenta
+     * sin nada enviado que nació con una captura que el mesero descartó (revisión R6, A2).
+     */
+    suspend fun discardAccount(
+        server: ServerTransport,
+        headers: Headers,
+        accountId: String,
+        body: MutationBody,
+    ) =
+        send(
+            server = server,
+            headers = headers,
+            method = "POST",
+            path = "restaurant/accounts/$accountId/discard",
+            body = body,
+            serializer = MutationBody.serializer(),
             deserializer = BillDto.serializer(),
         )
 
@@ -209,6 +231,7 @@ class WaiterApi(
             } catch (exception: IOException) {
                 return ApiOutcome.NoAnswer(ApiErrors.fromException(exception), sent.value)
             }
+        observeServerTime(response)
         return withContext(ioDispatcher) {
             response.use { answer ->
                 val text =
@@ -232,6 +255,12 @@ class WaiterApi(
                 }
             }
         }
+    }
+
+    private fun observeServerTime(response: Response) {
+        val clock = serverClock ?: return
+        val date = response.headers.getDate(DATE_HEADER) ?: return
+        clock.observe(serverMillis = date.time, deviceMillis = clock.deviceNow())
     }
 
     // El cliente del servidor emparejado (huella fijada) con el aviso de «la petición ya salió» y,
@@ -262,6 +291,8 @@ class WaiterApi(
 
     companion object {
         const val OFFLINE_ORDERS_PATH = "restaurant/offline-orders"
+
+        private const val DATE_HEADER = "Date"
 
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }

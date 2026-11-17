@@ -243,6 +243,7 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
             DraftSync.ACCOUNT_CLOSED ->
                 (capture.syncMessage ?: stringResource(R.string.sync_account_closed)) to
                     colors.redSoft
+            DraftSync.DISCARDING -> stringResource(R.string.sync_discarding) to colors.amberSoft
         }
     Surface(
         color = tone,
@@ -284,12 +285,21 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
                             modifier = Modifier.testTag(TAG_OPEN_ANOTHER),
                         )
                     }
-                    DraftSync.ACCOUNT_CLOSED ->
+                    DraftSync.ACCOUNT_CLOSED -> {
+                        // Una cuenta combinada: seguir en la cuenta en que se combinó (M3).
+                        for (merged in capture.tableAccounts) {
+                            SecondaryButton(
+                                text = stringResource(R.string.sync_follow_merged),
+                                onClick = { actions.onJoinAccount(merged) },
+                                modifier = Modifier.testTag(TAG_FOLLOW_MERGED),
+                            )
+                        }
                         SecondaryButton(
                             text = stringResource(R.string.sync_account_closed_action),
                             onClick = actions.onOpenAnotherAccount,
                             modifier = Modifier.testTag(TAG_OPEN_ANOTHER),
                         )
+                    }
                     DraftSync.REJECTED,
                     DraftSync.UNCERTAIN ->
                         SecondaryButton(
@@ -471,6 +481,8 @@ const val TAG_ORDER_PANEL = "order-panel"
 const val TAG_ORDER_ACCOUNT = "order-account"
 const val TAG_ORDER_TOTAL = "order-total"
 const val TAG_ORDER_MESSAGE = "order-message"
+const val TAG_FOLLOW_MERGED = "follow-merged"
+const val TAG_DISCARD_PENDING_OK = "discard-pending-ok"
 const val TAG_SEND_TO_KITCHEN = "send-to-kitchen"
 const val TAG_DISCARD_CAPTURE = "discard-capture"
 const val TAG_SYNC_PREFIX = "sync-"

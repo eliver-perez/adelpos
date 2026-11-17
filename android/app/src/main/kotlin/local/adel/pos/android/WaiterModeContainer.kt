@@ -14,8 +14,10 @@ import kotlinx.coroutines.launch
 import local.adel.pos.android.core.data.waiter.CaptureRepository
 import local.adel.pos.android.core.data.waiter.OrderQueueRepository
 import local.adel.pos.android.core.data.waiter.OrderSender
+import local.adel.pos.android.core.data.waiter.OrdersInFlight
 import local.adel.pos.android.core.data.waiter.RestaurantRepository
 import local.adel.pos.android.core.data.waiter.SentLineRepository
+import local.adel.pos.android.core.data.waiter.ServerClock
 import local.adel.pos.android.core.data.waiter.WaiterApi
 import local.adel.pos.android.core.data.waiter.WaiterServer
 import local.adel.pos.android.core.data.waiter.db.WaiterDao
@@ -39,6 +41,8 @@ class WaiterModeContainer(
     private val server: WaiterServer,
     private val api: WaiterApi,
     val queue: OrderQueueRepository,
+    private val serverClock: ServerClock,
+    private val inFlight: OrdersInFlight,
     private val catalog: CatalogSource,
     realtime: RealtimeFeed,
     private val linkState: Flow<LinkState>,
@@ -61,7 +65,8 @@ class WaiterModeContainer(
             }
         }
 
-    val sender: OrderSender = OrderSender(dao, server, api)
+    val sender: OrderSender =
+        OrderSender(dao, server, api, inFlight = inFlight, serverClock = serverClock)
 
     val captures: CaptureRepository =
         CaptureRepository(
@@ -71,6 +76,8 @@ class WaiterModeContainer(
             scheduler = queue::retryNow,
             catalog = lookups,
             scope = scope,
+            serverClock = serverClock,
+            inFlight = inFlight,
         )
 
     val restaurant: RestaurantRepository =

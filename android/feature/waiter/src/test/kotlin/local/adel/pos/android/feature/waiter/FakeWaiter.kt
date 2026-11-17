@@ -22,11 +22,13 @@ import local.adel.pos.android.core.domain.waiter.AccountBill
 import local.adel.pos.android.core.domain.waiter.AccountSummary
 import local.adel.pos.android.core.domain.waiter.Capture
 import local.adel.pos.android.core.domain.waiter.CaptureService
+import local.adel.pos.android.core.domain.waiter.DiscardResult
 import local.adel.pos.android.core.domain.waiter.DraftOperation
 import local.adel.pos.android.core.domain.waiter.DraftQuote
 import local.adel.pos.android.core.domain.waiter.DraftSync
 import local.adel.pos.android.core.domain.waiter.OrderQueueService
 import local.adel.pos.android.core.domain.waiter.OrderState
+import local.adel.pos.android.core.domain.waiter.OthersPending
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.domain.waiter.RestaurantSource
 import local.adel.pos.android.core.domain.waiter.RestaurantStatus
@@ -112,7 +114,7 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
 
             override fun quote(captureId: String): Flow<DraftQuote?> = flowOf(null)
 
-            override suspend fun discard(captureId: String) = Unit
+            override suspend fun discard(captureId: String) = DiscardResult.DONE
 
             override fun closeIfIdle(captureId: String) = Unit
         }
@@ -133,9 +135,14 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
 
             override suspend fun moveToNewAccount(operationId: String) = Unit
 
+            override suspend fun sendToAccount(operationId: String, accountId: String) = Unit
+
+            override fun othersPending(userId: String): Flow<List<OthersPending>> =
+                flowOf(emptyList())
+
             override suspend fun backToCapture(operationId: String): String? = null
 
-            override suspend fun discard(operationId: String) = Unit
+            override suspend fun discard(operationId: String) = DiscardResult.DONE
         }
 
     val sentLines =
@@ -206,7 +213,6 @@ class FakeWaiter(catalog: Catalog = Catalog.EMPTY) {
             images = null,
             tablesView = tablesView,
             activeWaiter = active,
-            pendingOfOthers = { flowOf(0) },
             elapsedClock = { 0L },
         )
 

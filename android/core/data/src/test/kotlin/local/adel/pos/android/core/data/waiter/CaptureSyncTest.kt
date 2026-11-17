@@ -353,7 +353,9 @@ class CaptureSyncTest {
         val confirm = body(requests("POST restaurant/accounts/$ACCOUNT/confirm").single())
         assertEquals("huella-4", confirm["expected_fingerprint"]!!.jsonPrimitive.content)
         assertEquals(4, confirm["revision"]!!.jsonPrimitive.content.toInt())
-        assertFalse(confirm["operation_id"]!!.jsonPrimitive.content == capture.id)
+        // La misma clave que el pedido (A1-D19): si la respuesta se pierde, el pedido sin conexión
+        // con esa clave es «ya aceptado».
+        assertEquals(capture.id, confirm["operation_id"]!!.jsonPrimitive.content)
         assertEquals(0, sends.get())
     }
 
