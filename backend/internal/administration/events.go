@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"local/ad-el-pos/server/internal/events"
+	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/stationscope"
 	"net/http"
 	"slices"
@@ -58,7 +59,8 @@ func (service *Service) serveEvents(writer http.ResponseWriter, request *http.Re
 	arguments := Request{Method: "GET", Path: "/api/v1/events/snapshot", Query: request.URL.Query(),
 		DeviceID: request.Header.Get("X-Device-ID"), DeviceToken: request.Header.Get("X-Device-Token"),
 		SessionToken: strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer "), Local: local,
-		OfflineCredential: request.Header.Get(OfflineCredentialHeader)}
+		OfflineCredential: request.Header.Get(OfflineCredentialHeader),
+		ClientKind:        request.Header.Get(httpapi.ClientKindHeader)}
 	if arguments.Query.Get("after") == "" && request.Header.Get("Last-Event-ID") != "" {
 		arguments.Query.Set("after", request.Header.Get("Last-Event-ID"))
 	}

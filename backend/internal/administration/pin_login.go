@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"local/ad-el-pos/server/internal/httpapi"
 )
 
 // Entrada con PIN en los dispositivos de meseros (etapa A1, fase B; §3.1 y decisiones A1-D1, A1-D3 y A1-D5). Estas
@@ -22,8 +23,9 @@ import (
 //
 // Y la credencial de envío (authenticateOfflineCredential) sustituye a la sesión solo en POST restaurant/offline-orders.
 
-// OfflineCredentialHeader es la cabecera con la credencial de envío del mesero (junto a las del dispositivo).
-const OfflineCredentialHeader = "X-Offline-Credential"
+// OfflineCredentialHeader es la cabecera con la credencial de envío del mesero (junto a las del dispositivo). Es la
+// misma de httpapi, que la rechaza en las rutas técnicas (revisión R3, B1).
+const OfflineCredentialHeader = httpapi.OfflineCredentialHeader
 
 // offlineOrdersRoute es la única ruta que acepta la credencial de envío.
 const offlineOrdersRoute = "restaurant/offline-orders"
@@ -53,14 +55,16 @@ const waiterEligibility = `u.active AND NOT u.support AND u.pin_hash IS NOT NULL
 
 // pinUser es un mesero en la pantalla de entrada del dispositivo: solo lo que el botón necesita (nada de roles ni
 // permisos). name es el nombre corto o, si no tiene, el visible; color es de la paleta o nulo; locked_until solo
-// existe mientras el PIN está bloqueado.
+// existe mientras dura un bloqueo por tiempo y requires_unlock (siempre presente) dice si el PIN quedó bloqueado
+// hasta que un administrador lo desbloquee (A1-D16; entonces locked_until es nulo).
 type pinUser struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Initial     string     `json:"initial"`
-	Color       *string    `json:"color"`
-	PINVersion  int        `json:"pin_version"`
-	LockedUntil *time.Time `json:"locked_until"`
+	ID             string     `json:"id"`
+	Name           string     `json:"name"`
+	Initial        string     `json:"initial"`
+	Color          *string    `json:"color"`
+	PINVersion     int        `json:"pin_version"`
+	LockedUntil    *time.Time `json:"locked_until"`
+	RequiresUnlock bool       `json:"requires_unlock"`
 }
 
 // pinUsers responde GET auth/pin-users al dispositivo android sin sesión.
@@ -73,7 +77,8 @@ func pinUsers(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		return nil, err
 	}
 	rows, err := tx.Query(ctx, `SELECT u.id,coalesce(u.short_name,u.display_name),u.badge_color,u.pin_version,
-        (SELECT a.locked_until FROM app.pin_attempts a WHERE a.user_id=u.id AND a.locked_until>now())
+        (SELECT a.locked_until FROM app.pin_attempts a WHERE a.user_id=u.id AND a.locked_until>now()),
+        coalesce((SELECT a.requires_unlock FROM app.pin_attempts a WHERE a.user_id=u.id),false)
         FROM app.users u WHERE `+waiterEligibility+` ORDER BY lower(coalesce(u.short_name,u.display_name)),u.id`)
 	if err != nil {
 		return nil, err
@@ -82,7 +87,7 @@ func pinUsers(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	users := []pinUser{}
 	for rows.Next() {
 		var user pinUser
-		if err := rows.Scan(&user.ID, &user.Name, &user.Color, &user.PINVersion, &user.LockedUntil); err != nil {
+		if err := rows.Scan(&user.ID, &user.Name, &user.Color, &user.PINVersion, &user.LockedUntil, &user.RequiresUnlock); err != nil {
 			return nil, err
 		}
 		user.Initial = badgeInitial(user.Name)
@@ -97,15 +102,18 @@ func pinUsers(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 // pinLogin responde POST auth/pin-login {user_id, pin}. El orden importa:
 //
 //  1. Solo un dispositivo android (A1-D3) y un PIN con forma de PIN (400 si no; no cuenta como intento).
-//  2. Bloqueo vigente → 429 PIN_LOCKED con details.locked_until, sin verificar el PIN.
+//  2. Bloqueo vigente → 429 PIN_LOCKED sin verificar el PIN: por tiempo con details.locked_until, o hasta que un
+//     administrador lo desbloquee con details.locked_until nulo y details.requires_unlock (A1-D16).
 //  3. Se verifica siempre un hash (el del usuario o uno ficticio), para no revelar por el tiempo quién tiene PIN.
 //  4. Un fallo (usuario inexistente, inactivo, de soporte, sin PIN o PIN incorrecto) cuenta para el bloqueo del
 //     usuario (si existe) y se registra; el quinto en 15 minutos bloquea el PIN 5 minutos (429 PIN_LOCKED) y lo
-//     registra una vez.
-//  5. Con el PIN correcto se borran los intentos; sin waiter_devices.use responde 403 (y se registra).
+//     registra una vez; el tercer bloqueo seguido en 24 horas lo deja bloqueado hasta que un administrador lo
+//     desbloquee (registro propio).
+//  5. Con el PIN correcto se borran los intentos y los bloqueos anteriores; sin waiter_devices.use responde 403 (y se
+//     registra).
 //  6. Sesión como auth/login (sustituye solo la sesión anterior de ese usuario en ese dispositivo: el cambio rápido de
-//     usuario no cierra las de los demás meseros) y credencial de envío nueva (la anterior de ese usuario en ese
-//     dispositivo queda revocada).
+//     usuario no cierra las de los demás meseros), marcada como sesión con PIN (solo permisos de mesero, A1-D17), y
+//     credencial de envío nueva (la anterior de ese usuario en ese dispositivo queda revocada).
 func pinLogin(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	if err := requireWaiterDevice(ctx, tx, request.DeviceID); err != nil {
 		return nil, err
@@ -132,12 +140,12 @@ func pinLogin(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	}
 	exists := err == nil
 	if exists {
-		lockedUntil, err := currentPINLock(ctx, tx, userID)
+		lock, err := currentPINLock(ctx, tx, userID)
 		if err != nil {
 			return nil, err
 		}
-		if lockedUntil != nil {
-			return failedPINLogin(ctx, tx, request.DeviceID, &userID, "PIN_LOCKED", lockedUntil)
+		if lock.active() {
+			return failedPINLogin(ctx, tx, request.DeviceID, &userID, "PIN_LOCKED", lock)
 		}
 	}
 	usable := exists && hash != "" && active && !support
@@ -147,16 +155,16 @@ func pinLogin(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	verified := VerifyPassword(input.PIN, hash)
 	if !usable || !verified {
 		if !exists {
-			return failedPINLogin(ctx, tx, request.DeviceID, nil, "PIN_INVALID", nil)
+			return failedPINLogin(ctx, tx, request.DeviceID, nil, "PIN_INVALID", pinLock{})
 		}
-		lockedUntil, err := recordPINFailure(ctx, tx, userID, request.DeviceID)
+		lock, err := recordPINFailure(ctx, tx, userID, request.DeviceID)
 		if err != nil {
 			return nil, err
 		}
-		if lockedUntil != nil {
-			return failedPINLogin(ctx, tx, request.DeviceID, &userID, "PIN_LOCKED", lockedUntil)
+		if lock.active() {
+			return failedPINLogin(ctx, tx, request.DeviceID, &userID, "PIN_LOCKED", lock)
 		}
-		return failedPINLogin(ctx, tx, request.DeviceID, &userID, "PIN_INVALID", nil)
+		return failedPINLogin(ctx, tx, request.DeviceID, &userID, "PIN_INVALID", pinLock{})
 	}
 	if _, err := tx.Exec(ctx, "DELETE FROM app.pin_attempts WHERE user_id=$1", userID); err != nil {
 		return nil, err
@@ -173,7 +181,7 @@ func pinLogin(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		return nil, &Fault{Status: 403, Code: "PERMISSION_DENIED", Commit: true,
 			Message: "No tienes permiso para entrar con PIN en los teléfonos y tabletas de meseros."}
 	}
-	token, err := issueSession(ctx, tx, userID, request.DeviceID, "replaced", sameDevice)
+	token, err := issueSession(ctx, tx, userID, request.DeviceID, "replaced", sameDevice, true)
 	if err != nil {
 		return nil, err
 	}
@@ -188,22 +196,36 @@ func pinLogin(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 	return map[string]any{"session_token": token, "pin_version": version, "offline_credential": credential}, nil
 }
 
-// currentPINLock devuelve hasta cuándo está bloqueado el PIN del usuario (nil si no lo está) y bloquea su fila de
-// intentos durante la transacción, para que dos intentos simultáneos cuenten uno después del otro.
-func currentPINLock(ctx context.Context, tx pgx.Tx, userID string) (*time.Time, error) {
-	var lockedUntil *time.Time
-	err := tx.QueryRow(ctx, `SELECT CASE WHEN locked_until>now() THEN locked_until END FROM app.pin_attempts
-        WHERE user_id=$1 FOR UPDATE`, userID).Scan(&lockedUntil)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return lockedUntil, err
+// pinLock es el bloqueo vigente del PIN de un usuario: por tiempo (until) o hasta que un administrador lo desbloquee
+// (requiresUnlock, A1-D16).
+type pinLock struct {
+	until          *time.Time
+	requiresUnlock bool
 }
 
-// recordPINFailure cuenta un fallo del usuario (5 en 15 minutos, desde cualquier dispositivo) y, al llegar al
-// quinto, bloquea su PIN 5 minutos, vuelve a empezar la cuenta y lo registra una sola vez (user.pin_locked, con el
-// dispositivo). Devuelve hasta cuándo quedó bloqueado, o nil.
-func recordPINFailure(ctx context.Context, tx pgx.Tx, userID, deviceID string) (*time.Time, error) {
+func (lock pinLock) active() bool {
+	return lock.until != nil || lock.requiresUnlock
+}
+
+// currentPINLock devuelve el bloqueo vigente del PIN del usuario y bloquea su fila de intentos durante la transacción,
+// para que dos intentos simultáneos cuenten uno después del otro.
+func currentPINLock(ctx context.Context, tx pgx.Tx, userID string) (pinLock, error) {
+	var lock pinLock
+	err := tx.QueryRow(ctx, `SELECT CASE WHEN locked_until>now() THEN locked_until END,requires_unlock FROM app.pin_attempts
+        WHERE user_id=$1 FOR UPDATE`, userID).Scan(&lock.until, &lock.requiresUnlock)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pinLock{}, nil
+	}
+	return lock, err
+}
+
+// recordPINFailure cuenta un fallo del usuario (5 en 15 minutos, desde cualquier dispositivo). Al quinto bloquea su PIN
+// y vuelve a empezar la cuenta de fallos (al vencer el bloqueo hay otros 5 intentos). Los bloqueos se cuentan en una
+// serie que empieza con el primero y dura 24 horas; un acierto la borra (borra toda la fila). Los dos primeros de la
+// serie son de 5 minutos (user.pin_locked, A1-D5); el tercero deja el PIN bloqueado hasta que un administrador lo
+// desbloquee (user.pin_locked_until_unlock, A1-D16). Cada bloqueo se registra una sola vez, con el dispositivo del
+// quinto fallo. Devuelve el bloqueo que quedó (vacío si todavía no se bloquea).
+func recordPINFailure(ctx context.Context, tx pgx.Tx, userID, deviceID string) (pinLock, error) {
 	var failures int
 	err := tx.QueryRow(ctx, `INSERT INTO app.pin_attempts AS a (user_id,failures,window_start,last_device_id)
         VALUES ($1,1,now(),$2)
@@ -214,37 +236,91 @@ func recordPINFailure(ctx context.Context, tx pgx.Tx, userID, deviceID string) (
             last_device_id=excluded.last_device_id
         RETURNING failures`, userID, deviceID).Scan(&failures)
 	if err != nil {
-		return nil, err
+		return pinLock{}, err
 	}
 	if failures < pinMaxFailures {
-		return nil, nil
+		return pinLock{}, nil
 	}
-	var lockedUntil time.Time
-	err = tx.QueryRow(ctx, `UPDATE app.pin_attempts SET failures=0,window_start=now(),locked_until=now()+interval '`+pinLockDuration+`'
-        WHERE user_id=$1 RETURNING locked_until`, userID).Scan(&lockedUntil)
+	// Una serie que empezó hace más de 24 horas se olvida y este bloqueo es el primero de una nueva.
+	var lock pinLock
+	var locks int
+	err = tx.QueryRow(ctx, `UPDATE app.pin_attempts SET
+            locks=CASE WHEN lock_series_started_at IS NULL OR lock_series_started_at<now()-interval '`+pinLockSeriesWindow+`'
+                THEN 1 ELSE locks+1 END,
+            lock_series_started_at=CASE WHEN lock_series_started_at IS NULL
+                OR lock_series_started_at<now()-interval '`+pinLockSeriesWindow+`' THEN now() ELSE lock_series_started_at END
+        WHERE user_id=$1 RETURNING locks`, userID).Scan(&locks)
 	if err != nil {
-		return nil, err
+		return pinLock{}, err
 	}
-	details := map[string]any{"locked_until": lockedUntil, "failures": pinMaxFailures}
-	if err := audit(ctx, tx, Principal{DeviceID: deviceID}, "user.pin_locked", "user", &userID, nil, details, true); err != nil {
-		return nil, err
+	action := "user.pin_locked"
+	if locks >= pinLocksBeforeUnlock {
+		action = "user.pin_locked_until_unlock"
+		lock.requiresUnlock = true
+		_, err = tx.Exec(ctx, `UPDATE app.pin_attempts SET failures=0,window_start=now(),locked_until=NULL,requires_unlock=true
+            WHERE user_id=$1`, userID)
+	} else {
+		var until time.Time
+		err = tx.QueryRow(ctx, `UPDATE app.pin_attempts SET failures=0,window_start=now(),locked_until=now()+interval '`+pinLockDuration+`'
+            WHERE user_id=$1 RETURNING locked_until`, userID).Scan(&until)
+		lock.until = &until
 	}
-	return &lockedUntil, nil
+	if err != nil {
+		return pinLock{}, err
+	}
+	details := map[string]any{"locked_until": lock.until, "requires_unlock": lock.requiresUnlock, "failures": pinMaxFailures,
+		"lock_in_series": locks}
+	if err := audit(ctx, tx, Principal{DeviceID: deviceID}, action, "user", &userID, nil, details, true); err != nil {
+		return pinLock{}, err
+	}
+	return lock, nil
 }
 
 // failedPINLogin registra la entrada fallida (sin el PIN) y responde: 401 PIN_INVALID o 429 PIN_LOCKED con
-// details.locked_until. Se confirma para conservar el intento y el bloqueo.
-func failedPINLogin(ctx context.Context, tx pgx.Tx, deviceID string, userID *string, code string, lockedUntil *time.Time) (any, error) {
+// details.locked_until y details.requires_unlock (siempre las dos). Se confirma para conservar el intento y el bloqueo.
+func failedPINLogin(ctx context.Context, tx pgx.Tx, deviceID string, userID *string, code string, lock pinLock) (any, error) {
 	if err := audit(ctx, tx, Principal{DeviceID: deviceID}, "session.pin_login_failed", "user", userID, nil,
 		map[string]string{"reason": code}, false); err != nil {
 		return nil, err
 	}
-	if code == "PIN_LOCKED" {
-		return nil, &Fault{Status: 429, Code: code, Commit: true,
-			Message: "Demasiados intentos con este PIN. Espera unos minutos o pide a un administrador que lo desbloquee.",
-			Details: map[string]any{"locked_until": lockedUntil}}
+	if code != "PIN_LOCKED" {
+		return nil, &Fault{Status: 401, Code: code, Commit: true, Message: "El PIN no es correcto."}
 	}
-	return nil, &Fault{Status: 401, Code: code, Commit: true, Message: "El PIN no es correcto."}
+	details := map[string]any{"locked_until": lock.until, "requires_unlock": lock.requiresUnlock}
+	if lock.requiresUnlock {
+		return nil, &Fault{Status: 429, Code: code, Commit: true, Details: details,
+			Message: "Este PIN quedó bloqueado por demasiados intentos. Pide a un administrador que lo desbloquee en Personal › Usuarios."}
+	}
+	return nil, &Fault{Status: 429, Code: code, Commit: true, Details: details,
+		Message: "Demasiados intentos con este PIN. Espera unos minutos o pide a un administrador que lo desbloquee."}
+}
+
+// pinLoginSlots limita cuántas entradas con PIN verifican su Argon2id a la vez en este servidor (revisión R3, O4): cada
+// verificación usa 64 MiB, y un dispositivo emparejado podría mandar muchas en paralelo. Las demás esperan su turno sin
+// haber abierto transacción; si no lo obtienen a tiempo, responden 503 PIN_LOGIN_BUSY.
+var pinLoginSlots = make(chan struct{}, 4)
+
+// pinLoginWait es cuánto espera una entrada con PIN su turno.
+const pinLoginWait = 5 * time.Second
+
+// pinLoginRequest dice si la petición es una entrada con PIN.
+func pinLoginRequest(request Request) bool {
+	return request.Method == "POST" && strings.TrimPrefix(request.Path, "/api/v1/") == "auth/pin-login"
+}
+
+// reservePINCheck toma un turno de verificación y devuelve cómo soltarlo.
+func reservePINCheck(ctx context.Context) (func(), error) {
+	wait, cancel := context.WithTimeout(ctx, pinLoginWait)
+	defer cancel()
+	select {
+	case pinLoginSlots <- struct{}{}:
+		return func() {
+			<-pinLoginSlots
+		}, nil
+	case <-wait.Done():
+		return nil, &Fault{Status: 503, Code: "PIN_LOGIN_BUSY",
+			Message: "Hay muchas entradas con PIN al mismo tiempo. Intenta de nuevo en unos segundos."}
+	}
 }
 
 // issueOfflineCredential crea la credencial de envío del mesero en el dispositivo (A1-D1) y revoca la anterior. Se
@@ -270,8 +346,8 @@ func offlineCredentialInvalid() error {
 // authenticateOfflineCredential identifica al mesero por su credencial de envío en lugar de una sesión (A1-D1). El
 // dispositivo ya se autenticó (no revocado). Revisa en cada petición, sin caché: la credencial del mismo dispositivo y
 // no revocada, el usuario activo y no de soporte, su PIN vigente con la misma pin_version con que se emitió, el tipo
-// android del dispositivo y el permiso waiter_devices.use. Devuelve al mesero con sus permisos vigentes: la operación
-// los vuelve a exigir como con una sesión.
+// android del dispositivo y el permiso waiter_devices.use. Devuelve al mesero con sus permisos vigentes de mesero
+// (solo los de la lista cerrada de waiter_scope.go, A1-D17): la operación los vuelve a exigir como con una sesión.
 func authenticateOfflineCredential(ctx context.Context, tx pgx.Tx, request Request) (Principal, error) {
 	var principal Principal
 	if len(request.OfflineCredential) != 43 {
@@ -306,6 +382,8 @@ func authenticateOfflineCredential(ctx context.Context, tx pgx.Tx, request Reque
 	if !slices.Contains(principal.Permissions, waiterDevicePermission) {
 		return principal, offlineCredentialInvalid()
 	}
+	principal.Permissions = waiterScope(principal.Permissions)
+	principal.PINSession = true
 	_, err = tx.Exec(ctx, "UPDATE app.offline_order_credentials SET last_used_at=now() WHERE id=$1", credentialID)
 	return principal, err
 }
