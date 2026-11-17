@@ -32,6 +32,7 @@ import local.adel.pos.android.ShellViewModel
 import local.adel.pos.android.core.domain.access.ActiveWaiter
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.connection.ConnectionSummary
+import local.adel.pos.android.core.domain.waiter.OrderState
 import local.adel.pos.android.core.ui.components.ActiveWaiterMenu
 import local.adel.pos.android.core.ui.components.AdelTopBar
 import local.adel.pos.android.core.ui.components.LocalUserActivity
@@ -46,16 +47,26 @@ import local.adel.pos.android.feature.access.SwitchBlockedDialog
 import local.adel.pos.android.feature.access.accessTitle
 import local.adel.pos.android.feature.access.asActions
 import local.adel.pos.android.feature.access.pin.ReenterPinRoute
-import local.adel.pos.android.feature.waiter.TablesRoute
-import local.adel.pos.android.feature.waiter.catalog.CatalogSampleRoute
-import local.adel.pos.android.feature.waiter.catalog.catalogSampleTitle
-import local.adel.pos.android.feature.waiter.tablesTitle
+import local.adel.pos.android.feature.waiter.capture.CaptureRoute
+import local.adel.pos.android.feature.waiter.capture.captureTitle
+import local.adel.pos.android.feature.waiter.pending.PendingOrdersRoute
+import local.adel.pos.android.feature.waiter.pending.ReviewRoute
+import local.adel.pos.android.feature.waiter.pending.pendingTitle
+import local.adel.pos.android.feature.waiter.pending.reviewTitle
+import local.adel.pos.android.feature.waiter.tables.TablesRoute
+import local.adel.pos.android.feature.waiter.tables.tablesTitle
 
 /** Destinos del modo Mesero (rutas con tipo de navigation-compose). */
 @Serializable data object TablesDestination
 
-/** Pantalla de muestra del catálogo y el personalizador (Fase D). */
-@Serializable data object CatalogDestination
+/** Captura de una cuenta (o de una cuenta nueva de la mesa) del mesero. */
+@Serializable data class CaptureDestination(val captureId: String)
+
+/** «Pedidos pendientes» del mesero. */
+@Serializable data object PendingDestination
+
+/** «Requiere tu revisión» de un pedido de la cola. */
+@Serializable data class ReviewDestination(val operationId: String)
 
 /**
  * Raíz de la interfaz: tema, barra superior con el indicador de conexión y, según el estado del
@@ -130,11 +141,13 @@ fun AdelPosNavigation(
     // Cada mesero empieza su propia navegación: lo que capturó otro no se ve aquí.
     val navController = key(waiter?.userId) { rememberNavController() }
     val backStackEntry by navController.currentBackStackEntryAsState()
-    val onCatalog = backStackEntry?.destination?.hasRoute<CatalogDestination>() == true
+    val destination = backStackEntry?.destination
     val title =
         when {
             waiter == null -> accessTitle(status)
-            onCatalog -> catalogSampleTitle()
+            destination?.hasRoute<CaptureDestination>() == true -> captureTitle()
+            destination?.hasRoute<PendingDestination>() == true -> pendingTitle()
+            destination?.hasRoute<ReviewDestination>() == true -> reviewTitle()
             else -> tablesTitle()
         }
     Scaffold(
@@ -174,24 +187,61 @@ fun AdelPosNavigation(
     }
 }
 
+/**
+ * El modo Mesero (Fase E): Mesas → la captura de una cuenta; «Pedidos pendientes» y «Requiere tu
+ * revisión». Después de «Enviar a cocina» se vuelve a Mesas (el pedido sigue en la cola con su
+ * estado).
+ */
 @Composable
 private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneLayout) {
+    val application = LocalContext.current.applicationContext as AdelPosApplication
+    val waiter = application.container.waiterDependencies
+    val openCapture: (String) -> Unit = { captureId ->
+        navController.navigate(CaptureDestination(captureId)) { launchSingleTop = true }
+    }
+    val openReview: (String) -> Unit = { operationId ->
+        navController.navigate(ReviewDestination(operationId)) { launchSingleTop = true }
+    }
     NavHost(navController = navController, startDestination = TablesDestination) {
         composable<TablesDestination> {
             TablesRoute(
                 layout = paneLayout,
-                onOpenCatalog = {
-                    navController.navigate(CatalogDestination) { launchSingleTop = true }
+                dependencies = waiter,
+                onOpenCapture = openCapture,
+                onOpenPending = {
+                    navController.navigate(PendingDestination) { launchSingleTop = true }
+                },
+                onOpenOrder = { order ->
+                    if (order.state == OrderState.NEEDS_REVIEW) {
+                        openReview(order.operationId)
+                    } else {
+                        navController.navigate(PendingDestination) { launchSingleTop = true }
+                    }
                 },
             )
         }
-        composable<CatalogDestination> {
-            val application = LocalContext.current.applicationContext as AdelPosApplication
-            val catalogRealtime = application.container.catalogRealtime
-            CatalogSampleRoute(
+        composable<CaptureDestination> {
+            CaptureRoute(
                 layout = paneLayout,
-                source = catalogRealtime.catalog,
-                images = catalogRealtime.images,
+                dependencies = waiter,
+                onDone = { navController.popBackStack(TablesDestination, inclusive = false) },
+            )
+        }
+        composable<PendingDestination> {
+            PendingOrdersRoute(
+                dependencies = waiter,
+                onOpenCapture = openCapture,
+                onOpenReview = openReview,
+            )
+        }
+        composable<ReviewDestination> {
+            ReviewRoute(
+                dependencies = waiter,
+                onDone = { navController.popBackStack() },
+                onOpenCapture = { captureId ->
+                    navController.popBackStack()
+                    openCapture(captureId)
+                },
             )
         }
     }

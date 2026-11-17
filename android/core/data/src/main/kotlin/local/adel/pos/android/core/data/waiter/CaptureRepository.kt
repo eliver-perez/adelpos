@@ -337,13 +337,15 @@ class CaptureRepository(
         }
     }
 
-    override suspend fun closeIfIdle(captureId: String) {
-        edits.withLock {
-            val capture = load(captureId) ?: return
-            if (!capture.inProgress && capture.pendingOperationId == null) {
-                timers.remove(captureId)?.cancel()
-                dao.deleteCapture(captureId)
-                quotes.value = quotes.value - captureId
+    override fun closeIfIdle(captureId: String) {
+        scope.launch {
+            edits.withLock {
+                val capture = load(captureId) ?: return@withLock
+                if (!capture.inProgress && capture.pendingOperationId == null) {
+                    timers.remove(captureId)?.cancel()
+                    dao.deleteCapture(captureId)
+                    quotes.value = quotes.value - captureId
+                }
             }
         }
     }

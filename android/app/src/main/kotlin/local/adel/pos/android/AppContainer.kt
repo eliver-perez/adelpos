@@ -6,6 +6,7 @@ import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import local.adel.pos.android.core.data.access.AccessRepository
@@ -36,6 +37,7 @@ import local.adel.pos.android.core.domain.security.SecretSealer
 import local.adel.pos.android.core.domain.server.ServerAnnouncements
 import local.adel.pos.android.core.domain.server.ServerRelocator
 import local.adel.pos.android.feature.access.AccessDependencies
+import local.adel.pos.android.feature.waiter.WaiterDependencies
 
 /**
  * Dependencias compartidas de la aplicación (inyección manual): una instancia de cada cosa por
@@ -260,6 +262,27 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     /** Fábrica del trabajador de la cola para la configuración de WorkManager. */
     val orderWorkerFactory: OrderWorkerFactory by lazy {
         OrderWorkerFactory(sender = { waiterMode.sender }, signals = orderSendSignals)
+    }
+
+    /** Lo que necesitan las pantallas del modo Mesero (`feature:waiter`). */
+    val waiterDependencies: WaiterDependencies by lazy {
+        WaiterDependencies(
+            restaurant = waiterMode.restaurant,
+            captures = waiterMode.captures,
+            orders = orderQueue,
+            sentLines = waiterMode.sentLines,
+            catalog = catalogRealtime.catalog,
+            images = catalogRealtime.images,
+            tablesView = devicePreferences,
+            activeWaiter = deviceAccess.activeWaiter,
+            // Solo el número de los pedidos de otros meseros, nunca cuáles.
+            pendingOfOthers = { userId ->
+                combine(orderQueue.pendingCount(), orderQueue.pendingCountOf(userId)) { all, mine ->
+                    all - mine
+                }
+            },
+            elapsedClock = SystemClock::elapsedRealtime,
+        )
     }
 
     /** Lo que necesitan las pantallas de entrada (`feature:access`). */

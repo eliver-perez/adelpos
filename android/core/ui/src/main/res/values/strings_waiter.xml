@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Textos compartidos del modo Mesero (Fase E; también para Para llevar de la A2). -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <!-- Los cinco estados de un pedido (§7), siempre distintos entre sí. -->
+    <string name="order_state_draft">Borrador</string>
+    <string name="order_state_queued">Por enviar</string>
+    <string name="order_state_sending">Enviando</string>
+    <string name="order_state_received">Recibido por el restaurante</string>
+    <string name="order_state_needs_review">Requiere tu revisión</string>
+
+    <!-- Preparación de lo enviado: los mismos textos del escritorio y de cocina. -->
+    <string name="preparation_without_items">Sin productos</string>
+    <string name="preparation_draft">Borrador</string>
+    <string name="preparation_confirmed_pending_dispatch">Pendiente de liberación</string>
+    <string name="preparation_pending_release">Enviado · sin confirmar en cocina</string>
+    <string name="preparation_scheduled">Programado para preparación</string>
+    <string name="preparation_released">Liberado a preparación</string>
+    <string name="preparation_preparing">En preparación</string>
+    <string name="preparation_ready">Listo</string>
+    <string name="preparation_change_pending">Cambio de cocina pendiente de revisión</string>
+    <string name="preparation_cancelled">Cancelado</string>
+    <string name="preparation_unknown">En cocina</string>
+
+    <!-- Tiempo de una mesa o cuenta («45 min»), y la advertencia de abierta mucho tiempo. -->
+    <string name="elapsed_long_open_hours">abierta hace más de %1$d h</string>
+    <string name="elapsed_long_open">abierta por mucho tiempo</string>
+</resources>
