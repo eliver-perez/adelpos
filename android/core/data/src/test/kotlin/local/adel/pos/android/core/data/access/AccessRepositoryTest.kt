@@ -15,9 +15,9 @@ import local.adel.pos.android.core.data.api.ClientIdentity
 import local.adel.pos.android.core.data.db.AppDatabase
 import local.adel.pos.android.core.data.db.PairedServerEntity
 import local.adel.pos.android.core.data.discovery.HttpsServerProbe
+import local.adel.pos.android.core.data.wipe.DeviceDataWipe
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.EntryResult
-import local.adel.pos.android.core.domain.access.NoWaiterWork
 import local.adel.pos.android.core.domain.access.OfflineAttemptPolicy
 import local.adel.pos.android.core.domain.access.RepairReason
 import local.adel.pos.android.core.domain.access.UnsentOrder
@@ -52,6 +52,9 @@ class AccessRepositoryTest {
     private var online = true
     private var now = 1_700_000_000_000L
     private val unsent = mutableListOf<UnsentOrder>()
+
+    // Lo que borró el registro de «borrar los datos de este dispositivo».
+    private val erased = mutableListOf<String>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val identity = ClientIdentity("0.1.0")
     private val ana = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -82,9 +85,9 @@ class AccessRepositoryTest {
             identity = identity,
             relocator = relocator,
             isOnline = { online },
-            work = NoWaiterWork,
             unsentOrders = { unsent.toList() },
             scope = scope,
+            wipe = DeviceDataWipe().apply { register("catálogo") { erased.add("catálogo") } },
             wallClock = { now },
             verifierIterations = 1_000,
         )
@@ -174,29 +177,37 @@ class AccessRepositoryTest {
         assertEquals(EntryResult.WrongPin, access.enter(ana, "4828"))
         val entered = access.enter(ana, "4829")
         assertTrue(entered is EntryResult.Entered)
-        assertFalse(
-            "sin conexión no hay sesión de Go",
-            (entered as EntryResult.Entered).waiter.hasServerSession,
-        )
+        assertFalse((entered as EntryResult.Entered).waiter.hasServerSession)
         assertEquals("sin red no se habla con el servidor", before, go.requests.size)
+        // Sin conexión no hay sesión de Go, tampoco la de su entrada anterior: se mira lo que de
+        // verdad sale en las cabeceras (AccessSafetyTest lo prueba con una petición real).
+        assertNull(access.sessionToken(ana))
+        assertNull(access.requestHeaders(ana)?.get("Authorization"))
     }
 
     @Test
-    fun cincoFallosSinConexionBloqueanLaEntradaLocal() = runBlocking {
+    fun cincoFallosSinConexionCierranLaEntradaSinConexionHastaEntrarConConexion() = runBlocking {
         val access = repository()
         access.pair()
         access.enter(ana, "4829")
         access.leave()
         online = false
-        repeat(4) { assertEquals(EntryResult.WrongPin, access.enter(ana, "1111")) }
-        val locked = access.enter(ana, "1111")
-        assertEquals(EntryResult.Locked(now + OfflineAttemptPolicy.LOCK_MILLIS), locked)
-        assertEquals("bloqueado aun con el PIN correcto", locked, access.enter(ana, "4829"))
+        repeat(OfflineAttemptPolicy.MAX_FAILURES - 1) {
+            assertEquals(EntryResult.WrongPin, access.enter(ana, "1111"))
+        }
+        assertEquals(EntryResult.OfflineClosed, access.enter(ana, "1111"))
         assertEquals(
-            now + OfflineAttemptPolicy.LOCK_MILLIS,
-            access.roster().waiters[0].lockedUntilEpochMillis,
+            "cerrada aun con el PIN correcto",
+            EntryResult.OfflineClosed,
+            access.enter(ana, "4829"),
         )
-        now += OfflineAttemptPolicy.LOCK_MILLIS
+        assertTrue(access.roster().waiters.single().offlineEntryClosed)
+        // Con conexión, Go verifica el PIN y la entrada sin conexión se vuelve a abrir.
+        online = true
+        access.recheck()
+        assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
+        access.leave()
+        online = false
         assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
     }
 
@@ -213,6 +224,15 @@ class AccessRepositoryTest {
             EntryResult.Locked(AccessRepository.epochMillis("2026-11-16T20:35:00Z")),
             access.enter(ana, "4829"),
         )
+        // Bloqueado hasta que lo desbloquee un administrador (A1-D16).
+        go.requiresUnlock = true
+        assertEquals(
+            EntryResult.Locked(untilEpochMillis = null, requiresUnlock = true),
+            access.enter(ana, "4829"),
+        )
+        val listed = access.roster().waiters.first { it.userId == ana }
+        assertTrue(listed.requiresUnlock)
+        assertNull(listed.lockedUntilEpochMillis)
         assertNull(access.activeWaiter.value)
         assertNull("un rechazo no guarda verificador", database.access().knownWaiter(ana))
     }
@@ -246,6 +266,7 @@ class AccessRepositoryTest {
         go.revoked = true
         access.recheck()
         assertEquals(DeviceStatus.Retired(listOf(order)), access.status.value)
+        assertEquals(listOf("catálogo"), erased)
         assertNull(access.activeWaiter.value)
         assertNull(access.sessionToken(ana))
         assertNull(database.access().pairedServer())
@@ -272,7 +293,8 @@ class AccessRepositoryTest {
             access.pair()
             access.enter(ana, "4829")
             access.report(AppError.SessionEnded("SESSION_REVOKED", null, null), ana)
-            withTimeout(5_000) { access.activeWaiter.first { it == null } }
+            // La sesión terminada no saca a Ana: le pide volver a escribir su PIN.
+            withTimeout(5_000) { access.activeWaiter.first { it?.mustReenterPin == true } }
             assertNull(access.sessionToken(ana))
             access.report(AppError.DeviceRevoked(null, null), null)
             withTimeout(5_000) { access.status.first { it is DeviceStatus.Retired } }
@@ -309,6 +331,7 @@ class AccessRepositoryTest {
         access.forgetServer()
         assertEquals(DeviceStatus.Unpaired(), access.status.value)
         assertNull(database.access().pairedServer())
+        assertEquals("«Emparejar de nuevo» también borra", listOf("catálogo"), erased)
     }
 
     @Test

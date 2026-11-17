@@ -6,6 +6,8 @@ import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import local.adel.pos.android.core.data.access.AccessRepository
 import local.adel.pos.android.core.data.access.PairingRepository
 import local.adel.pos.android.core.data.api.ClientIdentity
@@ -17,6 +19,8 @@ import local.adel.pos.android.core.data.pending.NoPendingOrders
 import local.adel.pos.android.core.data.preferences.DevicePreferencesRepository
 import local.adel.pos.android.core.data.security.KeystoreSecretSealer
 import local.adel.pos.android.core.data.session.DeviceServerAccess
+import local.adel.pos.android.core.data.wipe.DeviceDataWipe
+import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.IdleLock
 import local.adel.pos.android.core.domain.access.NoUnsentOrders
 import local.adel.pos.android.core.domain.access.NoWaiterWork
@@ -83,8 +87,22 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     val secretSealer: SecretSealer
         get() = keystoreSealer
 
-    /** Bloqueo por inactividad: `MainActivity` le avisa de cada toque de la pantalla. */
+    /**
+     * Bloqueo por inactividad, **uno por proceso** (revisión R3, A2 y B4): `MainActivity` y los
+     * diálogos le avisan de cada toque y [startIdleLock] lo vigila mientras viva el proceso.
+     */
     val idleLock: IdleLock by lazy { IdleLock(SystemClock::elapsedRealtime, waiterWork) }
+
+    /**
+     * Registro único de «borrar los datos de este dispositivo» (retirarlo o emparejarlo de nuevo;
+     * revisión R3, M4). Cada módulo que guarda datos del restaurante se registra aquí: hoy el
+     * catálogo con sus imágenes. **La Fase E registra aquí** la cola de pedidos y sus borradores, y
+     * cancela su trabajo de WorkManager (`WorkManager.cancelAllWork()`).
+     */
+    val deviceDataWipe: DeviceDataWipe =
+        DeviceDataWipe().apply {
+            register("catálogo e imágenes") { catalogRealtime.eraseDeviceData() }
+        }
 
     private val serverBrowser: NsdServerBrowser by lazy {
         NsdServerBrowser(appContext, serviceType = { settings.discoveryServiceType })
@@ -92,8 +110,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
 
     /**
      * Entrada al dispositivo (servidor emparejado, meseros, credenciales). Otros módulos piden aquí
-     * la API del servidor (`serverApi()`) y las cabeceras de autenticación (`requestHeaders()`) y
-     * avisan los errores de Go con `report()`.
+     * la API del servidor (`serverApi()`) y las cabeceras de autenticación de un mesero concreto,
+     * el dueño de la operación (`requestHeaders(userId)`), y avisan los errores de Go con
+     * `report(error, userId)`.
      */
     val deviceAccess: AccessRepository by lazy {
         AccessRepository(
@@ -108,9 +127,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
                     clock = SystemClock::elapsedRealtime,
                 ),
             isOnline = { connectionMonitor.current() == LinkState.ONLINE },
-            work = waiterWork,
             unsentOrders = unsentOrders,
             scope = appScope,
+            wipe = deviceDataWipe,
         )
     }
 
@@ -148,6 +167,37 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             linkState = connectionMonitor.linkState,
             foreground = appForeground.inForeground,
         )
+    }
+
+    private var idleLockStarted = false
+
+    /**
+     * Vigila la inactividad del mesero activo durante toda la vida del proceso (lo llama
+     * AdelPosApplication al arrancar): el plazo cuenta desde el último toque, no se reinicia al
+     * volver a crear la actividad y, al volver a primer plano, bloquea en ese momento si ya venció.
+     * Bloquear es volver a la lista de meseros ([AccessRepository.leave]) sin cerrar la sesión en
+     * Go.
+     */
+    fun startIdleLock() {
+        if (idleLockStarted) {
+            return
+        }
+        idleLockStarted = true
+        appScope.launch {
+            idleLock.supervise(
+                waiters = deviceAccess.activeWaiter.map { it?.userId },
+                timeouts =
+                    deviceAccess.status.map {
+                        (it as? DeviceStatus.Ready)?.idleLockSeconds ?: IdleLock.DEFAULT_SECONDS
+                    },
+                foreground = appForeground.inForeground,
+            ) { userId ->
+                // Solo si sigue siendo el mismo mesero (pudo cambiar mientras se decidía).
+                if (deviceAccess.activeWaiter.value?.userId == userId) {
+                    deviceAccess.leave()
+                }
+            }
+        }
     }
 
     /** Lo que necesitan las pantallas de entrada (`feature:access`). */

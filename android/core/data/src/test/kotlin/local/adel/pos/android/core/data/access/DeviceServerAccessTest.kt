@@ -19,7 +19,6 @@ import local.adel.pos.android.core.data.session.DeviceServerAccess
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.EntryResult
 import local.adel.pos.android.core.domain.access.NoUnsentOrders
-import local.adel.pos.android.core.domain.access.NoWaiterWork
 import local.adel.pos.android.core.domain.realtime.AccessInterruption
 import local.adel.pos.android.core.domain.server.ServerRelocator
 import local.adel.pos.android.core.domain.text.Hex
@@ -64,7 +63,6 @@ class DeviceServerAccessTest {
                 identity = ClientIdentity("0.1.0"),
                 relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
                 isOnline = { true },
-                work = NoWaiterWork,
                 unsentOrders = NoUnsentOrders,
                 scope = scope,
                 verifierIterations = 1_000,
@@ -141,15 +139,53 @@ class DeviceServerAccessTest {
             delay(200)
             assertNotNull(adapter.current.value)
 
-            // Sesión terminada: solo ese mesero vuelve a la entrada.
+            // Sesión terminada: sin conexión autorizada hasta que ese mesero vuelva a escribir su
+            // PIN; sigue activo (no pierde su trabajo) y la sesión de Ana no se toca.
             adapter.interruptions.onInterrupted(
                 AccessInterruption.SessionEnded("SESSION_REVOKED"),
                 beto,
             )
             adapter.awaitCurrent { it == null }
-            assertNull(access.activeWaiter.value)
+            assertEquals(beto, access.activeWaiter.value?.userId)
+            assertTrue(access.activeWaiter.value!!.mustReenterPin)
             assertNull(access.sessionToken(beto))
             assertNotNull(access.sessionToken(ana))
+            assertTrue(access.enter(beto, "6152") is EntryResult.Entered)
+            val again = adapter.awaitCurrent { it?.userId == beto }!!
+            assertEquals(
+                "Bearer ${access.sessionToken(beto)}",
+                again.credentials[AuthorizedServer.AUTHORIZATION_HEADER],
+            )
+            assertNotEquals(betoServer, again)
+        }
+
+    @Test
+    fun unMeseroQueEntroSinConexionNoTieneConexionAutorizada() =
+        runBlocking<Unit> {
+            var reachable = true
+            access =
+                AccessRepository(
+                    dao = database.access(),
+                    sealer = sealer,
+                    destroyKey = {},
+                    identity = ClientIdentity("0.1.0"),
+                    relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
+                    isOnline = { reachable },
+                    unsentOrders = NoUnsentOrders,
+                    scope = scope,
+                    verifierIterations = 1_000,
+                )
+            val adapter = DeviceServerAccess(access, scope)
+            pair()
+            access.enter(ana, "4829")
+            adapter.awaitCurrent { it?.userId == ana }
+            access.leave()
+            adapter.awaitCurrent { it == null }
+            reachable = false
+            assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
+            reachable = true
+            delay(200)
+            assertNull("la sesión anterior de Ana no se reutiliza", adapter.current.value)
         }
 
     @Test
