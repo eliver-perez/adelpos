@@ -1130,6 +1130,283 @@ credencial.
 
 ---
 
+## Fases C y B (dispositivo) · Servidor, emparejamiento y entrada con PIN
+
+Rama `etapa-a1-cb` (desde `etapa-a1-android` en `aeb9753`), un agente, 16/11/2026. Árbol `$SP/wt/CB`, `ISO_TAG=C`,
+Go temporal en 8194 (local) y 8454 (red), **un Go temporal nuevo por corrida** de la suite del dispositivo. **Sin
+cambios en el servidor, el escritorio, `config/`, `docs/API_V1.md`, `CLAUDE.md` ni `AGENTS.md`** (`android/CLAUDE.md` sí, a pedido del coordinador);
+`docs/etapas/*.md` con el mismo md5 antes y después. Ninguna prueba usó el servicio real de la Mac (8181, 8443, 55432 ni
+su carpeta) y ninguna búsqueda NSD de las pruebas buscó `_adelpos._tcp` (las pruebas usan `_adelpostest._tcp`; una
+captura de pantalla hecha a mano sí lo buscó, sin contactar al servicio: ver el hallazgo en «Pruebas ejecutadas»).
+Emuladores usados: `Pixel_8` (5580), `Pixel_Tablet` (5582) y `ADEL_A1_Tablet_API26` (5590), como mucho dos a la vez y
+siempre con `ANDROID_SERIAL` fijo.
+
+Commits:
+
+| Commit    | Tema                                                                                                                                                                                                                                 |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `3854031` | `core:domain`: código de emparejamiento, dirección del servidor, anuncio NSD y cambio de IP, versiones, verificador local del PIN, límite local, bloqueo por inactividad e interfaces de entrada                                     |
+| `0502f1e` | `core:data`: emparejamiento con el primer certificado fijado, NSD por versión, cambio de IP con la huella completa, entrada con PIN con y sin conexión, credenciales cifradas con el Keystore, revocación y Room v2 con su migración |
+| `9b0543f` | `core:ui`: teclado grande del PIN, distintivo del mesero con el color de Go, menú «Cambiar de mesero» en la barra superior, íconos                                                                                                   |
+| `a50d48d` | `core:data`: legibilidad (pasos con nombre en la consulta del emparejamiento), la entrada relee Room al abrir y sin red no pregunta a Go                                                                                             |
+| `ce4d9aa` | `feature:access` y `app`: pantallas de entrada, puerta de la aplicación, contenedor, ejecutor de pruebas y pruebas instrumentadas (también contra el Go temporal)                                                                    |
+| `4e20859` | Pruebas sin carreras con el teclado en pantalla                                                                                                                                                                                      |
+| `39f586b` | `WaiterWork.blocksLogout`: «Cerrar sesión» lo impiden la captura en curso y los pedidos sin enviar (decisión del coordinador)                                                                                                        |
+| `d7ee88b` | `scripts/android-e2e.sh`: extremo a extremo contra un Go temporal, reutilizable en las fases F y G                                                                                                                                   |
+| `bc7ba59` | `android/CLAUDE.md`: Room v2, la entrada para los demás módulos, el ejecutor y el tipo NSD de prueba, el `targetSdk` de prueba de las bibliotecas, el guion y dos reglas permanentes nuevas                                          |
+
+Cada commit compila por sí solo (comprobado con `git archive` de `a50d48d` + `assembleDebug`, el único que quedaba en
+duda al reacomodar los commits).
+
+### Fase C · Servidor y emparejamiento
+
+**Búsqueda automática** (`core/data/.../discovery/NsdServerBrowser.kt:55`): NSD por `_adelpos._tcp` durante 4 s,
+descubre, resuelve **de una en una** (desde la API 34 con `registerServiceInfoCallback` y `hostAddresses`, `:135`;
+antes con `resolveService` y `host`, en desuso pero única opción) y lee el TXT con las reglas de `collect` del
+escritorio (`core/domain/.../server/FoundServer.kt`, `ServerAnnouncements.parse`): `server_id` UUID en minúsculas,
+`fp` de 16 hexadecimales, puerto y al menos una dirección de la red local; un mismo `server_id` junta sus direcciones;
+el nombre de instancia sin los escapes `\ddd` de DNS-SD. El anuncio **nunca da confianza**: solo la dirección. Si el
+sistema no deja buscar (NSD no disponible o, con `targetSdk` 37, sin permiso de red local), `Browse.Unavailable` y la
+pantalla lo explica y deja escribir la dirección.
+
+**Dirección a mano** (`core/domain/.../server/ServerAddress.kt:44`): las mismas entradas aceptadas y rechazadas que
+`normalize_address`/`valid_server_host` de Rust (prueba con la tabla de `pairing.rs`): IPv4 privada o de enlace local,
+IPv6 única local o de enlace local, nombre `.local`, puerto 8443 por omisión. Lectura propia de IPv4/IPv6 sin DNS
+(`InetAddress.getByName` consultaría un nombre). Más estricta en tres casos (decisión 2).
+
+**Pantalla «Buscar el servidor»** (`feature/access/.../findserver/FindServerScreen.kt`), como `FindServerPage` del
+escritorio: nombre editable del dispositivo («Tableta 1» o «Teléfono 1»), «Computadoras principales en la red» con
+«Buscar otra vez» (solo nombres, nunca direcciones), «Escribir la dirección» y, si quedó algo en la bitácora, los
+pedidos que no se enviaron con «Borrar la bitácora». Nombre y dirección escritos en `SavedStateHandle`.
+
+**Emparejamiento con el protocolo exacto de la 9G** (`core/data/.../access/PairingRepository.kt`):
+`FirstSeenTrustManager` fija el **primer certificado** de la sesión y rechaza otro a mitad de ella (como
+`PinnedVerifier::first_seen`); con un servidor de la búsqueda, primero `GET version` y su huella debe empezar como el
+`fp` anunciado y el `server_id` ser el anunciado (`AnnouncementMismatch`); compromiso SHA-256(nT), número del servidor,
+revelación de nT (`request`, `:294`) y código con `PairingProtocol.code` (`core/domain/.../pairing/PairingProtocol.kt:43`, vector `166101`
+de Go y Rust). Pantalla del código (`PairingCodePanel`): código en grande en dos grupos («166 101», con descripción para
+lectores de pantalla dígito por dígito), nombre del restaurante, cuenta regresiva, «Cambiar nombre», estado y
+«Cancelar»; terminado (rechazada, vencida, cancelada) «Pedir otro código». Consulta cada 2 s, una a la vez
+(`FindServerViewModel`). Aprobada: **reclamo único** (`claimCredential`, `:190`), validación de la credencial
+(`device_id` UUID, token de 43, mismo `server_id`) y guardado (`saveClaimed`, `:227`): token **cifrado con el Keystore**
+(propósito `device-credential`), `server_id`, huella fijada, dirección, nombres e `idle_lock_seconds`. Si el Keystore
+falla, lo reclamado se conserva en la sesión y la siguiente consulta reintenta sin reclamar otra vez (hallazgo 3 de la
+9G). Tipo `android`, sistema «Android <versión>».
+
+**Conexión con la huella fijada** (`core/data/.../access/PairedConnection.kt`): siempre `PinnedTrustManager` con la
+huella guardada, solo `RESTRICTED_TLS`, sin redirecciones (nuevo en `PinnedHttpClient`). Una huella distinta es
+`ServerIdentityChanged` → «Esta tableta necesita emparejarse de nuevo» (`RepairScreen`, como `RepairTerminal.tsx`, con
+confirmación). **Nunca acepta cualquier certificado.**
+
+**Cambio de IP** (`core/domain/.../server/ServerRelocator.kt` + `PairedConnection.call`, `:56`): si una petición
+**no llegó a salir** (no se pudo conectar o respondió otro certificado; lo sabe `RequestSent`, un `EventListener` de
+OkHttp que marca `requestHeadersStart`), busca por NSD, prueba solo los anuncios con el mismo `server_id` y la misma
+huella corta, acepta la dirección nueva solo si responde `health/live` con la **huella completa**
+(`HttpsServerProbe`), la guarda en Room y repite la petición una vez. Una sola búsqueda a la vez y como máximo una cada
+10 s, como `ServerLocator::relocate`.
+
+**Versiones** (`core/domain/.../server/ServerCompatibility.kt`): en cada comprobación `GET version`; servidor anterior
+a 0.12.0 o sin `waiter-pin-v1` → «Actualiza el servidor del restaurante»; `min_client_versions.android` mayor que la
+aplicación, o un 426 en cualquier ruta → «Actualiza esta aplicación» (con «Datos para soporte»: versiones). Ambas con
+«Volver a comprobar».
+
+**Permisos de Android** (`feature/access/.../status/LocalNetworkPermissionGate.kt`): la política
+`NetworkPermissions.required(sdk, targetSdk)` (`core:domain`) devuelve hoy **ninguno** (`targetSdk` 36: `NsdManager` y
+las conexiones a la red local no piden permiso; `NEARBY_WIFI_DEVICES` no lo usa NSD). Con `targetSdk` 37 en Android 17
+devolverá `ACCESS_LOCAL_NETWORK` y la puerta ya muestra la explicación en español antes de pedirlo y, si se niega,
+cómo darlo en los ajustes (sin él no hay ninguna conexión a la red local, ni escribiendo la dirección). Confirmado en el
+emulador: el APK de pruebas de `core:data`, que tomaba `targetSdk` 37, recibió `SecurityException: Missing local
+network permission` al anunciar por NSD en Android 17 (se fijó `testOptions.targetSdk = 36`).
+
+### Fase B · Entrada con PIN en el dispositivo
+
+**Pantalla de entrada** (`feature/access/.../pin/PinEntryScreen.kt`): «¿Quién eres?» con los meseros de
+`auth/pin-users` en **botones grandes** (72 dp) con su distintivo (inicial en un círculo del color de Go) y «Bloqueado
+hasta las 14:35» si aplica; al tocar el propio, el **teclado numérico grande** (`core/ui/.../components/PinPad.kt`:
+teclas de 72 dp, puntos que dicen cuántos dígitos —nunca cuáles—, «Borrar» y «Entrar» desde 4 dígitos, máximo 6). En la
+tableta lista y teclado lado a lado; en el teléfono uno a la vez (Atrás vuelve a la lista). Mensajes: «PIN incorrecto»,
+«Demasiados intentos. Intenta de nuevo a las 14:35» (429 `PIN_LOCKED` con `details.locked_until`, o el límite local),
+sin permiso (403), «solo entran los meseros que ya entraron antes en esta tableta», actualización requerida, sin
+respuesta y el mensaje de Go para lo demás. La lista se pide al mostrarse y cada 30 s. **El PIN solo vive en memoria**
+(`PinEntryViewModel`): nunca en `SavedStateHandle`; cada intento lo borra.
+
+**Color del distintivo** (`core/ui/.../theme/AdelPalette.kt:227`, `waiterBadgeColors`): el único lugar donde un color
+se construye desde un dato; la inicial va en blanco o en el texto oscuro, el que más contraste; probado con los 16
+colores de `catalog.Palette` leídos de `backend/internal/catalog/palette.go` (≥ 3:1, texto grande en negritas) en ambos
+temas.
+
+**Cambio rápido de mesero**: `ActiveWaiterMenu` (`core/ui/.../components/WaiterBadge.kt`) en la barra superior,
+siempre visible con el mesero activo: su distintivo, su nombre y «Cambiar de mesero» (y «Entraste sin conexión» si es
+el caso). Vuelve a la lista sin cerrar la sesión de Go del mesero (`DeviceAccess.leave`); cada mesero tiene su propia
+navegación (`key(userId)` en `AdelPosApp.kt`): lo que capture uno no lo ve el siguiente. Con pedidos sin enviar de ese
+mesero no se permite (§7) y se avisa.
+
+**Bloqueo por inactividad** (`core/domain/.../access/IdleLock.kt:38`): `idle_lock_seconds` de Go (120 por omisión; 30
+como mínimo, como Go), reloj monótono inyectable, cada toque lo reinicia (`MainActivity.onUserInteraction`). **No
+bloquea** con captura en curso o pedidos sin enviar: lo pregunta a `WaiterWorkGate`
+(`core/domain/.../access/WaiterWork.kt:39`, «¿este mesero tiene trabajo que impide bloquear o cambiar de mesero?»), que
+la Fase E implementará; hoy `NoWaiterWork` responde «no». Lo vigila `AccessViewModel` por mesero activo.
+
+**Entrada sin conexión** (`AccessRepository.enterOfflineLocked`, `:484`): solo quien ya entró **con conexión en este
+dispositivo**; verificador PBKDF2-HMAC-SHA256 con sal de 16 bytes (`core/domain/.../access/PinVerifier.kt`,
+**120 000 iteraciones**, medidas en `ADEL_A1_Tablet_API26`: 0.27 a 0.32 s), cifrado con el Keystore y ligado al
+`user_id` (propósito `pin-verifier:<id>`). Límite local `OfflineAttemptPolicy`: 5 fallos en 15 min bloquean 5 min (la
+regla de Go, A1-D5), en Room para que reiniciar no lo borre. Se renueva (sal nueva) en **cada entrada con conexión**;
+con la lista de Go se invalida (verificador y credencial de envío) si `pin_version` cambió o el mesero ya no aparece
+(`invalidateLocked`, `:348`). Una sesión sin conexión **no tiene sesión de Go** (`ActiveWaiter.hasServerSession =
+false`).
+
+**Credencial de envío** (A1-D1): la `offline_credential` de cada `pin-login` se guarda cifrada (propósito
+`offline-credential:<id>`) y reemplaza la anterior; `AccessRepository.offlineCredential(userId)` la da a la cola de la
+Fase E.
+
+**Sesión revocada o vencida**: `DeviceAccess.report(error, userId)` con `SESSION_*` quita la sesión de ese mesero y, si
+es el activo, vuelve a la entrada. **Dispositivo revocado** (`DEVICE_REVOKED` de cualquier petición; `retireLocked`,
+`:567`): los pedidos sin enviar (`UnsentOrdersSource`, interfaz para la Fase E; hoy vacía) pasan a la **bitácora del
+dispositivo**, se borra todo lo demás en una transacción (servidor, meseros, verificadores, credenciales), se olvidan las
+sesiones y se **destruye la llave del Keystore**; pantalla «Este dispositivo fue retirado del restaurante» con «Este
+dispositivo fue retirado del restaurante; estos pedidos no se enviaron» y la lista si había. La bitácora se conserva
+(también al reabrir la aplicación, en «Buscar el servidor») hasta «Borrar la bitácora» (con confirmación). **No se
+construyó cliente SSE** (lo hace la Fase D): `event: interrupted` deberá llamar a `report()`.
+
+**Room v2** (`core/data/.../db/AccessEntities.kt`, `AppDatabase.kt:46`): `paired_server` (una fila; token cifrado),
+`known_waiters` (verificador y credencial cifrados; nombre, color y los intentos locales sin cifrar), `device_log`;
+migración 1 → 2 con el SQL de `schemas/…/2.json`, probada con `MigrationTestHelper`. Las llaves solo en el Keystore.
+
+**Para otros módulos (Fases D y E)** — `AppContainer.deviceAccess` (`AccessRepository`):
+
+- `serverApi(): ServerApi?` — la API del servidor emparejado en la dirección vigente, con la huella fijada (pedirla en
+  cada uso: la dirección cambia con el cambio de IP).
+- `requestHeaders(): Headers?` — `X-Device-ID`/`X-Device-Token` y, si hay mesero activo **con sesión**, `Authorization:
+Bearer`; `deviceCredentials()` solo las del dispositivo; `sessionToken(userId)` y `offlineCredential(userId)` por
+  mesero; `activeWaiter` (`StateFlow`) dice quién y si tiene sesión.
+- `report(error: AppError, userId: String?)` — **punto único** para «el dispositivo fue revocado» (`DEVICE_REVOKED`),
+  «la sesión del mesero ya no vale» (`SESSION_*`), `DEVICE_*` y huella distinta, desde cualquier petición o el SSE.
+- Implementar `WaiterWorkGate` y `UnsentOrdersSource` (hoy `NoWaiterWork`, `NoUnsentOrders` en `AppContainer`).
+
+### Decisiones (con su porqué)
+
+1. **La sesión del emparejamiento confía en el primer certificado** (como el escritorio): un servidor de red local no
+   tiene certificado de autoridad; el código de 6 dígitos ata esa huella y el administrador lo compara.
+2. **Dirección más estricta que Rust** sin ser más permisiva: IPv4 con ceros a la izquierda o abreviada se rechaza (la
+   biblioteca de URL de Rust la interpreta como octal o la completa); `:443` escrito se respeta (Rust lo pierde por ser
+   el puerto de HTTPS y usa 8443); puerto 0 rechazado.
+3. **Cambio de IP también ante otra huella** en la dirección guardada (Rust lo hace igual: su error de conexión incluye
+   el TLS): otro equipo pudo tomar la IP; solo se acepta la dirección nueva con la huella completa. Solo se repite una
+   petición que no salió.
+4. **Sesiones de Go solo en memoria**: no son necesarias después de cerrar la aplicación (se vuelve a entrar con el PIN;
+   la cola usa la credencial de envío) y así no hay un secreto más en disco.
+5. **Sin respuesta en la última comprobación se entra directo sin conexión** (y se vuelve a comprobar aparte) para que
+   el mesero no espere a que venza la conexión; con conexión y sin respuesta en `pin-login`, se cae al verificador.
+6. **Trabajo pendiente** (confirmado por el coordinador): el bloqueo por inactividad lo impiden la captura en curso y
+   los pedidos sin enviar; cambiar de mesero, solo los pedidos sin enviar del mesero actual (la captura se queda con
+   su mesero, su sesión no se cierra y el siguiente no la ve); un «Cerrar sesión» explícito, ambas cosas. En estas
+   fases no hay «Cerrar sesión» (el cambio de mesero y el bloqueo no cierran la sesión de Go): la regla queda en
+   `WaiterWork.blocksLogout`, con su prueba, para quien lo ofrezca.
+7. **«Emparejar de nuevo» también pasa los pedidos sin enviar a la bitácora y destruye la llave**, como la revocación
+   (los secretos eran de otro servidor). Ante una huella distinta se ofrece además «Volver a comprobar».
+8. **«Tableta» o «teléfono» en los textos** según `smallestScreenWidthDp ≥ 600`; nombre propuesto «Tableta 1» o
+   «Teléfono 1».
+9. **La puerta relee Room al abrir la pantalla principal** (`AccessRepository.start`, `:95`) y comprueba el servidor al
+   recuperar la red y cada minuto en primer plano (`AccessViewModel`): así se detectan revocación, PIN cambiado y
+   bloqueo nuevo sin el canal de eventos.
+10. **`testOptions.targetSdk = 36` en `core:data`**: el APK de pruebas de una biblioteca toma `compileSdk` (37) y en
+    Android 17 eso ya exige el permiso de red local (visto en Pixel_8).
+11. **Ejecutor de pruebas propio** (`AdelTestRunner`): NSD con `_adelpostest._tcp` en todas las pruebas de la app (el
+    emulador de Android 17 sí ve los PTR de la red de la Mac, avance §1.5: así nunca se prueba la huella contra el
+    servidor real) y `clientVersion` por argumento.
+12. Dependencias: ninguna nueva en el catálogo; `feature:access` usa `core-ktx`, `activity-compose`, `lifecycle-*` y
+    pruebas JVM ya verificadas (solo cambió su `gradle.lockfile`; `verification-metadata.xml` sin cambios).
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                          | Dónde                                                         | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core:domain:test` (JVM)                                                                                                     | Mac, JBR 25                                                   | **49/49** (también después de `blocksLogout`) (35 nuevas: `PairingProtocolTest` 5 con el vector `166101`, `ServerAddressTest` 5 con la tabla de Rust, `ServerAnnouncementsTest` 8 con TXT, `server_id` + huella y cambio de IP, `ServerCompatibilityTest` 4, `PinVerifierTest` 5 con Keystore falso, `AccessRulesTest` 8: límite local, inactividad con reloj virtual y con trabajo pendiente, `pin_version`, permisos)                                                                                                                                                                                                                                                                                                                                                                 |
+| `testDebugUnitTest` `core:data` (JVM + Robolectric SDK 36, Go simulado con TLS)                                              | Mac                                                           | **39/39** (22 nuevas: `AccessRepositoryTest` 13 —con conexión, sin conexión, límite, `PIN_LOCKED`, `pin_version`, revocación con bitácora, versiones, otra huella, credencial ilegible, cambio de IP con la sonda HTTPS real—, `PairingRepositoryTest` 5, `AccessErrorCodesTest` 4: códigos nuevos, primer certificado, «la petición salió»)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `testDebugUnitTest` `core:ui` / `feature:access` / `feature:waiter`                                                          | Mac                                                           | **9/9** (distintivo con los 16 colores de Go en ambos temas) / **4/4** (ViewModels: PIN solo en memoria, mensajes, inactividad, cambio de mesero, red, espera del código) / **2/2**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `./scripts/dev.sh android-test` (las anteriores + `lintDebug` de los 5 módulos) y `android-format-check`                     | Mac                                                           | Correctos, Lint sin avisos                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Instrumentadas de los módulos (`app`, `core:ui`, `core:data`), con `ANDROID_SERIAL`                                          | `Pixel_8` API 37                                              | **33/33** + 9 omitidas (las 7 de `AccessOnGoTest` y las 2 de `ServerApiOnDeviceTest`, que piden argumentos)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Lo mismo                                                                                                                     | `Pixel_Tablet` API 37                                         | **33/33** + 9 omitidas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Lo mismo                                                                                                                     | `ADEL_A1_Tablet_API26`                                        | **32/32** + 10 omitidas (también el modo avión, que no existe como shell en Android 8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Contra el Go temporal (`AccessOnGoTest`, 7 pasos; primero con el guion del scratchpad, después con `scripts/android-e2e.sh`) | `Pixel_8`, `Pixel_Tablet`, `ADEL_A1_Tablet_API26`             | **7/7** en cada uno: emparejamiento con código (uno equivocado se rechaza) y huella fijada = la del certificado; PIN incorrecto ×4 y **bloqueo al quinto** («Intenta de nuevo a las…», también con el PIN correcto); entrada, credencial y verificador; cambio de mesero; **sin conexión** (modo avión en API 37; en API 26 `adb root` + `svc wifi/data` desde la Mac, «Active default network: none») solo Ana, Beto rechazado; **PIN cambiado** → verificador y credencial invalidados al reconectar y entrada con el nuevo; **426** con `clientVersion=0.0.9`; **otro Go temporal con otra identidad** en la misma dirección → «necesita emparejarse de nuevo» sin que llegue ninguna petición HTTP (registro de Go) y nuevo emparejamiento; **revocación** → «retirado», Room vacío |
+| Revisión final (`4e20859`)                                                                                                   | `Pixel_8`: módulos y Go temporal; `Pixel_Tablet`: Go temporal | Las mismas cifras (33/33 + 9 y 7/7). Los módulos de `Pixel_Tablet` y todo `ADEL_A1_Tablet_API26` corrieron sobre `ce4d9aa`: `4e20859` solo cambia dos pruebas                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| PBKDF2 de 120 000 iteraciones (`PinVerifierOnDeviceTest`)                                                                    | API 26 / API 37                                               | 0.27–0.32 s / 0.37–0.54 s por derivación                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `iso.sh format`, `fmt-check`, `sync-check`; md5 de `docs/etapas/*.md`                                                        | Árbol CB                                                      | Correctos; md5 iguales antes y después                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+**Hallazgo**: una captura de pantalla de la aplicación de entrega (abierta a mano con `am start`, sin el ejecutor de
+pruebas) en `Pixel_Tablet` mostró en «Computadoras principales en la red» el anuncio **real** del servicio de la Mac
+(«ADEL POS — Eliver’s MacBook Pro»): en Android 17 la resolución NSD ya respondió (en la Fase 0 no). Solo fue la
+búsqueda mDNS: no se tocó nada, no hubo ninguna petición ni conexión al servicio real, y la aplicación se cerró y
+desinstaló enseguida. Confirma que la lectura del TXT de Go funciona con un anuncio real, y que las pruebas deben usar
+siempre `AdelTestRunner` (tipo `_adelpostest._tcp`), como ya lo hacen.
+
+### No verificado
+
+- El emparejamiento con un servidor encontrado por NSD de punta a punta y el cambio de IP en el dispositivo (en la JVM
+  sí, con la sonda HTTPS real contra el servidor simulado; la lectura de un anuncio real solo se vio en el hallazgo de
+  arriba, sin conectarse); requieren un dispositivo físico y un servidor de prueba anunciado en la red.
+- El permiso `ACCESS_LOCAL_NETWORK` en uso (hoy no se pide; solo la política y la pantalla).
+- El costo de PBKDF2 en una tableta económica real (medido solo en emuladores sobre la Mac).
+- La lista de pedidos sin enviar al retirar el dispositivo con pedidos reales (la cola es de la Fase E; probado en la
+  JVM con una fuente falsa).
+- El bloqueo por inactividad en el dispositivo (probado en la JVM con tiempo virtual).
+
+### Guion de extremo a extremo (`scripts/android-e2e.sh`)
+
+El guion de la suite contra el Go temporal pasó del scratchpad al repositorio, sin rutas del scratchpad ni de
+`iso.sh`. Recibe por variables `ANDROID_SERIAL` (obligatoria: nunca corre en todos los dispositivos conectados),
+`ADELPOS_E2E_LOCAL_URL` y `ADELPOS_E2E_NETWORK_URL` (las dos escuchas vistas desde la Mac), `ADELPOS_E2E_PIN`
+(opcional; se compara con la huella del certificado servido), `ADELPOS_E2E_SERVER_ID` (el paso 1 comprueba el
+emparejado), el token de aprovisionamiento (`ADELPOS_E2E_PROVISIONING[_FILE]`) o la terminal principal
+(`ADELPOS_E2E_MAIN_DEVICE`/`_TOKEN`), y `ADELPOS_E2E_DEVICE_HOST` (10.0.2.2 por omisión). **Se niega** (salida 2, antes
+de cualquier petición) con los puertos 8181/8443, un host que no sea 127.0.0.1/localhost, una URL sin puerto o el
+paso 6 junto con los anteriores, y antes de instalar exige `test_mode: true` en `GET version` de las dos escuchas y
+la huella esperada. Pasos 1–5 y 7 con un servidor; el 6 con otro servidor temporal de otra identidad en las mismas
+direcciones (`--no-install --steps "6 7"`). Resultados en `android/app/build/outputs/e2e/<serial>/`.
+
+Prueba de punta a punta (una vez, `ADEL_A1_Tablet_API26`, Go temporal `ISO_TAG=C` en 8194/8454): `--steps "1 2 3 4
+5"` **5/5** (paso 3 con el corte de red desde la Mac: «Active default network: none» y de vuelta 102); después de
+reemplazar el servidor con `iso.sh server-down`/`server-up` (otra identidad), una corrida con la huella vieja se
+**negó** («la huella … no es ADELPOS_E2E_PIN») y `--no-install --steps "6 7"` dio **2/2**. Guardas comprobadas sin
+servidor: 8181, 8443, `192.168.1.20`, URL sin puerto, el paso 6 mezclado y sin `ANDROID_SERIAL` se rechazan; con el
+Go temporal apagado, «no responde test_mode: true». La guarda de `test_mode: false` no se probó con un servidor real
+(a propósito).
+
+### Legibilidad (regla del propietario)
+
+Revisado todo lo escrito en la fase con la regla 14 de `android/CLAUDE.md` (no solo ktfmt): la consulta del
+emparejamiento se partió en pasos con nombre (`checkApproval`, `claimCredential`, `saveClaimed`), el perfil del mesero
+que entra y el `locked_until` de Go salieron a funciones propias, los `if` en una línea y las llamadas posicionales
+largas se escribieron en varias líneas con argumentos con nombre, y el ayudante de pruebas `MainComputer` quedó en
+funciones pequeñas. Comentarios en español en reglas, seguridad y protocolo.
+
+### Para el coordinador
+
+1. Resueltos con sus decisiones: el trabajo pendiente (decisión 6 y regla nueva en `android/CLAUDE.md`), la
+   actualización de `android/CLAUDE.md` y el guion en el repositorio.
+2. `android/CLAUDE.md`: las dos reglas nuevas van después de la 13; Prettier renumera las listas, así que en esta rama
+   quedan como 14 y 15 y al empalmar con tu regla 14 pasarán a 15 y 16 (ninguna referencia depende del número).
+3. Fase E: con trabajo pendiente, un «Emparejar de nuevo», «Actualizar» o la revocación sacan hoy al mesero de la
+   pantalla (§0-B pide no cerrar la sesión con pedidos sin enviar); la cola decidirá cómo se muestran.
+4. Regla del incidente (ya en `android/CLAUDE.md`): en pruebas nunca abrir la aplicación normal con la búsqueda
+   automática en la red real; si se ve el servidor real, no tocarlo.
+
+**Decisiones del coordinador al cerrar las fases C y B del dispositivo** (rama `etapa-a1-cb` fusionada en
+`etapa-a1-android`, `fca254c`; único empalme en la lista de reglas de `android/CLAUDE.md`: la regla 14 del propietario
+sobre código claro se conserva y las del agente quedan como 15 y 16):
+
+- **A1-D15 · Qué impide cerrar, cambiar o bloquear** (§0-B, §3.2 y §7): cambiar de mesero lo impiden solo los
+  pedidos sin enviar del mesero actual; una captura en curso se queda con su mesero sin cerrarle la sesión. El bloqueo
+  por inactividad y un «Cerrar sesión» explícito los impiden la captura en curso y los pedidos sin enviar.
+- **Pendiente para la Fase E**: «Emparejar de nuevo», «Actualiza esta aplicación» y la revocación con pedidos sin
+  enviar deben mostrarlos antes con un aviso claro y su confirmación (la revocación ya lo hace con
+  `UnsentOrdersSource`); nunca pasarlos en silencio a la bitácora.
+- **Regla para todas las fases**: ninguna prueba abre la app normal con la búsqueda en la red real (en la Fase C, una
+  revisión a mano la abrió y mostró el anuncio del servicio real; no se tocó ni hubo ninguna petición).
+
+---
+
 ## Fase E · Servidor
 
 Un agente, en su propio árbol de trabajo (`etapa-a1-es`, desde `etapa-a1-android` en `a139e2e`), en paralelo con la
