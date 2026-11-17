@@ -101,7 +101,11 @@ fun ActiveWaiterMenu(
                 )
             }
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
+        ) {
             if (offline) {
                 Text(
                     text = stringResource(R.string.waiter_menu_offline),
