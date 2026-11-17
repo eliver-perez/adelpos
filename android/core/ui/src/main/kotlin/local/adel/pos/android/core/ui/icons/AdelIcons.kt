@@ -47,6 +47,44 @@ object AdelIcons {
     /** Volver al panel anterior. */
     val ChevronLeft: ImageVector by lazy { icon("chevron-left", "m15 5-7 7 7 7") }
 
+    /** Abrir un menú (el del mesero activo). */
+    val ChevronDown: ImageVector by lazy { icon("chevron-down", "m5 9 7 7 7-7") }
+
+    /** Buscar otra vez o volver a comprobar. */
+    val Refresh: ImageVector by lazy {
+        icon(
+            "refresh",
+            "M20 7v5h-5M4 17v-5h5M5.6 7a7 7 0 0 1 11.5-2L20 8M4 16l2.9 3A7 7 0 0 0 18.4 17",
+        )
+    }
+
+    /** Cambiar de mesero. */
+    val Users: ImageVector by lazy {
+        icon(
+            "users",
+            circle(9f, 8f, 3.5f),
+            "M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8",
+        )
+    }
+
+    /** Computadora principal (servidor del restaurante). */
+    val Server: ImageVector by lazy {
+        icon(
+            "server",
+            roundedRect(4f, 3f, 16f, 7f, 2f),
+            roundedRect(4f, 14f, 16f, 7f, 2f),
+            "M8 6.5h.01M8 17.5h.01",
+        )
+    }
+
+    /** Aviso. */
+    val Alert: ImageVector by lazy {
+        icon("alert", "M12 3.5 2.5 20h19L12 3.5Z", "M12 10v4.5M12 17h.01")
+    }
+
+    /** Cambiar el nombre. */
+    val Edit: ImageVector by lazy { icon("edit", "M4 20h4L19 9l-4-4L4 16v4Z", "m13.5 6.5 4 4") }
+
     private fun icon(name: String, vararg paths: String): ImageVector {
         val builder =
             ImageVector.Builder(

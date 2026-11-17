@@ -2,6 +2,7 @@ package local.adel.pos.android.core.ui.theme
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 // ÚNICO archivo con colores escritos de la aplicación Android, como los bloques :root y
 // :root[data-theme='dark'] de desktop/src/styles.css en el escritorio (etapa 9D). Los valores son
@@ -212,3 +213,37 @@ internal val DarkAdelColors =
             ),
         tableOutOfServiceStripe = Color(0xFF27313D),
     )
+
+/** Colores del distintivo de un mesero: el círculo y la inicial encima. */
+@Immutable data class BadgeColors(val background: Color, val content: Color)
+
+/**
+ * Distintivo de un mesero con el color que eligió el administrador en la paleta de Go (`GET
+ * users/badge-colors`, la misma de las categorías: `catalog.Palette`), que llega como dato
+ * («#3591d4»). Es el único lugar donde un color se construye a partir de un dato. La inicial va en
+ * el tono (blanco o el texto oscuro del tema claro) que más contraste da con ese color, para que se
+ * lea en ambos temas; sin color (o con uno que no es hexadecimal), el azul suave de la marca.
+ */
+fun waiterBadgeColors(hex: String?, colors: AdelColors): BadgeColors {
+    val parsed = hex?.let(::colorFromHex) ?: return BadgeColors(colors.blueSoft, colors.blueStrong)
+    val light = Color(0xFFFFFFFF)
+    val dark = LightAdelColors.text
+    val content = if (contrastRatio(light, parsed) >= contrastRatio(dark, parsed)) light else dark
+    return BadgeColors(parsed, content)
+}
+
+/** Contraste WCAG entre dos colores (1 a 21). */
+fun contrastRatio(first: Color, second: Color): Double {
+    val lighter = maxOf(first.luminance(), second.luminance()) + 0.05
+    val darker = minOf(first.luminance(), second.luminance()) + 0.05
+    return lighter / darker
+}
+
+// «#rrggbb» en minúsculas o mayúsculas; null si no tiene esa forma.
+private fun colorFromHex(hex: String): Color? {
+    if (!Regex("^#[0-9a-fA-F]{6}$").matches(hex)) {
+        return null
+    }
+    val value = hex.substring(1).toLong(16)
+    return Color(0xFF000000 or value)
+}

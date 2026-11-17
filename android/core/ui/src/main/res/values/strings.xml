@@ -16,4 +16,16 @@
     <string name="table_state_out_of_service">Fuera de servicio</string>
 
     <string name="panes_back">Volver a %1$s</string>
+
+    <!-- Teclado del PIN (§3.2). -->
+    <string name="pin_pad_delete">Borrar</string>
+    <plurals name="pin_pad_digits">
+        <item quantity="one">%d dígito escrito</item>
+        <item quantity="many">%d dígitos escritos</item>
+        <item quantity="other">%d dígitos escritos</item>
+    </plurals>
+
+    <!-- Menú del mesero activo (cambio rápido de usuario, §3.2). -->
+    <string name="waiter_menu_switch">Cambiar de mesero</string>
+    <string name="waiter_menu_offline">Entraste sin conexión</string>
 </resources>

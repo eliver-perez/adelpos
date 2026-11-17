@@ -4,10 +4,11 @@ import android.app.UiAutomation
 import android.content.res.Configuration
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import local.adel.pos.android.core.ui.layout.PaneLayout
@@ -15,7 +16,6 @@ import local.adel.pos.android.core.ui.layout.TAG_PANES_DOUBLE
 import local.adel.pos.android.core.ui.layout.TAG_PANES_SINGLE
 import local.adel.pos.android.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import local.adel.pos.android.core.ui.layout.paneLayoutFor
-import local.adel.pos.android.feature.access.TAG_ACCESS_ENTER
 import local.adel.pos.android.feature.waiter.TAG_ACCOUNT_PANE
 import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
 import org.junit.After
@@ -29,11 +29,14 @@ import org.junit.runner.RunWith
  * La pantalla Mesas en el dispositivo real: uno o dos paneles según su tamaño y **rotación sin
  * perder lo capturado** (la búsqueda escrita y, en el teléfono, el panel de la cuenta abierto). La
  * rotación es la del dispositivo (no se simula): la actividad se destruye y se vuelve a crear como
- * cuando el mesero gira la tableta.
+ * cuando el mesero gira la tableta. Se llega a Mesas entrando con el PIN de un mesero conocido, sin
+ * conexión ([TestDevice]); el mesero sigue dentro después de cada rotación.
  */
 @RunWith(AndroidJUnit4::class)
 class DeviceLayoutTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @get:Rule val compose = createEmptyComposeRule()
+
+    private lateinit var scenario: ActivityScenario<MainActivity>
 
     private val automation: UiAutomation = InstrumentationRegistry.getInstrumentation().uiAutomation
 
@@ -42,22 +45,34 @@ class DeviceLayoutTest {
 
     @Before
     fun naturalRotation() {
+        TestDevice.seedOfflineWaiter()
         automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
-        compose.waitUntil(timeoutMillis = 10_000) {
-            compose.activity.resources.configuration.orientation != 0
-        }
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+        compose.waitUntil(timeoutMillis = 10_000) { configuration().orientation != 0 }
         compose.waitForIdle()
-        naturalOrientation = compose.activity.resources.configuration.orientation
+        naturalOrientation = configuration().orientation
+        TestDevice.enter(compose)
     }
 
     @After
     fun restoreRotation() {
         automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
         automation.setRotation(UiAutomation.ROTATION_UNFREEZE)
+        scenario.close()
+        TestDevice.reset()
+    }
+
+    // Configuración de la actividad vigente (cambia de objeto con cada rotación).
+    private fun configuration(): Configuration {
+        var current: Configuration? = null
+        scenario.onActivity { activity ->
+            current = Configuration(activity.resources.configuration)
+        }
+        return requireNotNull(current)
     }
 
     private fun currentLayout(): PaneLayout {
-        val configuration = compose.activity.resources.configuration
+        val configuration = configuration()
         return paneLayoutFor(configuration.screenWidthDp, configuration.screenHeightDp)
     }
 
@@ -72,9 +87,7 @@ class DeviceLayoutTest {
         automation.setRotation(
             if (quarterTurn) UiAutomation.ROTATION_FREEZE_90 else UiAutomation.ROTATION_FREEZE_0,
         )
-        compose.waitUntil(timeoutMillis = 10_000) {
-            compose.activity.resources.configuration.orientation == expected
-        }
+        compose.waitUntil(timeoutMillis = 10_000) { configuration().orientation == expected }
         compose.waitForIdle()
     }
 
@@ -90,7 +103,6 @@ class DeviceLayoutTest {
 
     @Test
     fun unoODosPanelesSegunElDispositivoYRotacionSinPerderLoCapturado() {
-        compose.onNodeWithTag(TAG_ACCESS_ENTER).performClick()
         assertPanes()
         compose.onNodeWithTag(TAG_TABLES_SEARCH).performTextInput("Terraza 4")
 
@@ -105,7 +117,6 @@ class DeviceLayoutTest {
 
     @Test
     fun enUnPanelLaCuentaAbiertaSigueAbiertaAlRotar() {
-        compose.onNodeWithTag(TAG_ACCESS_ENTER).performClick()
         if (currentLayout() == PaneLayout.DOUBLE) {
             // Tableta: la cuenta siempre está a la vista; no hay panel que abrir.
             compose.onNodeWithTag(TAG_ACCOUNT_PANE).assertIsDisplayed()
