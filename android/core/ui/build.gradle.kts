@@ -75,5 +75,9 @@ tasks.withType<Test>().configureEach {
             },
         )
         .withPropertyName("androidSources")
+    // La prueba del distintivo de los meseros lee la paleta de colores de Go.
+    inputs
+        .file(rootProject.file("../backend/internal/catalog/palette.go"))
+        .withPropertyName("badgePalette")
     systemProperty("adelpos.androidRoot", androidRoot.absolutePath)
 }

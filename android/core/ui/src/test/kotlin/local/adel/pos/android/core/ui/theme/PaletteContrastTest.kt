@@ -61,4 +61,32 @@ class PaletteContrastTest {
             }
         }
     }
+
+    /**
+     * Distintivo de los meseros con cada color de la paleta de Go (`catalog.Palette`, leída de
+     * `backend/internal/catalog/palette.go`): la inicial (texto grande y en negritas) contrasta al
+     * menos 3:1 con el círculo, y sin color se usa el azul suave con texto ≥ 4.5:1, en ambos temas.
+     */
+    @Test
+    fun laInicialDelDistintivoSeLeeConCadaColorDeGo() {
+        val androidRoot =
+            java.io.File(
+                System.getProperty("adelpos.androidRoot") ?: error("Falta adelpos.androidRoot"),
+            )
+        val palette = androidRoot.resolve("../backend/internal/catalog/palette.go").readText()
+        val hexes =
+            Regex("Hex: \"(#[0-9a-f]{6})\"").findAll(palette).map { it.groupValues[1] }.toList()
+        assertEquals("la paleta de Go tiene 16 colores", 16, hexes.size)
+        for (colors in listOf(LightAdelColors, DarkAdelColors)) {
+            for (hex in hexes) {
+                val badge = waiterBadgeColors(hex, colors)
+                assertMark("distintivo $hex", badge.content, badge.background)
+            }
+            val none = waiterBadgeColors(null, colors)
+            assertText("distintivo sin color", none.content, none.background)
+            assertEquals(none, waiterBadgeColors("azul", colors))
+            assertEquals(none, waiterBadgeColors("#12345", colors))
+        }
+        assertEquals(Color(0xFF3591D4), waiterBadgeColors("#3591D4", LightAdelColors).background)
+    }
 }
