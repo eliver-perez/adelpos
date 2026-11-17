@@ -144,14 +144,26 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   (otra identidad) en las mismas direcciones: `--steps "1 2 3 4 5"`, reemplazar el servidor y `--no-install --steps
 "6 7"`. En Android 8 a 10 el paso 3 corta la red desde la Mac con `adb root` (solo imágenes `google_apis`).
   Resultados en `android/app/build/outputs/e2e/<serial>/`. **Nunca** contra el servicio real de la Mac.
-- **`CatalogOnGoTest`** (`app`, contra el Go temporal; se omite sin argumentos) corre en tres etapas con
-  `am instrument -e class local.adel.pos.android.CatalogOnGoTest -e stage <a|b|c>` y los argumentos `pin`, `net`,
-  `local` y `provisioning`, con la aplicación instalada una sola vez (`:app:installDebug :app:installDebugAndroidTest`):
-  `a` empareja y entra por la API, crea el catálogo (≈ 300 productos, con sus tiempos en el registro `CatalogOnGoTest`),
-  cambia precio, crea, archiva y agota desde la principal (por el canal y por cambios) y revalida la imagen (304);
-  entre `a` y `b` se borra un producto en la base temporal (`DELETE FROM app.catalog_products WHERE code='TEMP-D'`) y
-  `b` lo recibe en `deleted`; entre `b` y `c` se cambia la época (`UPDATE app.catalog_epoch SET epoch =
-gen_random_uuid()`, como una restauración) y `c` recibe `reset: true`. Solo con la base **temporal** del arnés.
+- **`CatalogOnGoTest`** (`app`, contra el Go temporal; se omite sin argumentos) se corre con
+  **`scripts/android-e2e.sh --suite catalog`** (etapas `a`, `b` y `c`, una instrumentación cada una con `-e stage`):
+  `a` empareja y entra por la API, crea el catálogo (≈ 300 productos, con sus tiempos en el registro
+  `CatalogOnGoTest`), cambia precio, crea, archiva y agota desde la principal (por el canal y por cambios) y revalida la
+  imagen (304); `b` quita el producto de prueba («Filete de prueba», `FILETE`) con «Quitar datos de prueba» de la
+  principal (`maintenance/test-data`, la API de Go) y lo recibe en `deleted`; antes de `c` el guion cambia la época del
+  catálogo en la base temporal (`UPDATE app.catalog_epoch SET epoch = gen_random_uuid()`, como una restauración: Go no
+  tiene API para eso) y `c` recibe `reset: true`. Ese SQL solo corre con `ADELPOS_E2E_DATABASE_URL` y sus guardas
+  (127.0.0.1, nunca el puerto 55432, base `adel_pos_test_…` con la terminal principal del servidor que se prueba); sin
+  ella `c` sale como omitida.
+- **`FieldOnGoTest`** (Fase F, `--suite field`, pasos `f1`–`f10`): cocina en pantalla configurada por la API de la
+  principal (estación y ruta) con «En preparación» y «Listo» al momento; rendimiento (arranque en frío, Mesas con 40
+  mesas, captura con ~300 productos, «Enviar a cocina» y `dumpsys meminfo`, en el registro `AdelOnGo` con «Fase F ·»);
+  dos meseros en el mismo dispositivo (captura en curso que el otro no ve, cambio impedido con pedidos «Por enviar» y
+  cada pedido con la credencial de su mesero); transferir y combinar desde la principal con la cuenta abierta; bloqueo
+  largo del PIN (A1-D16: el guion deja dos bloqueos previos de la serie de `beto.f` en la base temporal, con las mismas
+  guardas) que cierra también la entrada sin conexión; la actividad recreada sin sus ViewModel (como tras la muerte del
+  proceso) con la captura y el personalizador abiertos; Atrás en Mesas y el bloqueo por inactividad al volver; tema
+  oscuro con capturas (`<salida>/screens`) y zonas táctiles de 48 dp. `-e tableOffset N` usa otras mesas de `f1` para
+  repetir un paso en el mismo servidor.
 - **Ejecutor de pruebas de `app`**: `AdelTestRunner` (antes de crear el contenedor) busca por NSD el tipo
   `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor emparejado que no
   responde y un mesero conocido para entrar sin conexión, con el Keystore real), `FakeAccess` (entrada falsa para las
@@ -160,9 +172,16 @@ gen_random_uuid()`, como una restauración) y `c` recibe `reset: true`. Solo con
   biblioteca toma `compileSdk` (37) si no se indica, y en Android 17 un `targetSdk` 37 exige `ACCESS_LOCAL_NETWORK`
   (visto: `SecurityException: Missing local network permission` al anunciar por NSD). Se prueba con el nivel de la
   aplicación (A1-D7).
-- **Matriz** (avance §1.7): `Pixel_8` (5580) y `Pixel_Tablet` (5582) con Android 17; `ADEL_A1_Phone_API33` (5592) y
-  `ADEL_A1_Tablet_API26` (5590). Emuladores sin ventana y de solo lectura con `iso.sh - emu-up <avd> <consola>`; como
-  mucho dos a la vez; `emu-down` al terminar.
+- **Matriz** (avance §1.7 y Fase F): `Pixel_8` y `Pixel_Tablet` con Android 17, `ADEL_A1_Phone_API33` y
+  `ADEL_A1_Tablet_API26`. Emuladores sin ventana y de solo lectura con `iso.sh - emu-up <avd> <consola>`; como mucho
+  dos a la vez (con dos corriendo de punta a punta y Gradle compilando, la entrada con PIN llegó a tardar 12 s y hubo
+  fallas por tiempo: mejor no compilar mientras corren); `emu-down` al terminar.
+  En cada uno: `connectedDebugAndroidTest` con `ANDROID_SERIAL` (contar los XML de cada módulo) y **`ANDROID_SERIAL=…
+ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levanta un servidor temporal nuevo para
+  cada parte (access 1–5; access 6–7 con otra identidad sin reinstalar; catalog; waiter; field) con la orden de
+  `ADELPOS_E2E_NEW_SERVER` (detiene el anterior, levanta otro en las mismas direcciones e imprime líneas
+  `ADELPOS_E2E_*=…`: provisioning y base temporal). Los agentes usan como orden `iso.sh - server-down` seguido de
+  `iso.sh <árbol> server-up`. Resultados en `<salida>/<suite>/` y `<salida>/summary.txt`.
 - **Corte de red**: `cmd connectivity airplane-mode enable|disable` en Android 11+ (desde la prueba con
   `UiAutomation.executeShellCommand`); en Android 8 solo desde la Mac con `adb root` + `svc wifi disable` +
   `svc data disable` (imágenes `google_apis`; las de Play no permiten root).
