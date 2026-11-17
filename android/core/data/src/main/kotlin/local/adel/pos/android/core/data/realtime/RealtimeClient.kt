@@ -138,7 +138,7 @@ class RealtimeClient(
                 is ConnectionEnd.Interrupted -> {
                     stateFlow.value = RealtimeState.Interrupted(end.interruption)
                     signalFlow.emit(RealtimeSignal.Interrupted(end.interruption))
-                    interruptions.onInterrupted(end.interruption)
+                    interruptions.onInterrupted(end.interruption, server.userId)
                     // No se reconecta con la misma sesión: se espera a que cambie (otro mesero,
                     // nueva entrada con PIN) o a que la aplicación vuelva a primer plano.
                     awaitCancellation()

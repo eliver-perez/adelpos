@@ -150,7 +150,7 @@ class CatalogOnGoTest {
         val repository =
             CatalogRepository(
                 store = store,
-                synchronizer = CatalogSynchronizer(access, api, store, interruptions = {}),
+                synchronizer = CatalogSynchronizer(access, api, store, interruptions = { _, _ -> }),
                 images = null,
                 scope = scope,
             )
@@ -199,7 +199,7 @@ class CatalogOnGoTest {
                 RealtimeClient(
                     access = harness.access,
                     active = MutableStateFlow(true),
-                    interruptions = {},
+                    interruptions = { _, _ -> },
                     cursorSeed = RecoveryStateCursorSeed(),
                 )
             val signals = Channel<RealtimeSignal>(Channel.UNLIMITED)

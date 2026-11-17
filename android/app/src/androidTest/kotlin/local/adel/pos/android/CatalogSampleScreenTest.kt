@@ -5,9 +5,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.hasAnyAncestor
-import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -25,16 +22,12 @@ import local.adel.pos.android.core.domain.catalog.CatalogVersion
 import local.adel.pos.android.core.domain.catalog.ProductAvailability
 import local.adel.pos.android.core.domain.catalog.ProductKind
 import local.adel.pos.android.core.domain.money.Money
-import local.adel.pos.android.core.ui.catalog.TAG_CATALOG_EMPTY
 import local.adel.pos.android.core.ui.catalog.TAG_CUSTOMIZER
 import local.adel.pos.android.core.ui.catalog.TAG_CUSTOMIZER_ADD
 import local.adel.pos.android.core.ui.catalog.productTag
-import local.adel.pos.android.core.ui.components.TAG_TOP_BAR
 import local.adel.pos.android.core.ui.layout.PaneLayout
 import local.adel.pos.android.core.ui.layout.currentPaneLayout
 import local.adel.pos.android.core.ui.theme.AdelTheme
-import local.adel.pos.android.feature.access.TAG_ACCESS_ENTER
-import local.adel.pos.android.feature.waiter.TAG_OPEN_CATALOG
 import local.adel.pos.android.feature.waiter.catalog.CatalogSampleScreen
 import local.adel.pos.android.feature.waiter.catalog.CatalogSampleViewModel
 import local.adel.pos.android.feature.waiter.catalog.TAG_SAMPLE_LINE
@@ -43,9 +36,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Pantalla de muestra «Catálogo» en el dispositivo: se llega desde Mesas, en la tableta la
- * cuadrícula y el personalizador van lado a lado y en el teléfono el personalizador se abre al
- * elegir un producto; lo agregado queda en la lista de muestra.
+ * Pantalla de muestra «Catálogo» en el dispositivo: en la tableta la cuadrícula y el personalizador
+ * van lado a lado y en el teléfono el personalizador se abre al elegir un producto; lo agregado
+ * queda en la lista de muestra. (Se llega desde Mesas con un mesero dentro; esa navegación la
+ * cubren las pruebas de extremo a extremo de la entrada.)
  */
 @RunWith(AndroidJUnit4::class)
 class CatalogSampleScreenTest {
@@ -90,19 +84,6 @@ class CatalogSampleScreenTest {
             groups = emptyList(),
             quickNotes = emptyList(),
         )
-
-    @Test
-    fun desdeMesasSeLlegaAlCatalogoSinDescargarTodavia() {
-        compose.onNodeWithTag(TAG_ACCESS_ENTER).performClick()
-        compose.onNodeWithTag(TAG_OPEN_CATALOG).performClick()
-        compose
-            .onNode(hasText("Catálogo").and(hasAnyAncestor(hasTestTag(TAG_TOP_BAR))))
-            .assertIsDisplayed()
-        // Sin sesión (el acceso llega con las fases B y C) el catálogo aún no se descarga.
-        compose
-            .onNodeWithTag(TAG_CATALOG_EMPTY)
-            .assertTextContains("Todavía no se descarga", substring = true)
-    }
 
     @Test
     fun elegirPersonalizarYAgregarEnUnoODosPaneles() {

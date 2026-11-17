@@ -8,27 +8,55 @@ import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
 /**
+ * Dirección vigente del servidor emparejado y cliente HTTPS con su huella SPKI fijada y las
+ * cabeceras `X-Client-*` (`PinnedHttpClient`).
+ */
+class ServerTransport(val baseUrl: HttpUrl, val client: OkHttpClient)
+
+/**
  * Conexión autorizada con el servidor del restaurante a nombre del mesero actual: lo que necesitan
  * el catálogo y el tiempo real para hablar con Go.
  *
- * @property baseUrl dirección del servidor emparejado (por ejemplo `https://192.168.1.10:8443/`).
- * @property client cliente con la huella SPKI fijada y las cabeceras `X-Client-*`
- *   (`PinnedHttpClient`).
+ * @param transport la dirección y el cliente **vigentes**: se piden en cada uso porque la dirección
+ *   cambia si el servidor cambia de IP (lo vuelve a encontrar el acceso por `server_id` y huella).
  * @property credentials cabeceras del dispositivo y del mesero: `X-Device-ID`, `X-Device-Token` y
  *   `Authorization: Bearer <sesión>`. Viven solo en memoria.
+ * @property userId el mesero dueño de la sesión (para avisar una sesión terminada solo de él).
  *
- * Dos conexiones son la misma si apuntan al mismo servidor con las mismas credenciales: una sesión
- * nueva (otro mesero o el mismo que volvió a entrar) es otra conexión, y el canal de tiempo real se
- * vuelve a abrir con ella.
+ * Dos conexiones son la misma si tienen las mismas credenciales: una sesión nueva (otro mesero o el
+ * mismo que volvió a entrar) es otra conexión, y el canal de tiempo real se vuelve a abrir con
+ * ella.
  */
-class AuthorizedServer(val baseUrl: HttpUrl, val client: OkHttpClient, val credentials: Headers) {
-    override fun equals(other: Any?): Boolean =
-        other is AuthorizedServer && other.baseUrl == baseUrl && other.credentials == credentials
+class AuthorizedServer(
+    private val transport: () -> ServerTransport,
+    val credentials: Headers,
+    val userId: String? = null,
+) {
+    /** Conexión con una dirección fija (pruebas y servidores que no cambian de dirección). */
+    constructor(
+        baseUrl: HttpUrl,
+        client: OkHttpClient,
+        credentials: Headers,
+        userId: String? = null,
+    ) : this(
+        transport = fixedTransport(ServerTransport(baseUrl, client)),
+        credentials = credentials,
+        userId = userId,
+    )
 
-    override fun hashCode(): Int = 31 * baseUrl.hashCode() + credentials.hashCode()
+    val baseUrl: HttpUrl
+        get() = transport().baseUrl
+
+    val client: OkHttpClient
+        get() = transport().client
+
+    override fun equals(other: Any?): Boolean =
+        other is AuthorizedServer && other.credentials == credentials
+
+    override fun hashCode(): Int = credentials.hashCode()
 
     // Nunca imprime las credenciales.
-    override fun toString(): String = "AuthorizedServer($baseUrl)"
+    override fun toString(): String = "AuthorizedServer(mesero $userId)"
 
     companion object {
         const val DEVICE_ID_HEADER = "X-Device-ID"
@@ -42,6 +70,10 @@ class AuthorizedServer(val baseUrl: HttpUrl, val client: OkHttpClient, val crede
                 .add(DEVICE_TOKEN_HEADER, deviceToken)
                 .add(AUTHORIZATION_HEADER, "Bearer $sessionToken")
                 .build()
+
+        private fun fixedTransport(transport: ServerTransport): () -> ServerTransport = {
+            transport
+        }
     }
 }
 

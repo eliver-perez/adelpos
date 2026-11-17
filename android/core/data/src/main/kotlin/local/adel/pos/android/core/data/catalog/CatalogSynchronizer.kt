@@ -60,7 +60,7 @@ class CatalogSynchronizer(
         val since = saved?.version?.takeIf { it > 0 }
         val epoch = saved?.epoch?.takeIf { since != null }
         when (val result = api.sync(server, since, epoch)) {
-            is AppResult.Failure -> failed(result.error)
+            is AppResult.Failure -> failed(result.error, server.userId)
             is AppResult.Success -> save(result.value)
         }
     }
@@ -89,10 +89,12 @@ class CatalogSynchronizer(
         )
     }
 
-    private fun failed(error: AppError): CatalogSyncOutcome {
+    private fun failed(error: AppError, userId: String?): CatalogSyncOutcome {
         // El dispositivo retirado, la sesión terminada o la versión vieja se avisan al punto único
         // del acceso; sin permiso de catálogo solo se informa en el estado de la descarga.
-        AccessInterruptionMapping.fromAppError(error)?.let { interruptions.onInterrupted(it) }
+        AccessInterruptionMapping.fromAppError(error)?.let { interruption ->
+            interruptions.onInterrupted(interruption, userId)
+        }
         return CatalogSyncOutcome.Failed(error)
     }
 

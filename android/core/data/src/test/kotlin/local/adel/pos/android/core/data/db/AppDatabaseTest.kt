@@ -15,8 +15,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Room versión 1 en la JVM con Robolectric (SDK 36): preferencias del dispositivo y persistencia al
- * reabrir.
+ * Room (versión vigente) en la JVM con Robolectric (SDK 36): preferencias del dispositivo y
+ * persistencia al reabrir.
  */
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseTest {
@@ -57,7 +57,7 @@ class AppDatabaseTest {
             assertEquals("map", second.devicePreferences().get("tables_view"))
             second.devicePreferences().remove("tables_view")
             assertNull(second.devicePreferences().get("tables_view"))
-            assertEquals(1, second.openHelper.readableDatabase.version)
+            assertEquals(2, second.openHelper.readableDatabase.version)
         } finally {
             second.close()
         }

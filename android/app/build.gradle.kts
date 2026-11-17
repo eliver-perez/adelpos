@@ -63,7 +63,8 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Ejecutor propio: búsqueda NSD con un tipo de prueba y versión de cliente por argumento.
+        testInstrumentationRunner = "local.adel.pos.android.AdelTestRunner"
     }
 
     signingConfigs {

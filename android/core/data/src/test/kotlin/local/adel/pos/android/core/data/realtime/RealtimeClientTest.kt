@@ -65,7 +65,9 @@ class RealtimeClientTest {
             RealtimeClient(
                 access = access,
                 active = active,
-                interruptions = { synchronized(interruptions) { interruptions.add(it) } },
+                interruptions = { interruption, _ ->
+                    synchronized(interruptions) { interruptions.add(interruption) }
+                },
                 cursorSeed = seed,
                 backoff = ReconnectBackoff(initialMillis = 50, maximumMillis = 400),
                 readTimeoutMillis = 300,
