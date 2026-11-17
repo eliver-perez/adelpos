@@ -1030,6 +1030,8 @@ class FieldOnGoTest {
 
     /** Captura de pantalla en la carpeta de la aplicación (el guion la copia a la Mac). */
     private fun screenshot(name: String) {
+        // Un diálogo del sistema «… no responde» (emulador cargado) taparía la pantalla.
+        SystemDialogs.dismissNotResponding(instrumentation.uiAutomation)
         compose.waitForIdle()
         Thread.sleep(SETTLE_MILLIS)
         val bitmap = instrumentation.uiAutomation.takeScreenshot() ?: return
@@ -1049,9 +1051,14 @@ class FieldOnGoTest {
     private fun touchTargetProblems(screen: String): List<String> {
         val density = TestDevice.app.resources.displayMetrics.density
         return compose.onAllNodes(hasClickAction()).fetchSemanticsNodes().mapNotNull { node ->
+            // Lo que quedó fuera de la vista (desplazado) no se revisa en esta pantalla; lo
+            // recortado por el borde de una lista se mide sin el recorte (su tamaño completo).
+            if (node.boundsInRoot.isEmpty) {
+                return@mapNotNull null
+            }
             val bounds = node.touchBoundsInRoot
-            val width = bounds.width / density
-            val height = bounds.height / density
+            val width = maxOf(bounds.width, node.size.width.toFloat()) / density
+            val height = maxOf(bounds.height, node.size.height.toFloat()) / density
             if (
                 width + TOUCH_TOLERANCE_DP >= MIN_TOUCH_DP &&
                     height + TOUCH_TOLERANCE_DP >= MIN_TOUCH_DP
