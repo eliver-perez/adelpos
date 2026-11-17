@@ -50,6 +50,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import local.adel.pos.android.core.domain.access.UnsentOrder
 import local.adel.pos.android.core.domain.pairing.FoundServerChoice
+import local.adel.pos.android.core.domain.pairing.PairingProblem
 import local.adel.pos.android.core.domain.pairing.PairingProtocol
 import local.adel.pos.android.core.domain.pairing.PairingState
 import local.adel.pos.android.core.domain.pairing.PairingView
@@ -63,6 +64,7 @@ import local.adel.pos.android.feature.access.R
 import local.adel.pos.android.feature.access.deviceWords
 import local.adel.pos.android.feature.access.pairingProblemText
 import local.adel.pos.android.feature.access.status.DeviceLogList
+import local.adel.pos.android.feature.access.status.UpdateServerScreen
 
 /**
  * «Buscar el servidor» (§4), como `FindServerPage` del escritorio: arriba, las computadoras
@@ -86,7 +88,16 @@ fun FindServerRoute(
         )
     LaunchedEffect(defaultName) { viewModel.proposeName(defaultName) }
     val code = viewModel.code
-    if (code != null) {
+    val problem = viewModel.problem
+    if (code == null && problem is PairingProblem.UpdateServer) {
+        // La computadora principal es anterior a la que pide esta aplicación: el mismo aviso que
+        // ya emparejado, con «Volver a comprobar» y la opción de elegir otra.
+        UpdateServerScreen(
+            serverVersion = problem.serverVersion,
+            onCheckAgain = viewModel::checkAgain,
+            onChooseAnother = viewModel::startOver,
+        )
+    } else if (code != null) {
         PairingCodePanel(
             view = code,
             problem = viewModel.problem?.let { pairingProblemText(it) },

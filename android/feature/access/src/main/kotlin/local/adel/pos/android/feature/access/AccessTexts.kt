@@ -63,6 +63,7 @@ fun pairingProblemText(problem: PairingProblem): String {
         PairingProblem.InvalidCredential -> stringResource(R.string.pairing_problem_credential)
         PairingProblem.StorageFailed ->
             stringResource(R.string.pairing_problem_storage, device.thisDevice)
+        is PairingProblem.UpdateServer -> stringResource(R.string.update_server_text)
         is PairingProblem.Server -> serverErrorText(problem.error)
     }
 }
