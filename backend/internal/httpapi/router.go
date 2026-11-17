@@ -159,6 +159,12 @@ func NewWithOptions(options Options, probe Probe, origins []string, logger *slog
 			tracked.WriteHeader(204)
 			return
 		}
+		// La credencial de envío del mesero solo vale en POST restaurant/offline-orders (etapa A1; revisión R3, B1):
+		// en cualquier otra ruta, también la versión, la salud y el contrato, se rechaza antes de atenderla.
+		if offlineCredentialMisplaced(r) {
+			fail(tracked, r, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED", "La autorización de envío solo sirve para entregar pedidos capturados sin conexión.")
+			return
+		}
 		technicalRoute := slices.Contains([]string{"/api/v1/health/live", "/api/v1/health/ready", "/api/v1/version", "/api/v1/events", "/api/v1/openapi.json"}, r.URL.Path)
 		if r.Method != http.MethodGet && (technicalRoute || len(application) == 0) {
 			w.Header().Set("Allow", "GET, OPTIONS")

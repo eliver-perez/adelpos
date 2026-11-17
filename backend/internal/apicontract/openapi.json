@@ -249,7 +249,7 @@
       "get": {
         "operationId": "getIdentity",
         "summary": "Sesión, permisos y terminal",
-        "description": "El usuario con sus permisos vigentes, sus preferencias, la terminal y los datos del establecimiento.",
+        "description": "El usuario con sus permisos vigentes, sus preferencias, la terminal y los datos del establecimiento. Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -317,7 +317,7 @@
       "post": {
         "operationId": "pinLogin",
         "summary": "Entrar con PIN en un dispositivo de meseros",
-        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (un administrador puede desbloquearlo). PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo.",
+        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read. Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -333,6 +333,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PinLoginResult"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "PIN bloqueado (PIN_LOCKED): por tiempo, con locked_until, o hasta que un administrador lo desbloquee, con requires_unlock.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinLockedError"
                 }
               }
             }
@@ -768,7 +778,7 @@
       "get": {
         "operationId": "getRecoveryState",
         "summary": "Recuperación del estado al reconectar",
-        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor).",
+        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor). Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1975,7 +1985,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "X-Offline-Credential",
-        "description": "Etapa A1: credencial de envío del mesero (256 bits) que entrega pinLogin. Sustituye a la sesión solo en submitOfflineOrder; en cualquier otra ruta, 401 OFFLINE_CREDENTIAL_NOT_ALLOWED."
+        "description": "Etapa A1: credencial de envío del mesero (256 bits) que entrega pinLogin. Sustituye a la sesión solo en submitOfflineOrder; en cualquier otra ruta o método, también las que no piden credencial (versión, salud, contrato, asistente, emparejamiento, login, listPinUsers, pinLogin) y el canal de eventos, 401 OFFLINE_CREDENTIAL_NOT_ALLOWED (revisión R3). Sus permisos son los de mesero (ver pinLogin)."
       }
     },
     "parameters": {
@@ -1993,7 +2003,7 @@
         "name": "X-Client-Kind",
         "in": "header",
         "required": false,
-        "description": "Tipo de cliente.",
+        "description": "Tipo de cliente. Etapa A1 (revisión R3): con la credencial de un dispositivo debe coincidir con el tipo con que se emparejó (android en un teléfono o tableta de meseros; desktop en una terminal de escritorio o de cocina); si no, 400 CLIENT_KIND_MISMATCH.",
         "schema": {
           "enum": ["desktop", "android"]
         }
@@ -2012,7 +2022,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until). Etapa A1: 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open).",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open).",
         "content": {
           "application/json": {
             "schema": {
@@ -4671,10 +4681,22 @@
           "locked_until": {
             "type": ["string", "null"],
             "format": "date-time",
-            "description": "Hasta cuándo está bloqueado el PIN por intentos fallidos, o null."
+            "description": "Hasta cuándo dura un bloqueo por tiempo, o null (también en el bloqueo que espera a un administrador)."
+          },
+          "requires_unlock": {
+            "type": "boolean",
+            "description": "Etapa A1 (A1-D16): el PIN quedó bloqueado hasta que un administrador lo desbloquee (locked_until es null). Siempre presente."
           }
         },
-        "required": ["id", "name", "initial", "color", "pin_version", "locked_until"],
+        "required": [
+          "id",
+          "name",
+          "initial",
+          "color",
+          "pin_version",
+          "locked_until",
+          "requires_unlock"
+        ],
         "description": "Mesero en la pantalla de entrada del dispositivo: solo lo que necesita su botón (nada de roles ni permisos)."
       },
       "PinUsers": {
@@ -4836,6 +4858,41 @@
         },
         "required": ["reason", "account_id", "account_state", "merged_into_id"],
         "description": "Etapa A1 (§6.4): error.details de 400 OPERATION_VALIDATION cuando la cuenta se cobró (closed), se canceló o liberó (voided) o se combinó con otra (merged, con merged_into_id) mientras se capturaba. Lo devuelven saveDraft, previewDraft, confirmDraft, cancelUnits, previewEdit y editUnits; el mensaje lo dice en español («La cuenta «Mesa 4» ya se cobró. No admite nuevas operaciones.»)."
+      },
+      "PinLockedError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "const": "PIN_LOCKED"
+              },
+              "message": {
+                "type": "string"
+              },
+              "request_id": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "properties": {
+                  "locked_until": {
+                    "type": ["string", "null"],
+                    "format": "date-time"
+                  },
+                  "requires_unlock": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["locked_until", "requires_unlock"]
+              }
+            },
+            "required": ["code", "message", "details"]
+          }
+        },
+        "required": ["error"],
+        "description": "Etapa A1: PIN bloqueado. Por tiempo: locked_until con la hora y requires_unlock false. Hasta que un administrador lo desbloquee (A1-D16): locked_until null y requires_unlock true."
       }
     }
   }

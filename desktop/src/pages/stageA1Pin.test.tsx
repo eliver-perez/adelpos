@@ -76,6 +76,14 @@ beforeEach(() => {
       has_pin: true,
       pin_locked_until: '2026-11-16T20:05:00Z',
     },
+    {
+      ...base,
+      id: '00000000-0000-4000-8000-0000000000a4',
+      username: 'dora',
+      display_name: 'Dora Ruiz',
+      has_pin: true,
+      pin_requires_unlock: true,
+    },
   ];
   replies = {};
   requests = [];
@@ -142,6 +150,28 @@ describe('Personal › Usuarios: PIN de los meseros', () => {
     fireEvent.click(within(carla).getByRole('button', { name: 'Desbloquear' }));
     await screen.findByText('PIN de Carla Díaz desbloqueado.');
     expect(sent('unlock_user_pin')[0]?.resourceId).toBe(users[2]!.id);
+  });
+
+  it('el bloqueo largo (A1-D16) pide desbloqueo y solo lo quita un administrador', async () => {
+    render(<UsersPage can={manager} onChanged={async () => undefined} />);
+    const dora = await rowOf('dora');
+    expect(dora.textContent).toContain('PIN bloqueado: pide desbloqueo');
+    expect(dora.textContent).not.toContain('hasta las');
+    fireEvent.click(within(dora).getByRole('button', { name: 'Desbloquear' }));
+    await screen.findByText('PIN de Dora Ruiz desbloqueado.');
+    expect(sent('unlock_user_pin')[0]?.resourceId).toBe(users[3]!.id);
+  });
+
+  it('en la fila propia no se ofrece el PIN: el suyo va en «Mi PIN» (revisión R3, B6)', async () => {
+    render(
+      <UsersPage can={manager} onChanged={async () => undefined} currentUserID={users[1]!.id} />,
+    );
+    const own = await rowOf('beto');
+    expect(own.textContent).toContain('Con PIN · Beto');
+    expect(within(own).queryByRole('button', { name: 'Cambiar PIN' })).toBeNull();
+    expect(within(own).queryByRole('button', { name: 'Asignar PIN' })).toBeNull();
+    const other = await rowOf('ana');
+    expect(within(other).getByRole('button', { name: 'Asignar PIN' })).toBeTruthy();
   });
 
   it('sin users.manage solo se ve el estado; con un servidor anterior no aparece nada del PIN', async () => {

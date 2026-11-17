@@ -29,6 +29,10 @@ const (
 	pinFailureWindow = "15 minutes"
 	pinLockDuration  = "5 minutes"
 	shortNameLength  = 20
+	// A1-D16: tras 3 bloqueos seguidos en 24 horas sin una entrada correcta, el PIN queda bloqueado hasta que un
+	// administrador lo desbloquee.
+	pinLocksBeforeUnlock = 3
+	pinLockSeriesWindow  = "24 hours"
 )
 
 // pinDummyHash se verifica cuando el usuario no existe o no tiene PIN, para que el tiempo de respuesta no revele
@@ -330,10 +334,13 @@ func removeUserPIN(ctx context.Context, tx pgx.Tx, principal Principal, userID s
 	return next, audit(ctx, tx, principal, "user.pin_removed", "user", &userID, nil, details, true)
 }
 
+// unlockUserPIN quita el bloqueo por tiempo o el que espera a un administrador (A1-D16) y borra los intentos y la
+// serie de bloqueos: el usuario vuelve a tener 5 intentos y 3 bloqueos antes del largo.
 func unlockUserPIN(ctx context.Context, tx pgx.Tx, principal Principal, userID string) (any, error) {
 	var lockedUntil *time.Time
+	var requiresUnlock bool
 	err := tx.QueryRow(ctx, `DELETE FROM app.pin_attempts WHERE user_id=$1
-        RETURNING CASE WHEN locked_until>now() THEN locked_until END`, userID).Scan(&lockedUntil)
+        RETURNING CASE WHEN locked_until>now() THEN locked_until END,requires_unlock`, userID).Scan(&lockedUntil, &requiresUnlock)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
@@ -342,10 +349,11 @@ func unlockUserPIN(ctx context.Context, tx pgx.Tx, principal Principal, userID s
 		return nil, err
 	}
 	// Solo se registra si de verdad estaba bloqueado (desbloquear un PIN libre no cambia nada).
-	if lockedUntil == nil {
+	if lockedUntil == nil && !requiresUnlock {
 		return next, nil
 	}
-	return next, audit(ctx, tx, principal, "user.pin_unlocked", "user", &userID, nil, map[string]any{"locked_until": lockedUntil}, true)
+	details := map[string]any{"locked_until": lockedUntil, "requires_unlock": requiresUnlock}
+	return next, audit(ctx, tx, principal, "user.pin_unlocked", "user", &userID, nil, details, true)
 }
 
 // ownPIN es «Mi PIN» (PUT auth/pin {current_password, pin}): el propio usuario define o cambia su PIN con su
@@ -393,7 +401,9 @@ func ownPIN(ctx context.Context, tx pgx.Tx, request Request, principal Principal
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.Exec(ctx, "DELETE FROM app.pin_attempts WHERE user_id=$1", principal.UserID); err != nil {
+	// Un PIN nuevo empieza sin intentos, salvo un bloqueo que espera a un administrador (A1-D16): «Mi PIN» no lo quita,
+	// para que solo lo desbloquee un administrador.
+	if _, err := tx.Exec(ctx, "DELETE FROM app.pin_attempts WHERE user_id=$1 AND NOT requires_unlock", principal.UserID); err != nil {
 		return nil, err
 	}
 	sessions, credentials, err := revokeWaiterAccess(ctx, tx, principal.UserID, "pin_changed", principal.SessionID)

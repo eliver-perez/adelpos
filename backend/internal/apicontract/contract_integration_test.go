@@ -53,7 +53,10 @@ type contractClient struct {
 	token    string
 	session  string
 	version  string
-	covered  map[string][]int
+	// kind es X-Client-Kind: el del dispositivo de la credencial (revisión R3, B2: desktop en la terminal del asistente,
+	// android en el teléfono emparejado).
+	kind    string
+	covered map[string][]int
 	// fingerprint es la huella SPKI del certificado del servidor (etapa 9G, fase C: emparejamiento).
 	fingerprint [32]byte
 }
@@ -81,7 +84,7 @@ func (client *contractClient) request(ctx context.Context, method, path string, 
 		request.Header.Set("Authorization", "Bearer "+client.session)
 	}
 	request.Header.Set(httpapi.ClientVersionHeader, client.version)
-	request.Header.Set(httpapi.ClientKindHeader, "android")
+	request.Header.Set(httpapi.ClientKindHeader, client.kind)
 	for key, value := range headers {
 		request.Header.Set(key, value)
 	}
@@ -204,7 +207,7 @@ func TestContractV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, covered: map[string][]int{},
+	client := &contractClient{t: t, contract: contract, handler: handler, version: product.Read().Version, kind: "desktop", covered: map[string][]int{},
 		fingerprint: serverIdentity.Fingerprint}
 	// Asistente inicial: la terminal principal y el administrador.
 	setup := httptest.NewRequest("POST", "/api/v1/setup", strings.NewReader(`{"name":"Contrato v1","timezone":"America/Monterrey",
@@ -532,23 +535,45 @@ func contractWaiterPIN(t *testing.T, client *contractClient, phone *contractClie
 	if accepted["status"] != "accepted" {
 		t.Fatalf("pedido con la credencial de envío: %v", accepted)
 	}
+	// Otro mesero falla 5 veces: 429 PIN_LOCKED con su bloqueo por tiempo (PinLockedError) y la lista lo informa.
+	other := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "beto.contrato",
+		"display_name": "Beto del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato-2"}, 200))
+	otherID := fmt.Sprint(other["id"])
+	client.setup("PUT", "/users/"+otherID+"/pin", map[string]any{"pin": "6152", "short_name": "Beto", "badge_color": ""}, 200)
+	for range 4 {
+		phone.call("POST", "/auth/pin-login", map[string]string{"user_id": otherID, "pin": "6153"}, nil, 401)
+	}
+	locked := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": otherID, "pin": "6153"}, nil, 429).Body.Bytes())
+	details := locked["error"].(map[string]any)["details"].(map[string]any)
+	if details["requires_unlock"] != false || details["locked_until"] == nil {
+		t.Fatalf("bloqueo por tiempo: %v", locked)
+	}
+	for _, entry := range decodeContract[map[string]any](t, phone.call("GET", "/auth/pin-users", nil, nil, 200).Body.Bytes())["users"].([]any) {
+		if user := entry.(map[string]any); user["id"] == otherID && (user["locked_until"] == nil || user["requires_unlock"] != false) {
+			t.Fatalf("la lista no informa el bloqueo: %v", user)
+		}
+	}
 }
 
 // contractPairing es el emparejamiento de un teléfono Android (etapa 9G, fases B y C): pide el código con el
 // compromiso de su número, lo revela, cambia su nombre, espera la aprobación (que se hace en la computadora
 // principal, fuera del contrato) y reclama su credencial una sola vez; otra solicitud se cancela.
 func contractPairing(t *testing.T, client *contractClient) *contractClient {
+	// Las rutas pairing/* las llama el teléfono que se empareja (todavía sin credencial), como cliente android.
+	terminal := *client
+	terminal.kind = "android"
 	nonce := make([]byte, 32)
 	_, _ = rand.Read(nonce)
-	created := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
+	created := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests", map[string]any{
 		"name": "Mesero contrato", "device_kind": "android", "os": "Android 15", "app_version": client.version,
 		"commitment": administration.PairingCommitment(nonce),
 	}, nil, 200).Body.Bytes())
 	requestID := created["request_id"]
 	secret := map[string]string{"X-Pairing-Secret": created["pairing_secret"]}
-	client.call("POST", "/pairing/requests/"+requestID+"/reveal", map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret, 200)
-	client.call("POST", "/pairing/requests/"+requestID+"/name", map[string]string{"name": "Mesero Ana contrato"}, secret, 200)
-	state := decodeContract[map[string]string](t, client.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes())
+	terminal.call("POST", "/pairing/requests/"+requestID+"/reveal", map[string]string{"terminal_nonce": hex.EncodeToString(nonce)}, secret, 200)
+	terminal.call("POST", "/pairing/requests/"+requestID+"/name", map[string]string{"name": "Mesero Ana contrato"}, secret, 200)
+	state := decodeContract[map[string]string](t, terminal.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes())
 	if state["state"] != "pending" || state["name"] != "Mesero Ana contrato" {
 		t.Fatalf("solicitud pendiente: %v", state)
 	}
@@ -562,26 +587,26 @@ func contractPairing(t *testing.T, client *contractClient) *contractClient {
 		t.Fatal(err)
 	}
 	client.setup("POST", "/devices/pairing-requests/"+requestID+"/approve", map[string]string{"code": code}, 200)
-	if approved := decodeContract[map[string]string](t, client.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes()); approved["state"] != "approved" {
+	if approved := decodeContract[map[string]string](t, terminal.call("GET", "/pairing/requests/"+requestID, nil, secret, 200).Body.Bytes()); approved["state"] != "approved" {
 		t.Fatalf("solicitud aprobada: %v", approved)
 	}
-	claimed := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret, 200).Body.Bytes())
+	claimed := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret, 200).Body.Bytes())
 	if claimed["name"] != "Mesero Ana contrato" || claimed["server_id"] != created["server_id"] {
 		t.Fatalf("credencial reclamada: %v", claimed)
 	}
 	again := httptest.NewRecorder()
-	client.handler.ServeHTTP(again, client.request(context.Background(), "POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret))
+	terminal.handler.ServeHTTP(again, terminal.request(context.Background(), "POST", "/pairing/requests/"+requestID+"/claim", map[string]any{}, secret))
 	if again.Code != 409 || strings.Contains(again.Body.String(), "device_token") {
 		t.Fatalf("la credencial se entrega una sola vez: %d %s", again.Code, again.Body.String())
 	}
-	other := decodeContract[map[string]string](t, client.call("POST", "/pairing/requests", map[string]any{
+	other := decodeContract[map[string]string](t, terminal.call("POST", "/pairing/requests", map[string]any{
 		"name": "Mesero que se arrepiente", "device_kind": "android", "os": "Android 15", "app_version": client.version,
 		"commitment": administration.PairingCommitment(serverNonce),
 	}, nil, 200).Body.Bytes())
-	client.call("POST", "/pairing/requests/"+other["request_id"]+"/cancel", map[string]any{},
+	terminal.call("POST", "/pairing/requests/"+other["request_id"]+"/cancel", map[string]any{},
 		map[string]string{"X-Pairing-Secret": other["pairing_secret"]}, 200)
 	// El teléfono ya emparejado (etapa A1): sus credenciales, sin sesión.
 	phone := *client
-	phone.device, phone.token, phone.session = claimed["device_id"], claimed["device_token"], ""
+	phone.device, phone.token, phone.session, phone.kind = claimed["device_id"], claimed["device_token"], "", "android"
 	return &phone
 }
