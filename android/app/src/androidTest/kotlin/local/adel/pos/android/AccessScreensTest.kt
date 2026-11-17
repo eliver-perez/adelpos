@@ -19,6 +19,7 @@ import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.RepairReason
+import local.adel.pos.android.core.domain.access.UnsentOrder
 import local.adel.pos.android.core.domain.connection.ConnectionSummary
 import local.adel.pos.android.core.domain.connection.LinkState
 import local.adel.pos.android.core.ui.components.TAG_PIN_KEY_PREFIX
@@ -43,6 +44,8 @@ import local.adel.pos.android.feature.access.pin.TAG_WAITER_LIST
 import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
 import local.adel.pos.android.feature.access.status.TAG_REPAIR_ACTION
 import local.adel.pos.android.feature.access.status.TAG_REPAIR_CONFIRM
+import local.adel.pos.android.feature.access.status.TAG_REPAIR_ERASES
+import local.adel.pos.android.feature.access.status.TAG_REPAIR_PENDING
 import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
 import local.adel.pos.android.navigation.AdelPosNavigation
 import org.junit.Assert.assertEquals
@@ -192,13 +195,16 @@ class AccessScreensTest {
     }
 
     @Test
-    fun emparejarDeNuevoPideConfirmacion() {
+    fun emparejarDeNuevoPideConfirmacionDiceQueSeBorraYMuestraLosPendientes() {
         var repairs = 0
+        val pending = UnsentOrder("Ana", "Mesa 4: 2 hamburguesas", System.currentTimeMillis())
         val actions =
             object : AccessActions by NoActions {
                 override fun repair() {
                     repairs += 1
                 }
+
+                override suspend fun pendingOrders(): List<UnsentOrder> = listOf(pending)
             }
         compose.setContent {
             AdelTheme {
@@ -215,6 +221,13 @@ class AccessScreensTest {
             .assertIsDisplayed()
         compose.onNodeWithTag(TAG_REPAIR_ACTION).performClick()
         assertEquals("primero se confirma", 0, repairs)
+        compose
+            .onNodeWithTag(TAG_REPAIR_ERASES)
+            .assertTextContains("el catálogo con sus imágenes", substring = true)
+        waitFor(TAG_REPAIR_PENDING)
+        compose
+            .onNode(hasText("Mesa 4: 2 hamburguesas", substring = true), useUnmergedTree = true)
+            .assertExists()
         compose.onNodeWithTag(TAG_REPAIR_CONFIRM).performClick()
         assertEquals(1, repairs)
     }

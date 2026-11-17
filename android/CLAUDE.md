@@ -195,6 +195,34 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   emparejarlo de nuevo pasan a la bitácora y se muestran con «Este dispositivo fue retirado del restaurante; estos
   pedidos no se enviaron»). Hoy son `NoWaiterWork` y `NoUnsentOrders`.
 
+### Contrato con la cola y el modo Mesero (revisión R3: M3, M4 y M5)
+
+Estas formas son estables: la Fase E las usa tal cual y cambiarlas se avisa en el informe de la etapa.
+
+- **Dueño de cada operación (M5).** Cada pedido, reintento o actualización guarda al crearse el `user_id` del mesero
+  que la hizo y, al salir, pide `deviceAccess.requestHeaders(userId)` con **ese** `user_id` (nunca
+  `activeWaiter.value`): si Ana cambió a Beto o se bloqueó mientras tanto, la operación sale con la sesión de Ana o,
+  si Ana ya no tiene sesión, sin `Authorization` (y entonces, si es un pedido sin conexión, con
+  `offlineCredential(userId)` en `submitOfflineOrder`). Un error de esa respuesta se avisa con
+  `deviceAccess.report(error, userId)` y el mismo `user_id`.
+- **Acceso que deja de valer (M3).** `report(AppError.SessionEnded(…), userId)` (`SESSION_*`) olvida la sesión de ese
+  mesero; `report(AppError.Rejected(401, AccessRepository.OFFLINE_CREDENTIAL_INVALID, …), userId)` olvida además su
+  verificador y su credencial de envío (`offlineCredential(userId)` pasa a null: hace falta entrar **con
+  conexión**). Ninguno saca al mesero ni toca la cola: si es el activo, `activeWaiter.value` sigue siendo él con
+  `hasServerSession = false` y `mustReenterPin = true`, y la raíz muestra «Vuelve a escribir tu PIN» encima de su
+  pantalla. La cola **conserva** el pedido (no lo descarta ni lo pasa a otro mesero) y lo reintenta cuando
+  `requestHeaders(userId)` vuelva a traer `Authorization` (otra entrada con conexión) u `offlineCredential(userId)`
+  vuelva a existir. Observar `activeWaiter` para saber cuándo volvió a entrar (`mustReenterPin` en false). Errores
+  que no son de acceso (`VALIDATION_ERROR`, `ORDER_REQUIRES_CONFIRMATION`…) los decide la pantalla: no pasan por
+  `report`. 400 `CLIENT_KIND_MISMATCH` es un problema de soporte: `report` no cambia nada con él.
+- **Borrar los datos de este dispositivo (M4).** La cola se registra una vez, al crearse en `AppContainer`:
+  `deviceDataWipe.register("cola de pedidos") { /* borrar cola y borradores; WorkManager.cancelAllWork() */ }`
+  (`DeviceDataPart.erase()` es `suspend`; se llama fuera del hilo principal). Al retirar el dispositivo o con «Emparejar
+  de nuevo», `AccessRepository` hace, en este orden: lee `UnsentOrdersSource.unsentOrders()` y lo pasa a la bitácora;
+  llama a cada parte registrada (una que falla no detiene a las demás); olvida el emparejamiento, los meseros, sus
+  verificadores y credenciales; destruye la llave del Keystore. Antes de confirmar «Emparejar de nuevo», la pantalla
+  muestra `DeviceAccess.pendingOrders()` (lo mismo que `unsentOrders()`).
+
 ## Catálogo y tiempo real (para los demás módulos)
 
 `AppContainer.catalogRealtime` (`CatalogRealtimeContainer`) arranca con la aplicación y habla con Go a través de
