@@ -142,8 +142,11 @@ private fun VariantBlock(
         BlockHeader(
             title = stringResource(R.string.customizer_variant),
             rule =
-                if (product.requiresVariant) stringResource(R.string.customizer_required_one)
-                else stringResource(R.string.customizer_optional),
+                if (product.requiresVariant) {
+                    stringResource(R.string.customizer_required_one)
+                } else {
+                    stringResource(R.string.customizer_optional)
+                },
         )
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -440,15 +443,25 @@ private fun ComboSlotBlock(
                 val candidate = catalog.product(productId) ?: continue
                 val option = slot.option(productId)
                 val selected = selection.productId == productId
+                // La disponibilidad la da la opción de la ranura (Go la calcula en la descarga) o,
+                // si no la trae, el propio producto.
                 val available =
-                    if (option != null) option.availableNow && !option.soldOut
-                    else candidate.selectable
+                    if (option != null) {
+                        option.availableNow && !option.soldOut
+                    } else {
+                        candidate.selectable
+                    }
                 val substitution = option?.substitutionPrice?.takeIf { positiveAmount(it) }
+                // Debajo del nombre: el cargo de sustitución o, si no se puede elegir, «Agotado».
+                val detail =
+                    when {
+                        substitution != null -> MoneyFormat.formatSigned(substitution.decimal)
+                        !available -> stringResource(R.string.product_sold_out)
+                        else -> null
+                    }
                 ChoiceChip(
                     label = candidate.name,
-                    detail =
-                        substitution?.let { MoneyFormat.formatSigned(it.decimal) }
-                            ?: if (!available) stringResource(R.string.product_sold_out) else null,
+                    detail = detail,
                     selected = selected,
                     enabled = selected || available,
                     onClick = { onValueChange(ComboChoices.chooseProduct(value, slot, productId)) },
@@ -481,8 +494,11 @@ private fun ComboSlotBlock(
                         .testTag(slotTag(slot.id) + "-personalizar"),
             ) {
                 Text(
-                    if (expanded) stringResource(R.string.customizer_slot_hide, component.name)
-                    else stringResource(R.string.customizer_slot_customize, component.name),
+                    if (expanded) {
+                        stringResource(R.string.customizer_slot_hide, component.name)
+                    } else {
+                        stringResource(R.string.customizer_slot_customize, component.name)
+                    },
                 )
             }
             if (expanded) {

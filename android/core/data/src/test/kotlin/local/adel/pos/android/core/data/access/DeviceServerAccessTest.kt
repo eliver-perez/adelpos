@@ -106,59 +106,65 @@ class DeviceServerAccessTest {
         }
 
     @Test
-    fun conexionSoloConMeseroConSesionYOtraAlCambiarDeMesero() = runBlocking<Unit> {
-        val adapter = DeviceServerAccess(access, scope)
-        pair()
-        assertTrue(access.status.value is DeviceStatus.Ready)
-        // Sin mesero dentro no hay conexión autorizada.
-        assertNull(adapter.current.value)
+    fun conexionSoloConMeseroConSesionYOtraAlCambiarDeMesero() =
+        runBlocking<Unit> {
+            val adapter = DeviceServerAccess(access, scope)
+            pair()
+            assertTrue(access.status.value is DeviceStatus.Ready)
+            // Sin mesero dentro no hay conexión autorizada.
+            assertNull(adapter.current.value)
 
-        assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
-        val anaServer = adapter.awaitCurrent { it?.userId == ana }!!
-        assertEquals(go.base.toHttpUrl(), anaServer.baseUrl)
-        assertEquals(go.deviceId, anaServer.credentials[AuthorizedServer.DEVICE_ID_HEADER])
-        assertEquals(
-            "Bearer ${access.sessionToken(ana)}",
-            anaServer.credentials[AuthorizedServer.AUTHORIZATION_HEADER],
-        )
+            assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
+            val anaServer = adapter.awaitCurrent { it?.userId == ana }!!
+            assertEquals(go.base.toHttpUrl(), anaServer.baseUrl)
+            assertEquals(go.deviceId, anaServer.credentials[AuthorizedServer.DEVICE_ID_HEADER])
+            assertEquals(
+                "Bearer ${access.sessionToken(ana)}",
+                anaServer.credentials[AuthorizedServer.AUTHORIZATION_HEADER],
+            )
 
-        access.leave()
-        adapter.awaitCurrent { it == null }
-        assertTrue(access.enter(beto, "6152") is EntryResult.Entered)
-        val betoServer = adapter.awaitCurrent { it?.userId == beto }!!
-        assertNotEquals("Otra sesión es otra conexión (el canal se reabre)", anaServer, betoServer)
+            access.leave()
+            adapter.awaitCurrent { it == null }
+            assertTrue(access.enter(beto, "6152") is EntryResult.Entered)
+            val betoServer = adapter.awaitCurrent { it?.userId == beto }!!
+            assertNotEquals(
+                "Otra sesión es otra conexión (el canal se reabre)",
+                anaServer,
+                betoServer,
+            )
 
-        // Sin permiso de eventos el mesero sigue dentro.
-        adapter.interruptions.onInterrupted(
-            AccessInterruption.PermissionLost("PERMISSION_DENIED"),
-            beto,
-        )
-        delay(200)
-        assertNotNull(adapter.current.value)
+            // Sin permiso de eventos el mesero sigue dentro.
+            adapter.interruptions.onInterrupted(
+                AccessInterruption.PermissionLost("PERMISSION_DENIED"),
+                beto,
+            )
+            delay(200)
+            assertNotNull(adapter.current.value)
 
-        // Sesión terminada: solo ese mesero vuelve a la entrada.
-        adapter.interruptions.onInterrupted(
-            AccessInterruption.SessionEnded("SESSION_REVOKED"),
-            beto,
-        )
-        adapter.awaitCurrent { it == null }
-        assertNull(access.activeWaiter.value)
-        assertNull(access.sessionToken(beto))
-        assertNotNull(access.sessionToken(ana))
-    }
+            // Sesión terminada: solo ese mesero vuelve a la entrada.
+            adapter.interruptions.onInterrupted(
+                AccessInterruption.SessionEnded("SESSION_REVOKED"),
+                beto,
+            )
+            adapter.awaitCurrent { it == null }
+            assertNull(access.activeWaiter.value)
+            assertNull(access.sessionToken(beto))
+            assertNotNull(access.sessionToken(ana))
+        }
 
     @Test
-    fun dispositivoRetiradoDesdeElCanalRetiraElDispositivo() = runBlocking<Unit> {
-        val adapter = DeviceServerAccess(access, scope)
-        pair()
-        access.enter(ana, "4829")
-        adapter.awaitCurrent { it != null }
-        adapter.interruptions.onInterrupted(AccessInterruption.DeviceRevoked, ana)
-        withTimeout(5_000) {
-            while (access.status.value !is DeviceStatus.Retired) {
-                delay(10)
+    fun dispositivoRetiradoDesdeElCanalRetiraElDispositivo() =
+        runBlocking<Unit> {
+            val adapter = DeviceServerAccess(access, scope)
+            pair()
+            access.enter(ana, "4829")
+            adapter.awaitCurrent { it != null }
+            adapter.interruptions.onInterrupted(AccessInterruption.DeviceRevoked, ana)
+            withTimeout(5_000) {
+                while (access.status.value !is DeviceStatus.Retired) {
+                    delay(10)
+                }
             }
+            adapter.awaitCurrent { it == null }
         }
-        adapter.awaitCurrent { it == null }
-    }
 }
