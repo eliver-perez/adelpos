@@ -2,6 +2,7 @@ package local.adel.pos.android
 
 import android.app.UiAutomation
 import android.util.Log
+import android.view.KeyEvent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -158,15 +159,17 @@ class WaiterModeOnGoTest {
         val capture = currentCapture(ids.getValue("table1"))
         val itemId = capture.visible.single().id
         // Rotación: lo capturado sigue a la vista (y guardado en Room y en Go).
-        automation.setRotation(UiAutomation.ROTATION_FREEZE_90)
-        compose.waitForIdle()
+        log("girar")
+        rotate(UiAutomation.ROTATION_FREEZE_90)
         showOrder()
         waitFor("$TAG_DRAFT_ROW_PREFIX$itemId")
-        automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
-        compose.waitForIdle()
+        log("girada; volver")
+        rotate(UiAutomation.ROTATION_FREEZE_0)
         showOrder()
         waitFor("$TAG_DRAFT_ROW_PREFIX$itemId")
+        log("enviar a cocina")
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        log("enviado")
         waitFor(TAG_TABLES_SEARCH)
         val order = waitForOrder(ids.getValue("table1")) { it.state == OrderState.RECEIVED }
         val accountId = order.receivedAccountId!!
@@ -181,7 +184,7 @@ class WaiterModeOnGoTest {
         // Otra terminal (la principal) guarda un renglón en la cuenta y lo confirma: la captura lo
         // ve al momento por el canal de tiempo real.
         compose.onNodeWithTag(TAG_PENDING).assertExists()
-        scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        pressBack()
         compose.onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table1")}").performClick()
         waitFor("account-$accountId")
         compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
@@ -466,7 +469,35 @@ class WaiterModeOnGoTest {
         compose.onNodeWithTag(productTag(productId)).performScrollTo().performClick()
         waitFor(TAG_CUSTOMIZER_ADD)
         compose.onNodeWithTag(TAG_CUSTOMIZER_ADD).performClick()
-        compose.waitForIdle()
+        log("agregado $productId")
+    }
+
+    /** El botón Atrás del sistema (la actividad vigente, también después de girar). */
+    private fun pressBack() {
+        InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        Thread.sleep(SETTLE_MILLIS)
+    }
+
+    private fun log(message: String) {
+        Log.i(TAG, message)
+    }
+
+    /**
+     * Gira la pantalla y espera a que la actividad nueva tenga la orientación pedida (la actividad
+     * se vuelve a crear; lo capturado debe seguir).
+     */
+    private fun rotate(rotation: Int) {
+        val before = TestDevice.app.resources.configuration.orientation
+        automation.setRotation(rotation)
+        val deadline = System.currentTimeMillis() + ROTATION_TIMEOUT_MILLIS
+        while (System.currentTimeMillis() < deadline) {
+            val now = TestDevice.app.resources.configuration.orientation
+            if (now != before) {
+                break
+            }
+            Thread.sleep(POLL_MILLIS)
+        }
+        Thread.sleep(SETTLE_MILLIS)
     }
 
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
@@ -483,8 +514,7 @@ class WaiterModeOnGoTest {
         val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
         val shown = compose.onAllNodes(hasTestTag(TAG_ORDER_PANEL)).fetchSemanticsNodes()
         if (single.isNotEmpty() && shown.isNotEmpty()) {
-            scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
-            compose.waitForIdle()
+            pressBack()
         }
     }
 
@@ -506,11 +536,15 @@ class WaiterModeOnGoTest {
 
     // --- Lo guardado en el dispositivo ---
 
+    /** La captura más reciente de Ana en la mesa (guardada en Room). */
     private fun currentCapture(tableId: String) = runBlocking {
         val ana = loadIds().getValue("ana")
-        container.database.waiter().capturesOf(ana).map(WaiterStorage::toCapture).single {
-            it.tableId == tableId
-        }
+        container.database
+            .waiter()
+            .capturesOf(ana)
+            .map(WaiterStorage::toCapture)
+            .filter { it.tableId == tableId }
+            .maxBy { it.createdAtMillis }
     }
 
     private fun waitForOrder(
@@ -694,6 +728,8 @@ class WaiterModeOnGoTest {
         const val ANA_PIN = "4829"
         const val ROLE = "Meseros A1"
         const val POLL_MILLIS = 250L
+        const val SETTLE_MILLIS = 1_500L
+        const val ROTATION_TIMEOUT_MILLIS = 10_000L
 
         /** La lista de permisos de mesero de Go (A1-D17), la misma que da la sesión con PIN. */
         val WAITER_PERMISSIONS =
