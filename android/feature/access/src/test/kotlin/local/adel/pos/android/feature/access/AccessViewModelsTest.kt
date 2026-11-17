@@ -452,4 +452,56 @@ class AccessViewModelsTest {
             assertEquals("ya emparejado deja de consultar", 3, polls)
             store.clear()
         }
+
+    @Test
+    fun conUnServidorViejoVolverAComprobarPideOtraVezAlMismo() =
+        runTest(dispatcher) {
+            val targets = mutableListOf<PairingTarget>()
+            var updated = false
+            val pending = PairingView(PairingState.PENDING, "166101", "Tableta 1", "Fonda", 0)
+            val flow =
+                object : PairingFlow {
+                    override suspend fun search() = ServerSearch.Found(emptyList())
+
+                    override suspend fun start(
+                        target: PairingTarget,
+                        deviceName: String,
+                    ): PairingStep {
+                        targets.add(target)
+                        return if (updated) {
+                            PairingStep.Showing(pending)
+                        } else {
+                            PairingStep.Failed(PairingProblem.UpdateServer("0.11.0"))
+                        }
+                    }
+
+                    override suspend fun poll(): PairingStep = PairingStep.Showing(pending)
+
+                    override suspend fun rename(deviceName: String) = PairingStep.Showing(pending)
+
+                    override suspend fun cancel() = Unit
+                }
+            val viewModel = owned("old-server") { FindServerViewModel(flow, SavedStateHandle()) }
+            viewModel.proposeName("Tableta 1")
+            viewModel.onAddressChange("192.168.1.20")
+            viewModel.requestAddress()
+            runCurrent()
+            assertEquals(PairingProblem.UpdateServer("0.11.0"), viewModel.problem)
+            assertNull(viewModel.code)
+            // Ya actualizada la computadora principal: «Volver a comprobar» sigue el
+            // emparejamiento.
+            updated = true
+            viewModel.checkAgain()
+            runCurrent()
+            assertEquals(
+                listOf(
+                    PairingTarget.Address("192.168.1.20"),
+                    PairingTarget.Address("192.168.1.20"),
+                ),
+                targets,
+            )
+            assertNull(viewModel.problem)
+            assertEquals("166101", viewModel.code?.code)
+            store.clear()
+        }
 }
