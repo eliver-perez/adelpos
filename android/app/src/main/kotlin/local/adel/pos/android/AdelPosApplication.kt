@@ -23,5 +23,7 @@ class AdelPosApplication : Application() {
         // ajustes antes de este punto.
         ProcessLifecycleOwner.get().lifecycle.addObserver(container.appForeground)
         container.catalogRealtime.start()
+        // Bloqueo por inactividad de todo el proceso (revisión R3, A2 y B4).
+        container.startIdleLock()
     }
 }

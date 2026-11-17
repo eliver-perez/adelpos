@@ -25,9 +25,10 @@
 #                                   terminal principal de un servidor ya configurado (la imprime una corrida anterior).
 #   JAVA_HOME, ANDROID_HOME         como en scripts/dev.sh (JDK de Android Studio y SDK del usuario por omisión).
 #
-# Pasos: 1 emparejar con el código · 2 PIN incorrecto, bloqueo al quinto y entrada · 3 entrada sin conexión
-# (modo avión en Android 11+; antes, `adb root` + `svc wifi/data` desde la Mac: solo imágenes google_apis) ·
-# 4 PIN cambiado invalida el verificador · 5 versión vieja (426) · 6 certificado cambiado · 7 dispositivo retirado.
+# Pasos: 1 emparejar con el código · 2 PIN incorrecto, bloqueo al quinto (cierra la entrada sin conexión), entrada
+# y cabeceras de cada mesero · 3 entrada sin conexión (modo avión en Android 11+; antes, `adb root` + `svc wifi/data`
+# desde la Mac: solo imágenes google_apis) · 4 PIN cambiado mientras el mesero trabaja: «Vuelve a escribir tu PIN»
+# sin salir de Mesas · 5 versión vieja (426) · 6 certificado cambiado · 7 dispositivo retirado.
 # El paso 6 necesita OTRO servidor temporal (otra identidad) en las MISMAS direcciones: correr primero
 # `--steps "1 2 3 4 5"`, reemplazar el servidor y después `--no-install --steps "6 7"` con los datos del nuevo.
 #
@@ -180,15 +181,22 @@ run_step() {
     shift
     local log="$OUT/$method.txt"
     "$ADB" -s "$ANDROID_SERIAL" logcat -c >/dev/null 2>&1 || true
+    # adb shell une los argumentos en una sola línea: un valor vacío desaparecería y correría los demás
+    # (am termina leyendo basura), así que serverId solo se pasa si existe.
+    local server_id=()
+    if [ -n "${ADELPOS_E2E_SERVER_ID:-}" ]; then
+        server_id=(-e serverId "$ADELPOS_E2E_SERVER_ID")
+    fi
     "$ADB" -s "$ANDROID_SERIAL" shell am instrument -w -r \
         -e class "local.adel.pos.android.AccessOnGoTest#$method" \
         -e local "http://$DEVICE_HOST:$LOCAL_PORT" -e address "$DEVICE_HOST:$NETWORK_PORT" -e pin "$PIN" \
-        -e serverId "${ADELPOS_E2E_SERVER_ID:-}" -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
+        ${server_id[@]+"${server_id[@]}"} -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
         local.adel.pos.android.test/local.adel.pos.android.AdelTestRunner >"$log" 2>&1 || true
     "$ADB" -s "$ANDROID_SERIAL" logcat -d -s AdelOnGo:V TestRunner:V AndroidRuntime:E \
         >"$OUT/$method-logcat.txt" 2>/dev/null || true
     local codes verdict
-    codes="$(grep -E '^INSTRUMENTATION_STATUS_CODE: ' "$log" | awk '{print $2}' | tr -d '\r' | tr '\n' ' ')"
+    # Sin ningún código (am no llegó a correr la prueba) grep no encuentra nada: «SIN RESULTADO».
+    codes="$(grep -E '^INSTRUMENTATION_STATUS_CODE: ' "$log" | awk '{print $2}' | tr -d '\r' | tr '\n' ' ' || true)"
     case "$codes" in
         *"-2"*) verdict="FALLA" ;;
         *"-4"* | *"-3"*) verdict="OMITIDA" ;;
@@ -199,6 +207,7 @@ run_step() {
     if [ "$verdict" != "APROBADA" ]; then
         FAILED=1
         grep -A12 'INSTRUMENTATION_STATUS: stack=' "$log" | head -14 | tee -a "$SUMMARY" || true
+        grep -m3 -E '^(Error|onError):' "$log" | tee -a "$SUMMARY" || true
     fi
 }
 
@@ -227,7 +236,7 @@ for step in $STEPS; do
                 run_step paso3_entradaSinConexion
             fi
             ;;
-        4) run_step paso4_pinCambiadoInvalidaElVerificadorAlReconectar ;;
+        4) run_step paso4_pinCambiadoPideVolverAEscribirloSinSalirDeMesas ;;
         5) run_step paso5_versionViejaPideActualizarLaAplicacion -e clientVersion 0.0.9 ;;
         6) run_step paso6_certificadoCambiadoNoConectaYPideEmparejarDeNuevo ;;
         7) run_step paso7_dispositivoRetiradoBorraTodo ;;

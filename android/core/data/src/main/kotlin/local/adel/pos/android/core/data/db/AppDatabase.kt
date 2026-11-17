@@ -13,6 +13,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * - Versión 1 (Fase A): preferencias del dispositivo.
  * - Versión 2 (fases B y C): servidor emparejado, meseros conocidos (verificador del PIN y
  *   credencial de envío cifrados con el Keystore) y bitácora del dispositivo.
+ * - Versión 3 (revisión R3, M1 y M2): los intentos sin conexión de cada mesero dejan de depender
+ *   del reloj (`offline_failures` acumulados y `offline_closed`).
  *
  * Reglas para las fases siguientes: cada cambio sube [version][Database.version] en uno, agrega su
  * `Migration` a [MIGRATIONS] y una prueba con `MigrationTestHelper` (`AppDatabaseMigrationTest`).
@@ -27,7 +29,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
             KnownWaiterEntity::class,
             DeviceLogEntry::class,
         ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -80,8 +82,47 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 2 → 3: `known_waiters` cambia sus columnas de intentos (sin reloj): se copia la tabla con
+         * los fallos que llevaba y la entrada sin conexión cerrada si estaba bloqueada. SQLite de
+         * Android 8 no puede quitar columnas: se crea la tabla nueva, se copian las filas y se
+         * cambia el nombre, como indica Room. El SQL es el de `schemas/…/3.json`.
+         */
+        val MIGRATION_2_3: Migration =
+            object : Migration(2, 3) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `known_waiters_v3` " +
+                            "(`user_id` TEXT NOT NULL, `server_id` TEXT NOT NULL, " +
+                            "`name` TEXT NOT NULL, `initial` TEXT NOT NULL, `color` TEXT, " +
+                            "`pin_version` INTEGER NOT NULL, `sealed_verifier` BLOB, " +
+                            "`sealed_offline_credential` BLOB, " +
+                            "`last_online_entry_millis` INTEGER NOT NULL, " +
+                            "`offline_failures` INTEGER NOT NULL, " +
+                            "`offline_closed` INTEGER NOT NULL, PRIMARY KEY(`user_id`))",
+                    )
+                    db.execSQL(
+                        "INSERT INTO `known_waiters_v3` (`user_id`, `server_id`, `name`, " +
+                            "`initial`, `color`, `pin_version`, `sealed_verifier`, " +
+                            "`sealed_offline_credential`, `last_online_entry_millis`, " +
+                            "`offline_failures`, `offline_closed`) " +
+                            "SELECT `user_id`, `server_id`, `name`, `initial`, `color`, " +
+                            "`pin_version`, `sealed_verifier`, `sealed_offline_credential`, " +
+                            "`last_online_entry_millis`, `local_failures`, " +
+                            "CASE WHEN `local_locked_until_millis` IS NULL THEN 0 ELSE 1 END " +
+                            "FROM `known_waiters`",
+                    )
+                    db.execSQL("DROP TABLE `known_waiters`")
+                    db.execSQL("ALTER TABLE `known_waiters_v3` RENAME TO `known_waiters`")
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_known_waiters_server_id` " +
+                            "ON `known_waiters` (`server_id`)",
+                    )
+                }
+            }
+
         /** Migraciones de todas las versiones, en orden. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, FILE_NAME)

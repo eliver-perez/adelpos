@@ -20,6 +20,9 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import local.adel.pos.android.core.data.api.ApiErrors
 import local.adel.pos.android.core.data.api.ApiOutcome
 import local.adel.pos.android.core.data.api.ClientIdentity
@@ -44,6 +47,8 @@ import local.adel.pos.android.feature.access.pin.TAG_ENTRY_BACK
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_EMPTY
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_MESSAGE
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_OFFLINE
+import local.adel.pos.android.feature.access.pin.TAG_REENTER
+import local.adel.pos.android.feature.access.pin.TAG_REENTER_MESSAGE
 import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
 import local.adel.pos.android.feature.access.status.TAG_CHECK_AGAIN
 import local.adel.pos.android.feature.access.status.TAG_REPAIR
@@ -202,10 +207,28 @@ class AccessOnGoTest {
         assertTrue("$status", status is DeviceStatus.Ready && status.online)
     }
 
+    // GET restaurant/state con las cabeceras del mesero [owner] (revisión R3, M5): Go responde a
+    // nombre de ese mesero.
+    private fun stateUserOf(owner: String): String? = runBlocking {
+        val api = container.deviceAccess.serverApi()!!
+        val headers = container.deviceAccess.requestHeaders(owner)!!
+        val outcome = api.get("restaurant/state", JsonObject.serializer(), headers)
+        assertTrue("$outcome", outcome is ApiOutcome.Success)
+        val user = (outcome as ApiOutcome.Success).value["user"]?.jsonObject
+        user?.get("id")?.jsonPrimitive?.content
+    }
+
     @Test
     fun paso2_pinIncorrectoBloqueoALosCincoYEntrada() {
         launch()
         val beto = userIdOf("Beto")
+        waitFor("$TAG_WAITER_PREFIX$beto")
+        // Beto entra una vez con conexión (queda su verificador) y cambia de mesero.
+        compose.onNodeWithTag("$TAG_WAITER_PREFIX$beto").performClick()
+        typePin(BETO_PIN)
+        waitFor(TAG_TABLES_SEARCH)
+        compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
+        compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
         waitFor("$TAG_WAITER_PREFIX$beto")
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$beto").performClick()
         repeat(4) { attempt ->
@@ -220,9 +243,11 @@ class AccessOnGoTest {
         typePin(BETO_PIN)
         waitForText("Intenta de nuevo a las")
         assertNull(container.deviceAccess.activeWaiter.value)
-        assertNull(
-            "un mesero que no entró no tiene verificador",
-            runBlocking { container.database.access().knownWaiter(beto) },
+        // El bloqueo de Go cierra su entrada sin conexión (revisión R3, M2): se prueba en el paso
+        // 3.
+        assertTrue(
+            "el bloqueo de Go cierra la entrada sin conexión",
+            runBlocking { container.database.access().knownWaiter(beto) }!!.offlineClosed,
         )
 
         // En el teléfono el teclado ocupa la pantalla: se vuelve a la lista para elegir a Ana.
@@ -238,6 +263,9 @@ class AccessOnGoTest {
         assertNotNull(container.deviceAccess.sessionToken(ana))
         assertNotNull(runBlocking { container.deviceAccess.offlineCredential(ana) })
         assertNotNull(runBlocking { container.database.access().knownWaiter(ana) }?.sealedVerifier)
+        // Las cabeceras son del mesero dueño de la operación, aunque el activo sea otro (M5).
+        assertEquals(ana, stateUserOf(ana))
+        assertEquals(beto, stateUserOf(beto))
         // Cambio rápido de mesero desde el menú visible.
         compose.onNodeWithTag(TAG_WAITER_MENU).performClick()
         compose.onNodeWithTag(TAG_WAITER_SWITCH).performClick()
@@ -259,16 +287,21 @@ class AccessOnGoTest {
             launch()
             waitFor(TAG_ENTRY_OFFLINE)
             val known = runBlocking { container.database.access().knownWaiters() }
-            assertEquals(listOf("Ana"), known.map { it.name })
-            val ana = known.single().userId
-            // Beto tiene PIN en Go, pero nunca entró en este dispositivo: sin conexión no entra.
-            compose.onAllNodes(hasText("Beto")).fetchSemanticsNodes().let {
-                assertTrue(it.isEmpty())
-            }
-            val beto = "bbbbbbbb-0000-4000-8000-000000000000"
+            assertEquals(setOf("Ana", "Beto"), known.map { it.name }.toSet())
+            val ana = known.single { it.name == "Ana" }.userId
+            val beto = known.single { it.name == "Beto" }.userId
+            // Beto tiene el PIN bloqueado en Go (paso 2): sin conexión tampoco entra, ni con el PIN
+            // correcto, y la lista lo dice (revisión R3, M2).
+            waitForText("Sin conexión no puede entrar")
+            assertEquals(
+                EntryResult.OfflineClosed,
+                runBlocking { container.deviceAccess.enter(beto, BETO_PIN) },
+            )
+            // Alguien que nunca entró en este dispositivo no entra sin conexión.
+            val stranger = "bbbbbbbb-0000-4000-8000-000000000000"
             assertEquals(
                 EntryResult.UnknownOffline,
-                runBlocking { container.deviceAccess.enter(beto, BETO_PIN) },
+                runBlocking { container.deviceAccess.enter(stranger, BETO_PIN) },
             )
             compose.onNodeWithTag("$TAG_WAITER_PREFIX$ana").performClick()
             typePin("9999")
@@ -289,7 +322,7 @@ class AccessOnGoTest {
     }
 
     @Test
-    fun paso4_pinCambiadoInvalidaElVerificadorAlReconectar() {
+    fun paso4_pinCambiadoPideVolverAEscribirloSinSalirDeMesas() {
         compose.waitUntil(timeoutMillis = 60_000) {
             container.connectionMonitor.current() == LinkState.ONLINE
         }
@@ -300,21 +333,36 @@ class AccessOnGoTest {
             .single { it.name == "Ana" }
             .userId
         assertNotNull(runBlocking { container.database.access().knownWaiter(ana) }?.sealedVerifier)
-        main.changePin("ana.a1", ANA_NEW_PIN)
-        // Al reconectar (o abrir la aplicación) se pide la lista: otra pin_version invalida.
         launch()
         waitFor("$TAG_WAITER_PREFIX$ana")
-        compose.waitUntil(timeoutMillis = 30_000) {
-            runBlocking { container.database.access().knownWaiter(ana) } == null
-        }
-        assertNull(runBlocking { container.deviceAccess.offlineCredential(ana) })
-        // El PIN viejo ya no sirve; el nuevo sí, y renueva el verificador con la versión nueva.
         compose.onNodeWithTag("$TAG_WAITER_PREFIX$ana").performClick()
         typePin(ANA_PIN)
+        waitFor(TAG_TABLES_SEARCH)
+        // En la principal le cambian el PIN mientras trabaja: al volver a comprobar (otra
+        // pin_version) su acceso deja de valer, pero Ana no sale de Mesas (revisión R3, M3).
+        main.changePin("ana.a1", ANA_NEW_PIN)
+        runBlocking { container.deviceAccess.recheck() }
+        waitFor(TAG_REENTER)
+        waitForText("Vuelve a escribir tu PIN")
+        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertExists()
+        assertEquals(ana, container.deviceAccess.activeWaiter.value?.userId)
+        assertNull(runBlocking { container.database.access().knownWaiter(ana) })
+        assertNull(runBlocking { container.deviceAccess.offlineCredential(ana) })
+        assertNull(container.deviceAccess.sessionToken(ana))
+        // El PIN viejo ya no sirve; el nuevo sí, y renueva el verificador con la versión nueva.
+        typePin(ANA_PIN)
+        waitFor(TAG_REENTER_MESSAGE)
         waitForText("PIN incorrecto")
         typePin(ANA_NEW_PIN)
-        waitFor(TAG_TABLES_SEARCH)
+        compose.waitUntil(timeoutMillis = 40_000) {
+            compose.onAllNodes(hasTestTag(TAG_REENTER)).fetchSemanticsNodes().isEmpty()
+        }
+        compose.onNodeWithTag(TAG_TABLES_SEARCH).assertExists()
+        val active = container.deviceAccess.activeWaiter.value!!
+        assertTrue(active.hasServerSession)
+        assertFalse(active.mustReenterPin)
         assertEquals(2, runBlocking { container.database.access().knownWaiter(ana) }?.pinVersion)
+        assertEquals(ana, stateUserOf(ana))
     }
 
     @Test

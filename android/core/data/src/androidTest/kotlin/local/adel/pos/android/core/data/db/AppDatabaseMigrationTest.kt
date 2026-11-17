@@ -62,6 +62,42 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun de2a3ConservaLosFallosYCierraLaEntradaDeQuienEstabaBloqueado() {
+        helper.createDatabase(testDatabase, 2).use { database ->
+            // Ana llevaba 2 fallos sin bloqueo; Beto estaba bloqueado (por reloj) hasta una hora.
+            for ((id, failures, lockedUntil) in
+                listOf(Triple("ana", 2, "NULL"), Triple("beto", 5, "1700000300000"))) {
+                database.execSQL(
+                    "INSERT INTO known_waiters (user_id, server_id, name, initial, color, " +
+                        "pin_version, sealed_verifier, sealed_offline_credential, " +
+                        "last_online_entry_millis, local_failures, local_window_start_millis, " +
+                        "local_locked_until_millis) VALUES ('$id', 's1', '$id', 'A', NULL, 1, " +
+                        "X'01', NULL, 1, $failures, 1, $lockedUntil)",
+                )
+            }
+        }
+        helper.runMigrationsAndValidate(testDatabase, 3, true, AppDatabase.MIGRATION_2_3).use {
+            database ->
+            database
+                .query(
+                    "SELECT user_id, offline_failures, offline_closed, sealed_verifier " +
+                        "FROM known_waiters ORDER BY user_id",
+                )
+                .use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals("ana", cursor.getString(0))
+                    assertEquals(2, cursor.getInt(1))
+                    assertEquals(0, cursor.getInt(2))
+                    assertArrayEquals(byteArrayOf(1), cursor.getBlob(3))
+                    cursor.moveToNext()
+                    assertEquals("beto", cursor.getString(0))
+                    assertEquals(5, cursor.getInt(1))
+                    assertEquals("el bloqueo por reloj pasa a entrada cerrada", 1, cursor.getInt(2))
+                }
+        }
+    }
+
+    @Test
     fun todasLasMigracionesLlevanALaVersionActual() = runBlocking {
         helper.createDatabase(testDatabase, 1).close()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -88,7 +124,7 @@ class AppDatabaseMigrationTest {
                 ),
             )
             assertArrayEquals(byteArrayOf(1, 2, 3), access.pairedServer()?.sealedDeviceToken)
-            assertEquals(2, database.openHelper.readableDatabase.version)
+            assertEquals(3, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }

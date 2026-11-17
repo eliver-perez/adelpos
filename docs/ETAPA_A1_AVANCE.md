@@ -2221,3 +2221,124 @@ users`, `PUT users/{id}/pin`, `GET devices` y cuentas para llevar → 403 con su
   `API_CONTRACTS.md`; la prueba lo exige), B1, B2 (`CLIENT_KIND_MISMATCH`) y O4; §15, las decisiones 1–5.
 
 **Al cerrar las correcciones del servidor** (rama `etapa-a1-b-fix` fusionada en `etapa-a1-android`): se acepta el ajuste de `TestContractV1` y `TestStageA1WaiterPIN`, que enviaban `X-Client-Kind: android` con la credencial de una terminal de escritorio (B2 lo rechaza con `400 CLIENT_KIND_MISMATCH`); el escritorio, la app y Playwright no cambian. Se conserva lo observado sobre `accounts.open` (descartar una cuenta vacía, liberar una mesa o pedir «Cancelar cuenta» con un supervisor, como cualquier mesero con ese permiso).
+
+## Correcciones de la revisión R3 · Dispositivo
+
+Rama `etapa-a1-cb-fix` (desde `etapa-a1-android` en `3ca8b6e`, con la fusión de `etapa-a1-android` en `b4e1cfe`:
+servidor corregido), un agente, 16 y 17/11/2026. Árbol `$SP/wt/CBfix`, `ISO_TAG=C`, Go temporal en 8194 (local) y 8454
+(red), uno nuevo por corrida. **Sin cambios en `backend/`, `desktop/`, `docs/API_V1.md`, `CLAUDE.md` ni `AGENTS.md`**
+(`android/CLAUDE.md` y `scripts/android-e2e.sh` sí); `docs/etapas/*.md` con el mismo md5 antes y después. Ninguna
+prueba usó el servicio real (8181, 8443, 55432) ni buscó `_adelpos._tcp`; no se abrió la aplicación normal fuera de
+`AdelTestRunner`. Emuladores: `Pixel_Tablet` (5582) y `ADEL_A1_Tablet_API26` (5590), siempre con `ANDROID_SERIAL`,
+apagados al terminar; nunca 5600–5606. Go temporal detenido y su base borrada.
+
+Commits (rutas explícitas):
+
+| Commit    | Tema                                                                                                                                                                        |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `00f16b0` | M4: `DeviceDataWipe` (registro único de borrado) y `eraseAll()` de `catalog.db`, la caché de imágenes y el catálogo en memoria                                              |
+| `f71c53f` | B4: `LocalUserActivity` y `Modifier.reportsUserActivity` (`core:ui`); el menú del mesero los usa                                                                            |
+| `6904e30` | A1, A2, M1, M2, M3, M5, A1-D16 y el cableado de M4/B4: dominio, datos (Room v3), `DeviceServerAccess`, «Vuelve a escribir tu PIN», textos de «Emparejar de nuevo» y pruebas |
+| `9fa7cd9` | `android/CLAUDE.md`                                                                                                                                                         |
+| `055df3a` | Fusión de `etapa-a1-android` (servidor corregido), sin conflictos                                                                                                           |
+| `47b3347` | 503 `PIN_LOGIN_BUSY` se reintenta; 400 `CLIENT_KIND_MISMATCH` es un error de soporte                                                                                        |
+| `21aeb3f` | Contrato M3/M4/M5 para la Fase E en `android/CLAUDE.md`, borrado fuera del hilo principal, pruebas instrumentadas nuevas                                                    |
+| `260a77e` | `AccessOnGoTest`: bloqueo de Go que cierra la entrada sin conexión, cabeceras por mesero y «Vuelve a escribir tu PIN» contra el Go temporal                                 |
+| `ee85a0f` | `scripts/android-e2e.sh`: sin `ADELPOS_E2E_SERVER_ID` ya no pasa un `serverId` vacío (am fallaba con «Invalid userId -2» y el guion salía sin decir nada)                   |
+
+`00f16b0` y `f71c53f` son independientes; `6904e30` reúne los cambios que se necesitan entre sí (dominio, datos y
+pantallas cambian juntos). No se comprobó con `git archive` que cada commit compile solo.
+
+### Qué se corrigió
+
+- **A1 y B7** (`core/data/.../access/AccessRepository.kt:574`, `enterOfflineLocked`): una entrada sin conexión borra
+  la sesión de Go que el mesero tuviera en memoria (`:601`); solo una entrada con conexión pone sesión. La prueba que
+  decía cubrirlo ahora mira la cabecera `Authorization` de una **petición real** al servidor simulado
+  (`AccessSafetyTest.unaEntradaSinConexionNuncaLlevaLaSesionDeGo`) y `DeviceServerAccess` no da conexión autorizada a
+  ese mesero (`DeviceServerAccessTest.unMeseroQueEntroSinConexionNoTieneConexionAutorizada`). El comentario de
+  `OfflineAttemptPolicy` se reescribió.
+- **A2 y B4**: el bloqueo por inactividad es del proceso. `IdleLock.supervise` (`core/domain/.../IdleLock.kt:74`)
+  combina mesero activo, plazo de Go y primer plano (`AppForeground` de la Fase D) con `collectLatest`; lo arranca
+  `AppContainer.startIdleLock()` (`app/.../AppContainer.kt:181`) desde `AdelPosApplication.onCreate`.
+  `AccessViewModel` ya no vigila. Empezar a vigilar **no** reinicia el plazo (solo un toque o la entrada de otro
+  mesero); al volver a primer plano se recalcula en ese momento con `elapsedRealtime`, así que tras un reposo
+  profundo se bloquea sin esperar; la espera es exacta (sin vueltas de 60 s). Los diálogos y menús reportan sus
+  toques (`Modifier.reportsUserActivity(LocalUserActivity.current)`, provisto en `AdelPosApp`). Las reglas del
+  coordinador siguen: el bloqueo no ocurre con captura en curso ni pedidos sin enviar.
+- **M1 y M2** (`OfflineAttemptPolicy.kt:33`, Room v3 con `offline_failures` y `offline_closed`, `MIGRATION_2_3` en
+  `AppDatabase.kt:91`, SQL igual a `schemas/…/3.json`): sin ningún reloj. Los fallos con o sin conexión
+  (`PIN_INVALID` también cuenta, `:486`) se acumulan y solo vuelven a cero con una entrada correcta; al quinto, la
+  entrada sin conexión de ese mesero queda cerrada (`EntryResult.OfflineClosed`) hasta que entre con conexión. Un
+  `PIN_LOCKED` de Go o un `locked_until`/`requires_unlock` en `auth/pin-users` (`:404`) también la cierra. La
+  migración conserva los fallos y pasa un bloqueo por reloj vigente a «cerrada».
+- **A1-D16**: `details.requires_unlock` de 429 `PIN_LOCKED` y `requires_unlock` de `auth/pin-users`
+  (`EntryResult.Locked(untilEpochMillis, requiresUnlock)`, `WaiterProfile.requiresUnlock`). Texto «Tu PIN está
+  bloqueado. Pide a un administrador que lo desbloquee.»; en la lista, «PIN bloqueado: pide a un administrador que lo
+  desbloquee»; sin conexión, «Sin conexión no puede entrar: entra con conexión».
+- **M3** (`report`, `:188`, y `accessEndedLocked`, `:212`; `invalidateLocked`, `:388`): `SESSION_*`, PIN cambiado
+  (otra `pin_version` o fuera de la lista) y `OFFLINE_CREDENTIAL_INVALID` (además borra verificador y credencial: B3
+  queda cubierto) nunca sacan al mesero: queda activo con `hasServerSession = false` y `mustReenterPin = true`, y
+  `AdelPosApp` muestra `ReenterPinRoute` («Vuelve a escribir tu PIN, Ana») encima de su pantalla, sin cerrarse con
+  Atrás ni fuera, con «Cambiar de mesero» bajo las reglas de siempre. Su navegación y lo capturado siguen debajo.
+- **M4** (`forgetLocked`, `:661`): pedidos sin enviar → bitácora; `wipe.eraseAll()` (catálogo e imágenes hoy; la cola
+  y WorkManager en la Fase E); olvidar emparejamiento y meseros; destruir la llave. «Emparejar de nuevo» muestra antes
+  los pedidos sin enviar (`DeviceAccess.pendingOrders()`) y dice qué se borra; el texto de «retirado» también. El
+  borrado corre en `Dispatchers.IO` y una parte que falla no detiene a las demás.
+- **M5** (`requestHeaders(userId)`, `:255`): cabeceras del mesero dueño de la operación; `DeviceServerAccess`
+  (`:30`) las pide para el mesero activo y no da conexión con `mustReenterPin`.
+- **Del aviso del coordinador**: 503 `PIN_LOGIN_BUSY` se reintenta hasta 3 veces cada 2 s (`:434`) sin contar fallo,
+  sin marcar sin conexión ni usar el verificador; después `EntryResult.Busy` («…muchos PIN a la vez. Inténtalo de
+  nuevo en unos segundos.»). 400 `CLIENT_KIND_MISMATCH` no cambia nada del estado (ni sesión ni red) y la entrada
+  muestra «…problema de configuración que debe revisar soporte (código CLIENT_KIND_MISMATCH)». La sesión acotada de
+  A1-D17 no rompió nada (`restaurant/state` responde con las cabeceras de cada mesero en el paso 2).
+
+### Formas que consume la Fase E (estables; descritas en `android/CLAUDE.md`, «Contrato con la cola y el modo Mesero»)
+
+- `AccessRepository.requestHeaders(userId: String): Headers?` (antes `requestHeaders()`, sin argumentos).
+- `report(error, userId)`: `SessionEnded` y `Rejected(401, AccessRepository.OFFLINE_CREDENTIAL_INVALID, …)` →
+  `ActiveWaiter.mustReenterPin`; `offlineCredential(userId)` pasa a null con la segunda.
+- `AppContainer.deviceDataWipe.register(name) { … }` (`DeviceDataPart.erase()` suspendida) y
+  `DeviceAccess.pendingOrders()`.
+- Otros cambios de forma: `ActiveWaiter(profile, hasServerSession, mustReenterPin = false)`; `EntryResult` suma
+  `OfflineClosed` y `Busy`, y `Locked` suma `requiresUnlock`; `WaiterProfile` suma `requiresUnlock` y
+  `offlineEntryClosed`; el constructor de `AccessRepository` ya no recibe `work` (no lo usaba) y recibe `wipe` y
+  `busyRetryMillis`.
+
+### Pruebas ejecutadas (todas con el código final, `ee85a0f`)
+
+| Qué                                                                                             | Dónde                           | Resultado                                                                                                        |
+| ----------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| JVM + Robolectric + Lint (`:core:domain:test testDebugUnitTest lintDebug`, con `--rerun-tasks`) | Mac                             | **176 pruebas, 0 fallas** (contadas en los XML: dominio 74, datos 84, ui 9, access 6, waiter 3); Lint sin avisos |
+| Instrumentadas (`connectedDebugAndroidTest`)                                                    | `Pixel_Tablet` (API 37)         | **54 pruebas, 0 fallas**, 12 omitidas (las de Go sin argumentos)                                                 |
+| Instrumentadas                                                                                  | `ADEL_A1_Tablet_API26` (API 26) | **54 pruebas, 0 fallas**, 13 omitidas (además, el modo avión por shell)                                          |
+| `scripts/android-e2e.sh` pasos 1–5, Go nuevo, pasos 6–7                                         | `Pixel_Tablet`                  | 7/7 aprobados                                                                                                    |
+| `scripts/android-e2e.sh` pasos 1–5 (red cortada desde la Mac en el 3), Go nuevo, pasos 6–7      | `ADEL_A1_Tablet_API26`          | 7/7 aprobados                                                                                                    |
+| `iso.sh format`, `fmt-check`, `ktfmtCheck`                                                      | Mac                             | sin cambios pendientes                                                                                           |
+
+Las pruebas de la revisión (`$SP/r3/.../R3ReviewTest.kt`, `R3IdleLockTest.kt`) quedaron en el repositorio al revés, en
+`core/data/src/test/.../access/AccessSafetyTest.kt` (A1, M1, M2, A1-D16, M3 ×3, M4, M5, 503 y 400) y
+`AccessViewModelsTest.volverAAbrirLaPantallaNoReiniciaElPlazoDelMeseroAnterior` (A2 con reposo profundo simulado), más
+`AccessRulesTest` (dominio), `AppDatabaseMigrationTest.de2a3…`, `CatalogSyncTest`/`CatalogImageCacheTest` (borrado),
+`AppNavigationTest.unaSesionTerminadaPideVolverAEscribirElPinSinSalirDeMesas` (en el dispositivo: el diálogo sobre
+Mesas y que un toque en él reinicia el plazo) y `AccessScreensTest` (confirmación con lo que se borra y los
+pendientes). Contra el Go temporal: un `PIN_LOCKED` real cierra la entrada sin conexión de Beto (paso 2) y sin red no
+entra ni con el PIN correcto (paso 3); `restaurant/state` responde a nombre de Ana y de Beto con sus cabeceras con Ana
+activa (paso 2); el PIN cambiado mientras Ana trabaja pide volver a escribirlo sin salir de Mesas (paso 4).
+
+### No verificado
+
+- El bloqueo largo de A1-D16 contra Go (pide 3 bloqueos de 5 minutos en 24 horas): solo en la JVM con el servidor
+  simulado en la forma del contrato. Igual 503 `PIN_LOGIN_BUSY` y 400 `CLIENT_KIND_MISMATCH`.
+- Atrás en la raíz de Android 8–11 con el proceso vivo y la vuelta tras un reposo profundo real: probados con tiempo
+  virtual y un reloj que avanza dormido; no en el emulador.
+- B4 se probó en el dispositivo con el diálogo de volver a escribir el PIN; el menú del mesero y los demás
+  `AlertDialog` usan el mismo modificador sin prueba propia.
+
+### Para el coordinador
+
+- La Fase E debe guardar el `user_id` dueño de cada operación y registrar la cola en `deviceDataWipe`; el resto está
+  en `android/CLAUDE.md`.
+- El guion de extremo a extremo tenía un error que no se vio en la corrida anterior porque entonces se pasaba
+  `ADELPOS_E2E_SERVER_ID`; corregido en `ee85a0f`.
+
+**Al cerrar las correcciones del dispositivo** (rama `etapa-a1-cb-fix`, que ya traía fusionado el servidor corregido, fusionada en `etapa-a1-android`): se acepta que la versión 3 de `AppDatabase` sea de estas correcciones (fallos acumulados y entrada sin conexión cerrada por mesero); la cola de la Fase E pasa a la versión 4. Quedan sin verificar en el dispositivo el bloqueo largo contra Go, `503 PIN_LOGIN_BUSY` y `400 CLIENT_KIND_MISMATCH` (solo JVM) y Atrás con el reposo real en Android 8–11 (tiempo virtual); la Fase F los incluye.
