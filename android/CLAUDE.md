@@ -71,7 +71,11 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
     `OrderTransitions` (`core:domain`): un borrador nunca se envía solo (solo con «Enviar a cocina»), «Recibido por el
     restaurante» llega **solo** con la respuesta de Go y «Requiere tu revisión» solo sale cuando el mesero acepta o
     corrige. Nada borra un pedido salvo el mesero en «Requiere tu revisión» o el borrado del dispositivo (después de
-    pasarlo a la bitácora). Los envíos usan las credenciales **del mesero que capturó** (`WaiterServer`).
+    pasarlo a la bitácora). Los envíos usan las credenciales **del mesero que capturó** (`WaiterServer`). Revisión
+    R6 (A1-D19): «Enviar a cocina» usa **la misma clave** en `confirmDraft` y en su pedido sin conexión; con conexión
+    no arma el pedido con un guardado del borrador sin resolver; toda escritura de la cola es condicional al estado
+    leído (`WaiterDao.transition`, nunca `@Upsert` de la fila) y el borrado espera a que se cancele el envío; descartar
+    también quita de Go lo guardado.
 19. **WorkManager sin restricción de red** (`WorkManagerOrderScheduler.CONSTRAINTS`, `NetworkType.NOT_REQUIRED`):
     `NetworkType.CONNECTED` espera una red validada con internet y la wifi del restaurante puede no tenerla
     (comprobado en `WorkNetworkOnDeviceTest`). El trabajador prueba el servidor él mismo y reintenta con espera
@@ -364,7 +368,7 @@ indicador **no exigen red validada** (la wifi del restaurante puede no tener int
 
 ## Base local (Room)
 
-`AppDatabase` versión 4: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
+`AppDatabase` versión 5: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
 huella fijada, `device_id`, **token del dispositivo cifrado**, `idle_lock_seconds`), `known_waiters` (meseros que ya
 entraron con conexión aquí: nombre, inicial, color, `pin_version`, **verificador del PIN y credencial de envío
 cifrados**, fallos sin conexión y si su entrada sin conexión está cerrada, sin ningún reloj) y `device_log` (bitácora: pedidos que no se enviaron, hasta que se borra).
@@ -373,7 +377,9 @@ Las llaves solo en el Android Keystore; lo cifrado lleva su propósito (`device-
 `known_waiters` a una tabla nueva: los fallos se conservan y un bloqueo por reloj pasa a entrada cerrada). Versión 4
 (Fase E): `captures` (capturas por mesero), `pending_orders` (la cola, con la clave de operación como llave),
 `restaurant_snapshot` y `waiter_permissions` (lo último de Go para trabajar sin conexión); migración 3 → 4 con el SQL
-de `schemas/…/4.json` (`WAITER_TABLES_V4`).
+de `schemas/…/4.json` (`WAITER_TABLES_V4`). Versión 5 (revisión R6): columnas nuevas `captures.created_account`,
+`pending_orders.unresolved_save` y `pending_orders.clock_corrected` (migración 4 → 5 con `ALTER TABLE`,
+`WAITER_COLUMNS_V5`).
 
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**
