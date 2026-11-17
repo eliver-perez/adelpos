@@ -120,8 +120,9 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   estados de mesa, botones, paneles) y la aplicación completa (navegación, uno o dos paneles según el dispositivo,
   rotación real con `UiAutomation.setRotation` sin perder lo capturado, indicador con el modo avión real).
 - **Contra el Go temporal**: `ServerApiOnDeviceTest` (`core:data`, argumentos `pin` y `net`) y, de punta a punta,
-  `AccessOnGoTest` (`app`, 7 pasos: emparejar con el código, PIN incorrecto y bloqueo al quinto, entrada sin conexión,
-  PIN cambiado, 426, certificado cambiado y dispositivo retirado). Ambas se omiten sin argumentos (en
+  `AccessOnGoTest` (`app`, 7 pasos: emparejar con el código, PIN incorrecto y bloqueo al quinto que cierra la entrada
+  sin conexión, cabeceras de cada mesero, entrada sin conexión, PIN cambiado con «Vuelve a escribir tu PIN» sin salir
+  de Mesas, 426, certificado cambiado y dispositivo retirado). Ambas se omiten sin argumentos (en
   `connectedDebugAndroidTest` salen como omitidas). `AccessOnGoTest` se corre con **`scripts/android-e2e.sh`**: un paso
   por instrumentación (`am instrument`) con la aplicación instalada una sola vez, la prueba hace de computadora
   principal por la escucha local (`MainComputer`) y la aplicación usa la escucha de red. Recibe por variables

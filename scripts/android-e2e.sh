@@ -25,9 +25,10 @@
 #                                   terminal principal de un servidor ya configurado (la imprime una corrida anterior).
 #   JAVA_HOME, ANDROID_HOME         como en scripts/dev.sh (JDK de Android Studio y SDK del usuario por omisión).
 #
-# Pasos: 1 emparejar con el código · 2 PIN incorrecto, bloqueo al quinto y entrada · 3 entrada sin conexión
-# (modo avión en Android 11+; antes, `adb root` + `svc wifi/data` desde la Mac: solo imágenes google_apis) ·
-# 4 PIN cambiado invalida el verificador · 5 versión vieja (426) · 6 certificado cambiado · 7 dispositivo retirado.
+# Pasos: 1 emparejar con el código · 2 PIN incorrecto, bloqueo al quinto (cierra la entrada sin conexión), entrada
+# y cabeceras de cada mesero · 3 entrada sin conexión (modo avión en Android 11+; antes, `adb root` + `svc wifi/data`
+# desde la Mac: solo imágenes google_apis) · 4 PIN cambiado mientras el mesero trabaja: «Vuelve a escribir tu PIN»
+# sin salir de Mesas · 5 versión vieja (426) · 6 certificado cambiado · 7 dispositivo retirado.
 # El paso 6 necesita OTRO servidor temporal (otra identidad) en las MISMAS direcciones: correr primero
 # `--steps "1 2 3 4 5"`, reemplazar el servidor y después `--no-install --steps "6 7"` con los datos del nuevo.
 #
@@ -227,7 +228,7 @@ for step in $STEPS; do
                 run_step paso3_entradaSinConexion
             fi
             ;;
-        4) run_step paso4_pinCambiadoInvalidaElVerificadorAlReconectar ;;
+        4) run_step paso4_pinCambiadoPideVolverAEscribirloSinSalirDeMesas ;;
         5) run_step paso5_versionViejaPideActualizarLaAplicacion -e clientVersion 0.0.9 ;;
         6) run_step paso6_certificadoCambiadoNoConectaYPideEmparejarDeNuevo ;;
         7) run_step paso7_dispositivoRetiradoBorraTodo ;;
