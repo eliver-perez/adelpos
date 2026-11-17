@@ -3346,3 +3346,273 @@ No verificado: la pantalla en un dispositivo (no se corrieron pruebas instrument
 servidor 0.10/0.11 real (el arnés no lo tiene).
 
 **Coordinador**: guía fusionada (`2f9f988`) y corrección del aviso fusionada (`c683c4a`; se acepta el botón «Elegir otra computadora principal»); la sección 2 de la guía se ajustó al comportamiento nuevo.
+
+## Correcciones de la revisión R6 · Dispositivo
+
+Un agente, en su árbol `$SP/wt/Efix` (rama `etapa-a1-e-fix`, desde `etapa-a1-android` en `bd7beb4`, ya con A1-D18 en el
+servidor), 17/11/2026, en paralelo con la Fase F. Encargo: **A1-D19** («el dispositivo resuelve antes de enviar»):
+C1, A1, A2, M1/O1, M2, M3, B2, B3, B4 y B5 (más O2 y O3, que eran de una línea). `ISO_TAG=E2`, Go temporal 8197/8457
+(uno nuevo por corrida contra el servidor, apagado y su base borrada al terminar), emuladores propios de solo lectura en
+las consolas 5580 (`Pixel_Tablet`) y 5582 (`ADEL_A1_Tablet_API26`). **Sin cambios en `backend/`** (lo de A1-D18 bastó),
+`desktop/`, `config/`, `CLAUDE.md` ni `AGENTS.md`; `docs/etapas/*.md` con el mismo md5 antes y después. Ninguna prueba usó
+el servicio real de la Mac ni abrió la aplicación normal con la búsqueda en la red real (todas con `AdelTestRunner`).
+
+### Commits (`etapa-a1-e-fix`)
+
+| Commit    | Qué                                                                                                                              |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `990aada` | La cola nunca repite ni revive pedidos (A1-D19): C1, A1, A2, M1/O1, M2, M3, B2–B5, O2, O3 y `AppDatabase` v5                     |
+| `5b88ad4` | Pruebas de la JVM: `OfflineNeverRepeatsTest` (las reproducciones del revisor exigiendo lo correcto, 20) y `R6RulesTest`          |
+| `d590962` | Migración 4 → 5 con `MigrationTestHelper` y `OrderSchedulerTest` (cancelar esperando y volver a programar el periódico)          |
+| `ad7faa1` | Pasos nuevos de `WaiterModeOnGoTest` (`w9`–`w13c`), `AdelTestRunner` y `scripts/android-e2e.sh --suite waiter`                   |
+| `a914627` | `android/CLAUDE.md`: `AppDatabase` v5 y las reglas de la cola de A1-D19                                                          |
+| `4713e81` | Pruebas en el dispositivo al día (producto no agotado en la principal, botones de diálogo, versión 5, «Reintentar ya»)           |
+| `c579287` | Formato ktfmt (sin cambios de comportamiento)                                                                                    |
+| `4986148` | `w13` combina la cuenta antes de que el pedido quede en la cola (el trabajador envía al arrancar el proceso)                     |
+| `b547abb` | Fusión de `etapa-a1-android` (Fase F) sin rebase; empalme en `scripts/android-e2e.sh`                                            |
+| `50ddacf` | Observaciones de interfaz de la Fase F: nombres cortos en el mapa del teléfono y el teclado de «Buscar el servidor» en Android 8 |
+| `ee36770` | `FieldOnGoTest.f6` sigue la cuenta combinada y exige que no quede nada por enviar en la cuenta destino (M3)                      |
+| `2456b63` | Regla del coordinador: con una cuenta **combinada** no se ofrece ni se hace «Abrir una cuenta nueva»                             |
+| `75542f2` | Fusión de `etapa-a1-android` (`2a5c1ca`: Fase G, `CLAUDE.md` y `AGENTS.md`) sin rebase, sin empalmes                             |
+
+Los commits desde `2456b63` van sin la línea `Co-Authored-By` (instrucción nueva).
+
+### Qué cambió
+
+Rutas desde `android/`: `…/domain` = `core/domain/src/main/kotlin/local/adel/pos/android/core/domain`, `…/data` =
+`core/data/src/main/kotlin/local/adel/pos/android/core/data`, `…/waiter` (pantallas) =
+`feature/waiter/src/main/kotlin/local/adel/pos/android/feature/waiter`.
+
+**C1 · el guardado sin respuesta se resuelve antes de armar el pedido**
+
+- Con conexión (`…/data/waiter/CaptureRepository.kt:343`, `sendToKitchen`): si después de la espera corta el guardado del
+  borrador sigue sin respuesta y el mesero tiene sesión, se espera hasta 20 s más a que llegue o se repite **con su clave
+  y el mismo contenido**; si todavía está en curso, «Enviar a cocina» responde `SendRequest.StillSaving` («Todavía se
+  está guardando lo último que capturaste…») y no arma nada. Resuelto, el pedido sale con lo que Go guardó de verdad
+  (normalmente con `confirmDraft`).
+- Sin conexión (o sin respuesta tras repetirlo): el pedido lleva ese guardado (`PendingOrder.unresolvedSave`, columna nueva
+  `pending_orders.unresolved_save`). El trabajador (`…/data/waiter/OrderSender.kt:225`, `resolveUnresolved`) lo repite
+  igual con la **sesión del mesero que capturó** antes de mandar el pedido: si abrió la cuenta, el pedido va a esa cuenta;
+  si lo dejó en el borrador y el mesero lo quitó después, el pedido lo sustituye (`OrderSendRules.resolved`); si Go lo
+  rechazó, nunca entró. Sin sesión se manda así: Go reconoce los renglones por su identificador (A1-D18).
+- `items_in_account` (`OrderSender.kt:345`): con una sola cuenta, el pedido se **redirige solo** a esa cuenta con la
+  misma clave (`SendOutcome.Redirect`); con varias, «Requiere tu revisión» ofrece «Enviar a esa cuenta» en cada una.
+
+**A1 · la misma clave en línea y en la cola**
+
+- `OnlineConfirm.operationId` = la clave del pedido = el id de la captura (`CaptureRepository.kt:838`). Si la confirmación
+  entró y su respuesta se perdió (o el proceso murió a media confirmación), el pedido sin conexión con esa clave recibe
+  `409 OFFLINE_ORDER_ALREADY_ACCEPTED` con `origin: "confirm_draft"` y queda «Recibido por el restaurante» con la cuenta de
+  `details.result` (`OrderSender.kt`, `rejected`; O3: sin cuenta queda null, no una cadena vacía).
+- `draft_item_sent` en «Requiere tu revisión» (`…/waiter/pending/PendingScreens.kt`): cada cambio así lleva «Ya se envió»
+  arriba del mensaje de Go y el botón principal es **«Enviar solo lo demás»** o, si todas las partidas ya estaban en
+  cocina, **«Confirmar sin volver a enviar»** (`OrderReviewRules.everythingAlreadySent`). «Corregir en la captura» ya no
+  vuelve a poner por enviar lo que Go dijo que ya se envió.
+
+**A2 · descartar también quita de Go lo guardado**
+
+- `CaptureRepository.discard` (`:410`) y `discardInGo` (`:941`): con sesión, se lee la cuenta y se quitan del borrador los
+  renglones **propios que siguen igual** a alguna versión que conoce el dispositivo (la base vista, lo visible o lo del
+  guardado en curso); lo que otra terminal cambió se queda. Si la cuenta **nació con esta captura**
+  (`Capture.createdAccount`, columna nueva `captures.created_account`) y queda vacía y sin nada enviado, se usa
+  «Descartar cuenta vacía» (`POST restaurant/accounts/{id}/discard`, `accounts.open`, el permiso con que el mesero la
+  abrió); si Go responde `ACCOUNT_NOT_EMPTY`, solo se quitan los renglones. Una apertura sin respuesta se repite con su
+  clave para saber qué cuenta abrió. Con `ACCOUNT_CONFLICT` se vuelve a leer (hasta 3 veces); una cuenta combinada se sigue
+  en la cuenta en que se combinó.
+- Sin conexión o sin sesión: la captura queda `DraftSync.DISCARDING` («Descartado: se quitará de la cuenta en cuanto haya
+  conexión» en Mesas y en Pedidos pendientes, sin abrirse), sigue contando como trabajo del mesero (no se pierde ni se
+  bloquea en silencio) y pasa a la bitácora si se borra el dispositivo. Se termina al volver la conexión o al entrar el
+  mesero con conexión (`resume`). El diálogo dice la verdad («Falta quitarlo de la cuenta… se quitará en cuanto vuelva la
+  conexión») y los textos de confirmación también.
+- «Descartar el pedido» (`…/data/waiter/OrderQueueRepository.kt:150`): si el pedido no tocó el borrador de Go se borra;
+  si no, pasa en una transacción a una captura en descarte (`discardingCaptureFrom`, `:338`) y se termina igual
+  (`CaptureDiscards`, conectado en `AppContainer`).
+- Con un descarte pendiente en la misma cuenta, «Enviar a cocina» no usa `confirmDraft` (que confirmaría el borrador
+  completo): sale como pedido sin conexión solo con lo suyo.
+
+**M1 y O1 · escrituras condicionales; el borrado espera**
+
+- `WaiterDao.saveOrder` (`@Upsert`) ya no existe. Toda escritura de la cola pasa por `WaiterDao.transition(order,
+estadoLeído)` (`…/data/waiter/db/WaiterEntities.kt:218`): una transacción que actualiza (`@Update`, nunca inserta) solo
+  si la fila sigue en el estado que se leyó. Un pedido borrado nunca vuelve; un cambio que llegó antes no se pisa.
+- `AppContainer` (registro «cola de pedidos y capturas»): `orderScheduler.cancelAndWait()` (cancela el envío y el periódico
+  y espera a WorkManager, `OrderSendWork.kt:122`), después `sender.exclusive { orderQueue.eraseAll() }` (espera a que
+  termine la vuelta en curso) y al final **B5**: `schedulePeriodic()` otra vez.
+
+**M2 · «Corregir en la captura» conserva la base vista**
+
+- La captura que nace de un pedido lleva sus renglones sustituidos como base con `Capture.SEEN_BASE_REVISION` (-1).
+  Antes de guardar se compara con el borrador vigente de Go (`CaptureRepository.reconciled`, `:1123`): si cada renglón
+  visto sigue igual, se guarda encima; si otra terminal cambió o quitó alguno, **conflicto** («Conservar mis cambios» o
+  «Descartar mis cambios»), nunca se guarda encima sin preguntar. Lo que quedó de un guardado sin respuesta se corrige con
+  «Sustituir» (lo cambia si está, lo agrega si no).
+
+**M3 · cuenta combinada**
+
+- Pedido: la revisión lee la cuenta con la sesión del mesero (`ReviewViewModel`) y, con `merged_into_id`, ofrece «Enviar
+  a la cuenta en que se combinó» (`OrderReviewRules.sendToAccount`: misma clave, mismos renglones sustituidos, que Go
+  encuentra allí porque la combinación mueve el borrador con sus ids).
+- Captura: `account_not_open` con `merged_into_id` (o el canal con la cuenta combinada) ofrece «Seguir en la cuenta en que
+  se combinó» (`joinAccount` con la base vista: se compara con la de la otra cuenta).
+- «Abrir una cuenta nueva en la mesa» genera **identificadores nuevos** en los dos caminos (cola y «Corregir»).
+
+**B2, B3 y B4**
+
+- B2: al empezar cada vuelta, el trabajador devuelve a «Por enviar» los «Enviando» que nadie está enviando
+  (`OrderSender.kt:209`); los que la captura confirma en línea están en `OrdersInFlight` y no se tocan. Al arrancar la
+  aplicación sigue `recoverAfterRestart`.
+- B3: «Pedidos pendientes» muestra de **cada otro mesero** cuántos pedidos tiene y por qué no salen («Su clave para enviar
+  ya no vale: cambió su PIN, se desactivó su usuario o ya no tiene permiso…» o «Esperan a que los revise…»), nunca cuáles
+  (`OrderQueueService.othersPending`). Go no distingue usuario desactivado de PIN cambiado (los dos son
+  `OFFLINE_CREDENTIAL_INVALID`), así que el texto nombra las tres causas.
+- B4: `ServerClock` (`…/data/waiter/ServerClock.kt`) aprende la diferencia con la hora de Go de la cabecera `Date` de cada
+  respuesta. La hora de captura se guarda en la hora de Go si se conocía (`clock_corrected`) y, si no, se corrige al
+  enviar; si Go rechaza con 400 una hora posterior a la suya (la respuesta trae su `Date`), se reenvía una vez corregida
+  con la misma clave (`OrderSender.kt:189`).
+
+**Fusión de la Fase F y sus dos observaciones de interfaz** (lo pidió el coordinador): `etapa-a1-android` (`6842246`) se
+fusionó sin rebase (`b547abb`); el único empalme fue `scripts/android-e2e.sh` (la estructura nueva de la Fase F con los
+pasos `w9`–`w13c` en `suite_steps` y `waiter_step`). Además:
+
+- **F4, nombres «M…» en el mapa del teléfono** (`…/domain/waiter/Restaurant.kt`, `TableNames.compact`, y
+  `…/waiter/tables/TablesMap.kt`): una mesa de menos de 80 dp de ancho muestra su nombre sin las palabras que comparten
+  **todas** las mesas del área («Mesa F12» → «F12»); sin palabras comunes queda el nombre completo y la descripción para
+  la accesibilidad sigue siendo el nombre completo. Prueba `TableNamesTest`.
+- **Teclado que tapaba la dirección en Android 8** (`feature/access/…/findserver/FindServerScreen.kt`, `CenteredColumn`, y
+  `app/src/main/AndroidManifest.xml`): la columna se achica por encima del teclado (`imePadding`) y el teclado ya no se
+  abre solo al entrar (`stateHidden|adjustResize`).
+
+**Ajuste final del coordinador · cuenta combinada** (`2456b63`): cuando la cuenta se combinó, **no** se ofrece «Abrir una
+cuenta nueva en la mesa» (lo que la combinación movió seguiría por enviar en la cuenta destino y podría enviarse dos
+veces); solo «Seguir en la cuenta en que se combinó» / «Enviar a la cuenta en que se combinó», «Corregir en la captura» o
+descartar.
+
+- Pedido (`…/domain/waiter/OrderReviewRules.kt`, `offersNewAccount` y `moveToNewAccount`): `OrderReview.accountMerged`
+  vale con `account_closed` + `merged` y también con el `account_not_open` en línea, cuyo `merged_into_id` ahora se guarda en
+  la revisión (`OrderReview.mergedIntoId`, `SendOutcome.AccountNotOpen`); `OrderQueueRepository.moveToNewAccount` no hace
+  nada con una cuenta combinada.
+- Captura (`Capture.accountMerged`, `OrderPanel`): cerrada por combinación no muestra el botón y `openAnotherAccount` no
+  hace nada; el cierre y su cuenta destino se escriben juntos, y una captura que nace de «Corregir» sobre una cuenta ya
+  cerrada queda «cerrada» (no en conflicto).
+- Pruebas JVM: `R6RulesTest.unaCuentaCombinadaNoOfreceUnaCuentaNueva`, y en `OfflineNeverRepeatsTest`
+  `laCapturaDeUnaCuentaCombinadaNoAbreUnaCuentaNueva` y `enLineaUnaCuentaCombinadaSoloOfreceLaCuentaEnQueSeCombino`.
+
+**Base local**: `AppDatabase` **v5** con `MIGRATION_4_5` (`ALTER TABLE` de las tres columnas, `WAITER_COLUMNS_V5`) y su
+esquema `schemas/…/5.json`.
+
+### Decisiones (con su porqué)
+
+1. **Con conexión, «Todavía se está guardando» solo si la petición sigue en curso.** Si tras esperar y repetir el guardado
+   no hay respuesta (ni siquiera un error), en la práctica no hay conexión: el pedido pasa a la cola con el guardado sin
+   resolver y el trabajador lo resuelve con su clave. Detener al mesero ahí lo dejaría sin poder enviar hasta que vuelva la
+   red, que es justo lo que la cola resuelve; con A1-D18 ya no duplica.
+2. **El trabajador repite el guardado sin respuesta solo con la sesión del mesero** (la credencial de envío solo sirve en
+   `submitOfflineOrder`). Sin sesión, el pedido sale igual y Go reconoce los renglones por su id; lo único que no cubre es
+   un renglón que ese guardado dejó y el mesero quitó después sin conexión (queda en el borrador y se ve en la cuenta).
+3. **`items_in_account` se redirige sin preguntar** (lo pide A1-D18: «el dispositivo lo hace sin preguntar»), con un tope
+   de dos vueltas por envío; con varias cuentas decide el mesero.
+4. **El descarte nunca quita lo que otra terminal cambió** (A1-D6): solo los renglones propios iguales a una versión que
+   conoce el dispositivo; la cuenta solo se descarta si nació con la captura y queda vacía. Un descarte sin conexión sigue
+   contando como trabajo del mesero (impide el bloqueo por inactividad), como una captura en curso.
+5. **«Corregir» y seguir una cuenta combinada comparan con la base vista** en lugar de adoptar el borrador de Go (`-1` en
+   lugar de 0): la marca «nunca leída» (0) sigue siendo solo para la captura que empezó sin conexión.
+6. **La hora de Go se aprende de `Date`** (toda respuesta la trae, también los rechazos) y vive en memoria; no hizo falta
+   guardarla porque el primer envío después de reiniciar la vuelve a dar.
+7. **AppDatabase v5 con `ALTER TABLE`** en lugar de cambiar la v4 (ya fusionada): los dispositivos de prueba con v4 migran
+   sin perder la cola.
+8. **`WaiterDependencies.pendingOfOthers` se quitó**: las pantallas leen `OrderQueueService.othersPending` (B3).
+
+### Pruebas que se corrieron
+
+Las corridas en el dispositivo son en la cabeza de la rama después de la fusión con la Fase F (`50ddacf`/`ee36770`; el
+último commit solo cambia `FieldOnGoTest.f6`), con el guion de la Fase F y un Go temporal **nuevo para cada suite**.
+
+| Prueba                                                                                                                            | Dónde                                                       | Resultado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `./scripts/dev.sh android-test` (JVM, Robolectric con Room y WorkManager, lint), en `75542f2` (después de la fusión de la Fase G) | Mac                                                         | **256 pruebas, 0 fallas**, lint sin hallazgos: `core:domain` 103 (nuevas `R6RulesTest` 7 y `TableNamesTest` 2), `core:data` 133 (nuevas `OfflineNeverRepeatsTest` 22 y `OrderSchedulerTest` 1; las de emparejar de la Fase G), `core:ui` 9, `feature:access` 7, `feature:waiter` 4                                                                                                                                                                                                             |
+| `OfflineNeverRepeatsTest`: las seis reproducciones del revisor (`R6ReviewTest`) **ahora exigen lo correcto** y 16 más             | Mac                                                         | 22/22. Antes de la corrección, las del revisor pasaban reproduciendo el defecto (C1, A1, A2, M1 ×2, M2)                                                                                                                                                                                                                                                                                                                                                                                        |
+| `./scripts/dev.sh android-format-check`, `iso.sh format`, `fmt-check` (y `ktfmtFormat`), también en `75542f2`                     | Mac                                                         | Correctos; `docs/etapas/*.md` con el mismo md5 antes y después                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Instrumentadas completas (`connectedDebugAndroidTest`), XML contados                                                              | `Pixel_Tablet` (API 37)                                     | **94 pruebas, 0 fallas**, 44 omitidas a propósito (las de punta a punta sin los argumentos del guion: `AccessOnGoTest` 7, `CatalogOnGoTest` 3, `WaiterModeOnGoTest` 19, `FieldOnGoTest` 13, `ServerApiOnDeviceTest` 2). Incluye `AppDatabaseMigrationTest` (3 → 4, **4 → 5** y todas hasta la actual) y `WaiterScreensTest` (otros meseros con su motivo)                                                                                                                                      |
+| Ídem                                                                                                                              | `ADEL_A1_Tablet_API26` (Android 8)                          | **94 pruebas, 0 fallas**, 46 omitidas a propósito (las mismas y, por ser Android 8, `WorkNetworkOnDeviceTest` y `ConnectionOnDeviceTest`). Corrida sola, con la aplicación desinstalada antes: con la de la suite field instalada, AGP terminó «con éxito» sin correr `app` (`INSTALL_FAILED_ALREADY_EXISTS`, el caso que advierte `android/CLAUDE.md`), y en una corrida con el otro emulador cargado `DeviceLayoutTest` perdió el texto al girar una vez (sola, aprobada dos veces seguidas) |
+| `scripts/android-e2e.sh --suite waiter` (19 pasos, `w9`–`w13c` nuevos)                                                            | `Pixel_Tablet`                                              | **19/19 aprobados**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Ídem                                                                                                                              | `ADEL_A1_Tablet_API26` (red cortada con `adb root` + `svc`) | **19/19 aprobados**                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `scripts/android-e2e.sh --suite field` (13 pasos de la Fase F)                                                                    | `ADEL_A1_Tablet_API26`                                      | **13/13 aprobados**, con el `f6` nuevo: «Seguir en la cuenta en que se combinó» y 0 renglones de la malteada por enviar en la cuenta destino                                                                                                                                                                                                                                                                                                                                                   |
+| Ídem                                                                                                                              | `Pixel_Tablet`                                              | **13/13 aprobados** con el `f6` nuevo (0 renglones por enviar en la cuenta destino; con el `f6` anterior, «Abrir una cuenta nueva», también 13/13 y quedaba 1, que es lo que ahora se exige que no pase)                                                                                                                                                                                                                                                                                       |
+
+**Después del ajuste final y de la fusión de la Fase G (`75542f2`)**, en `ADEL_A1_Tablet_API26` (encendido de nuevo: el
+anterior se colgó con «Boot completed» y `adb shell` sin respuesta; el coordinador lo apagó y reinició `adb`; esta vez
+cada `adb shell` llevó un tope de tiempo y no hubo cuelgues):
+
+| Prueba                                                                                      | Resultado                                                                                                                         |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Instrumentadas completas, con las aplicaciones de prueba desinstaladas antes (XML contados) | **94 pruebas, 0 fallas**, 46 omitidas a propósito                                                                                 |
+| `--suite waiter --steps "w1 w13a w13b w13c"` (Go temporal nuevo)                            | **4/4 aprobados**: la revisión ofrece «Enviar a la cuenta en que se combinó» y la cuenta destino queda sin duplicados ni borrador |
+| `--suite field --steps "f1 f6"` (Go temporal nuevo)                                         | **2/2 aprobados**; `f6`: 0 renglones por enviar en la cuenta destino                                                              |
+
+Antes de la fusión, la suite waiter en `Pixel_Tablet` también se corrió con la rama sola: las fallas de las primeras
+corridas fueron de la prueba (un producto agotado desde `w5`, tocar botones de diálogo con `performScrollTo` y una carrera
+de `w13`: el trabajador envía la cola al arrancar el proceso, antes que el cuerpo de la prueba), corregidas en `4713e81` y
+`4986148`. Una corrida quedó a medias porque el emulador `Pixel_Tablet` de la consola 5580 se apagó desde fuera (su
+registro termina sin error); se volvió a encender y se repitió todo.
+
+Lo que demuestran los pasos nuevos contra Go: `w9` la respuesta del guardado del borrador se pierde (Go lo guardó) y el
+mesero envía enseguida: la cuenta queda con la hamburguesa **una vez** y sin borrador; `w10` Go confirma «Enviar a
+cocina» y sus dos respuestas se pierden: el pedido sin conexión con **la misma clave** queda «Recibido» con una sola
+partida; `w11` descartar con conexión deja la cuenta que nació con la captura **anulada** (`voided`); `w12b` sin conexión
+el diálogo dice «Falta quitarlo de la cuenta» y la captura queda en descarte; `w12c` al entrar con conexión se termina y
+la cuenta queda anulada; `w13a`–`w13c` la principal combina la cuenta mientras el pedido espera sin conexión, Go lo
+rechaza con `account_closed` (`merged`), la revisión ofrece «Enviar a la cuenta en que se combinó» y la cuenta destino
+queda con la hamburguesa y los tacos **una vez** y sin borrador.
+
+### No verificado
+
+- El aviso «Todavía se está guardando…» en el dispositivo (necesita una respuesta de más de 26 s: se probó la lógica en la
+  JVM; en el Go temporal la repetición siempre respondió antes).
+- `items_in_account` y la apertura sin respuesta contra el Go temporal (en la JVM con las formas exactas del avance; en el
+  dispositivo, la respuesta perdida del guardado se probó en una cuenta ya abierta, `w9`).
+- El aviso de B4 contra Go (la cabecera `Date` del Go temporal no se alteró: se probó en la JVM con un `Date` 30 minutos
+  atrás).
+- B1, B6 y O4 quedan anotados (no eran parte de A1-D19).
+- Las dos observaciones de interfaz de la Fase F, en pantalla: el mapa del teléfono con 40 mesas y el teclado de «Buscar el
+  servidor» en Android 8 no se volvieron a fotografiar (sus pruebas de la JVM y la compilación sí; las suites de esta
+  corrida fueron en tabletas).
+- Lo que antes quedaba aquí («Abrir una cuenta nueva en la mesa» con una cuenta combinada dejaba por enviar en la
+  cuenta destino lo que la combinación movió) ya no aplica: desde `2456b63` esa opción no se ofrece ni se hace con una
+  cuenta combinada.
+
+### Para el coordinador
+
+1. **Archivos tocados** (para empalmar con la Fase F): `android/core/domain/…/waiter/` (Accounts, Capture, OrderQueue,
+   OrderReviewRules, OrderSendRules, WaiterServices), `android/core/data/…/waiter/` (CaptureRepository,
+   OrderQueueRepository, OrderSender, OrderSendWork, ServerClock nuevo, WaiterApi, WaiterDtos, WaiterMapper, db/),
+   `android/core/data/…/db/AppDatabase.kt` y `schemas/…/5.json`, `android/feature/waiter/` (pantallas, ViewModels,
+   `strings.xml`, `WaiterDependencies`), `android/app/` (`AppContainer`, `WaiterModeContainer`; en `androidTest`:
+   `AdelTestRunner`, `WaiterModeOnGoTest`, `WaiterScreensTest`), pruebas de `core:domain`, `core:data` y `feature:waiter`,
+   `android/CLAUDE.md` (regla 18 y la base local) y **`scripts/android-e2e.sh`** (solo la suite `waiter`: pasos nuevos
+   `w9`–`w13c` y su cabecera). Por las observaciones de la Fase F: `…/domain/waiter/Restaurant.kt` (`TableNames`),
+   `…/waiter/tables/TablesMap.kt`, `feature/access/…/findserver/FindServerScreen.kt` y `app/src/main/AndroidManifest.xml`;
+   y `FieldOnGoTest.f6`.
+2. **AppDatabase pasa a v5** (la Fase F no agregó otra versión: la fusión no tuvo empalme ahí).
+3. **Fusión de la Fase F hecha** (`b547abb`, sin rebase; solo `scripts/android-e2e.sh` tuvo empalme). `FieldOnGoTest.f6`
+   (de la Fase F) ahora sigue la cuenta combinada y **exige** que no quede nada por enviar en la cuenta destino, como
+   recomendaba la Fase F para cuando M3 estuviera corregido.
+4. **Emulador apagado desde fuera**: el `Pixel_Tablet` de mi consola 5580 se apagó a media corrida (≈ 12:00; su registro
+   termina sin error); lo volví a encender y repetí todo.
+5. **Sin cambios en el servidor**: la forma final de A1-D18 sirvió tal cual.
+6. Para `CLAUDE.md`/`AGENTS.md` (no los edité): §6 con `OfflineNeverRepeatsTest`, `R6RulesTest`, `OrderSchedulerTest` y
+   los pasos `w9`–`w13c` de `--suite waiter`; §15, A1-D19 implementada.
+
+### Notas del coordinador
+
+- **Fusión**: `etapa-a1-e-fix` (`75542f2`) en `etapa-a1-android` con `bbe84a2`, sin rebase. La rama ya tenía fusionada
+  la punta de `etapa-a1-android` (`2a5c1ca`), así que la fusión no tuvo empalmes.
+- **Regla de la cuenta combinada** (`2456b63`): la decidió el coordinador al revisar el informe anterior. Con una cuenta
+  combinada, «Abrir una cuenta nueva» dejaba por enviar en la cuenta destino lo que la combinación había movido, y eso
+  podía mandarse dos veces. Por eso solo se ofrece seguir en la cuenta en que se combinó. Va con §0-B (nunca se
+  duplica un pedido) y con A1-D19, sin cambiar ninguna decisión del propietario.
+- **Emulador colgado**: en la última corrida, `ADEL_A1_Tablet_API26` (consola 5582) terminó de arrancar según su
+  registro, pero `adb shell` no respondió durante más de una hora (la Mac tenía poca memoria libre). El coordinador lo
+  apagó, terminó las esperas de `adb` y reinició el servidor de `adb`. Se volvió a encender una vez, con tope de tiempo
+  en cada `adb shell`, y todo pasó. Es una falla del entorno, no de la app.
+- `CLAUDE.md` §6 y `android/CLAUDE.md` («Pruebas» del modo Mesero) ahora nombran las pruebas de la JVM de A1-D19 y los
+  pasos `w9`–`w13c`.

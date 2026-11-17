@@ -327,8 +327,12 @@ listo y un mesero **con sesión de Go**; la dirección se pide en cada uso por e
   mesero activo y, de los demás, solo cuántos son.
 - Pruebas: `OrderQueueRulesTest`, `WaiterRulesTest` (dominio); `OrderQueueTest`, `CaptureSyncTest` (Robolectric +
   MockWebServer); `WaiterViewModelsTest`; instrumentadas `WaiterScreensTest`, `WorkNetworkOnDeviceTest` y, contra el
-  Go temporal, `WaiterModeOnGoTest` con **`scripts/android-e2e.sh --suite waiter`** (pasos `w1`–`w7c`; el guion corta
-  la red entre pasos y en `w4` la prueba pierde una respuesta con `lostOfflineResponses`, que lee `AdelTestRunner`).
+  Go temporal, `WaiterModeOnGoTest` con **`scripts/android-e2e.sh --suite waiter`** (pasos `w1`–`w13c`; el guion corta
+  la red entre pasos y en `w4` la prueba pierde una respuesta con `lostOfflineResponses`, que lee `AdelTestRunner`;
+  desde la revisión R6, `w9`–`w13c` prueban A1-D19: `w9` pierde la respuesta del guardado con `lostDraftResponses`,
+  `w10` las de «Enviar a cocina», `w11`–`w12c` el descarte con y sin conexión y `w13a`–`w13c` la cuenta combinada
+  mientras el pedido espera). En la JVM, la cola de A1-D19: `OfflineNeverRepeatsTest`, `R6RulesTest` y
+  `OrderSchedulerTest`.
 
 ## Dependencias
 
