@@ -94,6 +94,8 @@
     <string name="entry_locked_admin">Tu PIN está bloqueado. Pide a un administrador que lo desbloquee.</string>
     <string name="entry_locked_admin_short">PIN bloqueado: pide a un administrador que lo desbloquee</string>
     <string name="entry_offline_closed">Sin conexión ya no puedes entrar en %1$s: hubo demasiados intentos o tu PIN está bloqueado. Conéctate a la red del restaurante y escribe tu PIN para entrar.</string>
+    <string name="entry_busy">La computadora principal está comprobando muchos PIN a la vez. Inténtalo de nuevo en unos segundos.</string>
+    <string name="entry_support_problem">%1$s tiene un problema de configuración que debe revisar soporte (código %2$s).</string>
     <string name="entry_offline_closed_short">Sin conexión no puede entrar: entra con conexión</string>
     <string name="entry_not_allowed">No tienes permiso para entrar en los teléfonos y tabletas de meseros. Pídelo al administrador.</string>
     <string name="entry_unknown_offline">Sin conexión solo entran los meseros que ya entraron antes en %1$s. Conecta el dispositivo a la red del restaurante para entrar.</string>

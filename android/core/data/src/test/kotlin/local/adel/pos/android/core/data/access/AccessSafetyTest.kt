@@ -18,6 +18,7 @@ import local.adel.pos.android.core.data.db.AppDatabase
 import local.adel.pos.android.core.data.db.PairedServerEntity
 import local.adel.pos.android.core.data.wipe.DeviceDataWipe
 import local.adel.pos.android.core.domain.access.ActiveWaiter
+import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.EntryResult
 import local.adel.pos.android.core.domain.access.OfflineAttemptPolicy
 import local.adel.pos.android.core.domain.access.UnsentOrder
@@ -87,6 +88,7 @@ class AccessSafetyTest {
             wipe = wipe,
             wallClock = { now },
             verifierIterations = 1_000,
+            busyRetryMillis = 10,
         )
 
     private suspend fun AccessRepository.pair() {
@@ -235,6 +237,57 @@ class AccessSafetyTest {
         online = false
         assertEquals(EntryResult.OfflineClosed, access.enter(beto, "6152"))
         assertTrue(access.roster().waiters.single().offlineEntryClosed)
+    }
+
+    @Test
+    fun goOcupadoSeReintentaSinContarComoFalloNiEntrarSinConexion() = runBlocking {
+        val access = repository()
+        access.pair()
+        assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
+        access.leave()
+        // Una vez ocupado: se reintenta solo y entra con conexión.
+        go.busyLogins = 1
+        go.pinLoginAttempts = 0
+        val entered = access.enter(ana, "4829")
+        assertTrue(entered is EntryResult.Entered)
+        assertTrue((entered as EntryResult.Entered).waiter.hasServerSession)
+        assertEquals(2, go.pinLoginAttempts)
+        access.leave()
+        // Siempre ocupado: tras los reintentos se avisa, sin contar un fallo ni usar el
+        // verificador local, y el dispositivo sigue en línea.
+        go.busyLogins = 100
+        go.pinLoginAttempts = 0
+        assertEquals(EntryResult.Busy, access.enter(ana, "4829"))
+        assertEquals(AccessRepository.BUSY_ATTEMPTS, go.pinLoginAttempts)
+        assertNull(access.activeWaiter.value)
+        assertEquals(0, database.access().knownWaiter(ana)!!.offlineFailures)
+        assertTrue((access.status.value as DeviceStatus.Ready).online)
+    }
+
+    @Test
+    fun elTipoDeClienteDistintoEsUnErrorDeSoporteYNoTocaLaSesion() = runBlocking {
+        val access = repository()
+        access.pair()
+        assertTrue(access.enter(ana, "4829") is EntryResult.Entered)
+        val session = access.sessionToken(ana)
+        go.kindMismatch = true
+        val result = access.enter(ana, "4829")
+        assertTrue(result is EntryResult.Failed)
+        assertEquals(
+            AccessRepository.CLIENT_KIND_MISMATCH,
+            (result as EntryResult.Failed).error.code,
+        )
+        assertTrue("sigue en línea", (access.status.value as DeviceStatus.Ready).online)
+        assertNotNull(database.access().knownWaiter(ana))
+        // El mismo error avisado por otra parte tampoco termina la sesión ni pide el PIN.
+        access.report(
+            AppError.Rejected(400, AccessRepository.CLIENT_KIND_MISMATCH, null, null),
+            ana,
+        )
+        delay(200)
+        assertEquals(session, access.sessionToken(ana))
+        assertFalse(access.activeWaiter.value!!.mustReenterPin)
+        assertTrue((access.status.value as DeviceStatus.Ready).online)
     }
 
     @Test

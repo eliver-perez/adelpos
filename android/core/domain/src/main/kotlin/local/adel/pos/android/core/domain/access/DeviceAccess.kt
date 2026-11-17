@@ -70,6 +70,12 @@ sealed interface EntryResult {
      */
     data object OfflineClosed : EntryResult
 
+    /**
+     * Go está verificando muchas entradas con PIN a la vez (503 `PIN_LOGIN_BUSY`) y siguió ocupado
+     * tras reintentar unos segundos: no cuenta como PIN incorrecto; volver a intentarlo.
+     */
+    data object Busy : EntryResult
+
     /** PIN correcto, pero sin el permiso `waiter_devices.use` (403 `PERMISSION_DENIED`). */
     data object NotAllowed : EntryResult
 

@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -78,6 +79,7 @@ class AccessRepository(
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val verifierIterations: Int = PinVerifier.DEFAULT_ITERATIONS,
     private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val busyRetryMillis: Long = BUSY_RETRY_MILLIS,
 ) : DeviceAccess {
     private val mutableStatus = MutableStateFlow<DeviceStatus>(DeviceStatus.Starting)
     private val mutableActive = MutableStateFlow<ActiveWaiter?>(null)
@@ -424,7 +426,20 @@ class AccessRepository(
         userId: String,
         pin: String,
     ): EntryResult? {
-        when (val outcome = current.pinLogin(userId, pin)) {
+        var attempt = 1
+        var outcome = current.pinLogin(userId, pin)
+        // 503 PIN_LOGIN_BUSY: Go está verificando muchos PIN a la vez. No es un PIN incorrecto ni
+        // falta de red (no cuenta como fallo ni se entra con el verificador local): se vuelve a
+        // intentar a los pocos segundos y, si sigue ocupado, se avisa.
+        while (outcome is ApiOutcome.Rejected && outcome.problem.code == PIN_LOGIN_BUSY) {
+            if (attempt >= BUSY_ATTEMPTS) {
+                return EntryResult.Busy
+            }
+            attempt += 1
+            delay(busyRetryMillis)
+            outcome = current.pinLogin(userId, pin)
+        }
+        when (outcome) {
             is ApiOutcome.Success -> {
                 val response = outcome.value
                 val profile = enteredProfile(userId, response.pinVersion)
@@ -599,9 +614,15 @@ class AccessRepository(
                 mutableStatus.value =
                     DeviceStatus.UpdateApp(identity.version, error.minClientVersion)
             is AppError.Rejected ->
-                if (error.code == "PIN_DEVICE_NOT_ALLOWED") {
-                    needsRepair(RepairReason.NOT_RECOGNIZED)
-                } else {
+                when (error.code) {
+                    "PIN_DEVICE_NOT_ALLOWED" -> needsRepair(RepairReason.NOT_RECOGNIZED)
+                    // El tipo de cliente no coincide con el del dispositivo: un problema para
+                    // soporte, no una sesión que dejó de valer ni falta de red; nada cambia aquí.
+                    CLIENT_KIND_MISMATCH -> Unit
+                    else -> markOffline()
+                }
+            is AppError.ServerProblem ->
+                if (error.code != PIN_LOGIN_BUSY) {
                     markOffline()
                 }
             else -> markOffline()
@@ -741,6 +762,18 @@ class AccessRepository(
     companion object {
         /** Credencial de envío que ya no vale (`submitOfflineOrder`). */
         const val OFFLINE_CREDENTIAL_INVALID = "OFFLINE_CREDENTIAL_INVALID"
+
+        /** 503: demasiadas entradas con PIN verificándose a la vez en Go; reintentar. */
+        const val PIN_LOGIN_BUSY = "PIN_LOGIN_BUSY"
+
+        /** 400: `X-Client-Kind` distinto del tipo del dispositivo emparejado (soporte). */
+        const val CLIENT_KIND_MISMATCH = "CLIENT_KIND_MISMATCH"
+
+        /**
+         * Intentos de `pin-login` mientras Go responde que está ocupado, y la espera entre ellos.
+         */
+        const val BUSY_ATTEMPTS = 3
+        const val BUSY_RETRY_MILLIS = 2_000L
 
         /** Propósito del cifrado de la credencial del dispositivo. */
         const val DEVICE_PURPOSE = "device-credential"
