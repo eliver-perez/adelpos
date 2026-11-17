@@ -1,0 +1,73 @@
+{
+  "catalog_version": 7,
+  "catalog_epoch": "0b0b0b0b-1111-4222-8333-444444444444",
+  "since": 45,
+  "full": true,
+  "reset": true,
+  "generated_at": "2026-11-16T19:00:00Z",
+  "timezone": "America/Monterrey",
+  "tax_rate": 8,
+  "price_list": { "id": "a1000000-0000-4000-8000-000000000002", "name": "Frontera", "revision": 1 },
+  "categories": [
+    {
+      "id": "c1000000-0000-4000-8000-000000000003",
+      "name": "Postres",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "sort_order": 1,
+      "color": "#8a5cf6",
+      "image_id": null,
+      "availability": {},
+      "available_now": true
+    }
+  ],
+  "products": [
+    {
+      "id": "b1000000-0000-4000-8000-000000000009",
+      "name": "Pastel de elote",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "category_id": "c1000000-0000-4000-8000-000000000003",
+      "code": "PAS",
+      "barcode": null,
+      "kind": "product",
+      "base_price": "45.00",
+      "image_id": "d1000000-0000-4000-8000-000000000001",
+      "sort_order": 1,
+      "archived": false,
+      "temporary_unavailable": false,
+      "availability": {},
+      "variants": [],
+      "ingredients": [],
+      "groups": [],
+      "slots": [],
+      "available_now": true,
+      "availability_reason": "",
+      "sold_out": false,
+      "sold_out_indefinite": false,
+      "sold_out_until": null,
+      "effective_tax_rate": 8,
+      "price": "45.00",
+      "price_origin": "list",
+      "pricing_error": null
+    }
+  ],
+  "ingredients": [],
+  "complements": [],
+  "portions": [],
+  "groups": [],
+  "quick_notes": [],
+  "images": [
+    {
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "media_type": "image/png",
+      "width": 4,
+      "height": 3,
+      "size": 75,
+      "checksum": "CHECKSUM_PLACEHOLDER"
+    }
+  ],
+  "deleted": []
+}

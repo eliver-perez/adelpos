@@ -9,6 +9,7 @@ import local.adel.pos.android.core.data.api.PinUsersResponse
 import local.adel.pos.android.core.data.api.PinnedHttpClient
 import local.adel.pos.android.core.data.api.ServerApi
 import local.adel.pos.android.core.data.api.VersionInfo
+import local.adel.pos.android.core.data.session.ServerTransport
 import local.adel.pos.android.core.domain.error.AppError
 import local.adel.pos.android.core.domain.server.ServerRelocator
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -71,6 +72,12 @@ internal class PairedConnection(
 
     /** API en la dirección vigente, con la huella fijada (sin buscar otra dirección). */
     fun api(): ServerApi = api(base)
+
+    /**
+     * Dirección vigente y cliente con la huella fijada, para lo que no cabe en [ServerApi]: las
+     * imágenes binarias con `ETag` y el canal de tiempo real (Fase D).
+     */
+    fun transport(): ServerTransport = ServerTransport(base.toHttpUrl(), client)
 
     private fun api(base: String): ServerApi = ServerApi(base.toHttpUrl(), client)
 
