@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Textos del catálogo y del personalizador (captura del mesero y, en la A2, Para llevar). En español del
+     restaurante, sin tecnicismos. Los mensajes de Go se muestran tal cual. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="catalog_search_label">Buscar producto por nombre o código</string>
+    <string name="catalog_search_clear">Borrar búsqueda</string>
+    <string name="catalog_categories">Categorías</string>
+
+    <string name="product_sold_out">Agotado</string>
+    <string name="product_sold_out_indefinite">Agotado hasta nuevo aviso</string>
+    <string name="product_unavailable">No disponible</string>
+    <string name="product_combo">Combo</string>
+    <string name="product_choose_variant">Elige presentación</string>
+    <string name="product_no_price">Sin precio</string>
+    <string name="product_reference_price">Precio de referencia: %1$s</string>
+    <string name="product_reference_note">El importe final lo calcula el restaurante al recibir el pedido.</string>
+    <string name="product_card_description">%1$s, %2$s</string>
+
+    <string name="customizer_variant">Presentación</string>
+    <string name="customizer_variant_base">Presentación base</string>
+    <string name="customizer_required_one">Obligatorio · elige 1</string>
+    <string name="customizer_required_at_least">Obligatorio · al menos %1$s</string>
+    <string name="customizer_required_range">Obligatorio · de %1$s a %2$s</string>
+    <string name="customizer_optional">Opcional</string>
+    <string name="customizer_optional_one">Opcional · elige 1</string>
+    <string name="customizer_optional_up_to">Opcional · hasta %1$s</string>
+    <string name="customizer_group_counter">%1$s de %2$s</string>
+    <string name="customizer_group_chosen">%1$s elegidas</string>
+    <string name="customizer_group_clear">Sin %1$s</string>
+    <string name="customizer_group_full">%1$s admite hasta %2$s: quita una porción de otra opción para cambiarla.</string>
+    <string name="customizer_option_full">%1$s admite hasta %2$s.</string>
+    <string name="customizer_one_portion">1 porción</string>
+    <string name="customizer_portions">%1$s porciones</string>
+    <string name="customizer_option_unavailable">No disponible</string>
+    <string name="customizer_option_sold_out">Agotado</string>
+    <string name="customizer_ingredients">Ingredientes</string>
+    <string name="customizer_ingredient_without">Sin</string>
+    <string name="customizer_ingredient_normal">Normal</string>
+    <string name="customizer_ingredient_extra">Extra</string>
+    <string name="customizer_ingredient_extra_price">Extra %1$s</string>
+    <string name="customizer_less">Menos %1$s</string>
+    <string name="customizer_more">Más %1$s</string>
+    <string name="customizer_portion_less">Quitar una porción de %1$s</string>
+    <string name="customizer_portion_more">Agregar una porción de %1$s</string>
+    <string name="customizer_slot_included">Incluidas %1$d</string>
+    <string name="customizer_slot_range">Incluidas %1$d · de %2$d a %3$d</string>
+    <string name="customizer_slot_customize">Personalizar %1$s</string>
+    <string name="customizer_slot_hide">Ocultar personalización de %1$s</string>
+    <string name="customizer_kitchen_notes">Indicaciones para cocina</string>
+    <string name="customizer_kitchen_notes_rule">Sin cargo</string>
+    <string name="customizer_remove_note">Quitar indicación %1$s</string>
+    <string name="customizer_observation">Observaciones</string>
+    <string name="customizer_observation_hint">Por ejemplo: salsa aparte</string>
+    <string name="customizer_observation_add">Agregar observación</string>
+    <string name="customizer_observation_too_long">Las observaciones no caben: quita alguna o escribe menos.</string>
+    <string name="customizer_quantity">Cantidad</string>
+    <string name="customizer_add">Agregar</string>
+    <string name="customizer_add_quantity">Agregar %1$d</string>
+    <string name="customizer_cancel">Cancelar</string>
+
+    <string name="problem_sold_out">%1$s está agotado.</string>
+    <string name="problem_unavailable">%1$s no está disponible: %2$s</string>
+    <string name="problem_variant_required">Elige la presentación de %1$s.</string>
+    <string name="problem_group_minimum">%1$s: elige al menos %2$s.</string>
+    <string name="problem_group_maximum">%1$s: elige como mucho %2$s.</string>
+    <string name="problem_option_maximum">%1$s: como mucho %2$s.</string>
+    <string name="problem_option_unavailable">%1$s ya no está disponible: elige otra opción.</string>
+    <string name="problem_component_range">%1$s: elige de %2$d a %3$d.</string>
+    <string name="problem_notes_too_long">Las observaciones son demasiado largas.</string>
+    <string name="problem_where">%1$s · %2$s</string>
+
+</resources>

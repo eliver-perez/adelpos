@@ -11,6 +11,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -20,6 +21,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.serialization.Serializable
+import local.adel.pos.android.AdelPosApplication
 import local.adel.pos.android.ShellViewModel
 import local.adel.pos.android.core.domain.connection.ConnectionSummary
 import local.adel.pos.android.core.ui.components.AdelTopBar
@@ -28,12 +30,17 @@ import local.adel.pos.android.core.ui.theme.AdelTheme
 import local.adel.pos.android.feature.access.AccessScreen
 import local.adel.pos.android.feature.access.accessTitle
 import local.adel.pos.android.feature.waiter.TablesRoute
+import local.adel.pos.android.feature.waiter.catalog.CatalogSampleRoute
+import local.adel.pos.android.feature.waiter.catalog.catalogSampleTitle
 import local.adel.pos.android.feature.waiter.tablesTitle
 
 /** Destinos de la navegación (rutas con tipo de navigation-compose). */
 @Serializable data object AccessDestination
 
 @Serializable data object TablesDestination
+
+/** Pantalla de muestra del catálogo y el personalizador (Fase D). */
+@Serializable data object CatalogDestination
 
 /**
  * Raíz de la interfaz: tema, barra superior con el indicador de conexión y navegación entre
@@ -57,8 +64,13 @@ fun AdelPosApp(
 fun AdelPosNavigation(connection: ConnectionSummary) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
-    val onTables = backStackEntry?.destination?.hasRoute<TablesDestination>() == true
-    val title = if (onTables) tablesTitle() else accessTitle()
+    val destination = backStackEntry?.destination
+    val title =
+        when {
+            destination?.hasRoute<TablesDestination>() == true -> tablesTitle()
+            destination?.hasRoute<CatalogDestination>() == true -> catalogSampleTitle()
+            else -> accessTitle()
+        }
     val paneLayout = currentPaneLayout()
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag(TAG_APP_ROOT),
@@ -78,7 +90,23 @@ fun AdelPosNavigation(connection: ConnectionSummary) {
                     },
                 )
             }
-            composable<TablesDestination> { TablesRoute(layout = paneLayout) }
+            composable<TablesDestination> {
+                TablesRoute(
+                    layout = paneLayout,
+                    onOpenCatalog = {
+                        navController.navigate(CatalogDestination) { launchSingleTop = true }
+                    },
+                )
+            }
+            composable<CatalogDestination> {
+                val application = LocalContext.current.applicationContext as AdelPosApplication
+                val catalogRealtime = application.container.catalogRealtime
+                CatalogSampleRoute(
+                    layout = paneLayout,
+                    source = catalogRealtime.catalog,
+                    images = catalogRealtime.images,
+                )
+            }
         }
     }
 }

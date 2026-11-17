@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Pantalla de muestra «Catálogo» (Fase D). En español del restaurante, sin tecnicismos. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <string name="catalog_sample_title">Catálogo</string>
+    <string name="catalog_sample_open">Ver el catálogo</string>
+    <string name="catalog_sample_open_lines">Ver lo agregado</string>
+    <string name="catalog_sample_lines_title">Agregado (muestra)</string>
+    <string name="catalog_sample_lines_empty">Elige un producto para personalizarlo. Lo que agregues aparece aquí; el pedido de una mesa llega con el modo Mesero.</string>
+    <string name="catalog_sample_line">%1$d × %2$s</string>
+    <string name="catalog_sample_not_downloaded">Todavía no se descarga el catálogo. Se descargará en cuanto haya conexión con el restaurante.</string>
+    <string name="catalog_sample_no_results">No hay productos con «%1$s».</string>
+    <string name="catalog_sample_empty_category">Esta categoría no tiene productos.</string>
+    <string name="catalog_sample_status_running">Actualizando el catálogo…</string>
+    <string name="catalog_sample_status_failed">No se pudo actualizar el catálogo. Se usa el que está guardado en este dispositivo.</string>
+    <string name="catalog_sample_status_no_session">El catálogo se descarga cuando un mesero entra con conexión.</string>
+    <plurals name="catalog_sample_status_ready">
+        <item quantity="one">Catálogo guardado en este dispositivo: %d producto.</item>
+        <item quantity="many">Catálogo guardado en este dispositivo: %d productos.</item>
+        <item quantity="other">Catálogo guardado en este dispositivo: %d productos.</item>
+    </plurals>
+</resources>

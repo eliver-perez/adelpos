@@ -131,6 +131,9 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    // Primer y segundo plano de toda la aplicación: abre y cierra el canal de tiempo real y el
+    // temporizador del catálogo (CatalogRealtimeContainer).
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.compose.ui.tooling.preview)

@@ -47,7 +47,7 @@ object AdelIcons {
     /** Volver al panel anterior. */
     val ChevronLeft: ImageVector by lazy { icon("chevron-left", "m15 5-7 7 7 7") }
 
-    private fun icon(name: String, vararg paths: String): ImageVector {
+    internal fun icon(name: String, vararg paths: String): ImageVector {
         val builder =
             ImageVector.Builder(
                 name = name,
@@ -70,7 +70,7 @@ object AdelIcons {
     }
 
     // <circle cx cy r> como dos arcos.
-    private fun circle(cx: Float, cy: Float, r: Float): String =
+    internal fun circle(cx: Float, cy: Float, r: Float): String =
         "M${cx - r} ${cy}a$r $r 0 1 0 ${2 * r} 0a$r $r 0 1 0 ${-2 * r} 0Z"
 
     // <rect x y width height rx> como trazo con esquinas redondeadas.
