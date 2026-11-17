@@ -1,0 +1,715 @@
+package local.adel.pos.android
+
+import android.app.UiAutomation
+import android.util.Log
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.printToLog
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import local.adel.pos.android.core.data.waiter.db.WaiterStorage
+import local.adel.pos.android.core.domain.waiter.OrderState
+import local.adel.pos.android.core.domain.waiter.PendingOrder
+import local.adel.pos.android.core.ui.catalog.TAG_CUSTOMIZER_ADD
+import local.adel.pos.android.core.ui.catalog.productTag
+import local.adel.pos.android.core.ui.components.TAG_PIN_KEY_PREFIX
+import local.adel.pos.android.core.ui.components.TAG_PIN_SUBMIT
+import local.adel.pos.android.core.ui.layout.TAG_PANES_SINGLE
+import local.adel.pos.android.core.ui.layout.TAG_PANE_OPEN_SECONDARY
+import local.adel.pos.android.core.ui.waiter.TAG_ORDER_STATE_PREFIX
+import local.adel.pos.android.feature.access.findserver.TAG_ADDRESS
+import local.adel.pos.android.feature.access.findserver.TAG_FIND_SERVER
+import local.adel.pos.android.feature.access.findserver.TAG_PAIRING_CODE
+import local.adel.pos.android.feature.access.pin.TAG_ENTRY
+import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_DRAFT_ROW_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_ORDER_PANEL
+import local.adel.pos.android.feature.waiter.capture.TAG_SEND_TO_KITCHEN
+import local.adel.pos.android.feature.waiter.capture.TAG_SENT_ROW_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_SYNC_PREFIX
+import local.adel.pos.android.feature.waiter.pending.TAG_PENDING
+import local.adel.pos.android.feature.waiter.pending.TAG_PENDING_ORDER_PREFIX
+import local.adel.pos.android.feature.waiter.pending.TAG_PENDING_REVIEW_PREFIX
+import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW
+import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_ACCEPT
+import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_CHANGE_PREFIX
+import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_NEW_ACCOUNT
+import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_REMOVE_PREFIX
+import local.adel.pos.android.feature.waiter.tables.TAG_NEW_ACCOUNT
+import local.adel.pos.android.feature.waiter.tables.TAG_OPEN_PENDING
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLE_PREFIX
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+
+/**
+ * Modo Mesero contra el **Go temporal** del arnés (§9), nunca el servicio real. La prueba hace de
+ * computadora principal por la escucha local ([MainComputer]) y la aplicación usa la escucha de red
+ * con la huella fijada al emparejar. Cada paso corre en su propia instrumentación, en orden, con la
+ * aplicación instalada una sola vez (`scripts/android-e2e.sh --suite waiter`): el proceso se
+ * reinicia en cada paso, así que también se comprueba que capturas y pedidos sobreviven al cierre.
+ * **La red la corta y la devuelve el guion entre pasos** (modo avión en Android 11+; `adb root` y
+ * `svc wifi/data` en Android 8–10).
+ *
+ * - `w1` prepara el restaurante (rol de meseros con sus permisos, catálogo, área y mesas), empareja
+ *   con el código y entra con el PIN.
+ * - `w2` captura **en línea** en una cuenta nueva (creación diferida), gira la pantalla sin perder
+ *   lo capturado y «Enviar a cocina» → «Recibido por el restaurante»; después otra terminal (la
+ *   principal) guarda un renglón y lo confirma, y la captura lo ve al momento.
+ * - `w3` (sin red) entra sin conexión y captura en otra mesa: el pedido queda «Por enviar».
+ * - `w4` (con red y `lostOfflineResponses=1`) sin volver a entrar: WorkManager envía con la
+ *   credencial de envío; la primera respuesta se pierde y el reintento con la misma clave **no
+ *   duplica** el pedido.
+ * - `w5` precio cambiado y producto agotado mientras se capturaba → «Requiere tu revisión» → quitar
+ *   lo agotado, aceptar y enviar con el precio nuevo.
+ * - `w6` la mesa se cobra mientras tanto → «Requiere tu revisión» → cuenta nueva en la mesa.
+ * - `w7a` (con red) borrador guardado en Go; `w7b` (sin red) se agrega más y se envía sin conexión;
+ *   `w7c` (con red) el pedido sustituye los renglones del borrador (A1-D6): la cuenta queda con
+ *   todo confirmado y sin borrador duplicado.
+ *
+ * Argumentos: `local`, `address`, `pin`, `mainDevice`, `mainToken` (los arma el guion) y, en `w4`,
+ * `lostOfflineResponses` (lo lee [AdelTestRunner]). Sin ellos se omite.
+ */
+@RunWith(AndroidJUnit4::class)
+class WaiterModeOnGoTest {
+    @get:Rule val compose = createEmptyComposeRule()
+
+    private val arguments = InstrumentationRegistry.getArguments()
+    private val automation: UiAutomation = InstrumentationRegistry.getInstrumentation().uiAutomation
+    private lateinit var main: MainComputer
+    private var scenario: ActivityScenario<MainActivity>? = null
+    private val container
+        get() = TestDevice.app.container
+
+    private val stateFile = File(TestDevice.app.filesDir, "waiter-on-go.json")
+
+    private fun argument(name: String): String {
+        val value = arguments.getString(name)
+        assumeTrue("Sin el argumento $name (Go temporal)", !value.isNullOrBlank())
+        return value!!
+    }
+
+    @Before
+    fun mainComputer() {
+        main = MainComputer(argument("local"), argument("mainDevice"), argument("mainToken"))
+    }
+
+    @After
+    fun close() {
+        automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
+        automation.setRotation(UiAutomation.ROTATION_UNFREEZE)
+        scenario?.close()
+    }
+
+    // --- Pasos ---
+
+    @Test
+    fun w1_prepararEmparejarYEntrar() {
+        val ana = main.ensureWaiters(mapOf(ANA_USER to ("Ana" to ANA_PIN))).getValue(ANA_USER)
+        grantWaiterPermissions()
+        val ids = mutableMapOf("ana" to ana)
+        ids.putAll(createCatalog())
+        ids.putAll(createTables())
+        saveIds(ids)
+        TestDevice.reset()
+        launch()
+        pairByAddress()
+        enterAna()
+        waitFor("$TAG_TABLE_PREFIX${ids.getValue("table1")}")
+        waitUntil("el catálogo descargado") {
+            container.catalogRealtime.catalog.catalog.value.product(ids.getValue("burger")) != null
+        }
+    }
+
+    @Test
+    fun w2_capturaEnLineaRotacionYEnvioACocina() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table1"))
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val capture = currentCapture(ids.getValue("table1"))
+        val itemId = capture.visible.single().id
+        // Rotación: lo capturado sigue a la vista (y guardado en Room y en Go).
+        automation.setRotation(UiAutomation.ROTATION_FREEZE_90)
+        compose.waitForIdle()
+        showOrder()
+        waitFor("$TAG_DRAFT_ROW_PREFIX$itemId")
+        automation.setRotation(UiAutomation.ROTATION_FREEZE_0)
+        compose.waitForIdle()
+        showOrder()
+        waitFor("$TAG_DRAFT_ROW_PREFIX$itemId")
+        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        waitFor(TAG_TABLES_SEARCH)
+        val order = waitForOrder(ids.getValue("table1")) { it.state == OrderState.RECEIVED }
+        val accountId = order.receivedAccountId!!
+        // En Go: una partida confirmada en la cuenta nueva de la mesa.
+        val bill = main.call("GET", "restaurant/accounts/$accountId").obj
+        assertEquals(1, bill.getValue("lines").jsonArray.size)
+        assertEquals(0, bill.getValue("draft").jsonArray.size)
+        openPending()
+        waitFor("$TAG_ORDER_STATE_PREFIX${OrderState.RECEIVED.storedName}")
+        saveIds(ids + ("account1" to accountId))
+
+        // Otra terminal (la principal) guarda un renglón en la cuenta y lo confirma: la captura lo
+        // ve al momento por el canal de tiempo real.
+        compose.onNodeWithTag(TAG_PENDING).assertExists()
+        scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        compose.onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table1")}").performClick()
+        waitFor("account-$accountId")
+        compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        showOrder()
+        waitFor("$TAG_SENT_ROW_PREFIX${sentVersion(accountId, 0)}")
+        val foreign = UUID.randomUUID().toString()
+        val revision = main.call("GET", "restaurant/accounts/$accountId").obj.revision()
+        val saved =
+            main.call(
+                "PUT",
+                "restaurant/accounts/$accountId/draft",
+                """{"operation_id":"${UUID.randomUUID()}","revision":$revision,""" +
+                    """"items":[${draftItem(foreign, ids.getValue("tacos"), 1)}]}""",
+            )
+        assertEquals(saved.body.toString(), 200, saved.status)
+        waitFor("$TAG_DRAFT_ROW_PREFIX$foreign")
+        confirmFromMain(accountId)
+        waitFor("$TAG_SENT_ROW_PREFIX${sentVersion(accountId, 1)}")
+    }
+
+    @Test
+    fun w3_capturaSinConexion() {
+        val ids = loadIds()
+        launch()
+        // Sin red: solo entra quien ya entró con conexión aquí (verificador local).
+        enterAna()
+        newAccountOn(ids.getValue("table2"))
+        addProduct(ids.getValue("tacos"))
+        addProduct(ids.getValue("tacos"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}pending")
+        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        waitFor(TAG_TABLES_SEARCH)
+        val order = waitForOrder(ids.getValue("table2")) { it.state == OrderState.QUEUED }
+        assertEquals(2, order.lines.single().item.line.quantity)
+        assertTrue("Con la versión del catálogo", order.catalogVersion > 0)
+        openPending()
+        waitFor("$TAG_ORDER_STATE_PREFIX${OrderState.QUEUED.storedName}")
+        waitForText("1 pedido por enviar")
+    }
+
+    @Test
+    fun w4_alVolverLaRedSeEnviaSinEntrarYSinDuplicar() {
+        val ids = loadIds()
+        // Proceso nuevo y sin entrar con el PIN: el pedido sigue en la cola y WorkManager lo envía
+        // con la credencial de envío de Ana. La primera respuesta se pierde (lostOfflineResponses).
+        launch()
+        val order =
+            waitForOrder(ids.getValue("table2"), timeout = 120_000) {
+                it.state == OrderState.RECEIVED
+            }
+        assertTrue("Hubo al menos un reintento", order.attempts >= 1)
+        val accounts = openAccountsOn(ids.getValue("table2"))
+        assertEquals("Una sola cuenta en la mesa", 1, accounts.size)
+        val bill = main.call("GET", "restaurant/accounts/${accounts.single()}").obj
+        val lines = bill.getValue("lines").jsonArray
+        assertEquals("El pedido entró una sola vez", 1, lines.size)
+        assertEquals(2, lines.single().jsonObject.getValue("quantity").jsonPrimitive.int)
+    }
+
+    @Test
+    fun w5_precioCambiadoYAgotadoConLaConfirmacionDelMesero() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table3"))
+        addProduct(ids.getValue("burger"))
+        addProduct(ids.getValue("shake"))
+        showOrder()
+        waitUntil("el borrador guardado con su cotización") {
+            val capture = currentCapture(ids.getValue("table3"))
+            capture.accountId != null &&
+                capture.operations.isEmpty() &&
+                capture.seenPrices.size == 2
+        }
+        // Mientras tanto, en la principal: la hamburguesa sube y la malteada se agota.
+        changePrice(ids.getValue("burger"), "130")
+        soldOut(ids.getValue("shake"))
+        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        waitFor(TAG_TABLES_SEARCH)
+        val review = waitForOrder(ids.getValue("table3")) { it.state == OrderState.NEEDS_REVIEW }
+        val shakeItem =
+            review.lines.first { it.item.line.productId == ids.getValue("shake") }.item.id
+        openPending()
+        openReview(review.operationId)
+        waitFor("${TAG_REVIEW_CHANGE_PREFIX}price_changed")
+        waitFor("${TAG_REVIEW_CHANGE_PREFIX}product_sold_out")
+        waitForText("$120.00 → $130.00")
+        compose
+            .onNodeWithTag("$TAG_REVIEW_REMOVE_PREFIX$shakeItem")
+            .performScrollTo()
+            .performClick()
+        waitFor(TAG_REVIEW_ACCEPT)
+        compose.onNodeWithTag(TAG_REVIEW_ACCEPT).performScrollTo().performClick()
+        val received = waitForOrder(ids.getValue("table3")) { it.state == OrderState.RECEIVED }
+        val bill = main.call("GET", "restaurant/accounts/${received.receivedAccountId}").obj
+        val lines = bill.getValue("lines").jsonArray.map { it.jsonObject }
+        assertEquals(1, lines.size)
+        assertEquals(
+            "130.00",
+            lines
+                .single()
+                .getValue("quote_line")
+                .jsonObject
+                .getValue("unit_price")
+                .jsonPrimitive
+                .content,
+        )
+        // El borrador ya no tiene lo que el pedido sustituyó (tampoco la malteada que se quitó).
+        assertEquals(0, bill.getValue("draft").jsonArray.size)
+    }
+
+    @Test
+    fun w6_mesaCobradaMientrasTanto() {
+        val ids = loadIds()
+        val accountId = ids.getValue("account1")
+        launch()
+        enterAna()
+        compose
+            .onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table1")}")
+            .performScrollTo()
+            .performClick()
+        waitFor("account-$accountId")
+        compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        addProduct(ids.getValue("tacos"))
+        showOrder()
+        waitUntil("el borrador guardado con su cotización") {
+            val capture = currentCapture(ids.getValue("table1"))
+            capture.operations.isEmpty() &&
+                capture.seenPrices.isNotEmpty() &&
+                capture.baseRevision > 0
+        }
+        // La principal cobra la cuenta.
+        payAccount(accountId)
+        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        waitFor(TAG_TABLES_SEARCH)
+        val review = waitForOrder(ids.getValue("table1")) { it.state == OrderState.NEEDS_REVIEW }
+        openPending()
+        openReview(review.operationId)
+        waitForText("ya se cobró")
+        compose.onNodeWithTag(TAG_REVIEW_NEW_ACCOUNT).performScrollTo().performClick()
+        val received =
+            waitForOrder(ids.getValue("table1")) {
+                it.operationId == review.operationId && it.state == OrderState.RECEIVED
+            }
+        assertTrue(received.receivedAccountId != accountId)
+        val bill = main.call("GET", "restaurant/accounts/${received.receivedAccountId}").obj
+        assertEquals(
+            "open",
+            bill.getValue("account").jsonObject.getValue("state").jsonPrimitive.content,
+        )
+        assertEquals(1, bill.getValue("lines").jsonArray.size)
+    }
+
+    @Test
+    fun w7a_borradorGuardadoEnGo() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table4"))
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val capture = currentCapture(ids.getValue("table4"))
+        val bill = main.call("GET", "restaurant/accounts/${capture.accountId}").obj
+        assertEquals(1, bill.getValue("draft").jsonArray.size)
+        saveIds(ids + ("account4" to capture.accountId!!))
+    }
+
+    @Test
+    fun w7b_sinConexionSeAgregaYSeEnvia() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        // La captura de la mesa 4 sigue en el dispositivo (Room) con su renglón ya guardado en Go.
+        compose
+            .onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table4")}")
+            .performScrollTo()
+            .performClick()
+        val capture = currentCapture(ids.getValue("table4"))
+        waitFor("table-capture-${capture.id}")
+        compose.onNodeWithTag("table-capture-${capture.id}").performScrollTo().performClick()
+        addProduct(ids.getValue("tacos"))
+        showOrder()
+        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        waitFor(TAG_TABLES_SEARCH)
+        val order = waitForOrder(ids.getValue("table4")) { it.state == OrderState.QUEUED }
+        // Sustituye el renglón que ya estaba en el borrador de Go, tal como lo vio.
+        assertEquals(1, order.replaces.size)
+        assertEquals(2, order.lines.size)
+    }
+
+    @Test
+    fun w7c_elPedidoSustituyeElBorradorSinDuplicar() {
+        val ids = loadIds()
+        launch()
+        waitForOrder(ids.getValue("table4"), timeout = 120_000) { it.state == OrderState.RECEIVED }
+        val bill = main.call("GET", "restaurant/accounts/${ids.getValue("account4")}").obj
+        assertEquals(2, bill.getValue("lines").jsonArray.size)
+        assertEquals(
+            "Sin renglones duplicados en el borrador",
+            0,
+            bill.getValue("draft").jsonArray.size,
+        )
+    }
+
+    // --- Pantallas ---
+
+    private fun launch() {
+        scenario = ActivityScenario.launch(MainActivity::class.java)
+    }
+
+    private fun waitFor(tag: String, timeout: Long = 40_000) {
+        try {
+            compose.waitUntil(timeoutMillis = timeout) {
+                compose
+                    .onAllNodes(hasTestTag(tag), useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+        } catch (failure: Throwable) {
+            compose.onRoot(useUnmergedTree = true).printToLog(TAG)
+            throw failure
+        }
+    }
+
+    private fun waitForText(text: String, timeout: Long = 40_000) {
+        compose.waitUntil(timeoutMillis = timeout) {
+            compose
+                .onAllNodes(hasText(text, substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+    }
+
+    private fun waitUntil(what: String, timeout: Long = 40_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeout
+        while (!condition()) {
+            check(System.currentTimeMillis() < deadline) { "No llegó: $what" }
+            Thread.sleep(POLL_MILLIS)
+        }
+    }
+
+    private fun pairByAddress() {
+        waitFor(TAG_FIND_SERVER)
+        compose.onNodeWithTag(TAG_ADDRESS).performTextReplacement(argument("address"))
+        compose.onNodeWithTag(TAG_ADDRESS).performImeAction()
+        waitFor(TAG_PAIRING_CODE)
+        val shown =
+            compose
+                .onNodeWithTag(TAG_PAIRING_CODE)
+                .fetchSemanticsNode()
+                .config[SemanticsProperties.Text]
+                .joinToString("") { it.text }
+        val approved = main.approvePairing(shown.replace(" ", ""))
+        assertEquals(approved.body.toString(), 200, approved.status)
+        waitFor(TAG_ENTRY)
+    }
+
+    private fun enterAna() {
+        val ana = loadIds().getValue("ana")
+        waitFor("$TAG_WAITER_PREFIX$ana")
+        compose.onNodeWithTag("$TAG_WAITER_PREFIX$ana").performClick()
+        for (digit in ANA_PIN) {
+            compose.onNodeWithTag("$TAG_PIN_KEY_PREFIX$digit").performClick()
+        }
+        compose.onNodeWithTag(TAG_PIN_SUBMIT).performClick()
+        waitFor(TAG_TABLES_SEARCH)
+    }
+
+    private fun newAccountOn(tableId: String) {
+        waitFor("$TAG_TABLE_PREFIX$tableId")
+        compose.onNodeWithTag("$TAG_TABLE_PREFIX$tableId").performScrollTo().performClick()
+        waitFor(TAG_NEW_ACCOUNT)
+        compose.onNodeWithTag(TAG_NEW_ACCOUNT).performScrollTo().performClick()
+        waitFor(productTag(loadIds().getValue("burger")))
+    }
+
+    private fun addProduct(productId: String) {
+        backToCatalog()
+        waitFor(productTag(productId))
+        compose.onNodeWithTag(productTag(productId)).performScrollTo().performClick()
+        waitFor(TAG_CUSTOMIZER_ADD)
+        compose.onNodeWithTag(TAG_CUSTOMIZER_ADD).performClick()
+        compose.waitForIdle()
+    }
+
+    /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
+    private fun showOrder() {
+        val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
+        val shown = compose.onAllNodes(hasTestTag(TAG_ORDER_PANEL)).fetchSemanticsNodes()
+        if (single.isNotEmpty() && shown.isEmpty()) {
+            compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
+        }
+        waitFor(TAG_ORDER_PANEL)
+    }
+
+    private fun backToCatalog() {
+        val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
+        val shown = compose.onAllNodes(hasTestTag(TAG_ORDER_PANEL)).fetchSemanticsNodes()
+        if (single.isNotEmpty() && shown.isNotEmpty()) {
+            scenario?.onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            compose.waitForIdle()
+        }
+    }
+
+    // El renglón del pedido que requiere revisión la abre al tocarlo.
+    private fun openReview(operationId: String) {
+        waitFor("$TAG_PENDING_REVIEW_PREFIX$operationId")
+        compose
+            .onNodeWithTag("$TAG_PENDING_ORDER_PREFIX$operationId")
+            .performScrollTo()
+            .performClick()
+        waitFor(TAG_REVIEW)
+    }
+
+    private fun openPending() {
+        waitFor(TAG_OPEN_PENDING)
+        compose.onNodeWithTag(TAG_OPEN_PENDING).performClick()
+        waitFor(TAG_PENDING)
+    }
+
+    // --- Lo guardado en el dispositivo ---
+
+    private fun currentCapture(tableId: String) = runBlocking {
+        val ana = loadIds().getValue("ana")
+        container.database.waiter().capturesOf(ana).map(WaiterStorage::toCapture).single {
+            it.tableId == tableId
+        }
+    }
+
+    private fun waitForOrder(
+        tableId: String,
+        timeout: Long = 60_000,
+        condition: (PendingOrder) -> Boolean,
+    ): PendingOrder {
+        val ana = loadIds().getValue("ana")
+        var found: PendingOrder? = null
+        waitUntil("el pedido de la mesa", timeout) {
+            found = runBlocking {
+                container.database.waiter().ordersOf(ana).map(WaiterStorage::toOrder).lastOrNull {
+                    it.destination.tableId == tableId && condition(it)
+                }
+            }
+            found != null
+        }
+        Log.i(TAG, "pedido de la mesa: ${found!!.state} intentos ${found!!.attempts}")
+        return found!!
+    }
+
+    // --- La computadora principal ---
+
+    private fun grantWaiterPermissions() {
+        val roles = main.call("GET", "roles").body.jsonArray.map { it.jsonObject }
+        val role = roles.first { it.getValue("name").jsonPrimitive.content == ROLE }
+        val permissions = WAITER_PERMISSIONS.joinToString(",") { "\"$it\"" }
+        val answer =
+            main.call(
+                "PATCH",
+                "roles/${role.getValue("id").jsonPrimitive.content}",
+                """{"name":"$ROLE","permissions":[$permissions]}""",
+            )
+        assertEquals(answer.body.toString(), 200, answer.status)
+    }
+
+    private fun createCatalog(): Map<String, String> {
+        val category =
+            main.call(
+                "POST",
+                "catalog/categories",
+                """{"name":"Comida E","active":true,"color":"#d64545"}""",
+            )
+        assertEquals(category.body.toString(), 200, category.status)
+        val categoryId = category.obj.text("id")
+        fun product(name: String, code: String, price: String): String {
+            val answer =
+                main.call(
+                    "POST",
+                    "catalog/products",
+                    """{"name":"$name","active":true,"category_id":"$categoryId",""" +
+                        """"code":"$code","kind":"product","base_price":"$price"}""",
+                )
+            assertEquals(answer.body.toString(), 200, answer.status)
+            return answer.obj.text("id")
+        }
+        return mapOf(
+            "burger" to product("Hamburguesa", "E-HAM", "120"),
+            "shake" to product("Malteada de fresa", "E-MAL", "65"),
+            "tacos" to product("Tacos al pastor", "E-TAC", "90"),
+        )
+    }
+
+    private fun createTables(): Map<String, String> {
+        val area =
+            main.call(
+                "POST",
+                "restaurant/areas",
+                """{"operation_id":"${UUID.randomUUID()}","name":"Salón E","active":true}""",
+            )
+        assertEquals(area.body.toString(), 200, area.status)
+        val areaId = area.obj.text("id")
+        val ids = mutableMapOf<String, String>()
+        for (number in 1..4) {
+            val table =
+                main.call(
+                    "POST",
+                    "restaurant/tables",
+                    """{"operation_id":"${UUID.randomUUID()}","area_id":"$areaId",""" +
+                        """"name":"Mesa E$number","shape":"rectangle","x":${20 + number * 150},""" +
+                        """"y":40,"width":100,"height":72,"seats":4,"active":true}""",
+                )
+            assertEquals(table.body.toString(), 200, table.status)
+            ids["table$number"] = table.obj.text("id")
+        }
+        return ids
+    }
+
+    private fun changePrice(productId: String, price: String) {
+        val current = main.call("GET", "catalog/products/$productId").obj
+        val changed = JsonObject(current + ("base_price" to JsonPrimitive(price)))
+        val answer = main.call("PATCH", "catalog/products/$productId", changed.toString())
+        assertEquals(answer.body.toString(), 200, answer.status)
+    }
+
+    private fun soldOut(productId: String) {
+        val answer =
+            main.call(
+                "POST",
+                "catalog/products/$productId/sold-out",
+                """{"operation_id":"${UUID.randomUUID()}","sold_out":true,"indefinite":true}""",
+            )
+        assertEquals(answer.body.toString(), 200, answer.status)
+    }
+
+    /** «Enviar a cocina» desde la principal (vista previa con su huella y confirmación). */
+    private fun confirmFromMain(accountId: String) {
+        val preview = main.call("GET", "restaurant/accounts/$accountId/preview").obj
+        val answer =
+            main.call(
+                "POST",
+                "restaurant/accounts/$accountId/confirm",
+                """{"operation_id":"${UUID.randomUUID()}","revision":${preview.getValue("revision")},""" +
+                    """"expected_fingerprint":"${preview.text("fingerprint")}"}""",
+            )
+        assertEquals(answer.body.toString(), 200, answer.status)
+    }
+
+    /**
+     * Cobra la cuenta completa en efectivo desde la principal: abre el turno de su caja (si no lo
+     * está) y registra el pago total con el saldo vigente.
+     */
+    private fun payAccount(accountId: String) {
+        val methods = main.call("GET", "payments/methods").body.jsonArray.map { it.jsonObject }
+        val cash = methods.first { (it["code"] as? JsonPrimitive)?.content == "cash" }.text("id")
+        main.call(
+            "POST",
+            "payments/shifts",
+            """{"operation_id":"${UUID.randomUUID()}","opening_float":"0"}""",
+        )
+        val balance = main.call("GET", "payments/accounts/$accountId").obj.text("balance")
+        val paid =
+            main.call(
+                "POST",
+                "payments/accounts/$accountId/payments",
+                """{"operation_id":"${UUID.randomUUID()}","method_id":"$cash","mode":"total",""" +
+                    """"received":"$balance","expected_balance":"$balance"}""",
+            )
+        assertEquals(paid.body.toString(), 200, paid.status)
+        val state = main.call("GET", "restaurant/accounts/$accountId").obj
+        assertEquals(
+            "closed",
+            state.getValue("account").jsonObject.getValue("state").jsonPrimitive.content,
+        )
+    }
+
+    private fun openAccountsOn(tableId: String): List<String> {
+        val listed = main.call("GET", "restaurant/accounts?table_id=$tableId&state=open").obj
+        return listed.getValue("items").jsonArray.map { it.jsonObject.text("id") }
+    }
+
+    private fun sentVersion(accountId: String, index: Int): String {
+        val lines =
+            main.call("GET", "restaurant/accounts/$accountId").obj.getValue("lines").jsonArray
+        return lines[index].jsonObject.text("version_id")
+    }
+
+    private fun draftItem(id: String, productId: String, quantity: Int): String =
+        """{"id":"$id","product_id":"$productId","variant_id":null,"quantity":$quantity,""" +
+            """"customization":{"ingredients":[],"groups":[],"components":[],"notes":""}}"""
+
+    private fun JsonObject.text(name: String): String = getValue(name).jsonPrimitive.content
+
+    private fun JsonObject.revision(): Int =
+        getValue("account").jsonObject.getValue("revision").jsonPrimitive.int
+
+    // --- Estado entre pasos ---
+
+    private fun saveIds(ids: Map<String, String>) {
+        stateFile.writeText(JsonObject(ids.mapValues { JsonPrimitive(it.value) }).toString())
+    }
+
+    private fun loadIds(): Map<String, String> =
+        Json.parseToJsonElement(stateFile.readText()).jsonObject.mapValues {
+            it.value.jsonPrimitive.content
+        }
+
+    private companion object {
+        const val TAG = "AdelOnGo"
+        const val ANA_USER = "ana.e1"
+        const val ANA_PIN = "4829"
+        const val ROLE = "Meseros A1"
+        const val POLL_MILLIS = 250L
+
+        /** La lista de permisos de mesero de Go (A1-D17), la misma que da la sesión con PIN. */
+        val WAITER_PERMISSIONS =
+            listOf(
+                "waiter_devices.use",
+                "restaurant.tables.read",
+                "restaurant.areas.read",
+                "accounts.read",
+                "accounts.open",
+                "orders.capture",
+                "orders.confirm",
+                "orders.edit",
+                "orders.cancel",
+                "catalog.read",
+                "catalog.prices.read",
+                "events.read",
+            )
+    }
+}
