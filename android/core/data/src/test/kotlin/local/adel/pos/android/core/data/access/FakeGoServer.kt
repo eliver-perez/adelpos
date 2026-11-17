@@ -55,6 +55,12 @@ class FakeGoServer(
 
     /** Rechazo de la solicitud de código (por ejemplo 429 `PAIRING_RATE_LIMITED`). */
     var createRejection: Pair<Int, String>? = null
+
+    /** Rechazo de `GET version` (un servidor viejo que no reconoce a esta aplicación). */
+    var versionRejection: Pair<Int, String>? = null
+
+    /** Si `GET version` informa `min_client_versions` (desde la 0.12.0). */
+    var informsClientVersions = true
     val serverId = "11111111-2222-4333-8444-555555555555"
     val requestId = "00000000-0000-4000-8000-000000000001"
     val serverNonce = ByteArray(32) { (64 + it).toByte() }
@@ -118,6 +124,8 @@ class FakeGoServer(
         val path = request.url.encodedPath.removePrefix("/api/v1/")
         val body = request.body?.utf8().orEmpty()
         return when {
+            path == "version" && versionRejection != null ->
+                fail(versionRejection!!.first, versionRejection!!.second)
             path == "version" -> json(200, versionBody())
             path == "health/live" -> json(200, """{"status":"alive"}""")
             path == "auth/pin-users" -> deviceOk(request) ?: json(200, pinUsersBody())
@@ -167,7 +175,7 @@ class FakeGoServer(
         """{"product":"AD-EL POS","server_version":"$serverVersion","api_version":"v1","schema_version":25,
         |"supported_api_versions":["v1"],"capabilities":[${capabilities.joinToString(",") { "\"$it\"" }}],
         |"events_available":true,"test_mode":true,"min_client_version":"0.10.0",
-        |"min_client_versions":{"desktop":"0.10.0","android":"$minAndroid"},
+        |${if (informsClientVersions) "\"min_client_versions\":{\"desktop\":\"0.10.0\",\"android\":\"$minAndroid\"}," else ""}
         |"client_kinds":["desktop","android"]}"""
             .trimMargin()
 
