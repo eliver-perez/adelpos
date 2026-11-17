@@ -13,7 +13,7 @@ import local.adel.pos.android.core.domain.access.PinVerifier
 import local.adel.pos.android.core.ui.components.TAG_PIN_KEY_PREFIX
 import local.adel.pos.android.core.ui.components.TAG_PIN_SUBMIT
 import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
-import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 
 /**
  * Estado del dispositivo para las pruebas de la aplicación completa sin servidor: un servidor
