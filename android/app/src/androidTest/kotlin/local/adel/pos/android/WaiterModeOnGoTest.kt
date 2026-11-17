@@ -34,7 +34,7 @@ import local.adel.pos.android.core.ui.catalog.TAG_CUSTOMIZER_ADD
 import local.adel.pos.android.core.ui.catalog.productTag
 import local.adel.pos.android.core.ui.components.TAG_PIN_KEY_PREFIX
 import local.adel.pos.android.core.ui.components.TAG_PIN_SUBMIT
-import local.adel.pos.android.core.ui.layout.TAG_PANES_SINGLE
+import local.adel.pos.android.core.ui.layout.TAG_PANE_BACK
 import local.adel.pos.android.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import local.adel.pos.android.core.ui.waiter.TAG_ORDER_STATE_PREFIX
 import local.adel.pos.android.feature.access.findserver.TAG_ADDRESS
@@ -573,12 +573,17 @@ class WaiterModeOnGoTest {
      */
     private fun showTables() {
         waitFor(TAG_TABLES_SEARCH)
-        val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
-        val panel = compose.onAllNodes(hasTestTag(TAG_ACCOUNT_PANE)).fetchSemanticsNodes()
-        if (single.isNotEmpty() && panel.isNotEmpty()) {
+        // Un panel con la mesa abierta tiene «Volver a Mesas».
+        if (present(TAG_ACCOUNT_PANE) && present(TAG_PANE_BACK)) {
             pressBack()
         }
     }
+
+    private fun present(tag: String): Boolean =
+        compose
+            .onAllNodes(hasTestTag(tag), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .isNotEmpty()
 
     private fun openTable(tableId: String) {
         showTables()
@@ -588,18 +593,15 @@ class WaiterModeOnGoTest {
 
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
     private fun showOrder() {
-        val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
-        val shown = compose.onAllNodes(hasTestTag(TAG_ORDER_PANEL)).fetchSemanticsNodes()
-        if (single.isNotEmpty() && shown.isEmpty()) {
+        if (!present(TAG_ORDER_PANEL) && present(TAG_PANE_OPEN_SECONDARY)) {
             compose.onNodeWithTag(TAG_PANE_OPEN_SECONDARY).performClick()
         }
         waitFor(TAG_ORDER_PANEL)
     }
 
+    /** En el teléfono, de la cuenta al catálogo («Volver a Catálogo»). */
     private fun backToCatalog() {
-        val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
-        val shown = compose.onAllNodes(hasTestTag(TAG_ORDER_PANEL)).fetchSemanticsNodes()
-        if (single.isNotEmpty() && shown.isNotEmpty()) {
+        if (present(TAG_ORDER_PANEL) && present(TAG_PANE_BACK)) {
             pressBack()
         }
     }
