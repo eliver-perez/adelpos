@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -609,6 +610,64 @@ class OfflineNeverRepeatsTest {
             listOf("r1", "r2"),
             put["items"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content },
         )
+    }
+
+    // Regla del coordinador (M3): con una cuenta combinada no se abre una cuenta nueva.
+    @Test
+    fun laCapturaDeUnaCuentaCombinadaNoAbreUnaCuentaNueva() = runBlocking {
+        respond("GET restaurant/accounts/$ACCOUNT", bill(3, "[${draftJson("r1")}]"))
+        val capture = openOnAccount()
+        awaitCapture(capture.id) { it.base.isNotEmpty() }
+        respond(
+            "PUT restaurant/accounts/$ACCOUNT/draft",
+            error(
+                400,
+                "OPERATION_VALIDATION",
+                """{"reason":"account_not_open","account_id":"$ACCOUNT",""" +
+                    """"account_state":"merged","merged_into_id":"$ACCOUNT_B"}""",
+            ),
+        )
+        captures.stage(capture.id, DraftOperation.Add(DraftLine("r2", line(BURGER, 1))), null)
+        val closed =
+            awaitCapture(capture.id) {
+                it.sync == DraftSync.ACCOUNT_CLOSED && it.tableAccounts.isNotEmpty()
+            }
+        assertTrue(closed.accountMerged)
+        captures.openAnotherAccount(capture.id)
+        delay(300)
+        val after = captures.capture(capture.id).first()!!
+        assertEquals(ACCOUNT, after.accountId)
+        assertEquals(DraftSync.ACCOUNT_CLOSED, after.sync)
+        assertTrue("Nunca se abre otra cuenta", requests("POST restaurant/accounts").isEmpty())
+    }
+
+    @Test
+    fun enLineaUnaCuentaCombinadaSoloOfreceLaCuentaEnQueSeCombino() = runBlocking {
+        respond("GET restaurant/accounts/$ACCOUNT", bill(3))
+        val capture = openOnAccount()
+        respond("PUT restaurant/accounts/$ACCOUNT/draft", bill(4, "[${draftJson("r1")}]"))
+        respond("GET restaurant/accounts/$ACCOUNT/preview", quote(4))
+        captures.stage(capture.id, DraftOperation.Add(DraftLine("r1", line(BURGER, 2))), null)
+        awaitCapture(capture.id) { it.sync == DraftSync.SAVED && it.seenPrices["r1"] != null }
+        respond(
+            "POST restaurant/accounts/$ACCOUNT/confirm",
+            error(
+                400,
+                "OPERATION_VALIDATION",
+                """{"reason":"account_not_open","account_id":"$ACCOUNT",""" +
+                    """"account_state":"merged","merged_into_id":"$ACCOUNT_B"}""",
+            ),
+        )
+        captures.sendToKitchen(capture.id, "Ana")
+        val review = awaitOrder(capture.id) { it.state == OrderState.NEEDS_REVIEW }
+        assertEquals(ACCOUNT_B, review.review!!.mergedIntoId)
+        assertFalse(OrderReviewRules.offersNewAccount(review.review!!))
+        // Ni aunque se pida: el pedido sigue igual, a la espera de «Enviar a la cuenta en que se
+        // combinó».
+        queue.moveToNewAccount(capture.id)
+        val same = queue.order(capture.id).first()!!
+        assertEquals(OrderState.NEEDS_REVIEW, same.state)
+        assertEquals(ACCOUNT, same.destination.accountId)
     }
 
     // --- B2, B3 y B4 ---

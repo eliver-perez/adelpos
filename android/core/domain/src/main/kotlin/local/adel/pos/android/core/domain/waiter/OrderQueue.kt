@@ -153,12 +153,15 @@ enum class ReviewReason {
  * Revisión pendiente de un pedido: lo que dijo Go la última vez que lo rechazó.
  *
  * @param catalogVersion la versión del catálogo del rechazo; la confirmación debe llevarla.
+ * @param mergedIntoId la cuenta en que se combinó la del pedido, si Go la dijo (en línea,
+ *   `account_not_open` con `merged_into_id`).
  */
 data class OrderReview(
     val reason: ReviewReason,
     val message: String,
     val changes: List<OrderChange>,
     val catalogVersion: Long?,
+    val mergedIntoId: String? = null,
 ) {
     /** Cambios que el mesero tiene que corregir (quitar o cambiar la partida, otro destino). */
     val blocking: List<OrderChange>
@@ -187,9 +190,14 @@ data class OrderReview(
                 .mapNotNull { it.accountId }
                 .distinct()
 
-    /** La cuenta del pedido se combinó con otra (`account_closed` con su estado `merged`). */
+    /**
+     * La cuenta del pedido se combinó con otra (`account_closed` con su estado `merged`, o
+     * `account_not_open` con la cuenta en que se combinó).
+     */
     val accountMerged: Boolean
-        get() = changes.any { it.kind == ChangeKind.ACCOUNT_CLOSED && it.now == MERGED }
+        get() =
+            mergedIntoId != null ||
+                changes.any { it.kind == ChangeKind.ACCOUNT_CLOSED && it.now == MERGED }
 
     companion object {
         /** Estado de Go de una cuenta combinada con otra. */

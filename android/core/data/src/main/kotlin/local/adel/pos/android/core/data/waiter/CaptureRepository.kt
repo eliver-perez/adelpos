@@ -268,6 +268,10 @@ class CaptureRepository(
     override suspend fun openAnotherAccount(captureId: String) {
         edits.withLock {
             val capture = load(captureId) ?: return
+            if (capture.accountMerged) {
+                // Regla del coordinador: lo que la combinación movió se enviaría dos veces.
+                return
+            }
             if (capture.sync == DraftSync.TABLE_HAS_ACCOUNT) {
                 // Ya vio las otras cuentas: la creación se reenvía sabiéndolo (clave nueva: el
                 // rechazo no creó nada).
@@ -531,7 +535,9 @@ class CaptureRepository(
             // la cambió, el conflicto se muestra en lugar de guardar encima.
             refreshFromGo(captureId)
             val loaded = edits.withLock { load(captureId) } ?: return
-            if (loaded.baseRevision <= 0 || loaded.sync == DraftSync.CONFLICT) {
+            val stopped =
+                loaded.sync == DraftSync.CONFLICT || loaded.sync == DraftSync.ACCOUNT_CLOSED
+            if (loaded.baseRevision <= 0 || stopped) {
                 return
             }
         }
@@ -668,16 +674,15 @@ class CaptureRepository(
                     }
                 }
             }
-            isAccountNotOpen(problem) -> {
-                clearInFlight(captureId, DraftSync.ACCOUNT_CLOSED, problem.message)
-                // Una cuenta combinada ofrece seguir en la cuenta en que se combinó (M3).
-                val merged = accountNotOpenDetails(problem)?.mergedIntoId
-                if (merged != null) {
-                    edits.withLock {
-                        load(captureId)?.let { save(it.copy(tableAccounts = mergedTarget(merged))) }
-                    }
-                }
-            }
+            // Una cuenta combinada ofrece solo seguir en la cuenta en que se combinó (M3); se
+            // escribe todo junto para que nunca se vea «Abrir una cuenta nueva» con ella.
+            isAccountNotOpen(problem) ->
+                clearInFlight(
+                    captureId,
+                    DraftSync.ACCOUNT_CLOSED,
+                    problem.message,
+                    tableAccounts = mergedTarget(accountNotOpenDetails(problem)?.mergedIntoId),
+                )
             problem.code == ACCOUNT_CONFLICT || problem.code == IDEMPOTENCY_CONFLICT ->
                 clearInFlight(captureId, DraftSync.CONFLICT, null)
             error is AppError.SessionEnded ||
@@ -694,7 +699,12 @@ class CaptureRepository(
         }
     }
 
-    private suspend fun clearInFlight(captureId: String, sync: DraftSync, message: String?) {
+    private suspend fun clearInFlight(
+        captureId: String,
+        sync: DraftSync,
+        message: String?,
+        tableAccounts: List<TableAccountRef>? = null,
+    ) {
         edits.withLock {
             load(captureId)?.let {
                 save(
@@ -703,6 +713,7 @@ class CaptureRepository(
                         syncMessage = message,
                         pendingOperationId = null,
                         inFlightCount = 0,
+                        tableAccounts = tableAccounts ?: it.tableAccounts,
                     ),
                 )
             }
@@ -730,7 +741,18 @@ class CaptureRepository(
             if (capture.pendingOperationId != null || capture.sync == DraftSync.DISCARDING) {
                 return
             }
-            if (capture.baseRevision == Capture.SEEN_BASE_REVISION) {
+            if (!bill.account.isOpen) {
+                // Se cobró, se canceló o se combinó mientras no se veía (p. ej. una captura que
+                // nace de «Corregir»): no es un conflicto, es una cuenta que ya no admite nada.
+                save(
+                    capture.copy(
+                        baseRevision = bill.account.revision,
+                        sync = DraftSync.ACCOUNT_CLOSED,
+                        syncMessage = null,
+                        tableAccounts = mergedTarget(bill.account.mergedIntoId),
+                    ),
+                )
+            } else if (capture.baseRevision == Capture.SEEN_BASE_REVISION) {
                 save(reconciled(capture, bill).copy(accountName = bill.account.name))
             } else if (capture.operations.isEmpty() || capture.baseRevision == 0) {
                 save(
@@ -905,7 +927,10 @@ class CaptureRepository(
     private fun onlineRejection(order: PendingOrder, problem: ApiProblem): SendOutcome {
         val error = ApiErrors.toAppError(problem)
         if (isAccountNotOpen(problem)) {
-            return SendOutcome.AccountNotOpen(problem.message ?: ACCOUNT_NOT_OPEN_FALLBACK)
+            return SendOutcome.AccountNotOpen(
+                message = problem.message ?: ACCOUNT_NOT_OPEN_FALLBACK,
+                mergedIntoId = accountNotOpenDetails(problem)?.mergedIntoId,
+            )
         }
         if (error is AppError.PermissionDenied) {
             return SendOutcome.Rejected(problem.message ?: PERMISSION_FALLBACK)

@@ -71,6 +71,7 @@ private data class StoredReview(
     val message: String,
     val changes: List<OfflineChangeDto>,
     @SerialName("catalog_version") val catalogVersion: Long?,
+    @SerialName("merged_into_id") val mergedIntoId: String? = null,
 )
 
 @Serializable
@@ -208,6 +209,7 @@ object WaiterStorage {
                             message = review.message,
                             changes = review.changes.map(WaiterMapper::changeDto),
                             catalogVersion = review.catalogVersion,
+                            mergedIntoId = review.mergedIntoId,
                         ),
                     )
                 },
@@ -289,6 +291,7 @@ object WaiterStorage {
                         message = stored.message,
                         changes = stored.changes.map(WaiterMapper::change),
                         catalogVersion = stored.catalogVersion,
+                        mergedIntoId = stored.mergedIntoId,
                     )
                 },
             attempts = entity.attempts,

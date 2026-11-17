@@ -10,6 +10,7 @@ import local.adel.pos.android.core.domain.waiter.WaiterFixtures.order
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -147,6 +148,59 @@ class R6RulesTest {
         assertEquals(pending.replaces, sent.replaces)
         assertEquals(pending.operationId, sent.operationId)
         assertNull(sent.review)
+    }
+
+    // Regla del coordinador (revisión R6, M3): con una cuenta combinada nunca se ofrece ni se hace
+    // «Abrir una cuenta nueva»; con una cobrada o cancelada, sí.
+    @Test
+    fun unaCuentaCombinadaNoOfreceUnaCuentaNueva() {
+        val merged =
+            OrderReview(
+                ReviewReason.CHANGES,
+                "La cuenta se combinó con otra cuenta.",
+                listOf(change(ChangeKind.ACCOUNT_CLOSED, null, acceptable = false, now = "merged")),
+                41,
+            )
+        assertFalse(OrderReviewRules.offersNewAccount(merged))
+        val mergedOnline =
+            OrderReview(
+                ReviewReason.ACCOUNT_NOT_OPEN,
+                "La cuenta se combinó con otra cuenta.",
+                emptyList(),
+                null,
+                mergedIntoId = "cuenta-b",
+            )
+        assertTrue(mergedOnline.accountMerged)
+        assertFalse(OrderReviewRules.offersNewAccount(mergedOnline))
+        val paid =
+            OrderReview(
+                ReviewReason.CHANGES,
+                "La cuenta ya se cobró.",
+                listOf(change(ChangeKind.ACCOUNT_CLOSED, null, acceptable = false, now = "closed")),
+                41,
+            )
+        assertTrue(OrderReviewRules.offersNewAccount(paid))
+        val pending =
+            order(
+                    capture(
+                        base = listOf(draft("guardado", BURGER)),
+                        own = setOf("guardado"),
+                    ),
+                    state = OrderState.NEEDS_REVIEW,
+                )
+                .copy(review = merged)
+        assertThrows(IllegalStateException::class.java) {
+            OrderReviewRules.moveToNewAccount(pending, 5_000) { "nuevo" }
+        }
+        // La captura: cerrada por combinación (con la cuenta destino) frente a cobrada.
+        val closedByMerge =
+            capture()
+                .copy(
+                    sync = DraftSync.ACCOUNT_CLOSED,
+                    tableAccounts = listOf(TableAccountRef("cuenta-b", 0, "")),
+                )
+        assertTrue(closedByMerge.accountMerged)
+        assertFalse(closedByMerge.copy(tableAccounts = emptyList()).accountMerged)
     }
 
     @Test
