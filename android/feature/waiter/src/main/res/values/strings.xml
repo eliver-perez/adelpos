@@ -1,10 +1,133 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Textos del modo Mesero (Fase E). En español del restaurante, sin tecnicismos. -->
 <resources xmlns:tools="http://schemas.android.com/tools" tools:locale="es">
+    <!-- Mesas (§6.1). -->
     <string name="tables_title">Mesas</string>
     <string name="tables_search">Buscar mesa</string>
-    <string name="tables_states_heading">Estados de las mesas</string>
-    <string name="tables_placeholder">Aquí aparecerán las áreas y las mesas del restaurante.</string>
-    <string name="account_title">Cuenta</string>
-    <string name="account_open">Ver cuenta</string>
-    <string name="account_placeholder">Elige una mesa para ver sus cuentas y capturar pedidos.</string>
+    <string name="tables_view_list">Lista</string>
+    <string name="tables_view_map">Mapa</string>
+    <string name="tables_refresh">Actualizar</string>
+    <string name="tables_pending">Pedidos pendientes</string>
+    <string name="tables_offline">Sin conexión: se ven las mesas de la última vez que hubo conexión.</string>
+    <string name="tables_loading">Leyendo las mesas…</string>
+    <string name="tables_empty">Todavía no hay mesas guardadas en esta tableta. Con conexión aparecen aquí.</string>
+    <string name="tables_no_results">Ninguna mesa se llama «%1$s».</string>
+    <string name="tables_no_permission">No tienes permiso para ver las mesas. Pide a un administrador que te lo dé en Personal › Roles.</string>
+    <string name="tables_seats">%1$d lugares</string>
+    <plurals name="tables_accounts">
+        <item quantity="one">%d cuenta</item>
+        <item quantity="many">%d cuentas</item>
+        <item quantity="other">%d cuentas</item>
+    </plurals>
+    <string name="tables_balance">Saldo %1$s</string>
+    <string name="tables_open_table">Ver la mesa</string>
+    <string name="tables_map_area">Área</string>
+
+    <!-- Panel de la mesa: cuentas abiertas (§6.2). -->
+    <string name="table_panel_choose">Elige una mesa para ver sus cuentas y capturar pedidos.</string>
+    <string name="table_panel_accounts">Cuentas abiertas</string>
+    <string name="table_panel_no_accounts">No tiene cuentas abiertas.</string>
+    <string name="table_panel_account">%1$s · folio %2$d</string>
+    <string name="table_panel_new_account">Nueva cuenta</string>
+    <string name="table_panel_new_account_note">La cuenta nace al guardar el primer producto.</string>
+    <string name="table_panel_no_open_permission">Sin permiso para abrir cuentas.</string>
+    <string name="table_panel_out_of_service">Esta mesa está fuera de servicio.</string>
+    <string name="table_panel_my_work">Lo tuyo en esta mesa</string>
+    <string name="table_panel_capture">Captura: %1$s</string>
+    <string name="table_panel_capture_new">cuenta nueva</string>
+    <plurals name="table_panel_products">
+        <item quantity="one">%d producto</item>
+        <item quantity="many">%d productos</item>
+        <item quantity="other">%d productos</item>
+    </plurals>
+
+    <!-- Captura (§6.3). -->
+    <string name="capture_screen_title">Captura</string>
+    <string name="capture_open_order">Ver la cuenta (%1$d)</string>
+    <string name="capture_catalog">Catálogo</string>
+    <string name="capture_new_account">Cuenta nueva</string>
+    <string name="capture_account">%1$s · folio %2$d</string>
+    <string name="capture_sent">Enviado a cocina</string>
+    <string name="capture_to_send">Por enviar</string>
+    <string name="capture_empty">Toca un producto del catálogo para agregarlo.</string>
+    <string name="capture_other_terminal">Capturado en otra terminal</string>
+    <string name="capture_remove">Quitar</string>
+    <string name="capture_change">Cambiar</string>
+    <string name="capture_send">Enviar a cocina</string>
+    <string name="capture_send_no_permission">Sin permiso para enviar a cocina.</string>
+    <string name="capture_capture_no_permission">Sin permiso para capturar pedidos.</string>
+    <string name="capture_total">Total de lo enviado y lo nuevo: %1$s</string>
+    <string name="capture_total_unknown">El importe lo calcula la computadora principal al recibir el pedido.</string>
+    <string name="capture_reference_price">Precio de referencia: %1$s</string>
+    <string name="capture_add">Agregar a la cuenta</string>
+    <string name="capture_update">Guardar el cambio</string>
+    <string name="capture_too_many">Un pedido admite hasta 20 productos distintos. Envía estos y captura el resto después.</string>
+    <string name="capture_nothing">No hay nada tuyo por enviar en esta cuenta.</string>
+    <string name="capture_discard">Descartar la captura</string>
+    <string name="capture_discard_title">¿Descartar la captura?</string>
+    <string name="capture_discard_text">Se quitan los productos que no se han enviado a cocina. Lo enviado no cambia.</string>
+    <string name="capture_discard_confirm">Descartar</string>
+    <string name="capture_cancel">Cancelar</string>
+
+    <!-- Cómo va el guardado del borrador. -->
+    <string name="sync_saved">Guardado en la computadora principal.</string>
+    <string name="sync_pending">Se guarda en esta tableta y se enviará en cuanto haya conexión.</string>
+    <string name="sync_saving">Guardando…</string>
+    <string name="sync_uncertain">No llegó la respuesta del guardado. Se vuelve a intentar sin duplicar nada.</string>
+    <string name="sync_retry">Reintentar</string>
+    <string name="sync_conflict">Otra terminal cambió esta cuenta mientras capturabas.</string>
+    <string name="sync_keep_mine">Conservar mis cambios</string>
+    <string name="sync_discard_mine">Descartar mis cambios</string>
+    <string name="sync_table_has_account">Otra terminal ya abrió una cuenta en esta mesa.</string>
+    <string name="sync_join_account">Agregar a «%1$s»</string>
+    <string name="sync_open_another">Abrir otra cuenta</string>
+    <string name="sync_account_closed_action">Abrir una cuenta nueva en la mesa</string>
+
+    <!-- Lo enviado: modificar o cancelar unidades (§6.3). -->
+    <string name="sent_modify">Modificar</string>
+    <string name="sent_cancel_units">Cancelar unidades</string>
+    <string name="sent_quantity">%1$d ×</string>
+    <string name="sent_cancel_title">Cancelar %1$s</string>
+    <string name="sent_cancel_quantity">Unidades a cancelar</string>
+    <string name="sent_notes">Observaciones para cocina</string>
+    <string name="sent_reason">Motivo</string>
+    <string name="sent_reason_hint">De 5 a 500 caracteres. Queda registrado quién lo hizo.</string>
+    <string name="sent_cancel_confirm">Cancelar unidades</string>
+    <string name="sent_modify_title">Modificar %1$s</string>
+    <string name="sent_modify_preview">Calcular el cambio</string>
+    <string name="sent_modify_confirm">Modificar</string>
+    <string name="sent_modify_quote">Con el cambio, esta partida queda en %1$s.</string>
+    <string name="sent_need_connection">Para modificar o cancelar lo enviado hace falta conexión.</string>
+    <string name="sent_no_edit_permission">Sin permiso para modificar lo enviado.</string>
+    <string name="sent_no_cancel_permission">Sin permiso para cancelar lo enviado.</string>
+    <string name="sent_close">Cerrar</string>
+    <string name="sent_error">%1$s</string>
+
+    <!-- Pedidos pendientes (§7). -->
+    <string name="pending_title">Pedidos pendientes</string>
+    <string name="pending_retry_now">Reintentar ya</string>
+    <string name="pending_empty">No tienes pedidos pendientes.</string>
+    <string name="pending_others">Otros meseros tienen pedidos por enviar en esta tableta: %1$d.</string>
+    <string name="pending_drafts">Capturas sin enviar a cocina</string>
+    <string name="pending_orders">Tus pedidos</string>
+    <string name="pending_captured_at">Capturado a las %1$s</string>
+    <string name="pending_received_at">Recibido a las %1$s</string>
+    <string name="pending_credential">Para enviarlo, vuelve a entrar con tu PIN con conexión.</string>
+    <string name="pending_attempts">Intentos: %1$d</string>
+    <string name="pending_review">Revisar</string>
+    <string name="pending_open_capture">Abrir</string>
+
+    <!-- Requiere tu revisión (§6.4). -->
+    <string name="review_title">Requiere tu revisión</string>
+    <string name="review_intro">La computadora principal encontró cambios. El pedido se envía solo después de que los aceptes.</string>
+    <string name="review_accept">Aceptar los cambios y enviar</string>
+    <string name="review_send">Enviar</string>
+    <string name="review_remove">Quitar del pedido</string>
+    <string name="review_new_account">Abrir una cuenta nueva en la mesa</string>
+    <string name="review_back_to_capture">Corregir en la captura</string>
+    <string name="review_discard">Descartar el pedido</string>
+    <string name="review_discard_title">¿Descartar este pedido?</string>
+    <string name="review_discard_text">No se envió a cocina. Si lo descartas, no se enviará.</string>
+    <string name="review_products">Lo que pediste</string>
+    <string name="review_gone">Este pedido ya no está en la cola.</string>
 </resources>

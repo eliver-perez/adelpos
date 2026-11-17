@@ -116,8 +116,11 @@ interface CaptureService {
     /** Descarta la captura (con la confirmación del mesero). */
     suspend fun discard(captureId: String)
 
-    /** Al salir de la captura: si no hay nada del mesero, se olvida (no deja registro). */
-    suspend fun closeIfIdle(captureId: String)
+    /**
+     * Al salir de la captura: si no hay nada del mesero, se olvida (no deja registro). No espera:
+     * sigue aunque la pantalla ya se haya cerrado.
+     */
+    fun closeIfIdle(captureId: String)
 }
 
 /**
