@@ -136,7 +136,7 @@ dependencies {
     // temporizador del catálogo (CatalogRealtimeContainer).
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.navigation.compose)
-    // Configuración de WorkManager con la fábrica del trabajador de la cola (Configuration.Provider).
+    // WorkManager con la fábrica del trabajador de la cola (Configuration.Provider).
     implementation(libs.work.runtime)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.compose.ui.tooling.preview)
