@@ -7,11 +7,13 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.printToLog
 import androidx.test.core.app.ActivityScenario
@@ -31,6 +33,7 @@ import local.adel.pos.android.core.data.waiter.db.WaiterStorage
 import local.adel.pos.android.core.domain.waiter.OrderState
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.ui.catalog.TAG_CUSTOMIZER_ADD
+import local.adel.pos.android.core.ui.catalog.TAG_PRODUCT_GRID
 import local.adel.pos.android.core.ui.catalog.productTag
 import local.adel.pos.android.core.ui.components.TAG_PIN_KEY_PREFIX
 import local.adel.pos.android.core.ui.components.TAG_PIN_SUBMIT
@@ -66,6 +69,7 @@ import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_REMOVE_PREFIX
 import local.adel.pos.android.feature.waiter.tables.TAG_ACCOUNT_PANE
 import local.adel.pos.android.feature.waiter.tables.TAG_NEW_ACCOUNT
 import local.adel.pos.android.feature.waiter.tables.TAG_OPEN_PENDING
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_LIST
 import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 import local.adel.pos.android.feature.waiter.tables.TAG_TABLE_PREFIX
 import org.junit.After
@@ -178,7 +182,7 @@ class WaiterModeOnGoTest {
         showOrder()
         waitFor("$TAG_DRAFT_ROW_PREFIX$itemId")
         log("enviar a cocina")
-        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        tap(TAG_SEND_TO_KITCHEN)
         log("enviado")
         waitForTables()
         val order = waitForOrder(ids.getValue("table1")) { it.state == OrderState.RECEIVED }
@@ -197,7 +201,7 @@ class WaiterModeOnGoTest {
         pressBack()
         openTable(ids.getValue("table1"))
         waitFor("account-$accountId")
-        compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        tap("account-$accountId")
         showOrder()
         waitFor("$TAG_SENT_ROW_PREFIX${sentVersion(accountId, 0)}")
         val foreign = UUID.randomUUID().toString()
@@ -226,7 +230,7 @@ class WaiterModeOnGoTest {
         addProduct(ids.getValue("tacos"))
         showOrder()
         waitFor("${TAG_SYNC_PREFIX}pending")
-        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        tap(TAG_SEND_TO_KITCHEN)
         waitForTables()
         val order = waitForOrder(ids.getValue("table2")) { it.state == OrderState.QUEUED }
         assertEquals(2, order.lines.single().item.line.quantity)
@@ -273,7 +277,7 @@ class WaiterModeOnGoTest {
         // Mientras tanto, en la principal: la hamburguesa sube y la malteada se agota.
         changePrice(ids.getValue("burger"), "130")
         soldOut(ids.getValue("shake"))
-        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        tap(TAG_SEND_TO_KITCHEN)
         waitForTables()
         val review = waitForOrder(ids.getValue("table3")) { it.state == OrderState.NEEDS_REVIEW }
         val shakeItem =
@@ -283,12 +287,9 @@ class WaiterModeOnGoTest {
         waitFor("${TAG_REVIEW_CHANGE_PREFIX}price_changed")
         waitFor("${TAG_REVIEW_CHANGE_PREFIX}product_sold_out")
         waitForText("$120.00 → $130.00")
-        compose
-            .onNodeWithTag("$TAG_REVIEW_REMOVE_PREFIX$shakeItem")
-            .performScrollTo()
-            .performClick()
+        tap("$TAG_REVIEW_REMOVE_PREFIX$shakeItem")
         waitFor(TAG_REVIEW_ACCEPT)
-        compose.onNodeWithTag(TAG_REVIEW_ACCEPT).performScrollTo().performClick()
+        tap(TAG_REVIEW_ACCEPT)
         val received = waitForOrder(ids.getValue("table3")) { it.state == OrderState.RECEIVED }
         val bill = main.call("GET", "restaurant/accounts/${received.receivedAccountId}").obj
         val lines = bill.getValue("lines").jsonArray.map { it.jsonObject }
@@ -315,7 +316,7 @@ class WaiterModeOnGoTest {
         enterAna()
         openTable(ids.getValue("table1"))
         waitFor("account-$accountId")
-        compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        tap("account-$accountId")
         showOrder()
         waitUntil("la cuenta leída de Go") {
             currentCapture(ids.getValue("table1")).baseRevision > 0
@@ -330,11 +331,11 @@ class WaiterModeOnGoTest {
         // La cuenta ya no está abierta (por el canal de tiempo real, o porque Go rechaza el
         // guardado con «…ya se cobró»): se ofrece una cuenta nueva en la mesa.
         waitFor("${TAG_SYNC_PREFIX}account_closed")
-        compose.onNodeWithTag(TAG_OPEN_ANOTHER).performScrollTo().performClick()
+        tap(TAG_OPEN_ANOTHER)
         waitFor("${TAG_SYNC_PREFIX}saved")
         val moved = currentCapture(ids.getValue("table1"))
         assertTrue(moved.accountId != null && moved.accountId != accountId)
-        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        tap(TAG_SEND_TO_KITCHEN)
         waitForTables()
         val received =
             waitForOrder(ids.getValue("table1")) {
@@ -362,7 +363,7 @@ class WaiterModeOnGoTest {
         enterAna()
         openTable(ids.getValue("table4"))
         waitFor("account-$accountId")
-        compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        tap("account-$accountId")
         showOrder()
         val lines =
             main.call("GET", "restaurant/accounts/$accountId").obj.getValue("lines").jsonArray
@@ -374,7 +375,7 @@ class WaiterModeOnGoTest {
         val burger = byProduct.getValue(ids.getValue("burger"))
         // Cancelar la unidad de tacos, con motivo (sin supervisor).
         waitFor("$TAG_SENT_CANCEL_PREFIX$tacos")
-        compose.onNodeWithTag("$TAG_SENT_CANCEL_PREFIX$tacos").performScrollTo().performClick()
+        tap("$TAG_SENT_CANCEL_PREFIX$tacos")
         compose
             .onNodeWithTag(TAG_SENT_REASON)
             .performTextReplacement("El cliente cambió de opinión")
@@ -382,7 +383,7 @@ class WaiterModeOnGoTest {
         waitUntil("la cancelación en Go") { lineState(accountId, tacos) == "cancelled" }
         // Modificar la hamburguesa: observaciones nuevas, calculadas primero con Go.
         waitFor("$TAG_SENT_MODIFY_PREFIX$burger")
-        compose.onNodeWithTag("$TAG_SENT_MODIFY_PREFIX$burger").performScrollTo().performClick()
+        tap("$TAG_SENT_MODIFY_PREFIX$burger")
         compose.onNodeWithTag(TAG_MODIFY_NOTES).performTextReplacement("sin cebolla")
         compose.onNodeWithTag(TAG_MODIFY_PREVIEW).performClick()
         waitFor(TAG_MODIFY_QUOTE)
@@ -432,10 +433,10 @@ class WaiterModeOnGoTest {
         openTable(ids.getValue("table4"))
         val capture = currentCapture(ids.getValue("table4"))
         waitFor("table-capture-${capture.id}")
-        compose.onNodeWithTag("table-capture-${capture.id}").performScrollTo().performClick()
+        tap("table-capture-${capture.id}")
         addProduct(ids.getValue("tacos"))
         showOrder()
-        compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
+        tap(TAG_SEND_TO_KITCHEN)
         waitForTables()
         val order = waitForOrder(ids.getValue("table4")) { it.state == OrderState.QUEUED }
         // Sustituye el renglón que ya estaba en el borrador de Go, tal como lo vio.
@@ -463,13 +464,21 @@ class WaiterModeOnGoTest {
         scenario = ActivityScenario.launch(MainActivity::class.java)
     }
 
+    /**
+     * Espera a que exista un nodo con [tag]. Lo de una lista perezosa solo existe cuando está
+     * compuesto (en una pantalla chica, el botón «Enviar a cocina» puede quedar abajo): cada
+     * segundo se desplazan hasta él las listas a la vista.
+     */
     private fun waitFor(tag: String, timeout: Long = 40_000) {
+        var nextReveal = 0L
         try {
             compose.waitUntil(timeoutMillis = timeout) {
-                compose
-                    .onAllNodes(hasTestTag(tag), useUnmergedTree = true)
-                    .fetchSemanticsNodes()
-                    .isNotEmpty()
+                present(tag) ||
+                    (System.currentTimeMillis() >= nextReveal &&
+                        run {
+                            nextReveal = System.currentTimeMillis() + REVEAL_EVERY_MILLIS
+                            reveal(tag)
+                        })
             }
         } catch (failure: Throwable) {
             compose.onRoot(useUnmergedTree = true).printToLog(TAG)
@@ -524,16 +533,16 @@ class WaiterModeOnGoTest {
     private fun newAccountOn(tableId: String) {
         showTables()
         waitFor("$TAG_TABLE_PREFIX$tableId")
-        compose.onNodeWithTag("$TAG_TABLE_PREFIX$tableId").performScrollTo().performClick()
+        tap("$TAG_TABLE_PREFIX$tableId")
         waitFor(TAG_NEW_ACCOUNT)
-        compose.onNodeWithTag(TAG_NEW_ACCOUNT).performScrollTo().performClick()
+        tap(TAG_NEW_ACCOUNT)
         waitFor(productTag(loadIds().getValue("burger")))
     }
 
     private fun addProduct(productId: String) {
         backToCatalog()
         waitFor(productTag(productId))
-        compose.onNodeWithTag(productTag(productId)).performScrollTo().performClick()
+        tap(productTag(productId))
         waitFor(TAG_CUSTOMIZER_ADD)
         compose.onNodeWithTag(TAG_CUSTOMIZER_ADD).performClick()
         log("agregado $productId")
@@ -590,10 +599,33 @@ class WaiterModeOnGoTest {
             .fetchSemanticsNodes()
             .isNotEmpty()
 
+    private fun reveal(tag: String): Boolean {
+        for (list in LAZY_LISTS) {
+            if (present(list)) {
+                runCatching {
+                    compose
+                        .onAllNodes(hasTestTag(list), useUnmergedTree = true)
+                        .onFirst()
+                        .performScrollToNode(hasTestTag(tag))
+                }
+                if (present(tag)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /** Toca el nodo con [tag], desplazando hasta él si está en una lista. */
+    private fun tap(tag: String) {
+        waitFor(tag)
+        compose.onNodeWithTag(tag).performScrollTo().performClick()
+    }
+
     private fun openTable(tableId: String) {
         showTables()
         waitFor("$TAG_TABLE_PREFIX$tableId")
-        compose.onNodeWithTag("$TAG_TABLE_PREFIX$tableId").performScrollTo().performClick()
+        tap("$TAG_TABLE_PREFIX$tableId")
     }
 
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
@@ -614,10 +646,7 @@ class WaiterModeOnGoTest {
     // El renglón del pedido que requiere revisión la abre al tocarlo.
     private fun openReview(operationId: String) {
         waitFor("$TAG_PENDING_REVIEW_PREFIX$operationId")
-        compose
-            .onNodeWithTag("$TAG_PENDING_ORDER_PREFIX$operationId")
-            .performScrollTo()
-            .performClick()
+        tap("$TAG_PENDING_ORDER_PREFIX$operationId")
         waitFor(TAG_REVIEW)
     }
 
@@ -824,6 +853,18 @@ class WaiterModeOnGoTest {
         const val POLL_MILLIS = 250L
         const val SETTLE_MILLIS = 1_500L
         const val ROTATION_TIMEOUT_MILLIS = 10_000L
+        const val REVEAL_EVERY_MILLIS = 1_000L
+
+        /** Las listas perezosas del modo Mesero en las que se busca desplazando. */
+        val LAZY_LISTS =
+            listOf(
+                TAG_ORDER_PANEL,
+                TAG_ACCOUNT_PANE,
+                TAG_TABLES_LIST,
+                TAG_PENDING,
+                TAG_REVIEW,
+                TAG_PRODUCT_GRID,
+            )
 
         /** La lista de permisos de mesero de Go (A1-D17), la misma que da la sesión con PIN. */
         val WAITER_PERMISSIONS =
