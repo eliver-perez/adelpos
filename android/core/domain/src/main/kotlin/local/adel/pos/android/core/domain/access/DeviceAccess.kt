@@ -7,7 +7,11 @@ import local.adel.pos.android.core.domain.error.AppError
  * Mesero en la pantalla de entrada (`auth/pin-users`): solo lo que necesita su botón.
  *
  * @param color hexadecimal de la paleta de Go (`#3591d4`) o null; la aplicación nunca lo elige.
- * @param lockedUntilEpochMillis hasta cuándo está bloqueado su PIN por intentos fallidos.
+ * @param lockedUntilEpochMillis hasta cuándo está bloqueado su PIN por intentos fallidos (Go).
+ * @param requiresUnlock su PIN quedó bloqueado hasta que un administrador lo desbloquee (A1-D16:
+ *   tres bloqueos seguidos en 24 horas sin una entrada correcta).
+ * @param offlineEntryClosed solo en la lista sin conexión: su entrada sin conexión está cerrada
+ *   (demasiados fallos o un bloqueo de Go) hasta que entre con conexión.
  */
 data class WaiterProfile(
     val userId: String,
@@ -16,6 +20,8 @@ data class WaiterProfile(
     val color: String?,
     val pinVersion: Int,
     val lockedUntilEpochMillis: Long?,
+    val requiresUnlock: Boolean = false,
+    val offlineEntryClosed: Boolean = false,
 )
 
 /**
@@ -29,8 +35,16 @@ data class WaiterRoster(val waiters: List<WaiterProfile>, val online: Boolean)
  *
  * @param hasServerSession entró con conexión y tiene sesión de Go; si entró sin conexión no la
  *   tiene: lo que capture lo valida Go al recibirlo (cola de la Fase E con su credencial de envío).
+ *   Una entrada sin conexión **nunca** usa una sesión de Go anterior (revisión R3, A1).
+ * @param mustReenterPin su acceso dejó de valer (sesión terminada o revocada, PIN cambiado,
+ *   credencial de envío rechazada): sigue siendo el mesero activo, con su captura y sus pendientes,
+ *   pero la pantalla le pide «Vuelve a escribir tu PIN» antes de seguir (revisión R3, M3).
  */
-data class ActiveWaiter(val profile: WaiterProfile, val hasServerSession: Boolean) {
+data class ActiveWaiter(
+    val profile: WaiterProfile,
+    val hasServerSession: Boolean,
+    val mustReenterPin: Boolean = false,
+) {
     val userId: String
         get() = profile.userId
 }
@@ -42,8 +56,19 @@ sealed interface EntryResult {
     /** PIN incorrecto (con o sin conexión). */
     data object WrongPin : EntryResult
 
-    /** Bloqueado por intentos fallidos hasta [untilEpochMillis] (Go o el límite local). */
-    data class Locked(val untilEpochMillis: Long?) : EntryResult
+    /**
+     * Go bloqueó el PIN por intentos fallidos: hasta [untilEpochMillis] o, con [requiresUnlock],
+     * hasta que un administrador lo desbloquee (A1-D16). También cierra la entrada sin conexión de
+     * ese mesero.
+     */
+    data class Locked(val untilEpochMillis: Long?, val requiresUnlock: Boolean = false) :
+        EntryResult
+
+    /**
+     * La entrada sin conexión de ese mesero está cerrada (demasiados fallos o su PIN bloqueado en
+     * Go): solo puede entrar con conexión.
+     */
+    data object OfflineClosed : EntryResult
 
     /** PIN correcto, pero sin el permiso `waiter_devices.use` (403 `PERMISSION_DENIED`). */
     data object NotAllowed : EntryResult
@@ -139,7 +164,15 @@ interface DeviceAccess {
     fun leave()
 
     /**
-     * Deja de usar el servidor emparejado para emparejar de nuevo (borra todo lo de ese servidor).
+     * Pedidos que no han llegado al servidor (la cola de la Fase E), para mostrarlos **antes** de
+     * confirmar «Emparejar de nuevo»: al confirmarlo pasan a la bitácora y se borran de la cola.
+     */
+    suspend fun pendingOrders(): List<UnsentOrder>
+
+    /**
+     * Deja de usar el servidor emparejado para emparejar de nuevo: los pedidos sin enviar pasan a
+     * la bitácora y se borran **todos los datos de este dispositivo** (registro de borrado: acceso,
+     * catálogo e imágenes y, en la Fase E, la cola).
      */
     suspend fun forgetServer()
 
@@ -150,9 +183,11 @@ interface DeviceAccess {
     fun acknowledgeRetirement()
 
     /**
-     * Otra parte de la aplicación (la cola o el canal de eventos de la Fase E) recibió un error de
-     * Go: `DEVICE_REVOKED` retira el dispositivo, `SESSION_*` regresa al mesero a la entrada con
-     * PIN, `DEVICE_*` y una huella distinta piden emparejar de nuevo.
+     * Otra parte de la aplicación (la cola, el catálogo o el canal de eventos) recibió un error de
+     * Go para el mesero [userId]: `DEVICE_REVOKED` retira el dispositivo; `SESSION_*` y
+     * `OFFLINE_CREDENTIAL_INVALID` dejan a ese mesero activo pero le piden «Vuelve a escribir tu
+     * PIN» (nunca lo sacan ni pierden su trabajo); `DEVICE_*` y una huella distinta piden emparejar
+     * de nuevo.
      */
     fun report(error: AppError, userId: String?)
 }

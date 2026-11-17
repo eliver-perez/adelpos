@@ -6,14 +6,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -23,8 +27,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import local.adel.pos.android.core.domain.access.RepairReason
 import local.adel.pos.android.core.domain.access.UnsentOrder
+import local.adel.pos.android.core.ui.components.LocalUserActivity
 import local.adel.pos.android.core.ui.components.PrimaryButton
 import local.adel.pos.android.core.ui.components.SecondaryButton
+import local.adel.pos.android.core.ui.components.reportsUserActivity
 import local.adel.pos.android.core.ui.icons.AdelIcons
 import local.adel.pos.android.core.ui.theme.AdelTheme
 import local.adel.pos.android.feature.access.R
@@ -53,7 +59,9 @@ fun LoadingScreen(modifier: Modifier = Modifier) {
 /**
  * «Esta tableta necesita emparejarse de nuevo» (§4, como `RepairTerminal` del escritorio): el
  * servidor cambió de identidad (nunca se conecta a otro certificado), ya no reconoce el dispositivo
- * o la autorización guardada ya no se puede leer. «Emparejar de nuevo» pide confirmación.
+ * o la autorización guardada ya no se puede leer. «Emparejar de nuevo» pide confirmación, dice qué
+ * se borra de este dispositivo y muestra antes los pedidos sin enviar, que pasan a la bitácora
+ * (revisión R3, M4).
  */
 @Composable
 fun RepairScreen(
@@ -61,9 +69,12 @@ fun RepairScreen(
     onRepair: () -> Unit,
     onCheckAgain: () -> Unit,
     modifier: Modifier = Modifier,
+    loadPendingOrders: suspend () -> List<UnsentOrder> = { emptyList() },
 ) {
     val words = deviceWords()
     var confirming by rememberSaveable { mutableStateOf(false) }
+    var pending by remember { mutableStateOf(emptyList<UnsentOrder>()) }
+    LaunchedEffect(confirming) { pending = if (confirming) loadPendingOrders() else emptyList() }
     CenteredColumn(modifier = modifier.testTag(TAG_REPAIR)) {
         Text(
             text = stringResource(R.string.repair_title, words.thisDeviceCapital),
@@ -102,8 +113,31 @@ fun RepairScreen(
     if (confirming) {
         AlertDialog(
             onDismissRequest = { confirming = false },
+            modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
             title = { Text(stringResource(R.string.repair_confirm_title)) },
-            text = { Text(stringResource(R.string.repair_confirm_text, words.thisDeviceCapital)) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text =
+                            stringResource(R.string.repair_confirm_text, words.thisDeviceCapital),
+                        modifier = Modifier.testTag(TAG_REPAIR_ERASES),
+                    )
+                    if (pending.isNotEmpty()) {
+                        Text(
+                            text = stringResource(R.string.repair_confirm_pending),
+                            color = AdelTheme.colors.red,
+                        )
+                        Column(modifier = Modifier.testTag(TAG_REPAIR_PENDING)) {
+                            for (order in pending) {
+                                Text(orderLine(order))
+                            }
+                        }
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -265,13 +299,7 @@ fun DeviceLogList(orders: List<UnsentOrder>, onClear: () -> Unit) {
     ) {
         for (order in orders) {
             Text(
-                text =
-                    stringResource(
-                        R.string.log_order_line,
-                        clockTime(order.capturedAtEpochMillis),
-                        order.waiterName,
-                        order.description,
-                    ),
+                text = orderLine(order),
                 style = MaterialTheme.typography.bodyLarge,
                 color = AdelTheme.colors.text,
             )
@@ -285,6 +313,7 @@ fun DeviceLogList(orders: List<UnsentOrder>, onClear: () -> Unit) {
     if (confirming) {
         AlertDialog(
             onDismissRequest = { confirming = false },
+            modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
             title = { Text(stringResource(R.string.log_clear_confirm_title)) },
             text = { Text(stringResource(R.string.log_clear_confirm_text)) },
             confirmButton = {
@@ -306,11 +335,23 @@ fun DeviceLogList(orders: List<UnsentOrder>, onClear: () -> Unit) {
     }
 }
 
+// Un pedido sin enviar: a qué hora, de quién y qué.
+@Composable
+private fun orderLine(order: UnsentOrder): String =
+    stringResource(
+        R.string.log_order_line,
+        clockTime(order.capturedAtEpochMillis),
+        order.waiterName,
+        order.description,
+    )
+
 /** Etiquetas para las pruebas. */
 const val TAG_LOADING = "access-loading"
 const val TAG_REPAIR = "access-repair"
 const val TAG_REPAIR_ACTION = "access-repair-action"
 const val TAG_REPAIR_CONFIRM = "access-repair-confirm"
+const val TAG_REPAIR_ERASES = "access-repair-erases"
+const val TAG_REPAIR_PENDING = "access-repair-pending"
 const val TAG_CHECK_AGAIN = "access-check-again"
 const val TAG_UPDATE_APP = "access-update-app"
 const val TAG_UPDATE_SERVER = "access-update-server"

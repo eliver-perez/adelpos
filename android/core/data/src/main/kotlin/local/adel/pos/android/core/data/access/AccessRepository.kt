@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import local.adel.pos.android.core.data.api.ApiErrors
 import local.adel.pos.android.core.data.api.ApiOutcome
 import local.adel.pos.android.core.data.api.ApiProblem
@@ -26,6 +27,7 @@ import local.adel.pos.android.core.data.db.DeviceLogEntry
 import local.adel.pos.android.core.data.db.KnownWaiterEntity
 import local.adel.pos.android.core.data.db.PairedServerEntity
 import local.adel.pos.android.core.data.session.ServerTransport
+import local.adel.pos.android.core.data.wipe.DeviceDataWipe
 import local.adel.pos.android.core.domain.access.ActiveWaiter
 import local.adel.pos.android.core.domain.access.DeviceAccess
 import local.adel.pos.android.core.domain.access.DeviceStatus
@@ -39,7 +41,6 @@ import local.adel.pos.android.core.domain.access.UnsentOrder
 import local.adel.pos.android.core.domain.access.UnsentOrdersSource
 import local.adel.pos.android.core.domain.access.WaiterProfile
 import local.adel.pos.android.core.domain.access.WaiterRoster
-import local.adel.pos.android.core.domain.access.WaiterWorkGate
 import local.adel.pos.android.core.domain.error.AppError
 import local.adel.pos.android.core.domain.security.SecretSealer
 import local.adel.pos.android.core.domain.security.SecretUnavailableException
@@ -60,8 +61,9 @@ import okhttp3.Headers
  * @param destroyKey borra la llave del Keystore al retirar el dispositivo: todo lo cifrado queda
  *   ilegible aunque algo sobreviviera al borrado.
  * @param isOnline si el dispositivo tiene una red por la que intentar (monitor de conexión).
- * @param work trabajo pendiente de cada mesero (Fase E): un mesero con trabajo nunca se saca.
  * @param unsentOrders pedidos sin enviar que pasan a la bitácora antes de borrar todo (Fase E).
+ * @param wipe registro único de «borrar los datos de este dispositivo» (catálogo, imágenes y, en la
+ *   Fase E, la cola): se usa al retirar el dispositivo y en «Emparejar de nuevo».
  */
 class AccessRepository(
     private val dao: AccessDao,
@@ -70,9 +72,9 @@ class AccessRepository(
     private val identity: ClientIdentity,
     private val relocator: ServerRelocator,
     private val isOnline: () -> Boolean,
-    private val work: WaiterWorkGate,
     private val unsentOrders: UnsentOrdersSource,
     private val scope: CoroutineScope,
+    private val wipe: DeviceDataWipe = DeviceDataWipe(),
     private val wallClock: () -> Long = System::currentTimeMillis,
     private val verifierIterations: Int = PinVerifier.DEFAULT_ITERATIONS,
     private val cpuDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -91,6 +93,9 @@ class AccessRepository(
     private var listed: List<WaiterProfile> = emptyList()
 
     // Sesión de Go de cada mesero en este dispositivo (solo en memoria; cada mesero tiene la suya).
+    // Solo la pone una entrada CON conexión; una entrada sin conexión, una sesión terminada o un
+    // acceso que dejó de valer la quitan (revisión R3, A1): nunca se reutiliza sin que Go haya
+    // verificado el PIN.
     private val sessions = ConcurrentHashMap<String, String>()
 
     override suspend fun start() {
@@ -152,6 +157,8 @@ class AccessRepository(
         mutableActive.value = null
     }
 
+    override suspend fun pendingOrders(): List<UnsentOrder> = unsentOrders.unsentOrders()
+
     override suspend fun forgetServer() {
         mutex.withLock {
             forgetLocked()
@@ -179,19 +186,38 @@ class AccessRepository(
     override fun report(error: AppError, userId: String?) {
         scope.launch {
             mutex.withLock {
-                when (error) {
-                    is AppError.DeviceRevoked -> retireLocked()
-                    is AppError.SessionEnded -> {
-                        if (userId != null) {
-                            sessions.remove(userId)
-                            if (mutableActive.value?.userId == userId) {
-                                mutableActive.value = null
-                            }
-                        }
-                    }
+                when {
+                    error is AppError.DeviceRevoked -> retireLocked()
+                    error is AppError.SessionEnded ->
+                        accessEndedLocked(userId, forgetOfflineEntry = false)
+                    error is AppError.Rejected && error.code == OFFLINE_CREDENTIAL_INVALID ->
+                        // La credencial de envío ya no vale (PIN cambiado, usuario desactivado,
+                        // reemplazada): el verificador tampoco; hace falta entrar con conexión.
+                        accessEndedLocked(userId, forgetOfflineEntry = true)
                     else -> applyErrorLocked(error)
                 }
             }
+        }
+    }
+
+    /**
+     * El acceso de [userId] dejó de valer (sesión terminada o revocada, PIN cambiado, credencial de
+     * envío rechazada; revisión R3, M3): se olvida su sesión (y, con [forgetOfflineEntry], su
+     * verificador y su credencial). Si es el mesero activo, **sigue activo** con su captura y sus
+     * pendientes, pero la pantalla le pide «Vuelve a escribir tu PIN»; nunca se le saca ni se pasa
+     * a otro mesero en silencio.
+     */
+    private suspend fun accessEndedLocked(userId: String?, forgetOfflineEntry: Boolean) {
+        if (userId == null) {
+            return
+        }
+        sessions.remove(userId)
+        if (forgetOfflineEntry) {
+            dao.deleteKnownWaiters(listOf(userId))
+        }
+        val active = mutableActive.value
+        if (active != null && active.userId == userId) {
+            mutableActive.value = active.copy(hasServerSession = false, mustReenterPin = true)
         }
     }
 
@@ -216,14 +242,17 @@ class AccessRepository(
     fun serverTransport(): ServerTransport? = connection?.transport()
 
     /**
-     * Cabeceras de autenticación del dispositivo (`X-Device-ID`, `X-Device-Token`) y, si hay un
-     * mesero activo **con sesión de Go**, su `Authorization: Bearer`. null sin servidor emparejado.
-     * Si la respuesta es 401 `DEVICE_REVOKED`, `SESSION_*` o la huella cambió, llamar a [report].
+     * Cabeceras de autenticación para una operación **del mesero [userId]** (el dueño de la
+     * operación, que la guarda al crearla; revisión R3, M5): las del dispositivo (`X-Device-ID`,
+     * `X-Device-Token`) y, si ese mesero tiene **sesión de Go** (entró con conexión y no terminó),
+     * su `Authorization: Bearer`. Nunca las de otro mesero: una operación de Ana que termina
+     * después de cambiar a Beto sale con la sesión de Ana (o sin sesión). null sin servidor
+     * emparejado. Si la respuesta es 401 `DEVICE_REVOKED`, `SESSION_*` u
+     * `OFFLINE_CREDENTIAL_INVALID`, o la huella cambió, llamar a [report] con el mismo [userId].
      */
-    fun requestHeaders(): Headers? {
+    fun requestHeaders(userId: String): Headers? {
         val credentials = connection?.credentials ?: return null
-        val session = mutableActive.value?.userId?.let(sessions::get)
-        return credentials.headers(session)
+        return credentials.headers(sessions[userId])
     }
 
     /**
@@ -351,8 +380,9 @@ class AccessRepository(
     }
 
     // Con la lista de Go: borra verificador y credencial de envío de quien ya no aparece o cambió
-    // de PIN, y actualiza nombre, inicial y color de los demás. Si el mesero activo dejó de valer
-    // y no tiene trabajo pendiente, vuelve a la entrada.
+    // de PIN, cierra la entrada sin conexión de quien tiene el PIN bloqueado en Go (M2) y actualiza
+    // nombre, inicial y color de los demás. Si el mesero activo dejó de valer, sigue activo y se le
+    // pide volver a escribir su PIN (M3).
     private suspend fun invalidateLocked(profiles: List<WaiterProfile>) {
         val known = dao.knownWaiters()
         val stale =
@@ -362,7 +392,6 @@ class AccessRepository(
             )
         if (stale.isNotEmpty()) {
             dao.deleteKnownWaiters(stale.toList())
-            stale.forEach(sessions::remove)
         }
         val byId = profiles.associateBy(WaiterProfile::userId)
         for (waiter in known) {
@@ -370,17 +399,22 @@ class AccessRepository(
             if (waiter.userId in stale) {
                 continue
             }
+            val lockedInGo = profile.lockedUntilEpochMillis != null || profile.requiresUnlock
+            if (lockedInGo && !waiter.offlineClosed) {
+                dao.updateOfflineAttempts(waiter.userId, waiter.offlineFailures, closed = true)
+            }
             if (
                 profile.name != waiter.name ||
                     profile.initial != waiter.initial ||
                     profile.color != waiter.color
             ) {
-                dao.saveKnownWaiter(waiter.withProfile(profile))
+                dao.knownWaiter(waiter.userId)?.let { current ->
+                    dao.saveKnownWaiter(current.withProfile(profile))
+                }
             }
         }
-        val active = mutableActive.value
-        if (active != null && active.userId in stale && !work.workOf(active.userId).blocksSwitch) {
-            mutableActive.value = null
+        for (userId in stale) {
+            accessEndedLocked(userId, forgetOfflineEntry = false)
         }
     }
 
@@ -400,7 +434,7 @@ class AccessRepository(
                 mutableActive.value = waiter
                 return EntryResult.Entered(waiter)
             }
-            is ApiOutcome.Rejected -> return entryRejectedLocked(outcome.problem)
+            is ApiOutcome.Rejected -> return entryRejectedLocked(userId, outcome.problem)
             is ApiOutcome.NoAnswer -> {
                 if (outcome.error == AppError.ServerIdentityChanged) {
                     applyErrorLocked(outcome.error)
@@ -431,11 +465,20 @@ class AccessRepository(
         return known.copy(pinVersion = pinVersion, lockedUntilEpochMillis = null)
     }
 
-    private suspend fun entryRejectedLocked(problem: ApiProblem): EntryResult =
+    // Rechazos de pin-login. Un PIN incorrecto con conexión cuenta en el mismo límite que los de
+    // sin conexión, y un bloqueo de Go cierra la entrada sin conexión (revisión R3, M2): el
+    // presupuesto de intentos es uno solo, con o sin red.
+    private suspend fun entryRejectedLocked(userId: String, problem: ApiProblem): EntryResult =
         when (problem.code) {
-            "PIN_INVALID",
+            "PIN_INVALID" -> {
+                countOfflineFailureLocked(userId)
+                EntryResult.WrongPin
+            }
             "VALIDATION_ERROR" -> EntryResult.WrongPin
-            "PIN_LOCKED" -> EntryResult.Locked(problem.lockedUntil())
+            "PIN_LOCKED" -> {
+                closeOfflineEntryLocked(userId)
+                EntryResult.Locked(problem.lockedUntil(), requiresUnlock = problem.requiresUnlock())
+            }
             "PERMISSION_DENIED" -> EntryResult.NotAllowed
             else -> {
                 val error = ApiErrors.toAppError(problem)
@@ -443,6 +486,27 @@ class AccessRepository(
                 EntryResult.Failed(error)
             }
         }
+
+    // Un fallo más para el límite sin conexión de un mesero conocido aquí.
+    private suspend fun countOfflineFailureLocked(userId: String) {
+        val known = dao.knownWaiter(userId) ?: return
+        val next =
+            OfflineAttemptPolicy.afterFailure(
+                LocalAttempts(known.offlineFailures, known.offlineClosed),
+            )
+        dao.updateOfflineAttempts(userId, next.failures, next.closed)
+    }
+
+    // Go bloqueó el PIN: la entrada sin conexión de ese mesero se cierra hasta que entre con
+    // conexión.
+    private suspend fun closeOfflineEntryLocked(userId: String) {
+        val known = dao.knownWaiter(userId) ?: return
+        val next =
+            OfflineAttemptPolicy.afterServerLock(
+                LocalAttempts(known.offlineFailures, known.offlineClosed),
+            )
+        dao.updateOfflineAttempts(userId, next.failures, next.closed)
+    }
 
     // Guarda (o renueva) el verificador local y la credencial de envío, cifrados con el Keystore.
     // Si el Keystore falla, el mesero entra igual con conexión, solo que sin entrada sin conexión.
@@ -481,26 +545,23 @@ class AccessRepository(
                 sealedVerifier = sealedVerifier,
                 sealedOfflineCredential = sealedCredential,
                 lastOnlineEntryMillis = now,
-                localFailures = 0,
-                localWindowStartMillis = now,
-                localLockedUntilMillis = null,
+                // Go acaba de verificar el PIN: los fallos vuelven a cero y la entrada sin conexión
+                // se abre (OfflineAttemptPolicy.afterOnlineSuccess).
+                offlineFailures = OfflineAttemptPolicy.afterOnlineSuccess().failures,
+                offlineClosed = OfflineAttemptPolicy.afterOnlineSuccess().closed,
             ),
         )
     }
 
-    // Sin conexión: solo quien ya entró con conexión aquí, con su verificador y el límite local.
+    // Sin conexión: solo quien ya entró con conexión aquí, con su verificador y el límite local,
+    // que no depende de ningún reloj (revisión R3, M1). La entrada sin conexión nunca da una sesión
+    // de Go: la que el mesero tuviera en memoria de una entrada anterior se olvida (R3, A1).
     private suspend fun enterOfflineLocked(userId: String, pin: String): EntryResult {
         val known = dao.knownWaiter(userId)
         val sealed = known?.sealedVerifier ?: return EntryResult.UnknownOffline
-        val now = wallClock()
-        val attempts =
-            LocalAttempts(
-                known.localFailures,
-                known.localWindowStartMillis,
-                known.localLockedUntilMillis,
-            )
-        OfflineAttemptPolicy.lockedUntil(attempts, now)?.let {
-            return EntryResult.Locked(it)
+        val attempts = LocalAttempts(known.offlineFailures, known.offlineClosed)
+        if (attempts.closed) {
+            return EntryResult.OfflineClosed
         }
         val verifier =
             try {
@@ -513,26 +574,16 @@ class AccessRepository(
             }
         val matches = withContext(cpuDispatcher) { verifier.matches(pin) }
         if (!matches) {
-            val next = OfflineAttemptPolicy.afterFailure(attempts, now)
-            dao.updateLocalAttempts(
-                userId,
-                next.failures,
-                next.windowStartEpochMillis,
-                next.lockedUntilEpochMillis,
-            )
-            val lockedUntil = OfflineAttemptPolicy.lockedUntil(next, now)
-            if (lockedUntil != null) {
-                return EntryResult.Locked(lockedUntil)
+            val next = OfflineAttemptPolicy.afterFailure(attempts)
+            dao.updateOfflineAttempts(userId, next.failures, next.closed)
+            if (next.closed) {
+                return EntryResult.OfflineClosed
             }
             return EntryResult.WrongPin
         }
-        val reset = OfflineAttemptPolicy.afterSuccess()
-        dao.updateLocalAttempts(
-            userId,
-            reset.failures,
-            now,
-            reset.lockedUntilEpochMillis,
-        )
+        val next = OfflineAttemptPolicy.afterOfflineSuccess(attempts)
+        dao.updateOfflineAttempts(userId, next.failures, next.closed)
+        sessions.remove(userId)
         val waiter = ActiveWaiter(known.profile(), hasServerSession = false)
         mutableActive.value = waiter
         return EntryResult.Entered(waiter)
@@ -580,20 +631,30 @@ class AccessRepository(
         mutableStatus.value = DeviceStatus.Retired(deviceLog())
     }
 
+    // Retirar el dispositivo o emparejarlo de nuevo (revisión R3, M4), en este orden:
+    // 1. los pedidos sin enviar pasan a la bitácora (se conserva hasta que alguien la borra);
+    // 2. se borran los datos de este dispositivo de todo el registro (catálogo, imágenes y, en la
+    //    Fase E, la cola con su trabajo de WorkManager);
+    // 3. se olvidan el emparejamiento, los meseros, sus verificadores y credenciales;
+    // 4. se destruye la llave del Keystore: lo cifrado que quedara ya no se puede leer.
     private suspend fun forgetLocked() {
         val now = wallClock()
         val unsent = unsentOrders.unsentOrders()
-        dao.forgetServer(
-            unsent.map { order ->
-                DeviceLogEntry(
-                    createdAtMillis = now,
-                    kind = DeviceLogEntry.KIND_UNSENT_ORDER,
-                    waiterName = order.waiterName,
-                    description = order.description,
-                    capturedAtMillis = order.capturedAtEpochMillis,
-                )
-            },
-        )
+        if (unsent.isNotEmpty()) {
+            dao.addToLog(
+                unsent.map { order ->
+                    DeviceLogEntry(
+                        createdAtMillis = now,
+                        kind = DeviceLogEntry.KIND_UNSENT_ORDER,
+                        waiterName = order.waiterName,
+                        description = order.description,
+                        capturedAtMillis = order.capturedAtEpochMillis,
+                    )
+                },
+            )
+        }
+        wipe.eraseAll()
+        dao.forgetServer(emptyList())
         sessions.clear()
         listed = emptyList()
         mutableActive.value = null
@@ -617,18 +678,12 @@ class AccessRepository(
                 )
             }
 
-    private suspend fun knownProfiles(): List<WaiterProfile> {
-        val now = wallClock()
-        return dao.knownWaiters()
+    // Los meseros que pueden intentar entrar sin conexión aquí; los de entrada cerrada se muestran
+    // con su aviso («Entra con conexión»).
+    private suspend fun knownProfiles(): List<WaiterProfile> =
+        dao.knownWaiters()
             .filter { it.sealedVerifier != null }
-            .map { waiter ->
-                waiter
-                    .profile()
-                    .copy(
-                        lockedUntilEpochMillis = waiter.localLockedUntilMillis?.takeIf { it > now },
-                    )
-            }
-    }
+            .map { waiter -> waiter.profile().copy(offlineEntryClosed = waiter.offlineClosed) }
 
     private fun ready(entity: PairedServerEntity, online: Boolean) =
         DeviceStatus.Ready(
@@ -646,6 +701,7 @@ class AccessRepository(
             color = user.color,
             pinVersion = user.pinVersion,
             lockedUntilEpochMillis = user.lockedUntil?.let(::epochMillis),
+            requiresUnlock = user.requiresUnlock,
         )
 
     private fun KnownWaiterEntity.profile() =
@@ -662,9 +718,8 @@ class AccessRepository(
             sealedVerifier = sealedVerifier,
             sealedOfflineCredential = sealedOfflineCredential,
             lastOnlineEntryMillis = lastOnlineEntryMillis,
-            localFailures = localFailures,
-            localWindowStartMillis = localWindowStartMillis,
-            localLockedUntilMillis = localLockedUntilMillis,
+            offlineFailures = offlineFailures,
+            offlineClosed = offlineClosed,
         )
 
     // `details.locked_until` de 429 PIN_LOCKED (RFC 3339), en milisegundos.
@@ -676,7 +731,17 @@ class AccessRepository(
         return epochMillis(value.content)
     }
 
+    // `details.requires_unlock` de 429 PIN_LOCKED (A1-D16): bloqueado hasta que lo desbloquee un
+    // administrador.
+    private fun ApiProblem.requiresUnlock(): Boolean {
+        val value = details?.get("requires_unlock") as? JsonPrimitive ?: return false
+        return value.booleanOrNull == true
+    }
+
     companion object {
+        /** Credencial de envío que ya no vale (`submitOfflineOrder`). */
+        const val OFFLINE_CREDENTIAL_INVALID = "OFFLINE_CREDENTIAL_INVALID"
+
         /** Propósito del cifrado de la credencial del dispositivo. */
         const val DEVICE_PURPOSE = "device-credential"
         private val PIN_PATTERN = Regex("^[0-9]{4,6}$")

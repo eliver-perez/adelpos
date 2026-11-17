@@ -10,6 +10,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -23,6 +25,7 @@ import local.adel.pos.android.core.domain.access.DeviceAccess
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.EntryResult
 import local.adel.pos.android.core.domain.access.IdleLock
+import local.adel.pos.android.core.domain.access.UnsentOrder
 import local.adel.pos.android.core.domain.access.WaiterProfile
 import local.adel.pos.android.core.domain.access.WaiterRoster
 import local.adel.pos.android.core.domain.access.WaiterWork
@@ -38,6 +41,7 @@ import local.adel.pos.android.core.domain.pairing.ServerSearch
 import local.adel.pos.android.feature.access.findserver.FindServerViewModel
 import local.adel.pos.android.feature.access.pin.EntryMessage
 import local.adel.pos.android.feature.access.pin.PinEntryViewModel
+import local.adel.pos.android.feature.access.pin.ReenterPinViewModel
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,9 +52,10 @@ import org.junit.Test
 
 /**
  * ViewModels de la entrada en la JVM con un acceso falso: el PIN nunca se guarda en el estado que
- * Android escribe a disco, los mensajes de cada resultado, el bloqueo por inactividad que regresa a
- * la entrada (y no con trabajo pendiente), el cambio de mesero bloqueado con pedidos sin enviar, la
- * comprobación al recuperar la red y la espera del código cada 2 s.
+ * Android escribe a disco, los mensajes de cada resultado, el bloqueo por inactividad del proceso
+ * (que volver a abrir la pantalla no reinicia; revisión R3, A2), «Vuelve a escribir tu PIN», el
+ * cambio de mesero bloqueado con pedidos sin enviar, la comprobación al recuperar la red y la
+ * espera del código cada 2 s.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccessViewModelsTest {
@@ -112,6 +117,8 @@ class AccessViewModelsTest {
             mutableActive.value = null
         }
 
+        override suspend fun pendingOrders(): List<UnsentOrder> = emptyList()
+
         override suspend fun forgetServer() = Unit
 
         override suspend fun clearDeviceLog() = Unit
@@ -152,6 +159,9 @@ class AccessViewModelsTest {
 
             for ((result, message) in
                 listOf(
+                    EntryResult.Locked(null, requiresUnlock = true) to
+                        EntryMessage.Locked(null, requiresUnlock = true),
+                    EntryResult.OfflineClosed to EntryMessage.OfflineClosed,
                     EntryResult.NotAllowed to EntryMessage.NotAllowed,
                     EntryResult.UnknownOffline to EntryMessage.UnknownOffline,
                     EntryResult.Failed(AppError.Unreachable) to EntryMessage.Unreachable,
@@ -206,11 +216,37 @@ class AccessViewModelsTest {
             )
         }
 
+    // La vigilancia del proceso, como AppContainer.startIdleLock: bloquear es volver a la lista
+    // si sigue siendo el mismo mesero.
+    private fun TestScope.superviseLikeTheProcess(
+        access: FakeAccess,
+        idleLock: IdleLock,
+        foreground: MutableStateFlow<Boolean>,
+    ) {
+        backgroundScope.launch {
+            idleLock.supervise(
+                waiters = access.activeWaiter.map { it?.userId },
+                timeouts =
+                    access.status.map {
+                        (it as? DeviceStatus.Ready)?.idleLockSeconds ?: IdleLock.DEFAULT_SECONDS
+                    },
+                foreground = foreground,
+            ) { userId ->
+                if (access.activeWaiter.value?.userId == userId) {
+                    access.leave()
+                }
+            }
+        }
+    }
+
     @Test
     fun elBloqueoPorInactividadRegresaALaEntradaSalvoConTrabajo() =
         runTest(dispatcher) {
-            val access = FakeAccess()
             val link = MutableStateFlow(LinkState.ONLINE)
+            val foreground = MutableStateFlow(true)
+            val access = FakeAccess()
+            val idle = IdleLock(clock = { testScheduler.currentTime }, work = { WaiterWork.NONE })
+            superviseLikeTheProcess(access, idle, foreground)
             gate(access, WaiterWork.NONE, link, this)
             access.mutableActive.value = ActiveWaiter(ana, hasServerSession = true)
             runCurrent()
@@ -222,12 +258,96 @@ class AccessViewModelsTest {
             assertNull("a los 60 s sin uso vuelve a la entrada", access.mutableActive.value)
 
             val busy = FakeAccess()
-            gate(busy, WaiterWork(captureInProgress = true, unsentOrders = 0), link, this)
+            val busyWork = WaiterWork(captureInProgress = true, unsentOrders = 0)
+            superviseLikeTheProcess(
+                busy,
+                IdleLock(clock = { testScheduler.currentTime }, work = { busyWork }),
+                foreground,
+            )
             busy.mutableActive.value = ActiveWaiter(ana, hasServerSession = true)
             runCurrent()
             advanceTimeBy(10 * 60_000)
             runCurrent()
             assertTrue("con una captura en curso no se bloquea", busy.mutableActive.value != null)
+            store.clear()
+        }
+
+    @Test
+    fun volverAAbrirLaPantallaNoReiniciaElPlazoDelMeseroAnterior() =
+        runTest(dispatcher) {
+            val link = MutableStateFlow(LinkState.ONLINE)
+            val foreground = MutableStateFlow(true)
+            val access = FakeAccess()
+            // El reloj del bloqueo sigue contando con el dispositivo dormido (elapsedRealtime);
+            // la espera de las corrutinas, no.
+            var asleepMillis = 0L
+            val idle =
+                IdleLock(
+                    clock = { testScheduler.currentTime + asleepMillis },
+                    work = { WaiterWork.NONE },
+                )
+            superviseLikeTheProcess(access, idle, foreground)
+            val first = ViewModelStore()
+            fun open(store: ViewModelStore): AccessViewModel =
+                ViewModelProvider.create(
+                        store,
+                        viewModelFactory {
+                            initializer {
+                                AccessViewModel(
+                                    AccessDependencies(
+                                        access = access,
+                                        pairing = NoPairing,
+                                        work = { WaiterWork.NONE },
+                                        idleLock = idle,
+                                        linkState = link,
+                                    ),
+                                )
+                            }
+                        },
+                    )[AccessViewModel::class]
+            open(first)
+            access.mutableActive.value = ActiveWaiter(ana, hasServerSession = true)
+            runCurrent()
+            advanceTimeBy(30_000)
+            runCurrent()
+            // Atrás en la raíz (Android 8 a 11): la actividad y su ViewModelStore se destruyen y
+            // la aplicación pasa a segundo plano; el proceso sigue vivo con Ana activa. El
+            // dispositivo se duerme: la espera no avanza, así que solo lo ve el primer plano.
+            first.clear()
+            foreground.value = false
+            runCurrent()
+            // Una hora después alguien abre la aplicación: se bloquea en ese momento, sin esperar
+            // ni conceder un plazo nuevo.
+            asleepMillis += 60 * 60_000
+            foreground.value = true
+            val second = ViewModelStore()
+            open(second)
+            runCurrent()
+            assertNull("el mesero anterior ya no está a la vista", access.activeWaiter.value)
+            second.clear()
+        }
+
+    @Test
+    fun volverAEscribirElPinEntraComoElMismoMeseroYElPinSoloViveEnMemoria() =
+        runTest(dispatcher) {
+            val access = FakeAccess()
+            access.mutableActive.value =
+                ActiveWaiter(ana, hasServerSession = false, mustReenterPin = true)
+            val viewModel = owned("reenter") { ReenterPinViewModel(access, "ana") }
+            access.next = EntryResult.Locked(null, requiresUnlock = true)
+            "4829".forEach(viewModel::onDigit)
+            viewModel.submit()
+            advanceUntilIdle()
+            assertEquals(0, viewModel.pinLength)
+            assertEquals(EntryMessage.Locked(null, requiresUnlock = true), viewModel.message)
+            assertEquals("sigue siendo Ana", "ana", access.activeWaiter.value?.userId)
+            access.next = EntryResult.Entered(ActiveWaiter(ana, hasServerSession = true))
+            "4829".forEach(viewModel::onDigit)
+            viewModel.submit()
+            advanceUntilIdle()
+            assertNull(viewModel.message)
+            assertEquals(listOf("4829", "4829"), access.pins)
+            assertFalse(access.activeWaiter.value!!.mustReenterPin)
             store.clear()
         }
 
