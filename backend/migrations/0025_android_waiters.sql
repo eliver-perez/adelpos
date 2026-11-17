@@ -30,11 +30,14 @@ ALTER TABLE app.users
         CONSTRAINT users_badge_color_check CHECK (badge_color IS NULL OR badge_color ~ '^#[0-9a-f]{6}$'),
     ADD CONSTRAINT users_pin_fields_check CHECK ((pin_hash IS NULL) = (pin_set_at IS NULL));
 
--- 2. Intentos fallidos del PIN y su bloqueo (§3.1, A1-D5). Son por usuario, no por dispositivo: 5 fallos dentro de 15
---    minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos (la contraseña no se bloquea; su
---    límite sigue siendo por usuario y terminal en login_attempts). Al bloquearse, el contador vuelve a cero: al vencer
---    el bloqueo hay otros 5 intentos. last_device_id es el dispositivo del último fallo (el que provocó el bloqueo).
---    Un administrador con users.manage lo desbloquea; un acierto borra la fila.
+-- 2. Intentos fallidos del PIN y su bloqueo (§3.1, A1-D5 y A1-D16). Son por usuario, no por dispositivo: 5 fallos
+--    dentro de 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos (la contraseña no se
+--    bloquea; su límite sigue siendo por usuario y terminal en login_attempts). Al bloquearse, el contador vuelve a
+--    cero: al vencer el bloqueo hay otros 5 intentos. last_device_id es el dispositivo del último fallo (el que provocó
+--    el bloqueo). Los bloqueos forman una serie que empieza con el primero (lock_series_started_at) y dura 24 horas:
+--    el tercero de la serie (locks = 3) deja el PIN bloqueado hasta que un administrador lo desbloquee
+--    (requires_unlock, sin locked_until). Un administrador con users.manage lo desbloquea (borra la fila); un acierto
+--    también borra la fila, con su serie.
 CREATE TABLE app.pin_attempts (
     user_id uuid CONSTRAINT pin_attempts_pkey PRIMARY KEY
         CONSTRAINT pin_attempts_user_id_fkey REFERENCES app.users(id),
@@ -43,7 +46,15 @@ CREATE TABLE app.pin_attempts (
     window_start timestamptz NOT NULL DEFAULT now(),
     locked_until timestamptz,
     last_device_id uuid
-        CONSTRAINT pin_attempts_last_device_id_fkey REFERENCES app.devices(id)
+        CONSTRAINT pin_attempts_last_device_id_fkey REFERENCES app.devices(id),
+    locks integer NOT NULL DEFAULT 0
+        CONSTRAINT pin_attempts_locks_check CHECK (locks BETWEEN 0 AND 3),
+    lock_series_started_at timestamptz,
+    requires_unlock boolean NOT NULL DEFAULT false,
+    CONSTRAINT pin_attempts_series_check CHECK ((locks = 0) = (lock_series_started_at IS NULL)),
+    CONSTRAINT pin_attempts_requires_unlock_check CHECK (
+        NOT requires_unlock OR (locked_until IS NULL AND locks = 3)
+    )
 );
 
 -- 3. Credencial de envío por mesero y dispositivo (A1-D1). La emite auth/pin-login junto con la sesión y solo sirve para
@@ -87,7 +98,13 @@ ALTER TABLE app.devices
     ADD COLUMN idle_lock_seconds integer NOT NULL DEFAULT 120
         CONSTRAINT devices_idle_lock_seconds_check CHECK (idle_lock_seconds BETWEEN 30 AND 3600);
 
--- 5. Permiso para entrar con PIN (§3.1, A1-D2). La lista de usuarios del dispositivo y la entrada con PIN solo aceptan a
+-- 5. Sesiones abiertas con PIN (A1-D17). Una sesión de auth/pin-login solo tiene los permisos del usuario que están en
+--    la lista cerrada de mesero (administration/waiter_scope.go): aunque la persona sea administrador, lo administrativo
+--    sigue con contraseña en la computadora. Las sesiones existentes son de contraseña (false); ninguna cambia.
+ALTER TABLE app.sessions
+    ADD COLUMN opened_with_pin boolean NOT NULL DEFAULT false;
+
+-- 6. Permiso para entrar con PIN (§3.1, A1-D2). La lista de usuarios del dispositivo y la entrada con PIN solo aceptan a
 --    usuarios activos con este permiso efectivo (rol más excepciones individuales). Se concede al administrador y al rol
 --    Mesero; no tiene efecto hasta que alguien tenga PIN. Ningún otro permiso de los roles existentes cambia: los demás
 --    permisos del mesero se asignan en Personal › Roles (docs/ANDROID_INSTALAR.md). En una instalación nueva los roles
@@ -99,7 +116,9 @@ INSERT INTO app.role_permissions(role_id, permission_key)
 SELECT id, 'waiter_devices.use' FROM app.roles WHERE code IN ('administrator', 'waiter');
 
 COMMENT ON TABLE app.pin_attempts IS
-    'Intentos fallidos del PIN por usuario y su bloqueo de 5 minutos (etapa A1, fase B)';
+    'Intentos fallidos del PIN por usuario, su bloqueo de 5 minutos y el que espera a un administrador (etapa A1, fase B)';
+COMMENT ON COLUMN app.sessions.opened_with_pin IS
+    'Sesión abierta con PIN en un dispositivo de meseros: solo permisos de mesero (etapa A1, A1-D17)';
 COMMENT ON TABLE app.offline_order_credentials IS
     'Credencial de envío de pedidos sin conexión por mesero y dispositivo; solo su SHA-256 (etapa A1, fase B)';
 
@@ -108,7 +127,7 @@ COMMENT ON TABLE app.offline_order_credentials IS
 -- coordinador en docs/ETAPA_A1_AVANCE.md)
 -- =====================================================================================================================
 
--- 6. Renglón con que se capturó cada partida confirmada (A1-D6). Al confirmar el borrador («Enviar a cocina») o un
+-- 7. Renglón con que se capturó cada partida confirmada (A1-D6). Al confirmar el borrador («Enviar a cocina») o un
 --    pedido capturado sin conexión, cada partida guarda el identificador que el cliente dio a su renglón al capturarlo
 --    (el id del renglón del borrador o el de la partida del pedido). Así, cuando un pedido sin conexión dice qué
 --    renglones del borrador sustituye (replaces_draft_items), Go distingue un renglón que ya se envió a cocina desde

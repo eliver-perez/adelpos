@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,7 @@ import (
 	"local/ad-el-pos/server/internal/administration"
 	"local/ad-el-pos/server/internal/database"
 	"local/ad-el-pos/server/internal/httpapi"
+	productinfo "local/ad-el-pos/server/internal/product"
 )
 
 // pinActor es quien hace la petición: la credencial del dispositivo y, según el caso, la sesión o la credencial de
@@ -31,6 +34,8 @@ type pinActor struct {
 	secret     string
 	session    string
 	credential string
+	// headers sustituye cabeceras del cliente en un caso concreto (por ejemplo, otro X-Client-Kind).
+	headers map[string]string
 }
 
 type pinEnvironment struct {
@@ -38,6 +43,9 @@ type pinEnvironment struct {
 	ctx     context.Context
 	pool    *pgxpool.Pool
 	handler func(actor pinActor, method, route string, body any) *httptest.ResponseRecorder
+	// android son los dispositivos de meseros: sus peticiones van como la aplicación Android (X-Client-Kind: android,
+	// 0.1.0); las demás, como el escritorio (revisión R3, B2: el tipo debe coincidir con el del dispositivo).
+	android map[string]bool
 }
 
 // call hace la petición y exige el estado; devuelve el cuerpo decodificado.
@@ -76,6 +84,19 @@ func (env *pinEnvironment) scalar(query string, args ...any) int {
 	return value
 }
 
+// timestampsAndIDs reconoce fechas RFC 3339 y UUID dentro del JSON de la auditoría.
+var timestampsAndIDs = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:\d{2})|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+// adminUserID es el identificador del usuario admin del asistente.
+func adminUserID(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	var id string
+	if err := pool.QueryRow(context.Background(), "SELECT id FROM app.users WHERE username='admin'").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func pinTestID() string {
 	var raw [16]byte
 	_, _ = rand.Read(raw[:])
@@ -95,6 +116,7 @@ func (env *pinEnvironment) waiterDevice(name string) pinActor {
 	if err != nil {
 		env.t.Fatal(err)
 	}
+	env.android[id] = true
 	return pinActor{device: id, secret: secret}
 }
 
@@ -136,7 +158,7 @@ func TestStageA1WaiterPIN(t *testing.T) {
 	handler := httpapi.New(func(ctx context.Context) database.Health {
 		return database.Probe(ctx, pool)
 	}, nil, slog.New(slog.NewJSONHandler(io.Discard, nil)), service)
-	env := &pinEnvironment{t: t, ctx: ctx, pool: pool}
+	env := &pinEnvironment{t: t, ctx: ctx, pool: pool, android: map[string]bool{}}
 	env.handler = func(actor pinActor, method, route string, body any) *httptest.ResponseRecorder {
 		var reader io.Reader = bytes.NewReader(nil)
 		if body != nil {
@@ -157,9 +179,18 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		if actor.credential != "" {
 			request.Header.Set(administration.OfflineCredentialHeader, actor.credential)
 		}
-		// Como la aplicación Android: su versión y su tipo (la 0.1.0 pasa con la mínima por tipo de cliente).
-		request.Header.Set(httpapi.ClientVersionHeader, "0.1.0")
-		request.Header.Set(httpapi.ClientKindHeader, "android")
+		// Como la aplicación de cada dispositivo: Android 0.1.0 (pasa con la mínima por tipo de cliente) o el escritorio
+		// con la versión del producto. Una cabecera explícita del caso la sustituye.
+		if env.android[actor.device] {
+			request.Header.Set(httpapi.ClientVersionHeader, "0.1.0")
+			request.Header.Set(httpapi.ClientKindHeader, "android")
+		} else if actor.device != "" {
+			request.Header.Set(httpapi.ClientVersionHeader, productinfo.Read().Version)
+			request.Header.Set(httpapi.ClientKindHeader, "desktop")
+		}
+		for key, value := range actor.headers {
+			request.Header.Set(key, value)
+		}
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		return response
@@ -259,7 +290,7 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		}
 		entry := users[0].(map[string]any)
 		if entry["id"] != ana || entry["name"] != "Ana" || entry["initial"] != "A" || entry["color"] != blue ||
-			entry["pin_version"] != float64(1) || entry["locked_until"] != nil || len(entry) != 6 {
+			entry["pin_version"] != float64(1) || entry["locked_until"] != nil || entry["requires_unlock"] != false || len(entry) != 7 {
 			t.Fatalf("Ana en la lista: %v", entry)
 		}
 		if env.scalar("SELECT count(*) FROM app.audit_events WHERE action='user.pin_set' AND entity_id=$1 AND after_state->>'set_by'='administrator'", ana) != 1 {
@@ -277,8 +308,9 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		}
 		// El quinto fallo en 15 minutos bloquea el PIN 5 minutos, también desde otro dispositivo y con el PIN correcto.
 		locked := env.fails(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "4828"}, 429, "PIN_LOCKED")
-		until, err := time.Parse(time.RFC3339Nano, fmt.Sprint(locked["details"].(map[string]any)["locked_until"]))
-		if err != nil || until.Sub(time.Now()) < 4*time.Minute || until.Sub(time.Now()) > 6*time.Minute {
+		lockDetails := locked["details"].(map[string]any)
+		until, err := time.Parse(time.RFC3339Nano, fmt.Sprint(lockDetails["locked_until"]))
+		if err != nil || until.Sub(time.Now()) < 4*time.Minute || until.Sub(time.Now()) > 6*time.Minute || lockDetails["requires_unlock"] != false {
 			t.Fatalf("bloqueo de 5 minutos: %v %v", locked, err)
 		}
 		env.fails(tablet, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "4829"}, 429, "PIN_LOCKED")
@@ -535,7 +567,181 @@ func TestStageA1WaiterPIN(t *testing.T) {
 		}
 	})
 
-	run("A1B_09_ningun_registro_guarda_secretos", func(t *testing.T) {
+	// Hasta dónde llega la serie de bloqueos del PIN de un usuario.
+	attempts := func(userID string) (int, int, bool) {
+		var failures, locks int
+		var requiresUnlock bool
+		err := pool.QueryRow(ctx, "SELECT failures,locks,requires_unlock FROM app.pin_attempts WHERE user_id=$1", userID).
+			Scan(&failures, &locks, &requiresUnlock)
+		if err != nil {
+			t.Fatalf("intentos de %s: %v", userID, err)
+		}
+		return failures, locks, requiresUnlock
+	}
+	fiveFailures := func(device pinActor, userID string) map[string]any {
+		for attempt := 1; attempt <= 4; attempt++ {
+			env.fails(device, "POST", "auth/pin-login", map[string]string{"user_id": userID, "pin": "1357"}, 401, "PIN_INVALID")
+		}
+		return env.fails(device, "POST", "auth/pin-login", map[string]string{"user_id": userID, "pin": "1357"}, 429, "PIN_LOCKED")
+	}
+
+	run("A1B_09_bloqueo_largo_hasta_que_un_administrador_lo_desbloquee", func(t *testing.T) {
+		locksBefore := env.scalar("SELECT count(*) FROM app.audit_events WHERE action='user.pin_locked' AND entity_id=$1", ana)
+		// Los dos primeros bloqueos de la serie son de 5 minutos (se dan por vencidos en la base para no esperar).
+		for series := 1; series <= 2; series++ {
+			details := fiveFailures(phone, ana)["details"].(map[string]any)
+			if details["locked_until"] == nil || details["requires_unlock"] != false {
+				t.Fatalf("bloqueo %d de la serie: %v", series, details)
+			}
+			if _, locks, _ := attempts(ana); locks != series {
+				t.Fatalf("bloqueos en la serie: %d, esperado %d", locks, series)
+			}
+			if _, err := pool.Exec(ctx, "UPDATE app.pin_attempts SET locked_until=now()-interval '1 second' WHERE user_id=$1", ana); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// El tercero en 24 horas sin una entrada correcta: bloqueado hasta que un administrador lo desbloquee.
+		long := fiveFailures(phone, ana)
+		details := long["details"].(map[string]any)
+		if details["locked_until"] != nil || details["requires_unlock"] != true || !strings.Contains(fmt.Sprint(long["message"]), "administrador") {
+			t.Fatalf("bloqueo largo: %v", long)
+		}
+		if env.scalar("SELECT count(*) FROM app.audit_events WHERE action='user.pin_locked' AND entity_id=$1", ana) != locksBefore+2 ||
+			env.scalar(`SELECT count(*) FROM app.audit_events WHERE action='user.pin_locked_until_unlock' AND entity_id=$1
+                AND device_id=$2 AND after_state->>'requires_unlock'='true'`, ana, phone.device) != 1 {
+			t.Fatal("los bloqueos de la serie y el largo deben registrarse cada uno una vez")
+		}
+		// Ni el PIN correcto, ni que pase el tiempo, ni «Mi PIN» lo quitan.
+		again := env.fails(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "5071"}, 429, "PIN_LOCKED")
+		if again["details"].(map[string]any)["requires_unlock"] != true {
+			t.Fatalf("con el PIN correcto: %v", again)
+		}
+		if _, err := pool.Exec(ctx, "UPDATE app.pin_attempts SET lock_series_started_at=now()-interval '25 hours' WHERE user_id=$1", ana); err != nil {
+			t.Fatal(err)
+		}
+		env.fails(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "5071"}, 429, "PIN_LOCKED")
+		anaDesktop := desktop
+		anaDesktop.session = fmt.Sprint(env.call(desktop, "POST", "auth/login", map[string]string{"username": "ana.a1", "password": "clave-ana.a1"}, 200)["session_token"])
+		env.call(anaDesktop, "PUT", "auth/pin", map[string]string{"current_password": "clave-ana.a1", "pin": "6284"}, 200)
+		env.fails(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "6284"}, 429, "PIN_LOCKED")
+		var listed map[string]any
+		for _, entry := range env.call(phone, "GET", "auth/pin-users", nil, 200)["users"].([]any) {
+			if entry.(map[string]any)["id"] == ana {
+				listed = entry.(map[string]any)
+			}
+		}
+		if listed["requires_unlock"] != true || listed["locked_until"] != nil {
+			t.Fatalf("la lista del dispositivo no dice que espera a un administrador: %v", listed)
+		}
+		if !strings.Contains(env.handler(admin, "GET", "users", nil).Body.String(), `"pin_requires_unlock":true`) {
+			t.Fatal("Personal › Usuarios no ve el bloqueo largo")
+		}
+		env.call(admin, "POST", "users/"+ana+"/pin/unlock", map[string]any{}, 200)
+		if env.scalar(`SELECT count(*) FROM app.audit_events WHERE action='user.pin_unlocked' AND entity_id=$1
+            AND after_state->>'requires_unlock'='true'`, ana) != 1 {
+			t.Fatal("el desbloqueo del bloqueo largo no quedó registrado")
+		}
+		env.call(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "6284"}, 200)
+		// Una entrada correcta borra la serie: dos bloqueos y un acierto, y el siguiente bloqueo vuelve a ser el primero.
+		if _, err := pool.Exec(ctx, `INSERT INTO app.pin_attempts(user_id,failures,locks,lock_series_started_at,last_device_id)
+            VALUES ($1,0,2,now(),$2)`, ana, phone.device); err != nil {
+			t.Fatal(err)
+		}
+		env.call(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "6284"}, 200)
+		if env.scalar("SELECT count(*) FROM app.pin_attempts WHERE user_id=$1", ana) != 0 {
+			t.Fatal("una entrada correcta debe borrar la serie de bloqueos")
+		}
+		// Una serie que empezó hace más de 24 horas se olvida: el tercer bloqueo cuenta como el primero de otra.
+		if _, err := pool.Exec(ctx, `INSERT INTO app.pin_attempts(user_id,failures,locks,lock_series_started_at,last_device_id)
+            VALUES ($1,4,2,now()-interval '25 hours',$2)`, ana, phone.device); err != nil {
+			t.Fatal(err)
+		}
+		late := env.fails(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "1357"}, 429, "PIN_LOCKED")
+		if late["details"].(map[string]any)["requires_unlock"] != false {
+			t.Fatalf("una serie vieja no debe dar el bloqueo largo: %v", late)
+		}
+		if _, locks, requiresUnlock := attempts(ana); locks != 1 || requiresUnlock {
+			t.Fatalf("serie nueva: %d bloqueos, espera a un administrador %v", locks, requiresUnlock)
+		}
+		env.call(admin, "POST", "users/"+ana+"/pin/unlock", map[string]any{}, 200)
+	})
+
+	run("A1B_10_la_sesion_con_pin_solo_tiene_permisos_de_mesero", func(t *testing.T) {
+		// El administrador ya tiene PIN («Mi PIN», 8061). Por su sesión con PIN y por su credencial solo tiene los
+		// permisos de mesero (A1-D17), aunque su rol los tenga todos.
+		login := env.call(phone, "POST", "auth/pin-login", map[string]string{"user_id": adminUserID(t, pool), "pin": "8061"}, 200)
+		adminPhone := pinActor{device: phone.device, secret: phone.secret, session: fmt.Sprint(login["session_token"])}
+		identity := env.call(adminPhone, "GET", "auth/me", nil, 200)
+		permissions := []string{}
+		for _, key := range identity["user"].(map[string]any)["permissions"].([]any) {
+			permissions = append(permissions, key.(string))
+		}
+		expected := append([]string{}, administration.WaiterPermissions...)
+		slices.Sort(expected)
+		slices.Sort(permissions)
+		if !slices.Equal(permissions, expected) {
+			t.Fatalf("permisos de la sesión con PIN del administrador: %v, esperados %v", permissions, expected)
+		}
+		state := env.call(adminPhone, "GET", "restaurant/state", nil, 200)
+		if len(state["user"].(map[string]any)["permissions"].([]any)) != len(expected) {
+			t.Fatalf("restaurant/state no informa los permisos acotados: %v", state["user"])
+		}
+		denials := env.scalar("SELECT count(*) FROM app.audit_events WHERE action='access.denied'")
+		env.fails(adminPhone, "GET", "users", nil, 403, "PERMISSION_DENIED")
+		env.fails(adminPhone, "PUT", "users/"+beto+"/pin", map[string]any{"pin": "6152"}, 403, "PERMISSION_DENIED")
+		env.fails(adminPhone, "GET", "devices", nil, 403, "PERMISSION_DENIED")
+		env.fails(adminPhone, "GET", "restaurant/accounts?mode=takeaway", nil, 403, "PERMISSION_DENIED")
+		if env.scalar("SELECT count(*) FROM app.audit_events WHERE action='access.denied'") != denials+4 {
+			t.Fatal("las denegaciones de la sesión con PIN no quedaron registradas")
+		}
+		env.call(adminPhone, "GET", "restaurant/accounts", nil, 200)
+		env.call(adminPhone, "GET", "catalog/sync", nil, 200)
+		// Con la credencial de envío: el pedido entra (permisos de mesero) y nada más.
+		credential := pinActor{device: phone.device, secret: phone.secret, credential: fmt.Sprint(login["offline_credential"])}
+		env.call(credential, "POST", "restaurant/offline-orders", order(), 200)
+		env.fails(credential, "GET", "users", nil, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
+		// Cambiar la contraseña desde la sesión con PIN no amplía los permisos de la sesión nueva.
+		changed := env.call(adminPhone, "POST", "auth/password", map[string]string{"current_password": "admin", "new_password": "nueva-clave-admin-a1"}, 200)
+		renewed := pinActor{device: phone.device, secret: phone.secret, session: fmt.Sprint(changed["session_token"])}
+		env.fails(renewed, "GET", "users", nil, 403, "PERMISSION_DENIED")
+		// Con contraseña, en la computadora, el administrador sigue teniendo todo.
+		admin.session = fmt.Sprint(env.call(desktop, "POST", "auth/login",
+			map[string]string{"username": "admin", "password": "nueva-clave-admin-a1"}, 200)["session_token"])
+		env.call(admin, "GET", "users", nil, 200)
+	})
+
+	run("A1B_11_la_credencial_se_rechaza_fuera_de_su_ruta_tambien_en_las_publicas", func(t *testing.T) {
+		login := env.call(phone, "POST", "auth/pin-login", map[string]string{"user_id": ana, "pin": "6284"}, 200)
+		credential := pinActor{device: phone.device, secret: phone.secret, credential: fmt.Sprint(login["offline_credential"])}
+		for _, route := range [][2]string{
+			{"GET", "setup/status"}, {"POST", "setup"}, {"POST", "devices/enroll"}, {"POST", "pairing/requests"},
+			{"POST", "auth/login"}, {"GET", "auth/pin-users"}, {"POST", "auth/pin-login"}, {"GET", "version"},
+			{"GET", "health/live"}, {"GET", "openapi.json"}, {"GET", "events?after=0"}, {"POST", "restaurant/offline-orders/"},
+		} {
+			env.fails(credential, route[0], route[1], map[string]any{}, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
+		}
+		// Una credencial inventada tampoco recibe nada.
+		invented := pinActor{device: phone.device, secret: phone.secret, credential: administration.NewToken()}
+		env.fails(invented, "GET", "auth/pin-users", nil, 401, "OFFLINE_CREDENTIAL_NOT_ALLOWED")
+	})
+
+	run("A1B_12_el_tipo_de_cliente_coincide_con_el_del_dispositivo", func(t *testing.T) {
+		desktopAsAndroid := admin
+		desktopAsAndroid.headers = map[string]string{httpapi.ClientKindHeader: "android", httpapi.ClientVersionHeader: "0.1.0"}
+		env.fails(desktopAsAndroid, "GET", "auth/me", nil, 400, "CLIENT_KIND_MISMATCH")
+		desktopAsAndroid.headers[httpapi.ClientVersionHeader] = productinfo.Read().Version
+		env.fails(desktopAsAndroid, "GET", "auth/me", nil, 400, "CLIENT_KIND_MISMATCH")
+		phoneAsDesktop := phone
+		phoneAsDesktop.headers = map[string]string{httpapi.ClientKindHeader: "desktop", httpapi.ClientVersionHeader: productinfo.Read().Version}
+		env.fails(phoneAsDesktop, "GET", "auth/pin-users", nil, 400, "CLIENT_KIND_MISMATCH")
+		// Sin cabeceras de cliente (herramientas por la escucha local) no hay nada que comparar.
+		bare := phone
+		bare.headers = map[string]string{httpapi.ClientKindHeader: "", httpapi.ClientVersionHeader: ""}
+		env.call(bare, "GET", "auth/pin-users", nil, 200)
+		env.call(admin, "GET", "auth/me", nil, 200)
+	})
+
+	run("A1B_13_ningun_registro_guarda_secretos", func(t *testing.T) {
 		rows, err := pool.Query(ctx, `SELECT action,coalesce(before_state::text,''),coalesce(after_state::text,'') FROM app.audit_events
             WHERE action LIKE 'user.pin%' OR action LIKE 'session.pin%' OR action LIKE 'user.%' OR action LIKE 'restaurant.offline%'`)
 		if err != nil {
@@ -549,14 +755,17 @@ func TestStageA1WaiterPIN(t *testing.T) {
 				t.Fatal(err)
 			}
 			seen[action] = true
-			for _, secret := range []string{"4829", "3958", "5071", "6152", "7305", "8061", "argon2", "pin_hash", anaCredential, anaSession, "secret_hash"} {
-				if strings.Contains(before+after, secret) {
+			// Las fechas y los identificadores pueden contener por azar los mismos dígitos que un PIN: se quitan antes.
+			text := timestampsAndIDs.ReplaceAllString(before+after, "")
+			for _, secret := range []string{"4829", "3958", "5071", "6152", "7305", "8061", "6284", "argon2", "pin_hash",
+				"nueva-clave-admin-a1", anaCredential, anaSession, "secret_hash"} {
+				if strings.Contains(text, secret) {
 					t.Fatalf("%s guarda un secreto (%s): %s %s", action, secret, before, after)
 				}
 			}
 		}
-		for _, action := range []string{"user.pin_set", "user.pin_removed", "user.pin_locked", "user.pin_unlocked", "user.pin_badge_changed",
-			"session.pin_login", "session.pin_login_failed"} {
+		for _, action := range []string{"user.pin_set", "user.pin_removed", "user.pin_locked", "user.pin_locked_until_unlock",
+			"user.pin_unlocked", "user.pin_badge_changed", "session.pin_login", "session.pin_login_failed"} {
 			if !seen[action] {
 				t.Fatalf("falta el registro %s", action)
 			}

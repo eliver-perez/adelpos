@@ -84,6 +84,10 @@ test('PIN de los meseros: asignar, rechazar uno trivial, bloquear y desbloquear,
 
   // 1. Asignar el PIN: uno trivial se rechaza con el mensaje de Go; el bueno se guarda con nombre corto y color.
   await openAdministration(page, 'Usuarios');
+  // En la fila propia no se ofrece el PIN: el del administrador va en «Mi PIN» (revisión R3, B6).
+  const own = page.locator('tbody tr').filter({ has: page.getByText('admin', { exact: true }) });
+  await expect(own.getByRole('button', { name: 'Administrar', exact: true })).toBeVisible();
+  await expect(own.getByRole('button', { name: /^(Asignar|Cambiar) PIN$/ })).toHaveCount(0);
   const row = page.locator('tbody tr').filter({ hasText: 'andrea.a1' });
   await expect(row).toContainText('Sin PIN');
   await row.getByRole('button', { name: 'Asignar PIN', exact: true }).click();
@@ -114,6 +118,7 @@ test('PIN de los meseros: asignar, rechazar uno trivial, bloquear y desbloquear,
     color: '#3591d4',
     pin_version: 1,
     locked_until: null,
+    requires_unlock: false,
   });
 
   // 2. Cinco fallos desde el teléfono bloquean el PIN; Usuarios lo muestra y «Desbloquear» lo quita.
@@ -131,6 +136,10 @@ test('PIN de los meseros: asignar, rechazar uno trivial, bloquear y desbloquear,
   });
   expect(locked.status).toBe(429);
   expect(errorCode(locked)).toBe('PIN_LOCKED');
+  // El primer bloqueo es por tiempo (A1-D16: el largo llega con el tercero seguido en 24 horas).
+  const lockDetails = (locked.body.error as { details?: Record<string, unknown> }).details;
+  expect(lockDetails?.requires_unlock).toBe(false);
+  expect(typeof lockDetails?.locked_until).toBe('string');
   await page.reload();
   await expect(topBar(page)).toBeVisible();
   await openAdministration(page, 'Usuarios');
