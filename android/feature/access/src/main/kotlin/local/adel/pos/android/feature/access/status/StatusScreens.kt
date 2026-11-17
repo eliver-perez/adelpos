@@ -160,6 +160,8 @@ fun RepairScreen(
 
 /**
  * «Actualiza esta aplicación» (426 o la mínima de Android del servidor) con «Volver a comprobar».
+ * Si hay pedidos sin enviar se muestran con su aviso (Fase E): siguen en el dispositivo y salen al
+ * instalar la versión nueva encima, pero **desinstalar** la aplicación los perdería.
  */
 @Composable
 fun UpdateAppScreen(
@@ -167,8 +169,11 @@ fun UpdateAppScreen(
     minClientVersion: String?,
     onCheckAgain: () -> Unit,
     modifier: Modifier = Modifier,
+    loadPendingOrders: suspend () -> List<UnsentOrder> = { emptyList() },
 ) {
     val words = deviceWords()
+    var pending by remember { mutableStateOf(emptyList<UnsentOrder>()) }
+    LaunchedEffect(Unit) { pending = loadPendingOrders() }
     CenteredColumn(modifier = modifier.testTag(TAG_UPDATE_APP)) {
         Text(
             text = stringResource(R.string.update_app_title),
@@ -178,6 +183,17 @@ fun UpdateAppScreen(
             text = stringResource(R.string.update_app_text, words.thisDevice),
             style = MaterialTheme.typography.bodyLarge,
         )
+        if (pending.isNotEmpty()) {
+            Text(
+                text = stringResource(R.string.update_app_pending, words.thisDevice),
+                color = AdelTheme.colors.red,
+            )
+            Column(modifier = Modifier.testTag(TAG_UPDATE_APP_PENDING)) {
+                for (order in pending) {
+                    Text(orderLine(order))
+                }
+            }
+        }
         PrimaryButton(
             text = stringResource(R.string.update_check_again),
             onClick = onCheckAgain,
@@ -352,6 +368,7 @@ const val TAG_REPAIR_ACTION = "access-repair-action"
 const val TAG_REPAIR_CONFIRM = "access-repair-confirm"
 const val TAG_REPAIR_ERASES = "access-repair-erases"
 const val TAG_REPAIR_PENDING = "access-repair-pending"
+const val TAG_UPDATE_APP_PENDING = "access-update-app-pending"
 const val TAG_CHECK_AGAIN = "access-check-again"
 const val TAG_UPDATE_APP = "access-update-app"
 const val TAG_UPDATE_SERVER = "access-update-server"

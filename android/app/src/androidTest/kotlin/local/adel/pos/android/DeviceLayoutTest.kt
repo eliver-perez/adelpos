@@ -16,8 +16,8 @@ import local.adel.pos.android.core.ui.layout.TAG_PANES_DOUBLE
 import local.adel.pos.android.core.ui.layout.TAG_PANES_SINGLE
 import local.adel.pos.android.core.ui.layout.TAG_PANE_OPEN_SECONDARY
 import local.adel.pos.android.core.ui.layout.paneLayoutFor
-import local.adel.pos.android.feature.waiter.TAG_ACCOUNT_PANE
-import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_ACCOUNT_PANE
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before

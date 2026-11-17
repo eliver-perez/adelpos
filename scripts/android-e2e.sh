@@ -10,7 +10,7 @@
 #   ADELPOS_E2E_NETWORK_URL=https://127.0.0.1:8454 \
 #   ADELPOS_E2E_PROVISIONING_FILE=/ruta/al/provisioning-token \
 #   ADELPOS_E2E_SERVER_ID=<server_id> \
-#   scripts/android-e2e.sh [--steps "1 2 3 4 5 7"] [--no-install] [--out <carpeta>]
+#   scripts/android-e2e.sh [--suite access|waiter] [--steps "1 2 3 4 5 7"] [--no-install] [--out <carpeta>]
 #
 # Variables:
 #   ANDROID_SERIAL                  obligatorio: el emulador o dispositivo (nunca se corre en todos los conectados).
@@ -32,19 +32,29 @@
 # El paso 6 necesita OTRO servidor temporal (otra identidad) en las MISMAS direcciones: correr primero
 # `--steps "1 2 3 4 5"`, reemplazar el servidor y después `--no-install --steps "6 7"` con los datos del nuevo.
 #
+# Suite `waiter` (Fase E, WaiterModeOnGoTest, con un servidor temporal nuevo): w1 preparar el restaurante, emparejar y
+# entrar · w2 captura en línea, rotación y «Enviar a cocina», y cambios de otra terminal al momento · w3 (SIN red)
+# captura sin conexión: «Por enviar» · w4 (con red) WorkManager envía sin entrar y la primera respuesta se pierde: el
+# reintento no duplica · w5 precio cambiado y agotado con la confirmación del mesero · w6 mesa cobrada mientras tanto ·
+# w7a borrador guardado en Go, w7b (SIN red) se agrega y se envía sin conexión, w7c (con red) el pedido sustituye el
+# borrador (A1-D6) · w8 cancelar y modificar unidades enviadas. La red la corta y la devuelve este guion entre pasos
+# (modo avión desde la Mac en Android 11+; `adb root` + `svc wifi/data` en Android 8–10).
+#
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`. Las pruebas usan el tipo NSD
 # `_adelpostest._tcp` (AdelTestRunner): nunca buscan ni prueban el servidor real del restaurante.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STEPS="1 2 3 4 5 7"
+SUITE="access"
+STEPS=""
 INSTALL=1
 OUT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --steps) STEPS="${2:?pasos}"; shift 2 ;;
+        --suite) SUITE="${2:?suite}"; shift 2 ;;
         --no-install) INSTALL=0; shift ;;
         --out) OUT="${2:?carpeta}"; shift 2 ;;
         *) echo "Argumento no reconocido: $1" >&2; exit 2 ;;
@@ -55,6 +65,12 @@ fail() {
     echo "android-e2e: $*" >&2
     exit 2
 }
+
+case "$SUITE" in
+    access) TEST_CLASS="AccessOnGoTest"; STEPS="${STEPS:-1 2 3 4 5 7}" ;;
+    waiter) TEST_CLASS="WaiterModeOnGoTest"; STEPS="${STEPS:-w1 w2 w3 w4 w5 w6 w7a w7b w7c w8}" ;;
+    *) fail "suite desconocida: $SUITE (access o waiter)" ;;
+esac
 
 : "${ANDROID_SERIAL:?Falta ANDROID_SERIAL (el emulador o dispositivo donde correr)}"
 LOCAL_URL="${ADELPOS_E2E_LOCAL_URL:?Falta ADELPOS_E2E_LOCAL_URL}"
@@ -154,7 +170,7 @@ mkdir -p "$OUT"
 SUMMARY="$OUT/summary.txt"
 SDK="$("$ADB" -s "$ANDROID_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')"
 {
-    echo "android-e2e en $ANDROID_SERIAL (API $SDK), pasos: $STEPS"
+    echo "android-e2e en $ANDROID_SERIAL (API $SDK), suite $SUITE, pasos: $STEPS"
     echo "servidor: $LOCAL_URL y $NETWORK_URL, huella $PIN"
     echo "terminal principal: $MAIN_DEVICE (ADELPOS_E2E_MAIN_DEVICE; el token está en $OUT/main-token)"
 } | tee "$SUMMARY"
@@ -175,7 +191,7 @@ fi
 
 FAILED=0
 
-# Un paso de AccessOnGoTest en su propia instrumentación; resultado según los códigos de am instrument.
+# Un paso de la suite en su propia instrumentación; resultado según los códigos de am instrument.
 run_step() {
     local method="$1"
     shift
@@ -188,7 +204,7 @@ run_step() {
         server_id=(-e serverId "$ADELPOS_E2E_SERVER_ID")
     fi
     "$ADB" -s "$ANDROID_SERIAL" shell am instrument -w -r \
-        -e class "local.adel.pos.android.AccessOnGoTest#$method" \
+        -e class "local.adel.pos.android.$TEST_CLASS#$method" \
         -e local "http://$DEVICE_HOST:$LOCAL_PORT" -e address "$DEVICE_HOST:$NETWORK_PORT" -e pin "$PIN" \
         ${server_id[@]+"${server_id[@]}"} -e mainDevice "$MAIN_DEVICE" -e mainToken "$MAIN_TOKEN" "$@" \
         local.adel.pos.android.test/local.adel.pos.android.AdelTestRunner >"$log" 2>&1 || true
@@ -221,7 +237,44 @@ host_network() {
     "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -m1 'Active default network' | tee -a "$SUMMARY" || true
 }
 
+# Suite waiter: corta (off) o devuelve (on) la red del dispositivo desde la Mac, según su versión.
+device_network() {
+    if [ "$SDK" -lt 30 ]; then
+        if [ "$1" = off ]; then
+            host_network disable
+        else
+            host_network enable
+            "$ADB" -s "$ANDROID_SERIAL" unroot >/dev/null 2>&1 || true
+            "$ADB" -s "$ANDROID_SERIAL" wait-for-device
+        fi
+    else
+        if [ "$1" = off ]; then
+            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode enable
+        else
+            "$ADB" -s "$ANDROID_SERIAL" shell cmd connectivity airplane-mode disable
+        fi
+        sleep 5
+        "$ADB" -s "$ANDROID_SERIAL" shell dumpsys connectivity | grep -m1 'Active default network' | tee -a "$SUMMARY" || true
+    fi
+}
+
 for step in $STEPS; do
+    if [ "$SUITE" = waiter ]; then
+        case "$step" in
+            w1) run_step w1_prepararEmparejarYEntrar ;;
+            w2) run_step w2_capturaEnLineaRotacionYEnvioACocina ;;
+            w3) device_network off; run_step w3_capturaSinConexion; device_network on ;;
+            w4) run_step w4_alVolverLaRedSeEnviaSinEntrarYSinDuplicar -e lostOfflineResponses 1 ;;
+            w5) run_step w5_precioCambiadoYAgotadoConLaConfirmacionDelMesero ;;
+            w6) run_step w6_mesaCobradaMientrasTanto ;;
+            w7a) run_step w7a_borradorGuardadoEnGo ;;
+            w7b) device_network off; run_step w7b_sinConexionSeAgregaYSeEnvia; device_network on ;;
+            w7c) run_step w7c_elPedidoSustituyeElBorradorSinDuplicar ;;
+            w8) run_step w8_cancelarYModificarLoEnviado ;;
+            *) fail "paso desconocido de la suite waiter: $step" ;;
+        esac
+        continue
+    fi
     case "$step" in
         1) run_step paso1_emparejarConElCodigo ;;
         2) run_step paso2_pinIncorrectoBloqueoALosCincoYEntrada ;;
