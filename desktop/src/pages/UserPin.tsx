@@ -52,8 +52,13 @@ function PinField({
   );
 }
 
-// Estado del PIN en la lista de usuarios: sin PIN, con PIN (y su distintivo) o bloqueado por intentos fallidos.
+// Estado del PIN en la lista de usuarios: sin PIN, con PIN (y su distintivo), bloqueado unos minutos por intentos
+// fallidos o bloqueado hasta que un administrador lo desbloquee.
 export function PinStatus({ user }: { user: User }) {
+  // A1-D16: tras tres bloqueos seguidos solo lo desbloquea un administrador.
+  if (user.pin_requires_unlock) {
+    return <span className="tag tag-warning">PIN bloqueado: pide desbloqueo</span>;
+  }
   if (user.pin_locked_until) {
     return (
       <span className="tag tag-warning">

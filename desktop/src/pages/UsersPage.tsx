@@ -251,9 +251,12 @@ function UserPermissionEditor({
 export function UsersPage({
   can,
   onChanged,
+  currentUserID,
 }: {
   can: (key: string) => boolean;
   onChanged: () => Promise<void>;
+  // Usuario de la sesión (etapa A1, revisión R3, B6): su PIN se define en «Mi PIN», con su contraseña, nunca aquí.
+  currentUserID?: string;
 }) {
   const users = useResource<User[]>('users');
   const roles = useResource<Role[]>('roles', { enabled: can('roles.read') });
@@ -435,20 +438,22 @@ export function UsersPage({
                         Asignar contraseña
                       </button>
                     )}
-                    {pinAvailable && can('users.manage') && (
+                    {pinAvailable && can('users.manage') && user.id !== currentUserID && (
                       <button className="secondary-button" onClick={() => openPIN(user)}>
                         {user.has_pin ? 'Cambiar PIN' : 'Asignar PIN'}
                       </button>
                     )}
-                    {pinAvailable && can('users.manage') && user.pin_locked_until && (
-                      <button
-                        className="secondary-button"
-                        disabled={unlocking === user.id}
-                        onClick={() => void unlock(user)}
-                      >
-                        Desbloquear
-                      </button>
-                    )}
+                    {pinAvailable &&
+                      can('users.manage') &&
+                      (user.pin_locked_until || user.pin_requires_unlock) && (
+                        <button
+                          className="secondary-button"
+                          disabled={unlocking === user.id}
+                          onClick={() => void unlock(user)}
+                        >
+                          Desbloquear
+                        </button>
+                      )}
                     {(can('users.manage') || can('permissions.read')) && (
                       <button
                         className="secondary-button"
