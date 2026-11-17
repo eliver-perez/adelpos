@@ -59,7 +59,7 @@ func login(ctx context.Context, tx pgx.Tx, request Request) (any, error) {
 		return nil, err
 	}
 	// Etapa 9H (§2.4): iniciar sesión solo cierra la sesión anterior del usuario en esta misma terminal.
-	token, err := issueSession(ctx, tx, userID, request.DeviceID, "replaced", sameDevice)
+	token, err := issueSession(ctx, tx, userID, request.DeviceID, "replaced", sameDevice, false)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,9 @@ const (
 	allDevices
 )
 
-func issueSession(ctx context.Context, tx pgx.Tx, userID, deviceID, reason string, scope sessionScope) (string, error) {
+// withPIN marca la sesión abierta con PIN en un dispositivo de meseros (etapa A1, A1-D17): authenticateSession le deja
+// solo los permisos de mesero.
+func issueSession(ctx context.Context, tx pgx.Tx, userID, deviceID, reason string, scope sessionScope, withPIN bool) (string, error) {
 	// El lock de usuario serializa los accesos simultáneos del mismo usuario y el índice parcial
 	// sessions_one_active_user_device_idx (migración 0024) garantiza una sola sesión vigente por usuario y
 	// terminal. Hasta la etapa 9G el índice era por usuario (sessions_one_active_user_idx) e iniciar sesión
@@ -133,7 +135,8 @@ func issueSession(ctx context.Context, tx pgx.Tx, userID, deviceID, reason strin
 		}
 	}
 	token := NewToken()
-	_, err = tx.Exec(ctx, "INSERT INTO app.sessions(user_id,device_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)", userID, deviceID, TokenHash(token), time.Now().Add(12*time.Hour))
+	_, err = tx.Exec(ctx, "INSERT INTO app.sessions(user_id,device_id,token_hash,expires_at,opened_with_pin) VALUES ($1,$2,$3,$4,$5)",
+		userID, deviceID, TokenHash(token), time.Now().Add(12*time.Hour), withPIN)
 	return token, err
 }
 
@@ -160,8 +163,9 @@ func changePassword(ctx context.Context, tx pgx.Tx, principal Principal, body []
 		return nil, err
 	}
 	// Cambiar la contraseña cierra las sesiones del usuario en todas las terminales (como antes de la 9H) y
-	// abre una nueva en esta.
-	token, err := issueSession(ctx, tx, principal.UserID, principal.DeviceID, "password_changed", allDevices)
+	// abre una nueva en esta. Desde una sesión con PIN la nueva sigue siendo de mesero (A1-D17): cambiar la contraseña
+	// no amplía los permisos de un teléfono o tableta.
+	token, err := issueSession(ctx, tx, principal.UserID, principal.DeviceID, "password_changed", allDevices, principal.PINSession)
 	if err != nil {
 		return nil, err
 	}

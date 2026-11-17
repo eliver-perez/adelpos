@@ -17,7 +17,8 @@ import (
 )
 
 // Etapa A1: actualización desde el esquema 24 con roles, usuarios, terminales y sesiones existentes. La sección B de la
-// 0025 agrega el PIN de los usuarios (sin PIN, versión 0, sin nombre corto ni color), los intentos del PIN, las
+// 0025 agrega el PIN de los usuarios (sin PIN, versión 0, sin nombre corto ni color), los intentos del PIN con su serie
+// de bloqueos (A1-D16), la marca de las sesiones abiertas con PIN (A1-D17, falsa en las existentes), las
 // credenciales de envío, el bloqueo por inactividad de cada terminal (120 s) y el permiso waiter_devices.use para el
 // administrador y el rol Mesero; la sección E, el renglón con que se capturó cada partida confirmada
 // (restaurant_items.draft_item_id, vacío en las existentes). No cambia ninguna fila existente de ninguna tabla: solo
@@ -177,16 +178,20 @@ func checkStageA1Permission(ctx context.Context, t *testing.T, pool *pgxpool.Poo
 // checkStageA1Columns: valores por omisión de las columnas nuevas y sus restricciones.
 func checkStageA1Columns(ctx context.Context, t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
-	var withPIN, versions, badges, idle int
+	var withPIN, versions, badges, idle, pinSessions, sessions int
 	err := pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM app.users WHERE pin_hash IS NOT NULL OR pin_set_at IS NOT NULL),
         (SELECT count(*) FROM app.users WHERE pin_version<>0),
         (SELECT count(*) FROM app.users WHERE short_name IS NOT NULL OR badge_color IS NOT NULL),
-        (SELECT count(*) FROM app.devices WHERE idle_lock_seconds<>120)`).Scan(&withPIN, &versions, &badges, &idle)
+        (SELECT count(*) FROM app.devices WHERE idle_lock_seconds<>120),
+        (SELECT count(*) FROM app.sessions WHERE opened_with_pin),
+        (SELECT count(*) FROM app.sessions)`).Scan(&withPIN, &versions, &badges, &idle, &pinSessions, &sessions)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if withPIN != 0 || versions != 0 || badges != 0 || idle != 0 {
-		t.Fatalf("valores por omisión: PIN %d, versiones %d, distintivos %d, bloqueo %d", withPIN, versions, badges, idle)
+	// Las sesiones existentes son de contraseña (A1-D17): ninguna queda como sesión con PIN.
+	if withPIN != 0 || versions != 0 || badges != 0 || idle != 0 || pinSessions != 0 || sessions != 2 {
+		t.Fatalf("valores por omisión: PIN %d, versiones %d, distintivos %d, bloqueo %d, sesiones con PIN %d de %d",
+			withPIN, versions, badges, idle, pinSessions, sessions)
 	}
 	rejected := map[string]string{
 		"bloqueo menor a 30 s":    "UPDATE app.devices SET idle_lock_seconds=29",
@@ -198,6 +203,14 @@ func checkStageA1Columns(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 		"PIN sin fecha":           "UPDATE app.users SET pin_hash='x'",
 		"versión negativa":        "UPDATE app.users SET pin_version=-1",
 		"intentos de más":         "INSERT INTO app.pin_attempts(user_id,failures) VALUES ('00000000-0000-4000-8000-0000000000a1',6)",
+		// A1-D16: a lo más 3 bloqueos en la serie, la serie con su inicio y el bloqueo largo sin hora de fin.
+		"bloqueos de más": `INSERT INTO app.pin_attempts(user_id,locks,lock_series_started_at)
+            VALUES ('00000000-0000-4000-8000-0000000000a1',4,now())`,
+		"serie sin inicio": "INSERT INTO app.pin_attempts(user_id,locks) VALUES ('00000000-0000-4000-8000-0000000000a1',1)",
+		"bloqueo largo con hora": `INSERT INTO app.pin_attempts(user_id,locks,lock_series_started_at,requires_unlock,locked_until)
+            VALUES ('00000000-0000-4000-8000-0000000000a1',3,now(),true,now()+interval '5 minutes')`,
+		"bloqueo largo antes del tercero": `INSERT INTO app.pin_attempts(user_id,locks,lock_series_started_at,requires_unlock)
+            VALUES ('00000000-0000-4000-8000-0000000000a1',2,now(),true)`,
 	}
 	for name, statement := range rejected {
 		if _, err := pool.Exec(ctx, statement); err == nil {
@@ -207,6 +220,13 @@ func checkStageA1Columns(ctx context.Context, t *testing.T, pool *pgxpool.Pool) 
 	if _, err := pool.Exec(ctx, `UPDATE app.users SET pin_hash='$argon2id$prueba',pin_set_at=now(),pin_version=1,short_name='Ana',
         badge_color='#3591d4' WHERE id='00000000-0000-4000-8000-0000000000a1'`); err != nil {
 		t.Fatalf("un PIN válido no se pudo guardar: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO app.pin_attempts(user_id,locks,lock_series_started_at,requires_unlock)
+        VALUES ('00000000-0000-4000-8000-0000000000a1',3,now(),true)`); err != nil {
+		t.Fatalf("un bloqueo que espera a un administrador no se pudo guardar: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "DELETE FROM app.pin_attempts"); err != nil {
+		t.Fatal(err)
 	}
 }
 

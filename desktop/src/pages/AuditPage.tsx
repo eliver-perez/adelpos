@@ -83,6 +83,8 @@ const actionLabels: Record<string, string> = {
   'user.pin_badge_changed': 'Nombre corto o color del distintivo cambiado',
   'user.pin_removed': 'PIN quitado',
   'user.pin_locked': 'PIN bloqueado por intentos fallidos',
+  // A1-D16: el tercer bloqueo seguido en 24 horas.
+  'user.pin_locked_until_unlock': 'PIN bloqueado hasta que lo desbloquee un administrador',
   'user.pin_unlocked': 'PIN desbloqueado',
   'session.pin_login': 'Entrada con PIN',
   'session.pin_login_failed': 'Entrada con PIN fallida',

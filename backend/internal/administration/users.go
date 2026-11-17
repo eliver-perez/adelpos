@@ -11,11 +11,13 @@ import (
 // has_password (etapa 9H) dice si el usuario tiene contraseña: los importados del sistema anterior entran sin ella
 // (sin acceso) hasta «Asignar contraseña» (user_password.go). Nunca se expone la contraseña ni su hash.
 // Etapa A1 (fase B, pin.go): si tiene PIN para los dispositivos de meseros (nunca el PIN ni su hash), su nombre corto,
-// el color de su distintivo y, si el PIN está bloqueado por intentos fallidos, hasta cuándo.
+// el color de su distintivo y, si el PIN está bloqueado por intentos fallidos, hasta cuándo o si espera a que un
+// administrador lo desbloquee (A1-D16, pin_requires_unlock).
 const publicUserColumns = "u.id,u.username,u.display_name,u.role_id,r.name AS role_name,u.active,u.initial_password," +
 	"(u.password_hash IS NOT NULL) AS has_password,u.created_at,u.updated_at," +
 	"(u.pin_hash IS NOT NULL) AS has_pin,u.short_name,u.badge_color," +
-	"(SELECT a.locked_until FROM app.pin_attempts a WHERE a.user_id=u.id AND a.locked_until>now()) AS pin_locked_until"
+	"(SELECT a.locked_until FROM app.pin_attempts a WHERE a.user_id=u.id AND a.locked_until>now()) AS pin_locked_until," +
+	"coalesce((SELECT a.requires_unlock FROM app.pin_attempts a WHERE a.user_id=u.id),false) AS pin_requires_unlock"
 
 type UserInput struct {
 	Username    string `json:"username"`

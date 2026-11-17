@@ -235,3 +235,39 @@ func TestOpenAPIDocumentIsServed(t *testing.T) {
 		t.Fatalf("el contrato admite escritura: %d", post.Code)
 	}
 }
+
+// Etapa A1 (revisión R3, B1): la credencial de envío del mesero solo vale en POST restaurant/offline-orders. En cualquier
+// otra ruta, también las técnicas (versión, salud, contrato) y el canal de eventos, el servidor responde 401
+// OFFLINE_CREDENTIAL_NOT_ALLOWED antes de atenderla; en su ruta pasa a la aplicación (aquí, sin aplicación: 405 o 404).
+func TestOfflineCredentialOnlyOnItsRoute(t *testing.T) {
+	h := handler(database.Health{Postgres: "available", Schema: "compatible"})
+	send := func(method, route string, credential bool) (int, map[string]any) {
+		r := httptest.NewRequest(method, route, nil)
+		if credential {
+			r.Header.Set(OfflineCredentialHeader, "credencial-de-prueba-de-43-caracteres-aaaaa")
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		var body map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		return w.Code, body
+	}
+	for _, route := range [][2]string{
+		{"GET", "/api/v1/version"}, {"GET", "/api/v1/health/live"}, {"GET", "/api/v1/health/ready"},
+		{"GET", "/api/v1/openapi.json"}, {"GET", "/api/v1/events"}, {"GET", "/api/v1/setup/status"},
+		{"POST", "/api/v1/auth/pin-login"}, {"GET", "/api/v1/restaurant/offline-orders"},
+		{"POST", "/api/v1/restaurant/offline-orders/"}, {"GET", "/missing"},
+	} {
+		status, body := send(route[0], route[1], true)
+		problem, _ := body["error"].(map[string]any)
+		if status != 401 || problem["code"] != "OFFLINE_CREDENTIAL_NOT_ALLOWED" {
+			t.Fatalf("%s %s con la credencial: %d %v", route[0], route[1], status, body)
+		}
+		if status, _ := send(route[0], route[1], false); status == 401 {
+			t.Fatalf("%s %s sin la credencial no debía responder 401", route[0], route[1])
+		}
+	}
+	if status, body := send("POST", "/api/v1/restaurant/offline-orders", true); status == 401 {
+		t.Fatalf("la ruta de los pedidos sin conexión rechazó la credencial: %v", body)
+	}
+}
