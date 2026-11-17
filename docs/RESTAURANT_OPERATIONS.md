@@ -374,6 +374,10 @@ Fases C y D de la etapa 9G (decisiones D9 y D11; contrato para clientes en [API_
   los que siguen así (como un guardado del borrador, con su evento y su auditoría) y no toca los de otras terminales;
   un renglón cambiado, quitado o ya enviado a cocina desde otra terminal es un cambio más que el mesero confirma o
   corrige. Cada partida confirmada guarda el id del renglón con que se capturó (`restaurant_items.draft_item_id`).
+  **Revisión R6 (A1-D18)**: el servidor nunca repite lo que ya entró: un renglón del borrador con el id de una partida
+  se sustituye aunque el pedido no lo nombre; confirmar una partida ya enviada envía solo lo demás; la clave de un
+  «Enviar a cocina» ya aplicado en esa cuenta responde `OFFLINE_ORDER_ALREADY_ACCEPTED`; y un pedido a una mesa cuyas
+  partidas ya están en una cuenta suya dice cuál (`items_in_account`).
 - **Etapa A1 (fase E)**: una operación sobre una cuenta que ya no está abierta sigue respondiendo
   `400 OPERATION_VALIDATION`, ahora con un mensaje por estado («La cuenta «Mesa 4» ya se cobró…») y
   `details.reason: "account_not_open"` con el estado; cocina publica además `restaurant.account.preparation_changed`
