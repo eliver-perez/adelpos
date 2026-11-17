@@ -108,6 +108,17 @@ class CatalogImageCache(
         }
     }
 
+    /**
+     * Borra todas las imágenes guardadas (archivos y su registro): «borrar los datos de este
+     * dispositivo». Espera a la descarga en curso para que no deje un archivo después.
+     */
+    suspend fun eraseAll() {
+        downloads.withLock {
+            withContext(ioDispatcher) { directory.deleteRecursively() }
+            dao.clearImageFiles()
+        }
+    }
+
     private suspend fun obtainLocked(imageId: String): File? {
         val file = fileOf(imageId)
         // Una fila sin su archivo (Android vació la caché) cuenta como imagen que falta.

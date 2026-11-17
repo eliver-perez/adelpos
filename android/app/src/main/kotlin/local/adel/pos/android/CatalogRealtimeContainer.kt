@@ -109,6 +109,14 @@ class CatalogRealtimeContainer(
     val realtime: RealtimeFeed
         get() = realtimeClient
 
+    /**
+     * «Borrar los datos de este dispositivo»: catalog.db, las imágenes guardadas y el catálogo en
+     * memoria (registrado en `DeviceDataWipe` por `AppContainer`).
+     */
+    suspend fun eraseDeviceData() {
+        repository.eraseAll()
+    }
+
     /** Lee el catálogo guardado, abre el canal en primer plano y programa las actualizaciones. */
     fun start() {
         if (started) {

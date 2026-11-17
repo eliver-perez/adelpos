@@ -126,6 +126,17 @@ class CatalogImageCacheTest {
     }
 
     @Test
+    fun borrarLosDatosDelDispositivoBorraLasImagenesYSuRegistro() = runBlocking {
+        val cache = cache()
+        mock.enqueue(image(IMAGE_BYTES))
+        assertNotNull(cache.obtain(IMAGE_ID))
+        cache.eraseAll()
+        assertNull(cache.cached(IMAGE_ID))
+        assertFalse(directory.exists())
+        assertNull(database.catalog().imageFile(IMAGE_ID))
+    }
+
+    @Test
     fun unContenidoQueNoCorrespondeAlChecksumNoSeGuarda() = runBlocking {
         val cache = cache()
         mock.enqueue(image(byteArrayOf(1, 2, 3)))
