@@ -113,6 +113,7 @@ object WaiterStorage {
                     capture.tableAccounts.map { StoredTableAccount(it.id, it.folio, it.name) },
                 ),
             pendingOperationId = capture.pendingOperationId,
+            inFlightCount = capture.inFlightCount,
             createdAt = capture.createdAtMillis,
             updatedAt = nowMillis,
         )
@@ -139,6 +140,7 @@ object WaiterStorage {
                     TableAccountRef(it.id, it.folio, it.name)
                 },
             pendingOperationId = entity.pendingOperationId,
+            inFlightCount = entity.inFlightCount,
             createdAtMillis = entity.createdAt,
         )
 

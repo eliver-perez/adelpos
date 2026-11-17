@@ -35,6 +35,7 @@ data class CaptureEntity(
     @ColumnInfo(name = "sync_message") val syncMessage: String?,
     @ColumnInfo(name = "table_accounts") val tableAccounts: String,
     @ColumnInfo(name = "pending_operation_id") val pendingOperationId: String?,
+    @ColumnInfo(name = "in_flight_count") val inFlightCount: Int,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
 )
@@ -102,23 +103,26 @@ internal val WAITER_TABLES_V4: List<String> =
             "`seen_account_ids` TEXT NOT NULL, `base` TEXT NOT NULL, " +
             "`base_revision` INTEGER NOT NULL, `operations` TEXT NOT NULL, " +
             "`own_item_ids` TEXT NOT NULL, `seen_prices` TEXT NOT NULL, " +
-            "`sync` TEXT NOT NULL, `sync_message` TEXT, `table_accounts` TEXT NOT NULL, " +
-            "`pending_operation_id` TEXT, `created_at` INTEGER NOT NULL, " +
+            "`sync` TEXT NOT NULL, `sync_message` TEXT, " +
+            "`table_accounts` TEXT NOT NULL, `pending_operation_id` TEXT, " +
+            "`in_flight_count` INTEGER NOT NULL, `created_at` INTEGER NOT NULL, " +
             "`updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
         "CREATE INDEX IF NOT EXISTS `index_captures_waiter_user_id` ON `captures` (`waiter_user_id`)",
         "CREATE TABLE IF NOT EXISTS `pending_orders` (`operation_id` TEXT NOT NULL, " +
             "`waiter_user_id` TEXT NOT NULL, `waiter_name` TEXT NOT NULL, " +
-            "`state` TEXT NOT NULL, `destination` TEXT NOT NULL, `lines` TEXT NOT NULL, " +
-            "`replaces` TEXT NOT NULL, `catalog_version` INTEGER NOT NULL, " +
-            "`catalog_epoch` TEXT, `captured_at` INTEGER NOT NULL, `confirmation` TEXT, " +
-            "`review` TEXT, `attempts` INTEGER NOT NULL, `last_error` TEXT, " +
+            "`state` TEXT NOT NULL, `destination` TEXT NOT NULL, " +
+            "`lines` TEXT NOT NULL, `replaces` TEXT NOT NULL, " +
+            "`catalog_version` INTEGER NOT NULL, `catalog_epoch` TEXT, " +
+            "`captured_at` INTEGER NOT NULL, `confirmation` TEXT, `review` TEXT, " +
+            "`attempts` INTEGER NOT NULL, `last_error` TEXT, " +
             "`credential_rejected` INTEGER NOT NULL, `online_confirm` TEXT, " +
             "`received_account_id` TEXT, `received_at` INTEGER, " +
             "`updated_at` INTEGER NOT NULL, PRIMARY KEY(`operation_id`))",
         "CREATE INDEX IF NOT EXISTS `index_pending_orders_waiter_user_id` ON `pending_orders` (`waiter_user_id`)",
         "CREATE INDEX IF NOT EXISTS `index_pending_orders_state` ON `pending_orders` (`state`)",
         "CREATE TABLE IF NOT EXISTS `restaurant_snapshot` (`kind` TEXT NOT NULL, " +
-            "`document` TEXT NOT NULL, `read_at` INTEGER NOT NULL, PRIMARY KEY(`kind`))",
+            "`document` TEXT NOT NULL, `read_at` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`kind`))",
         "CREATE TABLE IF NOT EXISTS `waiter_permissions` (`user_id` TEXT NOT NULL, " +
             "`permissions` TEXT NOT NULL, `read_at` INTEGER NOT NULL, " +
             "PRIMARY KEY(`user_id`))",
