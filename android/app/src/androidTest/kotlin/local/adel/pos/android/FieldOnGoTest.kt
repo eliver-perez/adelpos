@@ -16,6 +16,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasTestTag
@@ -816,8 +817,19 @@ class FieldOnGoTest {
 
     private fun tap(tag: String) {
         waitFor(tag)
+        // En un teléfono, el nodo puede existir (la lista perezosa ya lo compuso) y estar fuera de
+        // la vista: performScrollTo no desplaza una lista perezosa, así que se le pide a la lista
+        // que lo traiga (regresión de la Fase G: «Enviar a cocina» debajo del total en f6).
+        if (!displayed(tag)) {
+            reveal(tag)
+        }
         click(compose.onNodeWithTag(tag))
     }
+
+    private fun displayed(tag: String): Boolean = runCatching {
+        compose.onNodeWithTag(tag).assertIsDisplayed()
+    }
+        .isSuccess
 
     /** Toca el nodo; si está dentro de algo desplazable, primero lo trae a la vista. */
     private fun click(node: SemanticsNodeInteraction) {
