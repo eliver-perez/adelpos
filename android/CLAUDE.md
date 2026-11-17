@@ -189,6 +189,11 @@ ADELPOS_E2E_NEW_SERVER=<orden> scripts/android-e2e.sh --suite all`**, que levant
   `connectedDebugAndroidTest` lo escribe en el registro pero **termina con BUILD SUCCESSFUL sin correr las pruebas** de
   ese módulo. Comprobar siempre los resultados en `*/build/outputs/androidTest-results/connected/` y desinstalar antes
   (`adb uninstall local.adel.pos.android`).
+- **Ojo (emulador cargado)**: con dos emuladores y Gradle a la vez, el lanzador del emulador puede mostrar «Pixel
+  Launcher isn't responding»; ese diálogo se queda con el foco, la tecla Atrás que inyecta la instrumentación ya no
+  llega a la aplicación y Espresso falla con «has-window-focus=false». Las pruebas de punta a punta lo cierran con
+  «Wait» antes de Atrás y de cada captura (`SystemDialogs`); si aparece en las instrumentadas, repetirlas con el
+  emulador recién encendido y solo.
 
 ## Entrada al dispositivo (para los demás módulos)
 
