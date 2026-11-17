@@ -15,7 +15,6 @@ import local.adel.pos.android.core.data.db.AppDatabase
 import local.adel.pos.android.core.data.discovery.NsdServerBrowser
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.NoUnsentOrders
-import local.adel.pos.android.core.domain.access.NoWaiterWork
 import local.adel.pos.android.core.domain.error.AppError
 import local.adel.pos.android.core.domain.pairing.FoundServerChoice
 import local.adel.pos.android.core.domain.pairing.PairingProblem
@@ -64,7 +63,6 @@ class PairingRepositoryTest {
                 identity = identity,
                 relocator = ServerRelocator({ emptyList() }, { _, _ -> false }, { 0L }),
                 isOnline = { true },
-                work = NoWaiterWork,
                 unsentOrders = NoUnsentOrders,
                 scope = scope,
                 verifierIterations = 1_000,

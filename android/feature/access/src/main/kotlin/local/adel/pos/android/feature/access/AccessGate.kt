@@ -8,6 +8,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import local.adel.pos.android.core.domain.access.DeviceStatus
+import local.adel.pos.android.core.domain.access.UnsentOrder
+import local.adel.pos.android.core.ui.components.LocalUserActivity
+import local.adel.pos.android.core.ui.components.reportsUserActivity
 import local.adel.pos.android.core.ui.layout.PaneLayout
 import local.adel.pos.android.feature.access.findserver.FindServerRoute
 import local.adel.pos.android.feature.access.pin.PinEntryRoute
@@ -24,6 +27,9 @@ interface AccessActions {
 
     fun repair()
 
+    /** Pedidos sin enviar que pasarán a la bitácora si se empareja de nuevo. */
+    suspend fun pendingOrders(): List<UnsentOrder>
+
     fun acknowledgeRetirement()
 
     fun clearDeviceLog()
@@ -36,6 +42,8 @@ fun AccessViewModel.asActions(): AccessActions {
         override fun recheck() = viewModel.recheck()
 
         override fun repair() = viewModel.repair()
+
+        override suspend fun pendingOrders(): List<UnsentOrder> = viewModel.pendingOrders()
 
         override fun acknowledgeRetirement() = viewModel.acknowledgeRetirement()
 
@@ -71,6 +79,7 @@ fun AccessContent(
             RepairScreen(
                 reason = status.reason,
                 onRepair = actions::repair,
+                loadPendingOrders = actions::pendingOrders,
                 onCheckAgain = actions::recheck,
                 modifier = modifier,
             )
@@ -117,6 +126,7 @@ fun accessTitle(status: DeviceStatus): String =
 fun SwitchBlockedDialog(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
         title = { Text(stringResource(R.string.switch_blocked_title)) },
         text = { Text(stringResource(R.string.switch_blocked_text)) },
         confirmButton = {

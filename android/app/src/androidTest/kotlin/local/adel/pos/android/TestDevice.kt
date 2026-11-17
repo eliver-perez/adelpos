@@ -71,9 +71,8 @@ object TestDevice {
                 sealedVerifier = PinVerifier.seal(PinVerifier.create(PIN, 1), WAITER_ID, sealer),
                 sealedOfflineCredential = null,
                 lastOnlineEntryMillis = now,
-                localFailures = 0,
-                localWindowStartMillis = now,
-                localLockedUntilMillis = null,
+                offlineFailures = 0,
+                offlineClosed = false,
             ),
         )
         container.deviceAccess.start()

@@ -1,6 +1,7 @@
 package local.adel.pos.android.core.domain.access
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -12,47 +13,51 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Reglas de la entrada al dispositivo: límite local de intentos sin conexión, bloqueo por
- * inactividad con reloj inyectable (también que no bloquea con trabajo pendiente), invalidación de
- * los verificadores por `pin_version` y permisos de Android según el `targetSdk`.
+ * Reglas de la entrada al dispositivo: límite de intentos sin conexión que no depende de ningún
+ * reloj (revisión R3, M1 y M2), bloqueo por inactividad del proceso con reloj inyectable (también
+ * que no bloquea con trabajo pendiente y que volver a primer plano no da otro plazo, R3 A2),
+ * invalidación de los verificadores por `pin_version` y permisos de Android según el `targetSdk`.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccessRulesTest {
     @Test
-    fun cincoFallosSinConexionBloqueanCincoMinutos() {
+    fun losFallosSeAcumulanYElQuintoCierraLaEntradaSinConexion() {
         var attempts = LocalAttempts.NONE
-        val start = 1_000_000L
         for (failure in 1..4) {
-            attempts = OfflineAttemptPolicy.afterFailure(attempts, start + failure * 1_000)
-            assertNull(OfflineAttemptPolicy.lockedUntil(attempts, start + failure * 1_000))
+            attempts = OfflineAttemptPolicy.afterFailure(attempts)
             assertEquals(failure, attempts.failures)
+            assertFalse(attempts.closed)
         }
-        val fifth = start + 5_000
-        attempts = OfflineAttemptPolicy.afterFailure(attempts, fifth)
-        assertEquals(
-            fifth + OfflineAttemptPolicy.LOCK_MILLIS,
-            OfflineAttemptPolicy.lockedUntil(attempts, fifth),
-        )
-        assertEquals(0, attempts.failures)
-        // Al vencer el bloqueo hay otros cinco intentos.
-        val later = fifth + OfflineAttemptPolicy.LOCK_MILLIS
-        assertNull(OfflineAttemptPolicy.lockedUntil(attempts, later))
-        attempts = OfflineAttemptPolicy.afterFailure(attempts, later)
-        assertEquals(1, attempts.failures)
-        assertEquals(LocalAttempts.NONE, OfflineAttemptPolicy.afterSuccess())
+        attempts = OfflineAttemptPolicy.afterFailure(attempts)
+        assertTrue("el quinto fallo cierra la entrada sin conexión", attempts.closed)
+        // Ningún reloj la vuelve a abrir (revisión R3, M1): seguir fallando la deja cerrada.
+        repeat(100) { attempts = OfflineAttemptPolicy.afterFailure(attempts) }
+        assertTrue(attempts.closed)
+        // Una entrada correcta sin conexión no es posible con la entrada cerrada; solo una con
+        // conexión la abre.
+        assertEquals(LocalAttempts.NONE, OfflineAttemptPolicy.afterOnlineSuccess())
     }
 
     @Test
-    fun losFallosViejosNoCuentan() {
+    fun unaEntradaCorrectaSinConexionVuelveACeroLosFallosSinAbrirLoCerrado() {
         var attempts = LocalAttempts.NONE
-        for (failure in 1..4) {
-            attempts = OfflineAttemptPolicy.afterFailure(attempts, failure * 1_000L)
-        }
-        // El quinto llega después de la ventana de 15 minutos: empieza una cuenta nueva.
-        val late = 4_000L + OfflineAttemptPolicy.WINDOW_MILLIS
-        attempts = OfflineAttemptPolicy.afterFailure(attempts, late)
+        repeat(3) { attempts = OfflineAttemptPolicy.afterFailure(attempts) }
+        attempts = OfflineAttemptPolicy.afterOfflineSuccess(attempts)
+        assertEquals(LocalAttempts(failures = 0, closed = false), attempts)
+        // Los fallos no vuelven a cero solos: con el tiempo nada cambia (no hay ventana).
+        repeat(4) { attempts = OfflineAttemptPolicy.afterFailure(attempts) }
+        assertFalse(attempts.closed)
+        assertTrue(OfflineAttemptPolicy.afterFailure(attempts).closed)
+        val closed = LocalAttempts(failures = 0, closed = true)
+        assertTrue(OfflineAttemptPolicy.afterOfflineSuccess(closed).closed)
+    }
+
+    @Test
+    fun unBloqueoDeGoCierraLaEntradaSinConexion() {
+        val attempts =
+            OfflineAttemptPolicy.afterServerLock(LocalAttempts(failures = 1, closed = false))
+        assertTrue(attempts.closed)
         assertEquals(1, attempts.failures)
-        assertNull(OfflineAttemptPolicy.lockedUntil(attempts, late))
     }
 
     private class FakeWork(var work: WaiterWork = WaiterWork.NONE) : WaiterWorkGate {
@@ -68,20 +73,32 @@ class AccessRulesTest {
     fun bloqueaTrasElTiempoSinUsoYTocarReinicia() = runTest {
         val gate = FakeWork()
         val idle = IdleLock(clock = { testScheduler.currentTime }, work = gate)
-        var locked = false
-        val job = launch { idle.watch("ana", timeoutSeconds = { 120 }) { locked = true } }
+        var locked: String? = null
+        val job = launch { idle.watch("ana", timeoutSeconds = 120) { locked = it } }
         advanceTimeBy(119_000)
         runCurrent()
-        assertFalse(locked)
+        assertNull(locked)
         idle.touch()
         advanceTimeBy(119_000)
         runCurrent()
-        assertFalse("tocar la pantalla reinicia el plazo", locked)
+        assertNull("tocar la pantalla reinicia el plazo", locked)
         advanceTimeBy(1_001)
         runCurrent()
-        assertTrue(locked)
+        assertEquals("ana", locked)
         assertTrue(job.isCompleted)
         assertEquals(listOf("ana"), gate.asked)
+    }
+
+    @Test
+    fun empezarAVigilarNoReiniciaElPlazo() = runTest {
+        val idle = IdleLock(clock = { testScheduler.currentTime }, work = NoWaiterWork)
+        idle.touch()
+        advanceTimeBy(10 * 60_000)
+        var locked: String? = null
+        // La vigilancia empieza 10 minutos después del último toque: bloquea en ese momento.
+        launch { idle.watch("ana", timeoutSeconds = 120) { locked = it } }
+        runCurrent()
+        assertEquals("ana", locked)
     }
 
     @Test
@@ -90,7 +107,7 @@ class AccessRulesTest {
         val idle =
             IdleLock(clock = { testScheduler.currentTime }, work = gate, recheckMillis = 15_000)
         var locked = false
-        launch { idle.watch("ana", timeoutSeconds = { 60 }) { locked = true } }
+        launch { idle.watch("ana", timeoutSeconds = 60) { locked = true } }
         advanceTimeBy(10 * 60_000)
         runCurrent()
         assertFalse("con una captura en curso nunca se bloquea", locked)
@@ -105,31 +122,82 @@ class AccessRulesTest {
     }
 
     @Test
-    fun elPlazoMinimoEsElDeGoYSeLeeEnCadaVuelta() = runTest {
-        var seconds = 10
+    fun elPlazoMinimoEsElDeGo() = runTest {
         val idle = IdleLock(clock = { testScheduler.currentTime }, work = NoWaiterWork)
         var lockedAt = -1L
-        launch {
-            idle.watch("ana", timeoutSeconds = { seconds }) { lockedAt = testScheduler.currentTime }
-        }
+        launch { idle.watch("ana", timeoutSeconds = 10) { lockedAt = testScheduler.currentTime } }
         advanceTimeBy(29_000)
         runCurrent()
         assertEquals("menos de 30 s cuenta como 30", -1L, lockedAt)
         advanceTimeBy(1_001)
         runCurrent()
         assertEquals(30_000L, lockedAt)
-        // Un plazo nuevo de Go vale desde la siguiente vigilancia.
-        seconds = 300
-        lockedAt = -1L
-        launch {
-            idle.watch("ana", timeoutSeconds = { seconds }) { lockedAt = testScheduler.currentTime }
+    }
+
+    /**
+     * Revisión R3, A2 y B4: Ana está activa y la aplicación pasa a segundo plano (la actividad
+     * termina con Atrás en Android 8 a 11, o la pantalla se apaga). Pasa una hora con el
+     * dispositivo dormido: el reloj del sistema avanza, pero la espera de la corrutina no. Al
+     * volver a primer plano se bloquea **en ese momento**, sin conceder otro plazo; la vigilancia
+     * es del proceso y no vuelve a empezar con la actividad.
+     */
+    @Test
+    fun volverAPrimerPlanoDespuesDelPlazoBloqueaEnElMomento() = runTest {
+        var now = 0L
+        val idle = IdleLock(clock = { now }, work = NoWaiterWork)
+        val waiter = MutableStateFlow<String?>(null)
+        val foreground = MutableStateFlow(true)
+        val locks = mutableListOf<Pair<String, Long>>()
+        val supervisor = launch {
+            idle.supervise(waiter, MutableStateFlow(120), foreground) { user ->
+                locks.add(user to now)
+                waiter.value = null
+            }
         }
-        advanceTimeBy(299_000)
+        waiter.value = "ana"
         runCurrent()
-        assertEquals(-1L, lockedAt)
+        now = 30_000
+        foreground.value = false
+        runCurrent()
+        // Una hora con el dispositivo dormido: el reloj avanza y ninguna espera termina.
+        now = 30_000 + 60 * 60_000
+        runCurrent()
+        assertEquals(emptyList<Pair<String, Long>>(), locks)
+        foreground.value = true
+        runCurrent()
+        assertEquals(listOf("ana" to 30_000L + 60 * 60_000L), locks)
+        supervisor.cancel()
+    }
+
+    @Test
+    fun unPlazoQueGoAcortaValeEnseguidaYUnMeseroNuevoEmpiezaSuPlazo() = runTest {
+        val idle = IdleLock(clock = { testScheduler.currentTime }, work = NoWaiterWork)
+        val waiter = MutableStateFlow<String?>("ana")
+        val timeout = MutableStateFlow(600)
+        val locks = mutableListOf<Pair<String, Long>>()
+        val supervisor = launch {
+            idle.supervise(waiter, timeout, MutableStateFlow(true)) { user ->
+                locks.add(user to testScheduler.currentTime)
+                waiter.value = null
+            }
+        }
+        runCurrent()
+        advanceTimeBy(100_000)
+        runCurrent()
+        // El administrador baja el plazo a 60 s: ya venció y se bloquea sin esperar los 600 s.
+        timeout.value = 60
+        runCurrent()
+        assertEquals(listOf("ana" to 100_000L), locks)
+        // Beto entra: su plazo empieza al entrar.
+        waiter.value = "beto"
+        runCurrent()
+        advanceTimeBy(59_000)
+        runCurrent()
+        assertEquals(1, locks.size)
         advanceTimeBy(1_001)
         runCurrent()
-        assertEquals("empezó a vigilar en 30 001 ms", 330_001L, lockedAt)
+        assertEquals("beto" to 160_000L, locks.last())
+        supervisor.cancel()
     }
 
     @Test

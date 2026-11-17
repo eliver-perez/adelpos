@@ -22,8 +22,21 @@ import local.adel.pos.android.core.ui.components.AdelPinPadDefaults
 sealed interface EntryMessage {
     data object WrongPin : EntryMessage
 
-    /** Bloqueado hasta [untilEpochMillis] (null: hasta que un administrador lo desbloquee). */
-    data class Locked(val untilEpochMillis: Long?) : EntryMessage
+    /**
+     * Bloqueado en Go hasta [untilEpochMillis]; con [requiresUnlock] (o sin hora), hasta que un
+     * administrador lo desbloquee (A1-D16).
+     */
+    data class Locked(val untilEpochMillis: Long?, val requiresUnlock: Boolean = false) :
+        EntryMessage
+
+    /** Entrada sin conexión cerrada para ese mesero: tiene que entrar con conexión. */
+    data object OfflineClosed : EntryMessage
+
+    /** Go está ocupado verificando otras entradas: intentarlo de nuevo en unos segundos. */
+    data object Busy : EntryMessage
+
+    /** Un problema de configuración que resuelve soporte ([code] de Go, para dictarlo). */
+    data class SupportProblem(val code: String) : EntryMessage
 
     data object NotAllowed : EntryMessage
 
@@ -36,6 +49,32 @@ sealed interface EntryMessage {
     /** Otro error; [serverMessage] es el texto de Go, si lo hay. */
     data class Failed(val serverMessage: String?) : EntryMessage
 }
+
+// 400 de Go cuando el tipo de cliente no coincide con el del dispositivo (no debería pasar).
+private const val CLIENT_KIND_MISMATCH = "CLIENT_KIND_MISMATCH"
+
+/** El mensaje que corresponde a un intento de entrada (null si entró). */
+internal fun entryMessageFor(result: EntryResult): EntryMessage? =
+    when (result) {
+        is EntryResult.Entered -> null
+        EntryResult.WrongPin -> EntryMessage.WrongPin
+        is EntryResult.Locked -> EntryMessage.Locked(result.untilEpochMillis, result.requiresUnlock)
+        EntryResult.OfflineClosed -> EntryMessage.OfflineClosed
+        EntryResult.Busy -> EntryMessage.Busy
+        EntryResult.NotAllowed -> EntryMessage.NotAllowed
+        EntryResult.UnknownOffline -> EntryMessage.UnknownOffline
+        is EntryResult.Failed ->
+            when (result.error) {
+                is AppError.UpdateRequired -> EntryMessage.UpdateRequired
+                AppError.Unreachable -> EntryMessage.Unreachable
+                else ->
+                    if (result.error.code == CLIENT_KIND_MISMATCH) {
+                        EntryMessage.SupportProblem(CLIENT_KIND_MISMATCH)
+                    } else {
+                        EntryMessage.Failed(result.error.serverMessage)
+                    }
+            }
+    }
 
 /**
  * Pantalla de entrada (§3.2): la lista de meseros y el teclado del PIN del que se eligió. El mesero
@@ -132,11 +171,15 @@ class PinEntryViewModel(
         viewModelScope.launch {
             val result = access.enter(userId, typed)
             busy = false
-            message = messageFor(result)
+            message = entryMessageFor(result)
             if (result is EntryResult.Entered) {
                 selectedId = null
                 savedState[KEY_SELECTED] = null
-            } else if (result is EntryResult.Locked || result is EntryResult.UnknownOffline) {
+            } else if (
+                result is EntryResult.Locked ||
+                    result is EntryResult.UnknownOffline ||
+                    result is EntryResult.OfflineClosed
+            ) {
                 // La lista muestra el bloqueo o deja de mostrar a quien ya no puede entrar.
                 refresh()
             }
@@ -151,21 +194,6 @@ class PinEntryViewModel(
     override fun onCleared() {
         clearPin()
     }
-
-    private fun messageFor(result: EntryResult): EntryMessage? =
-        when (result) {
-            is EntryResult.Entered -> null
-            EntryResult.WrongPin -> EntryMessage.WrongPin
-            is EntryResult.Locked -> EntryMessage.Locked(result.untilEpochMillis)
-            EntryResult.NotAllowed -> EntryMessage.NotAllowed
-            EntryResult.UnknownOffline -> EntryMessage.UnknownOffline
-            is EntryResult.Failed ->
-                when (result.error) {
-                    is AppError.UpdateRequired -> EntryMessage.UpdateRequired
-                    AppError.Unreachable -> EntryMessage.Unreachable
-                    else -> EntryMessage.Failed(result.error.serverMessage)
-                }
-        }
 
     companion object {
         private const val KEY_SELECTED = "pinEntry.selected"
