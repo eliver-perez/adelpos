@@ -318,7 +318,21 @@ func (handler *service) replay(fingerprint string) (any, bool, error) {
 			Status:  409,
 			Code:    "OFFLINE_ORDER_ALREADY_ACCEPTED",
 			Message: "Este pedido ya había entrado con otra versión del envío y no se volvió a registrar. Revisa la cuenta antes de capturarlo de nuevo.",
-			Details: map[string]any{"status": "already_accepted", "result": result},
+			Details: map[string]any{"status": "already_accepted", "origin": "offline_order", "result": result},
+		}
+	}
+	// Etapa A1 (A1-D18): el pedido de la cola con la clave de un «Enviar a cocina» que ya entró en esa cuenta es el mismo
+	// pedido (la respuesta de confirmDraft se perdió y el dispositivo lo pasó a la cola con su clave). Solo con el mismo
+	// usuario, el mismo dispositivo y la misma cuenta; si no, el conflicto de siempre.
+	if sameSender && current == "POST restaurant/offline-orders" {
+		if accountID, confirmed := confirmedAccountOf(route); confirmed {
+			problem, err := handler.offlineAlreadyConfirmed(accountID)
+			if err != nil {
+				return nil, false, err
+			}
+			if problem != nil {
+				return nil, false, problem
+			}
 		}
 	}
 	if !sameSender || previousFingerprint != fingerprint {
