@@ -36,7 +36,20 @@ class CatalogStore(
         }
     }
 
-    private suspend fun replaceAll(payload: CatalogPayload) {
+    /**
+     * Borra todo catalog.db (catálogo, su versión y cursor, y el registro de imágenes guardadas) en
+     * una sola transacción: lo usa «borrar los datos de este dispositivo» al retirarlo o
+     * emparejarlo de nuevo. Los archivos de imagen los borra [CatalogImageCache.eraseAll].
+     */
+    suspend fun eraseAll() {
+        database.withTransaction {
+            clearCatalog()
+            dao.clearState()
+            dao.clearImageFiles()
+        }
+    }
+
+    private suspend fun clearCatalog() {
         dao.clearCategories()
         dao.clearProducts()
         dao.clearGroups()
@@ -45,6 +58,10 @@ class CatalogStore(
         dao.clearPortions()
         dao.clearQuickNotes()
         dao.clearImages()
+    }
+
+    private suspend fun replaceAll(payload: CatalogPayload) {
+        clearCatalog()
         dao.insertCategories(payload.categories)
         dao.insertProducts(payload.products)
         dao.insertGroups(payload.groups)

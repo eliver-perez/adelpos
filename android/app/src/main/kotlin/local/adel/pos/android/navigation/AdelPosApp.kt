@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -32,6 +34,7 @@ import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.connection.ConnectionSummary
 import local.adel.pos.android.core.ui.components.ActiveWaiterMenu
 import local.adel.pos.android.core.ui.components.AdelTopBar
+import local.adel.pos.android.core.ui.components.LocalUserActivity
 import local.adel.pos.android.core.ui.layout.PaneLayout
 import local.adel.pos.android.core.ui.layout.currentPaneLayout
 import local.adel.pos.android.core.ui.theme.AdelTheme
@@ -42,6 +45,7 @@ import local.adel.pos.android.feature.access.AccessViewModel
 import local.adel.pos.android.feature.access.SwitchBlockedDialog
 import local.adel.pos.android.feature.access.accessTitle
 import local.adel.pos.android.feature.access.asActions
+import local.adel.pos.android.feature.access.pin.ReenterPinRoute
 import local.adel.pos.android.feature.waiter.TablesRoute
 import local.adel.pos.android.feature.waiter.catalog.CatalogSampleRoute
 import local.adel.pos.android.feature.waiter.catalog.catalogSampleTitle
@@ -56,7 +60,10 @@ import local.adel.pos.android.feature.waiter.tablesTitle
 /**
  * Raíz de la interfaz: tema, barra superior con el indicador de conexión y, según el estado del
  * dispositivo, la entrada (buscar el servidor, emparejar, PIN…) o el modo Mesero del mesero activo.
- * Con la aplicación a la vista se vuelve a comprobar el servidor cada minuto.
+ * Si el acceso del mesero activo dejó de valer, «Vuelve a escribir tu PIN» encima de su pantalla
+ * (revisión R3, M3). Con la aplicación a la vista se vuelve a comprobar el servidor cada minuto.
+ * Los toques dentro de los diálogos también cuentan para el bloqueo por inactividad
+ * ([LocalUserActivity]; revisión R3, B4).
  */
 @Composable
 fun AdelPosApp(
@@ -75,17 +82,30 @@ fun AdelPosApp(
         gate.onForeground()
         onStopOrDispose { gate.onBackground() }
     }
-    AdelTheme(darkTheme = darkTheme) {
-        AdelPosNavigation(
-            connection = connection,
-            status = status,
-            activeWaiter = activeWaiter,
-            dependencies = dependencies,
-            actions = gate.asActions(),
-            onSwitchWaiter = gate::switchWaiter,
-        )
-        if (gate.switchBlocked) {
-            SwitchBlockedDialog(onDismiss = gate::dismissSwitchBlocked)
+    val idleLock = dependencies.idleLock
+    val onUserActivity: () -> Unit = remember(idleLock) { { idleLock.touch() } }
+    CompositionLocalProvider(LocalUserActivity provides onUserActivity) {
+        AdelTheme(darkTheme = darkTheme) {
+            AdelPosNavigation(
+                connection = connection,
+                status = status,
+                activeWaiter = activeWaiter,
+                dependencies = dependencies,
+                actions = gate.asActions(),
+                onSwitchWaiter = gate::switchWaiter,
+            )
+            val reentering = activeWaiter?.takeIf { it.mustReenterPin }
+            if (reentering != null && status is DeviceStatus.Ready) {
+                ReenterPinRoute(
+                    access = dependencies.access,
+                    waiter = reentering,
+                    onSwitchWaiter = gate::switchWaiter,
+                )
+            }
+            // Después del de volver a escribir el PIN, para quedar encima de él.
+            if (gate.switchBlocked) {
+                SwitchBlockedDialog(onDismiss = gate::dismissSwitchBlocked)
+            }
         }
     }
 }

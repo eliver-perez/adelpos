@@ -43,6 +43,10 @@ class PairedServerEntity(
  * Mesero que ya entró **con conexión** en este dispositivo (§3.2): su verificador local del PIN y
  * su credencial de envío (A1-D1), ambos cifrados con el Android Keystore y ligados a su `user_id`.
  * Lo demás (nombre, inicial, color y los intentos sin conexión) no es secreto.
+ *
+ * Intentos sin conexión (versión 3, revisión R3 M1 y M2): [offlineFailures] fallos acumulados desde
+ * la última entrada correcta y [offlineClosed] si la entrada sin conexión quedó cerrada hasta que
+ * entre con conexión. Ningún reloj interviene (`OfflineAttemptPolicy`).
  */
 @Entity(tableName = "known_waiters", indices = [Index("server_id")])
 class KnownWaiterEntity(
@@ -57,9 +61,8 @@ class KnownWaiterEntity(
     @ColumnInfo(name = "sealed_offline_credential", typeAffinity = ColumnInfo.BLOB)
     val sealedOfflineCredential: ByteArray?,
     @ColumnInfo(name = "last_online_entry_millis") val lastOnlineEntryMillis: Long,
-    @ColumnInfo(name = "local_failures") val localFailures: Int,
-    @ColumnInfo(name = "local_window_start_millis") val localWindowStartMillis: Long,
-    @ColumnInfo(name = "local_locked_until_millis") val localLockedUntilMillis: Long?,
+    @ColumnInfo(name = "offline_failures") val offlineFailures: Int,
+    @ColumnInfo(name = "offline_closed") val offlineClosed: Boolean,
 )
 
 /**
@@ -111,16 +114,10 @@ abstract class AccessDao {
     abstract suspend fun deleteKnownWaiters(userIds: List<String>)
 
     @Query(
-        "UPDATE known_waiters SET local_failures = :failures, " +
-            "local_window_start_millis = :windowStart, local_locked_until_millis = :lockedUntil " +
+        "UPDATE known_waiters SET offline_failures = :failures, offline_closed = :closed " +
             "WHERE user_id = :userId",
     )
-    abstract suspend fun updateLocalAttempts(
-        userId: String,
-        failures: Int,
-        windowStart: Long,
-        lockedUntil: Long?,
-    )
+    abstract suspend fun updateOfflineAttempts(userId: String, failures: Int, closed: Boolean)
 
     @Query("SELECT * FROM device_log ORDER BY id")
     abstract suspend fun deviceLog(): List<DeviceLogEntry>

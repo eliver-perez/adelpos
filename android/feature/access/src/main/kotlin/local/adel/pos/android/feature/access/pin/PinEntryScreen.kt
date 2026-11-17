@@ -237,6 +237,16 @@ private fun WaiterButton(
     onClick: () -> Unit,
 ) {
     val lockedUntil = waiter.lockedUntilEpochMillis?.takeIf { it > now }
+    // Lo que se ve bajo el nombre: el bloqueo de Go (hasta una hora o hasta que lo desbloquee un
+    // administrador) o la entrada sin conexión cerrada.
+    val notice =
+        when {
+            waiter.requiresUnlock -> stringResource(R.string.entry_locked_admin_short)
+            lockedUntil != null ->
+                stringResource(R.string.entry_locked_until, clockTime(lockedUntil))
+            waiter.offlineEntryClosed -> stringResource(R.string.entry_offline_closed_short)
+            else -> null
+        }
     val colors =
         if (selected) {
             ButtonDefaults.outlinedButtonColors(
@@ -262,9 +272,9 @@ private fun WaiterButton(
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            if (lockedUntil != null) {
+            if (notice != null) {
                 Text(
-                    text = stringResource(R.string.entry_locked_until, clockTime(lockedUntil)),
+                    text = notice,
                     style = MaterialTheme.typography.bodyMedium,
                     color = AdelTheme.colors.red,
                 )
@@ -345,14 +355,24 @@ private fun PinPanel(
     }
 }
 
+/** El texto de un mensaje de entrada (también lo usa «Vuelve a escribir tu PIN»). */
 @Composable
-private fun entryMessageText(message: EntryMessage): String {
+internal fun entryMessageText(message: EntryMessage): String {
     val words = deviceWords()
+    val lockedUntil = (message as? EntryMessage.Locked)?.untilEpochMillis
     return when (message) {
         EntryMessage.WrongPin -> stringResource(R.string.entry_wrong_pin)
         is EntryMessage.Locked ->
-            message.untilEpochMillis?.let { stringResource(R.string.entry_locked, clockTime(it)) }
-                ?: stringResource(R.string.entry_locked_admin)
+            if (message.requiresUnlock || lockedUntil == null) {
+                stringResource(R.string.entry_locked_admin)
+            } else {
+                stringResource(R.string.entry_locked, clockTime(lockedUntil))
+            }
+        EntryMessage.OfflineClosed ->
+            stringResource(R.string.entry_offline_closed, words.thisDevice)
+        EntryMessage.Busy -> stringResource(R.string.entry_busy)
+        is EntryMessage.SupportProblem ->
+            stringResource(R.string.entry_support_problem, words.thisDeviceCapital, message.code)
         EntryMessage.NotAllowed -> stringResource(R.string.entry_not_allowed)
         EntryMessage.UnknownOffline ->
             stringResource(R.string.entry_unknown_offline, words.thisDevice)
