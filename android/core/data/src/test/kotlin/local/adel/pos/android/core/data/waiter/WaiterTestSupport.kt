@@ -142,6 +142,8 @@ class FakeWaiterServer(private val mock: MockWebServer) : WaiterServer {
             null
         }
 
+    override suspend fun prepare() = Unit
+
     override fun sessionHeaders(userId: String): Headers? {
         val session = sessions[userId] ?: return null
         return Headers.headersOf(
