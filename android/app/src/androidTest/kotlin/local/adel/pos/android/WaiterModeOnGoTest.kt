@@ -4,6 +4,7 @@ import android.app.UiAutomation
 import android.util.Log
 import android.view.KeyEvent
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
@@ -844,10 +845,20 @@ class WaiterModeOnGoTest {
      */
     private fun tap(tag: String) {
         waitFor(tag)
+        // Compuesto pero fuera de la vista (la lista perezosa lo precarga): performScrollTo no
+        // desplaza una lista perezosa, así que se le pide a la lista que lo traiga.
+        if (!displayed(tag)) {
+            reveal(tag)
+        }
         val node = compose.onNodeWithTag(tag)
         runCatching { node.performScrollTo() }
         node.performClick()
     }
+
+    private fun displayed(tag: String): Boolean = runCatching {
+        compose.onNodeWithTag(tag).assertIsDisplayed()
+    }
+        .isSuccess
 
     private fun openTable(tableId: String) {
         showTables()
