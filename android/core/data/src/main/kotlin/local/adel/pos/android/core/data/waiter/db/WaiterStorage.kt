@@ -23,9 +23,10 @@ import local.adel.pos.android.core.domain.waiter.OrderState
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.domain.waiter.ReviewReason
 import local.adel.pos.android.core.domain.waiter.TableAccountRef
+import local.adel.pos.android.core.domain.waiter.UnresolvedSave
 
 /*
- * Documentos JSON de las tablas del modo Mesero (`AppDatabase` v4). Los renglones van con la forma `DraftItem` del contrato (la misma
+ * Documentos JSON de las tablas del modo Mesero (`AppDatabase` v5). Los renglones van con la forma `DraftItem` del contrato (la misma
  * que se envía a Go), así que lo guardado es exactamente lo que se mandará; los importes, como
  * cadenas decimales.
  */
@@ -70,6 +71,7 @@ private data class StoredReview(
     val message: String,
     val changes: List<OfflineChangeDto>,
     @SerialName("catalog_version") val catalogVersion: Long?,
+    @SerialName("merged_into_id") val mergedIntoId: String? = null,
 )
 
 @Serializable
@@ -78,6 +80,16 @@ private data class StoredOnlineConfirm(
     @SerialName("account_id") val accountId: String,
     val revision: Int,
     val fingerprint: String,
+)
+
+@Serializable
+private data class StoredUnresolvedSave(
+    @SerialName("operation_id") val operationId: String,
+    @SerialName("account_id") val accountId: String?,
+    @SerialName("table_id") val tableId: String,
+    @SerialName("seen_account_ids") val seenAccountIds: List<String>,
+    val revision: Int,
+    val items: List<DraftItemDto>,
 )
 
 /** Conversión entre el dominio y las filas de las tablas del modo Mesero. */
@@ -116,6 +128,7 @@ object WaiterStorage {
             inFlightCount = capture.inFlightCount,
             createdAt = capture.createdAtMillis,
             updatedAt = nowMillis,
+            createdAccount = capture.createdAccount,
         )
 
     fun toCapture(entity: CaptureEntity): Capture =
@@ -142,6 +155,7 @@ object WaiterStorage {
             pendingOperationId = entity.pendingOperationId,
             inFlightCount = entity.inFlightCount,
             createdAtMillis = entity.createdAt,
+            createdAccount = entity.createdAccount,
         )
 
     fun toEntity(order: PendingOrder): PendingOrderEntity =
@@ -195,6 +209,7 @@ object WaiterStorage {
                             message = review.message,
                             changes = review.changes.map(WaiterMapper::changeDto),
                             catalogVersion = review.catalogVersion,
+                            mergedIntoId = review.mergedIntoId,
                         ),
                     )
                 },
@@ -216,6 +231,21 @@ object WaiterStorage {
             receivedAccountId = order.receivedAccountId,
             receivedAt = order.receivedAtMillis,
             updatedAt = order.updatedAtMillis,
+            unresolvedSave =
+                order.unresolvedSave?.let { save ->
+                    json.encodeToString(
+                        StoredUnresolvedSave.serializer(),
+                        StoredUnresolvedSave(
+                            operationId = save.operationId,
+                            accountId = save.accountId,
+                            tableId = save.tableId,
+                            seenAccountIds = save.seenAccountIds,
+                            revision = save.revision,
+                            items = save.items.map(WaiterMapper::draftItem),
+                        ),
+                    )
+                },
+            clockCorrected = order.clockCorrected,
         )
 
     fun toOrder(entity: PendingOrderEntity): PendingOrder {
@@ -261,6 +291,7 @@ object WaiterStorage {
                         message = stored.message,
                         changes = stored.changes.map(WaiterMapper::change),
                         catalogVersion = stored.catalogVersion,
+                        mergedIntoId = stored.mergedIntoId,
                     )
                 },
             attempts = entity.attempts,
@@ -279,6 +310,19 @@ object WaiterStorage {
             receivedAccountId = entity.receivedAccountId,
             receivedAtMillis = entity.receivedAt,
             updatedAtMillis = entity.updatedAt,
+            unresolvedSave =
+                entity.unresolvedSave?.let { text ->
+                    val stored = json.decodeFromString(StoredUnresolvedSave.serializer(), text)
+                    UnresolvedSave(
+                        operationId = stored.operationId,
+                        accountId = stored.accountId,
+                        tableId = stored.tableId,
+                        seenAccountIds = stored.seenAccountIds,
+                        revision = stored.revision,
+                        items = stored.items.map(WaiterMapper::draftLine),
+                    )
+                },
+            clockCorrected = entity.clockCorrected,
         )
     }
 

@@ -9,6 +9,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -38,12 +39,15 @@ data class CaptureEntity(
     @ColumnInfo(name = "in_flight_count") val inFlightCount: Int,
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    /** v5: la cuenta nació en Go con esta captura (revisión R6, A2). */
+    @ColumnInfo(name = "created_account", defaultValue = "0") val createdAccount: Boolean = false,
 )
 
 /**
  * Pedido de la cola (§7): **nunca** se borra por cerrar la aplicación, reiniciar el dispositivo o
- * perder la batería; cada cambio de estado se escribe en una transacción. [operationId] es la clave
- * de operación, la misma en todos los reenvíos.
+ * perder la batería; cada cambio de estado se escribe en una transacción y **solo si el pedido
+ * sigue en el estado que se leyó** ([WaiterDao.transition]; revisión R6, M1 y O1). [operationId] es
+ * la clave de operación, la misma en todos los reenvíos.
  */
 @Entity(
     tableName = "pending_orders",
@@ -69,6 +73,10 @@ data class PendingOrderEntity(
     @ColumnInfo(name = "received_account_id") val receivedAccountId: String?,
     @ColumnInfo(name = "received_at") val receivedAt: Long?,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    /** v5: el guardado del borrador que quedó sin respuesta al enviarlo (JSON; revisión R6, C1). */
+    @ColumnInfo(name = "unresolved_save") val unresolvedSave: String? = null,
+    /** v5: la hora de captura ya está en la hora de Go (revisión R6, B4). */
+    @ColumnInfo(name = "clock_corrected", defaultValue = "0") val clockCorrected: Boolean = false,
 )
 
 /**
@@ -128,6 +136,17 @@ internal val WAITER_TABLES_V4: List<String> =
             "PRIMARY KEY(`user_id`))",
     )
 
+/**
+ * Columnas nuevas de la versión 5 (`MIGRATION_4_5`, revisión R6): solo se agregan, con su valor por
+ * omisión; las filas que ya había no cambian.
+ */
+internal val WAITER_COLUMNS_V5: List<String> =
+    listOf(
+        "ALTER TABLE `captures` ADD COLUMN `created_account` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `pending_orders` ADD COLUMN `unresolved_save` TEXT",
+        "ALTER TABLE `pending_orders` ADD COLUMN `clock_corrected` INTEGER NOT NULL DEFAULT 0",
+    )
+
 @Dao
 interface WaiterDao {
     // --- Capturas ---
@@ -172,6 +191,13 @@ interface WaiterDao {
     @Query("SELECT COUNT(*) FROM pending_orders WHERE state IN (:states)")
     fun observeCount(states: List<String>): Flow<Int>
 
+    /** Los pedidos sin enviar de los demás meseros (para contarlos, nunca para mostrarlos). */
+    @Query(
+        "SELECT * FROM pending_orders WHERE waiter_user_id != :userId AND state IN (:states) " +
+            "ORDER BY captured_at",
+    )
+    fun observeOthers(userId: String, states: List<String>): Flow<List<PendingOrderEntity>>
+
     @Query(
         "SELECT COUNT(*) FROM pending_orders WHERE waiter_user_id = :userId AND state IN (:states)",
     )
@@ -180,7 +206,22 @@ interface WaiterDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertOrder(order: PendingOrderEntity)
 
-    @Upsert suspend fun saveOrder(order: PendingOrderEntity)
+    /** Reescribe un pedido que **ya existe** (nunca lo vuelve a crear): filas actualizadas. */
+    @Update suspend fun updateOrder(order: PendingOrderEntity): Int
+
+    /**
+     * Escribe el pedido **solo si sigue** en [expectedState] (revisión R6, M1 y O1): un pedido
+     * borrado («Emparejar de nuevo», retiro) nunca vuelve, y un cambio que llegó primero (otro
+     * envío, la recuperación al arrancar, el mesero) no se pisa. Devuelve si se escribió.
+     */
+    @Transaction
+    suspend fun transition(order: PendingOrderEntity, expectedState: String): Boolean {
+        val current = order(order.operationId) ?: return false
+        if (current.state != expectedState) {
+            return false
+        }
+        return updateOrder(order) == 1
+    }
 
     @Query("DELETE FROM pending_orders WHERE operation_id = :operationId")
     suspend fun deleteOrder(operationId: String)

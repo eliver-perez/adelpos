@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import local.adel.pos.android.core.domain.waiter.DiningTable
 import local.adel.pos.android.core.domain.waiter.RestaurantView
 import local.adel.pos.android.core.domain.waiter.TableCanvas
+import local.adel.pos.android.core.domain.waiter.TableNames
 import local.adel.pos.android.core.domain.waiter.TableShape
 import local.adel.pos.android.core.ui.components.tableStateColors
 import local.adel.pos.android.core.ui.components.tableStateIcon
@@ -85,9 +86,19 @@ internal fun TablesMap(
                     Modifier.size((TableCanvas.WIDTH * scale).dp, (TableCanvas.HEIGHT * scale).dp),
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    for (table in view.tablesIn(current.id)) {
+                    val tables = view.tablesIn(current.id)
+                    val compact = TableNames.compact(tables)
+                    for (table in tables) {
                         MapTable(
                             table = table,
+                            // Una mesa angosta (muchas mesas en el teléfono) muestra su nombre
+                            // corto.
+                            name =
+                                if (table.width * scale < COMPACT_BELOW_DP) {
+                                    compact[table.id] ?: table.name
+                                } else {
+                                    table.name
+                                },
                             scale = scale,
                             dimmed = table.id !in matches,
                             onClick = { onTableSelect(table) },
@@ -100,7 +111,13 @@ internal fun TablesMap(
 }
 
 @Composable
-private fun MapTable(table: DiningTable, scale: Float, dimmed: Boolean, onClick: () -> Unit) {
+private fun MapTable(
+    table: DiningTable,
+    name: String,
+    scale: Float,
+    dimmed: Boolean,
+    onClick: () -> Unit,
+) {
     val colors = tableStateColors(table.state)
     val shape =
         if (table.shape == TableShape.ROUND) {
@@ -128,7 +145,7 @@ private fun MapTable(table: DiningTable, scale: Float, dimmed: Boolean, onClick:
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = table.name,
+                text = name,
                 style = MaterialTheme.typography.labelLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -144,6 +161,9 @@ private fun MapTable(table: DiningTable, scale: Float, dimmed: Boolean, onClick:
 }
 
 private const val DIMMED_ALPHA = 0.35f
+
+/** Ancho (dp) por debajo del cual una mesa del mapa muestra su nombre corto. */
+private const val COMPACT_BELOW_DP = 80f
 
 const val TAG_TABLES_MAP = "tables-map"
 const val TAG_MAP_AREA_PREFIX = "map-area-"

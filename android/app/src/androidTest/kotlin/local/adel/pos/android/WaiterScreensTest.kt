@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -29,6 +30,7 @@ import local.adel.pos.android.core.domain.waiter.OrderDestination
 import local.adel.pos.android.core.domain.waiter.OrderLine
 import local.adel.pos.android.core.domain.waiter.OrderReview
 import local.adel.pos.android.core.domain.waiter.OrderState
+import local.adel.pos.android.core.domain.waiter.OthersPending
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.domain.waiter.RestaurantStatus
 import local.adel.pos.android.core.domain.waiter.RestaurantView
@@ -117,7 +119,8 @@ class WaiterScreensTest {
                             .copy(review = review(acceptable = true)),
                     ),
                 captures = listOf(capture()),
-                others = 2,
+                others =
+                    listOf(OthersPending("Beto", unsent = 2, waitingForPin = 1, needingReview = 0)),
                 onRetryNow = { retried++ },
                 onOpenCapture = {},
                 onOpenReview = {},
@@ -134,6 +137,13 @@ class WaiterScreensTest {
         // Al final de la lista (perezosa): se desplaza hasta el aviso de los demás meseros.
         compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_PENDING_OTHERS))
         compose.onNodeWithTag(TAG_PENDING_OTHERS).assertExists()
+        // De los demás: cuántos y por qué no salen (revisión R6, B3), nunca cuáles.
+        compose
+            .onNodeWithTag(TAG_PENDING)
+            .performScrollToNode(hasText("Beto: 2 pedidos por enviar"))
+        compose.onNodeWithText("Beto: 2 pedidos por enviar").assertExists()
+        compose.onNodeWithText("Su clave para enviar ya no vale", substring = true).assertExists()
+        compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_RETRY_NOW))
         compose.onNodeWithTag(TAG_RETRY_NOW).assertIsEnabled().performClick()
         assertEquals(1, retried)
         // Sin nada «Por enviar», no hay qué reintentar.
@@ -141,7 +151,7 @@ class WaiterScreensTest {
             PendingOrdersScreen(
                 orders = listOf(order("op-3", OrderState.RECEIVED)),
                 captures = emptyList(),
-                others = 0,
+                others = emptyList(),
                 onRetryNow = { retried++ },
                 onOpenCapture = {},
                 onOpenReview = {},

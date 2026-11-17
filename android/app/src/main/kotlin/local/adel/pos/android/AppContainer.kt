@@ -6,7 +6,6 @@ import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import local.adel.pos.android.core.data.access.AccessRepository
@@ -19,11 +18,14 @@ import local.adel.pos.android.core.data.network.ConnectionMonitor
 import local.adel.pos.android.core.data.preferences.DevicePreferencesRepository
 import local.adel.pos.android.core.data.security.KeystoreSecretSealer
 import local.adel.pos.android.core.data.session.DeviceServerAccess
+import local.adel.pos.android.core.data.waiter.CaptureDiscards
 import local.adel.pos.android.core.data.waiter.DeviceWaiterServer
 import local.adel.pos.android.core.data.waiter.LostResponses
 import local.adel.pos.android.core.data.waiter.OrderQueueRepository
 import local.adel.pos.android.core.data.waiter.OrderSendSignals
 import local.adel.pos.android.core.data.waiter.OrderWorkerFactory
+import local.adel.pos.android.core.data.waiter.OrdersInFlight
+import local.adel.pos.android.core.data.waiter.ServerClock
 import local.adel.pos.android.core.data.waiter.WaiterApi
 import local.adel.pos.android.core.data.waiter.WorkManagerOrderScheduler
 import local.adel.pos.android.core.data.wipe.DeviceDataWipe
@@ -77,6 +79,14 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     /** Avisos entre quien pide enviar la cola y el trabajador que ya está enviando. */
     private val orderSendSignals = OrderSendSignals()
 
+    /**
+     * La diferencia con la hora de Go, para la hora de captura de los pedidos (revisión R6, B4).
+     */
+    private val serverClock = ServerClock()
+
+    /** Pedidos que este proceso confirma en línea en este momento (revisión R6, B2). */
+    private val ordersInFlight = OrdersInFlight()
+
     /** Envío de la cola con WorkManager (sin restricción de red; ver la clase). */
     val orderScheduler: WorkManagerOrderScheduler by lazy {
         WorkManagerOrderScheduler(appContext, orderSendSignals)
@@ -94,6 +104,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             describe = { line ->
                 catalogRealtime.catalog.catalog.value.product(line.productId)?.name
             },
+            // «Descartar el pedido» quita de Go lo suyo con la captura (revisión R6, A2).
+            discards = CaptureDiscards { captureId -> waiterMode.captures.discardNow(captureId) },
+            inFlight = ordersInFlight,
         )
     }
 
@@ -136,11 +149,13 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
         DeviceDataWipe().apply {
             register("catálogo e imágenes") { catalogRealtime.eraseDeviceData() }
             // Fase E: la cola, las capturas y lo guardado de Go (UnsentOrdersSource ya entregó lo
-            // no
-            // enviado a la bitácora) y ningún envío queda programado.
+            // no enviado a la bitácora). Revisión R6, M1 y B5: primero se cancela el envío y se
+            // espera a que termine la vuelta en curso (nada vuelve a escribir un pedido borrado) y,
+            // al final, se vuelve a programar el envío periódico.
             register("cola de pedidos y capturas") {
-                orderQueue.eraseAll()
-                orderScheduler.cancelAll()
+                orderScheduler.cancelAndWait()
+                waiterMode.sender.exclusive { orderQueue.eraseAll() }
+                orderScheduler.schedulePeriodic()
             }
         }
 
@@ -243,7 +258,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     /** Conexión del modo Mesero con las cabeceras del mesero dueño de cada operación (M5). */
     private val waiterServer: DeviceWaiterServer by lazy { DeviceWaiterServer(deviceAccess) }
 
-    private val waiterApi: WaiterApi by lazy { WaiterApi(lostResponses = settings.lostResponses) }
+    private val waiterApi: WaiterApi by lazy {
+        WaiterApi(lostResponses = settings.lostResponses, serverClock = serverClock)
+    }
 
     /** Modo Mesero (Fase E): mesas, capturas, cola y modificar o cancelar lo enviado. */
     val waiterMode: WaiterModeContainer by lazy {
@@ -252,6 +269,8 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             server = waiterServer,
             api = waiterApi,
             queue = orderQueue,
+            serverClock = serverClock,
+            inFlight = ordersInFlight,
             catalog = catalogRealtime.catalog,
             realtime = catalogRealtime.realtime,
             linkState = connectionMonitor.linkState,
@@ -275,12 +294,6 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             images = catalogRealtime.images,
             tablesView = devicePreferences,
             activeWaiter = deviceAccess.activeWaiter,
-            // Solo el número de los pedidos de otros meseros, nunca cuáles.
-            pendingOfOthers = { userId ->
-                combine(orderQueue.pendingCount(), orderQueue.pendingCountOf(userId)) { all, mine ->
-                    all - mine
-                }
-            },
             elapsedClock = SystemClock::elapsedRealtime,
         )
     }

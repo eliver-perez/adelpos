@@ -58,28 +58,74 @@ object OrderReviewRules {
     /**
      * «Abrir una cuenta nueva en la mesa» (la cuenta ya se cobró, se canceló o se combinó): el
      * pedido va a la mesa y ya no sustituye renglones del borrador (Go solo lo admite con una
-     * cuenta). Go vuelve a revisarlo todo y avisa si la mesa ya tiene otra cuenta.
+     * cuenta). Las partidas llevan **identificadores nuevos** (revisión R6, M3): las anteriores
+     * pueden seguir en el borrador de la otra cuenta (o de la cuenta en que se combinó) y Go las
+     * reconocería como de esa cuenta. Go vuelve a revisarlo todo y avisa si la mesa ya tiene otra
+     * cuenta.
      */
-    fun moveToNewAccount(order: PendingOrder, nowMillis: Long): PendingOrder {
+    fun moveToNewAccount(order: PendingOrder, nowMillis: Long, newId: () -> String): PendingOrder {
         check(order.state == OrderState.NEEDS_REVIEW) { "El pedido no requiere revisión" }
+        check(order.review?.accountMerged != true) {
+            "Una cuenta combinada no se manda a una cuenta nueva: se sigue en la que se combinó"
+        }
         val destination =
             order.destination.copy(
                 accountId = null,
                 accountName = null,
                 seenAccountIds = emptyList(),
             )
+        val renamed = order.lines.map { line -> line.copy(item = line.item.copy(id = newId())) }
         return requeued(
-                order = order.copy(destination = destination, replaces = emptyList()),
+                order =
+                    order.copy(
+                        destination = destination,
+                        lines = renamed,
+                        replaces = emptyList(),
+                        unresolvedSave = null,
+                    ),
                 confirmation = null,
                 nowMillis = nowMillis,
             )
             .copy(onlineConfirm = null)
     }
 
+    /**
+     * «Enviar a la cuenta en que se combinó» (o a la cuenta de la mesa donde ya están las
+     * partidas): el mismo pedido, con la misma clave y los mismos renglones que sustituye (Go los
+     * encuentra allí: la combinación mueve el borrador con sus identificadores; revisión R6, M3).
+     */
+    fun sendToAccount(order: PendingOrder, accountId: String, nowMillis: Long): PendingOrder {
+        check(order.state == OrderState.NEEDS_REVIEW) { "El pedido no requiere revisión" }
+        val destination =
+            order.destination.copy(
+                accountId = accountId,
+                accountName = null,
+                seenAccountIds = emptyList(),
+            )
+        return requeued(order.copy(destination = destination), confirmation = null, nowMillis)
+            .copy(onlineConfirm = null)
+    }
+
+    /**
+     * Todo lo del pedido ya estaba en cocina (`draft_item_sent` en cada partida): al confirmar, Go
+     * no envía nada nuevo y lo da por recibido (A1-D18).
+     */
+    fun everythingAlreadySent(order: PendingOrder): Boolean {
+        val sent = order.review?.alreadySentItemIds ?: return false
+        return order.lines.isNotEmpty() && order.lines.all { it.item.id in sent }
+    }
+
     /** Si la revisión ofrece abrir una cuenta nueva en la mesa (la cuenta ya no está abierta). */
-    fun offersNewAccount(review: OrderReview): Boolean =
-        review.reason == ReviewReason.ACCOUNT_NOT_OPEN ||
+    fun offersNewAccount(review: OrderReview): Boolean {
+        // Regla del coordinador (revisión R6, M3): con una cuenta **combinada** no se ofrece
+        // una cuenta nueva. Lo que la combinación movió seguiría por enviar en la cuenta en que se
+        // combinó y podría enviarse dos veces; solo se sigue ahí (o se corrige o se descarta).
+        if (review.accountMerged) {
+            return false
+        }
+        return review.reason == ReviewReason.ACCOUNT_NOT_OPEN ||
             review.changes.any { it.kind == ChangeKind.ACCOUNT_CLOSED }
+    }
 
     /** Partidas que el mesero puede quitar: las que Go señaló con un cambio que exige corregir. */
     fun removableItemIds(order: PendingOrder): Set<String> {

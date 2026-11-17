@@ -184,8 +184,10 @@ class OrderQueueRulesTest {
                 .copy(review = review)
         assertTrue(OrderReviewRules.offersNewAccount(review))
         assertEquals(1, pending.replaces.size)
-        val moved = OrderReviewRules.moveToNewAccount(pending, 5_000)
+        val moved = OrderReviewRules.moveToNewAccount(pending, 5_000) { "renglon-nuevo" }
         assertEquals(OrderState.QUEUED, moved.state)
+        // Identificadores nuevos (revisión R6, M3): los anteriores siguen en la otra cuenta.
+        assertEquals(listOf("renglon-nuevo"), moved.lines.map { it.item.id })
         assertNull(moved.destination.accountId)
         assertEquals(pending.destination.tableId, moved.destination.tableId)
         // Sin cuenta no hay borrador que sustituir (Go lo rechazaría).

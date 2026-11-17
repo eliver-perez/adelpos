@@ -47,16 +47,35 @@ fun CaptureRoute(
     val category by viewModel.selectedCategoryId.collectAsState()
     var confirmingDiscard by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var discardPending by remember { mutableStateOf(false) }
     val tooMany = stringResource(R.string.capture_too_many)
     val nothing = stringResource(R.string.capture_nothing)
+    val stillSaving = stringResource(R.string.capture_still_saving)
     LaunchedEffect(viewModel.notice) {
         when (viewModel.notice) {
             CaptureNotice.Sent -> onDone()
             CaptureNotice.TooManyLines -> message = tooMany
             CaptureNotice.NothingToSend -> message = nothing
+            CaptureNotice.StillSaving -> message = stillSaving
+            CaptureNotice.DiscardPending -> discardPending = true
             null -> Unit
         }
         viewModel.onNoticeShown()
+    }
+    if (discardPending) {
+        // Revisión R6, A2: se dice la verdad antes de volver a Mesas.
+        AlertDialog(
+            onDismissRequest = onDone,
+            title = { Text(stringResource(R.string.discard_pending_title)) },
+            text = { Text(stringResource(R.string.discard_pending_text)) },
+            confirmButton = {
+                TextButton(onClick = onDone, modifier = Modifier.testTag(TAG_DISCARD_PENDING_OK)) {
+                    Text(stringResource(R.string.discard_pending_ok))
+                }
+            },
+            modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
+        )
+        return
     }
     val current = capture ?: return
     val ownCount = OfflineOrderPlan.of(current).items.sumOf { it.line.quantity }

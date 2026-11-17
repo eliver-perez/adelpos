@@ -9,6 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import local.adel.pos.android.core.data.waiter.db.CaptureEntity
 import local.adel.pos.android.core.data.waiter.db.PendingOrderEntity
 import local.adel.pos.android.core.data.waiter.db.RestaurantSnapshotEntity
+import local.adel.pos.android.core.data.waiter.db.WAITER_COLUMNS_V5
 import local.adel.pos.android.core.data.waiter.db.WAITER_TABLES_V4
 import local.adel.pos.android.core.data.waiter.db.WaiterDao
 import local.adel.pos.android.core.data.waiter.db.WaiterPermissionsEntity
@@ -42,7 +43,7 @@ import local.adel.pos.android.core.data.waiter.db.WaiterPermissionsEntity
             RestaurantSnapshotEntity::class,
             WaiterPermissionsEntity::class,
         ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -151,8 +152,23 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 4 → 5 (revisión R6 en el dispositivo): columnas nuevas de la cola y las capturas (la
+         * cuenta que nació con la captura, el guardado sin respuesta de un pedido y si su hora ya
+         * es la de Go); los datos que había no cambian. El SQL es el de `schemas/…/5.json`.
+         */
+        val MIGRATION_4_5: Migration =
+            object : Migration(4, 5) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    for (statement in WAITER_COLUMNS_V5) {
+                        db.execSQL(statement)
+                    }
+                }
+            }
+
         /** Migraciones de todas las versiones, en orden. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+        val MIGRATIONS: Array<Migration> =
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, FILE_NAME)
