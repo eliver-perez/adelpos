@@ -158,4 +158,10 @@ interface CatalogDao {
 
     @Query("DELETE FROM image_files WHERE id IN (:ids)")
     suspend fun deleteImageFiles(ids: List<String>)
+
+    // Borrar los datos de este dispositivo (retirar o emparejar de nuevo).
+
+    @Query("DELETE FROM catalog_state") suspend fun clearState()
+
+    @Query("DELETE FROM image_files") suspend fun clearImageFiles()
 }
