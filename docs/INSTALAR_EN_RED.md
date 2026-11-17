@@ -13,6 +13,10 @@ restaurante. Desde la versión 0.10.0 (etapa 9G):
 > instalador para todo el equipo y terminales en red) llega en la Fase W de la etapa 9G y esta guía se completará
 > entonces.
 
+> **Teléfonos y tabletas de meseros.** Desde la versión 0.12.0 (etapa A1), los meseros pueden capturar en la
+> aplicación de Android. Cómo instalarla, emparejarla con la computadora principal y dar PIN a los meseros:
+> [ANDROID_INSTALAR.md](ANDROID_INSTALAR.md).
+
 > **Si esta Mac ya tenía AD-EL POS** (una versión anterior a la 0.10.0), no instales sin soporte: antes hay que pasar
 > los datos del restaurante a la carpeta nueva, con respaldo y comprobación. Soporte tiene el procedimiento en
 > [DEVELOPMENT_MACOS.md](../DEVELOPMENT_MACOS.md).
