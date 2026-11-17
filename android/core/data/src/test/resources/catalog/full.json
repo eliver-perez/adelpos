@@ -1,0 +1,345 @@
+{
+  "catalog_version": 41,
+  "catalog_epoch": "6f1f5f3e-1c2b-4d3e-9a8b-7c6d5e4f3a21",
+  "since": 0,
+  "full": true,
+  "reset": false,
+  "generated_at": "2026-11-16T18:00:00Z",
+  "timezone": "America/Monterrey",
+  "tax_rate": 16,
+  "price_list": { "id": "a1000000-0000-4000-8000-000000000001", "name": "General", "revision": 3 },
+  "categories": [
+    {
+      "id": "c1000000-0000-4000-8000-000000000001",
+      "name": "Hamburguesas",
+      "description": "",
+      "active": true,
+      "revision": 2,
+      "sort_order": 1,
+      "color": "#d64545",
+      "image_id": null,
+      "availability": {},
+      "available_now": true
+    },
+    {
+      "id": "c1000000-0000-4000-8000-000000000002",
+      "name": "Bebidas",
+      "description": "Frías",
+      "active": true,
+      "revision": 1,
+      "sort_order": 2,
+      "color": "#1f5fa8",
+      "image_id": null,
+      "availability": {},
+      "available_now": true
+    }
+  ],
+  "products": [
+    {
+      "id": "b1000000-0000-4000-8000-000000000001",
+      "name": "Hamburguesa clásica",
+      "description": "Con papas",
+      "active": true,
+      "revision": 4,
+      "category_id": "c1000000-0000-4000-8000-000000000001",
+      "code": "HAM-01",
+      "barcode": null,
+      "kind": "product",
+      "base_price": "120.00",
+      "tax_rate": null,
+      "price_can_decrease": false,
+      "image_id": "d1000000-0000-4000-8000-000000000001",
+      "sort_order": 1,
+      "archived": false,
+      "temporary_unavailable": false,
+      "availability": {},
+      "variants": [],
+      "ingredients": [
+        {
+          "ingredient_id": "e1000000-0000-4000-8000-000000000001",
+          "included_quantity": "1",
+          "removable": true,
+          "addable": true,
+          "max_quantity": "2",
+          "extra_price": "5.00",
+          "name": "Cebolla"
+        }
+      ],
+      "groups": [
+        {
+          "group_id": "f1000000-0000-4000-8000-000000000001",
+          "min_quantity": null,
+          "max_quantity": null,
+          "included": [{ "option_id": "f2000000-0000-4000-8000-000000000001", "quantity": "1" }]
+        }
+      ],
+      "slots": [],
+      "available_now": true,
+      "availability_reason": "",
+      "sold_out": false,
+      "sold_out_indefinite": false,
+      "sold_out_until": null,
+      "effective_tax_rate": 16,
+      "price": "120.00",
+      "price_origin": "list",
+      "pricing_error": null
+    },
+    {
+      "id": "b1000000-0000-4000-8000-000000000002",
+      "name": "Refresco",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "category_id": "c1000000-0000-4000-8000-000000000002",
+      "code": "REF",
+      "barcode": "7501055300075",
+      "kind": "product",
+      "base_price": "0.00",
+      "image_id": null,
+      "sort_order": 1,
+      "archived": false,
+      "temporary_unavailable": false,
+      "availability": {},
+      "variants": [
+        {
+          "id": "b2000000-0000-4000-8000-000000000001",
+          "name": "Chico",
+          "code": "REF-CH",
+          "barcode": null,
+          "price": "25.00",
+          "active": true,
+          "effective_price": "25.00",
+          "price_origin": "list",
+          "pricing_error": null
+        },
+        {
+          "id": "b2000000-0000-4000-8000-000000000002",
+          "name": "Grande",
+          "code": "REF-GR",
+          "barcode": null,
+          "price": "35.00",
+          "active": true,
+          "effective_price": "35.00",
+          "price_origin": "list",
+          "pricing_error": null
+        }
+      ],
+      "ingredients": [],
+      "groups": [],
+      "slots": [],
+      "available_now": true,
+      "availability_reason": "",
+      "sold_out": false,
+      "sold_out_indefinite": false,
+      "sold_out_until": null,
+      "effective_tax_rate": 16,
+      "price": null,
+      "price_origin": null,
+      "pricing_error": "El producto no tiene precio en la lista predeterminada."
+    },
+    {
+      "id": "b1000000-0000-4000-8000-000000000003",
+      "name": "Café de olla",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "category_id": "c1000000-0000-4000-8000-000000000002",
+      "code": "CAF",
+      "barcode": null,
+      "kind": "product",
+      "base_price": "30.00",
+      "image_id": null,
+      "sort_order": 2,
+      "archived": false,
+      "temporary_unavailable": false,
+      "availability": {},
+      "variants": [],
+      "ingredients": [],
+      "groups": [],
+      "slots": [],
+      "available_now": false,
+      "availability_reason": "Agotado hasta nuevo aviso.",
+      "sold_out": true,
+      "sold_out_indefinite": true,
+      "sold_out_until": null,
+      "effective_tax_rate": 16,
+      "price": "30.00",
+      "price_origin": "list",
+      "pricing_error": null
+    },
+    {
+      "id": "b1000000-0000-4000-8000-000000000004",
+      "name": "Combo clásico",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "category_id": "c1000000-0000-4000-8000-000000000001",
+      "code": "COMBO",
+      "barcode": null,
+      "kind": "combo",
+      "base_price": "150.00",
+      "image_id": null,
+      "sort_order": 3,
+      "archived": false,
+      "temporary_unavailable": false,
+      "availability": {},
+      "variants": [],
+      "ingredients": [],
+      "groups": [],
+      "slots": [
+        {
+          "id": "b3000000-0000-4000-8000-000000000001",
+          "name": "Bebida del combo",
+          "min_quantity": 1,
+          "max_quantity": 1,
+          "included_quantity": 1,
+          "default_quantity": 1,
+          "default_product_id": "b1000000-0000-4000-8000-000000000002",
+          "options": [
+            {
+              "product_id": "b1000000-0000-4000-8000-000000000002",
+              "substitution_price": "0.00",
+              "tiers": null,
+              "available_now": true,
+              "sold_out": false
+            },
+            {
+              "product_id": "b1000000-0000-4000-8000-000000000003",
+              "substitution_price": "5.00",
+              "tiers": null,
+              "available_now": false,
+              "sold_out": true
+            }
+          ]
+        }
+      ],
+      "available_now": true,
+      "availability_reason": "",
+      "sold_out": false,
+      "sold_out_indefinite": false,
+      "sold_out_until": null,
+      "effective_tax_rate": 16,
+      "price": "150.00",
+      "price_origin": "list",
+      "pricing_error": null
+    }
+  ],
+  "ingredients": [
+    {
+      "id": "e1000000-0000-4000-8000-000000000001",
+      "name": "Cebolla",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "unit": "porción"
+    }
+  ],
+  "complements": [
+    {
+      "id": "f3000000-0000-4000-8000-000000000001",
+      "name": "Papas",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "product_id": null,
+      "ingredient_id": null
+    },
+    {
+      "id": "f3000000-0000-4000-8000-000000000002",
+      "name": "Ensalada",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "product_id": null,
+      "ingredient_id": null
+    }
+  ],
+  "portions": [
+    {
+      "id": "f4000000-0000-4000-8000-000000000001",
+      "name": "Media",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "factor": "0.5"
+    }
+  ],
+  "groups": [
+    {
+      "id": "f1000000-0000-4000-8000-000000000001",
+      "name": "Guarnición",
+      "description": "",
+      "active": true,
+      "revision": 1,
+      "pricing_mode": "value",
+      "min_quantity": "1",
+      "max_quantity": "1",
+      "options": [
+        {
+          "id": "f2000000-0000-4000-8000-000000000001",
+          "complement_id": "f3000000-0000-4000-8000-000000000001",
+          "portion_id": null,
+          "reference_value": "0.00",
+          "extra_price": "0.00",
+          "max_quantity": null,
+          "active": true,
+          "tiers": null,
+          "available_now": true,
+          "sold_out": false
+        },
+        {
+          "id": "f2000000-0000-4000-8000-000000000002",
+          "complement_id": "f3000000-0000-4000-8000-000000000002",
+          "portion_id": "f4000000-0000-4000-8000-000000000001",
+          "reference_value": "0.00",
+          "extra_price": "10.00",
+          "max_quantity": null,
+          "active": true,
+          "tiers": [{ "from": 1, "unit_price": "8.00" }],
+          "name": "Ensalada",
+          "portion_name": "Media",
+          "portion_factor": "0.5",
+          "available_now": true,
+          "sold_out": false
+        }
+      ]
+    }
+  ],
+  "quick_notes": [
+    {
+      "id": "a2000000-0000-4000-8000-000000000001",
+      "category_id": "c1000000-0000-4000-8000-000000000001",
+      "text": "Sin cebolla",
+      "effect": "omit",
+      "ingredient_id": "e1000000-0000-4000-8000-000000000001",
+      "ingredient_name": "Cebolla",
+      "active": true,
+      "sort_order": 1,
+      "revision": 1,
+      "updated_at": "2026-11-16T17:00:00Z"
+    },
+    {
+      "id": "a2000000-0000-4000-8000-000000000002",
+      "category_id": "c1000000-0000-4000-8000-000000000001",
+      "text": "Bien cocida",
+      "effect": "none",
+      "ingredient_id": null,
+      "ingredient_name": null,
+      "active": true,
+      "sort_order": 2,
+      "revision": 1,
+      "updated_at": "2026-11-16T17:00:00Z"
+    }
+  ],
+  "images": [
+    {
+      "id": "d1000000-0000-4000-8000-000000000001",
+      "media_type": "image/png",
+      "width": 4,
+      "height": 3,
+      "size": 75,
+      "checksum": "CHECKSUM_PLACEHOLDER"
+    }
+  ],
+  "deleted": []
+}

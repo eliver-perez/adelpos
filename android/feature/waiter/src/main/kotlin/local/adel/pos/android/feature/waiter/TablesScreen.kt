@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import local.adel.pos.android.core.domain.table.TableState
+import local.adel.pos.android.core.ui.components.SecondaryButton
 import local.adel.pos.android.core.ui.components.TableStateBadge
 import local.adel.pos.android.core.ui.layout.AdaptivePanes
 import local.adel.pos.android.core.ui.layout.PaneLayout
@@ -33,6 +34,7 @@ import local.adel.pos.android.core.ui.theme.AdelDimens
 fun TablesRoute(
     layout: PaneLayout,
     viewModel: TablesViewModel = viewModel(factory = TablesViewModel.Factory),
+    onOpenCatalog: (() -> Unit)? = null,
 ) {
     TablesScreen(
         layout = layout,
@@ -40,6 +42,7 @@ fun TablesRoute(
         onSearchChange = viewModel::onSearchChange,
         showingAccount = viewModel.showingAccount,
         onShowingAccountChange = viewModel::onShowingAccountChange,
+        onOpenCatalog = onOpenCatalog,
     )
 }
 
@@ -55,6 +58,7 @@ fun TablesScreen(
     showingAccount: Boolean,
     onShowingAccountChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenCatalog: (() -> Unit)? = null,
 ) {
     val title = stringResource(R.string.tables_title)
     AdaptivePanes(
@@ -63,7 +67,7 @@ fun TablesScreen(
         onShowSecondaryChange = onShowingAccountChange,
         primaryTitle = title,
         openSecondaryLabel = stringResource(R.string.account_open),
-        primary = { TablesPane(search, onSearchChange) },
+        primary = { TablesPane(search, onSearchChange, onOpenCatalog) },
         secondary = { AccountPane() },
         modifier = modifier,
     )
@@ -71,7 +75,11 @@ fun TablesScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TablesPane(search: String, onSearchChange: (String) -> Unit) {
+private fun TablesPane(
+    search: String,
+    onSearchChange: (String) -> Unit,
+    onOpenCatalog: (() -> Unit)?,
+) {
     Column(
         modifier =
             Modifier.fillMaxSize()
@@ -104,6 +112,15 @@ private fun TablesPane(search: String, onSearchChange: (String) -> Unit) {
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        // Fase D: acceso de muestra a los componentes del catálogo (la Fase E los usa en la
+        // captura).
+        if (onOpenCatalog != null) {
+            SecondaryButton(
+                text = stringResource(R.string.catalog_sample_open),
+                onClick = onOpenCatalog,
+                modifier = Modifier.testTag(TAG_OPEN_CATALOG),
+            )
+        }
     }
 }
 
@@ -128,3 +145,4 @@ private fun AccountPane() {
 
 const val TAG_TABLES_SEARCH = "tables-search"
 const val TAG_ACCOUNT_PANE = "account-pane"
+const val TAG_OPEN_CATALOG = "open-catalog"

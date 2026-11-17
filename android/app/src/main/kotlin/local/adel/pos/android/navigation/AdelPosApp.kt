@@ -18,8 +18,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import kotlinx.serialization.Serializable
 import local.adel.pos.android.AdelPosApplication
@@ -40,10 +43,15 @@ import local.adel.pos.android.feature.access.SwitchBlockedDialog
 import local.adel.pos.android.feature.access.accessTitle
 import local.adel.pos.android.feature.access.asActions
 import local.adel.pos.android.feature.waiter.TablesRoute
+import local.adel.pos.android.feature.waiter.catalog.CatalogSampleRoute
+import local.adel.pos.android.feature.waiter.catalog.catalogSampleTitle
 import local.adel.pos.android.feature.waiter.tablesTitle
 
 /** Destinos del modo Mesero (rutas con tipo de navigation-compose). */
 @Serializable data object TablesDestination
+
+/** Pantalla de muestra del catálogo y el personalizador (Fase D). */
+@Serializable data object CatalogDestination
 
 /**
  * Raíz de la interfaz: tema, barra superior con el indicador de conexión y, según el estado del
@@ -99,7 +107,16 @@ fun AdelPosNavigation(
 ) {
     val paneLayout = currentPaneLayout()
     val waiter = activeWaiter?.takeIf { status is DeviceStatus.Ready }
-    val title = if (waiter != null) tablesTitle() else accessTitle(status)
+    // Cada mesero empieza su propia navegación: lo que capturó otro no se ve aquí.
+    val navController = key(waiter?.userId) { rememberNavController() }
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val onCatalog = backStackEntry?.destination?.hasRoute<CatalogDestination>() == true
+    val title =
+        when {
+            waiter == null -> accessTitle(status)
+            onCatalog -> catalogSampleTitle()
+            else -> tablesTitle()
+        }
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag(TAG_APP_ROOT),
         topBar = {
@@ -124,8 +141,7 @@ fun AdelPosNavigation(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).consumeWindowInsets(padding)) {
             if (waiter != null) {
-                // Cada mesero empieza su propia navegación: lo que capturó otro no se ve aquí.
-                key(waiter.userId) { WaiterNavigation(paneLayout) }
+                key(waiter.userId) { WaiterNavigation(navController, paneLayout) }
             } else {
                 AccessContent(
                     status = status,
@@ -139,10 +155,25 @@ fun AdelPosNavigation(
 }
 
 @Composable
-private fun WaiterNavigation(paneLayout: PaneLayout) {
-    val navController = rememberNavController()
+private fun WaiterNavigation(navController: NavHostController, paneLayout: PaneLayout) {
     NavHost(navController = navController, startDestination = TablesDestination) {
-        composable<TablesDestination> { TablesRoute(layout = paneLayout) }
+        composable<TablesDestination> {
+            TablesRoute(
+                layout = paneLayout,
+                onOpenCatalog = {
+                    navController.navigate(CatalogDestination) { launchSingleTop = true }
+                },
+            )
+        }
+        composable<CatalogDestination> {
+            val application = LocalContext.current.applicationContext as AdelPosApplication
+            val catalogRealtime = application.container.catalogRealtime
+            CatalogSampleRoute(
+                layout = paneLayout,
+                source = catalogRealtime.catalog,
+                images = catalogRealtime.images,
+            )
+        }
     }
 }
 

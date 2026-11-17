@@ -57,6 +57,8 @@ room {
 dependencies {
     api(project(":core:domain"))
     api(libs.okhttp)
+    // Canal de tiempo real (SSE) de Go: un solo flujo por proceso (RealtimeClient).
+    implementation(libs.okhttp.sse)
     implementation(libs.androidx.core.ktx)
     // api: AppDatabase (pública para el AppContainer) extiende RoomDatabase.
     api(libs.room.runtime)

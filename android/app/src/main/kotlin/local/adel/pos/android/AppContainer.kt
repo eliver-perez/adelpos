@@ -16,6 +16,7 @@ import local.adel.pos.android.core.data.network.ConnectionMonitor
 import local.adel.pos.android.core.data.pending.NoPendingOrders
 import local.adel.pos.android.core.data.preferences.DevicePreferencesRepository
 import local.adel.pos.android.core.data.security.KeystoreSecretSealer
+import local.adel.pos.android.core.data.session.DeviceServerAccess
 import local.adel.pos.android.core.domain.access.IdleLock
 import local.adel.pos.android.core.domain.access.NoUnsentOrders
 import local.adel.pos.android.core.domain.access.NoWaiterWork
@@ -120,6 +121,32 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
             osLabel = "Android ${Build.VERSION.RELEASE}",
             sealer = keystoreSealer,
             access = deviceAccess,
+        )
+    }
+
+    /**
+     * Conexión con el servidor a nombre del mesero activo para el catálogo y el canal de tiempo
+     * real (interfaz estrecha de la Fase D sobre [deviceAccess]); sus avisos van a
+     * `deviceAccess.report`.
+     */
+    private val serverAccess: DeviceServerAccess by lazy {
+        DeviceServerAccess(deviceAccess, appScope)
+    }
+
+    /** Primer o segundo plano de toda la aplicación (lo observa AdelPosApplication). */
+    val appForeground: AppForeground = AppForeground()
+
+    /**
+     * Catálogo en el dispositivo, imágenes y **el único** canal de tiempo real del proceso (Fase
+     * D). La Fase E se suscribe a `catalogRealtime.realtime`.
+     */
+    val catalogRealtime: CatalogRealtimeContainer by lazy {
+        CatalogRealtimeContainer(
+            context = appContext,
+            access = serverAccess,
+            interruptions = serverAccess.interruptions,
+            linkState = connectionMonitor.linkState,
+            foreground = appForeground.inForeground,
         )
     }
 

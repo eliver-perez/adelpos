@@ -25,6 +25,7 @@ import local.adel.pos.android.core.data.db.AccessDao
 import local.adel.pos.android.core.data.db.DeviceLogEntry
 import local.adel.pos.android.core.data.db.KnownWaiterEntity
 import local.adel.pos.android.core.data.db.PairedServerEntity
+import local.adel.pos.android.core.data.session.ServerTransport
 import local.adel.pos.android.core.domain.access.ActiveWaiter
 import local.adel.pos.android.core.domain.access.DeviceAccess
 import local.adel.pos.android.core.domain.access.DeviceStatus
@@ -206,6 +207,13 @@ class AccessRepository(
      * servidor emparejado. Se pide en cada uso (la dirección cambia con el cambio de IP).
      */
     fun serverApi(): ServerApi? = connection?.api()
+
+    /**
+     * Dirección vigente y cliente con la huella fijada del servidor emparejado, para lo que no cabe
+     * en [ServerApi] (imágenes binarias con `ETag` y el canal de tiempo real de la Fase D). null
+     * sin servidor emparejado; se pide en cada uso, como [serverApi].
+     */
+    fun serverTransport(): ServerTransport? = connection?.transport()
 
     /**
      * Cabeceras de autenticación del dispositivo (`X-Device-ID`, `X-Device-Token`) y, si hay un

@@ -62,14 +62,14 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
 
 ## Estructura
 
-| Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer`, `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                      |
-| `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`). Pruebas JVM en segundos. |
-| `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`.        |
-| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, andamio de uno o dos paneles (`layout/`). Compartido con la A2.                                                                                                                                                                                          |
-| `feature:access` | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, cambio de mesero, bloqueo por inactividad (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                  |
-| `feature:waiter` | biblioteca Android                       | Modo Mesero (Fase E). En la Fase A, «Mesas» de muestra con la búsqueda que sobrevive a la rotación y la cuenta a un toque en el teléfono.                                                                                                                                                                                                                                                                                           |
+| Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer`, `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                                                                                         |
+| `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente). Pruebas JVM en segundos. |
+| `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`).                                                                           |
+| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                                                                                              |
+| `feature:access` | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, cambio de mesero, bloqueo por inactividad (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                   |
+| `feature:waiter` | biblioteca Android                       | Modo Mesero (Fase E). Hoy, «Mesas» de muestra (Fase A) y «Catálogo» de muestra (Fase D, `catalog/`, desde Mesas): los componentes del catálogo y el personalizador sobre el catálogo guardado.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`); `core:data` → `core:domain`. Un
 módulo `feature` nunca depende de otro `feature`; la A2 agrega `feature:takeaway` sobre `core:*`.
@@ -101,6 +101,14 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   MockWebServer con TLS (huella aceptada y rechazada, cabeceras, 426 y demás errores), `MoneySerializer`, regla de los
   paneles, colores solo en la paleta y contraste AA de los tokens, `SavedStateHandle` de Mesas.
 - **Robolectric** (SDK 36, `src/test/resources/robolectric.properties`): Room. Cada SDK adicional descarga ≈ 224 MB.
+- **Catálogo y tiempo real (Fase D)**: JVM del dominio (búsqueda, personalizador, revisión, descripción, espera
+  creciente); `CatalogSyncTest` y `CatalogImageCacheTest` (Robolectric + MockWebServer con los JSON del contrato de
+  `core/data/src/test/resources/catalog/`: completa, cambios, `deleted`, archivados, `reset`, agotados, búsqueda,
+  transacción, 304); `CustomizationJsonTest` (la forma exacta de `customization`/`LineRequest`); `RealtimeClientTest`
+  (cursor de `changes`, `interrupted` con `id: 0`, `reset`, espera creciente, conexión muerta, sesión nueva, segundo
+  plano); `CatalogUpdateTriggersTest`; `DeviceServerAccessTest` (con el Go simulado de la entrada). Instrumentadas:
+  `CatalogDatabaseMigrationTest` (`MigrationTestHelper` y reemplazo en una transacción), `CatalogComponentsTest`
+  (`core:ui`) y `CatalogSampleScreenTest` (`app`).
 - **Instrumentadas** (`connectedDebugAndroidTest`): `MigrationTestHelper`, Keystore, Compose (tema, indicador,
   estados de mesa, botones, paneles) y la aplicación completa (navegación, uno o dos paneles según el dispositivo,
   rotación real con `UiAutomation.setRotation` sin perder lo capturado, indicador con el modo avión real).
@@ -118,6 +126,14 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   (otra identidad) en las mismas direcciones: `--steps "1 2 3 4 5"`, reemplazar el servidor y `--no-install --steps
 "6 7"`. En Android 8 a 10 el paso 3 corta la red desde la Mac con `adb root` (solo imágenes `google_apis`).
   Resultados en `android/app/build/outputs/e2e/<serial>/`. **Nunca** contra el servicio real de la Mac.
+- **`CatalogOnGoTest`** (`app`, contra el Go temporal; se omite sin argumentos) corre en tres etapas con
+  `am instrument -e class local.adel.pos.android.CatalogOnGoTest -e stage <a|b|c>` y los argumentos `pin`, `net`,
+  `local` y `provisioning`, con la aplicación instalada una sola vez (`:app:installDebug :app:installDebugAndroidTest`):
+  `a` empareja y entra por la API, crea el catálogo (≈ 300 productos, con sus tiempos en el registro `CatalogOnGoTest`),
+  cambia precio, crea, archiva y agota desde la principal (por el canal y por cambios) y revalida la imagen (304);
+  entre `a` y `b` se borra un producto en la base temporal (`DELETE FROM app.catalog_products WHERE code='TEMP-D'`) y
+  `b` lo recibe en `deleted`; entre `b` y `c` se cambia la época (`UPDATE app.catalog_epoch SET epoch =
+gen_random_uuid()`, como una restauración) y `c` recibe `reset: true`. Solo con la base **temporal** del arnés.
 - **Ejecutor de pruebas de `app`**: `AdelTestRunner` (antes de crear el contenedor) busca por NSD el tipo
   `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor emparejado que no
   responde y un mesero conocido para entrar sin conexión, con el Keystore real), `FakeAccess` (entrada falsa para las
@@ -157,6 +173,33 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
   un mesero manda») y **`UnsentOrdersSource`** (pedidos que no llegaron al servidor: al retirar el dispositivo o
   emparejarlo de nuevo pasan a la bitácora y se muestran con «Este dispositivo fue retirado del restaurante; estos
   pedidos no se enviaron»). Hoy son `NoWaiterWork` y `NoUnsentOrders`.
+
+## Catálogo y tiempo real (para los demás módulos)
+
+`AppContainer.catalogRealtime` (`CatalogRealtimeContainer`) arranca con la aplicación y habla con Go a través de
+`DeviceServerAccess` (la interfaz estrecha `ServerAccess` sobre `deviceAccess`: hay conexión solo con el dispositivo
+listo y un mesero **con sesión de Go**; la dirección se pide en cada uso por el cambio de IP). Sus rechazos y el
+`event: interrupted` del canal van a `deviceAccess.report(error, userId)` con el mesero dueño de la sesión.
+
+- **Catálogo** (`catalogRealtime.catalog`, `CatalogSource`): `catalog` (`StateFlow<Catalog>` de `catalog.db`),
+  `search(CatalogQuery)` (sin acentos ni mayúsculas, sobre la base local), `status` y `requestRefresh()`. Se actualiza
+  al abrir la aplicación, con sesión nueva, al recuperar la red, con los eventos del ámbito `catalog`, con «reconstruir»
+  y cada 5 minutos en primer plano; una descarga a la vez (si llega otra petición, una más al terminar). La versión y la
+  época guardadas (`catalog.value.version`) son las que la cola sin conexión envía con cada pedido. **Los precios son
+  referencia**: el importe final lo calcula Go.
+- **Imágenes** (`catalogRealtime.images`, `CatalogImages`): `cached`/`obtain` y `ProductImage` de `core:ui`, que
+  muestra un marcador mientras no hay imagen.
+- **Personalizador**: `ProductCustomizer` (`core:ui`) produce un `LineSelection` (= `LineRequest`); `toLineRequest()`
+  y `Customization.toDto()` (`core:data`) dan el JSON exacto que esperan `openAccount`, `saveDraft`,
+  `previewDraft` y `submitOfflineOrder` (con `CustomizationJson`); `CustomizationDto.toDomain()` lee un borrador de Go.
+  `CustomizationCheck` revisa solo lo que declara el catálogo; `LineDescription` describe la partida.
+- **Tiempo real** (`catalogRealtime.realtime`, `RealtimeFeed`): **un solo canal SSE por proceso**, abierto solo en primer
+  plano y con sesión; nunca abrir otro (Go admite dos por dispositivo). La Fase E se suscribe con
+  `realtime.events(RealtimeScopes.RESTAURANT)` (o `TAKEAWAY`, con tipos como
+  `RealtimeKinds.ACCOUNT_PREPARATION_CHANGED`) y `realtime.rebuilds()` (reset del servidor o canal abierto de nuevo:
+  volver a leer `restaurant/state`). El cursor sale del `id` de los mensajes `changes`; se abre desde el
+  `event_cursor` de `restaurant/state` (`RecoveryStateCursorSeed`; la Fase E puede pasar su propia semilla para no
+  leer el estado dos veces) y se reabre al cambiar de mesero.
 
 ## Dependencias
 
@@ -236,3 +279,10 @@ Las llaves solo en el Android Keystore; lo cifrado lleva su propósito (`device-
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**
 `fallbackToDestructiveMigration`: la base guardará pedidos sin enviar.
+
+`CatalogDatabase` (`catalog.db`, versión 1, Fase D) es **otra base**: la copia del catálogo de Go, que se reemplaza
+completa con `reset` o época distinta sin tocar `AppDatabase`. Cada registro guarda el documento JSON de Go
+(`document`) y las columnas que se consultan (orden, categoría, `search_key` normalizada); `catalog_state` (versión,
+época, lista y tasa), `images` (referencias) e `image_files` (la caché de `cacheDir/catalog-images/`, con su `ETag`).
+Cada descarga se guarda en una transacción. Mismas reglas de versiones, con `CatalogDatabase.MIGRATIONS` y
+`CatalogDatabaseMigrationTest`.
