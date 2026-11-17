@@ -15,15 +15,19 @@ import local.adel.pos.android.core.data.db.AppDatabase
 import local.adel.pos.android.core.data.discovery.HttpsServerProbe
 import local.adel.pos.android.core.data.discovery.NsdServerBrowser
 import local.adel.pos.android.core.data.network.ConnectionMonitor
-import local.adel.pos.android.core.data.pending.NoPendingOrders
 import local.adel.pos.android.core.data.preferences.DevicePreferencesRepository
 import local.adel.pos.android.core.data.security.KeystoreSecretSealer
 import local.adel.pos.android.core.data.session.DeviceServerAccess
+import local.adel.pos.android.core.data.waiter.DeviceWaiterServer
+import local.adel.pos.android.core.data.waiter.LostResponses
+import local.adel.pos.android.core.data.waiter.OrderQueueRepository
+import local.adel.pos.android.core.data.waiter.OrderSendSignals
+import local.adel.pos.android.core.data.waiter.OrderWorkerFactory
+import local.adel.pos.android.core.data.waiter.WaiterApi
+import local.adel.pos.android.core.data.waiter.WorkManagerOrderScheduler
 import local.adel.pos.android.core.data.wipe.DeviceDataWipe
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.IdleLock
-import local.adel.pos.android.core.domain.access.NoUnsentOrders
-import local.adel.pos.android.core.domain.access.NoWaiterWork
 import local.adel.pos.android.core.domain.access.UnsentOrdersSource
 import local.adel.pos.android.core.domain.access.WaiterWorkGate
 import local.adel.pos.android.core.domain.connection.LinkState
@@ -45,10 +49,13 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
      * @param clientVersion la versión que se informa al servidor (`X-Client-Version`).
      * @param discoveryServiceType el tipo NSD que se busca: las pruebas usan uno propio para no
      *   encontrar nunca el servidor real del restaurante.
+     * @param lostResponses solo pruebas: respuestas de Go que se descartan después de procesarse
+     *   (la «respuesta perdida» de §9); null en la aplicación.
      */
     data class Settings(
         val clientVersion: String = BuildConfig.VERSION_NAME,
         val discoveryServiceType: String = ServerAnnouncements.SERVICE_TYPE,
+        val lostResponses: LostResponses? = null,
     )
 
     private val appContext: Context = context.applicationContext
@@ -63,16 +70,40 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
 
     val connectionMonitor: ConnectionMonitor by lazy { ConnectionMonitor(appContext) }
 
-    /** Contador de pedidos por enviar; la cola real llega en la Fase E. */
-    val pendingOrders: PendingOrdersSource = NoPendingOrders
-
-    /** Trabajo pendiente de cada mesero (captura y cola de la Fase E); hoy nadie tiene. */
-    val waiterWork: WaiterWorkGate = NoWaiterWork
-
-    /** Pedidos sin enviar que pasan a la bitácora al retirar el dispositivo (Fase E). */
-    val unsentOrders: UnsentOrdersSource = NoUnsentOrders
-
     val database: AppDatabase by lazy { AppDatabase.open(appContext) }
+
+    /** Avisos entre quien pide enviar la cola y el trabajador que ya está enviando. */
+    private val orderSendSignals = OrderSendSignals()
+
+    /** Envío de la cola con WorkManager (sin restricción de red; ver la clase). */
+    val orderScheduler: WorkManagerOrderScheduler by lazy {
+        WorkManagerOrderScheduler(appContext, orderSendSignals)
+    }
+
+    /**
+     * La cola de pedidos del modo Mesero (Fase E, Room): también el contador del indicador, el
+     * trabajo pendiente de cada mesero y lo que se muestra antes de borrar al retirar el
+     * dispositivo.
+     */
+    val orderQueue: OrderQueueRepository by lazy {
+        OrderQueueRepository(
+            dao = database.waiter(),
+            scheduler = orderScheduler,
+            describe = { line ->
+                catalogRealtime.catalog.catalog.value.product(line.productId)?.name
+            },
+        )
+    }
+
+    /** Contador de pedidos por enviar de todo el dispositivo (indicador de conexión). */
+    val pendingOrders: PendingOrdersSource
+        get() = orderQueue
+
+    /** Trabajo pendiente de cada mesero: capturas en curso y pedidos sin enviar (A1-D15). */
+    val waiterWork: WaiterWorkGate = WaiterWorkGate { userId -> orderQueue.workOf(userId) }
+
+    /** Pedidos sin enviar que pasan a la bitácora al retirar el dispositivo. */
+    val unsentOrders: UnsentOrdersSource = UnsentOrdersSource { orderQueue.unsentOrders() }
 
     val devicePreferences: DevicePreferencesRepository by lazy {
         DevicePreferencesRepository(database.devicePreferences())
@@ -102,6 +133,13 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     val deviceDataWipe: DeviceDataWipe =
         DeviceDataWipe().apply {
             register("catálogo e imágenes") { catalogRealtime.eraseDeviceData() }
+            // Fase E: la cola, las capturas y lo guardado de Go (UnsentOrdersSource ya entregó lo
+            // no
+            // enviado a la bitácora) y ningún envío queda programado.
+            register("cola de pedidos y capturas") {
+                orderQueue.eraseAll()
+                orderScheduler.cancelAll()
+            }
         }
 
     private val serverBrowser: NsdServerBrowser by lazy {
@@ -198,6 +236,30 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
                 }
             }
         }
+    }
+
+    /** Conexión del modo Mesero con las cabeceras del mesero dueño de cada operación (M5). */
+    private val waiterServer: DeviceWaiterServer by lazy { DeviceWaiterServer(deviceAccess) }
+
+    private val waiterApi: WaiterApi by lazy { WaiterApi(lostResponses = settings.lostResponses) }
+
+    /** Modo Mesero (Fase E): mesas, capturas, cola y modificar o cancelar lo enviado. */
+    val waiterMode: WaiterModeContainer by lazy {
+        WaiterModeContainer(
+            dao = database.waiter(),
+            server = waiterServer,
+            api = waiterApi,
+            queue = orderQueue,
+            catalog = catalogRealtime.catalog,
+            realtime = catalogRealtime.realtime,
+            linkState = connectionMonitor.linkState,
+            foreground = appForeground.inForeground,
+        )
+    }
+
+    /** Fábrica del trabajador de la cola para la configuración de WorkManager. */
+    val orderWorkerFactory: OrderWorkerFactory by lazy {
+        OrderWorkerFactory(sender = { waiterMode.sender }, signals = orderSendSignals)
     }
 
     /** Lo que necesitan las pantallas de entrada (`feature:access`). */
