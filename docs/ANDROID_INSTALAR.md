@@ -53,8 +53,8 @@ emparejamiento y se pierden los pedidos que no se hayan enviado. Al volver a ins
 
 - **La computadora principal debe tener AD-EL POS 0.12.0 o posterior.** Lo ves en la computadora principal, en
   **Administración › Sistema › Configuración › «Ver estado del sistema»**, en «Versión de AD-EL POS». Si tiene una
-  versión anterior, el teléfono no puede emparejarse (al pedir el código dice «Esta aplicación necesita actualizarse
-  para entrar.») y, si ya estaba emparejado, dice **«Actualiza el servidor del restaurante»**. En los dos casos lo que
+  versión anterior, el teléfono lo dice antes de pedir el código (y también si ya estaba emparejado):
+  **«Actualiza el servidor del restaurante»**, con «Volver a comprobar» y «Elegir otra computadora principal». Lo que
   hay que actualizar es la computadora principal: soporte o el administrador instala la 0.12.0 con su instalador (pide
   la contraseña de administrador de la Mac). Cómo se instala la computadora principal:
   [INSTALAR_EN_RED.md](INSTALAR_EN_RED.md).

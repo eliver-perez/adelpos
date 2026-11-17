@@ -3194,3 +3194,155 @@ llegó a tardar 12 s y el lanzador del emulador dejó de responder (F6): es la M
   hacer en otro proyecto). No se subió nada (`origin/main` seguía en `24065f3`) ni hubo commits después; el coordinador
   restauró `main` en `24065f3` (con su seguimiento de `origin/main`) y `etapa-a1-android` en `bd7beb4`, y le quitó el
   seguimiento de `origin/main` que había heredado.
+
+---
+
+## Fase G · Guía del propietario (`docs/ANDROID_INSTALAR.md`)
+
+Rama `etapa-a1-g-doc` (desde `etapa-a1-android` en `fd44940`), un agente, 17/11/2026, en paralelo con otro agente en
+`android/`. Solo documentación: sin emuladores, sin Go temporal y sin cambios en código, `CLAUDE.md`, `AGENTS.md` ni
+`docs/etapas/` (md5 igual antes y después).
+
+### Commit
+
+- `7e0684f` — etapa A1 fase G: guía del propietario `docs/ANDROID_INSTALAR.md` y enlace desde `INSTALAR_EN_RED.md`.
+
+### Qué contiene la guía (§10 de la especificación)
+
+Corta, en segunda persona y con el estilo de `docs/INSTALAR_EN_RED.md`, en ocho secciones:
+
+1. **Instalar la aplicación**: Android 8.0 o posterior; pasar `AD-EL-POS-Android-0.1.0.apk` por carpeta compartida,
+   correo (Gmail no deja adjuntar `.apk`) o cable; el permiso de origen desconocido por app desde Android 8
+   («Permitir desde esta fuente», con la ruta alternativa por el buscador de Ajustes); el aviso de Play Protect; que es
+   una versión de prueba firmada con una llave de desarrollo; que una versión nueva se instala encima y conserva el
+   emparejamiento y los pedidos si viene de la misma llave; y que desinstalar o borrar datos obliga a emparejar de nuevo,
+   pierde los pedidos sin enviar y conviene revocar el registro anterior.
+2. **Antes de emparejar**: computadora principal 0.12.0 o posterior (dónde se ve la versión), misma wifi, usuario con
+   permiso de terminales, dirección fija recomendada.
+3. **Emparejar**: «Buscar el servidor», nombre («Tableta 1»/«Teléfono 1»), «Pedir código» o «Escribir la dirección»,
+   código de 6 dígitos que vence a los 5 minutos, «Cambiar nombre», aprobación en «Terminales nuevas» (solo en la
+   computadora principal, 5 códigos incorrectos), «Emparejamiento listo.» y «¿Quién eres?».
+4. **Permisos y PIN**: tabla de los permisos del rol Mesero (Fase 0, §4; la lista cerrada de A1-D17) con las
+   descripciones que muestra Personal › Roles; asignar el PIN (Personal › Usuarios) o «Mi PIN»; reglas del PIN; quién
+   aparece en la lista; bloqueo de 5 minutos tras 5 errores en 15 minutos y bloqueo hasta desbloquear tras 3 bloqueos en
+   24 horas (A1-D5, A1-D16); sesión con PIN acotada a lo del mesero (A1-D17); entrada sin conexión; bloqueo por
+   inactividad (2 minutos, «Editar» del dispositivo) y cambio de mesero (A1-D15).
+5. **Sin conexión**: los cinco estados, envío solo al volver la red aunque la app esté cerrada, «Reintentar ya»,
+   «Requiere tu revisión» con los mensajes reales de Go, modificar o cancelar lo enviado necesita conexión, no cobra.
+6. **Si no encuentra la computadora principal**: wifi (invitados, aislamiento, datos móviles), encendida y 0.12.0,
+   dirección a mano, permisos («Dispositivos cercanos»), VPN, y los avisos «Emparejar de nuevo» y «Actualiza esta
+   aplicación».
+7. **Retirar un dispositivo**: «Revocar» › «Confirmar revocación», qué borra el dispositivo, los pedidos sin enviar en
+   la bitácora («Borrar la bitácora»), dispositivo perdido o robado.
+8. **Limitaciones**: Para llevar, precuenta y aviso de platillos listos en la A2; no cobra; no marca agotados; no
+   probado en un dispositivo físico; versión de prueba sin tienda.
+
+Además, `docs/INSTALAR_EN_RED.md` tiene una nota nueva al principio que enlaza la guía.
+
+### Textos comprobados contra el código
+
+- **Dispositivo** (`android/feature/access/src/main/res/values/strings.xml`, `feature/waiter/.../strings.xml`,
+  `core/ui/.../strings.xml` y `strings_waiter.xml`): títulos y botones de «Buscar el servidor», el código, los avisos
+  de entrada y bloqueo, «Cambiar de mesero», «Vuelve a escribir tu PIN», «Emparejar de nuevo», «Actualiza esta
+  aplicación», «Actualiza el servidor del restaurante», «Este dispositivo fue retirado del restaurante», «Borrar la
+  bitácora», los cinco estados, «Pedidos pendientes», «Reintentar ya», «Revisar», «Aceptar los cambios y enviar» y
+  «Descartar el pedido». El flujo de la pantalla en `FindServerScreen.kt` (el botón de cada servidor dice «Pedir
+  código»).
+- **Escritorio**: `DevicesPage.tsx` («Terminales nuevas», «Código que muestra …», «Aprobar», «Rechazar», «Teléfono o
+  tableta», «Editar», «Bloqueo por inactividad» con 2 minutos por omisión, «Revocar», «Confirmar revocación»);
+  `UserPin.tsx` y `UsersPage.tsx` («Asignar PIN», «Cambiar PIN», «Nombre corto», «Color del distintivo», «PIN bloqueado:
+  pide desbloqueo», «Desbloquear», «Mi PIN» con la contraseña actual; el propio PIN solo desde «Mi PIN»);
+  `RolesPage.tsx` y `PermissionEditor.tsx` («Editar permisos», «Guardar rol», se muestran las descripciones);
+  `navigation/sections.ts` (rutas de Administración, «Mi PIN» solo con `waiter_devices.use`); `SettingsPage.tsx` y
+  `StatusPage.tsx` («Ver estado del sistema», «Versión de AD-EL POS»).
+- **Servidor**: descripciones de los permisos en `administration/permissions.go:41`, `operations/context.go:55-78`,
+  `catalog/context.go:63-64` y `kitchen/handler.go:43`; lista cerrada `administration/waiter_scope.go:14`; reglas del PIN
+  y bloqueos en `administration/pin.go:26-35`; concesión de `waiter_devices.use` al rol Mesero en `0025` y en
+  `setup.go`; cambiar o quitar el PIN cierra las sesiones y revoca la credencial de envío (`pin.go:288`, `:325`);
+  revocación y bloqueos en el Registro de movimientos (`devices.go:104`, `user.pin_locked`); mensajes de «Requiere tu
+  revisión» (`operations/offline_orders.go:705`, `:739`; `queries.go:130`).
+- **App**: versión 0.1.0 (`android/gradle.properties:11`), sin permisos peligrosos en el manifiesto y
+  `NetworkPermissions` sin ninguno con `targetSdk` 36 (la guía lo dice así y explica «Dispositivos cercanos» por si
+  acaso).
+
+### Diferencias con el encargo
+
+- El permiso se llama **«Entrar con PIN en teléfonos y tabletas de meseros»** (no «… en dispositivos de meseros»): la
+  guía usa el texto real.
+- **Con una computadora principal anterior a la 0.12.0 el emparejamiento no dice «Actualiza el servidor del
+  restaurante»**: `PairingRepository.request` (`core/data/.../access/PairingRepository.kt:294-327`) no compara la
+  versión del servidor antes de pedir el código; un servidor 0.10/0.11 responde 426 (su versión mínima única es la del
+  escritorio, como en el incidente de la Fase F) y la pantalla muestra `entry_update_required`, «Esta aplicación
+  necesita actualizarse para entrar.» (`AccessTexts.kt:75`). «Actualiza el servidor del restaurante» solo aparece con
+  el dispositivo ya emparejado (`AccessRepository.checkLocked`). La guía describe lo que pasa hoy y dice que en los dos
+  casos hay que actualizar la computadora principal.
+
+### Pruebas ejecutadas
+
+| Prueba                                     | Resultado                          |
+| ------------------------------------------ | ---------------------------------- |
+| `iso.sh … format` y `fmt-check` (Prettier) | aprobado                           |
+| `iso.sh … sync-check`                      | aprobado («Metadatos coherentes.») |
+| md5 de `docs/etapas/*.md` antes y después  | iguales                            |
+
+### No verificado
+
+- Los textos de Android ajenos a AD-EL POS (aviso de origen desconocido, «Permitir desde esta fuente»,
+  «Transferencia de archivos», Play Protect): dependen de la marca y la versión y no se vieron en un dispositivo; la
+  guía lo advierte.
+- Ningún paso de la guía se recorrió en pantalla (sin emulador ni Go temporal en esta parte).
+
+### Para el coordinador
+
+1. Decidir si se corrige el aviso del emparejamiento con un servidor anterior a 0.12.0 (comprobar `GET version` con
+   `ServerCompatibility.check` en `PairingRepository.request`, también con la dirección escrita, y mostrar «Actualiza el
+   servidor del restaurante»). Si se corrige, la sección 2 de la guía se simplifica (quitar la frase de «Esta aplicación
+   necesita actualizarse para entrar.»).
+2. Si la Fase G cambia el nombre del APK o la forma de entrega, actualizar la sección 1.
+
+## Emparejar con un servidor anterior a la 0.12.0 · Dispositivo
+
+Rama `etapa-a1-cb-fix2` (desde `etapa-a1-android` en `2f9f988`), 17/11/2026, árbol `$SP/wt/CBfix2`, `ISO_TAG=C`. Un
+commit: `b49b817` «Android: al emparejar con una computadora principal anterior a la 0.12.0, «Actualiza el servidor del
+restaurante»». Sin cambios en `backend/`, `desktop/` ni `docs/`; `docs/etapas/*.md` con el mismo md5. No se abrió
+ningún emulador ni Go temporal (no hacía falta: el arnés no tiene un servidor 0.11.0).
+
+### Defecto
+
+Al emparejar por la dirección escrita, `PairingRepository.request` pedía el código sin mirar la versión: una
+computadora principal 0.10 u 0.11 responde 426 y la pantalla decía «Esta aplicación necesita actualizarse para
+entrar.». «Actualiza el servidor del restaurante» solo salía ya emparejado (`checkLocked`).
+
+### Corrección
+
+- `core/data/.../access/PairingRepository.kt:302`: la primera petición de la sesión es siempre `GET version` (fija el
+  certificado, como antes con el servidor de la búsqueda) y, **antes de pedir el código**, `ServerCompatibility.check`
+  con la versión, las capacidades y `min_client_versions.android`:
+  - Servidor anterior a 0.12.0 o sin `waiter-pin-v1` → `PairingProblem.UpdateServer(serverVersion)` (nuevo en
+    `core/domain/.../pairing/Pairing.kt`). No se pide ningún código.
+  - Mínima de Android mayor que la aplicación → «Actualiza esta aplicación» (`AppError.UpdateRequired`), también sin
+    pedir el código.
+- `pairingProblem` (`:421`): un 426 o un tipo/versión de cliente desconocido (`AppError.UpdateRequired`) durante el
+  emparejamiento de un servidor que **no informa** `min_client_versions.android` (o cuyo `GET version` ya respondió
+  así: Go exime `version` de esa comprobación desde la 0.12.0) es un servidor viejo → `UpdateServer`.
+- Pantalla (`feature/access/.../findserver/FindServerScreen.kt:92`): con `UpdateServer`, la misma `UpdateServerScreen`
+  de «ya emparejado» («Actualiza el servidor del restaurante», versión en la sección de soporte) con «Volver a
+  comprobar» (`FindServerViewModel.checkAgain`, repite la última solicitud) y, solo aquí, «Elegir otra computadora
+  principal» (vuelve a la búsqueda).
+- `android/CLAUDE.md`, «Entrada al dispositivo»: la regla de versiones al emparejar y ya emparejado.
+
+### Pruebas
+
+| Qué                                                                                                                                                                                                                               | Resultado                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `PairingRepositoryTest.unServidorAnteriorA012PideActualizarloAntesDePedirElCodigo` (0.11.0 por dirección escrita y desde la búsqueda; 0.12.0 sin `waiter-pin-v1`)                                                                 | aprobada; ninguna solicitud de código llega al servidor                                                            |
+| `PairingRepositoryTest.conUnServidor012SigueElEmparejamientoDespuesDeComprobarLaVersion` (0.12.0 → código; `version` antes que `pairing/requests`; mínima de Android mayor → «Actualiza esta aplicación» sin pedir código)        | aprobada                                                                                                           |
+| `PairingRepositoryTest.un426DeUnServidorQueNoInformaLaMinimaEsUnServidorViejo` (426 en `version`; 426 y 400 `CLIENT_KIND_INVALID` en la solicitud sin mínima informada; con mínima, 426 sigue siendo «Actualiza esta aplicación») | aprobada                                                                                                           |
+| `AccessViewModelsTest.conUnServidorViejoVolverAComprobarPideOtraVezAlMismo`                                                                                                                                                       | aprobada                                                                                                           |
+| `android-test` (`:core:domain:test testDebugUnitTest lintDebug`)                                                                                                                                                                  | **224 pruebas JVM, 0 fallas** (contadas en los XML); Lint sin avisos; `:app:compileDebugAndroidTestKotlin` compila |
+| `ktfmtCheck`, `iso.sh format` y `fmt-check`                                                                                                                                                                                       | limpios                                                                                                            |
+
+No verificado: la pantalla en un dispositivo (no se corrieron pruebas instrumentadas ni contra un Go temporal) y un
+servidor 0.10/0.11 real (el arnés no lo tiene).
+
+**Coordinador**: guía fusionada (`2f9f988`) y corrección del aviso fusionada (`c683c4a`; se acepta el botón «Elegir otra computadora principal»); la sección 2 de la guía se ajustó al comportamiento nuevo.
