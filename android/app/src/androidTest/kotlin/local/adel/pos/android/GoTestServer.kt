@@ -21,8 +21,9 @@ import org.junit.Assume.assumeTrue
  * Fase 0 (prueba t05): la escucha local HTTP (`http://10.0.2.2:<ISO_GO_PORT>`, que Go trata como la
  * «computadora principal») configura, crea el catálogo, aprueba el emparejamiento y hace los
  * cambios; el dispositivo usa la escucha de red HTTPS con la huella fijada. Argumentos de la
- * instrumentación: `pin` (huella SPKI en hexadecimal), `net`, `local` y `provisioning`. **Nunca**
- * contra el servicio real de la Mac (8181, 8443).
+ * instrumentación: `pin` (huella SPKI en hexadecimal), `net`, `local` y la terminal principal del
+ * guion (`mainDevice` y `mainToken`) o `provisioning`. **Nunca** contra el servicio real de la Mac
+ * (8181, 8443).
  */
 class GoTestServer {
     private val arguments = InstrumentationRegistry.getArguments()
@@ -95,8 +96,36 @@ class GoTestServer {
     /** Credenciales del dispositivo Android emparejado y su sesión. */
     data class Device(val deviceId: String, val deviceToken: String, val session: String)
 
+    /**
+     * La computadora principal con sesión de administrador: la terminal que creó el guion
+     * (`scripts/android-e2e.sh`, argumentos `mainDevice` y `mainToken`) o, sin ella, el asistente
+     * inicial con el token de aprovisionamiento (argumento `provisioning`).
+     */
+    fun mainComputer(): MainComputer {
+        val deviceId = arguments.getString("mainDevice")
+        val deviceToken = arguments.getString("mainToken")
+        if (deviceId.isNullOrBlank() || deviceToken.isNullOrBlank()) {
+            return setUpMainComputer()
+        }
+        return MainComputer(deviceId, deviceToken, adminSession(deviceId, deviceToken))
+    }
+
+    /** Sesión nueva del administrador en la terminal principal [deviceId]. */
+    fun adminSession(deviceId: String, deviceToken: String): String {
+        val login =
+            call(
+                plain,
+                "POST",
+                "$local/api/v1/auth/login",
+                """{"username":"admin","password":"admin"}""",
+                mapOf("X-Device-ID" to deviceId, "X-Device-Token" to deviceToken),
+            )
+        assertEquals(login.body.toString(), 200, login.status)
+        return login.text("session_token")
+    }
+
     /** Asistente inicial con el token de aprovisionamiento y sesión de administrador. */
-    fun setUpMainComputer(): MainComputer {
+    private fun setUpMainComputer(): MainComputer {
         val setup =
             call(
                 plain,
@@ -109,16 +138,7 @@ class GoTestServer {
         assertEquals(setup.body.toString(), 200, setup.status)
         val deviceId = setup.text("device_id")
         val deviceToken = setup.text("device_token")
-        val login =
-            call(
-                plain,
-                "POST",
-                "$local/api/v1/auth/login",
-                """{"username":"admin","password":"admin"}""",
-                mapOf("X-Device-ID" to deviceId, "X-Device-Token" to deviceToken),
-            )
-        assertEquals(login.body.toString(), 200, login.status)
-        return MainComputer(deviceId, deviceToken, login.text("session_token"))
+        return MainComputer(deviceId, deviceToken, adminSession(deviceId, deviceToken))
     }
 
     /**
