@@ -3,11 +3,18 @@ package local.adel.pos.android.core.data.waiter
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.work.BackoffPolicy
 import androidx.work.ListenableWorker
+import androidx.work.NetworkType
 import androidx.work.testing.TestListenableWorkerBuilder
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
@@ -24,8 +31,11 @@ import local.adel.pos.android.core.data.waiter.WaiterTestSupport.error
 import local.adel.pos.android.core.data.waiter.WaiterTestSupport.line
 import local.adel.pos.android.core.data.waiter.WaiterTestSupport.queuedOrder
 import local.adel.pos.android.core.data.waiter.db.WaiterStorage
+import local.adel.pos.android.core.domain.access.IdleLock
 import local.adel.pos.android.core.domain.waiter.DraftLine
+import local.adel.pos.android.core.domain.waiter.DraftOperation
 import local.adel.pos.android.core.domain.waiter.OrderState
+import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.domain.waiter.ReviewReason
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
@@ -95,7 +105,7 @@ class OrderQueueTest {
         mock.close()
     }
 
-    private suspend fun insert(order: local.adel.pos.android.core.domain.waiter.PendingOrder) {
+    private suspend fun insert(order: PendingOrder) {
         database.waiter().insertOrder(WaiterStorage.toEntity(order))
     }
 
@@ -347,13 +357,62 @@ class OrderQueueTest {
         // Riesgo de la Fase 0 (§1.6): sin restricción de red; el trabajador prueba el servidor.
         val request = WorkManagerOrderScheduler.sendRequest()
         assertEquals(
-            androidx.work.NetworkType.NOT_REQUIRED,
+            NetworkType.NOT_REQUIRED,
             request.workSpec.constraints.requiredNetworkType,
         )
-        assertEquals(androidx.work.BackoffPolicy.EXPONENTIAL, request.workSpec.backoffPolicy)
+        assertEquals(BackoffPolicy.EXPONENTIAL, request.workSpec.backoffPolicy)
         assertEquals(
-            androidx.work.NetworkType.NOT_REQUIRED,
+            NetworkType.NOT_REQUIRED,
             WorkManagerOrderScheduler.periodicRequest().workSpec.constraints.requiredNetworkType,
         )
+    }
+
+    @Test
+    fun elBloqueoPorInactividadNoOcurreConPedidosSinEnviar() = runBlocking {
+        insert(queuedOrder("op-1"))
+        var now = 0L
+        val idle = IdleLock(clock = { now }, work = queue, recheckMillis = 50)
+        var locked: String? = null
+        val watcher =
+            CoroutineScope(Dispatchers.Default).launch {
+                idle.watch(ANA, timeoutSeconds = 120) { locked = it }
+            }
+        // Una hora sin tocar la pantalla, con un pedido «Por enviar»: no se bloquea.
+        now = 3_600_000L
+        delay(400)
+        assertNull(locked)
+        // La captura en curso también lo impide, pero no impide cambiar de mesero (A1-D15).
+        database
+            .waiter()
+            .saveCapture(
+                WaiterStorage.toEntity(
+                    WaiterTestSupport.capture(
+                        id = "captura",
+                        operations =
+                            listOf(
+                                DraftOperation.Add(
+                                    DraftLine("r1", line(BURGER)),
+                                ),
+                            ),
+                        own = setOf("r1"),
+                    ),
+                    1L,
+                ),
+            )
+        val order = queue.order("op-1").first()!!
+        database.waiter().saveOrder(WaiterStorage.toEntity(order.copy(state = OrderState.RECEIVED)))
+        assertTrue(queue.workOf(ANA).blocksIdleLock)
+        assertFalse(queue.workOf(ANA).blocksSwitch)
+        delay(400)
+        assertNull(locked)
+        // Sin nada pendiente se bloquea en la siguiente revisión.
+        database.waiter().deleteCapture("captura")
+        withTimeout(5_000) {
+            while (locked == null) {
+                delay(50)
+            }
+        }
+        assertEquals(ANA, locked)
+        watcher.cancel()
     }
 }
