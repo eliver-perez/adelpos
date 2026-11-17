@@ -38,6 +38,17 @@ class FakeGoServer(
 
     /** PIN bloqueado (de todos) hasta que lo desbloquee un administrador (A1-D16). */
     var requiresUnlock = false
+
+    /**
+     * Cuántas entradas con PIN más responde 503 PIN_LOGIN_BUSY (muchas verificaciones a la vez).
+     */
+    var busyLogins = 0
+
+    /** Intentos de `pin-login` recibidos (también los ocupados y los rechazados). */
+    var pinLoginAttempts = 0
+
+    /** `X-Client-Kind` distinto del tipo del dispositivo: 400 CLIENT_KIND_MISMATCH en pin-login. */
+    var kindMismatch = false
     var revoked = false
     var forbidden = emptySet<String>()
     var pairingState = "pending"
@@ -176,12 +187,24 @@ class FakeGoServer(
     private fun pinLogin(body: String): MockResponse {
         val userId = Regex("\"user_id\":\"([^\"]+)\"").find(body)?.groupValues?.get(1)
         val pin = Regex("\"pin\":\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+        pinLoginAttempts += 1
+        if (kindMismatch) {
+            return fail(400, "CLIENT_KIND_MISMATCH")
+        }
+        if (busyLogins > 0) {
+            busyLogins -= 1
+            return fail(503, "PIN_LOGIN_BUSY")
+        }
         val waiter = waiters[userId] ?: return fail(401, "PIN_INVALID")
         if (requiresUnlock) {
             return fail(429, "PIN_LOCKED", """{"locked_until":null,"requires_unlock":true}""")
         }
         if (lockedUntil != null) {
-            return fail(429, "PIN_LOCKED", """{"locked_until":"$lockedUntil"}""")
+            return fail(
+                429,
+                "PIN_LOCKED",
+                """{"locked_until":"$lockedUntil","requires_unlock":false}""",
+            )
         }
         if (waiter.second != pin) {
             return fail(401, "PIN_INVALID")

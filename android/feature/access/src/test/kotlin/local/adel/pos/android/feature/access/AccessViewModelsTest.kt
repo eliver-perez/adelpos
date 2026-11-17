@@ -162,6 +162,10 @@ class AccessViewModelsTest {
                     EntryResult.Locked(null, requiresUnlock = true) to
                         EntryMessage.Locked(null, requiresUnlock = true),
                     EntryResult.OfflineClosed to EntryMessage.OfflineClosed,
+                    EntryResult.Busy to EntryMessage.Busy,
+                    EntryResult.Failed(
+                        AppError.Rejected(400, "CLIENT_KIND_MISMATCH", "Mensaje de Go.", null),
+                    ) to EntryMessage.SupportProblem("CLIENT_KIND_MISMATCH"),
                     EntryResult.NotAllowed to EntryMessage.NotAllowed,
                     EntryResult.UnknownOffline to EntryMessage.UnknownOffline,
                     EntryResult.Failed(AppError.Unreachable) to EntryMessage.Unreachable,

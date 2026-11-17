@@ -32,6 +32,12 @@ sealed interface EntryMessage {
     /** Entrada sin conexión cerrada para ese mesero: tiene que entrar con conexión. */
     data object OfflineClosed : EntryMessage
 
+    /** Go está ocupado verificando otras entradas: intentarlo de nuevo en unos segundos. */
+    data object Busy : EntryMessage
+
+    /** Un problema de configuración que resuelve soporte ([code] de Go, para dictarlo). */
+    data class SupportProblem(val code: String) : EntryMessage
+
     data object NotAllowed : EntryMessage
 
     data object UnknownOffline : EntryMessage
@@ -44,6 +50,9 @@ sealed interface EntryMessage {
     data class Failed(val serverMessage: String?) : EntryMessage
 }
 
+// 400 de Go cuando el tipo de cliente no coincide con el del dispositivo (no debería pasar).
+private const val CLIENT_KIND_MISMATCH = "CLIENT_KIND_MISMATCH"
+
 /** El mensaje que corresponde a un intento de entrada (null si entró). */
 internal fun entryMessageFor(result: EntryResult): EntryMessage? =
     when (result) {
@@ -51,13 +60,19 @@ internal fun entryMessageFor(result: EntryResult): EntryMessage? =
         EntryResult.WrongPin -> EntryMessage.WrongPin
         is EntryResult.Locked -> EntryMessage.Locked(result.untilEpochMillis, result.requiresUnlock)
         EntryResult.OfflineClosed -> EntryMessage.OfflineClosed
+        EntryResult.Busy -> EntryMessage.Busy
         EntryResult.NotAllowed -> EntryMessage.NotAllowed
         EntryResult.UnknownOffline -> EntryMessage.UnknownOffline
         is EntryResult.Failed ->
             when (result.error) {
                 is AppError.UpdateRequired -> EntryMessage.UpdateRequired
                 AppError.Unreachable -> EntryMessage.Unreachable
-                else -> EntryMessage.Failed(result.error.serverMessage)
+                else ->
+                    if (result.error.code == CLIENT_KIND_MISMATCH) {
+                        EntryMessage.SupportProblem(CLIENT_KIND_MISMATCH)
+                    } else {
+                        EntryMessage.Failed(result.error.serverMessage)
+                    }
             }
     }
 

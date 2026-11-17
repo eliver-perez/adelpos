@@ -370,6 +370,9 @@ internal fun entryMessageText(message: EntryMessage): String {
             }
         EntryMessage.OfflineClosed ->
             stringResource(R.string.entry_offline_closed, words.thisDevice)
+        EntryMessage.Busy -> stringResource(R.string.entry_busy)
+        is EntryMessage.SupportProblem ->
+            stringResource(R.string.entry_support_problem, words.thisDeviceCapital, message.code)
         EntryMessage.NotAllowed -> stringResource(R.string.entry_not_allowed)
         EntryMessage.UnknownOffline ->
             stringResource(R.string.entry_unknown_offline, words.thisDevice)
