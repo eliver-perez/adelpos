@@ -46,7 +46,7 @@ import local.adel.pos.android.feature.access.status.TAG_REPAIR_ACTION
 import local.adel.pos.android.feature.access.status.TAG_REPAIR_CONFIRM
 import local.adel.pos.android.feature.access.status.TAG_REPAIR_ERASES
 import local.adel.pos.android.feature.access.status.TAG_REPAIR_PENDING
-import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 import local.adel.pos.android.navigation.AdelPosNavigation
 import org.junit.Assert.assertEquals
 import org.junit.Rule

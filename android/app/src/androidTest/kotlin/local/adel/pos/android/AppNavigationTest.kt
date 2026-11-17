@@ -22,7 +22,7 @@ import local.adel.pos.android.feature.access.pin.TAG_ENTRY
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_OFFLINE
 import local.adel.pos.android.feature.access.pin.TAG_REENTER
 import local.adel.pos.android.feature.access.pin.TAG_REENTER_MESSAGE
-import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
