@@ -43,17 +43,27 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
     `AdelDimens`); un solo botón principal por panel.
 13. **El indicador de conexión siempre visible** en la barra superior común (`AdelTopBar` + `ConnectionIndicator`):
     «En línea», «Sin conexión» y «N pedidos por enviar».
+14. **El trabajo pendiente de un mesero manda** (§0-B, §3.2 y §7; `WaiterWork` en `core:domain`): el bloqueo por
+    inactividad no ocurre con una captura en curso ni con pedidos sin enviar (`blocksIdleLock`); cambiar de mesero lo
+    impiden solo los pedidos sin enviar del mesero actual («Por enviar», «Enviando», «Requiere tu revisión»;
+    `blocksSwitch`): una captura en curso se queda guardada con su mesero, su sesión no se cierra y el siguiente no la
+    ve; un «Cerrar sesión» explícito lo impiden ambas cosas (`blocksLogout`). Quien muestre esas acciones pregunta a
+    `WaiterWorkGate` antes de hacerlas.
+15. **Ninguna prueba abre la aplicación normal con la búsqueda automática en la red real**: las pruebas
+    instrumentadas de `app` corren con `AdelTestRunner`, que busca el tipo NSD `_adelpostest._tcp` (el emulador de
+    Android 17 sí ve los anuncios de la red de la Mac). Para capturas o revisiones a mano, usar el mismo ejecutor o una
+    prueba; si alguna vez aparece el servidor real del restaurante, no se toca.
 
 ## Estructura
 
-| Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                   |
-| ---------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer`, `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), manifiesto, ícono, `src/debug` con `network_security_config`.                                 |
-| `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`. Pruebas JVM en segundos.                                                        |
-| `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi.getVersion`), `security/` (huella, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`. |
-| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, andamio de uno o dos paneles (`layout/`). Compartido con la A2.                     |
-| `feature:access` | biblioteca Android                       | Entrada al dispositivo: emparejamiento, búsqueda del servidor y PIN (fases B y C). En la Fase A, la pantalla de muestra «Entrar».                                                                                                                              |
-| `feature:waiter` | biblioteca Android                       | Modo Mesero (Fase E). En la Fase A, «Mesas» de muestra con la búsqueda que sobrevive a la rotación y la cuenta a un toque en el teléfono.                                                                                                                      |
+| Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer`, `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                      |
+| `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`). Pruebas JVM en segundos. |
+| `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`.        |
+| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, andamio de uno o dos paneles (`layout/`). Compartido con la A2.                                                                                                                                                                                          |
+| `feature:access` | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, cambio de mesero, bloqueo por inactividad (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                  |
+| `feature:waiter` | biblioteca Android                       | Modo Mesero (Fase E). En la Fase A, «Mesas» de muestra con la búsqueda que sobrevive a la rotación y la cuenta a un toque en el teléfono.                                                                                                                                                                                                                                                                                           |
 
 Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`); `core:data` → `core:domain`. Un
 módulo `feature` nunca depende de otro `feature`; la A2 agrega `feature:takeaway` sobre `core:*`.
@@ -73,6 +83,7 @@ no están definidos; necesitan Android Studio instalado, por eso **no** forman p
 | `./scripts/dev.sh android-build`        | `assembleDebug` y `assembleRelease` (R8, sin ofuscar) y el tamaño de cada APK.                     |
 | `./scripts/dev.sh android-test`         | Pruebas de la JVM (`core:domain`), JVM + Robolectric SDK 36 de los módulos Android y Android Lint. |
 | `./scripts/dev.sh android-connected`    | Pruebas instrumentadas; con más de un dispositivo, elegir con `ANDROID_SERIAL=emulator-5580`.      |
+| `scripts/android-e2e.sh`                | Extremo a extremo contra un servidor Go **temporal** (ver «Pruebas»); nunca el servicio real.      |
 
 Los agentes de la etapa usan el arnés aislado (`$SP/iso.sh <árbol> gradle <tareas…>`, `emu-up`, `server-up`), que da el
 mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como máximo: ktfmt corta los más largos.
@@ -87,9 +98,28 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
 - **Instrumentadas** (`connectedDebugAndroidTest`): `MigrationTestHelper`, Keystore, Compose (tema, indicador,
   estados de mesa, botones, paneles) y la aplicación completa (navegación, uno o dos paneles según el dispositivo,
   rotación real con `UiAutomation.setRotation` sin perder lo capturado, indicador con el modo avión real).
-- **Contra el Go temporal** (`ServerApiOnDeviceTest`, se omite sin argumentos): `iso.sh server-up` y los argumentos de
-  instrumentación `pin` (huella SPKI en hexadecimal de `run-<TAG>/identity/server-cert.pem`) y `net`
-  (`https://10.0.2.2:<ISO_NET_PORT>`). **Nunca** contra el servicio real de la Mac (8181, 8443).
+- **Contra el Go temporal**: `ServerApiOnDeviceTest` (`core:data`, argumentos `pin` y `net`) y, de punta a punta,
+  `AccessOnGoTest` (`app`, 7 pasos: emparejar con el código, PIN incorrecto y bloqueo al quinto, entrada sin conexión,
+  PIN cambiado, 426, certificado cambiado y dispositivo retirado). Ambas se omiten sin argumentos (en
+  `connectedDebugAndroidTest` salen como omitidas). `AccessOnGoTest` se corre con **`scripts/android-e2e.sh`**: un paso
+  por instrumentación (`am instrument`) con la aplicación instalada una sola vez, la prueba hace de computadora
+  principal por la escucha local (`MainComputer`) y la aplicación usa la escucha de red. Recibe por variables
+  `ANDROID_SERIAL`, `ADELPOS_E2E_LOCAL_URL` (`http://127.0.0.1:<puerto>`), `ADELPOS_E2E_NETWORK_URL`
+  (`https://127.0.0.1:<puerto>`), `ADELPOS_E2E_PIN` (opcional; si falta, la del certificado servido),
+  `ADELPOS_E2E_SERVER_ID` y `ADELPOS_E2E_PROVISIONING_FILE` (o `ADELPOS_E2E_PROVISIONING`, o la terminal principal en
+  `ADELPOS_E2E_MAIN_DEVICE`/`ADELPOS_E2E_MAIN_TOKEN`); se niega con los puertos 8181/8443, con otro host o si
+  `GET version` no dice `test_mode: true`. Pasos 1–5 y 7 con un servidor; el 6 necesita **otro** servidor temporal
+  (otra identidad) en las mismas direcciones: `--steps "1 2 3 4 5"`, reemplazar el servidor y `--no-install --steps
+"6 7"`. En Android 8 a 10 el paso 3 corta la red desde la Mac con `adb root` (solo imágenes `google_apis`).
+  Resultados en `android/app/build/outputs/e2e/<serial>/`. **Nunca** contra el servicio real de la Mac.
+- **Ejecutor de pruebas de `app`**: `AdelTestRunner` (antes de crear el contenedor) busca por NSD el tipo
+  `_adelpostest._tcp` y toma `clientVersion` de los argumentos. Ayudantes: `TestDevice` (un servidor emparejado que no
+  responde y un mesero conocido para entrar sin conexión, con el Keystore real), `FakeAccess` (entrada falsa para las
+  pantallas con estados forzados) y `MainComputer`.
+- **`testOptions.targetSdk = 36` en las bibliotecas que tocan la red** (`core:data`): el APK de pruebas de una
+  biblioteca toma `compileSdk` (37) si no se indica, y en Android 17 un `targetSdk` 37 exige `ACCESS_LOCAL_NETWORK`
+  (visto: `SecurityException: Missing local network permission` al anunciar por NSD). Se prueba con el nivel de la
+  aplicación (A1-D7).
 - **Matriz** (avance §1.7): `Pixel_8` (5580) y `Pixel_Tablet` (5582) con Android 17; `ADEL_A1_Phone_API33` (5592) y
   `ADEL_A1_Tablet_API26` (5590). Emuladores sin ventana y de solo lectura con `iso.sh - emu-up <avd> <consola>`; como
   mucho dos a la vez; `emu-down` al terminar.
@@ -100,6 +130,27 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   `connectedDebugAndroidTest` lo escribe en el registro pero **termina con BUILD SUCCESSFUL sin correr las pruebas** de
   ese módulo. Comprobar siempre los resultados en `*/build/outputs/androidTest-results/connected/` y desinstalar antes
   (`adb uninstall local.adel.pos.android`).
+
+## Entrada al dispositivo (para los demás módulos)
+
+`AppContainer.deviceAccess` (`AccessRepository`, que implementa `DeviceAccess`) es la única fuente del servidor
+emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo Mesero, cola, canal de eventos):
+
+- `serverApi(): ServerApi?` — la API del servidor emparejado en la dirección vigente, con la huella fijada. Pedirla en
+  cada uso (la dirección cambia con el cambio de IP); null sin servidor emparejado.
+- `requestHeaders(): Headers?` — `X-Device-ID`/`X-Device-Token` y, si hay mesero activo **con sesión de Go**,
+  `Authorization: Bearer`. `deviceCredentials()` da solo las del dispositivo; `sessionToken(userId)`, la sesión de un
+  mesero (solo en memoria: se pierde al cerrar la aplicación); `offlineCredential(userId)`, su credencial de envío
+  (A1-D1, cifrada con el Keystore) para `submitOfflineOrder` sin sesión. `activeWaiter` (`StateFlow`) dice quién usa
+  el dispositivo y si tiene sesión (`hasServerSession`; sin conexión no la tiene).
+- `report(error: AppError, userId: String?)` — **punto único** para los errores de Go de cualquier petición o del
+  canal de eventos (`event: interrupted`): `DEVICE_REVOKED` retira el dispositivo (bitácora y borrado), `SESSION_*`
+  regresa a ese mesero a la entrada, `DEVICE_*` y una huella distinta piden emparejar de nuevo, 426 pide actualizar.
+- La Fase E implementa en `AppContainer` **`WaiterWorkGate`** (captura en curso y pedidos sin enviar de cada mesero:
+  decide el bloqueo por inactividad, el cambio de mesero y el «Cerrar sesión»; ver la regla «El trabajo pendiente de
+  un mesero manda») y **`UnsentOrdersSource`** (pedidos que no llegaron al servidor: al retirar el dispositivo o
+  emparejarlo de nuevo pasan a la bitácora y se muestran con «Este dispositivo fue retirado del restaurante; estos
+  pedidos no se enviaron»). Hoy son `NoWaiterWork` y `NoUnsentOrders`.
 
 ## Dependencias
 
@@ -169,6 +220,13 @@ indicador **no exigen red validada** (la wifi del restaurante puede no tener int
 
 ## Base local (Room)
 
-`AppDatabase` (versión 1: `device_preferences`). Cada cambio de esquema: subir `version`, agregar la `Migration` a
-`AppDatabase.MIGRATIONS`, versionar el nuevo `core/data/schemas/…/<versión>.json` y un caso en
-`AppDatabaseMigrationTest`. **Nunca** `fallbackToDestructiveMigration`: la base guardará pedidos sin enviar.
+`AppDatabase` versión 2: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
+huella fijada, `device_id`, **token del dispositivo cifrado**, `idle_lock_seconds`), `known_waiters` (meseros que ya
+entraron con conexión aquí: nombre, inicial, color, `pin_version`, **verificador del PIN y credencial de envío
+cifrados**, intentos locales sin conexión) y `device_log` (bitácora: pedidos que no se enviaron, hasta que se borra).
+Las llaves solo en el Android Keystore; lo cifrado lleva su propósito (`device-credential`, `pin-verifier:<id>`,
+`offline-credential:<id>`). Migración 1 → 2 con el SQL de `schemas/…/2.json`.
+
+Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
+`core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**
+`fallbackToDestructiveMigration`: la base guardará pedidos sin enviar.
