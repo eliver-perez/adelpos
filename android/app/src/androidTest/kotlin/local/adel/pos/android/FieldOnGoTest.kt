@@ -534,9 +534,9 @@ class FieldOnGoTest {
         assertEquals(first.line, currentCapture(ana, table(ids, 10)).visible.first().line)
         click(compose.onNodeWithTag(TAG_CUSTOMIZER_CANCEL))
 
-        // «Cambiar» una partida ya capturada (2 tacos «bien dorados») con el personalizador
-        // abierto:
-        // al volver debe mostrar esa partida, no la configuración original del producto.
+        // «Cambiar» una partida ya capturada (2 tacos «bien dorados»), con el personalizador
+        // abierto al perder la actividad: al volver debe mostrar esa partida, no la
+        // configuración original del producto.
         showOrder()
         changeLine(first.id)
         customize(quantity = 2, observation = "bien dorados")
@@ -763,6 +763,12 @@ class FieldOnGoTest {
         }
     }
 
+    /** Si aparece el nodo [tag] antes de [timeout] (sin fallar). */
+    private fun waitedFor(tag: String, timeout: Long): Boolean = runCatching {
+        compose.waitUntil(timeoutMillis = timeout) { present(tag) }
+    }
+        .isSuccess
+
     private fun waitForText(text: String, timeout: Long = 40_000) {
         compose.waitUntil(timeoutMillis = timeout) {
             compose
@@ -815,6 +821,7 @@ class FieldOnGoTest {
 
     private fun pressBack() {
         log("Atrás")
+        SystemDialogs.dismissNotResponding(instrumentation.uiAutomation)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         Thread.sleep(SETTLE_MILLIS)
         compose.waitForIdle()
@@ -953,7 +960,11 @@ class FieldOnGoTest {
         val field = compose.onNodeWithTag(TAG_OBSERVATION_FIELD)
         runCatching { field.performScrollTo() }
         field.performTextReplacement(observation)
-        click(compose.onNodeWithTag(TAG_OBSERVATION_ADD))
+        // La acción del teclado agrega la observación (como el botón); si no llegó, el botón.
+        field.performImeAction()
+        if (!waitedFor(TAG_OBSERVATION_ENTRY, OBSERVATION_WAIT_MILLIS)) {
+            click(compose.onNodeWithTag(TAG_OBSERVATION_ADD))
+        }
         waitFor(TAG_OBSERVATION_ENTRY)
         assertEquals(CustomizerState(quantity.toString(), listOf(observation)), customizerState())
     }
@@ -1344,6 +1355,7 @@ class FieldOnGoTest {
         const val POLL_MILLIS = 250L
         const val SETTLE_MILLIS = 1_500L
         const val REVEAL_EVERY_MILLIS = 1_000L
+        const val OBSERVATION_WAIT_MILLIS = 5_000L
         const val MIN_TOUCH_DP = 48f
         const val TOUCH_TOLERANCE_DP = 0.5f
 
