@@ -528,7 +528,7 @@ func testStageA1ReplacedDraftChanges(t *testing.T, fixture *waiterModeFixture) {
 	expected := map[string]struct{ kind, message string }{
 		changedLine.ID: {operations.OfflineDraftItemChanged, "Papas producto: lo cambiaron en otra terminal"},
 		removed.ID:     {operations.OfflineDraftItemRemoved, "Filete: lo quitaron de la cuenta en otra terminal"},
-		sent.ID:        {operations.OfflineDraftItemSent, "Papas producto: ya se envió desde otra terminal"},
+		sent.ID:        {operations.OfflineDraftItemSent, "Papas producto: ya se envió a cocina desde otra terminal y no se vuelve a enviar"},
 	}
 	if code != 409 || rejection.Error.Code != "ORDER_REQUIRES_CONFIRMATION" || rejection.Error.Details.RequiresChanges ||
 		len(rejection.Error.Details.Changes) != 3 {
@@ -547,17 +547,20 @@ func testStageA1ReplacedDraftChanges(t *testing.T, fixture *waiterModeFixture) {
 		len(current.Draft) != 1 || current.Draft[0].Customization.Notes != "Sin sal" {
 		t.Fatalf("el rechazo cambió la cuenta: %+v", current.Draft)
 	}
-	// El mesero acepta los cambios: con la misma clave entra su pedido completo y el renglón de la otra terminal queda.
+	// El mesero acepta los cambios: con la misma clave entra lo demás de su pedido (lo ya enviado no se vuelve a enviar,
+	// A1-D18) y el renglón de la otra terminal queda.
 	body["confirmation"] = map[string]any{"catalog_version": rejection.Error.Details.CatalogVersion, "changes": rejection.Error.Details.Changes}
 	result := decodeResponse[operations.OfflineOrderResult](t, fixture.call(t, fixture.waiter, "POST", "restaurant/offline-orders", body, 200))
 	if len(result.RemovedDraftItemIDs) != 0 || len(result.AcceptedChanges) != 3 || len(result.Bill.Draft) != 1 ||
+		!slices.Equal(result.AlreadySentItemIDs, []string{sent.ID}) ||
 		result.Bill.Draft[0].Customization.Notes != "Sin sal" ||
 		fixture.count(t, "SELECT count(*)::int FROM app.restaurant_events WHERE kind='draft.saved' AND operation_id=$1", key) != 0 {
 		t.Fatalf("pedido confirmado: quitados %v, cambios %d, borrador %+v", result.RemovedDraftItemIDs, len(result.AcceptedChanges), result.Bill.Draft)
 	}
 	if fixture.count(t, `SELECT count(*)::int FROM app.restaurant_item_units u JOIN app.restaurant_items i ON i.id=u.item_id
-        JOIN app.restaurant_orders o ON o.id=i.original_order_id WHERE o.operation_id=$1`, key) != 4 {
-		t.Fatal("el pedido confirmado no entró completo")
+        JOIN app.restaurant_orders o ON o.id=i.original_order_id WHERE o.operation_id=$1`, key) != 2 ||
+		fixture.count(t, "SELECT count(*)::int FROM app.restaurant_items WHERE draft_item_id=$1", sent.ID) != 1 {
+		t.Fatal("el pedido confirmado debe enviar lo demás y nunca otra vez lo ya enviado")
 	}
 
 	// Ya enviado desde el mismo dispositivo (por ejemplo, «Enviar a cocina» en línea antes de perder la señal).
@@ -569,7 +572,7 @@ func testStageA1ReplacedDraftChanges(t *testing.T, fixture *waiterModeFixture) {
 	code, response = fixture.raw(fixture.waiter, "", "POST", "restaurant/offline-orders", repeat)
 	_, byItem = replacedChanges(t, response)
 	if code != 409 || byItem[own.ID].Kind != operations.OfflineDraftItemSent ||
-		!strings.HasPrefix(byItem[own.ID].Message, "Papas producto: ya se había enviado desde este dispositivo") {
+		!strings.HasPrefix(byItem[own.ID].Message, "Papas producto: ya se había enviado a cocina desde este dispositivo") {
 		t.Fatalf("renglón ya enviado desde el mismo dispositivo: %d %s", code, response)
 	}
 }
