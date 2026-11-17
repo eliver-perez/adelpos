@@ -550,6 +550,8 @@ class WaiterModeOnGoTest {
 
     /** El botón Atrás del sistema (la actividad vigente, también después de girar). */
     private fun pressBack() {
+        // Un diálogo del sistema «… no responde» (emulador cargado) se quedaría con la tecla.
+        SystemDialogs.dismissNotResponding(automation)
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         Thread.sleep(SETTLE_MILLIS)
     }
