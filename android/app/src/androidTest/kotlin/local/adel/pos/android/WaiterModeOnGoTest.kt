@@ -180,7 +180,7 @@ class WaiterModeOnGoTest {
         log("enviar a cocina")
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
         log("enviado")
-        waitFor(TAG_TABLES_SEARCH)
+        waitForTables()
         val order = waitForOrder(ids.getValue("table1")) { it.state == OrderState.RECEIVED }
         val accountId = order.receivedAccountId!!
         // En Go: una partida confirmada en la cuenta nueva de la mesa.
@@ -227,7 +227,7 @@ class WaiterModeOnGoTest {
         showOrder()
         waitFor("${TAG_SYNC_PREFIX}pending")
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitForTables()
         val order = waitForOrder(ids.getValue("table2")) { it.state == OrderState.QUEUED }
         assertEquals(2, order.lines.single().item.line.quantity)
         assertTrue("Con la versión del catálogo", order.catalogVersion > 0)
@@ -274,7 +274,7 @@ class WaiterModeOnGoTest {
         changePrice(ids.getValue("burger"), "130")
         soldOut(ids.getValue("shake"))
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitForTables()
         val review = waitForOrder(ids.getValue("table3")) { it.state == OrderState.NEEDS_REVIEW }
         val shakeItem =
             review.lines.first { it.item.line.productId == ids.getValue("shake") }.item.id
@@ -335,7 +335,7 @@ class WaiterModeOnGoTest {
         val moved = currentCapture(ids.getValue("table1"))
         assertTrue(moved.accountId != null && moved.accountId != accountId)
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitForTables()
         val received =
             waitForOrder(ids.getValue("table1")) {
                 it.operationId == moved.id && it.state == OrderState.RECEIVED
@@ -436,7 +436,7 @@ class WaiterModeOnGoTest {
         addProduct(ids.getValue("tacos"))
         showOrder()
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
-        waitFor(TAG_TABLES_SEARCH)
+        waitForTables()
         val order = waitForOrder(ids.getValue("table4")) { it.state == OrderState.QUEUED }
         // Sustituye el renglón que ya estaba en el borrador de Go, tal como lo vio.
         assertEquals(1, order.replaces.size)
@@ -572,11 +572,16 @@ class WaiterModeOnGoTest {
      * está abierta la mesa.
      */
     private fun showTables() {
-        waitFor(TAG_TABLES_SEARCH)
+        waitForTables()
         // Un panel con la mesa abierta tiene «Volver a Mesas».
         if (present(TAG_ACCOUNT_PANE) && present(TAG_PANE_BACK)) {
             pressBack()
         }
+    }
+
+    /** Mesas: la lista o, en el teléfono, la mesa elegida a un toque. */
+    private fun waitForTables() {
+        waitUntil("Mesas") { present(TAG_TABLES_SEARCH) || present(TAG_ACCOUNT_PANE) }
     }
 
     private fun present(tag: String): Boolean =
