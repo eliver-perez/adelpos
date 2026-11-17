@@ -6,9 +6,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
@@ -119,7 +119,8 @@ class WaiterScreensTest {
                             .copy(review = review(acceptable = true)),
                     ),
                 captures = listOf(capture()),
-                others = listOf(OthersPending("Beto", unsent = 2, waitingForPin = 1, needingReview = 0)),
+                others =
+                    listOf(OthersPending("Beto", unsent = 2, waitingForPin = 1, needingReview = 0)),
                 onRetryNow = { retried++ },
                 onOpenCapture = {},
                 onOpenReview = {},
@@ -137,7 +138,9 @@ class WaiterScreensTest {
         compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_PENDING_OTHERS))
         compose.onNodeWithTag(TAG_PENDING_OTHERS).assertExists()
         // De los demás: cuántos y por qué no salen (revisión R6, B3), nunca cuáles.
-        compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasText("Beto: 2 pedidos por enviar"))
+        compose
+            .onNodeWithTag(TAG_PENDING)
+            .performScrollToNode(hasText("Beto: 2 pedidos por enviar"))
         compose.onNodeWithText("Beto: 2 pedidos por enviar").assertExists()
         compose.onNodeWithText("Su clave para enviar ya no vale", substring = true).assertExists()
         compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_RETRY_NOW))

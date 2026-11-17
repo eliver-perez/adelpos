@@ -31,11 +31,11 @@ import local.adel.pos.android.core.domain.error.AppResult
 import local.adel.pos.android.core.domain.money.Money
 import local.adel.pos.android.core.domain.waiter.AccountBill
 import local.adel.pos.android.core.domain.waiter.Capture
+import local.adel.pos.android.core.domain.waiter.DiscardResult
 import local.adel.pos.android.core.domain.waiter.DraftLine
 import local.adel.pos.android.core.domain.waiter.DraftOperation
 import local.adel.pos.android.core.domain.waiter.DraftOperations
 import local.adel.pos.android.core.domain.waiter.DraftQuote
-import local.adel.pos.android.core.domain.waiter.DiscardResult
 import local.adel.pos.android.core.domain.waiter.SendRequest
 import local.adel.pos.android.core.domain.waiter.SentChangeResult
 import local.adel.pos.android.core.domain.waiter.SentLine
@@ -56,8 +56,8 @@ sealed interface CaptureNotice {
     data object StillSaving : CaptureNotice
 
     /**
-     * Descartada, pero lo guardado en la cuenta se quita en cuanto haya conexión (revisión R6,
-     * A2): se avisa antes de volver a Mesas.
+     * Descartada, pero lo guardado en la cuenta se quita en cuanto haya conexión (revisión R6, A2):
+     * se avisa antes de volver a Mesas.
      */
     data object DiscardPending : CaptureNotice
 }

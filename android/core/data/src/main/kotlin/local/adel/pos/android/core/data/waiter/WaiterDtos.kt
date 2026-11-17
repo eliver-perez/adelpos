@@ -251,8 +251,8 @@ data class OfflineChangeDto(
     val message: String = "",
     val acceptable: Boolean = false,
     /**
-     * Solo en `items_in_account` (A1-D18). Sin valor no se escribe: el eco de la confirmación
-     * lleva exactamente lo que dio Go.
+     * Solo en `items_in_account` (A1-D18). Sin valor no se escribe: el eco de la confirmación lleva
+     * exactamente lo que dio Go.
      */
     @SerialName("account_id") val accountId: String? = null,
 )

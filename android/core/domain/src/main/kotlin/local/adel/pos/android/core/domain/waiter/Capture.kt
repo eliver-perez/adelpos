@@ -42,8 +42,8 @@ enum class DraftSync {
 
     /**
      * El mesero descartó la captura, pero lo suyo que ya estaba guardado en el borrador de Go
-     * todavía no se quita (sin conexión o sin sesión): se quita en cuanto se pueda y, mientras,
-     * la captura sigue a la vista como «Descarte pendiente» (revisión R6, A2).
+     * todavía no se quita (sin conexión o sin sesión): se quita en cuanto se pueda y, mientras, la
+     * captura sigue a la vista como «Descarte pendiente» (revisión R6, A2).
      */
     DISCARDING,
 }
@@ -58,9 +58,9 @@ enum class DraftSync {
  * guardado y los toques se aplican encima) y con [SEEN_BASE_REVISION] la base es la que vio el
  * mesero pero se desconoce su revisión (la captura nace de «Corregir en la captura» o de seguir una
  * cuenta combinada): antes de guardar se compara con la de Go y, si otra terminal la cambió, el
- * conflicto se muestra (revisión R6, M2). Sin cuenta ([accountId] null) es una «cuenta
- * pendiente»: nace en Go con el primer producto (`openAccount`, creación diferida) o, sin conexión,
- * al enviarse el pedido.
+ * conflicto se muestra (revisión R6, M2). Sin cuenta ([accountId] null) es una «cuenta pendiente»:
+ * nace en Go con el primer producto (`openAccount`, creación diferida) o, sin conexión, al enviarse
+ * el pedido.
  *
  * @param ownItemIds renglones creados en este dispositivo: los que el pedido sin conexión manda y,
  *   si ya estaban guardados en Go, sustituye (A1-D6).

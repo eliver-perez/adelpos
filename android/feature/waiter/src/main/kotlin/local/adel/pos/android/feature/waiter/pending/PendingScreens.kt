@@ -447,7 +447,8 @@ fun ReviewScreen(
                             stringResource(R.string.review_already_sent),
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.testTag("$TAG_REVIEW_ALREADY_SENT_PREFIX${change.itemId}"),
+                            modifier =
+                                Modifier.testTag("$TAG_REVIEW_ALREADY_SENT_PREFIX${change.itemId}"),
                         )
                     }
                     Text(change.message, style = MaterialTheme.typography.bodyLarge)

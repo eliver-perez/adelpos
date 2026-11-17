@@ -116,9 +116,7 @@ class R6RulesTest {
         assertTrue(OrderReviewRules.everythingAlreadySent(pending))
         val withMore =
             pending.copy(
-                lines =
-                    pending.lines +
-                        pending.lines.single().copy(item = draft("r2", SHAKE)),
+                lines = pending.lines + pending.lines.single().copy(item = draft("r2", SHAKE)),
             )
         assertFalse(OrderReviewRules.everythingAlreadySent(withMore))
     }

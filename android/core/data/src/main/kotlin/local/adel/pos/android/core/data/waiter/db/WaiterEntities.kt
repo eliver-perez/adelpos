@@ -46,8 +46,8 @@ data class CaptureEntity(
 /**
  * Pedido de la cola (§7): **nunca** se borra por cerrar la aplicación, reiniciar el dispositivo o
  * perder la batería; cada cambio de estado se escribe en una transacción y **solo si el pedido
- * sigue en el estado que se leyó** ([WaiterDao.transition]; revisión R6, M1 y O1).
- * [operationId] es la clave de operación, la misma en todos los reenvíos.
+ * sigue en el estado que se leyó** ([WaiterDao.transition]; revisión R6, M1 y O1). [operationId] es
+ * la clave de operación, la misma en todos los reenvíos.
  */
 @Entity(
     tableName = "pending_orders",
@@ -137,8 +137,8 @@ internal val WAITER_TABLES_V4: List<String> =
     )
 
 /**
- * Columnas nuevas de la versión 5 (`MIGRATION_4_5`, revisión R6): solo se agregan, con su valor
- * por omisión; las filas que ya había no cambian.
+ * Columnas nuevas de la versión 5 (`MIGRATION_4_5`, revisión R6): solo se agregan, con su valor por
+ * omisión; las filas que ya había no cambian.
  */
 internal val WAITER_COLUMNS_V5: List<String> =
     listOf(
