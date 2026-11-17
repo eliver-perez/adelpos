@@ -70,6 +70,9 @@ class FindServerViewModel(
 
     private var polling: Job? = null
 
+    // Lo último que se pidió, para «Volver a comprobar» después de «Actualiza el servidor».
+    private var lastTarget: PairingTarget? = null
+
     init {
         searchAgain()
     }
@@ -112,10 +115,19 @@ class FindServerViewModel(
         request(PairingTarget.Address(address))
     }
 
+    /**
+     * «Volver a comprobar» tras «Actualiza el servidor del restaurante»: pide otra vez el código al
+     * mismo servidor (ya actualizado, sigue el emparejamiento).
+     */
+    fun checkAgain() {
+        lastTarget?.let(::request)
+    }
+
     private fun request(target: PairingTarget) {
         if (busy) {
             return
         }
+        lastTarget = target
         busy = true
         problem = null
         viewModelScope.launch {
