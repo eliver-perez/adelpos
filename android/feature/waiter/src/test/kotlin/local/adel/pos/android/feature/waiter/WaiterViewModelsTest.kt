@@ -20,6 +20,7 @@ import local.adel.pos.android.core.domain.money.Money
 import local.adel.pos.android.core.domain.table.TableState
 import local.adel.pos.android.core.domain.waiter.AccountSummary
 import local.adel.pos.android.core.domain.waiter.DiningTable
+import local.adel.pos.android.core.domain.waiter.DraftLine
 import local.adel.pos.android.core.domain.waiter.DraftOperation
 import local.adel.pos.android.core.domain.waiter.TableShape
 import local.adel.pos.android.core.domain.waiter.Totals
@@ -164,5 +165,44 @@ class WaiterViewModelsTest {
             advanceUntilIdle()
             assertEquals(listOf("captura-1"), fake.sent)
             assertEquals(CaptureNotice.Sent, model.notice)
+        }
+
+    @Test
+    fun cambiarUnaPartidaTrasCerrarseLaAplicacionVuelveConLaPartidaGuardada() =
+        runTest(dispatcher) {
+            // Fase F (FieldOnGoTest.f8): Android cerró la aplicación con «Cambiar» abierto en una
+            // partida de 2 con observaciones; el estado guardado solo tiene el producto y la
+            // partida. Debe volver la partida tal como está en la captura, no el producto original.
+            val line = LineSelection("p1", null, 2, Customization(notes = "bien dorados"))
+            val fake = FakeWaiter(Catalog.EMPTY)
+            fake.captureFlow.value =
+                FakeWaiter.emptyCapture("captura-1", "t1")
+                    .copy(base = listOf(DraftLine("renglon-1", line)))
+            val saved =
+                SavedStateHandle(
+                    mapOf(
+                        CaptureViewModel.KEY_CAPTURE_ID to "captura-1",
+                        CaptureViewModel.KEY_EDITING_PRODUCT to "p1",
+                        CaptureViewModel.KEY_EDITING_ITEM to "renglon-1",
+                    ),
+                )
+            val model = CaptureViewModel(fake.dependencies(), saved)
+            advanceUntilIdle()
+            assertEquals(line, model.editing)
+            assertEquals("renglon-1", model.editingItemId)
+
+            // Si la partida ya no existe (se envió o se quitó), el personalizador se cierra.
+            val gone =
+                SavedStateHandle(
+                    mapOf(
+                        CaptureViewModel.KEY_CAPTURE_ID to "captura-1",
+                        CaptureViewModel.KEY_EDITING_PRODUCT to "p1",
+                        CaptureViewModel.KEY_EDITING_ITEM to "renglon-quitado",
+                    ),
+                )
+            val closed = CaptureViewModel(fake.dependencies(), gone)
+            advanceUntilIdle()
+            assertNull(closed.editing)
+            assertNull(closed.editingItemId)
         }
 }

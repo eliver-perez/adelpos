@@ -30,6 +30,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -77,13 +78,18 @@ import org.junit.runner.RunWith
  *   uno archivado llegan por el evento `catalog.changed` del canal y por la descarga de cambios; un
  *   producto agotado desde la principal se ve «Agotado» y no se puede elegir; la imagen responde
  *   304 al revalidarla.
- * - (el guion borra un producto directamente en la base temporal, como lo haría la limpieza de Go)
- * - `b`: la baja llega en `deleted` por la descarga de cambios.
- * - (el guion cambia la época del catálogo en la base temporal, como una restauración)
+ * - `b`: la principal quita el producto de prueba («Filete de prueba», código `FILETE`, la firma de
+ *   los datos de prueba de Go) con «Quitar datos de prueba» (`maintenance/test-data`, su API: lo
+ *   borra de verdad porque no tiene operaciones) y la baja llega en `deleted` por la descarga de
+ *   cambios.
+ * - (el guion cambia la época del catálogo en la base temporal, como una restauración: Go no tiene
+ *   API para eso)
  * - `c`: Go responde `reset: true` y el catálogo se reemplaza completo; las imágenes se revalidan.
  *
- * Sin los argumentos de instrumentación (`pin`, `net`, `local`, `provisioning`, `stage`) se omite.
- * El estado entre etapas (credenciales e identificadores) queda en un archivo de la aplicación.
+ * Lo corre `scripts/android-e2e.sh --suite catalog`. Sin los argumentos de instrumentación (`pin`,
+ * `net`, `local`, `stage` y la terminal principal `mainDevice`/`mainToken` o `provisioning`) se
+ * omite. El estado entre etapas (credenciales e identificadores) queda en un archivo de la
+ * aplicación.
  */
 @RunWith(AndroidJUnit4::class)
 class CatalogOnGoTest {
@@ -164,7 +170,7 @@ class CatalogOnGoTest {
         context.deleteDatabase(DATABASE)
         File(context.cacheDir, "catalog-images-go-test").deleteRecursively()
 
-        val main = server.setUpMainComputer()
+        val main = server.mainComputer()
         val device = server.pairAndroid(deviceClient(server), main)
         val ids = createCatalog(server, main)
 
@@ -252,6 +258,7 @@ class CatalogOnGoTest {
         val server = GoTestServer()
         stage(server, "b")
         val saved = loadState()
+        removeTestProduct(server, mainComputer(server, saved), saved.text("temporary"))
         val harness = harness(server, device(saved))
         try {
             // La base guarda el catálogo de la etapa a: se piden solo los cambios.
@@ -340,7 +347,9 @@ class CatalogOnGoTest {
         val burger =
             createProduct(server, main, burgers, "Hamburguesa clásica", "HAM-01", "120", image)
         val coffee = createProduct(server, main, drinks, "Café de olla", "CAF", "30")
-        val temporary = createProduct(server, main, drinks, "Temporal D", "TEMP-D", "10")
+        // Con la firma exacta de un producto de prueba de Go (maintenance/signatures.go): «Quitar
+        // datos de prueba» lo borra en la etapa b.
+        val temporary = createProduct(server, main, drinks, "Filete de prueba", "FILETE", "10")
         for (number in 1..FILLER_PRODUCTS) {
             createProduct(server, main, filler, "Producto de relleno $number", "REL-$number", "15")
         }
@@ -462,6 +471,7 @@ class CatalogOnGoTest {
     ) {
         val state = buildJsonObject {
             put("main_device_id", main.deviceId)
+            put("main_device_token", main.deviceToken)
             put("device_id", device.deviceId)
             put("device_token", device.deviceToken)
             put("session", device.session)
@@ -480,6 +490,41 @@ class CatalogOnGoTest {
     }
 
     private fun JsonObject.text(name: String): String = getValue(name).jsonPrimitive.content
+
+    /** La principal de la etapa a, con una sesión nueva. */
+    private fun mainComputer(server: GoTestServer, saved: JsonObject): GoTestServer.MainComputer {
+        val deviceId = saved.text("main_device_id")
+        val deviceToken = saved.text("main_device_token")
+        return GoTestServer.MainComputer(
+            deviceId,
+            deviceToken,
+            server.adminSession(deviceId, deviceToken),
+        )
+    }
+
+    /**
+     * «Quitar datos de prueba» desde la principal: la vista previa debe tener solo el producto de
+     * prueba [productId] y se aplica ese mismo plan (Go borra el producto y anota la baja).
+     */
+    private fun removeTestProduct(
+        server: GoTestServer,
+        main: GoTestServer.MainComputer,
+        productId: String,
+    ) {
+        val preview = server.main("GET", "maintenance/test-data", null, main)
+        assertEquals(preview.body.toString(), 200, preview.status)
+        val remove = preview.body.getValue("remove").jsonArray.map { it.jsonObject }
+        assertEquals(listOf(productId), remove.map { it.text("id") })
+        val removed =
+            server.main(
+                "POST",
+                "maintenance/test-data/remove",
+                """{"operation_id":"${GoTestServer.operationId()}",""" +
+                    """"plan_id":"${preview.text("plan_id")}"}""",
+                main,
+            )
+        assertEquals(removed.body.toString(), 200, removed.status)
+    }
 
     private fun device(saved: JsonObject): GoTestServer.Device =
         GoTestServer.Device(
