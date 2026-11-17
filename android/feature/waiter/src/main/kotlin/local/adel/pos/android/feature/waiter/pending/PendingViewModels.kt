@@ -101,6 +101,11 @@ class ReviewViewModel(
         viewModelScope.launch {
             val current = dependencies.orders.order(operationId).filterNotNull().first()
             val review = current.review ?: return@launch
+            // En línea, Go ya dijo en qué cuenta se combinó; si no, se lee la cuenta.
+            review.mergedIntoId?.let {
+                mergedTarget = it
+                return@launch
+            }
             val accountId = current.destination.accountId ?: return@launch
             if (review.accountMerged || review.reason == ReviewReason.ACCOUNT_NOT_OPEN) {
                 val bill = dependencies.restaurant.bill(accountId)

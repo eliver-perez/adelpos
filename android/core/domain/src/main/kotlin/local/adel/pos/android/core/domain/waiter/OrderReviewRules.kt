@@ -65,6 +65,9 @@ object OrderReviewRules {
      */
     fun moveToNewAccount(order: PendingOrder, nowMillis: Long, newId: () -> String): PendingOrder {
         check(order.state == OrderState.NEEDS_REVIEW) { "El pedido no requiere revisión" }
+        check(order.review?.accountMerged != true) {
+            "Una cuenta combinada no se manda a una cuenta nueva: se sigue en la que se combinó"
+        }
         val destination =
             order.destination.copy(
                 accountId = null,
@@ -113,9 +116,16 @@ object OrderReviewRules {
     }
 
     /** Si la revisión ofrece abrir una cuenta nueva en la mesa (la cuenta ya no está abierta). */
-    fun offersNewAccount(review: OrderReview): Boolean =
-        review.reason == ReviewReason.ACCOUNT_NOT_OPEN ||
+    fun offersNewAccount(review: OrderReview): Boolean {
+        // Regla del coordinador (revisión R6, M3): con una cuenta **combinada** no se ofrece
+        // una cuenta nueva. Lo que la combinación movió seguiría por enviar en la cuenta en que se
+        // combinó y podría enviarse dos veces; solo se sigue ahí (o se corrige o se descarta).
+        if (review.accountMerged) {
+            return false
+        }
+        return review.reason == ReviewReason.ACCOUNT_NOT_OPEN ||
             review.changes.any { it.kind == ChangeKind.ACCOUNT_CLOSED }
+    }
 
     /** Partidas que el mesero puede quitar: las que Go señaló con un cambio que exige corregir. */
     fun removableItemIds(order: PendingOrder): Set<String> {

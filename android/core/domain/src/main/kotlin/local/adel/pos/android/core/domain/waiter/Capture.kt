@@ -119,6 +119,14 @@ data class Capture(
     fun isOwn(itemId: String): Boolean = itemId in ownItemIds
 
     /**
+     * La cuenta ya no está abierta porque **se combinó** con otra ([tableAccounts] lleva la cuenta
+     * en que se combinó): solo se sigue en esa cuenta, nunca en una nueva (regla del coordinador,
+     * revisión R6, M3).
+     */
+    val accountMerged: Boolean
+        get() = sync == DraftSync.ACCOUNT_CLOSED && tableAccounts.isNotEmpty()
+
+    /**
      * El guardado en Go que salió sin respuesta (o sigue en curso), para repetirlo con su clave
      * antes de mandar el pedido (revisión R6, C1); null si no hay ninguno.
      */

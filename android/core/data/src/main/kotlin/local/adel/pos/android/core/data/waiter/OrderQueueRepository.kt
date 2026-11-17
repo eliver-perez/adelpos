@@ -107,6 +107,10 @@ class OrderQueueRepository(
     }
 
     override suspend fun moveToNewAccount(operationId: String) {
+        // Con una cuenta combinada no se ofrece ni se hace (regla del coordinador, M3).
+        if (load(operationId)?.review?.accountMerged == true) {
+            return
+        }
         updateAndSend(operationId) { order ->
             OrderReviewRules.moveToNewAccount(order, clock(), newId)
         }

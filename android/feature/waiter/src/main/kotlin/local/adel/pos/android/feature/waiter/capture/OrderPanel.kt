@@ -286,7 +286,9 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
                         )
                     }
                     DraftSync.ACCOUNT_CLOSED -> {
-                        // Una cuenta combinada: seguir en la cuenta en que se combinó (M3).
+                        // Una cuenta combinada: **solo** seguir en la cuenta en que se combinó
+                        // (M3; regla del coordinador). Una cuenta nueva dejaría lo movido por
+                        // enviar allá y podría enviarse dos veces.
                         for (merged in capture.tableAccounts) {
                             SecondaryButton(
                                 text = stringResource(R.string.sync_follow_merged),
@@ -294,11 +296,13 @@ private fun SyncBanner(capture: Capture, actions: OrderPanelActions) {
                                 modifier = Modifier.testTag(TAG_FOLLOW_MERGED),
                             )
                         }
-                        SecondaryButton(
-                            text = stringResource(R.string.sync_account_closed_action),
-                            onClick = actions.onOpenAnotherAccount,
-                            modifier = Modifier.testTag(TAG_OPEN_ANOTHER),
-                        )
+                        if (!capture.accountMerged) {
+                            SecondaryButton(
+                                text = stringResource(R.string.sync_account_closed_action),
+                                onClick = actions.onOpenAnotherAccount,
+                                modifier = Modifier.testTag(TAG_OPEN_ANOTHER),
+                            )
+                        }
                     }
                     DraftSync.REJECTED,
                     DraftSync.UNCERTAIN ->

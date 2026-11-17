@@ -26,8 +26,11 @@ sealed interface SendOutcome {
     /** `ORDER_REQUIRES_CONFIRMATION` con los cambios. */
     data class RequiresConfirmation(val review: OrderReview) : SendOutcome
 
-    /** La cuenta ya no está abierta (en línea: `details.reason: account_not_open`). */
-    data class AccountNotOpen(val message: String) : SendOutcome
+    /**
+     * La cuenta ya no está abierta (en línea: `details.reason: account_not_open`); si se combinó,
+     * [mergedIntoId] es la cuenta en que se combinó.
+     */
+    data class AccountNotOpen(val message: String, val mergedIntoId: String? = null) : SendOutcome
 
     /**
      * La confirmación en línea no se pudo hacer, pero el pedido sigue como pedido sin conexión (Go
@@ -86,6 +89,7 @@ object OrderSendRules {
                             message = outcome.message,
                             changes = emptyList(),
                             catalogVersion = null,
+                            mergedIntoId = outcome.mergedIntoId,
                         ),
                     nowMillis = nowMillis,
                 )
