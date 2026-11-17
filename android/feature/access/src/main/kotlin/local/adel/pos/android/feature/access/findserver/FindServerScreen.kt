@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -424,14 +425,18 @@ private fun remaining(view: PairingView, now: Long): String {
     return "${seconds / 60}:${(seconds % 60).toString().padStart(2, '0')}"
 }
 
-/** Columna con desplazamiento y un ancho cómodo de lectura, centrada en la tableta. */
+/**
+ * Columna con desplazamiento y un ancho cómodo de lectura, centrada en la tableta. Se achica por
+ * encima del teclado (`imePadding`): en Android 8 el teclado tapaba la dirección (observación de la
+ * Fase F) y así el campo con el foco se desplaza a la vista.
+ */
 @Composable
 internal fun CenteredColumn(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     Box(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().imePadding().verticalScroll(rememberScrollState()),
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(

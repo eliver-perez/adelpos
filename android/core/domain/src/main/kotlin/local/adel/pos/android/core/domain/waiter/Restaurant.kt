@@ -123,6 +123,33 @@ data class RestaurantView(
     }
 }
 
+/**
+ * Nombres cortos de las mesas de un área para el mapa del teléfono (observación F4 de la Fase F):
+ * con muchas mesas, cada una mide pocos puntos y «Mesa F12» quedaba como «M…». Se quitan las
+ * palabras iniciales que comparten **todas** las mesas del área («Mesa F1» → «F1»); si alguna
+ * quedaría vacía o no hay palabras comunes, se conserva el nombre completo. El nombre completo
+ * sigue en la descripción para la accesibilidad.
+ */
+object TableNames {
+    fun compact(tables: List<DiningTable>): Map<String, String> {
+        val words = tables.map { it.name.trim().split(SPACES) }
+        val shared =
+            words.firstOrNull().orEmpty().indices.takeWhile { index ->
+                words.all { name -> name.size > index + 1 && name[index] == words.first()[index] }
+            }
+        return tables.zip(words).associate { (table, name) ->
+            table.id to
+                if (shared.isEmpty()) {
+                    table.name
+                } else {
+                    name.drop(shared.size).joinToString(" ")
+                }
+        }
+    }
+
+    private val SPACES = Regex("\\s+")
+}
+
 /** Búsqueda de mesa por nombre (§6.1), sin distinguir acentos ni mayúsculas. */
 object TableSearch {
     fun matches(table: DiningTable, query: String): Boolean {
