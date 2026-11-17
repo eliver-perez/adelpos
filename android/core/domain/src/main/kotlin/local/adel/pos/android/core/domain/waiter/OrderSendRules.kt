@@ -18,8 +18,8 @@ sealed interface SendOutcome {
 
     /**
      * El pedido iba a la mesa y sus partidas ya están en una cuenta abierta de esa mesa
-     * (`items_in_account`, A1-D18): vuelve a la cola dirigido a [accountId], con la misma clave, sin
-     * preguntar al mesero.
+     * (`items_in_account`, A1-D18): vuelve a la cola dirigido a [accountId], con la misma clave,
+     * sin preguntar al mesero.
      */
     data class Redirect(val accountId: String) : SendOutcome
 
@@ -144,21 +144,24 @@ object OrderSendRules {
     }
 
     /**
-     * Lo que se supo al repetir el guardado sin respuesta de un pedido ([PendingOrder.unresolvedSave],
-     * revisión R6, C1). Si entró y abrió la cuenta, el pedido va a esa cuenta; lo que ese guardado
-     * dejó en el borrador y el mesero quitó después se sustituye (Go lo quita si sigue igual).
+     * Lo que se supo al repetir el guardado sin respuesta de un pedido
+     * ([PendingOrder.unresolvedSave], revisión R6, C1). Si entró y abrió la cuenta, el pedido va a
+     * esa cuenta; lo que ese guardado dejó en el borrador y el mesero quitó después se sustituye
+     * (Go lo quita si sigue igual).
      */
     fun resolved(order: PendingOrder, resolution: SaveResolution, nowMillis: Long): PendingOrder {
         val unresolved = order.unresolvedSave ?: return order
         return when (resolution) {
-            SaveResolution.NotApplied -> order.copy(unresolvedSave = null, updatedAtMillis = nowMillis)
+            SaveResolution.NotApplied ->
+                order.copy(unresolvedSave = null, updatedAtMillis = nowMillis)
             is SaveResolution.Applied -> {
                 val lineIds = order.lines.map { it.item.id }.toSet()
                 val replacedIds = order.replaces.map(DraftLine::id).toSet()
                 val inDraft = resolution.draft.map(DraftLine::id).toSet()
-                val leftBehind = unresolved.items.filter { item ->
-                    item.id !in lineIds && item.id !in replacedIds && item.id in inDraft
-                }
+                val leftBehind =
+                    unresolved.items.filter { item ->
+                        item.id !in lineIds && item.id !in replacedIds && item.id in inDraft
+                    }
                 val destination =
                     if (order.destination.accountId == null) {
                         order.destination.copy(

@@ -60,7 +60,8 @@ sealed interface SendRequest {
 
     /**
      * Con conexión, el guardado anterior del borrador todavía no tiene respuesta: el pedido no se
-     * arma hasta saber qué guardó Go (revisión R6, C1). El mesero lo vuelve a intentar en un momento.
+     * arma hasta saber qué guardó Go (revisión R6, C1). El mesero lo vuelve a intentar en un
+     * momento.
      */
     data object StillSaving : SendRequest
 }

@@ -114,9 +114,9 @@ import org.junit.runner.RunWith
  *
  * - Revisión R6 (A1-D19): `w9` el guardado del borrador pierde su respuesta y se toca «Enviar a
  *   cocina»: se resuelve con su clave y entra una vez; `w10` la confirmación en línea entra y sus
- *   respuestas se pierden: el pedido sin conexión con la misma clave queda «Recibido» sin
- *   duplicar; `w11` descartar con conexión quita de Go lo guardado (y la cuenta vacía que nació
- *   con la captura); `w12a`–`w12c` descartar sin conexión queda pendiente y se termina al volver;
+ *   respuestas se pierden: el pedido sin conexión con la misma clave queda «Recibido» sin duplicar;
+ *   `w11` descartar con conexión quita de Go lo guardado (y la cuenta vacía que nació con la
+ *   captura); `w12a`–`w12c` descartar sin conexión queda pendiente y se termina al volver;
  *   `w13a`–`w13c` la cuenta se combina mientras el pedido espera sin conexión y el mesero lo manda
  *   a la cuenta en que se combinó.
  *
@@ -494,9 +494,7 @@ class WaiterModeOnGoTest {
         showOrder()
         tap(TAG_SEND_TO_KITCHEN)
         waitForTables()
-        waitForOrder(ids.getValue("table5"), timeout = 120_000) {
-            it.state == OrderState.RECEIVED
-        }
+        waitForOrder(ids.getValue("table5"), timeout = 120_000) { it.state == OrderState.RECEIVED }
         val bill = main.call("GET", "restaurant/accounts/$accountId").obj
         val products =
             bill.getValue("lines").jsonArray.map {
@@ -575,9 +573,7 @@ class WaiterModeOnGoTest {
         // Se dice la verdad: lo guardado en la cuenta se quita en cuanto haya conexión.
         tap(TAG_DISCARD_PENDING_OK)
         waitForTables()
-        val pending = runBlocking {
-            container.database.waiter().capture(ids.getValue("capture8"))
-        }
+        val pending = runBlocking { container.database.waiter().capture(ids.getValue("capture8")) }
         assertEquals(DraftSync.DISCARDING.name, pending!!.sync)
     }
 
@@ -648,7 +644,8 @@ class WaiterModeOnGoTest {
             bill.getValue("lines").jsonArray.map {
                 it.jsonObject.getValue("request").jsonObject.text("product_id")
             }
-        // Lo de la principal (tacos) y el pedido del mesero (hamburguesa y tacos), una vez cada uno.
+        // Lo de la principal (tacos) y el pedido del mesero (hamburguesa y tacos), una vez cada
+        // uno.
         assertEquals(1, products.count { it == ids.getValue("burger") })
         assertEquals(2, products.count { it == ids.getValue("tacos") })
         assertEquals(3, products.size)

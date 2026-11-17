@@ -228,7 +228,10 @@ class OfflineNeverRepeatsTest {
         val sent = body(requests("POST restaurant/offline-orders").single())
         assertEquals(capture.id, operationOf(sent))
         // Va con el identificador del renglón: Go lo quita del borrador aunque no lo nombre.
-        assertEquals("r1", sent["items"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content)
+        assertEquals(
+            "r1",
+            sent["items"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content,
+        )
         val done = WaiterStorage.toOrder(database.waiter().order(capture.id)!!)
         assertEquals(OrderState.RECEIVED, done.state)
         assertNull(done.unresolvedSave)
@@ -556,7 +559,15 @@ class OfflineNeverRepeatsTest {
             sent["destination"]!!.jsonObject["account_id"]!!.jsonPrimitive.content,
         )
         // Lo que sustituía va igual: la combinación movió el borrador con sus identificadores.
-        assertEquals("r1", sent["replaces_draft_items"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content)
+        assertEquals(
+            "r1",
+            sent["replaces_draft_items"]!!
+                .jsonArray
+                .single()
+                .jsonObject["id"]!!
+                .jsonPrimitive
+                .content,
+        )
         assertEquals(OrderState.RECEIVED, queue.order("op-1").first()!!.state)
     }
 
@@ -575,7 +586,10 @@ class OfflineNeverRepeatsTest {
             ),
         )
         captures.stage(capture.id, DraftOperation.Add(DraftLine("r2", line(BURGER, 1))), null)
-        val closed = awaitCapture(capture.id) { it.sync == DraftSync.ACCOUNT_CLOSED && it.tableAccounts.isNotEmpty() }
+        val closed =
+            awaitCapture(capture.id) {
+                it.sync == DraftSync.ACCOUNT_CLOSED && it.tableAccounts.isNotEmpty()
+            }
         assertEquals(ACCOUNT_B, closed.tableAccounts.single().id)
         // La cuenta B tiene el borrador movido con sus identificadores: se guarda encima.
         respond(
@@ -660,8 +674,7 @@ class OfflineNeverRepeatsTest {
     private fun body(request: RecordedRequest): JsonObject =
         Json.parseToJsonElement(request.body!!.utf8()).jsonObject
 
-    private fun operationOf(body: JsonObject): String =
-        body["operation_id"]!!.jsonPrimitive.content
+    private fun operationOf(body: JsonObject): String = body["operation_id"]!!.jsonPrimitive.content
 
     private suspend fun insert(order: PendingOrder) {
         database.waiter().insertOrder(WaiterStorage.toEntity(order))
@@ -772,7 +785,9 @@ class OfflineNeverRepeatsTest {
                     if (quantity == 2) {
                         emptyList()
                     } else {
-                        listOf(DraftOperation.Replace("r1", DraftLine("r1", line(BURGER, quantity))))
+                        listOf(
+                            DraftOperation.Replace("r1", DraftLine("r1", line(BURGER, quantity))),
+                        )
                     },
                 own = setOf("r1"),
             )

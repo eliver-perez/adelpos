@@ -55,15 +55,15 @@ class OrdersInFlight {
 /**
  * Envía la cola sin conexión (§7) con `submitOfflineOrder` y la **credencial de envío del mesero
  * que capturó cada pedido** (A1-D1; revisión R3, M5): nunca con la de otro. Cada pedido sale con su
- * clave de operación de siempre, **la misma que usó el «Enviar a cocina» en línea** (A1-D19): si
- * la respuesta se pierde, el reintento devuelve lo mismo y Go nunca lo duplica
+ * clave de operación de siempre, **la misma que usó el «Enviar a cocina» en línea** (A1-D19): si la
+ * respuesta se pierde, el reintento devuelve lo mismo y Go nunca lo duplica
  * (`OFFLINE_ORDER_ALREADY_ACCEPTED`, también si la confirmación en línea ya había entrado).
  *
  * Antes de cada pedido (revisión R6): recupera los que quedaron «Enviando» sin petición en curso
  * (B2), repite con su clave el guardado del borrador que quedó sin respuesta si el mesero tiene
- * sesión (C1) y, si Go dice que las partidas ya están en una cuenta de la mesa (`items_in_account`),
- * lo manda a esa cuenta con la misma clave. Cada escritura en Room es condicional al estado que se
- * leyó (M1 y O1).
+ * sesión (C1) y, si Go dice que las partidas ya están en una cuenta de la mesa
+ * (`items_in_account`), lo manda a esa cuenta con la misma clave. Cada escritura en Room es
+ * condicional al estado que se leyó (M1 y O1).
  *
  * Lo usa el trabajador de WorkManager (con la aplicación abierta o cerrada); una sola vuelta a la
  * vez en el proceso.
@@ -162,7 +162,9 @@ class OrderSender(
         return current
     }
 
-    /** Manda el pedido; si Go lo rechazó solo por la hora adelantada del dispositivo, lo corrige. */
+    /**
+     * Manda el pedido; si Go lo rechazó solo por la hora adelantada del dispositivo, lo corrige.
+     */
     private suspend fun submit(
         order: PendingOrder,
         transport: ServerTransport,
@@ -218,9 +220,9 @@ class OrderSender(
 
     /**
      * Revisión R6, C1: el guardado del borrador que quedó sin respuesta al tocar «Enviar a cocina»
-     * se repite **igual** (misma clave y mismo contenido) con la sesión del mesero que capturó, para
-     * saber si entró y, si abrió la cuenta, mandar el pedido a esa cuenta. Sin sesión se envía así
-     * (Go reconoce los renglones por su identificador, A1-D18).
+     * se repite **igual** (misma clave y mismo contenido) con la sesión del mesero que capturó,
+     * para saber si entró y, si abrió la cuenta, mandar el pedido a esa cuenta. Sin sesión se envía
+     * así (Go reconoce los renglones por su identificador, A1-D18).
      */
     private suspend fun resolveUnresolved(
         order: PendingOrder,

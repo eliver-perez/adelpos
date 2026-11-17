@@ -18,14 +18,14 @@ import local.adel.pos.android.core.data.network.ConnectionMonitor
 import local.adel.pos.android.core.data.preferences.DevicePreferencesRepository
 import local.adel.pos.android.core.data.security.KeystoreSecretSealer
 import local.adel.pos.android.core.data.session.DeviceServerAccess
-import local.adel.pos.android.core.data.waiter.DeviceWaiterServer
 import local.adel.pos.android.core.data.waiter.CaptureDiscards
+import local.adel.pos.android.core.data.waiter.DeviceWaiterServer
 import local.adel.pos.android.core.data.waiter.LostResponses
-import local.adel.pos.android.core.data.waiter.OrdersInFlight
-import local.adel.pos.android.core.data.waiter.ServerClock
 import local.adel.pos.android.core.data.waiter.OrderQueueRepository
 import local.adel.pos.android.core.data.waiter.OrderSendSignals
 import local.adel.pos.android.core.data.waiter.OrderWorkerFactory
+import local.adel.pos.android.core.data.waiter.OrdersInFlight
+import local.adel.pos.android.core.data.waiter.ServerClock
 import local.adel.pos.android.core.data.waiter.WaiterApi
 import local.adel.pos.android.core.data.waiter.WorkManagerOrderScheduler
 import local.adel.pos.android.core.data.wipe.DeviceDataWipe
@@ -79,7 +79,9 @@ class AppContainer(context: Context, private val settings: Settings = Settings()
     /** Avisos entre quien pide enviar la cola y el trabajador que ya está enviando. */
     private val orderSendSignals = OrderSendSignals()
 
-    /** La diferencia con la hora de Go, para la hora de captura de los pedidos (revisión R6, B4). */
+    /**
+     * La diferencia con la hora de Go, para la hora de captura de los pedidos (revisión R6, B4).
+     */
     private val serverClock = ServerClock()
 
     /** Pedidos que este proceso confirma en línea en este momento (revisión R6, B2). */

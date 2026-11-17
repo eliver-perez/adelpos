@@ -201,8 +201,8 @@ data class OrderReview(
  * Guardado del borrador en Go que salió y no tuvo respuesta cuando el mesero tocó «Enviar a cocina»
  * (revisión R6, C1; A1-D19): pudo haber entrado. Antes de mandar el pedido, quien tenga la sesión
  * del mesero lo repite **igual** (misma clave y mismo contenido) para saber qué pasó y, si abrió la
- * cuenta, mandar el pedido a esa cuenta. Sin sesión, Go reconoce los renglones por su
- * identificador (A1-D18).
+ * cuenta, mandar el pedido a esa cuenta. Sin sesión, Go reconoce los renglones por su identificador
+ * (A1-D18).
  *
  * @param accountId null: era la apertura de la cuenta en [tableId] (`openAccount`).
  */

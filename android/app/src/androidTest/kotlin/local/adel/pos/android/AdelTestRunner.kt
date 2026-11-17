@@ -37,7 +37,11 @@ class AdelTestRunner : AndroidJUnitRunner() {
 
     // Descarta las primeras respuestas de cada ruta indicada (después de que Go las procesó); sin
     // ningún argumento no descarta nada.
-    private fun lostResponses(offline: String?, drafts: String?, confirms: String?): LostResponses? {
+    private fun lostResponses(
+        offline: String?,
+        drafts: String?,
+        confirms: String?,
+    ): LostResponses? {
         val offlineLeft = AtomicInteger(offline?.toIntOrNull() ?: 0)
         val draftsLeft = AtomicInteger(drafts?.toIntOrNull() ?: 0)
         val confirmsLeft = AtomicInteger(confirms?.toIntOrNull() ?: 0)

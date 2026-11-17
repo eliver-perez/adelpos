@@ -45,13 +45,14 @@ class PendingOrdersViewModel(private val dependencies: WaiterDependencies) : Vie
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
-    val others: StateFlow<List<OthersPending>> =
-        userFlow { dependencies.orders.othersPending(it) }
-            .stateIn(
-                viewModelScope,
-                SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-                emptyList(),
-            )
+    val others: StateFlow<List<OthersPending>> = userFlow {
+        dependencies.orders.othersPending(it)
+    }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            emptyList(),
+        )
 
     fun retryNow() {
         dependencies.orders.retryNow()

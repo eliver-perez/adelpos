@@ -46,9 +46,9 @@ fun interface CaptureDiscards {
 
 /**
  * La cola de pedidos (§7) sobre las tablas del modo Mesero de `AppDatabase`: cada cambio de estado
- * es una escritura condicional al estado que se leyó ([WaiterDao.transition], revisión R6, M1 y
- * O1) con las transiciones del dominio ([OrderTransitions]); nada se borra por cerrar la
- * aplicación, reiniciar o perder la batería. También es:
+ * es una escritura condicional al estado que se leyó ([WaiterDao.transition], revisión R6, M1 y O1)
+ * con las transiciones del dominio ([OrderTransitions]); nada se borra por cerrar la aplicación,
+ * reiniciar o perder la batería. También es:
  * - el contador del indicador de conexión ([PendingOrdersSource], todo el dispositivo);
  * - el trabajo pendiente de cada mesero ([WaiterWorkGate]: capturas en curso y pedidos sin enviar);
  * - lo que se muestra antes de borrar al retirar el dispositivo o emparejarlo de nuevo
@@ -148,30 +148,29 @@ class OrderQueueRepository(
      * captura en descarte que quita de Go lo suyo (sin conexión, en cuanto la haya).
      */
     override suspend fun discard(operationId: String): DiscardResult {
-        val captureId =
-            mutex.withLock {
-                val order = load(operationId) ?: return DiscardResult.DONE
-                // Solo lo que Go no aceptó y espera al mesero: un pedido «Por enviar» o «Enviando»
-                // pudo haber entrado ya (respuesta perdida) y descartarlo invitaría a capturarlo
-                // otra vez.
-                check(order.state == OrderState.NEEDS_REVIEW) {
-                    "Solo se descarta un pedido que requiere revisión"
-                }
-                if (order.replaces.isEmpty() && order.unresolvedSave == null) {
-                    dao.deleteOrder(operationId)
-                    return DiscardResult.DONE
-                }
-                val capture = discardingCaptureFrom(order)
-                dao.captureFromOrder(WaiterStorage.toEntity(capture, clock()), operationId)
-                capture.id
+        val captureId = mutex.withLock {
+            val order = load(operationId) ?: return DiscardResult.DONE
+            // Solo lo que Go no aceptó y espera al mesero: un pedido «Por enviar» o «Enviando»
+            // pudo haber entrado ya (respuesta perdida) y descartarlo invitaría a capturarlo
+            // otra vez.
+            check(order.state == OrderState.NEEDS_REVIEW) {
+                "Solo se descarta un pedido que requiere revisión"
             }
+            if (order.replaces.isEmpty() && order.unresolvedSave == null) {
+                dao.deleteOrder(operationId)
+                return DiscardResult.DONE
+            }
+            val capture = discardingCaptureFrom(order)
+            dao.captureFromOrder(WaiterStorage.toEntity(capture, clock()), operationId)
+            capture.id
+        }
         return discards?.discardNow(captureId) ?: DiscardResult.PENDING
     }
 
     /**
      * Al arrancar el proceso: lo que quedó «Enviando» vuelve a «Por enviar» (misma clave) y se
-     * olvidan los recibidos de hace más de [RECEIVED_KEPT_MILLIS]. (El trabajador hace lo mismo
-     * al empezar cada vuelta: revisión R6, B2.)
+     * olvidan los recibidos de hace más de [RECEIVED_KEPT_MILLIS]. (El trabajador hace lo mismo al
+     * empezar cada vuelta: revisión R6, B2.)
      */
     suspend fun recoverAfterRestart() {
         mutex.withLock {

@@ -40,7 +40,9 @@ class OrderSchedulerTest {
         val scheduler = WorkManagerOrderScheduler(context, OrderSendSignals())
         scheduler.schedulePeriodic()
         scheduler.requestSend()
-        assertTrue(states(WorkManagerOrderScheduler.PERIODIC_WORK).contains(WorkInfo.State.ENQUEUED))
+        assertTrue(
+            states(WorkManagerOrderScheduler.PERIODIC_WORK).contains(WorkInfo.State.ENQUEUED),
+        )
         scheduler.cancelAndWait()
         assertEquals(
             listOf(WorkInfo.State.CANCELLED),
@@ -50,6 +52,8 @@ class OrderSchedulerTest {
         // trabajador, así que el envío pudo terminar antes por sí solo).
         assertTrue(states(WorkManagerOrderScheduler.SEND_WORK).all { it.isFinished })
         scheduler.schedulePeriodic()
-        assertTrue(states(WorkManagerOrderScheduler.PERIODIC_WORK).contains(WorkInfo.State.ENQUEUED))
+        assertTrue(
+            states(WorkManagerOrderScheduler.PERIODIC_WORK).contains(WorkInfo.State.ENQUEUED),
+        )
     }
 }
