@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.StateFlow
 import local.adel.pos.android.core.data.access.AccessRepository
 import local.adel.pos.android.core.data.session.ServerTransport
 import local.adel.pos.android.core.domain.access.ActiveWaiter
+import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.error.AppError
 import okhttp3.Headers
 
@@ -20,6 +21,12 @@ interface WaiterServer {
 
     /** Dirección vigente y cliente con la huella fijada; null sin servidor emparejado. */
     fun transport(): ServerTransport?
+
+    /**
+     * Antes de enviar sin pantallas (WorkManager despertó el proceso con la aplicación cerrada):
+     * lee el servidor emparejado guardado si todavía nadie lo leyó.
+     */
+    suspend fun prepare()
 
     /**
      * Cabeceras del dispositivo y la sesión de Go de [userId]; null si ese mesero no tiene sesión
@@ -50,6 +57,12 @@ class DeviceWaiterServer(private val access: AccessRepository) : WaiterServer {
     override val activeWaiter: StateFlow<ActiveWaiter?> = access.activeWaiter
 
     override fun transport(): ServerTransport? = access.serverTransport()
+
+    override suspend fun prepare() {
+        if (access.status.value is DeviceStatus.Starting) {
+            access.start()
+        }
+    }
 
     override fun sessionHeaders(userId: String): Headers? {
         // requestHeaders(userId) trae Authorization solo si ese mesero tiene sesión de Go (una

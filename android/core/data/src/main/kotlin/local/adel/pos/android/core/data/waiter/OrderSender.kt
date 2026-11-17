@@ -54,6 +54,9 @@ class OrderSender(
         var sent = 0
         var reviews = 0
         var retryLater = false
+        // Con la aplicación cerrada, WorkManager despierta el proceso sin pantallas: primero se lee
+        // el servidor emparejado guardado.
+        server.prepare()
         val queued = dao.ordersIn(OrderState.QUEUED.storedName).map(WaiterStorage::toOrder)
         for (order in queued) {
             if (order.credentialRejected) {

@@ -12,10 +12,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -68,10 +67,21 @@ class TablesViewModel(
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
-    private val clock = MutableStateFlow(dependencies.elapsedClock())
-
-    /** Reloj monótono que avanza cada medio minuto para el tiempo de las mesas. */
-    val now: StateFlow<Long> = clock.asStateFlow()
+    /**
+     * Reloj monótono que avanza cada medio minuto para el tiempo de las mesas, solo mientras la
+     * pantalla lo mira.
+     */
+    val now: StateFlow<Long> = flow {
+        while (true) {
+            emit(dependencies.elapsedClock())
+            delay(TICK_MILLIS)
+        }
+    }
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
+            dependencies.elapsedClock(),
+        )
 
     var search: String by mutableStateOf(savedState[KEY_SEARCH] ?: "")
         private set
@@ -91,12 +101,6 @@ class TablesViewModel(
 
     init {
         dependencies.restaurant.refresh()
-        viewModelScope.launch {
-            while (true) {
-                delay(TICK_MILLIS)
-                clock.value = dependencies.elapsedClock()
-            }
-        }
     }
 
     private fun <T> flowOfUser(block: (String) -> Flow<List<T>>): Flow<List<T>> =
