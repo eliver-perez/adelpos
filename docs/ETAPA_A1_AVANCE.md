@@ -2031,3 +2031,193 @@ fondo (ahí no ocurre, salvo destrucción por el sistema). Reproducción con tie
   para una operación de otro.
 - Se conservan: O1 (quitar el permiso deja inservible la credencial mientras falte; devolverlo la vuelve a habilitar, y
   así no se pierden pedidos), O2, O3 y B5 (igual que `auth/password`); B3 queda cubierto por M3.
+
+## Correcciones de la revisión R3 · Servidor y escritorio
+
+Un agente, en su propio árbol de trabajo (`etapa-a1-b-fix`, desde `etapa-a1-android` en `3ca8b6e`), en paralelo con el
+agente de las fases C y B del dispositivo (que corrige `android/`). 16/11/2026. Sin cambio de versión (0.12.0, esquema
+25: la 0025 todavía no está en ninguna instalación, así que su **sección B** se editó; una base de desarrollo o de
+prueba que ya la tenía se recrea). Pruebas en copias aisladas (`ISO_TAG=B`): clúster temporal 55499 con una base
+`adel_pos_test_b_*` por paquete y Go temporal de Playwright en 8186 con la vista previa en 1424. **No se tocó la
+instalación real** ni `android/`, `CLAUDE.md` ni `AGENTS.md`; `docs/etapas/*.md` con el mismo md5 antes y después. No se
+usaron emuladores ni `server-up`.
+
+Commits en `etapa-a1-b-fix`:
+
+- `29b63b3` — servidor: A1-D16, A1-D17, B1, B2 y O4; 0025 sección B; contrato v1 y sus pruebas.
+- `df8d00f` — `docs/API_V1.md` y `API_CONTRACTS.md`, con la prueba que los compara con la lista de permisos de mesero.
+- `1248802` — escritorio: bloqueo largo en Personal › Usuarios, sin «Asignar PIN» en la fila propia (B6) y etiqueta del
+  Registro de movimientos.
+
+### Qué cambió
+
+**A1-D16 · Bloqueo largo del PIN** (`backend/internal/administration/pin_login.go:228`, `recordPINFailure`):
+
+- Los fallos siguen igual (5 en 15 minutos → 5 minutos; la cuenta vuelve a cero al bloquearse). Cada bloqueo se cuenta
+  en una **serie** que empieza con el primero (`pin_attempts.lock_series_started_at`) y dura 24 horas: el primero y el
+  segundo son de 5 minutos (`user.pin_locked`, ahora con `lock_in_series`); **el tercero deja el PIN bloqueado hasta que
+  un administrador lo desbloquee** (`requires_unlock = true`, sin `locked_until`; registro propio
+  **`user.pin_locked_until_unlock`**, una vez, con el dispositivo). Una serie que empezó hace más de 24 horas se olvida
+  y el bloqueo nuevo es el primero de otra. **Una entrada correcta borra la fila** (fallos y serie).
+- Respuesta acordada con el dispositivo: `429 PIN_LOCKED` con `details.locked_until` (RFC 3339) y
+  `details.requires_unlock: false` en un bloqueo por tiempo; `details.locked_until: null` y `details.requires_unlock:
+true` en el largo (mensaje: «Este PIN quedó bloqueado por demasiados intentos. Pide a un administrador que lo
+  desbloquee en Personal › Usuarios.»). Las dos propiedades van siempre (`failedPINLogin`, `pin_login.go:281`).
+- `GET auth/pin-users`: cada usuario conserva `locked_until` y agrega `requires_unlock` (booleano, siempre presente).
+  `GET users`: `pin_requires_unlock`. `POST users/{id}/pin/unlock` quita los dos bloqueos y la serie; `user.pin_unlocked`
+  dice cuál quitó.
+- **«Mi PIN» no quita el bloqueo largo** (`ownPIN` solo borra los intentos si no espera a un administrador): así «solo
+  lo desbloquea un administrador» vale también para el propio usuario. Asignar o quitar el PIN desde Personal ›
+  Usuarios (que es una acción de administrador) sí empieza de cero, como antes.
+- 0025, sección B: `pin_attempts.locks` (0–3), `lock_series_started_at`, `requires_unlock` y dos CHECK
+  (`pin_attempts_series_check`: serie con inicio; `pin_attempts_requires_unlock_check`: el largo sin hora y con 3
+  bloqueos).
+
+**A1-D17 · La sesión con PIN solo tiene permisos de mesero**:
+
+- Lista cerrada en un solo lugar: `administration.WaiterPermissions` (`backend/internal/administration/waiter_scope.go:14`).
+  **Lista final**: `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`, `accounts.read`,
+  `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
+  `catalog.prices.read`, `events.read`. Sale de la tabla de §4 de la Fase 0 y de los permisos que exigen las rutas del
+  contrato que llama la app (`operations/handler.go`, `routePermission`): `restaurant/state` (cualquier sesión),
+  `restaurant/overview` (`restaurant.tables.read` y `restaurant.areas.read`), cuentas (`accounts.read`), abrir
+  (`accounts.open`), borrador (`orders.capture`), enviar a cocina y pedido sin conexión (`orders.confirm` y los demás de
+  `submitOfflineOrder`), modificar y cancelar unidades (`orders.edit`, `orders.cancel`), catálogo e imágenes
+  (`catalog.read`, `catalog.prices.read`), eventos (`events.read`) y entrar con PIN o «Mi PIN»
+  (`waiter_devices.use`). Nada de Para llevar, cocina, cobros, caja ni administración.
+- 0025, sección B: `sessions.opened_with_pin` (falso por omisión; las sesiones existentes quedan de contraseña).
+  `issueSession` recibe `withPIN` (`auth.go`); `pinLogin` lo pide en `true`; `authenticateSession` lo lee y deja
+  `principal.Permissions = waiterScope(efectivos)` (`service.go:459`), así que **toda** ruta, `auth/me` y
+  `restaurant/state` ven ya los permisos acotados. La credencial de envío también (`pin_login.go:385`).
+- «Cambiar contraseña» desde una sesión con PIN abre la sesión nueva igual de acotada (`principal.PINSession`).
+- Las sesiones con **contraseña** no cambian, también en un teléfono: la decisión habla de la sesión de `pin-login`.
+- `waiter_scope_test.go` comprueba que la lista solo tiene permisos registrados, nada administrativo ni de Para llevar,
+  y que el contrato (descripción de `pinLogin`), `docs/API_V1.md` y `API_CONTRACTS.md` la repiten completa.
+
+**B1 · La credencial de envío se rechaza en toda otra ruta**: `httpapi/router.go:164` (`offlineCredentialMisplaced`,
+`clientversion.go`) responde `401 OFFLINE_CREDENTIAL_NOT_ALLOWED` a toda petición con `X-Offline-Credential` que no sea
+`POST /api/v1/restaurant/offline-orders` **antes** de la comprobación de método y de versión: versión, salud, contrato,
+canal de eventos y rutas inexistentes incluidas. Además `dispatch` lo revisa **al principio** (`service.go:300`), antes
+del asistente, `devices/enroll`, `pairing/*`, `auth/login`, `auth/pin-users` y `auth/pin-login` (defensa para quien use
+`Service` sin `httpapi`). La constante vive en `httpapi.OfflineCredentialHeader` (administration la reutiliza).
+
+**B2 · `X-Client-Kind` igual al tipo del dispositivo** (`matchClientKind`, `service.go:395`): después de
+`authenticateDevice`, si la petición trae `X-Client-Kind` debe ser `android` en un dispositivo `android` y `desktop` en
+uno `desktop` o `kitchen`; si no, `400 CLIENT_KIND_MISMATCH`. Sin la cabecera no se compara. **No rompió nada real**: el
+escritorio (Rust, `api.rs` y `pairing.rs`) envía `desktop` desde dispositivos de escritorio; la app Android envía
+`android` desde su teléfono; los ayudantes de «computadora principal» de las pruebas de Android (`MainComputer.kt`,
+`GoTestServer.kt`) no mandan cabeceras de cliente. Lo que sí hubo que ajustar fueron **dos pruebas de Go que mandaban
+`android` con la credencial del escritorio del asistente**: `TestContractV1` (el cliente ahora lleva el tipo de su
+dispositivo: `desktop` en la terminal del asistente, `android` en el teléfono emparejado y en las rutas `pairing/*` que
+llama el teléfono) y `TestStageA1WaiterPIN` (cada petición va con el tipo y la versión de su dispositivo). Lo dejo dicho
+por si el coordinador lo considera un cambio de prueba que no debía hacerse; con ese ajuste, las especificaciones de
+Playwright que mandan cabeceras (`workflow-stage9g-print-agent`, `-sold-out`, `-terminals`, `-two-terminals` y
+`workflow-stage9h-adjustments`) pasan sin cambios.
+
+**O4 · Pocas verificaciones Argon2id a la vez** (`pin_login.go:301`): como máximo **4** `auth/pin-login` verifican a la
+vez; las demás esperan su turno hasta 5 s **en `Execute`, antes de abrir la transacción** (`service.go:217`), así que no
+ocupan conexiones de la base ni frenan el resto del servidor. Sin turno: `503 PIN_LOGIN_BUSY` («Hay muchas entradas con
+PIN al mismo tiempo. Intenta de nuevo en unos segundos.»). El inicio de sesión con contraseña no cambia (fuera del
+encargo).
+
+**B6 · Escritorio**: `UsersPage` recibe `currentUserID` (de `App.tsx`) y no ofrece «Asignar PIN»/«Cambiar PIN» en la
+fila propia (el PIN propio va en «Mi PIN»); «Desbloquear» sí aparece.
+
+**Escritorio, A1-D16**: `PinStatus` muestra **«PIN bloqueado: pide desbloqueo»** (`pin_requires_unlock`) con
+«Desbloquear»; el Registro de movimientos nombra `user.pin_locked_until_unlock` «PIN bloqueado hasta que lo desbloquee
+un administrador».
+
+**Contrato v1** (`openapi.json`): `pinLogin` documenta el bloqueo largo, `PIN_LOGIN_BUSY` y la lista de permisos de
+mesero, y tiene una respuesta `429` explícita con el esquema nuevo **`PinLockedError`** (`details.locked_until`
+date-time o `null` y `details.requires_unlock`, obligatorias); `PinUser.requires_unlock` (obligatoria);
+`ClientKind` y el esquema `offlineCredential` dicen las reglas nuevas; `getIdentity` y `getRecoveryState` dicen que con
+PIN los permisos llegan acotados; la respuesta de error lista `CLIENT_KIND_MISMATCH` y `PIN_LOGIN_BUSY`. `TestContractV1`
+bloquea a un segundo mesero con 5 fallos y valida el 429 contra `PinLockedError` y la lista con `locked_until`.
+
+### Decisiones (con su porqué)
+
+1. **Serie de 24 horas desde el primer bloqueo** (no una ventana deslizante): «3 bloqueos seguidos en 24 horas» con dos
+   columnas en lugar de guardar cada bloqueo; con bloqueos de 5 minutos un ataque llega al tercero en unos 20 minutos,
+   así que la diferencia en el borde no importa.
+2. **«Mi PIN» no quita el bloqueo largo** (sí lo hace un administrador al desbloquear, asignar o quitar el PIN). Así se
+   cumple «solo lo desbloquea un administrador» al pie de la letra y el administrador se entera.
+3. **Las sesiones con contraseña en un teléfono no se acotan**: A1-D17 habla de la sesión de `pin-login` y de la
+   credencial; quien sabe la contraseña ya podía entrar con ella en cualquier terminal. Si el propietario quiere acotar
+   también esas, basta marcar las sesiones por tipo de dispositivo.
+4. **`CLIENT_KIND_MISMATCH` es 400**, no 401: no es una credencial que haya que borrar (Rust solo borra con
+   `DEVICE_*`/`SESSION_*`); la app o la terminal mal configurada lo ve como un error claro.
+5. **4 turnos y 5 s de espera** para el PIN: ≈ 256 MiB de Argon2id como máximo; la espera va fuera de la transacción
+   para no agotar el grupo de conexiones (lo que de verdad frenaría al resto del servidor).
+6. **Defensa doble de B1** (router y `dispatch`): el router cubre las rutas técnicas, que nunca llegan a `dispatch`.
+
+### Para el agente de Android
+
+- `429 PIN_LOCKED`: leer `error.details.requires_unlock`; si es `true` (`locked_until: null`), el PIN espera a un
+  administrador: cerrar también la entrada sin conexión de ese mesero y decir «Pide a un administrador que lo
+  desbloquee». `auth/pin-users` trae `requires_unlock` en cada usuario.
+- `503 PIN_LOGIN_BUSY`: reintentar la entrada en unos segundos (no cuenta como fallo).
+- La sesión con PIN y la credencial solo tienen la lista de mesero: no esperar permisos fuera de ella en
+  `restaurant/state` (por ejemplo `takeaway.read`); la A2 la ampliará.
+- `X-Client-Kind: android` solo con la credencial del teléfono (con otra, `400 CLIENT_KIND_MISMATCH`), y nunca
+  `X-Offline-Credential` fuera de `POST restaurant/offline-orders` (401 `OFFLINE_CREDENTIAL_NOT_ALLOWED`, también en
+  `version` o `auth/pin-users`).
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                                                      | Dónde                                 | Resultado                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------- |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)                                                           | `iso.sh go-unit`                      | **Aprobado**                                                         |
+| `TestWaiterPermissionsAreClosedAndDocumented`, `TestWaiterScopeKeepsOnlyWaiterPermissions`, `TestPINLoginSlotsAreLimited`                | `internal/administration` (unitarias) | Aprobadas                                                            |
+| `TestOfflineCredentialOnlyOnItsRoute` (B1 en el router)                                                                                  | `internal/httpapi` (unitarias)        | Aprobada                                                             |
+| `TestStageA1WaiterPIN` sola (13 subpruebas; nuevas 09–12)                                                                                | `go-int ./internal/administration`    | **ok** (91 s)                                                        |
+| `go-int ./internal/administration` completo                                                                                              | base `adel_pos_test_b_*`              | **ok** (217 s)                                                       |
+| `go-int ./internal/operations` completo (con `TestStageA1WaiterMode`)                                                                    | idem                                  | **ok** (359 s)                                                       |
+| `go-int ./internal/apicontract` (`TestContractV1` con el 429 y el tipo por dispositivo)                                                  | idem                                  | **ok** (24 s)                                                        |
+| `go-int ./internal/database` (`TestStageA1Upgrade` con las columnas y CHECK nuevos)                                                      | idem                                  | **ok** (11 s)                                                        |
+| Vitest (`tsc --noEmit` + `vitest run src`)                                                                                               | `iso.sh vitest`                       | **96 archivos, 916 pruebas** (2 nuevas: bloqueo largo y fila propia) |
+| `npm run build`                                                                                                                          | `iso.sh build`                        | Correcto                                                             |
+| Playwright `workflow-stagea1` Chromium / WebKit                                                                                          | Go temporal 8186, vista previa 1424   | **1/1 y 1/1**                                                        |
+| Playwright Chromium `workflow-stage9g-print-agent`, `-sold-out`, `-terminals`, `-two-terminals`, `workflow-stage9h-adjustments` (por B2) | idem                                  | **9/9**                                                              |
+| `format`, `fmt-check`, `sync-check`; md5 de `docs/etapas/*.md`                                                                           | árbol `Bfix`                          | Correctos; idénticos                                                 |
+| `cargo test`                                                                                                                             | —                                     | No se corrió: `api.rs` no cambió                                     |
+
+`TestStageA1WaiterPIN` (`backend/internal/administration/pin_acceptance_test.go`) agrega:
+
+- **09** dos bloqueos de 5 minutos (se dan por vencidos en la base), el tercero largo (`requires_unlock`, sin hora,
+  mensaje con «administrador», `user.pin_locked` ×2 y `user.pin_locked_until_unlock` ×1 con el dispositivo); ni el PIN
+  correcto, ni 25 horas, ni «Mi PIN» lo quitan; la lista y Personal › Usuarios lo informan; el administrador lo
+  desbloquea (`user.pin_unlocked` con `requires_unlock`) y el mesero entra; una entrada correcta borra una serie de 2;
+  una serie de más de 24 horas vuelve a empezar (el bloqueo es de 5 minutos).
+- **10** el administrador con PIN: `auth/me` informa exactamente la lista de mesero, `restaurant/state` también; `GET
+users`, `PUT users/{id}/pin`, `GET devices` y cuentas para llevar → 403 con su `access.denied`; cuentas y catálogo
+  → 200; con su credencial el pedido sin conexión entra y `GET users` → 401 `OFFLINE_CREDENTIAL_NOT_ALLOWED`; «Cambiar
+  contraseña» desde esa sesión sigue acotada; con contraseña en la computadora tiene todo.
+- **11** la credencial en `setup/status`, `setup`, `devices/enroll`, `pairing/requests`, `auth/login`, `auth/pin-users`,
+  `auth/pin-login`, `version`, `health/live`, `openapi.json`, `events` y `restaurant/offline-orders/` → 401; una
+  inventada, también.
+- **12** escritorio con `android` (con 0.1.0 y con la versión del producto) y teléfono con `desktop` → 400
+  `CLIENT_KIND_MISMATCH`; sin cabeceras, 200.
+- **13** (antes 09) ningún registro guarda los PIN, la contraseña nueva, la sesión ni la credencial; ahora quita fechas y
+  UUID antes de buscar los PIN (podían contener por azar los mismos dígitos).
+
+### No verificado
+
+- La aplicación Android contra estas formas (la corrige el otro agente).
+- La regresión completa de Playwright (Fase G); aquí solo las especificaciones de la tabla.
+- `go-int` de los demás paquetes de la tupla (no se tocaron).
+- El límite de turnos bajo carga real (solo la prueba unitaria del semáforo).
+
+### Para el coordinador
+
+- **Decidir** si acepta el ajuste de cabeceras en `TestContractV1` y `TestStageA1WaiterPIN` por B2 (eran pruebas que
+  mandaban `android` con la credencial del escritorio; el escritorio, la app y Playwright no cambian).
+- Observación sin cambio: con `accounts.open` (en la lista, como en el rol) una sesión con PIN puede, como hoy cualquier
+  mesero con ese permiso, descartar una cuenta vacía, liberar una mesa y pedir «Cancelar cuenta» con la contraseña de un
+  supervisor (`supervisor_approval.go`). No es administración y la app no lo ofrece en la A1; si el propietario quiere
+  cerrar «Cancelar cuenta» con autorización desde un teléfono, es otra decisión.
+- Para `CLAUDE.md` (no lo edité): §6, las subpruebas nuevas de `TestStageA1WaiterPIN`, `TestOfflineCredentialOnlyOnItsRoute`,
+  `TestWaiterPermissionsAreClosedAndDocumented` y `TestPINLoginSlotsAreLimited`; §7, A1-D16, A1-D17 (la lista en
+  `waiter_scope.go`, regla: solo crece con funciones de la app y se documenta en el contrato, `API_V1.md` y
+  `API_CONTRACTS.md`; la prueba lo exige), B1, B2 (`CLIENT_KIND_MISMATCH`) y O4; §15, las decisiones 1–5.
+
+**Al cerrar las correcciones del servidor** (rama `etapa-a1-b-fix` fusionada en `etapa-a1-android`): se acepta el ajuste de `TestContractV1` y `TestStageA1WaiterPIN`, que enviaban `X-Client-Kind: android` con la credencial de una terminal de escritorio (B2 lo rechaza con `400 CLIENT_KIND_MISMATCH`); el escritorio, la app y Playwright no cambian. Se conserva lo observado sobre `accounts.open` (descartar una cuenta vacía, liberar una mesa o pedir «Cancelar cuenta» con un supervisor, como cualquier mesero con ese permiso).
