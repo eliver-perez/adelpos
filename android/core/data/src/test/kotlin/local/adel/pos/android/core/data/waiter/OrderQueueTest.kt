@@ -34,6 +34,7 @@ import local.adel.pos.android.core.data.waiter.db.WaiterStorage
 import local.adel.pos.android.core.domain.access.IdleLock
 import local.adel.pos.android.core.domain.waiter.DraftLine
 import local.adel.pos.android.core.domain.waiter.DraftOperation
+import local.adel.pos.android.core.domain.waiter.OrderReviewRules
 import local.adel.pos.android.core.domain.waiter.OrderState
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.domain.waiter.ReviewReason
@@ -414,5 +415,39 @@ class OrderQueueTest {
         }
         assertEquals(ANA, locked)
         watcher.cancel()
+    }
+
+    @Test
+    fun cuentaCobradaSinConexionPasaAUnaCuentaNuevaDeLaMesa() = runBlocking {
+        val saved = DraftLine("guardado", line(BURGER))
+        insert(queuedOrder("op-1", base = listOf(saved), own = setOf("guardado")))
+        val closed =
+            """{"kind":"account_closed","item_id":null,"product_id":null,"product_name":"",""" +
+                """"before":null,"now":"closed","message":"La cuenta «Mesa 4» ya se cobró.",""" +
+                """"acceptable":false}"""
+        mock.enqueue(
+            error(
+                409,
+                "ORDER_REQUIRES_CONFIRMATION",
+                """{"status":"requires_confirmation","catalog_version":41,""" +
+                    """"captured_catalog_version":41,"requires_changes":true,"changes":[$closed]}""",
+            ),
+        )
+        sender.sendPending()
+        val review = queue.order("op-1").first()!!
+        assertEquals(OrderState.NEEDS_REVIEW, review.state)
+        assertFalse(review.review!!.canAccept)
+        assertTrue(OrderReviewRules.offersNewAccount(review.review!!))
+        queue.moveToNewAccount("op-1")
+        mock.enqueue(accepted("cuenta-nueva"))
+        sender.sendPending()
+        mock.takeRequest()
+        val moved = body(mock.takeRequest())
+        // A la mesa, sin sustituir borrador (Go lo rechaza sin cuenta) y con la misma clave.
+        assertEquals(TABLE, moved["destination"]!!.jsonObject["table_id"]!!.jsonPrimitive.content)
+        assertFalse(moved["destination"]!!.jsonObject.containsKey("account_id"))
+        assertFalse(moved.containsKey("replaces_draft_items"))
+        assertEquals("op-1", moved["operation_id"]!!.jsonPrimitive.content)
+        assertEquals("cuenta-nueva", queue.order("op-1").first()!!.receivedAccountId)
     }
 }
