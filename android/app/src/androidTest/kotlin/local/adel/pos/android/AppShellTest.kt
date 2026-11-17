@@ -33,7 +33,7 @@ import local.adel.pos.android.feature.access.status.TAG_REPAIR
 import local.adel.pos.android.feature.access.status.TAG_RETIRED
 import local.adel.pos.android.feature.access.status.TAG_UPDATE_APP
 import local.adel.pos.android.feature.access.status.TAG_UPDATE_SERVER
-import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 import local.adel.pos.android.navigation.AdelPosNavigation
 import local.adel.pos.android.navigation.TAG_APP_ROOT
 import org.junit.Assert.assertEquals

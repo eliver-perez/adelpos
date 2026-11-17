@@ -57,7 +57,7 @@ import local.adel.pos.android.feature.access.status.TAG_REPAIR_CONFIRM
 import local.adel.pos.android.feature.access.status.TAG_RETIRED
 import local.adel.pos.android.feature.access.status.TAG_RETIRED_PAIR_AGAIN
 import local.adel.pos.android.feature.access.status.TAG_UPDATE_APP
-import local.adel.pos.android.feature.waiter.TAG_TABLES_SEARCH
+import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.After
 import org.junit.Assert.assertEquals

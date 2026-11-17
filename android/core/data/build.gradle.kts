@@ -63,6 +63,9 @@ dependencies {
     // api: AppDatabase (pública para el AppContainer) extiende RoomDatabase.
     api(libs.room.runtime)
     ksp(libs.room.compiler)
+    // Cola sin conexión del modo Mesero (Fase E): envío con WorkManager aunque la aplicación esté
+    // cerrada.
+    implementation(libs.work.runtime)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
 
@@ -73,6 +76,7 @@ dependencies {
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.mockwebserver)
     testImplementation(libs.okhttp.tls)
+    testImplementation(libs.work.testing)
 
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.core)

@@ -281,9 +281,9 @@ las terminales ni en el servidor: va dentro del APK o solo sirve para compilar y
 | kotlinx.coroutines (core, android, test)                       | 1.11.0                                                                       | Maven Central                   | Corrutinas y Flow.                                                                                                                                                                                                  |
 | JUnit / androidx.test (runner, core) / ext-junit / Espresso    | 4.13.2 / 1.7.0 / 1.3.0 / 3.7.0                                               | Maven Central / Google Maven    | Pruebas. Espresso 3.7.0 se fija porque Compose UI test trae 3.5.0, que falla en Android 17 (`InputManager.getInstance` ya no existe).                                                                               |
 | Robolectric                                                    | 4.18 (descarga `android-all-instrumented` de SDK 36, 224 MB)                 | Maven Central                   | Room en la JVM. El `android-all` lo descarga Robolectric al probar (en `~/.m2`), fuera del bloqueo de Gradle.                                                                                                       |
+| WorkManager (`work-runtime-ktx`, `work-testing`)               | 2.12.0                                                                       | Google Maven                    | Fase E: la cola sin conexión sale aunque la aplicación esté cerrada (`OrderSendWorker`, sin restricción de red). SHA-1 comprobado con Google Maven.                                                                 |
 
-En el catálogo, sin usar todavía: WorkManager 2.12.0 (`work-runtime-ktx`, `work-testing`; la cola sin conexión de la
-Fase E). Las imágenes del catálogo usan una caché propia (OkHttp con `ETag`), no Coil. **No se usan** Hilt, Retrofit, Coil, DataStore ni
+Las imágenes del catálogo usan una caché propia (OkHttp con `ETag`), no Coil. **No se usan** Hilt, Retrofit, Coil, DataStore ni
 `security-crypto` (en desuso; el cifrado es AES-256-GCM directo con el Android Keystore). Licencias: lo que entra al APK
 (Kotlin, AndroidX, Compose, OkHttp con Okio, kotlinx) es Apache 2.0; de las herramientas y pruebas, ktfmt es Apache 2.0,
 Robolectric MIT y JUnit 4 EPL 1.0. **SDK de Android**: no se instaló
