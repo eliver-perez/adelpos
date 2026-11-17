@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -168,6 +170,32 @@ class CaptureViewModel(
             dependencies.restaurant.accountChanges
                 .filter { it == capture.value?.accountId }
                 .collect { loadBill(it) }
+        }
+        restoreChangedLine()
+    }
+
+    /**
+     * Si Android cerró la aplicación mientras se cambiaba una partida por enviar («Cambiar»), el
+     * personalizador vuelve con **esa partida tal como está guardada** en la captura (Room), nunca
+     * con la configuración original del producto: «Guardar el cambio» la reemplazaría en silencio
+     * (cantidad 1 y sin su personalización). Si la partida ya no existe, se cierra el
+     * personalizador.
+     */
+    private fun restoreChangedLine() {
+        val itemId = editingItemId ?: return
+        if (editing != null) {
+            return
+        }
+        viewModelScope.launch {
+            val saved = capture.filterNotNull().first().visible.firstOrNull { it.id == itemId }
+            if (editingItemId != itemId || editing != null) {
+                return@launch
+            }
+            if (saved == null) {
+                closeEditor()
+            } else {
+                editing = saved.line
+            }
         }
     }
 
@@ -412,6 +440,12 @@ class CaptureViewModel(
 
     private fun restoreEditing(): LineSelection? {
         val productId: String = savedState[KEY_EDITING_PRODUCT] ?: return null
+        if (savedState.get<String>(KEY_EDITING_ITEM) != null) {
+            // «Cambiar» una partida: se toma de la captura guardada (restoreChangedLine).
+            return null
+        }
+        // Una partida nueva vuelve con el producto y su configuración original: lo elegido en el
+        // personalizador antes de que Android cerrara la aplicación no se guarda.
         return LineSelection(productId, null, 1, Customization.ORIGINAL)
     }
 
