@@ -42,9 +42,18 @@ import local.adel.pos.android.feature.access.findserver.TAG_FIND_SERVER
 import local.adel.pos.android.feature.access.findserver.TAG_PAIRING_CODE
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY
 import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_CANCEL_CONFIRM
 import local.adel.pos.android.feature.waiter.capture.TAG_DRAFT_ROW_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_MODIFY_CONFIRM
+import local.adel.pos.android.feature.waiter.capture.TAG_MODIFY_NOTES
+import local.adel.pos.android.feature.waiter.capture.TAG_MODIFY_PREVIEW
+import local.adel.pos.android.feature.waiter.capture.TAG_MODIFY_QUOTE
+import local.adel.pos.android.feature.waiter.capture.TAG_OPEN_ANOTHER
 import local.adel.pos.android.feature.waiter.capture.TAG_ORDER_PANEL
 import local.adel.pos.android.feature.waiter.capture.TAG_SEND_TO_KITCHEN
+import local.adel.pos.android.feature.waiter.capture.TAG_SENT_CANCEL_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_SENT_MODIFY_PREFIX
+import local.adel.pos.android.feature.waiter.capture.TAG_SENT_REASON
 import local.adel.pos.android.feature.waiter.capture.TAG_SENT_ROW_PREFIX
 import local.adel.pos.android.feature.waiter.capture.TAG_SYNC_PREFIX
 import local.adel.pos.android.feature.waiter.pending.TAG_PENDING
@@ -53,8 +62,8 @@ import local.adel.pos.android.feature.waiter.pending.TAG_PENDING_REVIEW_PREFIX
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_ACCEPT
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_CHANGE_PREFIX
-import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_NEW_ACCOUNT
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_REMOVE_PREFIX
+import local.adel.pos.android.feature.waiter.tables.TAG_ACCOUNT_PANE
 import local.adel.pos.android.feature.waiter.tables.TAG_NEW_ACCOUNT
 import local.adel.pos.android.feature.waiter.tables.TAG_OPEN_PENDING
 import local.adel.pos.android.feature.waiter.tables.TAG_TABLES_SEARCH
@@ -88,7 +97,8 @@ import org.junit.runner.RunWith
  *   duplica** el pedido.
  * - `w5` precio cambiado y producto agotado mientras se capturaba → «Requiere tu revisión» → quitar
  *   lo agotado, aceptar y enviar con el precio nuevo.
- * - `w6` la mesa se cobra mientras tanto → «Requiere tu revisión» → cuenta nueva en la mesa.
+ * - `w6` la mesa se cobra mientras el mesero tiene la cuenta abierta: Go rechaza el guardado
+ *   (`account_not_open`, «…ya se cobró») y lo capturado pasa a una cuenta nueva de la mesa.
  * - `w7a` (con red) borrador guardado en Go; `w7b` (sin red) se agrega más y se envía sin conexión;
  *   `w7c` (con red) el pedido sustituye los renglones del borrador (A1-D6): la cuenta queda con
  *   todo confirmado y sin borrador duplicado.
@@ -185,7 +195,7 @@ class WaiterModeOnGoTest {
         // ve al momento por el canal de tiempo real.
         compose.onNodeWithTag(TAG_PENDING).assertExists()
         pressBack()
-        compose.onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table1")}").performClick()
+        openTable(ids.getValue("table1"))
         waitFor("account-$accountId")
         compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
         showOrder()
@@ -303,40 +313,100 @@ class WaiterModeOnGoTest {
         val accountId = ids.getValue("account1")
         launch()
         enterAna()
-        compose
-            .onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table1")}")
-            .performScrollTo()
-            .performClick()
+        openTable(ids.getValue("table1"))
         waitFor("account-$accountId")
         compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        showOrder()
+        waitUntil("la cuenta leída de Go") {
+            currentCapture(ids.getValue("table1")).baseRevision > 0
+        }
+        // Mientras el mesero tiene la cuenta abierta, la principal la cobra (Go solo cierra una
+        // cuenta de salón liquidada sin borrador pendiente).
+        log("cobrar")
+        payAccount(accountId)
+        backToCatalog()
         addProduct(ids.getValue("tacos"))
         showOrder()
-        waitUntil("el borrador guardado con su cotización") {
-            val capture = currentCapture(ids.getValue("table1"))
-            capture.operations.isEmpty() &&
-                capture.seenPrices.isNotEmpty() &&
-                capture.baseRevision > 0
-        }
-        // La principal cobra la cuenta.
-        payAccount(accountId)
+        // Go rechaza el guardado: «La cuenta … ya se cobró» y se ofrece una cuenta nueva en la
+        // mesa.
+        waitFor("${TAG_SYNC_PREFIX}account_closed")
+        waitForText("ya se cobró")
+        compose.onNodeWithTag(TAG_OPEN_ANOTHER).performScrollTo().performClick()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val moved = currentCapture(ids.getValue("table1"))
+        assertTrue(moved.accountId != null && moved.accountId != accountId)
         compose.onNodeWithTag(TAG_SEND_TO_KITCHEN).performScrollTo().performClick()
         waitFor(TAG_TABLES_SEARCH)
-        val review = waitForOrder(ids.getValue("table1")) { it.state == OrderState.NEEDS_REVIEW }
-        openPending()
-        openReview(review.operationId)
-        waitForText("ya se cobró")
-        compose.onNodeWithTag(TAG_REVIEW_NEW_ACCOUNT).performScrollTo().performClick()
         val received =
             waitForOrder(ids.getValue("table1")) {
-                it.operationId == review.operationId && it.state == OrderState.RECEIVED
+                it.operationId == moved.id && it.state == OrderState.RECEIVED
             }
-        assertTrue(received.receivedAccountId != accountId)
+        assertEquals(moved.accountId, received.receivedAccountId)
         val bill = main.call("GET", "restaurant/accounts/${received.receivedAccountId}").obj
         assertEquals(
             "open",
             bill.getValue("account").jsonObject.getValue("state").jsonPrimitive.content,
         )
         assertEquals(1, bill.getValue("lines").jsonArray.size)
+        val paid = main.call("GET", "restaurant/accounts/$accountId").obj
+        assertEquals(
+            "closed",
+            paid.getValue("account").jsonObject.getValue("state").jsonPrimitive.content,
+        )
+    }
+
+    @Test
+    fun w8_cancelarYModificarLoEnviado() {
+        val ids = loadIds()
+        val accountId = ids.getValue("account4")
+        launch()
+        enterAna()
+        openTable(ids.getValue("table4"))
+        waitFor("account-$accountId")
+        compose.onNodeWithTag("account-$accountId").performScrollTo().performClick()
+        showOrder()
+        val lines =
+            main.call("GET", "restaurant/accounts/$accountId").obj.getValue("lines").jsonArray
+        val byProduct = lines.associate {
+            val line = it.jsonObject
+            line.getValue("request").jsonObject.text("product_id") to line.text("version_id")
+        }
+        val tacos = byProduct.getValue(ids.getValue("tacos"))
+        val burger = byProduct.getValue(ids.getValue("burger"))
+        // Cancelar la unidad de tacos, con motivo (sin supervisor).
+        waitFor("$TAG_SENT_CANCEL_PREFIX$tacos")
+        compose.onNodeWithTag("$TAG_SENT_CANCEL_PREFIX$tacos").performScrollTo().performClick()
+        compose
+            .onNodeWithTag(TAG_SENT_REASON)
+            .performTextReplacement("El cliente cambió de opinión")
+        compose.onNodeWithTag(TAG_CANCEL_CONFIRM).performClick()
+        waitUntil("la cancelación en Go") { lineState(accountId, tacos) == "cancelled" }
+        // Modificar la hamburguesa: observaciones nuevas, calculadas primero con Go.
+        waitFor("$TAG_SENT_MODIFY_PREFIX$burger")
+        compose.onNodeWithTag("$TAG_SENT_MODIFY_PREFIX$burger").performScrollTo().performClick()
+        compose.onNodeWithTag(TAG_MODIFY_NOTES).performTextReplacement("sin cebolla")
+        compose.onNodeWithTag(TAG_MODIFY_PREVIEW).performClick()
+        waitFor(TAG_MODIFY_QUOTE)
+        compose.onNodeWithTag(TAG_SENT_REASON).performTextReplacement("Lo pidió el cliente")
+        compose.onNodeWithTag(TAG_MODIFY_CONFIRM).performClick()
+        waitUntil("la modificación en Go") {
+            val current =
+                main.call("GET", "restaurant/accounts/$accountId").obj.getValue("lines").jsonArray
+            current.any { line ->
+                val request = line.jsonObject.getValue("request").jsonObject
+                request.text("product_id") == ids.getValue("burger") &&
+                    request.getValue("customization").jsonObject.text("notes") == "sin cebolla"
+            }
+        }
+    }
+
+    private fun lineState(accountId: String, versionId: String): String? {
+        val lines =
+            main.call("GET", "restaurant/accounts/$accountId").obj.getValue("lines").jsonArray
+        return lines
+            .map { it.jsonObject }
+            .firstOrNull { it.text("version_id") == versionId }
+            ?.text("state")
     }
 
     @Test
@@ -360,10 +430,7 @@ class WaiterModeOnGoTest {
         launch()
         enterAna()
         // La captura de la mesa 4 sigue en el dispositivo (Room) con su renglón ya guardado en Go.
-        compose
-            .onNodeWithTag("$TAG_TABLE_PREFIX${ids.getValue("table4")}")
-            .performScrollTo()
-            .performClick()
+        openTable(ids.getValue("table4"))
         val capture = currentCapture(ids.getValue("table4"))
         waitFor("table-capture-${capture.id}")
         compose.onNodeWithTag("table-capture-${capture.id}").performScrollTo().performClick()
@@ -456,6 +523,7 @@ class WaiterModeOnGoTest {
     }
 
     private fun newAccountOn(tableId: String) {
+        showTables()
         waitFor("$TAG_TABLE_PREFIX$tableId")
         compose.onNodeWithTag("$TAG_TABLE_PREFIX$tableId").performScrollTo().performClick()
         waitFor(TAG_NEW_ACCOUNT)
@@ -500,6 +568,25 @@ class WaiterModeOnGoTest {
         Thread.sleep(SETTLE_MILLIS)
     }
 
+    /**
+     * En el teléfono, Mesas muestra la lista o la mesa elegida (a un toque): vuelve a la lista si
+     * está abierta la mesa.
+     */
+    private fun showTables() {
+        waitFor(TAG_TABLES_SEARCH)
+        val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
+        val panel = compose.onAllNodes(hasTestTag(TAG_ACCOUNT_PANE)).fetchSemanticsNodes()
+        if (single.isNotEmpty() && panel.isNotEmpty()) {
+            pressBack()
+        }
+    }
+
+    private fun openTable(tableId: String) {
+        showTables()
+        waitFor("$TAG_TABLE_PREFIX$tableId")
+        compose.onNodeWithTag("$TAG_TABLE_PREFIX$tableId").performScrollTo().performClick()
+    }
+
     /** En el teléfono, la cuenta está a un toque; en la tableta, siempre a la vista. */
     private fun showOrder() {
         val single = compose.onAllNodes(hasTestTag(TAG_PANES_SINGLE)).fetchSemanticsNodes()
@@ -529,6 +616,7 @@ class WaiterModeOnGoTest {
     }
 
     private fun openPending() {
+        showTables()
         waitFor(TAG_OPEN_PENDING)
         compose.onNodeWithTag(TAG_OPEN_PENDING).performClick()
         waitFor(TAG_PENDING)

@@ -37,8 +37,8 @@
 # captura sin conexión: «Por enviar» · w4 (con red) WorkManager envía sin entrar y la primera respuesta se pierde: el
 # reintento no duplica · w5 precio cambiado y agotado con la confirmación del mesero · w6 mesa cobrada mientras tanto ·
 # w7a borrador guardado en Go, w7b (SIN red) se agrega y se envía sin conexión, w7c (con red) el pedido sustituye el
-# borrador (A1-D6). La red la corta y la devuelve este guion entre pasos (modo avión desde la Mac en Android 11+;
-# `adb root` + `svc wifi/data` en Android 8–10).
+# borrador (A1-D6) · w8 cancelar y modificar unidades enviadas. La red la corta y la devuelve este guion entre pasos
+# (modo avión desde la Mac en Android 11+; `adb root` + `svc wifi/data` en Android 8–10).
 #
 # Seguridad: se niega a correr con los puertos del servicio real (8181, 8443), con un host que no sea la propia Mac
 # o si `GET version` de alguna de las dos escuchas no responde `test_mode: true`. Las pruebas usan el tipo NSD
@@ -68,7 +68,7 @@ fail() {
 
 case "$SUITE" in
     access) TEST_CLASS="AccessOnGoTest"; STEPS="${STEPS:-1 2 3 4 5 7}" ;;
-    waiter) TEST_CLASS="WaiterModeOnGoTest"; STEPS="${STEPS:-w1 w2 w3 w4 w5 w6 w7a w7b w7c}" ;;
+    waiter) TEST_CLASS="WaiterModeOnGoTest"; STEPS="${STEPS:-w1 w2 w3 w4 w5 w6 w7a w7b w7c w8}" ;;
     *) fail "suite desconocida: $SUITE (access o waiter)" ;;
 esac
 
@@ -270,6 +270,7 @@ for step in $STEPS; do
             w7a) run_step w7a_borradorGuardadoEnGo ;;
             w7b) device_network off; run_step w7b_sinConexionSeAgregaYSeEnvia; device_network on ;;
             w7c) run_step w7c_elPedidoSustituyeElBorradorSinDuplicar ;;
+            w8) run_step w8_cancelarYModificarLoEnviado ;;
             *) fail "paso desconocido de la suite waiter: $step" ;;
         esac
         continue

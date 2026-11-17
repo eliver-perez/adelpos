@@ -5,10 +5,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import local.adel.pos.android.core.domain.catalog.Customization
 import local.adel.pos.android.core.domain.catalog.LineSelection
@@ -42,6 +44,7 @@ import local.adel.pos.android.core.ui.waiter.TAG_LONG_OPEN
 import local.adel.pos.android.core.ui.waiter.TAG_ORDER_STATE_PREFIX
 import local.adel.pos.android.feature.waiter.pending.PendingOrdersScreen
 import local.adel.pos.android.feature.waiter.pending.ReviewScreen
+import local.adel.pos.android.feature.waiter.pending.TAG_PENDING
 import local.adel.pos.android.feature.waiter.pending.TAG_PENDING_CREDENTIAL_PREFIX
 import local.adel.pos.android.feature.waiter.pending.TAG_PENDING_OTHERS
 import local.adel.pos.android.feature.waiter.pending.TAG_RETRY_NOW
@@ -128,6 +131,8 @@ class WaiterScreensTest {
         compose
             .onNodeWithTag("${TAG_PENDING_CREDENTIAL_PREFIX}op-1", useUnmergedTree = true)
             .assertExists()
+        // Al final de la lista (perezosa): se desplaza hasta el aviso de los demás meseros.
+        compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_PENDING_OTHERS))
         compose.onNodeWithTag(TAG_PENDING_OTHERS).assertExists()
         compose.onNodeWithTag(TAG_RETRY_NOW).assertIsEnabled().performClick()
         assertEquals(1, retried)
