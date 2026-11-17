@@ -77,10 +77,11 @@ import org.junit.runner.RunWith
  * del anfitrión corta la red en Android 8, reinicia el Go temporal con otra identidad en la misma
  * dirección o corre con otra versión de cliente. Sin los argumentos se omite.
  *
- * Argumentos: `local` (`http://10.0.2.2:<ISO_GO_PORT>`), `address` (`10.0.2.2:<ISO_NET_PORT>`),
- * `pin` (huella SPKI del certificado del Go temporal), `mainDevice` y `mainToken` (la terminal
- * principal del asistente), `hostNetworkCut` (`true` si el anfitrión cortó la red) y
- * `clientVersion` (lo lee [AdelTestRunner]).
+ * Argumentos (los arma `scripts/android-e2e.sh`): `local` (`http://10.0.2.2:<puerto local>`),
+ * `address` (`10.0.2.2:<puerto de red>`), `pin` (huella SPKI del certificado del Go temporal),
+ * `serverId` (opcional), `mainDevice` y `mainToken` (la terminal principal del asistente),
+ * `hostNetworkCut` (`true` si el anfitrión cortó la red) y `clientVersion` (lo lee
+ * [AdelTestRunner]).
  */
 @RunWith(AndroidJUnit4::class)
 class AccessOnGoTest {
@@ -179,6 +180,11 @@ class AccessOnGoTest {
         val stored = runBlocking { container.database.access().pairedServer() }
         assertNotNull(stored)
         assertEquals(argument("pin"), stored!!.fingerprintHex)
+        // El servidor emparejado es el que se indicó (si se indicó su server_id).
+        val serverId = arguments.getString("serverId")
+        if (!serverId.isNullOrBlank()) {
+            assertEquals(serverId, stored.serverId)
+        }
         assertFalse(
             String(stored.sealedDeviceToken, Charsets.ISO_8859_1).all { it.isLetterOrDigit() },
         )
