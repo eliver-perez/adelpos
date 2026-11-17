@@ -243,6 +243,7 @@ class OrderQueueRepository(
             syncMessage = null,
             tableAccounts = emptyList(),
             pendingOperationId = null,
+            inFlightCount = 0,
             createdAtMillis = clock(),
         )
     }

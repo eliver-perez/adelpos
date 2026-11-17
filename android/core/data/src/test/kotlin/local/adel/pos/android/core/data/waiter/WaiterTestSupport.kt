@@ -57,6 +57,7 @@ object WaiterTestSupport {
             syncMessage = null,
             tableAccounts = emptyList(),
             pendingOperationId = null,
+            inFlightCount = 0,
             createdAtMillis = 1_000L,
         )
 

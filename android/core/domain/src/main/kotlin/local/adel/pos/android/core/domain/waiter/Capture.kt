@@ -33,6 +33,12 @@ enum class DraftSync {
 
     /** Go rechazó el guardado (el mensaje de Go está en [Capture.syncMessage]). */
     REJECTED,
+
+    /**
+     * La cuenta ya no está abierta (se cobró, se canceló o se combinó; `account_not_open`): lo del
+     * mesero puede ir a una cuenta nueva de la mesa.
+     */
+    ACCOUNT_CLOSED,
 }
 
 /**
@@ -41,14 +47,18 @@ enum class DraftSync {
  * mesero no la ve.
  *
  * El borrador visible es [base] (lo último que Go aceptó o mostró) con las [operations] locales
- * encima. Sin cuenta ([accountId] null) es una «cuenta pendiente»: nace en Go con el primer
- * producto (`openAccount`, creación diferida) o, sin conexión, al enviarse el pedido.
+ * encima; con [baseRevision] 0 todavía no se leyó el borrador de Go (se lee antes del primer
+ * guardado y los toques se aplican encima). Sin cuenta ([accountId] null) es una «cuenta
+ * pendiente»: nace en Go con el primer producto (`openAccount`, creación diferida) o, sin conexión,
+ * al enviarse el pedido.
  *
  * @param ownItemIds renglones creados en este dispositivo: los que el pedido sin conexión manda y,
  *   si ya estaban guardados en Go, sustituye (A1-D6).
  * @param seenPrices precio por unidad que vio el mesero por renglón: el de la cotización de Go si
  *   hubo (en línea) o el de referencia del catálogo; viaja como `seen_unit_price`.
- * @param pendingOperationId clave de la operación de guardado incierta, que se repite igual.
+ * @param pendingOperationId clave del guardado en Go en curso o sin respuesta: se repite **igual**
+ *   (misma clave y mismo contenido: [base] con las primeras [inFlightCount] operaciones) antes de
+ *   mandar nada más, también después de reiniciar el proceso.
  */
 data class Capture(
     val id: String,
@@ -67,6 +77,7 @@ data class Capture(
     val syncMessage: String?,
     val tableAccounts: List<TableAccountRef>,
     val pendingOperationId: String?,
+    val inFlightCount: Int,
     val createdAtMillis: Long,
 ) {
     /** El borrador como se ve: lo de Go con los toques locales aplicados. */
@@ -83,6 +94,10 @@ data class Capture(
      */
     val inProgress: Boolean
         get() = operations.isNotEmpty() || base.any { it.id in ownItemIds }
+
+    /** Lo que se mandó (o se va a repetir) en el guardado en curso. */
+    val inFlightItems: List<DraftLine>
+        get() = DraftOperations.apply(base, operations.take(inFlightCount))
 
     /** Renglón del borrador que se capturó en este dispositivo. */
     fun isOwn(itemId: String): Boolean = itemId in ownItemIds
