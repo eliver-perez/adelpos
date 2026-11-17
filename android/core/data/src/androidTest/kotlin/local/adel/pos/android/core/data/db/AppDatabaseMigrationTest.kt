@@ -98,6 +98,46 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun de3a4ConservaLoAnteriorYCreaLasTablasDelModoMesero() {
+        helper.createDatabase(testDatabase, 3).use { database ->
+            database.execSQL(
+                "INSERT INTO known_waiters (user_id, server_id, name, initial, color, " +
+                    "pin_version, sealed_verifier, sealed_offline_credential, " +
+                    "last_online_entry_millis, offline_failures, offline_closed) " +
+                    "VALUES ('ana', 's1', 'Ana', 'A', NULL, 1, X'01', X'02', 1, 0, 0)",
+            )
+        }
+        helper.runMigrationsAndValidate(testDatabase, 4, true, AppDatabase.MIGRATION_3_4).use {
+            database ->
+            database.query("SELECT sealed_offline_credential FROM known_waiters").use { cursor ->
+                cursor.moveToFirst()
+                assertArrayEquals(byteArrayOf(2), cursor.getBlob(0))
+            }
+            for (table in
+                listOf("captures", "pending_orders", "restaurant_snapshot", "waiter_permissions")) {
+                database.query("SELECT count(*) FROM $table").use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals(table, 0, cursor.getInt(0))
+                }
+            }
+            // La cola guarda su pedido con la clave de operación como llave.
+            database.execSQL(
+                "INSERT INTO pending_orders (operation_id, waiter_user_id, waiter_name, state, " +
+                    "destination, lines, replaces, catalog_version, catalog_epoch, captured_at, " +
+                    "confirmation, review, attempts, last_error, credential_rejected, " +
+                    "online_confirm, received_account_id, received_at, updated_at) VALUES " +
+                    "('op-1', 'ana', 'Ana', 'queued', '{}', '[]', '[]', 41, NULL, 1, NULL, NULL, " +
+                    "0, NULL, 0, NULL, NULL, NULL, 1)",
+            )
+            database.query("SELECT state FROM pending_orders WHERE operation_id = 'op-1'").use {
+                cursor ->
+                cursor.moveToFirst()
+                assertEquals("queued", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
     fun todasLasMigracionesLlevanALaVersionActual() = runBlocking {
         helper.createDatabase(testDatabase, 1).close()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -124,7 +164,7 @@ class AppDatabaseMigrationTest {
                 ),
             )
             assertArrayEquals(byteArrayOf(1, 2, 3), access.pairedServer()?.sealedDeviceToken)
-            assertEquals(3, database.openHelper.readableDatabase.version)
+            assertEquals(4, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }

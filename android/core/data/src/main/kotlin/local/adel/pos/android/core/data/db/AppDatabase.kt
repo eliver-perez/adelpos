@@ -6,6 +6,12 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import local.adel.pos.android.core.data.waiter.db.CaptureEntity
+import local.adel.pos.android.core.data.waiter.db.PendingOrderEntity
+import local.adel.pos.android.core.data.waiter.db.RestaurantSnapshotEntity
+import local.adel.pos.android.core.data.waiter.db.WAITER_TABLES_V4
+import local.adel.pos.android.core.data.waiter.db.WaiterDao
+import local.adel.pos.android.core.data.waiter.db.WaiterPermissionsEntity
 
 /**
  * Base local del dispositivo (Room). El esquema de cada versión se exporta a `core/data/schemas/` y
@@ -15,6 +21,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  *   credencial de envío cifrados con el Keystore) y bitácora del dispositivo.
  * - Versión 3 (revisión R3, M1 y M2): los intentos sin conexión de cada mesero dejan de depender
  *   del reloj (`offline_failures` acumulados y `offline_closed`).
+ * - Versión 4 (Fase E): modo Mesero: capturas en curso por mesero (`captures`), la cola de pedidos
+ *   (`pending_orders`), lo último leído de Go para trabajar sin conexión (`restaurant_snapshot`) y
+ *   los permisos de cada mesero (`waiter_permissions`).
  *
  * Reglas para las fases siguientes: cada cambio sube [version][Database.version] en uno, agrega su
  * `Migration` a [MIGRATIONS] y una prueba con `MigrationTestHelper` (`AppDatabaseMigrationTest`).
@@ -28,14 +37,21 @@ import androidx.sqlite.db.SupportSQLiteDatabase
             PairedServerEntity::class,
             KnownWaiterEntity::class,
             DeviceLogEntry::class,
+            CaptureEntity::class,
+            PendingOrderEntity::class,
+            RestaurantSnapshotEntity::class,
+            WaiterPermissionsEntity::class,
         ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun devicePreferences(): DevicePreferenceDao
 
     abstract fun access(): AccessDao
+
+    /** Capturas por mesero, cola de pedidos y lo último leído de Go (Fase E). */
+    abstract fun waiter(): WaiterDao
 
     companion object {
         const val FILE_NAME = "adel-pos.db"
@@ -121,8 +137,22 @@ abstract class AppDatabase : RoomDatabase() {
                 }
             }
 
+        /**
+         * 3 → 4 (Fase E): tablas nuevas del modo Mesero (capturas, cola de pedidos, lo último leído
+         * de Go y los permisos de cada mesero); las demás no cambian. El SQL es el que genera Room
+         * para la versión 4 (`schemas/…/4.json`).
+         */
+        val MIGRATION_3_4: Migration =
+            object : Migration(3, 4) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    for (statement in WAITER_TABLES_V4) {
+                        db.execSQL(statement)
+                    }
+                }
+            }
+
         /** Migraciones de todas las versiones, en orden. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         fun open(context: Context): AppDatabase =
             Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, FILE_NAME)
