@@ -34,7 +34,20 @@ import (
 const (
 	ClientVersionHeader = "X-Client-Version"
 	ClientKindHeader    = "X-Client-Kind"
+	// OfflineCredentialHeader es la credencial de envío del mesero (etapa A1, A1-D1): solo vale en
+	// POST /api/v1/restaurant/offline-orders; en cualquier otra ruta, también las técnicas, se rechaza (revisión R3,
+	// B1). administration la valida en esa ruta.
+	OfflineCredentialHeader = "X-Offline-Credential"
+	offlineOrdersPath       = "/api/v1/restaurant/offline-orders"
 )
+
+// offlineCredentialMisplaced dice si la petición lleva la credencial de envío fuera de su única ruta.
+func offlineCredentialMisplaced(request *http.Request) bool {
+	if request.Header.Get(OfflineCredentialHeader) == "" {
+		return false
+	}
+	return request.Method != http.MethodPost || request.URL.Path != offlineOrdersPath
+}
 
 // ClientKinds son los tipos de cliente que conoce la API v1.
 var ClientKinds = []string{"desktop", "android"}
