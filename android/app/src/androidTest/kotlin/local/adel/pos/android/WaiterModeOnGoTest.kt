@@ -598,7 +598,14 @@ class WaiterModeOnGoTest {
         showOrder()
         waitFor("${TAG_SYNC_PREFIX}saved")
         val capture = currentCapture(ids.getValue("table9"))
-        saveIds(ids + ("account9" to capture.accountId!!))
+        // El mesero sale de la captura y, sin que él lo sepa, la principal combina la cuenta en
+        // otra de la mesa 10 (su borrador se mueve con sus identificadores). Se hace aquí y no en
+        // w13c: al arrancar el proceso, el trabajador envía la cola antes de que la prueba empiece.
+        backToTables()
+        val target = openFromMain(ids.getValue("table10"), ids.getValue("tacos"))
+        confirmFromMain(target)
+        mergeFromMain(capture.accountId!!, target)
+        saveIds(ids + ("account9" to capture.accountId!!) + ("target9" to target))
     }
 
     @Test
@@ -621,10 +628,7 @@ class WaiterModeOnGoTest {
     @Test
     fun w13c_cuentaCombinadaSeEnviaALaCuentaEnQueSeCombino() {
         val ids = loadIds()
-        // Antes de que el pedido salga, la principal combina la cuenta en otra de la mesa 10.
-        val target = openFromMain(ids.getValue("table10"), ids.getValue("tacos"))
-        confirmFromMain(target)
-        mergeFromMain(ids.getValue("account9"), target)
+        val target = ids.getValue("target9")
         launch()
         enterAna()
         val review =
@@ -786,6 +790,16 @@ class WaiterModeOnGoTest {
      * En el teléfono, Mesas muestra la lista o la mesa elegida (a un toque): vuelve a la lista si
      * está abierta la mesa.
      */
+    /** Sale de la captura con Atrás hasta Mesas (la captura con algo guardado se conserva). */
+    private fun backToTables() {
+        repeat(3) {
+            if (!present(TAG_TABLES_SEARCH) && !present(TAG_ACCOUNT_PANE)) {
+                pressBack()
+            }
+        }
+        waitForTables()
+    }
+
     private fun showTables() {
         waitForTables()
         // Un panel con la mesa abierta tiene «Volver a Mesas».
