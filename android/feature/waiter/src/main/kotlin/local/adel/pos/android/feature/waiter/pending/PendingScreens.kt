@@ -33,9 +33,13 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import local.adel.pos.android.core.domain.waiter.Capture
+import local.adel.pos.android.core.domain.waiter.ChangeKind
+import local.adel.pos.android.core.domain.waiter.DiscardResult
+import local.adel.pos.android.core.domain.waiter.DraftSync
 import local.adel.pos.android.core.domain.waiter.OfflineOrderPlan
 import local.adel.pos.android.core.domain.waiter.OrderReviewRules
 import local.adel.pos.android.core.domain.waiter.OrderState
+import local.adel.pos.android.core.domain.waiter.OthersPending
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.domain.waiter.ReviewReason
 import local.adel.pos.android.core.ui.components.LocalUserActivity
@@ -77,7 +81,7 @@ fun PendingOrdersRoute(
 fun PendingOrdersScreen(
     orders: List<PendingOrder>,
     captures: List<Capture>,
-    others: Int,
+    others: List<OthersPending>,
     onRetryNow: () -> Unit,
     onOpenCapture: (String) -> Unit,
     onOpenReview: (String) -> Unit,
@@ -95,7 +99,7 @@ fun PendingOrdersScreen(
             PrimaryButton(
                 text = stringResource(R.string.pending_retry_now),
                 onClick = onRetryNow,
-                enabled = orders.any { it.state == OrderState.QUEUED },
+                enabled = orders.any { it.state == OrderState.QUEUED } || others.isNotEmpty(),
                 modifier =
                     Modifier.fillMaxWidth()
                         .padding(top = AdelDimens.ScreenPadding)
@@ -135,15 +139,15 @@ fun PendingOrdersScreen(
                 CaptureRow(capture, onOpenCapture)
             }
         }
-        if (others > 0) {
+        if (others.isNotEmpty()) {
             item {
                 Text(
-                    stringResource(R.string.pending_others, others),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    stringResource(R.string.pending_others_title),
+                    style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.testTag(TAG_PENDING_OTHERS),
                 )
             }
+            items(others, key = { "otros-${it.waiterName}" }) { other -> OthersRow(other) }
         }
     }
 }
@@ -206,23 +210,71 @@ private fun OrderRow(order: PendingOrder, onOpenReview: (String) -> Unit) {
     }
 }
 
+/**
+ * Lo de otro mesero en este dispositivo: cuántos pedidos tiene sin enviar y por qué no salen (su
+ * clave de envío ya no vale o esperan su revisión; revisión R6, B3), nunca cuáles.
+ */
+@Composable
+private fun OthersRow(other: OthersPending) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth().testTag("$TAG_PENDING_OTHER_PREFIX${other.waiterName}"),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                pluralStringResource(
+                    R.plurals.pending_others_count,
+                    other.unsent,
+                    other.waiterName,
+                    other.unsent,
+                ),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            if (other.waitingForPin > 0) {
+                Text(
+                    stringResource(R.string.pending_others_pin),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (other.needingReview > 0) {
+                Text(
+                    stringResource(R.string.pending_others_review),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun CaptureRow(capture: Capture, onOpenCapture: (String) -> Unit) {
     val count = OfflineOrderPlan.of(capture).items.sumOf { it.line.quantity }
+    // Un descarte pendiente ya no se captura: solo se dice que falta quitarlo de la cuenta (A2).
+    val discarding = capture.sync == DraftSync.DISCARDING
     Surface(
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier =
             Modifier.fillMaxWidth()
                 .heightIn(min = AdelDimens.PrimaryActionHeight)
-                .clickable { onOpenCapture(capture.id) }
+                .clickable(enabled = !discarding) { onOpenCapture(capture.id) }
                 .testTag("$TAG_PENDING_CAPTURE_PREFIX${capture.id}"),
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(capture.tableName, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    pluralStringResource(R.plurals.table_panel_products, count, count),
+                    if (discarding) {
+                        stringResource(R.string.pending_discarding)
+                    } else {
+                        pluralStringResource(R.plurals.table_panel_products, count, count)
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -241,6 +293,22 @@ fun ReviewRoute(
 ) {
     val order by viewModel.order.collectAsState()
     var confirmingDiscard by remember { mutableStateOf(false) }
+    var discardPending by remember { mutableStateOf(false) }
+    if (discardPending) {
+        // Revisión R6, A2: lo guardado en la cuenta se quita en cuanto haya conexión.
+        AlertDialog(
+            onDismissRequest = onDone,
+            title = { Text(stringResource(R.string.discard_pending_title)) },
+            text = { Text(stringResource(R.string.discard_pending_text)) },
+            confirmButton = {
+                TextButton(onClick = onDone, modifier = Modifier.testTag(TAG_REVIEW_DISCARD_OK)) {
+                    Text(stringResource(R.string.discard_pending_ok))
+                }
+            },
+            modifier = Modifier.reportsUserActivity(LocalUserActivity.current),
+        )
+        return
+    }
     val current = order
     if (current == null || current.state != OrderState.NEEDS_REVIEW) {
         Column(modifier = Modifier.fillMaxSize().padding(AdelDimens.ScreenPadding)) {
@@ -262,6 +330,8 @@ fun ReviewRoute(
         onResend = { viewModel.resend(onDone) },
         onRemoveLine = viewModel::removeLine,
         onNewAccount = { viewModel.moveToNewAccount(onDone) },
+        mergedTarget = viewModel.mergedTarget,
+        onSendToAccount = { accountId -> viewModel.sendToAccount(accountId, onDone) },
         onBackToCapture = { viewModel.backToCapture(onOpenCapture) },
         onDiscard = { confirmingDiscard = true },
     )
@@ -274,7 +344,12 @@ fun ReviewRoute(
                 TextButton(
                     onClick = {
                         confirmingDiscard = false
-                        viewModel.discard(onDone)
+                        viewModel.discard { result ->
+                            when (result) {
+                                DiscardResult.DONE -> onDone()
+                                DiscardResult.PENDING -> discardPending = true
+                            }
+                        }
                     },
                     modifier = Modifier.testTag(TAG_REVIEW_DISCARD_CONFIRM),
                 ) {
@@ -294,8 +369,11 @@ fun ReviewRoute(
 /**
  * La lista clara de §6.4 con los mensajes de Go («Hamburguesa: $120.00 → $130.00», «Malteada de
  * fresa: agotado. Quítalo del pedido.», «La cuenta «Mesa 4» ya se cobró…»): quitar lo que no se
- * puede enviar, abrir una cuenta nueva si la cuenta ya no está abierta, corregir en la captura o
- * descartar el pedido; «Aceptar los cambios y enviar» solo con cambios que el mesero puede aceptar.
+ * puede enviar, abrir una cuenta nueva si la cuenta ya no está abierta (o mandarlo a la cuenta en
+ * que se combinó), corregir en la captura o descartar el pedido; «Aceptar los cambios y enviar»
+ * solo con cambios que el mesero puede aceptar. Lo que Go dice que ya está en cocina se marca «Ya
+ * se envió» y el botón principal nunca invita a enviarlo otra vez: «Enviar solo lo demás» o, si
+ * todo ya se había enviado, «Confirmar sin volver a enviar» (revisión R6, A1).
  */
 @Composable
 fun ReviewScreen(
@@ -308,9 +386,12 @@ fun ReviewScreen(
     onBackToCapture: () -> Unit,
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
+    mergedTarget: String? = null,
+    onSendToAccount: (String) -> Unit = {},
 ) {
     val review = requireNotNull(order.review)
     val removable = OrderReviewRules.removableItemIds(order)
+    val alreadySent = review.alreadySentItemIds.isNotEmpty()
     LazyColumn(
         modifier =
             modifier
@@ -361,7 +442,24 @@ fun ReviewScreen(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (change.kind == ChangeKind.DRAFT_ITEM_SENT) {
+                        Text(
+                            stringResource(R.string.review_already_sent),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("$TAG_REVIEW_ALREADY_SENT_PREFIX${change.itemId}"),
+                        )
+                    }
                     Text(change.message, style = MaterialTheme.typography.bodyLarge)
+                    val target = change.accountId
+                    if (change.kind == ChangeKind.ITEMS_IN_ACCOUNT && target != null) {
+                        SecondaryButton(
+                            text = stringResource(R.string.review_send_to_account),
+                            onClick = { onSendToAccount(target) },
+                            enabled = !working,
+                            modifier = Modifier.testTag("$TAG_REVIEW_SEND_TO_PREFIX$target"),
+                        )
+                    }
                     val itemId = change.itemId
                     if (itemId != null && itemId in removable) {
                         SecondaryButton(
@@ -389,7 +487,13 @@ fun ReviewScreen(
                 when {
                     review.canAccept ->
                         PrimaryButton(
-                            text = stringResource(R.string.review_accept),
+                            text =
+                                when {
+                                    OrderReviewRules.everythingAlreadySent(order) ->
+                                        stringResource(R.string.review_confirm_all_sent)
+                                    alreadySent -> stringResource(R.string.review_send_rest)
+                                    else -> stringResource(R.string.review_accept)
+                                },
                             onClick = onAccept,
                             enabled = !working,
                             modifier = Modifier.fillMaxWidth().testTag(TAG_REVIEW_ACCEPT),
@@ -402,6 +506,14 @@ fun ReviewScreen(
                             modifier = Modifier.fillMaxWidth().testTag(TAG_REVIEW_SEND),
                         )
                     else -> Unit
+                }
+                if (mergedTarget != null) {
+                    SecondaryButton(
+                        text = stringResource(R.string.review_send_to_merged),
+                        onClick = { onSendToAccount(mergedTarget) },
+                        enabled = !working,
+                        modifier = Modifier.fillMaxWidth().testTag(TAG_REVIEW_SEND_TO_MERGED),
+                    )
                 }
                 if (OrderReviewRules.offersNewAccount(review)) {
                     SecondaryButton(
@@ -445,6 +557,7 @@ private fun clock(millis: Long): String =
 const val TAG_PENDING = "pending"
 const val TAG_PENDING_EMPTY = "pending-empty"
 const val TAG_PENDING_OTHERS = "pending-others"
+const val TAG_PENDING_OTHER_PREFIX = "pending-other-"
 const val TAG_RETRY_NOW = "retry-now"
 const val TAG_PENDING_ORDER_PREFIX = "pending-order-"
 const val TAG_PENDING_CAPTURE_PREFIX = "pending-capture-"
@@ -461,3 +574,7 @@ const val TAG_REVIEW_BACK_TO_CAPTURE = "review-back-to-capture"
 const val TAG_REVIEW_DISCARD = "review-discard"
 const val TAG_REVIEW_DISCARD_CONFIRM = "review-discard-confirm"
 const val TAG_REVIEW_GONE = "review-gone"
+const val TAG_REVIEW_DISCARD_OK = "review-discard-ok"
+const val TAG_REVIEW_ALREADY_SENT_PREFIX = "review-already-sent-"
+const val TAG_REVIEW_SEND_TO_PREFIX = "review-send-to-"
+const val TAG_REVIEW_SEND_TO_MERGED = "review-send-to-merged"

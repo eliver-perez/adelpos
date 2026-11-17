@@ -42,6 +42,7 @@ data class Totals(val subtotal: Money, val discount: Money, val total: Money) {
  *
  * @param revision revisión vigente: toda escritura la lleva y Go responde `ACCOUNT_CONFLICT` si
  *   otra terminal la cambió.
+ * @param mergedIntoId la cuenta en que se combinó (solo si [state] es `merged`).
  */
 data class AccountSummary(
     val id: String,
@@ -58,6 +59,7 @@ data class AccountSummary(
     val assignedName: String?,
     val elapsedSeconds: Long?,
     val longOpen: Boolean,
+    val mergedIntoId: String? = null,
 ) {
     val isOpen: Boolean
         get() = state == STATE_OPEN

@@ -16,6 +16,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkRequest
 import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
+import androidx.work.await
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -113,9 +114,15 @@ class WorkManagerOrderScheduler(
             )
     }
 
-    /** «Borrar los datos de este dispositivo»: ningún envío pendiente queda programado. */
-    fun cancelAll() {
-        WorkManager.getInstance(context).cancelAllWork()
+    /**
+     * «Borrar los datos de este dispositivo»: cancela el envío y el periódico y **espera** a que
+     * WorkManager lo registre (revisión R6, M1). Quien borra espera además a que termine la vuelta
+     * en curso (`OrderSender.exclusive`) y, al final, vuelve a programar el periódico (B5).
+     */
+    suspend fun cancelAndWait() {
+        val workManager = WorkManager.getInstance(context)
+        workManager.cancelUniqueWork(SEND_WORK).await()
+        workManager.cancelUniqueWork(PERIODIC_WORK).await()
     }
 
     companion object {

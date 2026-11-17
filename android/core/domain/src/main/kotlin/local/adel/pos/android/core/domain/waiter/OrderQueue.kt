@@ -98,7 +98,14 @@ enum class ChangeKind(val wireName: String) {
     DRAFT_ITEM_SENT("draft_item_sent"),
 
     /**
-     * Un motivo que esta versión no conoce: se muestra el mensaje de Go y se trata como bloqueo.
+     * El pedido iba a la mesa, pero sus partidas ya están en una cuenta abierta de esa mesa
+     * ([OrderChange.accountId]; A1-D18): el pedido se manda a esa cuenta con la misma clave.
+     */
+    ITEMS_IN_ACCOUNT("items_in_account"),
+
+    /**
+     * Un motivo que esta versión no conoce: se muestra el mensaje de Go y vale lo que diga su
+     * `acceptable` (en la confirmación se devuelve con su `kind` original).
      */
     UNKNOWN("");
 
@@ -114,6 +121,8 @@ enum class ChangeKind(val wireName: String) {
  * `item_id`, `product_id` y `now` son los que Go compara).
  *
  * @param wireKind el `kind` original (también uno que esta versión no conoce).
+ * @param accountId solo en [ChangeKind.ITEMS_IN_ACCOUNT]: la cuenta de la mesa donde ya están las
+ *   partidas.
  */
 data class OrderChange(
     val kind: ChangeKind,
@@ -125,6 +134,7 @@ data class OrderChange(
     val now: String?,
     val message: String,
     val acceptable: Boolean,
+    val accountId: String? = null,
 )
 
 /** Por qué el pedido requiere la revisión del mesero. */
@@ -157,7 +167,53 @@ data class OrderReview(
     /** Con solo cambios aceptables, «Aceptar los cambios y enviar» basta. */
     val canAccept: Boolean
         get() = reason == ReviewReason.CHANGES && changes.isNotEmpty() && blocking.isEmpty()
+
+    /**
+     * Partidas que Go ya tiene en cocina (`draft_item_sent`): al confirmar, Go **no** las vuelve a
+     * enviar y manda solo lo demás (A1-D18).
+     */
+    val alreadySentItemIds: Set<String>
+        get() =
+            changes
+                .filter { it.kind == ChangeKind.DRAFT_ITEM_SENT }
+                .mapNotNull { it.itemId }
+                .toSet()
+
+    /** Cuentas de la mesa donde ya están las partidas del pedido (`items_in_account`). */
+    val accountsWithItems: List<String>
+        get() =
+            changes
+                .filter { it.kind == ChangeKind.ITEMS_IN_ACCOUNT }
+                .mapNotNull { it.accountId }
+                .distinct()
+
+    /** La cuenta del pedido se combinó con otra (`account_closed` con su estado `merged`). */
+    val accountMerged: Boolean
+        get() = changes.any { it.kind == ChangeKind.ACCOUNT_CLOSED && it.now == MERGED }
+
+    companion object {
+        /** Estado de Go de una cuenta combinada con otra. */
+        const val MERGED = "merged"
+    }
 }
+
+/**
+ * Guardado del borrador en Go que salió y no tuvo respuesta cuando el mesero tocó «Enviar a cocina»
+ * (revisión R6, C1; A1-D19): pudo haber entrado. Antes de mandar el pedido, quien tenga la sesión
+ * del mesero lo repite **igual** (misma clave y mismo contenido) para saber qué pasó y, si abrió la
+ * cuenta, mandar el pedido a esa cuenta. Sin sesión, Go reconoce los renglones por su
+ * identificador (A1-D18).
+ *
+ * @param accountId null: era la apertura de la cuenta en [tableId] (`openAccount`).
+ */
+data class UnresolvedSave(
+    val operationId: String,
+    val accountId: String?,
+    val tableId: String,
+    val seenAccountIds: List<String>,
+    val revision: Int,
+    val items: List<DraftLine>,
+)
 
 /**
  * Intento de confirmar en línea el borrador de Go (`confirmDraft`): su clave de operación, la
@@ -190,6 +246,9 @@ data class OrderConfirmation(val catalogVersion: Long, val changes: List<OrderCh
  *   respuesta, cambió el cálculo, otra terminal cambió la cuenta…), el pedido sigue como pedido sin
  *   conexión con [operationId] y Go revisa todo al recibirlo.
  * @param receivedAccountId cuenta en que entró (al recibirlo Go).
+ * @param unresolvedSave el guardado del borrador que quedó sin respuesta al enviarlo (C1).
+ * @param clockCorrected [capturedAtMillis] ya está en la hora de Go (se conocía la diferencia con
+ *   el reloj del dispositivo al capturar); si no, se corrige al enviarlo (revisión R6, B4).
  */
 data class PendingOrder(
     val operationId: String,
@@ -211,6 +270,24 @@ data class PendingOrder(
     val receivedAccountId: String?,
     val receivedAtMillis: Long?,
     val updatedAtMillis: Long,
+    val unresolvedSave: UnresolvedSave? = null,
+    val clockCorrected: Boolean = false,
+)
+
+/**
+ * Lo pendiente de otro mesero en este dispositivo, sin el detalle de sus pedidos (§7): cuántos
+ * tiene sin enviar y por qué no salen (revisión R6, B3).
+ *
+ * @param waitingForPin Go no reconoció su credencial de envío: PIN cambiado, usuario desactivado o
+ *   sin permiso para usar dispositivos de meseros.
+ * @param needingReview esperan a que ese mesero los revise (también los que Go rechazó por falta de
+ *   permiso).
+ */
+data class OthersPending(
+    val waiterName: String,
+    val unsent: Int,
+    val waitingForPin: Int,
+    val needingReview: Int,
 )
 
 /**

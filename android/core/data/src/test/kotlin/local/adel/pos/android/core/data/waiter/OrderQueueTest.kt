@@ -401,7 +401,7 @@ class OrderQueueTest {
                 ),
             )
         val order = queue.order("op-1").first()!!
-        database.waiter().saveOrder(WaiterStorage.toEntity(order.copy(state = OrderState.RECEIVED)))
+        database.waiter().updateOrder(WaiterStorage.toEntity(order.copy(state = OrderState.RECEIVED)))
         assertTrue(queue.workOf(ANA).blocksIdleLock)
         assertFalse(queue.workOf(ANA).blocksSwitch)
         delay(400)

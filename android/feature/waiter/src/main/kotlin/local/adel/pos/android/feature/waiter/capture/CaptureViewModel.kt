@@ -35,6 +35,7 @@ import local.adel.pos.android.core.domain.waiter.DraftLine
 import local.adel.pos.android.core.domain.waiter.DraftOperation
 import local.adel.pos.android.core.domain.waiter.DraftOperations
 import local.adel.pos.android.core.domain.waiter.DraftQuote
+import local.adel.pos.android.core.domain.waiter.DiscardResult
 import local.adel.pos.android.core.domain.waiter.SendRequest
 import local.adel.pos.android.core.domain.waiter.SentChangeResult
 import local.adel.pos.android.core.domain.waiter.SentLine
@@ -50,6 +51,15 @@ sealed interface CaptureNotice {
     data object TooManyLines : CaptureNotice
 
     data object NothingToSend : CaptureNotice
+
+    /** El guardado anterior todavía no tiene respuesta: el pedido no se armó (revisión R6, C1). */
+    data object StillSaving : CaptureNotice
+
+    /**
+     * Descartada, pero lo guardado en la cuenta se quita en cuanto haya conexión (revisión R6,
+     * A2): se avisa antes de volver a Mesas.
+     */
+    data object DiscardPending : CaptureNotice
 }
 
 /** El diálogo abierto sobre lo enviado (modificar o cancelar unidades). */
@@ -274,6 +284,7 @@ class CaptureViewModel(
                         is SendRequest.Queued -> CaptureNotice.Sent
                         SendRequest.NothingToSend -> CaptureNotice.NothingToSend
                         SendRequest.TooManyLines -> CaptureNotice.TooManyLines
+                        SendRequest.StillSaving -> CaptureNotice.StillSaving
                     }
             } finally {
                 sending = false
@@ -283,8 +294,11 @@ class CaptureViewModel(
 
     fun onDiscardCapture() {
         viewModelScope.launch {
-            dependencies.captures.discard(captureId)
-            notice = CaptureNotice.Sent
+            notice =
+                when (dependencies.captures.discard(captureId)) {
+                    DiscardResult.DONE -> CaptureNotice.Sent
+                    DiscardResult.PENDING -> CaptureNotice.DiscardPending
+                }
         }
     }
 

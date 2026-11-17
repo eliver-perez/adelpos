@@ -104,6 +104,7 @@ data class AccountDto(
     @SerialName("assigned_name") val assignedName: String? = null,
     @SerialName("elapsed_seconds") val elapsedSeconds: Long? = null,
     @SerialName("long_open") val longOpen: Boolean = false,
+    @SerialName("merged_into_id") val mergedIntoId: String? = null,
 )
 
 /**
@@ -180,6 +181,13 @@ data class SaveDraftBody(
     val items: List<DraftItemDto>,
 )
 
+/** `operation_id` y la revisión vigente (descartar una cuenta vacía, `discardAccount`). */
+@Serializable
+data class MutationBody(
+    @SerialName("operation_id") val operationId: String,
+    val revision: Int,
+)
+
 @Serializable
 data class ConfirmDraftBody(
     @SerialName("operation_id") val operationId: String,
@@ -242,6 +250,11 @@ data class OfflineChangeDto(
     val now: String? = null,
     val message: String = "",
     val acceptable: Boolean = false,
+    /**
+     * Solo en `items_in_account` (A1-D18). Sin valor no se escribe: el eco de la confirmación
+     * lleva exactamente lo que dio Go.
+     */
+    @SerialName("account_id") val accountId: String? = null,
 )
 
 @Serializable
@@ -268,6 +281,8 @@ data class OfflineOrderResultDto(
     @SerialName("order_id") val orderId: String = "",
     @SerialName("account_id") val accountId: String,
     @SerialName("removed_draft_item_ids") val removedDraftItemIds: List<String> = emptyList(),
+    /** Partidas que ya estaban en cocina y no se volvieron a enviar (A1-D18). */
+    @SerialName("already_sent_item_ids") val alreadySentItemIds: List<String> = emptyList(),
 )
 
 /** `details` de `ORDER_REQUIRES_CONFIRMATION`. */
@@ -278,8 +293,16 @@ data class OfflineRejectionDetailsDto(
     val changes: List<OfflineChangeDto> = emptyList(),
 )
 
-/** `details` de `OFFLINE_ORDER_ALREADY_ACCEPTED`. */
-@Serializable data class AlreadyAcceptedDetailsDto(val result: OfflineOrderResultDto)
+/**
+ * `details` de `OFFLINE_ORDER_ALREADY_ACCEPTED`: [origin] `offline_order` (la clave ya entró como
+ * pedido sin conexión) o `confirm_draft` (la clave es la de un «Enviar a cocina» en línea que ya se
+ * aplicó en esa cuenta; A1-D18).
+ */
+@Serializable
+data class AlreadyAcceptedDetailsDto(
+    val origin: String? = null,
+    val result: OfflineOrderResultDto? = null,
+)
 
 /** `details` de `TABLE_HAS_ACCOUNT` (`openAccount`). */
 @Serializable
@@ -292,4 +315,5 @@ data class TableHasAccountDetailsDto(val accounts: List<TableAccountDto> = empty
 data class AccountNotOpenDetailsDto(
     val reason: String = "",
     @SerialName("account_state") val accountState: String? = null,
+    @SerialName("merged_into_id") val mergedIntoId: String? = null,
 )
