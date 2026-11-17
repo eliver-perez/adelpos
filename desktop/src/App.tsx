@@ -550,7 +550,7 @@ function ApplicationContent({
       case 'catalog':
         return <CatalogPage can={can} />;
       case 'users':
-        return <UsersPage can={can} onChanged={session.refresh} />;
+        return <UsersPage can={can} onChanged={session.refresh} currentUserID={identity.user.id} />;
       case 'roles':
         return <RolesPage can={can} onChanged={session.refresh} />;
       case 'devices':

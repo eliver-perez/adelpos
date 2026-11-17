@@ -22,6 +22,8 @@ export interface User {
   short_name?: string | null;
   badge_color?: string | null;
   pin_locked_until?: string | null;
+  // A1-D16: el PIN quedó bloqueado por tres bloqueos seguidos y espera a que un administrador lo desbloquee.
+  pin_requires_unlock?: boolean;
 }
 
 export interface Identity {

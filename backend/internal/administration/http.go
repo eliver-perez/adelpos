@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"local/ad-el-pos/server/internal/httpapi"
 	"local/ad-el-pos/server/internal/lanlistener"
 )
 
@@ -106,6 +107,7 @@ func (service *Service) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		SourceAddress:     sourceAddress(address),
 		PairingSecret:     request.Header.Get("X-Pairing-Secret"),
 		OfflineCredential: request.Header.Get(OfflineCredentialHeader),
+		ClientKind:        request.Header.Get(httpapi.ClientKindHeader),
 	})
 	if err == nil {
 		result, err = service.completeDeferred(ctx, result)

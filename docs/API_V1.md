@@ -33,7 +33,10 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»).
    el teléfono) `X-Client-Version` es **obligatoria**: sin ella la respuesta también es 426 (fase C; todo cliente que
    llega por la red es de la 9G o posterior). Por la escucha local de la computadora principal una petición sin
    `X-Client-Version` se acepta como «cliente sin identificar» (herramientas, pruebas automáticas y aplicaciones
-   anteriores a la 9G, que solo existen en esa computadora). Una versión o un tipo que el servidor no reconoce es 400
+   anteriores a la 9G, que solo existen en esa computadora). Con la credencial de un dispositivo, `X-Client-Kind` debe
+   coincidir con el tipo con que se emparejó (`android` en un teléfono o tableta de meseros, `desktop` en una terminal
+   de escritorio o de cocina; etapa A1, revisión R3): si no, **400 `CLIENT_KIND_MISMATCH`**, para que nadie tome la
+   mínima de otro tipo de cliente. Una versión o un tipo que el servidor no reconoce es 400
    (`CLIENT_VERSION_INVALID`, `CLIENT_KIND_INVALID`).
 3. **Servidor más viejo que el cliente**: el cliente lee `GET /api/v1/version` (siempre responde, sin sesión ni
    cabeceras) y compara `server_version` con la versión mínima de servidor que necesita (en el escritorio,
@@ -169,7 +172,9 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
 
 1. **`listPinUsers`** (`GET /auth/pin-users`): `{"device": {"id", "name", "idle_lock_seconds"}, "users": [...]}`.
    Cada usuario: `id`, `name` (nombre corto o, si no tiene, el visible), `initial`, `color` (hexadecimal de la paleta
-   que elige el administrador, o `null`), `pin_version` y `locked_until` (`null` si no está bloqueado). Solo usuarios
+   que elige el administrador, o `null`), `pin_version`, `locked_until` (hasta cuándo dura un bloqueo por tiempo, o
+   `null`) y `requires_unlock` (siempre presente: `true` si el PIN espera a que un administrador lo desbloquee; entonces
+   `locked_until` es `null`). Solo usuarios
    activos, no de soporte, con PIN y con el permiso **`waiter_devices.use`** («Entrar con PIN en teléfonos y tabletas
    de meseros»; lo tienen el administrador y el rol Mesero). `idle_lock_seconds` es el bloqueo por inactividad del
    dispositivo (120 por omisión; se cambia en Administración › Terminales y también llega en `terminal` de
@@ -178,13 +183,30 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
 "offline_credential"}`:
    - PIN incorrecto (o un usuario que no puede entrar): **401 `PIN_INVALID`**. Un PIN sin forma de PIN: 400.
    - **5 fallos en 15 minutos**, desde cualquier dispositivo, bloquean el PIN de ese usuario **5 minutos**: **429
-     `PIN_LOCKED`** con `details.locked_until` (también si se intenta durante el bloqueo, aunque el PIN sea correcto).
-     Un administrador lo desbloquea en Personal › Usuarios. Queda en el Registro de movimientos.
+     `PIN_LOCKED`** con `details.locked_until` (RFC 3339) y `details.requires_unlock: false` (también si se intenta
+     durante el bloqueo, aunque el PIN sea correcto). Un administrador lo desbloquea en Personal › Usuarios. Queda en
+     el Registro de movimientos.
+   - **Bloqueo largo** (A1-D16, decisión del propietario): el **tercer bloqueo seguido en 24 horas** (contadas desde el
+     primero de la serie) **sin una entrada correcta** deja el PIN bloqueado **hasta que un administrador lo
+     desbloquee**: **429 `PIN_LOCKED`** con `details.locked_until: null` y `details.requires_unlock: true`. Ni el tiempo
+     ni que el propio usuario cambie su PIN en «Mi PIN» lo quitan. Una entrada correcta borra la serie. Esquema
+     `PinLockedError` del contrato.
    - PIN correcto sin `waiter_devices.use`: **403 `PERMISSION_DENIED`**.
+   - Pocas entradas con PIN se verifican a la vez en el servidor (revisión R3): si no hay turno en unos segundos,
+     **503 `PIN_LOGIN_BUSY`**; reintentar.
    - La sesión es como la de `login` (12 h) y **reemplaza solo la sesión anterior de ese usuario en ese
      dispositivo**: el cambio rápido de mesero no cierra las de los demás meseros del mismo dispositivo.
    - `offline_credential` es la **credencial de envío** del mesero en ese dispositivo: se entrega **una sola vez**,
      se guarda cifrada (Android Keystore) y la nueva sustituye a la anterior de ese mesero en ese dispositivo.
+   - **Solo permisos de mesero** (A1-D17, decisión del propietario): la sesión abierta con PIN y la credencial de
+     envío tienen los permisos del usuario **que están en la lista cerrada de permisos de mesero**, aunque la persona
+     sea administrador o supervisor (lo administrativo sigue con contraseña en la computadora): `waiter_devices.use`,
+     `restaurant.tables.read`, `restaurant.areas.read`, `accounts.read`, `accounts.open`, `orders.capture`,
+     `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`, `catalog.prices.read` y `events.read` (nada de
+     Para llevar todavía). `getIdentity` y `getRecoveryState` informan ya los permisos acotados; cualquier otra ruta
+     responde 403 como sin el permiso. La lista vive en un solo lugar del servidor
+     (`administration/waiter_scope.go`) y solo crece con las funciones de la aplicación (en la A2: Para llevar e
+     impresión de la precuenta). Cambiar la contraseña desde esa sesión no la amplía.
 3. **Verificador local y `pin_version`**: el dispositivo guarda el verificador del PIN de cada mesero con su
    `pin_version`. Al reconectarse (y al abrir la aplicación) pide `listPinUsers` y borra el verificador de quien ya no
    aparece (desactivado, sin PIN o sin permiso) o tiene otra `pin_version`. Cambiar o quitar el PIN (o que el propio
@@ -199,9 +221,10 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
    - Credencial que ya no vale (PIN cambiado o quitado, usuario desactivado o sin `waiter_devices.use`, credencial
      reemplazada por una entrada posterior): **401 `OFFLINE_CREDENTIAL_INVALID`**. El dispositivo **conserva el
      pedido** en «Por enviar» y pide al mesero que entre con su PIN con conexión (eso emite una credencial nueva).
-   - **Solo sirve en esa ruta**: en cualquier otra (o con otro método) la petición se rechaza con **401
-     `OFFLINE_CREDENTIAL_NOT_ALLOWED`**, aunque traiga sesión. «Requiere tu revisión» siempre necesita al mesero con su
-     PIN y conexión.
+   - **Solo sirve en esa ruta**: en cualquier otra (o con otro método), **también las que no piden credencial**
+     (versión, salud, contrato, asistente, emparejamiento, `login`, `listPinUsers`, `pinLogin`) y el canal de eventos,
+     la petición se rechaza con **401 `OFFLINE_CREDENTIAL_NOT_ALLOWED`** antes de atenderla, aunque traiga sesión
+     (revisión R3). «Requiere tu revisión» siempre necesita al mesero con su PIN y conexión.
    - No es una sesión: no cuenta en «Sesiones activas por tipo de terminal» y no vence por tiempo.
 
 La administración del PIN (asignar, cambiar, quitar y desbloquear, nombre corto y color del distintivo, «Mi PIN» y el
@@ -462,27 +485,29 @@ los renglones del borrador que **ese dispositivo** había guardado y que el pedi
 
 ## Códigos de error más frecuentes
 
-| Código                                                   | Estado | Qué hacer                                                                                |
-| -------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------- |
-| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                                 |
-| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                          |
-| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                     |
-| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min).   |
-| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                                 |
-| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                          |
-| `OPERATION_VALIDATION`                                   | 400    | Datos inválidos; con `details.reason: account_not_open`, la cuenta ya no está abierta.   |
-| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                              |
-| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                        |
-| `UNIT_HAS_PAYMENT`, `UNIT_HAS_DISCOUNT`                  | 409    | Las unidades tienen pago o descuento: no se cancelan ni modifican desde el dispositivo.  |
-| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                             |
-| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                                |
-| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                   |
-| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                            |
-| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                           |
-| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez.          |
-| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                      |
-| `PIN_INVALID`                                            | 401    | PIN incorrecto: volver a escribirlo.                                                     |
-| `PIN_LOCKED`                                             | 429    | PIN bloqueado hasta `details.locked_until` (o hasta que un administrador lo desbloquee). |
-| `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                    |
-| `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                 |
-| `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                              |
+| Código                                                   | Estado | Qué hacer                                                                                                           |
+| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
+| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                                                            |
+| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                                                     |
+| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                                                |
+| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min).                              |
+| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                                                            |
+| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                                                     |
+| `OPERATION_VALIDATION`                                   | 400    | Datos inválidos; con `details.reason: account_not_open`, la cuenta ya no está abierta.                              |
+| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                                                         |
+| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                                                   |
+| `UNIT_HAS_PAYMENT`, `UNIT_HAS_DISCOUNT`                  | 409    | Las unidades tienen pago o descuento: no se cancelan ni modifican desde el dispositivo.                             |
+| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                                                        |
+| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                                                           |
+| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                                              |
+| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                                                       |
+| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                                                      |
+| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez.                                     |
+| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                                                 |
+| `PIN_INVALID`                                            | 401    | PIN incorrecto: volver a escribirlo.                                                                                |
+| `PIN_LOCKED`                                             | 429    | PIN bloqueado hasta `details.locked_until`, o hasta que un administrador lo desbloquee (`details.requires_unlock`). |
+| `PIN_LOGIN_BUSY`                                         | 503    | Muchas entradas con PIN a la vez: reintentar en unos segundos.                                                      |
+| `CLIENT_KIND_MISMATCH`                                   | 400    | `X-Client-Kind` no es el tipo con que se emparejó el dispositivo.                                                   |
+| `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                                               |
+| `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                                            |
+| `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                                                         |
