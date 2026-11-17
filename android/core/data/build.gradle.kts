@@ -24,6 +24,10 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         animationsDisabled = true
+        // El APK de pruebas de la biblioteca toma el nivel de compileSdk (37) si no se indica: en
+        // Android 17 eso exige el permiso de red local para NSD y la red local (A1-D7). Se prueba
+        // con el mismo nivel objetivo que la aplicación (36).
+        targetSdk = 36
     }
 
     lint {

@@ -65,7 +65,7 @@ class CatalogSyncTest {
                 access = access,
                 api = CatalogApi(),
                 store = store,
-                interruptions = { interruptions.add(it) },
+                interruptions = { interruption, _ -> interruptions.add(interruption) },
                 clock = { 1_000L },
             )
         repository = CatalogRepository(store, synchronizer, images = null, scope = scope)

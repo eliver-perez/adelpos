@@ -17,4 +17,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent { AdelPosApp() }
     }
+
+    // Cada toque o tecla reinicia el plazo del bloqueo por inactividad (§3.2).
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        (application as AdelPosApplication).container.idleLock.touch()
+    }
 }

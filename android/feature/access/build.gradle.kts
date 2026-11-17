@@ -1,5 +1,6 @@
-// Entrada al dispositivo: emparejamiento, búsqueda del servidor y entrada con PIN (fases B y C). En
-// la Fase A, solo la pantalla de muestra «Entrar».
+// Entrada al dispositivo (fases B y C): búsqueda del servidor y emparejamiento, entrada con PIN,
+// cambio de mesero, bloqueo por inactividad, emparejar de nuevo, versiones y dispositivo retirado.
+// Solo usa las interfaces de core:domain (DeviceAccess, PairingFlow): la app conecta core:data.
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
@@ -38,6 +39,13 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.savedstate)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

@@ -74,9 +74,13 @@ sealed interface AccessInterruption {
     data class UpdateRequired(override val code: String) : AccessInterruption
 }
 
-/** Punto único al que se avisan las interrupciones de acceso (lo conecta la Fase B/C). */
+/**
+ * Punto único al que se avisan las interrupciones de acceso (lo conecta la entrada de las fases B y
+ * C con `AccessRepository.report`). [userId] es el mesero dueño de la sesión con la que se hizo la
+ * petición o se abrió el canal (null si no se sabe): una sesión terminada solo saca a ese mesero.
+ */
 fun interface AccessInterruptions {
-    fun onInterrupted(interruption: AccessInterruption)
+    fun onInterrupted(interruption: AccessInterruption, userId: String?)
 }
 
 /** Lo que entrega el canal de tiempo real a sus suscriptores. */

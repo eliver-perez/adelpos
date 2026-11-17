@@ -3,9 +3,9 @@ package local.adel.pos.android.core.data.api
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
-import local.adel.pos.android.core.data.security.Hex
 import local.adel.pos.android.core.domain.error.AppError
 import local.adel.pos.android.core.domain.error.AppResult
+import local.adel.pos.android.core.domain.text.Hex
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
