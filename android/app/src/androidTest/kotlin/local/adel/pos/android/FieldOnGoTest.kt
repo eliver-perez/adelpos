@@ -77,7 +77,7 @@ import local.adel.pos.android.feature.access.pin.TAG_ENTRY_BACK
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY_OFFLINE
 import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
 import local.adel.pos.android.feature.waiter.capture.TAG_DRAFT_ROW_PREFIX
-import local.adel.pos.android.feature.waiter.capture.TAG_OPEN_ANOTHER
+import local.adel.pos.android.feature.waiter.capture.TAG_FOLLOW_MERGED
 import local.adel.pos.android.feature.waiter.capture.TAG_ORDER_PANEL
 import local.adel.pos.android.feature.waiter.capture.TAG_SEND_TO_KITCHEN
 import local.adel.pos.android.feature.waiter.capture.TAG_SENT_ROW_PREFIX
@@ -95,7 +95,6 @@ import local.adel.pos.android.feature.waiter.tables.TAG_TABLE_PREFIX
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -421,22 +420,28 @@ class FieldOnGoTest {
             "f6: borrador de la cuenta destino tras combinar: $targetDraft (renglón de Ana: $shakeItem)",
         )
 
-        // Lo capturado no se pierde: se manda a una cuenta nueva de la mesa.
-        tap(TAG_OPEN_ANOTHER)
+        // M3 (revisión R6, A1-D19): la captura ofrece seguir en la cuenta en que se combinó; lo
+        // capturado se envía ahí y no queda nada de Ana por enviar en la cuenta destino.
+        tap(TAG_FOLLOW_MERGED)
+        waitUntil("la captura en la cuenta destino") {
+            val following = currentCapture(ana, table(ids, 8))
+            following.accountId == target &&
+                following.operations.isEmpty() &&
+                following.base.any { it.id == shakeItem }
+        }
         waitFor("${TAG_SYNC_PREFIX}saved")
-        val moved = currentCapture(ana, table(ids, 8))
-        assertNotEquals(accountId, moved.accountId)
         tap(TAG_SEND_TO_KITCHEN)
         val received =
             waitForOrder(ana, table(ids, 8)) {
-                it.operationId == moved.id && it.state == OrderState.RECEIVED
+                it.operationId == closed.id && it.state == OrderState.RECEIVED
             }
-        val lines = bill(received.receivedAccountId!!).getValue("lines").jsonArray
-        assertEquals(1, lines.size)
-        assertEquals(
-            ids.getValue("shake"),
-            lines.single().jsonObject.getValue("request").jsonObject.text("product_id"),
-        )
+        assertEquals(target, received.receivedAccountId)
+        val sentShakes =
+            bill(target).getValue("lines").jsonArray.count {
+                it.jsonObject.getValue("request").jsonObject.text("product_id") ==
+                    ids.getValue("shake")
+            }
+        assertEquals("La malteada entró una vez", 1, sentShakes)
         val stillThere =
             bill(target).getValue("draft").jsonArray.count {
                 it.jsonObject.text("product_id") == ids.getValue("shake")
@@ -444,6 +449,7 @@ class FieldOnGoTest {
         perf(
             "f6 (M3): renglones de la malteada que siguen por enviar en la cuenta destino: $stillThere",
         )
+        assertEquals("Nada de Ana queda por enviar en la cuenta destino", 0, stillThere)
     }
 
     @Test
