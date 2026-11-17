@@ -14,7 +14,9 @@ import local.adel.pos.android.core.data.waiter.WaiterApi
  * - con el argumento de instrumentación `clientVersion`, la aplicación se presenta al servidor con
  *   esa versión (prueba de «Actualiza esta aplicación», 426);
  * - con `lostOfflineResponses` (un número), esa cantidad de respuestas de `submitOfflineOrder` se
- *   descarta **después** de que Go la procesó: la «respuesta perdida» de §9 (Fase E).
+ *   descarta **después** de que Go la procesó: la «respuesta perdida» de §9 (Fase E); igual con
+ *   `lostDraftResponses` (guardar el borrador) y `lostConfirmResponses` («Enviar a cocina» en
+ *   línea) para la revisión R6.
  */
 class AdelTestRunner : AndroidJUnitRunner() {
     override fun callApplicationOnCreate(app: Application) {
@@ -23,23 +25,45 @@ class AdelTestRunner : AndroidJUnitRunner() {
             AppContainer.Settings(
                 clientVersion = arguments.getString("clientVersion") ?: BuildConfig.VERSION_NAME,
                 discoveryServiceType = TEST_SERVICE_TYPE,
-                lostResponses = lostOfflineResponses(arguments.getString("lostOfflineResponses")),
+                lostResponses =
+                    lostResponses(
+                        offline = arguments.getString("lostOfflineResponses"),
+                        drafts = arguments.getString("lostDraftResponses"),
+                        confirms = arguments.getString("lostConfirmResponses"),
+                    ),
             )
         super.callApplicationOnCreate(app)
     }
 
-    // Descarta las primeras [count] respuestas del pedido sin conexión (después de que Go las
-    // procesó); sin el argumento no descarta nada.
-    private fun lostOfflineResponses(count: String?): LostResponses? {
-        val remaining = AtomicInteger(count?.toIntOrNull() ?: return null)
+    // Descarta las primeras respuestas de cada ruta indicada (después de que Go las procesó); sin
+    // ningún argumento no descarta nada.
+    private fun lostResponses(
+        offline: String?,
+        drafts: String?,
+        confirms: String?,
+    ): LostResponses? {
+        val offlineLeft = AtomicInteger(offline?.toIntOrNull() ?: 0)
+        val draftsLeft = AtomicInteger(drafts?.toIntOrNull() ?: 0)
+        val confirmsLeft = AtomicInteger(confirms?.toIntOrNull() ?: 0)
+        if (offlineLeft.get() == 0 && draftsLeft.get() == 0 && confirmsLeft.get() == 0) {
+            return null
+        }
         return LostResponses { method, path ->
-            method == "POST" &&
-                path == WaiterApi.OFFLINE_ORDERS_PATH &&
-                remaining.getAndDecrement() > 0
+            val counter =
+                when {
+                    method == "POST" && path == WaiterApi.OFFLINE_ORDERS_PATH -> offlineLeft
+                    method == "PUT" && DRAFT_PATH.matches(path) -> draftsLeft
+                    method == "POST" && CONFIRM_PATH.matches(path) -> confirmsLeft
+                    else -> null
+                }
+            counter != null && counter.getAndDecrement() > 0
         }
     }
 
     companion object {
         const val TEST_SERVICE_TYPE = "_adelpostest._tcp"
+
+        private val DRAFT_PATH = Regex("restaurant/accounts/[^/]+/draft")
+        private val CONFIRM_PATH = Regex("restaurant/accounts/[^/]+/confirm")
     }
 }

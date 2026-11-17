@@ -51,7 +51,10 @@
 # captura sin conexión: «Por enviar» · w4 (con red) WorkManager envía sin entrar y la primera respuesta se pierde: el
 # reintento no duplica · w5 precio cambiado y agotado con la confirmación del mesero · w6 mesa cobrada mientras tanto ·
 # w7a borrador guardado en Go, w7b (SIN red) se agrega y se envía sin conexión, w7c (con red) el pedido sustituye el
-# borrador (A1-D6) · w8 cancelar y modificar unidades enviadas.
+# borrador (A1-D6) · w8 cancelar y modificar unidades enviadas · revisión R6 (A1-D19): w9 el guardado pierde su
+# respuesta antes de «Enviar a cocina» · w10 la confirmación en línea entra y pierde sus respuestas: sin duplicar ·
+# w11 descartar con conexión · w12a/w12b (SIN red)/w12c descartar sin conexión y terminarlo al volver ·
+# w13a/w13b (SIN red)/w13c la cuenta se combina y el pedido va a la cuenta en que se combinó.
 #
 # Suite `field` (Fase F, FieldOnGoTest, con un servidor temporal nuevo): f1 restaurante con cocina, 40 mesas y ~300
 # productos, emparejar y entrar · f2 rendimiento (arranque en frío, Mesas, captura, «Enviar a cocina», memoria) ·
@@ -110,7 +113,7 @@ suite_steps() {
     case "$1" in
         access) echo "1 2 3 4 5 7" ;;
         catalog) echo "a b c" ;;
-        waiter) echo "w1 w2 w3 w4 w5 w6 w7a w7b w7c w8" ;;
+        waiter) echo "w1 w2 w3 w4 w5 w6 w7a w7b w7c w8 w9 w10 w11 w12a w12b w12c w13a w13b w13c" ;;
         field) echo "f1 f2 f3 f4 f5a f5b f6 f7 f8 f9 f10" ;;
     esac
 }
@@ -403,6 +406,15 @@ waiter_step() {
         w7b) device_network off; run_step w7b_sinConexionSeAgregaYSeEnvia; device_network on ;;
         w7c) run_step w7c_elPedidoSustituyeElBorradorSinDuplicar ;;
         w8) run_step w8_cancelarYModificarLoEnviado ;;
+        w9) run_step w9_guardadoSinRespuestaAntesDeEnviar -e lostDraftResponses 1 ;;
+        w10) run_step w10_confirmacionAplicadaSinRespuestaNoDuplica -e lostConfirmResponses 2 ;;
+        w11) run_step w11_descartarConConexionQuitaDeLaCuenta ;;
+        w12a) run_step w12a_capturaGuardadaParaDescartar ;;
+        w12b) device_network off; run_step w12b_descartarSinConexionQuedaPendiente; device_network on ;;
+        w12c) run_step w12c_alVolverSeQuitaDeLaCuenta ;;
+        w13a) run_step w13a_capturaEnLaCuentaQueSeCombinara ;;
+        w13b) device_network off; run_step w13b_sinConexionSeEnviaALaCuenta; device_network on ;;
+        w13c) run_step w13c_cuentaCombinadaSeEnviaALaCuentaEnQueSeCombino ;;
         *) fail "paso desconocido de la suite waiter: $1" ;;
     esac
 }

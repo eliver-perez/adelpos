@@ -38,6 +38,7 @@ import local.adel.pos.android.core.domain.table.TableState
 import local.adel.pos.android.core.domain.waiter.AccountSummary
 import local.adel.pos.android.core.domain.waiter.Capture
 import local.adel.pos.android.core.domain.waiter.DiningTable
+import local.adel.pos.android.core.domain.waiter.DraftSync
 import local.adel.pos.android.core.domain.waiter.ElapsedTime
 import local.adel.pos.android.core.domain.waiter.OfflineOrderPlan
 import local.adel.pos.android.core.domain.waiter.OrderState
@@ -447,12 +448,20 @@ private fun TablePanel(
             items(captures, key = { "captura-${it.id}" }) { capture ->
                 val label = capture.accountName ?: stringResource(R.string.table_panel_capture_new)
                 val count = OfflineOrderPlan.of(capture).items.sumOf { it.line.quantity }
+                val discarding = capture.sync == DraftSync.DISCARDING
                 WorkRow(
                     title = stringResource(R.string.table_panel_capture, label),
-                    detail = pluralStringResource(R.plurals.table_panel_products, count, count),
+                    detail =
+                        if (discarding) {
+                            stringResource(R.string.pending_discarding)
+                        } else {
+                            pluralStringResource(R.plurals.table_panel_products, count, count)
+                        },
                     badge = { OrderStateBadge(OrderState.DRAFT) },
                     onClick = { actions.onOpenCapture(capture.id) },
                     tag = "$TAG_TABLE_CAPTURE_PREFIX${capture.id}",
+                    // Un descarte pendiente ya no se captura (revisión R6, A2).
+                    enabled = !discarding,
                 )
             }
             items(orders, key = { "pedido-${it.operationId}" }) { order ->

@@ -57,6 +57,25 @@ sealed interface SendRequest {
 
     /** El borrador tiene más renglones de los que acepta Go en un pedido. */
     data object TooManyLines : SendRequest
+
+    /**
+     * Con conexión, el guardado anterior del borrador todavía no tiene respuesta: el pedido no se
+     * arma hasta saber qué guardó Go (revisión R6, C1). El mesero lo vuelve a intentar en un
+     * momento.
+     */
+    data object StillSaving : SendRequest
+}
+
+/** Cómo quedó un descarte (de una captura o de un pedido en revisión). */
+enum class DiscardResult {
+    /** Ya no queda nada: lo del mesero se quitó también del borrador de Go (o nunca llegó). */
+    DONE,
+
+    /**
+     * Sin conexión (o sin sesión): lo del mesero que ya estaba guardado en el borrador de Go se
+     * quita en cuanto haya conexión; mientras, se ve como «Descarte pendiente» (revisión R6, A2).
+     */
+    PENDING,
 }
 
 /**
@@ -113,8 +132,12 @@ interface CaptureService {
     /** Cotización de Go del borrador guardado (precios para mostrar y la huella), si la hay. */
     fun quote(captureId: String): Flow<DraftQuote?>
 
-    /** Descarta la captura (con la confirmación del mesero). */
-    suspend fun discard(captureId: String)
+    /**
+     * Descarta la captura (con la confirmación del mesero) y quita del borrador de Go lo suyo que
+     * ya estaba guardado; si la cuenta nació con esta captura y queda vacía, también la descarta
+     * (revisión R6, A2). Sin conexión, el descarte queda pendiente ([DiscardResult.PENDING]).
+     */
+    suspend fun discard(captureId: String): DiscardResult
 
     /**
      * Al salir de la captura: si no hay nada del mesero, se olvida (no deja registro). No espera:
@@ -148,13 +171,25 @@ interface OrderQueueService {
     suspend fun moveToNewAccount(operationId: String)
 
     /**
+     * «Enviar a la cuenta en que se combinó» o «Enviar a esa cuenta» (las partidas ya están en una
+     * cuenta de la mesa): el mismo pedido a [accountId], con la misma clave.
+     */
+    suspend fun sendToAccount(operationId: String, accountId: String)
+
+    /**
      * «Corregir en la captura»: el pedido vuelve a ser un borrador del mesero en la misma mesa;
      * devuelve el identificador de la captura.
      */
     suspend fun backToCapture(operationId: String): String?
 
-    /** «Descartar el pedido» (con la confirmación del mesero). */
-    suspend fun discard(operationId: String)
+    /**
+     * «Descartar el pedido» (con la confirmación del mesero): también quita del borrador de Go lo
+     * suyo que ya estaba guardado ([DiscardResult.PENDING] sin conexión).
+     */
+    suspend fun discard(operationId: String): DiscardResult
+
+    /** Lo pendiente de los **demás** meseros en este dispositivo, sin el detalle (B3). */
+    fun othersPending(userId: String): Flow<List<OthersPending>>
 }
 
 /** Resultado de modificar o cancelar unidades enviadas. */

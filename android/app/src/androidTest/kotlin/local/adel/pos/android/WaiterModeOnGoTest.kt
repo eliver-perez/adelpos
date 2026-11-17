@@ -30,6 +30,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import local.adel.pos.android.core.data.waiter.db.WaiterStorage
+import local.adel.pos.android.core.domain.waiter.DraftSync
 import local.adel.pos.android.core.domain.waiter.OrderState
 import local.adel.pos.android.core.domain.waiter.PendingOrder
 import local.adel.pos.android.core.ui.catalog.TAG_CUSTOMIZER_ADD
@@ -46,6 +47,9 @@ import local.adel.pos.android.feature.access.findserver.TAG_PAIRING_CODE
 import local.adel.pos.android.feature.access.pin.TAG_ENTRY
 import local.adel.pos.android.feature.access.pin.TAG_WAITER_PREFIX
 import local.adel.pos.android.feature.waiter.capture.TAG_CANCEL_CONFIRM
+import local.adel.pos.android.feature.waiter.capture.TAG_DISCARD_CAPTURE
+import local.adel.pos.android.feature.waiter.capture.TAG_DISCARD_CONFIRM
+import local.adel.pos.android.feature.waiter.capture.TAG_DISCARD_PENDING_OK
 import local.adel.pos.android.feature.waiter.capture.TAG_DRAFT_ROW_PREFIX
 import local.adel.pos.android.feature.waiter.capture.TAG_MODIFY_CONFIRM
 import local.adel.pos.android.feature.waiter.capture.TAG_MODIFY_NOTES
@@ -66,6 +70,7 @@ import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_ACCEPT
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_CHANGE_PREFIX
 import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_REMOVE_PREFIX
+import local.adel.pos.android.feature.waiter.pending.TAG_REVIEW_SEND_TO_MERGED
 import local.adel.pos.android.feature.waiter.tables.TAG_ACCOUNT_PANE
 import local.adel.pos.android.feature.waiter.tables.TAG_NEW_ACCOUNT
 import local.adel.pos.android.feature.waiter.tables.TAG_OPEN_PENDING
@@ -107,8 +112,17 @@ import org.junit.runner.RunWith
  *   `w7c` (con red) el pedido sustituye los renglones del borrador (A1-D6): la cuenta queda con
  *   todo confirmado y sin borrador duplicado.
  *
+ * - Revisión R6 (A1-D19): `w9` el guardado del borrador pierde su respuesta y se toca «Enviar a
+ *   cocina»: se resuelve con su clave y entra una vez; `w10` la confirmación en línea entra y sus
+ *   respuestas se pierden: el pedido sin conexión con la misma clave queda «Recibido» sin duplicar;
+ *   `w11` descartar con conexión quita de Go lo guardado (y la cuenta vacía que nació con la
+ *   captura); `w12a`–`w12c` descartar sin conexión queda pendiente y se termina al volver;
+ *   `w13a`–`w13c` la cuenta se combina mientras el pedido espera sin conexión y el mesero lo manda
+ *   a la cuenta en que se combinó.
+ *
  * Argumentos: `local`, `address`, `pin`, `mainDevice`, `mainToken` (los arma el guion) y, en `w4`,
- * `lostOfflineResponses` (lo lee [AdelTestRunner]). Sin ellos se omite.
+ * `w9` y `w10`, `lostOfflineResponses`, `lostDraftResponses` y `lostConfirmResponses` (los lee
+ * [AdelTestRunner]). Sin ellos se omite.
  */
 @RunWith(AndroidJUnit4::class)
 class WaiterModeOnGoTest {
@@ -458,6 +472,202 @@ class WaiterModeOnGoTest {
         )
     }
 
+    // --- Revisión R6 (A1-D19) ---
+
+    @Test
+    fun w9_guardadoSinRespuestaAntesDeEnviar() {
+        val ids = loadIds()
+        // Una cuenta de la mesa 5 abierta en la principal, con algo ya enviado (la malteada está
+        // agotada desde w5).
+        val accountId = openFromMain(ids.getValue("table5"), ids.getValue("tacos"))
+        confirmFromMain(accountId)
+        launch()
+        enterAna()
+        openTable(ids.getValue("table5"))
+        tap("account-$accountId")
+        showOrder()
+        waitUntil("la cuenta leída de Go") {
+            currentCapture(ids.getValue("table5")).baseRevision > 0
+        }
+        // La respuesta del guardado se pierde (Go sí lo guardó) y el mesero envía enseguida.
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        tap(TAG_SEND_TO_KITCHEN)
+        waitForTables()
+        waitForOrder(ids.getValue("table5"), timeout = 120_000) { it.state == OrderState.RECEIVED }
+        val bill = main.call("GET", "restaurant/accounts/$accountId").obj
+        val products =
+            bill.getValue("lines").jsonArray.map {
+                it.jsonObject.getValue("request").jsonObject.text("product_id")
+            }
+        assertEquals(1, products.count { it == ids.getValue("burger") })
+        assertEquals(2, products.size)
+        assertEquals("Sin borrador repetido", 0, bill.getValue("draft").jsonArray.size)
+    }
+
+    @Test
+    fun w10_confirmacionAplicadaSinRespuestaNoDuplica() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table6"))
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val capture = currentCapture(ids.getValue("table6"))
+        // Go confirma y las dos respuestas se pierden: sale como pedido sin conexión con la misma
+        // clave y Go lo reconoce como ya aceptado.
+        tap(TAG_SEND_TO_KITCHEN)
+        waitForTables()
+        val received =
+            waitForOrder(ids.getValue("table6"), timeout = 120_000) {
+                it.operationId == capture.id && it.state == OrderState.RECEIVED
+            }
+        assertEquals(capture.accountId, received.receivedAccountId)
+        val bill = main.call("GET", "restaurant/accounts/${capture.accountId}").obj
+        assertEquals("Entró una sola vez", 1, bill.getValue("lines").jsonArray.size)
+        assertEquals(0, bill.getValue("draft").jsonArray.size)
+    }
+
+    @Test
+    fun w11_descartarConConexionQuitaDeLaCuenta() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table7"))
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val capture = currentCapture(ids.getValue("table7"))
+        assertTrue(capture.createdAccount)
+        tap(TAG_DISCARD_CAPTURE)
+        tap(TAG_DISCARD_CONFIRM)
+        waitForTables()
+        assertEquals("voided", accountState(capture.accountId!!))
+        assertTrue(captureGone(capture.id))
+    }
+
+    @Test
+    fun w12a_capturaGuardadaParaDescartar() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table8"))
+        addProduct(ids.getValue("tacos"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val capture = currentCapture(ids.getValue("table8"))
+        saveIds(ids + ("account8" to capture.accountId!!) + ("capture8" to capture.id))
+    }
+
+    @Test
+    fun w12b_descartarSinConexionQuedaPendiente() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        openTable(ids.getValue("table8"))
+        tap("table-capture-${ids.getValue("capture8")}")
+        showOrder()
+        tap(TAG_DISCARD_CAPTURE)
+        tap(TAG_DISCARD_CONFIRM)
+        // Se dice la verdad: lo guardado en la cuenta se quita en cuanto haya conexión.
+        tap(TAG_DISCARD_PENDING_OK)
+        waitForTables()
+        val pending = runBlocking { container.database.waiter().capture(ids.getValue("capture8")) }
+        assertEquals(DraftSync.DISCARDING.name, pending!!.sync)
+    }
+
+    @Test
+    fun w12c_alVolverSeQuitaDeLaCuenta() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        waitUntil("el descarte terminado", timeout = 120_000) {
+            captureGone(ids.getValue("capture8"))
+        }
+        assertEquals("voided", accountState(ids.getValue("account8")))
+    }
+
+    @Test
+    fun w13a_capturaEnLaCuentaQueSeCombinara() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        newAccountOn(ids.getValue("table9"))
+        addProduct(ids.getValue("burger"))
+        showOrder()
+        waitFor("${TAG_SYNC_PREFIX}saved")
+        val capture = currentCapture(ids.getValue("table9"))
+        // El mesero sale de la captura y, sin que él lo sepa, la principal combina la cuenta en
+        // otra de la mesa 10 (su borrador se mueve con sus identificadores). Se hace aquí y no en
+        // w13c: al arrancar el proceso, el trabajador envía la cola antes de que la prueba empiece.
+        backToTables()
+        val target = openFromMain(ids.getValue("table10"), ids.getValue("tacos"))
+        confirmFromMain(target)
+        mergeFromMain(capture.accountId!!, target)
+        saveIds(ids + ("account9" to capture.accountId!!) + ("target9" to target))
+    }
+
+    @Test
+    fun w13b_sinConexionSeEnviaALaCuenta() {
+        val ids = loadIds()
+        launch()
+        enterAna()
+        openTable(ids.getValue("table9"))
+        val capture = currentCapture(ids.getValue("table9"))
+        tap("table-capture-${capture.id}")
+        addProduct(ids.getValue("tacos"))
+        showOrder()
+        tap(TAG_SEND_TO_KITCHEN)
+        waitForTables()
+        val order = waitForOrder(ids.getValue("table9")) { it.state == OrderState.QUEUED }
+        assertEquals(ids.getValue("account9"), order.destination.accountId)
+        assertEquals(1, order.replaces.size)
+    }
+
+    @Test
+    fun w13c_cuentaCombinadaSeEnviaALaCuentaEnQueSeCombino() {
+        val ids = loadIds()
+        val target = ids.getValue("target9")
+        launch()
+        enterAna()
+        val review =
+            waitForOrder(ids.getValue("table9"), timeout = 120_000) {
+                it.state == OrderState.NEEDS_REVIEW
+            }
+        openPending()
+        openReview(review.operationId)
+        tap(TAG_REVIEW_SEND_TO_MERGED)
+        val received =
+            waitForOrder(ids.getValue("table9"), timeout = 120_000) {
+                it.operationId == review.operationId && it.state == OrderState.RECEIVED
+            }
+        assertEquals(target, received.receivedAccountId)
+        val bill = main.call("GET", "restaurant/accounts/$target").obj
+        val products =
+            bill.getValue("lines").jsonArray.map {
+                it.jsonObject.getValue("request").jsonObject.text("product_id")
+            }
+        // Lo de la principal (tacos) y el pedido del mesero (hamburguesa y tacos), una vez cada
+        // uno.
+        assertEquals(1, products.count { it == ids.getValue("burger") })
+        assertEquals(2, products.count { it == ids.getValue("tacos") })
+        assertEquals(3, products.size)
+        assertEquals("Sin borrador repetido", 0, bill.getValue("draft").jsonArray.size)
+    }
+
+    private fun accountState(accountId: String): String =
+        main
+            .call("GET", "restaurant/accounts/$accountId")
+            .obj
+            .getValue("account")
+            .jsonObject
+            .text("state")
+
+    private fun captureGone(captureId: String): Boolean = runBlocking {
+        container.database.waiter().capture(captureId) == null
+    }
+
     // --- Pantallas ---
 
     private fun launch() {
@@ -582,6 +792,16 @@ class WaiterModeOnGoTest {
      * En el teléfono, Mesas muestra la lista o la mesa elegida (a un toque): vuelve a la lista si
      * está abierta la mesa.
      */
+    /** Sale de la captura con Atrás hasta Mesas (la captura con algo guardado se conserva). */
+    private fun backToTables() {
+        repeat(3) {
+            if (!present(TAG_TABLES_SEARCH) && !present(TAG_ACCOUNT_PANE)) {
+                pressBack()
+            }
+        }
+        waitForTables()
+    }
+
     private fun showTables() {
         waitForTables()
         // Un panel con la mesa abierta tiene «Volver a Mesas».
@@ -618,10 +838,15 @@ class WaiterModeOnGoTest {
         return false
     }
 
-    /** Toca el nodo con [tag], desplazando hasta él si está en una lista. */
+    /**
+     * Toca el nodo con [tag], desplazando hasta él si está en una lista (un botón de un diálogo no
+     * tiene contenedor que desplazar).
+     */
     private fun tap(tag: String) {
         waitFor(tag)
-        compose.onNodeWithTag(tag).performScrollTo().performClick()
+        val node = compose.onNodeWithTag(tag)
+        runCatching { node.performScrollTo() }
+        node.performClick()
     }
 
     private fun openTable(tableId: String) {
@@ -743,14 +968,17 @@ class WaiterModeOnGoTest {
         assertEquals(area.body.toString(), 200, area.status)
         val areaId = area.obj.text("id")
         val ids = mutableMapOf<String, String>()
-        for (number in 1..4) {
+        for (number in 1..TABLES) {
+            // Dos filas de cinco dentro del lienzo de 1000 × 560.
+            val x = 20 + ((number - 1) % 5) * 180
+            val y = 40 + ((number - 1) / 5) * 150
             val table =
                 main.call(
                     "POST",
                     "restaurant/tables",
                     """{"operation_id":"${UUID.randomUUID()}","area_id":"$areaId",""" +
-                        """"name":"Mesa E$number","shape":"rectangle","x":${20 + number * 150},""" +
-                        """"y":40,"width":100,"height":72,"seats":4,"active":true}""",
+                        """"name":"Mesa E$number","shape":"rectangle","x":$x,""" +
+                        """"y":$y,"width":100,"height":72,"seats":4,"active":true}""",
                 )
             assertEquals(table.body.toString(), 200, table.status)
             ids["table$number"] = table.obj.text("id")
@@ -816,6 +1044,37 @@ class WaiterModeOnGoTest {
         )
     }
 
+    /** Abre una cuenta en la mesa desde la principal, con un producto en su borrador. */
+    private fun openFromMain(tableId: String, productId: String): String {
+        val answer =
+            main.call(
+                "POST",
+                "restaurant/accounts",
+                """{"operation_id":"${UUID.randomUUID()}","mode":"dine_in",""" +
+                    """"table_id":"$tableId","seen_account_ids":${seenOn(tableId)},""" +
+                    """"items":[${draftItem(UUID.randomUUID().toString(), productId, 1)}]}""",
+            )
+        assertEquals(answer.body.toString(), 200, answer.status)
+        return answer.obj.getValue("account").jsonObject.text("id")
+    }
+
+    private fun seenOn(tableId: String): String =
+        openAccountsOn(tableId).joinToString(",", "[", "]") { "\"$it\"" }
+
+    /** Combina [sourceId] en [targetId] desde la principal (el borrador se mueve con sus ids). */
+    private fun mergeFromMain(sourceId: String, targetId: String) {
+        val source = main.call("GET", "restaurant/accounts/$sourceId").obj.revision()
+        val target = main.call("GET", "restaurant/accounts/$targetId").obj.revision()
+        val answer =
+            main.call(
+                "POST",
+                "restaurant/accounts/$sourceId/merge",
+                """{"operation_id":"${UUID.randomUUID()}","revision":$source,""" +
+                    """"target_account_id":"$targetId","target_revision":$target}""",
+            )
+        assertEquals(answer.body.toString(), 200, answer.status)
+    }
+
     private fun openAccountsOn(tableId: String): List<String> {
         val listed = main.call("GET", "restaurant/accounts?table_id=$tableId&state=open").obj
         return listed.getValue("items").jsonArray.map { it.jsonObject.text("id") }
@@ -856,6 +1115,9 @@ class WaiterModeOnGoTest {
         const val SETTLE_MILLIS = 1_500L
         const val ROTATION_TIMEOUT_MILLIS = 10_000L
         const val REVEAL_EVERY_MILLIS = 1_000L
+
+        /** Mesas del restaurante de prueba (una o dos por paso). */
+        const val TABLES = 10
 
         /** Las listas perezosas del modo Mesero en las que se busca desplazando. */
         val LAZY_LISTS =

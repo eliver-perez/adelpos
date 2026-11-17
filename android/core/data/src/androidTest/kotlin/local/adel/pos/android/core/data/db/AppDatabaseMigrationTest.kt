@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -138,6 +139,47 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun de4a5ConservaLaColaYAgregaLasColumnasDeLaRevisionR6() {
+        helper.createDatabase(testDatabase, 4).use { database ->
+            database.execSQL(
+                "INSERT INTO pending_orders (operation_id, waiter_user_id, waiter_name, state, " +
+                    "destination, lines, replaces, catalog_version, catalog_epoch, captured_at, " +
+                    "confirmation, review, attempts, last_error, credential_rejected, " +
+                    "online_confirm, received_account_id, received_at, updated_at) VALUES " +
+                    "('op-1', 'ana', 'Ana', 'queued', '{}', '[]', '[]', 41, NULL, 1, NULL, NULL, " +
+                    "0, NULL, 0, NULL, NULL, NULL, 1)",
+            )
+            database.execSQL(
+                "INSERT INTO captures (id, waiter_user_id, table_id, table_name, account_id, " +
+                    "account_name, seen_account_ids, base, base_revision, operations, " +
+                    "own_item_ids, seen_prices, sync, sync_message, table_accounts, " +
+                    "pending_operation_id, in_flight_count, created_at, updated_at) VALUES " +
+                    "('c-1', 'ana', 'mesa', 'Mesa 4', NULL, NULL, '[]', '[]', 0, '[]', '[]', " +
+                    "'{}', 'SAVED', NULL, '[]', NULL, 0, 1, 1)",
+            )
+        }
+        helper.runMigrationsAndValidate(testDatabase, 5, true, AppDatabase.MIGRATION_4_5).use {
+            database ->
+            // El pedido sin enviar sigue igual y las columnas nuevas toman su valor por omisión.
+            database
+                .query(
+                    "SELECT state, unresolved_save, clock_corrected FROM pending_orders " +
+                        "WHERE operation_id = 'op-1'",
+                )
+                .use { cursor ->
+                    cursor.moveToFirst()
+                    assertEquals("queued", cursor.getString(0))
+                    assertTrue(cursor.isNull(1))
+                    assertEquals(0, cursor.getInt(2))
+                }
+            database.query("SELECT created_account FROM captures WHERE id = 'c-1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
+    @Test
     fun todasLasMigracionesLlevanALaVersionActual() = runBlocking {
         helper.createDatabase(testDatabase, 1).close()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -164,7 +206,7 @@ class AppDatabaseMigrationTest {
                 ),
             )
             assertArrayEquals(byteArrayOf(1, 2, 3), access.pairedServer()?.sealedDeviceToken)
-            assertEquals(4, database.openHelper.readableDatabase.version)
+            assertEquals(5, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }

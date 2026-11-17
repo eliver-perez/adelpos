@@ -39,6 +39,13 @@ enum class DraftSync {
      * mesero puede ir a una cuenta nueva de la mesa.
      */
     ACCOUNT_CLOSED,
+
+    /**
+     * El mesero descartó la captura, pero lo suyo que ya estaba guardado en el borrador de Go
+     * todavía no se quita (sin conexión o sin sesión): se quita en cuanto se pueda y, mientras, la
+     * captura sigue a la vista como «Descarte pendiente» (revisión R6, A2).
+     */
+    DISCARDING,
 }
 
 /**
@@ -48,9 +55,12 @@ enum class DraftSync {
  *
  * El borrador visible es [base] (lo último que Go aceptó o mostró) con las [operations] locales
  * encima; con [baseRevision] 0 todavía no se leyó el borrador de Go (se lee antes del primer
- * guardado y los toques se aplican encima). Sin cuenta ([accountId] null) es una «cuenta
- * pendiente»: nace en Go con el primer producto (`openAccount`, creación diferida) o, sin conexión,
- * al enviarse el pedido.
+ * guardado y los toques se aplican encima) y con [SEEN_BASE_REVISION] la base es la que vio el
+ * mesero pero se desconoce su revisión (la captura nace de «Corregir en la captura» o de seguir una
+ * cuenta combinada): antes de guardar se compara con la de Go y, si otra terminal la cambió, el
+ * conflicto se muestra (revisión R6, M2). Sin cuenta ([accountId] null) es una «cuenta pendiente»:
+ * nace en Go con el primer producto (`openAccount`, creación diferida) o, sin conexión, al enviarse
+ * el pedido.
  *
  * @param ownItemIds renglones creados en este dispositivo: los que el pedido sin conexión manda y,
  *   si ya estaban guardados en Go, sustituye (A1-D6).
@@ -59,6 +69,8 @@ enum class DraftSync {
  * @param pendingOperationId clave del guardado en Go en curso o sin respuesta: se repite **igual**
  *   (misma clave y mismo contenido: [base] con las primeras [inFlightCount] operaciones) antes de
  *   mandar nada más, también después de reiniciar el proceso.
+ * @param createdAccount la cuenta nació en Go con esta captura (`openAccount`): si el mesero la
+ *   descarta y queda vacía, se descarta también la cuenta (revisión R6, A2).
  */
 data class Capture(
     val id: String,
@@ -79,6 +91,7 @@ data class Capture(
     val pendingOperationId: String?,
     val inFlightCount: Int,
     val createdAtMillis: Long,
+    val createdAccount: Boolean = false,
 ) {
     /** El borrador como se ve: lo de Go con los toques locales aplicados. */
     val visible: List<DraftLine>
@@ -93,7 +106,10 @@ data class Capture(
      * borrador. Impide el bloqueo por inactividad y «Cerrar sesión» (A1-D15).
      */
     val inProgress: Boolean
-        get() = operations.isNotEmpty() || base.any { it.id in ownItemIds }
+        get() =
+            operations.isNotEmpty() ||
+                base.any { it.id in ownItemIds } ||
+                sync == DraftSync.DISCARDING
 
     /** Lo que se mandó (o se va a repetir) en el guardado en curso. */
     val inFlightItems: List<DraftLine>
@@ -101,6 +117,35 @@ data class Capture(
 
     /** Renglón del borrador que se capturó en este dispositivo. */
     fun isOwn(itemId: String): Boolean = itemId in ownItemIds
+
+    /**
+     * La cuenta ya no está abierta porque **se combinó** con otra ([tableAccounts] lleva la cuenta
+     * en que se combinó): solo se sigue en esa cuenta, nunca en una nueva (regla del coordinador,
+     * revisión R6, M3).
+     */
+    val accountMerged: Boolean
+        get() = sync == DraftSync.ACCOUNT_CLOSED && tableAccounts.isNotEmpty()
+
+    /**
+     * El guardado en Go que salió sin respuesta (o sigue en curso), para repetirlo con su clave
+     * antes de mandar el pedido (revisión R6, C1); null si no hay ninguno.
+     */
+    fun unresolvedSave(): UnresolvedSave? {
+        val operationId = pendingOperationId ?: return null
+        return UnresolvedSave(
+            operationId = operationId,
+            accountId = accountId,
+            tableId = tableId,
+            seenAccountIds = seenAccountIds,
+            revision = baseRevision,
+            items = inFlightItems,
+        )
+    }
+
+    companion object {
+        /** La base es la que vio el mesero, sin su revisión (ver la clase). */
+        const val SEEN_BASE_REVISION = -1
+    }
 }
 
 /**

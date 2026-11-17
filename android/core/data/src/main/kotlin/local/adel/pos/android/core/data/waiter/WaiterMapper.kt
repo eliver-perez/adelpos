@@ -78,6 +78,7 @@ object WaiterMapper {
             assignedName = dto.assignedName,
             elapsedSeconds = dto.elapsedSeconds,
             longOpen = dto.longOpen,
+            mergedIntoId = dto.mergedIntoId,
         )
 
     fun draftLine(dto: DraftItemDto): DraftLine =
@@ -159,6 +160,7 @@ object WaiterMapper {
             now = dto.now,
             message = dto.message,
             acceptable = dto.acceptable,
+            accountId = dto.accountId,
         )
 
     /** El cambio tal como lo dio Go, para devolverlo en la confirmación. */
@@ -172,5 +174,6 @@ object WaiterMapper {
             now = change.now,
             message = change.message,
             acceptable = change.acceptable,
+            accountId = change.accountId,
         )
 }

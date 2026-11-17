@@ -13,17 +13,24 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import local.adel.pos.android.core.domain.error.AppResult
 import local.adel.pos.android.core.domain.waiter.Capture
+import local.adel.pos.android.core.domain.waiter.DiscardResult
+import local.adel.pos.android.core.domain.waiter.OthersPending
 import local.adel.pos.android.core.domain.waiter.PendingOrder
+import local.adel.pos.android.core.domain.waiter.ReviewReason
 import local.adel.pos.android.feature.waiter.WaiterDependencies
 
 /**
  * «Pedidos pendientes» (§7): lo que el mesero activo tiene sin enviar (sus capturas y sus pedidos
  * de la cola con su estado) y lo recibido hace poco; «Reintentar ya». De los demás meseros solo se
- * dice cuántos pedidos tienen por enviar en este dispositivo, nunca cuáles.
+ * dice cuántos pedidos tienen por enviar en este dispositivo y por qué no salen (credencial que ya
+ * no vale, revisión pendiente; revisión R6, B3), nunca cuáles.
  */
 class PendingOrdersViewModel(private val dependencies: WaiterDependencies) : ViewModel() {
     private val userId: String? = dependencies.activeWaiter.value?.userId
@@ -38,11 +45,13 @@ class PendingOrdersViewModel(private val dependencies: WaiterDependencies) : Vie
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS), emptyList())
 
-    val others: StateFlow<Int> =
-        (userId?.let(dependencies.pendingOfOthers) ?: flowOf(0)).stateIn(
+    val others: StateFlow<List<OthersPending>> = userFlow {
+        dependencies.orders.othersPending(it)
+    }
+        .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(STOP_TIMEOUT_MILLIS),
-            0,
+            emptyList(),
         )
 
     fun retryNow() {
@@ -81,7 +90,36 @@ class ReviewViewModel(
     var working: Boolean by mutableStateOf(false)
         private set
 
+    /**
+     * La cuenta en que se combinó la del pedido, si se sabe (se lee con la sesión del mesero; M3):
+     * con ella se ofrece «Enviar a la cuenta en que se combinó».
+     */
+    var mergedTarget: String? by mutableStateOf(null)
+        private set
+
+    init {
+        viewModelScope.launch {
+            val current = dependencies.orders.order(operationId).filterNotNull().first()
+            val review = current.review ?: return@launch
+            // En línea, Go ya dijo en qué cuenta se combinó; si no, se lee la cuenta.
+            review.mergedIntoId?.let {
+                mergedTarget = it
+                return@launch
+            }
+            val accountId = current.destination.accountId ?: return@launch
+            if (review.accountMerged || review.reason == ReviewReason.ACCOUNT_NOT_OPEN) {
+                val bill = dependencies.restaurant.bill(accountId)
+                if (bill is AppResult.Success) {
+                    mergedTarget = bill.value.account.mergedIntoId
+                }
+            }
+        }
+    }
+
     fun accept(onDone: () -> Unit) = run(onDone) { dependencies.orders.accept(operationId) }
+
+    fun sendToAccount(accountId: String, onDone: () -> Unit) =
+        run(onDone) { dependencies.orders.sendToAccount(operationId, accountId) }
 
     fun resend(onDone: () -> Unit) = run(onDone) { dependencies.orders.resend(operationId) }
 
@@ -90,7 +128,20 @@ class ReviewViewModel(
     fun moveToNewAccount(onDone: () -> Unit) =
         run(onDone) { dependencies.orders.moveToNewAccount(operationId) }
 
-    fun discard(onDone: () -> Unit) = run(onDone) { dependencies.orders.discard(operationId) }
+    /** «Descartar el pedido»; [onDone] recibe si lo guardado en la cuenta quedó por quitar. */
+    fun discard(onDone: (DiscardResult) -> Unit) {
+        if (working) {
+            return
+        }
+        working = true
+        viewModelScope.launch {
+            try {
+                onDone(dependencies.orders.discard(operationId))
+            } finally {
+                working = false
+            }
+        }
+    }
 
     fun backToCapture(onCapture: (String) -> Unit) {
         if (working) {
