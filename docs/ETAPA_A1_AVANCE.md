@@ -2940,3 +2940,257 @@ el borrador: []» y «partidas confirmadas con el id del renglón: 1»): ya no s
   `contractOfflineNeverRepeats` en `TestContractV1`; §15, A1-D18 implementada en `operations/offline_orders.go`.
 
 **Al cerrar las correcciones del servidor de R6** (rama `etapa-a1-es-fix` fusionada en `etapa-a1-android`): se aceptan las dos decisiones del agente: el último guardado propio (mismo mesero y mismo dispositivo) se quita aunque difiera del pedido, porque la versión sin conexión es la más reciente de ese mesero; y lo ya enviado se reconoce en cualquier cuenta, sin mandar la diferencia de una cantidad subida sin conexión (el mensaje lo dice). La falla de tiempo de `TestCatalogImageCountsScansAfterStrayByteAfterSOI` (tope de 500 ms en `catalog`, con la Mac muy cargada) no se repitió sola ni en la segunda corrida; la regresión de la Fase G se corre sin otras cargas.
+
+---
+
+## Fase F · Pruebas de extremo a extremo
+
+Rama `etapa-a1-f` (desde `etapa-a1-android` en `61515c1`), un agente, 17 de noviembre de 2026, en paralelo con la
+revisión independiente R6 de la cola sin conexión (otro agente, consolas 5580–5592). Árbol `$SP/wt/F`; para correr la
+matriz mientras se seguía trabajando, dos copias de la misma rama (`$SP/wt/F-run` y `$SP/wt/F-run2`, borradas al terminar, en el commit
+probado). Go temporal `ISO_TAG=F` (8199/8459) y `ISO_TAG=F2` (8200/8460), **uno nuevo por suite y emulador** (con
+`--suite all`), apagados y con su base borrada al terminar. Emuladores propios de solo lectura: 5600 (`Pixel_Tablet`),
+5602 (`Pixel_8`), 5604 (`ADEL_A1_Tablet_API26`) y 5606 (`ADEL_A1_Phone_API33`), como mucho dos a la vez y siempre con
+`ANDROID_SERIAL`. **Sin cambios en `backend/`, `desktop/`, `config/`, `CLAUDE.md` ni `AGENTS.md`**;
+`docs/etapas/*.md` con el mismo md5 antes y después. Ninguna prueba usó el servicio real de la Mac (8181, 8443, 55432
+ni su carpeta) **salvo el incidente descrito abajo** (un toque de la prueba del APK `release` en `Pixel_8`).
+
+### Incidente con el servicio real (para el coordinador)
+
+El 17/11/2026 a las **11:00–11:01** (hora de la Mac), la prueba de humo del APK `release` en `Pixel_8` (consola 5602,
+Android 17) **tocó una vez el anuncio del servicio real** de la Mac. El APK `release` no usa `AdelTestRunner`: su
+búsqueda automática listó «ADEL POS — Eliver’s MacBook Pro» (en Android 17 el emulador sí ve el mDNS de la Mac, como
+en la Fase C) con su botón «Pedir código», y el guion de la prueba (`$SP/tmp-F/scripts/release_smoke.py`, por texto)
+eligió el primer botón «Pedir código» de la pantalla, que era el de ese anuncio y no el de la dirección escrita. La
+aplicación mandó **una** petición de emparejamiento a ese servidor y recibió «Esta aplicación necesita actualizarse
+para entrar» (426 del servicio real, que sigue en 0.11.0 y no admite la app 0.1.0). Lo comprobado: el Go temporal no
+recibió ninguna petición de emparejamiento en ese momento (su registro), y la pantalla mostró el 426. Lo **no**
+comprobado (no se debe tocar la instalación real): el registro del servicio real; por el 426, lo más probable es que
+la versión se rechazara antes de crear la solicitud. Se detuvo de inmediato: aplicación cerrada y desinstalada del
+emulador, sin más toques. **Para el coordinador:** revisar en la computadora principal real (Administración › Sistema
+› Terminales) que no quedó ninguna solicitud de emparejamiento pendiente, y decidir si la prueba del APK `release` en
+Android 17 se hace en la Fase G con otra salvaguarda (el guion ahora se detiene si la lista muestra cualquier
+servidor, ver abajo) o se deja solo en Android 8 y 13, donde el emulador no ve el mDNS de la Mac.
+
+Corrección del guion: ya no busca botones por texto; toca solo el campo de la dirección (lo vuelve a buscar justo
+antes de tocarlo, comprueba que la dirección quedó escrita en él) y pide el código con la acción del teclado de ese
+campo; antes de escribir y antes de pedir el código **se detiene y desinstala la aplicación** si la lista muestra
+cualquier servidor anunciado. Con esa versión corrió en `ADEL_A1_Tablet_API26` y `ADEL_A1_Phone_API33` («No se
+encontró ninguna computadora principal en la red»). `Pixel_8` queda sin la prueba del APK `release`.
+
+### Commits (`etapa-a1-f`, sobre `etapa-a1-android` en `61515c1`)
+
+| Commit    | Qué                                                                                                                                                                                                                                                                                  |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `30e094d` | `scripts/android-e2e.sh`: `--suite catalog` (llevado al repositorio desde el guion de la Fase D) y `--suite all` (un servidor temporal nuevo por parte con `ADELPOS_E2E_NEW_SERVER`); `CatalogOnGoTest` usa la terminal principal del guion y quita su producto de prueba por la API |
+| `13af08c` | **Defecto corregido**: «Cambiar» una partida después de que Android cerró la aplicación volvía con la configuración original del producto (con su prueba JVM)                                                                                                                        |
+| `6595c2d` | `FieldOnGoTest` (`--suite field`, pasos `f1`–`f10`) y la matriz completa en `android/CLAUDE.md`                                                                                                                                                                                      |
+| `b9557c4` | Pruebas robustas en un emulador cargado: el diálogo del sistema «Pixel Launcher isn't responding» se cierra antes de Atrás (`SystemDialogs`); observaciones con la acción del teclado                                                                                                |
+| `db63688` | `FieldOnGoTest`: la revisión de 48 dp no mide lo que quedó fuera de la vista (falso fallo en la tableta de Android 8) y el diálogo «no responde» se cierra antes de cada captura                                                                                                     |
+| `28bd495` | `android/CLAUDE.md`: el diálogo «no responde» del emulador cargado                                                                                                                                                                                                                   |
+
+### Qué se hizo
+
+**Una sola forma de correr todo lo de §9** (`scripts/android-e2e.sh`):
+
+- `--suite catalog` lleva al repositorio lo que hacía `$SP/tmp-D/scripts/catalog-on-go.sh`. `CatalogOnGoTest` usa la
+  terminal principal que crea el guion (`mainDevice`/`mainToken`, como las demás suites; sin ella, el asistente con
+  `provisioning`, como antes). Lo que antes era SQL entre etapas:
+  - la **baja de un producto** (etapa `b`) ahora es por la API de la principal: el producto temporal se crea con la
+    firma exacta de un producto de prueba de Go («Filete de prueba», código `FILETE`,
+    `backend/internal/maintenance/signatures.go`) y la etapa `b` lo quita con «Quitar datos de prueba»
+    (`GET maintenance/test-data` → `POST maintenance/test-data/remove` con el mismo `plan_id`; Go hace su respaldo en la
+    carpeta del servidor temporal y borra el producto porque no tiene operaciones). La baja llega en `deleted`;
+  - la **época del catálogo** (etapa `c`) solo cambia cuando la base se restaura (otro OID u otro clúster): Go no
+    tiene API para eso. Queda como SQL aislado en el guion (`UPDATE app.catalog_epoch SET epoch =
+gen_random_uuid()`), con `ADELPOS_E2E_DATABASE_URL` y guardas (solo 127.0.0.1/localhost, nunca el puerto 55432
+    del PostgreSQL real, solo una base `adel_pos_test_…` y solo si contiene la terminal principal del servidor que se
+    prueba). Sin la variable, `c` sale como omitida.
+- `--suite field` corre `FieldOnGoTest` (nueva, Fase F, pasos `f1`–`f10`; `f7` son tres instrumentaciones, la del
+  medio sin red). El único otro SQL de prueba es el de `f7` (A1-D16): dos bloqueos previos ya vencidos en la serie de
+  `beto.f` (`app.pin_attempts`), con las mismas guardas; el tercero lo provoca la prueba con cinco PIN incorrectos.
+- `--suite all` corre, con un servidor temporal **nuevo para cada parte**, access 1–5, access 6–7 (otra identidad, sin
+  reinstalar), catalog, waiter y field. El servidor lo levanta la orden de `ADELPOS_E2E_NEW_SERVER` (los agentes:
+  `iso.sh - server-down` + `iso.sh <árbol> server-up`), que imprime las variables `ADELPOS_E2E_*` nuevas; el guion
+  vuelve a comprobar `test_mode: true`, los puertos y la huella con cada servidor. Las guardas de siempre no
+  cambiaron (nunca 8181/8443, solo la Mac, `test_mode: true`, huella esperada).
+- `android/CLAUDE.md` («Pruebas»): cómo correr `catalog`, `field` y la matriz completa, y el aviso del emulador
+  cargado.
+
+**`FieldOnGoTest`** (`android/app/src/androidTest/.../FieldOnGoTest.kt`), contra el Go temporal:
+
+| Paso        | Qué comprueba                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `f1`        | La principal configura **cocina por la API** (estación `kds` y ruta de la categoría, como `stagea1_waiter_test.go`), 40 mesas, ~300 productos, dos meseros con PIN; captura oscura de «Buscar el servidor»; emparejar con el código y entrar                                                                                                                                                            |
+| `f2`        | Rendimiento (registro `AdelOnGo`, «Fase F ·»): arranque en frío, PIN → Mesas con 40 mesas, «Nueva cuenta» → catálogo, «Enviar a cocina» → «Recibido por el restaurante», `dumpsys meminfo`                                                                                                                                                                                                              |
+| `f3`        | Cocina pasa lo enviado a **«En preparación»** y a **«Listo»** (`POST kitchen/states` desde la principal): el mesero lo ve al momento en cada partida (`restaurant.account.preparation_changed`), sin permisos de cocina                                                                                                                                                                                 |
+| `f4`        | **Dos meseros**: Ana deja una captura guardada en curso y cambia a Beto (se permite); Beto no la ve ni en la mesa ni en «Pedidos pendientes»; Beto captura y envía; Ana vuelve y la encuentra y la envía; el historial de Go anota «Ana A1» y «Beto A1» en sus pedidos                                                                                                                                  |
+| `f5a`/`f5b` | (sin red) un pedido de Beto «Por enviar» **impide cambiar de mesero**; (con red) sale con la **credencial de envío de Beto** aunque la activa sea Ana (historial: «Beto A1»)                                                                                                                                                                                                                            |
+| `f6`        | Con la cuenta abierta en la captura, la principal **transfiere** lo enviado a otra cuenta (desaparece de la captura al momento; lo por enviar sigue) y después la **combina** («La cuenta ya no está abierta»; lo capturado sigue y se manda a una cuenta nueva sin duplicar en ella)                                                                                                                   |
+| `f7a`–`f7c` | **Bloqueo largo del PIN** (A1-D16): el quinto fallo es el tercer bloqueo → «Tu PIN está bloqueado. Pide a un administrador…», ni el PIN correcto entra, `pin_requires_unlock` en Go, la lista dice «PIN bloqueado»; sin red, «Sin conexión no puede entrar» (`OfflineClosed`); la principal lo desbloquea y Beto entra (la entrada sin conexión se abre de nuevo)                                       |
+| `f8`        | La actividad se **recrea sin sus ViewModel** (se vacía su almacén al destruirse: el camino de restauración de la muerte del proceso para lo de pantalla) con la captura y el personalizador abiertos: lo capturado sigue (Room); «Cambiar» vuelve con la partida guardada (defecto corregido); una partida nueva a medio personalizar vuelve con la configuración original (limitación, en el registro) |
+| `f9`        | Plazo de inactividad de 30 s (Administración › Terminales por la API); **Atrás en Mesas** cierra la actividad en Android 8 y 17 («actividades vivas 0»; en Android 13 la manda atrás) y al volver tras el plazo pide el PIN en los cuatro; con una captura en curso no se bloquea                                                                                                                       |
+| `f10`       | **Tema oscuro** (`cmd uimode night yes`): capturas de meseros, PIN, Mesas en lista y mapa, la mesa, la captura, el personalizador, la cuenta, «Pedidos pendientes» y el menú del mesero (el guion las copia a `<salida>/screens`); en cada pantalla, todo lo que se toca mide ≥ 48 dp (zona táctil de Compose)                                                                                          |
+
+### Matriz de resultados (§9)
+
+Cada suite de punta a punta con su **propio Go temporal nuevo** (`--suite all`: access 1–5, access 6–7 con otra
+identidad, catalog, waiter y field); números de los resúmenes del guion (pasos aprobados / pasos) y de los XML de las
+instrumentadas (`connectedDebugAndroidTest`, contados por módulo con `$SP/tmp-F/scripts/count.py`; `feature:access` y
+`feature:waiter` no tienen pruebas instrumentadas). Resultados en `$SP/tmp-F/matrix/<emulador>/`.
+
+| Prueba                                             | `Pixel_Tablet` (Android 17)                                                               | `Pixel_8` (Android 17)                                                  | `ADEL_A1_Tablet_API26` (Android 8)                                                                | `ADEL_A1_Phone_API33` (Android 13) |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| access (`AccessOnGoTest`, 7 pasos, dos servidores) | **7/7**                                                                                   | **7/7**                                                                 | **7/7**                                                                                           | **7/7**                            |
+| catalog (`CatalogOnGoTest`, 3 etapas)              | **3/3**                                                                                   | **3/3**                                                                 | **3/3**                                                                                           | **3/3**                            |
+| waiter (`WaiterModeOnGoTest`, 10 pasos)            | **10/10** (8/10 en el carril con `Pixel_8` en paralelo: F6 y F7; repetida sola: aprobada) | **10/10**                                                               | **10/10**                                                                                         | **10/10**                          |
+| field (`FieldOnGoTest`, 13 instrumentaciones)      | **13/13** (10/13 en el carril: F6; repetida sola: aprobada)                               | **13/13** (11/13 en el carril; `f8` y `f9` repetidos aparte: aprobados) | **13/13** (la primera corrida falló entera por la revisión de 48 dp, corregida en `db63688`)      | **13/13**                          |
+| Instrumentadas de los módulos (XML)                | **84, 0 fallas**, 35 omitidas (en el carril: 1 falla por F6, `AccessScreensTest`)         | **84 pruebas, 0 fallas**, 35 omitidas                                   | **84, 0 fallas**, 37 omitidas                                                                     | **84, 0 fallas**, 35 omitidas      |
+| APK `release` (R8 sin ofuscar, llave desechable)   | —                                                                                         | **no verificado** (incidente)                                           | **aprobada**: empareja, entra con PIN, pedido sin conexión que WorkManager envía al volver la red | **aprobada** (lo mismo)            |
+
+Instrumentadas por módulo en cada emulador: `app` 53 (33 omitidas: las 33 de punta a punta sin sus argumentos; en
+Android 8, 35: además `ConnectionOnDeviceTest.modoAvionCambiaElIndicador` y
+`WorkNetworkOnDeviceTest.conRedSinInternetSoloCorreElTrabajoSinRestriccion`, que necesitan órdenes de shell de
+Android 11+), `core:data` 18 (2 omitidas,
+`ServerApiOnDeviceTest`), `core:ui` 13. Las omitidas de punta a punta son exactamente las que el guion corre con
+argumentos en las filas de arriba.
+
+Commits probados: `Pixel_8` en `6595c2d` (y `f1`/`f8`/`f9` repetidos con el arreglo de las observaciones de `b9557c4`);
+`ADEL_A1_Phone_API33` en `b9557c4` (instrumentadas en `db63688`); `ADEL_A1_Tablet_API26` en `b9557c4` (field e
+instrumentadas en `db63688`); `Pixel_Tablet`: access y catalog en `6595c2d`, waiter, field e instrumentadas repetidas en `db63688` con el emulador recién encendido y solo. Entre esos commits solo cambiaron pruebas, salvo
+`13af08c` (anterior a todos).
+
+**JVM y Robolectric** (`:core:domain:test testDebugUnitTest lintDebug --rerun-tasks`, una vez, en `db63688`): **220 pruebas, 0
+fallas**; Lint sin errores ni avisos.
+
+### Rendimiento (`FieldOnGoTest.f2` y `f3`, `CatalogOnGoTest`; emuladores sobre la Mac)
+
+Medido dentro de la instrumentación (el «arranque en frío» va desde que el sistema crea el proceso, con el ejecutor de
+pruebas incluido, hasta que se ve la lista de meseros; «Displayed» es la línea del sistema para la actividad). Catálogo
+de 303 productos y 40 mesas. La memoria es el PSS total de `dumpsys meminfo` del proceso, que también carga el código
+de las pruebas. `ADEL_A1_Tablet_API26` y `ADEL_A1_Phone_API33` corrieron con otro emulador encendido; `Pixel_8` y
+`Pixel_Tablet`, solos (`Pixel_8` en su corrida 4; en el carril con otro emulador y Gradle subió a 4.9 s de arranque y 4.1 s para ver la mesa 40).
+
+| Medida                                                      | `ADEL_A1_Tablet_API26` (Android 8, 2 GiB) | `ADEL_A1_Phone_API33`   | `Pixel_8` (Android 17)  | `Pixel_Tablet` (Android 17) |
+| ----------------------------------------------------------- | ----------------------------------------- | ----------------------- | ----------------------- | --------------------------- |
+| Arranque en frío (proceso → lista de meseros)               | **1418 ms**                               | 1919 ms                 | 2723 ms                 | 2491 ms                     |
+| Abrir la actividad → lista de meseros / «Displayed»         | 557 ms / +377 ms                          | 1174 ms / +570 ms       | 1817 ms / +617 ms       | 1567 ms / +784 ms           |
+| APK `release`, `am start -W` en frío (`TotalTime`)          | **452–543 ms**                            | 1118 ms                 | — (ver incidente)       | —                           |
+| PIN (con conexión) → Mesas con la primera mesa              | 826 ms                                    | 926 ms                  | 950 ms                  | 946 ms                      |
+| PIN → la mesa 40 a la vista (desplazando la lista)          | 1394 ms                                   | 1620 ms                 | 1684 ms                 | 1771 ms                     |
+| «Nueva cuenta» → catálogo de ~300 productos a la vista      | 249 ms                                    | 269 ms                  | 300 ms                  | 367 ms                      |
+| «Enviar a cocina» → «Recibido por el restaurante»           | 309 ms                                    | 307 ms                  | 308 ms                  | 307 ms                      |
+| Cocina «En preparación» / «Listo» → visto por el mesero     | 643 / 617 ms                              | 908 / 667 ms            | 925 / 649 ms            | 924 / 650 ms                |
+| Descarga completa del catálogo (303) / búsqueda sin acentos | 222 ms / 0.63 ms                          | 333 ms / 0.70 ms        | 804 ms / 0.58 ms        | 794 ms / 0.82 ms            |
+| Memoria (PSS total; Java / nativa)                          | **≈ 87 MiB** (13 / 15 MiB)                | ≈ 142 MiB (14 / 22 MiB) | ≈ 140 MiB (20 / 17 MiB) | ≈ 141 MiB (21 / 16 MiB)     |
+
+Nada se vio lento en la tableta de Android 8: es el emulador más rápido de los cuatro (sistema más ligero y 1280 × 800 a
+160 dpi, todos arm64 con 2 GiB); un equipo físico económico será más lento (no verificado). Lo más lento de la tabla es la entrada con PIN
+(el Argon2id de Go en la Mac, ≈ 0.8–0.9 s en todos). Con dos emuladores y Gradle compilando a la vez, la entrada con PIN
+llegó a tardar 12 s y el lanzador del emulador dejó de responder (F6): es la Mac, no la aplicación.
+
+### Defectos y hallazgos
+
+| #   | Qué                                                                                                                                                                                                                                                                                                                           | Escenario                                                                                                                                                                                                                 | Estado                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1  | **«Cambiar» tras la muerte del proceso reemplazaba la partida con el producto original** (`CaptureViewModel.restoreEditing` guardaba solo el producto y la partida, y volvía con cantidad 1 y sin personalización en modo «Guardar el cambio»)                                                                                | Ana toca «Cambiar» en «2 × Tacos, bien dorados»; Android cierra la aplicación en segundo plano; al volver, el personalizador muestra 1 taco sin observaciones; «Guardar el cambio» la reemplazaría en silencio            | **Corregido** (`13af08c`, `feature/waiter/.../capture/CaptureViewModel.kt`: `restoreChangedLine`): vuelve la partida guardada en la captura (Room) o, si ya no existe, se cierra el personalizador. Prueba JVM `WaiterViewModelsTest.cambiarUnaPartidaTrasCerrarseLaAplicacionVuelveConLaPartidaGuardada` y en el dispositivo `FieldOnGoTest.f8`                                                         |
+| F2  | Una **partida nueva a medio personalizar** vuelve con la configuración original tras la muerte del proceso (lo capturado no se pierde: está en Room)                                                                                                                                                                          | Ana elige 3 hamburguesas «sin cebolla» sin tocar «Agregar»; Android cierra la aplicación; al volver ve 1 hamburguesa sin observaciones                                                                                    | **Limitación conocida, sin corregir** (ya anotada en las fases D y E): guardar la personalización en curso en `SavedStateHandle` necesita serializar `LineSelection` desde `feature:waiter` (sin `kotlinx.serialization` hoy); no es pequeño. Queda en el registro de `f8`                                                                                                                               |
+| F3  | **Cuenta combinada desde la principal** con lo capturado guardado en su borrador: Go mueve esos renglones (mismos ids) al borrador de la cuenta destino; la captura dice «La cuenta ya no está abierta» y con «Abrir una cuenta nueva en la mesa» los manda a una cuenta nueva **y siguen «por enviar» en la cuenta destino** | `f6`: tras combinar, el borrador de la cuenta destino tiene el renglón de Ana; después de enviarlo a la cuenta nueva, la malteada sigue por enviar en la destino (1 renglón): si alguien envía esa cuenta, sale dos veces | **Es M3 de la revisión R6** (ya decidido, A1-D19): comprobado aquí contra Go en el camino de la captura (R6 lo había leído sin ejecutar). Sin corregir aquí. La prueba no da por bueno el duplicado: comprueba lo que debe valer (la app lo nota y no pierde lo capturado) y deja la evidencia en el registro                                                                                            |
+| F4  | En el **mapa de Mesas del teléfono**, con 40 mesas en el lienzo, los nombres quedan como «M…»                                                                                                                                                                                                                                 | `05-mesas-mapa.png` de `Pixel_8`: 8 columnas de mesas de ~100 px; no se distinguen «Mesa F1» y «Mesa F12»                                                                                                                 | Observación de diseño (no defecto): el mapa escala el lienzo de Go al ancho; en teléfono convendría el número corto o permitir acercar. Para el propietario o la A2                                                                                                                                                                                                                                      |
+| F5  | El orden de la lista de Mesas es alfabético («Mesa F1, F10, F11, …, F19, F2»)                                                                                                                                                                                                                                                 | `04-mesas-lista.png`                                                                                                                                                                                                      | Observación: es el orden de Go (por nombre); igual en el escritorio. Sin cambio                                                                                                                                                                                                                                                                                                                          |
+| F6  | **Entorno**: con dos emuladores y Gradle a la vez, el emulador de tableta (Android 17) muestra «Pixel Launcher isn't responding»; el diálogo se queda con el foco y la tecla Atrás inyectada por la instrumentación no llega a la aplicación (y Espresso falla con «root … has-window-focus=false»)                           | Fallas de `w2`, `f4`, `f9`, `f10` y `AccessScreensTest.buscarElServidorYElCodigoEnGrande` en `Pixel_Tablet` (lane con `Pixel_8` en paralelo); capturas con el diálogo                                                     | No es de la aplicación. `SystemDialogs` cierra ese diálogo con «Wait» antes de Atrás (`b9557c4`) y antes de cada captura (`db63688`); waiter, field e instrumentadas de `Pixel_Tablet` se repitieron con el emulador recién encendido y solo: aprobadas. Las fallas de Atrás de una corrida anterior en `Pixel_8` (`f4`, `f5a`, `f6`) probablemente fueron lo mismo (no se capturó la pantalla entonces) |
+| F7  | **Entorno**: dos pasos sin ningún resultado (`am instrument` y `logcat` vacíos) a la misma hora en los dos emuladores                                                                                                                                                                                                         | `Pixel_8 f9` y `Pixel_Tablet w6` (≈ 11:11)                                                                                                                                                                                | Probable interrupción de `adb` con dos carriles a la vez (no se averiguó más); repetidos aparte y aprobados                                                                                                                                                                                                                                                                                              |
+
+### Decisiones (con su porqué)
+
+1. **`--suite all` con una orden externa para el servidor** (`ADELPOS_E2E_NEW_SERVER`): el guion del repositorio no
+   conoce el arnés (`iso.sh`) ni el clúster temporal, pero «un servidor nuevo por suite y emulador» es necesario (el
+   asistente es de una sola vez, el límite de emparejamiento es de 5 por origen cada 10 minutos y cuenta todo el
+   tráfico de los emuladores, y `catalog` cuenta los productos). La orden imprime las variables y el guion vuelve a
+   pasar todas las guardas con cada servidor.
+2. **La baja del producto por «Quitar datos de prueba»** y no por SQL: es la única API de Go que borra un producto, y
+   la firma `FILETE` ya es «de prueba» para Go (no se cambió `backend/`). La época sí sigue en SQL (Go no la expone;
+   la cambia solo una restauración).
+3. **Bloqueo largo con la serie adelantada en la base temporal** (lo permitía el encargo): tres bloqueos reales tardan
+   más de 10 minutos por emulador. El tercer bloqueo y todo lo que sigue (pantallas, entrada sin conexión cerrada,
+   desbloqueo) es real contra Go.
+4. **«Muerte del proceso» dentro de la instrumentación**: `am instrument` detiene la aplicación al empezar y terminar
+   cada paso (se pierde el estado guardado de la actividad) y no hay orden de shell para «No conservar actividades»
+   (`settings put global always_finish_activities 1` no tuvo efecto en Android 17). `f8` recrea la actividad y vacía
+   su almacén de ViewModel al destruirse, después de que guardó su estado: es lo que reconstruye Android tras la
+   muerte del proceso (pila de navegación y `SavedStateHandle`), sin el contenedor de la aplicación.
+5. **Corregir solo F1**: pequeño y claro (una partida guardada podía reemplazarse en silencio). F2 (personalización en
+   curso) necesita serializar `LineSelection` en `feature:waiter`: se deja anotado. F3 es M3 (A1-D19, otro agente).
+6. **APK `release` solo con una salvaguarda**: después del incidente, el guion se detiene si la búsqueda muestra
+   cualquier servidor; por eso no se repitió en `Pixel_8`.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                                    | Dónde                                         | Resultado                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| JVM + Robolectric SDK 36 + Lint (`:core:domain:test testDebugUnitTest lintDebug --rerun-tasks`)        | Mac, `db63688`                                | **220 pruebas, 0 fallas** (dominio 94, datos 107, ui 9, access 6, waiter 4 —la nueva de F1—); Lint sin errores ni avisos (3 sugerencias informativas)                                                                                                                                                                                                 |
+| `connectedDebugAndroidTest` (XML contados por módulo)                                                  | los cuatro emuladores                         | **84 pruebas, 0 fallas** en cada uno (omitidas: 35, o 37 en Android 8); detalle en la matriz                                                                                                                                                                                                                                                          |
+| `scripts/android-e2e.sh --suite all` (un Go temporal nuevo por parte)                                  | los cuatro emuladores                         | access **7/7**, catalog **3/3**, waiter **10/10** y field **13/13** en cada uno (con las repeticiones de la matriz)                                                                                                                                                                                                                                   |
+| `CatalogOnGoTest` con la baja por la API (primera corrida de la suite nueva)                           | `Pixel_Tablet`                                | 3/3                                                                                                                                                                                                                                                                                                                                                   |
+| APK `release` firmado con una llave desechable del scratchpad (2.3 MiB; la llave se borró al terminar) | `ADEL_A1_Tablet_API26`, `ADEL_A1_Phone_API33` | Aprobada en los dos (emparejar por dirección, PIN, pedido sin conexión que WorkManager envía al volver la red, una sola partida en Go). `Pixel_8`: incidente, sin prueba                                                                                                                                                                              |
+| Guardas del guion                                                                                      | Mac                                           | Se niega con su mensaje, antes de cualquier SQL o instrumentación, con la base en el puerto 55432, con una base que no es `adel_pos_test_…`, con un host que no es la Mac, con otro esquema y con la base **de otro servidor temporal** («no es la del servidor que se prueba»). Las guardas anteriores (8181/8443, `test_mode`, huella) no cambiaron |
+| `iso.sh format`, `fmt-check`, `ktfmtCheck` antes de cada commit; md5 de `docs/etapas/*.md`             | árbol F                                       | Correctos; md5 iguales antes y después                                                                                                                                                                                                                                                                                                                |
+
+### No verificado
+
+- **Dispositivo físico** (no hay uno conectado). Repetir allí: la búsqueda NSD real del servidor (emparejar eligiéndolo
+  de la lista y el cambio de IP por `server_id` y huella), la wifi del restaurante **sin internet** (WorkManager sin
+  restricción de red y el indicador), Doze largo con la aplicación cerrada (el trabajo periódico de 15 minutos y la
+  espera exponencial larga), el costo real de PBKDF2 y de la entrada con PIN, la memoria en una tableta de 2 GiB real, y
+  el flujo principal (emparejar, entrar, capturar en línea y sin conexión, enviar, revisión) en teléfono y tableta.
+- **El APK `release` en `Pixel_8` (Android 17)**: se detuvo por el incidente; corrió en Android 8 y 13.
+- **La muerte real del proceso**: `am instrument` detiene la aplicación (`force-stop`) al empezar y al terminar cada
+  paso, así que el estado de pantalla guardado no sobrevive entre pasos; `f8` lo simula dentro del proceso recreando
+  la actividad sin sus ViewModel. Que lo capturado sobrevive a un proceso nuevo sí lo cubren todos los pasos (cada uno
+  es un proceso nuevo: `w7a` → `w7b`, `f4`).
+- **El bloqueo largo con tres bloqueos reales** de 5 minutos: los dos primeros de la serie se escriben en la base
+  temporal; el tercero y todo lo que sigue sí es real contra Go.
+- **El SQL de la época del catálogo** sigue siendo SQL (no hay API); una restauración real del respaldo no se probó.
+- La personalización en curso tras la muerte del proceso (F2, limitación).
+
+### Para el coordinador
+
+1. **Incidente** (arriba): revisar en la computadora principal real que no quedó ninguna solicitud de
+   emparejamiento; decidir cómo (o si) se prueba el APK `release` en Android 17 en la Fase G. Sugerencia: con la
+   salvaguarda nueva y, si el anuncio real aparece, cerrar la aplicación (el guion ya lo hace) y dejarlo solo en
+   Android 8 y 13.
+2. **M3 (R6) comprobado contra Go** en el camino de la captura (F3): la corrección A1-D19 puede usar `FieldOnGoTest.f6`
+   como prueba; hoy registra cuántos renglones quedan «por enviar» en la cuenta destino (1) y no lo da por bueno. Al
+   corregirse, conviene volverla una aserción (0 en la destino o el pedido en la cuenta combinada).
+3. **Repetir lo afectado tras A1-D18/A1-D19** (como pediste): `scripts/android-e2e.sh --suite waiter` y `--suite field`
+   (y `access` si cambia la entrada) en un teléfono y una tableta.
+4. Observaciones de interfaz para el propietario o la A2 (no se cambiaron): el mapa de Mesas en el teléfono con muchas
+   mesas (nombres «M…», F4); en la tableta de Android 8, «Buscar el servidor» abre el teclado sobre el nombre al
+   entrar y tapa la dirección (el foco inicial va al primer campo; `stateHidden` lo evitaría).
+5. **Para `CLAUDE.md`/`AGENTS.md`** (no los edité): las pruebas de punta a punta corren con
+   `scripts/android-e2e.sh --suite all` y `ADELPOS_E2E_NEW_SERVER`; nunca abrir el APK `release` ni la aplicación normal
+   en un emulador de Android 17 sin una salvaguarda que se detenga si la lista muestra un servidor; en emuladores
+   cargados, el diálogo «… isn't responding» del lanzador se lleva el foco (`SystemDialogs`).
+6. La Fase G puede reutilizar `$SP/tmp-F/scripts/release_smoke.py` (fuera del repositorio) para el APK de prueba.
+
+**Al cerrar la Fase F** (rama `etapa-a1-f` fusionada en `etapa-a1-android`):
+
+- **Incidente con el servicio real (17/11/2026, 11:00–11:01)**: la prueba del APK `release` en `Pixel_8` (Android 17,
+  cuyo emulador ve los anuncios mDNS de la red de la Mac) abrió la app sin `AdelTestRunner`; el guion tocó «Pedir
+  código» del anuncio real y la app mandó **una** petición de emparejamiento al servicio real, que respondió 426 (el
+  servicio está en 0.11.0, cuya versión mínima única de cliente es 0.10.0, y la app es 0.1.0). Comprobado en el código de
+  la 0.11.0 (`main`, `backend/internal/httpapi/router.go:158` y `clientversion.go:120-175`): la versión del cliente se
+  revisa **antes** de llegar a cualquier ruta salvo salud, versión y contrato, así que la petición no llegó al
+  emparejamiento ni escribió nada en la base real. El coordinador no pudo consultar la base ni la bitácora del servicio
+  (la lectura se negó por permisos); queda pedirle al propietario que mire Administración › Sistema › Terminales. El
+  guion ya no toca ningún servidor de la lista y se detiene y desinstala la app si aparece alguno; el APK `release` en
+  Android 17 se repite en la Fase G solo con ese guion corregido.
+- Se acepta la corrección `13af08c` del personalizador (con su prueba). Quedan para las correcciones de A1-D19 (en curso)
+  el M3 de R6, comprobado ahora contra Go, y la repetición de las suites `waiter` y `field`; las dos observaciones de
+  interfaz (nombres cortados en el mapa del teléfono con 40 mesas y el teclado que tapa la dirección en Android 8) las
+  hace el agente de esas correcciones si son sencillas.
+- **Rama renombrada (17/11/2026, 11:19)**: en el repositorio principal, la rama `etapa-a1-android` quedó renombrada a
+  `main` (reemplazando el `main` local de la 9H). Fue un movimiento del propietario por error desde VS Code (lo iba a
+  hacer en otro proyecto). No se subió nada (`origin/main` seguía en `24065f3`) ni hubo commits después; el coordinador
+  restauró `main` en `24065f3` (con su seguimiento de `origin/main`) y `etapa-a1-android` en `bd7beb4`, y le quitó el
+  seguimiento de `origin/main` que había heredado.
