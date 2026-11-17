@@ -128,6 +128,7 @@
     <!-- Versiones (§4). -->
     <string name="update_app_title">Actualiza esta aplicación</string>
     <string name="update_app_text">La computadora principal del restaurante necesita una versión más reciente de AD-EL POS en %1$s. Instala la versión nueva y vuelve a abrirla.</string>
+    <string name="update_app_pending">Estos pedidos todavía no se envían: instala la versión nueva encima de la actual y se enviarán solos. No desinstales la aplicación de %1$s, porque se perderían.</string>
     <string name="update_server_title">Actualiza el servidor del restaurante</string>
     <string name="update_server_text">La computadora principal del restaurante tiene una versión anterior de AD-EL POS que no permite entrar con PIN en los teléfonos y tabletas. Pide que la actualicen.</string>
     <string name="update_check_again">Volver a comprobar</string>
