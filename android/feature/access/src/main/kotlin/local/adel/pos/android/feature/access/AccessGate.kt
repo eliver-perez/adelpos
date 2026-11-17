@@ -89,6 +89,7 @@ fun AccessContent(
                 minClientVersion = status.minClientVersion,
                 onCheckAgain = actions::recheck,
                 modifier = modifier,
+                loadPendingOrders = actions::pendingOrders,
             )
         is DeviceStatus.UpdateServer ->
             UpdateServerScreen(
