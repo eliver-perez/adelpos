@@ -2761,3 +2761,182 @@ M2, M3 y los bajos B2, B3, B4 y B5 (y O1 con M1); B1, B6, O2–O4 quedan anotado
   captura usa la diferencia con la hora de Go; el borrado vuelve a programar el envío periódico.
 - Las correcciones del servidor las hace el agente de la Fase E del servidor y, después, las del dispositivo el de la Fase
   E del dispositivo; la Fase F sigue en paralelo y no corrige estos hallazgos.
+
+## Correcciones de la revisión R6 · Servidor
+
+Un agente, en su propio árbol de trabajo (`etapa-a1-es-fix`, desde `etapa-a1-android` en `8c6d2a7`), en paralelo con la
+Fase F (otro agente en `android/` y `scripts/`). 17/11/2026. Encargo: **A1-D18** («el servidor nunca repite lo que ya
+entró»). **Sin migración** (la columna `restaurant_items.draft_item_id` de la sección E ya basta), sin cambio de versión
+(0.12.0, esquema 25) y sin cambios en el escritorio. Pruebas en copias aisladas (`ISO_TAG=E`): clúster temporal 55499
+con una base `adel_pos_test_e_*` por paquete; sin Go temporal, Playwright ni emuladores. **No se tocó la instalación
+real** ni `android/`, `scripts/`, `CLAUDE.md` ni `AGENTS.md`; `docs/etapas/*.md` con el mismo md5 antes y después.
+
+Commits en `etapa-a1-es-fix`:
+
+- `74edb74` — servidor: A1-D18 en `operations/offline_orders.go` y `operations/handler.go`, con los mensajes nuevos en
+  `TestStageA1WaiterMode`.
+- `3019c5b` — prueba `TestStageA1OfflineNeverRepeats` (`operations`).
+- `268bc89` — contrato v1 (`openapi.json`), `TestContractV1` (`contractOfflineNeverRepeats`), `docs/API_V1.md`,
+  `API_CONTRACTS.md` y `docs/RESTAURANT_OPERATIONS.md`.
+
+Los tres compilan y pasan `go vet -tags=integration` por sí solos (`git archive` de cada uno). `TestContractV1` queda
+al día en el tercero: en `74edb74` su paso del pedido sin conexión todavía esperaba el comportamiento anterior.
+
+### Qué cambió
+
+Todo en `POST restaurant/offline-orders` (`submitOfflineOrder`), compatible y en el contrato v1.
+
+**1. La misma clave que un «Enviar a cocina» ya aplicado** — `operations/handler.go:328` (`replay`) y
+`operations/offline_orders.go:922` (`confirmedAccountOf`) y `:938` (`offlineAlreadyConfirmed`):
+
+- Cómo se guardan las claves: `app.restaurant_operations` (id = `operation_id`, `actor_id`, `device_id`, `route` =
+  «método ruta», huella y respuesta) es **común** a `operations`, `kitchen` y `payments`; `replay` corre dentro del
+  candado exclusivo 7820148305, después de comprobar los permisos de la ruta.
+- Regla nueva, solo si **todo** se cumple: la ruta actual es `POST restaurant/offline-orders`; la guardada es
+  exactamente `POST restaurant/accounts/{uuid}/confirm`; el mismo usuario **y** el mismo dispositivo (con sesión o con
+  la credencial de envío); `destination.account_id` es esa cuenta; y existe el pedido de la confirmación
+  (`restaurant_orders.operation_id` = la clave, en esa cuenta). Entonces **409 `OFFLINE_ORDER_ALREADY_ACCEPTED`** con
+  `details.origin: "confirm_draft"` y `details.result` en la forma de `OfflineOrderResult` (el pedido de la
+  confirmación, la cuenta vigente, `already_sent_item_ids` con las partidas del pedido que estaban en él), **sin
+  escribir nada** (se revierte). Lee la cuenta con `authorizeAccount` (para llevar exige `takeaway.read`).
+- Sin agujero: otra cuenta, una mesa, otro usuario, otro dispositivo u otra ruta guardada (guardar el borrador, abrir la
+  cuenta, cocina, cobros) siguen en el `IDEMPOTENCY_CONFLICT` de siempre, sin datos. El 409 de una clave que ya entró
+  como pedido sin conexión agrega `details.origin: "offline_order"` (aditivo).
+
+**2. Renglones del borrador con el id de una partida** — `diagnoseDraftOverlap` (`offline_orders.go:562`), que sustituye
+a `diagnoseReplacedDraft` de la Fase E:
+
+- Candidatos: primero los de `replaces_draft_items` (como los vio el dispositivo), después cada partida del pedido que
+  no nombra (el mismo id es el mismo renglón: lo genera el dispositivo).
+- En el borrador: se **quita** si está igual (producto, presentación, cantidad y personalización) **o si el último
+  guardado del borrador fue del mismo usuario y dispositivo** (`restaurant_draft_items.author_id`/`device_id`, que cada
+  guardado reescribe en todas las filas: entonces lo que hay es suyo). Si lo dejó distinto otra terminal,
+  `draft_item_changed` (aceptable; al confirmar, el renglón ajeno se queda, como en la Fase E).
+- Ya enviado: ver 3. Nombrado, fuera del borrador y nunca enviado: `draft_item_removed`. Una partida nueva no es cambio.
+
+**3. Confirmar `draft_item_sent` es «enviar lo demás»** — `sentDraftItem` (`:631`), `pendingOfflineItems` (`:418`),
+`diagnoseOffline` y `acceptOffline` (`:814`):
+
+- Una partida del pedido (o un renglón de `replaces_draft_items`) cuyo id ya está en una partida confirmada
+  (`restaurant_items.draft_item_id`, en cualquier cuenta: así también se reconoce tras transferir o combinar) es
+  `draft_item_sent`, aceptable. Mensaje nuevo: «Papas: ya se envió a cocina desde otra terminal y no se vuelve a
+  enviar. Si confirmas, se envía lo demás del pedido.» (o «ya se había enviado a cocina desde este dispositivo…»).
+- Esas partidas **no se cotizan** (ni sus cambios de precio) **ni se confirman**; la respuesta 200 las lista en
+  **`already_sent_item_ids`** (propiedad nueva de `OfflineOrderResult`).
+- **Si no queda nada**: 200 `status: "accepted"` sin pedido nuevo; `order_id` = el último pedido en que entraron; sin
+  `touch` (la revisión de la cuenta no sube), sin evento `order.confirmed`; la clave se guarda con esa respuesta (el
+  reintento devuelve lo mismo). Auditoría `restaurant.offline_order.accepted` con `new_order: false` y
+  `already_sent_item_ids`.
+
+**4. Pedido a una mesa con las partidas en una cuenta abierta de esa mesa** — `tableAccountsWithItems` (`:498`) en
+`diagnoseOfflineTable`:
+
+- Si alguna partida está en el borrador de una cuenta abierta de la mesa, o ya se envió en una (por la cuenta original
+  del pedido o por sus unidades), el cambio bloqueante **`items_in_account`** (`acceptable: false`, `account_id` = la
+  cuenta, `now` = «folio N», mensaje «Lo que capturaste ya está en la cuenta «Mesa 3» (folio 12) de la mesa «Mesa 3».
+  Envía el pedido a esa cuenta.»), uno por cuenta, en lugar de `table_has_account` y del 400 genérico «la partida
+  pertenece a otra cuenta». `OfflineChange` agrega **`account_id`** (opcional, `omitempty`, solo en este cambio; está
+  en la estructura para que el eco de la confirmación siga pasando la decodificación estricta).
+- El dispositivo reenvía con **la misma clave** a `destination.account_id`; ahí aplican 2 y 3.
+
+**Contrato y documentación**: `openapi.json` (`OfflineChange.kind` + `items_in_account` y `account_id`;
+`OfflineOrderResult.already_sent_item_ids` y la descripción de `order_id`; `OfflineOrderAlreadyAccepted.details.origin`;
+descripciones de `submitOfflineOrder`, su 409 y `replaces_draft_items`), `docs/API_V1.md` (sección nueva «El servidor
+nunca repite lo que ya entró», con el JSON exacto del 409 de la clave de una confirmación), `API_CONTRACTS.md` («Etapa
+A1 · el servidor nunca repite lo que ya entró») y `docs/RESTAURANT_OPERATIONS.md`.
+
+### Decisiones (con su porqué)
+
+1. **«Último guardado propio» = se quita** (también para los renglones de `replaces_draft_items`). Es lo que corrige C1
+   aunque el mesero haya cambiado el renglón sin conexión después del guardado incierto: si el último que guardó el
+   borrador fue el mismo mesero desde el mismo dispositivo, el contenido es suyo y el pedido lo sustituye. Con otro
+   mesero en la misma tableta (autor distinto) o desde otra terminal, sigue siendo `draft_item_changed`: nunca se borra
+   en silencio lo de otro.
+2. **Lo ya enviado se reconoce en cualquier cuenta**: el id es del renglón que generó el dispositivo (UUID aleatorio);
+   una transferencia o una combinación no debe convertir un envío repetido en uno nuevo. Con la confirmación, la
+   cantidad de esa partida no se vuelve a enviar aunque el mesero la hubiera subido sin conexión: lo dice el mensaje y
+   puede capturar otra partida.
+3. **Todo ya enviado = 200 sin pedido nuevo** (no un 409): la cola necesita un «Recibido» y A1-D18 pide «responde como
+   aceptado». `order_id` sigue siendo un UUID (el pedido en que entraron) para no romper el esquema.
+4. **`draft_item_sent` sigue pidiendo confirmación** (el encargo dice «confirmar un `draft_item_sent` significa…»);
+   ahora confirmarlo nunca duplica.
+5. **`items_in_account` es bloqueante** (no se confirma): el pedido debe ir a otra cuenta; con su `account_id` el
+   dispositivo lo hace sin preguntar.
+
+### Forma final para el agente de Android
+
+- **Misma clave que `confirmDraft` (A1-D19)**, mismo usuario y dispositivo, `destination.account_id` = esa cuenta:
+  `409 {"error": {"code": "OFFLINE_ORDER_ALREADY_ACCEPTED", "message": "Este pedido ya había entrado al enviarlo a
+cocina y no se volvió a registrar.", "details": {"status": "already_accepted", "origin": "confirm_draft", "result":
+{"status": "accepted", "operation_id", "order_id" (el de la confirmación), "account_id", "catalog_version",
+"captured_catalog_version", "captured_at" (la del pedido), "received_at" (cuando entró la confirmación),
+"accepted_changes": [], "removed_draft_item_ids": [], "already_sent_item_ids": [ids del pedido que estaban en la
+confirmación], "bill"}}}}` → «Recibido por el restaurante». Otra cuenta, una mesa, otro usuario/dispositivo u otra
+  operación: `409 IDEMPOTENCY_CONFLICT` (sin `details`). El 409 por otro contenido de un pedido ya aceptado trae
+  `details.origin: "offline_order"`.
+- **Renglones guardados sin respuesta**: no hace falta nombrarlos en `replaces_draft_items` si la partida lleva el mismo
+  id; vuelven en `removed_draft_item_ids`. Si otra terminal los cambió: `draft_item_changed` (aceptable).
+- **Ya enviado**: cambio `{"kind": "draft_item_sent", "item_id": <id>, "product_id", "product_name", "before": null,
+"now": null, "acceptable": true, "message": "<producto>: ya se envió a cocina desde otra terminal y no se vuelve a
+enviar. Si confirmas, se envía lo demás del pedido."}` (o «…ya se había enviado a cocina desde este dispositivo…»). Al
+  confirmar (misma clave), 200 con `"already_sent_item_ids": [...]`; si son todas las partidas, no hubo pedido nuevo y
+  `order_id` es el pedido en que ya habían entrado.
+- **Mesa con las partidas en una cuenta suya**: `409 ORDER_REQUIRES_CONFIRMATION`, `requires_changes: true`, cambio
+  `{"kind": "items_in_account", "item_id": null, "product_id": null, "product_name": "", "before": null, "now": "folio
+12", "message": "Lo que capturaste ya está en la cuenta «…» (folio 12) de la mesa «…». Envía el pedido a esa
+cuenta.", "acceptable": false, "account_id": "<cuenta>"}` → reenviar **con la misma `operation_id`** a
+  `destination: {"account_id": "<cuenta>"}`.
+
+### Pruebas ejecutadas
+
+| Qué                                                                                     | Dónde                                                   | Resultado                                                                                                                                                                                                                                           |
+| --------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestStageA1OfflineNeverRepeats` (5 subpruebas) y `TestStageA1WaiterMode` (6), con `-v` | `internal/operations`, base `adel_pos_test_e_*`         | **PASS** las 11 (28 s)                                                                                                                                                                                                                              |
+| `TestR6Review` original del revisor contra este código                                  | copia desechable en `$SP/tmp-E`                         | **FALLA donde antes reproducía** (ya no hay duplicado); copia borrada                                                                                                                                                                               |
+| `go-int ./internal/apicontract` (`TestContractV1` con `contractOfflineNeverRepeats`)    | base `adel_pos_test_e_*`                                | **ok** (26 s), dos corridas                                                                                                                                                                                                                         |
+| `go-int ./internal/operations` completo                                                 | idem                                                    | **ok** (386 s)                                                                                                                                                                                                                                      |
+| `go-unit` (vet normal e integración, `test -race`, `GOOS=windows` build y vet)          | `iso.sh go-unit`                                        | 1.ª corrida: falla `TestCatalogImageCountsScansAfterStrayByteAfterSOI` (`catalog`, no tocado) por tiempo (573 ms > 500 ms) con la Mac cargada (promedio de carga ≈ 20–32 por la Fase F); esa prueba sola ×3: ok; **2.ª corrida completa: aprobado** |
+| `format`, `fmt-check`, `sync-check`                                                     | árbol `Esfix`                                           | Correctos                                                                                                                                                                                                                                           |
+| md5 de `docs/etapas/*.md`                                                               | antes y después de formatear, y contra `$SP/etapas.md5` | Idénticos                                                                                                                                                                                                                                           |
+| `go-int` de `administration` y `database`; Vitest, Playwright                           | —                                                       | No se corrieron: no se tocaron (sin migración ni escritorio)                                                                                                                                                                                        |
+
+`TestStageA1OfflineNeverRepeats` (`backend/internal/operations/stagea1_r6_test.go`, base propia) lleva las dos
+reproducciones del revisor (`TestR6Review` A1 y A3, que ya no se copian: se convirtieron en comprobaciones de lo
+correcto) y agrega cada punto:
+
+- **R6 A1**: apertura con el renglón que entró sin respuesta y pedido sin `replaces_draft_items` → 200, el renglón se
+  quita, entra una vez y el «Enviar a cocina» siguiente de otra terminal no tiene nada (400 «No hay productos
+  pendientes»); el mismo mesero lo cambió sin conexión (2 → 3) → se quita y entran 3; otra terminal lo cambió →
+  `draft_item_changed`, confirmado, el suyo se queda.
+- **R6 A3**: `confirmDraft` aplicado y pedido con otra clave → `draft_item_sent` con el mensaje nuevo; confirmado, entra
+  solo la partida nueva (`already_sent_item_ids`, una sola partida con ese id); todo ya enviado (sin nombrarlo) → 200
+  sin pedido nuevo, `order_id` = el de la confirmación, misma revisión; el reintento devuelve lo mismo.
+- **Misma clave**: 409 `OFFLINE_ORDER_ALREADY_ACCEPTED` `confirm_draft` con el pedido, la cuenta y la partida, sin
+  pedidos nuevos; la misma clave hacia otra cuenta, a una mesa, desde otro usuario y la de un guardado del borrador →
+  `IDEMPOTENCY_CONFLICT` sin el id del pedido.
+- **Mesa**: `items_in_account` con la cuenta y su folio, no confirmable; redirigido con la misma clave entra una vez;
+  ya enviadas también se reconocen.
+- **Credencial de envío**: misma clave de una confirmación de la tableta → ya aceptado; otra clave → `draft_item_sent`
+  sin repetir; renglón guardado desde la tableta y no nombrado → se quita.
+
+Además, el archivo original del revisor (`$SP/r6/tree/.../r6_review_test.go`), corrido contra este código en una copia
+desechable, **falla en sus dos subpruebas justo donde antes encontraba el defecto** («se esperaba el renglón todavía en
+el borrador: []» y «partidas confirmadas con el id del renglón: 1»): ya no se reproduce.
+
+### No verificado
+
+- La aplicación Android contra estos cambios (A1-D19, agente del dispositivo).
+- La liberación de cocina de un pedido sin partidas nuevas: no hay (no se crea pedido ni evento).
+- `go-int` de `administration` y `database`: no se tocaron (sin migración); quedan para la Fase G.
+
+### Para el coordinador
+
+- Sin cambios de reglas de negocio. Dos lecturas que conviene confirmar: el «último guardado propio» también se quita
+  cuando el renglón difiere (decisión 1) y lo ya enviado se reconoce en cualquier cuenta (decisión 2).
+- Quedan anotados (no son de A1-D18): una partida con el id de un renglón del borrador de **otra** cuenta (no de la
+  mesa) sigue siendo el 400 genérico; y un renglón ya enviado que alguien vuelve a guardar en el borrador con el mismo
+  id se trata como renglón del borrador (lo evita el dispositivo con A1-D19).
+- Para `CLAUDE.md` (no lo edité): §6, prueba nueva `TestStageA1OfflineNeverRepeats` (`operations`) y
+  `contractOfflineNeverRepeats` en `TestContractV1`; §15, A1-D18 implementada en `operations/offline_orders.go`.
+
+**Al cerrar las correcciones del servidor de R6** (rama `etapa-a1-es-fix` fusionada en `etapa-a1-android`): se aceptan las dos decisiones del agente: el último guardado propio (mismo mesero y mismo dispositivo) se quita aunque difiera del pedido, porque la versión sin conexión es la más reciente de ese mesero; y lo ya enviado se reconoce en cualquier cuenta, sin mandar la diferencia de una cantidad subida sin conexión (el mensaje lo dice). La falla de tiempo de `TestCatalogImageCountsScansAfterStrayByteAfterSOI` (tope de 500 ms en `catalog`, con la Mac muy cargada) no se repitió sola ni en la segunda corrida; la regresión de la Fase G se corre sin otras cargas.
