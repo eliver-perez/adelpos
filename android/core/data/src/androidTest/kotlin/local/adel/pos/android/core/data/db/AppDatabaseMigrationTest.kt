@@ -206,7 +206,7 @@ class AppDatabaseMigrationTest {
                 ),
             )
             assertArrayEquals(byteArrayOf(1, 2, 3), access.pairedServer()?.sealedDeviceToken)
-            assertEquals(4, database.openHelper.readableDatabase.version)
+            assertEquals(5, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }

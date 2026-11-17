@@ -477,8 +477,9 @@ class WaiterModeOnGoTest {
     @Test
     fun w9_guardadoSinRespuestaAntesDeEnviar() {
         val ids = loadIds()
-        // Una cuenta de la mesa 5 abierta en la principal, con algo ya enviado.
-        val accountId = openFromMain(ids.getValue("table5"), ids.getValue("shake"))
+        // Una cuenta de la mesa 5 abierta en la principal, con algo ya enviado (la malteada está
+        // agotada desde w5).
+        val accountId = openFromMain(ids.getValue("table5"), ids.getValue("tacos"))
         confirmFromMain(accountId)
         launch()
         enterAna()
@@ -625,7 +626,7 @@ class WaiterModeOnGoTest {
     fun w13c_cuentaCombinadaSeEnviaALaCuentaEnQueSeCombino() {
         val ids = loadIds()
         // Antes de que el pedido salga, la principal combina la cuenta en otra de la mesa 10.
-        val target = openFromMain(ids.getValue("table10"), ids.getValue("shake"))
+        val target = openFromMain(ids.getValue("table10"), ids.getValue("tacos"))
         confirmFromMain(target)
         mergeFromMain(ids.getValue("account9"), target)
         launch()
@@ -647,8 +648,10 @@ class WaiterModeOnGoTest {
             bill.getValue("lines").jsonArray.map {
                 it.jsonObject.getValue("request").jsonObject.text("product_id")
             }
+        // Lo de la principal (tacos) y el pedido del mesero (hamburguesa y tacos), una vez cada uno.
         assertEquals(1, products.count { it == ids.getValue("burger") })
-        assertEquals(1, products.count { it == ids.getValue("tacos") })
+        assertEquals(2, products.count { it == ids.getValue("tacos") })
+        assertEquals(3, products.size)
         assertEquals("Sin borrador repetido", 0, bill.getValue("draft").jsonArray.size)
     }
 
@@ -822,10 +825,15 @@ class WaiterModeOnGoTest {
         return false
     }
 
-    /** Toca el nodo con [tag], desplazando hasta él si está en una lista. */
+    /**
+     * Toca el nodo con [tag], desplazando hasta él si está en una lista (un botón de un diálogo no
+     * tiene contenedor que desplazar).
+     */
     private fun tap(tag: String) {
         waitFor(tag)
-        compose.onNodeWithTag(tag).performScrollTo().performClick()
+        val node = compose.onNodeWithTag(tag)
+        runCatching { node.performScrollTo() }
+        node.performClick()
     }
 
     private fun openTable(tableId: String) {

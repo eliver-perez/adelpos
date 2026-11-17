@@ -140,6 +140,7 @@ class WaiterScreensTest {
         compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasText("Beto: 2 pedidos por enviar"))
         compose.onNodeWithText("Beto: 2 pedidos por enviar").assertExists()
         compose.onNodeWithText("Su clave para enviar ya no vale", substring = true).assertExists()
+        compose.onNodeWithTag(TAG_PENDING).performScrollToNode(hasTestTag(TAG_RETRY_NOW))
         compose.onNodeWithTag(TAG_RETRY_NOW).assertIsEnabled().performClick()
         assertEquals(1, retried)
         // Sin nada «Por enviar», no hay qué reintentar.
