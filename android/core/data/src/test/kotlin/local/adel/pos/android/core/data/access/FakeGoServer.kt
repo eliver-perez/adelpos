@@ -33,7 +33,22 @@ class FakeGoServer(
 
     /** Meseros con PIN: id → (nombre, PIN, pin_version). */
     val waiters = linkedMapOf<String, Triple<String, String, Int>>()
+    /** PIN bloqueado (de todos los meseros) hasta esta hora RFC 3339. */
     var lockedUntil: String? = null
+
+    /** PIN bloqueado (de todos) hasta que lo desbloquee un administrador (A1-D16). */
+    var requiresUnlock = false
+
+    /**
+     * Cuántas entradas con PIN más responde 503 PIN_LOGIN_BUSY (muchas verificaciones a la vez).
+     */
+    var busyLogins = 0
+
+    /** Intentos de `pin-login` recibidos (también los ocupados y los rechazados). */
+    var pinLoginAttempts = 0
+
+    /** `X-Client-Kind` distinto del tipo del dispositivo: 400 CLIENT_KIND_MISMATCH en pin-login. */
+    var kindMismatch = false
     var revoked = false
     var forbidden = emptySet<String>()
     var pairingState = "pending"
@@ -159,9 +174,9 @@ class FakeGoServer(
     private fun pinUsersBody(): String {
         val users =
             waiters.entries.joinToString(",") { (id, value) ->
-                val locked = lockedUntil?.let { "\"$it\"" } ?: "null"
+                val locked = lockedUntil?.takeUnless { requiresUnlock }?.let { "\"$it\"" } ?: "null"
                 """{"id":"$id","name":"${value.first}","initial":"${value.first.take(1)}","color":"#3591d4",
-                |"pin_version":${value.third},"locked_until":$locked}"""
+                |"pin_version":${value.third},"locked_until":$locked,"requires_unlock":$requiresUnlock}"""
                     .trimMargin()
             }
         return """{"device":{"id":"$deviceId","name":"Tableta de la terraza","idle_lock_seconds":$idleLockSeconds},
@@ -172,9 +187,24 @@ class FakeGoServer(
     private fun pinLogin(body: String): MockResponse {
         val userId = Regex("\"user_id\":\"([^\"]+)\"").find(body)?.groupValues?.get(1)
         val pin = Regex("\"pin\":\"([^\"]+)\"").find(body)?.groupValues?.get(1)
+        pinLoginAttempts += 1
+        if (kindMismatch) {
+            return fail(400, "CLIENT_KIND_MISMATCH")
+        }
+        if (busyLogins > 0) {
+            busyLogins -= 1
+            return fail(503, "PIN_LOGIN_BUSY")
+        }
         val waiter = waiters[userId] ?: return fail(401, "PIN_INVALID")
+        if (requiresUnlock) {
+            return fail(429, "PIN_LOCKED", """{"locked_until":null,"requires_unlock":true}""")
+        }
         if (lockedUntil != null) {
-            return fail(429, "PIN_LOCKED", """{"locked_until":"$lockedUntil"}""")
+            return fail(
+                429,
+                "PIN_LOCKED",
+                """{"locked_until":"$lockedUntil","requires_unlock":false}""",
+            )
         }
         if (waiter.second != pin) {
             return fail(401, "PIN_INVALID")

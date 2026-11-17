@@ -12,7 +12,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -21,6 +20,7 @@ import local.adel.pos.android.core.domain.access.ActiveWaiter
 import local.adel.pos.android.core.domain.access.DeviceAccess
 import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.IdleLock
+import local.adel.pos.android.core.domain.access.UnsentOrder
 import local.adel.pos.android.core.domain.access.WaiterWorkGate
 import local.adel.pos.android.core.domain.connection.LinkState
 import local.adel.pos.android.core.domain.pairing.PairingFlow
@@ -29,7 +29,8 @@ import local.adel.pos.android.core.domain.pairing.PairingFlow
  * Lo que necesita la entrada al dispositivo. Lo arma `AppContainer` (inyección manual) y las
  * pruebas lo arman con implementaciones falsas.
  *
- * @param idleLock el mismo que avisa de cada toque de la pantalla (`MainActivity`).
+ * @param idleLock el del proceso (lo vigila `AppContainer`; `MainActivity` y los diálogos le avisan
+ *   de cada toque). Las pantallas no lo vigilan: volver a crearlas nunca reinicia el plazo.
  * @param wallClock hora del dispositivo, para mostrar «Intenta de nuevo a las 14:35».
  */
 class AccessDependencies(
@@ -43,9 +44,10 @@ class AccessDependencies(
 
 /**
  * Puerta de entrada de la aplicación: decide qué pantalla se ve según el estado del dispositivo
- * ([DeviceAccess.status]) y el mesero activo, vigila el bloqueo por inactividad (§3.2), vuelve a
- * comprobar el servidor al recuperar la red y cada minuto con la aplicación a la vista, y hace el
- * cambio rápido de mesero.
+ * ([DeviceAccess.status]) y el mesero activo, vuelve a comprobar el servidor al recuperar la red y
+ * cada minuto con la aplicación a la vista, y hace el cambio rápido de mesero. El bloqueo por
+ * inactividad **no** vive aquí sino en el proceso (`AppContainer.startIdleLock`; revisión R3, A2):
+ * esta pantalla se destruye y se vuelve a crear con el proceso vivo.
  */
 class AccessViewModel(private val dependencies: AccessDependencies) : ViewModel() {
     private val access = dependencies.access
@@ -69,23 +71,7 @@ class AccessViewModel(private val dependencies: AccessDependencies) : ViewModel(
                 .filter { it == LinkState.ONLINE }
                 .collect { access.recheck() }
         }
-        // Bloqueo por inactividad del mesero activo: al cambiar de mesero se vigila al nuevo.
-        viewModelScope.launch {
-            access.activeWaiter.collectLatest { waiter ->
-                if (waiter != null) {
-                    dependencies.idleLock.watch(
-                        userId = waiter.userId,
-                        timeoutSeconds = ::idleLockSeconds,
-                    ) {
-                        access.leave()
-                    }
-                }
-            }
-        }
     }
-
-    private fun idleLockSeconds(): Int =
-        (access.status.value as? DeviceStatus.Ready)?.idleLockSeconds ?: IdleLock.DEFAULT_SECONDS
 
     /** La aplicación pasó a primer plano: comprueba ya y después cada minuto. */
     fun onForeground() {
@@ -128,7 +114,13 @@ class AccessViewModel(private val dependencies: AccessDependencies) : ViewModel(
         viewModelScope.launch { access.recheck() }
     }
 
-    /** «Emparejar de nuevo» (confirmado): deja de usar el servidor emparejado. */
+    /** Pedidos sin enviar que pasarán a la bitácora con «Emparejar de nuevo». */
+    suspend fun pendingOrders(): List<UnsentOrder> = access.pendingOrders()
+
+    /**
+     * «Emparejar de nuevo» (confirmado): deja de usar el servidor emparejado y borra los datos de
+     * este dispositivo.
+     */
     fun repair() {
         viewModelScope.launch { access.forgetServer() }
     }

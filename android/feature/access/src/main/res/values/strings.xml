@@ -91,7 +91,12 @@
     <string name="entry_checking">Comprobando…</string>
     <string name="entry_wrong_pin">PIN incorrecto. Inténtalo de nuevo.</string>
     <string name="entry_locked">Demasiados intentos. Intenta de nuevo a las %1$s.</string>
-    <string name="entry_locked_admin">Demasiados intentos. Pide a un administrador que desbloquee tu PIN.</string>
+    <string name="entry_locked_admin">Tu PIN está bloqueado. Pide a un administrador que lo desbloquee.</string>
+    <string name="entry_locked_admin_short">PIN bloqueado: pide a un administrador que lo desbloquee</string>
+    <string name="entry_offline_closed">Sin conexión ya no puedes entrar en %1$s: hubo demasiados intentos o tu PIN está bloqueado. Conéctate a la red del restaurante y escribe tu PIN para entrar.</string>
+    <string name="entry_busy">La computadora principal está comprobando muchos PIN a la vez. Inténtalo de nuevo en unos segundos.</string>
+    <string name="entry_support_problem">%1$s tiene un problema de configuración que debe revisar soporte (código %2$s).</string>
+    <string name="entry_offline_closed_short">Sin conexión no puede entrar: entra con conexión</string>
     <string name="entry_not_allowed">No tienes permiso para entrar en los teléfonos y tabletas de meseros. Pídelo al administrador.</string>
     <string name="entry_unknown_offline">Sin conexión solo entran los meseros que ya entraron antes en %1$s. Conecta el dispositivo a la red del restaurante para entrar.</string>
     <string name="entry_failed">No se pudo entrar. Inténtalo de nuevo.</string>
@@ -103,6 +108,11 @@
     <string name="switch_blocked_text">Tienes pedidos sin enviar. Envíalos o revísalos antes de cambiar de mesero.</string>
     <string name="common_understood">Entendido</string>
 
+    <!-- Vuelve a escribir tu PIN (revisión R3, M3): el acceso del mesero activo dejó de valer. -->
+    <string name="reenter_title">Vuelve a escribir tu PIN, %1$s</string>
+    <string name="reenter_text">Tu sesión terminó o cambió tu PIN. Lo que estabas capturando y tus pedidos sin enviar se conservan.</string>
+    <string name="reenter_switch">Cambiar de mesero</string>
+
     <!-- Emparejar de nuevo (§4, como RepairTerminal del escritorio). -->
     <string name="repair_title">%1$s necesita emparejarse de nuevo</string>
     <string name="repair_identity_changed">El servidor del restaurante cambió su identidad y %1$s ya no puede comprobar que es el del restaurante. Por seguridad no se conecta: vuelve a emparejarla.</string>
@@ -112,7 +122,8 @@
     <string name="repair_action">Emparejar de nuevo</string>
     <string name="repair_check_again">Volver a comprobar</string>
     <string name="repair_confirm_title">Emparejar de nuevo</string>
-    <string name="repair_confirm_text">%1$s dejará de usar el servidor del restaurante con el que se emparejó. Después busca la computadora principal y pide un código nuevo. Los datos del restaurante no cambian.</string>
+    <string name="repair_confirm_text">%1$s dejará de usar el servidor del restaurante con el que se emparejó y borrará lo que guardó de él: su autorización, los meseros y sus PIN guardados, y el catálogo con sus imágenes. Los pedidos sin enviar pasan a la bitácora de este dispositivo. Después busca la computadora principal y pide un código nuevo. En la computadora principal no se borra nada.</string>
+    <string name="repair_confirm_pending">Estos pedidos no se enviaron y pasarán a la bitácora:</string>
 
     <!-- Versiones (§4). -->
     <string name="update_app_title">Actualiza esta aplicación</string>
@@ -127,7 +138,7 @@
 
     <!-- Dispositivo retirado (§3.2). -->
     <string name="retired_title">Este dispositivo fue retirado del restaurante</string>
-    <string name="retired_text">La computadora principal retiró %1$s. Se borraron sus datos y su autorización.</string>
+    <string name="retired_text">La computadora principal retiró %1$s. Se borraron su autorización, los meseros y sus PIN guardados, y el catálogo con sus imágenes.</string>
     <string name="retired_unsent">Este dispositivo fue retirado del restaurante; estos pedidos no se enviaron:</string>
     <string name="retired_log_kept">Quedan en la bitácora de este dispositivo hasta que la borres.</string>
     <string name="retired_pair_again">Emparejar de nuevo</string>

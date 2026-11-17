@@ -48,6 +48,8 @@ data class PinUserDto(
     val color: String? = null,
     @SerialName("pin_version") val pinVersion: Int,
     @SerialName("locked_until") val lockedUntil: String? = null,
+    /** A1-D16: bloqueado hasta que un administrador lo desbloquee (`locked_until` es null). */
+    @SerialName("requires_unlock") val requiresUnlock: Boolean = false,
 )
 
 /** Cuerpo de `POST auth/pin-login` (`pinLogin`). */

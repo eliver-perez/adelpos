@@ -79,6 +79,29 @@ class CatalogSyncTest {
     }
 
     @Test
+    fun borrarLosDatosDelDispositivoVaciaElCatalogoYLaSiguienteDescargaEsCompleta() = runBlocking {
+        mock.enqueue(json(200, fixture("full.json")))
+        repository.refreshNow()
+        mock.takeRequest()
+        assertTrue(repository.catalog.value.products.isNotEmpty())
+
+        // Retirar el dispositivo o emparejarlo de nuevo (DeviceDataWipe).
+        repository.eraseAll()
+        assertTrue(repository.catalog.value.products.isEmpty())
+        assertNull(repository.catalog.value.version)
+        assertNull(store.state())
+        assertEquals(0, store.productCount())
+        assertEquals(emptySet<String>(), store.referencedImageIds())
+
+        mock.enqueue(json(200, fixture("full.json")))
+        repository.refreshNow()
+        assertNull(
+            "sin versión guardada se descarga todo otra vez",
+            mock.takeRequest().url.queryParameter("since"),
+        )
+    }
+
+    @Test
     fun primeraDescargaCompletaConPreciosDeReferenciaYAgotados() = runBlocking {
         mock.enqueue(json(200, fixture("full.json")))
         val outcome = repository.refreshNow()

@@ -16,8 +16,10 @@ import local.adel.pos.android.core.domain.realtime.AccessInterruptions
  * La interfaz estrecha de la Fase D ([ServerAccess]) sobre la entrada al dispositivo de las fases B
  * y C ([AccessRepository]): hay conexión autorizada solo con el dispositivo listo y un mesero
  * activo **con sesión de Go** (uno que entró sin conexión no la tiene; su captura la valida Go al
- * enviar). Cambia al entrar, al cambiar de mesero y al salir, y el canal de tiempo real se vuelve a
- * abrir con la sesión nueva. La dirección se pide en cada uso (cambio de IP).
+ * enviar) y que no tenga que volver a escribir su PIN (su sesión terminó o dejó de valer). Las
+ * cabeceras son siempre las **de ese mesero** ([AccessRepository.requestHeaders] con su `user_id`;
+ * revisión R3, M5). Cambia al entrar, al cambiar de mesero y al salir, y el canal de tiempo real se
+ * vuelve a abrir con la sesión nueva. La dirección se pide en cada uso (cambio de IP).
  */
 class DeviceServerAccess(private val access: AccessRepository, scope: CoroutineScope) :
     ServerAccess {
@@ -26,10 +28,15 @@ class DeviceServerAccess(private val access: AccessRepository, scope: CoroutineS
             .stateIn(scope, SharingStarted.Eagerly, null)
 
     private fun authorized(status: DeviceStatus, waiter: ActiveWaiter?): AuthorizedServer? {
-        if (status !is DeviceStatus.Ready || waiter == null || !waiter.hasServerSession) {
+        if (
+            status !is DeviceStatus.Ready ||
+                waiter == null ||
+                !waiter.hasServerSession ||
+                waiter.mustReenterPin
+        ) {
             return null
         }
-        val headers = access.requestHeaders() ?: return null
+        val headers = access.requestHeaders(waiter.userId) ?: return null
         if (headers[AuthorizedServer.AUTHORIZATION_HEADER] == null) {
             return null
         }

@@ -54,21 +54,28 @@ aviso de platillos listos). Es **un cliente más del servidor del restaurante** 
     impiden solo los pedidos sin enviar del mesero actual («Por enviar», «Enviando», «Requiere tu revisión»;
     `blocksSwitch`): una captura en curso se queda guardada con su mesero, su sesión no se cierra y el siguiente no la
     ve; un «Cerrar sesión» explícito lo impiden ambas cosas (`blocksLogout`). Quien muestre esas acciones pregunta a
-    `WaiterWorkGate` antes de hacerlas.
+    `WaiterWorkGate` antes de hacerlas. Un acceso que deja de valer (`SESSION_*`, PIN cambiado,
+    `OFFLINE_CREDENTIAL_INVALID`) **nunca** saca al mesero ni pierde su trabajo: queda activo con `mustReenterPin` y la
+    raíz muestra «Vuelve a escribir tu PIN» encima de su pantalla (`ReenterPinRoute`).
 16. **Ninguna prueba abre la aplicación normal con la búsqueda automática en la red real**: las pruebas
     instrumentadas de `app` corren con `AdelTestRunner`, que busca el tipo NSD `_adelpostest._tcp` (el emulador de
     Android 17 sí ve los anuncios de la red de la Mac). Para capturas o revisiones a mano, usar el mismo ejecutor o una
     prueba; si alguna vez aparece el servidor real del restaurante, no se toca.
+17. **El bloqueo por inactividad es del proceso**, no de una pantalla (`AppContainer.startIdleLock` con
+    `IdleLock.supervise`): volver a crear la actividad nunca reinicia el plazo y, al volver a primer plano, bloquea en
+    ese momento si ya venció. Todo `AlertDialog`, `DropdownMenu`, `Dialog` u hoja nueva lleva
+    `Modifier.reportsUserActivity(LocalUserActivity.current)` (`core:ui`): sus toques no pasan por
+    `Activity.onUserInteraction`.
 
 ## Estructura
 
 | Módulo           | Tipo                                     | Qué contiene                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer`, `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                                                                                         |
+| `app`            | aplicación (`local.adel.pos.android`)    | `AdelPosApplication` + `AppContainer` (con el bloqueo por inactividad del proceso y el registro de borrado), `MainActivity` (de borde a borde), `ShellViewModel` (indicador), navegación (`navigation/AdelPosApp.kt`, rutas con tipo), `CatalogRealtimeContainer` (catálogo, imágenes y el único canal de tiempo real) y `AppForeground` (primer plano del proceso), manifiesto, ícono, `src/debug` con `network_security_config`.                                                                                                                                                                                                                                                   |
 | `core:domain`    | Kotlin/JVM puro (sin Android)            | `Money` y `MoneyFormat`, `LinkState`/`ConnectionSummary` y `DefaultNetworkTracker`, `PendingOrdersSource`, `AppError`/`AppResult`, `SecretSealer`, `TableState`, `TablesView`; `server/` (dirección escrita, anuncio NSD, cambio de IP, versiones), `pairing/` (código de 6 dígitos, `PairingFlow`), `access/` (`DeviceAccess`, verificador del PIN, límite local, bloqueo por inactividad, `WaiterWork`), `catalog/` (modelos del catálogo, búsqueda sin acentos, `Customization`/`LineSelection`, reglas del personalizador y revisión de lo que declara el catálogo), `realtime/` (`RealtimeFeed`, señales, interrupciones de acceso, espera creciente). Pruebas JVM en segundos. |
 | `core:data`      | biblioteca Android                       | `api/` (OkHttp con huella fijada, cabeceras del cliente, JSON, `MoneySerializer`, errores de Go → `AppError`, `ServerApi` con `ApiOutcome`), `access/` (`AccessRepository`, `PairingRepository`, `PairedConnection`), `discovery/` (NSD, sonda HTTPS), `security/` (huella fijada, primer certificado del emparejamiento, Keystore), `db/` (Room, esquemas en `core/data/schemas/`), `network/`, `pending/`, `preferences/`; `catalog/` (`catalog.db`, descarga completa y por cambios, caché de imágenes, actualizaciones), `realtime/` (cliente SSE), `session/` (`ServerAccess`, `DeviceServerAccess`).                                                                           |
-| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                                                                                              |
-| `feature:access` | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, cambio de mesero, bloqueo por inactividad (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                   |
+| `core:ui`        | biblioteca Android (Compose, Material 3) | Tema claro/oscuro (`theme/`), íconos propios (`icons/AdelIcons.kt`, los trazos de `desktop/src/components/Icon.tsx`), botones, barra superior e indicador, estado de mesa, toques de los diálogos para el bloqueo por inactividad (`LocalUserActivity`), andamio de uno o dos paneles (`layout/`), `catalog/` (búsqueda, categorías, cuadrícula con «Agotado», imagen con marcador y el personalizador táctil). Compartido con la A2.                                                                                                                                                                                                                                                |
+| `feature:access` | biblioteca Android                       | Entrada al dispositivo (fases B y C): «Buscar el servidor» y código de emparejamiento, entrada con PIN, «Vuelve a escribir tu PIN», cambio de mesero (`AccessViewModel`), emparejar de nuevo, actualizar la aplicación o el servidor, dispositivo retirado y su bitácora, permiso de red local. Solo usa interfaces de `core:domain`.                                                                                                                                                                                                                                                                                                                                                |
 | `feature:waiter` | biblioteca Android                       | Modo Mesero (Fase E). Hoy, «Mesas» de muestra (Fase A) y «Catálogo» de muestra (Fase D, `catalog/`, desde Mesas): los componentes del catálogo y el personalizador sobre el catálogo guardado.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Dependencias entre módulos: `app` → todos; `feature:*` → `core:ui` (→ `core:domain`); `core:data` → `core:domain`. Un
@@ -113,8 +120,9 @@ mismo entorno. Los comentarios de línea (`//`) se escriben de 100 columnas como
   estados de mesa, botones, paneles) y la aplicación completa (navegación, uno o dos paneles según el dispositivo,
   rotación real con `UiAutomation.setRotation` sin perder lo capturado, indicador con el modo avión real).
 - **Contra el Go temporal**: `ServerApiOnDeviceTest` (`core:data`, argumentos `pin` y `net`) y, de punta a punta,
-  `AccessOnGoTest` (`app`, 7 pasos: emparejar con el código, PIN incorrecto y bloqueo al quinto, entrada sin conexión,
-  PIN cambiado, 426, certificado cambiado y dispositivo retirado). Ambas se omiten sin argumentos (en
+  `AccessOnGoTest` (`app`, 7 pasos: emparejar con el código, PIN incorrecto y bloqueo al quinto que cierra la entrada
+  sin conexión, cabeceras de cada mesero, entrada sin conexión, PIN cambiado con «Vuelve a escribir tu PIN» sin salir
+  de Mesas, 426, certificado cambiado y dispositivo retirado). Ambas se omiten sin argumentos (en
   `connectedDebugAndroidTest` salen como omitidas). `AccessOnGoTest` se corre con **`scripts/android-e2e.sh`**: un paso
   por instrumentación (`am instrument`) con la aplicación instalada una sola vez, la prueba hace de computadora
   principal por la escucha local (`MainComputer`) y la aplicación usa la escucha de red. Recibe por variables
@@ -160,19 +168,61 @@ emparejado, el mesero activo y sus credenciales. Otro módulo (catálogo, modo M
 
 - `serverApi(): ServerApi?` — la API del servidor emparejado en la dirección vigente, con la huella fijada. Pedirla en
   cada uso (la dirección cambia con el cambio de IP); null sin servidor emparejado.
-- `requestHeaders(): Headers?` — `X-Device-ID`/`X-Device-Token` y, si hay mesero activo **con sesión de Go**,
-  `Authorization: Bearer`. `deviceCredentials()` da solo las del dispositivo; `sessionToken(userId)`, la sesión de un
-  mesero (solo en memoria: se pierde al cerrar la aplicación); `offlineCredential(userId)`, su credencial de envío
-  (A1-D1, cifrada con el Keystore) para `submitOfflineOrder` sin sesión. `activeWaiter` (`StateFlow`) dice quién usa
-  el dispositivo y si tiene sesión (`hasServerSession`; sin conexión no la tiene).
+- `requestHeaders(userId): Headers?` — las cabeceras **del mesero dueño de la operación** (guárdalo al crearla; nunca
+  «el mesero activo» para una operación de otro): `X-Device-ID`/`X-Device-Token` y, si ese mesero tiene **sesión de
+  Go**, `Authorization: Bearer`. Solo una entrada con conexión da sesión; una entrada sin conexión nunca usa la de una
+  entrada anterior. `deviceCredentials()` da solo las del dispositivo; `sessionToken(userId)`, la sesión de un mesero
+  (solo en memoria: se pierde al cerrar la aplicación); `offlineCredential(userId)`, su credencial de envío (A1-D1,
+  cifrada con el Keystore) para `submitOfflineOrder` sin sesión. `activeWaiter` (`StateFlow`) dice quién usa el
+  dispositivo, si tiene sesión (`hasServerSession`; sin conexión no la tiene) y si debe volver a escribir su PIN
+  (`mustReenterPin`).
 - `report(error: AppError, userId: String?)` — **punto único** para los errores de Go de cualquier petición o del
-  canal de eventos (`event: interrupted`): `DEVICE_REVOKED` retira el dispositivo (bitácora y borrado), `SESSION_*`
-  regresa a ese mesero a la entrada, `DEVICE_*` y una huella distinta piden emparejar de nuevo, 426 pide actualizar.
+  canal de eventos (`event: interrupted`), con el mismo `userId` de `requestHeaders`: `DEVICE_REVOKED` retira el
+  dispositivo (bitácora y borrado), `SESSION_*` y `OFFLINE_CREDENTIAL_INVALID` olvidan la sesión de ese mesero (la
+  segunda también su verificador) y, si es el activo, le piden «Vuelve a escribir tu PIN» sin sacarlo; `DEVICE_*` y
+  una huella distinta piden emparejar de nuevo, 426 pide actualizar.
+- **Borrar los datos de este dispositivo** (`AppContainer.deviceDataWipe`, `DeviceDataWipe`): registro único que usan
+  retirar el dispositivo y «Emparejar de nuevo», después de pasar los pedidos sin enviar a la bitácora y antes de
+  olvidar el emparejamiento y destruir la llave del Keystore. Hoy registra el catálogo con sus imágenes; **la Fase E
+  registra ahí** la cola de pedidos y sus borradores y cancela su trabajo (`WorkManager.cancelAllWork()`). Todo módulo
+  nuevo que guarde datos del restaurante se registra ahí.
+- Límite de la entrada sin conexión (`OfflineAttemptPolicy`, sin reloj): los fallos (con o sin conexión) se acumulan y
+  solo vuelven a cero con una entrada correcta; al quinto, o con el PIN bloqueado en Go (`PIN_LOCKED`, `locked_until`
+  o `requires_unlock` de `auth/pin-users`, A1-D16), la entrada sin conexión de ese mesero queda cerrada hasta que
+  entre con conexión.
 - La Fase E implementa en `AppContainer` **`WaiterWorkGate`** (captura en curso y pedidos sin enviar de cada mesero:
   decide el bloqueo por inactividad, el cambio de mesero y el «Cerrar sesión»; ver la regla «El trabajo pendiente de
   un mesero manda») y **`UnsentOrdersSource`** (pedidos que no llegaron al servidor: al retirar el dispositivo o
   emparejarlo de nuevo pasan a la bitácora y se muestran con «Este dispositivo fue retirado del restaurante; estos
   pedidos no se enviaron»). Hoy son `NoWaiterWork` y `NoUnsentOrders`.
+
+### Contrato con la cola y el modo Mesero (revisión R3: M3, M4 y M5)
+
+Estas formas son estables: la Fase E las usa tal cual y cambiarlas se avisa en el informe de la etapa.
+
+- **Dueño de cada operación (M5).** Cada pedido, reintento o actualización guarda al crearse el `user_id` del mesero
+  que la hizo y, al salir, pide `deviceAccess.requestHeaders(userId)` con **ese** `user_id` (nunca
+  `activeWaiter.value`): si Ana cambió a Beto o se bloqueó mientras tanto, la operación sale con la sesión de Ana o,
+  si Ana ya no tiene sesión, sin `Authorization` (y entonces, si es un pedido sin conexión, con
+  `offlineCredential(userId)` en `submitOfflineOrder`). Un error de esa respuesta se avisa con
+  `deviceAccess.report(error, userId)` y el mismo `user_id`.
+- **Acceso que deja de valer (M3).** `report(AppError.SessionEnded(…), userId)` (`SESSION_*`) olvida la sesión de ese
+  mesero; `report(AppError.Rejected(401, AccessRepository.OFFLINE_CREDENTIAL_INVALID, …), userId)` olvida además su
+  verificador y su credencial de envío (`offlineCredential(userId)` pasa a null: hace falta entrar **con
+  conexión**). Ninguno saca al mesero ni toca la cola: si es el activo, `activeWaiter.value` sigue siendo él con
+  `hasServerSession = false` y `mustReenterPin = true`, y la raíz muestra «Vuelve a escribir tu PIN» encima de su
+  pantalla. La cola **conserva** el pedido (no lo descarta ni lo pasa a otro mesero) y lo reintenta cuando
+  `requestHeaders(userId)` vuelva a traer `Authorization` (otra entrada con conexión) u `offlineCredential(userId)`
+  vuelva a existir. Observar `activeWaiter` para saber cuándo volvió a entrar (`mustReenterPin` en false). Errores
+  que no son de acceso (`VALIDATION_ERROR`, `ORDER_REQUIRES_CONFIRMATION`…) los decide la pantalla: no pasan por
+  `report`. 400 `CLIENT_KIND_MISMATCH` es un problema de soporte: `report` no cambia nada con él.
+- **Borrar los datos de este dispositivo (M4).** La cola se registra una vez, al crearse en `AppContainer`:
+  `deviceDataWipe.register("cola de pedidos") { /* borrar cola y borradores; WorkManager.cancelAllWork() */ }`
+  (`DeviceDataPart.erase()` es `suspend`; se llama fuera del hilo principal). Al retirar el dispositivo o con «Emparejar
+  de nuevo», `AccessRepository` hace, en este orden: lee `UnsentOrdersSource.unsentOrders()` y lo pasa a la bitácora;
+  llama a cada parte registrada (una que falla no detiene a las demás); olvida el emparejamiento, los meseros, sus
+  verificadores y credenciales; destruye la llave del Keystore. Antes de confirmar «Emparejar de nuevo», la pantalla
+  muestra `DeviceAccess.pendingOrders()` (lo mismo que `unsentOrders()`).
 
 ## Catálogo y tiempo real (para los demás módulos)
 
@@ -269,12 +319,13 @@ indicador **no exigen red validada** (la wifi del restaurante puede no tener int
 
 ## Base local (Room)
 
-`AppDatabase` versión 2: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
+`AppDatabase` versión 3: `device_preferences` (v1); `paired_server` (una fila: `server_id`, nombre, última dirección,
 huella fijada, `device_id`, **token del dispositivo cifrado**, `idle_lock_seconds`), `known_waiters` (meseros que ya
 entraron con conexión aquí: nombre, inicial, color, `pin_version`, **verificador del PIN y credencial de envío
-cifrados**, intentos locales sin conexión) y `device_log` (bitácora: pedidos que no se enviaron, hasta que se borra).
+cifrados**, fallos sin conexión y si su entrada sin conexión está cerrada, sin ningún reloj) y `device_log` (bitácora: pedidos que no se enviaron, hasta que se borra).
 Las llaves solo en el Android Keystore; lo cifrado lleva su propósito (`device-credential`, `pin-verifier:<id>`,
-`offline-credential:<id>`). Migración 1 → 2 con el SQL de `schemas/…/2.json`.
+`offline-credential:<id>`). Migraciones 1 → 2 y 2 → 3 con el SQL de `schemas/…/2.json` y `3.json` (la 2 → 3 copia
+`known_waiters` a una tabla nueva: los fallos se conservan y un bloqueo por reloj pasa a entrada cerrada).
 
 Cada cambio de esquema: subir `version`, agregar la `Migration` a `AppDatabase.MIGRATIONS`, versionar el nuevo
 `core/data/schemas/…/<versión>.json` y un caso en `AppDatabaseMigrationTest`. **Nunca**

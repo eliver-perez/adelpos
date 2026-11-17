@@ -10,6 +10,7 @@ import local.adel.pos.android.core.domain.access.DeviceStatus
 import local.adel.pos.android.core.domain.access.EntryResult
 import local.adel.pos.android.core.domain.access.IdleLock
 import local.adel.pos.android.core.domain.access.NoWaiterWork
+import local.adel.pos.android.core.domain.access.UnsentOrder
 import local.adel.pos.android.core.domain.access.WaiterProfile
 import local.adel.pos.android.core.domain.access.WaiterRoster
 import local.adel.pos.android.core.domain.connection.LinkState
@@ -60,6 +61,11 @@ class FakeAccess(
     override fun leave() {
         mutableActive.value = null
     }
+
+    /** Pedidos sin enviar que mostraría «Emparejar de nuevo». */
+    var pending: List<UnsentOrder> = emptyList()
+
+    override suspend fun pendingOrders(): List<UnsentOrder> = pending
 
     override suspend fun forgetServer() = Unit
 
@@ -132,6 +138,8 @@ object NoActions : AccessActions {
     override fun recheck() = Unit
 
     override fun repair() = Unit
+
+    override suspend fun pendingOrders(): List<UnsentOrder> = emptyList()
 
     override fun acknowledgeRetirement() = Unit
 

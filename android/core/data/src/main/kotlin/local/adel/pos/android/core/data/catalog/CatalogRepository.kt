@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import local.adel.pos.android.core.domain.catalog.Catalog
 import local.adel.pos.android.core.domain.catalog.CatalogProduct
 import local.adel.pos.android.core.domain.catalog.CatalogQuery
@@ -34,6 +36,10 @@ class CatalogRepository(
     private val requests = Channel<Unit>(Channel.CONFLATED)
     private var started = false
 
+    // Una descarga y un borrado nunca se mezclan: lo que llegue después de borrar se guarda sobre
+    // un catálogo vacío, nunca a medias con el anterior.
+    private val work = Mutex()
+
     override val catalog: StateFlow<Catalog> = snapshot.asStateFlow()
 
     override val status: StateFlow<CatalogSyncStatus> = syncStatus.asStateFlow()
@@ -57,7 +63,22 @@ class CatalogRepository(
     }
 
     /** Descarga ya (esperando a la que esté en curso) y actualiza el catálogo en memoria. */
-    suspend fun refreshNow(): CatalogSyncOutcome {
+    suspend fun refreshNow(): CatalogSyncOutcome = work.withLock { refreshLocked() }
+
+    /**
+     * «Borrar los datos de este dispositivo» (retirarlo o emparejarlo de nuevo): catalog.db, las
+     * imágenes guardadas y la fotografía en memoria. Espera a la descarga en curso.
+     */
+    suspend fun eraseAll() {
+        work.withLock {
+            images?.eraseAll()
+            store.eraseAll()
+            snapshot.value = Catalog.EMPTY
+            syncStatus.value = CatalogSyncStatus()
+        }
+    }
+
+    private suspend fun refreshLocked(): CatalogSyncOutcome {
         syncStatus.update { it.copy(running = true) }
         val outcome = synchronizer.synchronize()
         when (outcome) {
