@@ -3189,3 +3189,8 @@ llegó a tardar 12 s y el lanzador del emulador dejó de responder (F6): es la M
   el M3 de R6, comprobado ahora contra Go, y la repetición de las suites `waiter` y `field`; las dos observaciones de
   interfaz (nombres cortados en el mapa del teléfono con 40 mesas y el teclado que tapa la dirección en Android 8) las
   hace el agente de esas correcciones si son sencillas.
+- **Rama renombrada (17/11/2026, 11:19)**: en el repositorio principal, la rama `etapa-a1-android` quedó renombrada a
+  `main` (reemplazando el `main` local de la 9H). Fue un movimiento del propietario por error desde VS Code (lo iba a
+  hacer en otro proyecto). No se subió nada (`origin/main` seguía en `24065f3`) ni hubo commits después; el coordinador
+  restauró `main` en `24065f3` (con su seguimiento de `origin/main`) y `etapa-a1-android` en `bd7beb4`, y le quitó el
+  seguimiento de `origin/main` que había heredado.
