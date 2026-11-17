@@ -195,6 +195,104 @@ class PairingRepositoryTest {
         )
     }
 
+    // Cuántas solicitudes de código llegaron al servidor.
+    private fun codeRequests() =
+        go.requests.count { it.url.encodedPath == "/api/v1/pairing/requests" }
+
+    @Test
+    fun unServidorAnteriorA012PideActualizarloAntesDePedirElCodigo() = runBlocking {
+        // Una computadora principal 0.11.0: sin la entrada con PIN ni la mínima por tipo.
+        go.serverVersion = "0.11.0"
+        go.capabilities = listOf("offline-orders-v1")
+        go.informsClientVersions = false
+        go.createRejection = 426 to "CLIENT_UPDATE_REQUIRED"
+        val flow = pairing()
+        assertEquals(
+            "con la dirección escrita a mano",
+            PairingStep.Failed(PairingProblem.UpdateServer("0.11.0")),
+            flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
+        )
+        found =
+            listOf(
+                FoundServer(
+                    go.serverId,
+                    "Caja",
+                    ServerAnnouncements.shortFingerprint(go.fingerprint),
+                    go.server.port,
+                    listOf(go.server.hostName),
+                ),
+            )
+        flow.search()
+        assertEquals(
+            "con el servidor encontrado en la red",
+            PairingStep.Failed(PairingProblem.UpdateServer("0.11.0")),
+            flow.start(PairingTarget.Found(go.serverId), "Tableta 1"),
+        )
+        assertEquals("no se pidió ningún código", 0, codeRequests())
+
+        // 0.12.0 sin la capacidad del PIN tampoco sirve.
+        go.serverVersion = "0.12.0"
+        assertEquals(
+            PairingStep.Failed(PairingProblem.UpdateServer("0.12.0")),
+            flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
+        )
+        assertEquals(0, codeRequests())
+    }
+
+    @Test
+    fun conUnServidor012SigueElEmparejamientoDespuesDeComprobarLaVersion() = runBlocking {
+        val flow = pairing()
+        val view = flow.start(PairingTarget.Address("caja.local"), "Tableta 1").view()
+        assertEquals(PairingState.PENDING, view.state)
+        assertEquals(go.expectedCode(), view.code)
+        val paths = go.requests.map { it.url.encodedPath }
+        assertEquals(
+            "la versión se pide antes que el código",
+            listOf("/api/v1/version", "/api/v1/pairing/requests"),
+            paths.take(2),
+        )
+        // Si el servidor pide una aplicación más reciente: «Actualiza esta aplicación», sin pedir
+        // código.
+        go.minAndroid = "0.2.0"
+        val before = codeRequests()
+        val step = flow.start(PairingTarget.Address("caja.local"), "Tableta 1")
+        val problem = (step as PairingStep.Failed).problem as PairingProblem.Server
+        assertEquals("0.2.0", (problem.error as AppError.UpdateRequired).minClientVersion)
+        assertEquals(before, codeRequests())
+    }
+
+    @Test
+    fun un426DeUnServidorQueNoInformaLaMinimaEsUnServidorViejo() = runBlocking {
+        val flow = pairing()
+        // GET version rechazado con 426: no hay mínima informada.
+        go.versionRejection = 426 to "CLIENT_UPDATE_REQUIRED"
+        assertEquals(
+            PairingStep.Failed(PairingProblem.UpdateServer(null)),
+            flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
+        )
+        // La versión responde (0.12.0 con la capacidad) pero sin la mínima por tipo, y la solicitud
+        // responde 426 (o tipo de cliente desconocido): también es un servidor viejo.
+        go.versionRejection = null
+        go.informsClientVersions = false
+        go.createRejection = 426 to "CLIENT_UPDATE_REQUIRED"
+        assertEquals(
+            PairingStep.Failed(PairingProblem.UpdateServer("0.12.0")),
+            flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
+        )
+        go.createRejection = 400 to "CLIENT_KIND_INVALID"
+        assertEquals(
+            PairingStep.Failed(PairingProblem.UpdateServer("0.12.0")),
+            flow.start(PairingTarget.Address("caja.local"), "Tableta 1"),
+        )
+        // Con la mínima informada, un 426 sí es «Actualiza esta aplicación».
+        go.informsClientVersions = true
+        go.createRejection = 426 to "CLIENT_UPDATE_REQUIRED"
+        val step = flow.start(PairingTarget.Address("caja.local"), "Tableta 1")
+        val problem = (step as PairingStep.Failed).problem
+        assertTrue("$problem", problem is PairingProblem.Server)
+        assertTrue((problem as PairingProblem.Server).error is AppError.UpdateRequired)
+    }
+
     @Test
     fun estadosFinalesYRechazos() = runBlocking {
         val flow = pairing()

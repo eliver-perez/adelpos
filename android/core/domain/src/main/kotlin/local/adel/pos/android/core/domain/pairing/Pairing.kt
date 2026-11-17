@@ -82,6 +82,14 @@ sealed interface PairingProblem {
     data object StorageFailed : PairingProblem
 
     /**
+     * «Actualiza el servidor del restaurante»: la computadora principal es anterior a 0.12.0 o no
+     * tiene la entrada con PIN (`waiter-pin-v1`), así que no puede emparejar teléfonos ni tabletas
+     * ([local.adel.pos.android.core.domain.server.ServerCompatibility]). [serverVersion] es la que
+     * informó, si la informó (solo para la sección de soporte).
+     */
+    data class UpdateServer(val serverVersion: String?) : PairingProblem
+
+    /**
      * Error al hablar con el servidor: sin respuesta, certificado distinto a mitad de la sesión,
      * 426, o un rechazo con su código (`PAIRING_RATE_LIMITED`, `PAIRING_EXPIRED`…) y su mensaje en
      * español para mostrarse tal cual.

@@ -215,6 +215,7 @@ fun UpdateServerScreen(
     serverVersion: String?,
     onCheckAgain: () -> Unit,
     modifier: Modifier = Modifier,
+    onChooseAnother: (() -> Unit)? = null,
 ) {
     CenteredColumn(modifier = modifier.testTag(TAG_UPDATE_SERVER)) {
         Text(
@@ -231,6 +232,14 @@ fun UpdateServerScreen(
             icon = AdelIcons.Refresh,
             modifier = Modifier.fillMaxWidth().testTag(TAG_CHECK_AGAIN),
         )
+        // Al emparejar: puede que haya otra computadora principal, ya actualizada.
+        if (onChooseAnother != null) {
+            SecondaryButton(
+                text = stringResource(R.string.update_server_choose_another),
+                onClick = onChooseAnother,
+                modifier = Modifier.fillMaxWidth().testTag(TAG_CHOOSE_ANOTHER),
+            )
+        }
         SupportSection(
             listOfNotNull(
                 serverVersion?.let { stringResource(R.string.support_server_version, it) },
@@ -372,6 +381,7 @@ const val TAG_UPDATE_APP_PENDING = "access-update-app-pending"
 const val TAG_CHECK_AGAIN = "access-check-again"
 const val TAG_UPDATE_APP = "access-update-app"
 const val TAG_UPDATE_SERVER = "access-update-server"
+const val TAG_CHOOSE_ANOTHER = "access-choose-another"
 const val TAG_RETIRED = "access-retired"
 const val TAG_RETIRED_PAIR_AGAIN = "access-retired-pair-again"
 const val TAG_DEVICE_LOG = "access-device-log"

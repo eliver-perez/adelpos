@@ -35,6 +35,7 @@ import local.adel.pos.android.core.domain.security.SecretUnavailableException
 import local.adel.pos.android.core.domain.server.FoundServer
 import local.adel.pos.android.core.domain.server.ServerAddress
 import local.adel.pos.android.core.domain.server.ServerAnnouncements
+import local.adel.pos.android.core.domain.server.ServerCompatibility
 import local.adel.pos.android.core.domain.text.Hex
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -42,9 +43,12 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 /**
  * Búsqueda del servidor y emparejamiento con el protocolo exacto de la 9G (§4; `pairing.rs` del
  * escritorio y `backend/internal/administration/pairing.go`):
- * 1. La sesión fija el **primer certificado** que ve ([FirstSeenTrustManager]); si el servidor vino
- *    de la búsqueda, su huella debe empezar como la anunciada (`fp`) y su `server_id` ser el
- *    anunciado.
+ * 1. La sesión fija el **primer certificado** que ve ([FirstSeenTrustManager]) al pedir `GET
+ *    version`; si el servidor vino de la búsqueda, su huella debe empezar como la anunciada (`fp`)
+ *    y su `server_id` ser el anunciado. Con la versión se comprueba, antes de pedir el código
+ *    (también con la dirección escrita), que el servidor sirva para esta aplicación
+ *    ([ServerCompatibility.check]): uno anterior a 0.12.0 o sin `waiter-pin-v1` lleva a «Actualiza
+ *    el servidor del restaurante» ([PairingProblem.UpdateServer]).
  * 2. Solicitud con el compromiso SHA-256(nT), número del servidor nS y revelación de nT.
  * 3. Código de 6 dígitos con la huella fijada; el administrador lo escribe en la computadora
  *    principal.
@@ -294,18 +298,48 @@ class PairingRepository(
     private suspend fun request(base: String, name: String, announced: FoundServer?): PairingStep {
         val trust = FirstSeenTrustManager()
         val api = ServerApi(base.toHttpUrl(), PinnedHttpClient.createForPairing(trust, identity))
+        // La primera conexión de la sesión fija el certificado y trae la versión del servidor.
+        val version = api.get("version", VersionInfo.serializer())
+        if (version !is ApiOutcome.Success) {
+            // Sin la versión no se sabe qué mínima pide el servidor: un 426 aquí es de uno viejo.
+            return failed(pairingProblem(version.error(), informsMinimum = false, null))
+        }
+        val info = version.value
         if (announced != null) {
-            // La primera conexión de la sesión fija el certificado; su huella debe empezar como la
-            // anunciada antes de pedir nada.
-            val version = api.get("version", VersionInfo.serializer())
-            if (version !is ApiOutcome.Success) {
-                return failed(PairingProblem.Server(version.error()))
-            }
+            // Su huella debe empezar como la anunciada antes de pedir nada.
             val seen = trust.fingerprint ?: return failed(PairingProblem.AnnouncementMismatch)
             if (ServerAnnouncements.shortFingerprint(seen) != announced.fingerprintPrefix) {
                 return failed(PairingProblem.AnnouncementMismatch)
             }
         }
+        // Antes de pedir el código: un servidor que no sirve para esta aplicación respondería 426
+        // a la solicitud, y el aviso sería el equivocado («actualiza esta aplicación»).
+        val minimum = info.minClientVersions[ClientIdentity.KIND]
+        val verdict =
+            ServerCompatibility.check(
+                appVersion = identity.version,
+                serverVersion = info.serverVersion,
+                capabilities = info.capabilities,
+                minAndroidVersion = minimum,
+            )
+        when (verdict) {
+            is ServerCompatibility.Verdict.UpdateServer ->
+                return failed(PairingProblem.UpdateServer(verdict.serverVersion))
+            is ServerCompatibility.Verdict.UpdateApp ->
+                return failed(
+                    PairingProblem.Server(
+                        AppError.UpdateRequired(
+                            code = "CLIENT_UPDATE_REQUIRED",
+                            minClientVersion = verdict.minClientVersion,
+                            serverVersion = verdict.serverVersion,
+                            serverMessage = null,
+                            requestId = null,
+                        ),
+                    ),
+                )
+            ServerCompatibility.Verdict.Compatible -> Unit
+        }
+        val informsMinimum = minimum != null
         val nonce = PairingProtocol.newNonce()
         val created =
             when (
@@ -324,7 +358,10 @@ class PairingRepository(
                     )
             ) {
                 is ApiOutcome.Success -> outcome.value
-                else -> return failed(PairingProblem.Server(outcome.error()))
+                else ->
+                    return failed(
+                        pairingProblem(outcome.error(), informsMinimum, info.serverVersion),
+                    )
             }
         val fingerprint =
             trust.fingerprint ?: return failed(PairingProblem.Server(AppError.InvalidResponse(200)))
@@ -353,7 +390,7 @@ class PairingRepository(
                 headers,
             )
         if (revealed !is ApiOutcome.Success) {
-            return failed(PairingProblem.Server(revealed.error()))
+            return failed(pairingProblem(revealed.error(), informsMinimum, info.serverVersion))
         }
         val code = PairingProtocol.code(fingerprint, nonce, serverNonce, created.requestId)
         val started =
@@ -374,6 +411,23 @@ class PairingRepository(
     }
 
     private fun failed(problem: PairingProblem) = PairingStep.Failed(problem)
+
+    /**
+     * El problema de un error al pedir el código. «Actualiza esta aplicación» (426 o tipo o versión
+     * de cliente no reconocidos) solo es cierto si el servidor informa la mínima de Android
+     * (`min_client_versions.android`, desde la 0.12.0); si no la informa, es un servidor anterior
+     * que no conoce esta aplicación: «Actualiza el servidor del restaurante».
+     */
+    private fun pairingProblem(
+        error: AppError,
+        informsMinimum: Boolean,
+        serverVersion: String?,
+    ): PairingProblem =
+        if (error is AppError.UpdateRequired && !informsMinimum) {
+            PairingProblem.UpdateServer(serverVersion ?: error.serverVersion)
+        } else {
+            PairingProblem.Server(error)
+        }
 
     private fun ApiOutcome<*>.error(): AppError =
         when (this) {
