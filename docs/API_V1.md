@@ -429,11 +429,13 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
   - aceptables con la confirmación del mesero: `price_changed`, `table_has_account` (la mesa ya tiene una cuenta que
     el mesero no veía: confirmar abre otra);
   - aceptables también (etapa A1): `draft_item_changed`, `draft_item_removed` y `draft_item_sent` (un renglón del
-    borrador que el pedido sustituye ya no está como lo vio el dispositivo; ver abajo);
+    borrador que el pedido sustituye ya no está como lo vio el dispositivo, o una partida ya se envió a cocina; ver
+    abajo);
   - que exigen corregir el pedido (`requires_changes: true`): `product_sold_out`, `product_unavailable`,
     `product_removed`, `complement_unavailable`, `item_unavailable`, `item_invalid`, `account_closed` (la cuenta ya se
     cobró, se canceló o se combinó; desde la etapa A1, `now` dice cuál: `closed`, `voided` o `merged`),
-    `table_unavailable`. El cliente quita o cambia la partida (o el destino) y reenvía.
+    `table_unavailable` y, desde A1-D18, `items_in_account` (ver abajo). El cliente quita o cambia la partida (o el
+    destino) y reenvía.
 - **Confirmación**: el cliente reenvía el pedido con **la misma `operation_id`** y
   `"confirmation": {"catalog_version": <la del rechazo>, "changes": <los cambios que vio el mesero>}`. Se acepta solo
   si esa es la versión vigente del catálogo y los cambios cubren todos los de ese momento; entra **siempre con los
@@ -444,7 +446,8 @@ se envía con **`submitOfflineOrder`** (`POST /restaurant/offline-orders`; permi
   porque el precio volvió, y después el reenvío con la confirmación) responde **409 `OFFLINE_ORDER_ALREADY_ACCEPTED`**
   con `details.result`, el resultado que sí entró (`order_id`, `account_id`, cuenta completa): nunca entra dos veces y
   **el teléfono no debe capturarlo de nuevo**; marca el pedido de su cola como aceptado con ese resultado. Desde otro
-  usuario u otra terminal, la misma clave es `IDEMPOTENCY_CONFLICT` sin datos.
+  usuario u otra terminal, la misma clave es `IDEMPOTENCY_CONFLICT` sin datos. Desde la etapa A1, `details.origin`
+  dice qué entró con esa clave (`offline_order` o `confirm_draft`; ver «El servidor nunca repite lo que ya entró»).
 - **Registro de movimientos**: `restaurant.offline_order.accepted` (hora de captura, hora de llegada, versiones del
   catálogo y cambios aceptados) y, en cada rechazo, `restaurant.offline_order.requires_confirmation` (con los cambios);
   ambos con la clave de operación como identificador. La historia de la cuenta marca el pedido (`order.confirmed` con
@@ -469,45 +472,108 @@ los renglones del borrador que **ese dispositivo** había guardado y que el pedi
   - `draft_item_changed`: otra terminal lo cambió («Tacos al pastor: lo cambiaron en otra terminal. Si confirmas, tu
     pedido entra como lo capturaste y el cambio de la otra terminal se queda sin enviar en la cuenta.»);
   - `draft_item_removed`: lo quitaron del borrador («…: lo quitaron de la cuenta en otra terminal…»);
-  - `draft_item_sent`: **ya se envió a cocina** («Tacos al pastor: ya se envió desde otra terminal. Si confirmas, tu
-    pedido entra completo y puede repetirlo.»; si lo envió el mismo dispositivo, «ya se había enviado desde este
-    dispositivo»). Go lo sabe porque cada partida confirmada guarda el id del renglón con que se capturó
+  - `draft_item_sent`: **ya se envió a cocina** («Tacos al pastor: ya se envió a cocina desde otra terminal y no se
+    vuelve a enviar. Si confirmas, se envía lo demás del pedido.»; si lo envió el mismo dispositivo, «ya se había
+    enviado a cocina desde este dispositivo…»). Go lo sabe porque cada partida confirmada guarda el id del renglón con que se capturó
     (`restaurant_items.draft_item_id`, migración 0025, sección E).
 - Los tres son **aceptables**: el mesero los confirma como un cambio de precio (misma `operation_id`, `confirmation`
   con los cambios del rechazo) y su pedido entra como lo capturó; el renglón de la otra terminal se queda como está.
-  O corrige su pedido (quita la partida, y el renglón de `replaces_draft_items`) y lo reenvía.
+  O corrige su pedido (quita la partida, y el renglón de `replaces_draft_items`) y lo reenvía. Desde A1-D18,
+  confirmar `draft_item_sent` **envía lo demás**: lo ya enviado nunca se vuelve a enviar (ver abajo).
 - Idempotencia y doble envío como cualquier pedido sin conexión (un reintento después de aceptado devuelve la misma
   respuesta y no quita nada más; `OFFLINE_ORDER_ALREADY_ACCEPTED` con otro contenido). Funciona igual con la sesión o
   con la credencial de envío.
 - Recomendación para la aplicación: guardar con cada renglón el contenido con que el servidor lo aceptó en el último
   `saveDraft` correcto (eso es lo que «vio») y enviar en `replaces_draft_items` solo esos; los renglones nuevos
-  capturados sin conexión van solo en `items`.
+  capturados sin conexión van solo en `items`. **Cada partida del pedido usa el id de su renglón** (el que generó el
+  dispositivo al capturarlo): es lo que permite reconocerlo en el borrador o entre lo ya enviado.
+
+### El servidor nunca repite lo que ya entró (etapa A1, decisión A1-D18)
+
+Después de la revisión independiente de la cola sin conexión (R6), `submitOfflineOrder` reconoce lo que ya entró aunque
+la respuesta de la operación anterior se haya perdido:
+
+1. **La misma clave que un «Enviar a cocina» ya aplicado**: si `confirmDraft` entró con la `operation_id` K y su
+   respuesta se perdió, el dispositivo manda el pedido de la cola con **la misma K** (A1-D19). Si K entró como
+   `confirmDraft` **en la misma cuenta** (`destination.account_id`), **del mismo usuario y el mismo dispositivo**
+   (sesión o credencial de envío), la respuesta es **409 `OFFLINE_ORDER_ALREADY_ACCEPTED`** sin mandar nada:
+
+   ```json
+   {
+     "error": {
+       "code": "OFFLINE_ORDER_ALREADY_ACCEPTED",
+       "message": "Este pedido ya había entrado al enviarlo a cocina y no se volvió a registrar.",
+       "details": {
+         "status": "already_accepted",
+         "origin": "confirm_draft",
+         "result": {
+           "status": "accepted",
+           "operation_id": "K",
+           "order_id": "pedido de la confirmación",
+           "account_id": "la cuenta",
+           "catalog_version": 52,
+           "captured_catalog_version": 51,
+           "captured_at": "la del pedido",
+           "received_at": "cuando entró la confirmación",
+           "accepted_changes": [],
+           "removed_draft_item_ids": [],
+           "already_sent_item_ids": ["partidas del pedido que estaban en esa confirmación"],
+           "bill": { "…": "la cuenta vigente" }
+         }
+       }
+     }
+   }
+   ```
+
+   El dispositivo marca el pedido «Recibido por el restaurante» con ese resultado. La misma K **hacia otra cuenta o a
+   una mesa, desde otro usuario u otro dispositivo, o guardada por otra operación** (guardar el borrador, abrir la
+   cuenta…) sigue siendo **409 `IDEMPOTENCY_CONFLICT`** sin datos de nadie.
+
+2. **Renglones del borrador con el id de una partida**: se tratan como sustituidos aunque no vengan en
+   `replaces_draft_items` (por ejemplo, un guardado que entró en Go sin que el dispositivo recibiera la respuesta). Si
+   el renglón está igual que la partida, o lo guardó por última vez **el mismo mesero desde el mismo dispositivo**
+   (entonces lo que hay en Go es suyo, aunque lo cambiara después sin conexión), se quita en la misma transacción y
+   aparece en `removed_draft_item_ids`; si otra terminal lo dejó distinto, `draft_item_changed` (aceptable, como antes).
+   La misma regla del «último guardado propio» aplica a los renglones de `replaces_draft_items`.
+3. **Partidas ya enviadas** (`draft_item_sent`): una partida del pedido —o un renglón de `replaces_draft_items`— cuyo
+   id ya está en una partida confirmada (`restaurant_items.draft_item_id`) es `draft_item_sent`, aceptable, con el
+   mensaje «Papas: ya se envió a cocina desde otra terminal y no se vuelve a enviar. Si confirmas, se envía lo demás del
+   pedido.» (o «ya se había enviado a cocina desde este dispositivo…»). **Confirmarlo envía lo demás**: esas partidas
+   no se cotizan ni se vuelven a enviar y la respuesta 200 las lista en **`already_sent_item_ids`**. Si **no queda
+   nada**, la respuesta sigue siendo 200 `status: "accepted"`, sin pedido nuevo: `already_sent_item_ids` trae todas las
+   partidas y **`order_id` es el pedido en que ya habían entrado**; la cuenta no cambia (ni su revisión).
+4. **Pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa** (en su borrador o ya enviadas; por
+   ejemplo, la apertura con el primer producto entró y su respuesta se perdió): en lugar del 400 genérico, 409
+   `ORDER_REQUIRES_CONFIRMATION` (`requires_changes: true`) con el cambio **`items_in_account`** (`acceptable:
+false`, **`account_id`** = esa cuenta, `now` = su folio, `item_id` y `product_id` en `null`), sin
+   `table_has_account`. El dispositivo reenvía **con la misma `operation_id`** a `destination.account_id` = esa
+   cuenta; ahí aplican los puntos 2 y 3.
 
 ## Códigos de error más frecuentes
 
-| Código                                                   | Estado | Qué hacer                                                                                                           |
-| -------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------- |
-| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                                                            |
-| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                                                     |
-| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                                                |
-| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min).                              |
-| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                                                            |
-| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                                                     |
-| `OPERATION_VALIDATION`                                   | 400    | Datos inválidos; con `details.reason: account_not_open`, la cuenta ya no está abierta.                              |
-| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                                                         |
-| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                                                   |
-| `UNIT_HAS_PAYMENT`, `UNIT_HAS_DISCOUNT`                  | 409    | Las unidades tienen pago o descuento: no se cancelan ni modifican desde el dispositivo.                             |
-| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                                                        |
-| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                                                           |
-| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                                              |
-| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                                                       |
-| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                                                      |
-| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión ya entró: usar `details.result`, no capturarlo otra vez.                                     |
-| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                                                 |
-| `PIN_INVALID`                                            | 401    | PIN incorrecto: volver a escribirlo.                                                                                |
-| `PIN_LOCKED`                                             | 429    | PIN bloqueado hasta `details.locked_until`, o hasta que un administrador lo desbloquee (`details.requires_unlock`). |
-| `PIN_LOGIN_BUSY`                                         | 503    | Muchas entradas con PIN a la vez: reintentar en unos segundos.                                                      |
-| `CLIENT_KIND_MISMATCH`                                   | 400    | `X-Client-Kind` no es el tipo con que se emparejó el dispositivo.                                                   |
-| `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                                               |
-| `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                                            |
-| `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                                                         |
+| Código                                                   | Estado | Qué hacer                                                                                                                  |
+| -------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `CLIENT_UPDATE_REQUIRED`                                 | 426    | Actualizar la aplicación de este equipo.                                                                                   |
+| `DEVICE_REVOKED`, `DEVICE_REQUIRED`                      | 401    | Emparejar la terminal otra vez.                                                                                            |
+| `PAIRING_EXPIRED`, `PAIRING_REJECTED`                    | 409    | Pedir otro código de emparejamiento.                                                                                       |
+| `PAIRING_RATE_LIMITED`, `PAIRING_LIMIT_REACHED`          | 429    | Esperar unos minutos: límite por origen o tope global de solicitudes (30 cada 10 min).                                     |
+| `SESSION_REPLACED`, `SESSION_EXPIRED`, `SESSION_REVOKED` | 401    | Iniciar sesión otra vez.                                                                                                   |
+| `PERMISSION_DENIED`                                      | 403    | El usuario no tiene el permiso.                                                                                            |
+| `OPERATION_VALIDATION`                                   | 400    | Datos inválidos; con `details.reason: account_not_open`, la cuenta ya no está abierta.                                     |
+| `ACCOUNT_CONFLICT`                                       | 409    | Otra terminal cambió la cuenta: recargarla.                                                                                |
+| `QUOTE_CHANGED`                                          | 409    | El cálculo cambió: volver a calcular y confirmar.                                                                          |
+| `UNIT_HAS_PAYMENT`, `UNIT_HAS_DISCOUNT`                  | 409    | Las unidades tienen pago o descuento: no se cancelan ni modifican desde el dispositivo.                                    |
+| `TABLE_HAS_ACCOUNT`                                      | 409    | La mesa ya tiene una cuenta abierta: elegir.                                                                               |
+| `PRODUCT_SOLD_OUT`                                       | 409    | El producto está agotado.                                                                                                  |
+| `PRODUCT_UNAVAILABLE`                                    | 409    | El producto no está disponible (pausado, fuera de horario o inactivo).                                                     |
+| `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                                                              |
+| `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                                                             |
+| `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión (o su «Enviar a cocina», `details.origin`) ya entró: usar `details.result`, no capturarlo otra vez. |
+| `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                                                        |
+| `PIN_INVALID`                                            | 401    | PIN incorrecto: volver a escribirlo.                                                                                       |
+| `PIN_LOCKED`                                             | 429    | PIN bloqueado hasta `details.locked_until`, o hasta que un administrador lo desbloquee (`details.requires_unlock`).        |
+| `PIN_LOGIN_BUSY`                                         | 503    | Muchas entradas con PIN a la vez: reintentar en unos segundos.                                                             |
+| `CLIENT_KIND_MISMATCH`                                   | 400    | `X-Client-Kind` no es el tipo con que se emparejó el dispositivo.                                                          |
+| `PIN_DEVICE_NOT_ALLOWED`                                 | 403    | La entrada con PIN solo existe en dispositivos `android` emparejados.                                                      |
+| `OFFLINE_CREDENTIAL_INVALID`                             | 401    | Conservar el pedido y pedir al mesero que entre con su PIN con conexión.                                                   |
+| `OFFLINE_CREDENTIAL_NOT_ALLOWED`                         | 401    | La credencial de envío solo se usa en `submitOfflineOrder`.                                                                |

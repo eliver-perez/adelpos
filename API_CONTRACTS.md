@@ -3938,3 +3938,28 @@ Ninguna ruta del escritorio cambia de forma; el escritorio no cambió.
   tomado y antes que mesas y cuentas).
 - **Base** (0025, sección E): `restaurant_items.draft_item_id` (uuid opcional, con índice parcial): el id del renglón
   del borrador o de la partida del pedido sin conexión con que se capturó cada partida confirmada (`confirmLines`).
+
+## Etapa A1 · el servidor nunca repite lo que ya entró (revisión R6, A1-D18, sin migración)
+
+Decisión A1-D18 de [docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md) («Decisiones sobre la revisión R6»). Solo cambia
+`POST restaurant/offline-orders` (`submitOfflineOrder`), de forma compatible; detalle y forma exacta en
+[docs/API_V1.md](docs/API_V1.md), «El servidor nunca repite lo que ya entró». Código en
+`operations/offline_orders.go` (`diagnoseDraftOverlap`, `tableAccountsWithItems`, `offlineAlreadyConfirmed`) y
+`operations/handler.go` (`replay`).
+
+- **Misma clave que un `confirmDraft` aplicado**: si la clave ya está en `restaurant_operations` con la ruta
+  `POST restaurant/accounts/{id}/confirm`, del mismo usuario y dispositivo, y el pedido va a esa cuenta: 409
+  `OFFLINE_ORDER_ALREADY_ACCEPTED` con `details.origin: "confirm_draft"` y `details.result` en la forma de
+  `OfflineOrderResult` (pedido de la confirmación, cuenta vigente, `already_sent_item_ids`), sin escribir nada. Con otra
+  cuenta, una mesa, otro usuario, otro dispositivo u otra ruta guardada: `IDEMPOTENCY_CONFLICT` como siempre. El 409 de
+  una clave que ya entró como pedido sin conexión lleva ahora `details.origin: "offline_order"`.
+- **Renglones del borrador con el id de una partida**: se sustituyen aunque no estén en `replaces_draft_items`. Se
+  quitan si siguen iguales a la partida (o al renglón nombrado) o si el último guardado del borrador fue del mismo
+  usuario y dispositivo (`restaurant_draft_items.author_id`/`device_id`); si no, `draft_item_changed`.
+- **Partidas ya enviadas** (`restaurant_items.draft_item_id`, en cualquier cuenta): `draft_item_sent`; al confirmar no
+  se cotizan ni se envían (`already_sent_item_ids`). Sin nada pendiente: 200 sin pedido nuevo (`order_id` = el último
+  pedido en que entraron), sin evento `order.confirmed` y sin subir la revisión; auditoría
+  `restaurant.offline_order.accepted` con `new_order: false` y `already_sent_item_ids`.
+- **Mesa con las partidas en una cuenta abierta suya** (borrador o enviadas): cambio bloqueante `items_in_account` con
+  `account_id` y `now` = folio, sin `table_has_account`. `OfflineChange` agrega `account_id` (opcional, solo en ese
+  cambio).

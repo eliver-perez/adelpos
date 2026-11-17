@@ -353,8 +353,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	// Etapa A1 (fase E): mesas, modificar y cancelar unidades, cuenta que ya no está abierta y el borrador en el pedido
 	// sin conexión.
 	contractWaiterMode(t, client, contractWaiterData{
-		accountID: accountID, burger: fmt.Sprint(burger["id"]), fries: fmt.Sprint(fries["id"]), version: version,
-		customization: customization,
+		accountID: accountID, tableID: fmt.Sprint(tables[0]["id"]), burger: fmt.Sprint(burger["id"]), fries: fmt.Sprint(fries["id"]),
+		version: version, customization: customization,
 	})
 
 	// Eventos en tiempo real: el primer mensaje del flujo cumple EventBatch.
@@ -403,6 +403,7 @@ func contractScenario(t *testing.T, client *contractClient) {
 // contractWaiterData es lo que el recorrido del modo Mesero toma del recorrido principal.
 type contractWaiterData struct {
 	accountID     string
+	tableID       string
 	burger        string
 	fries         string
 	version       int64
@@ -467,39 +468,74 @@ func contractWaiterMode(t *testing.T, client *contractClient, data contractWaite
 		t.Fatalf("detalle de la cuenta que ya no está abierta: %v %s", err, details)
 	}
 
-	// Pedido sin conexión que sustituye un renglón del borrador guardado en línea (lo quita) y otro que otra terminal
-	// cambió mientras tanto (cambio que el mesero confirma).
-	saved := map[string]any{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 2, "customization": data.customization}
-	other := map[string]any{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 1, "customization": data.customization}
-	draft := decodeContract[map[string]any](t, client.call("PUT", route+"/draft", map[string]any{
-		"operation_id": contractID(), "revision": bill["account"].(map[string]any)["revision"], "items": []map[string]any{saved, other},
-	}, nil, 200).Body.Bytes())
-	seenOther := map[string]any{}
-	for key, value := range other {
-		seenOther[key] = value
+	contractOfflineNeverRepeats(t, client, data, bill["account"].(map[string]any)["revision"])
+}
+
+// contractOfflineNeverRepeats es el pedido sin conexión frente al borrador y a lo ya enviado (A1-D6 y A1-D18): un
+// renglón guardado con el id de una partida se sustituye aunque el pedido no lo nombre; una partida ya enviada es
+// draft_item_sent y al confirmar se envía lo demás; la clave de un «Enviar a cocina» ya aplicado es
+// OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft); y a una mesa cuyas partidas ya están en una cuenta suya,
+// items_in_account con la cuenta.
+func contractOfflineNeverRepeats(t *testing.T, client *contractClient, data contractWaiterData, revision any) {
+	route := "/restaurant/accounts/" + data.accountID
+	line := func(quantity int) map[string]any {
+		return map[string]any{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": quantity, "customization": data.customization}
 	}
-	seenOther["quantity"] = 3
-	order := map[string]any{
-		"operation_id":    contractID(),
-		"catalog_version": data.version,
-		"captured_at":     time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
-		"destination":     map[string]any{"account_id": data.accountID},
-		"items": []map[string]any{{"id": saved["id"], "product_id": data.fries, "variant_id": nil, "quantity": 2,
-			"customization": data.customization, "seen_unit_price": "40.00"}},
-		"replaces_draft_items": []map[string]any{saved, seenOther},
+	item := func(saved map[string]any) map[string]any {
+		return map[string]any{"id": saved["id"], "product_id": data.fries, "variant_id": nil, "quantity": saved["quantity"],
+			"customization": data.customization, "seen_unit_price": "40.00"}
 	}
-	rejection := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", order, nil, 409).Body.Bytes())
-	changes := rejection["error"].(map[string]any)["details"].(map[string]any)
-	if list, _ := changes["changes"].([]any); len(list) != 1 || list[0].(map[string]any)["kind"] != "draft_item_changed" {
-		t.Fatalf("renglón cambiado en otra terminal: %v", changes)
+	order := func(key string, destination map[string]any, items ...map[string]any) map[string]any {
+		return map[string]any{
+			"operation_id": key, "catalog_version": data.version,
+			"captured_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+			"destination": destination, "items": items,
+		}
 	}
-	order["confirmation"] = map[string]any{"catalog_version": changes["catalog_version"], "changes": changes["changes"]}
-	accepted := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", order, nil, 200).Body.Bytes())
+	account := map[string]any{"account_id": data.accountID}
+	saved, other := line(2), line(1)
+	client.call("PUT", route+"/draft", map[string]any{
+		"operation_id": contractID(), "revision": revision, "items": []map[string]any{saved, other},
+	}, nil, 200)
+	// El renglón guardado con el id de la partida se quita aunque el pedido no lo nombre; el otro se queda.
+	accepted := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders",
+		order(contractID(), account, item(saved)), nil, 200).Body.Bytes())
 	removed, _ := accepted["removed_draft_item_ids"].([]any)
 	remaining, _ := accepted["bill"].(map[string]any)["draft"].([]any)
-	if len(removed) != 1 || removed[0] != saved["id"] || len(remaining) != 1 || remaining[0].(map[string]any)["id"] != other["id"] ||
-		len(draft["draft"].([]any)) != 2 {
+	if len(removed) != 1 || removed[0] != saved["id"] || len(remaining) != 1 || remaining[0].(map[string]any)["id"] != other["id"] {
 		t.Fatalf("pedido que sustituye el borrador: quitados %v, quedan %v", removed, remaining)
+	}
+	// La partida ya enviada: draft_item_sent; confirmado, entra solo lo demás.
+	extra := line(1)
+	resend := order(contractID(), account, item(saved), item(extra))
+	rejection := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", resend, nil, 409).Body.Bytes())
+	details := rejection["error"].(map[string]any)["details"].(map[string]any)
+	if list, _ := details["changes"].([]any); len(list) != 1 || list[0].(map[string]any)["kind"] != "draft_item_sent" {
+		t.Fatalf("partida ya enviada: %v", details)
+	}
+	resend["confirmation"] = map[string]any{"catalog_version": details["catalog_version"], "changes": details["changes"]}
+	accepted = decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders", resend, nil, 200).Body.Bytes())
+	if sent, _ := accepted["already_sent_item_ids"].([]any); len(sent) != 1 || sent[0] != saved["id"] {
+		t.Fatalf("ya enviadas: %v", accepted["already_sent_item_ids"])
+	}
+	// «Enviar a cocina» con la clave K que entró sin respuesta; la cola manda el pedido con K: ya aceptado.
+	key := contractID()
+	current := decodeContract[map[string]any](t, client.call("GET", route, nil, nil, 200).Body.Bytes())
+	preview := decodeContract[map[string]any](t, client.call("GET", route+"/preview", nil, nil, 200).Body.Bytes())
+	client.call("POST", route+"/confirm", map[string]any{
+		"operation_id": key, "revision": current["account"].(map[string]any)["revision"], "expected_fingerprint": preview["fingerprint"],
+	}, nil, 200)
+	repeated := client.call("POST", "/restaurant/offline-orders", order(key, account, item(other)), nil, 409).Body.Bytes()
+	if err := client.contract.ValidateJSON(map[string]any{"$ref": "#/components/schemas/OfflineOrderAlreadyAccepted"}, repeated); err != nil ||
+		!strings.Contains(string(repeated), `"origin":"confirm_draft"`) {
+		t.Fatalf("pedido con la clave de un Enviar a cocina aplicado: %v %s", err, repeated)
+	}
+	// A la mesa, con partidas que ya están en su cuenta abierta: items_in_account con la cuenta.
+	redirect := decodeContract[map[string]any](t, client.call("POST", "/restaurant/offline-orders",
+		order(contractID(), map[string]any{"table_id": data.tableID, "seen_account_ids": []string{}}, item(other)), nil, 409).Body.Bytes())
+	changes, _ := redirect["error"].(map[string]any)["details"].(map[string]any)["changes"].([]any)
+	if len(changes) != 1 || changes[0].(map[string]any)["kind"] != "items_in_account" || changes[0].(map[string]any)["account_id"] != data.accountID {
+		t.Fatalf("partidas ya en una cuenta de la mesa: %v", redirect)
 	}
 }
 
