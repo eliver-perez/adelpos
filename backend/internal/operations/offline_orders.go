@@ -1,6 +1,7 @@
 package operations
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -56,9 +57,26 @@ import (
 //   - un renglón que ya no está como el dispositivo lo vio no se quita ni se acepta en silencio: es un cambio más de
 //     la lista (draft_item_changed si otra terminal lo cambió, draft_item_removed si lo quitaron, draft_item_sent si ya
 //     se envió a cocina: la partida confirmada conserva el id del renglón en restaurant_items.draft_item_id). Los tres
-//     se aceptan con la confirmación del mesero, como un cambio de precio: el pedido entra como lo capturó y el
-//     renglón de la otra terminal se queda como está; si no, el mesero corrige su pedido y lo reenvía.
+//     se aceptan con la confirmación del mesero, como un cambio de precio: el pedido entra como lo capturó (menos lo
+//     ya enviado, A1-D18) y el renglón de la otra terminal se queda como está; si no, el mesero corrige su pedido y lo
+//     reenvía.
 //   - Idempotencia, límites y credencial de envío: los mismos del pedido (la clave guarda el resultado completo).
+//
+// El servidor nunca repite lo que ya entró (etapa A1, decisión A1-D18, después de la revisión independiente R6):
+//
+//   - Los renglones del borrador con el mismo id que una partida del pedido son el mismo renglón (el id lo genera el
+//     dispositivo al capturar): se tratan como sustituidos aunque no vengan en replaces_draft_items. Si siguen como
+//     los vio el dispositivo (o como los trae el pedido) o los guardó por última vez el mismo mesero desde el mismo
+//     dispositivo, se quitan del borrador al aceptar; si otra terminal los cambió, draft_item_changed.
+//   - Una partida del pedido que ya se envió a cocina (alguna partida confirmada conserva su id en
+//     restaurant_items.draft_item_id) es draft_item_sent: confirmarla significa «enviar lo demás». Lo ya enviado nunca
+//     se vuelve a enviar; si no queda nada, el pedido se acepta sin partidas nuevas (already_sent_item_ids, y order_id
+//     es el pedido en que ya habían entrado).
+//   - Un pedido con la misma clave de operación que un «Enviar a cocina» (confirmDraft) ya aplicado en esa cuenta por
+//     el mismo mesero desde el mismo dispositivo es el mismo pedido: OFFLINE_ORDER_ALREADY_ACCEPTED con el resultado
+//     (handler.go, replay). Con otra cuenta, otro usuario, otro dispositivo u otra operación, IDEMPOTENCY_CONFLICT.
+//   - Un pedido para una mesa cuyas partidas ya están en una cuenta abierta de esa mesa (en su borrador o enviadas)
+//     responde items_in_account con esa cuenta (account_id) para que el dispositivo lo dirija ahí.
 
 // Motivos de cambio de un pedido capturado sin conexión.
 const (
@@ -76,6 +94,8 @@ const (
 	OfflineDraftItemChanged = "draft_item_changed"
 	OfflineDraftItemRemoved = "draft_item_removed"
 	OfflineDraftItemSent    = "draft_item_sent"
+	// Etapa A1 (A1-D18): las partidas del pedido a una mesa ya están en una cuenta abierta de esa mesa (account_id).
+	OfflineItemsInAccount = "items_in_account"
 )
 
 // offlineClockSkew es cuánto puede adelantarse el reloj del teléfono a la hora del servidor.
@@ -127,6 +147,8 @@ type OfflineChange struct {
 	Message     string  `json:"message"`
 	// Acceptable: el mesero puede aceptarlo con la confirmación; si no, hay que corregir el pedido.
 	Acceptable bool `json:"acceptable"`
+	// AccountID (etapa A1, solo en items_in_account) es la cuenta abierta de la mesa donde ya están las partidas.
+	AccountID *string `json:"account_id,omitempty"`
 }
 
 // OfflineOrderResult es la respuesta de un pedido aceptado.
@@ -140,9 +162,12 @@ type OfflineOrderResult struct {
 	CapturedAt             time.Time       `json:"captured_at"`
 	ReceivedAt             time.Time       `json:"received_at"`
 	AcceptedChanges        []OfflineChange `json:"accepted_changes"`
-	// RemovedDraftItemIDs (etapa A1) son los renglones de replaces_draft_items que se quitaron del borrador.
+	// RemovedDraftItemIDs (etapa A1) son los renglones del borrador que el pedido sustituyó y se quitaron.
 	RemovedDraftItemIDs []string `json:"removed_draft_item_ids"`
-	Bill                *Bill    `json:"bill"`
+	// AlreadySentItemIDs (etapa A1, A1-D18) son las partidas del pedido que ya se habían enviado a cocina y no se
+	// volvieron a enviar. Si son todas, no se creó un pedido nuevo y OrderID es el pedido en que ya habían entrado.
+	AlreadySentItemIDs []string `json:"already_sent_item_ids"`
+	Bill               *Bill    `json:"bill"`
 }
 
 // offlineDiagnosis es lo que encontró la revisión del pedido.
@@ -152,8 +177,12 @@ type offlineDiagnosis struct {
 	snapshot    catalog.Snapshot
 	account     *Account
 	priceListID string
-	// replacedDraft son los renglones del borrador que siguen como los vio el dispositivo y se quitan al aceptarlo.
+	// replacedDraft son los renglones del borrador que el pedido sustituye y se quitan al aceptarlo.
 	replacedDraft []string
+	// sent son las partidas del pedido que ya se enviaron a cocina (no se vuelven a enviar) y sentOrderID el último
+	// pedido en que entraron.
+	sent        map[string]bool
+	sentOrderID string
 }
 
 func (handler *service) offlineOrder() (any, error) {
@@ -314,16 +343,17 @@ func (handler *service) diagnoseOffline(input OfflineOrderInput) (*offlineDiagno
 					Message: accountNotOpenMessage(account) + " Elige otra cuenta o abre una nueva en la mesa.",
 				})
 			} else {
-				replaced, changes, err := handler.diagnoseReplacedDraft(account.ID, input.ReplacesDraftItems)
+				overlap, err := handler.diagnoseDraftOverlap(account.ID, input)
 				if err != nil {
 					return nil, err
 				}
-				diagnosis.replacedDraft = replaced
-				diagnosis.changes = append(diagnosis.changes, changes...)
+				diagnosis.replacedDraft = overlap.remove
+				diagnosis.sent, diagnosis.sentOrderID = overlap.sent, overlap.sentOrderID
+				diagnosis.changes = append(diagnosis.changes, overlap.changes...)
 			}
 		}
 	} else {
-		changes, err := handler.diagnoseOfflineTable(destination)
+		changes, err := handler.diagnoseOfflineTable(input)
 		if err != nil {
 			return nil, err
 		}
@@ -335,8 +365,13 @@ func (handler *service) diagnoseOffline(input OfflineOrderInput) (*offlineDiagno
 			return nil, err
 		}
 	}
-	lines := make([]catalog.LineRequest, 0, len(input.Items))
-	for _, item := range input.Items {
+	// Lo que ya se envió a cocina no se vuelve a cotizar ni a enviar (A1-D18): solo se revisa y se cotiza lo demás.
+	pending := pendingOfflineItems(input.Items, diagnosis.sent)
+	if len(pending) == 0 {
+		return diagnosis, nil
+	}
+	lines := make([]catalog.LineRequest, 0, len(pending))
+	for _, item := range pending {
 		lines = append(lines, item.LineRequest)
 	}
 	quote, snapshot, err := catalog.QuoteForOrder(handler.ctx, handler.tx, catalog.PreviewRequest{
@@ -345,7 +380,7 @@ func (handler *service) diagnoseOffline(input OfflineOrderInput) (*offlineDiagno
 	})
 	if err == nil {
 		diagnosis.quote, diagnosis.snapshot = quote, snapshot
-		for index, item := range input.Items {
+		for index, item := range pending {
 			if change := offlinePriceChange(item, quote.Lines[index]); change != nil {
 				diagnosis.changes = append(diagnosis.changes, *change)
 			}
@@ -359,7 +394,7 @@ func (handler *service) diagnoseOffline(input OfflineOrderInput) (*offlineDiagno
 	}
 	// Algún producto o parte del pedido ya no se puede cotizar: se revisa cada partida por separado para decir cuál
 	// y por qué (y los precios de las que sí se pueden cotizar).
-	for _, item := range input.Items {
+	for _, item := range pending {
 		change, err := handler.diagnoseOfflineItem(item, diagnosis.priceListID)
 		if err != nil {
 			return nil, err
@@ -379,8 +414,21 @@ func (handler *service) diagnoseOffline(input OfflineOrderInput) (*offlineDiagno
 	return diagnosis, nil
 }
 
-// diagnoseOfflineTable revisa una mesa de destino: que siga en servicio y qué cuentas abiertas no veía el mesero.
-func (handler *service) diagnoseOfflineTable(destination OfflineDestination) ([]OfflineChange, error) {
+// pendingOfflineItems son las partidas del pedido que todavía no se enviaron a cocina, en su orden.
+func pendingOfflineItems(items []OfflineItem, sent map[string]bool) []OfflineItem {
+	pending := make([]OfflineItem, 0, len(items))
+	for _, item := range items {
+		if !sent[item.ID] {
+			pending = append(pending, item)
+		}
+	}
+	return pending
+}
+
+// diagnoseOfflineTable revisa una mesa de destino: que siga en servicio, que sus partidas no estén ya en una cuenta
+// abierta de la mesa y qué cuentas abiertas no veía el mesero.
+func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]OfflineChange, error) {
+	destination := input.Destination
 	if err := handler.request.Actor.Require("accounts.open"); err != nil {
 		return nil, err
 	}
@@ -400,6 +448,27 @@ func (handler *service) diagnoseOfflineTable(destination OfflineDestination) ([]
 			Kind:    OfflineTableUnavailable,
 			Message: "La mesa «" + name + "» está fuera de servicio o inactiva. Elige otra mesa.",
 		}}, nil
+	}
+	holding, err := handler.tableAccountsWithItems(*destination.TableID, input.Items)
+	if err != nil {
+		return nil, err
+	}
+	if len(holding) > 0 {
+		// Etapa A1 (A1-D18): por ejemplo, la cuenta nació en Go con estas partidas (la apertura entró y su respuesta se
+		// perdió). Abrir otra cuenta las duplicaría; el dispositivo reenvía el pedido a esa cuenta (account_id).
+		changes := []OfflineChange{}
+		for _, account := range holding {
+			accountID := account.ID
+			folio := fmt.Sprintf("folio %d", account.Folio)
+			changes = append(changes, OfflineChange{
+				Kind:      OfflineItemsInAccount,
+				Now:       &folio,
+				AccountID: &accountID,
+				Message: "Lo que capturaste ya está en la cuenta «" + account.Name + "» (" + folio + ") de la mesa «" + name +
+					"». Envía el pedido a esa cuenta.",
+			})
+		}
+		return changes, nil
 	}
 	unseen, err := readList[TableAccountRef](handler.ctx, handler.tx, `SELECT jsonb_build_object(
         'id',a.id,'folio',a.folio,'name',a.name) FROM app.restaurant_accounts a
@@ -424,73 +493,179 @@ func (handler *service) diagnoseOfflineTable(destination OfflineDestination) ([]
 	}}, nil
 }
 
-// diagnoseReplacedDraft compara los renglones que el pedido sustituye con el borrador vigente de la cuenta. Devuelve
-// los que siguen exactamente como los vio el dispositivo (se quitarán al aceptar el pedido) y un cambio por cada uno
-// que no: cambiado en otra terminal, quitado o ya enviado a cocina.
-func (handler *service) diagnoseReplacedDraft(accountID string, replaced []DraftItem) ([]string, []OfflineChange, error) {
-	matched := []string{}
-	changes := []OfflineChange{}
-	if len(replaced) == 0 {
-		return matched, changes, nil
+// tableAccountsWithItems son las cuentas abiertas de la mesa que ya tienen alguna partida del pedido: en su borrador o
+// ya enviada (una partida confirmada con ese id cuyas unidades siguen en la cuenta o que se confirmó en ella).
+func (handler *service) tableAccountsWithItems(tableID string, items []OfflineItem) ([]TableAccountRef, error) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
 	}
-	current, err := handler.readDraft(accountID)
-	if err != nil {
-		return nil, nil, err
-	}
-	saved := map[string]DraftItem{}
-	for _, item := range current {
-		saved[item.ID] = item
-	}
-	for _, seen := range replaced {
-		now, exists := saved[seen.ID]
-		if exists && now.Quantity == seen.Quantity && sameDraftLine(now, seen) {
-			matched = append(matched, seen.ID)
-			continue
-		}
-		change, err := handler.replacedDraftChange(accountID, seen, exists)
-		if err != nil {
-			return nil, nil, err
-		}
-		changes = append(changes, *change)
-	}
-	return matched, changes, nil
+	return readList[TableAccountRef](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',a.id,'folio',a.folio,'name',a.name)
+        FROM app.restaurant_accounts a WHERE a.table_id=$1 AND a.state='open' AND (
+            EXISTS(SELECT FROM app.restaurant_draft_items d WHERE d.account_id=a.id AND d.id=ANY($2::uuid[]))
+            OR EXISTS(SELECT FROM app.restaurant_items i JOIN app.restaurant_orders o ON o.id=i.original_order_id
+                WHERE i.draft_item_id=ANY($2::uuid[]) AND (o.original_account_id=a.id
+                    OR EXISTS(SELECT FROM app.restaurant_item_units u WHERE u.item_id=i.id AND u.account_id=a.id))))
+        ORDER BY a.created_at,a.id`, tableID, ids)
 }
 
-// replacedDraftChange explica qué pasó con un renglón del borrador que ya no está como lo vio el dispositivo. Los tres
-// casos se aceptan con la confirmación del mesero: su pedido entra como lo capturó y lo de la otra terminal no se toca.
-func (handler *service) replacedDraftChange(accountID string, seen DraftItem, exists bool) (*OfflineChange, error) {
+// draftRow es un renglón del borrador vigente con el usuario y el dispositivo que guardaron el borrador por última vez
+// (cada guardado reescribe todas las filas con los suyos, operations/drafts.go).
+type draftRow struct {
+	item     DraftItem
+	authorID string
+	deviceID string
+}
+
+func (handler *service) readDraftRows(accountID string) (map[string]draftRow, error) {
+	rows, err := handler.tx.Query(handler.ctx, `SELECT jsonb_build_object('id',id,'product_id',product_id,
+        'variant_id',variant_id,'quantity',quantity,'customization',customization),author_id::text,device_id::text
+        FROM app.restaurant_draft_items WHERE account_id=$1`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := map[string]draftRow{}
+	for rows.Next() {
+		var encoded []byte
+		var row draftRow
+		if err := rows.Scan(&encoded, &row.authorID, &row.deviceID); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(encoded, &row.item); err != nil {
+			return nil, err
+		}
+		result[row.item.ID] = row
+	}
+	return result, rows.Err()
+}
+
+// draftOverlap es lo que el pedido tiene en común con el borrador y con lo ya enviado de su cuenta.
+type draftOverlap struct {
+	// remove son los renglones del borrador que el pedido sustituye y se quitan al aceptarlo.
+	remove []string
+	// sent son las partidas del pedido (o renglones que sustituye) que ya se enviaron a cocina.
+	sent        map[string]bool
+	sentOrderID string
+	changes     []OfflineChange
+}
+
+// diagnoseDraftOverlap compara el pedido con el borrador vigente de la cuenta y con lo ya enviado (A1-D6 y A1-D18).
+// Revisa primero los renglones que el pedido nombra en replaces_draft_items (tal como los vio el dispositivo) y
+// después cada partida del pedido que no nombra (el mismo id es el mismo renglón):
+//
+//   - sigue en el borrador igual a como lo vio el dispositivo, o lo guardó por última vez el mismo mesero desde el
+//     mismo dispositivo (entonces lo que hay es suyo, aunque lo cambiara después sin conexión): se quita al aceptar;
+//   - sigue en el borrador con otro contenido que guardó otra terminal: draft_item_changed (se queda);
+//   - ya se envió a cocina: draft_item_sent, y esa partida no se vuelve a enviar;
+//   - un renglón nombrado que ya no está y nunca se envió: draft_item_removed. Una partida nueva no es un cambio.
+func (handler *service) diagnoseDraftOverlap(accountID string, input OfflineOrderInput) (*draftOverlap, error) {
+	overlap := &draftOverlap{remove: []string{}, sent: map[string]bool{}, changes: []OfflineChange{}}
+	current, err := handler.readDraftRows(accountID)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		seen  DraftItem
+		named bool
+	}
+	candidates := []candidate{}
+	named := map[string]bool{}
+	for _, seen := range input.ReplacesDraftItems {
+		candidates = append(candidates, candidate{seen: seen, named: true})
+		named[seen.ID] = true
+	}
+	for _, item := range input.Items {
+		if !named[item.ID] {
+			candidates = append(candidates, candidate{seen: item.DraftItem})
+		}
+	}
+	for _, candidate := range candidates {
+		seen := candidate.seen
+		row, exists := current[seen.ID]
+		if exists {
+			unchanged := row.item.Quantity == seen.Quantity && sameDraftLine(row.item, seen)
+			own := row.authorID == handler.request.Actor.UserID && row.deviceID == handler.request.Actor.DeviceID
+			if unchanged || own {
+				overlap.remove = append(overlap.remove, seen.ID)
+				continue
+			}
+			change, err := handler.draftChange(OfflineDraftItemChanged, seen, "")
+			if err != nil {
+				return nil, err
+			}
+			overlap.changes = append(overlap.changes, *change)
+			continue
+		}
+		orderID, deviceID, found, err := handler.sentDraftItem(seen.ID)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			overlap.sent[seen.ID] = true
+			if overlap.sentOrderID == "" {
+				overlap.sentOrderID = orderID
+			}
+			change, err := handler.draftChange(OfflineDraftItemSent, seen, deviceID)
+			if err != nil {
+				return nil, err
+			}
+			overlap.changes = append(overlap.changes, *change)
+			continue
+		}
+		if candidate.named {
+			change, err := handler.draftChange(OfflineDraftItemRemoved, seen, "")
+			if err != nil {
+				return nil, err
+			}
+			overlap.changes = append(overlap.changes, *change)
+		}
+	}
+	slices.Sort(overlap.remove)
+	return overlap, nil
+}
+
+// sentDraftItem busca la partida confirmada más reciente que conserva el id del renglón (restaurant_items.draft_item_id,
+// en cualquier cuenta: el id lo generó el dispositivo para ese renglón) y devuelve su pedido y el dispositivo que la
+// envió.
+func (handler *service) sentDraftItem(id string) (string, string, bool, error) {
+	var orderID, deviceID string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT o.id::text,o.device_id::text FROM app.restaurant_items i
+        JOIN app.restaurant_orders o ON o.id=i.original_order_id WHERE i.draft_item_id=$1
+        ORDER BY o.created_at DESC,o.id LIMIT 1`, id).Scan(&orderID, &deviceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return orderID, deviceID, true, nil
+}
+
+// draftChange explica qué pasó con un renglón del borrador o una partida del pedido. Los tres casos se aceptan con la
+// confirmación del mesero: su pedido entra como lo capturó, lo de la otra terminal no se toca y lo ya enviado no se
+// vuelve a enviar. sentFrom es el dispositivo que envió el renglón (solo en draft_item_sent).
+func (handler *service) draftChange(kind string, seen DraftItem, sentFrom string) (*OfflineChange, error) {
 	itemID, productID := seen.ID, seen.ProductID
 	name := "Un producto del borrador"
 	err := handler.tx.QueryRow(handler.ctx, "SELECT name FROM app.catalog_products WHERE id=$1", seen.ProductID).Scan(&name)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	change := &OfflineChange{ItemID: &itemID, ProductID: &productID, ProductName: name, Acceptable: true}
-	if exists {
-		change.Kind = OfflineDraftItemChanged
+	change := &OfflineChange{Kind: kind, ItemID: &itemID, ProductID: &productID, ProductName: name, Acceptable: true}
+	switch kind {
+	case OfflineDraftItemChanged:
 		change.Message = name + ": lo cambiaron en otra terminal. Si confirmas, tu pedido entra como lo capturaste y el " +
 			"cambio de la otra terminal se queda sin enviar en la cuenta."
-		return change, nil
-	}
-	// La partida confirmada conserva el id del renglón con que se capturó (restaurant_items.draft_item_id): si existe en
-	// esta cuenta, el renglón ya se envió a cocina; si no, lo quitaron del borrador.
-	var deviceID string
-	err = handler.tx.QueryRow(handler.ctx, `SELECT o.device_id::text FROM app.restaurant_items i
-        JOIN app.restaurant_orders o ON o.id=i.original_order_id
-        WHERE i.draft_item_id=$1 AND o.original_account_id=$2 ORDER BY o.created_at DESC,o.id LIMIT 1`, seen.ID, accountID).
-		Scan(&deviceID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		change.Kind = OfflineDraftItemRemoved
+	case OfflineDraftItemRemoved:
 		change.Message = name + ": lo quitaron de la cuenta en otra terminal. Si confirmas, tu pedido entra como lo capturaste."
-		return change, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	change.Kind = OfflineDraftItemSent
-	change.Message = name + ": ya se envió desde otra terminal. Si confirmas, tu pedido entra completo y puede repetirlo."
-	if deviceID == handler.request.Actor.DeviceID {
-		change.Message = name + ": ya se había enviado desde este dispositivo. Si confirmas, tu pedido entra completo y puede repetirlo."
+	case OfflineDraftItemSent:
+		change.Message = name + ": ya se envió a cocina desde otra terminal y no se vuelve a enviar. Si confirmas, se " +
+			"envía lo demás del pedido."
+		if sentFrom == handler.request.Actor.DeviceID {
+			change.Message = name + ": ya se había enviado a cocina desde este dispositivo y no se vuelve a enviar. Si " +
+				"confirmas, se envía lo demás del pedido."
+		}
 	}
 	return change, nil
 }
@@ -634,9 +809,16 @@ func offlineRejection(input OfflineOrderInput, version int64, received time.Time
 }
 
 // acceptOffline confirma el pedido en su cuenta (abriéndola en la mesa si hace falta) con los precios del servidor.
+// Desde la etapa A1 (A1-D18) solo confirma las partidas que todavía no se enviaron a cocina; si no queda ninguna, el
+// pedido se acepta sin pedido nuevo (order_id es el pedido en que ya habían entrado).
 func (handler *service) acceptOffline(input OfflineOrderInput, diagnosis *offlineDiagnosis, version int64, received time.Time) (any, error) {
-	items := make([]DraftItem, 0, len(input.Items))
+	items := []DraftItem{}
+	alreadySent := []string{}
 	for _, item := range input.Items {
+		if diagnosis.sent[item.ID] {
+			alreadySent = append(alreadySent, item.ID)
+			continue
+		}
 		items = append(items, item.DraftItem)
 	}
 	account := diagnosis.account
@@ -661,19 +843,28 @@ func (handler *service) acceptOffline(input OfflineOrderInput, diagnosis *offlin
 	} else if err := handler.validateDraftItems(account.ID, items); err != nil {
 		return nil, err
 	}
-	if err := validateStorageAmount(diagnosis.quote); err != nil {
-		return nil, err
+	if diagnosis.quote != nil {
+		if err := validateStorageAmount(diagnosis.quote); err != nil {
+			return nil, err
+		}
 	}
-	if err := handler.touch(account.ID, account.Revision); err != nil {
-		return nil, err
+	// La revisión de la cuenta sube solo si el pedido cambia algo (partidas nuevas o renglones quitados del borrador).
+	if len(items) > 0 || len(diagnosis.replacedDraft) > 0 {
+		if err := handler.touch(account.ID, account.Revision); err != nil {
+			return nil, err
+		}
 	}
 	removed, err := handler.removeReplacedDraft(account.ID, diagnosis.replacedDraft)
 	if err != nil {
 		return nil, err
 	}
-	orderID, confirmed, err := handler.confirmLines(account.ID, items, diagnosis.quote, diagnosis.snapshot)
-	if err != nil {
-		return nil, err
+	orderID := diagnosis.sentOrderID
+	confirmed := []map[string]any{}
+	if len(items) > 0 {
+		orderID, confirmed, err = handler.confirmLines(account.ID, items, diagnosis.quote, diagnosis.snapshot)
+		if err != nil {
+			return nil, err
+		}
 	}
 	accepted := diagnosis.changes
 	confirmedVersion := any(nil)
@@ -688,15 +879,18 @@ func (handler *service) acceptOffline(input OfflineOrderInput, diagnosis *offlin
 		"confirmation_catalog_version": confirmedVersion,
 		"accepted_changes":             accepted,
 		"removed_draft_item_ids":       removed,
+		"already_sent_item_ids":        alreadySent,
 	}
-	if err := handler.event(account.ID, nil, "order.confirmed", nil, map[string]any{
-		"order_id": orderID, "items": confirmed, "quote": diagnosis.quote, "preparation_state": "confirmed_pending_dispatch",
-		"offline": offline,
-	}); err != nil {
-		return nil, err
+	if len(items) > 0 {
+		if err := handler.event(account.ID, nil, "order.confirmed", nil, map[string]any{
+			"order_id": orderID, "items": confirmed, "quote": diagnosis.quote, "preparation_state": "confirmed_pending_dispatch",
+			"offline": offline,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	operationID := input.OperationID
-	audited := map[string]any{"account_id": account.ID, "order_id": orderID}
+	audited := map[string]any{"account_id": account.ID, "order_id": orderID, "new_order": len(items) > 0}
 	for key, value := range offline {
 		audited[key] = value
 	}
@@ -718,12 +912,107 @@ func (handler *service) acceptOffline(input OfflineOrderInput, diagnosis *offlin
 		ReceivedAt:             received,
 		AcceptedChanges:        accepted,
 		RemovedDraftItemIDs:    removed,
+		AlreadySentItemIDs:     alreadySent,
 		Bill:                   bill,
 	}, nil
 }
 
-// removeReplacedDraft quita del borrador los renglones que el pedido sustituye y que siguen como los vio el
-// dispositivo, y lo publica como un guardado del borrador (historia de la cuenta, evento restaurant.draft.saved y
+// confirmedAccountOf reconoce la ruta guardada de un «Enviar a cocina» (POST restaurant/accounts/{id}/confirm) y
+// devuelve su cuenta.
+func confirmedAccountOf(route string) (string, bool) {
+	rest, found := strings.CutPrefix(route, "POST restaurant/accounts/")
+	if !found {
+		return "", false
+	}
+	accountID, found := strings.CutSuffix(rest, "/confirm")
+	if !found || validateID(accountID) != nil {
+		return "", false
+	}
+	return accountID, true
+}
+
+// offlineAlreadyConfirmed responde a un pedido de la cola cuya clave ya entró como «Enviar a cocina» (confirmDraft) en
+// la misma cuenta (A1-D18): OFFLINE_ORDER_ALREADY_ACCEPTED con el resultado en la forma de un pedido aceptado
+// (el pedido que entró, la cuenta vigente y las partidas del pedido que ya estaban en él), sin escribir nada. Devuelve
+// nil si el pedido va a otra cuenta o a una mesa (entonces la clave es de otra operación: IDEMPOTENCY_CONFLICT).
+func (handler *service) offlineAlreadyConfirmed(accountID string) (*Error, error) {
+	var input OfflineOrderInput
+	if err := json.Unmarshal(handler.request.Body, &input); err != nil {
+		return nil, nil
+	}
+	if input.Destination.AccountID == nil || *input.Destination.AccountID != accountID {
+		return nil, nil
+	}
+	var orderID string
+	var received time.Time
+	err := handler.tx.QueryRow(handler.ctx, `SELECT id::text,created_at FROM app.restaurant_orders
+        WHERE operation_id=$1 AND original_account_id=$2`, handler.operationID, accountID).Scan(&orderID, &received)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	account, err := handler.readAccount(accountID)
+	if err != nil {
+		return nil, err
+	}
+	if err := handler.authorizeAccount(account, false); err != nil {
+		return nil, err
+	}
+	version, err := catalog.Version(handler.ctx, handler.tx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(input.Items))
+	for _, item := range input.Items {
+		ids = append(ids, item.ID)
+	}
+	alreadySent := []string{}
+	rows, err := handler.tx.Query(handler.ctx, `SELECT DISTINCT draft_item_id::text FROM app.restaurant_items
+        WHERE original_order_id=$1 AND draft_item_id=ANY($2::uuid[]) ORDER BY 1`, orderID, ids)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		alreadySent = append(alreadySent, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	bill, err := handler.readBill(accountID)
+	if err != nil {
+		return nil, err
+	}
+	result := &OfflineOrderResult{
+		Status:                 "accepted",
+		OperationID:            handler.operationID,
+		OrderID:                orderID,
+		AccountID:              accountID,
+		CatalogVersion:         version,
+		CapturedCatalogVersion: input.CatalogVersion,
+		CapturedAt:             input.CapturedAt.UTC(),
+		ReceivedAt:             received.UTC(),
+		AcceptedChanges:        []OfflineChange{},
+		RemovedDraftItemIDs:    []string{},
+		AlreadySentItemIDs:     alreadySent,
+		Bill:                   bill,
+	}
+	return &Error{
+		Status:  409,
+		Code:    "OFFLINE_ORDER_ALREADY_ACCEPTED",
+		Message: "Este pedido ya había entrado al enviarlo a cocina y no se volvió a registrar.",
+		Details: map[string]any{"status": "already_accepted", "origin": "confirm_draft", "result": result},
+	}, nil
+}
+
+// removeReplacedDraft quita del borrador los renglones que el pedido sustituye (diagnoseDraftOverlap), y lo publica como un guardado del borrador (historia de la cuenta, evento restaurant.draft.saved y
 // Registro de movimientos), en la misma transacción del pedido. Los demás renglones conservan su lugar.
 func (handler *service) removeReplacedDraft(accountID string, replaced []string) ([]string, error) {
 	removed := []string{}

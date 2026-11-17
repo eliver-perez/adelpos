@@ -1448,7 +1448,7 @@
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige.",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1469,7 +1469,7 @@
             }
           },
           "409": {
-            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró con otro contenido del mismo usuario y terminal (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado); o la clave es de otro usuario o terminal (IDEMPOTENCY_CONFLICT).",
+            "description": "Requiere confirmación (ORDER_REQUIRES_CONFIRMATION); la clave ya entró, del mismo usuario y terminal, como pedido sin conexión con otro contenido o como «Enviar a cocina» en la misma cuenta (OFFLINE_ORDER_ALREADY_ACCEPTED, con el resultado y su origin); o la clave es de otro usuario, otra terminal u otra operación (IDEMPOTENCY_CONFLICT).",
             "content": {
               "application/json": {
                 "schema": {
@@ -4387,7 +4387,7 @@
               "$ref": "#/components/schemas/DraftItem"
             },
             "maxItems": 20,
-            "description": "Etapa A1 (opcional, solo con destination.account_id): los renglones del borrador de la cuenta que este dispositivo había guardado y que el pedido sustituye, tal como los vio (id, producto, presentación, cantidad y personalización). Al aceptar el pedido Go quita del borrador los que siguen así (removed_draft_item_ids) y avisa como un guardado del borrador; los demás son cambios draft_item_changed, draft_item_removed o draft_item_sent que el mesero confirma o corrige."
+            "description": "Etapa A1 (opcional, solo con destination.account_id): los renglones del borrador de la cuenta que este dispositivo había guardado y que el pedido sustituye, tal como los vio (id, producto, presentación, cantidad y personalización). Al aceptar el pedido Go quita del borrador los que siguen así (removed_draft_item_ids) y avisa como un guardado del borrador; los demás son cambios draft_item_changed, draft_item_removed o draft_item_sent que el mesero confirma o corrige. Desde A1-D18, un renglón del borrador con el mismo id que una partida del pedido se sustituye aunque no venga aquí."
           }
         },
         "required": ["operation_id", "catalog_version", "captured_at", "destination", "items"]
@@ -4409,7 +4409,8 @@
               "table_has_account",
               "draft_item_changed",
               "draft_item_removed",
-              "draft_item_sent"
+              "draft_item_sent",
+              "items_in_account"
             ]
           },
           "item_id": {
@@ -4434,6 +4435,11 @@
           },
           "acceptable": {
             "type": "boolean"
+          },
+          "account_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Etapa A1 (A1-D18), solo en items_in_account: la cuenta abierta de la mesa donde ya están las partidas."
           }
         },
         "required": [
@@ -4446,7 +4452,7 @@
           "message",
           "acceptable"
         ],
-        "description": "Cambio entre lo que vio el mesero y el estado vigente: producto, antes, ahora y motivo. acceptable indica si basta la confirmación del mesero (precio, mesa con otra cuenta, renglón del borrador cambiado, quitado o ya enviado desde otra terminal) o si hay que corregir el pedido. En draft_item_*, item_id es el id del renglón del borrador. En account_closed, now es el estado de la cuenta (closed, voided o merged)."
+        "description": "Cambio entre lo que vio el mesero y el estado vigente: producto, antes, ahora y motivo. acceptable indica si basta la confirmación del mesero (precio, mesa con otra cuenta, renglón del borrador cambiado o quitado en otra terminal, partida ya enviada) o si hay que corregir el pedido. En draft_item_*, item_id es el id del renglón (el mismo que la partida del pedido). Confirmar draft_item_sent envía lo demás: lo ya enviado nunca se vuelve a enviar. En account_closed, now es el estado de la cuenta (closed, voided o merged). En items_in_account (no se confirma), account_id es la cuenta abierta de la mesa que ya tiene las partidas y now su folio: el pedido se reenvía con la misma operation_id a esa cuenta."
       },
       "OfflineOrderResult": {
         "type": "object",
@@ -4460,7 +4466,8 @@
           },
           "order_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Pedido que entró con esta clave; si todas las partidas ya se habían enviado (already_sent_item_ids), el pedido en que entraron."
           },
           "account_id": {
             "type": "string",
@@ -4497,7 +4504,15 @@
               "type": "string",
               "format": "uuid"
             },
-            "description": "Etapa A1: renglones de replaces_draft_items que se quitaron del borrador (vacío sin ellos)."
+            "description": "Etapa A1: renglones del borrador que el pedido sustituyó (los de replaces_draft_items y los que tienen el id de una partida del pedido) y se quitaron. Vacío sin ellos."
+          },
+          "already_sent_item_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Etapa A1 (A1-D18): partidas del pedido que ya se habían enviado a cocina y no se volvieron a enviar. Si son todas, no se creó un pedido nuevo y order_id es el pedido en que ya habían entrado."
           }
         },
         "required": [
@@ -4620,7 +4635,7 @@
       },
       "OfflineOrderAlreadyAccepted": {
         "type": "object",
-        "description": "La clave de este pedido ya se guardó con otro contenido del mismo usuario y la misma terminal (por ejemplo, entró una repetición tardía del envío original): no se registró otra vez y details.result es el resultado que sí entró. El teléfono no debe capturarlo de nuevo.",
+        "description": "La clave de este pedido ya entró, del mismo usuario y la misma terminal: como pedido sin conexión con otro contenido (por ejemplo, una repetición tardía del envío original) o, desde la etapa A1 (A1-D18), como «Enviar a cocina» (confirmDraft) en la misma cuenta. No se registró otra vez y details.result es el resultado que sí entró (con origin confirm_draft: el pedido de la confirmación, la cuenta vigente y en already_sent_item_ids las partidas del pedido que ya estaban en él). El teléfono lo marca como recibido y no lo captura de nuevo.",
         "properties": {
           "error": {
             "type": "object",
@@ -4642,6 +4657,10 @@
                   },
                   "result": {
                     "$ref": "#/components/schemas/OfflineOrderResult"
+                  },
+                  "origin": {
+                    "enum": ["offline_order", "confirm_draft"],
+                    "description": "Etapa A1: offline_order si la clave ya entró como pedido sin conexión con otro contenido; confirm_draft si entró como «Enviar a cocina» (confirmDraft) en la misma cuenta, del mismo usuario y dispositivo (A1-D18)."
                   }
                 },
                 "required": ["status", "result"]
