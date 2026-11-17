@@ -136,12 +136,15 @@ class AccessRulesTest {
     fun elTrabajoPendienteDecideQueSeImpide() {
         assertFalse(WaiterWork.NONE.blocksIdleLock)
         assertFalse(WaiterWork.NONE.blocksSwitch)
+        assertFalse(WaiterWork.NONE.blocksLogout)
         val capturing = WaiterWork(captureInProgress = true, unsentOrders = 0)
         assertTrue(capturing.blocksIdleLock)
         assertFalse("la captura se queda con su mesero", capturing.blocksSwitch)
+        assertTrue("nunca se cierra la sesión con una captura en curso", capturing.blocksLogout)
         val unsent = WaiterWork(captureInProgress = false, unsentOrders = 1)
         assertTrue(unsent.blocksIdleLock)
         assertTrue(unsent.blocksSwitch)
+        assertTrue(unsent.blocksLogout)
     }
 
     private fun profile(id: String, version: Int) =
