@@ -6,7 +6,8 @@ agregó la versión mínima por tipo de cliente, la entrada con PIN y la credenc
 ([etapas/ETAPA_A1_ANDROID.md](etapas/ETAPA_A1_ANDROID.md), §3) y, para el modo Mesero (§6–§8), las mesas, cancelar y
 modificar unidades, el evento de preparación, el motivo de una cuenta que ya no está abierta, el borrador en el pedido
 sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). La etapa A2
-([etapas/ETAPA_A2_ANDROID.md](etapas/ETAPA_A2_ANDROID.md)) agregó **Para llevar** (servidor 0.13.0, ver «Para llevar»).
+([etapas/ETAPA_A2_ANDROID.md](etapas/ETAPA_A2_ANDROID.md)) agregó **Para llevar** (servidor 0.13.0, ver «Para llevar») e
+**imprimir la precuenta** desde el dispositivo en su impresora (esquema 26, ver «Imprimir la precuenta»).
 
 - **Contrato OpenAPI 3.1**: [`backend/internal/apicontract/openapi.json`](../backend/internal/apicontract/openapi.json)
   es la fuente. El servidor lo publica en `GET /api/v1/openapi.json` (sin sesión) y está incrustado en el binario.
@@ -46,7 +47,7 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    `offline-orders-v1`, `state-recovery-v1`, `client-version-check`, `openapi-v1`…; desde la etapa A1,
    `client-versions-by-kind`, `waiter-pin-v1` (entrada con PIN, credencial de envío y su administración) y
    `waiter-mode-v1` (lo del modo Mesero de la sección «Modo Mesero»); desde la etapa A2, `takeaway-v1` (lo de la
-   sección «Para llevar»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
+   sección «Para llevar») y `device-precheck-printer-v1` (lo de «Imprimir la precuenta»)). La aplicación Android 0.1.0 exige un servidor 0.12.0 o posterior; el escritorio 0.12.0 sigue
    funcionando con un servidor 0.11.0 y solo muestra lo del PIN si el servidor anuncia `waiter-pin-v1`.
 4. **Credenciales**: la terminal (o el teléfono) emparejada envía `X-Device-ID` y `X-Device-Token`; con sesión,
    además `Authorization: Bearer <token>` (desde la etapa A1, en `submitOfflineOrder` el teléfono puede enviar en su
@@ -69,42 +70,45 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
 
 ## Operaciones
 
-| `operationId`            | Método y ruta (bajo `/api/v1`)                | Para qué                                                                       |
-| ------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------ |
-| `getVersion`             | `GET /version`                                | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
-| `getReadiness`           | `GET /health/ready`                           | Servidor y base de datos listos (200) o no (503).                              |
-| `getOpenAPI`             | `GET /openapi.json`                           | Este contrato.                                                                 |
-| `login`                  | `POST /auth/login`                            | Iniciar sesión en una terminal emparejada.                                     |
-| `logout`                 | `POST /auth/logout`                           | Cerrar la sesión.                                                              |
-| `getIdentity`            | `GET /auth/me`                                | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
-| `listPinUsers`           | `GET /auth/pin-users`                         | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
-| `pinLogin`               | `POST /auth/pin-login`                        | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
-| `streamEvents`           | `GET /events`                                 | Eventos en tiempo real (SSE).                                                  |
-| `getCatalogSync`         | `GET /catalog/sync`                           | Catálogo descargable completo o «solo cambios desde la versión X».             |
-| `listCatalogProducts`    | `GET /catalog/products`                       | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
-| `getCatalogImage`        | `GET /catalog/images/{id}`                    | Imagen en JSON base64 (la usa el escritorio).                                  |
-| `getCatalogImageContent` | `GET /catalog/images/{id}/content`            | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
-| `setProductSoldOut`      | `POST /catalog/products/{id}/sold-out`        | «Agotado» y «Disponible otra vez».                                             |
-| `getRecoveryState`       | `GET /restaurant/state`                       | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
-| `getRestaurantOverview`  | `GET /restaurant/overview`                    | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
-| `listAccounts`           | `GET /restaurant/accounts`                    | Cuentas con sus estados.                                                       |
-| `openAccount`            | `POST /restaurant/accounts`                   | Abrir una cuenta con su primer producto.                                       |
-| `getAccount`             | `GET /restaurant/accounts/{id}`               | Cuenta con su borrador y sus partidas confirmadas.                             |
-| `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`         | Guardar el borrador.                                                           |
-| `previewDraft`           | `GET /restaurant/accounts/{id}/preview`       | Calcular el borrador y obtener su huella.                                      |
-| `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm`      | Confirmar (enviar a cocina) el borrador.                                       |
-| `cancelUnits`            | `POST /restaurant/accounts/{id}/cancel`       | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
-| `previewEdit`            | `POST /restaurant/accounts/{id}/edit-preview` | Calcular la modificación de una partida enviada y su huella.                   |
-| `editUnits`              | `POST /restaurant/accounts/{id}/edit`         | Modificar una partida enviada, con motivo.                                     |
-| `updateTakeawayCustomer` | `POST /restaurant/accounts/{id}/customer`     | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
-| `submitOfflineOrder`     | `POST /restaurant/offline-orders`             | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
-| `deliverTakeaway`        | `POST /payments/accounts/{id}/deliver`        | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
-| `createPairingRequest`   | `POST /pairing/requests`                      | Pedir un código de emparejamiento (sin credencial).                            |
-| `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`          | Revelar el número de la terminal después de recibir el del servidor.           |
-| `getPairingRequest`      | `GET /pairing/requests/{id}`                  | Consultar si la computadora principal ya aprobó el código.                     |
-| `renamePairingRequest`   | `POST /pairing/requests/{id}/name`            | Corregir el nombre propuesto mientras espera.                                  |
-| `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`          | Dejar de esperar la aprobación.                                                |
-| `claimPairingCredential` | `POST /pairing/requests/{id}/claim`           | Recibir una sola vez la credencial de la terminal.                             |
+| `operationId`            | Método y ruta (bajo `/api/v1`)                 | Para qué                                                                       |
+| ------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| `getVersion`             | `GET /version`                                 | Versión del servidor, `min_client_version`, tipos de cliente y funciones.      |
+| `getReadiness`           | `GET /health/ready`                            | Servidor y base de datos listos (200) o no (503).                              |
+| `getOpenAPI`             | `GET /openapi.json`                            | Este contrato.                                                                 |
+| `login`                  | `POST /auth/login`                             | Iniciar sesión en una terminal emparejada.                                     |
+| `logout`                 | `POST /auth/logout`                            | Cerrar la sesión.                                                              |
+| `getIdentity`            | `GET /auth/me`                                 | Usuario, permisos vigentes, preferencias, terminal y establecimiento.          |
+| `listPinUsers`           | `GET /auth/pin-users`                          | Meseros que pueden entrar con PIN en el dispositivo (sin sesión, etapa A1).    |
+| `pinLogin`               | `POST /auth/pin-login`                         | Entrar con PIN: sesión y credencial de envío (etapa A1).                       |
+| `streamEvents`           | `GET /events`                                  | Eventos en tiempo real (SSE).                                                  |
+| `getCatalogSync`         | `GET /catalog/sync`                            | Catálogo descargable completo o «solo cambios desde la versión X».             |
+| `listCatalogProducts`    | `GET /catalog/products`                        | Productos para la captura con disponibilidad, «Agotado» y precio de una lista. |
+| `getCatalogImage`        | `GET /catalog/images/{id}`                     | Imagen en JSON base64 (la usa el escritorio).                                  |
+| `getCatalogImageContent` | `GET /catalog/images/{id}/content`             | Imagen binaria con `ETag` (304 con `If-None-Match`).                           |
+| `setProductSoldOut`      | `POST /catalog/products/{id}/sold-out`         | «Agotado» y «Disponible otra vez».                                             |
+| `getRecoveryState`       | `GET /restaurant/state`                        | Estado al reconectar: permisos, mesas, cuentas, preparación y cursor.          |
+| `getRestaurantOverview`  | `GET /restaurant/overview`                     | Áreas, mesas (lista y mapa) y umbrales de tiempo (etapa A1).                   |
+| `listAccounts`           | `GET /restaurant/accounts`                     | Cuentas con sus estados.                                                       |
+| `openAccount`            | `POST /restaurant/accounts`                    | Abrir una cuenta con su primer producto.                                       |
+| `getAccount`             | `GET /restaurant/accounts/{id}`                | Cuenta con su borrador y sus partidas confirmadas.                             |
+| `saveDraft`              | `PUT /restaurant/accounts/{id}/draft`          | Guardar el borrador.                                                           |
+| `previewDraft`           | `GET /restaurant/accounts/{id}/preview`        | Calcular el borrador y obtener su huella.                                      |
+| `confirmDraft`           | `POST /restaurant/accounts/{id}/confirm`       | Confirmar (enviar a cocina) el borrador.                                       |
+| `cancelUnits`            | `POST /restaurant/accounts/{id}/cancel`        | Cancelar unidades enviadas, con motivo (etapa A1 en el contrato).              |
+| `previewEdit`            | `POST /restaurant/accounts/{id}/edit-preview`  | Calcular la modificación de una partida enviada y su huella.                   |
+| `editUnits`              | `POST /restaurant/accounts/{id}/edit`          | Modificar una partida enviada, con motivo.                                     |
+| `updateTakeawayCustomer` | `POST /restaurant/accounts/{id}/customer`      | Nombre del cliente y teléfono de un pedido para llevar (etapa A2).             |
+| `submitOfflineOrder`     | `POST /restaurant/offline-orders`              | Pedido capturado sin conexión (Android; con sesión o credencial de envío).     |
+| `printPrecheck`          | `POST /payments/accounts/{id}/precheck/print`  | Imprimir la precuenta (etapa A2 en el contrato).                               |
+| `getDocumentStatus`      | `GET /payments/accounts/{id}/documents/status` | Estado de impresión de una precuenta, sin importes (etapa A2).                 |
+| `retryDocument`          | `POST /payments/accounts/{id}/documents/retry` | Reintentar sin motivo una precuenta que no salió (etapa A2 en el contrato).    |
+| `deliverTakeaway`        | `POST /payments/accounts/{id}/deliver`         | Marcar entregado un pedido para llevar ya pagado (etapa A2 en el contrato).    |
+| `createPairingRequest`   | `POST /pairing/requests`                       | Pedir un código de emparejamiento (sin credencial).                            |
+| `revealPairingNonce`     | `POST /pairing/requests/{id}/reveal`           | Revelar el número de la terminal después de recibir el del servidor.           |
+| `getPairingRequest`      | `GET /pairing/requests/{id}`                   | Consultar si la computadora principal ya aprobó el código.                     |
+| `renamePairingRequest`   | `POST /pairing/requests/{id}/name`             | Corregir el nombre propuesto mientras espera.                                  |
+| `cancelPairingRequest`   | `POST /pairing/requests/{id}/cancel`           | Dejar de esperar la aprobación.                                                |
+| `claimPairingCredential` | `POST /pairing/requests/{id}/claim`            | Recibir una sola vez la credencial de la terminal.                             |
 
 ## Encontrar el servidor y emparejarse (fases B y C)
 
@@ -140,7 +144,9 @@ sin conexión y el cursor de eventos de la recuperación (ver «Modo Mesero»). 
    depende de haber recibido todos los eventos. Responde a cualquier sesión válida, aunque el usuario ya no pueda
    consultar cuentas, para que el cliente sepa qué permisos perdió:
    - `user.permissions`: permisos vigentes (leídos de PostgreSQL en esa petición);
-   - `terminal`: la terminal (una terminal revocada no llega aquí: 401 `DEVICE_REVOKED`);
+   - `terminal`: la terminal (una terminal revocada no llega aquí: 401 `DEVICE_REVOKED`); desde la etapa A2, con
+     `precheck_printer_id` y `precheck_printer` (`{id, name, terminal_name}` o `null`), la impresora de precuentas del
+     dispositivo (ver «Imprimir la precuenta»);
    - `catalog_version` y `catalog_epoch`: si la época es otra, descargar todo; si no y la versión es mayor que la del
      catálogo guardado, descargar los cambios;
    - `tables` (con `restaurant.tables.read`) con su estado (`free`, `occupied`, `awaiting_payment`,
@@ -206,7 +212,8 @@ terminales de escritorio siguen con usuario y contraseña). Llevan la credencial
      sea administrador o supervisor (lo administrativo sigue con contraseña en la computadora): `waiter_devices.use`,
      `restaurant.tables.read`, `restaurant.areas.read`, `accounts.read`, `accounts.open`, `orders.capture`,
      `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`, `catalog.prices.read`, `events.read` y, desde la
-     etapa A2 (Para llevar), `takeaway.read`, `takeaway.manage` y `takeaway.deliver`. `getIdentity` y
+     etapa A2, `takeaway.read`, `takeaway.manage` y `takeaway.deliver` (Para llevar) y `payments.tickets.print`
+     (imprimir la precuenta). `getIdentity` y
      `getRecoveryState` informan ya los permisos acotados; cualquier otra ruta responde 403 como sin el permiso. La
      lista vive en un solo lugar del servidor (`administration/waiter_scope.go`) y solo crece con las funciones de la
      aplicación (en la A2: Para llevar e impresión de la precuenta). Cambiar la contraseña desde esa sesión no la
@@ -659,6 +666,48 @@ en el pedido para llevar de Juan (folio 12). Envía el pedido a esa cuenta."`; s
    antes de entregar» (también si llega `BALANCE_PENDING` porque otra caja dejó saldo). El mesero no cobra: el cobro
    sigue en la caja.
 
+## Imprimir la precuenta (etapa A2, parte C)
+
+Capacidad **`device-precheck-printer-v1`** (servidor 0.13.0, esquema 26; decisión A2-D3). El mesero imprime la
+precuenta de una mesa o de un pedido para llevar **en la impresora asignada a su dispositivo** en Administración ›
+Sistema › Terminales › Editar («Impresora de precuentas»: una de red o la USB de una terminal con agente de impresión).
+Permiso **`payments.tickets.print`** («Imprimir tickets y precuentas»; está en la lista de permisos de mesero), además
+de `accounts.read` (y `takeaway.read` en un pedido para llevar). **Imprimir requiere conexión**: nunca entra en la cola
+sin conexión.
+
+1. **La impresora del dispositivo**: `terminal.precheck_printer` de `getIdentity` y `getRecoveryState` (`null` si no
+   tiene). Un dispositivo `android` imprime **solo** en ella: sin ella **no** pasa a la impresora de tickets de Cobros ni
+   a la de una caja. Las terminales de escritorio siguen como hasta ahora (la de su caja o la general).
+2. **El nombre visible**: el botón dice «Imprimir precuenta», «Imprimir ticket de venta» o «Imprimir cuenta» según
+   `establishment.precheck_name` de `getIdentity` (`precheck`, `sales_ticket` o `bill`); el impreso lo pone Go con el
+   mismo nombre (PRECUENTA, TICKET DE VENTA o CUENTA), con la misma plantilla y el mismo renderizador de la caja, y
+   «Atendió: <quien la imprime>».
+3. **`printPrecheck`** (`POST /payments/accounts/{id}/precheck/print`, `{"operation_id"}`) → **200**
+   `{"requested": true, "status", "job_id", "ticket_id", "message", "problem", "printer_name", "terminal_name"}`.
+   Cada toque arma **una precuenta nueva** con el estado vigente de la cuenta (como en la caja): no hay «copia» ni
+   motivo. `problem` es lo que Go ya sabe al encolar: **`agent_offline`** si la impresora es la USB de una terminal cuyo
+   agente no consulta desde hace más de 30 s (el trabajo espera y sale cuando vuelve) o `null`. `printer_name` es la
+   impresora y `terminal_name` su terminal (si es la USB de una terminal; `null` en una de red). Rechazos (no se encola
+   nada, esquema `PrinterRejection`):
+   - **409 `PRINTER_NOT_CONFIGURED`** con `details: {"document": "precheck", "problem": "missing", "scope": "device"}` y
+     el mensaje «Este dispositivo no tiene impresora asignada. Pide al administrador que la elija en Terminales.»;
+   - **409 `PRINTER_UNAVAILABLE`** con `details: {"document", "problem": "inactive" | "unsupported", "printer_name",
+"scope": "device"}` si la impresora asignada dejó de servir;
+   - 403 sin `payments.tickets.print`; 409 `IDEMPOTENCY_CONFLICT` con la misma clave y otro contenido.
+4. **`getDocumentStatus`** (`GET /payments/accounts/{id}/documents/status?ticket_id=<de printPrecheck>`, permiso
+   `payments.tickets.print`; **sin importes ni pagos**) → `{"ticket_id", "kind", "payment_id", "created_at", "job_id",
+"job_state", "job_problem", "printer_name", "copies", "terminal_name"}`. Para seguir la precuenta unos segundos
+   después de mandarla (el trabajador de la cola intenta cada segundo y tarda unos 4 s en saber que una impresora de red
+   no responde): `job_problem` `unreachable` («La impresora no responde»), `agent_offline` («La Caja 2 está
+   desconectada», con `terminal_name`), `uncertain` (revisar el papel antes de pedir otra), `not_found`, `inactive`,
+   `unsupported` o `setup`; `job_state` `submitted` es que la impresora o su cola lo aceptó. 404 si el documento no es de
+   esa cuenta; 400 si `ticket_id` no es un identificador.
+5. **`retryDocument`** (`POST /payments/accounts/{id}/documents/retry`, `{"operation_id", "ticket_id", "job_id"?}`, permiso
+   `payments.tickets.print`): reintenta **sin motivo** una precuenta cuyo último trabajo nunca salió en papel (`error` o
+   `intervention`; regla de la 9F), en la impresora del dispositivo (la misma resolución: sin ella, el mismo 409
+   `PRINTER_NOT_CONFIGURED` con `scope: "device"`). Responde como `printPrecheck`. Sin un trabajo fallido, 409
+   `PRINT_NOT_FAILED`. Con `uncertain` no se reintenta: se revisa el papel y, si hace falta, se pide otra precuenta.
+
 ## Códigos de error más frecuentes
 
 | Código                                                   | Estado | Qué hacer                                                                                                                  |
@@ -679,6 +728,8 @@ en el pedido para llevar de Juan (folio 12). Envía el pedido a esa cuenta."`; s
 | `ORDER_REQUIRES_CONFIRMATION`                            | 409    | Mostrar los cambios al mesero y reenviar con su confirmación.                                                              |
 | `IDEMPOTENCY_CONFLICT`                                   | 409    | La clave ya se usó con otro contenido: consultar el resultado.                                                             |
 | `OFFLINE_ORDER_ALREADY_ACCEPTED`                         | 409    | El pedido sin conexión (o su «Enviar a cocina», `details.origin`) ya entró: usar `details.result`, no capturarlo otra vez. |
+| `PRINTER_NOT_CONFIGURED`, `PRINTER_UNAVAILABLE`          | 409    | Sin impresora válida para la precuenta; con `details.scope: "device"`, la del dispositivo (se elige en Terminales).        |
+| `PRINT_NOT_FAILED`                                       | 409    | La precuenta no tiene una impresión fallida que reintentar.                                                                |
 | `BALANCE_PENDING`                                        | 409    | El pedido para llevar tiene saldo: cobrarlo en la caja antes de marcarlo como entregado.                                   |
 | `ALREADY_DELIVERED`                                      | 409    | El pedido para llevar ya estaba entregado: volver a leerlo.                                                                |
 | `LOGIN_THROTTLED`                                        | 429    | Esperar 15 minutos.                                                                                                        |

@@ -23,6 +23,10 @@ const (
 	printerMissing = "missing"
 )
 
+// printerScopeDevice es details.scope del rechazo sin impresora válida de un dispositivo android (etapa A2, A2-D3): la
+// impresora que falta o no sirve es la de ese dispositivo, que se elige en Terminales, no la de Cobros.
+const printerScopeDevice = "device"
+
 // Documentos que avisan la falta de impresora (detalle público del rechazo).
 const (
 	documentPrecheck = "precheck"
@@ -85,15 +89,26 @@ func printedPrecheckTitle(key string) string {
 // Caja 2 por medio de su agente). Precuentas, tickets de pago, documentos de caja y sus reintentos y reimpresiones
 // salen en la impresora de la caja de la terminal que los pide; si esa caja no tiene una propia (o la terminal no
 // tiene caja), en la impresora de tickets general, como hasta ahora.
+//
+// Etapa A2 (parte C, decisión A2-D3): un teléfono o tableta de meseros (dispositivo android) imprime solo en su
+// «Impresora de precuentas» (devices.precheck_printer_id, Terminales › Editar). Sin ella el motivo es missing con el
+// ámbito del dispositivo (deviceScoped): nunca pasa a la impresora de su caja ni a la general de Cobros, para que el
+// mesero no mande su precuenta a otra impresora sin saberlo. Reintentar y reimprimir usan esta misma resolución.
 func (handler *service) receiptPrinter() (*kitchen.Printer, string, error) {
-	var registerPrinter *string
-	err := handler.tx.QueryRow(handler.ctx, `SELECT rp.printer_id::text FROM app.devices d
-        JOIN app.register_receipt_printers rp ON rp.register_id=d.register_id WHERE d.id=$1`,
-		handler.request.Actor.DeviceID).Scan(&registerPrinter)
+	var devicePrinter, registerPrinter *string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT d.kind,d.precheck_printer_id::text,rp.printer_id::text FROM app.devices d
+        LEFT JOIN app.register_receipt_printers rp ON rp.register_id=d.register_id WHERE d.id=$1`,
+		handler.request.Actor.DeviceID).Scan(&handler.requesterKind, &devicePrinter, &registerPrinter)
 	if err != nil && !isNoRows(err) {
 		return nil, "", err
 	}
 	printerID := registerPrinter
+	if handler.requesterKind == "android" {
+		printerID = devicePrinter
+		if printerID == nil {
+			return nil, printerMissing, nil
+		}
+	}
 	if printerID == nil {
 		settings, err := handler.settings()
 		if err != nil {
@@ -111,10 +126,20 @@ func (handler *service) receiptPrinter() (*kitchen.Printer, string, error) {
 	return printer, kitchen.PrinterProblem(printer), nil
 }
 
+// deviceScoped dice si la impresora de los documentos de quien pide es la de su dispositivo (un android, A2-D3). Se
+// sabe después de receiptPrinter, que lee el tipo del dispositivo.
+func (handler *service) deviceScoped() bool {
+	return handler.requesterKind == "android"
+}
+
 // printerUnavailableError es el rechazo de un documento sin impresora válida, con el documento y el motivo
-// en los detalles públicos para que la interfaz ofrezca «Configurar impresora» y «Reintentar».
+// en los detalles públicos para que la interfaz ofrezca «Configurar impresora» y «Reintentar». Desde la etapa A2,
+// details.scope es «device» si la impresora es la del dispositivo que pide (se elige en Terminales).
 func (handler *service) printerUnavailableError(document, problem string, printer *kitchen.Printer) error {
 	details := map[string]string{"document": document, "problem": problem}
+	if handler.deviceScoped() {
+		details["scope"] = printerScopeDevice
+	}
 	if problem == printerMissing {
 		return &Error{Status: 409, Code: "PRINTER_NOT_CONFIGURED", Message: handler.missingPrinterMessage(document), Details: details}
 	}
@@ -122,8 +147,12 @@ func (handler *service) printerUnavailableError(document, problem string, printe
 	return &Error{Status: 409, Code: "PRINTER_UNAVAILABLE", Message: kitchen.UnavailablePrinterMessage(problem, printer.Name), Details: details}
 }
 
-// missingPrinterMessage dice qué documento no tiene impresora, con el nombre visible de la precuenta.
+// missingPrinterMessage dice qué documento no tiene impresora, con el nombre visible de la precuenta. En un
+// dispositivo android (A2-D3) dice que falta la impresora del dispositivo y quién la asigna.
 func (handler *service) missingPrinterMessage(document string) string {
+	if handler.deviceScoped() {
+		return "Este dispositivo no tiene impresora asignada. Pide al administrador que la elija en Terminales."
+	}
 	switch document {
 	case documentPrecheck:
 		settings, err := handler.settings()
@@ -270,7 +299,27 @@ func (handler *service) retryDocument(parts []string) (any, error) {
 		return nil, err
 	}
 	result := map[string]any{"status": job.State, "job_id": job.ID, "ticket_id": input.TicketID}
+	if err := handler.addJobFeedback(result, job.ID); err != nil {
+		return nil, err
+	}
 	return result, handler.audit(handler.ctx, handler.tx, "payments.document_retried", "account", &accountID, nil, result)
+}
+
+// addJobFeedback agrega a la respuesta de una impresión lo que Go ya sabe del trabajo recién encolado (etapa A2, parte
+// C): problem, la clave del problema que ya tiene (agent_offline si la terminal de la impresora no consulta, ya al
+// encolar; o el de un trabajo que no pudo salir), y printer_name y terminal_name (la terminal, si es la impresora USB
+// de una terminal), para que el teléfono diga «Enviada a Caja 1» o «La Caja 2 está desconectada». Lo que pase después
+// (por ejemplo, que la impresora de red no responda) se consulta con documents/status.
+func (handler *service) addJobFeedback(result map[string]any, jobID string) error {
+	var problem, printerName, terminalName *string
+	err := handler.tx.QueryRow(handler.ctx, `SELECT `+kitchen.JobProblemSQL("j")+`,p.name,`+kitchen.JobTerminalSQL("j")+`
+        FROM app.kitchen_print_jobs j LEFT JOIN app.kitchen_printers p ON p.id=j.printer_id WHERE j.id=$1`, jobID).
+		Scan(&problem, &printerName, &terminalName)
+	if err != nil {
+		return err
+	}
+	result["problem"], result["printer_name"], result["terminal_name"] = problem, printerName, terminalName
+	return nil
 }
 
 // validReprintReason exige el motivo (5–500 caracteres) de una copia de un documento ya emitido: reimprimirlo

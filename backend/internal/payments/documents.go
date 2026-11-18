@@ -283,7 +283,8 @@ func (handler *service) enqueueDocument(finance *Finance, kind string, payment *
 		handler.request.Actor.DeviceID, accountRevision, adjustments); err != nil {
 		return nil, err
 	}
-	return map[string]any{"requested": true, "status": job.State, "job_id": job.ID, "ticket_id": ticketID, "message": job.LastError}, nil
+	result := map[string]any{"requested": true, "status": job.State, "job_id": job.ID, "ticket_id": ticketID, "message": job.LastError}
+	return result, handler.addJobFeedback(result, job.ID)
 }
 
 // printReceiptIfRequested encola el ticket de un pago cuando el cajero lo solicita o, sin
@@ -382,7 +383,24 @@ func (handler *service) reprintDocument(parts []string) (any, error) {
 		map[string]string{"ticket_id": input.TicketID, "job_id": job.ID, "reason": input.Reason}); err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": job.State, "job_id": job.ID, "ticket_id": input.TicketID}, nil
+	result := map[string]any{"status": job.State, "job_id": job.ID, "ticket_id": input.TicketID}
+	return result, handler.addJobFeedback(result, job.ID)
+}
+
+// documentStatus es el estado de impresión de una precuenta o un ticket de la cuenta (GET
+// payments/accounts/{id}/documents/status?ticket_id=…, etapa A2, parte C): el del último trabajo con su problema, su
+// impresora y la terminal de la impresora. Es la lectura estrecha con la que el teléfono sigue la precuenta que mandó
+// a imprimir: exige payments.tickets.print y no payments.read, que expone el cobro completo; no trae importes ni pagos.
+func (handler *service) documentStatus(parts []string) (any, error) {
+	ticketID := handler.request.Query.Get("ticket_id")
+	if err := validateID(ticketID); err != nil {
+		return nil, err
+	}
+	record, err := readDocument(handler.ctx, handler.tx, parts[1], ticketID)
+	if isNoRows(err) {
+		return nil, notFound("El documento no pertenece a esta cuenta.")
+	}
+	return record, err
 }
 
 type DocumentRecord struct {

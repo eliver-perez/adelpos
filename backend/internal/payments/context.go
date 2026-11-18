@@ -208,6 +208,9 @@ type service struct {
 	request     Request
 	audit       Audit
 	operationID string
+	// requesterKind es el tipo del dispositivo que pide (desktop, kitchen o android), leído una vez por operación al
+	// resolver la impresora de sus documentos (etapa A2, parte C).
+	requesterKind string
 }
 
 func isNoRows(err error) bool {

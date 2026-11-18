@@ -108,6 +108,8 @@ var (
 		{table: "cash_drawer_settings", column: "printer_id"}:     true,
 		// Etapa 9G (fase E): impresora de tickets propia de una caja.
 		{table: "register_receipt_printers", column: "printer_id"}: true,
+		// Etapa A2 (parte C): impresora de precuentas de un teléfono o tableta de meseros.
+		{table: "devices", column: "precheck_printer_id"}: true,
 	}
 	productHandled = map[reference]bool{
 		{table: "catalog_variants", column: "product_id"}:            true,
@@ -712,6 +714,25 @@ func (builder *planBuilder) decidePrinterSettings(printer printerRow) error {
 			ID:     "register-receipt:" + register.ID,
 			Name:   fmt.Sprintf("Impresora de tickets de «%s»", register.Name),
 			Reason: fmt.Sprintf("Era «%s»; la caja vuelve a la impresora de tickets general.", printer.Name),
+		})
+	}
+	// Etapa A2 (parte C): un teléfono o tableta cuya impresora de precuentas es de prueba se queda sin ella (no imprime
+	// precuentas hasta que se elija otra en Terminales).
+	rows, err = builder.tx.Query(builder.ctx, `SELECT id::text, name FROM app.devices WHERE precheck_printer_id = $1::uuid
+        ORDER BY name, id`, printer.ID)
+	if err != nil {
+		return err
+	}
+	devices, err := pgx.CollectRows(rows, pgx.RowToStructByPos[namedRow])
+	if err != nil {
+		return err
+	}
+	for _, device := range devices {
+		plan.Unlink = append(plan.Unlink, Entry{
+			Kind:   KindSetting,
+			ID:     "device-precheck:" + device.ID,
+			Name:   fmt.Sprintf("Impresora de precuentas de «%s»", device.Name),
+			Reason: fmt.Sprintf("Era «%s»; el dispositivo queda sin impresora de precuentas hasta que elijas otra.", printer.Name),
 		})
 	}
 	rows, err = builder.tx.Query(builder.ctx, `SELECT r.id::text, r.name FROM app.cash_drawer_settings d

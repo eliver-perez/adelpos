@@ -188,6 +188,9 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		exec(`INSERT INTO app.cash_drawer_settings(register_id, printer_id, enabled)
             SELECT id, $1, true FROM app.registers WHERE name='Caja 1'
             ON CONFLICT (register_id) DO UPDATE SET printer_id=excluded.printer_id, enabled=true`, testPrinter)
+		// Etapa A2 (parte C): también la impresora de precuentas de un teléfono de meseros.
+		exec(`INSERT INTO app.devices(name,secret_hash,kind,os,app_version,paired_at,precheck_printer_id)
+            VALUES ('Tableta 9F','hash-tableta-9f','android','Android 15','0.2.0',now(),$1)`, testPrinter)
 
 		value := preview(env.admin)
 		if !slices.Equal(labels(value.Remove), []string{"printer:Destino controlado E2E"}) || len(value.Deactivate) != 0 || len(value.Keep) != 0 {
@@ -195,6 +198,7 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		}
 		if !slices.Equal(labels(value.Unlink), []string{
 			"setting:Impresora de tickets de Cobros",
+			"setting:Impresora de precuentas de «Tableta 9F»",
 			"setting:Cajón de dinero de «Caja 1»",
 			"setting:Respaldo de la impresora «Impresora de cocina 9F»",
 		}) {
@@ -239,6 +243,7 @@ func testTestDataRemoval(t *testing.T, env *delegationEnvironment) {
 		if env.scalar(t, "SELECT count(*) FROM app.kitchen_printers WHERE id=$1", testPrinter) != 0 ||
 			env.scalar(t, "SELECT count(*) FROM app.payment_settings WHERE receipt_printer_id IS NOT NULL") != 0 ||
 			env.scalar(t, "SELECT count(*) FROM app.cash_drawer_settings WHERE printer_id IS NOT NULL OR enabled") != 0 ||
+			env.scalar(t, "SELECT count(*) FROM app.devices WHERE precheck_printer_id IS NOT NULL") != 0 ||
 			env.scalar(t, "SELECT count(*) FROM app.kitchen_printers WHERE id=$1 AND fallback_id IS NULL AND active", realPrinter) != 1 {
 			t.Fatal("la impresora de prueba o su configuración siguen ahí")
 		}

@@ -53,6 +53,8 @@ func Apply(ctx context.Context, tx pgx.Tx, plan *Plan, backup string) (Result, e
 		// edita las políticas.
 		{`DELETE FROM app.register_receipt_printers WHERE printer_id::text = ANY($1::text[])`, []any{printers}},
 		{`UPDATE app.payment_settings SET revision = revision + 1, updated_at = now() WHERE $1`, []any{len(plan.registerReceipts) > 0}},
+		// Etapa A2 (parte C): el teléfono o la tableta queda sin impresora de precuentas.
+		{`UPDATE app.devices SET precheck_printer_id = NULL WHERE precheck_printer_id::text = ANY($1::text[])`, []any{printers}},
 		{`UPDATE app.kitchen_printers SET fallback_id = NULL, revision = revision + 1, updated_at = now()
             WHERE fallback_id::text = ANY($1::text[])`, []any{printers}},
 		// Estaciones de prueba fuera de las terminales, de los usuarios (etapa 9F) y de las rutas que se

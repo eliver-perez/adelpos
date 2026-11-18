@@ -4004,3 +4004,47 @@ escritorio cambia de forma y el escritorio no cambió (solo su versión, 0.13.0)
   cuentas para llevar; `pinLogin` con la lista de permisos nueva. Pruebas: `TestStageA2Takeaway` (`operations`) y
   `contractTakeaway` en `TestContractV1`.
 - **Versiones**: servidor 0.13.0 (esquema 25); `GET version` anuncia `takeaway-v1`.
+
+## Etapa A2 · impresora de precuentas por dispositivo (parte C, esquema 26)
+
+Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.md) §5 y decisión A2-D3 de
+[docs/ETAPA_A2_AVANCE.md](docs/ETAPA_A2_AVANCE.md). Lo del dispositivo (`printPrecheck`, `getDocumentStatus`,
+`retryDocument` y `terminal.precheck_printer`) está en [docs/API_V1.md](docs/API_V1.md), «Imprimir la precuenta», y en
+`internal/apicontract/openapi.json` (capacidad `device-precheck-printer-v1`). Aquí, lo de la computadora principal.
+
+- **Base** (0026, parte C): `devices.precheck_printer_id` (uuid opcional, llave foránea a `kitchen_printers`, índice
+  parcial `devices_precheck_printer_idx` y `CHECK (precheck_printer_id IS NULL OR kind = 'android')`), vacía en todas
+  las terminales existentes; ninguna fila cambia (`TestStageA2Upgrade`).
+- **`PATCH devices/{id}`** (`devices.manage`): campo opcional nuevo `precheck_printer_id`. **Sin el campo se conserva**
+  la guardada (clientes anteriores); **`null` la quita**; un identificador la asigna si el dispositivo es `android`
+  (si no, `400` «La impresora de precuentas solo se asigna a teléfonos y tabletas de meseros.») y la impresora existe
+  y puede imprimir precuentas (activa y con un transporte que imprime, `kitchen.PrinterProblem`; si no, `400` con el
+  motivo). Queda en el Registro de movimientos (`device.updated`, antes y después).
+- **`GET devices`**, la respuesta del `PATCH` y la auditoría: `precheck_printer_id`, `precheck_printer_name` y
+  `precheck_printer_terminal_name` (la terminal, solo si es la USB de una terminal).
+- **`GET devices/{id}/configuration`** (`devices.read`): `precheck_printer` (`{id, name, transport, terminal_name,
+active, problem}` de la asignada, o `null`) y `precheck_printer_options` (todas las impresoras con su `problem`, por
+  nombre, para el selector; vacía en una terminal que no es `android`). Así quien edita terminales elige sin necesitar
+  `kitchen.printers.manage`.
+- **`auth/me` y `restaurant/state`**: `terminal.precheck_printer_id` y `terminal.precheck_printer` (`{id, name,
+terminal_name}` o `null`), con la misma consulta (`terminalIdentityQuery`, `administration/devices.go`).
+- **Resolución** (`payments.receiptPrinter`, `payments/document_printing.go`): un dispositivo `android` imprime **solo**
+  en su impresora de precuentas (precuenta, reintento, reimpresión y, si algún día los pidiera, tickets y documentos de
+  caja); sin ella, `409 PRINTER_NOT_CONFIGURED` con `details.scope: "device"` y «Este dispositivo no tiene impresora
+  asignada. Pide al administrador que la elija en Terminales.»; con una que dejó de servir, `409 PRINTER_UNAVAILABLE`
+  con `details.scope: "device"`. Las terminales de escritorio y de cocina: igual que antes (la de su caja o la general,
+  sin `scope`).
+- **Respuestas**: `precheck/print`, `documents/retry` y `documents/reprint` agregan `problem` (`agent_offline` si la
+  terminal de la impresora no consulta, ya al encolar), `printer_name` y `terminal_name` (`addJobFeedback`). El ticket de
+  pago (`printing` del cobro) también, cuando se encola.
+- **`GET payments/accounts/{id}/documents/status?ticket_id=…`** (`payments.tickets.print`, lock 7820148305 compartido):
+  el `DocumentRecord` de ese documento (`job_state`, `job_problem`, `printer_name`, `copies`, `terminal_name`), sin
+  importes; 404 si no es de la cuenta. Va con query porque el puente admite un solo identificador por ruta.
+- **Permisos de mesero** (`WaiterPermissions`): `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
+  `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
+  `catalog.prices.read`, `events.read`, `takeaway.read`, `takeaway.manage`, `takeaway.deliver` y
+  **`payments.tickets.print`**. No `payments.tickets.reprint`: volver a imprimir arma una precuenta nueva, como en la caja.
+- **«Quitar datos de prueba»**: si la impresora de precuentas de un dispositivo es de prueba, se desvincula («Impresora de
+  precuentas de «…»»; el dispositivo queda sin impresora) en lugar de impedir que se elimine.
+- **Escritorio**: Terminales › Editar de un `android` muestra «Impresora de precuentas» y «Ver configuración» la informa,
+  solo si el servidor anuncia `device-precheck-printer-v1`; si no, el `PATCH` no lleva el campo.

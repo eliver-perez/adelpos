@@ -6,6 +6,10 @@ func extendedRoute(method, action string) *route {
 	if method == "GET" && action == "precheck" {
 		return &route{"payments.read", true, (*service).precheck}
 	}
+	// Etapa A2 (parte C): estado de impresión de un documento, sin exponer el cobro (con el permiso de imprimirlo).
+	if method == "GET" && action == "documents/status" {
+		return &route{"payments.tickets.print", true, (*service).documentStatus}
+	}
 	if method != "POST" {
 		return nil
 	}
