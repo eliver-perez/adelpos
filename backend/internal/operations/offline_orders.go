@@ -77,6 +77,15 @@ import (
 //     (handler.go, replay). Con otra cuenta, otro usuario, otro dispositivo u otra operación, IDEMPOTENCY_CONFLICT.
 //   - Un pedido para una mesa cuyas partidas ya están en una cuenta abierta de esa mesa (en su borrador o enviadas)
 //     responde items_in_account con esa cuenta (account_id) para que el dispositivo lo dirija ahí.
+//
+// Pedido para llevar nuevo capturado sin conexión (etapa A2, §3.2 de la especificación): el destino puede ser, en
+// lugar de una cuenta o una mesa, destination.takeaway (con el nombre del cliente y el teléfono, opcionales). Al
+// aceptarlo se abre un pedido para llevar como «Nuevo pedido» de la caja (sin mesa ficticia, origen «Para llevar»,
+// responsable = quien envía: el mesero de la sesión o de la credencial de envío) y exige además accounts.open y
+// takeaway.manage. Las reglas de la clave son las mismas de A1-D6, A1-D18 y A1-D19: la misma clave nunca abre dos
+// pedidos (el resultado guardado se devuelve en cada reintento) y, si sus partidas ya están en un pedido para llevar
+// abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con ese pedido, igual que en
+// una mesa, para que el dispositivo lo reenvíe con la misma clave a destination.account_id.
 
 // Motivos de cambio de un pedido capturado sin conexión.
 const (
@@ -114,13 +123,22 @@ type OfflineOrderInput struct {
 	ReplacesDraftItems []DraftItem `json:"replaces_draft_items"`
 }
 
-// OfflineDestination es una cuenta abierta (account_id) o una mesa donde abrir una cuenta nueva (table_id, con las
-// cuentas que el mesero veía abiertas en ella y un nombre opcional).
+// OfflineDestination es una cuenta abierta (account_id), una mesa donde abrir una cuenta nueva (table_id, con las
+// cuentas que el mesero veía abiertas en ella y un nombre opcional) o, desde la etapa A2, un pedido para llevar nuevo
+// (takeaway). Solo uno de los tres.
 type OfflineDestination struct {
-	AccountID      *string  `json:"account_id"`
-	TableID        *string  `json:"table_id"`
-	SeenAccountIDs []string `json:"seen_account_ids"`
-	Name           string   `json:"name"`
+	AccountID      *string          `json:"account_id"`
+	TableID        *string          `json:"table_id"`
+	SeenAccountIDs []string         `json:"seen_account_ids"`
+	Name           string           `json:"name"`
+	Takeaway       *OfflineTakeaway `json:"takeaway"`
+}
+
+// OfflineTakeaway (etapa A2) son los datos opcionales del cliente de un pedido para llevar nuevo, con los mismos límites
+// que al abrir la cuenta (validCustomerFields).
+type OfflineTakeaway struct {
+	CustomerName string `json:"customer_name"`
+	Phone        string `json:"phone"`
 }
 
 // OfflineItem es una partida del pedido con el precio por unidad que vio el mesero.
@@ -217,11 +235,24 @@ func validateOfflineInput(input *OfflineOrderInput, received time.Time) error {
 		return invalid("La hora de captura del pedido falta o es posterior a la hora del servidor.")
 	}
 	destination := input.Destination
-	if (destination.AccountID == nil) == (destination.TableID == nil) {
-		return invalid("Indica el destino del pedido: una cuenta abierta o una mesa.")
+	chosen := 0
+	for _, given := range []bool{destination.AccountID != nil, destination.TableID != nil, destination.Takeaway != nil} {
+		if given {
+			chosen++
+		}
 	}
-	if destination.AccountID != nil && (len(destination.SeenAccountIDs) > 0 || destination.Name != "") {
+	if chosen != 1 {
+		return invalid("Indica el destino del pedido: una cuenta abierta, una mesa o un pedido para llevar nuevo.")
+	}
+	if destination.TableID == nil && (len(destination.SeenAccountIDs) > 0 || destination.Name != "") {
 		return invalid("Las cuentas vistas y el nombre solo aplican a una cuenta nueva en una mesa.")
+	}
+	if takeaway := destination.Takeaway; takeaway != nil {
+		takeaway.CustomerName = strings.TrimSpace(takeaway.CustomerName)
+		takeaway.Phone = strings.TrimSpace(takeaway.Phone)
+		if !validCustomerFields(takeaway.CustomerName, takeaway.Phone) {
+			return invalid(customerFieldsMessage)
+		}
 	}
 	for _, id := range destination.SeenAccountIDs {
 		if err := validateID(id); err != nil {
@@ -352,8 +383,14 @@ func (handler *service) diagnoseOffline(input OfflineOrderInput) (*offlineDiagno
 				diagnosis.changes = append(diagnosis.changes, overlap.changes...)
 			}
 		}
-	} else {
+	} else if destination.TableID != nil {
 		changes, err := handler.diagnoseOfflineTable(input)
+		if err != nil {
+			return nil, err
+		}
+		diagnosis.changes = append(diagnosis.changes, changes...)
+	} else {
+		changes, err := handler.diagnoseOfflineTakeaway(input)
 		if err != nil {
 			return nil, err
 		}
@@ -449,7 +486,7 @@ func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]Offline
 			Message: "La mesa «" + name + "» está fuera de servicio o inactiva. Elige otra mesa.",
 		}}, nil
 	}
-	holding, err := handler.tableAccountsWithItems(*destination.TableID, input.Items)
+	holding, err := handler.openAccountsWithItems(destination.TableID, input.Items)
 	if err != nil {
 		return nil, err
 	}
@@ -493,15 +530,56 @@ func (handler *service) diagnoseOfflineTable(input OfflineOrderInput) ([]Offline
 	}}, nil
 }
 
-// tableAccountsWithItems son las cuentas abiertas de la mesa que ya tienen alguna partida del pedido: en su borrador o
-// ya enviada (una partida confirmada con ese id cuyas unidades siguen en la cuenta o que se confirmó en ella).
-func (handler *service) tableAccountsWithItems(tableID string, items []OfflineItem) ([]TableAccountRef, error) {
+// diagnoseOfflineTakeaway revisa un pedido para llevar nuevo (etapa A2): quien lo envía debe poder abrir cuentas y
+// administrar pedidos para llevar, y sus partidas no deben estar ya en un pedido para llevar abierto (A1-D18, como en
+// una mesa: por ejemplo, la apertura en línea con el primer producto entró y su respuesta se perdió; abrir otro pedido
+// las duplicaría). El dispositivo reenvía el pedido con la misma clave a esa cuenta (account_id).
+func (handler *service) diagnoseOfflineTakeaway(input OfflineOrderInput) ([]OfflineChange, error) {
+	if err := handler.request.Actor.Require("accounts.open", "takeaway.manage"); err != nil {
+		return nil, err
+	}
+	holding, err := handler.openAccountsWithItems(nil, input.Items)
+	if err != nil {
+		return nil, err
+	}
+	changes := []OfflineChange{}
+	for _, account := range holding {
+		accountID := account.ID
+		folio := fmt.Sprintf("folio %d", account.Folio)
+		order := "el pedido para llevar"
+		if account.CustomerName != "" {
+			order += " de " + account.CustomerName
+		}
+		changes = append(changes, OfflineChange{
+			Kind:      OfflineItemsInAccount,
+			Now:       &folio,
+			AccountID: &accountID,
+			Message:   "Lo que capturaste ya está en " + order + " (" + folio + "). Envía el pedido a esa cuenta.",
+		})
+	}
+	return changes, nil
+}
+
+// heldAccount es una cuenta abierta que ya tiene partidas de un pedido sin conexión (items_in_account).
+type heldAccount struct {
+	ID           string `json:"id"`
+	Folio        int64  `json:"folio"`
+	Name         string `json:"name"`
+	CustomerName string `json:"customer_name"`
+}
+
+// openAccountsWithItems son las cuentas abiertas de la mesa (con tableID) o los pedidos para llevar abiertos (sin
+// tableID, etapa A2) que ya tienen alguna partida del pedido: en su borrador o ya enviada (una partida confirmada con
+// ese id cuyas unidades siguen en la cuenta o que se confirmó en ella).
+func (handler *service) openAccountsWithItems(tableID *string, items []OfflineItem) ([]heldAccount, error) {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		ids = append(ids, item.ID)
 	}
-	return readList[TableAccountRef](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',a.id,'folio',a.folio,'name',a.name)
-        FROM app.restaurant_accounts a WHERE a.table_id=$1 AND a.state='open' AND (
+	return readList[heldAccount](handler.ctx, handler.tx, `SELECT jsonb_build_object('id',a.id,'folio',a.folio,'name',a.name,
+        'customer_name',a.customer_name)
+        FROM app.restaurant_accounts a WHERE a.state='open'
+            AND (($1::uuid IS NOT NULL AND a.table_id=$1) OR ($1::uuid IS NULL AND a.mode='takeaway')) AND (
             EXISTS(SELECT FROM app.restaurant_draft_items d WHERE d.account_id=a.id AND d.id=ANY($2::uuid[]))
             OR EXISTS(SELECT FROM app.restaurant_items i JOIN app.restaurant_orders o ON o.id=i.original_order_id
                 WHERE i.draft_item_id=ANY($2::uuid[]) AND (o.original_account_id=a.id
@@ -823,8 +901,7 @@ func (handler *service) acceptOffline(input OfflineOrderInput, diagnosis *offlin
 	}
 	account := diagnosis.account
 	if account == nil {
-		// Mesa: se abre una cuenta nueva, como el primer producto de una mesa en la captura.
-		accountInput := AccountInput{Mode: "dine_in", TableID: input.Destination.TableID, Name: input.Destination.Name}
+		accountInput := offlineAccountInput(input.Destination)
 		if err := handler.fillAccountName(&accountInput); err != nil {
 			return nil, err
 		}
@@ -915,6 +992,17 @@ func (handler *service) acceptOffline(input OfflineOrderInput, diagnosis *offlin
 		AlreadySentItemIDs:     alreadySent,
 		Bill:                   bill,
 	}, nil
+}
+
+// offlineAccountInput es la cuenta nueva que abre un pedido sin cuenta de destino. En una mesa, como el primer producto
+// de una mesa en la captura. Para llevar (etapa A2), como «Nuevo pedido» de la caja: sin mesa, con el origen
+// «Para llevar» y el nombre y el teléfono del cliente que capturó el mesero. En las dos el nombre es la referencia
+// neutra (fillAccountName) y el responsable, quien envía el pedido (validateAccountInput).
+func offlineAccountInput(destination OfflineDestination) AccountInput {
+	if takeaway := destination.Takeaway; takeaway != nil {
+		return AccountInput{Mode: "takeaway", Origin: TakeawayOrigin, CustomerName: takeaway.CustomerName, Phone: takeaway.Phone}
+	}
+	return AccountInput{Mode: "dine_in", TableID: destination.TableID, Name: destination.Name}
 }
 
 // confirmedAccountOf reconoce la ruta guardada de un «Enviar a cocina» (POST restaurant/accounts/{id}/confirm) y

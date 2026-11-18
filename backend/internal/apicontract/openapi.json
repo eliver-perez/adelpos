@@ -27,6 +27,9 @@
       "name": "Restaurante"
     },
     {
+      "name": "Cobros"
+    },
+    {
       "name": "Emparejamiento"
     }
   ],
@@ -317,7 +320,7 @@
       "post": {
         "operationId": "pinLogin",
         "summary": "Entrar con PIN en un dispositivo de meseros",
-        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read. Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
+        "description": "Solo un dispositivo android emparejado (403 PIN_DEVICE_NOT_ALLOWED en otro tipo), con su credencial. PIN de 4 a 6 dígitos (400 si no tiene esa forma). PIN incorrecto o usuario que no puede entrar: 401 PIN_INVALID. 5 fallos en 15 minutos, desde cualquier dispositivo, bloquean el PIN de ese usuario 5 minutos: 429 PIN_LOCKED con details.locked_until (RFC 3339) y details.requires_unlock false. Etapa A1 (A1-D16): el tercer bloqueo seguido en 24 horas sin una entrada correcta deja el PIN bloqueado hasta que un administrador lo desbloquee: 429 PIN_LOCKED con details.locked_until null y details.requires_unlock true. Una entrada correcta borra la serie de bloqueos. PIN correcto sin el permiso waiter_devices.use: 403 PERMISSION_DENIED. Pocas entradas con PIN a la vez en el servidor: si no hay turno en unos segundos, 503 PIN_LOGIN_BUSY (reintentar). Responde como login (sesión de 12 horas; reemplaza solo la sesión anterior de ese usuario en ese dispositivo, así que el cambio rápido de mesero no cierra las de los demás) más pin_version y la credencial de envío, que sustituye a la anterior de ese mesero en ese dispositivo. Etapa A1 (A1-D17): la sesión y la credencial de envío solo tienen los permisos del usuario que están en la lista cerrada de permisos de mesero: waiter_devices.use, restaurant.tables.read, restaurant.areas.read, accounts.read, accounts.open, orders.capture, orders.confirm, orders.edit, orders.cancel, catalog.read, catalog.prices.read, events.read y, desde la etapa A2 (Para llevar), takeaway.read, takeaway.manage y takeaway.deliver. Aunque el usuario sea administrador, nada más (getIdentity y getRecoveryState informan ya los permisos acotados).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -778,7 +781,7 @@
       "get": {
         "operationId": "getRecoveryState",
         "summary": "Recuperación del estado al reconectar",
-        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor). Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero.",
+        "description": "Responde a cualquier sesión válida: permisos vigentes, terminal, versión del catálogo y, según los permisos, mesas y cuentas abiertas con su revisión y estados de preparación. Una terminal revocada recibe 401 DEVICE_REVOKED. Etapa A1: event_cursor es el cursor del canal de eventos en el momento de la lectura (abrir streamEvents con ?after=event_cursor). Etapa A1 (A1-D17): en una sesión abierta con pinLogin, los permisos que informa son solo los de mesero. Etapa A2: con takeaway.read, accounts incluye los pedidos para llevar abiertos (mode takeaway, sin mesa) con su cliente, preparation_state, payment_state y delivery_state; sus cambios llegan por streamEvents en el ámbito takeaway (restaurant.account.*, restaurant.order.confirmed, restaurant.account.preparation_changed, takeaway.delivered, restaurant.account.closed).",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -840,7 +843,7 @@
       "get": {
         "operationId": "listAccounts",
         "summary": "Cuentas",
-        "description": "Cuentas paginadas (abiertas por omisión) con sus estados de preparación, pago y entrega. Requiere accounts.read.",
+        "description": "Cuentas paginadas (abiertas por omisión) con sus estados de preparación, pago y entrega. Requiere accounts.read. Etapa A2 (Para llevar): mode=takeaway&state=open es la lista de pedidos para llevar pendientes (folio, customer_name, phone, elapsed_seconds, urgency, preparation_state, payment_state y delivery_state; las más antiguas primero); con mode=takeaway exige además takeaway.read (403 sin él) y sin mode las cuentas para llevar solo se incluyen con takeaway.read. search busca en folio, cliente, teléfono y nombre.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1444,11 +1447,76 @@
         "tags": ["Restaurante"]
       }
     },
+    "/restaurant/accounts/{id}/customer": {
+      "post": {
+        "operationId": "updateTakeawayCustomer",
+        "summary": "Nombre del cliente y teléfono de un pedido para llevar",
+        "description": "Etapa A2 (decisión A2-D1): cambia el nombre del cliente y el teléfono de un pedido para llevar abierto, en cualquier momento. Requiere takeaway.manage (y accounts.read). Sin revisión: no la pide ni la sube (solo cambia esos dos datos), así que no choca con el borrador; si dos dispositivos los editan, la última edición gana. Los dos campos son obligatorios: vacío quita el dato; se recortan los espacios y caben 100 y 40 caracteres (400 OPERATION_VALIDATION si no). Una cuenta de salón: 400 OPERATION_VALIDATION; un pedido que ya no está abierto: 400 OPERATION_VALIDATION con details AccountNotOpenDetails. Idempotente con operation_id (otro contenido con la misma clave: 409 IDEMPOTENCY_CONFLICT). Publica restaurant.account.updated en el ámbito takeaway y queda en la historia de la cuenta y en el Registro de movimientos; sin cambios no registra nada. Devuelve la cuenta.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cuenta con los datos del cliente.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bill"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Restaurante"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "customer_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                },
+                "required": ["operation_id", "customer_name", "phone"]
+              }
+            }
+          }
+        }
+      }
+    },
     "/restaurant/offline-orders": {
       "post": {
         "operationId": "submitOfflineOrder",
         "summary": "Pedido capturado sin conexión",
-        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id.",
+        "description": "Para la aplicación Android: el pedido de la cola con la versión del catálogo con que se capturó, la hora de captura, el destino y el precio por unidad que vio el mesero. Sin cambios se acepta y se confirma (cocina lo recibe). Con cambios responde 409 ORDER_REQUIRES_CONFIRMATION con la lista; se acepta al reenviarlo con la misma operation_id y confirmation (la catalog_version vigente que devolvió el rechazo y los cambios que vio el mesero), siempre con los precios del servidor. Requiere orders.confirm, orders.capture, accounts.read, catalog.read y catalog.prices.read (y accounts.open para una mesa). Etapa A1: en lugar de la sesión acepta la credencial de envío del mesero (X-Offline-Credential, de pinLogin) junto con la del dispositivo, para que la cola salga aunque la sesión haya vencido; Go valida al recibir el dispositivo, el usuario activo, su PIN vigente (misma pin_version), waiter_devices.use y los permisos de la operación. Si la credencial ya no vale (PIN cambiado o quitado, usuario desactivado o sin waiter_devices.use, credencial reemplazada): 401 OFFLINE_CREDENTIAL_INVALID; el pedido se conserva y el mesero entra con su PIN con conexión. Sesión y credencial juntas: 400. Etapa A1 (A1-D6): con account_id, replaces_draft_items dice qué renglones del borrador de la cuenta sustituye el pedido (tal como los vio el dispositivo); al aceptarlo Go los quita del borrador en la misma transacción (removed_draft_item_ids) y avisa a las demás terminales como un guardado del borrador. Un renglón cambiado, quitado o ya enviado desde otra terminal es un cambio más (draft_item_changed, draft_item_removed, draft_item_sent) que el mesero confirma con la misma operation_id o corrige. A1-D18 (el servidor nunca repite lo que ya entró): una partida con el id de un renglón del borrador de la cuenta lo sustituye aunque no venga en replaces_draft_items (igual, o guardado por última vez por el mismo mesero en el mismo dispositivo: se quita; cambiado en otra terminal: draft_item_changed); una partida ya enviada a cocina es draft_item_sent y al confirmarlo se envía lo demás (si no queda nada, 200 sin pedido nuevo, already_sent_item_ids); la misma operation_id de un confirmDraft ya aplicado en esa cuenta por el mismo usuario y dispositivo es 409 OFFLINE_ORDER_ALREADY_ACCEPTED (origin confirm_draft) sin mandar nada (con otra cuenta, una mesa, otro usuario u otra operación, IDEMPOTENCY_CONFLICT); un pedido a una mesa cuyas partidas ya están en una cuenta abierta de esa mesa es items_in_account con account_id. Etapa A2 (Para llevar): con destination.takeaway abre un pedido para llevar nuevo (mode takeaway, sin mesa, origin «Para llevar», el cliente y el teléfono del destino, responsable = el mesero de la sesión o de la credencial de envío) y exige además accounts.open y takeaway.manage. Mismas reglas de la clave: un reintento con la misma operation_id devuelve el mismo pedido (nunca abre otro) y, si sus partidas ya están en un pedido para llevar abierto (la apertura en línea entró y su respuesta se perdió), responde items_in_account con su account_id para reenviarlo con la misma operation_id a destination.account_id.",
         "parameters": [
           {
             "$ref": "#/components/parameters/ClientVersion"
@@ -1515,6 +1583,110 @@
             "offlineCredential": []
           }
         ]
+      }
+    },
+    "/payments/accounts/{id}/deliver": {
+      "post": {
+        "operationId": "deliverTakeaway",
+        "summary": "Marcar entregado un pedido para llevar pagado",
+        "description": "Registra la entrega de un pedido para llevar (ya existía; la etapa A2 lo agregó al contrato). Requiere takeaway.deliver, accounts.read y takeaway.read. Go no entrega un pedido sin pagar: con saldo pendiente responde 409 BALANCE_PENDING («Cóbralo antes de marcarlo como entregado»); entregado antes, 409 ALREADY_DELIVERED; una cuenta de salón, 400. Pagado, entregado y sin nada por enviar en su borrador, el pedido se cierra (closed true; con borrador queda abierto y entregado). Idempotente con operation_id. Publica takeaway.delivered (y restaurant.account.closed) en el ámbito takeaway. Etapa A2: finance (el estado financiero completo, con los pagos) solo llega a quien tiene payments.read; a los demás (la sesión con PIN de un mesero nunca lo tiene) es null.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClientVersion"
+          },
+          {
+            "$ref": "#/components/parameters/ClientKind"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entrega registrada.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "const": true
+                    },
+                    "closed": {
+                      "type": "boolean",
+                      "description": "La cuenta quedó liquidada y entregada, y se cerró (false si su borrador tiene algo por enviar)."
+                    },
+                    "finance": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "account_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "payment_state": {
+                              "type": "string"
+                            },
+                            "delivery_state": {
+                              "type": "string"
+                            },
+                            "balance": {
+                              "$ref": "#/components/schemas/Money"
+                            }
+                          },
+                          "required": ["account_id", "payment_state", "delivery_state", "balance"]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Estado financiero completo de la cuenta, solo con payments.read; si no, null."
+                    }
+                  },
+                  "required": ["delivered", "closed", "finance"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Saldo pendiente (BALANCE_PENDING), ya entregado (ALREADY_DELIVERED) o la clave es de otra operación (IDEMPOTENCY_CONFLICT).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "tags": ["Cobros"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "operation_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": ["operation_id"]
+              }
+            }
+          }
+        }
       }
     },
     "/pairing/requests": {
@@ -2022,7 +2194,7 @@
     },
     "responses": {
       "Error": {
-        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open).",
+        "description": "Error. 400 datos inválidos, 401 terminal o sesión (DEVICE_*, SESSION_*), 403 sin permiso, 404 no existe, 409 conflicto (ACCOUNT_CONFLICT, QUOTE_CHANGED, IDEMPOTENCY_CONFLICT, PRODUCT_SOLD_OUT…), 426 CLIENT_UPDATE_REQUIRED, 429 demasiados intentos (LOGIN_THROTTLED, PIN_LOCKED con details.locked_until y details.requires_unlock). Etapa A1: 400 CLIENT_KIND_MISMATCH; 401 PIN_INVALID, OFFLINE_CREDENTIAL_INVALID y OFFLINE_CREDENTIAL_NOT_ALLOWED; 403 PIN_DEVICE_NOT_ALLOWED; 503 PIN_LOGIN_BUSY. Desde la etapa A1, una cuenta que ya no está abierta responde 400 OPERATION_VALIDATION con details AccountNotOpenDetails (reason account_not_open). Etapa A2: 409 BALANCE_PENDING y ALREADY_DELIVERED en deliverTakeaway.",
         "content": {
           "application/json": {
             "schema": {
@@ -3931,6 +4103,18 @@
             "type": "string",
             "format": "uuid"
           },
+          "customer_name": {
+            "type": "string",
+            "description": "Nombre del cliente (vacío si no se capturó). Etapa A2: en un pedido para llevar se cambia con updateTakeawayCustomer."
+          },
+          "phone": {
+            "type": "string",
+            "description": "Teléfono del cliente (vacío si no se capturó)."
+          },
+          "origin": {
+            "type": "string",
+            "description": "Origen del pedido para llevar («Para llevar» al abrirlo con «Nuevo pedido», en la caja o desde la aplicación; la caja también usa otros, como «Ventanilla»); vacío en una cuenta de salón."
+          },
           "assigned_user_id": {
             "type": "string",
             "format": "uuid"
@@ -3952,10 +4136,12 @@
             "description": "without_items, draft (solo borrador), pending_release, scheduled, released, preparing, ready, change_pending o cancelled. Cambia sin otra operación de la cuenta cuando cocina avanza: evento restaurant.account.preparation_changed."
           },
           "payment_state": {
-            "type": "string"
+            "type": "string",
+            "description": "Lo calcula Go con los pagos reales: not_recorded (sin pagos), partial (con abonos) o paid (liquidada; también una cuenta con productos y total cero)."
           },
           "delivery_state": {
-            "type": "string"
+            "type": "string",
+            "description": "not_delivered o delivered (solo pedidos para llevar: deliverTakeaway o la entrega junto con el cobro en la caja). Un pedido para llevar pagado y entregado se cierra."
           },
           "confirmed_quantity": {
             "type": "integer"
@@ -3987,6 +4173,9 @@
           "mode",
           "state",
           "table_id",
+          "customer_name",
+          "phone",
+          "origin",
           "revision",
           "created_at",
           "updated_at",
@@ -3997,7 +4186,7 @@
           "draft_quantity",
           "totals"
         ],
-        "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go."
+        "description": "Cuenta con su revisión (control optimista: toda escritura la envía) y los estados que calcula Go. Un pedido para llevar es una cuenta con mode takeaway, sin mesa (table_id null), con su folio, el cliente, el origen y sus estados de preparación, pago y entrega independientes (estar pagado no es estar entregado)."
       },
       "Table": {
         "type": "object",
@@ -4276,7 +4465,7 @@
           "accounts",
           "event_cursor"
         ],
-        "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read (las cuentas para llevar exigen además takeaway.read)."
+        "description": "Estado para un cliente que se reconecta. tables es null sin restaurant.tables.read y accounts es null sin accounts.read; accounts trae las cuentas abiertas, y las para llevar (mode takeaway, con su preparación, pago y entrega) solo con takeaway.read."
       },
       "OfflineItem": {
         "type": "object",
@@ -4345,9 +4534,23 @@
               "name": {
                 "type": "string",
                 "maxLength": 100
+              },
+              "takeaway": {
+                "type": "object",
+                "properties": {
+                  "customer_name": {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                },
+                "description": "Etapa A2: un pedido para llevar nuevo (exclusivo con account_id y table_id; sin seen_account_ids, name ni replaces_draft_items). customer_name y phone son opcionales (vacíos si no se capturaron; con los límites de la cuenta, 100 y 40 caracteres ya recortados)."
               }
             },
-            "description": "Una cuenta abierta (account_id) o una mesa donde abrir una cuenta nueva (table_id, con las cuentas que el mesero veía abiertas en ella)."
+            "description": "Uno solo de: una cuenta abierta (account_id), una mesa donde abrir una cuenta nueva (table_id, con las cuentas que el mesero veía abiertas en ella y un name opcional) o, desde la etapa A2, un pedido para llevar nuevo (takeaway)."
           },
           "items": {
             "type": "array",

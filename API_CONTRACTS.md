@@ -3869,8 +3869,9 @@ que usa el escritorio (no están en el contrato para clientes, como `devices/*`)
   solo tienen los permisos efectivos del usuario que están en la lista cerrada `administration.WaiterPermissions`
   (`waiter_scope.go`, el único lugar): `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
   `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`, `catalog.read`,
-  `catalog.prices.read` y `events.read`. Un administrador con PIN no puede usar por esa sesión ninguna ruta de
-  administración (`users.*`, `devices.*`, `settings.*`…; 403 con `access.denied`) ni Para llevar; `auth/me` y
+  `catalog.prices.read` y `events.read` (desde la etapa A2, también Para llevar: ver «Etapa A2 · Para llevar en el
+  servidor»). Un administrador con PIN no puede usar por esa sesión ninguna ruta de
+  administración (`users.*`, `devices.*`, `settings.*`…; 403 con `access.denied`) ni de cobros; `auth/me` y
   `restaurant/state` informan los permisos acotados. «Cambiar contraseña» desde esa sesión abre otra igual de acotada.
   Las sesiones con contraseña (también en un teléfono) no cambian. `waiter_scope_test.go` comprueba que el contrato,
   `docs/API_V1.md` y este archivo repiten la lista.
@@ -3963,3 +3964,43 @@ Decisión A1-D18 de [docs/ETAPA_A1_AVANCE.md](docs/ETAPA_A1_AVANCE.md) («Decisi
 - **Mesa con las partidas en una cuenta abierta suya** (borrador o enviadas): cambio bloqueante `items_in_account` con
   `account_id` y `now` = folio, sin `table_has_account`. `OfflineChange` agrega `account_id` (opcional, solo en ese
   cambio).
+
+## Etapa A2 · Para llevar en el servidor (parte B, sin migración; servidor 0.13.0)
+
+Especificación: [docs/etapas/ETAPA_A2_ANDROID.md](docs/etapas/ETAPA_A2_ANDROID.md) §3 y §0-B, decisiones A2-D1, A2-D2 y
+A2-D6 de [docs/ETAPA_A2_AVANCE.md](docs/ETAPA_A2_AVANCE.md). Todo es de la API para clientes: forma exacta en
+[docs/API_V1.md](docs/API_V1.md), «Para llevar», y en `internal/apicontract/openapi.json` (capacidad `takeaway-v1`).
+Esquema 25 (sin migración); `min_client_versions` no cambia (`desktop` 0.10.0, `android` 0.1.0). Ninguna ruta del
+escritorio cambia de forma y el escritorio no cambió (solo su versión, 0.13.0).
+
+- **Permisos de mesero** (`administration.WaiterPermissions`, A1-D17): la lista cerrada de la sesión con PIN y de la
+  credencial de envío queda en `waiter_devices.use`, `restaurant.tables.read`, `restaurant.areas.read`,
+  `accounts.read`, `accounts.open`, `orders.capture`, `orders.confirm`, `orders.edit`, `orders.cancel`,
+  `catalog.read`, `catalog.prices.read`, `events.read`, **`takeaway.read`**, **`takeaway.manage`** y
+  **`takeaway.deliver`** (el último, opcional en el rol). Siguen fuera los cobros (`payments.*`), la caja y lo
+  administrativo.
+- **`POST restaurant/offline-orders`** (`submitOfflineOrder`): destino nuevo, opcional y exclusivo con `account_id` y
+  `table_id`, **`destination.takeaway: {customer_name?, phone?}`** (límites de `AccountInput`, 100 y 40, recortados;
+  sin `seen_account_ids`, `name` ni `replaces_draft_items`). Exige además `accounts.open` y `takeaway.manage`. Abre la
+  cuenta `mode: takeaway` con `origin` «Para llevar» (`operations.TakeawayOrigin`, el mismo que manda la caja),
+  responsable = quien envía (sesión o credencial de envío) y la confirma en la misma operación. Las reglas de la clave
+  son las de A1-D6, A1-D18 y A1-D19: un reintento devuelve el resultado guardado y nunca abre otro pedido; si las
+  partidas ya están en un pedido para llevar abierto (borrador o enviadas), el cambio bloqueante `items_in_account`
+  con su `account_id` (`openAccountsWithItems`, la misma consulta de la mesa). Código en
+  `operations/offline_orders.go`.
+- **`POST restaurant/accounts/{id}/customer`** (`updateTakeawayCustomer`, A2-D1; permiso `takeaway.manage`):
+  `{operation_id, customer_name, phone}` (los dos obligatorios; vacío quita) → la cuenta. Solo pedidos para llevar
+  abiertos (de salón: `400 OPERATION_VALIDATION`; que ya no está abierto: el rechazo de `ensureOpen` con
+  `details.reason: account_not_open`). **Sin revisión** (no la pide ni la sube). Idempotente (`restaurant_operations`),
+  con historia `account.updated`, evento `restaurant.account.updated` en el ámbito `takeaway` y auditoría
+  `restaurant.account.updated` en la misma transacción; sin cambios no escribe nada. Toma el lock 7820148305 exclusivo
+  como toda escritura de `restaurant/*` (ningún lock nuevo). Código en `operations/takeaway.go`.
+- **`POST payments/accounts/{id}/deliver`** (`deliverTakeaway`, ya existía; A2-D2): sin cambios de regla (409
+  `BALANCE_PENDING` con saldo, 409 `ALREADY_DELIVERED`, cierre del pedido pagado y entregado). La respuesta
+  `{finance, closed, delivered}` lleva `finance` **solo con `payments.read`**; sin él, `null` (la sesión con PIN del
+  mesero no consulta cobros). El escritorio no usa ese `finance` (`payments_deliver`). Código en `payments/delivery.go`.
+- **Contrato**: `Account` documenta `customer_name`, `phone` y `origin` (obligatorios: Go siempre los entrega) y los
+  valores de `payment_state` y `delivery_state`; `listAccounts` con `mode=takeaway`; `getRecoveryState` con las
+  cuentas para llevar; `pinLogin` con la lista de permisos nueva. Pruebas: `TestStageA2Takeaway` (`operations`) y
+  `contractTakeaway` en `TestContractV1`.
+- **Versiones**: servidor 0.13.0 (esquema 25); `GET version` anuncia `takeaway-v1`.

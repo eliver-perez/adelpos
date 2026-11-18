@@ -45,6 +45,10 @@ var capabilities = []string{
 	// cancelar y modificar unidades, restaurant.account.preparation_changed, error.details.reason en una cuenta que ya
 	// no está abierta, replaces_draft_items en el pedido sin conexión y event_cursor en restaurant/state.
 	"waiter-mode-v1",
+	// Etapa A2 (parte B, servidor 0.13.0): Para llevar en la aplicación de meseros: el destino takeaway del pedido sin
+	// conexión, el nombre del cliente y el teléfono (POST restaurant/accounts/{id}/customer), «Entregado» de un pedido
+	// pagado (deliverTakeaway) y takeaway.read, takeaway.manage y takeaway.deliver en los permisos de mesero.
+	"takeaway-v1",
 }
 
 type ErrorBody struct {

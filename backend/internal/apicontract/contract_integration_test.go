@@ -352,10 +352,11 @@ func contractScenario(t *testing.T, client *contractClient) {
 	}
 	// Etapa A1 (fase E): mesas, modificar y cancelar unidades, cuenta que ya no está abierta y el borrador en el pedido
 	// sin conexión.
-	contractWaiterMode(t, client, contractWaiterData{
+	waiterData := contractWaiterData{
 		accountID: accountID, tableID: fmt.Sprint(tables[0]["id"]), burger: fmt.Sprint(burger["id"]), fries: fmt.Sprint(fries["id"]),
 		version: version, customization: customization,
-	})
+	}
+	contractWaiterMode(t, client, waiterData)
 
 	// Eventos en tiempo real: el primer mensaje del flujo cumple EventBatch.
 	streamContext, stop := context.WithTimeout(context.Background(), 400*time.Millisecond)
@@ -397,6 +398,8 @@ func contractScenario(t *testing.T, client *contractClient) {
 	order := offline("40.00")
 	order["destination"] = map[string]any{"account_id": accountID}
 	contractWaiterPIN(t, client, phone, order)
+	// Etapa A2 (parte B): Para llevar desde el teléfono.
+	contractTakeaway(t, client, phone, waiterData)
 	client.call("POST", "/auth/logout", nil, nil, 200)
 }
 
@@ -645,4 +648,84 @@ func contractPairing(t *testing.T, client *contractClient) *contractClient {
 	phone := *client
 	phone.device, phone.token, phone.session, phone.kind = claimed["device_id"], claimed["device_token"], "", "android"
 	return &phone
+}
+
+// contractTakeaway es Para llevar en la aplicación de meseros (etapa A2, parte B): un mesero con el rol de la guía (los
+// permisos de la A1 más takeaway.*) entra con PIN; la cola entrega con la credencial de envío un pedido para llevar
+// nuevo (destination.takeaway); la lista de pendientes y restaurant/state lo traen con su cliente y sus estados; el
+// mesero cambia el nombre y el teléfono (updateTakeawayCustomer) y solo puede marcarlo entregado cuando la caja ya lo
+// cobró (deliverTakeaway: BALANCE_PENDING antes, finance null después porque el mesero no consulta cobros).
+func contractTakeaway(t *testing.T, client *contractClient, phone *contractClient, data contractWaiterData) {
+	role := decodeContract[map[string]any](t, client.setup("POST", "/roles", map[string]any{"name": "Meseros para llevar contrato",
+		"permissions": []string{"waiter_devices.use", "orders.confirm", "orders.capture", "accounts.read", "accounts.open",
+			"catalog.read", "catalog.prices.read", "events.read", "takeaway.read", "takeaway.manage", "takeaway.deliver"}}, 200))
+	waiter := decodeContract[map[string]any](t, client.setup("POST", "/users", map[string]any{"username": "carla.contrato",
+		"display_name": "Carla del contrato", "role_id": role["id"], "active": true, "password": "clave-del-contrato-3"}, 200))
+	waiterID := fmt.Sprint(waiter["id"])
+	client.setup("PUT", "/users/"+waiterID+"/pin", map[string]any{"pin": "7395", "short_name": "Carla", "badge_color": ""}, 200)
+	login := decodeContract[map[string]any](t, phone.call("POST", "/auth/pin-login",
+		map[string]string{"user_id": waiterID, "pin": "7395"}, nil, 200).Body.Bytes())
+	waiterPhone := *phone
+	waiterPhone.session = fmt.Sprint(login["session_token"])
+	queue := *phone
+	order := map[string]any{
+		"operation_id": contractID(), "catalog_version": data.version,
+		"captured_at": time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano),
+		"destination": map[string]any{"takeaway": map[string]any{"customer_name": "Juan", "phone": "5551234567"}},
+		"items": []map[string]any{{"id": contractID(), "product_id": data.fries, "variant_id": nil, "quantity": 1,
+			"customization": data.customization, "seen_unit_price": "40.00"}},
+	}
+	accepted := decodeContract[map[string]any](t, queue.call("POST", "/restaurant/offline-orders", order,
+		map[string]string{"X-Offline-Credential": fmt.Sprint(login["offline_credential"])}, 200).Body.Bytes())
+	account := accepted["bill"].(map[string]any)["account"].(map[string]any)
+	accountID := fmt.Sprint(account["id"])
+	if account["mode"] != "takeaway" || account["table_id"] != nil || account["origin"] != "Para llevar" || account["customer_name"] != "Juan" ||
+		account["assigned_user_id"] != waiterID {
+		t.Fatalf("pedido para llevar sin conexión: %v", account)
+	}
+	pending := func(source []any) map[string]any {
+		for _, value := range source {
+			if candidate := value.(map[string]any); candidate["id"] == accountID {
+				return candidate
+			}
+		}
+		return nil
+	}
+	list := decodeContract[map[string]any](t, waiterPhone.call("GET", "/restaurant/accounts?mode=takeaway&state=open", nil, nil, 200).Body.Bytes())
+	if found := pending(list["items"].([]any)); found == nil || found["payment_state"] != "not_recorded" || found["delivery_state"] != "not_delivered" {
+		t.Fatalf("pendientes para llevar: %v", list["items"])
+	}
+	state := decodeContract[map[string]any](t, waiterPhone.call("GET", "/restaurant/state", nil, nil, 200).Body.Bytes())
+	if found := pending(state["accounts"].([]any)); found == nil || found["mode"] != "takeaway" {
+		t.Fatalf("restaurant/state del mesero sin el pedido para llevar: %v", state["accounts"])
+	}
+	updated := decodeContract[map[string]any](t, waiterPhone.call("POST", "/restaurant/accounts/"+accountID+"/customer", map[string]any{
+		"operation_id": contractID(), "customer_name": "Juan Pérez", "phone": "",
+	}, nil, 200).Body.Bytes())
+	if saved := updated["account"].(map[string]any); saved["customer_name"] != "Juan Pérez" || saved["phone"] != "" ||
+		saved["revision"] != account["revision"] {
+		t.Fatalf("datos del cliente: %v", saved)
+	}
+	deliver := "/payments/accounts/" + accountID + "/deliver"
+	rejected := decodeContract[map[string]any](t, waiterPhone.call("POST", deliver, map[string]any{"operation_id": contractID()}, nil, 409).Body.Bytes())
+	if rejected["error"].(map[string]any)["code"] != "BALANCE_PENDING" {
+		t.Fatalf("entregar sin pagar: %v", rejected)
+	}
+	// La caja lo cobra (preparación, fuera del contrato: turno y cobro en efectivo).
+	methods := decodeContract[[]map[string]any](t, client.setup("GET", "/payments/methods", nil, 200))
+	cash := ""
+	for _, method := range methods {
+		if method["code"] == "cash" {
+			cash = fmt.Sprint(method["id"])
+		}
+	}
+	client.setup("POST", "/payments/shifts", map[string]any{"operation_id": contractID(), "opening_float": "0"}, 200)
+	finance := decodeContract[map[string]any](t, client.setup("GET", "/payments/accounts/"+accountID, nil, 200))
+	client.setup("POST", "/payments/accounts/"+accountID+"/payments", map[string]any{
+		"operation_id": contractID(), "method_id": cash, "mode": "total", "expected_balance": finance["balance"],
+	}, 200)
+	delivered := decodeContract[map[string]any](t, waiterPhone.call("POST", deliver, map[string]any{"operation_id": contractID()}, nil, 200).Body.Bytes())
+	if delivered["delivered"] != true || delivered["closed"] != true || delivered["finance"] != nil {
+		t.Fatalf("entrega desde el teléfono: %v", delivered)
+	}
 }
