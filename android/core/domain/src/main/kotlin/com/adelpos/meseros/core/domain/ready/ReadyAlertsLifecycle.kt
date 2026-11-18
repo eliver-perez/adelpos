@@ -133,17 +133,18 @@ object ReadyAlertsLifecycle {
     }
 
     /**
-     * Solo `DEVICE_REVOKED` significa retirado (protocolo de `ready-alerts` tras la revisión del
-     * servidor): cualquier otro rechazo de la credencial, un `interrupted` con otro código o un 5xx
-     * es temporal y se reintenta con espera creciente; si la credencial de verdad dejó de valer, lo
-     * dirá la comprobación de la entrada al dispositivo.
+     * Forma final corregida de `ready-alerts`: un `interrupted` solo significa retirado con
+     * `DEVICE_REVOKED` (con cualquier otro código, `TEMPORARY`…, el cliente lo da como un 5xx y se
+     * reintenta con espera creciente). Al abrir o leer, 401 `DEVICE_REVOKED` es retirado y los
+     * demás `DEVICE_*` (`DEVICE_REQUIRED`) se tratan «igual que en las demás rutas»: se avisan a la
+     * entrada al dispositivo, que pide emparejar de nuevo.
      */
     fun onError(error: AppError): ErrorAction =
         when (error) {
             is AppError.DeviceRevoked,
+            is AppError.DeviceNotRecognized,
             is AppError.UpdateRequired,
             AppError.ServerIdentityChanged -> ErrorAction.STOP_AND_REPORT
-            is AppError.DeviceNotRecognized -> ErrorAction.RETRY
             is AppError.TryLater -> ErrorAction.WAIT_AND_READ
             is AppError.PermissionDenied -> ErrorAction.STOP
             is AppError.Rejected ->

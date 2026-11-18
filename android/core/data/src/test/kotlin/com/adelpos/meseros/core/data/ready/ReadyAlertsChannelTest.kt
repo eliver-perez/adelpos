@@ -339,17 +339,33 @@ class ReadyAlertsChannelTest {
     }
 
     @Test
-    fun interruptedConOtroCodigoOUnRechazoDeLaCredencialSonTemporales() = runBlocking {
-        mock.enqueue(stream(alerts(1), interrupted("INTERNAL")))
-        mock.enqueue(CatalogTestSupport.error(401, "DEVICE_REQUIRED"))
+    fun interruptedConOtroCodigoEsTemporalYSinIdNoMueveElCursor() = runBlocking {
+        // Forma corregida: `interrupted` sin `id` y con `{"code"}`; `TEMPORARY` (un 5xx) se
+        // reintenta.
+        mock.enqueue(
+            stream(alerts(1), "event: interrupted\ndata: {\"code\":\"TEMPORARY\"}\n\n"),
+        )
         mock.enqueue(stream(alerts(2, alert(2)), alerts(2, active = false)))
 
         val reason = withTimeout(5_000) { channel().run() }
 
         assertEquals(ReadyStopReason.INACTIVE, reason)
-        assertEquals(3, mock.requestCount)
+        assertEquals(2, mock.requestCount)
         assertTrue("nada se dio por retirado", server.reported.isEmpty())
+        takeRequest()
+        assertEquals("1", takeRequest().url.queryParameter("after"))
         assertEquals(listOf(2L), presenter.shown.map { it.id })
+    }
+
+    @Test
+    fun unRechazoDeLaCredencialAlAbrirSeAvisaComoEnLasDemasRutas() = runBlocking {
+        mock.enqueue(CatalogTestSupport.error(401, "DEVICE_REQUIRED"))
+
+        val reason = withTimeout(5_000) { channel().run() }
+
+        assertEquals(ReadyStopReason.REPORTED, reason)
+        assertEquals(1, mock.requestCount)
+        assertEquals("DEVICE_REQUIRED", server.reported.single().code)
     }
 
     @Test

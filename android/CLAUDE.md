@@ -489,8 +489,8 @@ aplicación (A2-D10) con las plantillas de `app/src/main/res/values/strings.xml`
 - **Se detiene** cuando el canal termina: `active: false` (nadie entró hoy o «Avisar platillos listos» apagado; al
   pasar `day_ends_at` vuelve a preguntar con `GET` y, mientras Go diga `active: true`, sigue), el dispositivo retirado
   (solo `DEVICE_REVOKED`, por `interrupted` o un 401), otra huella o 426 (se avisa a `deviceAccess.report`) o un
-  rechazo permanente al abrir (403/400); cualquier otro código de `interrupted`, otro `DEVICE_*` o un 5xx es temporal
-  (espera creciente). También cuando el
+  rechazo permanente al abrir (403/400); un 401 con otro `DEVICE_*` al abrir se avisa como en las demás rutas
+  (emparejar de nuevo); cualquier otro código de `interrupted` (`TEMPORARY`) o un 5xx es temporal (espera creciente). También cuando el
   dispositivo deja de estar listo y con «borrar los datos de este dispositivo» (registrado en `deviceDataWipe` como
   «avisos de platillos listos»: detiene canal y servicio, borra Room y quita los avisos a la vista).
 - **Sin duplicados ni pérdidas** (§4.1): Room guarda el cursor y lo último de Go (`ready_alerts_state`) y los avisos ya

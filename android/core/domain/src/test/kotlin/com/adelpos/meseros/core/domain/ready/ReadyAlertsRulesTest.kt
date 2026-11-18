@@ -316,9 +316,10 @@ class ReadyAlertsRulesTest {
             ErrorAction.STOP_AND_REPORT,
             ReadyAlertsLifecycle.onError(AppError.DeviceRevoked(null, null)),
         )
-        // Solo DEVICE_REVOKED es «retirado»; cualquier otro rechazo de la credencial es temporal.
+        // Al abrir o leer, un 401 DEVICE_REQUIRED es como en las demás rutas (se avisa a la
+        // entrada).
         assertEquals(
-            ErrorAction.RETRY,
+            ErrorAction.STOP_AND_REPORT,
             ReadyAlertsLifecycle.onError(
                 AppError.DeviceNotRecognized("DEVICE_REQUIRED", null, null),
             ),
